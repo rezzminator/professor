@@ -20,7 +20,7 @@ func (current *composer) openCodeSessionRow(session store.OpenCodeSession) Row {
 		Kind:           ResumeOpenCode,
 		ID:             session.ID,
 		Name:           name,
-		Project:        projectName(session.ProjectDir),
+		Project:        current.projects.of(session.ProjectDir),
 		CWD:            firstNonEmpty(session.Directory, session.ProjectDir),
 		PromptCount:    session.PromptCount,
 		AssistantCount: session.AssistantCount,
@@ -93,7 +93,7 @@ func (current *composer) liveOpenCodeRow(
 	_, row.C1H = current.cacheSockets[seat.Socket]
 	if row.CWD == "" {
 		row.CWD = firstNonEmpty(seat.CWD, pane.CurrentPath)
-		row.Project = projectName(row.CWD)
+		row.Project = current.projects.of(row.CWD)
 	}
 	if row.Name == "" {
 		// The pane title names the chat only while it carries OpenCode's own

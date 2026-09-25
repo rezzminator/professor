@@ -65,7 +65,7 @@ func newTarget(output Output) (string, string) {
 		project = output.ProjectOrder[0]
 	}
 	if project == "" {
-		project = projectName(output.fallbackDir)
+		project = output.projects.of(output.fallbackDir)
 	}
 	directory := output.ProjectDirs[project]
 	if directory == "" {
@@ -87,7 +87,7 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 	if currentDir == "" {
 		return output
 	}
-	current := projectName(currentDir)
+	current := output.projects.of(currentDir)
 	if current == "" || current == "?" {
 		return output
 	}
@@ -172,9 +172,10 @@ func sortProjectRows(rows []Row) ([]Row, []string) {
 }
 
 func projectDirs(input Input) map[string]string {
+	names := projectNames{}
 	directories := make(map[string]projectDir)
 	if input.Options.CurrentDir != "" {
-		project := projectName(input.Options.CurrentDir)
+		project := names.of(input.Options.CurrentDir)
 		directories[project] = projectDir{
 			path:   cleanPath(input.Options.CurrentDir),
 			seeded: true,
@@ -182,12 +183,12 @@ func projectDirs(input Input) map[string]string {
 	}
 	for index := range input.Transcripts {
 		transcript := input.Transcripts[index]
-		rememberProjectDir(directories, transcript.CWD, transcript.EffectiveActivityNS())
+		rememberProjectDir(names, directories, transcript.CWD, transcript.EffectiveActivityNS())
 	}
 	for index := range input.Rollouts {
 		rollout := input.Rollouts[index]
 		if rollout.UserThread {
-			rememberProjectDir(directories, rollout.CWD, rollout.MTimeNS)
+			rememberProjectDir(names, directories, rollout.CWD, rollout.MTimeNS)
 		}
 	}
 	result := make(map[string]string, len(directories))
@@ -198,6 +199,7 @@ func projectDirs(input Input) map[string]string {
 }
 
 func rememberProjectDir(
+	names projectNames,
 	directories map[string]projectDir,
 	path string,
 	activityNS int64,
@@ -205,13 +207,15 @@ func rememberProjectDir(
 	if path == "" {
 		return
 	}
-	project := projectName(path)
-	incumbent, found := directories[project]
+	ref := names.resolve(path)
+	incumbent, found := directories[ref.name]
 	if found && (incumbent.seeded || incumbent.activityNS > activityNS) {
 		return
 	}
-	directories[project] = projectDir{
-		path:       cleanPath(path),
+	// A project's launch directory is its repository root: a new chat in
+	// the repo never opens inside a worktree that a merge will delete.
+	directories[ref.name] = projectDir{
+		path:       cleanPath(ref.root),
 		activityNS: activityNS,
 	}
 }

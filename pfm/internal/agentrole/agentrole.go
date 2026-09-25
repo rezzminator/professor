@@ -117,13 +117,13 @@ func Resolve(engineID pfmengine.ID, role, cwd, home string) (string, Artifact, e
 	if err != nil {
 		return "", Artifact{}, err
 	}
-	repo, err := repoRoot(cwd)
+	repo, err := roleLadderRoot(cwd)
 	if err != nil {
 		return "", Artifact{}, err
 	}
 
 	// When cwd sits under $HOME with no repo of its own above it, the walk in
-	// repoRoot lands on $HOME itself and both rungs name the SAME directory.
+	// roleLadderRoot lands on $HOME itself and both rungs name the SAME directory.
 	// One directory searched once must report as one rung: an unknown-role
 	// message listing the same path twice claims a breadth of search it never
 	// had.
@@ -240,13 +240,13 @@ func readTOMLConstitution(path string) (string, error) {
 	return fleetPrompt + "\n---\n\n" + doc.DeveloperInstructions, nil
 }
 
-// repoRoot walks upward from start (inclusive) to the nearest ancestor that
+// roleLadderRoot walks upward from start (inclusive) to the nearest ancestor that
 // contains a .claude/agents or a .codex/agents directory — the shared repo
 // boundary the whole ladder resolves against, computed once regardless of
 // which engine is asking. When no ancestor qualifies, start stands in for
 // <repo>, so the ladder's repo-local directory is still a concrete path that
 // correctly reports "does not exist" rather than inventing a third state.
-func repoRoot(start string) (string, error) {
+func roleLadderRoot(start string) (string, error) {
 	dir := start
 	for {
 		for _, sub := range []string{filepath.Join(".claude", "agents"), filepath.Join(".codex", "agents")} {

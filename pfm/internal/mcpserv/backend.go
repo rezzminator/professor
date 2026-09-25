@@ -15,6 +15,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -154,20 +155,46 @@ const (
 // list is chat_ls: chat.List under the tool's payload contract, projected
 // onto the wire row.
 func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, error) {
-	return current.listProjected(ctx, input, true)
+	return current.listProjected(ctx, input, true, "")
+}
+
+// lsScope is public chat_ls's repository scope: the repository of the caller
+// _meta resolves, else none — and the scope line says which, and why.
+func (current *backend) lsScope(
+	ctx context.Context,
+	meta map[string]any,
+	input LSInput,
+) (repo, scope string, err error) {
+	if input.All {
+		return "", "all repos", nil
+	}
+	caller, err := current.callerForRequest(ctx, meta)
+	if err != nil {
+		return "", "", fmt.Errorf("chat_ls: resolve caller scope: %w", err)
+	}
+	if !caller.valid || strings.TrimSpace(caller.row.Dir) == "" {
+		scope = "all repos — caller cwd unknown"
+		if caller.detail != "" {
+			scope += " (" + caller.detail + ")"
+		}
+		return "", scope, nil
+	}
+	repo = gitroot.RepoRoot(caller.row.Dir)
+	return repo, repo, nil
 }
 
 // listUnbounded projects every row for an internal identity lookup. Public
 // chat_ls keeps its payload cap; resolving a caller must not turn a row beyond
 // that presentation boundary into an absence.
 func (current *backend) listUnbounded(ctx context.Context, input LSInput) (LSOutput, error) {
-	return current.listProjected(ctx, input, false)
+	return current.listProjected(ctx, input, false, "")
 }
 
 func (current *backend) listProjected(
 	ctx context.Context,
 	input LSInput,
 	defaultLimit bool,
+	repo string,
 ) (LSOutput, error) {
 	if current.chat == nil {
 		return LSOutput{}, fmt.Errorf("chat_ls verb is not configured")
@@ -188,7 +215,10 @@ func (current *backend) listProjected(
 	} else if input.Killed {
 		view = compose.KilledView
 	}
-	listed, err := current.chat.List(ctx, chat.ListRequest{View: view, Project: input.Project, Limit: limit})
+	listed, err := current.chat.List(
+		ctx,
+		chat.ListRequest{View: view, Project: input.Project, Limit: limit, Repo: repo},
+	)
 	if err != nil {
 		return LSOutput{}, err
 	}
@@ -213,7 +243,7 @@ func (current *backend) listProjected(
 	return LSOutput{
 		Rows: rows, Count: len(rows), Matched: listed.Matched,
 		Truncated: listed.Truncated, KilledCount: listed.KilledCount,
-		Filter: input.Project,
+		Filter: input.Project, Scope: "all repos", Elsewhere: listed.Elsewhere,
 	}, nil
 }
 

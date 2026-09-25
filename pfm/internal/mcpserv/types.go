@@ -7,7 +7,7 @@ import (
 
 // LSInput selects the fleet view returned by chat_ls.
 type LSInput struct {
-	All     bool   `json:"all,omitempty" jsonschema:"include killed and background rows; the payload limit below still applies"`
+	All     bool   `json:"all,omitempty" jsonschema:"include killed and background rows from every repository; the payload limit below still applies (unlike pfm chat ls --all, which lists live chats only)"`
 	Killed  bool   `json:"killed,omitempty" jsonschema:"return killed rows only"`
 	Project string `json:"project,omitempty" jsonschema:"case-insensitive substring filter on a row's project or directory"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"maximum rows returned, default 200 and maximum 1000; total and truncated always report the full match count"`
@@ -44,6 +44,12 @@ type LSOutput struct {
 	// Filter echoes the project filter that was applied, so a caller reading
 	// an empty result knows whether it filtered itself down to nothing.
 	Filter string `json:"filter,omitempty"`
+	// Scope is the repository listed, or why every repository was: "all
+	// repos" under all, "all repos — caller cwd unknown" when the caller did
+	// not resolve, so an unscoped answer is never silent. Elsewhere counts
+	// the rows a repository scope left out.
+	Scope     string `json:"scope"`
+	Elsewhere int    `json:"elsewhere,omitempty"`
 }
 
 // ResolveInput selects one chat.sh resolution namespace.

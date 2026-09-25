@@ -40,11 +40,12 @@ type composer struct {
 	claudeAccounts   accountMatcher
 	codexAccounts    accountMatcher
 	projectDirs      map[string]string
+	projects         projectNames
 }
 
 // Compose performs the complete side-effect-free row composition pass.
 func Compose(input Input) Output {
-	current := &composer{input: input}
+	current := &composer{input: input, projects: projectNames{}}
 	current.buildIndexes()
 
 	liveClaude, splits := current.liveClaudeRows()
@@ -70,6 +71,7 @@ func Compose(input Input) Output {
 		primaryCodex:       input.Options.PrimaryCodexAccount,
 		primaryOpenCode:    input.Options.PrimaryOpenCode,
 		fallbackDir:        input.Options.CurrentDir,
+		projects:           current.projects,
 	}
 	if !configuredAccount(input.AccountRoots, output.primaryAccount) {
 		if len(input.AccountRoots) != 0 {
@@ -259,7 +261,7 @@ func (current *composer) buildIndexes() {
 	)
 	directories := make(map[string]projectDir)
 	if current.input.Options.CurrentDir != "" {
-		project := projectName(current.input.Options.CurrentDir)
+		project := current.projects.of(current.input.Options.CurrentDir)
 		directories[project] = projectDir{
 			path:   cleanPath(current.input.Options.CurrentDir),
 			seeded: true,
@@ -276,7 +278,7 @@ func (current *composer) buildIndexes() {
 		if _, wanted := wantedTranscriptPaths[normalizedPath]; wanted {
 			current.transcriptByPath[normalizedPath] = transcript
 		}
-		rememberProjectDir(directories, transcript.CWD, transcript.EffectiveActivityNS())
+		rememberProjectDir(current.projects, directories, transcript.CWD, transcript.EffectiveActivityNS())
 	}
 	current.rolloutByPath = make(map[string]store.Rollout, len(wantedRolloutPaths))
 	current.rolloutByID = make(map[string]store.Rollout, len(wantedRolloutIDs))
@@ -290,7 +292,7 @@ func (current *composer) buildIndexes() {
 			current.rolloutByID[rollout.ID] = rollout
 		}
 		if rollout.UserThread {
-			rememberProjectDir(directories, rollout.CWD, rollout.MTimeNS)
+			rememberProjectDir(current.projects, directories, rollout.CWD, rollout.MTimeNS)
 		}
 	}
 	current.projectDirs = make(map[string]string, len(directories))
@@ -585,7 +587,7 @@ func (current *composer) liveClaudeRow(
 	_, row.C1H = current.cacheSockets[socket]
 	if row.CWD == "" && pane.CurrentPath != "" {
 		row.CWD = pane.CurrentPath
-		row.Project = projectName(pane.CurrentPath)
+		row.Project = current.projects.of(pane.CurrentPath)
 	}
 	indexed := naming.DisplayName(
 		transcript.CustomTitle,
@@ -679,7 +681,7 @@ func (current *composer) splitRow(
 	if row.ActivityNS == 0 {
 		row.ActivityNS = socketEpochNS(socket)
 	}
-	row.Project = projectName(row.CWD)
+	row.Project = current.projects.of(row.CWD)
 	row.Accounts = sortedIntKeys(accounts)
 	return row
 }
@@ -729,7 +731,7 @@ func (current *composer) liveCodexRows() []Row {
 		row.Attached = pane.Attached
 		if row.CWD == "" && pane.CurrentPath != "" {
 			row.CWD = pane.CurrentPath
-			row.Project = projectName(pane.CurrentPath)
+			row.Project = current.projects.of(pane.CurrentPath)
 		}
 		if row.Name == "" {
 			row.Name = "Codex chat"
@@ -771,7 +773,7 @@ func (current *composer) bootingRows() []Row {
 			WindowName:  entry.WindowName,
 			Name:        name,
 			CWD:         entry.CWD,
-			Project:     projectName(entry.CWD),
+			Project:     current.projects.of(entry.CWD),
 			ServerCount: 1,
 			Here:        entry.Socket == current.input.Options.CurrentSocket,
 			ActivityNS:  paneStartActivityNS(entry.PaneStartUnix),
@@ -862,7 +864,7 @@ func (current *composer) transcriptRow(
 			transcript.FirstPrompt,
 		),
 		LastPrompt:  transcript.LastPrompt,
-		Project:     projectName(transcript.CWD),
+		Project:     current.projects.of(transcript.CWD),
 		CWD:         transcript.CWD,
 		Size:        transcript.Size,
 		PromptCount: transcript.PromptCount,
@@ -892,7 +894,7 @@ func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
 		ID:          root,
 		Path:        newest.Path,
 		Name:        name,
-		Project:     projectName(newest.CWD),
+		Project:     current.projects.of(newest.CWD),
 		CWD:         newest.CWD,
 		Size:        newest.Size,
 		PromptCount: newest.PromptCount,
@@ -1201,22 +1203,6 @@ func targetKey(socket, paneID string) string {
 func transcriptIDFromPath(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))
-}
-
-func projectName(cwd string) string {
-	if cwd == "" {
-		return "?"
-	}
-	trimmed := strings.TrimRight(cwd, string(filepath.Separator))
-	if trimmed == "" {
-		return "?"
-	}
-	index := strings.LastIndexByte(trimmed, byte(filepath.Separator))
-	project := trimmed[index+1:]
-	if project == "." || project == ".." || project == "" {
-		return "?"
-	}
-	return project
 }
 
 func configuredAccount(roots []AccountRoot, account int) bool {

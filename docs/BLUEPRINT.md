@@ -331,7 +331,7 @@ The blueprint evolves through semver git tags. Each tier has one source of truth
 2. Review every non-current status:
    - `UPDATED` — inspect the printed `git -C <blueprint> diff <pinned>..HEAD -- templates/<template>` command and hand-apply only the parts that belong locally.
    - `NEW` — adopt it only if useful, then create its mapping with `pfm update pin --template <template> <local>`; `pfm update ignore <template>...` keeps a template the project will never take out of every later report.
-   - `GONE-UPSTREAM` — keep the local file as yours or delete it, then `pfm update drop <local>`.
+   - `GONE-UPSTREAM` — delete the retired local file and run `pfm update drop <local>`; keep it and drop only its pin if the project still uses it.
    - `LOCAL-DELETED` — restore the local file or drop its pin.
 3. After applying an `UPDATED` file, advance that one baseline with `pfm update pin <local>`. Use `--all` only after reviewing and applying every reported updated file.
 4. Re-run `pfm update check`; it is clean only when nothing needs review. Rebuild enabled engine mirrors from the resulting local sources.

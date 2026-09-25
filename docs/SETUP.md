@@ -314,8 +314,8 @@ Claude takes your answers and:
     "sacred_ground": "patient cognitive assessment data and diagnostic accuracy",
     "structure": "multi-project",
     "subprojects": [
-      { "dir": "a", "desc": "the assessment service", "pkg": "pnpm" },
-      { "dir": "b", "desc": "the scoring worker", "pkg": "uv" }
+      { "dir": "a", "desc": "the assessment service", "pkg": "pnpm", "owns_infra": true },
+      { "dir": "b", "desc": "the scoring worker", "pkg": "uv", "owns_infra": false }
     ],
     "tech_commands": {
       "a": {
@@ -501,20 +501,21 @@ Before either tier moves, read every release note between the installed and the 
 2. Read every non-current row:
    - `UPDATED` — the printed diff compares unfilled templates and will not `git apply` to a filled local file. Follow this merge recipe:
 
-     1. Once per project, write `values.sed` with one `s|{TOKEN}|value|g` line per install-time token in `docs/PLACEHOLDERS.md`. Derive each value by comparing a filled local file with `git -C <blueprint> show <pinned>:templates/<template>`; the baseline stores no values. Escape `\`, `&`, and `|` in replacement values. Extend the script for new tokens in `HEAD`, and leave registered runtime metavariables literal.
-     2. For each row, use its pinned SHA and template path to render both template versions with the project's values into temporary `base` and `theirs` files, then merge them into `<local>`:
+     1. Once per project, read the target's `.professor/manifest.json` `interview` first: `project_name`, `subprojects` (including each entry's `dir` and ownership fields such as `owns_infra`), `tech_commands`, `ports`, and opt-ins hold the install's answers. Compare a filled local file with `git -C <blueprint> show <pinned>:templates/<template>` only for values the manifest lacks; ask the user for an unrecoverable value, never invent one. Create `merge_dir=$(mktemp -d)` outside the project and write `"$merge_dir/values.sed"` with one `s|{TOKEN}|value|g` line per scalar install-time token with one project-wide value in `docs/PLACEHOLDERS.md`. Escape `\`, `&`, and `|` in replacement values. Extend the script for new scalar tokens in `HEAD`. Render `{PROJECT_ROSTER}` and the materialization-expansion tokens `{ROSTER_DOC_PATHS}`, `{PROJECT_TYPING_RULES}`, `{PROJECT_TYPECHECK}`, `{PROJECT_FORMAT}`, `{PROJECT_LINT}`, `{PROJECT_INSTALL_CMD}`, `{PROJECT_RUN_CMD}`, `{PROJECT_ENV_FILES}`, `{HEALTH_PROBE}`, `{ENV_FILE_PROVISION}`, `{ENV_BOOTSTRAP}`, `{POST_INSTALL_HOOKS}`, `{STATUS_EXTRA_PROBES}`, `{DEV_PROCESS_PATTERN}`, `{DEV_PREREQS}`, and `{PORT_DEFAULTS}` per file, copying `<local>`'s installed block shape where it exists. Fill roster-entry tokens (`{project}`, `{PROJECT}`, `{PROJECT_ROLE}`, `{PROJECT_STACK}`, `{PROJECT_PKG_MGR}`, `{PROJECT_TEST_RUNNER}`, `{PROJECT_PORT}`) and per-project `CLAUDE.md` decomposition tokens per entry in their install-time sites. Registered runtime metavariables, including lowercase `{project}` and `{cmd}`, never go into `values.sed`; `pcm.md`'s derive-only `<!-- INSTALL: ... -->` roster examples and similar generic patterns keep `{project}` literal so they discover the live roster at runtime.
+     2. For each row, use its pinned SHA and template path to render both template versions with `"$merge_dir/values.sed"` into scratch `base` and `theirs` files. Before merging, render the per-file and structural install-time sites in both files from the manifest and `<local>`, and apply the install's KEEP/INSTALL decisions to both, dropping every block the install dropped and removing its decision comment. In `dev.sh` and `worktree.sh`, `INFRA_MAKE_DIR="{project}"` is an install-time assignment: set it to the infra owner's directory or `"-"` when none; expand `PROJECTS=(...)` entries per roster. A concrete assignment, path or roster entry is install-time even if its brace token is lowercase; generic examples such as `pcm.md`'s derive-only patterns remain literal.
 
         ```bash
-        git -C <blueprint> show <pinned>:templates/<template> | sed -f values.sed > base
-        git -C <blueprint> show HEAD:templates/<template> | sed -f values.sed > theirs
-        git merge-file --diff3 <local> base theirs
+        git -C <blueprint> show <pinned>:templates/<template> | sed -f "$merge_dir/values.sed" > "$merge_dir/base"
+        git -C <blueprint> show HEAD:templates/<template> | sed -f "$merge_dir/values.sed" > "$merge_dir/theirs"
+        git merge-file --diff3 <local> "$merge_dir/base" "$merge_dir/theirs"
         # Resolve conflicts in <local>, then check before pinning:
-        comm -23 <(grep -oE '\{[A-Za-z_][A-Za-z0-9_]*\}' <local> | sort -u) <(grep -oE '\{[A-Za-z_][A-Za-z0-9_]*\}' theirs | sort -u)
+        awk 'FILENAME==ARGV[1] {theirs[$0]=1; next} /\{[A-Za-z_][A-Za-z0-9_]*\}/ && !($0 in theirs) {print FNR ": " $0}' "$merge_dir/theirs" <local>
+        test -f <local> && ! grep -nE '<!--[[:space:]]+(KEEP|INSTALL)' <local>
         ```
 
      3. `git merge-file` returns the number of conflicts: `0` is clean, positive means conflicts, negative means an error. Resolve each conflict by keeping the project's own edits and taking the upstream framework change. The local `# pfm-scaffold:` line is absent from both templates; the merge normally keeps it.
-     4. The token check must print nothing: a token left in `<local>` is allowed only when rendered `theirs` keeps that literal token. Fill every extra token before `pfm update pin <local>`, then remove `base` and `theirs`. Never copy a template over a filled local file.
-   - `NEW` — adopt it only if useful. Fill its install-time tokens with the same `values.sed`, compare the resulting `<local>` tokens with its rendered `theirs` using the check above, and fill every extra token before `pfm update pin --template <template> <local>`. A single-project testing manual keeps the template frontmatter with `{project}` filled: a roster entry named `demo` yields `name: demo-testing-manual`, even when its local path is `testing-manual.md`. A template this project will never take is silenced with `pfm update ignore <template>...` (`--undo` reverses; it counts as `ignored`, never as review). For a scaffolded file the project does not use, follow the delete/drop/ignore sequence in [Phase 3 — Smoke test](#phase-3--smoke-test).
+     4. Both checks must exit `0` and print nothing: a token left in `<local>` is allowed only when rendered `theirs` keeps that identical line, and no KEEP/INSTALL decision marker may remain. Fill every extra token before `pfm update pin <local>`, then remove `"$merge_dir"` after all rows. Never copy a template over a filled local file.
+   - `NEW` — adopt it only if useful. Fill its scalar install-time tokens with the same `values.sed` and render per-file and structural tokens as above, compare the resulting `<local>` tokens with its rendered `theirs` using the check above, and fill every extra token before `pfm update pin --template <template> <local>`. A single-project testing manual keeps the template frontmatter with `{project}` filled: a roster entry named `demo` yields `name: demo-testing-manual`, even when its local path is `testing-manual.md`. A template this project will never take is silenced with `pfm update ignore <template>...` (`--undo` reverses; it counts as `ignored`, never as review). For a scaffolded file the project does not use, follow the delete/drop/ignore sequence in [Phase 3 — Smoke test](#phase-3--smoke-test).
    - `GONE-UPSTREAM` — delete the local file and run `pfm update drop <local>`; a retired framework surface left live can work against the new framework unsupervised. Keep it as your own file and drop its pin only if the project deliberately still uses it.
    - `LOCAL-DELETED` — restore the local file or drop its pin.
 

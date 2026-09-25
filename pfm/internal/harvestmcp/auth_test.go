@@ -2,12 +2,18 @@ package harvestmcp
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestAuthStoreMigratesACleartextClientSecretOnLoad is L2-F20's migration
@@ -129,4 +135,138 @@ func TestAuthenticateClientVerifiesByDigestNotPlaintext(t *testing.T) {
 	if stored.ClientSecret != "" {
 		t.Fatalf("the registered client's in-memory record still carries a cleartext secret: %+v", stored)
 	}
+}
+
+// TestBeginRefusesPastThePendingCeilingUntilExpiredOnesAreSwept: every
+// /authorize request mints a pending transaction, so begin refuses once
+// maxPendingConsents are open — and sweeps expired ones before counting, so
+// abandoned transactions never hold the gateway shut past consentTTL.
+func TestBeginRefusesPastThePendingCeilingUntilExpiredOnesAreSwept(t *testing.T) {
+	fake := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	store := newAuthStore(legacyPublicURL, legacyPublicURL+"/mcp", legacyPass, "", "", fake)
+	client := oauthClient{persistedClient: persistedClient{
+		ClientID: "client-1", RedirectURIs: []string{legacyRedirect}, TokenEndpointAuthMethod: tokenAuthNone,
+	}}
+	_, challenge := legacyPKCE()
+	begin := func() error {
+		_, err := store.begin(client, legacyRedirect, "", challenge, pkceMethodS256, "", []string{HarvesterScope})
+		return err
+	}
+	for i := range maxPendingConsents {
+		if err := begin(); err != nil {
+			t.Fatalf("authorization %d refused early: %v", i, err)
+		}
+	}
+	if err := begin(); !errors.Is(err, errTooManyPendingConsents) {
+		t.Fatalf("authorization past the ceiling = %v, want %v", err, errTooManyPendingConsents)
+	}
+	store.mu.Lock()
+	open := len(store.pending)
+	store.mu.Unlock()
+	if open != maxPendingConsents {
+		t.Fatalf("pending transactions = %d, want exactly the ceiling %d", open, maxPendingConsents)
+	}
+	fake.Advance(consentTTL + time.Second)
+	if err := begin(); err != nil {
+		t.Fatalf("authorization after every open one expired = %v, want the sweep to make room", err)
+	}
+	store.mu.Lock()
+	open = len(store.pending)
+	store.mu.Unlock()
+	if open != 1 {
+		t.Fatalf("pending transactions after the sweep = %d, want only the new one", open)
+	}
+}
+
+// TestRegisterHoldsTheClientCeilingUnderConcurrency is
+// TestRegisterRefusesPastTheClientCeiling raced: concurrent /register calls
+// must not all pass the ceiling check before any of them inserts. It counts
+// the result, so it catches the overshoot without -race.
+func TestRegisterHoldsTheClientCeilingUnderConcurrency(t *testing.T) {
+	for round := range 20 {
+		store := newAuthStore(legacyPublicURL, legacyPublicURL+"/mcp", legacyPass, "", "")
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		accepted := 0
+		for range 4 * maxRegisteredClients {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, _, code := store.register(persistedClient{
+					RedirectURIs: []string{legacyRedirect}, TokenEndpointAuthMethod: tokenAuthNone,
+				})
+				if code == "" {
+					mu.Lock()
+					accepted++
+					mu.Unlock()
+				} else if code != oauthErrorTooManyClients {
+					t.Errorf("round %d: registration refused with %q, want %q", round, code, oauthErrorTooManyClients)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		store.mu.Lock()
+		stored := len(store.clients)
+		store.mu.Unlock()
+		if accepted != maxRegisteredClients || stored != maxRegisteredClients {
+			t.Fatalf("round %d: accepted %d, stored %d clients, want exactly the ceiling %d",
+				round, accepted, stored, maxRegisteredClients)
+		}
+	}
+}
+
+// TestConsentEntropyFailureIsNotAnExpiredTransaction: the right passphrase
+// whose authorization code cannot be minted is a server failure — logged
+// with its cause and rendered as a 500 — never the "link expired" page an
+// unknown or stale transaction gets.
+func TestConsentEntropyFailureIsNotAnExpiredTransaction(t *testing.T) {
+	fake := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	store := newAuthStore(legacyPublicURL, legacyPublicURL+"/mcp", legacyPass, "", "", fake)
+	client := oauthClient{persistedClient: persistedClient{
+		ClientID: "client-1", RedirectURIs: []string{legacyRedirect}, TokenEndpointAuthMethod: tokenAuthNone,
+	}}
+	_, challenge := legacyPKCE()
+	txn, err := store.begin(client, legacyRedirect, "", challenge, pkceMethodS256, "", []string{HarvesterScope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mint = func(int) (string, error) { return "", errors.New("entropy source exhausted") }
+	_, recorder := obs.Test(t)
+	const addr = "203.0.113.7:54321"
+
+	code, ok, alive := store.consent(txn, legacyPass, addr)
+	expiredCode, expiredOK, expiredAlive := store.consent("no-such-txn", legacyPass, addr)
+	if code != "" || !ok || alive {
+		t.Fatalf("entropy failure = (%q, %v, %v), want (\"\", true, false)", code, ok, alive)
+	}
+	if code == expiredCode && ok == expiredOK && alive == expiredAlive {
+		t.Fatalf("entropy failure and an expired transaction both returned (%q, %v, %v)", code, ok, alive)
+	}
+	logged := false
+	for _, record := range recorder.Records() {
+		if record.Message == "harvester.auth.consent.mint" {
+			if got, _ := record.Field(obs.FieldErr); strings.Contains(asString(got), "entropy source exhausted") {
+				logged = true
+			}
+		}
+	}
+	if !logged {
+		t.Fatalf("the entropy failure was not logged with its cause: %s", recorder.Raw())
+	}
+
+	server := legacyNewRemote(t, legacyPublicURL, legacyPass, "")
+	clientID, _, _ := legacyRegister(t, server, tokenAuthNone, legacyRedirect)
+	serverTxn := legacyAuthorize(t, server, clientID, challenge, "")
+	server.store.mint = func(int) (string, error) { return "", errors.New("entropy source exhausted") }
+	if rec := legacyConsent(t, server, serverTxn, legacyPass); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("consent with an entropy failure = %d %s, want 500", rec.Code, rec.Body.String())
+	}
+}
+
+func asString(value any) string {
+	text, _ := value.(string)
+	return text
 }

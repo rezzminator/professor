@@ -380,6 +380,10 @@ func (r *RemoteServer) authorize(w http.ResponseWriter, req *http.Request) {
 		resource,
 		scope,
 	)
+	if errors.Is(err, errTooManyPendingConsents) {
+		r.redirectError(w, redirect, q.Get("state"), oauthErrorTooManyClients, err.Error())
+		return
+	}
 	if err != nil {
 		r.redirectError(w, redirect, q.Get("state"), "invalid_request", err.Error())
 		return
@@ -414,6 +418,13 @@ func (r *RemoteServer) consent(w http.ResponseWriter, req *http.Request) {
 		}
 		txn = req.Form.Get("txn")
 		code, ok, alive := r.store.consent(txn, req.Form.Get("passphrase"), remoteAddr(req))
+		if ok && !alive {
+			// The store logged the cause; the page must not claim "expired".
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, "<p>The harvester could not issue an authorization code. Try again shortly.</p>")
+			return
+		}
 		if !alive {
 			expiredConsent(w)
 			return
@@ -633,7 +644,7 @@ func (r *RemoteServer) revoke(w http.ResponseWriter, req *http.Request) {
 	if id == "" {
 		id, secret = req.Form.Get("client_id"), req.Form.Get("client_secret")
 	}
-	if id != "" && !r.authenticateClient(id, secret, true) {
+	if id == "" || !r.authenticateClient(id, secret, true) {
 		r.oauthError(w, http.StatusBadRequest, "invalid_client", "client authentication failed")
 		return
 	}

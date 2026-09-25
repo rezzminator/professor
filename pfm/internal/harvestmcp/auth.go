@@ -6,6 +6,7 @@ package harvestmcp
 // credentials out of the state file.
 
 import (
+	"context"
 	cryptoRand "crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -41,6 +43,22 @@ const (
 	consentTTL                 = 10 * time.Minute
 	maxConsentAttempts         = 5
 	defaultTokenExpiry         = 3600
+)
+
+// maxPendingConsents bounds how many /authorize transactions may wait for the
+// operator's passphrase at once. Every /authorize request mints one, and an
+// abandoned one lingers until consentTTL, so without a bound the map grows with
+// the request rate. Same policy as maxRegisteredClients: expired transactions
+// are swept first, then a request at the ceiling is refused — never a live
+// transaction silently evicted. Four open authorizations per client at the
+// client ceiling is far above what the handful of real clients ever holds.
+const maxPendingConsents = 4 * maxRegisteredClients
+
+// errTooManyPendingConsents is begin's refusal at maxPendingConsents; the
+// /authorize handler renders it as oauthErrorTooManyClients, the same
+// temporarily_unavailable refusal /register gives at its ceiling.
+var errTooManyPendingConsents = errors.New(
+	"the harvester gateway has reached its pending-authorization limit; retry once an open authorization completes or expires",
 )
 
 var pkceChallenge = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
@@ -159,6 +177,9 @@ type authStore struct {
 	// maxConsentAttempts above caps ONE transaction, but /authorize mints a
 	// fresh one on every request.
 	limiter *passphraseLimiter
+	// mint issues consent's authorization codes: tokenURLSafe, replaced only
+	// by a test that must drive the entropy-failure branch.
+	mint func(size int) (string, error)
 }
 
 func newAuthStore(issuer, resource, passphrase, staticToken, statePath string, clocks ...clock.Clock) *authStore {
@@ -171,7 +192,7 @@ func newAuthStore(issuer, resource, passphrase, staticToken, statePath string, c
 		statePath: statePath, clock: watch, clients: map[string]oauthClient{},
 		pending: map[string]pendingConsent{}, codes: map[string]authorizationCode{},
 		access: map[string]accessToken{}, refresh: map[string]refreshToken{},
-		limiter: newPassphraseLimiter(),
+		limiter: newPassphraseLimiter(), mint: tokenURLSafe,
 	}
 	if staticToken != "" {
 		s.staticHash = digest(staticToken)
@@ -290,15 +311,6 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 			return persistedClient{}, "", "invalid_redirect_uri"
 		}
 	}
-	// L2-F21: /register was unthrottled and persisted every client forever.
-	// Refuse at the ceiling rather than silently evicting an
-	// oldest-but-still-used client — see maxRegisteredClients' doc comment.
-	s.mu.Lock()
-	full := len(s.clients) >= maxRegisteredClients
-	s.mu.Unlock()
-	if full {
-		return persistedClient{}, "", oauthErrorTooManyClients
-	}
 	id, err := tokenURLSafe(18)
 	if err != nil {
 		return persistedClient{}, "", oauthErrorServer
@@ -326,10 +338,18 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	if c.Scope == "" {
 		c.Scope = HarvesterScope
 	}
+	// L2-F21: /register was unthrottled and persisted every client forever.
+	// Refuse at the ceiling rather than silently evicting an
+	// oldest-but-still-used client — see maxRegisteredClients' doc comment.
+	// The check and the insert share one critical section, so concurrent
+	// registrations cannot all pass the check before any of them lands.
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.clients) >= maxRegisteredClients {
+		return persistedClient{}, "", oauthErrorTooManyClients
+	}
 	s.clients[id] = oauthClient{persistedClient: c}
 	s.saveLocked()
-	s.mu.Unlock()
 	return c, secret, ""
 }
 
@@ -397,6 +417,17 @@ func (s *authStore) begin(
 		return "", err
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Sweep, check and insert under one lock: see maxPendingConsents.
+	now := s.clock.Now()
+	for id := range s.pending {
+		if now.Sub(s.pending[id].Created) > consentTTL {
+			delete(s.pending, id)
+		}
+	}
+	if len(s.pending) >= maxPendingConsents {
+		return "", errTooManyPendingConsents
+	}
 	s.pending[txn] = pendingConsent{
 		ClientID:    c.ClientID,
 		RedirectURI: redirect,
@@ -405,9 +436,8 @@ func (s *authStore) begin(
 		Challenge:   challenge,
 		Method:      method,
 		Resource:    resource,
-		Created:     s.clock.Now(),
+		Created:     now,
 	}
-	s.mu.Unlock()
 	return txn, nil
 }
 
@@ -416,7 +446,10 @@ func (s *authStore) begin(
 // that bound caps ONE transaction, this one caps every transaction addr (or
 // the whole gateway) can mint. A locked-out guess is refused the SAME way a
 // wrong passphrase is (alive=true, ok=false) — the caller never learns
-// whether it hit the lockout or just guessed wrong.
+// whether it hit the lockout or just guessed wrong. The right passphrase whose
+// authorization code cannot be minted returns ok=true, alive=false: a server
+// failure, logged here, that the caller must render as one — never as the
+// expired transaction ("", false, false) it would otherwise look like.
 func (s *authStore) consent(txn, supplied, addr string) (string, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -441,9 +474,11 @@ func (s *authStore) consent(txn, supplied, addr string) (string, bool, bool) {
 	}
 	s.limiter.recordSuccess(addr)
 	delete(s.pending, txn)
-	code, err := tokenURLSafe(24)
+	code, err := s.mint(24)
 	if err != nil {
-		return "", false, false
+		obs.Logger(obs.Component(context.Background(), "mcp")).Error("harvester.auth.consent.mint",
+			obs.FieldErr, err.Error(), "client_id", p.ClientID)
+		return "", true, false
 	}
 	s.codes[code] = authorizationCode{
 		Code:        code,

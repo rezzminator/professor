@@ -612,18 +612,45 @@ func TestRunStdioResolvesCodexCallerInProcess(t *testing.T) {
 	}
 }
 
-// A stdio server whose chat family failed to configure cannot verify a
-// daemon's chat runtime, so it never forwards: chat_ls answers the in-process
-// configuration error and the daemon sees no chat call. A healthy chat whose
-// runtime matches still forwards.
-func TestRunStdioForwardsChatOnlyWhenLocalChatConfigured(t *testing.T) {
+// The daemon mounts chat and harvester. A stdio server forwards only when its
+// config enables exactly those families and every one configured: a family
+// that failed locally, or a daemon family this config disables, keeps it in
+// process — the failed family's tools answer the configuration error, the
+// disabled family's tools are never listed — and one stderr line says why.
+func TestRunStdioForwardsOnlyTheFamiliesItsConfigServes(t *testing.T) {
+	harvesterFailed := FailedFamily{
+		Family: pfmconfig.MCPServerHarvester, Tools: harvesterRosterNoSearch,
+		Err: errors.New("harvester config broken"), ConfigPath: "/pfm/config.json",
+	}
+	chatFailed := FailedFamily{
+		Family: pfmconfig.MCPServerChat, Tools: ToolNames(),
+		Err: errors.New("chat config broken"), ConfigPath: "/pfm/config.json",
+	}
 	for _, row := range []struct {
 		name        string
-		chatFailed  bool
+		chat        bool
+		harvester   bool
+		failed      []FailedFamily
+		call        string
 		wantForward bool
+		wantError   string
+		wantWarning string
 	}{
-		{name: "local chat failed", chatFailed: true, wantForward: false},
-		{name: "local chat healthy and runtime matches", chatFailed: false, wantForward: true},
+		{
+			name: "local chat failed", harvester: true, failed: []FailedFamily{chatFailed},
+			call: "chat_ls", wantError: "chat config broken",
+			wantWarning: "family chat failed to configure locally; using in-process MCP",
+		},
+		{
+			name: "local harvester failed", chat: true, failed: []FailedFamily{harvesterFailed},
+			call: "harvester_read", wantError: "harvester config broken",
+			wantWarning: "family harvester failed to configure locally; using in-process MCP",
+		},
+		{
+			name: "config disables chat the daemon mounts", harvester: true,
+			wantWarning: "mounts family chat that this config disables; using in-process MCP",
+		},
+		{name: "families and runtime match", chat: true, harvester: true, call: "chat_ls", wantForward: true},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			testjail.Fleet(t)
@@ -643,59 +670,77 @@ func TestRunStdioForwardsChatOnlyWhenLocalChatConfigured(t *testing.T) {
 				HarvesterTools:      daemonProfessor.Servers()[pfmconfig.MCPServerHarvester],
 				ChatRuntimeIdentity: "sha256:proxy-test",
 			})
-			var chatRequests atomic.Int32
+			var professorRequests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-				if request.Body != nil {
-					body, err := io.ReadAll(request.Body)
-					if err != nil {
-						t.Errorf("read daemon request body: %v", err)
-					}
-					if strings.Contains(string(body), `"chat_`) {
-						chatRequests.Add(1)
-					}
-					request.Body = io.NopCloser(bytes.NewReader(body))
+				if request.URL.Path == pfmconfig.MCPPathProfessor {
+					professorRequests.Add(1)
 				}
 				daemon.ServeHTTP(writer, request)
 			}))
 			defer server.Close()
 
-			options := ProfessorOptions{Harvester: newTestHarvester(t, harvestmcp.Runtime{})}
-			if row.chatFailed {
-				options.Failed = []FailedFamily{{
-					Family: pfmconfig.MCPServerChat, Tools: ToolNames(),
-					Err: errors.New("chat config broken"), ConfigPath: "/pfm/config.toml",
-				}}
-			} else {
+			options := ProfessorOptions{Failed: row.failed}
+			if row.chat {
 				var localCalls [][]string
 				options.Chat = proxyTestService("local", nil, &localCalls)
 			}
+			if row.harvester {
+				options.Harvester = newTestHarvester(t, harvestmcp.Runtime{})
+			}
 			var warnings proxyTestBuffer
+			address := proxyTestAddress(server)
 			session := stdioTestSession(t, newTestProfessor(t, options), StdioOptions{
-				DaemonAddress: proxyTestAddress(server), Home: resolved.Home,
+				DaemonAddress: address, Home: resolved.Home,
 				SIDDir: resolved.SIDDir, Warnings: &warnings,
 			})
-			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-				Name: "chat_ls", Arguments: map[string]any{},
-			})
-			if err != nil {
-				t.Fatalf("chat_ls: %v; warnings: %s", err, warnings.String())
-			}
-			forwarded := chatRequests.Load()
-			if !row.wantForward {
-				if !result.IsError || len(result.Content) == 0 ||
-					!strings.Contains(result.Content[0].(*mcp.TextContent).Text, "chat config broken") {
-					t.Fatalf("chat_ls = %+v, want the in-process configuration error", result)
+			names := sessionToolNames(t, session)
+			if row.wantForward {
+				if strings.Contains(warnings.String(), "using in-process MCP") {
+					t.Fatalf("matching families fell back in process: %s", warnings.String())
 				}
-				if forwarded != 0 {
-					t.Fatalf("daemon saw %d chat requests, want 0; warnings: %s", forwarded, warnings.String())
+				result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+					Name: row.call, Arguments: map[string]any{},
+				})
+				if err != nil || result.IsError {
+					t.Fatalf("%s = %+v, %v; want the daemon's answer", row.call, result, err)
+				}
+				if professorRequests.Load() == 0 {
+					t.Fatalf("daemon saw no professor request; warnings: %s", warnings.String())
 				}
 				return
 			}
-			if result.IsError {
-				t.Fatalf("chat_ls = %+v, want the daemon's answer", result)
+			if professorRequests.Load() != 0 {
+				t.Fatalf("daemon %s received %d requests, want none; warnings: %s",
+					pfmconfig.MCPPathProfessor, professorRequests.Load(), warnings.String())
 			}
-			if forwarded == 0 {
-				t.Fatalf("daemon saw no chat request; warnings: %s", warnings.String())
+			if want := "pfm mcp stdio: "; !strings.HasPrefix(warnings.String(), want) ||
+				!strings.Contains(warnings.String(), row.wantWarning) {
+				t.Fatalf("warnings = %q, want the line naming %q", warnings.String(), row.wantWarning)
+			}
+			if !row.chat && len(row.failed) == 0 {
+				want := "pfm mcp stdio: daemon at " + address + " " + row.wantWarning
+				if !strings.Contains(warnings.String(), want) {
+					t.Fatalf("warnings = %q, want %q", warnings.String(), want)
+				}
+				for _, name := range names {
+					if strings.HasPrefix(name, "chat_") || name == "servicedesk" {
+						t.Fatalf("tools/list = %v, lists %s from the family this config disables", names, name)
+					}
+				}
+				return
+			}
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: row.call, Arguments: map[string]any{},
+			})
+			if err != nil {
+				t.Fatalf("%s: %v; warnings: %s", row.call, err, warnings.String())
+			}
+			if !result.IsError || len(result.Content) == 0 ||
+				!strings.Contains(result.Content[0].(*mcp.TextContent).Text, row.wantError) {
+				t.Fatalf("%s = %+v, want the in-process configuration error", row.call, result)
+			}
+			if len(daemonCalls) != 0 {
+				t.Fatalf("daemon chat saw calls %v, want none", daemonCalls)
 			}
 		})
 	}

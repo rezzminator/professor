@@ -15,7 +15,8 @@ import (
 // to the contracts' harvester part, byte for byte, for each of the four
 // combinations: clause 3 (local documents) only when local, clause 6 (web
 // search) only when a backend is configured — never a routing guide that
-// recommends a tool the server does not register.
+// recommends a tool the server does not register. Every combination ends with
+// the per-item empty-versus-error rule; search off adds the enable hint.
 func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
 	clause1 := `Read a web page → harvester_read with it in urls`
 	clause2 := `a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or harvester_search_literature handle → harvester_read with it in publications`
@@ -24,7 +25,10 @@ func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
 	clause5 := `save a file's bytes unparsed → harvester_download_file`
 	clause6 := `search the web for a topic → harvester_search_web`
 
-	join := func(clauses ...string) string { return strings.Join(clauses, "; ") + "." }
+	const perItem = ` Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
+	const searchOff = ` Web search is not configured on this server — set search.searxngURL or search.braveApiKey in harvester.config.json to enable web search.`
+	join := func(clauses ...string) string { return strings.Join(clauses, "; ") + "." + perItem }
+	joinOff := func(clauses ...string) string { return join(clauses...) + searchOff }
 
 	for _, test := range []struct {
 		name            string
@@ -32,13 +36,17 @@ func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
 		remote          bool
 		want            string
 	}{
-		{"local, search off", false, false, join(clause1, clause2, clause3, clause4, clause5)},
+		{"local, search off", false, false, joinOff(clause1, clause2, clause3, clause4, clause5)},
 		{"local, search on", true, false, join(clause1, clause2, clause3, clause4, clause5, clause6)},
-		{"remote, search off", false, true, join(clause1, clause2, clause4, clause5)},
+		{"remote, search off", false, true, joinOff(clause1, clause2, clause4, clause5)},
 		{"remote, search on", true, true, join(clause1, clause2, clause4, clause5, clause6)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := serverInstructions(test.searchAvailable, test.remote); got != test.want {
+			got := serverInstructions(test.searchAvailable, test.remote)
+			if !test.searchAvailable && strings.Contains(got, "harvester_search_web") {
+				t.Fatalf("search off, instructions name harvester_search_web: %q", got)
+			}
+			if got != test.want {
 				t.Fatalf(
 					"serverInstructions(%v, %v) =\n%q\nwant\n%q",
 					test.searchAvailable,

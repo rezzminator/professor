@@ -19,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
@@ -134,7 +135,7 @@ func NewConfiguredHarvester(version string, runtime Runtime) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "professor", Version: version}, &mcp.ServerOptions{
+	server := mcp.NewServer(&mcp.Implementation{Name: config.MCPServerHarvester, Version: version}, &mcp.ServerOptions{
 		Instructions: serverInstructions(runtimeSearchEnabled(runtime), runtime.Remote),
 	})
 	resolver := &harvest.Resolver{

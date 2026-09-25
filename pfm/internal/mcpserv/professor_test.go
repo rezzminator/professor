@@ -3,6 +3,7 @@ package mcpserv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -16,7 +17,10 @@ import (
 )
 
 // maxInstructionRunes is the contracts' bound on every professor composition.
-const maxInstructionRunes = 900
+// The one professor server carries the routing of the chat and harvester
+// families, which were two servers each under its own cap, so the combined
+// bound is 1200 runes; no route clause is shortened to fit it.
+const maxInstructionRunes = 1200
 
 func newTestHarvester(t *testing.T, runtime harvestmcp.Runtime) *harvestmcp.Service {
 	t.Helper()
@@ -197,9 +201,42 @@ func TestProfessorRefusesWhenEveryFamilyIsDisabled(t *testing.T) {
 	}
 }
 
+// A professor whose every enabled family failed to configure still starts:
+// each tool of the failed family stays listed and answers IsError with the
+// configuration error and a fix that names each engine's reconnect.
+func TestProfessorServesAFailedFamilyAlone(t *testing.T) {
+	professor, err := NewProfessor(ProfessorOptions{Version: "test", Failed: []FailedFamily{{
+		Family: pfmconfig.MCPServerChat, Tools: ToolNames(),
+		Err: errors.New("chat config broken"), ConfigPath: "/pfm/config.json",
+	}}})
+	if err != nil {
+		t.Fatalf("NewProfessor(chat failed alone) error = %v, want a started server", err)
+	}
+	session := inMemorySession(t, professor.Server())
+	if names := sessionToolNames(t, session); !slices.Equal(names, sortedRoster(ToolNames())) {
+		t.Fatalf("tools/list = %v, want every chat tool %v", names, sortedRoster(ToolNames()))
+	}
+	for _, name := range ToolNames() {
+		result, err := session.CallTool(
+			context.Background(),
+			&mcp.CallToolParams{Name: name, Arguments: map[string]any{}},
+		)
+		if err != nil {
+			t.Fatalf("%s protocol error = %v, want an MCP error result", name, err)
+		}
+		text := result.Content[0].(*mcp.TextContent).Text
+		want := "pfm mcp: the chat family failed to configure: chat config broken. Fix: correct the config key " +
+			"this error names in /pfm/config.json, then reconnect the MCP server (Claude Code: /mcp; " +
+			"Codex and OpenCode: start a new chat)."
+		if !result.IsError || text != want {
+			t.Fatalf("%s = IsError %t %q, want IsError and %q", name, result.IsError, text, want)
+		}
+	}
+}
+
 // TestProfessorInstructionsStayWithinTheBound composes every combination —
 // both families or one, each view, search on and off, the remote harvester
-// part included — and pins the composition and the 900-rune bound.
+// part included — and pins the composition and the 1200-rune bound.
 func TestProfessorInstructionsStayWithinTheBound(t *testing.T) {
 	chat := newTestChat(t)
 	for _, remote := range []bool{false, true} {

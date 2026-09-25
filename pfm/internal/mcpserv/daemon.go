@@ -67,11 +67,12 @@ type DaemonOptions struct {
 // authenticates no caller (`pfm install` registers every client without a
 // credential — internal/installer/mcp.go), so every local process and every
 // local user that can open 127.0.0.1 can call the chat tools this mounts.
-// The Origin refusal below stops a browser, not a peer. Codex is the one
-// registered client that reaches the chat tools this way (its config.toml
-// entry is a URL, where Claude Code and OpenCode both get per-chat stdio), so
-// the route stays; narrowing it to the owning user needs a per-daemon secret
-// in every client registration, which is an installer-side change.
+// The Origin refusal below stops a browser, not a peer. Every engine
+// registers `pfm mcp serve --stdio`, and each stdio server forwards to this
+// daemon's config.MCPPathProfessor route, so every local client reaches the
+// chat tools through this daemon; narrowing it to the owning user needs a
+// per-daemon secret in every client registration, which is an installer-side
+// change.
 func NewDaemonHandler(options DaemonOptions) http.Handler {
 	if options.Clock == nil {
 		options.Clock = clock.Real

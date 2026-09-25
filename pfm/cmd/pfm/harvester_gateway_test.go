@@ -94,8 +94,8 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 	response := do(http.MethodPost, "/mcp", "example-gateway-token", initialize)
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "harvester_read") ||
-		!strings.Contains(string(body), `"name":"professor"`) {
-		t.Fatalf("authenticated /mcp = %d %s, want serverInfo professor and harvester_read", response.StatusCode, body)
+		!strings.Contains(string(body), `"name":"harvester"`) {
+		t.Fatalf("authenticated /mcp = %d %s, want serverInfo harvester and harvester_read", response.StatusCode, body)
 	}
 	sessionID = response.Header.Get("Mcp-Session-Id")
 	do(http.MethodPost, "/mcp", "example-gateway-token", `{"jsonrpc":"2.0","method":"notifications/initialized"}`)

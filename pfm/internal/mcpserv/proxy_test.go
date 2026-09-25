@@ -649,41 +649,85 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 	<-restored
 }
 
-func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
-	var routeCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/status" {
-			identity := "sha256:selected"
-			if routeCalls.Load() > 0 {
-				identity = "sha256:replacement"
+// A daemon restarted under a different chat runtime between the original send
+// and its replay: a chat call is refused rather than replayed into the wrong
+// fleet, while a harvester call — which carries no chat runtime — replays and
+// is answered. The runtime is probed before a replay, never before the
+// original send.
+func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
+	for _, row := range []struct {
+		name       string
+		call       string
+		wantReplay bool
+	}{
+		{name: "chat call refused", call: "chat_new"},
+		{name: "servicedesk call refused", call: "servicedesk"},
+		{name: "harvester call replayed", call: "harvester_read", wantReplay: true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var routeCalls, firstSendProbes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Path == "/status" {
+					if routeCalls.Load() == 0 {
+						firstSendProbes.Add(1)
+					}
+					identity := "sha256:selected"
+					if routeCalls.Load() > 0 {
+						identity = "sha256:replacement"
+					}
+					if err := json.NewEncoder(writer).Encode(DaemonStatus{
+						PID: 1, Servers: map[string][]string{"chat": ToolNames()}, ChatRuntimeIdentity: identity,
+					}); err != nil {
+						t.Errorf("encode status: %v", err)
+					}
+					return
+				}
+				if routeCalls.Add(1) == 1 {
+					writer.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				var frame proxyFrame
+				if err := json.NewDecoder(request.Body).Decode(&frame); err != nil {
+					t.Errorf("decode replayed frame: %v", err)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				writer.Header().Set("Mcp-Session-Id", "new-session")
+				answer := `{"jsonrpc":"2.0","id":` + string(frame.ID) + `,"result":{"answered":"` + frame.Method + `"}}`
+				_, _ = io.WriteString(writer, answer)
+			}))
+			defer server.Close()
+			proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+			proxy.expectedRuntimeIdentity = "sha256:selected"
+			proxy.sessionID = "old-session"
+			proxy.protocol = "2025-06-18"
+			proxy.retryDelay = time.Millisecond
+			proxy.retryWindow = time.Second
+			proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
+			frame := []byte(proxyTestToolCall(8, row.call, `{"name":"wrong-fleet"}`))
+			response, err := proxy.sendWithRetry(context.Background(), frame, false)
+			if firstSendProbes.Load() != 0 {
+				t.Fatalf("first send probed /status %d times, want none", firstSendProbes.Load())
 			}
-			if err := json.NewEncoder(writer).Encode(DaemonStatus{
-				PID: 1, Servers: map[string][]string{"chat": ToolNames()}, ChatRuntimeIdentity: identity,
-			}); err != nil {
-				t.Errorf("encode status: %v", err)
+			if !row.wantReplay {
+				const refused = "runtime mismatch during recovery; request was not replayed"
+				if err == nil || !strings.Contains(err.Error(), refused) {
+					t.Fatalf("mismatched replacement error = %v, want contextual no-replay error", err)
+				}
+				if routeCalls.Load() != 1 {
+					t.Fatalf(
+						"mismatched replacement received %d route posts, want only failed original",
+						routeCalls.Load(),
+					)
+				}
+				return
 			}
-			return
-		}
-		routeCalls.Add(1)
-		writer.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.expectedRuntimeIdentity = "sha256:selected"
-	proxy.sessionID = "old-session"
-	proxy.protocol = "2025-06-18"
-	proxy.retryDelay = time.Millisecond
-	proxy.retryWindow = time.Second
-	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
-	_, err := proxy.sendWithRetry(
-		context.Background(), []byte(proxyTestToolCall(8, "chat_new", `{"name":"wrong-fleet"}`)), false,
-	)
-	if err == nil || !strings.Contains(err.Error(), "runtime mismatch") ||
-		!strings.Contains(err.Error(), "not replayed") {
-		t.Fatalf("mismatched replacement error = %v, want contextual no-replay error", err)
-	}
-	if routeCalls.Load() != 1 {
-		t.Fatalf("mismatched replacement received %d route posts, want only failed original", routeCalls.Load())
+			if err != nil {
+				t.Fatalf("harvester replay error = %v, want the replayed answer", err)
+			}
+			if want := `{"jsonrpc":"2.0","id":8,"result":{"answered":"tools/call"}}`; string(response) != want {
+				t.Fatalf("harvester replay response = %s, want %s", response, want)
+			}
+		})
 	}
 }
 
@@ -752,7 +796,10 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 	}
 }
 
-func TestStdioProxyRefreshesClaudeConversationForEveryCall(t *testing.T) {
+// A harvester call needs no current transcript: with the crumb unreadable or
+// the crumb directory not absolute it still forwards the identity resolved at
+// start, where a chat call is refused.
+func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 	var received []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		var frame map[string]any
@@ -819,6 +866,20 @@ func TestStdioProxyRefreshesClaudeConversationForEveryCall(t *testing.T) {
 			output.String(),
 		)
 	}
+	assertHarvesterCallForwarded := func(id int) {
+		t.Helper()
+		proxy.forward(context.Background(), []byte(proxyTestToolCall(id, "harvester_read", `{}`)), &output)
+		meta := received[len(received)-1]["params"].(map[string]any)["_meta"].(map[string]any)
+		if len(received) != before+1 || meta["pfmProxy"].(map[string]any)["id"] != "conversation-a" {
+			t.Fatalf("harvester call without a usable crumb: received=%d output=%s",
+				len(received)-before, output.String())
+		}
+		received = received[:before]
+	}
+	assertHarvesterCallForwarded(51)
+	proxy.sidDir = "relative/sid"
+	assertHarvesterCallForwarded(52)
+	proxy.sidDir = sidDir
 	if err := os.Remove(crumb); err != nil {
 		t.Fatal(err)
 	}

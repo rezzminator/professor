@@ -37,7 +37,8 @@ func newIssuesTestService(t *testing.T) *Service {
 
 // TestChatInstructionsRouteComplaintsToServicedesk pins the chat server's
 // initialize Instructions to the contracts' chat part, byte for byte,
-// ending in the servicedesk routing clause rather than issue_servicedesk.
+// ending in the shell-only sentence after the servicedesk routing clause
+// (never issue_servicedesk).
 func TestChatInstructionsRouteComplaintsToServicedesk(t *testing.T) {
 	service := newIssuesTestService(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -55,7 +56,7 @@ func TestChatInstructionsRouteComplaintsToServicedesk(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = clientSession.Close() })
 
-	want := "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; compact myself at a milestone → chat_self_compact; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents."
+	want := "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; compact myself at a milestone → chat_self_compact; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands."
 	got := clientSession.InitializeResult().Instructions
 	if got != want {
 		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", got, want)

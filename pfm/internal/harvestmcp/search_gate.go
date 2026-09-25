@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
@@ -23,8 +24,10 @@ func runtimeSearchEnabled(runtime Runtime) bool {
 
 // serverInstructions is the harvester's routing clauses, exactly the
 // contracts' harvester part: the six clauses joined by "; ", ending with
-// ".". Clause 3 (local documents) is omitted on the remote gateway; clause 6
-// (web search) is present only when a search backend is configured.
+// ".", then the per-item empty-versus-error rule. Clause 3 (local documents)
+// is omitted on the remote gateway; clause 6 (web search) is present only when
+// a search backend is configured, and without one the text ends with the hint
+// that enables it — never naming the unregistered search tool.
 func serverInstructions(searchAvailable, remote bool) string {
 	routes := []string{
 		`Read a web page → harvester_read with it in urls`,
@@ -41,7 +44,13 @@ func serverInstructions(searchAvailable, remote bool) string {
 	if searchAvailable {
 		routes = append(routes, `search the web for a topic → harvester_search_web`)
 	}
-	return strings.Join(routes, "; ") + "."
+	text := strings.Join(routes, "; ") + "." +
+		` Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
+	if !searchAvailable {
+		text += " Web search is not configured on this server — set search.searxngURL or search.braveApiKey in " +
+			config.HarvesterFileName + " to enable web search."
+	}
+	return text
 }
 
 // renderSearchFailure is the public rendering of a failed search call.

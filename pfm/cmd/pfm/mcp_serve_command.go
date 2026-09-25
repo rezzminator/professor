@@ -240,7 +240,8 @@ func runMCPStdio(_, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 // newStdioProfessor configures every enabled family and builds the stdio
 // server over them. A family that fails to configure does not take the other
 // down: its tools stay listed and answer the error (mcpserv.FailedFamily), and
-// one stderr line names it. Only when no family configures does it fail.
+// one stderr line names it — the sole enabled family included, so the server
+// still starts. Only when config enables no family does it fail.
 // closeFamilies closes each configured service; it is always safe to call.
 func newStdioProfessor(
 	stderr io.Writer,
@@ -283,8 +284,8 @@ func newStdioProfessor(
 			families.Harvester = harvester
 		}
 	}
-	if families.Chat == nil && families.Harvester == nil {
-		return nil, closeFamilies, errors.New("no enabled family configured")
+	if families.Chat == nil && families.Harvester == nil && len(families.Failed) == 0 {
+		return nil, closeFamilies, errors.New("no family is enabled by config")
 	}
 	professor, err = mcpserv.NewProfessor(families)
 	return professor, closeFamilies, err

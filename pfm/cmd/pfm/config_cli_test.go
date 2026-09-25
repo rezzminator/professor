@@ -123,8 +123,8 @@ func TestConfigCLIMCPStdioRefusesWhenEveryServerIsDisabled(t *testing.T) {
 }
 
 // TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart pins that `pfm mcp
-// serve --stdio` with only the harvester enabled reaches the server start
-// rather than a usage refusal. Stdin is closed immediately so the reachable
+// serve --stdio` with only the harvester enabled configures it and reaches the
+// server start: exit 0, no usage refusal and no harvester configuration error. Stdin is closed immediately so the reachable
 // server terminates instead of blocking the test on stdio framing.
 func TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart(t *testing.T) {
 	root := jailTest(t)
@@ -148,10 +148,10 @@ func TestConfigCLIMCPStdioHarvesterOnlyReachesServerStart(t *testing.T) {
 	}()
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", path, "mcp", "serve", "--stdio"}, &stdout, &stderr); code == 2 ||
-		strings.Contains(stderr.String(), "usage: pfm mcp") {
+	if code := run([]string{"--config", path, "mcp", "serve", "--stdio"}, &stdout, &stderr); code != 0 ||
+		strings.Contains(stderr.String(), "configure harvester") {
 		t.Fatalf(
-			"run(mcp serve --stdio) code=%d stdout=%q stderr=%q, want the enabled harvester's server start, not usage",
+			"run(mcp serve --stdio) code=%d stdout=%q stderr=%q, want exit 0 from the enabled harvester's server start",
 			code,
 			stdout.String(),
 			stderr.String(),

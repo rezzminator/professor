@@ -227,11 +227,12 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 }
 
 // runStdioTransport forwards to the daemon's config.MCPPathProfessor when it
-// mounts every locally enabled family and, when chat is enabled, runs the
-// same chat runtime; otherwise it serves the combined server in process and
-// says why on the warnings writer. A chat family that failed to configure
-// locally has no runtime to verify the daemon's against, so it never forwards:
-// in process, every chat tool answers its configuration error.
+// mounts exactly the locally enabled families and, when chat is enabled, runs
+// the same chat runtime; otherwise it serves the combined server in process
+// and says why on the warnings writer. A daemon family this config disables
+// would reach the client through the forwarded tools/list, and a family that
+// failed to configure locally must answer its configuration error, so either
+// keeps the server in process.
 func (professor *Professor) runStdioTransport(
 	ctx context.Context,
 	reader io.ReadCloser,
@@ -247,8 +248,8 @@ func (professor *Professor) runStdioTransport(
 		fmt.Fprintf(warnings, "pfm mcp stdio: %s; using in-process MCP; %s\n", reason, consequence)
 		return professor.combined.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
 	}
-	if professor.chatFailed {
-		return inProcess("chat family failed to configure locally, so the daemon's chat runtime cannot be verified")
+	if len(professor.failed) > 0 {
+		return inProcess(fmt.Sprintf("family %s failed to configure locally", strings.Join(professor.failed, ", ")))
 	}
 	address := options.DaemonAddress
 	if address == "" {
@@ -264,6 +265,11 @@ func (professor *Professor) runStdioTransport(
 	for _, family := range slices.Sorted(maps.Keys(professor.servers)) {
 		if _, mounted := status.Servers[family]; !mounted {
 			return inProcess(fmt.Sprintf("family %s not mounted by daemon at %s", family, address))
+		}
+	}
+	for _, family := range slices.Sorted(maps.Keys(status.Servers)) {
+		if _, enabled := professor.servers[family]; !enabled {
+			return inProcess(fmt.Sprintf("daemon at %s mounts family %s that this config disables", address, family))
 		}
 	}
 	if professor.chat != nil && (status.ChatRuntimeIdentity == "" ||
@@ -336,8 +342,10 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 			proxy.answerFailure(output, frame.ID, fmt.Errorf("inspect caller thread metadata: %w", err))
 			return
 		}
+		// Only a chat tool acts on the caller's current transcript; every
+		// other call carries the identity resolved at start.
 		engine, engineErr := pfmengine.Parse(identity.Engine)
-		if !explicitThreadID && engineErr == nil && engine == pfmengine.Claude {
+		if !explicitThreadID && isChatToolCall(frame) && engineErr == nil && engine == pfmengine.Claude {
 			if !filepath.IsAbs(proxy.sidDir) {
 				proxy.answerFailure(
 					output,
@@ -380,6 +388,20 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 	if _, err := output.Write(append(response, '\n')); err != nil {
 		proxy.warn("write daemon response to stdio: %v", err)
 	}
+}
+
+// isChatToolCall: frame is a tools/call naming a chat tool, servicedesk included.
+func isChatToolCall(frame proxyFrame) bool {
+	if frame.Method != "tools/call" {
+		return false
+	}
+	var params struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(frame.Params, &params); err != nil {
+		return false
+	}
+	return slices.Contains(chatToolNames, params.Name)
 }
 
 func proxyCallHasThreadID(raw []byte) (bool, error) {
@@ -454,11 +476,15 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInit
 	for attempt := 0; ; attempt++ {
 		var result proxyPostResult
 		var err error
-		if proxy.expectedRuntimeIdentity != "" {
+		// A replay may reach a restarted daemon: a chat call is refused when
+		// its chat runtime is not the one this proxy was selected for; every
+		// other frame replays. The original send goes unprobed.
+		if attempt > 0 && proxy.expectedRuntimeIdentity != "" {
 			status, probeErr := ProbeDaemon(proxy.address)
 			if probeErr != nil {
 				err = fmt.Errorf("verify daemon runtime before replay: %w", probeErr)
-			} else if status.ChatRuntimeIdentity == "" || status.ChatRuntimeIdentity != proxy.expectedRuntimeIdentity {
+			} else if (status.ChatRuntimeIdentity == "" ||
+				status.ChatRuntimeIdentity != proxy.expectedRuntimeIdentity) && replayIsChatCall(frame) {
 				return nil, fmt.Errorf(
 					"pfm MCP daemon %s runtime mismatch during recovery; request was not replayed",
 					proxy.address,
@@ -505,6 +531,16 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInit
 		case <-timer.C():
 		}
 	}
+}
+
+// replayIsChatCall decodes a frame about to be replayed; one that does not
+// decode is treated as a chat call, so it is refused rather than replayed.
+func replayIsChatCall(raw []byte) bool {
+	var frame proxyFrame
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		return true
+	}
+	return isChatToolCall(frame)
 }
 
 func (proxy *stdioProxy) uncertainDelivery(cause error) error {

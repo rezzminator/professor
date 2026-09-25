@@ -43,17 +43,20 @@ type FailedFamily struct {
 type Professor struct {
 	combined *mcp.Server
 	chat     *Service // nil: the chat family is disabled or failed
-	// chatFailed: the chat family is enabled but failed to configure, so no
-	// runtime identity exists to check a daemon's chat against.
-	chatFailed bool
-	handler    http.Handler
-	families   map[string]http.Handler
-	servers    map[string][]string
+	// failed names each enabled family that failed to configure: its tools
+	// answer the error in process, so a stdio server holding one never
+	// forwards to a daemon that would serve that family healthy.
+	failed   []string
+	handler  http.Handler
+	families map[string]http.Handler
+	servers  map[string][]string
 }
 
-// NewProfessor builds the combined server and one view per enabled family.
+// NewProfessor builds the combined server and one view per enabled family. A
+// professor whose every enabled family failed still builds: its tools answer
+// the configuration errors.
 func NewProfessor(options ProfessorOptions) (*Professor, error) {
-	if options.Chat == nil && options.Harvester == nil {
+	if options.Chat == nil && options.Harvester == nil && len(options.Failed) == 0 {
 		return nil, errors.New("pfm mcp: every family is disabled")
 	}
 	professor := &Professor{
@@ -77,9 +80,7 @@ func NewProfessor(options ProfessorOptions) (*Professor, error) {
 		add(pfmconfig.MCPServerChat, chatInstructions, options.Chat.registerTools, ToolNames())
 	}
 	for _, failed := range options.Failed {
-		if failed.Family == pfmconfig.MCPServerChat {
-			professor.chatFailed = true
-		}
+		professor.failed = append(professor.failed, failed.Family)
 		add(failed.Family, failedFamilyInstructions(failed.Family), failed.registerTools, failed.Tools)
 	}
 	professor.combined = newProfessorServer(options.Version, strings.Join(parts, "\n\n"))
@@ -134,7 +135,7 @@ func failedFamilyInstructions(family string) string {
 // call answers the configuration error, so the tools are never silently absent.
 func (failed FailedFamily) registerTools(server *mcp.Server) {
 	message := fmt.Sprintf(
-		"pfm mcp: the %s family failed to configure: %v. Fix: correct the config key this error names in %s, then reconnect with /mcp.",
+		"pfm mcp: the %s family failed to configure: %v. Fix: correct the config key this error names in %s, then reconnect the MCP server (Claude Code: /mcp; Codex and OpenCode: start a new chat).",
 		failed.Family,
 		failed.Err,
 		failed.ConfigPath,

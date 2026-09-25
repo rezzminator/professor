@@ -680,6 +680,59 @@ func connectHTTPMCP(
 // enabled family fails to configure: the healthy family serves, and every tool
 // of the failed family stays listed and answers an MCP error naming the
 // family, the configuration error and the fix.
+// A chat-only config whose chat family fails to configure still starts the
+// server: every chat tool is listed and answers the configuration error.
+func TestMCPStdioStartsWhenTheSoleFamilyFails(t *testing.T) {
+	root := jailTest(t)
+	runtime := commandRuntime{Config: config.Defaults(root, nil), Paths: jailPaths(t)}
+	runtime.Config.Path = root + "/config.json"
+	runtime.Config.MCPServers[config.MCPServerChat] = config.MCPServer{Enabled: true}
+	runtime.Config.MCPServers[config.MCPServerHarvester] = config.MCPServer{Enabled: false}
+	runtime.Paths.TmuxDir = ""
+
+	var stderr bytes.Buffer
+	professor, closeFamilies, err := newStdioProfessor(&stderr, runtime, mcpRuntime(runtime, true))
+	exitCode := 0
+	defer closeFamilies(&exitCode)
+	if err != nil {
+		t.Fatalf("newStdioProfessor error = %v, want a started server whose chat tools answer the error", err)
+	}
+	if !strings.Contains(stderr.String(), "configure chat: ") {
+		t.Fatalf("stderr = %q, want the line naming the failed chat family", stderr.String())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := professor.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = serverSession.Close() }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+	tools, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools.Tools) != len(mcpserv.ToolNames()) {
+		t.Fatalf("tools/list holds %d tools, want the %d chat tools", len(tools.Tools), len(mcpserv.ToolNames()))
+	}
+	for _, name := range mcpserv.ToolNames() {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: map[string]any{}})
+		if err != nil {
+			t.Fatalf("%s protocol error = %v, want an MCP error result", name, err)
+		}
+		if text := toolResultText(result); !result.IsError ||
+			!strings.Contains(text, "configure chat MCP backend: tmux directory is empty") {
+			t.Fatalf("%s = IsError %t %q, want the configuration error", name, result.IsError, text)
+		}
+	}
+}
+
 func TestMCPStdioDegradesPerFamily(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -772,7 +825,8 @@ func TestMCPStdioDegradesPerFamily(t *testing.T) {
 				t.Fatalf("%s IsError = false, text %q", test.failedCall, text)
 			}
 			for _, part := range []string{
-				test.failed + " family failed to configure", test.wantError, runtime.Config.Path, "/mcp",
+				test.failed + " family failed to configure", test.wantError, runtime.Config.Path,
+				"Claude Code: /mcp", "Codex and OpenCode: start a new chat",
 			} {
 				if !strings.Contains(text, part) {
 					t.Fatalf("%s error text = %q, want it to hold %q", test.failedCall, text, part)

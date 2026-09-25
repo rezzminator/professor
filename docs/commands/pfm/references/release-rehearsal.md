@@ -18,12 +18,13 @@ Stage B's hardest case is the adopter several versions behind, so every round ru
 Model: the Codex model `pfm/internal/codexgen/config.go` maps `sonnet` to (`grep -o '"sonnet": *"[^"]*"' pfm/internal/codexgen/config.go`), effort `xhigh` — the weaker model at its highest setting, per `docs/design/integration-suite/laws.md` Law 5. One run per stage attempt, its files in `$RUN` — a directory OUTSIDE every git repository (`$RUN` = the release directory's `rehearsal/{machine}-{round}/` for Stage B and its `stage-a/` subdirectory for Stage A, under `$HOME/.local/state/pfm/releases/`): Codex loads each ancestor repo's `AGENTS.md`, and this repo's contract would turn the adopter into a Professor maintainer:
 
 ```bash
-pfm headless exec --engine codex --model "$MODEL" --effort xhigh --no-session-persistence \
-  --cwd "$RUN" --timeout 5400 --prompt-file "$RUN/brief.md" --schema "$RUN/schema.json" \
-  --output-format text --out "$RUN/result.json" \
-  --engine-arg --sandbox --engine-arg workspace-write \
-  --engine-arg -c --engine-arg sandbox_workspace_write.network_access=true
+timeout 5400 codex exec --model "$MODEL" -c model_reasoning_effort=xhigh \
+  --cd "$RUN" --skip-git-repo-check --ephemeral \
+  --sandbox workspace-write -c sandbox_workspace_write.network_access=true \
+  --output-schema "$RUN/schema.json" -o "$RUN/result.json" - < "$RUN/brief.md"
 ```
+
+The driver calls Codex directly because `pfm headless exec --engine codex` routes through OpenCode since 89db9254, while the rehearsal's isolation premises are Codex CLI facts.
 
 `workspace-write` confines host writes to `$RUN`; `network_access=true` is what lets the sandbox reach the Docker socket. Codex credentials never enter the container — a token refresh in there would rotate the host's login.
 

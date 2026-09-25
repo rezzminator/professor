@@ -254,7 +254,7 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 			case projectGoneUpstream:
 				fmt.Fprintf(
 					stdout,
-					"    %s   %s — local file is YOURS now — keep it and pfm update drop %s, or delete both\n",
+					"    %s   %s — retired upstream — delete it and pfm update drop %s; keep it and drop only its pin if the project still uses it\n",
 					item.Local,
 					item.Template,
 					item.Local,

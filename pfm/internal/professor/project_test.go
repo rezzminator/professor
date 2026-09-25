@@ -60,6 +60,22 @@ func TestProfessorDoctorProjectLine(t *testing.T) {
 	}
 }
 
+func TestGoneUpstreamReportRecommendsDeletingRetiredFile(t *testing.T) {
+	var output bytes.Buffer
+	writeProjectHuman(&output, projectReport{
+		Counts: map[projectStatus]int{projectGoneUpstream: 1},
+		Items: []projectReportItem{{
+			Status:   projectGoneUpstream,
+			Local:    "legacy.md",
+			Template: "project/legacy.md",
+		}},
+	})
+	want := "retired upstream — delete it and pfm update drop legacy.md; keep it and drop only its pin if the project still uses it"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("GONE-UPSTREAM advice = %q, want %q", output.String(), want)
+	}
+}
+
 // TestProfessorDoctorReviewRequiredMovesWarningTally pins L3-F15: `pfm doctor`
 // must not stay clean while a managed project has review-required drift.
 // `pfm update check` already returns exit 3 in this exact state

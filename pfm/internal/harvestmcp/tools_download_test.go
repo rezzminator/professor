@@ -106,3 +106,24 @@ func TestDownloadFileItemNamesItsRungVia(t *testing.T) {
 		t.Fatalf("download_file text = %q, want via", text)
 	}
 }
+
+// TestDownloadFileAllFailedIsAnError: a call whose every item failed answers
+// isError true, so a caller gating on isError never reads a failed batch as a
+// result; one item that downloaded keeps the batch a result.
+func TestDownloadFileAllFailedIsAnError(t *testing.T) {
+	session := connectHarvesterInProcess(t, newTestService(t, Runtime{}))
+	result := callRaw(t, session, toolDownloadFile, map[string]any{
+		"urls": []string{"/tmp/x.zip", "10.1038/nature14539"},
+	})
+	if !result.IsError || !strings.Contains(allText(result), "harvester_read") {
+		t.Fatalf("download_file with every item failed: isError = %v, content %s", result.IsError, allText(result))
+	}
+	failed := DownloadItem{Source: "https://example.test/gone.zip", Error: "HTTP 404"}
+	served := DownloadItem{Source: "https://example.test/bundle.zip", Kind: "zip", Path: "/tmp/bundle.zip"}
+	if mixed := downloadResult([]DownloadItem{failed, served}); mixed.IsError {
+		t.Fatalf("download_file with one item served: isError = true, content %s", allText(mixed))
+	}
+	if all := downloadResult([]DownloadItem{failed, failed}); !all.IsError {
+		t.Fatalf("download_file with every item failed: isError = false, content %s", allText(all))
+	}
+}

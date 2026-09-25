@@ -150,11 +150,16 @@ func (service *Service) downloadFile(
 }
 
 // downloadResult renders the items as the tool's content: one text block per
-// item, plus a resource_link block for each remote file.
+// item, plus a resource_link block for each remote file. Every item failed:
+// the call is an error, so a failed batch never reads as a result; one item
+// that downloaded keeps the batch a result.
 func downloadResult(items []DownloadItem) *mcp.CallToolResult {
-	result := &mcp.CallToolResult{}
+	result := &mcp.CallToolResult{IsError: true}
 	for index := range items {
 		item := &items[index]
+		if item.Error == "" {
+			result.IsError = false
+		}
 		result.Content = append(result.Content, &mcp.TextContent{Text: renderDownload(*item)})
 		if item.Resource != nil {
 			size := item.Resource.Size

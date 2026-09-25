@@ -33,8 +33,8 @@ and the two seams.
   installer-owned` fence that `pfm install` writes and owns; Codex reads the key as the first
   developer item of every thread and rebuilds it verbatim after compaction. A hand-written
   `developer_instructions` outside the fence is preserved untouched and the fleet prompt is not
-  installed there. `pfm doctor`'s `codex developer_instructions=` row reports `ok`, `MISSING` or
-  `CHECK FAILED` for each configured account. Full-history children inherit context; fresh/custom
+  installed there. `pfm doctor`'s `codex developer_instructions=` row reports `ok`, `MISSING`,
+  `CHECK FAILED` and related states (e.g. `no-accounts`, `MISMATCH`) for each configured account. Full-history children inherit context; fresh/custom
   children need the coordination briefing specified in the appendix. These instructions guide tool
   selection; they do not remove the professor MCP's chat_* tools.
 - `harness-prompts/opencode.md` — head + `opencode/professor.md` + tail. OpenCode has no

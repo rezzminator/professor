@@ -46,7 +46,7 @@ func TestMainLineWearsTheSubagentPalette(t *testing.T) {
 		{"cache warn", quiet, cWarn + "💾1h∞"},
 		{"cache bad", "", cBad + "💾1h!"},
 	} {
-		if got := cacheWindowSegment(cacheRuntime, now, want.path); !strings.Contains(got, want.color) {
+		if got := cacheWindowSegment(cacheRuntime, now, want.path, -1, nil); !strings.Contains(got, want.color) {
 			t.Fatalf("%s: segment %q lacks %q", want.role, got, want.color)
 		}
 	}

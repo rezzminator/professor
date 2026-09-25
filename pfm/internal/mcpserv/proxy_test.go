@@ -234,9 +234,7 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 					close(firstCallsReady)
 				}
 				<-releaseFirstCalls
-				return &http.Response{
-					StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody,
-				}, nil
+				return proxyTestSessionLost(), nil
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -604,51 +602,6 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 	}
 }
 
-func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
-	var initialCalls, returnedCalls [][]string
-	initial := proxyTestDaemon(proxyTestService("initial", nil, &initialCalls))
-	returned := proxyTestDaemon(proxyTestService("returned", nil, &returnedCalls))
-	var mutex sync.RWMutex
-	current := initial
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		mutex.RLock()
-		handler := current
-		mutex.RUnlock()
-		if handler == nil {
-			http.Error(writer, "daemon restarting", http.StatusServiceUnavailable)
-			return
-		}
-		handler.ServeHTTP(writer, request)
-	}))
-	defer server.Close()
-
-	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
-	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
-	proxy.identity = nil
-	proxy.retryWindow = 500 * time.Millisecond
-	proxy.retryDelay = 10 * time.Millisecond
-	harness := startProxyTestHarness(t, proxy)
-	harness.write(t, proxyTestInitialize)
-	_ = harness.read(t)
-	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	mutex.Lock()
-	current = nil
-	mutex.Unlock()
-	restored := make(chan struct{})
-	go func() {
-		<-time.After(50 * time.Millisecond)
-		mutex.Lock()
-		current = returned
-		mutex.Unlock()
-		close(restored)
-	}()
-	harness.write(t, proxyTestToolCall(8, "chat_new", `{"name":"after-restart"}`))
-	if got := proxyTestStructured(t, harness.read(t))["message"]; got != "returned" {
-		t.Fatalf("call after retry-window recovery = %v, want returned", got)
-	}
-	<-restored
-}
-
 // A daemon restarted under a different chat runtime between the original send
 // and its replay: a chat call is refused rather than replayed into the wrong
 // fleet, while a harvester call — which carries no chat runtime — replays and
@@ -683,7 +636,7 @@ func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
 					return
 				}
 				if routeCalls.Add(1) == 1 {
-					writer.WriteHeader(http.StatusServiceUnavailable)
+					http.Error(writer, "session not found", http.StatusNotFound)
 					return
 				}
 				var frame proxyFrame

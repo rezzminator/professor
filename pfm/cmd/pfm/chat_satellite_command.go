@@ -27,6 +27,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -243,7 +244,10 @@ func runChatSaveContext(
 	return 0
 }
 
-func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) (exitCode int) {
+// runChatLS is `pfm chat ls`: chat.List's live, unkilled chats in the current
+// directory's repository, or with --all in every repository. MCP chat_ls's
+// `all` differs: it adds killed and background rows as well.
+func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
 	clk = defaultClock(clk)
 	all := false
 	for _, arg := range args {
@@ -251,26 +255,23 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 		case "--all", "-a", "all":
 			all = true
 		default:
-			fmt.Fprintln(stderr, "usage: pfm chat ls [--all]")
+			fmt.Fprintln(
+				stderr,
+				"usage: pfm chat ls [--all]  (--all: live chats in every repo; MCP chat_ls all also adds killed rows)",
+			)
 			return 2
 		}
 	}
-	database, err := store.Open(store.WithWarningWriter(stderr))
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
-		return 1
+	request := pfmchat.ListRequest{View: compose.AllView, LiveOnly: true, ReadOnly: true}
+	if !all {
+		directory, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat ls: read the current directory: %v\n", err)
+			return 1
+		}
+		request.Repo = gitroot.RepoRoot(directory)
 	}
-	defer func() { cli.CloseResource(database, "pfm chat ls: close database", stderr, &exitCode) }()
-	request := fleet.Request{View: compose.AllView, ReadOnly: true}
-	if len(runtimes) != 0 {
-		request.Runtime = &runtimes[0]
-	}
-	scan, err := fleet.Scan(context.Background(), database, request, stderr)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
-		return 1
-	}
-	root, err := repositoryRoot()
+	listed, err := pfmchat.List(context.Background(), firstRuntime(runtimes), request, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
 		return 1
@@ -280,20 +281,8 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 	} else {
 		fmt.Fprintln(stdout, "live chats in this repo (name · session · state · last activity):")
 	}
-	found, elsewhere, killed := 0, 0, 0
-	for index := range scan.Output.Rows {
-		row := &scan.Output.Rows[index]
-		if !row.Kind.IsAddressable() {
-			continue
-		}
-		if row.Killed || row.NameKilled {
-			killed++
-			continue
-		}
-		if !all && !pathWithinDir(row.CWD, root) {
-			elsewhere++
-			continue
-		}
+	for index := range listed.Rows {
+		row := &listed.Rows[index]
 		chat := pfmchat.FromRow(*row)
 		status, inspectErr := headless.Inspect(context.Background(), chat, clk.Now())
 		state := doctor.StateUnknown
@@ -310,52 +299,23 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 		}
 		location := ""
 		if all {
-			location = strings.Replace(row.CWD, scan.Env.Paths.Home, "~", 1) + "  "
+			location = strings.Replace(row.CWD, listed.Home, "~", 1) + "  "
 		}
 		fmt.Fprintf(
 			stdout, "  %-28s %-24s %-7s %s%s\n",
 			transcript.Truncate(row.Name, 28), handle, state, location, transcript.Truncate(row.LastPrompt, 64),
 		)
-		found++
 	}
-	if found == 0 {
+	if len(listed.Rows) == 0 {
 		fmt.Fprintln(stdout, "  (none)")
 	}
-	if !all && elsewhere > 0 {
-		fmt.Fprintf(stdout, "  (+%d live in other dirs — pfm chat ls --all to see them)\n", elsewhere)
+	if listed.Elsewhere > 0 {
+		fmt.Fprintf(stdout, "  (+%d live in other dirs — pfm chat ls --all to see them)\n", listed.Elsewhere)
 	}
-	if killed > 0 {
-		fmt.Fprintf(stdout, "  (+%d killed — pfm ls --killed to manage)\n", killed)
+	if listed.KilledCount > 0 {
+		fmt.Fprintf(stdout, "  (+%d killed — pfm ls --killed to manage)\n", listed.KilledCount)
 	}
 	return 0
-}
-
-func repositoryRoot() (string, error) {
-	directory, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	directory, err = filepath.Abs(directory)
-	if err != nil {
-		return "", err
-	}
-	for current := directory; ; current = filepath.Dir(current) {
-		if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
-			return current, nil
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return directory, nil
-		}
-	}
-}
-
-func pathWithinDir(path, root string) bool {
-	path = filepath.Clean(path)
-	root = filepath.Clean(root)
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 func runChatBranch(

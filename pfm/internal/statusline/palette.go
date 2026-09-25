@@ -22,7 +22,7 @@ const (
 	cElapsed    = "\x1b[38;5;215m"
 	cTools      = "\x1b[38;5;87m"
 	cCompaction = "\x1b[38;5;177m"
-	cGrowth     = "\x1b[38;5;141m"
+	cDelegating = "\x1b[38;5;171m"
 	cCwd        = "\x1b[38;5;156m"
 	cLabel      = "\x1b[97m"
 	cMuted      = "\x1b[38;5;245m"

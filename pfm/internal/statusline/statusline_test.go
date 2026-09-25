@@ -525,6 +525,8 @@ func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 		Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}},
 		time.Now(),
 		transcriptPath,
+		-1,
+		nil,
 	)
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(segment, "")
 	if !strings.Contains(plain, "💾1h∞") || strings.Contains(plain, "1h?") {

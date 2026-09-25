@@ -39,6 +39,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/fleet: 2
       github.com/rezzminator/professor/pfm/internal/fleetdb: 2
       github.com/rezzminator/professor/pfm/internal/gather: 22
+      github.com/rezzminator/professor/pfm/internal/gitroot: 2
       github.com/rezzminator/professor/pfm/internal/harvest: 132
       github.com/rezzminator/professor/pfm/internal/harvestcli: 6
       github.com/rezzminator/professor/pfm/internal/harvestmcp: 6

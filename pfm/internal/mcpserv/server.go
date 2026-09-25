@@ -151,7 +151,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	mutating := &mcp.ToolAnnotations{ReadOnlyHint: false}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_ls",
-		Description: "Lists live and resumable chats as rows — \"what chats are running\", \"is there a chat named X\". Call chat_ls{} or chat_ls{project:\"substring\", all:true}. Returns rows plus matched, truncated, and the filter echoed back; rows empty with matched 0 = nothing matched; a tool error = the fleet could not be read. Address a row with chat_inject by its session or name.",
+		Description: "Lists live and resumable chats as rows — \"what chats are running\", \"is there a chat named X\". Call chat_ls{} or chat_ls{project:\"substring\", all:true}. Scoped to the caller's repository when the caller resolves, else to every one, named in scope; all drops the scope and adds killed and background rows (pfm chat ls --all stays on live chats). Returns rows plus matched, truncated, scope, elsewhere, and the filter echoed back; rows empty with matched 0 = nothing matched; a tool error = the fleet could not be read. Address a row with chat_inject by its session or name.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_ls", service.chatLS))
 	mcp.AddTool(server, &mcp.Tool{
@@ -430,10 +430,15 @@ func (service *Service) chatKeys(
 
 func (service *Service) chatLS(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input LSInput,
 ) (*mcp.CallToolResult, LSOutput, error) {
-	output, err := service.backend.list(ctx, input)
+	repo, scope, err := service.backend.lsScope(ctx, requestMeta(request), input)
+	if err != nil {
+		return nil, LSOutput{}, err
+	}
+	output, err := service.backend.listProjected(ctx, input, true, repo)
+	output.Scope = scope
 	return nil, output, err
 }
 

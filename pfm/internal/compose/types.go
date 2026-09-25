@@ -237,4 +237,5 @@ type Output struct {
 	primaryCodex       int
 	primaryOpenCode    int
 	fallbackDir        string
+	projects           projectNames
 }

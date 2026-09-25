@@ -3,7 +3,9 @@ package inject
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
@@ -74,6 +76,39 @@ const paneScrollbackLines = 2000
 // count gets the history.
 const paneBusyTailLines = 20
 
+// IsFooterBusy is the busy test for a whole pane capture: IsBusyFor scoped to
+// the pane's last paneBusyTailLines non-empty lines, where the live spinner and
+// footer render. A whole-screen test reads the chat's own transcript prose — an
+// answer saying "read 27,615 tokens" still on screen — as a turn that never
+// ends. Inside that window a Claude transcript RECORD line is dropped too: an
+// agent's `● Agent "X" finished · 46s` or a `⏺ Read 27,615 tokens` matches
+// busyPattern's `· \d+s` / `\d+ tokens` arms and, sitting under an idle
+// composer, kept the pane "busy" until new output scrolled it away — a
+// self-compact waiter never saw its caller yield (2026-09-25).
+func IsFooterBusy(engine pfmengine.ID, capture string) bool {
+	tail := lastNonEmptyLines(capture, paneBusyTailLines)
+	if engine != pfmengine.OpenCode {
+		tail = withoutRecordLines(tail)
+	}
+	return IsBusyFor(engine, tail)
+}
+
+// withoutRecordLines drops every line whose first non-space rune is a Claude
+// transcript record bullet (● or ⏺). The live spinner never opens with one —
+// its glyphs are ✻ ✢ ✶ ✳ ✽ · — so the busy arms still see it.
+func withoutRecordLines(tail string) string {
+	lines := strings.Split(tail, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimLeftFunc(stripTerminalControl(line), unicode.IsSpace)
+		if strings.HasPrefix(trimmed, "●") || strings.HasPrefix(trimmed, "⏺") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 // samplePane returns one observation and whether the pane could be READ at
 // all. A capture failure is never rendered as an observation: paneSample's
 // zero value says "not busy, no receipt seen", and for receipts that polarity
@@ -88,7 +123,7 @@ func (wait SettledTurn) samplePane(ctx context.Context) (paneSample, error) {
 		return paneSample{}, err
 	}
 	return paneSample{
-		busy:     IsBusyFor(wait.Engine, lastNonEmptyLines(capture, paneBusyTailLines)),
+		busy:     IsFooterBusy(wait.Engine, capture),
 		receipts: countCompactionReceipts(capture),
 	}, nil
 }

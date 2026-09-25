@@ -25,3 +25,26 @@ func TestListNeverListsThePickerPlaceholders(t *testing.T) {
 		}
 	}
 }
+
+// TestSelectLiveOnlyDropsKilledAndResumableRows pins the CLI's live listing:
+// a killed live chat (by tombstone or by name) is counted, never listed, and a
+// resumable row is neither.
+func TestSelectLiveOnlyDropsKilledAndResumableRows(t *testing.T) {
+	rows := []compose.Row{
+		{Kind: compose.LiveClaude, ID: "live", CWD: "/work/alpha"},
+		{Kind: compose.LiveClaude, ID: "killed", CWD: "/work/alpha", Killed: true},
+		{Kind: compose.LiveCodex, ID: "name-killed", CWD: "/work/alpha", NameKilled: true},
+		{Kind: compose.ResumeClaude, ID: "resumable", CWD: "/work/alpha"},
+	}
+	result := Select(rows, 9, ListRequest{LiveOnly: true})
+	if len(result.Rows) != 1 || result.Rows[0].ID != "live" || result.KilledCount != 2 {
+		t.Fatalf("live-only select = %+v, want only the live row and 2 killed", result)
+	}
+	if every := Select(rows, 9, ListRequest{}); len(every.Rows) != 4 || every.KilledCount != 9 {
+		t.Fatalf(
+			"unfiltered select = %d rows killed %d, want 4 rows and the scan's tally",
+			len(every.Rows),
+			every.KilledCount,
+		)
+	}
+}

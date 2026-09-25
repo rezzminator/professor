@@ -181,9 +181,11 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 				switch {
 				case decodeErr != nil:
 					proxy.warn("decode validated client frame: %v", decodeErr)
-				case envelope.Method == proxyInitializeMethod || envelope.Method == "notifications/initialized":
+				case isProxyHandshake(envelope.Method):
 					// Handshake stays ordered; later traffic may overlap.
 					proxy.forward(requestCtx, frame, output)
+				case envelope.Method == proxyDiscoverMethod && len(envelope.ID) != 0:
+					proxy.answerError(output, envelope.ID, proxyMethodNotFound, `method "server/discover" not found`)
 				case len(envelope.ID) != 0:
 					state, registered := proxy.registerRequest(requestCtx, envelope.ID)
 					if !registered {
@@ -331,7 +333,7 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 		proxy.warn("decode validated client frame: %v", err)
 		return
 	}
-	if frame.Method == proxyInitializeMethod || frame.Method == "notifications/initialized" {
+	if isProxyHandshake(frame.Method) {
 		proxy.storeHandshake(frame.Method, raw)
 	}
 	forwarded := raw
@@ -367,19 +369,13 @@ func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writ
 		}
 		forwarded = withIdentity
 	}
-	response, err := proxy.sendWithRetry(ctx, forwarded, frame.Method == proxyInitializeMethod)
+	response, err := proxy.sendWithRetry(ctx, forwarded, isProxyHandshake(frame.Method))
 	if err != nil {
 		if len(frame.ID) == 0 {
-			proxy.warn(
-				"dropped notification %q after pfm MCP daemon %s was unreachable for %s: %v",
-				frame.Method,
-				proxy.address,
-				proxy.retryWindow,
-				err,
-			)
+			proxy.warn("dropped notification %q: %v", frame.Method, err)
 			return
 		}
-		proxy.answerFailure(output, frame.ID, err)
+		proxy.answerForwardFailure(output, frame.ID, err)
 		return
 	}
 	if len(response) == 0 {
@@ -467,12 +463,13 @@ func addProxyIdentity(raw []byte, identity ProxyIdentity) ([]byte, error) {
 	return json.Marshal(request)
 }
 
-func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInitialize bool) ([]byte, error) {
+// sendWithRetry retries only a connection failure or a lost session, inside
+// the retry window; a daemon rejection is the request's answer at once.
+func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isHandshake bool) ([]byte, error) {
 	retryCtx, cancel := context.WithTimeout(ctx, proxy.retryWindow)
 	defer cancel()
 	var lastErr error
-	needsReinitialize := false
-	var recoveryGeneration uint64
+	replayedLostSession := false
 	for attempt := 0; ; attempt++ {
 		var result proxyPostResult
 		var err error
@@ -491,8 +488,11 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInit
 				)
 			}
 		}
-		if attempt > 0 && !isInitialize && needsReinitialize {
-			result.generation, err = proxy.reinitializeCurrent(retryCtx, recoveryGeneration)
+		if err == nil && !isHandshake {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return nil, contextErr
+			}
+			result.generation, err = proxy.restoreSession(retryCtx)
 		}
 		if err == nil {
 			if contextErr := ctx.Err(); contextErr != nil {
@@ -500,6 +500,13 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInit
 			}
 			result, err = proxy.post(ctx, frame)
 			if err == nil {
+				if !isHandshake && !replayedLostSession && uninitializedSessionResponse(result.response) {
+					// The daemon answered from a session that never saw initialize:
+					// the request never ran, so re-initialize and replay it once.
+					replayedLostSession = true
+					proxy.clearSession(result.generation)
+					continue
+				}
 				return result.response, nil
 			}
 		}
@@ -510,11 +517,12 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInit
 		if errors.As(err, &uncertain) {
 			return nil, proxy.uncertainDelivery(err)
 		}
-		lastErr = err
-		needsReinitialize = proxy.clearSession(result.generation)
-		if needsReinitialize {
-			recoveryGeneration = proxy.session().generation
+		var rejected proxyRejectedError
+		if errors.As(err, &rejected) {
+			return nil, err
 		}
+		lastErr = err
+		proxy.clearSession(result.generation)
 		timer := proxy.clock.NewTimer(proxy.retryDelay)
 		select {
 		case <-retryCtx.Done():
@@ -522,12 +530,7 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInit
 			if contextErr := ctx.Err(); contextErr != nil {
 				return nil, contextErr
 			}
-			return nil, fmt.Errorf(
-				"pfm MCP daemon %s stayed unreachable for %s; start it with `pfm mcp serve` and retry: %w",
-				proxy.address,
-				proxy.retryWindow,
-				lastErr,
-			)
+			return nil, proxy.retryExhausted(lastErr)
 		case <-timer.C():
 		}
 	}
@@ -572,16 +575,6 @@ func (proxy *stdioProxy) reinitialize(ctx context.Context) error {
 	defer proxy.reinitMutex.Unlock()
 	_, err := proxy.reinitializeLocked(ctx)
 	return err
-}
-
-func (proxy *stdioProxy) reinitializeCurrent(ctx context.Context, generation uint64) (uint64, error) {
-	proxy.reinitMutex.Lock()
-	defer proxy.reinitMutex.Unlock()
-	session := proxy.session()
-	if session.generation != generation || session.sessionID != "" || session.protocol != "" {
-		return session.generation, nil
-	}
-	return proxy.reinitializeLocked(ctx)
 }
 
 func (proxy *stdioProxy) reinitializeLocked(ctx context.Context) (uint64, error) {
@@ -640,7 +633,7 @@ func (proxy *stdioProxy) post(ctx context.Context, frame []byte) (proxyPostResul
 		}
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return result, fmt.Errorf("daemon answered HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		return result, proxy.daemonStatusError(response.StatusCode, body)
 	}
 	responseSessionID := response.Header.Get("Mcp-Session-Id")
 	if len(bytes.TrimSpace(body)) == 0 {
@@ -758,16 +751,17 @@ func (proxy *stdioProxy) updateSession(generation uint64, sessionID, protocol st
 	proxy.sessionGeneration++
 }
 
-func (proxy *stdioProxy) clearSession(generation uint64) bool {
+// clearSession forgets the session only while generation is still current, so
+// a late failure cannot wipe a session another request already recovered.
+func (proxy *stdioProxy) clearSession(generation uint64) {
 	proxy.sessionMutex.Lock()
 	defer proxy.sessionMutex.Unlock()
 	if generation != proxy.sessionGeneration {
-		return proxy.sessionID == "" && proxy.protocol == ""
+		return
 	}
 	proxy.sessionID = ""
 	proxy.protocol = ""
 	proxy.sessionGeneration++
-	return true
 }
 
 func (proxy *stdioProxy) answerFailure(output io.Writer, id json.RawMessage, cause error) {

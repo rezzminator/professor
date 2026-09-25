@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -31,28 +32,11 @@ func DiscoverSourceRepo() string {
 	}
 }
 
+// mainWorktreeOf maps a linked worktree of the source clone to its main
+// checkout; anything else, or a main checkout that is not the clone, is root.
 func mainWorktreeOf(root string) string {
-	raw, err := os.ReadFile(filepath.Join(root, ".git"))
-	if err != nil {
-		return root
-	}
-	gitdir, found := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
-	if !found {
-		return root
-	}
-	if !filepath.IsAbs(gitdir) {
-		gitdir = filepath.Join(root, gitdir)
-	}
-	common, err := os.ReadFile(filepath.Join(gitdir, "commondir"))
-	if err != nil {
-		return root
-	}
-	commonDir := strings.TrimSpace(string(common))
-	if !filepath.IsAbs(commonDir) {
-		commonDir = filepath.Join(gitdir, commonDir)
-	}
-	main := filepath.Dir(filepath.Clean(commonDir))
-	if !isSourceRepo(main) {
+	main, ok := gitroot.MainCheckout(root)
+	if !ok || !isSourceRepo(main) {
 		return root
 	}
 	return main

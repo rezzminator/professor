@@ -55,7 +55,11 @@ type input struct {
 			InputTokens              int64 `json:"input_tokens"`
 		} `json:"current_usage"`
 	} `json:"context_window"`
-	Cost struct {
+	// PromptCache is Claude Code's own cache tracker (2.1.25x+): the TTL its
+	// newest request used and when that cache expires. Absent before the
+	// first request and on older builds.
+	PromptCache *promptCache `json:"prompt_cache"`
+	Cost        struct {
 		TotalCostUSD      float64 `json:"total_cost_usd"`
 		TotalDurationMS   int64   `json:"total_duration_ms"`
 		TotalLinesAdded   int64   `json:"total_lines_added"`
@@ -704,137 +708,6 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 			_ = os.Remove(filepath.Join(runtime.RateLimitDir, entry.Name()))
 		}
 	}
-}
-
-func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string) string {
-	ttl := time.Hour
-	label := "1h"
-	if runtime.getenv("FORCE_PROMPT_CACHING_5M") == "1" {
-		ttl = 5 * time.Minute
-		label = "5m"
-	}
-	// A transcript we could not read is NOT a chat without a cache window, and
-	// the two must never share a rendering. Returning "" here made the segment
-	// disappear, which is indistinguishable from a statusline that has no cache
-	// timer at all — so the one state worth shouting about, a chat running with
-	// transcript saving off, arrived as silence. That chat cannot be resumed and
-	// its window cannot be measured; the statusline is where the user finds out.
-	//
-	// "!" is deliberately not "?": "?" means the transcript WAS read and simply
-	// carries no user turn to anchor on, which is a fact about the chat. "!" is
-	// a fact about us — we could not look.
-	if transcriptPath == "" {
-		return sep + cBad + "💾" + label + "!" + reset
-	}
-	info, err := os.Stat(transcriptPath)
-	if err != nil || info.IsDir() {
-		return sep + cBad + "💾" + label + "!" + reset
-	}
-	cachePath := filepath.Join(
-		runtime.CacheDir,
-		"cc-sl-anchor-"+strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl"),
-	)
-	key := fmt.Sprintf("%d:%d", info.ModTime().Unix(), info.Size())
-	cachedKey, anchor := readAnchorCache(cachePath)
-	if cachedKey != key {
-		anchor = cacheAnchor(transcriptPath)
-		encoded := "-"
-		if !anchor.IsZero() {
-			encoded = strconv.FormatInt(anchor.Unix(), 10)
-		}
-		_ = atomicfile.Write(cachePath, []byte(key+" "+encoded), 0o600)
-	}
-	if anchor.IsZero() {
-		if label == "1h" {
-			return sep + cWarn + "💾1h∞" + reset
-		}
-		return sep + cWarn + "💾" + label + "?" + reset
-	}
-	remaining := ttl - now.Sub(anchor)
-	if remaining > 0 {
-		return sep + cGood + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset
-	}
-	return sep + cBad + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset
-}
-
-func readAnchorCache(path string) (string, time.Time) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return "", time.Time{}
-	}
-	fields := strings.Fields(string(body))
-	if len(fields) != 2 || fields[1] == "-" {
-		if len(fields) == 2 {
-			return fields[0], time.Time{}
-		}
-		return "", time.Time{}
-	}
-	epoch, err := strconv.ParseInt(fields[1], 10, 64)
-	if err != nil {
-		return "", time.Time{}
-	}
-	return fields[0], time.Unix(epoch, 0)
-}
-
-// cacheAnchor is the moment the prompt cache was last written or refreshed:
-// the newest main-chain record that WAS an API request or its reply — an
-// assistant record, or a user record other than a local slash command's
-// transcript echo. Local commands (/rc, /cost, the /compact receipt …) write
-// user-typed records without making a request, and anchoring on them showed a
-// cache twelve hours cold as "expired 9m ago". Sidechains refresh their own
-// cache, never the main chat's.
-func cacheAnchor(path string) time.Time {
-	for _, size := range []int64{65_536, 1_048_576} {
-		body, err := readTail(path, size)
-		if err != nil {
-			continue
-		}
-		var newest time.Time
-		scanner := bufio.NewScanner(strings.NewReader(string(body)))
-		scanner.Buffer(make([]byte, 64*1024), int(size)+1)
-		for scanner.Scan() {
-			var record struct {
-				Type      string `json:"type"`
-				Sidechain bool   `json:"isSidechain"`
-				Timestamp string `json:"timestamp"`
-				Message   struct {
-					Content json.RawMessage `json:"content"`
-				} `json:"message"`
-			}
-			if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Sidechain || record.Timestamp == "" {
-				continue
-			}
-			switch record.Type {
-			case "assistant":
-			case "user":
-				if localCommandRecord(record.Message.Content) {
-					continue
-				}
-			default:
-				continue
-			}
-			parsed, parseErr := time.Parse(time.RFC3339Nano, record.Timestamp)
-			if parseErr == nil && parsed.After(newest) {
-				newest = parsed
-			}
-		}
-		if !newest.IsZero() {
-			return newest
-		}
-	}
-	return time.Time{}
-}
-
-// localCommandRecord recognises the transcript echo of a local slash command:
-// string content opening with one of Claude Code's local-command tags. Array
-// content is a real turn (tool results, content blocks) and always counts.
-func localCommandRecord(content json.RawMessage) bool {
-	var text string
-	if json.Unmarshal(content, &text) != nil {
-		return false
-	}
-	trimmed := strings.TrimSpace(text)
-	return strings.HasPrefix(trimmed, "<local-command-") || strings.HasPrefix(trimmed, "<command-name>")
 }
 
 func readTail(path string, size int64) (tail []byte, returnErr error) {

@@ -116,7 +116,7 @@ Toggled by `mcp.servers.chat.enabled`; `servicedesk` belongs to this family and 
 
 | Tool | Status | Inputs | Returns |
 | --------------------------- | ------ | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat_ls` | ● | `{all?, killed?, project?, limit?}` | Fleet rows (accounts, engines, sizes, liveness), including chats still booting. `project` filters case-insensitively on project label or directory; rows are capped (200 default, 1000 max) with `matched`/`truncated` reporting the cut. |
+| `chat_ls` | ● | `{all?, killed?, project?, limit?}` | Fleet rows (accounts, engines, sizes, liveness), including chats still booting. `project` filters case-insensitively on project label or directory; rows are capped (200 default, 1000 max) with `matched`/`truncated` reporting the cut. Without `all`, rows are scoped to the caller's repository (a linked worktree counts as its repo) when `_meta` resolves the caller; `scope` names the repo or `all repos — caller cwd unknown`, `elsewhere` counts the rows left out. `all` also adds killed and background rows, unlike `pfm chat ls --all`, which stays on live chats. |
 | `chat_new` | ✚ | `{name, prompt?, engine?, account?, model?, effort?, cwd?, 1h?, attach?, await?, progress?, settle?, timeout?}` | Spawned chat identity. |
 | `chat_open` | ✚ | `{target}` | Open result. |
 | `chat_read` | ◆ | `{source, last_n?, max_bytes?}` | Transcript text (converges onto CLI `read`). |

@@ -79,6 +79,9 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 	proxy.clock = testClock
 	proxy.retryDelay = time.Second
 	proxy.retryWindow = time.Minute
+	// A held session lets the first attempt reach the daemon before any replay.
+	proxy.sessionID = "session-before-refusal"
+	proxy.protocol = "2025-06-18"
 	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
 	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
 		if err := request.Context().Err(); err != nil {
@@ -121,9 +124,26 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 	<-testClock.timerCreated
 	fakeClock.Advance(proxy.retryDelay)
 	harness.write(t, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}`)
-	<-cancellationForwarded
+	// The cancellation needs a session too, so it waits behind the held replay;
+	// the request must already be cancelled when the replay boundary opens.
+	deadline := time.After(2 * time.Second)
+	for {
+		proxy.requestMutex.Lock()
+		request := proxy.requests["number:2"]
+		cancelled := request != nil && request.cancelled
+		proxy.requestMutex.Unlock()
+		if cancelled {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("request 2 was never marked cancelled")
+		case <-time.After(time.Millisecond):
+		}
+	}
 	proxy.reinitMutex.Unlock()
 	reinitLocked = false
+	<-cancellationForwarded
 	_ = harness.read(t)
 	if mutations.Load() != 0 {
 		t.Fatalf("cancelled request executed %d mutations after its retry timer fired", mutations.Load())

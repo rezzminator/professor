@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,7 +38,6 @@ type subagentTask struct {
 	Cwd               string          `json:"cwd"`
 	ContextWindowSize int64           `json:"contextWindowSize"`
 	TokenCount        int64           `json:"tokenCount"`
-	TokenSamples      []int64         `json:"tokenSamples"`
 }
 
 // subagentRow is one line Claude Code accepts back: the task id and the body
@@ -58,14 +58,23 @@ type agentActivity struct {
 	errors      int
 	compactions int
 	cacheHit    int
+	transcript  string
 	last        time.Time
 	err         error
+	nest        agentNesting
 }
 
 const (
 	subagentBarWidth = 8
 	localAgentTask   = "local_agent"
 	taskRunning      = "running"
+	taskCompleted    = "completed"
+	// taskDelegating is pfm's status, not Claude Code's: the task stopped
+	// while an agent it spawned, at any depth, still works.
+	taskDelegating = "delegating"
+	// finishedCollapse is how long a finished row keeps its full body before
+	// it collapses to status, age, identity and label.
+	finishedCollapse = time.Minute
 	entryAssistant   = "assistant"
 	entryUser        = "user"
 	// stallAfter is the quiet time before a running agent's row says idle:
@@ -73,11 +82,8 @@ const (
 	stallAfter = time.Minute
 )
 
-// sparkLevels is the TUI's scan-line ladder (internal/ui usageSpark), low to
-// high: block elements ▁…█ and braille are WebGL custom glyphs in VS Code's
-// terminal and render stale under repaint; cmd/pfm/webgl_glyph_guard_test.go
-// pins the banned ranges.
-var sparkLevels = []rune("_⎽⎼⎻⎺¯")
+// ansiSGR matches one colour escape: a muted row drops them all and wears one.
+var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // ServeSubagents answers Claude Code's subagentStatusLine command: stdin's
 // row context in, one {id,content} JSON line per agent-panel row out.
@@ -117,6 +123,7 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
+	var tree *agentTree // scanned once per render, on the first agent row
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
 		if task.ID == "" || (task.TokenCount <= 0 && task.ContextWindowSize <= 0) {
@@ -124,7 +131,14 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 		}
 		var activity *agentActivity
 		if task.Type == localAgentTask {
+			if tree == nil {
+				tree = scanAgentTree(data.TranscriptPath)
+			}
 			read := readAgentActivity(data.TranscriptPath, task.ID)
+			read.nest = tree.nesting(task.ID)
+			for _, cause := range tree.drainWarnings() {
+				fmt.Fprintf(warn, "pfm statusline --subagents: row %s: nested agents: %s\n", task.ID, cause)
+			}
 			for index, err := range []error{read.roleErr, read.err} {
 				if err != nil && (index == 0 || err != read.roleErr) {
 					fmt.Fprintf(warn, "pfm statusline --subagents: row %s: %v\n", task.ID, err)
@@ -140,11 +154,16 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 	return out.String(), nil
 }
 
-// subagentContent renders gauge → name·role → model·effort → status and time
-// → idle → tools → errors → cache → compactions → growth → cwd → label; the
-// label goes last because Claude Code truncates the row's tail. The cwd shows
-// only when the agent works outside the session's own directory — the same
-// one is noise.
+// subagentContent renders nested → gauge → name·role → model·effort → status
+// and time → idle → tools → errors → cache → compactions → cwd → label; the
+// nested count (working/all) leads because it is what a parent row is read for, and the
+// label goes last because Claude Code truncates the row's tail.
+// The cwd shows only when the agent works outside the session's own
+// directory — the same one is noise. A finished row steps back: completed, it
+// renders muted under Claude Code's own faint for its first minute; after
+// that minute every finished row collapses to its status, how long ago it
+// ended, its identity and its label. Claude Code, not this command, decides
+// when the row leaves the panel.
 func subagentContent(
 	task *subagentTask,
 	activity *agentActivity,
@@ -152,32 +171,89 @@ func subagentContent(
 	inherited sessionEffortRecord,
 	now time.Time,
 ) string {
-	line := cTokens + formatContextTokens(task.TokenCount) + reset
+	line := activeContent(task, activity, sessionCwd, inherited, now)
+	if !rowFinished(task, activity) {
+		return rowOpen + line
+	}
+	ended := time.Time{}
+	if activity != nil {
+		ended = activity.last
+	}
+	status := strings.TrimSpace(task.Status)
+	if ended.IsZero() || now.Sub(ended) < finishedCollapse {
+		if status != taskCompleted {
+			return rowOpen + line // a failure keeps its full colour for its first minute: it is an alert
+		}
+		return cMuted + ansiSGR.ReplaceAllString(line, "") + reset
+	}
+	statusColor := cMuted
+	if status != taskCompleted {
+		statusColor = cFailed
+	}
+	ago := formatDuration(now.Sub(ended).Milliseconds())
+	collapsed := statusColor + status + reset + cMuted + " " + ago + " ago" + reset
+	if identity := ansiSGR.ReplaceAllString(subagentIdentity(task.Name, activity), ""); identity != "" {
+		collapsed = appendSegment(collapsed, cMuted+identity+reset)
+	}
+	if label := rowLabel(task); label != "" {
+		collapsed = appendSegment(collapsed, cMuted+label+reset)
+	}
+	return collapsed
+}
+
+// rowFinished is true once the task stopped and no agent below it still runs:
+// Claude Code marks an orchestrator completed while its background workers
+// work on, and that row is not finished.
+func rowFinished(task *subagentTask, activity *agentActivity) bool {
+	switch strings.TrimSpace(task.Status) {
+	case taskCompleted, "failed", "killed", "error":
+	default:
+		return false
+	}
+	return activity == nil || activity.nest.active == 0 && activity.nest.unknown == 0 && activity.nest.err == nil
+}
+
+func rowLabel(task *subagentTask) string {
+	if label := strings.TrimSpace(task.Label); label != "" {
+		return label
+	}
+	return strings.TrimSpace(task.Description)
+}
+
+// activeContent is the full row, without its opening: see subagentContent.
+func activeContent(
+	task *subagentTask,
+	activity *agentActivity,
+	sessionCwd string,
+	inherited sessionEffortRecord,
+	now time.Time,
+) string {
+	gauge := cTokens + formatContextTokens(task.TokenCount) + reset
 	if task.ContextWindowSize > 0 {
 		percent := int(task.TokenCount * 100 / task.ContextWindowSize)
-		line = makeBar(percent, subagentBarWidth) + " " +
+		gauge = makeBar(percent, subagentBarWidth) + " " +
 			percentColor(percent) + fmt.Sprintf("%d%%", percent) + reset + " " +
-			line + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
+			gauge + cWindow + "/" + formatContextTokens(task.ContextWindowSize) + reset
 	}
+	line := ""
+	if activity != nil {
+		line = nestingSegment(activity.nest)
+	}
+	line = appendSegment(line, gauge)
 	line = appendSegment(line, subagentIdentity(task.Name, activity))
 	line = appendSegment(line, subagentModel(task.Model, task.Effort, inherited))
 	line = appendSegment(line, subagentStatus(task, activity, now))
 	if activity != nil {
 		line = appendSegment(line, activitySegments(*activity, task.Status == taskRunning, now))
 	}
-	line = appendSegment(line, sparkline(task.TokenSamples))
 	cwd := strings.TrimSpace(task.Cwd)
 	if cwd != "" && filepath.Clean(cwd) != filepath.Clean(strings.TrimSpace(sessionCwd)) {
 		line = appendSegment(line, cCwd+filepath.Base(cwd)+reset)
 	}
-	label := strings.TrimSpace(task.Label)
-	if label == "" {
-		label = strings.TrimSpace(task.Description)
+	if label := rowLabel(task); label != "" {
+		line = appendSegment(line, cLabel+label+reset)
 	}
-	if label == "" {
-		return rowOpen + line
-	}
-	return rowOpen + appendSegment(line, cLabel+label+reset)
+	return line
 }
 
 // subagentIdentity renders name·role: the agent's name when it was given one,
@@ -251,14 +327,22 @@ func modelFamily(model string) string {
 }
 
 // subagentStatus renders the task status and the time since its start: live
-// while it runs, frozen at its transcript's last entry once it stops.
+// while it runs, frozen at its transcript's last entry once it stops. A task
+// Claude Code calls stopped while an agent below it still works is
+// delegating: its own turn is over, its work is not, and its clock runs on.
 func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) string {
 	status := strings.TrimSpace(task.Status)
+	live := status == taskRunning
+	if !live && activity != nil && activity.nest.active > 0 {
+		status, live = taskDelegating, true
+	}
 	color := ""
 	switch status {
+	case taskDelegating:
+		color = cDelegating
 	case taskRunning:
 		color = cRunning
-	case "completed":
+	case taskCompleted:
 		color = cCompleted
 	case "failed", "killed", "error":
 		color = cFailed
@@ -271,7 +355,7 @@ func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) 
 		return segment
 	}
 	end := now
-	if status != taskRunning && activity != nil && !activity.last.IsZero() {
+	if !live && activity != nil && !activity.last.IsZero() {
 		end = activity.last
 	}
 	elapsed := cElapsed + formatDuration(max(end.UnixMilli()-task.StartTime, 0)) + reset
@@ -283,10 +367,12 @@ func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) 
 
 // activitySegments renders idle → tools → errors → cache → compactions from
 // the transcript; idle, errors and compactions appear only when they say
-// something. A transcript that could not be read shows "?" for tools and cache.
+// something. The cache segment has the main line's shape: the time left on the
+// agent's own prompt cache, then the share of its newest call's prompt read
+// from it. A transcript that could not be read shows "tools ?" and "💾!".
 func activitySegments(activity agentActivity, running bool, now time.Time) string {
 	if activity.err != nil {
-		return cWarn + "tools ?" + reset + sep + cWarn + "cache ?" + reset
+		return cWarn + "tools ?" + reset + sep + cBad + "💾!" + reset
 	}
 	line := ""
 	if quiet := now.Sub(activity.last); running && !activity.last.IsZero() && quiet >= stallAfter {
@@ -300,18 +386,7 @@ func activitySegments(activity agentActivity, running bool, now time.Time) strin
 	if activity.errors > 0 {
 		line = appendSegment(line, cBad+plural(activity.errors, "error")+reset)
 	}
-	if activity.cacheHit < 0 {
-		line = appendSegment(line, cMuted+"cache –"+reset)
-	} else {
-		color := cBad
-		switch {
-		case activity.cacheHit >= 80:
-			color = cGood
-		case activity.cacheHit >= 50:
-			color = cWarn
-		}
-		line = appendSegment(line, cTools+"cache "+reset+color+fmt.Sprintf("%d%%", activity.cacheHit)+reset)
-	}
+	line = appendSegment(line, agentCacheText(activity.transcript, activity.cacheHit, now))
 	if activity.compactions > 0 {
 		line = appendSegment(line, cCompaction+fmt.Sprintf("⟲%d", activity.compactions)+reset)
 	}
@@ -341,6 +416,7 @@ func readAgentActivity(sessionTranscript, id string) agentActivity {
 	base := filepath.Join(strings.TrimSuffix(sessionTranscript, ".jsonl"), "subagents", "agent-"+id)
 	activity.role, activity.roleErr = readAgentRole(base + ".meta.json")
 	path := base + ".jsonl"
+	activity.transcript = path
 	file, err := os.Open(path)
 	if err != nil {
 		activity.err = fmt.Errorf("open sub-agent transcript %s: %w", path, err)
@@ -430,32 +506,8 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		return
 	}
 	if usage := entry.Message.Usage; usage != nil {
-		if total := usage.Input + usage.CacheRead + usage.CacheCreation; total > 0 {
-			activity.cacheHit = int(usage.CacheRead * 100 / total)
+		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
+			activity.cacheHit = hit
 		}
 	}
-}
-
-// sparkline draws the recent token samples scaled to their own peak: the
-// gauge already says how full the window is, so this line shows the shape —
-// steady growth, a stall, or the drop of a compaction. Fewer than two samples
-// draw nothing.
-func sparkline(samples []int64) string {
-	if len(samples) < 2 {
-		return ""
-	}
-	var scale int64
-	for _, sample := range samples {
-		scale = max(scale, sample)
-	}
-	if scale <= 0 {
-		return ""
-	}
-	var line strings.Builder
-	top := int64(len(sparkLevels) - 1)
-	for _, sample := range samples {
-		level := min(max(sample*top/scale, 0), top)
-		line.WriteRune(sparkLevels[level])
-	}
-	return cGrowth + line.String() + reset
 }

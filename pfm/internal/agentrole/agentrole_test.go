@@ -124,10 +124,10 @@ func TestStripFrontmatterThreeShapes(t *testing.T) {
 // anywhere must still say so explicitly rather than printing a bare empty
 // list. This is the repo's absence-vs-error law at a visible surface.
 func TestUnknownRoleReportsDistinctDirectoryStates(t *testing.T) {
-	// pinRepoBoundary anchors repoRoot(repo) at repo itself via a
+	// pinRepoBoundary anchors roleLadderRoot(repo) at repo itself via a
 	// .codex/agents marker, WITHOUT creating repo/.claude/agents — so the
 	// cc-side rung can independently be "not found", "empty", or "listing"
-	// while repoRoot still resolves deterministically to repo.
+	// while roleLadderRoot still resolves deterministically to repo.
 	pinRepoBoundary := func(t *testing.T, repo string) {
 		t.Helper()
 		mustMkdir(t, filepath.Join(repo, ".codex", "agents"))
@@ -198,7 +198,7 @@ func TestUnknownRoleReportsDistinctDirectoryStates(t *testing.T) {
 	})
 }
 
-// Test 6 — ladder dedupe. When repoRoot(cwd) resolves to the same directory
+// Test 6 — ladder dedupe. When roleLadderRoot(cwd) resolves to the same directory
 // as home, the unknown-role message must list that directory ONCE, not
 // twice: one directory searched once must not claim a breadth of search it
 // never had.
@@ -208,7 +208,7 @@ func TestUnknownRoleReportsDistinctDirectoryStates(t *testing.T) {
 // the red-then-green evidence in the report this test file shipped with).
 func TestLadderDedupeSameDirectoryListedOnce(t *testing.T) {
 	// home == cwd, and NEITHER has a .claude/agents or .codex/agents marker
-	// anywhere above it (t.TempDir() is a fresh leaf), so repoRoot(home)
+	// anywhere above it (t.TempDir() is a fresh leaf), so roleLadderRoot(home)
 	// falls through to "start" — home itself. Both ladder rungs would
 	// therefore name the exact same directory without the guard.
 	home := t.TempDir()

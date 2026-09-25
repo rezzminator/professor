@@ -75,14 +75,10 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 			case "2":
 				close(oldStarted)
 				<-releaseOld
-				return &http.Response{
-					StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody,
-				}, nil
+				return proxyTestSessionLost(), nil
 			case "3":
 				if recoveryToolCalls.Add(1) == 1 {
-					return &http.Response{
-						StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody,
-					}, nil
+					return proxyTestSessionLost(), nil
 				}
 			}
 			return &http.Response{
@@ -173,9 +169,7 @@ func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: http.NoBody}, nil
 		case "tools/call":
 			if toolCalls.Add(1) == 1 {
-				return &http.Response{
-					StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody,
-				}, nil
+				return proxyTestSessionLost(), nil
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,

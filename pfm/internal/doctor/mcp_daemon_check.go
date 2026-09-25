@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net"
+	"slices"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
@@ -34,7 +38,11 @@ func configuredDaemonReachability(runtime config.Runtime) (mcpserv.DaemonStatus,
 // SOMETHING answered on the configured port but not as pfm's daemon (wrong
 // status body, wrong pid, a non-200). The last two are different faults — ours
 // being down vs. someone else holding the port — and must never render as the
-// same "unreachable" line. A disabled configuration makes an absent daemon a
+// same "unreachable" line. A daemon that accepts the connection but does not
+// answer within the probe timeout is a third fault, "unresponsive": slow, not
+// gone. A running daemon whose mounted families differ from the families this
+// config enables predates that config and is named with its restart. A
+// disabled configuration makes an absent daemon a
 // reported fact rather than a warning; a running or foreign service is still
 // reported normally.
 func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings int) {
@@ -48,6 +56,7 @@ func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings in
 			status.StartTime,
 			status.Endpoint,
 		)
+		warnings += printMCPDaemonFamiliesDoctor(stdout, runtime, status)
 		warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
 		if status.PFMVersion != runtime.Version {
 			warnings++
@@ -58,6 +67,9 @@ func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings in
 				runtime.Version,
 			)
 		}
+	case mcpDaemonTimedOut(daemonErr):
+		warnings++
+		fmt.Fprintf(stdout, "doctor: mcp daemon=unresponsive error=%v\n", daemonErr)
 	case errors.Is(daemonErr, mcpserv.ErrDaemonAbsent):
 		if !mcpConfigured(runtime) {
 			fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable disabled-in-config error=%v\n", daemonErr)
@@ -70,4 +82,33 @@ func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings in
 		fmt.Fprintf(stdout, "doctor: mcp daemon=foreign-service error=%v\n", daemonErr)
 	}
 	return warnings
+}
+
+// mcpDaemonTimedOut reports whether the probe failed on its timeout: the
+// transport error stays in ProbeDaemon's ErrDaemonAbsent chain.
+func mcpDaemonTimedOut(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// printMCPDaemonFamiliesDoctor compares the families the running daemon
+// mounts with the registered families this config enables.
+func printMCPDaemonFamiliesDoctor(stdout io.Writer, runtime config.Runtime, status mcpserv.DaemonStatus) int {
+	mounted := slices.Sorted(maps.Keys(status.Servers))
+	var enabled []string
+	for _, family := range config.RegisteredMCPServers() {
+		if runtime.Config.MCPServers[family].Enabled {
+			enabled = append(enabled, family)
+		}
+	}
+	if slices.Equal(mounted, enabled) {
+		return 0
+	}
+	fmt.Fprintf(
+		stdout,
+		"doctor: mcp daemon families mounted=%s enabled=%s — the daemon predates the config; restart it: pfm install --yes\n",
+		strings.Join(mounted, ","),
+		strings.Join(enabled, ","),
+	)
+	return 1
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 // useRealDaemonReachability opts a test back into the real
@@ -107,7 +108,8 @@ func TestMCPDaemonDoctorReportsRunningWithNoWarnings(t *testing.T) {
 	healthy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(
-			`{"pfmVersion":"v1.0.0","protocolVersion":"1","pid":1234,"startTime":"now","endpoint":"http://127.0.0.1"}`,
+			`{"pfmVersion":"v1.0.0","protocolVersion":"1","pid":1234,"startTime":"now","endpoint":"http://127.0.0.1",` +
+				`"servers":{"chat":["chat_ls"]}}`,
 		))
 	}))
 	defer healthy.Close()
@@ -214,7 +216,8 @@ func TestMCPDaemonDoctorWarnsOnVersionSkew(t *testing.T) {
 	healthy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(
-			`{"pfmVersion":"v9.9.9-skewed","protocolVersion":"1","pid":1234,"startTime":"now","endpoint":"http://127.0.0.1"}`,
+			`{"pfmVersion":"v9.9.9-skewed","protocolVersion":"1","pid":1234,"startTime":"now","endpoint":"http://127.0.0.1",` +
+				`"servers":{"chat":["chat_ls"]}}`,
 		))
 	}))
 	defer healthy.Close()
@@ -237,5 +240,102 @@ func TestMCPDaemonDoctorWarnsOnVersionSkew(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "doctor: mcp daemon=version-skew daemon=v9.9.9-skewed client=v1.0.0") {
 		t.Fatalf("output = %q, want a version-skew warning naming both versions", output.String())
+	}
+}
+
+// TestMCPDaemonDoctorNamesAnUnresponsiveDaemon: a listener that accepts the
+// connection but never answers /status within the probe timeout is a slow
+// daemon, never the "unreachable" row an absent one gets.
+func TestMCPDaemonDoctorNamesAnUnresponsiveDaemon(t *testing.T) {
+	useRealDaemonReachability(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := listener.Close(); closeErr != nil {
+			t.Errorf("close silent listener: %v", closeErr)
+		}
+	})
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	var output bytes.Buffer
+	warnings := printMCPDaemonDoctor(&output, runtimeForPort(port))
+	if warnings != 1 {
+		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
+	}
+	if !strings.Contains(output.String(), "doctor: mcp daemon=unresponsive error=") {
+		t.Fatalf("output = %q, want an unresponsive row", output.String())
+	}
+	if strings.Contains(output.String(), "daemon=unreachable") {
+		t.Fatalf("output = %q, a slow daemon must never read as an absent one", output.String())
+	}
+}
+
+func TestMCPDaemonDoctorComparesMountedFamiliesWithConfig(t *testing.T) {
+	tests := []struct {
+		name         string
+		enabled      map[string]bool
+		mounted      []string
+		wantWarnings int
+		wantFamilies string
+	}{
+		{
+			name:         "enabled family not mounted",
+			enabled:      map[string]bool{pfmconfig.MCPServerChat: true, pfmconfig.MCPServerHarvester: true},
+			mounted:      []string{pfmconfig.MCPServerChat},
+			wantWarnings: 1,
+			wantFamilies: "doctor: mcp daemon families mounted=chat enabled=chat,harvester" +
+				" — the daemon predates the config; restart it: pfm install --yes",
+		},
+		{
+			name:         "disabled family mounted",
+			enabled:      map[string]bool{pfmconfig.MCPServerChat: true, pfmconfig.MCPServerHarvester: false},
+			mounted:      []string{pfmconfig.MCPServerChat, pfmconfig.MCPServerHarvester},
+			wantWarnings: 1,
+			wantFamilies: "doctor: mcp daemon families mounted=chat,harvester enabled=chat" +
+				" — the daemon predates the config; restart it: pfm install --yes",
+		},
+		{
+			name:    "families match",
+			enabled: map[string]bool{pfmconfig.MCPServerChat: true, pfmconfig.MCPServerHarvester: false},
+			mounted: []string{pfmconfig.MCPServerChat},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			previous := DaemonReachabilityOverride
+			t.Cleanup(func() { DaemonReachabilityOverride = previous })
+			servers := make(map[string][]string, len(test.mounted))
+			for _, family := range test.mounted {
+				servers[family] = []string{family + "_tool"}
+			}
+			DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
+				return mcpserv.DaemonStatus{PFMVersion: "v1.0.0", PID: 1234, Servers: servers}, nil
+			}
+			runtime := runtimeForPort(1)
+			runtime.Config.MCPServers = map[string]pfmconfig.MCPServer{}
+			for family, enabled := range test.enabled {
+				runtime.Config.MCPServers[family] = pfmconfig.MCPServer{Enabled: enabled}
+			}
+
+			var output bytes.Buffer
+			warnings := printMCPDaemonDoctor(&output, runtime)
+			if warnings != test.wantWarnings {
+				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())
+			}
+			if !strings.Contains(output.String(), "doctor: mcp daemon=running pid=1234") {
+				t.Fatalf("output = %q, want the running row", output.String())
+			}
+			if test.wantFamilies == "" {
+				if strings.Contains(output.String(), "families") {
+					t.Fatalf("output = %q, matching families printed a families row", output.String())
+				}
+				return
+			}
+			if !strings.Contains(output.String(), test.wantFamilies+"\n") {
+				t.Fatalf("output = %q, want %q", output.String(), test.wantFamilies)
+			}
+		})
 	}
 }

@@ -54,16 +54,11 @@ func TestUpdateRefusesSourceDowngrade(t *testing.T) {
 	}
 }
 
-// TestUpdateSourceOnDetachedHeadFastForwards is a REGRESSION test for the
-// stale "source checkout is detached" refusal: updateRepository used to call
-// `git symbolic-ref --quiet --short HEAD` right after resolving previousRef
-// and return an error the moment that failed (a detached HEAD has no
-// symbolic ref), refusing an update on a source clone checked out at a bare
-// tag/commit rather than a branch. The fix drops that check entirely; a
-// detached source now fast-forwards past it exactly like a branch checkout.
-func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
-	repo := newDetachedUpdateGitFixture(t)
-	runtime := updateTestRuntime(t)
+// stubUpdatePipeline records an owned canonical binary and stubs the build,
+// install and doctor steps with no-ops, so a real Run exercises only the
+// source-side checks and the reporting around them.
+func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
+	t.Helper()
 	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
@@ -74,7 +69,6 @@ func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
 		t.Fatal(err)
 	}
-
 	oldBuild := updateBuildCandidate
 	oldInstall := updateApplyInstall
 	oldDoctor := updateRunDoctor
@@ -93,6 +87,84 @@ func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
+}
+
+// commitUntaggedFixtureChange adds one commit on the source branch.
+func commitUntaggedFixtureChange(t *testing.T, repo, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(name+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTemp(t, repo, "add", name)
+	gitTemp(t, repo, "commit", "-qm", "fixture "+name)
+}
+
+// When the source's nearest tag is not a release tag, the version check that
+// rules out a downgrade cannot run; treating that as "not a downgrade" let
+// `--to v0.9.0` roll a v0.10.0 source back.
+func TestUpdateRefusesADowngradeItCannotRuleOut(t *testing.T) {
+	repo := newUpdateGitFixture(t)
+	gitTemp(t, repo, "merge", "--ff-only", "--quiet", "v0.10.0")
+	commitUntaggedFixtureChange(t, repo, "NIGHTLY")
+	gitTemp(t, repo, "tag", "nightly")
+	runtime := updateTestRuntime(t)
+	stubUpdatePipeline(t, runtime)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"--skip-harvest", "--to", "v0.9.0", "--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("Run() code = 0, want a refusal; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "cannot rule out a downgrade to v0.9.0") ||
+		!strings.Contains(stderr.String(), "nightly") {
+		t.Fatalf("Run() stderr = %q, want the refusal naming the unparsable tag", stderr.String())
+	}
+}
+
+// Target on the source commit itself: nothing to roll back, whatever the
+// nearest tag says.
+func TestUpdateToTheSourceCommitProceedsWhenTheNearestTagDoesNotParse(t *testing.T) {
+	repo := newUpdateGitFixture(t)
+	gitTemp(t, repo, "tag", "-a", "-m", "nightly", "nightly")
+	runtime := updateTestRuntime(t)
+	stubUpdatePipeline(t, runtime)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"--skip-harvest", "--to", "v0.9.0", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("Run() code = %d, want success; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+// Clean tags and a target no older than the source's nearest tag: the guard
+// rules the downgrade out and the update goes ahead.
+func TestUpdateProceedsWhenTheDowngradeIsRuledOut(t *testing.T) {
+	repo := newUpdateGitFixture(t)
+	gitTemp(t, repo, "merge", "--ff-only", "--quiet", "v0.10.0")
+	commitUntaggedFixtureChange(t, repo, "AHEAD")
+	runtime := updateTestRuntime(t)
+	stubUpdatePipeline(t, runtime)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run(
+		[]string{"--skip-harvest", "--to", "v0.10.0", "--repo", repo},
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 0 {
+		t.Fatalf("Run() code = %d, want success; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+// TestUpdateSourceOnDetachedHeadFastForwards is a REGRESSION test for the
+// stale "source checkout is detached" refusal: updateRepository used to call
+// `git symbolic-ref --quiet --short HEAD` right after resolving previousRef
+// and return an error the moment that failed (a detached HEAD has no
+// symbolic ref), refusing an update on a source clone checked out at a bare
+// tag/commit rather than a branch. The fix drops that check entirely; a
+// detached source now fast-forwards past it exactly like a branch checkout.
+func TestUpdateSourceOnDetachedHeadFastForwards(t *testing.T) {
+	repo := newDetachedUpdateGitFixture(t)
+	runtime := updateTestRuntime(t)
+	stubUpdatePipeline(t, runtime)
 
 	var stdout, stderr bytes.Buffer
 	if code := Run([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
@@ -234,35 +306,7 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 func TestUpdateBareRunReportsNotManagedOutsideAnyProject(t *testing.T) {
 	repo := newUpdateGitFixture(t)
 	runtime := updateTestRuntime(t)
-	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
-	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
-		t.Fatal(err)
-	}
-
-	oldBuild := updateBuildCandidate
-	oldInstall := updateApplyInstall
-	oldDoctor := updateRunDoctor
-	t.Cleanup(func() {
-		updateBuildCandidate = oldBuild
-		updateApplyInstall = oldInstall
-		updateRunDoctor = oldDoctor
-	})
-	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
-	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		return nil
-	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{}, nil
-	}
-	stubUpdateBaselineDoctor(t, doctorOutcome{})
+	stubUpdatePipeline(t, runtime)
 
 	outside := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -696,29 +740,7 @@ func newUpdateGitFixture(t *testing.T) string {
 // v0.9.0` directly.
 func newDetachedUpdateGitFixture(t *testing.T) string {
 	t.Helper()
-	repo := t.TempDir()
-	gitTemp(t, repo, "init", "-q")
-	gitTemp(t, repo, "config", "user.email", "fixture.invalid")
-	gitTemp(t, repo, "config", "user.name", "fixture-identity")
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gitTemp(t, repo, "add", "README.md")
-	gitTemp(t, repo, "commit", "-qm", "fixture")
-	gitTemp(t, repo, "tag", "v0.9.0")
-	if err := os.WriteFile(filepath.Join(repo, "RELEASE"), []byte("next\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gitTemp(t, repo, "add", "RELEASE")
-	gitTemp(t, repo, "commit", "-qm", "fixture next release")
-	gitTemp(t, repo, "tag", "v0.10.0")
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	if err := os.MkdirAll(remote, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	gitTemp(t, remote, "init", "--bare", "-q")
-	gitTemp(t, repo, "remote", "add", "origin", remote)
-	gitTemp(t, repo, "push", "-q", "origin", "HEAD", "--tags")
+	repo := newUpdateGitFixture(t)
 	gitTemp(t, repo, "checkout", "-q", "--detach", "v0.9.0")
 	return repo
 }
@@ -814,30 +836,7 @@ func newUntaggedPreviousReleaseNotesFixture(t *testing.T) string {
 func updateWithReleaseNotesFakes(t *testing.T, repo string) string {
 	t.Helper()
 	runtime := updateTestRuntime(t)
-	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
-	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
-		t.Fatal(err)
-	}
-	oldBuild, oldInstall, oldDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
-	t.Cleanup(func() {
-		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldDoctor
-	})
-	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
-	}
-	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
-		return nil
-	}
-	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
-		return doctorOutcome{}, nil
-	}
-	stubUpdateBaselineDoctor(t, doctorOutcome{})
+	stubUpdatePipeline(t, runtime)
 	var stdout, stderr bytes.Buffer
 	if code := Run([]string{"--skip-harvest", "--repo", repo}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("Run() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())

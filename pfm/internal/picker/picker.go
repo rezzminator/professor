@@ -65,11 +65,7 @@ func Run(
 	// invocation is deliberately eligible only for the NEXT `pfm ls`.
 	updateRow, hasUpdate := cachedProfessorUpdateRow(runtime)
 	failureRow, hasFailure := cachedProfessorUpdateFailureRow(runtime, hasUpdate)
-	// Nothing has touched the terminal yet — safe to print here, unlike from
-	// inside the interactive picker's own alt-screen session.
-	if notice := professorUpdateCheckNotice(runtime); notice != "" {
-		fmt.Fprintln(stderr, notice)
-	}
+	updateNotice := professorUpdateCheckNotice(runtime)
 	triggerProfessorUpdateCheck(runtime)
 	if killed {
 		if flags.NArg() != 0 || all || *plain {
@@ -132,6 +128,12 @@ func Run(
 		}
 		outcome, err = picker.Pick(ctx, scan.Snapshot)
 	} else {
+		// Interactive only — a scripted listing's stderr is read by a script.
+		// Nothing has touched the terminal yet, so printing is safe here,
+		// unlike from inside the picker's own alt-screen session.
+		if updateNotice != "" {
+			fmt.Fprintln(stderr, updateNotice)
+		}
 		scan, err = scanFleetCached(ctx, database, request)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
@@ -301,15 +303,19 @@ func resolveSelectedRow(
 		return compose.Row{}, fmt.Errorf("re-resolve %s before open: %w", row.ID, err)
 	}
 	for index := range scan.Output.Rows {
-		if scan.Output.Rows[index].ID == row.ID {
+		// A row painted killed (the Killed or All view) opens as it did; only a
+		// row painted live and killed since is refused.
+		if scan.Output.Rows[index].ID == row.ID && (row.Killed || !scan.Output.Rows[index].Killed) {
 			return scan.Output.Rows[index], nil
 		}
 	}
-	// The rescan RAN and came back without this id — not a failure to look,
-	// a real answer: the chat was killed or resumed elsewhere between the
-	// picker's paint and this Enter. Opening the stale row here is exactly
-	// the second-seat hazard this function exists to close, so the picker
-	// names the miss instead of acting on it.
+	// The rescan RAN and came back without this id, or with it killed — not
+	// a failure to look, a real answer: the chat was killed or resumed
+	// elsewhere between the picker's paint and this Enter. Opening the stale
+	// row here is exactly the second-seat hazard this function exists to
+	// close (and opening a killed one would undo the kill), so the picker
+	// names the miss instead of acting on it. The rescan stays the full
+	// AllView: a partial scan would read a live row as gone.
 	name := row.Name
 	if name == "" {
 		name = row.ID

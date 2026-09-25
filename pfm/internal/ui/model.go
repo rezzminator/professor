@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1092,21 +1093,13 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	follow := model.selectedKey()
 	fallback := model.cursor
 	rows := snapshot.Rows
-	updatePresent := false
-	for index := range rows {
-		row := &rows[index]
-		if row.Kind == compose.ProfessorUpdate {
-			updatePresent = true
-			break
-		}
-	}
-	if !updatePresent {
-		for index := range model.rows {
-			row := &model.rows[index]
-			if row.Kind == compose.ProfessorUpdate {
-				rows = append([]compose.Row{*row}, rows...)
-				break
-			}
+	// The update and update-check failure rows are read once from the cache
+	// before the picker opens; a refresh snapshot never carries them, so
+	// each is carried forward for the session.
+	for _, kind := range []compose.Kind{compose.ProfessorUpdate, compose.ProfessorUpdateFailed} {
+		isKind := func(row compose.Row) bool { return row.Kind == kind }
+		if previous := slices.IndexFunc(model.rows, isKind); previous >= 0 && !slices.ContainsFunc(rows, isKind) {
+			rows = append([]compose.Row{model.rows[previous]}, rows...)
 		}
 	}
 	if len(model.deactivatedSockets) != 0 {
@@ -1226,6 +1219,9 @@ func (model *Model) toggleKilled() {
 	switch {
 	case row.Kind == compose.ProfessorUpdate:
 		model.killStatus = "⌃X refused — the Professor update banner is an action, not a chat"
+		return
+	case row.Kind == compose.ProfessorUpdateFailed:
+		model.killStatus = "⌃X refused — the update-check failure row is a notice, not a chat"
 		return
 	case row.Kind == compose.Booting:
 		model.killStatus = "⌃X refused — " + row.Name +

@@ -179,3 +179,64 @@ func TestResolveSelectedRowNamesAChatGoneFromASuccessfulRescan(t *testing.T) {
 		t.Fatalf("resolved row = %#v, want the zero value alongside the error", resolved)
 	}
 }
+
+// TestResolveSelectedRowRefusesAChatKilledAfterThePaint: Enter's full
+// AllView rescan still finds a chat killed between the paint and the key —
+// with Killed set. Opening it would resurrect a chat the user just killed,
+// so the refusal is the same as for a chat gone from the rescan.
+func TestResolveSelectedRowRefusesAChatKilledAfterThePaint(t *testing.T) {
+	root := jailTest(t)
+	const id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	transcriptPath := filepath.Join(root, "claude", "project", id+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"user","cwd":"/work/project","message":{"content":"first"}}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
+	if err := database.UpsertTranscript(context.Background(), store.Transcript{
+		UUID: id, Path: transcriptPath, CWD: "/work/project", Size: 1, PromptCount: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	paintedRow := compose.Row{ID: id, Kind: compose.ResumeClaude, Name: "killed-after-paint"}
+	if err := database.Kill(context.Background(), store.Killed{ID: id, KilledAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	resolved, err := resolveSelectedRow(
+		context.Background(), database, paintedRow, &pfmconfig.Runtime{Paths: jailPaths(t)}, &stderr,
+	)
+	if err == nil {
+		t.Fatalf("resolveSelectedRow() opened a chat killed after the paint: %#v", resolved)
+	}
+	want := "killed-after-paint no longer exists — it was killed or resumed elsewhere before you pressed Enter"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+
+	// A row the picker painted killed (Enter in the Killed or All view) is the
+	// operator's own choice, not a race: it re-resolves as it always did.
+	paintedKilled := paintedRow
+	paintedKilled.Killed = true
+	resolved, err = resolveSelectedRow(
+		context.Background(), database, paintedKilled, &pfmconfig.Runtime{Paths: jailPaths(t)}, &stderr,
+	)
+	if err != nil || resolved.ID != id {
+		t.Fatalf("resolveSelectedRow(painted killed) = %#v, %v; want the rescanned row %s", resolved, err, id)
+	}
+}

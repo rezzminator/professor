@@ -88,32 +88,46 @@ func cachedProfessorUpdateFailureRow(runtime pfmconfig.Runtime, hasUpdate bool) 
 	}, true
 }
 
-// professorUpdateCheckNotice names an update-check state cachedProfessorUpdateRow
-// itself cannot show: it only ever answers ("", false) for three very
+// professorUpdateCheckNotice names an update-check state the picker rows
+// themselves cannot show: cachedProfessorUpdateRow and
+// cachedProfessorUpdateFailureRow only ever answer ("", false) for very
 // different situations — a genuine "no update available" (updatecheck.Read
 // found nothing AND the detached checker has been succeeding), the cache
-// file itself being unreadable, and a detached checker that has been failing
-// every run for days while Read keeps answering found=false. Folding all
-// three into silence is exactly "an error rendering as absence"; this
-// returns a one-line stderr notice for the second and third, "" for the
-// first (and whenever the release gate does not apply).
+// file itself being unreadable, a detached checker that has been failing
+// every run for days while Read keeps answering found=false, and a found
+// update or failure whose source-repo marker cannot be read (neither row
+// renders without a usable clone). Folding them into silence is exactly "an
+// error rendering as absence"; this returns a one-line stderr notice for
+// every state but the first, "" for the first (and whenever the release gate
+// does not apply).
 //
-// It is safe to call and print BEFORE the interactive picker takes the
+// Run prints it only on the interactive path, BEFORE the picker takes the
 // terminal (mirrors the flag-validation stderr writes already at the top of
 // Run) — never mid-frame, which is why triggerProfessorUpdateCheck's own
-// detached child stays silent instead of writing here itself.
+// detached child stays silent instead of writing here itself — and never on
+// a scripted listing, whose stderr a script reads.
 func professorUpdateCheckNotice(runtime pfmconfig.Runtime) string {
 	if !runtime.IsRelease() {
 		return ""
 	}
 	cachePath := professorUpdateCachePath(runtime)
-	_, found, err := updatecheck.Read(cachePath, runtime.Version)
+	update, found, err := updatecheck.Read(cachePath, runtime.Version)
 	if err != nil {
 		return fmt.Sprintf("pfm ls: could not read the Professor update cache: %v", err)
 	}
+	_, markerErr := installer.ReadSourceRepoMarker(runtime.Paths.Home)
 	if found {
-		// An update IS available — cachedProfessorUpdateRow already renders
-		// it as its own picker row; a second notice would only repeat it.
+		// An update IS available — cachedProfessorUpdateRow renders it as its
+		// own picker row only when the source-repo marker reads; a second
+		// notice would then only repeat it.
+		if markerErr != nil {
+			return fmt.Sprintf(
+				"pfm ls: Professor %s is available but its source repository cannot be used: %v"+
+					" — run pfm install --yes from the clone",
+				update.Latest,
+				markerErr,
+			)
+		}
 		return ""
 	}
 	marker, failing, err := updatecheck.ReadFailure(cachePath)
@@ -123,12 +137,19 @@ func professorUpdateCheckNotice(runtime pfmconfig.Runtime) string {
 	if !failing {
 		return ""
 	}
-	return fmt.Sprintf(
+	notice := fmt.Sprintf(
 		"pfm ls: Professor update check failing since %s (%s): %s",
 		marker.At.Local().Format("2006-01-02 15:04"),
 		marker.Class,
 		marker.Reason,
 	)
+	if markerErr != nil {
+		notice += fmt.Sprintf(
+			"; its source repository cannot be used: %v — run pfm install --yes from the clone",
+			markerErr,
+		)
+	}
+	return notice
 }
 
 // triggerProfessorUpdateCheck is intentionally fire-and-forget and silent.

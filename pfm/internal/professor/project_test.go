@@ -183,6 +183,34 @@ func TestSelfHostedReviewLinePrintsARunnableDiffCommand(t *testing.T) {
 	}
 }
 
+// TestSelfHostedPinReviewLineAgainstAGitStorePrintsTheLocalFileDiff: a file
+// pinned while the store was self-hosted carries PinnedSHA
+// self-hosted@unknown; once the store is a git clone the exact-diff line
+// would be `git diff self-hosted@unknown..<sha>`, a range git cannot resolve.
+func TestSelfHostedPinReviewLineAgainstAGitStorePrintsTheLocalFileDiff(t *testing.T) {
+	report := projectReport{
+		Root:   "/work/project",
+		Store:  Store{Root: "/work/blueprint", Templates: "/work/blueprint/templates/project", SHA: "abc1234"},
+		Counts: map[projectStatus]int{projectUpdated: 1},
+		Items: []projectReportItem{{
+			Status:   projectUpdated,
+			Local:    "CLAUDE.md",
+			Template: "CLAUDE.md",
+			Pin:      FilePin{Template: "CLAUDE.md", PinnedSHA: UnknownSelfHostedSHA},
+		}},
+	}
+	var output bytes.Buffer
+	writeProjectHuman(&output, report)
+	text := output.String()
+	if strings.Contains(text, "diff "+UnknownSelfHostedSHA+"..") {
+		t.Fatalf("review line prints an unresolvable self-hosted@unknown range:\n%s", text)
+	}
+	want := "review: diff /work/project/CLAUDE.md /work/blueprint/templates/project/CLAUDE.md"
+	if !strings.Contains(text, want) {
+		t.Fatalf("review line missing the runnable local-file diff %q:\n%s", want, text)
+	}
+}
+
 func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 	var human bytes.Buffer
 	writeProjectUnmanaged(&human, false)

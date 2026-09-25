@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
@@ -120,7 +122,7 @@ func TestProfessorUpdateCheckNoticeNamesAPersistentlyFailingChecker(t *testing.T
 // cachedProfessorUpdateRow already surfaces a found update as its own picker
 // row — a second stderr line would only repeat it.
 func TestProfessorUpdateCheckNoticeStaysSilentWhenAnUpdateIsAlreadyRendered(t *testing.T) {
-	runtime := releaseRuntime(t)
+	runtime := releaseRuntimeWithSourceRepo(t)
 	cachePath := professorUpdateCachePath(runtime)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v1.2.0")
@@ -189,5 +191,104 @@ func TestCachedProfessorUpdateFailureRowStaysSilentWithNoFailure(t *testing.T) {
 	runtime := releaseRuntimeWithSourceRepo(t)
 	if _, ok := cachedProfessorUpdateFailureRow(runtime, false); ok {
 		t.Fatal("cachedProfessorUpdateFailureRow() reported a row with no failure marker, want none")
+	}
+}
+
+// writeFoundUpdateCache records a successful check that found v1.2.0.
+func writeFoundUpdateCache(t *testing.T, runtime pfmconfig.Runtime) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v1.2.0")
+		writer.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+	if err := updatecheck.CheckForUpdate(
+		context.Background(), professorUpdateCachePath(runtime), runtime.Version, server.URL, server.Client(),
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeFailingUpdateCache records a detached checker failing with a 503.
+func writeFailingUpdateCache(t *testing.T, runtime pfmconfig.Runtime) {
+	t.Helper()
+	failing := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer failing.Close()
+	if err := updatecheck.CheckForUpdate(
+		context.Background(), professorUpdateCachePath(runtime), runtime.Version, failing.URL, failing.Client(),
+	); err == nil {
+		t.Fatal("CheckForUpdate() against a failing server returned nil error")
+	}
+}
+
+// releaseRuntimeWithoutSourceRepo is a release runtime whose home holds no
+// source-repo marker: the update and failure rows cannot render there.
+func releaseRuntimeWithoutSourceRepo(t *testing.T) pfmconfig.Runtime {
+	t.Helper()
+	runtime := releaseRuntime(t)
+	runtime.Paths.Home = t.TempDir()
+	return runtime
+}
+
+// A found update whose source-repo marker cannot be read renders no row (the
+// update chat needs a usable clone); staying silent too would read as "no
+// update available".
+func TestProfessorUpdateCheckNoticeNamesAFoundUpdateWithAnUnusableSourceRepo(t *testing.T) {
+	runtime := releaseRuntimeWithoutSourceRepo(t)
+	writeFoundUpdateCache(t, runtime)
+	if row, ok := cachedProfessorUpdateRow(runtime); ok {
+		t.Fatalf("cachedProfessorUpdateRow() = %+v, want no row without a usable source repo", row)
+	}
+	_, markerErr := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	if markerErr == nil {
+		t.Fatal("fixture home unexpectedly holds a readable source-repo marker")
+	}
+	want := "pfm ls: Professor v1.2.0 is available but its source repository cannot be used: " +
+		markerErr.Error() + " — run pfm install --yes from the clone"
+	if notice := professorUpdateCheckNotice(runtime); notice != want {
+		t.Fatalf("notice = %q, want %q", notice, want)
+	}
+}
+
+func TestProfessorUpdateCheckNoticeNamesAFailingCheckWithAnUnusableSourceRepo(t *testing.T) {
+	runtime := releaseRuntimeWithoutSourceRepo(t)
+	writeFailingUpdateCache(t, runtime)
+	if row, ok := cachedProfessorUpdateFailureRow(runtime, false); ok {
+		t.Fatalf("cachedProfessorUpdateFailureRow() = %+v, want no row without a usable source repo", row)
+	}
+	_, markerErr := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	if markerErr == nil {
+		t.Fatal("fixture home unexpectedly holds a readable source-repo marker")
+	}
+	notice := professorUpdateCheckNotice(runtime)
+	if !strings.Contains(notice, "failing since") || !strings.Contains(notice, "network") ||
+		!strings.Contains(notice, markerErr.Error()) {
+		t.Fatalf("notice = %q, want the failure and the marker error %q", notice, markerErr)
+	}
+}
+
+// A scripted listing (--tsv, --plain, --killed, <id>) is parsed by a script;
+// the update notice on stderr belongs only to the interactive picker.
+func TestScriptedListingPrintsNoUpdateNotice(t *testing.T) {
+	previousStart := startProfessorUpdateCheck
+	t.Cleanup(func() { startProfessorUpdateCheck = previousStart })
+	startProfessorUpdateCheck = func(context.Context, []string, deps.StartOptions) error { return nil }
+
+	for _, args := range [][]string{{"--killed"}, {"--killed", "--tsv"}, {"--tsv"}, {"--plain"}, {"no-such-chat"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			jailTest(t)
+			runtime := pfmconfig.Runtime{Version: "v1.0.0", Paths: jailPaths(t)}
+			writeFailingUpdateCache(t, runtime)
+			if professorUpdateCheckNotice(runtime) == "" {
+				t.Fatal("fixture: the failing check produced no notice to suppress")
+			}
+			var stdout, stderr bytes.Buffer
+			code := Run(args, &stdout, &stderr, runtime)
+			if strings.Contains(stderr.String(), "update check") {
+				t.Fatalf("pfm ls %v (code %d) printed the update notice on stderr: %q", args, code, stderr.String())
+			}
+		})
 	}
 }

@@ -99,6 +99,36 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	return professor.RunProjectUpdate("", postArgs, stdout, stderr, runtime)
 }
 
+// refuseSourceDowngrade guards a target the source (previousRef, a commit)
+// already contains: it proceeds when both tags parse and the target is not
+// older, or when the target is the source commit itself; a failed lookup is
+// never read as "not a downgrade".
+func refuseSourceDowngrade(ctx context.Context, repo, target, previousRef string) error {
+	currentTag, describeErr := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
+	currentTag = strings.TrimSpace(currentTag)
+	currentVersion, currentOK := semver.ParseVersion(currentTag)
+	targetVersion, targetOK := semver.ParseVersion(target)
+	failedLookup := fmt.Sprintf("the target tag %q is not vMAJOR.MINOR.PATCH", target)
+	switch {
+	case describeErr != nil:
+		failedLookup = fmt.Sprintf("git describe of the source failed: %v", describeErr)
+	case !currentOK:
+		failedLookup = fmt.Sprintf("the source's nearest tag %q is not vMAJOR.MINOR.PATCH", currentTag)
+	case targetOK && targetVersion.Less(currentVersion):
+		return fmt.Errorf("target %s would downgrade source from %s", target, currentTag)
+	case targetOK:
+		return nil
+	}
+	targetCommit, err := updateGitOutput(ctx, repo, "rev-parse", "--verify", target+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("cannot rule out a downgrade to %s: %s; resolve target commit: %w", target, failedLookup, err)
+	}
+	if strings.TrimSpace(targetCommit) != previousRef {
+		return fmt.Errorf("cannot rule out a downgrade to %s: %s", target, failedLookup)
+	}
+	return nil
+}
+
 func updateRepository(
 	ctx context.Context,
 	repo, requestedTag string,
@@ -145,11 +175,8 @@ func updateRepository(
 			return fmt.Errorf("target %s does not fast-forward the current source branch", target)
 		}
 	} else {
-		currentTag, describeErr := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
-		currentVersion, currentOK := semver.ParseVersion(strings.TrimSpace(currentTag))
-		targetVersion, targetOK := semver.ParseVersion(target)
-		if describeErr == nil && currentOK && targetOK && targetVersion.Less(currentVersion) {
-			return fmt.Errorf("target %s would downgrade source from %s", target, strings.TrimSpace(currentTag))
+		if err := refuseSourceDowngrade(ctx, repo, target, previousRef); err != nil {
+			return err
 		}
 	}
 

@@ -219,10 +219,10 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 			switch status {
 			case projectUpdated:
 				fmt.Fprintf(stdout, "    %s   %s  pinned @%s\n", item.Local, item.Template, item.Pin.PinnedSHA)
-				if r.Store.SHA == UnknownSelfHostedSHA {
+				if item.Pin.PinnedSHA == UnknownSelfHostedSHA || r.Store.SHA == UnknownSelfHostedSHA {
 					fmt.Fprintf(
 						stdout,
-						"      review: self-hosted store — no git history, so an exact %s..%s diff cannot run; "+
+						"      review: self-hosted pin or store — no git history, so an exact %s..%s diff cannot run; "+
 							"comparing the current template against your local file instead:\n",
 						item.Pin.PinnedSHA,
 						r.Store.SHA,

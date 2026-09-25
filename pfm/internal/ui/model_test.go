@@ -257,6 +257,39 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 	}
 }
 
+// TestProfessorUpdateFailureRowPersistsAcrossRefresh: the failure row is
+// read once from the cache before the picker opens, exactly like the update
+// row; a refresh snapshot never carries it, so dropping it on the first
+// refresh turns a failing checker back into silence mid-session.
+func TestProfessorUpdateFailureRowPersistsAcrossRefresh(t *testing.T) {
+	snapshot := Snapshot{
+		Rows: []compose.Row{
+			{
+				Kind: compose.ProfessorUpdateFailed, ID: "pfm-update-check-failed-2026-01-02T03:04:05Z",
+				Name: "failing since 2026-01-02 03:04 (network): 503", Project: ".professor",
+				CWD: "/home/test/.professor",
+			},
+			{
+				Kind: compose.LiveClaude, ID: "professor-work", Name: "Professor work",
+				Project: ".professor", CWD: "/home/test/.professor",
+			},
+		},
+		View:           compose.DefaultView,
+		PrimaryAccount: 1,
+		AccountIDs:     []int{1},
+		NowNS:          fixtureNowNS,
+		Width:          120,
+		Height:         20,
+	}
+	refresh := snapshot
+	refresh.Rows = snapshot.Rows[1:]
+	updated, _ := NewModel(snapshot).Update(RefreshMsg{Snapshot: refresh})
+	visible := updated.(Model).VisibleRows()
+	if len(visible) != 2 || visible[0].Kind != compose.ProfessorUpdateFailed {
+		t.Fatalf("refresh dropped the update-check failure row: %#v", visible)
+	}
+}
+
 func TestProfessorUpdateCtrlSCyclesVisibleClaudeAccountEvenWhenCodexChosen(t *testing.T) {
 	snapshot := Snapshot{
 		Rows: []compose.Row{

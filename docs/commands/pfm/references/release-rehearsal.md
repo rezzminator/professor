@@ -18,17 +18,31 @@ Stage B's hardest case is the adopter several versions behind, so every round ru
 Model: `gpt-6-luna`, effort `xhigh` — the weaker model at its highest setting, per `docs/design/integration-suite/laws.md` Law 5. One run per stage attempt, its files in `$RUN` — a directory OUTSIDE every git repository (`$RUN` = the release directory's `rehearsal/{machine}-{round}/` for Stage B and its `stage-a/` subdirectory for Stage A, under `$HOME/.local/state/pfm/releases/`): Codex loads each ancestor repo's `AGENTS.md`, and this repo's contract would turn the adopter into a Professor maintainer:
 
 ```bash
+REH="$HOME/.local/state/pfm/codex-rehearsal"
 export CODEX_HOME="$RUN/codex-home"
-mkdir -p "$CODEX_HOME" && cp "$HOME/.codex/auth.json" "$CODEX_HOME/auth.json"
+mkdir -p "$CODEX_HOME" && ln -sfn "$REH/auth.json" "$CODEX_HOME/auth.json"
 timeout 5400 codex exec --model "$MODEL" -c model_reasoning_effort=xhigh \
   --cd "$RUN" --skip-git-repo-check --ephemeral \
   --sandbox workspace-write -c sandbox_workspace_write.network_access=true \
   --output-schema "$RUN/schema.json" -o "$RUN/result.json" - < "$RUN/brief.md"
 ```
 
-The separate Codex home exposes only the host login, so host skills, agents, and user config cannot enter the adopter driver's context. Each run gets its own COPY of the login, never a symlink: a driver's token refresh must never write the host login. Drive the two machines one at a time, or each with its own copy.
+The driver authenticates only with a dedicated rehearsal login, `$HOME/.local/state/pfm/codex-rehearsal`, which the user logs in ONCE with `CODEX_HOME="$HOME/.local/state/pfm/codex-rehearsal" codex login --device-auth` — never the host `~/.codex`. Each run's separate Codex home links `auth.json` to that rehearsal login and holds nothing else, so host skills, agents, and user config cannot enter the adopter driver's context. Never link a run to `~/.codex` — Codex writes `auth.json` in place through the link, so a refresh rewrites the host login — and never copy a login file: a copy shares the source's OAuth refresh token, and the first refresh in either home invalidates the other's. Drive the two machines one at a time, so refreshes of the one rehearsal login never race.
 
-Preflight: before a round starts, a one-line probe must answer through the same `CODEX_HOME` — `codex exec --model "$MODEL" --skip-git-repo-check --ephemeral 'reply OK'`. A dead login or a Codex outage then becomes a named BLOCKED before the round, not a failed round.
+Preflight, before a round starts — each failure exits BLOCKED, named, never a failed round, and no check prints a token:
+
+```bash
+[ -s "$REH/auth.json" ] || { echo "BLOCKED: no rehearsal Codex login at $REH/auth.json"; exit 20; }
+case "$(readlink -f "$CODEX_HOME/auth.json")" in
+  "$(readlink -f "$HOME/.codex")"/*) echo "BLOCKED: the run's auth.json resolves into the host ~/.codex"; exit 21 ;;
+esac
+if cmp -s <(jq -r .tokens.refresh_token "$REH/auth.json") <(jq -r .tokens.refresh_token "$HOME/.codex/auth.json"); then
+  echo "BLOCKED: the rehearsal login shares the host refresh token (a copy, not its own login)"; exit 22
+fi
+codex exec --model "$MODEL" --skip-git-repo-check --ephemeral 'reply OK'
+```
+
+The last line is the one-line probe through the same `CODEX_HOME`: a dead rehearsal login or a Codex outage becomes a named BLOCKED before the round. Never ask the user to re-login the live `~/.codex` — `codex login` clears the existing login before the new one completes, and an abandoned flow leaves the host with none; a re-login goes into the rehearsal home. Never copy or symlink Claude Code's credentials for a driver run — the same shared-refresh-token hazard applies.
 
 The driver calls Codex directly because `pfm headless exec --engine codex` routes through OpenCode since 89db9254, while the rehearsal's isolation premises are Codex CLI facts.
 

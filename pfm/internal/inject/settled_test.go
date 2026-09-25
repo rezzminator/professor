@@ -178,3 +178,78 @@ func TestSettledTurnCountsReceiptsOverHistoryNotTheVisibleFold(t *testing.T) {
 		)
 	}
 }
+
+// idleAfterAgentRecord is an idle Claude pane whose busy window still holds the
+// transcript record a finished background agent leaves behind. Its "· 46s"
+// matches busyPattern's `· \d+s` arm, and the "Read 27,615 tokens" record
+// matches `\d+ tokens`; both are history, not a live turn.
+const idleAfterAgentRecord = "● Agent \"Commit release fixes\" finished · 46s\n" +
+	"⏺ Read 27,615 tokens from the notes\n" +
+	"  Compaction is queued with its steer to follow.\n" +
+	"─────────────────────────\n❯ \n─────────────────────────\n" +
+	"  🟢 ▱▱▱▱ 8% │ .professor │ develop\n"
+
+// TestIsFooterBusyIgnoresTranscriptRecords is the 2026-09-25 self-compact that
+// typed its /compact minutes late: a record line inside the busy window made
+// the idle pane read busy, so the waiter never saw the caller yield. A record
+// line is transcript; only the live spinner and footer say a turn is running.
+func TestIsFooterBusyIgnoresTranscriptRecords(t *testing.T) {
+	cases := []struct {
+		name    string
+		capture string
+		want    bool
+	}{
+		{"idle pane under an agent-finished record", idleAfterAgentRecord, false},
+		{"idle pane under a tokens record", "⏺ Read 27,615 tokens\n❯ \n", false},
+		{"live spinner with seconds and tokens", idleAfterAgentRecord + "✻ Working… (12s · ↓ 100 tokens)\n", true},
+		{"live spawning line", "● Agent \"X\" finished · 46s\n  Spawning … · 51s\n❯ \n", true},
+		{"esc to interrupt footer", "● done · 3s\n  esc to interrupt\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsFooterBusy(pfmengine.Claude, tc.capture); got != tc.want {
+				t.Fatalf("IsFooterBusy(%q) = %t, want %t", tc.capture, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSelfWaiterSeesTheYieldPastATranscriptRecord drives Run over a pane that
+// goes busy, then idle with an agent-finished record in its busy window, and
+// stays idle. The waiter must see the caller yield and release on the
+// steady-idle fallback — within its busy bound plus the stability window,
+// counted in polls, not after its whole ten-minute budget.
+func TestSelfWaiterSeesTheYieldPastATranscriptRecord(t *testing.T) {
+	const busyTries, idleTries, idleStable = 25, 1500, 3
+	captures := 0
+	wait := SettledTurn{
+		Capture: func(context.Context) (string, error) {
+			captures++
+			if captures <= 3 {
+				return captureBusy, nil
+			}
+			return idleAfterAgentRecord, nil
+		},
+		Sleep:      func(context.Context, time.Duration) {},
+		Pane:       "%0",
+		Engine:     pfmengine.Claude,
+		SelfTarget: true,
+		BusyTries:  busyTries,
+		IdleTries:  idleTries,
+		IdleStable: idleStable,
+	}
+	observed, err := wait.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() errored over a readable pane: %v", err)
+	}
+	if observed {
+		t.Fatal("Run() claimed a turn boundary although no turn started after the yield")
+	}
+	if bound := 3 + busyTries + idleStable + 3; captures > bound {
+		t.Fatalf(
+			"self waiter released after %d captures, want at most %d: the idle pane read busy "+
+				"from a transcript record, so the caller's yield was never seen",
+			captures, bound,
+		)
+	}
+}

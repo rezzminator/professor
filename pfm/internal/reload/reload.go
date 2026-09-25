@@ -457,7 +457,7 @@ func waitCallerIdle(
 		showsComposer := composerDrawn(capture)
 		sawComposer = sawComposer || showsComposer
 		switch {
-		case inject.IsBusy(capture):
+		case inject.IsFooterBusy(request.Engine, capture):
 			stable = 0
 			if !announced {
 				announced = true

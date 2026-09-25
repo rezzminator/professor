@@ -74,6 +74,15 @@ const paneScrollbackLines = 2000
 // count gets the history.
 const paneBusyTailLines = 20
 
+// IsFooterBusy is the busy test for a whole pane capture: IsBusyFor scoped to
+// the pane's last paneBusyTailLines non-empty lines, where the live spinner and
+// footer render. A whole-screen test reads the chat's own transcript prose — an
+// answer saying "read 27,615 tokens" still on screen — as a turn that never
+// ends.
+func IsFooterBusy(engine pfmengine.ID, capture string) bool {
+	return IsBusyFor(engine, lastNonEmptyLines(capture, paneBusyTailLines))
+}
+
 // samplePane returns one observation and whether the pane could be READ at
 // all. A capture failure is never rendered as an observation: paneSample's
 // zero value says "not busy, no receipt seen", and for receipts that polarity
@@ -88,7 +97,7 @@ func (wait SettledTurn) samplePane(ctx context.Context) (paneSample, error) {
 		return paneSample{}, err
 	}
 	return paneSample{
-		busy:     IsBusyFor(wait.Engine, lastNonEmptyLines(capture, paneBusyTailLines)),
+		busy:     IsFooterBusy(wait.Engine, capture),
 		receipts: countCompactionReceipts(capture),
 	}, nil
 }

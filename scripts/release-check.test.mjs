@@ -900,6 +900,22 @@ describe("ready R1–R6", () => {
     assert.match(r.out, /^FAIL R4: releases\/v0\.78\.0\.md — `## Verification` holds no line with `REHEARSAL RULED` and round 7; the ruling ships in the note$/m, r.out);
     assertRerun(r, "REHEARSE");
   });
+  test("R4 RULED against a note with no ## Verification section", () => {
+    const f = fixture();
+    f.advance({ "releases/v0.78.0.md": NOTE.replace(/\n## Verification\n[\s\S]*$/, "\n") }, ["notes"]);
+    ruled(f, f.head);
+    const r = f.ready("--stamp");
+    assertFail(r, "R4");
+    assert.match(r.out, /^FAIL R4: releases\/v0\.78\.0\.md — holds no `## Verification` section; the ruling ships in it$/m, r.out);
+  });
+  test("R4 RULED line with a hyphen instead of an em dash", () => {
+    const f = fixture();
+    f.advance({ "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
+    ruled(f, f.head, " - the owner ruled to ship");
+    const r = f.ready("--stamp");
+    assertFail(r, "R4");
+    assert.match(r.out, /^FAIL R4: rehearsal\.md — line one is not `REHEARSAL RULED \{sha\} round \{n\} — \{ruling\}`: "REHEARSAL RULED [0-9a-f]+ round 7 - the owner ruled to ship"$/m, r.out);
+  });
   test("R4 RULED with empty ruling text", () => {
     const f = fixture();
     f.advance({ "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
@@ -919,7 +935,8 @@ describe("ready R1–R6", () => {
     ruled(f, f.head);
     const r = f.ready("--stamp");
     assertFail(r, "R4");
-    assert.doesNotMatch(r.out, /^FAIL R4: rehearsal\.md/m, r.out);
+    assert.doesNotMatch(r.out, /^FAIL R[123]/m, r.out);
+    assert.doesNotMatch(r.out, /^FAIL R4: (rehearsal\.md|releases\/)/m, r.out);
     assert.match(r.out, /^FAIL R4: docs\/x\.md — changed since the rehearsed [0-9a-f]{7}; only releases\/v0\.78\.0\.md § Verification carries the rehearsal over$/m, r.out);
   });
   test("R5 notes check not PASS at HEAD", () => {

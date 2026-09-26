@@ -50,7 +50,7 @@ Read `$CDOCS/pfm/$REFS/release-rehearsal.md` and run one round of it: machines `
 
 1. Judge each result, never the model's verdict alone: re-run each claimed check through `release-rehearsal.sh exec`; replay each FRICTION command. A missing or schema-invalid `result.json`, or a driver exit other than 0, is `BLOCKED` for that machine.
 2. Route each friction: `notes` when the note misled or omitted; `docs` for `INSTALL.md` or `docs/SETUP.md`; `code` when a documented command failed. A friction the update prompt caused is two rows: `code` (the candidate's prompt, for the next update) and `notes` (the workaround, for this one).
-3. `DIR/rehearsal.md`: line one `REHEARSAL CLEAN {sha} round {n}`, `REHEARSAL FRICTION {sha} round {n}` or `REHEARSAL BLOCKED {sha} round {n}`; a row per machine and per friction.
+3. `DIR/rehearsal.md`: line one `REHEARSAL CLEAN {sha} round {n}`, `REHEARSAL FRICTION {sha} round {n}` or `REHEARSAL BLOCKED {sha} round {n}`; a row per machine and per friction. Only the user's recorded ruling to ship past a FRICTION round makes it `REHEARSAL RULED {sha} round {n} — {ruling}`, with a matching `REHEARSAL RULED` round `{n}` line in the note's `## Verification`.
 4. Return `DONE REHEARSE` when both machines are CLEAN, `FIX REHEARSE: {n}` with routes, or `FAILED REHEARSE` at round 5 without CLEAN or when the fence will not run.
 
 ## READY

@@ -1125,7 +1125,7 @@ function ready(o) {
   const ruledLine = /^REHEARSAL RULED ([0-9a-f]{7,40}) round (\d+)(?:\s+—(.*))?$/.exec(lineOne);
   const r4 = ruledLine ?? /^REHEARSAL CLEAN ([0-9a-f]{7,40}) round (\d+)$/.exec(lineOne);
   if (!r4)
-    failR("R4", "REHEARSE", "rehearsal.md", rehearsal === null ? "absent" : `line one is not \`REHEARSAL CLEAN {sha} round {n}\`: ${JSON.stringify(textLines(rehearsal)[0] ?? "")}`);
+    failR("R4", "REHEARSE", "rehearsal.md", rehearsal === null ? "absent" : `line one is not \`${lineOne.startsWith("REHEARSAL RULED") ? "REHEARSAL RULED {sha} round {n} — {ruling}" : "REHEARSAL CLEAN {sha} round {n}"}\`: ${JSON.stringify(textLines(rehearsal)[0] ?? "")}`);
   else {
     if (ruledLine) {
       if (!(ruledLine[3] ?? "").trim())
@@ -1137,7 +1137,9 @@ function ready(o) {
         const range = verificationRange(noteText);
         const body = range ? textLines(noteText).slice(range.start, range.end) : [];
         const round = new RegExp(`\\bREHEARSAL RULED\\b.*\\bround ${ruledLine[2]}\\b`);
-        if (!body.some((l) => round.test(l)))
+        if (!range)
+          failR("R4", "REHEARSE", notePath, "holds no `## Verification` section; the ruling ships in it");
+        else if (!body.some((l) => round.test(l)))
           failR("R4", "REHEARSE", notePath, `\`## Verification\` holds no line with \`REHEARSAL RULED\` and round ${ruledLine[2]}; the ruling ships in the note`);
       }
     }

@@ -3,7 +3,7 @@
   "installed_from": {
     "mode": "self-hosted",
     "repo": "rezzminator/professor",
-    "version": "0.78.0"
+    "version": "0.79.0-alpha"
   },
   "profile": "minimal",
   "answers": {

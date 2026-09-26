@@ -49,7 +49,7 @@ type updateFileSnapshot struct {
 // reads only the legacy name — without these files restored first, it
 // converges on defaults and tears down every MCP service the real config
 // enabled, including the launch agent. It also captures every MCP
-// registration install rewrites — each Claude user registry, ~/.mcp.json,
+// registration install rewrites — each Claude user registry, $HOME/.claude.json, ~/.mcp.json,
 // each Codex home's config.toml, the OpenCode config and the MCP ownership
 // ledger — so a rollback never leaves the candidate's registrations behind.
 func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, error) {
@@ -81,7 +81,13 @@ func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, err
 	) {
 		candidates = append(candidates, candidate{registry.Path, updateMCPRegistration})
 	}
-	candidates = append(candidates, candidate{filepath.Join(home, ".mcp.json"), updateMCPRegistration})
+	// $HOME/.claude.json is rewritten even when no account wires it (install
+	// sweeps pfm's legacy entries there), so it is captured either way.
+	candidates = append(
+		candidates,
+		candidate{filepath.Join(home, ".claude.json"), updateMCPRegistration},
+		candidate{filepath.Join(home, ".mcp.json"), updateMCPRegistration},
+	)
 	for _, codexHome := range runtime.Config.CodexHomes() {
 		candidates = append(candidates, candidate{filepath.Join(codexHome, "config.toml"), updateMCPRegistration})
 	}

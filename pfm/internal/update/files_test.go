@@ -360,3 +360,25 @@ func TestUpdateRollbackResidueNamesAChangedConfigFileAsAConfigFile(t *testing.T)
 		t.Fatalf("stderr=%q, want %q", stderr, want)
 	}
 }
+
+// $HOME/.claude.json is rewritten by install even when no account wires it
+// (every account has its own ConfigDir): pfm's legacy entries there go. The
+// snapshot therefore covers it too, and rollback restores its pre-update bytes.
+func TestUpdateRollbackRestoresTheHomeClaudeRegistryNoAccountWires(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	runtime, repo := updateRollbackTestRuntime(t)
+	home := runtime.Paths.Home
+	runtime.Config = pfmconfig.Config{
+		Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1")}},
+	}
+	homeRegistry := filepath.Join(home, ".claude.json")
+	before := "{\"mcpServers\":{\"chat\":{\"command\":\"pfm\"}}}\n"
+	writeUpdateFixtureFile(t, homeRegistry, before)
+	updateRollbackAfterInstall(t, runtime, repo, func() error {
+		writeUpdateFixtureFile(t, homeRegistry, "{\"mcpServers\":{}}\n")
+		return nil
+	}, func() {})
+	if got, err := os.ReadFile(homeRegistry); err != nil || string(got) != before {
+		t.Fatalf("%s after rollback = %q, %v; want its pre-update bytes %q", homeRegistry, got, err, before)
+	}
+}

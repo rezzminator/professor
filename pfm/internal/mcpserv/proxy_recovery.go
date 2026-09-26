@@ -8,16 +8,26 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
 	// proxyDiscoverMethod is the probe Claude Code sends before initialize. The
 	// daemon refuses it with HTTP 400, so the proxy answers it itself: a local
 	// method-not-found sends the client straight on to initialize.
-	proxyDiscoverMethod     = "server/discover"
-	proxyMethodNotFound     = -32601
-	proxyInternalError      = -32603
+	proxyDiscoverMethod = "server/discover"
+	proxyMethodNotFound = -32601
+	proxyInternalError  = -32603
+	// proxyUninitializedError is go-sdk text: ServerSession.handle's error for
+	// a request before initialize ("method %q is invalid during session
+	// initialization", mcp/server.go). TestProxyRecoveryTextsMatchTheGoSDK
+	// drives the real sdk and fails if the text changes.
 	proxyUninitializedError = "invalid during session initialization"
+	// proxySessionClosingText is go-sdk text: the streamable handler's 404 for
+	// a session shutting down mid-request (mcp/streamable.go). Its other 404,
+	// for a session it does not hold, is mcp.ErrSessionMissing's text.
+	proxySessionClosingText = "session is closing"
 )
 
 // proxySessionLostError is the daemon's 404 for a session it no longer holds
@@ -55,7 +65,9 @@ func (failure proxyRejectedError) code() int {
 
 func (proxy *stdioProxy) daemonStatusError(status int, body []byte) error {
 	text := strings.TrimSpace(string(body))
-	if status == http.StatusNotFound && strings.Contains(text, "session") {
+	// Only the go-sdk's own session-loss bodies mean a lost session; any other
+	// 404 (a wrong route, a body that merely says "session") is a refusal.
+	if status == http.StatusNotFound && (text == mcp.ErrSessionMissing.Error() || text == proxySessionClosingText) {
 		return proxySessionLostError{status: status, text: text}
 	}
 	return proxyRejectedError{address: proxy.address, status: status, text: text}

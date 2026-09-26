@@ -240,10 +240,14 @@ func (current *backend) listProjected(
 			Socket: row.Socket, Pane: row.PaneID, transcriptPath: row.Path,
 		})
 	}
+	scope := "all repos"
+	if repo != "" {
+		scope = repo
+	}
 	return LSOutput{
 		Rows: rows, Count: len(rows), Matched: listed.Matched,
 		Truncated: listed.Truncated, KilledCount: listed.KilledCount,
-		Filter: input.Project, Scope: "all repos", Elsewhere: listed.Elsewhere,
+		Filter: input.Project, Scope: scope, Elsewhere: listed.Elsewhere,
 	}, nil
 }
 

@@ -733,3 +733,19 @@ func TestChatOpenResolvesATargetByName(t *testing.T) {
 		t.Fatalf("chat_open %q failed before the open door: %v (output %+v)", name, err, output)
 	}
 }
+
+// TestListProjectedScopeNamesTheRepoItWasGiven pins pfm-update-6#F4: a
+// repository-scoped listing reports that repository as its scope, and only
+// an unscoped one reports every repository.
+func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
+	current := &backend{chat: &fakeChatVerbs{}}
+	for repo, want := range map[string]string{"/work/one": "/work/one", "": "all repos"} {
+		output, err := current.listProjected(context.Background(), LSInput{}, true, repo)
+		if err != nil {
+			t.Fatalf("listProjected(%q): %v", repo, err)
+		}
+		if output.Scope != want {
+			t.Errorf("listProjected(%q).Scope = %q, want %q", repo, output.Scope, want)
+		}
+	}
+}

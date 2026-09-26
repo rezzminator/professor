@@ -151,7 +151,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 **CLAUDE.md rules:**
 
 - Load `/quality:claude-md` first — spine, admission, budget; a heading other files cite is renamed only with every citer
-- Keep non-negotiable rules exactly as they are
+- Keep every sacred-ground rule's meaning; carry every other rule per `/quality:claude-md` write step 5
 
 **Command rules:**
 
@@ -323,7 +323,7 @@ Shape: match the existing files of the same kind — the live registry is the te
 
 ### CLAUDE.md (root + child)
 
-`/quality:claude-md` is the law — the spine (Vocabulary, Runtime, Rules), what earns a line, the budget, placement by scope, the no-rosters rule, and its `check` gate. Load it before writing or restructuring any CLAUDE.md.
+Law: `/quality:claude-md`.
 
 ---
 

@@ -35,7 +35,7 @@ Every session and sub-agent reads the orientation file whole before its first to
 
 ## Title and stake
 
-Line one names the project and what it is in one clause. At most three lines follow on what a careless edit costs here — the one fact that changes how every reader weighs every action ("`services/ledger/` moves real money: a migration there runs against production on deploy").
+Line one names the project and what it is in one clause. At most three lines follow on what a careless edit costs here — the one fact that changes how every reader weighs every action ("`services/ledger/` moves real money: a migration there runs against production on deploy"). No history, no feature list.
 
 ## Vocabulary
 
@@ -47,6 +47,7 @@ The project's nouns, each mapped to its source: one lookup from the word people 
 - Paths are full: from the repository root, or from the file's own directory in a child file. Outside the tree: rooted at `$HOME` or `~`. A variable segment is braced: `services/{name}/`, `releases/v{X.Y.Z}.md`.
 - Admission: people or prompts in the project use the term, and at least one holds — its home is not found by one `ls` or grep of the term; it means something here other than its everyday meaning; it is a top-level component.
 - Closed world: every top-level directory git tracks (a child file: every directory under its own) is covered by an entry whose path is that directory or one inside it.
+- Closed world outranks admission: a top-level directory whose name explains itself keeps its entry, and its gloss says only what the name does not.
 - One term per concept: the entry's spelling is the only spelling — in this file, every prompt, doc, commit subject and identifier. A second name found elsewhere is renamed to the entry's term, or the entry is renamed end to end. Where `/quality:llm-codebase` wrote a glossary, its canonical terms and homes are these entries; its rejected variants stay in the glossary for the spelling census.
 - `## Path vars` exists only when the project's prompts substitute `$VAR` tokens.
 
@@ -62,7 +63,7 @@ Everything that executes the project's work, one `##` per executor, each carryin
 
 - Admission: the code cannot show it; no mechanism enforces it — or a hook does, and the rule is one line naming the route the hook permits; its absence causes a mistake; it is concrete enough to verify.
 - The sacred-ground `##` comes first — secrets, personal data, publication, whatever the project marks sacred — and is the only place `NEVER` and `MUST` appear.
-- Every other rule names the tool, command or path to use.
+- Every other rule is phrased positively and names the tool, command or path to use.
 - Grouped by domain under `##`; one rule per bullet; a bullet over two lines is two rules or a paragraph.
 - Stated once across everything loaded with the file: a rule the harness's system or persona layer, or a parent orientation file, already carries is cut here.
 
@@ -77,7 +78,7 @@ Everything that executes the project's work, one `##` per executor, each carryin
 
 ## Budget and placement
 
-- 200 lines and 16 KB per file, root or child, measured with `wc -l -c`; an `@path` import counts toward the file that imports it.
+- 200 lines and 16,000 bytes per file, root or child, measured with `wc -l -c`; an `@path` import counts toward the file that imports it.
 - The root file carries only what binds the whole repository — two or more of its projects.
 - A child orientation file in a project directory carries only that project's delta and loads when the reader works there; a rule scoped to one project moves down into it.
 - A rule bound to a file pattern goes to a path-scoped rule file where the engine supports one (Claude Code: `.claude/rules/*.md` with `paths:`).
@@ -118,13 +119,13 @@ echo "checked $(printf '%s\n' "$ps" | grep -c .) paths · $(wc -l < "$f" | tr -d
 ## Modes
 
 - No argument: the law above, applied while writing.
-- `check [path…]`: read-only; no path means the hand-edited orientation file at the repository root. Run the truth script, then the checks below. Emit `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — only a file read earns a verdict. An `ERROR` line fails every check it left unrun.
+- `check [path…]`: read-only; no path means the hand-edited orientation file at the repository root. Run the truth script, then the checks below. Emit `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — only a file read earns a verdict. An `ERROR` line fails every check it left unrun. A user-level file outside any repository (`~/.claude/CLAUDE.md`) skips the truth script and checks 3 and 4.
 - `write <path>`: the steps below, to the law.
 
 Checks:
 
 1. Spine: a spine section missing where it has content, out of order, or a top-level section that fits a spine section or fails admission.
-2. Budget: over 200 lines or over 16 KB.
+2. Budget: over 200 lines or over 16,000 bytes.
 3. Path truth: a `MISSING`, `ABSOLUTE` or `ERROR` line from the truth script.
 4. Closed world: an `UNCOVERED` line from the truth script.
 5. Admission: a tour or file-by-file entry, an entry for one self-indexed command, skill or agent, a gloss that restates its path.
@@ -139,7 +140,7 @@ Write steps:
 
 1. Read the stream: the target, its parent orientation files, every readable co-loaded layer; list the headings other files cite.
 2. Gather candidate terms: top-level directories (`git ls-files | cut -d/ -f1 -s | sort -u`), commit scopes (`git log --format=%s -n 500 | sed -n 's/^[a-z]*(\([^)]*\)).*/\1/p' | tr ',' '\n' | sort | uniq -c | sort -rn`), the terms the existing file and prompts use, design-doc names.
-3. Admit each by § Vocabulary admission; locate each home by grep.
+3. Admit each by the admission bullet of § Vocabulary; locate each home by grep.
 4. Runtime: find the engines (which orientation files and engine directories exist) and the environments (build files, dev scripts, CI workflows, container files); run each command once — only a command that ran is written as working; one that cannot run goes in the report as unverified.
 5. Carry every existing rule over: kept, moved (child file, path rule, command, doc), merged, or cut with a named reason — the `/quality:prompt` cut discipline.
 6. Retarget the citers of every renamed heading in the same pass.

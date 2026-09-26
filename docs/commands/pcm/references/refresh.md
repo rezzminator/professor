@@ -279,7 +279,7 @@ Tier and effort per the fleet prompt § Model Selection: **mechanical (sonnet), 
 
 #### The worker brief
 
-Every dispatch carries all five briefing fields (root `CLAUDE.md` § Subagent dispatch), plus one input the 2-file cap makes it impossible for a worker to fetch:
+Every dispatch carries all five briefing fields (the fleet prompt's § Orchestration), plus one input the 2-file cap makes it impossible for a worker to fetch:
 
 **Quote the source project's commit messages for this live file into the brief** — `git -C {live-root} log --format='%h %s%n%b' {last-sync}.. -- {source}`, where `{last-sync}` is the `Source:` trailer of the newest `release:` commit on `main`. Those messages are where that project ALREADY ruled the change framework-bound, and a worker that cannot see them will read a generic mechanism as install-specific topology and rule it LOCAL. A file with no commits since `{last-sync}` is briefed as such, so "no message quoted" means the orchestrator looked, not that it skipped.
 

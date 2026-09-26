@@ -142,7 +142,7 @@ Everything that executes the project's work, one `##` per executor. Each carries
 
 ## Budget
 
-- A root orientation file: 200 lines and 16 KB. The line figure is the harness's published target; the byte figure is those 200 lines at 80 characters, because a line has no length limit and a file can meet 200 lines while carrying several times the bytes.
+- A root orientation file: 200 lines and 16,000 bytes. The line figure is the harness's published target; the byte figure is those 200 lines at 80 characters, because a line has no length limit and a file can meet 200 lines while carrying several times the bytes.
 - A child file: the same budget, holding only its delta.
 - Measured with `wc -l -c`; an import (`@path`) counts toward the file that imports it, since it expands at launch.
 
@@ -177,10 +177,10 @@ Loaded before any write to an orientation file; the reader applies the law as it
 
 ### `check [path…]`
 
-Certifies each file, read-only: runs § The truth script and the checks below, and emits `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — never a verdict for a file it did not read. An `ERROR` line fails every check it left unrun. No path: the hand-edited orientation file at the repository root.
+Certifies each file, read-only: runs § The truth script and the checks below, and emits `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — never a verdict for a file it did not read. An `ERROR` line fails every check it left unrun. A user-level file outside any repository skips the truth script and checks 3 and 4. No path: the hand-edited orientation file at the repository root.
 
 1. Spine: a spine section missing where it has content, out of order, or a top-level section that fits a spine section or fails admission.
-2. Budget: over 200 lines or over 16 KB.
+2. Budget: over 200 lines or over 16,000 bytes.
 3. Path truth: a `MISSING`, `ABSOLUTE` or `ERROR` line from the truth script.
 4. Closed world: an `UNCOVERED` line from the truth script.
 5. Admission: a tour or file-by-file entry, a single self-indexed command, skill or agent, a gloss that restates its path.
@@ -222,7 +222,7 @@ else (cd "$d" && git ls-files) | cut -d/ -f1 -s | sort -u | while IFS= read -r t
 echo "checked $(printf '%s\n' "$ps" | grep -c .) paths · $(wc -l < "$f" | tr -d ' ') lines · $(wc -c < "$f" | tr -d ' ') bytes"
 ```
 
-- Path truth: every backticked token holding a `/` and no placeholder, URL or home prefix must exist relative to the file's directory or the repository root.
+- Path truth: every backticked token holding a `/` and no placeholder, URL, or `~` or `/` prefix must exist relative to the file's directory or the repository root.
 - Absolute: a machine-absolute path with a real name after `/Users/` or `/home/`; a rule that names the pattern with `…` passes.
 - Closed world: each top-level directory git tracks under the file's directory must appear as the start of a backticked path inside `# Vocabulary`.
 
@@ -241,7 +241,7 @@ echo "checked $(printf '%s\n' "$ps" | grep -c .) paths · $(wc -l < "$f" | tr -d
 - A term-keyed Vocabulary instead of a directory tour: the tour is the content measured not to help (§ Evidence); the term is the key the reader arrives with.
 - `# Rules`, not `# MANDATORY Rules`: a MANDATORY heading tells the model every rule beneath it is an invariant and it over-triggers on the ordinary ones (`/quality:prompt` anti-pattern 8); the sacred-ground `##` placed first carries the weight where it belongs.
 - Runtime covers environments as well as engines, so the law holds for a web application (`## Local`, `## CI`, `## Production`) as much as for an agent framework.
-- 16 KB beside 200 lines: the published line target read at an 80-character line; without a byte figure the line cap is met by long lines.
+- 16,000 bytes beside 200 lines: the published line target read at an 80-character line; without a byte figure the line cap is met by long lines.
 - Path vars under Vocabulary: the same shape, and defined before any rule uses them.
 - Bullets over tables for entries: greppable by term, local edits, fewer bytes.
 - Full paths only: a fragment relative to an earlier mention makes the reader rebuild the path — the round-trip the file exists to save.

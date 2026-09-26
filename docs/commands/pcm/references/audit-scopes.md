@@ -21,7 +21,6 @@ Files: `.claude/commands/**/*.md`
 - **Agent references:** every agent name/path referenced in the command → verify agent file exists
 - **Doc path references:** every `$CDOCS`, `$REFS`, `docs/` path → verify target exists on disk
 - **Subcommand structure:** if command defines subcommands via table/args, verify each is handled in the body
-- **Route-to validity:** if this command is named in CLAUDE.md "Request Routing" (non-obvious calls + guards only), the entry → matches what the command actually handles
 - **Size limit:** no command file >35KB
 - **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`pcm.md § Authoring conventions — Descriptions`); `disable-model-invocation: true` only on user-triggered-by-design commands
 
@@ -30,8 +29,7 @@ Files: `.claude/commands/**/*.md`
 Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — includes command-embedded skills)
 
 - **Structure:** SKILL.md exists in each skill dir, has identifiable trigger patterns
-- **Skill registration:** every skill dir under `.claude/skills/` has a `description` frontmatter (auto-surfaced in the available-skills list) that names every mode/trigger the body defines; CLAUDE.md keeps only the one-line Skills pointer, not a per-skill table
-- **Registry, not roster:** the skill's `description:` carries its triggers (CLAUDE.md lists no skills — the harness indexes them); a CLAUDE.md mention exists only for a guard or a mandatory-load obligation
+- **Skill registration:** every skill dir under `.claude/skills/` has a `description` frontmatter (auto-surfaced in the available-skills list) that names every mode/trigger the body defines
 
 ## `templates` — Walk the shipped product
 
@@ -71,12 +69,11 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 
 Catches what no single-domain audit can see. Reads across ALL domains simultaneously.
 
-- **Routing ↔ commands:** every command/skill named in CLAUDE.md "Request Routing" (the non-obvious calls + guards only — most route by self-indexing) → file exists and handles claimed scope
 - **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (rosters: `/quality:claude-md`)
-- **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry) — CLAUDE.md carries no command roster
-- **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter; CLAUDE.md Skills section is a pointer, not a list (nothing to drift)
+- **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry)
+- **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter
 - **Frontmatter validity:** every agent has non-empty `name`/`description`/`tools`; root agent `name` matches its `subagent_type` registry entry
-- **Doc ownership:** CLAUDE.md doc-ownership claims → claimed paths exist
+- **Orientation files:** `/quality:claude-md check` over `CLAUDE.md`, `pfm/CLAUDE.md` and `workflows/deep-rr/CLAUDE.md` — each verdict line verbatim; a REJECTED or UNREAD file is a FAIL
 - **Invariant spot-check:** sample 3 critical invariants from `pcm.md § Critical invariants` → verify they hold in the actual files
 - **Co-loaded duplication sweep:** the same rule stated in two co-loaded files (pcm.md ↔ root CLAUDE.md ↔ quality/prompt.md; child CLAUDE.md ↔ root; a command ↔ its reference cards) — each rule lives in exactly ONE canonical home, others carry at most a pointer (quality/prompt anti-patterns 3 & 11)
 - **Claims ↔ code:** spot-check factual claims (paths, mechanisms, configs, counts) in root + child CLAUDE.md against the code — a claim wrong in the reassuring direction is CRITICAL, never INFO

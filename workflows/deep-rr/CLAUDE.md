@@ -53,6 +53,7 @@ The harness wraps `workflow.js` in an async function body with ambient globals (
 - Worker-model reality is part of the contract: optional schema fields are null-tolerant (haiku emitters send `null` for "nothing"; a hard type = a retry burned), the engine null-scrubs at ingest, and prose-tolerant fields (stance targets) are coerced, not rejected.
 - Prompts are template consts with snapshot tests. Regenerate deliberately and eyeball the diff — never blind `-u`.
 - Secrets and PII never go into code or docs.
+- An `as`-cast blinds `tsc` to the nullability that crashes on the first real row: validate at data entry and let the type follow.
 
 ## Testing model
 

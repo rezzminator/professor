@@ -23,7 +23,7 @@ wc -l CLAUDE.md {project}/CLAUDE.md $(find .claude -name SKILL.md -not -path '*/
 
 Flag a file when:
 
-- `CLAUDE.md`, root or child: over 200 lines; a child that restates root rules rather than holding only its delta
+- `CLAUDE.md`, root or child: over the line or byte budget of `/quality:claude-md`; a child that restates root rules rather than holding only its delta
 - `.claude/agents/*.md` and `{project}/.claude/agents/*.md`: over 15 KB, or `description` over 30 words — every agent description loads into every spawn
 - `.claude/commands/**/*.md`, nested command dirs included (`pfm/`, `flights/`, `quality/`, `audit/`, `rnd/`, `h/`): over 35 KB
 - `SKILL.md`, under `.claude/skills/*/` and embedded in command dirs: over 500 lines, or `description` plus when-to-use over 1,536 chars combined

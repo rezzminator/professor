@@ -20,7 +20,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 
 ### How the pieces connect
 
-- `CLAUDE.md` — the law + guards + routing; names mandatory-load obligations; shaped by `/quality:claude-md` (no rosters)
+- `CLAUDE.md` — the orientation file: Vocabulary, Runtime, Rules; shaped by `/quality:claude-md`
 - `.claude/commands/**/*.md` — slash commands (`/pcm`, `/pfm:release`, `/dev`; `/quality:*`, `/context-meter`, `/pfm` are global)
 - `.claude/agents/*.md` — registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set; source-fetched per `templates/project/skills/sources.json`, never vendored)
@@ -142,12 +142,12 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 **CLAUDE.md rules:**
 
 - Load `/quality:claude-md` first — spine, admission, budget; a heading other files cite is renamed only with every citer
-- Keep non-negotiable rules exactly as they are
+- Keep every sacred-ground rule's meaning; carry every other rule per `/quality:claude-md` write step 5
 
 **Command rules:**
 
 - Any change to a body's entry points is followed by a `/quality:description` pass over its `description:`
-- A command that dispatches an agent names the `subagent_type` and the five briefing fields (root `CLAUDE.md` § Subagent dispatch)
+- A command that dispatches an agent names the `subagent_type` and the five briefing fields (the fleet prompt's § Orchestration)
 
 **Script rules:**
 
@@ -212,7 +212,7 @@ Ask: "Want me to fix these issues?"
 
 **Full rename:** Grep ALL occurrences (including `templates/**`, `README.md`, `BLUEPRINT.md`, `SETUP.md`, `refresh-map.json`) → update agents → update CLAUDE.md → final grep for zero stale refs → recompile the Codex mirror.
 
-**New agent:** Create `.claude/agents/{name}.md` — its `description:` is the registry entry, its `model:` pins the tier (root `CLAUDE.md` § Subagent dispatch carries no roster) → `pfm codex build .` (it compiles a `.codex/agents/{name}.toml`) → decide whether it ships upstream as `templates/project/agents/{name}.md`.
+**New agent:** Create `.claude/agents/{name}.md` — its `description:` is the registry entry, its `model:` pins the tier (root `CLAUDE.md` carries no roster: `/quality:claude-md`) → `pfm codex build .` (it compiles a `.codex/agents/{name}.toml`) → decide whether it ships upstream as `templates/project/agents/{name}.md`.
 
 **New skill:** Create `.claude/skills/{name}/SKILL.md` → no CLAUDE.md edit needed (skills self-index from `description:` frontmatter). A skill meant for adopters is registered in `templates/project/skills/sources.json` and lives in its OWN public repo — the blueprint never vendors one.
 
@@ -240,7 +240,7 @@ Shape: match the existing files of the same kind — the live registry is the te
 
 ### CLAUDE.md (root + child)
 
-`/quality:claude-md` is the law — the spine (Vocabulary, Runtime, Rules), what earns a line, the budget, placement by scope, the no-rosters rule, and its `check` gate. Load it before writing or restructuring any CLAUDE.md.
+Law: `/quality:claude-md`.
 
 ---
 

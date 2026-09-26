@@ -1,12 +1,13 @@
 <h1 align="center">Professor</h1>
 
 <p align="center">
-  <strong>An LLM-harness fleet boost framework.</strong><br>
+  <strong>Multi-agent framework for Claude Code, Codex &amp; OpenCode.</strong><br>
   Turns the AI coding chats on your machine into a disciplined engineering team —<br>
   one you can see, message, and hold to the rules.
 </p>
 
 <p align="center">
+  <a href="https://github.com/rezzminator/professor/actions/workflows/verify.yml"><img alt="verify" src="https://github.com/rezzminator/professor/actions/workflows/verify.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/rezzminator/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/rezzminator/professor"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/rezzminator/professor"></a>
   <img alt="go" src="https://img.shields.io/badge/go-1.27-00ADD8">
@@ -21,6 +22,10 @@
   <a href="#the-fleet-cli-pfm">Fleet CLI</a> ·
   <a href="#workflows-workflows">Workflows</a> ·
   <a href="docs/BLUEPRINT.md">Blueprint</a>
+</p>
+
+<p align="center">
+  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat_inject, the comms ledger scrolls underneath" width="900">
 </p>
 
 <h2 align="center">Professor is a complete, integrated toolbox for everything you want to do — that Anthropic, OpenAI <em>or anyone else</em> will <em>never</em> give you.</h2>
@@ -54,11 +59,7 @@ Every transcript below is real output from this repository, redacted only of nam
 
 > `pfm ls`: every AI chat on the machine — Claude Code, Codex (⬢), and OpenCode — across accounts (🥇🥈), grouped by repo, live (●), resumable (↻), or agent-run (⚙). `⇄` marks chats that talk to other chats; `←here` is the one you are sitting in; `✦` opens a new one on any harness. Pick one, attach, or fire it a goal without ever attaching. A chat that scrolled off a closed terminal tab is not gone — it is a resumable transcript, and now somebody can find it.
 
-`tab` once more and the same fleet is drawn as a sky:
-
-<p align="center">
-  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat_inject, the comms ledger scrolls underneath" width="900">
-</p>
+`tab` once more and the same fleet is drawn as the sky at the top of this page.
 
 > Every project is a star its chats orbit; a spawned chat rises as a moon at its parent's angle, so lineage is visible in the sky itself. When chats talk to each other the sky draws an edge between them, read from a durable comms ledger — an edge is a fact, not a guess. The chronoscope replays the last 24h, and a chat that is dead now still renders as the ghost it was back then.
 
@@ -209,6 +210,16 @@ claude plugin install sub-agent-compact@professor
 
 Extracted from a live production monorepo, not designed in the abstract. Every rule here exists because something went wrong without it — the gate that reads disk instead of chat exists because an agent once claimed green; the scoped-commit rule exists because two concurrent commits once swallowed each other's files; the prevention step exists because the same bug class shipped twice. The characters exist because a generic agent wasn't good enough to argue with.
 
-Built by [@rezzminator](https://github.com/rezzminator). Issues and PRs welcome.
+Built by [@rezzminator](https://github.com/rezzminator).
 
-**License:** MIT
+## Help and community
+
+Questions and ideas go to [Discussions](https://github.com/rezzminator/professor/discussions), bugs to [an issue](https://github.com/rezzminator/professor/issues/new/choose), vulnerabilities privately through [SECURITY.md](SECURITY.md); [SUPPORT.md](SUPPORT.md) has the details.
+
+## Contributing
+
+Work lands on `develop`; `main` moves only by release. [CONTRIBUTING.md](CONTRIBUTING.md) carries the build, the gates and the rules of a repository whose files ship into other people's agent pipelines. Pull requests are welcome.
+
+## License
+
+[MIT](LICENSE)

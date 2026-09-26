@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,15 +14,23 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude", "settings.json")
 	secondary := filepath.Join(home, ".cc", "4", "settings.json")
-	writeFixture(t, canonical, `{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"canonical-keep"}]}]}}`)
-	writeFixture(t, secondary, `{"hooks":{"SessionEnd":[{"matcher":"","hooks":[{"type":"command","command":"secondary-keep"}]}]}}`)
+	writeFixture(
+		t,
+		canonical,
+		`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"canonical-keep"}]}]}}`,
+	)
+	writeFixture(
+		t,
+		secondary,
+		`{"hooks":{"SessionEnd":[{"matcher":"","hooks":[{"type":"command","command":"secondary-keep"}]}]}}`,
+	)
 	canonicalAlias := filepath.Join(home, ".cc", "1", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(canonicalAlias), 0o700); err != nil {
 		t.Fatal(err)
@@ -33,16 +42,23 @@ func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {
 	now := func() time.Time { return time.Date(2031, 2, 3, 4, 5, 6, 0, time.UTC) }
 	runner := &outputRunner{printOutput: "state = not running\n"}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "4")}, Now: now, Runner: runner,
+		Mode:       ModeApply,
+		Home:       home,
+		ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "4")},
+		Now:        now,
+		Runner:     runner,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	wantedProbe := "systemctl --user is-active --quiet pfm-name-sync.service"
+	wantedProbe := nameSyncStateProbe
 	if schedulerIsLaunchd {
 		wantedProbe = "launchctl print gui/" + strconv.Itoa(os.Getuid()) + "/" + launchdLabel
 	}
 	if len(runner.calls) == 0 || runner.calls[0] != wantedProbe {
-		t.Fatalf("installer did not probe the running-service gate before touching fixtures; fake runner calls: %v", runner.calls)
+		t.Fatalf(
+			"installer did not probe the running-service gate before touching fixtures; fake runner calls: %v",
+			runner.calls,
+		)
 	}
 
 	for _, path := range []string{canonical, secondary} {
@@ -57,22 +73,29 @@ func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {
 
 	var second bytes.Buffer
 	report, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "4")}, Now: now, Stdout: &second, Runner: &fakeRunner{},
+		Mode:       ModeApply,
+		Home:       home,
+		ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "4")},
+		Now:        now,
+		Stdout:     &second,
+		Runner:     &fakeRunner{},
 	})
 	if err != nil || report.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())
 	}
 
-	raw := readFixture(t, filepath.Join(home, ".codex", "hooks.json"))
-	if hookCommandCount(t, raw, "SessionStart", codexHookTemplate(home).Command) != 1 {
-		t.Fatalf("missing appendix: %s", raw)
+	// pfm writes no Codex hook, so an install over a Codex home with none
+	// leaves no hooks.json behind at all.
+	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("install wrote a Codex hooks file it owns nothing in: %v", err)
 	}
-
 }
 
 func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) {
 	home := filepath.Join("neutral", "home")
-	raw := []byte(`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"manual-keep"}]}]},"cleanupPeriodDays":42}`)
+	raw := []byte(
+		`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"manual-keep"}]}]},"cleanupPeriodDays":42}`,
+	)
 	updated, changed, owned, err := updateSettings(raw, home, false, nil)
 	if err != nil || !changed {
 		t.Fatalf("updateSettings changed=%v err=%v", changed, err)
@@ -89,6 +112,8 @@ func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) 
 		event, matcher, command string
 	}{
 		{"PreToolUse", "Agent|Task", prefix + " internal explore-deny"},
+		{"PreToolUse", "Bash", prefix + " internal git-guard"},
+		{"SubagentStart", "rr|super-rr|heavy-rr", prefix + " internal rr-dir"},
 		{"UserPromptSubmit", "", prefix + " internal epic-inject"},
 		{"UserPromptSubmit", "", prefix + " internal reload-intercept"},
 		{"UserPromptSubmit", "", prefix + " internal compact-nudge"},
@@ -107,7 +132,12 @@ func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) 
 		t.Fatalf("owned hooks=%d, want %d: %#v", len(owned), want, owned)
 	}
 
-	withManual := append([]byte(`{"hooks":{"PreToolUse":[{"matcher":"Agent|Task","hooks":[{"type":"command","command":"operator-keep"}]}]}}`), '\n')
+	withManual := append(
+		[]byte(
+			`{"hooks":{"PreToolUse":[{"matcher":"Agent|Task","hooks":[{"type":"command","command":"operator-keep"}]}]}}`,
+		),
+		'\n',
+	)
 	updated, _, owned, err = updateSettings(withManual, home, false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -126,44 +156,6 @@ func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) 
 // under UserPromptSubmit with an empty matcher (the epic-inject shape), and
 // one that already carries it TWICE — the shape a hand-edited or
 // double-installed settings.json can reach — keeps exactly one copy.
-func TestSettingsInstallWiresReloadInterceptHookAndDedupes(t *testing.T) {
-	home := filepath.Join("neutral", "home")
-	prefix := home + "/.local/bin/pfm"
-	reloadIntercept := prefix + " internal reload-intercept"
-
-	updated, changed, owned, err := updateSettings([]byte("{}\n"), home, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Fatal("wiring an empty settings.json reported no change")
-	}
-	if got := hookCommandCount(t, string(updated), "UserPromptSubmit", reloadIntercept); got != 1 {
-		t.Fatalf("reload-intercept count=%d after wiring an empty settings.json, want 1\n%s", got, updated)
-	}
-	if got := hookMatcherCount(t, string(updated), "UserPromptSubmit", reloadIntercept, ""); got != 1 {
-		t.Fatalf("reload-intercept matcher count=%d, want 1 empty matcher\n%s", got, updated)
-	}
-	if owned[settingsHookKey{Event: "UserPromptSubmit", Command: reloadIntercept}] != 1 {
-		t.Fatalf("owned ledger did not claim the reload-intercept hook: %#v", owned)
-	}
-
-	twice := []byte(`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[
-		{"type":"command","command":"` + reloadIntercept + `"},
-		{"type":"command","command":"` + reloadIntercept + `"}
-	]}]}}`)
-	deduped, changed, _, err := updateSettings(twice, home, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Fatal("a doubled reload-intercept hook was not rewritten")
-	}
-	if got := hookCommandCount(t, string(deduped), "UserPromptSubmit", reloadIntercept); got != 1 {
-		t.Fatalf("reload-intercept count=%d after dedupe, want exactly 1\n%s", got, deduped)
-	}
-}
-
 func TestInstallPausesAutomaticDreamHooksAcrossClaudeAndCodex(t *testing.T) {
 	home := t.TempDir()
 	pfm := filepath.Join(home, ".local", "bin", "pfm")
@@ -255,12 +247,19 @@ func TestInstallPausesDreamHooksAcrossUnknownEventsAndPreservesMalformedNeighbor
 	if !ok {
 		t.Fatalf("hooks document has wrong shape: %#v", document["hooks"])
 	}
-	if _, ok := events["Stop"]; ok {
+	// Stop's only entry held the retired Dream hook; what Stop holds after the
+	// install is the callmeter registration alone, in an entry of its own.
+	callmeter := home + "/.local/bin/pfm internal callmeter"
+	if stop, _ := events["Stop"].([]any); len(stop) != 1 ||
+		hookCommandCount(t, string(updated), "Stop", callmeter) != 1 {
 		t.Fatalf("event containing only a retired Dream hook survived: %#v", events["Stop"])
 	}
 	notification, ok := events["Notification"].([]any)
 	if !ok || len(notification) != 2 {
-		t.Fatalf("Notification entries=%#v, want the malformed entry and its surviving neighbor", events["Notification"])
+		t.Fatalf(
+			"Notification entries=%#v, want the malformed entry and its surviving neighbor",
+			events["Notification"],
+		)
 	}
 	if notification[0] != nil {
 		t.Fatalf("non-map Notification entry was not preserved: %#v", notification)
@@ -285,7 +284,8 @@ func TestInstallPausesDreamHooksAcrossUnknownEventsAndPreservesMalformedNeighbor
 	if !malformed || !neighbor {
 		t.Fatalf("surviving hooks malformed=%v neighbor=%v: %#v", malformed, neighbor, hooks)
 	}
-	if strings.Contains(string(updated), "dream hook nudge") || strings.Contains(string(updated), "dreamer-agent-inject.sh") {
+	if strings.Contains(string(updated), "dream hook nudge") ||
+		strings.Contains(string(updated), "dreamer-agent-inject.sh") {
 		t.Fatalf("retired Dream hook survived in an unknown event:\n%s", updated)
 	}
 
@@ -306,8 +306,16 @@ func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 	}{
 		{name: "bare pfm agent inject", command: "pfm dream hook agent-inject", want: "dream-agent-inject"},
 		{name: "path cc fleet nudge", command: "/opt/legacy/.local/bin/cc-fleet dream hook nudge", want: "dream-nudge"},
-		{name: "bare codex injection", command: "cc-fleet dream hook codex-subagent-inject", want: "dream-codex-subagent-inject"},
-		{name: "legacy shell shim", command: "bash /opt/legacy/hooks/dreamer-agent-inject.sh --fixture", want: "dream-agent-inject"},
+		{
+			name:    "bare codex injection",
+			command: "cc-fleet dream hook codex-subagent-inject",
+			want:    "dream-codex-subagent-inject",
+		},
+		{
+			name:    "legacy shell shim",
+			command: "bash /opt/legacy/hooks/dreamer-agent-inject.sh --fixture",
+			want:    "dream-agent-inject",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -359,7 +367,12 @@ func TestInstallOwnershipLedgerClaimsHooksAlreadyPresentInSettings(t *testing.T)
 		t.Fatalf("an already fully-wired settings.json was unexpectedly rewritten")
 	}
 	if want := len(claudeHookTemplates(home)); len(owned) != want {
-		t.Fatalf("owned hooks=%d, want %d — every already-present expected hook must be claimed: %#v", len(owned), want, owned)
+		t.Fatalf(
+			"owned hooks=%d, want %d — every already-present expected hook must be claimed: %#v",
+			len(owned),
+			want,
+			owned,
+		)
 	}
 	for key, count := range owned {
 		if count != 1 {
@@ -370,11 +383,17 @@ func TestInstallOwnershipLedgerClaimsHooksAlreadyPresentInSettings(t *testing.T)
 	// The doctor hook probe must agree: an already-owned hook is never drift.
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	writeFixture(t, settingsPath, string(preexisting))
-	encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{physicalSettingsPath(settingsPath): owned})
+	encoded, err := encodeSettingsHookOwnership(
+		map[string]settingsHookCounts{physicalSettingsPath(settingsPath): owned},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"), string(encoded))
+	writeFixture(
+		t,
+		settingsHookOwnershipPath(managedRootForHome(home)),
+		string(encoded),
+	)
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
 	for _, result := range ProbeExpectedHooks(home, machine) {
 		if result.State == "drift" {
@@ -437,6 +456,8 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 	prefix := home + "/.local/bin/pfm"
 	expectedKeys := []settingsHookKey{
 		{Event: "PreToolUse", Matcher: "Agent|Task", Command: prefix + " internal explore-deny"},
+		{Event: "PreToolUse", Matcher: "Bash", Command: prefix + " internal git-guard"},
+		{Event: "SubagentStart", Matcher: "rr|super-rr|heavy-rr", Command: prefix + " internal rr-dir"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal epic-inject"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal reload-intercept"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal compact-nudge"},
@@ -445,9 +466,21 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 		{Event: "SessionEnd", Matcher: "", Command: prefix + " internal clear-kill"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal exit-intercept"},
 		{Event: "SessionEnd", Matcher: "", Command: prefix + " internal exit-close"},
+		{Event: "PreToolUse", Matcher: "Bash", Command: prefix + " internal callmeter"},
+		{Event: "PostToolUse", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "PostToolUseFailure", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "PostToolBatch", Matcher: "", Command: prefix + " internal callmeter"},
+		{Event: "SubagentStart", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "SubagentStop", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "Stop", Matcher: "", Command: prefix + " internal callmeter"},
 	}
 	if len(owned) != len(expectedKeys) {
-		t.Fatalf("owned hooks=%d, want %d — every already-present expected hook must be claimed even with foreign hooks in the document: %#v", len(owned), len(expectedKeys), owned)
+		t.Fatalf(
+			"owned hooks=%d, want %d — every already-present expected hook must be claimed even with foreign hooks in the document: %#v",
+			len(owned),
+			len(expectedKeys),
+			owned,
+		)
 	}
 	for _, key := range expectedKeys {
 		if owned[key] != 1 {
@@ -467,7 +500,12 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 		"SessionEnd":   foreignSessionEnd,
 	} {
 		if got := hookCommandCount(t, string(updated), event, foreign); got != 1 {
-			t.Fatalf("foreign %s hook count=%d after wiring, want 1 (installer must leave it untouched)\n%s", event, got, updated)
+			t.Fatalf(
+				"foreign %s hook count=%d after wiring, want 1 (installer must leave it untouched)\n%s",
+				event,
+				got,
+				updated,
+			)
 		}
 	}
 
@@ -475,11 +513,17 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 	// drift, foreign hooks in the document notwithstanding.
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	writeFixture(t, settingsPath, string(withForeign))
-	encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{physicalSettingsPath(settingsPath): owned})
+	encoded, err := encodeSettingsHookOwnership(
+		map[string]settingsHookCounts{physicalSettingsPath(settingsPath): owned},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"), string(encoded))
+	writeFixture(
+		t,
+		settingsHookOwnershipPath(managedRootForHome(home)),
+		string(encoded),
+	)
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
 	for _, result := range ProbeExpectedHooks(home, machine) {
 		if result.State == "drift" {
@@ -780,15 +824,23 @@ func TestDreamHookPauseRetiresEveryCopyAndPreservesNeighbors(t *testing.T) {
     ]}]
   }
 }`)
-	writeFixture(t, secondaryPath, `{"hooks":{"PreToolUse":[{"matcher":"Agent","hooks":[{"type":"command","command":"secondary-keep"}]}]}}`)
+	writeFixture(
+		t,
+		secondaryPath,
+		`{"hooks":{"PreToolUse":[{"matcher":"Agent","hooks":[{"type":"command","command":"secondary-keep"}]}]}}`,
+	)
 
 	now := func() time.Time { return time.Date(2031, 2, 3, 4, 5, 6, 0, time.UTC) }
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "3")}, Now: now, Runner: &fakeRunner{},
+		Mode:       ModeApply,
+		Home:       home,
+		ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "3")},
+		Now:        now,
+		Runner:     &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ownershipPath := filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json")
+	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
 	if info, err := os.Stat(ownershipPath); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("ownership ledger mode=%v err=%v, want 0600", info, err)
 	}
@@ -820,14 +872,23 @@ func TestDreamHookPauseRetiresEveryCopyAndPreservesNeighbors(t *testing.T) {
 
 	var second bytes.Buffer
 	report, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "3")}, Now: now, Stdout: &second, Runner: &fakeRunner{},
+		Mode:       ModeApply,
+		Home:       home,
+		ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "3")},
+		Now:        now,
+		Stdout:     &second,
+		Runner:     &fakeRunner{},
 	})
 	if err != nil || report.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "3")}, Now: now, Runner: &fakeRunner{},
+		Mode:       ModeUninstall,
+		Home:       home,
+		ConfigDirs: []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "3")},
+		Now:        now,
+		Runner:     &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -902,7 +963,11 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	hooksPath := filepath.Join(home, ".codex", "hooks.json")
 	writeFixture(t, hooksPath, "{broken\n")
-	expected := ExpectedHook{Event: "SessionStart", Matcher: codexClearMatcher, Command: filepath.Join(home, ".local", "bin", "pfm") + " internal clear-kill"}
+	expected := ExpectedHook{
+		Event:   "SessionStart",
+		Matcher: codexClearMatcher,
+		Command: filepath.Join(home, ".local", "bin", "pfm") + " internal clear-kill",
+	}
 	physical := physicalSettingsPath(hooksPath)
 	encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
 		physical: {{Event: expected.Event, Matcher: expected.Matcher, Command: expected.Command}: 1},
@@ -910,7 +975,7 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, filepath.Join(managed, "settings-hook-ownership.json"), string(encoded))
+	writeFixture(t, settingsHookOwnershipPath(managed), string(encoded))
 	installer := engine{options: Options{Mode: ModeUninstall, Home: home}, managedRoot: managed}
 	err = installer.wireCodexHooks()
 	if err == nil || !strings.Contains(err.Error(), "refuse to strand owned hooks in invalid Codex hooks JSON") {

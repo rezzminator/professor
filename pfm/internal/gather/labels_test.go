@@ -14,7 +14,7 @@ type captureStub struct {
 	failing map[string]bool
 }
 
-func (stub captureStub) ListPanes(context.Context, string) ([]Pane, error) {
+func (stub captureStub) ListPanes(context.Context, string) ([]ProbePane, error) {
 	return nil, errors.New("not used")
 }
 
@@ -38,8 +38,8 @@ func statusline(label string) string {
 // panes disagree keeps the name it has, and a pane that could not be captured
 // freezes its window rather than letting a sibling speak for it.
 func TestClaudeWindowRenames(t *testing.T) {
-	pane := func(socket, session, window, paneID, windowName, command string) Pane {
-		return Pane{
+	pane := func(socket, session, window, paneID, windowName, command string) ProbePane {
+		return ProbePane{
 			Socket:         socket,
 			SessionName:    session,
 			WindowID:       window,
@@ -51,14 +51,14 @@ func TestClaudeWindowRenames(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		panes   []Pane
+		panes   []ProbePane
 		screens map[string]string
 		failing map[string]bool
 		want    map[string]string // window id -> target name
 	}{
 		{
 			name:  "a labelled pane names its window",
-			panes: []Pane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude")},
+			panes: []ProbePane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude")},
 			screens: map[string]string{
 				"cc-1-2-3\x00%1": statusline("RESEARCH"),
 			},
@@ -66,7 +66,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name:  "an unlabelled chat keeps the name it has",
-			panes: []Pane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude")},
+			panes: []ProbePane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude")},
 			screens: map[string]string{
 				"cc-1-2-3\x00%1": "just a shell prompt\n",
 			},
@@ -74,7 +74,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name:  "a window already carrying its label is left alone",
-			panes: []Pane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "RESEARCH", "claude")},
+			panes: []ProbePane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "RESEARCH", "claude")},
 			screens: map[string]string{
 				"cc-1-2-3\x00%1": statusline("RESEARCH"),
 			},
@@ -82,7 +82,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name:  "a squatter session on a chat socket is not that chat",
-			panes: []Pane{pane("cc-1-2-3", "someone-else", "@1", "%1", "zsh", "claude")},
+			panes: []ProbePane{pane("cc-1-2-3", "someone-else", "@1", "%1", "zsh", "claude")},
 			screens: map[string]string{
 				"cc-1-2-3\x00%1": statusline("RESEARCH"),
 			},
@@ -90,7 +90,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name:  "a viewport mirrors another chat's statusline",
-			panes: []Pane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "tmux")},
+			panes: []ProbePane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "tmux")},
 			screens: map[string]string{
 				"cc-1-2-3\x00%1": statusline("SOMEBODY_ELSE"),
 			},
@@ -98,7 +98,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name: "two differently labelled panes in one window cancel each other",
-			panes: []Pane{
+			panes: []ProbePane{
 				pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude"),
 				pane("cc-1-2-3", "cc-1-2-3", "@1", "%2", "zsh", "claude"),
 			},
@@ -110,7 +110,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name: "a pane that could not be captured freezes its window",
-			panes: []Pane{
+			panes: []ProbePane{
 				pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude"),
 				pane("cc-1-2-3", "cc-1-2-3", "@1", "%2", "zsh", "claude"),
 			},
@@ -122,7 +122,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name: "two windows converging on one name are both left alone",
-			panes: []Pane{
+			panes: []ProbePane{
 				pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude"),
 				pane("cc-4-5-6", "cc-4-5-6", "@2", "%1", "zsh", "claude"),
 			},
@@ -134,7 +134,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name:  "a codex socket is named from its thread, never from a capture",
-			panes: []Pane{pane("cx-1-2-3", "cx-1-2-3", "@1", "%1", "zsh", "codex")},
+			panes: []ProbePane{pane("cx-1-2-3", "cx-1-2-3", "@1", "%1", "zsh", "codex")},
 			screens: map[string]string{
 				"cx-1-2-3\x00%1": statusline("NOT_THIS"),
 			},
@@ -142,7 +142,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 		},
 		{
 			name:  "a label longer than the window budget is clipped",
-			panes: []Pane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude")},
+			panes: []ProbePane{pane("cc-1-2-3", "cc-1-2-3", "@1", "%1", "zsh", "claude")},
 			screens: map[string]string{
 				"cc-1-2-3\x00%1": statusline(strings.Repeat("A", 40)),
 			},
@@ -182,7 +182,7 @@ func TestClaudeWindowRenames(t *testing.T) {
 // Both engines converge in ONE pass, and a claude window never steals the
 // name a codex window is taking.
 func TestBothEnginesConvergeInOnePass(t *testing.T) {
-	panes := []Pane{
+	panes := []ProbePane{
 		{
 			Socket:         "cc-1-2-3",
 			SessionName:    "cc-1-2-3",

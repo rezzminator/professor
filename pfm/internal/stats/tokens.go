@@ -2,6 +2,7 @@ package stats
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 const (
@@ -96,7 +97,8 @@ type tokenRecord struct {
 func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now int64) []string {
 	pathsBySocket := make(map[string]map[string]bool)
 	sessionsBySocket := make(map[string]map[string]bool)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.Socket == "" || row.Path == "" || !liveKind(row.Kind) {
 			continue
 		}
@@ -277,7 +279,14 @@ func (sampler *Sampler) readTokenUsageLocked(path string) (tokenMeasure, []strin
 	openedInfo, statErr := file.Stat()
 	if statErr != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			return tokenMeasure{}, []string{fmt.Sprintf("stat chat token transcript %s before read: %v; close after stat failure: %v", path, statErr, closeErr)}
+			return tokenMeasure{}, []string{
+				fmt.Sprintf(
+					"stat chat token transcript %s before read: %v; close after stat failure: %v",
+					path,
+					statErr,
+					closeErr,
+				),
+			}
 		}
 		return tokenMeasure{}, []string{fmt.Sprintf("stat chat token transcript %s before read: %v", path, statErr)}
 	}
@@ -286,15 +295,26 @@ func (sampler *Sampler) readTokenUsageLocked(path string) (tokenMeasure, []strin
 	}
 	if matches, guardErr := tokenRewriteGuardMatches(file, entry); guardErr != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			return tokenMeasure{}, []string{fmt.Sprintf("verify chat token transcript %s rewrite guard: %v; close after guard failure: %v", path, guardErr, closeErr)}
+			return tokenMeasure{}, []string{
+				fmt.Sprintf(
+					"verify chat token transcript %s rewrite guard: %v; close after guard failure: %v",
+					path,
+					guardErr,
+					closeErr,
+				),
+			}
 		}
-		return tokenMeasure{}, []string{fmt.Sprintf("verify chat token transcript %s rewrite guard: %v", path, guardErr)}
+		return tokenMeasure{}, []string{
+			fmt.Sprintf("verify chat token transcript %s rewrite guard: %v", path, guardErr),
+		}
 	} else if !matches {
 		entry = sampler.newTokenCacheEntryLocked(path, openedInfo)
 	}
 	if _, err := file.Seek(entry.offset, io.SeekStart); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			return tokenMeasure{}, []string{fmt.Sprintf("seek chat token transcript %s: %v; close after seek failure: %v", path, err, closeErr)}
+			return tokenMeasure{}, []string{
+				fmt.Sprintf("seek chat token transcript %s: %v; close after seek failure: %v", path, err, closeErr),
+			}
 		}
 		return tokenMeasure{}, []string{fmt.Sprintf("seek chat token transcript %s: %v", path, err)}
 	}
@@ -305,7 +325,8 @@ func (sampler *Sampler) readTokenUsageLocked(path string) (tokenMeasure, []strin
 		chunk, readErr := reader.ReadBytes('\n')
 		entry.offset += int64(len(chunk))
 		if len(chunk) > 0 {
-			line := append(entry.partial, chunk...)
+			line := append([]byte{}, entry.partial...)
+			line = append(line, chunk...)
 			entry.partial = nil
 			if line[len(line)-1] == '\n' {
 				line = line[:len(line)-1]
@@ -367,7 +388,7 @@ func tokenRewriteGuardMatches(file *os.File, entry *tokenCacheEntry) (bool, erro
 	if read != len(guard) {
 		return false, nil
 	}
-	return string(guard) == string(entry.rewriteGuard), nil
+	return bytes.Equal(guard, entry.rewriteGuard), nil
 }
 
 func updateTokenRewriteGuard(file *os.File, entry *tokenCacheEntry) error {
@@ -392,7 +413,7 @@ func updateTokenRewriteGuard(file *os.File, entry *tokenCacheEntry) error {
 }
 
 func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
-	if len(strings.TrimSpace(string(line))) == 0 {
+	if strings.TrimSpace(string(line)) == "" {
 		return nil
 	}
 	var record tokenRecord
@@ -420,7 +441,7 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 	if record.Payload.Type == "token_count" {
 		total := record.Payload.Info.TotalTokenUsage.TotalTokens
 		if total < 0 {
-			return fmt.Errorf("Codex lifetime usage contains a negative token count")
+			return fmt.Errorf("lifetime usage for Codex contains a negative token count")
 		}
 		if total > 0 {
 			entry.codexTokens = total

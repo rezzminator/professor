@@ -19,6 +19,7 @@ set -uo pipefail
 # them whatever locale the caller's shell carries.
 export LC_ALL=C
 PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 BASE="$PFM/.arch"
 CEIL_SRC="${CEIL_SRC:-800}"; CEIL_TEST="${CEIL_TEST:-1000}"
 # A baselined over-ceiling file may carry CEIL_SLACK lines of move churn (an
@@ -32,17 +33,8 @@ say() { printf 'CHECK %-22s %-7s %s\n' "$1" "$2" "$3"; case $2 in FAIL) [ "$rc" 
 cd "$PFM" || { say setup ERROR "cannot cd $PFM"; exit 2; }
 T=$(mktemp -d) || { say setup ERROR "mktemp failed"; exit 2; }
 trap 'rm -rf "$T"' EXIT
-# repo_git reads the worktree's own index. Inside the dev fence a linked
-# worktree's .git names a host path the container cannot see, so dev.sh iso
-# hands over the mounted git dir and work tree instead.
-repo_git() {
-  if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" && -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
-    git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
-      -c safe.directory="$PFM_DEV_REPO_WORK_TREE" "$@"
-  else
-    git "$@"
-  fi
-}
+# shellcheck source=repo-git.sh
+source "$SCRIPTS/repo-git.sh" || { say setup ERROR "cannot source $SCRIPTS/repo-git.sh"; exit 2; }
 # The file lists include untracked files (a wave's new package exists before its
 # commit) and exclude deleted ones (a wave's removed file is gone before its commit).
 repo_git ls-files -co --exclude-standard '*.go' | while read -r f; do [ -f "$f" ] && echo "$f"; done | sort -u > "$T/all.list"
@@ -52,15 +44,29 @@ grep '_test\.go$' "$T/all.list" > "$T/test.list"
 
 # g <out> <list> <grep args...>: grep over a file list; returns 2 when grep could
 # not read (rc ≥ 2), so an unreadable tree never passes as a clean one.
-g() { local out=$1 list=$2; shift 2; grep "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
+# An EMPTY list is never "clean": grep with no file operands would read stdin
+# and hang the gate, so it is reported as an enumerator that could not run.
+g() { local out=$1 list=$2; shift 2; [ -s "$list" ] || return 2; grep "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
 
 # ratchet <id> <name> <current>: set ratchet — FAIL on any line the baseline lacks.
 ratchet() {
   local id=$1 name=$2 cur=$3
   sort -u "$cur" -o "$cur"
   if [ "$MODE" = --measure ]; then
-    mkdir -p "$BASE"
-    if [ -f "$BASE/$name.txt" ]; then comm -12 "$BASE/$name.txt" "$cur" > "$T/measured"; mv "$T/measured" "$BASE/$name.txt"; else cp "$cur" "$BASE/$name.txt"; fi
+    if ! mkdir -p "$BASE"; then
+      say "$id" ERROR "could not create .arch directory for $name"
+      return
+    fi
+    if [ -f "$BASE/$name.txt" ]; then
+      if ! comm -12 "$BASE/$name.txt" "$cur" > "$T/measured" ||
+         ! mv "$T/measured" "$BASE/$name.txt"; then
+        say "$id" ERROR "could not update .arch/$name.txt"
+        return
+      fi
+    elif ! cp "$cur" "$BASE/$name.txt"; then
+      say "$id" ERROR "could not write .arch/$name.txt"
+      return
+    fi
     say "$id" MEASURE "$(wc -l < "$BASE/$name.txt" | tr -d ' ') entries -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
@@ -78,10 +84,20 @@ ratchet_counts() {
   local id=$1 name=$2 cur=$3 slack=${4:-0}
   sort -u "$cur" -o "$cur"
   if [ "$MODE" = --measure ]; then
-    mkdir -p "$BASE"
+    if ! mkdir -p "$BASE"; then
+      say "$id" ERROR "could not create .arch directory for $name"
+      return
+    fi
     if [ -f "$BASE/$name.txt" ]; then
-      awk 'FILENAME==ARGV[1] {base[$1]=$2; next} ($1 in base) {print $1" "($2<base[$1] ? $2 : base[$1])}' "$BASE/$name.txt" "$cur" | sort -u > "$T/measured"; mv "$T/measured" "$BASE/$name.txt"
-    else cp "$cur" "$BASE/$name.txt"; fi
+      if ! awk 'FILENAME==ARGV[1] {base[$1]=$2; next} ($1 in base) {print $1" "($2<base[$1] ? $2 : base[$1])}' "$BASE/$name.txt" "$cur" | sort -u > "$T/measured" ||
+         ! mv "$T/measured" "$BASE/$name.txt"; then
+        say "$id" ERROR "could not update .arch/$name.txt"
+        return
+      fi
+    elif ! cp "$cur" "$BASE/$name.txt"; then
+      say "$id" ERROR "could not write .arch/$name.txt"
+      return
+    fi
     say "$id" MEASURE "$(awk '{s+=$2} END {print s+0}' "$BASE/$name.txt") in $(wc -l < "$BASE/$name.txt" | tr -d ' ') keys -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
@@ -106,7 +122,28 @@ ratchet_counts C2-ceiling-test ceiling-test "$T/c2" "$CEIL_SLACK"
 grep '^cmd/pfm/' "$T/src.list" > "$T/cmd.list"
 n=$(xargs cat < "$T/cmd.list" | wc -l | tr -d ' ')
 if [ ! -s "$T/cmd.list" ]; then say C3-cmd-budget ERROR "no cmd/pfm sources listed — the enumerator did not run"
-elif [ "$MODE" = --measure ]; then mkdir -p "$BASE"; [ -f "$BASE/cmd-budget.txt" ] && [ "$(cat "$BASE/cmd-budget.txt")" -lt "$n" ] && n=$(cat "$BASE/cmd-budget.txt"); echo "$n" > "$BASE/cmd-budget.txt"; say C3-cmd-budget MEASURE "budget $n lines -> .arch/cmd-budget.txt"
+elif [ "$MODE" = --measure ]; then
+  if ! mkdir -p "$BASE"; then
+    say C3-cmd-budget ERROR "could not create .arch directory for cmd-budget"
+  else
+    budget=""
+    budget_ok=1
+    if [ -f "$BASE/cmd-budget.txt" ]; then
+      if ! budget=$(cat "$BASE/cmd-budget.txt"); then
+        say C3-cmd-budget ERROR "could not read .arch/cmd-budget.txt"
+        budget_ok=0
+      elif [ "$budget" -lt "$n" ]; then
+        n=$budget
+      fi
+    fi
+    if [ "$budget_ok" -eq 1 ]; then
+      if ! printf '%s\n' "$n" > "$BASE/cmd-budget.txt"; then
+        say C3-cmd-budget ERROR "could not write .arch/cmd-budget.txt"
+      else
+        say C3-cmd-budget MEASURE "budget $n lines -> .arch/cmd-budget.txt"
+      fi
+    fi
+  fi
 elif [ ! -f "$BASE/cmd-budget.txt" ]; then say C3-cmd-budget ERROR "baseline .arch/cmd-budget.txt missing"
 elif [ "$n" -gt "$(cat "$BASE/cmd-budget.txt")" ]; then say C3-cmd-budget FAIL "cmd/pfm = $n > budget $(cat "$BASE/cmd-budget.txt")"
 else say C3-cmd-budget PASS "cmd/pfm = $n <= budget $(cat "$BASE/cmd-budget.txt")"; fi
@@ -123,13 +160,13 @@ if g "$T/raw" "$T/notmux.list" -lE 'deps\.Executable\("tmux"\)|\[\]string\{"-S",
 else say C5-tmux-runner ERROR "grep could not read sources"; fi
 
 # C6 one atomic writer: outside internal/atomicfile/, a file naming an atomic-write
-# helper or hand-rolling the scratch-file-plus-rename pattern (os.CreateTemp + os.Rename).
+# helper or opening a scratch file itself (os.CreateTemp). The rename is NOT
+# required: a scratch file that never reaches os.Rename is still a hand-rolled
+# writer (headless/run had three such copies the old both-patterns rule missed).
 grep -v '^internal/atomicfile/' "$T/src.list" > "$T/noatomic.list"
 if g "$T/c6" "$T/noatomic.list" -lE '^func (writeAtomic|WriteAtomic|atomicWrite|AtomicWrite|writeFileAtomic|WriteFileAtomic)\(' &&
    g "$T/temps" "$T/noatomic.list" -l 'os\.CreateTemp('; then
-  if [ ! -s "$T/temps" ] || g "$T/renames" "$T/temps" -l 'os\.Rename('; then
-    [ -s "$T/temps" ] && cat "$T/renames" >> "$T/c6"; ratchet C6-atomic-write atomic-writers "$T/c6"
-  else say C6-atomic-write ERROR "grep could not read the scratch-file writers"; fi
+  cat "$T/temps" >> "$T/c6"; ratchet C6-atomic-write atomic-writers "$T/c6"
 else say C6-atomic-write ERROR "grep could not read sources"; fi
 
 # C7 one SQLite opener: sql.Open outside internal/sqlitedb/.
@@ -162,7 +199,7 @@ else say C11-db-names ERROR "grep could not read sources"; fi
 if [ ! -f CLAUDE.md ]; then say C12-claude-pointers ERROR "pfm/CLAUDE.md missing"
 else
   : > "$T/c12"
-  for p in $(grep -oE '^\| `[a-z/]+/`' CLAUDE.md | tr -d '|` '; grep -oE '`[a-z/]+/`' CLAUDE.md | grep -vE '^`(cmd|internal|testdata|shim|e2e|prompts)' | tr -d '`'); do
+  for p in $(grep -oE '^\| `[a-z/]+/`' CLAUDE.md | tr -d '|` '; grep -oE '`[a-z/]+/`' CLAUDE.md | grep -vE '^`(cmd|internal|testdata|e2e)' | tr -d '`'); do
     [ -d "internal/$p" ] || [ -d "$p" ] || echo "$p" >> "$T/c12"
   done
   for f in $(grep -oE '`?[A-Z][A-Z_]+\.md`?' CLAUDE.md | tr -d '`' | sort -u); do [ -e "$f" ] || [ -e "../$f" ] || echo "$f" >> "$T/c12"; done
@@ -216,4 +253,64 @@ if g "$T/decl" "$T/src.list" -ohE '\b[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(string[[
   else say C16-env-outside-paths ERROR "grep could not read sources"; fi
 else say C16-env-outside-paths ERROR "grep could not read the PFM_* name declarations"; fi
 
+# C17 one free function per name: the same unexported free-function name in two
+# files is a twin waiting to diverge (clipRunes x5, isLive/IsLive with opposite
+# answers). Case-folded so IsLive and isLive collide. Methods are excluded (a
+# String() per type is the language), as are _linux/_darwin pairs, which define
+# one identifier twice BY DESIGN (pfm/CLAUDE.md § one binary, two kernels).
+grep -vE '_(linux|darwin)\.go$' "$T/src.list" > "$T/nokernel.list"
+if g "$T/raw" "$T/nokernel.list" -nE '^func [A-Za-z_][A-Za-z0-9_]*\('; then
+  awk -F: '{ match($3, /^func [A-Za-z_][A-Za-z0-9_]*/); n=tolower(substr($3, 6, RLENGTH-5)); if (n!="main" && n!="init") print n" "$1 }' "$T/raw" \
+    | sort -u | awk '{files[$1]=files[$1]" "$2; c[$1]++} END {for (n in c) if (c[n]>1) print n":"files[n]}' | sort > "$T/c17"
+  ratchet C17-dup-functions dup-functions "$T/c17"
+else say C17-dup-functions ERROR "grep could not read function declarations"; fi
+
+# C18 one spelling per engine: OpenCode is the brand; Opencode / Oc* / oc* are
+# drift, and GPT is an undeclared synonym for Codex. Count per file, only shrinks.
+if g "$T/raw" "$T/all.list" -nE 'Opencode|\b[oO]c[A-Z][A-Za-z]+|GPT'; then count_by_file "$T/raw" > "$T/c18"; ratchet_counts C18-engine-spellings engine-spellings "$T/c18"
+else say C18-engine-spellings ERROR "grep could not read sources"; fi
+
+# C19 one environment namespace: CHAT_*, CC_* reads are pfm's own
+# variables under a foreign prefix — a `grep PFM_` never finds them.
+if g "$T/raw" "$T/src.list" -nE '(Getenv|LookupEnv)\("(CHAT|CC)_'; then count_by_file "$T/raw" > "$T/c19"; ratchet_counts C19-env-namespace env-namespace "$T/c19"
+else say C19-env-namespace ERROR "grep could not read sources"; fi
+
+# C20 one name for ~/.codex: CodexHome. codexRoot / CodexRoot / AccountHome
+# name the same directory in 43 files a `grep CodexHome` misses.
+if g "$T/raw" "$T/src.list" -nE '\b[cC]odexRoot\b|\bAccountHome\b'; then count_by_file "$T/raw" > "$T/c20"; ratchet_counts C20-codex-home codex-home "$T/c20"
+else say C20-codex-home ERROR "grep could not read sources"; fi
+
+# C21 one test jail: a test that hand-rolls its scratch root with
+# os.MkdirTemp("/tmp", ...) instead of testjail.ShortRoot has its own copy of
+# the jail, and the six copies already disagree on the DB path.
+grep -v '^internal/testjail/' "$T/test.list" > "$T/nojail.list"
+if g "$T/raw" "$T/nojail.list" -n 'os\.MkdirTemp("/tmp"'; then count_by_file "$T/raw" > "$T/c21"; ratchet_counts C21-test-jail test-jail-copies "$T/c21"
+else say C21-test-jail ERROR "grep could not read tests"; fi
+
+# C22 host doors stay inside their four seam packages: a bare os.Getenv/
+# LookupEnv/UserHomeDir/user.Current/exec.Command/exec.CommandContext/
+# exec.LookPath/time.Now/Sleep/After/NewTimer/NewTicker/Tick/net.Dial/
+# net.Listen in non-test code outside internal/{clock,deps,paths,tmux} is a
+# door the unit-test law (§ Three seams item 4) has not seamed yet; the baseline
+# only shrinks as later batches migrate a package onto clock.Clock,
+# deps.Runner, tmux.Fake or paths.Env. internal/mockengine + cmd/mock-engine
+# are the fifth seam: the mock IS a host (exec, env, files, clock) — the thing
+# the other four fake — so its doors are its purpose, not a leak to migrate.
+grep -vE '^(internal/(clock|deps|paths|tmux|mockengine)|cmd/mock-engine)/' "$T/src.list" > "$T/noseam.list"
+if g "$T/raw" "$T/noseam.list" -nE 'os\.Getenv|LookupEnv|UserHomeDir|user\.Current|exec\.Command|exec\.CommandContext|exec\.LookPath|time\.Now|time\.Sleep|time\.After|time\.NewTimer|time\.NewTicker|time\.Tick|net\.Dial|net\.Listen'; then
+  count_by_file "$T/raw" > "$T/c22"; ratchet_counts C22-host-doors host-doors "$T/c22"
+else say C22-host-doors ERROR "grep could not read sources"; fi
+
+# C23 one activity log: a bare log.Print*/log.Fatal* or a hand-rolled
+# fmt.Fprint*(os.Stderr in non-test code writes where nothing can read it back
+# — no level, no fields, no destination a field report or a lane beat can
+# attach. internal/obs IS the destination and cmd/pfm's stderr IS a verb's user-facing
+# output, so both are outside the count; every other package moves onto
+# obs.Logger/obs.Span as part B migrates it, and this baseline only shrinks.
+grep -vE '^(internal/obs/|cmd/pfm/)' "$T/src.list" > "$T/noobs.list"
+if g "$T/raw" "$T/noobs.list" -nHE '\blog\.(Print|Fatal)|fmt\.Fprint[a-zA-Z]*\(os\.Stderr'; then
+  count_by_file "$T/raw" > "$T/c23"; ratchet_counts C23-bare-log bare-log "$T/c23"
+else say C23-bare-log ERROR "grep could not read sources"; fi
+
+bash "$PFM/scripts/arch-c24.sh" "$MODE"; c24=$?; [ "$c24" -gt "$rc" ] && rc=$c24 # C24 lives in its own script
 exit $rc

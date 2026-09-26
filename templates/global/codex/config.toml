@@ -1,5 +1,6 @@
 # Professor global Codex defaults. Existing settings win on pfm install.
-# Runtime instructions are appended by the native SessionStart hook from templates/prompts/codex-appendix.md.
+# Runtime instructions are appended by the native SessionStart hook from the staged
+# harness-prompts/codex.md, composed from pfm/harness-prompts/.
 
 [features.multi_agent_v2]
 wait_agent_enabled = true

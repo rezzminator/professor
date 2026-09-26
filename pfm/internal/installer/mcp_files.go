@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 func readMCPFile(path string) ([]byte, bool, error) {
@@ -40,5 +40,5 @@ func (installer *engine) writeMCPFile(path string, original, wanted []byte, exis
 			return err
 		}
 	}
-	return atomicfile.Write(path, wanted, 0600)
+	return atomicfile.Write(path, wanted, 0o600)
 }

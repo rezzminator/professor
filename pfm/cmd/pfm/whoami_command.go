@@ -3,17 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	pfmchat "hostops/pfm/internal/chat"
 	"io"
-	"os"
 
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // runWhoami prints THIS chat's own tmux session name — its identity, and the
@@ -22,10 +19,10 @@ import (
 // caller can switch to this binary without reading differently. --json adds
 // the engine identity for callers that want more than the handle.
 func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("whoami", "usage: pfm whoami [--json | --label]", stderr)
-	asJSON := flags.Bool("json", false, "print the full identity as JSON")
+	flags := cli.NewFlagSet(whoamiCommand, "usage: pfm whoami [--json | --label]", stderr)
+	asJSON := flags.Bool(jsonFormat, false, "print the full identity as JSON")
 	asLabel := flags.Bool("label", false, "print the chat label, falling back to its session")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || (*asJSON && *asLabel) {
@@ -61,7 +58,7 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		if target == "" {
 			target = identity.Session
 		}
-		capture, captureErr := (inject.CommandTmux{}).Capture(
+		capture, captureErr := (inject.TmuxInjector{}).Capture(
 			ctx, identity.SocketPath, target, true, inject.FullScrollback,
 		)
 		if captureErr == nil {
@@ -81,67 +78,4 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	}
 	fmt.Fprintf(stdout, "%s\n", identity.Session)
 	return 0
-}
-
-// codexSeatIdentifier adapts the fleet's thread-to-live-seat lookup to the
-// injector's final sender-identity rung. It is deliberately separate from
-// resolve.Whoami: tmux environment and process ancestry stay the first two
-// rungs, because CODEX_THREAD_ID can be inherited by a process with a seat of
-// its own.
-type codexSeatIdentifier struct{ Runtime *commandRuntime }
-
-func (identifier codexSeatIdentifier) Identify(ctx context.Context) (resolve.Identity, error) {
-	identity, found := pfmchat.SeatIdentity(ctx, identifier.Runtime)
-	if !found {
-		return resolve.Identity{}, resolve.ErrNoTmux
-	}
-	return identity, nil
-}
-
-func newInjectEngine(runtimes ...commandRuntime) (*inject.Engine, error) {
-	return newInjectEngineAllowingUnsigned(false, runtimes...)
-}
-
-// newInjectEngineAllowingUnsigned builds the same engine with the unsigned
-// refusal lifted. Only `pfm chat inject --allow-unsigned` passes true: every
-// other caller gets the refusal, because an unsigned message is one the
-// recipient must not act on.
-func newInjectEngineAllowingUnsigned(
-	allowUnsigned bool,
-	runtimes ...commandRuntime,
-) (*inject.Engine, error) {
-	identifier := codexSeatIdentifier{}
-	dependencies := inject.Dependencies{}
-	dependencies.Options.AllowUnsigned = allowUnsigned
-	if len(runtimes) != 0 {
-		identifier.Runtime = &runtimes[0]
-		dependencies.Spawner = inject.CommandThenSpawner{
-			ConfigPath: runtimes[0].Config.Path,
-		}
-		dependencies.ClaudeBinary = runtimes[0].Config.Claude.Binary
-		dependencies.CodexBinary = runtimes[0].Config.Codex.Binary
-		dependencies.OpencodeBinary = runtimes[0].Config.OpenCode.Binary
-		dependencies.Recorder = sharedCommsRecorder(runtimes[0].Paths)
-		dependencies.WarningWriter = os.Stderr
-		for _, account := range runtimes[0].Config.Accounts {
-			if emoji := runtimes[0].Config.EmojiFor(account.ID); emoji != "" && emoji != "·" {
-				dependencies.AccountEmojis = append(dependencies.AccountEmojis, emoji)
-			}
-		}
-	}
-	dependencies.Names = pfmchat.NameResolver{Runtime: identifier.Runtime}
-	dependencies.CodexSeat = identifier
-	return inject.New(dependencies)
-}
-
-func sharedCommsRecorder(values paths.Values) func(context.Context, shared.CommsEvent) error {
-	return func(ctx context.Context, event shared.CommsEvent) error {
-		state := shared.Open(ctx, values)
-		recordErr := state.RecordComms(ctx, event)
-		closeErr := state.Close()
-		if closeErr != nil {
-			closeErr = fmt.Errorf("close shared state after comms event: %w", closeErr)
-		}
-		return errors.Join(recordErr, closeErr)
-	}
 }

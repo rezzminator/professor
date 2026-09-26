@@ -8,14 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type liveDuringCorpseReprobe struct{}
 
-func (liveDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.Pane, error) {
-	return []gather.Pane{{PaneID: "%1"}}, nil
+func (liveDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
+	return []gather.ProbePane{{PaneID: "%1"}}, nil
 }
 
 func (liveDuringCorpseReprobe) Sessions(context.Context, string) ([]VSCTSession, error) {
@@ -32,7 +33,7 @@ func (liveDuringCorpseReprobe) ClientIdle(context.Context, string) (time.Duratio
 
 type unreadableDuringCorpseReprobe struct{}
 
-func (unreadableDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.Pane, error) {
+func (unreadableDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
 	return nil, errors.New("fixture permission denied")
 }
 
@@ -106,7 +107,7 @@ func TestApplyPreservesAPlannedCorpseWhenReprobeIsUnreadable(t *testing.T) {
 // filesystem removal rather than stopping at the re-probe gate.
 type goneDuringCorpseReprobe struct{}
 
-func (goneDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.Pane, error) {
+func (goneDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
 	return nil, gather.ErrServerGone
 }
 
@@ -122,19 +123,22 @@ func (goneDuringCorpseReprobe) ClientIdle(context.Context, string) (time.Duratio
 	return 0, false, nil
 }
 
-// The role-crumb sweep is wired into BOTH paths that end a socket, not only
-// the kill-server one: a dead socket file with no server behind it still
-// leaves a role- crumb pointing nowhere unless removal clears it too.
-func TestApplyRemovesTheRoleCrumbOnADeadSocketRemoval(t *testing.T) {
+// Role-prompt cleanup is wired into both paths that end a socket.
+func TestApplyRemovesTheRolePromptOnADeadSocketRemoval(t *testing.T) {
 	const socket = "cc-905-1-1"
+	const seat = "builder"
 	tmuxDir := t.TempDir()
 	path := filepath.Join(tmuxDir, socket)
 	if err := os.WriteFile(path, []byte("corpse fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	sidDir := t.TempDir()
-	crumb := filepath.Join(sidDir, "role-"+socket)
-	if err := os.WriteFile(crumb, []byte(`{"role":"builder"}`), 0o600); err != nil {
+	prompt := mustReapSeatPromptPath(t, sidDir, socket)
+	if err := agentrole.WriteSeatPrompt(sidDir, socket, "", "<!-- pfm agent-role: worker -->\nROLE"); err != nil {
+		t.Fatal(err)
+	}
+	living := mustReapSeatPromptPath(t, sidDir, "cc-906-1-1")
+	if err := agentrole.WriteSeatPrompt(sidDir, "cc-906-1-1", "", "<!-- pfm agent-role: worker -->\nROLE"); err != nil {
 		t.Fatal(err)
 	}
 	runner := &Runner{
@@ -143,11 +147,12 @@ func TestApplyRemovesTheRoleCrumbOnADeadSocketRemoval(t *testing.T) {
 	}
 	decisions, warnings := runner.apply(context.Background(), []Decision{{
 		Socket: socket,
+		Label:  seat,
 		State:  StateDead,
 		Action: ActionRemoveSocketFile,
 	}})
 	if len(warnings) != 0 {
-		t.Fatalf("clean role-crumb removal produced warnings: %v", warnings)
+		t.Fatalf("clean role-prompt removal produced warnings: %v", warnings)
 	}
 	if len(decisions) != 1 || decisions[0].Failed {
 		t.Fatalf("dead-socket removal decision = %#v, want a clean, non-failed removal", decisions)
@@ -155,8 +160,11 @@ func TestApplyRemovesTheRoleCrumbOnADeadSocketRemoval(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("corpse socket file survived its own removal: %v", err)
 	}
-	if _, err := os.Stat(crumb); !os.IsNotExist(err) {
-		t.Fatalf("role crumb survived a dead-socket removal: %v", err)
+	if _, err := os.Stat(prompt); !os.IsNotExist(err) {
+		t.Fatalf("role prompt survived a dead-socket removal: %v", err)
+	}
+	if _, err := os.Stat(living); err != nil {
+		t.Fatalf("living seat's role prompt was removed: %v", err)
 	}
 }
 
@@ -232,46 +240,33 @@ func TestApplyMarksADecisionFailedWhenKillServerErrors(t *testing.T) {
 	}
 }
 
-// removeRoleCrumb is best-effort by name: a missing crumb is the ordinary
-// case (most seats carry no --role) and must never be reported at all.
-func TestRemoveRoleCrumbIsBestEffortWhenMissing(t *testing.T) {
-	removed, err := removeRoleCrumb(t.TempDir(), "cc-999-1-1")
-	if err != nil {
-		t.Fatalf("removeRoleCrumb on a missing crumb returned an error: %v", err)
-	}
-	if removed {
-		t.Fatal("removeRoleCrumb reported removed=true for a crumb that never existed")
+func TestRemoveRoleSeatPromptIsBestEffortWhenMissing(t *testing.T) {
+	if err := removeRoleSeatPrompt(t.TempDir(), "missing"); err != nil {
+		t.Fatalf("removeRoleSeatPrompt on a missing prompt returned an error: %v", err)
 	}
 }
 
-func TestRemoveRoleCrumbRemovesAnExistingCrumb(t *testing.T) {
+func TestRemoveRoleSeatPromptRemovesAnExistingPrompt(t *testing.T) {
 	sidDir := t.TempDir()
-	const socket = "cc-999-1-1"
-	path := filepath.Join(sidDir, "role-"+socket)
-	if err := os.WriteFile(path, []byte(`{"role":"builder"}`), 0o600); err != nil {
+	const socket = "cc-builder"
+	path := mustReapSeatPromptPath(t, sidDir, socket)
+	if err := agentrole.WriteSeatPrompt(sidDir, socket, "", "<!-- pfm agent-role: worker -->\nROLE"); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := removeRoleCrumb(sidDir, socket)
-	if err != nil {
-		t.Fatalf("removeRoleCrumb: %v", err)
-	}
-	if !removed {
-		t.Fatal("removeRoleCrumb reported removed=false for a crumb that existed")
+	if err := removeRoleSeatPrompt(sidDir, socket); err != nil {
+		t.Fatalf("removeRoleSeatPrompt: %v", err)
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
-		t.Fatalf("role crumb survived removal: %v", statErr)
+		t.Fatalf("role prompt survived removal: %v", statErr)
 	}
 }
 
-// apply must clear an orphaned role- crumb on every path that ends a
-// server — the T1 seat re-arm wave's canonical kill clears its own, every
-// other path (including this sweep's) leaves the crumb behind unless this
-// wires it up.
-func TestApplyRemovesTheRoleCrumbOnAResolvedKill(t *testing.T) {
+func TestApplyRemovesTheRolePromptOnAResolvedKill(t *testing.T) {
 	const socket = "cc-903-1-1"
+	const seat = "builder"
 	sidDir := t.TempDir()
-	crumb := filepath.Join(sidDir, "role-"+socket)
-	if err := os.WriteFile(crumb, []byte(`{"role":"builder"}`), 0o600); err != nil {
+	prompt := mustReapSeatPromptPath(t, sidDir, socket)
+	if err := agentrole.WriteSeatPrompt(sidDir, socket, "", "<!-- pfm agent-role: worker -->\nROLE"); err != nil {
 		t.Fatal(err)
 	}
 	runner := &Runner{
@@ -283,37 +278,39 @@ func TestApplyRemovesTheRoleCrumbOnAResolvedKill(t *testing.T) {
 	}
 	decisions, warnings := runner.apply(context.Background(), []Decision{{
 		Socket: socket,
+		Label:  seat,
 		State:  StateIdle,
 		Action: ActionKillServer,
 	}})
 	if len(warnings) != 0 {
-		t.Fatalf("clean role-crumb removal produced warnings: %v", warnings)
+		t.Fatalf("clean role-prompt removal produced warnings: %v", warnings)
 	}
 	if len(decisions) != 1 || decisions[0].State != StateKilled || decisions[0].Failed {
 		t.Fatalf("kill decision = %#v, want a clean StateKilled", decisions)
 	}
-	if _, err := os.Stat(crumb); !os.IsNotExist(err) {
-		t.Fatalf("role crumb survived a resolved kill: %v", err)
+	if _, err := os.Stat(prompt); !os.IsNotExist(err) {
+		t.Fatalf("role prompt survived a resolved kill: %v", err)
 	}
 }
 
-// A role-crumb removal failure is a warning, never a reap failure: it holds
+// A role-prompt removal failure is a warning, never a reap failure: it holds
 // up nothing this sweep's own exit code answers for, and it must never be
 // swallowed silently either.
-func TestApplyWarnsWithoutFailingWhenTheRoleCrumbCannotBeRemoved(t *testing.T) {
+func TestApplyWarnsWithoutFailingWhenTheRolePromptCannotBeRemoved(t *testing.T) {
 	const socket = "cc-904-1-1"
+	const seat = "builder"
 	sidDir := t.TempDir()
-	crumb := filepath.Join(sidDir, "role-"+socket)
-	// A non-empty DIRECTORY in the crumb's place makes os.Remove fail with
+	prompt := mustReapSeatPromptPath(t, sidDir, socket)
+	// A non-empty directory in the prompt's place makes os.Remove fail with
 	// ENOTEMPTY for every uid, root included. A read-only parent directory
 	// is not that: root ignores permission bits entirely, so that trick
 	// proved "unremovable" only on a machine that happened not to be root —
 	// exactly the coincidence this repo's own fenced gate exists to catch
 	// (it runs the suite as root in a container).
-	if err := os.Mkdir(crumb, 0o700); err != nil {
+	if err := os.Mkdir(prompt, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(crumb, "occupant"), []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(prompt, "occupant"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -326,21 +323,31 @@ func TestApplyWarnsWithoutFailingWhenTheRoleCrumbCannotBeRemoved(t *testing.T) {
 	}
 	decisions, warnings := runner.apply(context.Background(), []Decision{{
 		Socket: socket,
+		Label:  seat,
 		State:  StateIdle,
 		Action: ActionKillServer,
 	}})
 	if len(decisions) != 1 || decisions[0].State != StateKilled || decisions[0].Failed {
 		t.Fatalf(
-			"an unremovable role crumb must not fail the reap itself: %#v",
+			"an unremovable role prompt must not fail the reap itself: %#v",
 			decisions,
 		)
 	}
 	if len(warnings) != 1 {
-		t.Fatalf("an unremovable role crumb produced %d warnings, want 1: %v", len(warnings), warnings)
+		t.Fatalf("an unremovable role prompt produced %d warnings, want 1: %v", len(warnings), warnings)
 	}
-	if _, err := os.Stat(crumb); err != nil {
-		t.Fatalf("the crumb directory that could not be removed vanished anyway: %v", err)
+	if _, err := os.Stat(prompt); err != nil {
+		t.Fatalf("the prompt directory that could not be removed vanished anyway: %v", err)
 	}
+}
+
+func mustReapSeatPromptPath(t *testing.T, sidDir, socket string) string {
+	t.Helper()
+	path, err := agentrole.SeatPromptPath(sidDir, socket, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestReapSocketSelectionDelegatesCanonicalClassifier(t *testing.T) {
@@ -886,7 +893,7 @@ type fakeClientIdleTmux struct {
 	err   error
 }
 
-func (fakeClientIdleTmux) ListPanes(context.Context, string) ([]gather.Pane, error) {
+func (fakeClientIdleTmux) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
 	return nil, nil
 }
 
@@ -930,9 +937,7 @@ func TestProbeIdleSignalsNeverTranslatesAnUnansweredProbeIntoFreshness(t *testin
 		t.Run(testCase.name, func(t *testing.T) {
 			runner := &Runner{tmux: testCase.tmux, now: time.Now}
 			sockets := []Socket{{Name: "cc-100-1-1", Attached: true}}
-			if err := runner.probeIdleSignals(context.Background(), sockets); err != nil {
-				t.Fatalf("probeIdleSignals: %v", err)
-			}
+			runner.probeIdleSignals(context.Background(), sockets)
 			if sockets[0].ClientIdleOK {
 				t.Fatalf("ClientIdleOK = true, want false for %s", testCase.name)
 			}
@@ -966,9 +971,7 @@ func TestProbeIdleSignalsCarriesAGenuineClientIdleThrough(t *testing.T) {
 		now:  time.Now,
 	}
 	sockets := []Socket{{Name: "cc-100-1-1", Attached: true}}
-	if err := runner.probeIdleSignals(context.Background(), sockets); err != nil {
-		t.Fatalf("probeIdleSignals: %v", err)
-	}
+	runner.probeIdleSignals(context.Background(), sockets)
 	if !sockets[0].ClientIdleOK {
 		t.Fatal("ClientIdleOK = false for a probe that genuinely answered")
 	}

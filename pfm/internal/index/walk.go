@@ -87,8 +87,8 @@ func walkClaudeRoots(ctx context.Context, roots []string) ([]diskFile, error) {
 	return sortedDiskFiles(filesByPath), nil
 }
 
-func walkCodexRollouts(ctx context.Context, codexRoot string) ([]diskFile, error) {
-	root := filepath.Join(codexRoot, "sessions")
+func walkCodexRollouts(ctx context.Context, codexHome string) ([]diskFile, error) {
+	root := filepath.Join(codexHome, "sessions")
 	absolute, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("make Codex rollout root absolute: %w", err)

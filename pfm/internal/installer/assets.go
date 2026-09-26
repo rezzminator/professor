@@ -10,7 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/reload"
+	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 //go:embed assets
@@ -22,8 +23,11 @@ type assetFile struct {
 }
 
 func assetFiles() ([]assetFile, error) {
-	var files []assetFile
-	err := fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
+	files, err := harnessPromptAssetFiles()
+	if err != nil {
+		return nil, err
+	}
+	err = fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -92,15 +96,6 @@ func renderShimAsset(content []byte, options Options) ([]byte, error) {
 		return nil, err
 	}
 	return []byte(text), nil
-}
-
-func renderClaudeLauncherAsset(content []byte, options Options) ([]byte, error) {
-	configured := ""
-	if strings.HasPrefix(options.ClaudeBinary, "/") {
-		configured = options.ClaudeBinary
-	}
-	rendered, err := replaceSingleAssetMarker(string(content), "__PFM_CONFIGURED_CLAUDE__", shellSingleQuoted(configured))
-	return []byte(rendered), err
 }
 
 // renderReloadCommandAsset replaces the {{RELOAD_USAGE}} token in the
@@ -173,10 +168,6 @@ func replaceSingleAssetMarker(content, marker, replacement string) (string, erro
 	return strings.Replace(content, marker, replacement, 1), nil
 }
 
-func shellSingleQuoted(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
 func sortedBoolKeys(values map[int]bool) []int {
 	keys := make([]int, 0, len(values))
 	for key := range values {
@@ -186,6 +177,14 @@ func sortedBoolKeys(values map[int]bool) []int {
 	return keys
 }
 
+// readAsset reads one embedded asset by the managed-root-relative path it
+// stages to. The harness-prompt parts are embedded by their own package —
+// pfm/harness-prompts, the ONE copy of that tree — and reached through the
+// same name, so staging, composition and the command preview all keep one
+// door.
 func readAsset(name string) ([]byte, error) {
+	if relative, isHarnessPrompt := harnessPromptAssetName(name); isHarnessPrompt {
+		return harnessprompts.ReadPart(relative)
+	}
 	return embeddedAssets.ReadFile(path.Join("assets", name))
 }

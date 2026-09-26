@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // Route is the legacy picker action letter.
@@ -14,13 +14,13 @@ type Route byte
 const (
 	NewClaude    Route = 'N'
 	NewCodex     Route = 'C'
-	NewOpencode  Route = 'P'
+	NewOpenCode  Route = 'P'
 	Live         Route = 'L'
 	Agent        Route = 'A'
 	ResumeClaude Route = 'R'
 	ResumeCodex  Route = 'X'
-	// ResumeOpencode takes the next free letter; 'O' reads as OpenCode.
-	ResumeOpencode Route = 'O'
+	// ResumeOpenCode takes the next free letter; 'O' reads as OpenCode.
+	ResumeOpenCode Route = 'O'
 )
 
 // Request is every value needed to synthesize and prepare one selected row.
@@ -40,7 +40,7 @@ type Request struct {
 }
 
 // ChatServer is a detached server that must exist before its attach line is
-// emitted. The executor creates it through spawn.CommandTmux.NewSession, the
+// emitted. The executor creates it through spawn.TmuxSpawner.NewSession, the
 // one chat-server creator, so a picker-born chat carries the same server
 // options as every other door's.
 type ChatServer struct {
@@ -67,7 +67,7 @@ type Plan struct {
 }
 
 // Pane is the tmux state needed by solo and self-switch.
-type Pane struct {
+type ActionPane struct {
 	PaneID         string
 	TTY            string
 	SessionName    string
@@ -78,7 +78,7 @@ type Pane struct {
 
 // TmuxClient contains only action mutations and prerequisite probes.
 type TmuxClient interface {
-	ListPanes(ctx context.Context, socket string) ([]Pane, error)
+	ListPanes(ctx context.Context, socket string) ([]ActionPane, error)
 	SocketAlive(ctx context.Context, socket string) bool
 	KillPane(ctx context.Context, socket, paneID string) error
 	KillServer(ctx context.Context, socket string) error

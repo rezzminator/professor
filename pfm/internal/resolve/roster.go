@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // RosterCandidate is one composed fleet row projected onto the fields needed

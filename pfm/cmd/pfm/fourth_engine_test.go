@@ -8,19 +8,20 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/ask"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/sky"
-	"hostops/pfm/internal/spawn"
-	"hostops/pfm/internal/stats"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/theme"
-	"hostops/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sky"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/theme"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 const fourthEngineHelper = "PFM_FOURTH_ENGINE_HELPER"
@@ -82,12 +83,15 @@ func TestFourthEngineNeedsOnlyItsOwnPackage(t *testing.T) {
 		t.Fatalf("decoded ask config=%#v", machine.Ask)
 	}
 
-	var doctor strings.Builder
-	if warnings := printEngineCapabilities(&doctor); warnings != 0 {
-		t.Fatalf("doctor warnings=%d row=%q", warnings, doctor.String())
+	var doctorOutput strings.Builder
+	if warnings := doctor.PrintEngineCapabilities(
+		&doctorOutput,
+		doctor.Dependencies{ExpectedEngineCapabilities: expectedEngineCapabilities},
+	); warnings != 0 {
+		t.Fatalf("doctor warnings=%d row=%q", warnings, doctorOutput.String())
 	}
-	if !strings.Contains(doctor.String(), "zz=index,launcher,matcher,usage,headless,ask") {
-		t.Fatalf("doctor row omitted fourth engine: %q", doctor.String())
+	if !strings.Contains(doctorOutput.String(), "zz=index,launcher,matcher,usage,headless,ask") {
+		t.Fatalf("doctor row omitted fourth engine: %q", doctorOutput.String())
 	}
 
 	current := pfmengine.Claude
@@ -110,7 +114,11 @@ func TestFourthEngineNeedsOnlyItsOwnPackage(t *testing.T) {
 	}
 	palette := theme.Load("default")
 	if palette.EngineRow[id] == "" || palette.StatsEngine[id] == "" {
-		t.Fatalf("fourth engine has no theme fallback: rows=%q stats=%q", palette.EngineRow[id], palette.StatsEngine[id])
+		t.Fatalf(
+			"fourth engine has no theme fallback: rows=%q stats=%q",
+			palette.EngineRow[id],
+			palette.StatsEngine[id],
+		)
 	}
 }
 
@@ -121,7 +129,16 @@ func (fourthSource) Sync(context.Context, *store.Store, []string, *index.Counter
 type fourthLauncher struct{}
 
 func (fourthLauncher) ComposerReady(string) bool { return true }
-func (fourthLauncher) Rename(context.Context, spawn.Tmux, string, string, string, spawn.Timings, spawn.Trace) (string, error) {
+
+func (fourthLauncher) Rename(
+	context.Context,
+	spawn.Tmux,
+	string,
+	string,
+	string,
+	spawn.Timings,
+	spawn.Trace,
+) (string, error) {
 	return "", nil
 }
 

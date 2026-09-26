@@ -33,6 +33,18 @@ type ProcFS interface {
 	Stat(pid int) (ProcStat, error)
 }
 
+// ProcessIdentity is process metadata available without reading argv.
+type ProcessIdentity struct {
+	EffectiveUID uint32
+	Command      string
+}
+
+// ProcIdentity is the optional ProcFS extension that identifies a process
+// without reading its protected command line.
+type ProcIdentity interface {
+	ProcessIdentity(pid int) (ProcessIdentity, error)
+}
+
 // ProcBirth is the optional ProcFS extension that reports when a process was
 // created, in epoch seconds. Only Codex thread identification needs a wall
 // clock, so a ProcFS that cannot supply one stays usable everywhere else.
@@ -46,6 +58,16 @@ type ProcBirth interface {
 // everywhere else and the reaper reports no RAM rather than refusing to run.
 type ProcMemory interface {
 	RSSKB(pid int) (int64, error)
+}
+
+// Terminate asks a process to exit. A process that already exited satisfies
+// the request.
+func Terminate(pid int) error {
+	err := syscall.Kill(pid, syscall.SIGTERM)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
 }
 
 // FileID names one file by device and inode: the identity an install's
@@ -63,6 +85,8 @@ type ProcImage interface {
 	Image(pid int) (FileID, error)
 }
 
+func fileIDDevice[T ~int32 | ~uint32 | ~uint64](device T) uint64 { return uint64(device) }
+
 // FileIDOf is the identity of the file at path, following symlinks.
 func FileIDOf(path string) (FileID, error) {
 	info, err := os.Stat(path)
@@ -73,7 +97,7 @@ func FileIDOf(path string) (FileID, error) {
 	if !ok {
 		return FileID{}, fmt.Errorf("stat %s: no device and inode on this platform", path)
 	}
-	return FileID{Device: uint64(stat.Dev), Inode: uint64(stat.Ino)}, nil
+	return FileID{Device: fileIDDevice(stat.Dev), Inode: stat.Ino}, nil
 }
 
 // NewProcFS returns the process-table reader for a given proc root.
@@ -91,6 +115,9 @@ func FileIDOf(path string) (FileID, error) {
 func NewProcFS(root string) ProcFS {
 	if root != "" {
 		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			if filepath.Clean(root) == "/proc" {
+				return nativeProcFS()
+			}
 			return RealProcFS{Root: root}
 		}
 	}
@@ -135,7 +162,7 @@ func (proc RealProcFS) Cmdline(pid int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return splitNUL(content), nil
+	return SplitNUL(content), nil
 }
 
 // Environ returns the process environment keyed before the first equals sign.
@@ -145,7 +172,7 @@ func (proc RealProcFS) Environ(pid int) (map[string]string, error) {
 		return nil, err
 	}
 	environment := make(map[string]string)
-	for _, entry := range splitNUL(content) {
+	for _, entry := range SplitNUL(content) {
 		key, value, found := strings.Cut(entry, "=")
 		if found {
 			environment[key] = value
@@ -282,7 +309,9 @@ func (proc RealProcFS) path(pid int, element string) string {
 	return filepath.Join(proc.root(), strconv.Itoa(pid), element)
 }
 
-func splitNUL(content []byte) []string {
+// SplitNUL decodes a NUL-delimited kernel vector, preserving meaningful empty
+// fields and removing only trailing delimiters.
+func SplitNUL(content []byte) []string {
 	parts := strings.Split(string(content), "\x00")
 	for len(parts) != 0 && parts[len(parts)-1] == "" {
 		parts = parts[:len(parts)-1]

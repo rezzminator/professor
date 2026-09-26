@@ -1,0 +1,45 @@
+{
+	// The demo from the Mac side: the blueprint checkout as the folder (this
+	// window is where the host's own Claude sessions run) plus a terminal
+	// profile that drops into the pfm-demo container — pick "pfm-demo" from
+	// the terminal's profile menu, or make it the default below. Open with
+	//   code infra/demo/pfm-demo-host.code-workspace
+	// Its sibling pfm-demo.code-workspace is the window INSIDE the container;
+	// VS Code cannot mix the two authorities in one window, so run both.
+	"folders": [
+		{ "name": "professor (host checkout)", "path": "../.." },
+	],
+	"settings": {
+		"window.title": "pfm-demo host · ${activeEditorShort}",
+		"terminal.integrated.profiles.osx": {
+			"pfm-demo": {
+				"path": "docker",
+				"args": ["exec", "-it", "-w", "/work/express", "-e", "TERM=xterm-256color", "-e", "COLORTERM=truecolor", "pfm-demo", "zsh", "-i"],
+				"icon": "server-environment",
+				"color": "terminal.ansiMagenta"
+			},
+			"zsh": { "path": "zsh", "args": ["-l"] }
+		},
+		"terminal.integrated.defaultProfile.osx": "zsh",
+		"terminal.integrated.fontSize": 15,
+		"terminal.integrated.gpuAcceleration": "off",
+		"files.trimTrailingWhitespace": true,
+		"search.exclude": {
+			"**/node_modules": true,
+			"**/.worktrees": true,
+			"**/tmp": true,
+			"**/dist": true,
+		},
+	},
+	"extensions": {
+		"recommendations": [
+			"ms-vscode-remote.remote-containers",
+			"ms-azuretools.vscode-docker",
+			"golang.go",
+			"timonwong.shellcheck",
+			"foxundermoon.shell-format",
+			"mads-hartmann.bash-ide-vscode",
+			"redhat.vscode-yaml",
+		],
+	}
+}

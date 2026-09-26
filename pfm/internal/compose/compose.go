@@ -6,18 +6,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (
-	claudeResumeCap = 30
-	codexResumeCap  = 15
-	ocResumeCap     = 10
+	claudeResumeCap   = 30
+	codexResumeCap    = 15
+	openCodeResumeCap = 10
 )
 
 type composer struct {
@@ -31,25 +30,30 @@ type composer struct {
 	lineageByRoot    map[string]store.CodexLineage
 	lineageRootByID  map[string]string
 	killedByID       map[string]store.Killed
-	panesBySocket    map[string][]gather.Pane
-	paneByTarget     map[string]gather.Pane
+	panesBySocket    map[string][]gather.ProbePane
+	paneByTarget     map[string]gather.ProbePane
 	claudeSockets    map[string]struct{}
 	cacheSockets     map[string]struct{}
 	liveTranscripts  map[string]struct{}
 	liveRollouts     map[string]struct{}
+	liveOpenCode     map[string]struct{}
 	claudeAccounts   accountMatcher
 	codexAccounts    accountMatcher
 	projectDirs      map[string]string
+	projects         projectNames
 }
 
 // Compose performs the complete side-effect-free row composition pass.
 func Compose(input Input) Output {
-	current := &composer{input: input}
+	current := &composer{input: input, projects: projectNames{}}
 	current.buildIndexes()
 
 	liveClaude, splits := current.liveClaudeRows()
 	liveCodex := current.liveCodexRows()
-	liveRows := collapseLiveServers(append(liveClaude, liveCodex...))
+	liveOpenCode := current.liveOpenCodeRows()
+	liveRows := collapseLiveServers(
+		append(append(liveClaude, liveCodex...), liveOpenCode...),
+	)
 	liveRows = append(liveRows, splits...)
 	// Booting rows are already deduped by socket in gather (DetectCrumblessLive
 	// skips any socket a crumb resolves for), so they bypass
@@ -62,11 +66,12 @@ func Compose(input Input) Output {
 		ProjectDirs:        cloneStringMap(current.projectDirs),
 		includeNewClaude:   input.Options.View != KilledView && len(input.AccountRoots) != 0,
 		includeNewCodex:    input.Options.View != KilledView && len(input.Options.CodexAccountIDs) != 0,
-		includeNewOpenCode: input.Options.View != KilledView && len(input.Options.OpencodeAccountIDs) != 0,
+		includeNewOpenCode: input.Options.View != KilledView && len(input.Options.OpenCodeAccountIDs) != 0,
 		primaryAccount:     input.Options.PrimaryAccount,
 		primaryCodex:       input.Options.PrimaryCodexAccount,
-		primaryOpenCode:    input.Options.PrimaryOpencode,
+		primaryOpenCode:    input.Options.PrimaryOpenCode,
 		fallbackDir:        input.Options.CurrentDir,
+		projects:           current.projects,
 	}
 	if !configuredAccount(input.AccountRoots, output.primaryAccount) {
 		if len(input.AccountRoots) != 0 {
@@ -78,13 +83,15 @@ func Compose(input Input) Output {
 			output.primaryCodex = input.Options.CodexAccountIDs[0]
 		}
 	}
-	if !configuredID(input.Options.OpencodeAccountIDs, output.primaryOpenCode) {
-		if len(input.Options.OpencodeAccountIDs) != 0 {
-			output.primaryOpenCode = input.Options.OpencodeAccountIDs[0]
+	if !configuredID(input.Options.OpenCodeAccountIDs, output.primaryOpenCode) {
+		if len(input.Options.OpenCodeAccountIDs) != 0 {
+			output.primaryOpenCode = input.Options.OpenCodeAccountIDs[0]
 		}
 	}
 
-	for _, row := range append(liveRows, agentRows...) {
+	liveRows = append(liveRows, agentRows...)
+	for index := range liveRows {
+		row := liveRows[index]
 		row = current.applyKill(row, EngineForKind(row.Kind))
 		countOmitted(row, &output.KilledCount, &output.SuppressedCount)
 		if visibleInView(row, input.Options.View) {
@@ -94,7 +101,8 @@ func Compose(input Input) Output {
 
 	claudeResume := make([]Row, 0)
 	claudeEligible := 0
-	for _, transcript := range input.Transcripts {
+	for index := range input.Transcripts {
+		transcript := input.Transcripts[index]
 		if _, live := current.liveTranscripts[transcript.UUID]; live {
 			continue
 		}
@@ -118,23 +126,19 @@ func Compose(input Input) Output {
 		if claudeEligible > claudeResumeCap {
 			output.SuppressedCount += claudeEligible - claudeResumeCap
 		}
-		for _, row := range claudeResume {
+		for index := range claudeResume {
+			row := claudeResume[index]
 			output.Rows = append(output.Rows, current.finalize(row))
 		}
 	} else {
 		output.Rows = append(
 			output.Rows,
-			current.selectResumeRows(
-				claudeResume,
-				claudeResumeCap,
-				&output.SuppressedCount,
-			)...,
-		)
+			current.selectResumeRows(claudeResume, claudeResumeCap, &output.SuppressedCount)...)
 	}
-
 	codexResume := make([]Row, 0)
 	codexEligible := 0
-	for _, lineage := range current.codexLineages {
+	for index := range current.codexLineages {
+		lineage := current.codexLineages[index]
 		if _, live := current.liveRollouts[lineage.RootID]; live {
 			continue
 		}
@@ -158,53 +162,57 @@ func Compose(input Input) Output {
 		if codexEligible > codexResumeCap {
 			output.SuppressedCount += codexEligible - codexResumeCap
 		}
-		for _, row := range codexResume {
+		for index := range codexResume {
+			row := codexResume[index]
 			output.Rows = append(output.Rows, current.finalize(row))
 		}
 	} else {
 		output.Rows = append(
 			output.Rows,
-			current.selectResumeRows(
-				codexResume,
-				codexResumeCap,
-				&output.SuppressedCount,
-			)...,
-		)
+			current.selectResumeRows(codexResume, codexResumeCap, &output.SuppressedCount)...)
 	}
 
-	ocResume := make([]Row, 0)
-	ocEligible := 0
-	for _, session := range input.OcSessions {
+	openCodeResume := make([]Row, 0)
+	openCodeEligible := 0
+	for index := range input.OpenCodeSessions {
+		session := input.OpenCodeSessions[index]
 		// Subagent children and archived sessions never earn rows: a child is
 		// part of its parent's turn, an archived one the user filed away.
 		if session.ParentID != "" || session.TimeArchivedMS != 0 {
 			continue
 		}
-		row := current.ocSessionRow(session)
-		row = current.applyKill(row, pfmengine.Opencode)
+		// A session a live pane already claimed is that pane's row, not a
+		// second resumable one — the same suppression liveTranscripts and
+		// liveRollouts do for the other two engines.
+		if _, live := current.liveOpenCode[session.ID]; live {
+			continue
+		}
+		row := current.openCodeSessionRow(session)
+		row = current.applyKill(row, EngineForKind(row.Kind))
 		countOmitted(row, &output.KilledCount, &output.SuppressedCount)
 		if input.Options.View == DefaultView {
 			if defaultEligible(row) {
-				ocEligible++
-				ocResume = insertTopRow(ocResume, row, ocResumeCap)
+				openCodeEligible++
+				openCodeResume = insertTopRow(openCodeResume, row, openCodeResumeCap)
 			}
 		} else {
-			ocResume = append(ocResume, row)
+			openCodeResume = append(openCodeResume, row)
 		}
 	}
 	if input.Options.View == DefaultView {
-		if ocEligible > ocResumeCap {
-			output.SuppressedCount += ocEligible - ocResumeCap
+		if openCodeEligible > openCodeResumeCap {
+			output.SuppressedCount += openCodeEligible - openCodeResumeCap
 		}
-		for _, row := range ocResume {
+		for index := range openCodeResume {
+			row := openCodeResume[index]
 			output.Rows = append(output.Rows, current.finalize(row))
 		}
 	} else {
 		output.Rows = append(
 			output.Rows,
 			current.selectResumeRows(
-				ocResume,
-				ocResumeCap,
+				openCodeResume,
+				openCodeResumeCap,
 				&output.SuppressedCount,
 			)...,
 		)
@@ -217,13 +225,13 @@ func Compose(input Input) Output {
 }
 
 func (current *composer) buildIndexes() {
-	current.codexLineages, current.lineageRootByID =
-		store.ResolveCodexLineages(current.input.Rollouts)
+	current.codexLineages, current.lineageRootByID = store.ResolveCodexLineages(current.input.Rollouts)
 	current.lineageByRoot = make(
 		map[string]store.CodexLineage,
 		len(current.codexLineages),
 	)
-	for _, lineage := range current.codexLineages {
+	for index := range current.codexLineages {
+		lineage := current.codexLineages[index]
 		current.lineageByRoot[lineage.RootID] = lineage
 	}
 
@@ -241,7 +249,7 @@ func (current *composer) buildIndexes() {
 	wantedRolloutIDs := make(map[string]struct{}, len(current.input.Snapshot.Codex))
 	for _, process := range current.input.Snapshot.Codex {
 		wantedRolloutPaths[cleanPath(process.RolloutPath)] = struct{}{}
-		wantedRolloutIDs[gather.CodexThreadID(process)] = struct{}{}
+		wantedRolloutIDs[gather.LiveCodexThreadID(process)] = struct{}{}
 	}
 	current.transcriptByID = make(
 		map[string]store.Transcript,
@@ -251,15 +259,16 @@ func (current *composer) buildIndexes() {
 		map[string]store.Transcript,
 		len(wantedTranscriptPaths),
 	)
-	directories := make(map[string]projectDirectory)
+	directories := make(map[string]projectDir)
 	if current.input.Options.CurrentDir != "" {
-		project := projectName(current.input.Options.CurrentDir)
-		directories[project] = projectDirectory{
+		project := current.projects.of(current.input.Options.CurrentDir)
+		directories[project] = projectDir{
 			path:   cleanPath(current.input.Options.CurrentDir),
 			seeded: true,
 		}
 	}
-	for _, transcript := range current.input.Transcripts {
+	for index := range current.input.Transcripts {
+		transcript := current.input.Transcripts[index]
 		_, wantedAgent := wantedAgentIDs[transcript.UUID]
 		_, wantedLive := wantedTranscriptIDs[transcript.UUID]
 		if wantedAgent || wantedLive {
@@ -269,11 +278,12 @@ func (current *composer) buildIndexes() {
 		if _, wanted := wantedTranscriptPaths[normalizedPath]; wanted {
 			current.transcriptByPath[normalizedPath] = transcript
 		}
-		rememberProjectDir(directories, transcript.CWD, transcript.EffectiveActivityNS())
+		rememberProjectDir(current.projects, directories, transcript.CWD, transcript.EffectiveActivityNS())
 	}
 	current.rolloutByPath = make(map[string]store.Rollout, len(wantedRolloutPaths))
 	current.rolloutByID = make(map[string]store.Rollout, len(wantedRolloutIDs))
-	for _, rollout := range current.input.Rollouts {
+	for index := range current.input.Rollouts {
+		rollout := current.input.Rollouts[index]
 		normalizedPath := cleanPath(rollout.Path)
 		if _, wanted := wantedRolloutPaths[normalizedPath]; wanted {
 			current.rolloutByPath[normalizedPath] = rollout
@@ -282,7 +292,7 @@ func (current *composer) buildIndexes() {
 			current.rolloutByID[rollout.ID] = rollout
 		}
 		if rollout.UserThread {
-			rememberProjectDir(directories, rollout.CWD, rollout.MTimeNS)
+			rememberProjectDir(current.projects, directories, rollout.CWD, rollout.MTimeNS)
 		}
 	}
 	current.projectDirs = make(map[string]string, len(directories))
@@ -293,9 +303,10 @@ func (current *composer) buildIndexes() {
 	for _, killed := range current.input.Killed {
 		current.killedByID[killed.ID] = killed
 	}
-	current.panesBySocket = make(map[string][]gather.Pane)
-	current.paneByTarget = make(map[string]gather.Pane, len(current.input.Snapshot.Panes))
-	for _, pane := range current.input.Snapshot.Panes {
+	current.panesBySocket = make(map[string][]gather.ProbePane)
+	current.paneByTarget = make(map[string]gather.ProbePane, len(current.input.Snapshot.Panes))
+	for index := range current.input.Snapshot.Panes {
+		pane := current.input.Snapshot.Panes[index]
 		current.panesBySocket[pane.Socket] = append(
 			current.panesBySocket[pane.Socket],
 			pane,
@@ -325,6 +336,7 @@ func (current *composer) buildIndexes() {
 	}
 	current.liveTranscripts = make(map[string]struct{})
 	current.liveRollouts = make(map[string]struct{})
+	current.liveOpenCode = make(map[string]struct{})
 	// Account roots are the stable side of the prefix match. Resolve each one
 	// once, then match the ordinary row path lexically against both its
 	// configured and canonical spellings. The previous implementation called
@@ -334,7 +346,7 @@ func (current *composer) buildIndexes() {
 	// the symlink-safe attribution contract is preserved without putting the
 	// common path on the filesystem.
 	current.claudeAccounts = newAccountMatcher(current.input.AccountRoots)
-	current.codexAccounts = newAccountMatcher(current.input.CodexRoots)
+	current.codexAccounts = newAccountMatcher(current.input.CodexHomes)
 }
 
 func canonicalPath(path string) string {
@@ -372,6 +384,10 @@ type accountPathRoot struct {
 	account    int
 	configured string
 	canonical  string
+	// configDir / configDirCanonical: the seat's own config dir, when the
+	// root carries one; empty roots never match a process by config dir.
+	configDir          string
+	configDirCanonical string
 }
 
 type accountMatcher struct {
@@ -385,13 +401,40 @@ func newAccountMatcher(roots []AccountRoot) accountMatcher {
 			continue
 		}
 		configured := absoluteCleanPath(root.Path)
-		matcher.roots = append(matcher.roots, accountPathRoot{
+		entry := accountPathRoot{
 			account:    root.Account,
 			configured: configured,
 			canonical:  canonicalPath(configured),
-		})
+		}
+		if root.ConfigDir != "" {
+			entry.configDir = absoluteCleanPath(root.ConfigDir)
+			entry.configDirCanonical = canonicalPath(entry.configDir)
+		}
+		matcher.roots = append(matcher.roots, entry)
 	}
 	return matcher
+}
+
+// accountForConfigDir names the seat whose config dir a live process runs
+// under — an exact match, configured spelling or canonical. Zero when the
+// process names no config dir or none of the roots carries one, so the
+// caller falls back to the transcript path.
+func (matcher accountMatcher) accountForConfigDir(dir string) int {
+	if dir == "" {
+		return 0
+	}
+	normalized := absoluteCleanPath(dir)
+	canonical := canonicalPath(normalized)
+	for _, root := range matcher.roots {
+		if root.configDir == "" {
+			continue
+		}
+		if normalized == root.configDir || normalized == root.configDirCanonical ||
+			canonical == root.configDir || canonical == root.configDirCanonical {
+			return root.account
+		}
+	}
+	return 0
 }
 
 func (matcher accountMatcher) accountFor(path string) int {
@@ -456,8 +499,8 @@ func (current *composer) liveClaudeRows() ([]Row, []Row) {
 		if crumb.PaneID == "" {
 			if socketCrumbs.socket == nil ||
 				crumb.Filename < socketCrumbs.socket.Filename {
-				copy := crumb
-				socketCrumbs.socket = &copy
+				crumbCopy := crumb
+				socketCrumbs.socket = &crumbCopy
 			}
 			continue
 		}
@@ -495,7 +538,7 @@ func (current *composer) liveClaudeRows() ([]Row, []Row) {
 		}
 
 		var crumb gather.Crumb
-		var pane gather.Pane
+		var pane gather.ProbePane
 		if len(paneIDs) == 1 {
 			crumb = socketCrumbs.panes[paneIDs[0]]
 			pane = current.paneByTarget[targetKey(socket, paneIDs[0])]
@@ -520,7 +563,7 @@ func (current *composer) liveClaudeRows() ([]Row, []Row) {
 
 func (current *composer) liveClaudeRow(
 	socket string,
-	pane gather.Pane,
+	pane gather.ProbePane,
 	path string,
 ) (Row, string) {
 	transcript, found := current.transcriptByPath[cleanPath(path)]
@@ -544,7 +587,7 @@ func (current *composer) liveClaudeRow(
 	_, row.C1H = current.cacheSockets[socket]
 	if row.CWD == "" && pane.CurrentPath != "" {
 		row.CWD = pane.CurrentPath
-		row.Project = projectName(pane.CurrentPath)
+		row.Project = current.projects.of(pane.CurrentPath)
 	}
 	indexed := naming.DisplayName(
 		transcript.CustomTitle,
@@ -638,7 +681,7 @@ func (current *composer) splitRow(
 	if row.ActivityNS == 0 {
 		row.ActivityNS = socketEpochNS(socket)
 	}
-	row.Project = projectName(row.CWD)
+	row.Project = current.projects.of(row.CWD)
 	row.Accounts = sortedIntKeys(accounts)
 	return row
 }
@@ -665,11 +708,11 @@ func (current *composer) liveCodexRows() []Row {
 		}
 		rollout, found := current.rolloutByPath[cleanPath(process.RolloutPath)]
 		if !found {
-			rollout, found = current.rolloutByID[gather.CodexThreadID(process)]
+			rollout, found = current.rolloutByID[gather.LiveCodexThreadID(process)]
 		}
 		if !found {
 			rollout = store.Rollout{
-				ID:   gather.CodexThreadID(process),
+				ID:   gather.LiveCodexThreadID(process),
 				Path: process.RolloutPath,
 			}
 		}
@@ -688,7 +731,7 @@ func (current *composer) liveCodexRows() []Row {
 		row.Attached = pane.Attached
 		if row.CWD == "" && pane.CurrentPath != "" {
 			row.CWD = pane.CurrentPath
-			row.Project = projectName(pane.CurrentPath)
+			row.Project = current.projects.of(pane.CurrentPath)
 		}
 		if row.Name == "" {
 			row.Name = "Codex chat"
@@ -730,7 +773,7 @@ func (current *composer) bootingRows() []Row {
 			WindowName:  entry.WindowName,
 			Name:        name,
 			CWD:         entry.CWD,
-			Project:     projectName(entry.CWD),
+			Project:     current.projects.of(entry.CWD),
 			ServerCount: 1,
 			Here:        entry.Socket == current.input.Options.CurrentSocket,
 			ActivityNS:  paneStartActivityNS(entry.PaneStartUnix),
@@ -794,7 +837,11 @@ func (current *composer) agentRows() []Row {
 		if row.Name == "" {
 			row.Name = "(no prompt)"
 		}
-		if row.Account == 0 {
+		// The process's config dir is the seat, whatever store the transcript
+		// sits in: with seats sharing one store, the path names every seat.
+		if account := current.claudeAccounts.accountForConfigDir(agent.ConfigDir); account != 0 {
+			row.Account = account
+		} else if row.Account == 0 {
 			row.Account = current.accountFor(agent.ConfigDir)
 		}
 		_, row.C1H = current.cacheSockets[agent.Socket]
@@ -817,7 +864,7 @@ func (current *composer) transcriptRow(
 			transcript.FirstPrompt,
 		),
 		LastPrompt:  transcript.LastPrompt,
-		Project:     projectName(transcript.CWD),
+		Project:     current.projects.of(transcript.CWD),
 		CWD:         transcript.CWD,
 		Size:        transcript.Size,
 		PromptCount: transcript.PromptCount,
@@ -847,7 +894,7 @@ func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
 		ID:          root,
 		Path:        newest.Path,
 		Name:        name,
-		Project:     projectName(newest.CWD),
+		Project:     current.projects.of(newest.CWD),
 		CWD:         newest.CWD,
 		Size:        newest.Size,
 		PromptCount: newest.PromptCount,
@@ -855,35 +902,6 @@ func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
 		Account:     current.codexAccounts.accountFor(newest.Path),
 		BG:          newest.IsBG,
 	}
-}
-
-// ocSessionRow renders one OpenCode session. The title is authoritative —
-// OpenCode names its sessions itself — with the first prompt as fallback for
-// sessions it never titled.
-func (current *composer) ocSessionRow(session store.OcSession) Row {
-	name := session.Title
-	if name == "" {
-		name = naming.DisplayName("", "", session.FirstPrompt)
-	}
-	return Row{
-		Kind:           ResumeOpencode,
-		ID:             session.ID,
-		Name:           name,
-		Project:        projectName(session.ProjectDir),
-		CWD:            firstNonEmpty(session.Directory, session.ProjectDir),
-		PromptCount:    session.PromptCount,
-		AssistantCount: session.AssistantCount,
-		ActivityNS:     session.TimeUpdatedMS * int64(time.Millisecond),
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func (current *composer) lineageRoot(rollout store.Rollout) string {
@@ -919,7 +937,12 @@ func (current *composer) applyKill(row Row, engine pfmengine.ID) Row {
 	// kill-eligibility test (ui/model.go's toggleKilled): neither side may let
 	// a kill land on an identity that stops meaning anything the moment the
 	// crumb appears and the row becomes an ordinary live one.
-	if row.Kind == LiveSplit || row.Kind == Booting || row.ID == "" {
+	// An unidentified live OpenCode row is keyed on its own SOCKET for exactly
+	// the reason Booting is, and needs the same guard: the moment the seat's
+	// session is finally pinned down, a tombstone written against the socket
+	// names nothing at all.
+	if row.Kind == LiveSplit || row.Kind == Booting || row.ID == "" ||
+		pfmengine.SocketKeyedID(engine, row.ID, row.Socket) {
 		return row
 	}
 	// Explicit kills carry no baseline and stay permanent. A /clear kill is a
@@ -987,7 +1010,8 @@ func (current *composer) selectResumeRows(
 	switch current.input.Options.View {
 	case AllView:
 		selected := make([]Row, 0, len(rows))
-		for _, row := range rows {
+		for index := range rows {
+			row := rows[index]
 			selected = append(selected, current.finalize(row))
 		}
 		defaultRows := defaultEligibleCount(rows)
@@ -997,7 +1021,8 @@ func (current *composer) selectResumeRows(
 		return selected
 	case KilledView:
 		selected := make([]Row, 0)
-		for _, row := range rows {
+		for index := range rows {
+			row := rows[index]
 			if row.Killed {
 				selected = append(selected, current.finalize(row))
 			}
@@ -1070,6 +1095,14 @@ func defaultEligible(row Row) bool {
 	if row.Kind == LiveCodex {
 		return !row.BG
 	}
+	// A LIVE OpenCode row is exempt for the same reason and one stronger: a
+	// seat no indexed session could be pinned to carries NO counters at all
+	// (liveOpenCodeRows), so every emptiness test below reads a running TUI
+	// the user is typing into as an abandoned spawn. The whole point of this
+	// Kind is that such a chat stops being reported as absent.
+	if row.Kind == LiveOpenCode {
+		return !row.BG
+	}
 	// An OpenCode session has no file size at all — it lives entirely inside
 	// its engine's SQLite store, so the size half of this test would suppress
 	// every one of them forever. Its reality signal is prompts AND an answer:
@@ -1077,9 +1110,12 @@ func defaultEligible(row Row) bool {
 	// with prompts but zero assistant messages was opened and never
 	// answered — exactly as empty as a Claude transcript with no visible
 	// turns. The displayed prompt count is never fudged to fake either case.
-	if row.Kind == ResumeOpencode {
+	if row.Kind == ResumeOpenCode {
 		return !row.BG && row.PromptCount > 0 && row.AssistantCount > 0
 	}
+	// A resumable Claude transcript with a file but no parsed prompts is a
+	// spawn that was never used, so the default view suppresses it on purpose.
+	// The all view remains the way to reach that row.
 	return !row.BG && row.Size > 0 && row.PromptCount > 0
 }
 
@@ -1096,7 +1132,8 @@ func visibleInView(row Row, view View) bool {
 
 func defaultEligibleCount(rows []Row) int {
 	count := 0
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if defaultEligible(row) {
 			count++
 		}
@@ -1111,7 +1148,8 @@ func collapseLiveServers(rows []Row) []Row {
 	}
 	winners := make(map[string]winner)
 	standalone := make([]Row, 0)
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID == "" || row.Kind == LiveSplit {
 			standalone = append(standalone, row)
 			continue
@@ -1142,31 +1180,16 @@ func collapseLiveServers(rows []Row) []Row {
 }
 
 func newerSocket(challenger, incumbent string) bool {
-	challengerEpoch := socketEpoch(challenger)
-	incumbentEpoch := socketEpoch(incumbent)
+	challengerEpoch := pfmengine.SocketBirth(challenger)
+	incumbentEpoch := pfmengine.SocketBirth(incumbent)
 	if challengerEpoch != incumbentEpoch {
 		return challengerEpoch > incumbentEpoch
 	}
 	return challenger > incumbent
 }
 
-func socketEpoch(socket string) int64 {
-	parts := strings.Split(socket, "-")
-	if len(parts) != 4 {
-		return 0
-	}
-	if _, ok := pfmengine.FromSocket(socket); !ok {
-		return 0
-	}
-	epoch, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || epoch < 0 {
-		return 0
-	}
-	return epoch
-}
-
 func socketEpochNS(socket string) int64 {
-	epoch := socketEpoch(socket)
+	epoch := pfmengine.SocketBirth(socket)
 	if epoch <= 0 || epoch > (1<<63-1)/1_000_000_000 {
 		return 0
 	}
@@ -1180,22 +1203,6 @@ func targetKey(socket, paneID string) string {
 func transcriptIDFromPath(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))
-}
-
-func projectName(cwd string) string {
-	if cwd == "" {
-		return "?"
-	}
-	trimmed := strings.TrimRight(cwd, string(filepath.Separator))
-	if trimmed == "" {
-		return "?"
-	}
-	index := strings.LastIndexByte(trimmed, byte(filepath.Separator))
-	project := trimmed[index+1:]
-	if project == "." || project == ".." || project == "" {
-		return "?"
-	}
-	return project
 }
 
 func configuredAccount(roots []AccountRoot, account int) bool {
@@ -1234,8 +1241,8 @@ func EngineForKindChecked(kind Kind) (pfmengine.ID, error) {
 	switch kind {
 	case LiveCodex, ResumeCodex, NewCodex:
 		return pfmengine.Codex, nil
-	case ResumeOpencode, NewOpencode:
-		return pfmengine.Opencode, nil
+	case LiveOpenCode, ResumeOpenCode, NewOpenCode:
+		return pfmengine.OpenCode, nil
 	case LiveClaude, ResumeClaude, NewClaude, LiveSplit, Agent, Booting:
 		return pfmengine.Claude, nil
 	default:

@@ -3,7 +3,7 @@ package run
 import (
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // pfm stages its own system prompt (--system-prompt-file / --system-prompt);

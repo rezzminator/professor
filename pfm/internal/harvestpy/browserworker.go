@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // AskReply is one answer from the SSRF authority for a worker guard ask.
@@ -27,21 +29,46 @@ type browserAsk struct {
 	URL string `json:"url"`
 }
 
-// BrowserFetchRequest is one real-browser fetch request. Proxy may be empty
-// for a direct connection; it is threaded through verbatim, never configured
-// here — procuring an exit is a separate decision.
+// BrowserFetchRequest is one real-browser fetch request. It is threaded
+// through verbatim; nothing is configured here. It carries no render mode: the
+// worker always launches Chrome headless.
 type BrowserFetchRequest struct {
-	URL      string `json:"url"`
-	Proxy    string `json:"proxy,omitempty"`
-	Headless bool   `json:"headless"`
+	URL string `json:"url"`
+	// Proxy is the DIAL half of the browser rung's SSRF boundary, and the
+	// worker REFUSES to launch Chrome without it (browser.py PROXY_REQUIRED).
+	// Every URL Chrome touches is validated by Go through the ask protocol,
+	// but the connection that follows is Chrome's own: it resolves the host a
+	// second time, so a TTL-0 rebind reaches 127.0.0.1 / 169.254.169.254 with
+	// a public address on the record. Only a proxy Go owns — one that dials
+	// through the pinned dialer internal/harvest already uses for every other
+	// client — makes the address Go validated the address Chrome connects to.
+	Proxy string `json:"proxy,omitempty"`
 	// HostResolverRules pins Chrome's own DNS to the address the Go side
 	// already resolved and validated (a "MAP host ip" rule). Chrome otherwise
 	// resolves independently through the system resolver, which on a network
 	// that rewrites DNS answers would send the browser rung to a block page
-	// while every HTTP rung reached the real host. Empty leaves Chrome's
-	// resolution alone.
+	// while every HTTP rung reached the real host. Behind the proxy the worker
+	// appends its own catch-all so nothing else resolves at all.
 	HostResolverRules string `json:"host_resolver_rules,omitempty"`
 	TimeoutMS         int    `json:"timeout_ms,omitempty"`
+	// Referer is the provenance Referer the navigation carries (the same one
+	// the ladder's HTTP rungs send): some anti-bot walls open for a visitor
+	// arriving with ANY Referer and refuse a Referer-less one.
+	Referer string `json:"referer,omitempty"`
+	// PressLoaders lets the render press the page's load-more buttons while it
+	// scrolls. Pressing can fire requests or navigation, so only a registered
+	// site's render presses (harvest.SitePressesLoaders); false is omitted and
+	// the worker scrolls read-only.
+	PressLoaders bool `json:"press_loaders,omitempty"`
+	// MarkerToken is carried by the lazy-load marker the worker stamps on an
+	// incomplete render (browser.py mark_incomplete); Go reads back only a marker
+	// holding its own token, never one a page ships (harvest.BrowserMarkerToken).
+	MarkerToken string `json:"marker_token,omitempty"`
+	// Headers are the caller's headers; the worker's route adds them to the
+	// requests to HeadersOrigin only (a same-origin navigation, redirect hop or
+	// subresource), never page-wide: another origin never receives them.
+	Headers       map[string]string `json:"headers,omitempty"`
+	HeadersOrigin string            `json:"headers_origin,omitempty"`
 }
 
 // browserWorkerRequest is the wire shape of one worker op.
@@ -67,55 +94,100 @@ func NewBrowserWorker(runtime Runtime) *BrowserWorker {
 func (worker *BrowserWorker) Close() error {
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
-	worker.stopWorkerLocked()
-	return nil
+	return worker.stopWorkerLocked()
 }
 
 // Fetch renders source in system Chrome through the interactive stdio
 // protocol. Every URL Chrome touches arrives as an ask; onAsk is the SSRF
 // authority (harvest.AssertFetchable at the adapter layer). A nil onAsk
 // refuses every ask fail-closed.
-func (worker *BrowserWorker) Fetch(ctx context.Context, source, proxy string, headless bool, timeoutMS int, onAsk func(url string) error) (string, int, error) {
-	return worker.FetchPinned(ctx, source, proxy, "", headless, timeoutMS, onAsk)
+func (worker *BrowserWorker) Fetch(
+	ctx context.Context,
+	source, proxy string,
+	timeoutMS int,
+	onAsk func(url string) error,
+) (string, int, error) {
+	html, status, _, err := worker.FetchPinned(
+		ctx,
+		source,
+		proxy,
+		"",
+		"",
+		"",
+		nil,
+		"",
+		false,
+		timeoutMS,
+		onAsk,
+	)
+	return html, status, err
 }
 
 // FetchPinned is Fetch with Chrome's resolver pinned to an already-validated
-// address (see BrowserFetchRequest.HostResolverRules). An empty rule behaves
-// exactly like Fetch.
-func (worker *BrowserWorker) FetchPinned(ctx context.Context, source, proxy, hostResolverRules string, headless bool, timeoutMS int, onAsk func(url string) error) (string, int, error) {
+// address (see BrowserFetchRequest.HostResolverRules) and the navigation
+// carrying referer (see BrowserFetchRequest.Referer), pressing the page's
+// load-more buttons only when pressLoaders (see BrowserFetchRequest.PressLoaders),
+// an incomplete render stamped with markerToken (see BrowserFetchRequest.MarkerToken).
+// It also returns finalURL: the address of the document html holds, after every
+// redirect; "" when the worker did not report one. An empty rule, an empty
+// referer, an empty token and a false pressLoaders behave exactly like Fetch.
+func (worker *BrowserWorker) FetchPinned(
+	ctx context.Context,
+	source, proxy, hostResolverRules, referer, markerToken string,
+	headers map[string]string,
+	headersOrigin string,
+	pressLoaders bool,
+	timeoutMS int,
+	onAsk func(url string) error,
+) (string, int, string, error) {
 	if strings.TrimSpace(source) == "" {
-		return "", 0, errors.New("browser fetch url is empty")
+		return "", 0, "", errors.New("browser fetch url is empty")
 	}
-	body, err := json.Marshal(browserWorkerRequest{Op: "fetch", BrowserFetchRequest: BrowserFetchRequest{URL: source, Proxy: proxy, Headless: headless, HostResolverRules: hostResolverRules, TimeoutMS: timeoutMS}})
+	body, err := json.Marshal(
+		browserWorkerRequest{
+			Op: "fetch",
+			BrowserFetchRequest: BrowserFetchRequest{
+				URL:               source,
+				Proxy:             proxy,
+				HostResolverRules: hostResolverRules,
+				TimeoutMS:         timeoutMS,
+				Referer:           referer,
+				PressLoaders:      pressLoaders,
+				MarkerToken:       markerToken,
+				Headers:           headers,
+				HeadersOrigin:     headersOrigin,
+			},
+		},
+	)
 	if err != nil {
-		return "", 0, fmt.Errorf("marshal browser fetch request: %w", err)
+		return "", 0, "", fmt.Errorf("marshal browser fetch request: %w", err)
 	}
-	line, stderr, err := worker.requestInteractive(ctx, body, onAsk)
+	line, stderr, err := worker.requestInteractive(ctx, "fetch", body, onAsk)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	var response struct {
 		OK       bool   `json:"ok"`
 		HTML     string `json:"html"`
 		Status   int    `json:"status"`
-		Headless bool   `json:"headless"`
 		Error    string `json:"error"`
+		FinalURL string `json:"final_url"`
 	}
 	if err := json.Unmarshal(line, &response); err != nil {
-		return "", 0, fmt.Errorf("decode browser worker response JSON: %w (stderr: %s)", err, stderr)
+		return "", 0, "", fmt.Errorf("decode browser worker response JSON: %w (stderr: %s)", err, stderr)
 	}
 	if !response.OK {
 		if response.Error == "" {
 			response.Error = "browser worker returned ok=false without error"
 		}
-		return "", 0, errors.New(response.Error)
+		return "", 0, "", errors.New(response.Error)
 	}
-	return response.HTML, response.Status, nil
+	return response.HTML, response.Status, response.FinalURL, nil
 }
 
 // Smoke invokes the browser worker's no-launch importability probe.
 func (worker *BrowserWorker) Smoke(ctx context.Context) (map[string]any, error) {
-	line, stderr, err := worker.requestInteractive(ctx, []byte(`{"op":"smoke"}`), func(string) error {
+	line, stderr, err := worker.requestInteractive(ctx, "smoke", []byte(`{"op":"smoke"}`), func(string) error {
 		return errors.New("smoke never asks")
 	})
 	if err != nil {
@@ -141,25 +213,52 @@ func (worker *BrowserWorker) Smoke(ctx context.Context) (map[string]any, error) 
 // could carry internal hostnames or credentialed URLs into the tool response
 // an agent reads.
 func stderrTail(stderr string) string {
-	const max = 500
+	const maxTailBytes = 500
 	stderr = strings.TrimSpace(stderr)
-	if len(stderr) <= max {
+	if len(stderr) <= maxTailBytes {
 		return stderr
 	}
-	return "… " + stderr[len(stderr)-max:]
+	return "… " + stderr[len(stderr)-maxTailBytes:]
 }
 
-func (worker *BrowserWorker) requestInteractive(ctx context.Context, body []byte, onAsk func(url string) error) ([]byte, string, error) {
+func (worker *BrowserWorker) requestInteractive(
+	ctx context.Context,
+	op string,
+	body []byte,
+	onAsk func(url string) error,
+) (line []byte, tail string, returnErr error) {
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
 	browser, err := worker.ensureWorkerLocked()
 	if err != nil {
 		return nil, "", err
 	}
-	if _, err := browser.stdin.Write(append(body, '\n')); err != nil {
-		stderr := stderrTail(browser.stderr.String())
-		worker.stopWorkerLocked()
-		return nil, stderr, fmt.Errorf("browser worker write failed: %w (stderr: %s)", err, stderr)
+	end := browser.obs.Request(op)
+	defer func() { end(len(line), returnErr) }()
+	payload := append(append([]byte(nil), body...), '\n')
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := browser.stdin.Write(payload)
+		writeResult <- err
+	}()
+	select {
+	case err := <-writeResult:
+		if err != nil {
+			stderr := stderrTail(browser.stderr.String())
+			cleanupErr := worker.stopWorkerLocked()
+			return nil, stderr, fmt.Errorf(
+				"browser worker write failed: %w (stderr: %s; cleanup: %v)",
+				err,
+				stderr,
+				cleanupErr,
+			)
+		}
+	case <-ctx.Done():
+		cleanupErr := worker.stopWorkerLocked()
+		if cleanupErr != nil {
+			return nil, "", fmt.Errorf("browser worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
+		}
+		return nil, "", fmt.Errorf("browser worker request cancelled: %w", ctx.Err())
 	}
 	type readResult struct {
 		line []byte
@@ -168,18 +267,26 @@ func (worker *BrowserWorker) requestInteractive(ctx context.Context, body []byte
 	read := make(chan readResult, 1)
 	for {
 		go func() {
-			line, err := browser.stdout.ReadBytes('\n')
+			line, err := readLineBounded(browser.stdout, browserResponseLimit)
 			read <- readResult{line: bytes.TrimSpace(line), err: err}
 		}()
 		select {
 		case <-ctx.Done():
-			worker.stopWorkerLocked()
+			cleanupErr := worker.stopWorkerLocked()
+			if cleanupErr != nil {
+				return nil, "", fmt.Errorf("browser worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
+			}
 			return nil, "", fmt.Errorf("browser worker request cancelled: %w", ctx.Err())
 		case result := <-read:
 			if result.err != nil {
 				stderr := stderrTail(browser.stderr.String())
-				worker.stopWorkerLocked()
-				return nil, stderr, fmt.Errorf("browser worker read failed: %w (stderr: %s)", result.err, stderr)
+				cleanupErr := worker.stopWorkerLocked()
+				return nil, stderr, fmt.Errorf(
+					"browser worker read failed: %w (stderr: %s; cleanup: %v)",
+					result.err,
+					stderr,
+					cleanupErr,
+				)
 			}
 			var ask browserAsk
 			if unmarshalErr := json.Unmarshal(result.line, &ask); unmarshalErr == nil && ask.Ask == "fetchable" {
@@ -195,26 +302,40 @@ func (worker *BrowserWorker) requestInteractive(ctx context.Context, body []byte
 				if marshalErr != nil {
 					return nil, "", fmt.Errorf("marshal browser ask reply: %w", marshalErr)
 				}
-				if _, writeErr := browser.stdin.Write(append(answer, '\n')); writeErr != nil {
+				writeResult := make(chan error, 1)
+				payload := append(append([]byte(nil), answer...), '\n')
+				go func() {
+					_, writeErr := browser.stdin.Write(payload)
+					writeResult <- writeErr
+				}()
+				select {
+				case writeErr := <-writeResult:
+					if writeErr == nil {
+						continue
+					}
 					stderr := stderrTail(browser.stderr.String())
-					worker.stopWorkerLocked()
-					return nil, stderr, fmt.Errorf("browser worker ask reply failed: %w (stderr: %s)", writeErr, stderr)
+					cleanupErr := worker.stopWorkerLocked()
+					return nil, stderr, fmt.Errorf(
+						"browser worker ask reply failed: %w (stderr: %s; cleanup: %v)",
+						writeErr,
+						stderr,
+						cleanupErr,
+					)
+				case <-ctx.Done():
+					cleanupErr := worker.stopWorkerLocked()
+					if cleanupErr != nil {
+						return nil, "", fmt.Errorf(
+							"browser worker ask reply cancelled: %w (cleanup: %v)",
+							ctx.Err(),
+							cleanupErr,
+						)
+					}
+					return nil, "", fmt.Errorf("browser worker ask reply cancelled: %w", ctx.Err())
 				}
-				continue
 			}
 			return result.line, stderrTail(browser.stderr.String()), nil
 		}
 	}
-}
-
-// browserWorkerCommand is injectable for protocol tests; production validates
-// the provisioned script is a regular file, then execs the pinned interpreter.
-var browserWorkerCommand = func(python, script string) (*exec.Cmd, error) {
-	info, statErr := os.Stat(script)
-	if statErr != nil || info.IsDir() || !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("browser worker script is not provisioned: %s", script)
-	}
-	return exec.Command(python, script), nil
 }
 
 func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
@@ -222,48 +343,69 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 		return worker.worker, nil
 	}
 	if strings.TrimSpace(worker.runtime.Python) == "" {
-		return nil, errors.New("browser interpreter path is empty; the browser environment is NOT provisioned (it provisions on the first browser fetch once fetch.browser is true in harvester.config.json)")
+		return nil, errors.New(
+			"browser interpreter path is empty; the browser environment is NOT provisioned (it provisions on the first browser fetch once fetch.browser is true in harvester.config.json)",
+		)
 	}
-	command, err := browserWorkerCommand(worker.runtime.Python, worker.runtime.Script)
+	if worker.runtime.Runner == nil {
+		info, err := os.Stat(worker.runtime.Script)
+		if err != nil || info.IsDir() || !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("browser worker script is not provisioned: %s", worker.runtime.Script)
+		}
+	}
+	runner := worker.runtime.Runner
+	if runner == nil {
+		runner = obs.Runner(deps.RealRunner{})
+	}
+	processObs := obs.NewProcess(context.Background(), "browser")
+	stderr := &lockedBuffer{}
+	process, err := runner.Start(
+		context.Background(),
+		[]string{worker.runtime.Python, worker.runtime.Script},
+		deps.StartOptions{
+			StdinPipe:    true,
+			StdoutPipe:   true,
+			ProcessGroup: true,
+			Stderr:       processObs.Stderr(stderr),
+		},
+	)
 	if err != nil {
-		return nil, err
-	}
-	configureBrowserCommand(command)
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("open browser worker stdin: %w", err)
-	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open browser worker stdout: %w", err)
-	}
-	process := &workerProcess{command: command, stdin: stdin, stdout: bufio.NewReader(stdout)}
-	command.Stderr = &process.stderr
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
+		processObs.Started(0, err)
 		return nil, fmt.Errorf("start browser worker: %w", err)
 	}
-	worker.worker = process
-	return process, nil
+	processObs.Started(process.Pid(), nil)
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		_ = process.KillGroup()
+		_ = process.Wait()
+		return nil, fmt.Errorf("open browser worker stdin: %w", err)
+	}
+	stdout, err := process.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		_ = process.KillGroup()
+		_ = process.Wait()
+		return nil, fmt.Errorf("open browser worker stdout: %w", err)
+	}
+	processState := &workerProcess{
+		process:    process,
+		stdin:      stdin,
+		stdout:     bufio.NewReader(stdout),
+		stdoutPipe: stdout,
+		stderr:     stderr,
+		obs:        processObs,
+	}
+	worker.worker = processState
+	return processState, nil
 }
 
-func (worker *BrowserWorker) stopWorkerLocked() {
+func (worker *BrowserWorker) stopWorkerLocked() error {
 	if worker.worker == nil {
-		return
+		return nil
 	}
 	process := worker.worker
 	worker.worker = nil
-	_ = process.stdin.Close()
-	if process.command.Process != nil {
-		// Kill the whole process GROUP: patchright's node driver and the Chrome
-		// it launched are children of the python worker, and killing only the
-		// direct child leaves Chrome reparented and alive.
-		if err := killBrowserProcessGroup(process.command.Process.Pid); err != nil {
-			_ = process.command.Process.Kill()
-		}
-	}
-	_ = process.command.Wait()
+	return stopWorkerProcess(process, "browser worker")
 }
 
 var _ io.Closer = (*BrowserWorker)(nil)

@@ -1,0 +1,19 @@
+# A fake Claude process on PATH supplies a transcript-backed chat on the fixed jail socket.
+exec jail-pfm chat new --engine claude --name worker --cwd $WORK 'open the fixture'
+stdout 'worker'
+exec jail-pfm chat ls --all
+stdout 'worker'
+
+# Unsigned delivery is explicit and is proved in the real tmux pane.
+exec jail-pfm chat inject --allow-unsigned worker hello
+stdout 'injected LIVE'
+exec jail-until cc-1700000000-4242-7 cc-1700000000-4242-7 hello
+stdout hello
+exec jail-pfm chat status worker
+stdout idle
+
+# Ending exits cleanly and removes the live row.
+exec jail-pfm chat end worker
+stdout ended
+exec jail-pfm chat ls --all
+! stdout worker

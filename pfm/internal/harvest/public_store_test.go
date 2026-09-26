@@ -99,12 +99,12 @@ func TestSymlinkBelowReportsASymlinkedComponent(t *testing.T) {
 
 func TestCanonicalPublicPathResolvesSymlinksAndTolerantOfMissingTail(t *testing.T) {
 	root := t.TempDir()
-	real := filepath.Join(root, "real")
-	if err := os.Mkdir(real, 0o700); err != nil {
+	realPath := filepath.Join(root, "real")
+	if err := os.Mkdir(realPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(realPath, link); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,7 +113,7 @@ func TestCanonicalPublicPathResolvesSymlinksAndTolerantOfMissingTail(t *testing.
 	if err != nil {
 		t.Fatalf("canonicalPublicPath(existing symlink): %v", err)
 	}
-	wantReal, err := filepath.EvalSymlinks(real)
+	wantReal, err := filepath.EvalSymlinks(realPath)
 	if err != nil {
 		t.Fatal(err)
 	}

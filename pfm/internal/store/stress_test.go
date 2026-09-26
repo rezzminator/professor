@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -100,7 +100,11 @@ func stressKilledContention(t *testing.T, dbPath string) {
 	elapsed := time.Since(started)
 
 	store := openTestStore(t)
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
 	records, err := store.Shared().KilledRecords(context.Background())
 	if err != nil {
 		t.Fatalf("count shared stress killed rows: %v", err)
@@ -181,7 +185,7 @@ func stressTranscriptPass(
 	t *testing.T,
 	store *Store,
 	update bool,
-) (elapsed time.Duration, maxBatch time.Duration) {
+) (elapsed, maxBatch time.Duration) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -360,7 +364,11 @@ func TestStoreStressKilledHelper(t *testing.T) {
 		t.Fatalf("invalid store stress write count %q", os.Getenv(storeStressCountEnv))
 	}
 	store := openTestStore(t)
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
 
 	ready := os.Getenv(storeStressReadyEnv)
 	gate := os.Getenv(storeStressGateEnv)

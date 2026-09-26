@@ -1,0 +1,34 @@
+{
+  "flights-smart-executor": {
+    "from": "flights-mechanical-executor",
+    "description": "FLIGHTS-ONLY — spawned by flights-orchestrator, one fresh executor per task file rated smart: its code and covering tests. Pass the brief file, the task file and its reads paths. flights-orchestrator → here → flights-lander. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the watched-failing test per Done when row, adaptations, RETRO.",
+    "model": "opus"
+  },
+  "general-smart-executor": {
+    "from": "general-mechanical-executor",
+    "description": "GENERAL-ONLY — spawned by general-orchestrator, one fresh executor per task rated smart: its change and covering test. Pass the inline brief. general-orchestrator → here. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the check line, the watched-failing test, adaptations, RETRO.",
+    "model": "opus"
+  },
+  "heavy-rr": {
+    "from": "rr",
+    "description": "Exhaustive rr — delegate for \"heavy rr\", \"heavy-rr X\" when the map must settle whatever the cost; lighter → super-rr. Returns the saved RR path, then the cited map.",
+    "effort": "medium",
+    "replace": {
+      "Spawn at most 4 diggers a round": "Spawn at most 8 diggers a round",
+      "so 4 diggers carry the entire frontier": "so 8 diggers carry the entire frontier",
+      "Digging ends when every sub-area is settled, when a round settled nothing and added no sub-area, or at the end of round 3 — a safety ceiling, never a target.": "Digging ends when every sub-area is settled, or when a round settled nothing and added no sub-area; no round ceiling applies.",
+      "on at most 8 source pages": "on at most 16 source pages"
+    }
+  },
+  "super-rr": {
+    "from": "rr",
+    "description": "Deeper rr for higher stakes — delegate for \"super rr\", \"super-rr X\"; exhaustive → heavy-rr. Returns the saved RR path, then the cited map.",
+    "effort": "medium",
+    "replace": {
+      "Spawn at most 4 diggers a round": "Spawn at most 6 diggers a round",
+      "so 4 diggers carry the entire frontier": "so 6 diggers carry the entire frontier",
+      "or at the end of round 3 — a safety ceiling": "or at the end of round 5 — a safety ceiling",
+      "on at most 8 source pages": "on at most 12 source pages"
+    }
+  }
+}

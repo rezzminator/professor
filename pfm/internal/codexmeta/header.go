@@ -46,9 +46,15 @@ func Decode(line []byte) (Header, error) {
 		return Header{}, errors.New("record is not session_meta")
 	}
 	fields := Fields{
-		ID: first(record.ID, record.Payload.ID), SessionID: first(record.SessionID, record.Payload.SessionID),
-		ParentThread: first(record.ParentThread, record.Payload.ParentThread), ParentThreadID: first(record.ParentThreadID, record.Payload.ParentThreadID),
-		ThreadSource: first(record.ThreadSource, record.Payload.ThreadSource), Source: record.Source,
+		ID:        first(record.ID, record.Payload.ID),
+		SessionID: first(record.SessionID, record.Payload.SessionID),
+		ParentThread: first(
+			record.ParentThread,
+			record.Payload.ParentThread,
+		),
+		ParentThreadID: first(record.ParentThreadID, record.Payload.ParentThreadID),
+		ThreadSource:   first(record.ThreadSource, record.Payload.ThreadSource),
+		Source:         record.Source,
 	}
 	if len(fields.Source) == 0 {
 		fields.Source = record.Payload.Source
@@ -77,15 +83,31 @@ func Decode(line []byte) (Header, error) {
 	case fields.ThreadSource == "" && fields.ParentThread == "" && fields.ParentThreadID == "" && (source == "cli" || source == "vscode" || source == "exec" || source == "mcp"):
 		kind = User
 	}
-	return Header{Fields: fields, Kind: kind, LineageParent: first(record.SessionID, record.Payload.SessionID, record.ParentThread, record.ParentThreadID, record.Payload.ParentThread, record.Payload.ParentThreadID, fields.ParentThreadID)}, nil
+	return Header{
+		Fields: fields,
+		Kind:   kind,
+		LineageParent: first(
+			record.SessionID,
+			record.Payload.SessionID,
+			record.ParentThread,
+			record.ParentThreadID,
+			record.Payload.ParentThread,
+			record.Payload.ParentThreadID,
+			fields.ParentThreadID,
+		),
+	}, nil
 }
 
-func Read(path string) (Header, error) {
+func ReadHeader(path string) (header Header, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Header{}, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %s: %w", path, err))
+		}
+	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for lines := 0; lines < 20 && scanner.Scan(); lines++ {

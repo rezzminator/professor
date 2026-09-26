@@ -15,14 +15,34 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
+
+type resolvedSelfKey struct{}
+
+// WithResolvedSelf binds an immutable, request-local caller seat. A shared MCP
+// daemon uses it to resolve self without consulting process-global identity.
+func WithResolvedSelf(ctx context.Context, self headless.Chat) context.Context {
+	return context.WithValue(ctx, resolvedSelfKey{}, self)
+}
+
+// ScopedSelf returns the exact request-local caller seat, when one was bound.
+func ScopedSelf(ctx context.Context) (headless.Chat, bool) {
+	if ctx == nil {
+		return headless.Chat{}, false
+	}
+	self, ok := ctx.Value(resolvedSelfKey{}).(headless.Chat)
+	return self, ok
+}
 
 var (
 	// ErrUnknownChat: nothing in the fleet answers to the target.
@@ -62,6 +82,43 @@ func Target(ctx context.Context, name string, runtime *pfmconfig.Runtime) (headl
 	return found, nil
 }
 
+// DeliverName sends a rename command to one live chat. A concrete pane is an
+// immutable scoped target; a pane-less aggregate must pass through the normal
+// resolution ladder so a split socket is refused as ambiguous.
+func DeliverName(
+	ctx context.Context,
+	chat headless.Chat,
+	name string,
+	runtime *pfmconfig.Runtime,
+) (int, string, error) {
+	engine, err := NewInjectEngine(false, runtime)
+	if err != nil {
+		return 1, "", err
+	}
+	request := inject.Request{
+		Target: PaneTarget(chat), Message: "/rename " + name,
+	}
+	if chat.Pane == "" {
+		result, injectErr := engine.Inject(ctx, request)
+		return result.Code, result.Message, injectErr
+	}
+	values, err := targetPaths(runtime)
+	if err != nil {
+		return 1, "", err
+	}
+	socketPath, err := values.SocketUnder(chat.Socket)
+	if err != nil {
+		return 1, "", err
+	}
+	target := inject.Target{
+		SocketPath: socketPath, Pane: chat.Pane, Engine: string(chat.Engine),
+		Name: chat.Name, ID: chat.ID, Session: chat.Session,
+	}
+	request.Target = chat.Pane
+	result, err := engine.InjectTarget(ctx, target, request)
+	return result.Code, result.Message, err
+}
+
 // Resolve finds a chat by name, id, or socket over a read-only fleet scan —
 // the same rows the picker shows, so a chat the user can see is a chat every
 // verb can address. "self" and "me" are the caller's own chat. Ambiguity is
@@ -75,42 +132,210 @@ func Resolve(
 	warn io.Writer,
 	runtime *pfmconfig.Runtime,
 ) (headless.Chat, bool, error) {
-	if name == "self" || name == "me" {
-		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
-		if err != nil {
-			return headless.Chat{}, false, err
-		}
-		identity, err := identifier.Identify(ctx)
-		if err != nil {
-			seat, found := SeatIdentity(ctx, runtime)
-			if !found {
-				return headless.Chat{}, false, err
-			}
-			identity = seat
-		}
-		switch {
-		case identity.ID != "":
-			name = identity.ID
-		case identity.SocketName != "":
-			name = identity.SocketName
-		default:
-			name = identity.Session
+	normalized := resolve.NormalizeTarget(name)
+	selfTarget := normalized == "self" || normalized == "me"
+	if selfTarget {
+		if self, ok := ScopedSelf(ctx); ok {
+			return self, true, nil
 		}
 	}
-	rows, err := Rows(ctx, warn, runtime)
+	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
 	if err != nil {
 		return headless.Chat{}, false, err
 	}
-	return Match(rows, name)
+	raw, err := rawResolver(runtime)
+	if err != nil {
+		return headless.Chat{}, false, err
+	}
+	values, err := targetPaths(runtime)
+	if err != nil {
+		return headless.Chat{}, false, err
+	}
+	var requestIdentity *resolve.Identity
+	if resolve.IsRawPane(normalized) {
+		if scoped, ok := ScopedSelf(ctx); ok {
+			identity := resolve.Identity{}
+			if scoped.Socket != "" {
+				identity.SocketPath, err = values.SocketUnder(scoped.Socket)
+				if err != nil {
+					return headless.Chat{}, false, fmt.Errorf("resolve scoped caller socket: %w", err)
+				}
+			}
+			requestIdentity = &identity
+		}
+	}
+	var rosterMatch headless.Chat
+	roster := resolve.RosterFunc(func(
+		ctx context.Context,
+		name, requiredEngine string,
+	) (resolve.Seat, int, string, error) {
+		rows, rowsErr := Rows(ctx, warn, runtime)
+		if rowsErr != nil {
+			return resolve.Seat{}, resolve.CodeUndelivered, "", rowsErr
+		}
+		matched, found, matchErr := Match(rows, name)
+		if matchErr != nil {
+			var ambiguity *resolve.RosterAmbiguityError
+			if errors.As(matchErr, &ambiguity) {
+				return resolve.Seat{}, resolve.CodeAmbiguous, ambiguity.Error(), nil
+			}
+			return resolve.Seat{}, resolve.CodeUndelivered, "", matchErr
+		}
+		if !found || (requiredEngine != "" && string(matched.Engine) != requiredEngine) {
+			return resolve.Seat{}, resolve.CodeUnknown, "", nil
+		}
+		rosterMatch = matched
+		socketPath := ""
+		if matched.Socket != "" {
+			socketPath, matchErr = values.SocketUnder(matched.Socket)
+			if matchErr != nil {
+				return resolve.Seat{}, resolve.CodeUndelivered, "", matchErr
+			}
+		}
+		pane := matched.Pane
+		if pane == "" {
+			pane = matched.Session
+		}
+		return resolve.Seat{
+			SocketPath: socketPath, Pane: pane, Engine: string(matched.Engine),
+			Name: matched.Name, ID: matched.ID, Session: matched.Session,
+		}, 0, "", nil
+	})
+	seat, code, detail, err := (resolve.Ladder{
+		Roster: roster, Raw: raw, Self: identifier,
+		CodexSelf:       codexSeatIdentifier{runtime: runtime},
+		RequestIdentity: requestIdentity,
+		Env:             paths.OSEnv{}, Session: inject.TmuxInjector{},
+	}).Resolve(ctx, name, resolve.LadderOptions{})
+	if err != nil {
+		return headless.Chat{}, false, err
+	}
+	switch code {
+	case 0:
+		if rosterMatch != (headless.Chat{}) {
+			return rosterMatch, true, nil
+		}
+		resolved := headless.Chat{
+			Name: seat.Name, ID: seat.ID, Engine: pfmengine.ID(seat.Engine),
+			Socket: filepath.Base(seat.SocketPath), Session: seat.Session,
+			Pane: seat.Pane, Live: true,
+		}
+		if selfTarget {
+			rows, rowsErr := Rows(ctx, warn, runtime)
+			if rowsErr != nil {
+				return headless.Chat{}, false, rowsErr
+			}
+			candidates := []string{seat.ID}
+			if seat.ID == "" {
+				candidates = append(candidates, filepath.Base(seat.SocketPath), seat.Session)
+			}
+			enriched := false
+			for _, candidate := range candidates {
+				if candidate == "" {
+					continue
+				}
+				indexed, found, matchErr := Match(rows, candidate)
+				if matchErr != nil {
+					return headless.Chat{}, false, matchErr
+				}
+				if found {
+					resolved = enrichResolvedSelf(resolved, indexed)
+					enriched = true
+					break
+				}
+			}
+			if !enriched && seat.ID != "" {
+				resolved, rowsErr = enrichRecordedSelf(ctx, resolved, warn)
+				if rowsErr != nil {
+					return headless.Chat{}, false, rowsErr
+				}
+			}
+		}
+		return resolved, true, nil
+	case resolve.CodeUnknown:
+		return headless.Chat{}, false, nil
+	case resolve.CodeAmbiguous:
+		return headless.Chat{}, false, errors.New(detail)
+	default:
+		return headless.Chat{}, false, fmt.Errorf("resolve target %q failed with code %d: %s", name, code, detail)
+	}
+}
+
+func enrichResolvedSelf(resolved, indexed headless.Chat) headless.Chat {
+	if indexed.Live && indexed.Pane != "" {
+		return indexed
+	}
+	resolved.Name = indexed.Name
+	resolved.ID = indexed.ID
+	resolved.Engine = indexed.Engine
+	resolved.Path = indexed.Path
+	resolved.CWD = indexed.CWD
+	return resolved
+}
+
+func enrichRecordedSelf(
+	ctx context.Context,
+	resolved headless.Chat,
+	warn io.Writer,
+) (result headless.Chat, returnErr error) {
+	database, err := store.Open(store.WithWarningWriter(warn))
+	if err != nil {
+		return headless.Chat{}, err
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
+		}
+	}()
+	if resolved.Engine != pfmengine.Claude {
+		return resolved, nil
+	}
+	transcript, found, err := database.Transcript(ctx, resolved.ID)
+	if err != nil {
+		return headless.Chat{}, fmt.Errorf("resolve self transcript %q: %w", resolved.ID, err)
+	}
+	if !found {
+		return resolved, nil
+	}
+	resolved.Name = naming.DisplayName(transcript.CustomTitle, transcript.AITitle, transcript.FirstPrompt)
+	resolved.Path = transcript.Path
+	resolved.CWD = transcript.CWD
+	return resolved, nil
+}
+
+func rawResolver(runtime *pfmconfig.Runtime) (*resolve.Resolver, error) {
+	binaries := resolve.Binaries{Values: map[pfmengine.ID]string{}}
+	if runtime != nil {
+		binaries.Values[pfmengine.Claude] = runtime.Config.Claude.Binary
+		binaries.Values[pfmengine.Codex] = runtime.Config.Codex.Binary
+		binaries.Values[pfmengine.OpenCode] = runtime.Config.OpenCode.Binary
+		for _, account := range runtime.Config.Accounts {
+			if emoji := runtime.Config.EmojiFor(account.ID); emoji != "" && emoji != "·" {
+				binaries.AccountEmojis = append(binaries.AccountEmojis, emoji)
+			}
+		}
+	}
+	return resolve.New(nil, binaries)
+}
+
+func targetPaths(runtime *pfmconfig.Runtime) (paths.Values, error) {
+	if runtime != nil {
+		return runtime.Paths, nil
+	}
+	return paths.Resolve()
 }
 
 // Rows is one read-only scan of the whole fleet (the all view).
-func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) ([]compose.Row, error) {
+func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (rows []compose.Row, returnErr error) {
 	database, err := store.Open(store.WithWarningWriter(warn))
 	if err != nil {
 		return nil, err
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
+		}
+	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
 		View: compose.AllView, ReadOnly: true, Runtime: runtime,
 	}, warn)
@@ -123,11 +348,12 @@ func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) ([]co
 // RosterCandidates projects composed rows onto the roster matching rule's input.
 func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 	candidates := make([]resolve.RosterCandidate, 0, len(rows))
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		candidates = append(candidates, resolve.RosterCandidate{
 			Name: row.Name, ID: row.ID, Socket: row.Socket,
 			Session: row.SessionName, Pane: row.PaneID,
-			Engine: string(compose.EngineForKind(row.Kind)), Live: IsLive(row.Kind),
+			Engine: string(compose.EngineForKind(row.Kind)), Live: row.Kind.IsAddressable(),
 		})
 	}
 	return candidates
@@ -140,22 +366,14 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	if err != nil || !found {
 		return headless.Chat{}, false, err
 	}
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID == match.ID && row.Socket == match.Socket &&
 			row.PaneID == match.Pane && row.Name == match.Name {
 			return FromRow(row), true, nil
 		}
 	}
 	return headless.Chat{}, false, fmt.Errorf("resolved roster row disappeared from the same snapshot")
-}
-
-// IsLive reports whether a row kind is a running chat (booting included).
-func IsLive(kind compose.Kind) bool {
-	return kind == compose.LiveClaude ||
-		kind == compose.LiveCodex ||
-		kind == compose.LiveSplit ||
-		kind == compose.Agent ||
-		kind == compose.Booting
 }
 
 // FromRow is a composed row in the shape every verb operates on.
@@ -169,7 +387,7 @@ func FromRow(row compose.Row) headless.Chat {
 		Socket:  row.Socket,
 		Session: row.SessionName,
 		Pane:    row.PaneID,
-		Live:    IsLive(row.Kind),
+		Live:    row.Kind.IsAddressable(),
 	}
 }
 
@@ -184,22 +402,28 @@ func FromRow(row compose.Row) headless.Chat {
 // after the tmux rungs fail, because CODEX_THREAD_ID is INHERITED — a process
 // with a pane of its own must never be renamed by an id it merely inherited.
 func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Identity, bool) {
-	thread := os.Getenv(resolve.CodexThreadEnv)
-	if thread == "" || os.Getenv(resolve.ClaudeSessionEnv) != "" {
+	env := paths.OSEnv{}
+	thread := env.Get(resolve.CodexThreadEnv)
+	if thread == "" || env.Get(resolve.ClaudeSessionEnv) != "" {
 		return resolve.Identity{}, false
 	}
 	database, err := store.Open(store.WithWarningWriter(io.Discard))
 	if err != nil {
 		return resolve.Identity{}, false
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "chat identity: close fleet database: %v\n", err)
+		}
+	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
 		View: compose.AllView, ReadOnly: true, Runtime: runtime,
 	}, io.Discard)
 	if err != nil {
 		return resolve.Identity{}, false
 	}
-	for _, row := range scan.Output.Rows {
+	for index := range scan.Output.Rows {
+		row := scan.Output.Rows[index]
 		if row.ID != thread || row.Socket == "" {
 			continue
 		}

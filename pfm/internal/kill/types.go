@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // SelfEnvironment contains only the caller state used for self-identification.
@@ -69,7 +69,10 @@ type ExitArgs struct {
 // TmuxClient abstracts all tmux mutation behind a jailed implementation.
 type TmuxClient interface {
 	PanePID(ctx context.Context, socketPath, paneID string) (int, error)
-	PaneExists(ctx context.Context, socketPath, paneID string) bool
+	// PaneExists distinguishes "could not ask" from "gone": a transient tmux
+	// failure returns a non-nil error and an unspecified bool, never a bare
+	// false a caller could mistake for a confirmed exit.
+	PaneExists(ctx context.Context, socketPath, paneID string) (bool, error)
 	SendLine(ctx context.Context, socketPath, paneID, line string) error
 	KillPane(ctx context.Context, socketPath, paneID string) error
 	KillServer(ctx context.Context, socketPath string) error
@@ -91,7 +94,7 @@ type Refresher interface {
 type Dependencies struct {
 	Paths        paths.Values
 	ClaudeRoots  []string
-	CodexRoots   []string
+	CodexHomes   []string
 	ConfigPath   string
 	ProcFS       gather.ProcFS
 	Tmux         TmuxClient
@@ -102,16 +105,23 @@ type Dependencies struct {
 	PollEvery    time.Duration
 	PollAttempts int
 	Refresher    Refresher
+	// ConfirmEvery and ConfirmAttempts bound Manager.ConfirmExit's own
+	// caller-side wait — short, because unlike the finisher's detached grace
+	// window this one blocks the interactive/MCP kill call.
+	ConfirmEvery    time.Duration
+	ConfirmAttempts int
 }
 
 // Manager performs public kill operations.
 type Manager struct {
-	database *store.Store
-	proc     gather.ProcFS
-	tmux     TmuxClient
-	spawner  ExitSpawner
-	now      func() time.Time
-	paths    resolvedPaths
+	database        *store.Store
+	proc            gather.ProcFS
+	tmux            TmuxClient
+	spawner         ExitSpawner
+	now             func() time.Time
+	paths           resolvedPaths
+	confirmEvery    time.Duration
+	confirmAttempts int
 }
 
 // Finisher performs the detached graceful-exit phase.
@@ -129,6 +139,6 @@ type Finisher struct {
 type resolvedPaths struct {
 	home       string
 	sidDir     string
-	codexRoots []string
+	codexHomes []string
 	tmuxDir    string
 }

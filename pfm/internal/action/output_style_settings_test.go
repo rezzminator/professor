@@ -1,13 +1,43 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+func TestClaudeSpawnCommandUsesRunnerStartBoundary(t *testing.T) {
+	fake := &deps.FakeRunner{}
+	binary := deps.Executable("sh")
+	fake.ScriptStart([]string{binary}, 42, nil, nil)
+	spawn := ClaudeSpawn{
+		Purpose: PurposeQuery,
+		Account: 1,
+		Machine: pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{Binary: binary}},
+		Runner:  fake,
+	}
+	command, err := spawn.Command(context.Background())
+	if err != nil {
+		t.Fatalf("Command() error = %v", err)
+	}
+	command.Stdout = &bytes.Buffer{}
+	command.Stderr = &bytes.Buffer{}
+	if err := command.Run(); err != nil {
+		t.Fatalf("ProcessCommand.Run() error = %v", err)
+	}
+	calls := fake.Starts()
+	if len(calls) != 1 || len(calls[0].Argv) == 0 || calls[0].Argv[0] != binary {
+		t.Fatalf("Runner starts = %#v, want one call beginning with %q", calls, binary)
+	}
+	if calls[0].Opts.Stdout == nil || calls[0].Opts.Stderr == nil {
+		t.Fatalf("Runner stdio = %#v, want caller streams", calls[0].Opts)
+	}
+}
 
 // pfm stages its own system prompt (--system-prompt-file); Claude Code's own
 // output style (a project or user "outputStyle" setting) would otherwise
@@ -36,7 +66,12 @@ func TestClaudeSpawnCarriesOutputStyleDefaultSettings(t *testing.T) {
 			t.Fatalf("%s command spawn: %v", purpose, err)
 		}
 		if !containsFlagPair(command.Args, "--settings", pfmengine.OutputStyleDefaultSettings) {
-			t.Fatalf("%s command argv %#v lacks --settings %s", purpose, command.Args, pfmengine.OutputStyleDefaultSettings)
+			t.Fatalf(
+				"%s command argv %#v lacks --settings %s",
+				purpose,
+				command.Args,
+				pfmengine.OutputStyleDefaultSettings,
+			)
 		}
 	}
 }

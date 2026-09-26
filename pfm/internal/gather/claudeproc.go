@@ -10,8 +10,7 @@ import (
 // trustworthy after its original pane exits.
 func DetectClaudeProcesses(
 	proc ProcFS,
-	panes []Pane,
-	binaries ...string,
+	panes []ProbePane, binaries ...string,
 ) ([]ClaudeProcess, error) {
 	cmdlines, err := processCmdlines(proc)
 	if err != nil {
@@ -27,14 +26,13 @@ func DetectClaudeProcesses(
 func detectClaudeProcessesFrom(
 	cmdlines map[int][]string,
 	proc ProcFS,
-	panes []Pane,
-	binaries ...string,
+	panes []ProbePane, binaries ...string,
 ) ([]ClaudeProcess, error) {
 	pids := sortedPIDs(cmdlines)
 	paneByPID := panesByPID(panes)
 	processes := make([]ClaudeProcess, 0)
 	for _, pid := range pids {
-		if !isClaudeCommand(cmdlines[pid], binaries...) {
+		if !IsClaudeCommand(cmdlines[pid], binaries...) {
 			continue
 		}
 		pane, found := paneForProcess(proc, pid, paneByPID)

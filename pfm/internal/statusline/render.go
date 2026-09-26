@@ -6,21 +6,21 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/sky"
-	"hostops/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/sky"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 const (
@@ -31,13 +31,13 @@ const (
 	blue    = "\x1b[1;34m"
 	magenta = "\x1b[1;35m"
 	dim     = "\x1b[2m"
-	white   = "\x1b[1;37m"
 	reset   = "\x1b[0m"
 	sep     = " " + dim + "│" + reset + " "
 )
 
 type input struct {
 	Model struct {
+		ID          string `json:"id"`
 		DisplayName string `json:"display_name"`
 	} `json:"model"`
 	Workspace struct {
@@ -55,7 +55,11 @@ type input struct {
 			InputTokens              int64 `json:"input_tokens"`
 		} `json:"current_usage"`
 	} `json:"context_window"`
-	Cost struct {
+	// PromptCache is Claude Code's own cache tracker (2.1.25x+): the TTL its
+	// newest request used and when that cache expires. Absent before the
+	// first request and on older builds.
+	PromptCache *promptCache `json:"prompt_cache"`
+	Cost        struct {
 		TotalCostUSD      float64 `json:"total_cost_usd"`
 		TotalDurationMS   int64   `json:"total_duration_ms"`
 		TotalLinesAdded   int64   `json:"total_lines_added"`
@@ -144,7 +148,13 @@ func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) 
 	// present-but-empty array), not a second opinion on a payload that DID
 	// report and simply carries no Fable entry for this account.
 	if limits.Scoped == nil && account > 0 {
-		if fable, ok := usagehook.CachedFableWindow(runtime.CacheDir, runtime.UID, account, runtime.ConfigDir, now); ok {
+		if fable, ok := usagehook.CachedFableWindow(
+			runtime.CacheDir,
+			runtime.UID,
+			account,
+			runtime.ConfigDir,
+			now,
+		); ok {
 			if resetAt, err := time.Parse(time.RFC3339, fable.ResetsAt); err == nil {
 				windows["seven_day_fable"] = rateWindow{
 					UsedPercentage: *fable.Utilization,
@@ -193,29 +203,12 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 
 	harvestRateLimits(runtime, now, account, data)
 
-	modelSymbol := "●"
-	switch {
-	case strings.Contains(data.Model.DisplayName, "Fable"):
-		modelSymbol = "✦"
-	case strings.Contains(data.Model.DisplayName, "Opus"):
-		modelSymbol = "◆"
-	case strings.Contains(data.Model.DisplayName, "Sonnet"):
-		modelSymbol = "◇"
-	case strings.Contains(data.Model.DisplayName, "Haiku"):
-		modelSymbol = "○"
-	}
 	directoryName := filepath.Base(filepath.Clean(directory))
 	if directory == "" || directoryName == string(filepath.Separator) {
 		directoryName = "~"
 	}
 
-	l1 := badge + cyan + modelSymbol + " " + data.Model.DisplayName + reset
-	if data.SessionName != "" {
-		l1 += sep + white + "🔖 " + data.SessionName + reset
-	}
-	if effort := effortSegment(runtime, data); effort != "" {
-		l1 += sep + effort
-	}
+	l1 := badge + modelSegment(data)
 	l1 += sep + blue + directoryName + reset
 	if data.Worktree.Name != "" {
 		l1 += sep + magenta + "🌳 " + data.Worktree.Name + reset
@@ -235,25 +228,12 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		}
 		l1 += sep + color + data.Vim.Mode + reset
 	}
-	counts := fleetCounts(runtime)
-	l1 += sep + sky.SnapshotCounts(counts)
-
-	percent := int(data.ContextWindow.UsedPercentage)
-	urgency := urgencyEmoji(percent)
-	l2 := urgency + " " + makeBar(percent, 10) + " " + percentColor(percent) +
-		strconv.Itoa(percent) + "%" + reset
-	wide := runtime.Columns == 0 || runtime.Columns >= 100
-	contextTokens := data.ContextWindow.CurrentUsage.CacheReadInputTokens +
-		data.ContextWindow.CurrentUsage.CacheCreationInputTokens +
-		data.ContextWindow.CurrentUsage.InputTokens
-	if wide && contextTokens > 0 {
-		l2 += sep + dim + "🧮" + formatTokens(contextTokens) + reset
+	if data.SessionName != "" {
+		l1 += sep + cLabel + "🔖 " + data.SessionName + reset
 	}
-	// Never width-gated: a 97-column VS Code pane once lost the timer to the
-	// same gate as the token count, and a missing cache timer is indistinguishable
-	// from an expired one nobody rendered. Whether the transcript is readable is
-	// the segment's own question to answer, and it answers it visibly.
-	l2 += cacheWindowSegment(runtime, now, data.TranscriptPath)
+	l1 += sep + sky.SnapshotCounts(fleetCounts(runtime))
+
+	gauge, l2, contextTokens := renderContextLine(runtime, data, directory, now)
 	if data.Cost.TotalCostUSD > 0 && runtime.Engine != pfmengine.Codex {
 		color := dim
 		if data.Cost.TotalCostUSD >= 10 {
@@ -266,15 +246,15 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
 	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
 	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.
-	l2 += sep + dim + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
+	l2 += sep + cElapsed + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
 
 	l3 := ""
 	if runtime.Engine == pfmengine.Codex {
-		gptLine, replacement := gptSegment(runtime, now, contextTokens, l2)
+		codexLine, replacement := codexSegment(runtime, now, contextTokens, l2, gauge.transcript)
 		if replacement != "" {
 			l2 = replacement
 		}
-		l3 = appendSegment(l3, gptLine)
+		l3 = appendSegment(l3, codexLine)
 	}
 	l3 = appendRateSegments(l3, now, data)
 
@@ -282,38 +262,6 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		return reset + l1 + "\n" + reset + l2 + "\n" + reset + l3 + "\n", nil
 	}
 	return reset + l1 + "\n" + reset + l2 + "\n", nil
-}
-
-func effortSegment(runtime Runtime, data input) string {
-	if data.Effort.Level == "" {
-		return ""
-	}
-	color, emoji := cyan, "🔆"
-	switch data.Effort.Level {
-	case "low":
-		color, emoji = dim, "🔹"
-	case "medium":
-		color, emoji = green, "🔶"
-	case "high":
-		color, emoji = yellow, "💠"
-	case "xhigh":
-		color, emoji = magenta, "💎"
-	case "max":
-		color, emoji = red, "👑"
-	}
-	sessionID := runtime.getenv("CLAUDE_CODE_SESSION_ID")
-	if sessionID == "" {
-		sessionID = data.SessionID
-	}
-	if data.Effort.Level == "xhigh" && sessionID != "" {
-		if _, err := os.Stat(filepath.Join(runtime.Home, ".claude", "ultracode", sessionID)); err == nil {
-			return red + "🚀 ultracode" + reset
-		}
-	}
-	if !data.Thinking.Enabled {
-		return dim + "💤 " + data.Effort.Level + " (off)" + reset
-	}
-	return color + emoji + " " + data.Effort.Level + reset
 }
 
 func formatDuration(milliseconds int64) string {
@@ -366,7 +314,7 @@ func makeBar(percent, width int) string {
 		strings.Repeat("▱", width-filled) + reset
 }
 
-func formatTokens(tokens int64) string {
+func formatContextTokens(tokens int64) string {
 	switch {
 	case tokens >= 1_000_000:
 		return fmt.Sprintf("%d.%dM", tokens/1_000_000, tokens%1_000_000/100_000)
@@ -648,7 +596,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 		rename := gather.WindowRename{
 			Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
 		}
-		client := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
+		client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
 		if err := client.RenameWindow(commandContext, rename); err != nil {
 			return
 		}
@@ -762,140 +710,16 @@ func harvestRateLimits(runtime Runtime, now time.Time, account int, data input) 
 	}
 }
 
-func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string) string {
-	ttl := time.Hour
-	label := "1h"
-	if runtime.getenv("FORCE_PROMPT_CACHING_5M") == "1" {
-		ttl = 5 * time.Minute
-		label = "5m"
-	}
-	// A transcript we could not read is NOT a chat without a cache window, and
-	// the two must never share a rendering. Returning "" here made the segment
-	// disappear, which is indistinguishable from a statusline that has no cache
-	// timer at all — so the one state worth shouting about, a chat running with
-	// transcript saving off, arrived as silence. That chat cannot be resumed and
-	// its window cannot be measured; the statusline is where the user finds out.
-	//
-	// "!" is deliberately not "?": "?" means the transcript WAS read and simply
-	// carries no user turn to anchor on, which is a fact about the chat. "!" is
-	// a fact about us — we could not look.
-	if transcriptPath == "" {
-		return sep + red + "💾" + label + "!" + reset
-	}
-	info, err := os.Stat(transcriptPath)
-	if err != nil || info.IsDir() {
-		return sep + red + "💾" + label + "!" + reset
-	}
-	cachePath := filepath.Join(
-		runtime.CacheDir,
-		"cc-sl-anchor-"+strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl"),
-	)
-	key := fmt.Sprintf("%d:%d", info.ModTime().Unix(), info.Size())
-	cachedKey, anchor := readAnchorCache(cachePath)
-	if cachedKey != key {
-		anchor = cacheAnchor(transcriptPath)
-		encoded := "-"
-		if !anchor.IsZero() {
-			encoded = strconv.FormatInt(anchor.Unix(), 10)
-		}
-		_ = atomicfile.Write(cachePath, []byte(key+" "+encoded), 0o600)
-	}
-	if anchor.IsZero() {
-		return sep + yellow + "💾" + label + "?" + reset
-	}
-	remaining := ttl - now.Sub(anchor)
-	if remaining > 0 {
-		return sep + green + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset
-	}
-	return sep + red + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset
-}
-
-func readAnchorCache(path string) (string, time.Time) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return "", time.Time{}
-	}
-	fields := strings.Fields(string(body))
-	if len(fields) != 2 || fields[1] == "-" {
-		if len(fields) == 2 {
-			return fields[0], time.Time{}
-		}
-		return "", time.Time{}
-	}
-	epoch, err := strconv.ParseInt(fields[1], 10, 64)
-	if err != nil {
-		return "", time.Time{}
-	}
-	return fields[0], time.Unix(epoch, 0)
-}
-
-// cacheAnchor is the moment the prompt cache was last written or refreshed:
-// the newest main-chain record that WAS an API request or its reply — an
-// assistant record, or a user record other than a local slash command's
-// transcript echo. Local commands (/rc, /cost, the /compact receipt …) write
-// user-typed records without making a request, and anchoring on them showed a
-// cache twelve hours cold as "expired 9m ago". Sidechains refresh their own
-// cache, never the main chat's.
-func cacheAnchor(path string) time.Time {
-	for _, size := range []int64{65_536, 1_048_576} {
-		body, err := readTail(path, size)
-		if err != nil {
-			continue
-		}
-		var newest time.Time
-		scanner := bufio.NewScanner(strings.NewReader(string(body)))
-		scanner.Buffer(make([]byte, 64*1024), int(size)+1)
-		for scanner.Scan() {
-			var record struct {
-				Type      string `json:"type"`
-				Sidechain bool   `json:"isSidechain"`
-				Timestamp string `json:"timestamp"`
-				Message   struct {
-					Content json.RawMessage `json:"content"`
-				} `json:"message"`
-			}
-			if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Sidechain || record.Timestamp == "" {
-				continue
-			}
-			switch record.Type {
-			case "assistant":
-			case "user":
-				if localCommandRecord(record.Message.Content) {
-					continue
-				}
-			default:
-				continue
-			}
-			parsed, parseErr := time.Parse(time.RFC3339Nano, record.Timestamp)
-			if parseErr == nil && parsed.After(newest) {
-				newest = parsed
-			}
-		}
-		if !newest.IsZero() {
-			return newest
-		}
-	}
-	return time.Time{}
-}
-
-// localCommandRecord recognises the transcript echo of a local slash command:
-// string content opening with one of Claude Code's local-command tags. Array
-// content is a real turn (tool results, content blocks) and always counts.
-func localCommandRecord(content json.RawMessage) bool {
-	var text string
-	if json.Unmarshal(content, &text) != nil {
-		return false
-	}
-	trimmed := strings.TrimSpace(text)
-	return strings.HasPrefix(trimmed, "<local-command-") || strings.HasPrefix(trimmed, "<command-name>")
-}
-
-func readTail(path string, size int64) ([]byte, error) {
+func readTail(path string, size int64) (tail []byte, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close tail file %s: %w", path, err))
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
@@ -927,7 +751,7 @@ func formatCacheTime(duration time.Duration, expired bool) string {
 	return fmt.Sprintf("%ds", seconds)
 }
 
-func fileAge(path string, now time.Time) time.Duration {
+func statuslineFileAge(path string, now time.Time) time.Duration {
 	info, err := os.Stat(path)
 	if err != nil {
 		return 100 * 365 * 24 * time.Hour
@@ -936,7 +760,7 @@ func fileAge(path string, now time.Time) time.Duration {
 }
 
 func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Duration) {
-	if runtime.Spawn == nil || fileAge(cachePath, runtime.now()) <= ttl {
+	if runtime.Spawn == nil || statuslineFileAge(cachePath, runtime.now()) <= ttl {
 		return
 	}
 	lockPath := strings.TrimSuffix(cachePath, ".json") + ".lock"
@@ -953,19 +777,25 @@ func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Du
 	}
 }
 
-type gptUsageCache struct {
-	Primary   *gptWindow `json:"primary"`
-	Secondary *gptWindow `json:"secondary"`
-	PlanType  string     `json:"planType"`
+type codexUsageCache struct {
+	Primary   *codexWindow `json:"primary"`
+	Secondary *codexWindow `json:"secondary"`
+	PlanType  string       `json:"planType"`
 }
 
-type gptWindow struct {
+type codexWindow struct {
 	UsedPercent        float64 `json:"usedPercent"`
 	WindowDurationMins int64   `json:"windowDurationMins"`
 	ResetsAt           int64   `json:"resetsAt"`
 }
 
-func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 string) (string, string) {
+func codexSegment(
+	runtime Runtime,
+	now time.Time,
+	contextTokens int64,
+	currentL2 string,
+	transcriptGauge bool,
+) (string, string) {
 	model := runtime.getenv("ANTHROPIC_MODEL")
 	if model == "" {
 		model = "gpt-5.6-sol"
@@ -978,7 +808,7 @@ func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 s
 	} else {
 		segment += sep + red + "⇅ proxy DOWN" + reset
 	}
-	requests, authReject := gptRequestCount(runtime, now)
+	requests, authReject := codexRequestCount(runtime, now)
 	if requests > 0 {
 		segment += sep + dim + "↻ " + strconv.Itoa(requests) + " today" + reset
 	}
@@ -986,11 +816,11 @@ func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 s
 		segment += sep + red + "⚠ auth-reject streak — WS upgrade refused; CCP_CODEX_TRANSPORT=http" + reset
 	}
 	usagePath := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
-	armRefresh(runtime, RefreshKindGPT, usagePath, 5*time.Minute)
+	armRefresh(runtime, RefreshKindCodex, usagePath, 5*time.Minute)
 	usageBody, usageErr := os.ReadFile(usagePath)
-	var usage gptUsageCache
+	var usage codexUsageCache
 	if usageErr == nil && json.Unmarshal(usageBody, &usage) == nil {
-		for _, window := range []*gptWindow{usage.Primary, usage.Secondary} {
+		for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
 			if window == nil || window.UsedPercent < 0 {
 				continue
 			}
@@ -1014,7 +844,7 @@ func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 s
 	} else {
 		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)
 	}
-	if window > 0 && contextTokens > 0 {
+	if !transcriptGauge && window > 0 && contextTokens > 0 {
 		percent := int(contextTokens * 100 / window)
 		if percent > 100 {
 			percent = 100
@@ -1025,18 +855,23 @@ func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 s
 		}
 		replacement = urgencyEmoji(percent) + " " + makeBar(percent, 10) + " " +
 			percentColor(percent) + strconv.Itoa(percent) + "%" + reset + " " + dim +
-			"of " + formatTokens(window) + reset + rest
+			"of " + formatContextTokens(window) + reset + rest
 	}
 	return segment, replacement
 }
 
-func gptRequestCount(runtime Runtime, now time.Time) (int, bool) {
+func codexRequestCount(runtime Runtime, now time.Time) (int, bool) {
 	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-gptreq")
-	if fileAge(cachePath, now) > 30*time.Second {
+	if statuslineFileAge(cachePath, now) > 30*time.Second {
 		logPath := filepath.Join(runtime.Home, ".local", "state", "claude-code-proxy", "proxy.log")
 		file, err := os.Open(logPath)
 		if err == nil {
-			defer file.Close()
+			defer func() {
+				if err := file.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "statusline: close %s proxy log %s: %v\n",
+						pfmengine.MustLookup(pfmengine.Codex).Short, logPath, err)
+				}
+			}()
 			today := now.UTC().Format("2006-01-02")
 			count := 0
 			last := make([]int, 0, 3)
@@ -1066,7 +901,7 @@ func gptRequestCount(runtime Runtime, now time.Time) (int, bool) {
 			for _, status := range last {
 				reject = reject && (status == 401 || status == 403)
 			}
-			_ = atomicfile.Write(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolInt(reject))), 0o600)
+			_ = atomicfile.Write(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolDigit(reject))), 0o600)
 		}
 	}
 	body, err := os.ReadFile(cachePath)
@@ -1082,7 +917,7 @@ func gptRequestCount(runtime Runtime, now time.Time) (int, bool) {
 	return count, reject == 1
 }
 
-func boolInt(value bool) int {
+func boolDigit(value bool) int {
 	if value {
 		return 1
 	}
@@ -1109,13 +944,4 @@ func resetCountdown(now time.Time, resetsAt int64) string {
 		return fmt.Sprintf(" %s↻%dd%dh%s", dim, remaining/86400, remaining%86400/3600, reset)
 	}
 	return fmt.Sprintf(" %s↻%dh%dm%s", dim, remaining/3600, remaining%3600/60, reset)
-}
-
-func sortedKeys[V any](values map[string]V) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

@@ -2,7 +2,7 @@
 
 Two independent things live in this repo. Install what you need.
 
-- **`pfm`** — the host fleet CLI: statusline, `/reload`, the chat MCP server, multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
+- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `professor` MCP server (chat and harvester families), multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
 - **Professor, the discipline layer** — `CLAUDE.md`, agents, commands, the pipeline. Installed into YOUR project through a Claude-guided interview.
 
 Shortest path first.
@@ -70,7 +70,7 @@ pfm install --yes --skip-harvest --skip-engine codex --skip-themes
 
 - `--skip-harvest` leaves the pinned harvestpy runtime unmanaged; it avoids the harvest download and its disk footprint. It does not hide a failed provision.
 - `--skip-engine codex` suppresses the Codex dependency probe and Codex mirror/hooks. It does not alter Claude or OpenCode surfaces.
-- `--skip-themes` suppresses source-fetched theme installation. Theme entries come from `templates/themes/sources.json` and the current Tokyo Night target is `~/.claude/themes/tokyo-night.json`.
+- `--skip-themes` suppresses theme installation. Theme entries come from `templates/themes/sources.json`: the source-fetched Tokyo Night (`~/.claude/themes/tokyo-night.json`) and the bundled per-account overlays `professor-{gold,silver,bronze}.json` beside it (Tokyo Night with one input-bar colour each, merged at install).
 
 The current embedded harvest plan is measured, not a promise for every host. On Linux `amd64`, the cold package closure is about **3.1 GB** (3,106,174,573 bytes) to download and about **5.8 GB** (5,786,939,761 bytes) installed. The uv and CPython bootstrap archives add roughly 57 MB, and temporary files or caches can require more free space. Other platforms and future lock revisions vary; the preview is the authoritative plan for the host.
 
@@ -81,21 +81,21 @@ Add `$HOME/.local/bin` to `PATH` if it isn't already, then:
 ```bash
 pfm install             # preview — the default mode, no writes
 pfm install --yes       # apply the preview
-pfm install --vscode    # opt-in preview: the Professor VS Code extension + the PFM default terminal
+pfm install --vscode    # opt-in preview: the Professor VS Code extension (Extensions view + terminal `+` dropdown entry) and the PFM default terminal; press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`.
 pfm install --yes --vscode
 ```
 
 `pfm install --yes` manages eight surfaces, all under `$HOME`; `--vscode` adds a ninth:
 
-1. Staged assets — `~/.local/share/pfm/install/`
-2. Command symlinks — `~/.claude/commands/` (`/reload`); skill symlinks — `~/.claude/skills/` (`deep-rr`, `architecture-design`, `/handoff`)
+1. Staged assets — `~/.local/share/pfm/install/`, including the `claude` launcher; since that launcher disables Claude Code's own version cleanup, pfm also owns retention under `~/.local/share/claude/versions/` — `pfm doctor` reports count, bytes, and prunable size, and `pfm install` previews and applies the prune (`pfm/TESTPLAN.md` § claude-versions)
+2. Command symlinks — `~/.claude/commands/` (`/reload`); skill symlinks — `~/.claude/skills/` (`deep-rr`, `/handoff`)
 3. The `pfm-name-sync` scheduler — three systemd user units (Linux) or one launchd agent (macOS)
 4. Every Claude account settings file it finds (`~/.claude/settings.json` and each `~/.cc/N/settings.json`) — adds the usage, group, and `/clear` `SessionEnd` hooks; adopts the statusline only if none is already set
-5. `~/.codex/prompts/`, `~/.codex/skills/`, and `~/.codex/agents/` — Codex mirrors generated from the installed global Claude commands and host-global agent sources; only marker-owned command outputs are replaced or retired, while unmarked conflicts survive and stop the install by name
+5. `~/.codex/prompts/`, `~/.codex/skills/`, and `~/.codex/agents/` — Codex mirrors generated from the installed global Claude commands and host-global agent sources; a role lands in `agents/` as a REGULAR FILE, because Codex opens a role with `O_NOFOLLOW` and rejects a symlink as "agent type is currently not available". Only marker-owned outputs are replaced or retired, while unmarked conflicts survive and stop the install by name
 6. `~/.codex/hooks.json` — migrates surviving binary paths and removes retired clear-kill and Dream/STM hooks; it installs no automatic Codex hook
 7. One source line appended to `~/.zshrc` — restart your shell (or `source ~/.zshrc`) for it to take effect
-8. `~/.claude/themes/` — source-fetched themes declared by `templates/themes/sources.json`; a failed cosmetic fetch is reported and skipped without aborting the other surfaces
-9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install), and in the user or remote-machine `settings.json` adds a `PFM` terminal profile and selects it as the platform default (the extension's own `Professor` profile stays in the + dropdown — a default an extension contributes would make every window reload drop the open terminals). A PFM terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and unrelated profiles survive; later installs retain ownership, and uninstall removes only the links still pointing at PFM's copy and restores the prior default unless the operator changed it after installation. Reload the VS Code window once to load a newly linked extension.
+8. `~/.claude/themes/` — the themes declared by `templates/themes/sources.json`, source-fetched and bundled; a failed cosmetic fetch or an unreadable bundled file is reported and skipped without aborting the other surfaces
+9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install) and registers it in that product's own `extensions/extensions.json` — the file modern VS Code actually scans user extensions from, so a link alone is never loaded — and in the user or remote-machine `settings.json` adds a `PFM` terminal profile (icon `mortar-board`, colour magenta) and selects it as the platform default (the extension's own `Professor` profile stays in the + dropdown — a default an extension contributes would make every window reload drop the open terminals). After a reload, the extension is visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown. Press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`. A PFM terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and unrelated profiles survive; later installs retain ownership, and uninstall removes only the links (and the index entries they registered) still pointing at PFM's copy, restoring the prior default unless the operator changed it after installation. Reload the VS Code window once to load a newly linked extension. `pfm doctor` reports one row per product (link, index registration, version) and per owned settings file.
 
 Every rewritten file is backed up before it's touched.
 
@@ -170,7 +170,8 @@ One writer per surface — the law that keeps the two installers from fighting o
 | Host fleet wiring | `pfm install` — the only writer | `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, the systemd/launchd scheduler units, every Claude account `settings.json`, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, and the opt-in VS Code user/remote `settings.json` |
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
-| Source-fetched themes (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json` and other targets declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
+| Themes, source-fetched and bundled (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json`, `~/.claude/themes/professor-{gold,silver,bronze}.json`, and any other target declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
+| MCP client registration (the one `professor` server) | `pfm install` — the only writer | registered while either family is enabled (`mcp.servers.chat.enabled`, `harvester.enabled`), removed when both are off; every engine registers the same stdio command `~/.local/bin/pfm mcp serve --stdio` (absolute path), which forwards to the daemon's `/mcp/professor`. Claude: key `mcpServers.professor` in every user-scope `.claude.json` a pfm-launched Claude can read — `~/.claude.json` for the account pfm spawns without `CLAUDE_CONFIG_DIR`, `<config dir>/.claude.json` for every explicit account, and `$CLAUDE_CONFIG_DIR/.claude.json` when the shell exports it. Codex: one installer-owned `[mcp_servers.professor]` fence (`command`, `args`) at the end of every Codex home's `config.toml`. OpenCode: key `mcp.professor` of type `local` in `opencode.jsonc` |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 
@@ -197,11 +198,13 @@ Each tier has one source of truth and one update mechanism:
 
 | Tier | Truth | Staying current |
 | ----------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. |
+| Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. It rolls back only on a `pfm doctor` failure (a required dependency, launcher, hooks, host overlay, global agents, config, or database state); pre-existing warnings never block it, and it reports each warning the update newly introduced. |
 | Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local files | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm update check` reports template deltas; you review and hand-apply each wanted change, then pin it. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit them by hand. Rebuild or verify them with their compiler, including `pfm codex build` and `pfm codex check`. |
 
-**Read every release you skipped before you update.** `pfm version` names the installed release; each later `releases/vX.Y.Z.md` up to the target is one release's changes, and its `#### → For:` lines are what that release asks of you. Read all of them first — five versions behind is five files — and merge their actions into one list, a later release's action superseding an earlier one on the same surface. Then run `pfm update` and work through the list; `pfm update` prints the release-notes files it moved past once the source has advanced.
+A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.md`, `.codex/**`, `.opencode/**` are generated, never tracked (see [`.gitignore`](.gitignore)). Opening it in Claude Code first generates them via the `Stop` hook; opening it in Codex or OpenCode before that first Claude turn needs `pfm codex build .` and `pfm opencode build .` run once by hand. `pfm install` compiles the machine-global `.toml` twins the same way, into pfm's own generated directory — never into the clone.
+
+**Read every release you skipped before you update.** `pfm version` names the installed release; each later `releases/vX.Y.Z.md` up to the target is one release's changes, and its `#### → For:` lines are what that release asks of you, each marked `before update`, `after update` or `per project` (the grammar is `docs/RELEASE.md` § Release notes). A release whose note carries `#### → Stop:` is a required stop: update to it first, finish its actions, then continue. Read all of them first — five versions behind is five files — and merge their actions into one list, a later release's action superseding an earlier one on the same surface. Then run `pfm update` and work through the list; `pfm update` prints the release-notes files it moved past once the source has advanced.
 
 The project flow is deliberately non-destructive:
 

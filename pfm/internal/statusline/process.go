@@ -10,62 +10,64 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	pfmengine "hostops/pfm/internal/engine"
-	"syscall"
 	"time"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // SpawnDetached starts one refresher as a new session and releases the child.
-// The render path never waits for credentials, networks, or App Server startup.
-func SpawnDetached(kind RefreshKind) error {
+// The render path never waits for credentials, networks, or App Server
+// startup. runner is the deps.Runner seam (pfm/TESTPLAN.md § Seams); nil
+// defaults to obs.Runner(deps.RealRunner{}).
+func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve pfm executable: %w", err)
 	}
 	argument := ""
 	switch kind {
-	case RefreshKindGPT:
+	case RefreshKindCodex:
 		argument = "--refresh-gpt"
 	default:
 		return fmt.Errorf("unknown statusline refresher %q", kind)
 	}
-	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		return fmt.Errorf("open null device: %w", err)
+	if runner == nil {
+		runner = obs.Runner(deps.RealRunner{})
 	}
-	defer null.Close()
-	command := exec.Command(executable, "statusline", argument)
-	command.Stdin = null
-	command.Stdout = null
-	command.Stderr = null
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := command.Start(); err != nil {
+	// Stdin/Stdout/Stderr left unset: a detached Start child defaults to the
+	// null device, the same /dev/null this refresher wired explicitly before
+	// this seam.
+	process, err := runner.Start(
+		context.Background(),
+		[]string{executable, "statusline", argument},
+		deps.StartOptions{Detach: true},
+	)
+	if err != nil {
 		return fmt.Errorf("start detached %s refresher: %w", kind, err)
 	}
-	if err := command.Process.Release(); err != nil {
+	if err := process.Release(); err != nil {
 		return fmt.Errorf("release detached %s refresher: %w", kind, err)
 	}
 	return nil
 }
 
-// ReadGPTRateLimits performs the complete Codex App Server initialize exchange
+// ReadCodexRateLimits performs the complete Codex App Server initialize exchange
 // and returns its id=1 response. It runs only in a detached refresher child.
-func ReadGPTRateLimits(ctx context.Context) ([]byte, error) {
-	return ReadGPTRateLimitsWithBinary(ctx, pfmengine.MustLookup(pfmengine.Codex).Binary)
+func ReadCodexRateLimits(ctx context.Context) ([]byte, error) {
+	return ReadCodexRateLimitsWithBinary(ctx, pfmengine.MustLookup(pfmengine.Codex).Binary)
 }
 
-// ReadGPTRateLimitsWithBinary uses the machine-configured Codex command.
-func ReadGPTRateLimitsWithBinary(ctx context.Context, binary string) ([]byte, error) {
-	return ReadGPTRateLimitsWithBinaryAtHome(ctx, binary, "")
+// ReadCodexRateLimitsWithBinary uses the machine-configured Codex command.
+func ReadCodexRateLimitsWithBinary(ctx context.Context, binary string) ([]byte, error) {
+	return ReadCodexRateLimitsWithBinaryAtHome(ctx, binary, "")
 }
 
-// ReadGPTRateLimitsWithBinaryAtHome reads one configured Codex account. An
+// ReadCodexRateLimitsWithBinaryAtHome reads one configured Codex account. An
 // explicit home keeps multi-account limits isolated from the caller's own
 // CODEX_HOME.
-func ReadGPTRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome string) ([]byte, error) {
+func ReadCodexRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome string) ([]byte, error) {
 	if binary == "" {
 		binary = pfmengine.MustLookup(pfmengine.Codex).Binary
 	}
@@ -75,7 +77,7 @@ func ReadGPTRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome st
 	if codexHome != "" {
 		command.Env = replaceCommandEnv(os.Environ(), "CODEX_HOME", codexHome)
 	}
-	return readGPTRateLimitsCommand(command)
+	return readCodexRateLimitsCommand(child, command)
 }
 
 func replaceCommandEnv(environment []string, name, value string) []string {
@@ -89,7 +91,7 @@ func replaceCommandEnv(environment []string, name, value string) []string {
 	return append(replaced, prefix+value)
 }
 
-func readGPTRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
+func readCodexRateLimitsCommand(ctx context.Context, command *exec.Cmd) ([]byte, error) {
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open App Server stdin: %w", err)
@@ -101,8 +103,13 @@ func readGPTRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
+		obs.StartFailed(ctx, command.Args, err)
 		return nil, fmt.Errorf("start Codex App Server: %w", err)
 	}
+	// The App Server is a direct process door until it migrates behind
+	// deps.Runner: its start and exit are recorded here, once each.
+	finish := obs.Started(ctx, command.Args, command.Process.Pid)
+	wait := func() error { err := command.Wait(); finish(err); return err }
 	payload := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"clientInfo":{"name":"statusline","version":"1.0.0"}}}`,
 		`{"jsonrpc":"2.0","method":"initialized","params":null}`,
@@ -111,7 +118,7 @@ func readGPTRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 	if _, err := io.WriteString(stdin, payload); err != nil {
 		_ = stdin.Close()
 		_ = command.Process.Kill()
-		_ = command.Wait()
+		_ = wait()
 		return nil, fmt.Errorf("write App Server handshake: %w", err)
 	}
 
@@ -125,19 +132,19 @@ func readGPTRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 		if json.Unmarshal(line, &envelope) == nil && string(envelope.ID) == "1" {
 			_ = stdin.Close()
 			_ = command.Process.Kill()
-			_ = command.Wait()
+			_ = wait()
 			return append(line, '\n'), nil
 		}
 	}
 	_ = stdin.Close()
 	if err := scanner.Err(); err != nil {
 		_ = command.Process.Kill()
-		_ = command.Wait()
+		_ = wait()
 		return nil, fmt.Errorf("read App Server response: %w", err)
 	}
-	waitErr := command.Wait()
+	waitErr := wait()
 	return nil, fmt.Errorf(
-		"App Server returned no id=1 response: wait=%v stderr=%s",
+		"command from App Server returned no id=1 response: wait=%v stderr=%s",
 		waitErr,
 		strings.TrimSpace(stderr.String()),
 	)

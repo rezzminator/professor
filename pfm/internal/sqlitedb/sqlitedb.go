@@ -15,6 +15,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // driverName is the pure-Go SQLite driver the whole engine uses.
@@ -29,6 +31,13 @@ const StoreBusyTimeout = 10 * time.Second
 // that silently stayed in rollback mode would make concurrent chats erase one
 // another's writes — synchronous=NORMAL and foreign keys on.
 func OpenStore(ctx context.Context, path string) (*sql.DB, error) {
+	finish := obs.SQLOpen(ctx, "store", path)
+	database, err := openStoreFile(ctx, path)
+	finish(err)
+	return database, err
+}
+
+func openStoreFile(ctx context.Context, path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory for %s: %w", path, err)
 	}
@@ -45,7 +54,10 @@ func OpenStore(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 func storePragmas(ctx context.Context, database *sql.DB) error {
-	if _, err := database.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", StoreBusyTimeout.Milliseconds())); err != nil {
+	if _, err := database.ExecContext(
+		ctx,
+		fmt.Sprintf("PRAGMA busy_timeout=%d", StoreBusyTimeout.Milliseconds()),
+	); err != nil {
 		return fmt.Errorf("set busy_timeout: %w", err)
 	}
 	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
@@ -69,23 +81,32 @@ func storePragmas(ctx context.Context, database *sql.DB) error {
 // would ignore the live -wal and serve a stale snapshot. busy bounds how long
 // a statement waits on the writer, so a hot moment is an error, never a hang.
 func OpenReadOnly(path string, busy time.Duration) (*sql.DB, error) {
-	return openForeign(path, "mode=ro&", busy)
+	return openForeign(path, "readonly", "mode=ro&", busy)
 }
 
 // OpenReadWrite opens a database another program owns for a write, on one
 // connection, without changing its journal or sync settings. busy bounds how
 // long a statement waits on the owner's writer.
 func OpenReadWrite(path string, busy time.Duration) (*sql.DB, error) {
-	return openForeign(path, "", busy)
+	return openForeign(path, "readwrite", "", busy)
 }
 
-func openForeign(path, mode string, busy time.Duration) (*sql.DB, error) {
-	database, err := sql.Open(driverName, fileURI(path, fmt.Sprintf("%s_pragma=busy_timeout(%d)", mode, busy.Milliseconds())))
+// openForeign records the open under the db component as kind (readonly,
+// readwrite); the foreign openers take no context, so the process logger is
+// the destination.
+func openForeign(path, kind, mode string, busy time.Duration) (*sql.DB, error) {
+	finish := obs.SQLOpen(context.Background(), kind, path)
+	database, err := sql.Open(
+		driverName,
+		fileURI(path, fmt.Sprintf("%s_pragma=busy_timeout(%d)", mode, busy.Milliseconds())),
+	)
 	if err != nil {
+		finish(err)
 		return nil, fmt.Errorf("open sqlite database %s: %w", path, err)
 	}
 	database.SetMaxOpenConns(1)
 	database.SetMaxIdleConns(1)
+	finish(nil)
 	return database, nil
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,13 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type fakeProc struct {
@@ -65,13 +65,13 @@ func (proc *fakeProc) Stat(pid int) (gather.ProcStat, error) {
 }
 
 type fakeTmux struct {
-	mutex         sync.Mutex
-	panePID       int
-	existsFor     int
-	existsCalls   int
-	sent          []string
-	killedPanes   []string
-	killedServers []string
+	mutex                     sync.Mutex
+	panePID, existsFor        int
+	existsErrFor, existsCalls int // existsErrFor: leading calls that error, before existsFor answers
+	killPaneErr               error
+	sent                      []string
+	killedPanes               []string
+	killedServers             []string
 	// viewport wiring: which terminals watch the chat, and which pane each of
 	// those terminals is. Both empty means nothing is watching it.
 	clientTTYs []string
@@ -110,14 +110,14 @@ func (tmux *fakeTmux) PanePID(
 	return tmux.panePID, nil
 }
 
-func (tmux *fakeTmux) PaneExists(
-	_ context.Context,
-	_, _ string,
-) bool {
+func (tmux *fakeTmux) PaneExists(_ context.Context, _, _ string) (bool, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	tmux.existsCalls++
-	return tmux.existsCalls <= tmux.existsFor
+	if tmux.existsCalls <= tmux.existsErrFor {
+		return false, errors.New("tmux probe failed")
+	}
+	return tmux.existsCalls-tmux.existsErrFor <= tmux.existsFor, nil
 }
 
 func (tmux *fakeTmux) SendLine(
@@ -141,7 +141,7 @@ func (tmux *fakeTmux) KillPane(
 		tmux.killedPanes,
 		filepath.Base(socketPath)+"\t"+paneID,
 	)
-	return nil
+	return tmux.killPaneErr
 }
 
 func (tmux *fakeTmux) KillServer(
@@ -175,7 +175,6 @@ func (function refreshFunc) Refresh(ctx context.Context) error {
 func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 
 	configDir := filepath.Join(jail.home, ".cc", "7")
 	writeTestFile(
@@ -186,7 +185,7 @@ func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
 	finisher, err := NewFinisher(database, Dependencies{Paths: paths.Values{
 		Home:    jail.home,
 		SIDDir:  jail.sidDir,
-		Roots:   map[pfmengine.ID][]string{pfmengine.Codex: {jail.codexRoot}},
+		Roots:   map[pfmengine.ID][]string{pfmengine.Codex: {jail.codexHome}},
 		TmuxDir: jail.tmuxDir,
 	}})
 	if err != nil {
@@ -210,7 +209,6 @@ func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
 func TestManagerCanExitResolvedCodexSelfWithoutAmbientTmux(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
 		Spawner: spawner,
@@ -246,7 +244,6 @@ func TestManagerCanExitResolvedCodexSelfWithoutAmbientTmux(t *testing.T) {
 func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	claudeID := "11111111-1111-4111-8111-111111111111"
@@ -260,7 +257,7 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	}
 	codexID := "22222222-2222-4222-8222-222222222222"
 	rolloutPath := filepath.Join(
-		jail.codexRoot,
+		jail.codexHome,
 		"sessions",
 		"2026",
 		"07",
@@ -359,13 +356,12 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 func TestManagerStoreOnlyCodexSelfKills(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	threadID := "55555555-5555-4555-8555-555555555555"
 	writeCodexStateThread(
 		t,
-		filepath.Join(jail.codexRoot, "state_0.sqlite"),
+		filepath.Join(jail.codexHome, "state_0.sqlite"),
 		threadID,
 		"/work/store-only",
 		"",
@@ -418,13 +414,12 @@ func TestManagerStoreOnlyCodexSelfKills(t *testing.T) {
 func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	threadID := "55555555-5555-4555-8555-555555555555"
 	rolloutID := "66666666-6666-4666-8666-666666666666"
 	rolloutPath := filepath.Join(
-		jail.codexRoot,
+		jail.codexHome,
 		"sessions",
 		"2026",
 		"07",
@@ -432,7 +427,7 @@ func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
 	)
 	writeCodexStateThread(
 		t,
-		filepath.Join(jail.codexRoot, "state_0.sqlite"),
+		filepath.Join(jail.codexHome, "state_0.sqlite"),
 		threadID,
 		"/work/paginated",
 		rolloutPath,
@@ -486,7 +481,6 @@ func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
 func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	manager, err := New(database, Dependencies{})
@@ -533,7 +527,6 @@ func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 func TestManagerClaudeCrumbPrecedenceWritesNullBaseline(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	socketName := "cc-300-1-1"
 	paneID := "%5"
 	socketID := "33333333-3333-4333-8333-333333333333"
@@ -584,7 +577,6 @@ func TestManagerClaudeCrumbPrecedenceWritesNullBaseline(t *testing.T) {
 func TestKilledChatStaysKilledAsItGrowsUntilUnkill(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	id := "77777777-7777-4777-8777-777777777777"
@@ -661,7 +653,8 @@ func listedByDefault(t *testing.T, database *store.Store, id string) bool {
 		t.Fatal(err)
 	}
 	cached := false
-	for _, candidate := range candidates {
+	for candidateIndex := range candidates {
+		candidate := &candidates[candidateIndex]
 		cached = cached || candidate.UUID == id
 	}
 	transcripts, err := database.Transcripts(ctx)
@@ -678,7 +671,8 @@ func listedByDefault(t *testing.T, database *store.Store, id string) bool {
 		Options:     compose.Options{View: compose.DefaultView},
 	})
 	composed := false
-	for _, row := range output.Rows {
+	for rowIndex := range output.Rows {
+		row := &output.Rows[rowIndex]
 		composed = composed || row.ID == id
 	}
 	if cached != composed {
@@ -704,14 +698,13 @@ func listedByDefault(t *testing.T, database *store.Store, id string) bool {
 func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	rootID := "88888888-8888-4888-8888-888888888888"
 	childID := "99999999-9999-4999-8999-999999999999"
 	if err := database.UpsertRollout(ctx, store.Rollout{
 		ID:          rootID,
-		Path:        filepath.Join(jail.codexRoot, "sessions", "rollout-"+rootID+".jsonl"),
+		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+rootID+".jsonl"),
 		Size:        100,
 		MTimeNS:     100,
 		CWD:         "/work/proja",
@@ -725,7 +718,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	// to the root by session_id — exactly what `codex resume` produces.
 	if err := database.UpsertRollout(ctx, store.Rollout{
 		ID:          childID,
-		Path:        filepath.Join(jail.codexRoot, "sessions", "rollout-"+childID+".jsonl"),
+		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+childID+".jsonl"),
 		Size:        200,
 		MTimeNS:     200,
 		CWD:         "/work/proja",
@@ -792,7 +785,8 @@ func listedCodexByDefault(t *testing.T, database *store.Store, rootID string) bo
 		t.Fatal(err)
 	}
 	cached := false
-	for _, candidate := range candidates {
+	for candidateIndex := range candidates {
+		candidate := &candidates[candidateIndex]
 		cached = cached || candidate.LineageRoot == rootID
 	}
 	rollouts, err := database.Rollouts(ctx)
@@ -809,7 +803,8 @@ func listedCodexByDefault(t *testing.T, database *store.Store, rootID string) bo
 		Options:  compose.Options{View: compose.DefaultView},
 	})
 	composed := false
-	for _, row := range output.Rows {
+	for rowIndex := range output.Rows {
+		row := &output.Rows[rowIndex]
 		composed = composed || row.ID == rootID
 	}
 	if cached != composed {
@@ -826,7 +821,6 @@ func listedCodexByDefault(t *testing.T, database *store.Store, rootID string) bo
 func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 	id := "55555555-5555-4555-8555-555555555555"
 	transcriptPath := filepath.Join(jail.claudeRoot, id+".jsonl")
@@ -929,7 +923,6 @@ func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 	id := "77777777-7777-4777-8777-777777777777"
 	transcriptPath := filepath.Join(jail.claudeRoot, id+".jsonl")
@@ -941,16 +934,16 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := database.Shared()
-	if err := state.AddChild(ctx, shared.KindNew, id, "cc-501-1-1", 1); err != nil {
+	if err := state.AddChild(ctx, fleetdb.KindNew, id, "cc-501-1-1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := state.AddChild(ctx, shared.KindPane, id, "cc-502-1-1\t%21", 1); err != nil {
+	if err := state.AddChild(ctx, fleetdb.KindPane, id, "cc-502-1-1\t%21", 1); err != nil {
 		t.Fatal(err)
 	}
 	// A teammate of a DIFFERENT chat must survive this reap.
 	if err := state.AddChild(
 		ctx,
-		shared.KindNew,
+		fleetdb.KindNew,
 		"neighbour",
 		"cc-503-1-1",
 		1,
@@ -992,15 +985,15 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 		t.Fatalf("killed panes = %q", tmux.killedPanes)
 	}
 	// The reaped rows are gone and the neighbour's rows are untouched.
-	if values, _, err := state.Children(ctx, shared.KindNew, id); err != nil ||
+	if values, _, err := state.Children(ctx, fleetdb.KindNew, id); err != nil ||
 		len(values) != 0 {
 		t.Fatalf("children after reap = %v, %v", values, err)
 	}
-	if values, _, err := state.Children(ctx, shared.KindPane, id); err != nil ||
+	if values, _, err := state.Children(ctx, fleetdb.KindPane, id); err != nil ||
 		len(values) != 0 {
 		t.Fatalf("pane children after reap = %v, %v", values, err)
 	}
-	values, _, err := state.Children(ctx, shared.KindNew, "neighbour")
+	values, _, err := state.Children(ctx, fleetdb.KindNew, "neighbour")
 	if err != nil || !reflect.DeepEqual(values, []string{"cc-503-1-1"}) {
 		t.Fatalf("neighbour children = %v, %v", values, err)
 	}
@@ -1009,10 +1002,9 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 func TestFinisherCodexUsesQuit(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 	id := "66666666-6666-4666-8666-666666666666"
-	path := filepath.Join(jail.codexRoot, "sessions", "rollout-"+id+".jsonl")
+	path := filepath.Join(jail.codexHome, "sessions", "rollout-"+id+".jsonl")
 	if err := database.UpsertRollout(ctx, store.Rollout{
 		ID:          id,
 		Path:        path,
@@ -1116,7 +1108,7 @@ type killJail struct {
 	sidDir     string
 	tmuxDir    string
 	claudeRoot string
-	codexRoot  string
+	codexHome  string
 	dbPath     string
 }
 
@@ -1129,7 +1121,7 @@ func newKillJail(t *testing.T) killJail {
 		sidDir:     filepath.Join(root, "sid"),
 		tmuxDir:    filepath.Join(root, "tmux"),
 		claudeRoot: filepath.Join(root, "claude"),
-		codexRoot:  filepath.Join(root, "codex"),
+		codexHome:  filepath.Join(root, "codex"),
 		dbPath:     filepath.Join(root, "fleet.db"),
 	}
 	for _, directory := range []string{
@@ -1137,7 +1129,7 @@ func newKillJail(t *testing.T) killJail {
 		jail.sidDir,
 		jail.tmuxDir,
 		jail.claudeRoot,
-		jail.codexRoot,
+		jail.codexHome,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -1147,7 +1139,7 @@ func newKillJail(t *testing.T) killJail {
 	t.Setenv("PFM_DB", jail.dbPath)
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
-	t.Setenv("PFM_CODEX_ROOT", jail.codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
 	t.Setenv("PFM_TMUX_DIR", jail.tmuxDir)
 	t.Setenv("PFM_HOME", jail.home)
 	return jail
@@ -1159,6 +1151,11 @@ func (jail killJail) open(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
 	return database
 }
 
@@ -1206,7 +1203,11 @@ func writeCodexStateThread(
 	if err != nil {
 		t.Fatalf("create scratch Codex state store: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, string(schema)); err != nil {
 		t.Fatalf("apply Codex state schema: %v", err)
@@ -1271,7 +1272,6 @@ func tmuxKilledAt(t *testing.T, database *store.Store, id string) int64 {
 func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	// Exactly the reported shape: project "?", no transcript row, no file.
@@ -1289,7 +1289,7 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 			PaneID:    paneID,
 			SessionID: agentID,
 		}},
-		Panes: []gather.Pane{{
+		Panes: []gather.ProbePane{{
 			Socket:      socket,
 			SessionName: socket,
 			PaneID:      paneID,
@@ -1358,7 +1358,6 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 func TestKillingAnUnknownIDStillFailsWithoutAnEngine(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
 	ctx := context.Background()
 
 	manager, err := New(database, Dependencies{

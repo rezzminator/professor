@@ -25,21 +25,23 @@ disable = ["MD014", "MD036", "MD040", "MD046", "MD063", "MD072", "MD073"]
 
 # Report, never rewrite. MD018/MD020 read a line-initial `#20` — a wave, issue or
 # PR number — as a heading missing its space and "fix" it into one, which also
-# re-levels every real heading below it (measured: a wave-train doc lost two
+# re-levels every real heading below it (measured: a design doc lost two
 # prose lines that way). MD056/MD075 rewrite a malformed table by DELETING
 # content (measured: an orphaned row lost a cell's word).
 unfixable = ["MD018", "MD020", "MD056", "MD075"]
 
 # Generated mirrors are rebuilt from their Claude sources, never hand-formatted:
-# format the source and recompile (`pfm codex build .`, build-opencode.mjs).
+# format the source and recompile (`pfm codex build .`, `pfm opencode build .`).
 # `releases/` and `CHANGELOG.md` history plus `.professor/` ledgers are records,
-# not prose — and `refresh-scope.sh` parses release.md bullets line-anchored.
+# not prose.
 # A wave train under `docs/dev/trains/` is a per-run append-log whose prose cites
 # waves as `#20` — line-initial, which MD018 reads as a heading missing its space.
 # `testdata/` holds byte-exact conversion oracles. A staged or embedded prompt
-# asset is byte-pinned by the Go suite — `prompts_asset_test.go` asserts the
-# asset equals its `templates/prompts/` twin and `pfm/prompts/embed_test.go`
-# pins each file's SHA-256 — so a format pass turns the suite red, and a
+# asset is byte-pinned by the Go suite — `pfm/harness-prompts/` is the ONE copy
+# of that tree, embedded into the binary, and `harness_prompts_test.go` asserts
+# that each staged engine prompt equals the composition of its three parts
+# while `pfm doctor` hashes a binary's copy against this directory — so a
+# format pass turns the suite red, and a
 # `harness-*.md` is a verbatim capture of another system's prompt that a reformat
 # falsifies outright (measured: MD046 added 8 fences, reflow merged two
 # IMPORTANT lines). A file whose bytes another test asserts is not prose.
@@ -53,8 +55,7 @@ exclude = [
   ".professor",
   "**/testdata/**",
   "docs/dev/trains",
-  "templates/prompts",
-  "pfm/prompts",
+  "pfm/harness-prompts",
   "pfm/internal/installer/assets",
   "**/*.prompt.md",
   "tmp",
@@ -91,7 +92,7 @@ terms = ["Last updated", "Last Updated", "FIXME", "TBD"]
 # Category map — every professor-owned markdown path, and what it is exempt from
 #
 #   prompt  .claude/**, CLAUDE.md, templates/**  — an LLM reads it at runtime
-#   doc     docs/**, pfm/**, engines/**          — an agent greps then reads it
+#   doc     docs/**, pfm/**, workflows/**        — an agent greps then reads it
 #   public  README.md, INSTALL.md               — a person reads it rendered;
 #                                                 README.md exempt from MD033
 #   generated / record                           — in `exclude` above

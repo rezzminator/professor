@@ -19,13 +19,11 @@
   <a href="#install">Install</a> ·
   <a href="#the-discipline-layer-templates">Discipline layer</a> ·
   <a href="#the-fleet-cli-pfm">Fleet CLI</a> ·
-  <a href="#engines-engines">Engines</a> ·
+  <a href="#workflows-workflows">Workflows</a> ·
   <a href="docs/BLUEPRINT.md">Blueprint</a>
 </p>
 
-<p align="center">
-  <img src="docs/img/pfm-fleet.gif" alt="pfm ls: a fleet of Claude Code chats across four projects and two accounts, fuzzy-found, then the Limits dashboard for two Claude and two Codex accounts, then the cosmos sky with a live comms ledger of chats messaging each other" width="900">
-</p>
+<h2 align="center">Professor is a complete, integrated toolbox for everything you want to do — that Anthropic, OpenAI <em>or anyone else</em> will <em>never</em> give you.</h2>
 
 A fleet controller and a discipline layer for **Claude Code, Codex, and OpenCode** — chats that talk to each other, agents that follow the rules, and a harvester that reads what the web won't show a bot.
 
@@ -50,33 +48,17 @@ Every transcript below is real output from this repository, redacted only of nam
 
 ### 1. See the fleet
 
-```text
- pfm  🥇 account 1 · ⚡1h · 12 rows · 38 killed · 64 empty
- tabs   Chats   Stats   Limits    tab/shift+tab
- Chats · fuzzy search and all existing chat controls
-find › type project or name                                                        12/12 visible
-╭─ fleet 12 ───────────────────────────────────────────────────────────────────────────────────────╮
-│╭─ api                                                                                            │
-│› ✦ [ Claude ] Codex OpenCode     🥇                                             0p     0B      0s│
-││ ● PAYMENTS_REFACTOR             ⬢ 🥇 ⇄                                       118p    14M      2m│
-││ ⚙ SCHEMA_MIGRATION              ⚙ agent 🥈                                    20p   6.1M      7h│
-│╭─ webapp                                                                                         │
-││ ● ORCHESTRATOR                  🥇 ⇄ ←here                                    37p   2.7M      1m│
-││ ⚙ DESIGN_PASS                   ⚙ agent 🥇                                    18p   1.9M     58m│
-││ ↻ DEPLOY_PROD                   🥇                                            59p   8.6M      2d│
-│╭─ ops                                                                                            │
-││ ● FLEET_BUILDER                 ⬢ ⇄                                           77p    94M      0s│
-││ ↻ CCC                           🥈                                           452p    32M     54m│
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- ↑↓ move  enter open  esc cancel  type to fuzzy-find
- ⌃X hide  ⌃E 1h  ⌃S account  ⌃O reboot
-```
+<p align="center">
+  <img src="docs/img/cards/pkx.webp" alt="pfm ls: every chat on this machine on one screen — api, webapp and ops projects; live, resumable, agent-run and new rows across Claude, Codex and OpenCode. The picker opens a Claude chat, takes a message, detaches back to the picker, then opens a Codex chat — same screen, different engine" width="900">
+</p>
 
 > `pfm ls`: every AI chat on the machine — Claude Code, Codex (⬢), and OpenCode — across accounts (🥇🥈), grouped by repo, live (●), resumable (↻), or agent-run (⚙). `⇄` marks chats that talk to other chats; `←here` is the one you are sitting in; `✦` opens a new one on any harness. Pick one, attach, or fire it a goal without ever attaching. A chat that scrolled off a closed terminal tab is not gone — it is a resumable transcript, and now somebody can find it.
 
 `tab` once more and the same fleet is drawn as a sky:
 
-![The pfm cosmos tab: the agent fleet drawn as a star map, each project a star and each chat a body orbiting it](docs/img/pfm-cosmos.png)
+<p align="center">
+  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat_inject, the comms ledger scrolls underneath" width="900">
+</p>
 
 > Every project is a star its chats orbit; a spawned chat rises as a moon at its parent's angle, so lineage is visible in the sky itself. When chats talk to each other the sky draws an edge between them, read from a durable comms ledger — an edge is a fact, not a guess. The chronoscope replays the last 24h, and a chat that is dead now still renders as the ghost it was back then.
 
@@ -84,99 +66,62 @@ find › type project or name                                                   
 
 Two panes, two harnesses. You type one line into the Claude chat on the left; the Codex chat on the right receives it as a signed turn and gets to work.
 
-```text
-┌────────────────────────────────────────────────────────────┐        ┌────────────────────────────────────────────────────────────┐
-│  ▐▛███▛█   Claude Code v2.1.270                            │        │ ╭──────────────────────────────────────────╮               │
-│ ▝▜██████▀  Fable 5.1 with low effort · Claude Max          │        │ │ >_ OpenAI Codex (v0.154.0)               │               │
-│   ▝▝ ▝▝    ~/.professor                                    │        │ │ model:       gpt-6-astra xhigh           │               │
-│                                                            │        │ │ directory:   ~/.professor                │               │
-│ ❯ Tell the Codex chat named DEMO_CODEX to run the          │        │ │ permissions: YOLO mode                   │               │
-│   migration test suite and report back when green.         │        │ ╰──────────────────────────────────────────╯               │
-│                                                            │        │ › Run the migration test suite and report back when        │
-│   Called chat_inject                                       │ -----> │   it is green.  — sid 0a98b7fe · to reply:                 │
-│ ⏺ Sent — DEMO_CODEX has the instruction (delivered         │        │   chat_inject DEMO_CLAUDE <message>                        │
-│   live, it's already working) and will report back         │        │                                                            │
-│   here when the migration suite is green.                  │        │ • Explored                                                 │
-│   Verdict: message delivered to DEMO_CODEX — awaiting      │        │   └ Read dev.sh · Search migration (suite|test)            │
-│   its green report in this chat. ☕                        │        │ • The runner has no separate migration target, so          │
-│ ✻ Baked for 9s · done 1:11 AM                              │        │   I'll run the full PFM suite, which includes the          │
-│ ─────────────────────────────────────── DEMO_CLAUDE ─      │        │   migration tests, inside the container fence.             │
-│ ❯                                                          │        │ • Waiting for background terminal (2m 17s)                 │
-│ ────────────────────────────────────────────────────       │        │   └ .claude/scripts/dev.sh iso test pfm                    │
-│  🥈 ✦ Fable 5.1 │ 🔖 DEMO_CLAUDE │ 🔹 low │ 🌿 develop     │        │ › Ask Codex to do anything                                 │
-│  ▰▱▱▱▱ 5h-used:36% │ ▰▱▱▱▱ 7d-used:35% ↻5d3h               │        │   gpt-6-astra xhigh · Working · Context 82% left           │
-└────────────────────────────────────────────────────────────┘        └────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/img/cards/duo.webp" alt="Cross-harness orchestration: one Claude chat dispatches three workers — a Codex reviewer, an OpenCode docs writer, a Claude test runner — with chat_inject; each ACK and VERDICT flies back into the commanding chat, dispatched 3 · received 3" width="900">
+</p>
 
 > The footer on the Codex side is the signature: who spoke (`sid 0a98b7fe`) and the exact command to answer them. A message no sender could be derived for is refused, never delivered anonymously.
 
-`pfm chat inject` is what the Claude chat called — it types a real, signed turn into another chat's pane — under a per-target lock, safe against a busy target (`--force-now`) and shell-hostile payloads (`--file`). `pfm chat ask` waits for the answer, with named exit codes: `0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered`. The same verbs are an MCP server, so an agent can spawn, message, read, and retire other chats across all three harnesses — and `issue_servicedesk` lets it file a bug against its own host tool.
+`pfm chat inject` is what the Claude chat called — it types a real, signed turn into another chat's pane — under a per-target lock, safe against a busy target (`--force-now`) and shell-hostile payloads (`--file`). `pfm chat ask` waits for the answer, with named exit codes: `0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered · 7 answered, but another message reached the chat mid-wait`. The same verbs are the chat family of the `professor` MCP server (`chat_*` tools), so an agent can spawn, message, read, and retire other chats across all three harnesses — and `servicedesk` lets it file a bug against its own host tool.
 
 ### 3. Rules that bite
 
 A subagent tries to `Edit` a file under `.claude/`. The PreToolUse guard answers:
 
 ```text
-DENIED — infra edits route through /pfm: open this session's gate from the repo root …
-Do NOT route around this by disabling the hook or editing infra outside /pfm.
+DENIED — infra edits route through /pcm: open this session's gate from the repo root …
+Do NOT route around this by disabling the hook or editing infra outside /pcm.
 ```
 
-The refusal carries its own unlock steps. That is one of 26 mandatory rules every install ships with: only `gitter` writes git; fix loops cap at three attempts, then `BLOCKED-DEFERRED`; read-only mappers (`tracer`) are separated from judges (`reviewer`); and **every check names what its own broken state reports** — a gate that says "fine" when healthy and when broken is a coincidence detector.
+The refusal carries its own unlock steps. That is one of the mandatory rules every install ships with: only `gitter` writes git; guarded files sit behind `/pcm`; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
 
 ### 4. Read what the web hides from bots
 
 About one in ten of the world's top 10,000 websites now tells AI crawlers to stay out — among news publishers, more than half (HasData AI Crawler Block Index, July 2026). Harvester fetches the way a reader's browser does and climbs a seven-rung ladder — direct → Chrome-fingerprint TLS → reader proxy → extractor → headless-then-headed browser → Wayback → OCR — until it holds real content:
 
-```text
-$ pfm harvest https://www.nytimes.com/          # robots.txt: every AI crawler Disallow: /
-→ 2,930 chars, the live front page
+<p align="center">
+  <img src="docs/img/cards/harv.webp" alt="Harvester: a fetch climbs the ladder on a live stage — every source it touched lit, every step logged with its reason, the result box with the character count and the trace; then the next scenario" width="900">
+</p>
 
-$ pfm harvest https://www.reuters.com/
-→ ERROR: The source is protected by an access challenge. Choose another copy.
-```
-
-The second line is the design: an app shell is never stored as the page, and a block is reported as a block — never as an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `pfm harvest ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. The whole surface is also an MCP server. The browser rung never solves anything interactive.
+A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `pfm harvest ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. The whole surface is also the harvester family of the `professor` MCP server (`harvester_*` tools) — one stdio registration, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`. The browser rung never solves anything interactive.
 
 ### 5. One contract, three runtimes
 
 ```text
+$ pfm codex build .
 $ head -1 AGENTS.md
 <!-- Generated by pfm codex build from CLAUDE.md; do not edit — edit the source, then re-run: pfm codex build -->
 $ pfm codex check .
 CODEX CHECK PASS
 ```
 
-`CLAUDE.md` compiles to `AGENTS.md`; `.claude/**` compiles to `.codex/**` and `.opencode/**`; global agents get `.toml` twins. The Stop hook recompiles the mirrors and a drifted mirror fails the check, so the three harnesses can never disagree about the law. Even the verification engine is one TypeScript source compiled for both the Claude Workflow runtime and the Codex SDK.
+`CLAUDE.md` compiles to `AGENTS.md`; `.claude/**` compiles to `.codex/**` and `.opencode/**`; global agents' `.toml` roles compile straight into `~/.codex/agents/` as regular files — Codex opens a role with `O_NOFOLLOW` and refuses a symlink, so a link there is a role that cannot spawn. Every mirror is generated, never tracked — a fresh clone has none of them until its compiler runs. The Stop hook recompiles the mirrors and a drifted mirror fails the check, so the three harnesses can never disagree about the law. Even the verification engine is one TypeScript source compiled for both the Claude Workflow runtime and the Codex SDK.
 
 ### 6. Reload without losing the conversation
 
-Account 🥇 is at 94% of its weekly limit. You type `/reload --account 2`; the same pane comes back on 🥈 with the whole conversation, and remembers the codeword it was given on the other account.
+Every seat's windows on one tab, confirmed against the provider every two seconds — you see 96% before it becomes 100%:
 
-```text
-┌────────────────────────────────────────────────────────────┐        ┌────────────────────────────────────────────────────────────┐
-│  ▐▛███▛█   Claude Code v2.1.270                            │        │  ▐▛███▛█   Claude Code v2.1.270                            │
-│ ▝▜██████▀  Opus 5 (1M context) · Claude Max                │        │ ▝▜██████▀  Opus 5 · Claude Max                             │
-│   ▝▝ ▝▝    ~/.professor                                    │        │   ▝▝ ▝▝    ~/.professor                                    │
-│                                                            │        │                                                            │
-│ ❯ Remember this codeword for later: BLUE-HERON.            │        │ ❯ Remember this codeword for later: BLUE-HERON.            │
-│ ⏺ BLUE-HERON — held, my friend. ☕                         │        │ ⏺ BLUE-HERON — held, my friend. ☕                         │
-│   Verdict: codeword stored — note the 7-day cap            │        │   Verdict: codeword stored — note the 7-day cap            │
-│   is at 95%, so /reload may be needed.                     │ reload │   is at 95%, so /reload may be needed.                     │
-│ ✻ Baked for 4s · done 1:34 AM                              │ -----> │ ✻ Baked for 4s · done 1:34 AM                              │
-│                                                            │        │ ⏺ UserPromptSubmit operation blocked by hook:              │
-│                                                            │        │   Original prompt: /reload --account 2                     │
-│                                                            │        │ ❯ What was the codeword I gave you? One line.              │
-│                                                            │        │ ⏺ The codeword is BLUE-HERON.                              │
-│                                                            │        │ ✻ Brewed for 12s · done 1:35 AM                            │
-│ ─────────────────────────────────────── RELOAD_DEMO ─      │        │ ─────────────────────────────────────── RELOAD_DEMO ─      │
-│ ❯ /reload --account 2                                      │        │ ❯                                                          │
-│ ────────────────────────────────────────────────────       │        │ ────────────────────────────────────────────────────       │
-│  🥇 ◆ Opus 5 (1M context) │ 🔖 RELOAD_DEMO                 │        │  🥈 ◆ Opus 5 │ 🔖 RELOAD_DEMO                              │
-│  ▱▱▱▱▱ 5h-used:2% │ ▰▰▰▰▱ 7d-used:94% ↻4d6h                │        │  ▰▱▱▱▱ 5h-used:39% │ ▰▱▱▱▱ 7d-used:36% ↻5d3h               │
-└────────────────────────────────────────────────────────────┘        └────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/img/cards/limx.webp" alt="The pfm Limits tab: three Claude seats and a Codex home, each with its 5-hour and 7-day usage bars, percentage used and time to reset, provider-confirmed seconds ago" width="900">
+</p>
 
-> "Blocked by hook" is the design: the `/reload` hook takes the prompt before the model sees it, so the reboot never spends a turn.
+Account 🥇 is at 96% of its 5-hour window. The usage hook warns the chat mid-task; it finishes the step in flight and moves the conversation to 🥈 itself — same pane, same history:
+
+<p align="center">
+  <img src="docs/img/cards/reloadx.webp" alt="Reload without losing the conversation: the usage-limit hook fires at 96% on account 1; the chat finishes step 3, calls pfm chat reload --account 2 --then, the pane reboots in place on account 2 with every earlier turn still there, and resumes at step 4" width="900">
+</p>
+
+> The red banner is the usage hook — it reaches the model before the limit does. `/reload` typed by a human goes through a hook too, before the model sees it, so the reboot never spends a turn.
 
 The running chat reboots in place — same pane, same history, new account, model, or effort. `--then "prompt"` hands the baton unattended; `/reload` typed by a human runs through a hook without spending a model turn; `/handoff --branch` carries the full context into a detached successor.
 
@@ -201,7 +146,7 @@ cat "$HOME/.professor/docs/SETUP.md"      # the install interview — start here
 The checkout is pinned to the latest semantic version tag. A maintainer checkout also runs `git config core.hooksPath .githooks` so `pfm doctor` reports `pre-push gate=armed`. Upgrading? Follow the [update workflow](INSTALL.md#updating): `pfm update check` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED` with the exact diff, and `pin` / `ignore` / `drop` record your decision — pfm never rewrites a project file after init.
 
 > [!WARNING]
-> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. Both MCP servers ship disabled. The trade-off is deliberate and documented, not hidden.
+> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `professor` MCP server's two families ship disabled — `mcp.servers.chat.enabled` for chat, `harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
 
 ---
 
@@ -209,17 +154,17 @@ The checkout is pinned to the latest semantic version tag. A maintainer checkout
 
 Clone it into a repo and you get the complete agent, command, hook, script, and `CLAUDE.md` template set. `docs/SETUP.md` walks an interview that substitutes your project's names into every placeholder; `docs/PLACEHOLDERS.md` is the substitution law. Every template is the live source file verbatim — never a skeleton.
 
-The single idea underneath it is the **honest-looking absence** — an instrument that answers "nothing found" both when nothing is there and when the instrument itself is broken. The wave walker says it out loud:
+The single idea underneath it is the **honest-looking absence** — an instrument that answers "nothing found" both when nothing is there and when the instrument itself is broken. The rules say it out loud:
 
-> SCOUT FAILURE… An empty enumeration is never a verdict.
+> An empty enumeration is never a verdict.
 
-- **One agent writes git.** `gitter` runs six named phases (SETUP, COMMIT, MERGE, PUSH, PULL, TAG). No other agent commits.
-- **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pfm` plus a session that has read the quality-prompt contract.
+- **One agent writes git.** `gitter` is the only agent that commits; every other agent is read-only.
+- **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pcm` plus a session that has read the quality-prompt contract.
 - **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
-- **The wave pipeline.** refine → scheduler → orchestrator → builder → walker: the walker is a 19-seat verification engine (scout, thread walkers, slice sensor, gate sweep, security auditor, invariant hunter, anomaly judge, coverage critic, second opinion, final judge) whose failure states are named.
-- **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED` — never silence.
+- **The flight pipeline.** `/flights:spec` turns a batch of work into one self-contained task file per executor; one of the `/flights:orchestrate-*` commands runs a fresh executor per file and verifies every return against the diff; one `flights-lander` per project runs the checks, one review of the whole diff and adversarial tests, then `gitter` commits. `/flights:audit` re-reads the whole flight from its own artifacts, never from what an agent said it did.
+- **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
 
-Optional roles ship for teams that want them — `/officer`, `/km`, `/pm`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**
+Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**
 
 ---
 
@@ -229,23 +174,22 @@ One Go binary with embedded installer assets. Beyond the six moments above:
 
 - **Limits, honestly.** The `Limits` tab shows every provider window on the box; a provider it cannot reach never renders as a 0% bar — the panel says `no usage source registered` instead.
 - **Crash-safety by construction.** `reap`, `archive`, `heal`, and `install` default to a dry run, and the dry run **is** the apply's preview. `heal` backs up the store before it deletes a row.
-- **Headless exec.** `pfm headless exec` is one scriptable interface for Claude and Codex: prompt, system prompt, schema, timeout in; normalized result and native streaming out. See [HEADLESS.md](pfm/HEADLESS.md).
-- **Housekeeping.** `doctor` runs the dependency registry and fleet DB checks; `tokens` attributes spend per agent; `context-meter` prices every prompt surface; `statusline` renders identity, session and spend; `codex build|check` is the single writer of the Codex mirror. `pfm dream` keeps its repository-memory commands, with automatic injection removed.
-- **Editor.** `pfm install --vscode` installs the Professor VS Code extension and makes the PFM terminal the default, so each new integrated terminal opens at the fleet picker.
+- **Headless exec.** `pfm headless exec` is one scriptable interface for Claude and OpenCode; `--engine codex` also routes to OpenCode. Prompt, system prompt, schema, and timeout go in; normalized results or native streams come out. See [headless README](pfm/internal/headless/README.md).
+- **Housekeeping.** `doctor` runs the dependency registry and fleet DB checks; `tokens` attributes spend per agent; `context-meter` prices every prompt surface; `statusline` renders identity, session and spend; `codex build|check` is the single writer of the Codex mirror.
+- **Editor.** `pfm install --vscode` installs the Professor VS Code extension — visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown — and makes the `PFM` settings profile (its own icon and colour) the default, so each new integrated terminal opens at the fleet picker. To open a Professor terminal, press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`.
 
 <details>
 <summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.24.13+ for source builds</summary>
 
-From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.24.13 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [HARVESTER.md](pfm/HARVESTER.md).
+From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.24.13 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [harvest README](pfm/internal/harvest/README.md).
 
 </details>
 
 ---
 
-## Engines (`engines/`)
+## Workflows (`workflows/`)
 
-- **deep-rr** (`engines/deep-rr/`) — background research that returns a cited report: a scout swarm, a brainer steering the crawl, quote-pinned claims audited mechanically, lineage clustering so corroboration counts independent sources. Compiled for the Claude Workflow runtime. Start at [engines/deep-rr/README.md](engines/deep-rr/README.md).
-- **wave-walker** (`engines/wave-walker/engine/`) — post-merge wiring verification: a scout, parallel walkers, a rule engine and a final judge. One TypeScript source compiled by `cross-workflow` for both the Claude Workflow runtime and the Codex SDK. Node ≥ 22.13. Design: [engines/wave-walker/engine/design.md](engines/wave-walker/engine/design.md).
+- **deep-rr** (`workflows/deep-rr/`) — background research that returns a cited report: a scout swarm, a brainer steering the crawl, quote-pinned claims audited mechanically, lineage clustering so corroboration counts independent sources. Compiled for the Claude Workflow runtime. Start at [workflows/deep-rr/README.md](workflows/deep-rr/README.md).
 
 ---
 

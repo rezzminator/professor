@@ -84,3 +84,26 @@ func TestWriteFailureReportsAScratchItCouldNotRemove(t *testing.T) {
 		t.Fatalf("Write = %v; want the replace failure joined with the unremoved scratch path", err)
 	}
 }
+
+// TestWriteFromStreamsUnderTheLimitAndRefusesPastIt: a stream within the limit
+// is published whole; one byte past it is ErrTooLarge, the old file stays and
+// no scratch remains.
+func TestWriteFromStreamsUnderTheLimitAndRefusesPastIt(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "body.bin")
+	written, err := WriteFrom(path, strings.NewReader("0123456789"), 0o600, 10)
+	if err != nil || written != 10 {
+		t.Fatalf("WriteFrom at the limit = (%d, %v), want (10, nil)", written, err)
+	}
+	if _, err := WriteFrom(path, strings.NewReader("0123456789A"), 0o600, 10); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("WriteFrom one byte past the limit error = %v, want ErrTooLarge", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "0123456789" {
+		t.Fatalf("the refused stream replaced the old file: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("scratch left behind after a refused stream: %v, %v", entries, err)
+	}
+}

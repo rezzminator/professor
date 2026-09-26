@@ -1,0 +1,194 @@
+package harvestmcp
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	goRuntime "runtime"
+	"strings"
+	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+)
+
+// fakeBrowserWorker is an in-memory stand-in for the Patchright worker: the
+// stdio protocol and nothing else. A real Python process is never started and
+// no Chrome is ever launched, so these tests say nothing about Chrome's own
+// flags — they pin what GO sends.
+type fakeBrowserWorker struct {
+	runner   *deps.FakeRunner
+	python   string
+	script   string
+	requests chan map[string]any
+}
+
+// newFakeBrowserWorker provisions a browser environment fixture (interpreter,
+// script and a matching environment.json, so EnsureBrowser reuses it instead
+// of provisioning) and wires a fake worker that records each request line and
+// answers it. Both browser tests in this package share it rather than each
+// carrying a copy of the 40-line fixture.
+func newFakeBrowserWorker(t *testing.T) (pythonConverter, *fakeBrowserWorker) {
+	t.Helper()
+	root := t.TempDir()
+	platform := harvestpy.Platform{GOOS: goRuntime.GOOS, GOARCH: goRuntime.GOARCH}
+	current := harvestpy.BrowserRuntimeRoot(root, platform)
+	python := filepath.Join(current, "project", ".venv", "bin", "python")
+	script := filepath.Join(current, "project", "browser.py")
+	if err := os.MkdirAll(filepath.Dir(python), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{python, script} {
+		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record := harvestpy.EnvironmentDigest{
+		Schema:       1,
+		SourceSHA256: sha256Hex(harvestpy.BrowserWorkerSource()),
+		LockSHA256:   sha256Hex(harvestpy.BrowserLockMetadata()),
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(current, "environment.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	runner := &deps.FakeRunner{}
+	runner.ScriptInteractive([]string{python}, deps.InteractiveScript{
+		Pid:    9101,
+		Stdin:  stdinWriter,
+		Stdout: stdoutReader,
+	})
+	worker := &fakeBrowserWorker{runner: runner, python: python, script: script, requests: make(chan map[string]any, 4)}
+	go func() {
+		defer func() { _ = stdoutWriter.Close() }()
+		line, readErr := bufio.NewReader(stdinReader).ReadString('\n')
+		if readErr != nil {
+			return
+		}
+		request := map[string]any{}
+		if unmarshalErr := json.Unmarshal([]byte(line), &request); unmarshalErr != nil {
+			// A request the fake cannot parse must not read as "no request":
+			// record the failure so the assertion names it.
+			request = map[string]any{"decode_error": unmarshalErr.Error(), "raw_len": len(line)}
+		}
+		worker.requests <- request
+		_, _ = fmt.Fprintln(
+			stdoutWriter,
+			`{"ok":true,"html":"fake browser result","status":200,"final_url":"https://93.184.216.34/landed"}`,
+		)
+	}()
+	return pythonConverter{browserRoot: root, runner: runner}, worker
+}
+
+// request returns the one request the fake worker received, failing the test
+// when none arrived — "the worker was never asked" is a different fact from
+// "the worker was asked for the wrong thing", and only one of them is a
+// missing proxy.
+func (w *fakeBrowserWorker) request(t *testing.T) map[string]any {
+	t.Helper()
+	select {
+	case request := <-w.requests:
+		return request
+	default:
+		t.Fatal("the browser worker received no request at all")
+		return nil
+	}
+}
+
+// TestFetchBrowserSendsAGoOwnedPinnedProxy is L2-F7's Go half: browser.py
+// refuses to launch Chrome without a proxy (PROXY_REQUIRED), because only a
+// proxy Go owns makes the address Go validated the address Chrome connects
+// to. Before this fix the Go side sent an empty proxy and the rung was dead.
+func TestFetchBrowserSendsAGoOwnedPinnedProxy(t *testing.T) {
+	converter, worker := newFakeBrowserWorker(t)
+	html, status, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7")
+	if err != nil {
+		t.Fatalf("FetchBrowser() error = %v", err)
+	}
+	if html != "fake browser result" || status != 200 {
+		t.Fatalf("FetchBrowser() = (%q, %d), want the fake response", html, status)
+	}
+	request := worker.request(t)
+	proxy, _ := request["proxy"].(string)
+	if proxy == "" {
+		t.Fatalf("browser fetch carried no proxy: %v — browser.py refuses to launch without one", request)
+	}
+	if !strings.HasPrefix(proxy, "http://127.0.0.1:") {
+		t.Fatalf("browser proxy = %q, want the Go-owned loopback proxy", proxy)
+	}
+}
+
+// TestFetchBrowserKeepsTheOperatorsOwnProxy is the other arm: when the
+// operator configured fetch.proxyURL, every other rung in this harvester
+// already leaves the dial to that proxy (harvest.Options.ProxyURL), and the
+// browser rung must not quietly substitute its own.
+func TestFetchBrowserKeepsTheOperatorsOwnProxy(t *testing.T) {
+	converter, worker := newFakeBrowserWorker(t)
+	converter.proxyURL = "http://proxy.example.test:8080"
+	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7"); err != nil {
+		t.Fatalf("FetchBrowser() error = %v", err)
+	}
+	request := worker.request(t)
+	if proxy, _ := request["proxy"].(string); proxy != converter.proxyURL {
+		t.Fatalf("browser proxy = %q, want the configured %q", proxy, converter.proxyURL)
+	}
+}
+
+// TestFetchBrowserSendsTheProvenanceReferer: the browser rung arrives the way
+// every HTTP rung of the ladder does — from a search result. A Referer-less
+// navigation meets the forum wall the HTTP rungs already pass.
+func TestFetchBrowserSendsTheProvenanceReferer(t *testing.T) {
+	converter, worker := newFakeBrowserWorker(t)
+	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7"); err != nil {
+		t.Fatalf("FetchBrowser() error = %v", err)
+	}
+	request := worker.request(t)
+	if referer, _ := request["referer"].(string); referer != harvest.ProvenanceReferer {
+		t.Fatalf("browser fetch referer = %q, want %q: %v", referer, harvest.ProvenanceReferer, request)
+	}
+}
+
+// TestFetchBrowserNeverAsksAnUnregisteredPageToPress: pressing a load-more
+// button can fire requests or navigation, so a page no registered site owns is
+// rendered read-only — its request carries no press_loaders true.
+func TestFetchBrowserNeverAsksAnUnregisteredPageToPress(t *testing.T) {
+	converter, worker := newFakeBrowserWorker(t)
+	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7"); err != nil {
+		t.Fatalf("FetchBrowser() error = %v", err)
+	}
+	request := worker.request(t)
+	if press, present := request["press_loaders"]; present && press != false {
+		t.Fatalf("an unregistered page was asked to press load-more buttons: %v", request)
+	}
+}
+
+// TestFetchBrowserCarriesTheMarkerTokenAndTheLandingAddress: the worker stamps
+// an incomplete render with the harvester's own token, so the request must
+// carry it (a page's own meta of the marker's name never flags it partial),
+// and the address the render landed on must come back to the ladder, which
+// never lets a render at another address replace a kept flagged page.
+func TestFetchBrowserCarriesTheMarkerTokenAndTheLandingAddress(t *testing.T) {
+	converter, worker := newFakeBrowserWorker(t)
+	_, _, finalURL, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7")
+	if err != nil {
+		t.Fatalf("FetchBrowser() error = %v", err)
+	}
+	if finalURL != "https://93.184.216.34/landed" {
+		t.Fatalf("FetchBrowser() final URL = %q, want the address the worker reported", finalURL)
+	}
+	request := worker.request(t)
+	if token, _ := request["marker_token"].(string); token == "" || token != harvest.BrowserMarkerToken() {
+		t.Fatalf("browser fetch marker_token = %q, want the harvester's own token: %v", token, request)
+	}
+}

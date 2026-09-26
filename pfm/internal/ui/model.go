@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -13,56 +14,38 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/sahilm/fuzzy"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
-	"hostops/pfm/internal/sky"
-	"hostops/pfm/internal/spawn"
-	pfmstats "hostops/pfm/internal/stats"
-	"hostops/pfm/internal/theme"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/sky"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 const (
 	defaultWidth  = 120
 	defaultHeight = 28
-	// statsRefreshInterval is the Limits/Stats tab sample cadence while
-	// somebody is watching. The Stats tab (resourcesOnly — live CPU/memory
-	// bars) keeps this flat; the Limits tab decays via statsCadence instead
-	// (statsRefreshGrowth/statsRefreshMaxInterval), because this was the
-	// picker's last periodic loop without an idle backoff: an untouched
-	// Limits tab ticked every 2s forever, which is what kept re-arming a
-	// Codex provider sampler that execs `codex app-server` per fetch (2026-
-	// 09-08 measurement, devbox: one thread at 70%, `codex app-server`
-	// spawned every ~10s — see stats.CodexLiveLimitsTTL).
+	keyDown       = "down"
+	keyCtrlP      = "ctrl+p"
+	keyCtrlN      = "ctrl+n"
+	// statsRefreshInterval is the Limits/Stats cadence while watched. Stats
+	// (resourcesOnly — live CPU/memory bars) stays flat; Limits decays via
+	// statsCadence because its former 2s loop kept re-arming the Codex provider
+	// sampler (`codex app-server`; see stats.CodexLiveLimitsTTL).
 	statsRefreshInterval = 2 * time.Second
-	// statsRefreshGrowth/statsRefreshMaxInterval are the Limits tab's
-	// tickCadence arithmetic — the same law as the sky tick (see
-	// skyTickGrowth above), just gentler: 2s stretching to 30s over a
-	// leisurely climb rather than parking outright, because a Limits sample
-	// remains cheap to at least glance at (SampleLive always returns the
-	// last-good cached card immediately; it never blocks on the network).
-	statsRefreshGrowth      = 1.35
+	// statsRefreshMaxInterval caps Limits' tickCadence backoff at 30s rather
+	// than parking; SampleLive returns its last-good card without blocking.
 	statsRefreshMaxInterval = 30 * time.Second
 	cosmosRefreshInterval   = 2 * time.Second
 	clockRefreshInterval    = 5 * time.Second
-	// skyTickBaseInterval is the ambient sky/cosmos header widget's cadence
-	// while somebody is watching — ~8fps, fast enough that comets, wind, and
-	// twinkle read as motion. Unlike the fleet scan and the Stats/Cosmos tab
-	// samplers (both already gated off the moment their tab loses focus),
-	// this tick used to run unconditionally for the picker's entire life,
-	// tab or no tab, idle or not — an abandoned `pfm ls` (VS Code's
-	// tab-revival storm, 2026-09-03) rendered a full frame eight times a
-	// second for as long as the pane stayed open.
+	// skyTickBaseInterval is the watched ambient sky/cosmos cadence: ~8fps,
+	// enough for motion. Unlike tab-gated samplers, this tick once rendered
+	// for the picker's entire life, even when idle or on another tab.
 	//
-	// skyTickGrowth decays it via the same tickCadence arithmetic that backs
-	// off the fleet scan (see activity.go), but steeper: at 8fps a gentle
-	// 1.1x ramp still takes minutes to matter, so skyTickParkThreshold marks
-	// the point — reached within a few seconds of continuous idle — where
-	// the loop stops rescheduling itself entirely rather than merely ticking
-	// slower forever. A keystroke (see wakeSky) restarts it instantly rather
-	// than waiting for a stale, already-scheduled tick to fire.
+	// tickCadence backs it off steeply; at skyTickParkThreshold the loop stops
+	// rescheduling entirely. wakeSky restarts it immediately on input.
 	skyTickBaseInterval  = 125 * time.Millisecond
-	skyTickGrowth        = 1.35
 	skyTickParkThreshold = 1 * time.Second
 )
 
@@ -127,8 +110,8 @@ type Model struct {
 	codexPrimary         int
 	initialCodexPrimary  int
 	codexAccountIDs      []int
-	opencodePrimary      int
-	opencodeAccountIDs   []int
+	openCodePrimary      int
+	openCodeAccountIDs   []int
 	cache1H              bool
 	tab                  Tab
 	statsSubtab          StatsSubtab
@@ -147,7 +130,7 @@ type Model struct {
 	statsError           string
 	cosmos               compose.CosmosGraph
 	cosmosSampler        CosmosSampler
-	cosmosEvents         []shared.CommsEvent
+	cosmosEvents         []fleetdb.CommsEvent
 	cosmosSeats          map[string]*cosmosSeat
 	cosmosNowNS          int64
 	cosmosLoading        bool
@@ -170,7 +153,7 @@ type Model struct {
 	cosmosPast      *compose.CosmosGraph
 	cosmosViewNS    int64
 	cosmosPlaying   bool
-	cosmosTimeline  []shared.CommsEvent
+	cosmosTimeline  []fleetdb.CommsEvent
 	cosmosPastCount int
 	cosmosPastCutNS int64
 	// cosmosSelected is the node key under the navigator's reticle ("" for
@@ -243,8 +226,8 @@ func NewModel(snapshot Snapshot) Model {
 		codexPrimary:        validAccount(snapshot.CodexPrimaryAccount, snapshot.CodexAccountIDs),
 		initialCodexPrimary: validAccount(snapshot.CodexPrimaryAccount, snapshot.CodexAccountIDs),
 		codexAccountIDs:     normalizedAccountIDs(snapshot.CodexAccountIDs),
-		opencodePrimary:     validAccount(snapshot.OpencodePrimaryAccount, snapshot.OpencodeAccountIDs),
-		opencodeAccountIDs:  normalizedAccountIDs(snapshot.OpencodeAccountIDs),
+		openCodePrimary:     validAccount(snapshot.OpenCodePrimaryAccount, snapshot.OpenCodeAccountIDs),
+		openCodeAccountIDs:  normalizedAccountIDs(snapshot.OpenCodeAccountIDs),
 		cache1H:             snapshot.Cache1H,
 		query:               input,
 		initialKilled:       make(map[string]bool),
@@ -261,15 +244,28 @@ func NewModel(snapshot Snapshot) Model {
 		skyEnabled:          !snapshot.NoSky,
 		cosmosSafe:          snapshot.CosmosSafe,
 		activity:            snapshot.Activity,
-		skyCadence:          newTickCadence(snapshot.Activity, skyTickBaseInterval, skyTickGrowth, skyTickParkThreshold),
-		statsCadence:        newTickCadence(snapshot.Activity, statsRefreshInterval, statsRefreshGrowth, statsRefreshMaxInterval),
-		mergeNewChat:        snapshot.MergeNewChat,
-		newChatEngine:       defaultNewChatEngine(snapshot.AccountIDs, snapshot.CodexAccountIDs, snapshot.OpencodeAccountIDs),
+		skyCadence: newTickCadence(
+			snapshot.Activity,
+			skyTickBaseInterval,
+			skyTickParkThreshold,
+		),
+		statsCadence: newTickCadence(
+			snapshot.Activity,
+			statsRefreshInterval,
+			statsRefreshMaxInterval,
+		),
+		mergeNewChat: snapshot.MergeNewChat,
+		newChatEngine: defaultNewChatEngine(
+			snapshot.AccountIDs,
+			snapshot.CodexAccountIDs,
+			snapshot.OpenCodeAccountIDs,
+		),
 	}
 	if model.samplingContext == nil {
 		model.samplingContext = context.Background()
 	}
-	for _, row := range model.rows {
+	for index := range model.rows {
+		row := &model.rows[index]
 		if row.ID != "" {
 			model.initialKilled[row.ID] = row.Killed
 		}
@@ -280,17 +276,20 @@ func NewModel(snapshot Snapshot) Model {
 	return model
 }
 
-var configuredAccountEmojis map[int]string
-var configuredCodexAccountEmojis map[int]string
+var (
+	configuredAccountEmojis      map[int]string
+	configuredCodexAccountEmojis map[int]string
+)
 
-func defaultNewChatEngine(claude, codex, opencode []int) pfmengine.ID {
-	if len(normalizedAccountIDs(claude)) != 0 || (len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(opencode)) == 0) {
+func defaultNewChatEngine(claude, codex, openCode []int) pfmengine.ID {
+	if len(normalizedAccountIDs(claude)) != 0 ||
+		(len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(openCode)) == 0) {
 		return pfmengine.Claude
 	}
 	if len(normalizedAccountIDs(codex)) != 0 {
 		return pfmengine.Codex
 	}
-	return pfmengine.Opencode
+	return pfmengine.OpenCode
 }
 
 func copyEmojis(values map[int]string) map[int]string {
@@ -388,7 +387,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !isStatsSamplingTab(model.tab) || message.generation != model.statsGeneration {
 			return model, nil
 		}
-		return model, model.startStatsSample()
+		command := model.startStatsSample()
+		return model, command
 	case cosmosSampleMsg:
 		if model.tab != TabCosmos || message.generation != model.statsGeneration {
 			return model, nil
@@ -411,7 +411,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if model.tab != TabCosmos || message.generation != model.statsGeneration {
 			return model, nil
 		}
-		return model, model.startCosmosSample()
+		command := model.startCosmosSample()
+		return model, command
 	case cosmosTickMsg:
 		if model.tab != TabCosmos || !model.skyEnabled || message.generation != model.cosmosTickGeneration {
 			return model, nil
@@ -442,7 +443,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		model.activity.Stamp(time.Now())
 		model.updateQuery(model.query.Value() + message.Content)
-		return model, model.wakeSky()
+		command := model.wakeSky()
+		return model, command
 	case tea.KeyMsg:
 		model.activity.Stamp(time.Now())
 		wake := model.wakeSky()
@@ -498,7 +500,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// so tmux swallowed the keystroke before the picker ever saw it. Any
 	// replacement must stay clear of the tmux prefix.
 	case "ctrl+o":
-		if row, ok := model.selectedRow(); ok && isLive(row.Kind) {
+		if row, ok := model.selectedRow(); ok && row.Kind.IsLiveSeat() {
 			model.outcome = OutcomeReboot
 			model.outcomeRow = row
 			return model, tea.Quit
@@ -512,7 +514,10 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				model.outcomeEngine = model.newChatEngine
 				return model, tea.Quit
 			}
-			if model.mergeNewChat && isNewChatKind(row.Kind) {
+			if row.Kind == compose.ProfessorUpdateFailed {
+				return model, nil // notice only, no chat to open — see professor_update_failed_row.go
+			}
+			if model.mergeNewChat && isNewChatActionKind(row.Kind) {
 				switch model.newChatEngine {
 				case pfmengine.Codex:
 					row.Kind = compose.NewCodex
@@ -520,11 +525,13 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				case pfmengine.Claude:
 					row.Kind = compose.NewClaude
 					row.Name = "New " + pfmengine.MustLookup(pfmengine.Claude).Short + " chat"
-				case pfmengine.Opencode:
-					row.Kind = compose.NewOpencode
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.Opencode).Short + " chat"
+				case pfmengine.OpenCode:
+					row.Kind = compose.NewOpenCode
+					row.Name = "New " + pfmengine.MustLookup(pfmengine.OpenCode).Short + " chat"
 				default:
-					model.killStatus = "new chat is not available for " + pfmengine.MustLookup(model.newChatEngine).Short
+					model.killStatus = "new chat is not available for " + pfmengine.MustLookup(
+						model.newChatEngine,
+					).Short
 					return model, nil
 				}
 				row.Account = model.accountForKind(row.Kind)
@@ -534,7 +541,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			switch model.actionIndex {
 			case 1:
-				if isLive(row.Kind) {
+				if row.Kind.IsLiveSeat() {
 					model.outcome = OutcomeReboot
 					model.outcomeRow = row
 					return model, tea.Quit
@@ -549,14 +556,14 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				switch {
 				case row.Kind == compose.LiveSplit:
 					model.killStatus = "deactive refused — split live window; deactivate its chats individually"
-				case isLive(row.Kind) && row.Socket != "":
+				case row.Kind.IsLiveSeat() && row.Socket != "":
 					model.deactivate(row)
 				default:
 					model.killStatus = "deactive refused — " + row.Name + " is not running"
 				}
 				return model, nil
 			default:
-				if isNewChatKind(row.Kind) {
+				if isNewChatActionKind(row.Kind) {
 					row.Account = model.accountForKind(row.Kind)
 				}
 				model.outcome = OutcomeSelected
@@ -565,13 +572,13 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return model, nil
-	case "up", "ctrl+p":
+	case "up", keyCtrlP:
 		if count := len(model.filtered); count > 0 {
 			model.cursor = (model.cursor - 1 + count) % count
 		}
 		model.actionIndex = 0
 		return model, nil
-	case "down", "ctrl+n":
+	case keyDown, keyCtrlN:
 		if count := len(model.filtered); count > 0 {
 			model.cursor = (model.cursor + 1) % count
 		}
@@ -582,7 +589,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		model.actionIndex = 0
 		return model, nil
 	case "pgdown":
-		model.cursor = minInt(
+		model.cursor = min(
 			maxInt(0, len(model.filtered)-1),
 			model.cursor+model.pageRows(),
 		)
@@ -618,7 +625,9 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (model Model) navigateHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if model.tab == TabStats && model.statsFocus == StatsFocusSubtab {
-		model.statsSubtab = StatsSubtab((int(model.statsSubtab) + int(statsSubtabCount) + direction) % int(statsSubtabCount))
+		model.statsSubtab = StatsSubtab(
+			(int(model.statsSubtab) + int(statsSubtabCount) + direction) % int(statsSubtabCount),
+		)
 		return model, nil
 	}
 	if model.tab == TabStats && model.statsFocus == StatsFocusContent {
@@ -629,7 +638,8 @@ func (model Model) navigateHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if model.tab == TabStats {
 		model.statsFocus = StatsFocusSubtab
 	}
-	return model, model.samplingTabTransition(previous)
+	command := model.samplingTabTransition(previous)
+	return model, command
 }
 
 func (model Model) switchTab(direction int) (tea.Model, tea.Cmd) {
@@ -638,7 +648,8 @@ func (model Model) switchTab(direction int) (tea.Model, tea.Cmd) {
 	if model.tab == TabStats {
 		model.statsFocus = StatsFocusSubtab
 	}
-	return model, model.samplingTabTransition(previous)
+	command := model.samplingTabTransition(previous)
+	return model, command
 }
 
 // samplingTabTransition owns cancellation-by-generation for the live tabs.
@@ -714,7 +725,7 @@ func batchCommands(commands ...tea.Cmd) tea.Cmd {
 
 func (model Model) navigateChatHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if row, ok := model.selectedRow(); ok && model.mergeNewChat &&
-		(isNewChatKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
+		(isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
 		model.newChatEngine = adjacentID(model.newChatEngine, direction, model.newChatEngines())
 		return model, nil
 	}
@@ -758,14 +769,15 @@ func (model Model) newChatEngines() []pfmengine.ID {
 		}
 		ids = append(ids, id)
 	}
-	for _, row := range model.rows {
+	for index := range model.rows {
+		row := &model.rows[index]
 		switch row.Kind {
 		case compose.NewClaude:
 			appendUnique(pfmengine.Claude)
 		case compose.NewCodex:
 			appendUnique(pfmengine.Codex)
-		case compose.NewOpencode:
-			appendUnique(pfmengine.Opencode)
+		case compose.NewOpenCode:
+			appendUnique(pfmengine.OpenCode)
 		}
 	}
 	for _, id := range spawn.RegisteredLaunchers() {
@@ -796,15 +808,15 @@ func (model *Model) cycleSelectedAccount() {
 		return
 	}
 	engine := compose.EngineForKind(row.Kind)
-	if model.mergeNewChat && isNewChatKind(row.Kind) {
+	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
 		engine = model.newChatEngine
 	}
 	if engine == pfmengine.Codex {
 		model.codexPrimary = nextAccount(model.codexPrimary, model.codexAccountIDs)
 		return
 	}
-	if engine == pfmengine.Opencode {
-		model.opencodePrimary = nextAccount(model.opencodePrimary, model.opencodeAccountIDs)
+	if engine == pfmengine.OpenCode {
+		model.openCodePrimary = nextAccount(model.openCodePrimary, model.openCodeAccountIDs)
 		return
 	}
 	model.primary = nextAccount(model.primary, model.accountIDs)
@@ -828,29 +840,31 @@ func (model Model) accountForKind(kind compose.Kind) int {
 
 func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "down", "ctrl+n":
+	case keyDown, keyCtrlN:
 		switch model.statsFocus {
 		case StatsFocusTop:
 			model.statsFocus = StatsFocusSubtab
 		case StatsFocusSubtab:
 			model.statsFocus = StatsFocusContent
 		case StatsFocusContent:
-			if model.statsSubtab == StatsChats && model.statsCursor+1 < len(model.stats.Chats) {
+			switch {
+			case model.statsSubtab == StatsChats && model.statsCursor+1 < len(model.stats.Chats):
 				model.statsCursor++
-			} else if model.statsSubtab == StatsDocker && model.statsDockerCursor+1 < len(model.stats.Docker) {
+			case model.statsSubtab == StatsDocker && model.statsDockerCursor+1 < len(model.stats.Docker):
 				model.statsDockerCursor++
 			}
 		}
-	case "up", "ctrl+p":
+	case "up", keyCtrlP:
 		switch model.statsFocus {
 		case StatsFocusSubtab:
 			model.statsFocus = StatsFocusTop
 		case StatsFocusContent:
-			if model.statsSubtab == StatsChats && model.statsCursor > 0 {
+			switch {
+			case model.statsSubtab == StatsChats && model.statsCursor > 0:
 				model.statsCursor--
-			} else if model.statsSubtab == StatsDocker && model.statsDockerCursor > 0 {
+			case model.statsSubtab == StatsDocker && model.statsDockerCursor > 0:
 				model.statsDockerCursor--
-			} else {
+			default:
 				model.statsFocus = StatsFocusSubtab
 			}
 		}
@@ -868,12 +882,12 @@ func (model Model) updateLimitsKey(key string) (tea.Model, tea.Cmd) {
 	innerWidth, innerHeight := model.limitViewportDimensions()
 	maximum := maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight)
 	switch key {
-	case "down", "ctrl+n":
-		model.limitsOffset = minInt(maximum, model.limitsOffset+1)
-	case "up", "ctrl+p":
+	case keyDown, keyCtrlN:
+		model.limitsOffset = min(maximum, model.limitsOffset+1)
+	case "up", keyCtrlP:
 		model.limitsOffset = maxInt(0, model.limitsOffset-1)
 	case "pgdown":
-		model.limitsOffset = minInt(maximum, model.limitsOffset+innerHeight)
+		model.limitsOffset = min(maximum, model.limitsOffset+innerHeight)
 	case "pgup":
 		model.limitsOffset = maxInt(0, model.limitsOffset-innerHeight)
 	case "home":
@@ -939,13 +953,14 @@ func (model *Model) wakeSky() tea.Cmd {
 		return nil
 	}
 	model.skyParked = false
-	model.skyCadence = newTickCadence(model.activity, skyTickBaseInterval, skyTickGrowth, skyTickParkThreshold)
+	model.skyCadence = newTickCadence(model.activity, skyTickBaseInterval, skyTickParkThreshold)
 	return skyTickCmd(skyTickBaseInterval)
 }
 
-func liveSockets(rows []compose.Row) map[string]bool {
+func trackedChatSockets(rows []compose.Row) map[string]bool {
 	sockets := make(map[string]bool)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.Socket != "" && isNameGroupRow(row.Kind) {
 			sockets[row.Socket] = true
 		}
@@ -955,10 +970,13 @@ func liveSockets(rows []compose.Row) map[string]bool {
 
 func liveEngineCounts(rows []compose.Row) map[pfmengine.ID]int {
 	counts := make(map[pfmengine.ID]int)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		switch row.Kind {
 		case compose.LiveCodex:
 			counts[pfmengine.Codex]++
+		case compose.LiveOpenCode:
+			counts[pfmengine.OpenCode]++
 		case compose.LiveSplit:
 			counts[pfmengine.Claude] += maxInt(1, row.SplitCount)
 		case compose.LiveClaude, compose.Agent, compose.Booting:
@@ -1016,7 +1034,7 @@ func (model *Model) applyStats(snapshot pfmstats.Snapshot) {
 	model.adoptClock(snapshot.SampleTime)
 	model.sortStats(follow)
 	innerWidth, innerHeight := model.limitViewportDimensions()
-	model.limitsOffset = minInt(model.limitsOffset, maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight))
+	model.limitsOffset = min(model.limitsOffset, maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight))
 }
 
 func (model *Model) sortStats(follow string) {
@@ -1042,7 +1060,7 @@ func (model *Model) sortStats(follow string) {
 			}
 		}
 	}
-	model.statsCursor = minInt(model.statsCursor, len(model.stats.Chats)-1)
+	model.statsCursor = min(model.statsCursor, len(model.stats.Chats)-1)
 }
 
 func (model Model) selectedStatsKey() string {
@@ -1075,40 +1093,35 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	follow := model.selectedKey()
 	fallback := model.cursor
 	rows := snapshot.Rows
-	updatePresent := false
-	for _, row := range rows {
-		if row.Kind == compose.ProfessorUpdate {
-			updatePresent = true
-			break
-		}
-	}
-	if !updatePresent {
-		for _, row := range model.rows {
-			if row.Kind == compose.ProfessorUpdate {
-				rows = append([]compose.Row{row}, rows...)
-				break
-			}
+	// The update and update-check failure rows are read once from the cache
+	// before the picker opens; a refresh snapshot never carries them, so
+	// each is carried forward for the session.
+	for _, kind := range []compose.Kind{compose.ProfessorUpdate, compose.ProfessorUpdateFailed} {
+		isKind := func(row compose.Row) bool { return row.Kind == kind }
+		if previous := slices.IndexFunc(model.rows, isKind); previous >= 0 && !slices.ContainsFunc(rows, isKind) {
+			rows = append([]compose.Row{model.rows[previous]}, rows...)
 		}
 	}
 	if len(model.deactivatedSockets) != 0 {
-		live := liveSockets(rows)
+		live := trackedChatSockets(rows)
 		for socket := range model.deactivatedSockets {
 			if !live[socket] {
 				delete(model.deactivatedSockets, socket)
 			}
 		}
 		filtered := make([]compose.Row, 0, len(rows))
-		for _, row := range rows {
-			if isLive(row.Kind) && model.deactivatedSockets[row.Socket] {
+		for index := range rows {
+			row := &rows[index]
+			if row.Kind.IsLiveSeat() && model.deactivatedSockets[row.Socket] {
 				continue
 			}
-			filtered = append(filtered, row)
+			filtered = append(filtered, *row)
 		}
 		rows = filtered
 	}
 	if model.skyEnabled {
-		before := liveSockets(model.rows)
-		after := liveSockets(rows)
+		before := trackedChatSockets(model.rows)
+		after := trackedChatSockets(rows)
 		eventTime := snapshot.NowNS
 		if eventTime == 0 {
 			eventTime = model.nowNS
@@ -1175,9 +1188,10 @@ func (model *Model) deactivate(row compose.Row) {
 	key := compose.RowKey(row)
 	fallback := model.cursor
 	kept := model.rows[:0]
-	for _, candidate := range model.rows {
-		if compose.RowKey(candidate) != key {
-			kept = append(kept, candidate)
+	for index := range model.rows {
+		candidate := &model.rows[index]
+		if compose.RowKey(*candidate) != key {
+			kept = append(kept, *candidate)
 		}
 	}
 	model.rows = kept
@@ -1206,6 +1220,9 @@ func (model *Model) toggleKilled() {
 	case row.Kind == compose.ProfessorUpdate:
 		model.killStatus = "⌃X refused — the Professor update banner is an action, not a chat"
 		return
+	case row.Kind == compose.ProfessorUpdateFailed:
+		model.killStatus = "⌃X refused — the update-check failure row is a notice, not a chat"
+		return
 	case row.Kind == compose.Booting:
 		model.killStatus = "⌃X refused — " + row.Name +
 			" is still booting (no identity yet); retry once it settles"
@@ -1226,7 +1243,7 @@ func (model *Model) toggleKilled() {
 		Killed: !row.Killed,
 		Socket: row.Socket,
 		PaneID: row.PaneID,
-		Live:   isLive(row.Kind),
+		Live:   row.Kind.IsLiveSeat(),
 		Name:   row.Name,
 	}
 	// ⌃X lands NOW — the store write, and the kill when the row is live. It
@@ -1268,7 +1285,8 @@ func (model *Model) rebuild(follow string, fallback int) {
 	model.search = make([]string, len(model.rows))
 	byProject := make(map[string]int)
 	model.groups = model.groups[:0]
-	for index, row := range model.rows {
+	for index := range model.rows {
+		row := &model.rows[index]
 		project := cleanField(row.Project)
 		if project == "" {
 			project = "?"
@@ -1317,14 +1335,16 @@ func (model *Model) rebuildOrder() {
 		// The update notice is an extra global action above the ordinary new-chat
 		// row. Neither row belongs to project activity order: pinning both keeps
 		// an active Professor chat from slipping between them.
-		for index, row := range model.rows {
-			if row.Kind == compose.ProfessorUpdate && model.visibleInView(row) {
+		for index := range model.rows {
+			row := &model.rows[index]
+			if row.Kind == compose.ProfessorUpdate && model.visibleInView(*row) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 			}
 		}
-		for index, row := range model.rows {
-			if isNewChatKind(row.Kind) && model.visibleInView(row) {
+		for index := range model.rows {
+			row := &model.rows[index]
+			if isNewChatActionKind(row.Kind) && model.visibleInView(*row) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 				newChatEmitted = true
@@ -1340,7 +1360,7 @@ func (model *Model) rebuildOrder() {
 			if !model.visibleInView(model.rows[index]) {
 				continue
 			}
-			if model.mergeNewChat && isNewChatKind(model.rows[index].Kind) {
+			if model.mergeNewChat && isNewChatActionKind(model.rows[index].Kind) {
 				if newChatEmitted {
 					continue
 				}
@@ -1376,8 +1396,8 @@ func (model *Model) rebuildOrder() {
 	}
 }
 
-func isNewChatKind(kind compose.Kind) bool {
-	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpencode
+func isNewChatActionKind(kind compose.Kind) bool {
+	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
 }
 
 // nameGroupPrefix reads a GROUP:NAME declaration off a chat name.
@@ -1409,8 +1429,8 @@ func nameGroupPrefix(name string) (string, bool) {
 // Agent, Booting, and every resumable kind — a resumable SOLO:BUILD groups
 // with its live namesakes exactly like a live row would.
 func isNameGroupRow(kind compose.Kind) bool {
-	return isLive(kind) || kind == compose.Agent || kind == compose.Booting ||
-		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpencode
+	return kind.IsAddressable() ||
+		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpenCode
 }
 
 func (model *Model) refilter(follow string, fallback int) {
@@ -1457,7 +1477,7 @@ func (model *Model) refilter(follow string, fallback int) {
 			}
 		}
 	}
-	model.cursor = minInt(maxInt(fallback, 0), len(model.filtered)-1)
+	model.cursor = min(maxInt(fallback, 0), len(model.filtered)-1)
 }
 
 func runeSubsequence(pattern, candidate string) bool {
@@ -1511,12 +1531,6 @@ func rowEngine(kind compose.Kind) pfmengine.ID {
 	return compose.EngineForKind(kind)
 }
 
-func isLive(kind compose.Kind) bool {
-	return kind == compose.LiveClaude ||
-		kind == compose.LiveCodex ||
-		kind == compose.LiveSplit
-}
-
 // Result returns the effects accumulated by the pure model. Cancelled reverts
 // PrimaryAccount to what the picker opened with, since a ⌃S account switch is
 // only a pending intent until the picker exits deliberately.
@@ -1555,8 +1569,8 @@ func (model Model) accountForEngine(engine pfmengine.ID) int {
 	switch engine {
 	case pfmengine.Codex:
 		return model.codexPrimary
-	case pfmengine.Opencode:
-		return model.opencodePrimary
+	case pfmengine.OpenCode:
+		return model.openCodePrimary
 	default:
 		return model.primary
 	}
@@ -1597,13 +1611,6 @@ func (model Model) ValidUTF8Query() bool        { return utf8.ValidString(model.
 func (model Model) HasVisibleSelection() bool { // compact invariant helper
 	return len(model.filtered) == 0 ||
 		(model.cursor >= 0 && model.cursor < len(model.filtered))
-}
-
-func minInt(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
 }
 
 func maxInt(left, right int) int {

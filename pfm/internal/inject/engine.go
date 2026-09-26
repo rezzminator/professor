@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,11 +14,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/rearm"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // SenderSessionEnv, SenderLabelEnv, and SenderIDEnv are how a chat states its
@@ -43,12 +44,14 @@ type Engine struct {
 	codexSeat     SelfIdentifier
 	binaries      map[pfmengine.ID]string
 	accountEmojis []string
-	recorder      func(context.Context, shared.CommsEvent) error
+	recorder      func(context.Context, fleetdb.CommsEvent) error
 	warningWriter io.Writer
-	// sidDir is where T1 role re-arm crumbs live (paths.Values.SIDDir) —
-	// the same directory the existing SID transcript crumbs and reload
-	// worker logs already share. See internal/rearm.
-	sidDir string
+	// requestIdentity is present only on an engine scoped to one validated
+	// request caller. Raw pane ids use its socket instead of daemon ambient
+	// state because pane ids are unique only within one tmux server.
+	requestIdentity *resolve.Identity
+	// env is Dependencies.Env, defaulting to paths.OSEnv{}.
+	env paths.Env
 	// senderSelf is this process's own identity, resolved at most once: the
 	// session and id cannot change while we run. Its Label is final only
 	// when it was handed to us (options.Sender, the stated environment);
@@ -77,7 +80,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 		Values: map[pfmengine.ID]string{
 			pfmengine.Claude:   dependencies.ClaudeBinary,
 			pfmengine.Codex:    dependencies.CodexBinary,
-			pfmengine.Opencode: dependencies.OpencodeBinary,
+			pfmengine.OpenCode: dependencies.OpenCodeBinary,
 		},
 		AccountEmojis: dependencies.AccountEmojis,
 	}
@@ -89,7 +92,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 		dependencies.Resolver = resolver
 	}
 	if dependencies.Tmux == nil {
-		dependencies.Tmux = CommandTmux{}
+		dependencies.Tmux = TmuxInjector{}
 	}
 	if dependencies.Spawner == nil {
 		dependencies.Spawner = CommandThenSpawner{}
@@ -97,26 +100,26 @@ func New(dependencies Dependencies) (*Engine, error) {
 	if dependencies.WarningWriter == nil {
 		dependencies.WarningWriter = os.Stderr
 	}
+	if dependencies.Env == nil {
+		dependencies.Env = paths.OSEnv{}
+	}
 	resolved, err := paths.Resolve()
 	if err != nil {
 		return nil, err
 	}
 	options := withDefaults(dependencies.Options)
-	applyEnvironment(&options)
+	applyEnvironment(&options, dependencies.Env)
 	if options.BodyRoot == "" {
-		options.BodyRoot = filepath.Join(
-			resolved.Home,
-			".local", "state", "pfm", "inject-bodies",
-		)
+		options.BodyRoot = filepath.Join(resolved.Home, ".local", "state", "pfm", "inject-bodies")
 	}
 	// chat.sh:147 locks under ${TMPDIR:-/tmp}/chat-inject-locks. The Go engine
 	// shares that namespace so a Go inject and a chat.sh inject into the same
 	// pane mutually exclude instead of interleaving keystrokes.
 	if options.LockRoot == "" {
-		options.LockRoot = filepath.Join(tempRoot(), "chat-inject-locks")
+		options.LockRoot = filepath.Join(tempRoot(dependencies.Env), "chat-inject-locks")
 	}
 	if options.ThenLogRoot == "" {
-		options.ThenLogRoot = tempRoot()
+		options.ThenLogRoot = tempRoot(dependencies.Env)
 	}
 	if dependencies.Identifier == nil {
 		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
@@ -137,7 +140,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 		accountEmojis: append([]string(nil), dependencies.AccountEmojis...),
 		recorder:      dependencies.Recorder,
 		warningWriter: dependencies.WarningWriter,
-		sidDir:        resolved.SIDDir,
+		env:           dependencies.Env,
 	}, nil
 }
 
@@ -150,6 +153,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 // is a sync.Once and may already have been used by the shared engine. The
 // scoped copy starts with a fresh sender cache and an explicit sender.
 func (engine *Engine) WithIdentity(identity resolve.Identity, label string) *Engine {
+	requestIdentity := identity
 	sender := &Sender{
 		Session: identity.Session,
 		Label:   strings.TrimSpace(label),
@@ -158,17 +162,18 @@ func (engine *Engine) WithIdentity(identity resolve.Identity, label string) *Eng
 	options := engine.options
 	options.Sender = sender
 	return &Engine{
-		resolver:      engine.resolver,
-		names:         engine.names,
-		tmux:          engine.tmux,
-		spawner:       engine.spawner,
-		options:       options,
-		whoami:        fixedIdentifier{identity: identity},
-		binaries:      cloneEngineBinaries(engine.binaries),
-		accountEmojis: append([]string(nil), engine.accountEmojis...),
-		recorder:      engine.recorder,
-		warningWriter: engine.warningWriter,
-		sidDir:        engine.sidDir,
+		resolver:        engine.resolver,
+		names:           engine.names,
+		tmux:            engine.tmux,
+		spawner:         engine.spawner,
+		options:         options,
+		whoami:          fixedIdentifier{identity: identity},
+		binaries:        cloneEngineBinaries(engine.binaries),
+		accountEmojis:   append([]string(nil), engine.accountEmojis...),
+		recorder:        engine.recorder,
+		warningWriter:   engine.warningWriter,
+		requestIdentity: &requestIdentity,
+		env:             engine.env,
 	}
 }
 
@@ -190,14 +195,14 @@ func cloneEngineBinaries(values map[pfmengine.ID]string) map[pfmengine.ID]string
 
 // tempRoot is chat.sh's ${TMPDIR:-/tmp}, the root both implementations share
 // for inject locks and --then chain logs.
-func tempRoot() string {
-	if value := os.Getenv("TMPDIR"); value != "" {
+func tempRoot(env paths.Env) string {
+	if value := env.Get("TMPDIR"); value != "" {
 		return strings.TrimRight(value, "/")
 	}
 	return "/tmp"
 }
 
-func applyEnvironment(options *Options) {
+func applyEnvironment(options *Options, env paths.Env) {
 	seconds := []struct {
 		name   string
 		target *time.Duration
@@ -215,7 +220,7 @@ func applyEnvironment(options *Options) {
 		{"CHAT_THEN_SETTLE", &options.ThenSettle},
 	}
 	for _, setting := range seconds {
-		value := os.Getenv(setting.name)
+		value := env.Get(setting.name)
 		if value == "" {
 			continue
 		}
@@ -241,7 +246,7 @@ func applyEnvironment(options *Options) {
 		{"CHAT_THEN_IDLE_STABLE", &options.ThenIdleStable},
 	}
 	for _, setting := range integers {
-		value := os.Getenv(setting.name)
+		value := env.Get(setting.name)
 		if value == "" {
 			continue
 		}
@@ -310,8 +315,8 @@ func withDefaults(options Options) Options {
 	if options.BodyMaxAge == 0 {
 		options.BodyMaxAge = defaultBodyMaxAge
 	}
-	if options.Now == nil {
-		options.Now = time.Now
+	if options.Clock == nil {
+		options.Clock = clock.Real
 	}
 	// chat.sh:1063-1077 __then cadence.
 	if options.ThenMin == 0 {
@@ -350,109 +355,62 @@ func (engine *Engine) ResolveEngine(
 	return engine.resolve(ctx, name, requiredEngine)
 }
 
+// ResolveKind applies the shared ladder while restricting the raw fallback to
+// one requested namespace. The roster rung still runs first for every kind.
+func (engine *Engine) ResolveKind(
+	ctx context.Context,
+	name string,
+	kind resolve.Kind,
+	requiredEngine string,
+) (Target, int, string, error) {
+	return engine.resolveWithOptions(ctx, name, resolve.LadderOptions{
+		RequiredEngine: requiredEngine,
+		Kinds:          []resolve.Kind{kind},
+	})
+}
+
 func (engine *Engine) resolve(
 	ctx context.Context,
 	name, requiredEngine string,
 ) (Target, int, string, error) {
-	name = unquoteTarget(name)
-	if name == "" {
-		return Target{}, CodeUnknown, "empty target", nil
-	}
-	if requiredEngine == "" && (name == "self" || name == "me") {
-		identity, err := engine.whoami.Identify(ctx)
-		if (err != nil || identity.Session == "") &&
-			engine.codexSeat != nil &&
-			os.Getenv(resolve.CodexThreadEnv) != "" {
-			identity, err = engine.codexSeat.Identify(ctx)
-		}
-		if err != nil || identity.Session == "" || identity.SocketPath == "" {
-			return Target{}, CodeUnknown, "self target has no live tmux seat", nil
-		}
-		pane := identity.Session
-		if identity.Pane != "" {
-			pane = identity.Pane
-		}
-		target := targetFromParts(identity.SocketPath, pane)
-		if identity.Engine == string(pfmengine.Codex) {
-			target.Engine = string(pfmengine.Codex)
-		}
-		return target, 0, "", nil
-	}
-	if requiredEngine == "" && rawPane(name) {
-		// chat.sh:549 — pane ids are unique per tmux SERVER, not globally, so a
-		// bare %id needs its socket from CHAT_INJECT_SOCKET (set by the __then
-		// waiter re-delivering to the pane it watched) or from our own $TMUX.
-		socket := os.Getenv("CHAT_INJECT_SOCKET")
-		if socket == "" {
-			socket = currentSocketPath()
-		}
-		if socket == "" {
-			return Target{}, CodeUnknown, "raw pane target requires TMUX", nil
-		}
-		return targetFromParts(socket, name), 0, "", nil
-	}
-	if engine.names != nil {
-		target, code, detail, err := engine.names.ResolveName(ctx, name, requiredEngine)
-		if err != nil {
-			return Target{}, CodeUndelivered, "", err
-		}
-		switch code {
-		case 0:
-			return target, 0, detail, nil
-		case CodeAmbiguous:
-			return Target{}, CodeAmbiguous, detail, nil
-		case CodeUnknown:
-			// A fresh Codex spawn may not have written the rollout needed to
-			// compose a roster row. Raw session/label/window resolution is the
-			// required catch-up fallback for that window.
-		default:
-			return Target{}, CodeUndelivered, "", fmt.Errorf(
-				"roster resolver returned unsupported code %d", code,
-			)
-		}
-	}
+	return engine.resolveWithOptions(ctx, name, resolve.LadderOptions{RequiredEngine: requiredEngine})
+}
 
-	kinds := []resolve.Kind{
-		resolve.Session,
-		resolve.Label,
-		resolve.CxWindow,
+func (engine *Engine) resolveWithOptions(
+	ctx context.Context,
+	name string,
+	options resolve.LadderOptions,
+) (Target, int, string, error) {
+	var roster resolve.RosterResolver
+	if engine.names != nil {
+		roster = resolve.RosterFunc(func(
+			ctx context.Context,
+			name, requiredEngine string,
+		) (resolve.Seat, int, string, error) {
+			target, code, detail, err := engine.names.ResolveName(ctx, name, requiredEngine)
+			return seatFromTarget(target), code, detail, err
+		})
 	}
-	if requiredEngine != "" {
-		if requiredEngine != string(pfmengine.Codex) {
-			return Target{}, CodeUndelivered, "", fmt.Errorf(
-				"unsupported engine-scoped resolver %q", requiredEngine,
-			)
-		}
-		kinds = []resolve.Kind{resolve.CxWindow}
+	seat, code, detail, err := (resolve.Ladder{
+		Roster: roster, Raw: engine.resolver, Self: engine.whoami,
+		CodexSelf: engine.codexSeat, RequestIdentity: engine.requestIdentity,
+		Env: engine.env, Session: engine.tmux,
+	}).Resolve(ctx, name, options)
+	return targetFromSeat(seat), code, detail, err
+}
+
+func seatFromTarget(target Target) resolve.Seat {
+	return resolve.Seat{
+		SocketPath: target.SocketPath, Pane: target.Pane, Engine: target.Engine,
+		Name: target.Name, ID: target.ID, Session: target.Session,
 	}
-	for _, kind := range kinds {
-		outcome, err := engine.resolver.Resolve(ctx, kind, name)
-		if err != nil {
-			return Target{}, CodeUndelivered, "", err
-		}
-		switch outcome.Code {
-		case 0:
-			socket, pane, ok := parseTargetLine(outcome.Stdout)
-			if !ok {
-				return Target{}, CodeUndelivered, "", fmt.Errorf(
-					"resolver %s returned malformed target",
-					kind,
-				)
-			}
-			target := targetFromParts(socket, pane)
-			target.Name = name
-			if session, sessionErr := engine.tmux.CurrentSession(ctx, socket); sessionErr == nil {
-				target.Session = session
-			}
-			if kind == resolve.CxWindow {
-				target.Engine = string(pfmengine.Codex)
-			}
-			return target, 0, outcome.Stderr, nil
-		case 2:
-			return Target{}, CodeAmbiguous, outcome.Stderr, nil
-		}
+}
+
+func targetFromSeat(seat resolve.Seat) Target {
+	return Target{
+		SocketPath: seat.SocketPath, Pane: seat.Pane, Engine: seat.Engine,
+		Name: seat.Name, ID: seat.ID, Session: seat.Session,
 	}
-	return Target{}, CodeUnknown, fmt.Sprintf("target %q matched no live chat", name), nil
 }
 
 // Capture resolves and captures a pane without mutating it.
@@ -476,6 +434,17 @@ func (engine *Engine) Capture(
 		FullScrollback,
 	)
 	if err != nil {
+		if pfmtmux.CouldNotRun(err) {
+			// tmux itself never started (missing binary, bad configured
+			// socket dir) — a probe that could not run, never a pane that
+			// answered dead. Folding this into CodeDead would tell the
+			// caller a live chat's pane is gone when the truth is "could
+			// not look"; the cause rides in detail since this door's err
+			// return stays nil for every prior caller (mcpserv among them).
+			return target, "", CodeCaptureFailed, fmt.Sprintf(
+				"could not run tmux to capture %q: %v", target.Pane, err,
+			), nil
+		}
 		return target, "", CodeDead, "target pane is dead or unreadable", nil
 	}
 	if tailLines > 0 {
@@ -509,44 +478,54 @@ func (engine *Engine) ScheduleAfterCurrentTurn(
 	if _, captureErr := engine.capture(ctx, target, 0); captureErr != nil {
 		return refused(CodeDead, "target pane is dead or unreadable"), nil
 	}
-	// T1 re-arm: a self-compact of a seat with a remembered --role appends
-	// rearm.Pointer as one more link in the steer chain. Then is already a
-	// chain — the --then waiter delivers each steer one settled turn apart
-	// (DeliverThen) — so this is one more hop, never a rewrite of the
-	// caller's own steers. See internal/rearm and cmd/pfm/run_command.go's
-	// WriteCrumb for the other half.
 	then := request.Then
-	if isSelfCompactRequest(request) {
-		pointer, hasRole, err := engine.rolePointer(target)
-		if err != nil {
-			return Result{}, err
-		}
-		if hasRole {
-			then = append(append([]string{}, request.Then...), pointer)
-		}
-	}
 	steers := make([]string, 0, len(then)+1)
 	steers = append(steers, request.Message)
 	steers = append(steers, then...)
 	logPath := engine.steerLogPath(target)
+	// The check and the arming are ONE step, under the pane's own inject lock.
+	// refuseIfArmed only READS the armed record; the matching write happens
+	// later, inside spawner.Spawn (armRecord), so two schedules whose reads
+	// both landed before either write both saw an unarmed pane and both
+	// spawned a waiter — armRecord's "leave a live arming alone" branch
+	// suppresses the second RECORD, never the second PROCESS, and two waiters
+	// then race one pane and one O_TRUNC log. The lock is the same one a live
+	// inject holds while it types (lockTarget), and it is released as soon as
+	// the record is down and the waiter is running.
+	lock, lockRefusal := engine.lockTarget(ctx, target)
+	if lockRefusal != "" {
+		return refused(CodeUndelivered, lockRefusal), nil
+	}
+	defer lock.release()
+	if result, ok := engine.refuseIfArmed(target, request, logPath); !ok {
+		return result, nil
+	}
+	// Only the ORIGINAL self-compaction needs the caller's turn ridden
+	// out. A chained re-arm is typed into a pane this waiter already
+	// watched settle, so its next busy is the steer's own turn.
+	selfTarget := !request.Chain && isSelfTarget(request.Target)
 	if err := engine.spawner.Spawn(ctx, SteerSpawn{
 		SocketPath: target.SocketPath,
 		Target:     target.Pane,
+		Engine:     target.Engine,
 		Steers:     steers,
 		LogPath:    logPath,
 		Append:     request.Chain,
 		Sender:     engine.sender(ctx),
-		// Only the ORIGINAL self-compaction needs the caller's turn ridden
-		// out. A chained re-arm is typed into a pane this waiter already
-		// watched settle, so its next busy is the steer's own turn.
-		SelfTarget: !request.Chain && isSelfTarget(request.Target),
+		SelfTarget: selfTarget,
 	}); err != nil {
 		return refused(
 			CodeUndelivered,
 			fmt.Sprintf("could not schedule command after the current turn: %v", err),
 		), nil
 	}
-	message := fmt.Sprintf("scheduled COMMAND into %q after the current turn settles — %d post-command steer(s) armed (log: %s)", target.Pane, len(then), logPath)
+	engine.announceArmed(ctx, target, request, selfTarget)
+	message := fmt.Sprintf(
+		"scheduled COMMAND into %q after the current turn settles — %d post-command steer(s) armed (log: %s)",
+		target.Pane,
+		len(then),
+		logPath,
+	)
 	if isSelfCompactRequest(request) {
 		message += SelfCompactStopNotice
 	}
@@ -568,7 +547,9 @@ func (engine *Engine) ScheduleSelfCompact(
 	ctx context.Context,
 	focus string,
 	then []string,
-) (Result, error) {
+) (result Result, err error) {
+	states := trail(ctx, "self-compact")
+	defer func() { outcome(states, result, err) }()
 	focus = strings.TrimSpace(focus)
 	// The full control-character class, not just \r\n\x00: ESC, BEL, and
 	// the rest of C0/DEL are the same threat class (an injected control
@@ -609,71 +590,6 @@ func (engine *Engine) ScheduleSelfCompact(
 	})
 }
 
-// rolePointer looks up target's remembered T1 role — if any — and composes
-// its re-arm text. The three ReadCrumb states stay distinct here exactly as
-// they do in cmd/pfm/reload_command.go: no crumb returns ("", false, nil),
-// today's exact behavior; a crumb that exists but could not be read returns
-// a real error rather than silently behaving as "no role"; a live crumb
-// returns its rearm.Pointer text, sized to THIS channel's own budget — see
-// rearmThresholdBytes.
-func (engine *Engine) rolePointer(target Target) (string, bool, error) {
-	crumb, ok, err := rearm.ReadCrumb(engine.sidDir, filepath.Base(target.SocketPath), target.Pane)
-	if err != nil {
-		return "", false, err
-	}
-	if !ok {
-		return "", false, nil
-	}
-	return rearm.Pointer(crumb, engine.rearmThresholdBytes(target)), true, nil
-}
-
-// rearmPreamblePadding is subtracted from a channel's own autoFileThreshold
-// before it becomes a T1 re-arm budget. Two things ride along with
-// rearm.Pointer's full-text branch that this function has no exact number
-// for: its own preamble ("you are still <role> — re-armed with your full
-// constitution:\n\n", role name length varies) and the mandatory sender
-// footer signedMessage always appends to a live steer (session/label/uuid,
-// also variable). Padding generously rather than measuring exactly keeps
-// this decision and prepareMessage's own spill decision (body.go) from
-// disagreeing at the boundary — the failure mode of guessing too LOW is a
-// pointer sent as a pointer one byte earlier than strictly required; the
-// failure mode of guessing too HIGH is the defect this function exists to
-// fix (a full-text attempt silently spilled and pointed at a snapshot).
-const rearmPreamblePadding = 200
-
-// rearmThresholdBytes derives the self-compact channel's own T1 re-arm
-// budget instead of handing rearm.Pointer its design ceiling
-// (rearm.DefaultThresholdBytes) unchecked.
-//
-// This channel is NOT reload's SendLiteral: DeliverThen -> engine.inject ->
-// prepareLiveMessage -> prepareMessage (body.go) spills ANY body above
-// autoFileThreshold(target.Engine) — 720 runes Claude, 900 Codex, both far
-// below every measured role constitution (dev 2.6KB, qa 3KB+) — into
-// ~/.local/state/pfm/inject-bodies and replaces it with a pointer at that
-// SNAPSHOT file. isHarnessCommand does not rescue a re-arm pointer: it is
-// plain prose, not a "/" command, so an un-budgeted full-text attempt here
-// would (a) never actually land as full text, (b) point the seat at a
-// frozen copy instead of the live artifact — destroying the exact "re-read
-// the CURRENT artifact, no second copy to drift" property T1 was approved
-// on — and (c) that copy rots into a dangling path once
-// defaultBodyMaxAge (7 days) sweeps it. Deriving the REAL budget here makes
-// rearm.Pointer's own size check choose the short pointer at the LIVE
-// artifact instead, which beats a pointer at a frozen one every time this
-// channel's budget is smaller than rearm.DefaultThresholdBytes — which, for
-// every role measured so far, it always is.
-//
-// cmd/pfm/reload_command.go keeps rearm.DefaultThresholdBytes unchanged: its
-// channel (reloadCommandTmux.SendLiteral) has no equivalent spill, so full
-// text genuinely lands there. Do not "harmonize" the two call sites — they
-// answer different questions about different channels.
-func (engine *Engine) rearmThresholdBytes(target Target) int {
-	budget := engine.inlineThreshold(target.Engine) - rearmPreamblePadding
-	if budget < 0 {
-		budget = 0
-	}
-	return min(budget, rearm.DefaultThresholdBytes)
-}
-
 // isSelfCompactRequest is true for the one shape the stop rule applies to: a
 // chat compacting ITSELF. For any other target the waiter is watching somebody
 // else's pane, so what this caller does next cannot blur the turn boundary.
@@ -709,7 +625,28 @@ const SelfCompactStopNotice = " — STOP NOW: end this turn without running " +
 // target's own turn to end first. The internal inject() this delegates to
 // still accepts a /compact primary when Chain is true — that is how
 // ScheduleAfterCurrentTurn's detached waiter (DeliverThen) delivers one.
-func (engine *Engine) Inject(ctx context.Context, request Request) (Result, error) {
+func (engine *Engine) Inject(ctx context.Context, request Request) (result Result, err error) {
+	return engine.injectRequest(ctx, request, nil)
+}
+
+// InjectTarget performs one delivery against an already-resolved immutable
+// seat. Context-scoped MCP mutations use it so a split pane is never resolved
+// again through an aggregate session or name.
+func (engine *Engine) InjectTarget(
+	ctx context.Context,
+	target Target,
+	request Request,
+) (result Result, err error) {
+	return engine.injectRequest(ctx, request, &target)
+}
+
+func (engine *Engine) injectRequest(
+	ctx context.Context,
+	request Request,
+	resolved *Target,
+) (result Result, err error) {
+	states := trail(ctx, "inject")
+	defer func() { outcome(states, result, err) }()
 	ctx = withSender(ctx, engine.sender(ctx))
 	if isCompactCommand(request.Message) {
 		return refused(
@@ -720,14 +657,24 @@ func (engine *Engine) Inject(ctx context.Context, request Request) (Result, erro
 				"human. Nothing was typed.",
 		), nil
 	}
-	result, err := engine.inject(ctx, request)
+	if resolved == nil {
+		result, err = engine.inject(ctx, request)
+	} else {
+		if request.Message == "" {
+			return refused(CodeUndelivered, "refusing to inject an empty message"), nil
+		}
+		if checked, ok := engine.checkSteerChain(request); !ok {
+			return checked, nil
+		}
+		result, err = engine.injectResolved(ctx, request, *resolved, "")
+	}
 	if err != nil || result.Code != 0 || !result.Typed || request.Origin != "" || engine.recorder == nil {
 		return result, err
 	}
 	sender := engine.sender(ctx)
-	event := shared.CommsEvent{
-		AtNS:           engine.options.Now().UnixNano(),
-		Kind:           shared.KindInject,
+	event := fleetdb.CommsEvent{
+		AtNS:           engine.options.Clock.Now().UnixNano(),
+		Kind:           fleetdb.KindInject,
 		SenderSession:  sender.Session,
 		SenderLabel:    sender.Label,
 		SenderUUID:     sender.UUID,
@@ -768,26 +715,25 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	if code != 0 {
 		return refused(code, detail), nil
 	}
+	return engine.injectResolved(ctx, request, target, detail)
+}
+
+func (engine *Engine) injectResolved(
+	ctx context.Context,
+	request Request,
+	target Target,
+	detail string,
+) (Result, error) {
 	base := Result{
 		Status:         "refused",
 		SocketPath:     target.SocketPath,
 		Pane:           target.Pane,
 		ResolutionNote: detail,
 	}
-	lock, err := acquireTargetLock(
-		engine.options.LockRoot,
-		target.SocketPath+":"+target.Pane,
-		engine.options.LockTimeout,
-		engine.options.LockPoll,
-		engine.options.LockMaxHold,
-	)
-	if err != nil {
+	lock, lockRefusal := engine.lockTarget(ctx, target)
+	if lockRefusal != "" {
 		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf(
-			"could not acquire inject lock for %q: %v",
-			target.Pane,
-			err,
-		)
+		base.Message = lockRefusal
 		return base, nil
 	}
 	defer lock.release()
@@ -798,12 +744,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Message = "target pane is dead or unreadable"
 		return base, nil
 	}
-	base.Busy = IsBusy(capture)
-	command, commandErr := engine.tmux.PaneCommand(
-		ctx,
-		target.SocketPath,
-		target.Pane,
-	)
+	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
 	verifiedEngine := ""
 	if commandErr == nil {
 		verifiedEngine = paneCommandEngine(command, engine.binaries)
@@ -811,6 +752,10 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			target.Engine = verifiedEngine
 		}
 	}
+	// Busy is read only AFTER the pane's own process names the engine: the
+	// three TUIs render three different footers (IsBusyFor).
+	paneEngine := pfmengine.ID(target.Engine)
+	base.Busy = IsBusyFor(paneEngine, capture)
 	// Both TUIs own a safe composer queue while a turn is running. A normal
 	// inject types there and submits without interrupting the active turn;
 	// force-now alone is allowed to send Escape. pane_current_command is NOT a
@@ -819,7 +764,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	queueing := base.Busy && !request.ForceNow
 	if base.Busy && request.ForceNow {
 		for attempt := 0; attempt < engine.options.InterruptTries; attempt++ {
-			if !IsBusy(capture) {
+			if !IsBusyFor(paneEngine, capture) {
 				break
 			}
 			if err := engine.tmux.SendKey(
@@ -831,7 +776,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 				return Result{}, err
 			}
 			base.Interrupted = true
-			sleepContext(ctx, engine.options.Poll)
+			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capture(ctx, target, 0)
 			if err != nil {
 				base.Code = CodeDead
@@ -841,14 +786,14 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		}
 	} else if base.Busy && !queueing {
 		for attempt := 0; attempt < engine.options.BusyTries; attempt++ {
-			sleepContext(ctx, engine.options.Poll)
+			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capture(ctx, target, 0)
 			if err != nil {
 				base.Code = CodeDead
 				base.Message = "target pane died while waiting for idle"
 				return base, nil
 			}
-			if !IsBusy(capture) {
+			if !IsBusyFor(paneEngine, capture) {
 				base.Busy = false
 				break
 			}
@@ -856,6 +801,30 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		if base.Busy {
 			base.Code = CodeBusy
 			base.Message = "ABORT: target pane is busy; nothing was typed (retry when idle or use force_now)"
+			return base, nil
+		}
+	}
+
+	// Claude's agents panel can hold the keyboard under an empty composer. One
+	// Escape hands focus back without touching the turn; a panel that keeps it is
+	// refused by name, never typed into.
+	if agentPanelFocused(capture) {
+		if err := engine.tmux.SendKey(ctx, target.SocketPath, target.Pane, "Escape"); err != nil {
+			return Result{}, err
+		}
+		engine.sleepContext(ctx, engine.options.Poll)
+		capture, err = engine.capture(ctx, target, 0)
+		if err != nil {
+			base.Code = CodeDead
+			base.Message = "target pane died while leaving the agents panel"
+			return base, nil
+		}
+		if agentPanelFocused(capture) {
+			base.Code = CodeUndelivered
+			base.Message = fmt.Sprintf(
+				"ABORT: %q has its agents panel focused and Escape did not return focus to the composer; nothing was typed",
+				target.Pane,
+			)
 			return base, nil
 		}
 	}
@@ -883,8 +852,13 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			)
 			return base, nil
 		}
-		if typing {
-			if quiet := engine.options.Now().Sub(last); quiet < engine.options.TypistQuiet {
+		// client_activity moves on focus events, mouse reports and the
+		// terminal's own query replies as well as keystrokes, so an attached
+		// VS Code tab reads as "typing" without end. A human mid-sentence
+		// leaves a draft in the composer; an empty composer with recent
+		// activity is a watched pane, not a typed one.
+		if typing && hasDraft(lastComposerLine(capture)) {
+			if quiet := engine.options.Clock.Now().Sub(last); quiet < engine.options.TypistQuiet {
 				base.Code = CodeBusy
 				base.Status = "typing"
 				base.Message = fmt.Sprintf(
@@ -906,7 +880,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		if err := engine.tmux.CancelCopyMode(ctx, target.SocketPath, target.Pane); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -915,7 +889,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		}
 	}
 	if strings.Contains(strings.ToLower(capture), "restore the code") ||
-		strings.Contains(strings.ToLower(lastLines(capture, 12)), "create a plan?") {
+		strings.Contains(strings.ToLower(captureLastLines(capture, 12)), "create a plan?") {
 		if err := engine.tmux.SendKey(
 			ctx,
 			target.SocketPath,
@@ -924,7 +898,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -943,7 +917,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		if err := engine.tmux.CancelCopyMode(ctx, target.SocketPath, target.Pane); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -989,7 +963,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -997,7 +971,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			return base, nil
 		}
 		base.DraftStashed = strings.Contains(
-			strings.ToLower(lastLines(capture, 8)),
+			strings.ToLower(captureLastLines(capture, 8)),
 			"stashed",
 		)
 		draftLine := lastComposerLine(capture)
@@ -1020,12 +994,12 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			); err != nil {
 				return Result{}, err
 			}
-			sleepContext(ctx, engine.options.Poll)
+			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capture(ctx, target, 0)
 			if err != nil {
 				break
 			}
-			if strings.Contains(strings.ToLower(lastLines(capture, 8)), "stashed") {
+			if strings.Contains(strings.ToLower(captureLastLines(capture, 8)), "stashed") {
 				base.DraftStashed = true
 			}
 			draftLine = lastComposerLine(capture)
@@ -1083,21 +1057,22 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	pasteTransport := !commandTransport &&
 		(request.FileBacked || utf8.RuneCountInString(message) > engine.inlineThreshold(target.Engine))
 	var sendErr error
-	if pasteTransport {
+	switch {
+	case pasteTransport:
 		sendErr = engine.tmux.SendPaste(
 			ctx,
 			target.SocketPath,
 			target.Pane,
 			message,
 		)
-	} else if commandTransport {
+	case commandTransport:
 		base.LiteralChunks, sendErr = engine.sendPacedLiteral(
 			ctx,
 			target,
 			message,
 			lock,
 		)
-	} else {
+	default:
 		sendErr = engine.tmux.SendLiteral(
 			ctx,
 			target.SocketPath,
@@ -1112,13 +1087,15 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	normalized := normalizeSpace(message)
 	needle := tailRunes(normalized, 40)
 	for attempt := 0; attempt < engine.options.SettleTries; attempt++ {
-		_ = lock.beat()
+		if beatErr := lock.beat(); beatErr != nil {
+			return lockLost(base, target.Pane, beatErr), nil
+		}
 		capture, err = engine.capture(ctx, target, 0)
 		if err == nil && (strings.Contains(normalizeSpace(capture), needle) ||
 			(pasteTransport && HasPastePlaceholder(capture))) {
 			break
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 	}
 	// Render-settle is advisory only. Echo detection flakes on wrapping,
 	// bracketed-paste placeholders, and footer glyphs; once literal bytes have
@@ -1130,7 +1107,9 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	submitted := false
 	for attempt := 1; attempt <= engine.options.EnterTries; attempt++ {
 		base.SubmitRetries = attempt
-		_ = lock.beat()
+		if beatErr := lock.beat(); beatErr != nil {
+			return lockLost(base, target.Pane, beatErr), nil
+		}
 		if err := engine.tmux.SendKey(
 			ctx,
 			target.SocketPath,
@@ -1139,7 +1118,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.EnterSettle)
+		engine.sleepContext(ctx, engine.options.EnterSettle)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			continue
@@ -1194,6 +1173,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		if err := engine.spawner.Spawn(ctx, SteerSpawn{
 			SocketPath: target.SocketPath,
 			Target:     target.Pane,
+			Engine:     target.Engine,
 			Steers:     request.Then,
 			LogPath:    base.SteerLog,
 			Append:     request.Chain,
@@ -1215,7 +1195,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Steers = len(request.Then)
 	}
 
-	sleepContext(ctx, engine.options.ProofSettle)
+	engine.sleepContext(ctx, engine.options.ProofSettle)
 	proof, proofErr := engine.capture(ctx, target, 0)
 	if proofErr != nil {
 		base.Status = "delivered_unproven"
@@ -1267,26 +1247,26 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Message = fmt.Sprintf(
 			"queued COMMAND into %q — busy %s accepted %d paced literal chunk(s) without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 			base.LiteralChunks,
 		)
 	case queueing && request.FileBacked:
 		base.Message = fmt.Sprintf(
 			"queued FILE-BACKED into %q — busy %s accepted the bracketed-paste block without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 		)
 	case queueing && pasteTransport:
 		base.Message = fmt.Sprintf(
 			"queued PASTE into %q — busy %s accepted the bracketed-paste block without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 		)
 	case queueing:
 		base.Message = fmt.Sprintf(
 			"queued into %q — busy %s accepted the turn without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 		)
 	case commandTransport:
 		base.Message = fmt.Sprintf(
@@ -1327,13 +1307,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Message += " — WARNING: " + warning
 	}
 	base.Proof = lastNonEmptyLines(proof, engine.options.ProofLines)
-	if !deliveryProven(
-		preSubmitCapture,
-		proof,
-		message,
-		queueing,
-		pasteTransport,
-	) {
+	if !deliveryProven(paneEngine, preSubmitCapture, proof, message, queueing, pasteTransport) {
 		base.Status = "delivered_unproven"
 		base.Message = fmt.Sprintf(
 			"delivered-unproven into %q — input cleared, but the pane capture below shows neither the message past the input bar nor the expected %s",
@@ -1376,7 +1350,10 @@ func (engine *Engine) pasteRescue(target Target, request Request, prepared Prepa
 	}
 	stored, warnings, err := engine.persistBody(request.Message, name)
 	if err != nil {
-		return "", fmt.Sprintf("AUTO-FILE RESCUE FAILED: could not preserve the unproven body to a rescue file: %v", err)
+		return "", fmt.Sprintf(
+			"AUTO-FILE RESCUE FAILED: could not preserve the unproven body to a rescue file: %v",
+			err,
+		)
 	}
 	note = fmt.Sprintf("AUTO-FILE RESCUE: the full body was preserved at %s — read it fully", stored)
 	for _, warning := range warnings {
@@ -1385,7 +1362,7 @@ func (engine *Engine) pasteRescue(target Target, request Request, prepared Prepa
 	return stored, note
 }
 
-func engineName(value string) string {
+func injectedEngineName(value string) string {
 	id, err := pfmengine.Parse(value)
 	if err != nil {
 		return fmt.Sprintf("engine %q", value)
@@ -1416,7 +1393,7 @@ func (engine *Engine) sendPacedLiteral(
 		}
 		chunks++
 		if end < len(runes) {
-			sleepContext(ctx, engine.options.CommandChunkGap)
+			engine.sleepContext(ctx, engine.options.CommandChunkGap)
 		}
 	}
 	return chunks, nil
@@ -1656,7 +1633,7 @@ func (engine *Engine) sender(ctx context.Context) Sender {
 			engine.senderSelf = *engine.options.Sender
 			return
 		}
-		if stated, ok := statedSender(); ok {
+		if stated, ok := statedSender(engine.env); ok {
 			engine.senderSelf = stated
 			return
 		}
@@ -1672,11 +1649,11 @@ func (engine *Engine) sender(ctx context.Context) Sender {
 // statedSender reads the identity a spawning chat handed this process. It is
 // read from our OWN environment only — never from a message or a caller flag,
 // so a chat can state who IT is and never who somebody else is.
-func statedSender() (Sender, bool) {
+func statedSender(env paths.Env) (Sender, bool) {
 	stated := Sender{
-		Session: os.Getenv(SenderSessionEnv),
-		Label:   os.Getenv(SenderLabelEnv),
-		UUID:    os.Getenv(SenderIDEnv),
+		Session: env.Get(SenderSessionEnv),
+		Label:   env.Get(SenderLabelEnv),
+		UUID:    env.Get(SenderIDEnv),
 	}
 	if stated.Session == "" && stated.Label == "" && stated.UUID == "" {
 		return Sender{}, false
@@ -1694,12 +1671,12 @@ func statedSender() (Sender, bool) {
 // is read from, and whether it is live at all: a sender with no seat has no
 // label to read and signs by its session id alone.
 func (engine *Engine) detectSender(ctx context.Context) (Sender, resolve.Identity, bool) {
-	sender := Sender{UUID: os.Getenv("CLAUDE_CODE_SESSION_ID")}
+	sender := Sender{UUID: engine.env.Get("CLAUDE_CODE_SESSION_ID")}
 	identity, err := engine.whoami.Identify(ctx)
 	if (err != nil || identity.Session == "") &&
 		engine.codexSeat != nil &&
-		os.Getenv(resolve.CodexThreadEnv) != "" &&
-		os.Getenv(resolve.ClaudeSessionEnv) == "" {
+		engine.env.Get(resolve.CodexThreadEnv) != "" &&
+		engine.env.Get(resolve.ClaudeSessionEnv) == "" {
 		identity, err = engine.codexSeat.Identify(ctx)
 	}
 	if err != nil || identity.Session == "" {
@@ -1762,86 +1739,27 @@ func (engine *Engine) senderLabel(
 	return strings.TrimSpace(window)
 }
 
-// steerLogPath mirrors chat.sh:940 — ${TMPDIR:-/tmp}/chat-then-<target>.log —
-// but scoped by SOCKET as well as pane. Every chat's own live pane is %0 on
-// its own dedicated socket, so a bare pane-derived name collided across
-// EVERY chat on the machine: a fresh chain on one chat truncated the exact
-// log file another chat's forensics depended on
-// (the 2026-09-03 self-compact that ate an operator's live draft). The path is now
-// ${TMPDIR:-/tmp}/chat-then-<sanitized base(SocketPath)>.<sanitized Pane>.log:
-// each component is sanitized SEPARATELY, every non-alphanumeric byte in it
-// (including a literal '-' inside the socket name itself) folded to '_',
-// BEFORE the two are joined with a '.' — a byte the sanitizer never emits.
-// Joining the raw components first (with '-') and sanitizing afterward let a
-// hyphen inside one component alias with the join delimiter: two distinct
-// (socket, pane) pairs whose hyphen boundary fell in different places could
-// sanitize to the identical path (this repo's own socket names are
-// hyphen-joined numeric triples — cmd/pfm/commands.go's freshEngineSocket,
-// "%s%d-%d-%d"). Sanitizing first and joining on a delimiter the sanitizer
-// never produces makes that collision structurally impossible.
-func (engine *Engine) steerLogPath(target Target) string {
-	sanitize := func(component string) string {
-		return strings.Map(func(character rune) rune {
-			switch {
-			case character >= 'a' && character <= 'z',
-				character >= 'A' && character <= 'Z',
-				character >= '0' && character <= '9':
-				return character
-			default:
-				return '_'
-			}
-		}, component)
-	}
-	name := sanitize(filepath.Base(target.SocketPath)) + "." + sanitize(target.Pane)
-	return filepath.Join(engine.options.ThenLogRoot, "chat-then-"+name+".log")
-}
-
 func targetFromParts(socketPath, pane string) Target {
-	base := filepath.Base(socketPath)
-	id, ok := pfmengine.FromSocket(base)
-	if !ok && os.Getenv("PFM_TEST_PROBE_SOCKETS") == "1" {
-		id, ok = pfmengine.FromSocket(strings.TrimPrefix(base, "probe-"))
-	}
-	if !ok {
-		return Target{SocketPath: socketPath, Pane: pane, Engine: "unknown"}
-	}
-	return Target{SocketPath: socketPath, Pane: pane, Engine: string(id)}
-}
-
-func parseTargetLine(line string) (string, string, bool) {
-	fields := strings.Split(strings.TrimSpace(line), "\t")
-	return firstTwo(fields)
-}
-
-func firstTwo(fields []string) (string, string, bool) {
-	if len(fields) != 2 || fields[0] == "" || fields[1] == "" {
-		return "", "", false
-	}
-	return fields[0], fields[1], true
-}
-
-func currentSocketPath() string {
-	value := os.Getenv("TMUX")
-	if comma := strings.IndexByte(value, ','); comma >= 0 {
-		value = value[:comma]
-	}
-	return value
-}
-
-func rawPane(value string) bool {
-	if len(value) < 2 || value[0] != '%' {
-		return false
-	}
-	for _, character := range value[1:] {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
-	return true
+	return targetFromSeat(resolve.SeatFromParts(socketPath, pane, paths.OSEnv{}))
 }
 
 func refused(code int, message string) Result {
 	return Result{Status: "refused", Code: code, Message: message}
+}
+
+// lockLost fills base for a delivery whose heartbeat could no longer prove
+// it still holds the target's lock (F9): it stops typing rather than risk
+// interleaving keystrokes with whoever stole the lock, and reports the loss
+// under its own code instead of the generic CodeUndelivered.
+func lockLost(base Result, pane string, err error) Result {
+	base.Status = "lock_lost"
+	base.Code = CodeLockLost
+	base.Message = fmt.Sprintf(
+		"stopped delivering into %q: %v",
+		pane,
+		err,
+	)
+	return base
 }
 
 func normalizeSpace(value string) string {
@@ -1864,7 +1782,7 @@ func tailRunes(value string, count int) string {
 	return string(runes)
 }
 
-func lastLines(value string, count int) string {
+func captureLastLines(value string, count int) string {
 	lines := strings.Split(value, "\n")
 	if len(lines) > count {
 		lines = lines[len(lines)-count:]
@@ -1872,16 +1790,14 @@ func lastLines(value string, count int) string {
 	return strings.Join(lines, "\n")
 }
 
-func sleepContext(ctx context.Context, duration time.Duration) {
+// sleepContext waits duration or until ctx is cancelled, through the
+// engine's own Clock seam (nil defaults to clock.Real), so a test driving
+// clock.NewFake advances every retry loop here without a real sleep.
+func (engine *Engine) sleepContext(ctx context.Context, duration time.Duration) {
 	if duration <= 0 {
 		return
 	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
+	_ = engine.options.Clock.Sleep(ctx, duration)
 }
 
 // captureLabel reads this chat's own 🔖 label through naming, the one package

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/action"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type fakeReloadTmux struct {
@@ -38,21 +38,25 @@ func (tmux *fakeReloadTmux) Capture(context.Context, string, string) (string, er
 	}
 	return "Claude\n❯ ", nil
 }
+
 func (tmux *fakeReloadTmux) SendKey(_ context.Context, _, _, key string) error {
 	if key == "Enter" && tmux.literal == "/exit" {
 		tmux.dead = true
 	}
 	return nil
 }
+
 func (tmux *fakeReloadTmux) SendLiteral(_ context.Context, _, _, value string) error {
 	tmux.literal = value
 	return nil
 }
+
 func (tmux *fakeReloadTmux) Respawn(_ context.Context, _, _, _, command string) error {
 	tmux.respawn = command
 	tmux.dead = false
 	return nil
 }
+
 func (tmux *fakeReloadTmux) Display(_ context.Context, _, _, message string) error {
 	tmux.displays = append(tmux.displays, message)
 	return nil
@@ -148,17 +152,7 @@ func (tmux *delayedThenTmux) Capture(context.Context, string, string) (string, e
 	return "Chat\n" + wrapComposer(marker, draft, 60), nil
 }
 
-// wrapComposer renders a draft the way Claude and Codex actually draw one: the
-// ❯/› marker on the FIRST line only, continuation lines indented beneath it,
-// the block framed by the input box's horizontal rules.
-//
-// The fixture this replaced echoed one hardcoded 17-character prompt onto a
-// single line, so it read the same whether the composer reader handled wrapping
-// or not — green against correct code and against the one-line reader that
-// could never confirm a real steer. It breaks lines at a fixed width, MID-word,
-// which is the harsher of the two real shapes (Claude breaks at word boundaries
-// until a single token is wider than the box — a path or a URL, the substance
-// of most steers).
+// wrapComposer renders a multiline TUI draft with its marker only on row one.
 func wrapComposer(marker, text string, width int) string {
 	rule := strings.Repeat("─", width)
 	runes := []rune(text)
@@ -228,6 +222,7 @@ func (respawnPromptProc) Cmdline(int) ([]string, error) { return []string{"claud
 func (respawnPromptProc) Environ(int) (map[string]string, error) {
 	return map[string]string{}, nil
 }
+
 func (proc respawnPromptProc) Stat(pid int) (gather.ProcStat, error) {
 	if pid == 801 {
 		return gather.ProcStat{ParentPID: proc.tmux.newPID}, nil
@@ -238,6 +233,7 @@ func (promptReadyProc) Cmdline(int) ([]string, error) { return []string{"claude"
 func (promptReadyProc) Environ(int) (map[string]string, error) {
 	return map[string]string{}, nil
 }
+
 func (promptReadyProc) Stat(pid int) (gather.ProcStat, error) {
 	if pid == 801 {
 		return gather.ProcStat{ParentPID: 700}, nil
@@ -262,12 +258,42 @@ func TestSessionFromCrumbUsesPaneSpecificIdentity(t *testing.T) {
 	}
 }
 
+func TestSessionFromPaneCrumbRequiresExactValidatedBinding(t *testing.T) {
+	dir := t.TempDir()
+	const socket = "cc-1-2-3"
+	if err := os.WriteFile(filepath.Join(dir, socket+".%7"), []byte("/transcripts/pane.jsonl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, socket), []byte("/transcripts/socket.jsonl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id, path, err := SessionFromPaneCrumb(dir, socket, "%7")
+	if err != nil || id != "pane" || path != "/transcripts/pane.jsonl" {
+		t.Fatalf("exact pane identity = %q/%q err=%v", id, path, err)
+	}
+	id, path, err = SessionFromPaneCrumb(dir, socket, "%8")
+	if err != nil || id != "" || path != "" {
+		t.Fatalf("missing pane borrowed socket fallback = %q/%q err=%v", id, path, err)
+	}
+	if _, _, err := SessionFromPaneCrumb(dir, socket, "bad"); !errors.Is(err, ErrInvalidPaneCrumb) {
+		t.Fatalf("invalid pane error = %v, want ErrInvalidPaneCrumb", err)
+	}
+	if _, _, err := SessionFromPaneCrumb("relative", socket, "%7"); err == nil ||
+		!strings.Contains(err.Error(), "not absolute") {
+		t.Fatalf("relative breadcrumb directory error = %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, socket+".%9"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := SessionFromPaneCrumb(dir, socket, "%9"); err == nil ||
+		!strings.Contains(err.Error(), "read reload breadcrumb") {
+		t.Fatalf("pane breadcrumb read error = %v", err)
+	}
+}
+
 func TestTranscriptCWDReadsARecordBeforeTheSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.jsonl")
-	content := strings.Join([]string{
-		`{"type":"summary","message":"not a cwd"}`,
-		`{"cwd":"/jail/project","message":"start"}`,
-	}, "\n") + "\n"
+	content := `{"type":"summary","message":"not a cwd"}` + "\n" + `{"cwd":"/jail/project","message":"start"}` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -287,11 +313,28 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			t.Errorf("close lock: %v", err)
+		}
+	}()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Run(context.Background(), Request{Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7", Account: 2, AccountIDs: []int{2}}, Options{SIDDir: dir, Delay: -1}, nil, nil, nil)
+	_, err = Run(
+		context.Background(),
+		Request{
+			Engine:     pfmengine.Claude,
+			SocketPath: "/tmp/probe-1",
+			Pane:       "%7",
+			Account:    2,
+			AccountIDs: []int{2},
+		},
+		Options{SIDDir: dir, Delay: -1},
+		nil,
+		nil,
+		nil,
+	)
 	if err == nil || !strings.Contains(err.Error(), "already in flight") {
 		t.Fatalf("overlap error = %v", err)
 	}
@@ -316,8 +359,6 @@ func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 	}
 }
 
-// reloadTestMachine is a two-account roster whose account 2 is explicit, so a
-// reload line has a config dir to state.
 func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
 	return pfmconfig.Config{
 		Claude: pfmconfig.ClaudePrefs{PermissionMode: pfmconfig.PermissionBypass, SystemPrompt: systemPrompt},
@@ -328,10 +369,6 @@ func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
 	}
 }
 
-// A reloaded chat is a RESUME, and a resume carries the same prompt material a
-// fresh launch would: the reload constructor used to be a fourth independent
-// spawn site with no idea the fleet had a configured system prompt, so a
-// rebooted seat silently reverted to the CLI's own.
 func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	home := t.TempDir()
 	promptPath := action.ProfessorPromptPath(home)
@@ -356,6 +393,15 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	}
 	if !strings.Contains(professor, "--dangerously-skip-permissions") {
 		t.Fatalf("reloaded chat lost the configured autonomy posture: %q", professor)
+	}
+	rolePrompt := filepath.Join(home, "sid", "role-prompt-cc-reviewer.md")
+	roleRun, err := claudeRun(Request{
+		Account: 2, Home: home, Machine: reloadTestMachine(pfmconfig.SystemPromptProfessor, home),
+		SessionID: "11111111-1111-4111-8111-111111111111", PromptChannel: rolePrompt,
+	})
+	if err != nil || !strings.Contains(roleRun, " --system-prompt-file "+action.Quote(rolePrompt)) ||
+		strings.Contains(roleRun, action.Quote(action.ProfessorPromptPath(home))) {
+		t.Fatalf("Claude role reload did not replace the ordinary prompt file: run=%q error=%v", roleRun, err)
 	}
 
 	lean, err := claudeRun(Request{
@@ -390,16 +436,24 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 }
 
 func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
+	prompt := strings.Repeat("0123456789abcdef", 820) + ` a triple quote """ and slash \\ survive`
 	run, err := engineRun(Request{
-		Engine:      "cx",
-		Account:     9,
-		AccountHome: "/jail/codex/9",
-		CodexBinary: "/opt/codex safe",
-		CodexYolo:   false,
-		SessionID:   "019ff700-0000-7000-8000-000000000001",
+		Engine:        "cx",
+		Account:       9,
+		CodexHome:     "/jail/codex/9",
+		CodexBinary:   "/opt/codex safe",
+		CodexYolo:     false,
+		SessionID:     "019ff700-0000-7000-8000-000000000001",
+		PromptChannel: prompt,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+	developerInstructions := action.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
+	if !strings.Contains(run, " -c "+developerInstructions+" resume ") {
+		t.Fatalf("Codex role reload does not carry one complete developer-instructions value before resume: %q", run)
 	}
 	for _, want := range []string{
 		"CODEX_HOME='/jail/codex/9'",
@@ -413,10 +467,14 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	if strings.Contains(run, "CLAUDE_CONFIG_DIR=") {
 		t.Fatalf("Codex reload inherited a Claude config assignment: %q", run)
 	}
+	roleless, err := codexRun(Request{SessionID: "019ff700-0000-7000-8000-000000000001"})
+	if err != nil || strings.Contains(roleless, "developer_instructions") {
+		t.Fatalf("roleless Codex reload changed: run=%q error=%v", roleless, err)
+	}
 }
 
-func TestOpencodeRunIsNotMisroutedToClaude(t *testing.T) {
-	run, err := engineRun(Request{Engine: pfmengine.Opencode})
+func TestOpenCodeRunIsNotMisroutedToClaude(t *testing.T) {
+	run, err := engineRun(Request{Engine: pfmengine.OpenCode})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,12 +483,12 @@ func TestOpencodeRunIsNotMisroutedToClaude(t *testing.T) {
 	}
 }
 
-func TestRunRefusesOpencodeBeforeExitingThePane(t *testing.T) {
+func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 	tmux := &fakeReloadTmux{}
 	_, err := Run(
 		context.Background(),
 		Request{
-			Engine: pfmengine.Opencode, SocketPath: "/tmp/ox-session", Pane: "%7",
+			Engine: pfmengine.OpenCode, SocketPath: "/tmp/ox-session", Pane: "%7",
 			PanePID: 700, Account: 1, AccountIDs: []int{1}, CWD: "/work",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
@@ -487,7 +545,7 @@ func TestRunWaitsForExitTextToRenderBeforeSubmitting(t *testing.T) {
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-reload-render", Pane: "%7",
 			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
-			Account: 1, AccountIDs: []int{1}, AccountHome: "/jail/codex/1",
+			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
 		tmux,
@@ -515,7 +573,7 @@ func TestRunRefusesBlindExitWhenTextNeverRenders(t *testing.T) {
 		Request{
 			Engine: pfmengine.Codex, SocketPath: filepath.Join(t.TempDir(), "fake-codex-socket"), Pane: "%7",
 			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
-			Account: 1, AccountIDs: []int{1}, AccountHome: "/jail/codex/1",
+			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
 		tmux,
@@ -595,13 +653,6 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 	}
 }
 
-func TestLastComposerLineFindsCodexCommandAbovePopupWhitespace(t *testing.T) {
-	capture := "Codex\n› /exit\n" + strings.Repeat("\n", 30)
-	if got := lastComposerLine(capture); !strings.Contains(got, "/exit") {
-		t.Fatalf("lastComposerLine()=%q, want the visible Codex command", got)
-	}
-}
-
 func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 	tmux := &respawnPIDTmux{oldPID: 700, newPID: 900}
 	_, err := Run(
@@ -630,31 +681,6 @@ func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 	}
 }
 
-func TestClaudeLiveUsesThePaneProcessPIDNotTheTmuxPaneID(t *testing.T) {
-	proc := fakeReloadProc{
-		pids: []int{801},
-		argv: map[int][]string{801: {"claude"}},
-		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
-	}
-	live, err := claudeLive(proc, 700)
-	if err != nil || !live {
-		t.Fatalf("claudeLive() = %v, %v", live, err)
-	}
-}
-
-func TestClaudeLiveIgnoresAProcessThatExitsDuringTheProcScan(t *testing.T) {
-	proc := fakeReloadProc{
-		pids:   []int{800, 801},
-		argv:   map[int][]string{801: {"claude"}},
-		cmdErr: map[int]error{800: os.ErrNotExist},
-		stat:   map[int]gather.ProcStat{801: {ParentPID: 700}},
-	}
-	live, err := claudeLive(proc, 700)
-	if err != nil || !live {
-		t.Fatalf("claudeLive() = %v, %v", live, err)
-	}
-}
-
 func TestFailedThenWritesTheRecoverableSentinel(t *testing.T) {
 	dir := t.TempDir()
 	tmux := &fakeReloadTmux{}
@@ -675,19 +701,12 @@ func TestFailedThenWritesTheRecoverableSentinel(t *testing.T) {
 	}
 }
 
-// TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines reproduces the
-// defect the operator hit on every account switch: the steer landed in the
-// composer and pfm refused to press Enter, so a human had to.
-//
-// deliverThen proves delivery by the prompt's TAIL — the half that proves
-// nothing was truncated in transit — and read that proof off the composer's
-// MARKER line alone. Claude prints the marker on the first line of a wrapped
-// draft, so the tail of any prompt longer than one row was unreachable and the
-// proof could never be satisfied. Every real steer is longer than one row.
+// A wrapped prompt's tail must prove delivery even though the marker is only
+// on the first composer row.
 func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
-	const then = "Continue the wave: read the refine checkpoint end to end, " +
-		"execute the remaining round, and write the zero-gap spec to the queue " +
-		"path before presenting the user gate."
+	const then = "Continue the flight: read the run ledger end to end, " +
+		"execute the remaining tasks, and write the zero-gap task file to the " +
+		"flight directory before presenting the user gate."
 	tmux := &delayedThenTmux{}
 	tmux.respawn = "claude"
 	proc := fakeReloadProc{
@@ -711,30 +730,6 @@ func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
 	}
 	if !tmux.submitted {
 		t.Fatal("a wrapped --then prompt was never submitted — Enter was withheld from a prompt that had fully landed")
-	}
-}
-
-// TestComposerTextReadsAWrappedDraftAndStopsAtTheBoxRule pins the render taken
-// from a live pane at the moment of a refusal: marker plus non-breaking space
-// on line one, continuations indented beneath, the box rule closing the block,
-// status rows below it that must stay OUT of the read.
-func TestComposerTextReadsAWrappedDraftAndStopsAtTheBoxRule(t *testing.T) {
-	rule := strings.Repeat("─", 40)
-	capture := strings.Join([]string{
-		"Chat",
-		rule,
-		"❯ \u00a0Continue the reload-then reproduction. This prompt is",
-		"  deliberately long enough to wrap across several rendered",
-		"  composer lines. END OF REPRO PROMPT MARKER.",
-		rule,
-		"  bypass permissions on (shift+tab to cycle)",
-	}, "\n")
-	got := composerText(capture)
-	if !strings.Contains(got, "END OF REPRO PROMPT MARKER.") {
-		t.Fatalf("composerText lost the wrapped tail: %q", got)
-	}
-	if strings.Contains(got, "bypass permissions") {
-		t.Fatalf("composerText read past the box rule into the status rows: %q", got)
 	}
 }
 
@@ -817,6 +812,24 @@ func TestRunWaitsForTheCallerTurnToEndBeforeTypingExit(t *testing.T) {
 	}
 }
 
+// A mid-turn /reload used to hold /exit with the wait logged only to the
+// worker's own stderr; the pane itself must announce the wait, then the reboot.
+func TestRunAnnouncesTheHoldAndTheRebootOnThePane(t *testing.T) {
+	tmux := &busyThenIdleTmux{busyCaptures: 3, typedAfter: -1}
+	options := Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 10}
+	_, err := Run(
+		context.Background(), reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-announce"), options, tmux, nil, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWaiting := "pfm reload: waiting for this turn to end, then rebooting this chat"
+	wantRebooting := "pfm reload: rebooting now"
+	if len(tmux.displays) != 2 || tmux.displays[0] != wantWaiting || tmux.displays[1] != wantRebooting {
+		t.Fatalf("pane displays=%#v, want [%q, %q]", tmux.displays, wantWaiting, wantRebooting)
+	}
+}
+
 func TestRunRefusesToTypeExitIntoAChatThatStaysBusy(t *testing.T) {
 	tmux := &busyThenIdleTmux{busyCaptures: 1 << 30, typedAfter: -1}
 	_, err := Run(
@@ -831,7 +844,12 @@ func TestRunRefusesToTypeExitIntoAChatThatStaysBusy(t *testing.T) {
 		t.Fatalf("always-busy chat error=%v, want a 'still busy' refusal", err)
 	}
 	if tmux.literal != "" || tmux.typedAfter != -1 || tmux.respawn != "" {
-		t.Fatalf("a busy chat was touched: literal=%q typedAfter=%d respawn=%q", tmux.literal, tmux.typedAfter, tmux.respawn)
+		t.Fatalf(
+			"a busy chat was touched: literal=%q typedAfter=%d respawn=%q",
+			tmux.literal,
+			tmux.typedAfter,
+			tmux.respawn,
+		)
 	}
 }
 
@@ -927,7 +945,11 @@ func TestRunConfirmsTheBackgroundWorkExitDialog(t *testing.T) {
 		t.Fatalf("exit dialog was not confirmed: %v (keys %v)", err, tmux.keys)
 	}
 	if countKey(tmux.keys, "Enter") != 2 || tmux.respawn == "" {
-		t.Fatalf("want exactly one submit Enter plus one confirm Enter, got keys %v respawn=%q", tmux.keys, tmux.respawn)
+		t.Fatalf(
+			"want exactly one submit Enter plus one confirm Enter, got keys %v respawn=%q",
+			tmux.keys,
+			tmux.respawn,
+		)
 	}
 }
 

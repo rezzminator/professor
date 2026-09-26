@@ -1,17 +1,26 @@
 package installer
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
-	"hostops/pfm/internal/codexappendix"
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+)
+
+const (
+	hookEventUserPromptSubmit = "UserPromptSubmit"
+	hookEventPreToolUse       = "PreToolUse"
+	hookExploreMatcher        = "Agent|Task"
+	// hookRRDirMatcher names the agents whose prompt reads the RR-DIR line:
+	// templates/global/agents/rr.md and the variants declared from it.
+	hookRRDirMatcher = "rr|super-rr|heavy-rr"
+	// hookMatchAll is the matcher that fires for every tool or agent name.
+	hookMatchAll = "*"
+	// stateBroken is the VS Code extension link state (vscode_index.go); the
+	// hook check has its own states in hook_probe.go.
+	stateBroken = "broken"
 )
 
 // ExpectedHook is one hook the installer converges and owns.
@@ -22,13 +31,10 @@ type ExpectedHook struct {
 	Matcher string
 	Command string
 	Name    string
-}
-
-// HookProbeResult keeps missing, broken, and ownership drift distinct.
-type HookProbeResult struct {
-	Hook  ExpectedHook
-	State string
-	Error string
+	// Async marks a hook the harness runs in the background: the settings
+	// writer puts "async": true in its hook object and converges an owned
+	// entry that lacks it. It is not part of the ownership key.
+	Async bool
 }
 
 // ExpectedHooks is the installer's exported source of truth for doctor. The
@@ -61,34 +67,66 @@ func ExpectedHooks(home string, config pfmconfig.Config) []ExpectedHook {
 			result = append(result, hook)
 		}
 	}
-	for _, account := range config.CodexAccounts {
-		file := filepath.Join(account.Home, "hooks.json")
-		physical := physicalSettingsPath(file)
-		if seen[physical] {
-			continue
-		}
-		seen[physical] = true
-		hook := codexHookTemplate(home)
-		hook.Target = fmt.Sprintf("codex[%d]", account.ID)
-		hook.File = file
-		result = append(result, hook)
-	}
+	// Codex accounts carry no expected hook: the fleet prompt reaches a Codex
+	// session through config.toml's developer_instructions, and the
+	// SessionStart appendix hook pfm used to own is retired.
 	return result
 }
 
 func claudeHookTemplates(home string) []ExpectedHook {
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	return []ExpectedHook{
+	templates := []ExpectedHook{
 		{Event: "SessionStart", Command: binary + " internal launcher-repair", Name: "launcher-repair"},
-		{Event: "UserPromptSubmit", Command: binary + " usage-hook", Name: "usage"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " usage-hook", Name: "usage"},
 		{Event: "SessionEnd", Command: binary + " internal clear-kill", Name: "clear-kill"},
 		{Event: "SessionEnd", Command: binary + " internal exit-close", Name: "exit-close"},
-		{Event: "PreToolUse", Matcher: "Agent|Task", Command: binary + " internal explore-deny", Name: "explore-deny"},
-		{Event: "UserPromptSubmit", Command: binary + " internal epic-inject", Name: "epic-inject"},
-		{Event: "UserPromptSubmit", Command: binary + " internal reload-intercept", Name: "reload-intercept"},
-		{Event: "UserPromptSubmit", Command: binary + " internal exit-intercept", Name: "exit-intercept"},
-		{Event: "UserPromptSubmit", Command: binary + " internal compact-nudge", Name: "compact-nudge"},
+		{
+			Event:   hookEventPreToolUse,
+			Matcher: hookExploreMatcher,
+			Command: binary + " internal explore-deny",
+			Name:    "explore-deny",
+		},
+		{
+			// Every Bash call in every repository: only gitter writes shared
+			// git state (docs/design/hooks/git-guard.md).
+			Event:   hookEventPreToolUse,
+			Matcher: "Bash",
+			Command: binary + " internal git-guard",
+			Name:    "git-guard",
+		},
+		{
+			Event:   "SubagentStart",
+			Matcher: hookRRDirMatcher,
+			Command: binary + " internal rr-dir",
+			Name:    "rr-dir",
+		},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal epic-inject", Name: "epic-inject"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal exit-intercept", Name: "exit-intercept"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal compact-nudge", Name: "compact-nudge"},
 	}
+	// callmeter is one command registered on seven events
+	// (docs/design/hooks/callmeter.md § The hooks): PreToolUse matches Bash
+	// only (the directory a command starts in), the other tool events and the
+	// subagent events match every name, PostToolBatch and Stop carry no name
+	// to match. Every registration runs async so the hook never sits in front
+	// of a call.
+	callmeter := binary + " internal callmeter"
+	for _, placement := range []struct{ event, matcher string }{
+		{hookEventPreToolUse, "Bash"},
+		{"PostToolUse", hookMatchAll},
+		{"PostToolUseFailure", hookMatchAll},
+		{"PostToolBatch", ""},
+		{"SubagentStart", hookMatchAll},
+		{"SubagentStop", hookMatchAll},
+		{"Stop", ""},
+	} {
+		templates = append(templates, ExpectedHook{
+			Event: placement.event, Matcher: placement.matcher,
+			Command: callmeter, Name: "callmeter", Async: true,
+		})
+	}
+	return templates
 }
 
 func commandByName(hooks []ExpectedHook, name string) string {
@@ -118,277 +156,4 @@ func physicalSettingsPath(path string) string {
 		missing = append(missing, filepath.Base(candidate))
 		candidate = parent
 	}
-}
-
-// ProbeExpectedHooks parses each expected file once, validates the canonical
-// command path, then cross-checks the same ownership ledger uninstall reads.
-func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult {
-	expected := ExpectedHooks(home, config)
-	ownership, _, ownershipErr := readSettingsHookOwnership(filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"))
-	if ownershipErr != nil {
-		return []HookProbeResult{{
-			Hook:  ExpectedHook{Target: "ownership", File: filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json")},
-			State: "broken", Error: ownershipErr.Error(),
-		}}
-	}
-	type fileProbe struct {
-		counts      settingsHookCounts
-		allCounts   settingsHookCounts
-		globalIssue string
-		eventIssues map[string]string
-		err         error
-	}
-	files := map[string]fileProbe{}
-	fileTargets := map[string]string{}
-	fileDisplayPaths := map[string]string{}
-	for _, hook := range expected {
-		physical := physicalSettingsPath(hook.File)
-		if _, done := files[physical]; done {
-			continue
-		}
-		fileTargets[physical] = hook.Target
-		fileDisplayPaths[physical] = hook.File
-		raw, err := os.ReadFile(hook.File)
-		if err != nil {
-			files[physical] = fileProbe{err: err}
-			continue
-		}
-		var document map[string]any
-		if err := json.Unmarshal(raw, &document); err != nil {
-			files[physical] = fileProbe{err: fmt.Errorf("parse %s: %w", hook.File, err)}
-			continue
-		}
-		counts, allCounts, globalIssue, eventIssues := inspectExpectedHookDocument(document)
-		files[physical] = fileProbe{
-			counts: counts, allCounts: allCounts,
-			globalIssue: globalIssue, eventIssues: eventIssues,
-		}
-	}
-
-	results := make([]HookProbeResult, 0, len(expected)*2)
-	expectedKeys := map[string]bool{}
-	for _, hook := range expected {
-		physical := physicalSettingsPath(hook.File)
-		key := settingsHookKey{Event: hook.Event, Matcher: hook.Matcher, Command: hook.Command}
-		expectedKeys[physical+"\x00"+hook.Event+"\x00"+hook.Matcher+"\x00"+hook.Command] = true
-		file := files[physical]
-		if file.err != nil {
-			state := "broken"
-			if errors.Is(file.err, os.ErrNotExist) {
-				state = "missing"
-			}
-			results = append(results, HookProbeResult{Hook: hook, State: state, Error: file.err.Error()})
-			if ownership[physical][key] != 0 {
-				results = append(results, HookProbeResult{
-					Hook: hook, State: "drift",
-					Error: fmt.Sprintf("ownership=%d file=unreadable", ownership[physical][key]),
-				})
-			}
-		} else if file.globalIssue != "" {
-			results = append(results, HookProbeResult{Hook: hook, State: "broken", Error: file.globalIssue})
-		} else if issue := file.eventIssues[hook.Event]; issue != "" {
-			results = append(results, HookProbeResult{Hook: hook, State: "broken", Error: issue})
-		} else if file.counts[key] == 0 {
-			state, detail := missingOrStaleHook(file.allCounts, hook)
-			results = append(results, HookProbeResult{Hook: hook, State: state, Error: detail})
-		} else {
-			results = append(results, HookProbeResult{Hook: hook, State: "ok"})
-		}
-		if file.err == nil && ownership[physical][key] != file.counts[key] {
-			results = append(results, HookProbeResult{
-				Hook: hook, State: "drift",
-				Error: fmt.Sprintf("ownership=%d file=%d", ownership[physical][key], file.counts[key]),
-			})
-		}
-	}
-	// A retired command sitting in a file is invisible to the loop above —
-	// it matches no expected hook — so walk every probed file's raw command
-	// inventory once for any hook that matches the shared retired-command
-	// table, regardless of whether the installer ever wrote or owned it.
-	for physical, file := range files {
-		if file.err != nil {
-			continue
-		}
-		for key, count := range file.allCounts {
-			if count == 0 {
-				continue
-			}
-			name, retired := retiredHookCommandName(key.Command)
-			if !retired {
-				continue
-			}
-			results = append(results, HookProbeResult{
-				Hook: ExpectedHook{
-					Target: fileTargets[physical], File: fileDisplayPaths[physical],
-					Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: name,
-				},
-				State: "stale", Error: "retired hook command is still present",
-			})
-		}
-	}
-	for path, counts := range ownership {
-		for key, count := range counts {
-			identity := path + "\x00" + key.Event + "\x00" + key.Matcher + "\x00" + key.Command
-			if expectedKeys[identity] {
-				continue
-			}
-			results = append(results, HookProbeResult{
-				Hook:  ExpectedHook{Target: "ownership", File: path, Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: "unexpected"},
-				State: "drift", Error: fmt.Sprintf("ledger owns %d hook(s) absent from installer expectations", count),
-			})
-		}
-	}
-	sort.SliceStable(results, func(left, right int) bool {
-		l, r := results[left], results[right]
-		return l.Hook.Target+"\x00"+l.Hook.File+"\x00"+l.Hook.Event+"\x00"+l.Hook.Name+"\x00"+l.State <
-			r.Hook.Target+"\x00"+r.Hook.File+"\x00"+r.Hook.Event+"\x00"+r.Hook.Name+"\x00"+r.State
-	})
-	return results
-}
-
-func missingOrStaleHook(counts settingsHookCounts, hook ExpectedHook) (string, string) {
-	if counts[settingsHookKey{Event: hook.Event, Matcher: hook.Matcher, Command: hook.Command}] > 0 {
-		return "broken", "hook type is not command"
-	}
-	_, arguments, foundArguments := strings.Cut(hook.Command, " ")
-	if !foundArguments {
-		return "missing", "expected command absent"
-	}
-	wantedSuffix := " " + arguments
-	for key, count := range counts {
-		if count == 0 || key.Event != hook.Event || key.Matcher != hook.Matcher {
-			continue
-		}
-		fields := strings.Fields(key.Command)
-		if len(fields) > 0 && strings.HasSuffix(key.Command, wantedSuffix) {
-			return "broken", fmt.Sprintf("command points at %s", fields[0])
-		}
-	}
-	return "missing", "expected command absent"
-}
-
-// inspectExpectedHookDocument validates the JSON shape doctor relies on. The
-// installer's ownership counter intentionally remains tolerant because it must
-// also remove historical entries; doctor is stricter and only counts typed
-// command hooks as healthy.
-func inspectExpectedHookDocument(document map[string]any) (settingsHookCounts, settingsHookCounts, string, map[string]string) {
-	typed := settingsHookCounts{}
-	all := settingsHookCounts{}
-	issues := map[string]string{}
-	hooksValue, present := document["hooks"]
-	if !present {
-		return typed, all, "", issues
-	}
-	events, ok := hooksValue.(map[string]any)
-	if !ok {
-		return typed, all, "hooks is not an object", issues
-	}
-	for event, eventValue := range events {
-		entries, ok := eventValue.([]any)
-		if !ok {
-			issues[event] = fmt.Sprintf("event %s is not an array", event)
-			continue
-		}
-		for entryIndex, entryValue := range entries {
-			entry, ok := entryValue.(map[string]any)
-			if !ok {
-				issues[event] = fmt.Sprintf("event %s entry %d is not an object", event, entryIndex)
-				continue
-			}
-			matcher := ""
-			if matcherValue, exists := entry["matcher"]; exists {
-				var matcherOK bool
-				matcher, matcherOK = matcherValue.(string)
-				if !matcherOK {
-					issues[event] = fmt.Sprintf("event %s entry %d matcher is not a string", event, entryIndex)
-					continue
-				}
-			}
-			hookValues, ok := entry["hooks"].([]any)
-			if !ok {
-				issues[event] = fmt.Sprintf("event %s entry %d hooks is not an array", event, entryIndex)
-				continue
-			}
-			for hookIndex, hookValue := range hookValues {
-				hook, ok := hookValue.(map[string]any)
-				if !ok {
-					issues[event] = fmt.Sprintf("event %s entry %d hook %d is not an object", event, entryIndex, hookIndex)
-					continue
-				}
-				command, ok := hook["command"].(string)
-				if !ok || strings.TrimSpace(command) == "" {
-					issues[event] = fmt.Sprintf("event %s entry %d hook %d command is not a non-empty string", event, entryIndex, hookIndex)
-					continue
-				}
-				key := settingsHookKey{Event: event, Matcher: matcher, Command: command}
-				all[key]++
-				if hookType, ok := hook["type"].(string); ok && hookType == "command" {
-					typed[key]++
-				}
-			}
-		}
-	}
-	return typed, all, "", issues
-}
-
-func codexHookTemplate(home string) ExpectedHook {
-	return ExpectedHook{Event: "SessionStart", Matcher: codexappendix.Matcher, Command: codexappendix.Command(home), Name: "codex-appendix"}
-}
-
-// HookProbeOverride is nil in production; a fleet test main may swap it for
-// a deterministic stub exactly like ReportHooks' own probe (the same seam
-// dependencyProbeOverride uses in cmd/pfm), so a jail can pin every hook "ok"
-// without staging real settings.json content for it.
-var HookProbeOverride func(home string, machine pfmconfig.Config) []HookProbeResult
-
-// ReportHooks prints one doctor line per expected hook, and returns the
-// warnings they earned. When claudeAbsent, every claude[N] target collapses
-// to ONE named skip line per account instead of nine per-hook MISSING rows,
-// and earns no warning — the installer never wires Claude hooks on a host
-// with no Claude Code binary, so doctor must not fault it for that. Codex
-// targets are reported exactly as before regardless of Claude's presence.
-func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claudeAbsent bool) int {
-	var results []HookProbeResult
-	if HookProbeOverride != nil {
-		results = HookProbeOverride(home, machine)
-	} else {
-		results = ProbeExpectedHooks(home, machine)
-	}
-	warnings := 0
-	skipped := map[string]bool{}
-	for _, result := range results {
-		hook := result.Hook
-		if claudeAbsent && strings.HasPrefix(hook.Target, "claude[") {
-			if !skipped[hook.Target] {
-				skipped[hook.Target] = true
-				fmt.Fprintf(stdout, "doctor: hook %s skipped (no Claude Code binary installed)\n", hook.Target)
-			}
-			continue
-		}
-		file := filepath.Base(hook.File)
-		if file == "." || file == "" {
-			file = "(unknown)"
-		}
-		prefix := fmt.Sprintf("doctor: hook %s %s %s %s", hook.Target, file, hook.Event, hook.Name)
-		switch result.State {
-		case "ok":
-			fmt.Fprintln(stdout, prefix+" ok")
-		case "missing":
-			warnings++
-			fmt.Fprintln(stdout, prefix+" MISSING — run pfm install")
-		case "broken":
-			warnings++
-			fmt.Fprintf(stdout, "%s broken error=%s\n", prefix, result.Error)
-		case "drift":
-			warnings++
-			fmt.Fprintf(stdout, "%s drift error=%s\n", prefix, result.Error)
-		case "stale":
-			warnings++
-			fmt.Fprintln(stdout, prefix+" stale — run pfm install")
-		default:
-			warnings++
-			fmt.Fprintf(stdout, "%s broken error=unknown hook state %q\n", prefix, result.State)
-		}
-	}
-	return warnings
 }

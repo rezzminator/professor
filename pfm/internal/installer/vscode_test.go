@@ -108,7 +108,11 @@ func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.
 			t.Fatalf("uninstall retained %q (settings.json had no such key before install):\n%s", gone, restored)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(
+		filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName),
+	); !os.IsNotExist(
+		err,
+	) {
 		t.Fatalf("uninstall retained VS Code ownership ledger: %v", err)
 	}
 }
@@ -295,7 +299,13 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, oldPath, `{"terminal.integrated.profiles.osx":{"PFM":`+string(profile)+`},"terminal.integrated.defaultProfile.osx":"PFM"}`)
+	writeFixture(
+		t,
+		oldPath,
+		`{"terminal.integrated.profiles.osx":{"PFM":`+string(
+			profile,
+		)+`},"terminal.integrated.defaultProfile.osx":"PFM"}`,
+	)
 	record := vscodeOwnershipDocument{Version: vscodeOwnershipVersion, Files: []vscodeOwnershipRecord{{
 		Path: oldPath, Platform: "osx", ProfileOwned: true, DefaultOwned: true,
 	}}}
@@ -306,8 +316,10 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 	writeFixture(t, filepath.Join(managed, vscodeOwnershipName), string(ledger))
 	writeFixture(t, newPath, `{}`)
 	installer := engine{
-		options: Options{Mode: ModeApply, Home: home, VSCode: true, Stdout: &bytes.Buffer{},
-			vscodePlatform: "linux", vscodeSettingsPaths: []string{newPath}},
+		options: Options{
+			Mode: ModeApply, Home: home, VSCode: true, Stdout: &bytes.Buffer{},
+			vscodePlatform: "linux", vscodeSettingsPaths: []string{newPath},
+		},
 		apply: true, managedRoot: managed, stamp: "fixture",
 	}
 	if err := installer.wireVSCode(); err != nil {
@@ -323,8 +335,10 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
-	options := Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
-		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings}}
+	options := Options{
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
+	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +365,8 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 		t.Fatalf("reinstall after edited-profile refusal: %v", err)
 	}
 	got := readFixture(t, settings)
-	if !strings.Contains(got, `/operator/zsh`) || !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "PFM"`) {
+	if !strings.Contains(got, `/operator/zsh`) ||
+		!strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "PFM"`) {
 		t.Fatalf("reinstall did not reconcile around retained edited profile:\n%s", got)
 	}
 }
@@ -368,7 +383,8 @@ func TestMalformedVSCodeSettingsSkipsVisiblyWithoutBlockingInstall(t *testing.T)
 	if err != nil {
 		t.Fatalf("malformed VS Code settings blocked unrelated install steps: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "skip") || !strings.Contains(output.String(), "VS Code") || !strings.Contains(output.String(), "decode") {
+	if !strings.Contains(output.String(), "skip") || !strings.Contains(output.String(), "VS Code") ||
+		!strings.Contains(output.String(), "decode") {
 		t.Fatalf("malformed VS Code settings were not reported visibly:\n%s", output.String())
 	}
 	if _, err := os.Stat(filepath.Join(home, ".zshrc")); err != nil {

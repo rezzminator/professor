@@ -11,6 +11,7 @@ import (
 // a reload's /exit from a human's: true exactly while the flock is held,
 // false before the file exists and after the lock is released.
 func TestInFlightTracksThePaneMutex(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if inFlight, err := InFlight(dir, "cc-1-1-1", "%0"); err != nil || inFlight {
 		t.Fatalf("no lock file: inFlight=%v err=%v, want false/nil", inFlight, err)
@@ -23,7 +24,11 @@ func TestInFlightTracksThePaneMutex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			t.Errorf("close lock: %v", err)
+		}
+	}()
 	if inFlight, err := InFlight(dir, "cc-1-1-1", "%0"); err != nil || inFlight {
 		t.Fatalf("file present, lock free: inFlight=%v err=%v, want false/nil", inFlight, err)
 	}

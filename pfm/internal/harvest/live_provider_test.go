@@ -3,6 +3,7 @@ package harvest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 const (
@@ -74,11 +75,16 @@ func TestLiveProviderPMC(t *testing.T) {
 // and starts the pinned conversion worker.
 func TestLiveFetchRequestedDOI(t *testing.T) {
 	if !liveProviderSelected("requested-doi") {
-		t.Skipf("provider=requested-doi status=opt-in-required kind= chars=0 valid=false complete=false receipt_safe=false")
+		t.Skipf(
+			"provider=requested-doi status=opt-in-required kind= chars=0 valid=false complete=false receipt_safe=false",
+		)
 	}
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	python, script := liveWorkerConfig(t, "requested-doi")
-	worker := &liveWorkerConverter{worker: harvestpy.NewConverter(harvestpy.Runtime{Python: python, Script: script}), dir: t.TempDir()}
+	worker := &liveWorkerConverter{
+		worker: harvestpy.NewConverter(harvestpy.Runtime{Python: python, Script: script}),
+		dir:    t.TempDir(),
+	}
 	t.Cleanup(func() { _ = worker.worker.Close() })
 	cacheDir := t.TempDir()
 	h, err := New(Options{
@@ -92,13 +98,19 @@ func TestLiveFetchRequestedDOI(t *testing.T) {
 		ContactEmail:     strings.TrimSpace(os.Getenv("HARVESTER_LIVE_CONTACT")),
 	})
 	if err != nil {
-		t.Fatalf("provider=requested-doi status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false")
+		t.Fatalf(
+			"provider=requested-doi status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+		)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	result := h.FetchPublic(ctx, liveRequestedDOI(), FetchOptions{})
 	if result.Error != "" {
-		t.Errorf("provider=requested-doi status=unavailable kind=%s http_status=%d chars=0 valid=false complete=false receipt_safe=true", safeLiveErrorKind(result.ErrorKind), result.HTTPStatus)
+		t.Errorf(
+			"provider=requested-doi status=unavailable kind=%s http_status=%d chars=0 valid=false complete=false receipt_safe=true",
+			safeLiveErrorKind(result.ErrorKind),
+			result.HTTPStatus,
+		)
 		return
 	}
 	complete := regularFileNonEmpty(result.Path)
@@ -113,7 +125,15 @@ func TestLiveFetchRequestedDOI(t *testing.T) {
 	if !valid {
 		status = "invalid"
 	}
-	t.Logf("provider=requested-doi status=%s kind=%s chars=%d valid=%t complete=%t receipt_safe=%t", status, safeLiveKind(result.Kind), result.Chars, valid, complete, receiptSafe)
+	t.Logf(
+		"provider=requested-doi status=%s kind=%s chars=%d valid=%t complete=%t receipt_safe=%t",
+		status,
+		safeLiveKind(result.Kind),
+		result.Chars,
+		valid,
+		complete,
+		receiptSafe,
+	)
 	if !valid {
 		t.Errorf("provider=requested-doi did not produce a valid public artifact")
 	}
@@ -140,22 +160,51 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 		t.Skipf("provider=%s status=opt-in-required kind= chars=0 valid=false complete=false receipt_safe=false", name)
 	}
 	if env, mirror := liveMirrorEnv[name]; mirror && baseURL == "" {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false — set %s to the mirror's base URL", name, env)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false — set %s to the mirror's base URL",
+			name,
+			env,
+		)
 	}
-	python, script := strings.TrimSpace(os.Getenv("HARVESTER_LIVE_PYTHON")), strings.TrimSpace(os.Getenv("HARVESTER_LIVE_SCRIPT"))
+	python, script := strings.TrimSpace(
+		os.Getenv("HARVESTER_LIVE_PYTHON"),
+	), strings.TrimSpace(
+		os.Getenv("HARVESTER_LIVE_SCRIPT"),
+	)
 	if python == "" || script == "" {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false", name)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+			name,
+		)
 	}
 	if _, err := os.Stat(python); err != nil {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false", name)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+			name,
+		)
 	}
 	if _, err := os.Stat(script); err != nil {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false", name)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+			name,
+		)
 	}
 
 	cacheDir := t.TempDir()
-	worker := &liveWorkerConverter{worker: harvestpy.NewConverter(harvestpy.Runtime{Python: python, Script: script}), dir: t.TempDir()}
-	options := Options{CacheDir: cacheDir, Converter: worker, DOIMirrorURL: "", IPFSCatalogURL: "", DOIViewerURL: "", MD5CatalogURL: "", GoogleScholarURL: "", ContactEmail: strings.TrimSpace(os.Getenv("HARVESTER_LIVE_CONTACT"))}
+	worker := &liveWorkerConverter{
+		worker: harvestpy.NewConverter(harvestpy.Runtime{Python: python, Script: script}),
+		dir:    t.TempDir(),
+	}
+	options := Options{
+		CacheDir:         cacheDir,
+		Converter:        worker,
+		DOIMirrorURL:     "",
+		IPFSCatalogURL:   "",
+		DOIViewerURL:     "",
+		MD5CatalogURL:    "",
+		GoogleScholarURL: "",
+		ContactEmail:     strings.TrimSpace(os.Getenv("HARVESTER_LIVE_CONTACT")),
+	}
 	switch name {
 	case "doi-mirror":
 		options.DOIMirrorURL = baseURL
@@ -170,7 +219,10 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 	}
 	h, err := New(options)
 	if err != nil {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false", name)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+			name,
+		)
 	}
 	t.Cleanup(func() { _ = worker.worker.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -178,7 +230,12 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 	result := fetch(ctx, h)
 	if result.Error != "" {
 		writeLiveDiagnostic(name, result)
-		t.Errorf("provider=%s status=unavailable kind=%s http_status=%d chars=0 valid=false complete=false receipt_safe=true", name, safeLiveErrorKind(result.ErrorKind), result.HTTPStatus)
+		t.Errorf(
+			"provider=%s status=unavailable kind=%s http_status=%d chars=0 valid=false complete=false receipt_safe=true",
+			name,
+			safeLiveErrorKind(result.ErrorKind),
+			result.HTTPStatus,
+		)
 		return
 	}
 	public := h.PublicResult(liveProviderSource(name), result, false)
@@ -199,7 +256,16 @@ func runLiveProvider(t *testing.T, name, baseURL string, fetch func(context.Cont
 	if !valid {
 		status = "invalid"
 	}
-	t.Logf("provider=%s status=%s kind=%s chars=%d valid=%t complete=%t receipt_safe=%t", name, status, safeLiveKind(public.Kind), public.Chars, valid, complete, receiptSafe)
+	t.Logf(
+		"provider=%s status=%s kind=%s chars=%d valid=%t complete=%t receipt_safe=%t",
+		name,
+		status,
+		safeLiveKind(public.Kind),
+		public.Chars,
+		valid,
+		complete,
+		receiptSafe,
+	)
 	if !valid {
 		t.Errorf("provider=%s did not produce a valid public artifact", name)
 	}
@@ -266,13 +332,22 @@ func liveWorkerConfig(t *testing.T, name string) (string, string) {
 	python := strings.TrimSpace(os.Getenv("HARVESTER_LIVE_PYTHON"))
 	script := strings.TrimSpace(os.Getenv("HARVESTER_LIVE_SCRIPT"))
 	if python == "" || script == "" {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false", name)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+			name,
+		)
 	}
 	if _, err := os.Stat(python); err != nil {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false", name)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+			name,
+		)
 	}
 	if _, err := os.Stat(script); err != nil {
-		t.Fatalf("provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false", name)
+		t.Fatalf(
+			"provider=%s status=unavailable kind=configuration chars=0 valid=false complete=false receipt_safe=false",
+			name,
+		)
 	}
 	return python, script
 }
@@ -298,7 +373,20 @@ func safeLiveKind(kind string) string {
 func safeLiveErrorKind(kind string) string {
 	low := strings.ToLower(strings.TrimSpace(kind))
 	switch low {
-	case "challenge", "connect", "conversion", "dns", "disabled", "http", "integrity", "invalid", "malformed", "missing", "timeout", "too_large", "unavailable", "wrong_kind":
+	case "challenge",
+		"connect",
+		"conversion",
+		"dns",
+		"disabled",
+		"http",
+		"integrity",
+		"invalid",
+		"malformed",
+		"missing",
+		"timeout",
+		"too_large",
+		"unavailable",
+		"wrong_kind":
 		return low
 	default:
 		return "failed"
@@ -315,12 +403,23 @@ func writeLiveDiagnostic(name string, result Result) {
 	if contact != "" {
 		detail = strings.ReplaceAll(detail, contact, "[contact-redacted]")
 	}
-	line := fmt.Sprintf("provider=%s error_kind=%s http_status=%d challenge=%t error=%s\n", name, safeLiveErrorKind(result.ErrorKind), result.HTTPStatus, result.Challenge, detail)
+	line := fmt.Sprintf(
+		"provider=%s error_kind=%s http_status=%d challenge=%t error=%s\n",
+		name,
+		safeLiveErrorKind(result.ErrorKind),
+		result.HTTPStatus,
+		result.Challenge,
+		detail,
+	)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close live-provider diagnostic %s: %v\n", path, err)
+		}
+	}()
 	_ = file.Chmod(0o600)
 	_, _ = file.WriteString(line)
 }
@@ -382,7 +481,10 @@ func assertLiveExpectedText(t *testing.T, name string, result Result) bool {
 	if result.Path != "" {
 		body, err := os.ReadFile(result.Path)
 		if err != nil {
-			t.Errorf("provider=%s status=invalid kind=artifact_read chars=0 valid=false complete=false receipt_safe=true", name)
+			t.Errorf(
+				"provider=%s status=invalid kind=artifact_read chars=0 valid=false complete=false receipt_safe=true",
+				name,
+			)
 			return false
 		}
 		content = string(body)
@@ -391,11 +493,19 @@ func assertLiveExpectedText(t *testing.T, name string, result Result) bool {
 	}
 	valid := true
 	if marker != "" && !containsLiveMarker(content, marker) {
-		t.Errorf("provider=%s status=invalid kind=unexpected_text chars=%d valid=false complete=true receipt_safe=true", name, result.Chars)
+		t.Errorf(
+			"provider=%s status=invalid kind=unexpected_text chars=%d valid=false complete=true receipt_safe=true",
+			name,
+			result.Chars,
+		)
 		valid = false
 	}
 	if section != "" && !containsLiveMarker(content, section) {
-		t.Errorf("provider=%s status=invalid kind=unexpected_section chars=%d valid=false complete=true receipt_safe=true", name, result.Chars)
+		t.Errorf(
+			"provider=%s status=invalid kind=unexpected_section chars=%d valid=false complete=true receipt_safe=true",
+			name,
+			result.Chars,
+		)
 		valid = false
 	}
 	return valid
@@ -415,17 +525,26 @@ func retainLiveOutput(t *testing.T, name string, result Result) {
 		return
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Errorf("provider=%s status=invalid kind=output_write chars=0 valid=false complete=true receipt_safe=true", name)
+		t.Errorf(
+			"provider=%s status=invalid kind=output_write chars=0 valid=false complete=true receipt_safe=true",
+			name,
+		)
 		return
 	}
 	receipt, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		t.Errorf("provider=%s status=invalid kind=receipt_write chars=0 valid=false complete=true receipt_safe=true", name)
+		t.Errorf(
+			"provider=%s status=invalid kind=receipt_write chars=0 valid=false complete=true receipt_safe=true",
+			name,
+		)
 		return
 	}
 	receiptPath := filepath.Join(dir, name+"-receipt.json")
 	if err := os.WriteFile(receiptPath, append(receipt, '\n'), 0o600); err != nil {
-		t.Errorf("provider=%s status=invalid kind=receipt_write chars=0 valid=false complete=true receipt_safe=true", name)
+		t.Errorf(
+			"provider=%s status=invalid kind=receipt_write chars=0 valid=false complete=true receipt_safe=true",
+			name,
+		)
 		return
 	}
 	if result.Path == "" {
@@ -433,11 +552,17 @@ func retainLiveOutput(t *testing.T, name string, result Result) {
 	}
 	body, err := os.ReadFile(result.Path)
 	if err != nil {
-		t.Errorf("provider=%s status=invalid kind=artifact_read chars=0 valid=false complete=false receipt_safe=true", name)
+		t.Errorf(
+			"provider=%s status=invalid kind=artifact_read chars=0 valid=false complete=false receipt_safe=true",
+			name,
+		)
 		return
 	}
 	if err := os.WriteFile(filepath.Join(dir, name+"-artifact"), body, 0o600); err != nil {
-		t.Errorf("provider=%s status=invalid kind=output_write chars=0 valid=false complete=true receipt_safe=true", name)
+		t.Errorf(
+			"provider=%s status=invalid kind=output_write chars=0 valid=false complete=true receipt_safe=true",
+			name,
+		)
 	}
 }
 
@@ -446,7 +571,11 @@ type liveWorkerConverter struct {
 	dir    string
 }
 
-func (converter *liveWorkerConverter) Convert(ctx context.Context, kind, source string, body []byte) (string, error) {
+func (converter *liveWorkerConverter) Convert(
+	ctx context.Context,
+	kind, source string,
+	body []byte,
+) (markdown string, returnErr error) {
 	ext := filepath.Ext(source)
 	if ext == "" {
 		ext = "." + strings.TrimPrefix(strings.ToLower(kind), ".")
@@ -456,7 +585,11 @@ func (converter *liveWorkerConverter) Convert(ctx context.Context, kind, source 
 		return "", fmt.Errorf("create live conversion input: %w", err)
 	}
 	path := file.Name()
-	defer os.Remove(path)
+	defer func() {
+		if err := os.Remove(path); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove live conversion input %s: %w", path, err))
+		}
+	}()
 	if _, err := file.Write(body); err != nil {
 		_ = file.Close()
 		return "", err

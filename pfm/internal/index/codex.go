@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"hostops/pfm/internal/codexmeta"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type codexRecord struct {
@@ -35,7 +35,7 @@ type codexPayload struct {
 	Content        json.RawMessage `json:"content"`
 }
 
-func parseCodex(
+func parseCodexRolloutFile(
 	file diskFile,
 	start int64,
 	rollout store.Rollout,
@@ -53,13 +53,13 @@ func parseCodex(
 		if err := json.Unmarshal(line, &record); err != nil {
 			return
 		}
-		if value := firstNonEmpty(record.CWD, record.Payload.CWD); value != "" {
+		if value := firstNonEmptyCodexField(record.CWD, record.Payload.CWD); value != "" {
 			rollout.CWD = value
 		}
-		if value := firstNonEmpty(record.SessionID, record.Payload.SessionID); value != "" {
+		if value := firstNonEmptyCodexField(record.SessionID, record.Payload.SessionID); value != "" {
 			rollout.SessionID = value
 		}
-		if value := firstNonEmpty(
+		if value := firstNonEmptyCodexField(
 			record.ParentThread,
 			record.ParentThreadID,
 			record.Payload.ParentThread,
@@ -74,8 +74,8 @@ func parseCodex(
 			rollout.UserThread = false
 			sourceKnown = true
 		}
-		if source := firstNonEmpty(record.ThreadSource, record.Payload.ThreadSource); source != "" {
-			rollout.UserThread = source == "user"
+		if source := firstNonEmptyCodexField(record.ThreadSource, record.Payload.ThreadSource); source != "" {
+			rollout.UserThread = source == messageRoleUser
 			sourceKnown = true
 		}
 
@@ -96,7 +96,7 @@ func parseCodex(
 		// counting it too would double-count. Queued injects delivered
 		// mid-turn write ONLY the response_item.
 		if record.Type == "response_item" && record.Payload.Type == "message" &&
-			record.Payload.Role == "user" {
+			record.Payload.Role == messageRoleUser {
 			prompt := naming.FlattenPromptText(record.Payload.Content)
 			if prompt == "" || protocolPrompt(prompt) {
 				return
@@ -171,7 +171,7 @@ func protocolPrompt(prompt string) bool {
 	return false
 }
 
-func firstNonEmpty(values ...string) string {
+func firstNonEmptyCodexField(values ...string) string {
 	for _, value := range values {
 		if value != "" {
 			return value

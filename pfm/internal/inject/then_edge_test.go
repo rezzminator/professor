@@ -3,7 +3,7 @@ package inject
 import (
 	"context"
 	"errors"
-	pfmengine "hostops/pfm/internal/engine"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,8 +11,39 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
+
+// countingClock hands back a fresh, later instant on every Now() call while
+// every other Clock method delegates to the embedded clock.Clock — a thin
+// adapter (never a second fake) for the one test that needs "one second
+// elapsed" per poll without a real sleep or a driven Advance.
+type countingClock struct {
+	clock.Clock
+	start time.Time
+	calls int
+}
+
+func (c *countingClock) Now() time.Time {
+	c.calls++
+	return c.start.Add(time.Duration(c.calls) * time.Second)
+}
+
+// fixedClock hands back the SAME instant from every Now() call while every
+// other Clock method delegates to the embedded clock.Clock — the seam a
+// test reaches for instead of clock.NewFake whenever the code path under
+// test can still block on a real Sleep (acquireTargetLock's lock-settle
+// wait, chiefly): a bare Fake never advances on its own, so a Sleep it was
+// never told to release hangs the test forever, where clock.Real's Sleep
+// just... sleeps, briefly, the way it always has.
+type fixedClock struct {
+	clock.Clock
+	now time.Time
+}
+
+func (c fixedClock) Now() time.Time { return c.now }
 
 // fakeSelf answers "who am I" without asking the machine. Resolving the target
 // "self" for real needs a live tmux seat, so a test that leans on the ambient
@@ -54,6 +85,16 @@ func (fake fakeSelf) Identify(context.Context) (resolve.Identity, error) {
 type paneFrame struct {
 	phase   string
 	capture string
+	// visible is what a capture of the VISIBLE fold alone returns, when that
+	// differs from the history capture samplePane asks for. "" means the two
+	// agree. A frame that sets it models the one shape the receipt count
+	// exists for: a receipt that is in the pane's history but clipped out of
+	// the visible fold, and scrolls back into view later.
+	visible string
+	// err is a capture that FAILED. The zero paneSample is not what this
+	// frame hands back — the error is, so the waiter can tell a pane it could
+	// not read from a pane with nothing on it.
+	err error
 }
 
 const (
@@ -88,7 +129,7 @@ func (script *paneScript) Capture(
 	_ context.Context,
 	_, _ string,
 	_ bool,
-	_ int,
+	scrollback int,
 ) (string, error) {
 	script.mu.Lock()
 	defer script.mu.Unlock()
@@ -97,7 +138,14 @@ func (script *paneScript) Capture(
 		index = len(script.frames) - 1
 	}
 	script.served++
-	return script.frames[index].capture, nil
+	frame := script.frames[index]
+	if frame.err != nil {
+		return "", frame.err
+	}
+	if scrollback == 0 && frame.visible != "" {
+		return frame.visible, nil
+	}
+	return frame.capture, nil
 }
 
 // decidedIn names the phase the waiter was looking at when it stopped waiting.
@@ -132,6 +180,18 @@ func newScriptedEngine(t *testing.T, frames []paneFrame) (*Engine, *paneScript) 
 	return engine, script
 }
 
+// mustSettle runs the settled-turn wait and fails the test on the baseline
+// error — the state that means the pane could not be read even once, which no
+// scripted fixture here produces (settled_test.go covers that one on purpose).
+func mustSettle(t *testing.T, engine *Engine, selfTarget bool) bool {
+	t.Helper()
+	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", selfTarget, pfmengine.Claude)
+	if err != nil {
+		t.Fatalf("waitForSettledTurn() baseline error: %v", err)
+	}
+	return observed
+}
+
 func repeatFrame(phase, capture string, count int) []paneFrame {
 	frames := make([]paneFrame, 0, count)
 	for range count {
@@ -154,7 +214,7 @@ func TestThenWaiterDoesNotDeliverBeforeTheCompactionRuns(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseDone, captureReceipt, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -183,7 +243,7 @@ func TestThenWaiterDoesNotDeliverIntoResumedWork(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseLate, captureReceipt, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -215,7 +275,7 @@ func TestThenWaiterStillReleasesWithoutACompactionReceipt(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseResumed, captureBusy, 8)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -243,7 +303,7 @@ func TestCompactionReceiptNeedsToAppear(t *testing.T) {
 	if !strings.Contains(frames[2].capture, "Compacted") {
 		t.Fatalf("fixture no longer shows a stale receipt during the gap")
 	}
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -270,7 +330,7 @@ func TestThenWaiterDoesNotBurnTheBudgetWaitingForATurnThatAlreadyRan(t *testing.
 	engine.options.ThenIdleTries = 500
 	engine.options.ThenIdleStable = 2
 
-	observed := engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	observed := mustSettle(t, engine, true)
 
 	if observed {
 		t.Fatal(
@@ -304,7 +364,7 @@ func TestSelfCompactScheduleTellsTheCallerToStop(t *testing.T) {
 	engine := newTestEngineWith(t, "cx-self-compact", fake, &fakeSpawner{})
 	engine.whoami = fakeSelf{identity: resolve.Identity{
 		Session:    "cx-self-compact",
-		SocketPath: filepath.Join("/tmp", "tmux-jail", "cx-self-compact"),
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cx-self-compact"),
 		Pane:       "%1",
 		Engine:     "codex",
 		Source:     "test",
@@ -376,7 +436,7 @@ func TestNonSelfWaiterDoesNotWaitOutATurnItDidNotStart(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseLate, captureBusy, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	observed := engine.waitForSettledTurn(context.Background(), "", "chat", false)
+	observed := mustSettle(t, engine, false)
 
 	if !observed {
 		t.Fatal(
@@ -422,21 +482,21 @@ func TestDeliverThenHoldsForTypistThenDelivers(t *testing.T) {
 
 	start := time.Unix(1_700_000_000, 0)
 	fake.clientActivity = start
-	var calls int
-	engine.options.Now = func() time.Time {
-		calls++
-		return start.Add(time.Duration(calls) * time.Second)
-	}
+	counting := &countingClock{Clock: clock.Real, start: start}
+	engine.options.Clock = counting
 
-	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
+	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Code != 0 || !result.Typed {
 		t.Fatalf("DeliverThen() = %+v, want a confirmed delivery once the typist went quiet", result)
 	}
-	if calls < 3 {
-		t.Fatalf("delivered before the typist actually went quiet: waitForQuietTypist's clock only advanced %d time(s), want at least 3 (TypistQuiet=3s at 1s/poll)", calls)
+	if counting.calls < 3 {
+		t.Fatalf(
+			"delivered before the typist actually went quiet: waitForQuietTypist's clock only advanced %d time(s), want at least 3 (TypistQuiet=3s at 1s/poll)",
+			counting.calls,
+		)
 	}
 	enters := 0
 	for _, key := range fake.keys {
@@ -472,9 +532,9 @@ func TestDeliverThenRefusesWhenTypistNeverClears(t *testing.T) {
 	// The clock always reads "1s after the last keystroke" — quiet never
 	// crosses the 3s TypistQuiet threshold no matter how many times it is
 	// sampled.
-	engine.options.Now = func() time.Time { return start.Add(time.Second) }
+	engine.options.Clock = fixedClock{Clock: clock.Real, now: start.Add(time.Second)}
 
-	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
+	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,11 +569,15 @@ func TestScheduleSelfCompactComposesPerEngineAndForwardsThen(t *testing.T) {
 			engine := newTestEngineWith(t, "cc-self-compact-compose", fake, spawner)
 			engine.whoami = fakeSelf{identity: resolve.Identity{
 				Session:    "self-session",
-				SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-self-compact-compose"),
+				SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-compose"),
 				Pane:       "%1",
 				Engine:     test.engine,
 			}}
-			result, err := engine.ScheduleSelfCompact(context.Background(), "hold the wave state", []string{"resume the wave"})
+			result, err := engine.ScheduleSelfCompact(
+				context.Background(),
+				"hold the wave state",
+				[]string{"resume the wave"},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -554,7 +618,7 @@ func TestScheduleSelfCompactRefusesAnInvalidFocusBeforeScheduling(t *testing.T) 
 		engine := newTestEngineWith(t, "cc-self-compact-validate", fake, spawner)
 		engine.whoami = fakeSelf{identity: resolve.Identity{
 			Session:    "self-session",
-			SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-self-compact-validate"),
+			SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-validate"),
 			Pane:       "%1",
 		}}
 		result, err := engine.ScheduleSelfCompact(context.Background(), focus, []string{"resume"})
@@ -593,24 +657,182 @@ func TestDeliverThenReportsUndeliveredWhenTmuxUnreadable(t *testing.T) {
 	engine.options.TypistQuiet = 3 * time.Second
 
 	start := time.Unix(1_700_000_000, 0)
-	engine.options.Now = func() time.Time { return start }
+	engine.options.Clock = fixedClock{Clock: clock.Real, now: start}
 
-	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
+	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Code != CodeUndelivered || result.Status != "undelivered" {
-		t.Fatalf("DeliverThen() = %+v, want a Code 6 undelivered result when tmux could not be read for the whole wait window (not Code 7 \"typing\" — an error is never evidence of a typist)", result)
+		t.Fatalf(
+			"DeliverThen() = %+v, want a Code 6 undelivered result when tmux could not be read for the whole wait window (not Code 7 \"typing\" — an error is never evidence of a typist)",
+			result,
+		)
 	}
 	if !strings.Contains(result.Message, "then steer NOT delivered") ||
 		!strings.Contains(result.Message, "could not read who is at") ||
 		!strings.Contains(result.Message, readErr.Error()) {
-		t.Fatalf("undelivered message %q lacks the \"could not read\" shape naming the tmux error %v", result.Message, readErr)
+		t.Fatalf(
+			"undelivered message %q lacks the \"could not read\" shape naming the tmux error %v",
+			result.Message,
+			readErr,
+		)
 	}
 	if strings.Contains(result.Message, "a human kept typing") {
-		t.Fatalf("undelivered message %q falsely renders a tmux read failure as \"a human kept typing\"", result.Message)
+		t.Fatalf(
+			"undelivered message %q falsely renders a tmux read failure as \"a human kept typing\"",
+			result.Message,
+		)
 	}
 	if len(fake.keys) != 0 || len(fake.literals) != 0 {
-		t.Fatalf("typed despite tmux being unreadable the whole wait window: keys=%q literals=%q", fake.keys, fake.literals)
+		t.Fatalf(
+			"typed despite tmux being unreadable the whole wait window: keys=%q literals=%q",
+			fake.keys,
+			fake.literals,
+		)
+	}
+}
+
+// TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait (L1-T3): no
+// existing test ever cancels the ctx DeliverThen is given, so a regression
+// that silently swapped it for context.Background() anywhere along the wait
+// chain (waitForSettledTurn's Sleep/Capture calls) would still pass every
+// other test in this package. Each configured wait step here is 2 seconds
+// (6 poll/min/settle steps deep); a ctx that is genuinely threaded through
+// returns almost instantly once cancelled — a wait that dropped it would
+// still be sleeping when the bounded select below times out.
+func TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait(t *testing.T) {
+	fake := &fakeTmux{capture: captureIdle}
+	engine := newTestEngine(t, "cc-then-cancel", fake)
+	// Every capture answers the way a real tmux exec does once its ctx is
+	// already done: a failure, not a reading — see settled_test.go's own
+	// baseline-retry fixture for the sibling shape.
+	script := &paneScript{
+		fakeTmux: fake,
+		frames:   []paneFrame{{phase: phaseCaller, err: context.Canceled}},
+	}
+	engine.tmux = script
+	engine.options.ThenMin = 2 * time.Second
+	engine.options.ThenIdlePoll = 2 * time.Second
+	engine.options.ThenSettle = 2 * time.Second
+	engine.options.ThenBusyTries = 3
+	engine.options.ThenIdleTries = 3
+	engine.options.ThenIdleStable = 1
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	type outcome struct {
+		result Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := engine.DeliverThen(ctx, ThenWait{
+			SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-then-cancel"),
+			Target:     "%1",
+			Steers:     []string{"resume the wave"},
+		})
+		done <- outcome{result, err}
+	}()
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf(
+				"DeliverThen() returned a Go error %v, want the cancellation named on the Result instead",
+				out.err,
+			)
+		}
+		if !strings.Contains(out.result.Message, context.Canceled.Error()) {
+			t.Fatalf("Message = %q, want it to name the cancelled context", out.result.Message)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal(
+			"DeliverThen did not return promptly after its ctx was cancelled — " +
+				"each configured wait step is 2s across a 6-step budget, so an " +
+				"honoured cancellation must land well inside this 3s bound",
+		)
+	}
+}
+
+// captureBusyReceipt is the pane a background sub-agent leaves behind: the
+// compaction receipt is on screen, the main turn is over, and the agent's
+// own footer keeps busyPattern matching for as long as it runs.
+const captureBusyReceipt = "Compacted (ctrl+o to see full summary)\n" +
+	"● Background agent running…\n  esc to interrupt\n❯ "
+
+// TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy is
+// Wave 8 item 5 (beat E1.20): a chat with a background sub-agent never reads
+// idle, so a waiter that insists on !busy before it trusts the receipt sits
+// out its whole budget and then delivers with the "no turn boundary" WARNING
+// — ten minutes late and unproven. The receipt is the boundary: a receipt
+// that was NOT on screen when the waiter woke and IS on screen now proves
+// this turn's compaction ran, whatever the footer says.
+func TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy(t *testing.T) {
+	for _, selfTarget := range []bool{true, false} {
+		t.Run(fmt.Sprintf("self=%t", selfTarget), func(t *testing.T) {
+			var frames []paneFrame
+			frames = append(frames, repeatFrame(phaseCaller, captureBusy, 3)...)
+			frames = append(frames, repeatFrame(phaseDone, captureBusyReceipt, 6)...)
+
+			engine, script := newScriptedEngine(t, frames)
+			engine.options.ThenBusyTries = 4
+			engine.options.ThenIdleTries = 8
+			observed := mustSettle(t, engine, selfTarget)
+
+			if !observed {
+				t.Fatal(
+					"waiter reported no turn boundary although this turn's own receipt " +
+						"appeared while it watched — it waited for an idle a background " +
+						"agent never grants and will deliver late WITH the WARNING",
+				)
+			}
+			if got := script.decidedIn(); got != phaseDone {
+				t.Fatalf("waiter released in phase %q, want %q", got, phaseDone)
+			}
+			// The baseline capture takes the first caller frame, the loop the
+			// other two, and the FIRST receipt frame decides: any later release
+			// rode the busy footer instead.
+			if script.served != 4 {
+				t.Fatalf("waiter sampled %d times, want 4 (baseline + 2 busy + the receipt frame)", script.served)
+			}
+		})
+	}
+}
+
+// TestThenWaiterIgnoresAReceiptThatWasAlreadyOnScreenWhenItWoke is the
+// stale-receipt trap of the rule above (the class reload_then_proof_test.go's
+// stale placeholder pins): a receipt already in the baseline capture and
+// never re-printed proves nothing about THIS turn, footer or no footer.
+//
+// The fixture is deliberately one the OLD condition passes and the new one
+// fails (F7): the baseline carries a receipt AND a busy footer, a turn is
+// then seen to start, and the pane goes idle with that same receipt still on
+// it. "turnStarted && receipt && !busy" fires on the first idle frame — it
+// never asked whether the receipt was NEW — while the count-based rule sees
+// one receipt before and one after and refuses. The idle-stable fallback is
+// held out of reach (IdleStable above the whole budget) so the two codepaths
+// differ in the RESULT, not merely in when they returned.
+func TestThenWaiterIgnoresAReceiptThatWasAlreadyOnScreenWhenItWoke(t *testing.T) {
+	var frames []paneFrame
+	frames = append(frames, repeatFrame(phaseCaller, captureBusyReceipt, 3)...)
+	frames = append(frames, repeatFrame(phaseLate, captureReceipt, 12)...)
+
+	engine, script := newScriptedEngine(t, frames)
+	engine.options.ThenBusyTries = 2
+	engine.options.ThenIdleTries = 6
+	engine.options.ThenIdleStable = 30
+	observed := mustSettle(t, engine, false)
+
+	if observed {
+		t.Fatal(
+			"waiter took a receipt that was already on screen in its baseline " +
+				"capture as proof this turn's compaction ran — a receipt must be " +
+				"newly PRINTED, not merely still there once the footer cleared",
+		)
+	}
+	if script.served < 3 {
+		t.Fatalf("waiter gave up after %d samples without exhausting its budget", script.served)
 	}
 }

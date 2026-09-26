@@ -12,6 +12,7 @@ package archive
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,9 +24,12 @@ import (
 	"strings"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // sidechainMarker is the first-record field that tells a subagent's transcript
@@ -97,6 +101,11 @@ type Report struct {
 	Unsupported []string
 	// Young counts sidechain transcripts left alone as too new.
 	Young int
+	// Unresolved are killed ids whose transcript lookup could not run — a
+	// directory that could not be read or scanned, never "nothing found
+	// there." They are reported and their kill row is left standing: a
+	// lookup that failed to look is not proof the chat is gone.
+	Unresolved []string
 	// Bytes is the total planned or moved.
 	Bytes int64
 	// Unkilled counts kill rows retired by this run.
@@ -148,7 +157,7 @@ func New(dependencies Dependencies) (*Runner, error) {
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	return &Runner{
 		paths:            resolved,
@@ -160,21 +169,54 @@ func New(dependencies Dependencies) (*Runner, error) {
 	}, nil
 }
 
-// Run plans the archive and, with Apply, performs it.
+// Run plans the archive and, with Apply, performs it. The state door walks
+// requested → planned → applied (with Apply) → done/failed, mirroring the
+// reap sweep (internal/reap/runner.go's Run), plus one comp=state record per
+// planned or performed move — "chat" is the prior state every move starts
+// from, since a move begins as an ordinary killed or sidechain chat.
 func (runner *Runner) Run(
 	ctx context.Context,
 	options Options,
-) (Report, error) {
-	live := LiveSessions(
+) (report Report, err error) {
+	trail := obs.NewTrail(ctx, "archive", "requested")
+	defer func() { trail.End(err) }()
+	live, err := LiveSessions(
 		runner.proc,
 		firstEngineRoot(runner.paths.Roots[pfmengine.Codex]),
 		runner.paths.SIDDir,
 		runner.codexBinary,
 	)
-	if options.Subagents {
-		return runner.runSubagents(options, live)
+	if err != nil {
+		// A reading that could not run is not "no chats are live" — refuse
+		// the whole decision rather than move a transcript out from under a
+		// chat this run never proved was dead.
+		return Report{}, fmt.Errorf("determine which chats are live: %w", err)
 	}
-	return runner.runKilled(ctx, options, live)
+	if options.Subagents {
+		report, err = runner.runSubagents(options, live)
+	} else {
+		report, err = runner.runKilled(ctx, options, live)
+	}
+	if err != nil {
+		return Report{}, err
+	}
+	trail.Reach("planned", "moves classified")
+	if options.Apply {
+		trail.Reach("applied", "moves applied")
+	}
+	for _, move := range report.Moves {
+		state, cause := "planned", "archive move planned"
+		var failed error
+		switch {
+		case move.Applied:
+			state, cause = "moved", "archive move applied"
+		case move.Failed != "":
+			state, cause = "failed", move.Failed
+			failed = errors.New(move.Failed)
+		}
+		obs.Transition(ctx, "archive", "chat", state, cause)(failed)
+	}
+	return report, nil
 }
 
 func (runner *Runner) runKilled(
@@ -189,26 +231,37 @@ func (runner *Runner) runKilled(
 	}
 	// decided is every id this run resolved one way or another — moved,
 	// orphaned, or skipped as live. Those three leave the killed list;
-	// unsupported engines remain killed and are reported separately.
+	// unsupported engines and unresolved lookups remain killed and are
+	// reported separately.
 	decided := make([]string, 0, len(killed))
 	for _, chat := range killed {
-		if chat.Engine == pfmengine.Opencode {
+		if chat.Engine == pfmengine.OpenCode {
 			report.Unsupported = append(report.Unsupported, chat.ID)
 			continue
 		}
-		decided = append(decided, chat.ID)
 		if _, running := live[strings.ToLower(chat.ID)]; running {
 			report.Live = append(report.Live, chat.ID)
+			decided = append(decided, chat.ID)
 			continue
 		}
-		source, engine := runner.findTranscript(chat)
+		source, engine, err := runner.findTranscript(chat)
+		if err != nil {
+			// The lookup could not run — a directory it needed to read or
+			// scan failed for a reason other than "nothing there." Report it
+			// and leave the kill standing: retiring it here is how a killed
+			// chat whose transcript exists gets reported an orphan.
+			report.Unresolved = append(report.Unresolved, chat.ID)
+			continue
+		}
 		if source == "" {
 			report.Orphans = append(report.Orphans, chat.ID)
+			decided = append(decided, chat.ID)
 			continue
 		}
 		info, err := os.Stat(source)
 		if err != nil {
 			report.Orphans = append(report.Orphans, chat.ID)
+			decided = append(decided, chat.ID)
 			continue
 		}
 		move := Move{
@@ -220,6 +273,7 @@ func (runner *Runner) runKilled(
 		}
 		report.Moves = append(report.Moves, move)
 		report.Bytes += move.Bytes
+		decided = append(decided, chat.ID)
 	}
 	if !options.Apply {
 		return report, nil
@@ -339,28 +393,48 @@ func (runner *Runner) runSubagents(
 // findTranscript resolves a killed chat to the file that holds it. The store's
 // engine is the hint, never the authority: a kill written before the lineage
 // was indexed carries no engine at all.
-func (runner *Runner) findTranscript(chat KilledChat) (string, pfmengine.ID) {
+//
+// A non-nil error means the lookup could not run — a directory it needed to
+// read or scan failed for a reason other than the ordinary "it isn't there" —
+// and is distinct from an empty path, which means the lookup ran to
+// completion and genuinely found nothing.
+func (runner *Runner) findTranscript(chat KilledChat) (string, pfmengine.ID, error) {
 	if chat.Engine != pfmengine.Codex {
-		if path := runner.findClaudeTranscript(chat.ID); path != "" {
-			return path, pfmengine.Claude
+		path, err := runner.findClaudeTranscript(chat.ID)
+		if err != nil {
+			return "", "", err
+		}
+		if path != "" {
+			return path, pfmengine.Claude, nil
 		}
 	}
-	if path := runner.findCodexRollout(chat.ID); path != "" {
-		return path, pfmengine.Codex
+	path, err := runner.findCodexRollout(chat.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if path != "" {
+		return path, pfmengine.Codex, nil
 	}
 	if chat.Engine == pfmengine.Codex {
-		if path := runner.findClaudeTranscript(chat.ID); path != "" {
-			return path, pfmengine.Claude
+		path, err := runner.findClaudeTranscript(chat.ID)
+		if err != nil {
+			return "", "", err
+		}
+		if path != "" {
+			return path, pfmengine.Claude, nil
 		}
 	}
-	return "", ""
+	return "", "", nil
 }
 
-func (runner *Runner) findClaudeTranscript(id string) string {
+func (runner *Runner) findClaudeTranscript(id string) (string, error) {
 	for _, root := range runner.claudeRoots() {
 		entries, err := os.ReadDir(root)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("read %s for a claude transcript: %w", root, err)
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {
@@ -368,22 +442,28 @@ func (runner *Runner) findClaudeTranscript(id string) string {
 			}
 			candidate := filepath.Join(root, entry.Name(), id+".jsonl")
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				return candidate
+				return candidate, nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
-func (runner *Runner) findCodexRollout(id string) string {
+func (runner *Runner) findCodexRollout(id string) (string, error) {
 	found := ""
 	root := filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "sessions")
-	_ = filepath.WalkDir(root, func(
+	err := filepath.WalkDir(root, func(
 		path string,
 		entry fs.DirEntry,
 		err error,
 	) error {
-		if err != nil || entry.IsDir() || found != "" {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() || found != "" {
 			return nil
 		}
 		if strings.HasSuffix(entry.Name(), ".jsonl") &&
@@ -392,7 +472,10 @@ func (runner *Runner) findCodexRollout(id string) string {
 		}
 		return nil
 	})
-	return found
+	if err != nil {
+		return "", fmt.Errorf("scan %s for a codex rollout: %w", root, err)
+	}
+	return found, nil
 }
 
 // claudeRoots is every account's projects directory, plus the default account
@@ -485,7 +568,7 @@ func (runner *Runner) backupSidecars() ([]string, error) {
 			directory,
 			filepath.Base(source)+"."+stamp,
 		)
-		if err := os.WriteFile(target, content, 0o600); err != nil {
+		if err := atomicfile.Write(target, content, 0o600); err != nil {
 			return nil, fmt.Errorf("write %s: %w", target, err)
 		}
 		backups = append(backups, target)
@@ -495,7 +578,7 @@ func (runner *Runner) backupSidecars() ([]string, error) {
 
 // pruneLines drops every line naming an archived id. The file is rewritten
 // through a temporary beside it, so an interrupted prune leaves the original.
-func (runner *Runner) pruneLines(path string, ids []string) (int, error) {
+func (runner *Runner) pruneLines(path string, ids []string) (dropped int, returnErr error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -506,22 +589,20 @@ func (runner *Runner) pruneLines(path string, ids []string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s: %w", path, err))
+		}
+	}()
 
 	wanted := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		wanted[strings.ToLower(id)] = struct{}{}
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return 0, fmt.Errorf("create a temporary beside %s: %w", path, err)
-	}
-	defer os.Remove(temporary.Name())
-
-	dropped := 0
+	dropped = 0
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	writer := bufio.NewWriter(temporary)
+	var content bytes.Buffer
 	for scanner.Scan() {
 		line := scanner.Text()
 		archived := false
@@ -535,26 +616,17 @@ func (runner *Runner) pruneLines(path string, ids []string) (int, error) {
 			dropped++
 			continue
 		}
-		if _, err := writer.WriteString(line + "\n"); err != nil {
-			return 0, fmt.Errorf("write %s: %w", temporary.Name(), err)
+		if _, err := content.WriteString(line + "\n"); err != nil {
+			return 0, fmt.Errorf("buffer %s: %w", path, err)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return 0, fmt.Errorf("read %s: %w", path, err)
 	}
-	if err := writer.Flush(); err != nil {
-		return 0, fmt.Errorf("flush %s: %w", temporary.Name(), err)
-	}
-	if err := temporary.Close(); err != nil {
-		return 0, fmt.Errorf("close %s: %w", temporary.Name(), err)
-	}
 	if dropped == 0 {
 		return 0, nil
 	}
-	if err := os.Chmod(temporary.Name(), 0o600); err != nil {
-		return 0, fmt.Errorf("chmod %s: %w", temporary.Name(), err)
-	}
-	if err := os.Rename(temporary.Name(), path); err != nil {
+	if err := atomicfile.Write(path, content.Bytes(), 0o600); err != nil {
 		return 0, fmt.Errorf("replace %s: %w", path, err)
 	}
 	return dropped, nil
@@ -566,7 +638,11 @@ func isSidechain(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "archive: close sidechain transcript %s: %v\n", path, err)
+		}
+	}()
 	head := make([]byte, headBytes)
 	read, err := file.Read(head)
 	if read <= 0 && err != nil {
@@ -585,7 +661,7 @@ func moveFile(source, target string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", source, err)
 	}
-	if err := os.WriteFile(target, content, 0o600); err != nil {
+	if err := atomicfile.Write(target, content, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", target, err)
 	}
 	if err := os.Remove(source); err != nil {

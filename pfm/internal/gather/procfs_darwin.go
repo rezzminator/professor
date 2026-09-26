@@ -3,9 +3,9 @@
 package gather
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,7 +13,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // DarwinProcFS answers the same questions RealProcFS answers, on a kernel that
@@ -76,6 +77,25 @@ func (proc *DarwinProcFS) Environ(pid int) (map[string]string, error) {
 	return environment, nil
 }
 
+// ProcessIdentity returns metadata the kernel exposes without protected argv.
+func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
+	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("read process identity for pid %d via kern.proc.pid: %w", pid, err)
+	}
+	command := make([]byte, 0, len(process.Proc.P_comm))
+	for _, character := range process.Proc.P_comm {
+		if character == 0 {
+			break
+		}
+		command = append(command, byte(character))
+	}
+	return ProcessIdentity{
+		EffectiveUID: process.Eproc.Ucred.Uid,
+		Command:      string(command),
+	}, nil
+}
+
 // Stat returns the parent pid and a birth stamp.
 //
 // StartTime is NOT the same unit as Linux's: there it is kernel ticks since
@@ -100,7 +120,7 @@ func (proc *DarwinProcFS) Birth(pid int) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read kern.proc.pid for %d: %w", pid, err)
 	}
-	return int64(process.Proc.P_starttime.Sec), nil
+	return process.Proc.P_starttime.Sec, nil
 }
 
 // RSSKB returns a process's resident set size in kilobytes.
@@ -123,11 +143,19 @@ func (proc *DarwinProcFS) RSSKB(pid int) (int64, error) {
 }
 
 func (proc *DarwinProcFS) loadResident() {
-	output, err := exec.Command(deps.Executable("ps"), "-A", "-o", "pid=,rss=").Output()
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		context.Background(),
+		[]string{deps.Executable("ps"), "-A", "-o", "pid=,rss="},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
 	if err != nil {
 		proc.residentErr = fmt.Errorf("sample resident memory via ps: %w", err)
 		return
 	}
+	output := result.Stdout
 	proc.resident = make(map[int]int64)
 	for _, line := range strings.Split(string(output), "\n") {
 		fields := strings.Fields(line)
@@ -150,9 +178,15 @@ func (proc *DarwinProcFS) loadResident() {
 // transcript a live chat holds open, and "no open files" is a claim, not a
 // shrug — reporting it falsely would let archive evict a file still in use.
 func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
-	output, err := exec.Command(
-		deps.Executable("lsof"), "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn",
-	).Output()
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		context.Background(),
+		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn"},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
+	output := result.Stdout
 	if err != nil {
 		// lsof exits non-zero when a pid owns no matching files at all, and it
 		// still prints what it found. Only an empty result alongside an error is
@@ -193,9 +227,15 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 // the one the process still holds after an install renamed a new file over
 // the path. A missing entry is an error, never a zero identity.
 func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
-	output, err := exec.Command(
-		deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di",
-	).Output()
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		context.Background(),
+		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di"},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
+	output := result.Stdout
 	if err != nil && len(output) == 0 {
 		return FileID{}, fmt.Errorf("read the executable of pid %d via lsof: %w", pid, err)
 	}
@@ -241,7 +281,7 @@ func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
 // argv entries may legitimately be EMPTY strings, so the argc count is what
 // separates argv from the environment — skipping empty fields to find the
 // boundary would silently promote an environment variable into argv.
-func procArgs(pid int) (argv []string, env []string, err error) {
+func procArgs(pid int) (argv, env []string, err error) {
 	buffer, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read kern.procargs2 for %d: %w", pid, err)

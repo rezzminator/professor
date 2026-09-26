@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // hygiene is the launch-environment strip every fleet-born process carries
@@ -29,6 +30,7 @@ var hygieneNames = []string{
 	"CLAUDECODE",
 	"CLAUDE_CODE_CHILD_SESSION",
 	"CLAUDE_CONFIG_DIR",
+	"CLAUDE_PROJECT_DIR",
 	"ENABLE_PROMPT_CACHING_1H",
 	"FORCE_PROMPT_CACHING_5M",
 	"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
@@ -42,7 +44,21 @@ var hygieneNames = []string{
 	"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
 }
 
+// HygieneNames returns a copy of the fleet strip list, so a strip outside this
+// package (the doctor's harness capture) follows every name added here.
+func HygieneNames() []string { return append([]string(nil), hygieneNames...) }
+
 var hygiene = envStripWords(hygieneNames)
+
+// opencodeHygieneNames widens the fleet strip for OpenCode alone. An OpenCode
+// born in a VS Code terminal inherits CLAUDE_CODE_SSE_PORT from the Claude
+// Code extension; OpenCode then dials that port without the lock-file token,
+// the extension closes the socket with 1008, and OpenCode's backoff resets on
+// every open — one rejected handshake per second for the life of the chat.
+// Claude keeps the variable: the CLI reads the token and the IDE link is wanted.
+var opencodeHygieneNames = append(append([]string{}, hygieneNames...), "CLAUDE_CODE_SSE_PORT")
+
+var opencodeHygiene = envStripWords(opencodeHygieneNames)
 
 // envStripWords renders one strip list as the `env -u NAME …` prefix.
 func envStripWords(names []string) string {
@@ -60,12 +76,17 @@ func envStripWords(names []string) string {
 // launches, but intentionally adds no autonomy or resume flags of its own.
 // home and claude carry the systemPrompt choice; the launcher re-decides it
 // every spawn (hygiene strips any inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).
-func LauncherRun(real string, args []string, configDir, home string, claude pfmconfig.ClaudePrefs) (string, error) {
-	values := append([]string{real, configDir}, args...)
+func LauncherRun(
+	realBinary string,
+	args []string,
+	configDir, home string,
+	claude pfmconfig.ClaudePrefs,
+) (string, error) {
+	values := append([]string{realBinary, configDir}, args...)
 	if hasNUL(values...) {
 		return "", errors.New("launcher values cannot contain NUL")
 	}
-	if real == "" {
+	if realBinary == "" {
 		return "", errors.New("real Claude binary is empty")
 	}
 	// The launcher states its own binary and config dir — it has already
@@ -80,7 +101,7 @@ func LauncherRun(real string, args []string, configDir, home string, claude pfmc
 		Args:              args,
 		Machine:           pfmconfig.Config{Claude: claude},
 		explicitConfigDir: configDir,
-		binary:            real,
+		binary:            realBinary,
 		quoteBinary:       true,
 		noAutonomy:        true,
 	}.ShellCommand()
@@ -104,31 +125,31 @@ func Synthesize(request Request) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	if request.Prompt != "" && route != NewClaude && route != NewCodex && route != NewOpencode {
+	if request.Prompt != "" && route != NewClaude && route != NewCodex && route != NewOpenCode {
 		return Plan{}, fmt.Errorf("initial prompt is not valid for %s route", request.Row.Kind)
 	}
 	switch route {
-	case ResumeOpencode:
+	case ResumeOpenCode:
 		// One fleet-wide OpenCode seat: no per-account roster to satisfy, the
 		// binary comes from the machine config's opencode section.
-	case NewOpencode:
-		if _, found := machine.OpencodeAccountByID(request.PrimaryAccount); !found {
+	case NewOpenCode:
+		if _, found := machine.OpenCodeAccountByID(request.PrimaryAccount); !found {
 			return Plan{}, fmt.Errorf(
-				"OpenCode account %d is not in the configured roster",
+				"requested OpenCode account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
 	case NewClaude, Agent, ResumeClaude:
 		if _, found := machine.Account(request.PrimaryAccount); !found {
 			return Plan{}, fmt.Errorf(
-				"Claude account %d is not in the configured roster",
+				"requested Claude account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
 	case NewCodex, ResumeCodex:
 		if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
 			return Plan{}, fmt.Errorf(
-				"Codex account %d is not in the configured roster",
+				"requested Codex account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
@@ -158,7 +179,13 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Prompt != "" {
 			arguments = append(arguments, request.Prompt)
 		}
-		run, err := claudeCommand(PurposeInteractive, request.Home, request.PrimaryAccount, request.Cache1H, machine, arguments...)
+		run, err := claudeCommand(
+			PurposeInteractive,
+			request.Home,
+			request.PrimaryAccount,
+			request.Cache1H,
+			machine,
+			arguments...)
 		if err != nil {
 			return Plan{}, err
 		}
@@ -175,16 +202,16 @@ func Synthesize(request Request) (Plan, error) {
 			plan.Line += " " + Quote(request.Prompt)
 		}
 		plan.Line += ")"
-	case NewOpencode:
+	case NewOpenCode:
 		if request.Row.CWD == "" || request.FreshSocket == "" {
 			return Plan{}, errors.New("new OpenCode action requires cwd and fresh socket")
 		}
 		var command strings.Builder
-		command.WriteString(hygiene)
+		command.WriteString(opencodeHygiene)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
-			pfmengine.MustLookup(pfmengine.Opencode).Binary,
+			pfmengine.MustLookup(pfmengine.OpenCode).Binary,
 			machine.Source("opencode.binary") == pfmconfig.SourceFile,
 		))
 		command.WriteByte(' ')
@@ -194,8 +221,8 @@ func Synthesize(request Request) (Plan, error) {
 			command.WriteString(Quote(request.Prompt))
 		}
 		plan.Run = command.String()
-		plan = onChatServer(plan, request, machine, pfmengine.Opencode)
-	case ResumeOpencode:
+		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
+	case ResumeOpenCode:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
 			return Plan{}, errors.New(
@@ -203,11 +230,11 @@ func Synthesize(request Request) (Plan, error) {
 			)
 		}
 		var command strings.Builder
-		command.WriteString(hygiene)
+		command.WriteString(opencodeHygiene)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
-			pfmengine.MustLookup(pfmengine.Opencode).Binary,
+			pfmengine.MustLookup(pfmengine.OpenCode).Binary,
 			machine.Source("opencode.binary") == pfmconfig.SourceFile,
 		))
 		command.WriteString(" --session ")
@@ -215,7 +242,7 @@ func Synthesize(request Request) (Plan, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(request.Row.CWD))
 		plan.Run = opencodeContinuityBanner(request.Row) + command.String()
-		plan = onChatServer(plan, request, machine, pfmengine.Opencode)
+		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
 	case Live:
 		if request.Row.Socket == "" {
 			return Plan{}, errors.New("live action requires a socket")
@@ -264,7 +291,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
 			return Plan{}, errors.New(
-				"Claude resume requires id, cwd, and fresh socket",
+				"resuming Claude requires id, cwd, and fresh socket",
 			)
 		}
 		resume, err := claudeCommand(
@@ -294,7 +321,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
 			return Plan{}, errors.New(
-				"Codex resume requires id, cwd, and fresh socket",
+				"resuming Codex requires id, cwd, and fresh socket",
 			)
 		}
 		plan.Run = continuityBanner(request.Row) +
@@ -310,9 +337,9 @@ func routeForKind(kind compose.Kind) (Route, error) {
 		return NewClaude, nil
 	case compose.NewCodex:
 		return NewCodex, nil
-	case compose.NewOpencode:
-		return NewOpencode, nil
-	case compose.LiveClaude, compose.LiveCodex, compose.LiveSplit:
+	case compose.NewOpenCode:
+		return NewOpenCode, nil
+	case compose.LiveClaude, compose.LiveCodex, compose.LiveOpenCode, compose.LiveSplit:
 		return Live, nil
 	// A booting row carries no other identity than its socket, so Enter can
 	// only ever attach it — the same Live route an ordinary live row takes,
@@ -329,8 +356,8 @@ func routeForKind(kind compose.Kind) (Route, error) {
 		return ResumeClaude, nil
 	case compose.ResumeCodex:
 		return ResumeCodex, nil
-	case compose.ResumeOpencode:
-		return ResumeOpencode, nil
+	case compose.ResumeOpenCode:
+		return ResumeOpenCode, nil
 	default:
 		return 0, fmt.Errorf("unsupported row kind %s", kind)
 	}
@@ -372,11 +399,11 @@ func claudeCommandWith(
 	}.ShellCommand()
 }
 
-// ProfessorPromptPath is the staged professor system prompt `pfm install`
-// writes under the managed root; claude.systemPrompt "professor" points every
+// ProfessorPromptPath is the composed Claude prompt `pfm install` stages
+// under the managed root; claude.systemPrompt "professor" points every
 // managed launch at it via --system-prompt-file.
 func ProfessorPromptPath(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "prompts", "professor-prompt.md")
+	return paths.HarnessPromptPath(home, pfmengine.Claude)
 }
 
 // continuityBanner is the first thing a resumed Codex pane prints, above
@@ -448,20 +475,8 @@ func opencodeContinuityBanner(row compose.Row) string {
 	return banner.String()
 }
 
-func codexCommand(machine pfmconfig.Config, args ...string) string {
-	return codexCommandFor(machine, 1, args...)
-}
-
 func codexCommandFor(machine pfmconfig.Config, account int, args ...string) string {
 	return codexCommandWithAccount(hygiene, machine, account, args...)
-}
-
-func codexCommandWith(
-	environmentStrip string,
-	machine pfmconfig.Config,
-	args ...string,
-) string {
-	return codexCommandWithAccount(environmentStrip, machine, 1, args...)
 }
 
 func codexCommandWithAccount(
@@ -497,7 +512,7 @@ func codexCommandWithAccount(
 
 func normalizedMachineConfig(machine pfmconfig.Config, home string) pfmconfig.Config {
 	if machine.Version == pfmconfig.Version &&
-		(len(machine.Accounts) != 0 || len(machine.CodexAccounts) != 0 || len(machine.OpencodeAccounts) != 0) {
+		(len(machine.Accounts) != 0 || len(machine.CodexAccounts) != 0 || len(machine.OpenCodeAccounts) != 0) {
 		return machine
 	}
 	return pfmconfig.Defaults(home, nil)
@@ -554,7 +569,7 @@ func agentCommand(
 }
 
 // onChatServer puts the plan's run on a fresh server the executor creates
-// detached through the one chat-server creator (spawn.CommandTmux.NewSession),
+// detached through the one chat-server creator (spawn.TmuxSpawner.NewSession),
 // born with the engine's short name as its window, and makes the eval line
 // the attach to it. The line never creates a server itself: an attached
 // `tmux new-session` there was a creator with no title policy and a window

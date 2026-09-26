@@ -9,7 +9,9 @@ import (
 
 func TestWavePlosNberOfflineDeterministic(t *testing.T) {
 	plos := plosCandidates("10.1371/journal.pcbi.1003285")
-	if len(plos) != 1 || plos[0].URL != "https://journals.plos.org/pcbi/article/file?id=10.1371%2Fjournal.pcbi.1003285&type=printable" && plos[0].URL != "https://journals.plos.org/pcbi/article/file?id=10.1371/journal.pcbi.1003285&type=printable" {
+	if len(plos) != 1 ||
+		plos[0].URL != "https://journals.plos.org/pcbi/article/file?id=10.1371%2Fjournal.pcbi.1003285&type=printable" &&
+			plos[0].URL != "https://journals.plos.org/pcbi/article/file?id=10.1371/journal.pcbi.1003285&type=printable" {
 		t.Fatalf("plos candidates=%#v", plos)
 	}
 	if plosCandidates("10.1038/s41586-020-2649-2") != nil {
@@ -59,8 +61,13 @@ func TestLegacyOAProviderEdgeShapes(t *testing.T) {
 		client := legacyOAClient(t, func(*http.Request) string {
 			return `{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"https://public.example.test/best.pdf","version":"publishedVersion"},"oa_locations":[{"url_for_pdf":"https://public.example.test/alternate.pdf","version":"acceptedVersion"}]}`
 		})
-		got, err := (&Resolver{ContactEmail: "test@example.org"}).unpaywall(context.Background(), client, "10.1234/example")
-		if err != nil || len(got) != 2 || got[1].URL != "https://public.example.test/alternate.pdf" || got[1].Priority != 17 {
+		got, err := (&Resolver{ContactEmail: "test@example.org"}).unpaywall(
+			context.Background(),
+			client,
+			"10.1234/example",
+		)
+		if err != nil || len(got) != 2 || got[1].URL != "https://public.example.test/alternate.pdf" ||
+			got[1].Priority != 17 {
 			t.Fatalf("Unpaywall candidates=%#v err=%v", got, err)
 		}
 	})
@@ -70,7 +77,8 @@ func TestLegacyOAProviderEdgeShapes(t *testing.T) {
 			return `{"open_access":{"is_oa":true,"oa_status":"green","oa_url":"https://public.example.test/top.pdf"},"locations":[{"is_oa":false,"pdf_url":"https://closed.example.test/not-oa.pdf"},{"is_oa":true,"pdf_url":"https://public.example.test/location.pdf","version":"acceptedVersion"}]}`
 		})
 		got, err := (&Resolver{}).openAlexDOI(context.Background(), client, "10.1234/example")
-		if err != nil || len(got) != 2 || got[1].URL != "https://public.example.test/location.pdf" || got[1].Priority != 18 {
+		if err != nil || len(got) != 2 || got[1].URL != "https://public.example.test/location.pdf" ||
+			got[1].Priority != 18 {
 			t.Fatalf("OpenAlex candidates=%#v err=%v", got, err)
 		}
 	})

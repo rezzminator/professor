@@ -6,10 +6,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type LauncherState string
@@ -25,8 +28,24 @@ type ClaudeLauncherStatus struct {
 	Target string
 }
 
+// ErrClaudeBinaryNotFound reports that no executable Claude binary exists in
+// the configured location, the native versions directory, or PATH.
+var ErrClaudeBinaryNotFound = errors.New("claude binary not found")
+
+// ErrConfiguredClaudeBinaryNotFound reports that claude.binary names no
+// executable in its absolute location or the caller-supplied PATH.
+var ErrConfiguredClaudeBinaryNotFound = errors.New("configured Claude binary not found")
+
 func managedClaudeLauncher(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "bin", pfmengine.MustLookup(pfmengine.Claude).Binary)
+	return filepath.Join(
+		home,
+		".local",
+		"share",
+		"pfm",
+		"install",
+		"bin",
+		pfmengine.MustLookup(pfmengine.Claude).Binary,
+	)
 }
 
 func canonicalClaudeLauncher(home string) string {
@@ -35,6 +54,96 @@ func canonicalClaudeLauncher(home string) string {
 
 func claudeLauncherStatePath(home string) string {
 	return filepath.Join(home, ".local", "share", "pfm", "install", "launcher.state")
+}
+
+// ResolveClaudeBinary selects the real Claude executable behind pfm's managed
+// launcher. A configured executable wins and a missing configured command
+// fails explicitly; otherwise the newest native version wins, followed by each
+// PATH component in order. The canonical and managed launchers, including
+// physical aliases of the managed file, are never returned because doing so
+// would recurse back into pfm.
+func ResolveClaudeBinary(home, configuredBinary, pathEnv string) (string, error) {
+	managed := managedClaudeLauncher(home)
+	canonical := canonicalClaudeLauncher(home)
+
+	if filepath.IsAbs(configuredBinary) {
+		eligible, err := eligibleClaudeBinary(configuredBinary, canonical, managed)
+		if err != nil {
+			return "", fmt.Errorf("inspect configured Claude binary %s: %w", configuredBinary, err)
+		}
+		if eligible {
+			return configuredBinary, nil
+		}
+	} else if configuredBinary != "" && configuredBinary != pfmengine.MustLookup(pfmengine.Claude).Binary {
+		for _, directory := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+			if directory == "" {
+				directory = "."
+			}
+			candidate, err := filepath.Abs(filepath.Join(directory, configuredBinary))
+			if err != nil {
+				return "", fmt.Errorf("resolve configured Claude binary %s in %s: %w", configuredBinary, directory, err)
+			}
+			eligible, err := eligibleClaudeBinary(candidate, canonical, managed)
+			if err != nil {
+				return "", fmt.Errorf("inspect configured Claude binary %s: %w", candidate, err)
+			}
+			if eligible {
+				return candidate, nil
+			}
+		}
+		return "", fmt.Errorf("%w: %s", ErrConfiguredClaudeBinaryNotFound, configuredBinary)
+	}
+
+	report, err := InspectClaudeVersions(home, configuredBinary)
+	if err != nil {
+		return "", fmt.Errorf("inspect Claude versions: %w", err)
+	}
+	if report.Newest != nil {
+		return report.Newest.Path, nil
+	}
+
+	for _, directory := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+		if directory == "" {
+			directory = "."
+		}
+		candidate, err := filepath.Abs(filepath.Join(directory, pfmengine.MustLookup(pfmengine.Claude).Binary))
+		if err != nil {
+			return "", fmt.Errorf("resolve Claude PATH candidate in %s: %w", directory, err)
+		}
+		eligible, err := eligibleClaudeBinary(candidate, canonical, managed)
+		if err != nil {
+			return "", fmt.Errorf("inspect Claude PATH candidate %s: %w", candidate, err)
+		}
+		if eligible {
+			return candidate, nil
+		}
+	}
+	return "", ErrClaudeBinaryNotFound
+}
+
+func eligibleClaudeBinary(candidate, canonical, managed string) (bool, error) {
+	candidate = filepath.Clean(candidate)
+	if candidate == filepath.Clean(canonical) || candidate == filepath.Clean(managed) {
+		return false, nil
+	}
+	candidateInfo, err := os.Stat(candidate)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !candidateInfo.Mode().IsRegular() || candidateInfo.Mode().Perm()&0o111 == 0 {
+		return false, nil
+	}
+	managedInfo, err := os.Stat(managed)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return true, nil
+		}
+		return false, fmt.Errorf("inspect managed Claude launcher %s: %w", managed, err)
+	}
+	return !os.SameFile(candidateInfo, managedInfo), nil
 }
 
 func InspectClaudeLauncher(home string) (ClaudeLauncherStatus, error) {
@@ -69,7 +178,7 @@ func InspectClaudeLauncher(home string) (ClaudeLauncherStatus, error) {
 // RepairClaudeLauncher is the fast SessionStart repair path. A correct link
 // costs one lstat and readlink; a displaced native symlink is recorded before
 // it is atomically replaced.
-func RepairClaudeLauncher(home string) (bool, error) {
+func RepairClaudeLauncher(home string) (repaired bool, returnErr error) {
 	status, err := InspectClaudeLauncher(home)
 	if err != nil {
 		return false, err
@@ -113,7 +222,11 @@ func RepairClaudeLauncher(home string) (bool, error) {
 	if err := os.Remove(temporaryPath); err != nil {
 		return false, err
 	}
-	defer os.Remove(temporaryPath)
+	defer func() {
+		if err := os.Remove(temporaryPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove Claude launcher staging %s: %w", temporaryPath, err))
+		}
+	}()
 	if err := os.Symlink(managed, temporaryPath); err != nil {
 		return false, fmt.Errorf("create managed Claude launcher link: %w", err)
 	}
@@ -132,11 +245,62 @@ func (installer *engine) wireClaudeLauncher() error {
 		installer.ok(canonicalClaudeLauncher(installer.options.Home))
 		return nil
 	}
-	description := "link " + canonicalClaudeLauncher(installer.options.Home) + " -> " + managedClaudeLauncher(installer.options.Home)
+	description := "link " + canonicalClaudeLauncher(
+		installer.options.Home,
+	) + " -> " + managedClaudeLauncher(
+		installer.options.Home,
+	)
 	return installer.change(description, func() error {
 		_, err := RepairClaudeLauncher(installer.options.Home)
 		return err
 	})
+}
+
+// pruneClaudeVersions is wireClaudeLauncher's sibling: since pfm's launcher
+// disables Claude Code's own version cleanup (it never symlinks the
+// canonical binary straight into versions/), pfm owns retention instead.
+// Preview mode prints the plan without touching a file — the same preview
+// that pfm install's own dry run gives every other change; apply mode
+// removes exactly the planned set. A live-process probe failure removes
+// nothing and names why, rather than guess a version is unused.
+func (installer *engine) pruneClaudeVersions() error {
+	home := installer.options.Home
+	report, err := InspectClaudeVersions(home, installer.options.ClaudeBinary)
+	if err != nil {
+		return fmt.Errorf("inspect Claude versions: %w", err)
+	}
+	if len(report.Versions) == 0 {
+		return nil
+	}
+	procs := gather.NewProcFS(installer.options.ProcRoot)
+	report = ProbeLiveClaudeVersions(report, procs, syscall.Kill)
+	if report.LiveProbeErr != nil {
+		installer.say("  skip    claude versions: retention not applied — %v", report.LiveProbeErr)
+		return nil
+	}
+	remove, kept := PlanClaudeVersionPrune(report, ClaudeVersionKeepCount)
+	for _, version := range remove {
+		description := fmt.Sprintf(
+			"remove %s (%s, %s)",
+			version.Path,
+			filepath.Base(version.Path),
+			FormatClaudeVersionBytes(version.Bytes),
+		)
+		if err := installer.change(description, func() error {
+			return os.Remove(version.Path)
+		}); err != nil {
+			return fmt.Errorf("prune Claude version %s: %w", version.Path, err)
+		}
+	}
+	keptPaths := make([]string, 0, len(kept))
+	for path := range kept {
+		keptPaths = append(keptPaths, path)
+	}
+	sort.Strings(keptPaths)
+	for _, path := range keptPaths {
+		installer.ok(fmt.Sprintf("keep %s (%s)", path, kept[path]))
+	}
+	return nil
 }
 
 func (installer *engine) unwireClaudeLauncher() error {
@@ -175,11 +339,11 @@ func (installer *engine) unwireClaudeLauncher() error {
 	})
 }
 
-// ClaudeAbsent reports whether path is pfm's own Claude launcher AND its
-// last run exited 127 — the shim's contract for "no real Claude binary
-// resolved" (assets/bin/claude). Any other exit code, or a path that is not
-// pfm's launcher, is a real failure, never absence: doctor's dep and
-// harness-prompt rows both decide "Claude is absent" through this one check.
+// ClaudeAbsent reports whether path is pfm's own Claude launcher AND its last
+// run exited 127 — the managed launch contract for "no real Claude binary
+// resolved". Any other exit code, or a path that is not pfm's launcher, is a
+// real failure, never absence: doctor's dep and harness-prompt rows both decide
+// "Claude is absent" through this one check.
 func ClaudeAbsent(home, path string, exitCode int) bool {
 	if exitCode != 127 {
 		return false

@@ -1,0 +1,473 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`prompt builders > BRAIN_COMPUTE_PROMPT → full-string snapshot 1`] = `
+"You are the BRAINER, now DERIVING the final answer for: "best vector database for production RAG at scale". The judge ruled the answer still needs this derivation — build it, do not restate facts.
+Judge directive: derive blended cost/query with error bars
+Judge reasoning: the answer needs a number
+Hardened facts (adversarially fact-checked + source-corrected — your input numbers):
+- fact: recall
+  why: lb
+  clean: 0.96 ± 0.02
+The run's accumulated RESULT (your answer + the half-built \`working\` derivation to finish):
+answer: pgvector
+confidence: medium
+evidence:
+  - fact: recall
+    value: 0.98
+    source: arxiv
+    status: settled
+keyClaimIds:
+  - 1
+resolved:
+  - idx
+openGaps:
+  - mt
+working: cost=x
+Derive with rigor:
+- first fact-check your input numbers: verify each against a current primary source (WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications)) and correct any that is stale, wrong, or imprecise before computing — a derivation is only as sound as its inputs;
+- assemble the verified inputs with their units;
+- write and run a short script for any non-trivial arithmetic — load Bash + Write via ToolSearch if absent, run python (or node) — compute, do not estimate;
+- propagate the input uncertainties into an explicit ± error range;
+- adversarially check your own work: re-derive a second way or sanity-check against an anchor, and fix any unit / formula / arithmetic slip.
+Return the updated \`resultSoFar\`: fold the completed derivation into \`working\` (the verified inputs, the steps, the numbers, the ± result, the self-check), put the headline computed result in \`answer\`, and keep \`keyClaimIds\` / \`resolved\` / \`openGaps\` / \`tensions\` / \`confidence\` current — \`keyClaimIds\` are the ledger claim ids the answer rests on; the deprecated \`evidence\` array is never populated.
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > BRAINER_PROMPT/collect → full-string snapshot 1`] = `
+"You are the BRAINER — you make every decision in this research run and set its direction.
+
+You are the ROOT brainer: you carry the whole run to a real answer — stop.lost is not yours to set.
+How the run works: a scout seeded the first rabbit-holes and a prospector named the source venues; then you drive each wave. For each lane you pick, a scheduler finds the highest-value sources and sequential readers read them in full (carrying a running answer across the sources), returning findings + new rabbit-holes; your per-lane \`note\` directs what the scheduler picks and what the readers extract. Then you update the running result, steer the next wave, and decide when to stop. On stop, a refinement stage hardens your findings, a judge stress-tests the answer, and a synthesiser writes the report.
+
+The engine keeps the open rabbit-holes as an id-keyed store and carries each one's score history natively — you never re-emit the whole set, you return deltas against it.
+
+Direction is two powers:
+• LOOK UP rabbit-holes already in the store (by id) to research next.
+• ORIGINATE — when the answer needs an angle, candidate, or sub-question no stored rabbit-hole covers, add it as a new directive {keyword, why, score} and a researcher will go collect it. Name a gap you can see rather than wait for one to surface; summon a candidate the scout missed — not padding. Put it in \`lookupNext\` to pursue now, or in \`add\` to park it for a later wave.
+
+As you steer, hold three rules:
+• Pivot on disproof — when a lead is fundamentally refuted, abandon it without sunk-cost and take a different road; a dead lead dropped is progress.
+• Surfacing is not verifying — finding a result does not verify it. If the answer's headline rests on a claim you have not stress-tested, the judge will reject the stop, so stress-test load-bearing claims before declaring done.
+• Promote serendipity — a surfaced, non-seeded candidate that out-evidences the seeded ones becomes first-class: deepen it like a seed rather than under-explore it for being off the seed list.
+
+Before you decide, hunt for coverage gaps — a candidate, sub-question, or angle the goal needs that no lane has touched — and probe them yourself with WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications), as many as you need, to fill them; fold what you find into resultSoFar and originate the missing rabbit-holes into \`lookupNext\`. Beyond gap-filling, leave the heavy digging to the lane readers.
+
+Wave 2. Query: "best vector database for production RAG at scale". RUBRIC
+Scout landscape: L
+RABBIT-HOLE STORE — open rabbit-holes (\`#id [last score or "new"] keyword — why\`); re-score up or down, a low one can resurrect:
+- #1 [80] x — y
+ALREADY PURSUED — do not look up or re-originate these (research history):
+- a
+Findings this wave (from the researchers' page-reading):
+
+TOP-PICK SCORE TRAJECTORY by wave (calibrated 0-100): - 60
+- 40
+A steadily declining trajectory means high-value rabbit-holes are drying up — read it as convergence.
+SOURCE VENUES (from the prospector) — give each lookupNext pick the subset whose source fits its lane, in its \`sources\`, so its researcher searches the right places first:
+- source: arXiv (site:arxiv.org)
+  goodFor: ANN indexes
+- source: SemiAnalysis
+  goodFor: cost
+A venue suffixed '⚠ never assigned' has had NO lane yet — either route a lane to it this wave or name the waiver in stop.reason when you declare done.
+
+RESULT SO FAR — the run's living MEMORY, carried wave to wave. Prior version:
+answer: pgvector
+confidence: medium
+evidence:
+  - fact: recall
+    value: 0.98
+    source: arxiv
+    status: settled
+keyClaimIds:
+  - 1
+resolved:
+  - idx
+openGaps:
+  - mt
+working: cost=x
+Update and return \`resultSoFar\` as the run's memory: refine \`answer\`; set \`keyClaimIds\` to the ledger ids the answer rests on; record the working \`assumptions\` the answer leans on (each {claim, basis}) and revise or retire them as evidence lands; move closed parts into \`resolved\`; keep \`openGaps\` current; record any \`tensions\` (conflicting sources); for build-the-answer / estimate questions grow the \`working\` derivation chain (else ''); set \`confidence\`.
+Weight findings by evidence quality — funding independence, sample size, replication, stated limitations — not mere existence; let it drive both your scores and \`confidence\`.
+For each headline / load-bearing finding, originate a lane to hunt failed replications, null trials, or refutations. Corroboration is what feeds the ledger's own settled/tentative computation — you never set status yourself; originate lanes that give the machinery independent clusters to count.
+
+Then return deltas against the store:
+(1) \`rescore\`: [{id, score}] — only the rabbit-holes whose 0-100 score changes this wave (score every "new" one at least once); unlisted ones keep their last score. Score honestly per the rubric; a marginal one scores low. When you are setting stop.done=true this wave, skip scoring the new ones — a frontier you are closing needs no scores.
+(2) \`add\`: [{keyword, why, score}] — new rabbit-holes to park in the store for a later wave (the engine assigns each an id).
+(3) \`lookupNext\`: the rabbit-holes to research now — each either {id} (a stored one) or {keyword, why, score, sources, note} (one you originate and pursue now). None may be already pursued. Assign each its \`sources\` venue subset. For EVERY lookupNext lane author a \`note\`: the research directive — WHAT to find plus ranked fallbacks ("if not X, focus on Y; give both if available"). It steers both the scheduler's source pick and the reader's extraction; keep it distinct from \`why\` (your store/scoring rationale). A lane's method must be executable by a READ-ONLY reader over fetched pages (attack lanes alone get a bounded live search) — never assign per-item tracker probes, review-cadence checks, or interactive verification; reshape such a method into fetchable-source questions. Set refetch:true on a lane whose cached copy was reported CORRUPT so the scheduler bypasses the poisoned cache.
+(4) \`rename\`: [{id, keyword, why?}] — relabel a rabbit-hole, keeping its id + history (optional).
+(5) \`drop\`: [id, …] — eliminate a dead/duplicate rabbit-hole; a merge = drop the duplicate and rescore the survivor (optional).
+(spawn is unavailable this wave — the parallel-brainer cap is reached; do not emit one.)
+(6) \`stop\`: {done, reason}. STOP
+StructuredOutput discipline: its input must be ONE valid JSON object — escape every quote, newline, and backslash inside string values; no code fences, no XML/<parameter> syntax, no prose outside the JSON. Emit EVERY required field in that one call — a required array with nothing to report is [], never omitted — and never collapse your findings into a single prose field the schema splits into structured ones. Omit optional fields you have nothing for. Keep free-text values tight (one line each unless the field says otherwise) — a compact payload parses, an essay-sized one truncates and dies. When a schema error comes back naming a field, fix exactly that field and re-emit the corrected COMPLETE object — resending the same shape fails the same way.
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > BRAINER_PROMPT/w0 → full-string snapshot 1`] = `
+"You are the BRAINER — you make every decision in this research run and set its direction.
+
+You are the ROOT brainer: you carry the whole run to a real answer — stop.lost is not yours to set.
+How the run works: a scout seeded the first rabbit-holes and a prospector named the source venues; then you drive each wave. For each lane you pick, a scheduler finds the highest-value sources and sequential readers read them in full (carrying a running answer across the sources), returning findings + new rabbit-holes; your per-lane \`note\` directs what the scheduler picks and what the readers extract. Then you update the running result, steer the next wave, and decide when to stop. On stop, a refinement stage hardens your findings, a judge stress-tests the answer, and a synthesiser writes the report.
+
+The engine keeps the open rabbit-holes as an id-keyed store and carries each one's score history natively — you never re-emit the whole set, you return deltas against it.
+
+Direction is two powers:
+• LOOK UP rabbit-holes already in the store (by id) to research next.
+• ORIGINATE — when the answer needs an angle, candidate, or sub-question no stored rabbit-hole covers, add it as a new directive {keyword, why, score} and a researcher will go collect it. Name a gap you can see rather than wait for one to surface; summon a candidate the scout missed — not padding. Put it in \`lookupNext\` to pursue now, or in \`add\` to park it for a later wave.
+
+As you steer, hold three rules:
+• Pivot on disproof — when a lead is fundamentally refuted, abandon it without sunk-cost and take a different road; a dead lead dropped is progress.
+• Surfacing is not verifying — finding a result does not verify it. If the answer's headline rests on a claim you have not stress-tested, the judge will reject the stop, so stress-test load-bearing claims before declaring done.
+• Promote serendipity — a surfaced, non-seeded candidate that out-evidences the seeded ones becomes first-class: deepen it like a seed rather than under-explore it for being off the seed list.
+
+Before you decide, hunt for coverage gaps — a candidate, sub-question, or angle the goal needs that no lane has touched — and probe them yourself with WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications), as many as you need, to fill them; fold what you find into resultSoFar and originate the missing rabbit-holes into \`lookupNext\`. Beyond gap-filling, leave the heavy digging to the lane readers.
+
+Wave 0. Query: "best vector database for production RAG at scale". RUBRIC
+Scout landscape: L
+RABBIT-HOLE STORE — open rabbit-holes (\`#id [last score or "new"] keyword — why\`); re-score up or down, a low one can resurrect:
+
+ALREADY PURSUED — do not look up or re-originate these (research history):
+
+Findings this wave (from the researchers' page-reading):
+
+
+RESULT SO FAR — the run's living MEMORY. Start it this wave: capture the answer as it stands plus the load-bearing evidence behind it.
+Update and return \`resultSoFar\` as the run's memory: refine \`answer\`; set \`keyClaimIds\` to the ledger ids the answer rests on; record the working \`assumptions\` the answer leans on (each {claim, basis}) and revise or retire them as evidence lands; move closed parts into \`resolved\`; keep \`openGaps\` current; record any \`tensions\` (conflicting sources); for build-the-answer / estimate questions grow the \`working\` derivation chain (else ''); set \`confidence\`.
+Weight findings by evidence quality — funding independence, sample size, replication, stated limitations — not mere existence; let it drive both your scores and \`confidence\`.
+For each headline / load-bearing finding, originate a lane to hunt failed replications, null trials, or refutations. Corroboration is what feeds the ledger's own settled/tentative computation — you never set status yourself; originate lanes that give the machinery independent clusters to count.
+
+Then return deltas against the store:
+(1) \`rescore\`: [{id, score}] — only the rabbit-holes whose 0-100 score changes this wave (score every "new" one at least once); unlisted ones keep their last score. Score honestly per the rubric; a marginal one scores low. When you are setting stop.done=true this wave, skip scoring the new ones — a frontier you are closing needs no scores.
+(2) \`add\`: [{keyword, why, score}] — new rabbit-holes to park in the store for a later wave (the engine assigns each an id).
+(3) \`lookupNext\`: the rabbit-holes to research now — each either {id} (a stored one) or {keyword, why, score, sources, note} (one you originate and pursue now). None may be already pursued. For EVERY lookupNext lane author a \`note\`: the research directive — WHAT to find plus ranked fallbacks ("if not X, focus on Y; give both if available"). It steers both the scheduler's source pick and the reader's extraction; keep it distinct from \`why\` (your store/scoring rationale). A lane's method must be executable by a READ-ONLY reader over fetched pages (attack lanes alone get a bounded live search) — never assign per-item tracker probes, review-cadence checks, or interactive verification; reshape such a method into fetchable-source questions. Set refetch:true on a lane whose cached copy was reported CORRUPT so the scheduler bypasses the poisoned cache.
+(4) \`rename\`: [{id, keyword, why?}] — relabel a rabbit-hole, keeping its id + history (optional).
+(5) \`drop\`: [id, …] — eliminate a dead/duplicate rabbit-hole; a merge = drop the duplicate and rescore the survivor (optional).
+(spawn is unavailable this wave — the parallel-brainer cap is reached; do not emit one.)
+(6) \`stop\`: {done, reason}. STOP
+Goal mode: if the goal is already well answered and the best remaining rabbit-hole adds only marginal value (a declining trajectory is strong evidence), set stop.done=true rather than chase diminishing returns.
+StructuredOutput discipline: its input must be ONE valid JSON object — escape every quote, newline, and backslash inside string values; no code fences, no XML/<parameter> syntax, no prose outside the JSON. Emit EVERY required field in that one call — a required array with nothing to report is [], never omitted — and never collapse your findings into a single prose field the schema splits into structured ones. Omit optional fields you have nothing for. Keep free-text values tight (one line each unless the field says otherwise) — a compact payload parses, an essay-sized one truncates and dies. When a schema error comes back naming a field, fix exactly that field and re-emit the corrected COMPLETE object — resending the same shape fails the same way.
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > BRAINER_PROMPT/wN → full-string snapshot 1`] = `
+"You are the BRAINER — you make every decision in this research run and set its direction.
+
+You are the ROOT brainer: you carry the whole run to a real answer — stop.lost is not yours to set.
+How the run works: a scout seeded the first rabbit-holes and a prospector named the source venues; then you drive each wave. For each lane you pick, a scheduler finds the highest-value sources and sequential readers read them in full (carrying a running answer across the sources), returning findings + new rabbit-holes; your per-lane \`note\` directs what the scheduler picks and what the readers extract. Then you update the running result, steer the next wave, and decide when to stop. On stop, a refinement stage hardens your findings, a judge stress-tests the answer, and a synthesiser writes the report.
+
+The engine keeps the open rabbit-holes as an id-keyed store and carries each one's score history natively — you never re-emit the whole set, you return deltas against it.
+
+Direction is two powers:
+• LOOK UP rabbit-holes already in the store (by id) to research next.
+• ORIGINATE — when the answer needs an angle, candidate, or sub-question no stored rabbit-hole covers, add it as a new directive {keyword, why, score} and a researcher will go collect it. Name a gap you can see rather than wait for one to surface; summon a candidate the scout missed — not padding. Put it in \`lookupNext\` to pursue now, or in \`add\` to park it for a later wave.
+
+As you steer, hold three rules:
+• Pivot on disproof — when a lead is fundamentally refuted, abandon it without sunk-cost and take a different road; a dead lead dropped is progress.
+• Surfacing is not verifying — finding a result does not verify it. If the answer's headline rests on a claim you have not stress-tested, the judge will reject the stop, so stress-test load-bearing claims before declaring done.
+• Promote serendipity — a surfaced, non-seeded candidate that out-evidences the seeded ones becomes first-class: deepen it like a seed rather than under-explore it for being off the seed list.
+
+Before you decide, hunt for coverage gaps — a candidate, sub-question, or angle the goal needs that no lane has touched — and probe them yourself with WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications), as many as you need, to fill them; fold what you find into resultSoFar and originate the missing rabbit-holes into \`lookupNext\`. Beyond gap-filling, leave the heavy digging to the lane readers.
+
+Wave 3. Query: "best vector database for production RAG at scale". RUBRIC
+Scout landscape: L
+RABBIT-HOLE STORE — open rabbit-holes (\`#id [last score or "new"] keyword — why\`); re-score up or down, a low one can resurrect:
+- #1 [80] x — y
+ALREADY PURSUED — do not look up or re-originate these (research history):
+- a
+Findings this wave (from the researchers' page-reading):
+- rabbitHole: x
+  summary: s
+TOP-PICK SCORE TRAJECTORY by wave (calibrated 0-100): - 90
+- 70
+- 50
+A steadily declining trajectory means high-value rabbit-holes are drying up — read it as convergence.
+SOURCE VENUES (from the prospector) — give each lookupNext pick the subset whose source fits its lane, in its \`sources\`, so its researcher searches the right places first:
+- source: arXiv (site:arxiv.org)
+  goodFor: ANN indexes
+- source: SemiAnalysis
+  goodFor: cost
+A venue suffixed '⚠ never assigned' has had NO lane yet — either route a lane to it this wave or name the waiver in stop.reason when you declare done.
+
+RESULT SO FAR — the run's living MEMORY, carried wave to wave. Prior version:
+answer: pgvector
+confidence: medium
+evidence:
+  - fact: recall
+    value: 0.98
+    source: arxiv
+    status: settled
+keyClaimIds:
+  - 1
+resolved:
+  - idx
+openGaps:
+  - mt
+working: cost=x
+Update and return \`resultSoFar\` as the run's memory: refine \`answer\`; set \`keyClaimIds\` to the ledger ids the answer rests on; record the working \`assumptions\` the answer leans on (each {claim, basis}) and revise or retire them as evidence lands; move closed parts into \`resolved\`; keep \`openGaps\` current; record any \`tensions\` (conflicting sources); for build-the-answer / estimate questions grow the \`working\` derivation chain (else ''); set \`confidence\`.
+Weight findings by evidence quality — funding independence, sample size, replication, stated limitations — not mere existence; let it drive both your scores and \`confidence\`.
+For each headline / load-bearing finding, originate a lane to hunt failed replications, null trials, or refutations. Corroboration is what feeds the ledger's own settled/tentative computation — you never set status yourself; originate lanes that give the machinery independent clusters to count.
+
+Then return deltas against the store:
+(1) \`rescore\`: [{id, score}] — only the rabbit-holes whose 0-100 score changes this wave (score every "new" one at least once); unlisted ones keep their last score. Score honestly per the rubric; a marginal one scores low. When you are setting stop.done=true this wave, skip scoring the new ones — a frontier you are closing needs no scores.
+(2) \`add\`: [{keyword, why, score}] — new rabbit-holes to park in the store for a later wave (the engine assigns each an id).
+(3) \`lookupNext\`: the rabbit-holes to research now — each either {id} (a stored one) or {keyword, why, score, sources, note} (one you originate and pursue now). None may be already pursued. Assign each its \`sources\` venue subset. For EVERY lookupNext lane author a \`note\`: the research directive — WHAT to find plus ranked fallbacks ("if not X, focus on Y; give both if available"). It steers both the scheduler's source pick and the reader's extraction; keep it distinct from \`why\` (your store/scoring rationale). A lane's method must be executable by a READ-ONLY reader over fetched pages (attack lanes alone get a bounded live search) — never assign per-item tracker probes, review-cadence checks, or interactive verification; reshape such a method into fetchable-source questions. Set refetch:true on a lane whose cached copy was reported CORRUPT so the scheduler bypasses the poisoned cache.
+(4) \`rename\`: [{id, keyword, why?}] — relabel a rabbit-hole, keeping its id + history (optional).
+(5) \`drop\`: [id, …] — eliminate a dead/duplicate rabbit-hole; a merge = drop the duplicate and rescore the survivor (optional).
+(spawn is unavailable this wave — the parallel-brainer cap is reached; do not emit one.)
+(6) \`stop\`: {done, reason}. STOP
+Goal mode: if the goal is already well answered and the best remaining rabbit-hole adds only marginal value (a declining trajectory is strong evidence), set stop.done=true rather than chase diminishing returns.
+StructuredOutput discipline: its input must be ONE valid JSON object — escape every quote, newline, and backslash inside string values; no code fences, no XML/<parameter> syntax, no prose outside the JSON. Emit EVERY required field in that one call — a required array with nothing to report is [], never omitted — and never collapse your findings into a single prose field the schema splits into structured ones. Omit optional fields you have nothing for. Keep free-text values tight (one line each unless the field says otherwise) — a compact payload parses, an essay-sized one truncates and dies. When a schema error comes back naming a field, fix exactly that field and re-emit the corrected COMPLETE object — resending the same shape fails the same way.
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > DEBUG_PROMPT → full-string snapshot 1`] = `
+"Consolidate and analyze this RR run's diagnostics for an engineer debugging the pipeline. Goal: "best vector database for production RAG at scale".
+Walk it phase by phase — scout → prospector → each research wave → finalize (initiate → refine → judge → synthesise) — reporting what happened at each with the actual numbers, plus anomalies, degraded/failed agents, or wasted effort to fix.
+Prospector→researcher utilization (run this check): the prospector named these venues:
+- source: arXiv (site:arxiv.org)
+  goodFor: ANN indexes
+- source: SemiAnalysis
+  goodFor: cost
+Each lane in laneRecords carries the \`assignedVenues\` the brainer gave it; from that lane's summary + rabbitHoles, judge whether the researcher actually drew on those venues. Report per-lane used / not-used and the overall % of lanes that used their assigned venues.
+Then answer this run-specific question directly: why?
+v3 ledger machinery to sanity-check: claims are quote-pinned + audited by a claimAuditor (dead auditor ⇒ claims stuck pending), clustered by a lineageClerk (bad clustering ⇒ wrong settled/tentative), derivations rerun by a rerunner — all degrade to null. Check metrics.claimsTotal / nullAttacksTotal / citationsBogus / chao for anomalies (e.g. all claims pending, zero nullAttacks on a contested topic, bogus citations stripped). metrics.auditCounts is the quote-pin audit outcome — read the fail and repinned counts BEFORE declaring pinning healthy: citationsBogus alone masks a broken pin contract; a high fail count surviving normalization+repin means real pin rot. metrics.pursuedTotal INCLUDES finalize judge-reopen lanes (metrics.reopenedLanes) — reconcile lane counts against that split before suspecting a silent lane loss. Walk the FINALIZE phase with the same rigor as the waves: judge verdicts (metrics.goalMet, metrics.judgePasses), refine counter-findings, and any crawl reopen — when a report contradicts the crawl-era answer, the turn usually happened there.
+Metrics:
+mode: goal
+dir: RR/x
+wavesRun: 1
+stopReason: brainer-done
+scoutRabbitHoles: 3
+prospectorVenues: 4
+pursuedTotal: 5
+rabbitHolesFinal: 2
+bestOpenScore: 80
+topScores:
+  - 80
+done: true
+reportWritten: true
+confidence: high
+claimsTotal: 0
+nullAttacksTotal: 0
+citationsBogus: 0
+citationsAuditFailed: 0
+citationsUnverified: 0
+auditCounts:
+  pass: 0
+  fail: 0
+  repinned: 0
+  unpinned: 0
+  pending: 0
+quotesRepinned: 0
+cachePathsRejected: 0
+venuesUnrouted: 0
+goalMet: true
+judgePasses: 1
+reopenedLanes: 0
+Lane records (wave, keyword, assignedVenues, summary, rabbitHoles):
+
+Per-wave log:
+- wave: 0
+  topScore: 0
+  done: false
+  reason: seed
+Per-wave result-so-far log (the brainer's running memory each wave):
+
+Return diagnosis (markdown).
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > INITIATOR_PROMPT → full-string snapshot 1`] = `
+"You direct the FINALIZE phase for: "best vector database for production RAG at scale". The research is done; below is everything it gathered. Shape the finishing pipeline to fit this query, then return the plan.
+The finish runs in two parts, and you set how each starts:
+1. REFINEMENT — one refine agent per item adversarially fact-checks that group of load-bearing facts and returns them corrected and hardened. You decide the grouping. (A judge then evaluates the hardened answer and may trigger a derivation or a re-check; you do not plan that.)
+2. SYNTHESIS — writes the final report from the hardened, judged answer. You give it a focus note.
+The run's accumulated RESULT (the brainer's living memory — answer, the \`working\` derivation, keyClaimIds, gaps, tensions):
+answer: pgvector
+confidence: medium
+evidence:
+  - fact: recall
+    value: 0.98
+    source: arxiv
+    status: settled
+keyClaimIds:
+  - 1
+resolved:
+  - idx
+openGaps:
+  - mt
+working: cost=x
+Per-wave log:
+- wave: 0
+  topScore: 0
+  done: false
+  reason: seed
+Scout landscape: L
+Top open rabbit-holes left unpursued:
+- x
+Return:
+- refinement.facts[] — the load-bearing facts to harden, aggressively grouped: bundle facts that share sources or stand or fall together into ONE item (each {fact, why, claimId?}); prefer a few broad groups over many atomic facts. Cover every fact that would change the answer if wrong; skip soft restatements. Where a fact corresponds to a ledger claim, set its claimId — hardening then updates that claim's record.
+- synthesiser.focus — one note on what the report must emphasize / the shape the answer should take.
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > JUDGE_PROMPT → full-string snapshot 1`] = `
+"You are the JUDGE — the terminal skeptic of the FINALIZE phase for: "best vector database for production RAG at scale". The crawl is done and its load-bearing facts were just hardened. Judge whether the answer is actually sound before the report is written.
+The answer + its keyClaimIds + \`working\` derivation (the run's living memory):
+answer: pgvector
+confidence: medium
+evidence:
+  - fact: recall
+    value: 0.98
+    source: arxiv
+    status: settled
+keyClaimIds:
+  - 1
+resolved:
+  - idx
+openGaps:
+  - mt
+working: cost=x
+Hardened facts (each adversarially fact-checked + source-corrected by a refine pass):
+- fact: recall
+  why: lb
+  clean: 0.96 ± 0.02
+What the answer must deliver: lead with cost
+LEFTOVER OPEN RABBIT-HOLES — leads the crawl surfaced but never pursued (it stopped first). Decide whether any names a REAL gap the answer needs; if one does, set goalMet false and return it in reopenRabbitHoles to reopen the crawl on it — otherwise ignore them:
+- [70] multi-tenant isolation — unverified at scale
+Before upholding, actively try to disprove the load-bearing claim as hard as you can — \`verificationSound\` holds only when it survives every angle:
+- funding / conflict of interest — is the trial run or funded by the product's own seller?
+- independent replication — does a separate group confirm it, or does the headline rest on a single source?
+- contradicting / null results — search for failed replications and negative trials that cut against it.
+- retraction status — check PubPeer, retraction notices, and expressions of concern.
+- evidence quality — a weak sample size or unaddressed limitations downgrade a claim, however confidently stated.
+A claim that survives this cross-examination is sound; one that does not → \`verificationSound\` false, naming the specific weakness in \`directive\`.
+Judge four things, each a strict boolean:
+- goalMet — the answer fully meets the goal AND delivers the spec above, not merely "close enough".
+- verificationSound — the refine pass genuinely verified the facts (caught real errors, used current correct values) rather than rubber-stamping or mis-hardening one.
+- needsCompute — the answer rests on a quantitative derivation it does not yet hold. A derivation may be written and run (Python scientific stack).
+- computeSound — any derivation already present is valid (right inputs, propagated error bars, no arithmetic slip); true when none is needed.
+Uphold a sound finish: when goalMet, verificationSound, and computeSound all hold, return them true with an empty directive. Otherwise name the single most load-bearing problem and the precise fix.
+Return goalMet, verificationSound, needsCompute, computeSound, reasoning (the load-bearing reason for the verdict), directive (the exact fix or derivation to perform; '' when satisfied), reopenRabbitHoles (1-3 {keyword, why} ONLY when a real evidence/coverage gap needs more crawling, else []), reopenDirective (ONLY with reopenRabbitHoles: the EXTRACTION directive for the reopened lane's reader — WHAT to find in the fetched pages; keep it distinct from directive, which fixes the refine/report layer), retractClaimIds (ledger claim ids whose evidence is discredited — retraction, fabrication, or misattribution surfaced during verification; [] otherwise).
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > PROSPECTOR_PROMPT → full-string snapshot 1`] = `
+"Goal: "best vector database for production RAG at scale". Scout landscape: L
+Sources the scout already opened:
+- https://a.com
+Name the 6-8 highest-value, authoritative source venues for this goal — where primary, expert, or rigorous information on the topic actually lives. The right set is domain-specific (GPU serving → arXiv/USENIX/MLSys/SemiAnalysis/r/LocalLLaMA; a stock → SEC EDGAR/earnings calls/Bloomberg; weather → NOAA/ECMWF).
+Span what is relevant here: primary research (papers/preprints + where they live for this field), official docs, standards bodies/regulators, authoritative datasets/benchmarks, deep practitioner/industry analysis, high-signal community venues. Exclude generic SEO blogs.
+Assess where this subject is most actively researched. When a non-English literature is genuinely significant for this topic — a disease studied mostly in China/Japan, a field led by Russian or Korean groups — name the high-value native venues for those languages (CNKI/Wanfang → Chinese, J-STAGE/ICHUSHI → Japanese, SciELO/LILACS → Spanish/Portuguese, eLibrary.ru → Russian, KoreaMed → Korean), each with how to query it, and set languageGuidance: one line telling the brainer which languages to cover and why. For an English-dominated topic, return only English venues and languageGuidance "".
+Where the same concept is indexed under other names (older or alternate terms, regional spellings), fold those synonyms into the venues' search guidance so English-indexed work filed under a different name is still found.
+For each venue: source (venue + how to reach/search it, e.g. "arXiv (site:arxiv.org)"), goodFor (the sub-questions it is best for — specific enough for the downstream brainer to match each research lane to the right venue), and lang (its language as an ISO-ish code like zh/ja/es/ru/ko — omit for English).
+Run WebSearch (one or more queries) to discover and verify the actual highest-value venues — confirm each exists and is authoritative (memory alone misses recent venues). Return highValueSources (6-8, lang-tagged when non-English), languageGuidance ("" when the topic is English-dominated), and a brief reasoning naming what you searched.
+StructuredOutput discipline: its input must be ONE valid JSON object — escape every quote, newline, and backslash inside string values; no code fences, no XML/<parameter> syntax, no prose outside the JSON. Emit EVERY required field in that one call — a required array with nothing to report is [], never omitted — and never collapse your findings into a single prose field the schema splits into structured ones. Omit optional fields you have nothing for. Keep free-text values tight (one line each unless the field says otherwise) — a compact payload parses, an essay-sized one truncates and dies. When a schema error comes back naming a field, fix exactly that field and re-emit the corrected COMPLETE object — resending the same shape fails the same way.
+Use the web only (WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications)) to check sources — never read local files or this repo's own code; they are not evidence."
+`;
+
+exports[`prompt builders > REFINE_PROMPT → full-string snapshot 1`] = `
+"Fact-check and harden this load-bearing fact for the goal "best vector database for production RAG at scale". NET-FRAGMENT
+Fact: F
+Why it is load-bearing: W
+First verify it adversarially: hunt counter-evidence, newer information, and the real numbers — actively look for where it is false, outdated, or imprecise. Record every counter-search query you actually run, verbatim, in queriesTried — the record of the attack matters as much as its outcome. Do not rubber-stamp a well-supported fact; do not manufacture doubt about one you cannot actually break. Then settle every doubt against the sources and return only the clean, corrected claim(s) — the right values, current and verified, dropping anything that does not hold. Cite sources inline.
+Return report (markdown: the hardened claim(s) for this fact), queriesTried (the exact counter-search queries you ran), counterFound (true only when a real counter-example/contradiction turned up — a completed search that found nothing is false, not a lie), counterNote (what the counter-evidence was, when counterFound; '' otherwise).
+Use the web only (WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications)) to check sources — never read local files or this repo's own code; they are not evidence."
+`;
+
+exports[`prompt builders > RESEARCHER_PROMPT → full-string snapshot 1`] = `
+"You are reader 2 of 3 on one research lane — read your assigned slice and digest it. You do NOT search the web: the sources are already chosen and fetched to the local cache. Tools (load any via ToolSearch): Bash (read the cache files); mcp__professor__harvester_read with publications + mcp__professor__harvester_search_literature (resolve a wall to its open-access full text); mcp__professor__harvester_download_file (to view an image, download it via mcp__professor__harvester_download_file for a local path, then read it).
+TOP GOAL: "best vector database for production RAG at scale".
+TRAIL (top goal → … → this lane): goal  →  x.
+This lane: "x" (why it matters: w).
+DIRECTIVE — what to extract, with ranked fallbacks: extract the recall numbers; fallback to latency if recall is absent
+KEY CLAIMS SO FAR (\`c12 claim\` — ids look like c12) — when your content SUPPORTS or ATTACKS one of these, say so via \`stance\` {target: the NUMBER from its c12 id}; a contradiction is also your Surprise note:
+c1 pgvector recall is 0.98 on the LAION benchmark
+READ NOW — your assigned slice(s), from the local cache on disk (already fetched; never re-fetch). First confirm each file exists and is non-empty (e.g. wc -c PATH); then read each char window with code, e.g. python3 -c "print(open('PATH',encoding='utf-8',errors='replace').read()[OFFSET:OFFSET+LIMIT])" — if the output is truncated, read it in sub-parts (OFFSET, OFFSET+step, … to OFFSET+LIMIT) until the whole window is consumed. Use this code path for every read — the Read tool errors out above ~25k tokens on a big cache file; if you do reach for Read, page it with offset/limit, never request the whole file:
+1. https://a.com — read /cache/a.txt chars [0, 2000) (open the file, slice [0:2000])
+HONEST READ — if an assigned file is MISSING, empty, or unreadable, do NOT invent its content: record it in deadEnds, leave the running answer unchanged (an honest gap, never a fabricated summary), and the engine will reopen the lane. A confident wrong summary is worse than an admitted empty read. If a cached file's CONTENT is corrupted — spam, a different page than its URL promises, garbled or foreign-language filler — record it in deadEnds as "CORRUPT: <cachePath> — <one line why>"; the engine quarantines that cache path and routes a fresh fetch.
+Extract everything that serves the DIRECTIVE and the top goal — facts, numbers, and for any trial or study its funding source, conflicts of interest, sample size, and key limitations. You may read images to understand the content. If the content is in another language, translate your findings to English, keeping each cited source's original-language title alongside the translation.
+Extract each load-bearing fact as a claim: {claim (one sentence), value (the number/verdict if any), quote (VERBATIM from the content, ≤300 chars — ONE CONTIGUOUS unbroken span that carries the fact; NEVER stitch fragments with an ellipsis, a spliced quote fails the mechanical audit and the claim dies), source (url/DOI), cachePath (the cache file you read it in), entities (authors/funder/dataset/venue when visible)}. A claim without its verbatim quote is worthless — no quote, no claim.
+If your assigned content is a paywall, stub, or too thin for the directive, extract its DOI/identifier and call mcp__professor__harvester_read with it in publications — it resolves DOIs — or mcp__professor__harvester_search_literature and read its hit via mcp__professor__harvester_read with its handle in publications to fetch the open-access full text to the cache, then read THAT from disk; do not return an empty answer. This is scoped to resolving THIS source — do not open a general web search.
+Return: runningAnswer (extend the prior answer with what you found, kept a coherent whole — or begin it if you are reader 1); rabbitHoles (new gap searches the content raises, {keyword, why}); nextSources (up to 5 of the content's top outbound citations/links, each {ref: exact url or DOI, why, expect: support/attack/neutral, target: the claim id it bears on}); claims (each load-bearing fact pinned to a verbatim quote, this read's cachePath, its source, and entities when visible); newTerms (the community's terms of art this slice uses that we don't, {term, gloss}); surprise (one line, ONLY when this slice contradicts a KEY CLAIM above); deadEnds (any slice that was missing/empty/garbled/walled). <<FOOTER-FRAGMENT>>
+StructuredOutput discipline: its input must be ONE valid JSON object — escape every quote, newline, and backslash inside string values; no code fences, no XML/<parameter> syntax, no prose outside the JSON. Emit EVERY required field in that one call — a required array with nothing to report is [], never omitted — and never collapse your findings into a single prose field the schema splits into structured ones. Omit optional fields you have nothing for. Keep free-text values tight (one line each unless the field says otherwise) — a compact payload parses, an essay-sized one truncates and dies. When a schema error comes back naming a field, fix exactly that field and re-emit the corrected COMPLETE object — resending the same shape fails the same way.
+ANSWER SO FAR — the running answer from the earlier readers on this lane; extend and correct it, do not restate it wholesale:
+so far: pgvector recall ~0.96"
+`;
+
+exports[`prompt builders > SCHEDULER_PROMPT → full-string snapshot 1`] = `
+"You are the RESEARCH SCHEDULER — you own source discovery for this wave. For each lane below, find the HIGHEST-VALUE sources to read — as MANY as genuinely add value, no cap. The readers only read what you return; they do not search.
+TOP GOAL: "best vector database for production RAG at scale".
+Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web (registered only when a search backend is configured; WebSearch otherwise); mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
+VENUE LEGEND — the prospector's venues, referenced by number below:
+1. arXiv (site:arxiv.org) (ANN indexes)
+2. SemiAnalysis (cost)
+
+LANES — each carries a rabbit-hole, the brainer's directive \`note\` (WHAT to find + ranked fallbacks), and the venues to prefer:
+#1 hnsw tuning — recall knobs
+  directive: find ef/M build-vs-query tradeoffs; if absent, the default recall/latency curve
+  venues: 1, 2
+Work in TWO batched rounds — never one-source-at-a-time round-trips:
+1. DISCOVER — run ALL lanes' searches in ONE parallel batch (WebSearch / mcp__professor__harvester_search_web / mcp__professor__harvester_search_literature). Prefer each lane's assigned venues; let its \`note\` decide which results serve it. A lane carrying a concrete ref takes that ref as a source directly — no search needed for it.
+2. SIZE — call mcp__professor__harvester_read (web urls in urls; works — DOI, id, harvester_search_literature handle — in publications) with include_content:false on EVERY candidate across all lanes in ONE parallel batch. With include_content:false it fetches + caches the full text and returns each item under its group ({urls:[…], publications:[…]}) as {tokens, path to the cache file, chars, cached, and gaps naming why the text is incomplete (empty when complete)} and NO body. Drop any candidate that failed or came back walled/thin and pick another from the same lane.
+SANITY — after sizing, compare the batch: two DIFFERENT urls returning identical {tokens, chars} is a cache-poisoning signature — treat both as failed and replace them.
+For each lane, return its chosen sources as {source (the exact url or DOI), path (the cache path from the include_content:false read), size (the reply's tokens), chars}. Group them under the lane's id. A lane may return several sources; return an empty list for a lane only when every candidate failed.
+Return \`lanes\`: one entry per input lane id, each {id, sources:[{source, path, size, chars}], venuesServed:[...], unsourced:[{ref, reason}]}. venuesServed is the subset of THIS lane's ASSIGNED venues (the legend entries' exact source strings) its chosen sources actually come from — [] when none. unsourced lists every ref/DOI/venue the lane's directive or brief NAMED that could not be fetched, each {ref, reason} — omit the field entirely when everything named was sourced. A lane whose PRIORITY venue yielded nothing must say so in unsourced (reason e.g. "venue unfetchable") — never silently substitute a lower tier for it. Use the sizes you measured — never invent them.
+StructuredOutput discipline: its input must be ONE valid JSON object — escape every quote, newline, and backslash inside string values; no code fences, no XML/<parameter> syntax, no prose outside the JSON. Emit EVERY required field in that one call — a required array with nothing to report is [], never omitted — and never collapse your findings into a single prose field the schema splits into structured ones. Omit optional fields you have nothing for. Keep free-text values tight (one line each unless the field says otherwise) — a compact payload parses, an essay-sized one truncates and dies. When a schema error comes back naming a field, fix exactly that field and re-emit the corrected COMPLETE object — resending the same shape fails the same way."
+`;
+
+exports[`prompt builders > SCOUT_PROMPT → full-string snapshot 1`] = `
+"You are scout probe 1 of 3, on the angle «skeptic» — surfaces counter-evidence. Lens: critical. NET-FRAGMENT
+Step 1 — run WebSearch with: "best vector database for production RAG at scale criticism". You may refine it ONCE if the results are off-angle — stay on THIS angle, do not wander onto another probe's.
+Step 2 — pick the up-to-3 most relevant sources FOR THIS ANGLE and fetch them via mcp__professor__harvester_read (their urls in urls) — built-in WebFetch is denied. For each fetched page, first surface the key facts about "best vector database for production RAG at scale" as this angle reveals them, then apply this instruction: <<FOOTER-FRAGMENT>> Record the local cache path the fetch tool reports as EVERY claim's cachePath — a claim without its cachePath can never be mechanically verified and stays permanently unpinned; never invent one when the tool did not report it. Skip the footer's Surprise section — no prior claims exist yet.
+Step 3 — return ALL SIX fields (an array with nothing to report is [], never omitted): landscape (2-3 sentences on what THIS ANGLE revealed — not the whole topic, and NEVER your findings packed into prose: facts go in claims[], page detail in pages[].summary); pages[] (each: url, 2-3 sentence summary, rabbitHoles[] copied from the page's "Rabbit holes" section as {keyword, why}); nextSources[] union of the pages' "Next sources" sections, each {ref, why}; claims[] union of the pages' "Claims" sections, each pinned to a verbatim quote — a claim without its verbatim quote is worthless, no quote no claim; newTerms[] union of the pages' "New terms" sections; deadEnds[] for any source that timed out, was parked, or was off-topic — do not invent rabbit-holes for those. If every source is dead/unreachable, still return a valid result: landscape from your search, pages [], the dead sources in deadEnds.
+StructuredOutput discipline: its input must be ONE valid JSON object — escape every quote, newline, and backslash inside string values; no code fences, no XML/<parameter> syntax, no prose outside the JSON. Emit EVERY required field in that one call — a required array with nothing to report is [], never omitted — and never collapse your findings into a single prose field the schema splits into structured ones. Omit optional fields you have nothing for. Keep free-text values tight (one line each unless the field says otherwise) — a compact payload parses, an essay-sized one truncates and dies. When a schema error comes back naming a field, fix exactly that field and re-emit the corrected COMPLETE object — resending the same shape fails the same way."
+`;
+
+exports[`prompt builders > SYNTHESISER_PROMPT → full-string snapshot 1`] = `
+"Write the final research report (mode=goal) for: "best vector database for production RAG at scale".
+Emphasis from the finalize director: lead with cost
+Work from: the run's accumulated RESULT (the brainer's living memory — answer, working derivation, keyClaimIds, resolved, open gaps, tensions), the hardened facts (each adversarially fact-checked + source-corrected), not raw findings.
+Lean on the hardened facts as the source of truth: drop anything they leave unsupported and use the corrected value wherever they revised one. The \`working\` field holds the computed derivation (the calculated answer with error bars) — present it verbatim, do not re-derive or second-guess it. Cite sources inline where they matter.
+Scout landscape: L
+Run result so far (the answer as it ended + its keyClaimIds + the \`working\` derivation):
+answer: pgvector
+confidence: medium
+evidence:
+  - fact: recall
+    value: 0.98
+    source: arxiv
+    status: settled
+keyClaimIds:
+  - 1
+resolved:
+  - idx
+openGaps:
+  - mt
+working: cost=x
+Per-wave log (what each wave pursued + where the answer stood — for the §2 narrative):
+- wave: 0
+  topScore: 0
+  done: false
+  reason: seed
+Hardened facts (the corrected claims):
+- fact: recall
+  why: lb
+  clean: 0.96 ± 0.02
+Top remaining open rabbit-holes (for Open questions):
+- x
+Write \`report\` as markdown with exactly these sections in order: (1) Prompt — the goal; (2) Research waves — per wave: what was pursued and how the answer sharpened (from the per-wave log); (3) Scout landscape; (4) Findings — the synthesized answer, LEADING with the computed result + its error bars from \`working\` and showing the derivation, then weaving each hardened fact in with its corrected value; (5) Assumptions — the working assumptions the answer leans on (from resultSoFar.assumptions), each with its basis, flagging any that is load-bearing but unconfirmed; (6) Verdict + overall confidence; (7) Plan — concrete operator actions; (8) Open questions. Also return verdict (1-3 sentences), confidence, plan (array of action strings), openQuestions (array).
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;
+
+exports[`prompt builders > VALIDATOR_PROMPT → full-string snapshot 1`] = `
+"You are the VALIDATOR for one research wave of: "best vector database for production RAG at scale". Judge cheaply, from the intros below, whether each lane fulfilled what it was sent to find.
+Requests this wave (\`#id keyword — why\`):
+- id: 1
+  keyword: hnsw tuning
+  why: recall knobs
+What each lane returned (intro only):
+- keyword: hnsw tuning
+  intro: covers ef/M tradeoffs
+Lanes that returned nothing (failed outright): - sharding
+For each request return {id, fulfilled, reason}: fulfilled=true when the return actually answers the request; false when it is off-target, empty, or too thin to use (one-line reason). Then set enough — did the wave make real progress overall? — and missing — the specific gaps still open for the next wave to re-pursue.
+Return checks, enough, missing.
+The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object."
+`;

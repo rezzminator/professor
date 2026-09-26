@@ -10,7 +10,11 @@ import (
 
 func writeSessionIndex(t *testing.T, root string, lines ...string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "session_index.jsonl"), []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(root, "session_index.jsonl"),
+		[]byte(strings.Join(lines, "\n")),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -28,7 +32,12 @@ func TestCodexIndexProofFindsOnlyThisRename(t *testing.T) {
 	stale := t.TempDir()
 	writeSessionIndex(t, stale, indexLine("old", "PING_PROBE", since.Add(-time.Hour)), `{"id":"torn","thread_na`)
 	fresh := t.TempDir()
-	writeSessionIndex(t, fresh, indexLine("other", "SOMETHING_ELSE", since.Add(time.Second)), indexLine("new", "PING_PROBE", since.Add(3*time.Second)))
+	writeSessionIndex(
+		t,
+		fresh,
+		indexLine("other", "SOMETHING_ELSE", since.Add(time.Second)),
+		indexLine("new", "PING_PROBE", since.Add(3*time.Second)),
+	)
 
 	if landed, err := codexIndexProof([]string{stale})("PING_PROBE", since); err != nil || landed {
 		t.Fatalf("stale-only ledger = %v, %v; want false, nil", landed, err)

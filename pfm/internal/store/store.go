@@ -9,10 +9,12 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
-	"hostops/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const (
@@ -64,15 +66,17 @@ var migrations = [...]string{
 // operator decisions such as kills, teammates, and the primary account.
 type Store struct {
 	db    *sql.DB
-	state *shared.Store
+	state *fleetdb.Store
 	path  string
 
 	warnMu sync.Mutex
 	warn   io.Writer
+	clock  clock.Clock
 }
 
 type openOptions struct {
-	warn io.Writer
+	warn  io.Writer
+	clock clock.Clock
 }
 
 // OpenOption customizes process-local Store behavior.
@@ -84,6 +88,15 @@ func WithWarningWriter(w io.Writer) OpenOption {
 	return func(options *openOptions) {
 		if w != nil {
 			options.warn = w
+		}
+	}
+}
+
+// WithClock injects the store clock for deterministic busy retry and audit timestamps.
+func WithClock(value clock.Clock) OpenOption {
+	return func(options *openOptions) {
+		if value != nil {
+			options.clock = value
 		}
 	}
 }
@@ -101,7 +114,7 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("resolve store paths: %w", err)
 	}
 
-	settings := openOptions{warn: os.Stderr}
+	settings := openOptions{warn: os.Stderr, clock: clock.Real}
 	for _, option := range options {
 		option(&settings)
 	}
@@ -113,9 +126,10 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 
 	store := &Store{
 		db:    db,
-		state: shared.Open(ctx, resolved),
+		state: fleetdb.OpenSharedState(ctx, resolved),
 		path:  resolved.DB,
 		warn:  settings.warn,
+		clock: settings.clock,
 	}
 	if err := store.migrate(ctx); err != nil {
 		return nil, errors.Join(err, store.Close())
@@ -134,6 +148,20 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 	return store, nil
 }
 
+func (s *Store) clockNow() time.Time {
+	if s.clock == nil {
+		return clock.Real.Now()
+	}
+	return s.clock.Now()
+}
+
+func (s *Store) clockTimer(duration time.Duration) clock.Timer {
+	if s.clock == nil {
+		return clock.Real.NewTimer(duration)
+	}
+	return s.clock.NewTimer(duration)
+}
+
 // SharedPath reports the shared state database this Store writes kills to.
 func (s *Store) SharedPath() string { return s.state.Path() }
 
@@ -142,7 +170,7 @@ func (s *Store) SharedDegraded() error { return s.state.Degraded() }
 
 // Shared exposes the shared state store for the few callers that need it
 // directly, including the teammate reaper.
-func (s *Store) Shared() *shared.Store { return s.state }
+func (s *Store) Shared() *fleetdb.Store { return s.state }
 
 func (s *Store) migrate(ctx context.Context) error {
 	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
@@ -191,17 +219,25 @@ func (s *Store) migrate(ctx context.Context) error {
 		// Bumping user_version for it would instead lock every older pfm on
 		// this machine out of the whole store the moment one binary ran it —
 		// including the very binary pfm update's rollback restores.
-		if err := ensureOcSessionsAssistantCount(ctx, tx); err != nil {
+		if err := ensureColumn(
+			ctx, tx, "oc_sessions", "assistant_count", "INTEGER NOT NULL DEFAULT 0",
+		); err != nil {
 			return err
 		}
-		return nil
+		// continued_in is ensured the same way and for the same reason: an
+		// older binary's explicit transcript column list never names it, and
+		// its upsert leaves it alone. The claude parser version bump that ships
+		// with it is what fills the rows indexed before it existed.
+		return ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''")
 	})
 }
 
-func ensureOcSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error {
-	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(oc_sessions)")
+// ensureColumn adds one additive column when the table lacks it. table,
+// column and definition are compile-time constants, never user input.
+func ensureColumn(ctx context.Context, tx *ImmediateTx, table, column, definition string) error {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
-		return fmt.Errorf("inspect oc_sessions columns: %w", err)
+		return fmt.Errorf("inspect %s columns: %w", table, err)
 	}
 	present := false
 	for rows.Next() {
@@ -210,23 +246,26 @@ func ensureOcSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error 
 		var notNull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan oc_sessions column: %w", err)
+			return errors.Join(fmt.Errorf("scan %s column: %w", table, err), rows.Close())
 		}
-		if name == "assistant_count" {
+		if name == column {
 			present = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("iterate oc_sessions columns: %w", err)
+		return errors.Join(fmt.Errorf("iterate %s columns: %w", table, err), rows.Close())
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close %s columns: %w", table, err)
+	}
 	if present {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, "ALTER TABLE oc_sessions ADD COLUMN assistant_count INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return fmt.Errorf("ensure oc_sessions.assistant_count: %w", err)
+	if _, err := tx.ExecContext(
+		ctx,
+		"ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition,
+	); err != nil {
+		return fmt.Errorf("ensure %s.%s: %w", table, column, err)
 	}
 	return nil
 }
@@ -254,7 +293,7 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 		return nil
 	}
 
-	rows, err := s.db.QueryContext(ctx, "SELECT id, hidden_at FROM hidden")
+	rows, err := s.logged().QueryContext(ctx, "SELECT id, hidden_at FROM hidden")
 	if err != nil {
 		return fmt.Errorf("read kills awaiting adoption: %w", err)
 	}
@@ -279,7 +318,7 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, id := range shared.SortedIDs(adopted) {
+	for _, id := range fleetdb.SortedIDs(adopted) {
 		if _, alreadyShared := existing[id]; alreadyShared {
 			continue
 		}
@@ -300,7 +339,7 @@ func userVersion(ctx context.Context, query rowQueryer) (int, error) {
 
 // UserVersion reports PRAGMA user_version.
 func (s *Store) UserVersion(ctx context.Context) (int, error) {
-	return userVersion(ctx, s.db)
+	return userVersion(ctx, s.logged())
 }
 
 // Path reports the database pathname resolved when the Store was opened.

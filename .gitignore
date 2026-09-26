@@ -6,13 +6,9 @@ node_modules/
 .env.*
 !.env.example
 /tmp/
-engines/wave-walker/engine/tmp/
-# Reproducible cross-runtime candidates are rebuilt locally. The immutable
-# legacy bundle and the explicit active pointer remain tracked release inputs.
-engines/wave-walker/engine/dist/cross-workflow/
-engines/wave-walker/engine/headless-equivalence-input.json
-engines/wave-walker/engine/runtime-smoke-input.json
 .worktrees/
+# Retired build tree created in the clone by an older SETUP.
+/engines/
 # Source-fetched skills are cloned at install from their own public repos
 # (templates/skills/sources.json) and are NEVER vendored here: a
 # tracked copy is exactly the silent drift the sources.json law exists to
@@ -25,7 +21,28 @@ engines/wave-walker/engine/runtime-smoke-input.json
 # whatever `.claude/skills/` holds, and a tracked link into an ignored tree
 # resolves only in the working copy that added it. One line per fetched skill.
 .codex/skills/deep-rr
-# OpenCode mirror (build-opencode.mjs): skill symlinks stay untracked like
+# OpenCode mirror (`pfm opencode build`): skill symlinks stay untracked like
+# Generated mirrors are never tracked beside their source: their compiler
+# (`pfm codex build` for Codex, `pfm opencode build` for OpenCode)
+# writes them at install/init time and the Stop hook keeps them current on
+# every later edit. A fresh clone has none of these paths until it generates
+# — `pfm codex build .` + `pfm opencode build .`
+# — which every gate that reads them runs first (see `scripts/
+# check-agent-roster.mjs`'s NOT GENERATED state and the CI `Generate mirrors`
+# step). Keepers stay tracked and are NOT covered by these rules:
+# `.codex/config.toml` (hand-written, holds one generated `mcp_servers`
+# fence), `templates/global/agents/*.md`.
+/AGENTS.md
+/pfm/AGENTS.md
+.codex/agents/
+.codex/skills/
+.opencode/agent/
+.opencode/command/
+.opencode/LICENSE
+.opencode/SECURITY.md
+.opencode/opencode.jsonc
+templates/global/agents/*.toml
+# OpenCode mirror (`pfm opencode build`): skill symlinks stay untracked like
 # .codex/skills/; the goals/ tree is the goal plugin's live session state.
 .opencode/skills/
 .opencode/goals/

@@ -4,10 +4,10 @@ import (
 	"context"
 	"io"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
-	pfmstats "hostops/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 )
 
 // Tab is one top-level picker body. Chats preserves the original picker and
@@ -56,7 +56,7 @@ type StatsSampler interface {
 // CosmosSampler keeps the open cosmos tab current without making rendering
 // query the shared database.
 type CosmosSampler interface {
-	Sample(ctx context.Context, sinceNS int64) ([]shared.CommsEvent, error)
+	Sample(ctx context.Context, sinceNS int64) ([]fleetdb.CommsEvent, error)
 }
 
 // Picker is the common boundary used by the interactive, plain, and TSV
@@ -80,8 +80,8 @@ type Snapshot struct {
 	CodexPrimaryAccount    int
 	CodexAccountIDs        []int
 	CodexAccountEmojis     map[int]string
-	OpencodePrimaryAccount int
-	OpencodeAccountIDs     []int
+	OpenCodePrimaryAccount int
+	OpenCodeAccountIDs     []int
 	Theme                  string
 	Cache1H                bool
 	NowNS                  int64

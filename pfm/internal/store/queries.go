@@ -5,18 +5,26 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // transcriptColumns is alias-qualified because every transcript query joins
 // the effective-killed mirror, whose key column is also named uuid.
 const transcriptColumns = `
 t.uuid, t.path, t.size, t.mtime_ns, t.activity_ns, t.parsed_offset, t.cwd, t.custom_title,
-t.ai_title, t.first_prompt, t.last_prompt, t.prompt_count, t.is_bg`
+t.ai_title, t.first_prompt, t.last_prompt, t.prompt_count, t.is_bg, t.continued_in,
+` + transcriptSupersededSQL
+
+// transcriptSupersededSQL is the one spelling of Transcript.Superseded. The
+// cached first frame filters on it and fleet.followContinuations drops the
+// segments whose field it fills, so the two frames cannot disagree about
+// which segment is the chat.
+const transcriptSupersededSQL = `(t.continued_in!='' AND t.continued_in!=t.uuid AND EXISTS (
+  SELECT 1 FROM transcripts AS successor WHERE successor.uuid=t.continued_in))`
 
 const rolloutColumns = `
 id, path, size, mtime_ns, parsed_offset, cwd, user_thread, session_id,
@@ -78,20 +86,25 @@ func (s *Store) DefaultCandidates(
 func (s *Store) defaultTranscripts(
 	ctx context.Context,
 	limit int,
-) ([]Transcript, error) {
-	rows, err := s.db.QueryContext(ctx, `
+) (transcripts []Transcript, returnErr error) {
+	rows, err := s.logged().QueryContext(ctx, `
 SELECT `+transcriptColumns+`
 FROM transcripts AS t
 LEFT JOIN `+effectiveKilled+` AS h ON h.uuid=t.uuid
 WHERE t.is_bg=0 AND t.size>0 AND t.prompt_count>0 AND h.uuid IS NULL
   AND NOT `+labelKilledSQL+`
+  AND NOT `+transcriptSupersededSQL+`
 ORDER BY CASE WHEN t.activity_ns>0 THEN t.activity_ns ELSE t.mtime_ns END DESC, t.uuid
 LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query cached transcript candidates: %w", err)
 	}
-	defer rows.Close()
-	transcripts := make([]Transcript, 0, limit)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close cached transcript rows: %w", err))
+		}
+	}()
+	transcripts = make([]Transcript, 0, limit)
 	for rows.Next() {
 		transcript, err := scanTranscript(rows)
 		if err != nil {
@@ -114,12 +127,13 @@ func (s *Store) defaultRollouts(
 		return nil, err
 	}
 	rollouts := make([]Rollout, 0, min(limit, len(lineages)))
-	for _, lineage := range lineages {
-		if codexLineageKilled(lineage, killedByID) ||
-			codexLineageLabelKilled(lineage, cxNames) {
+	for index := range lineages {
+		lineage := &lineages[index]
+		if codexLineageKilled(*lineage, killedByID) ||
+			codexLineageLabelKilled(*lineage, cxNames) {
 			continue
 		}
-		if codexLineageSuppressed(lineage) {
+		if codexLineageSuppressed(*lineage) {
 			continue
 		}
 		rollouts = append(rollouts, lineage.Newest)
@@ -139,17 +153,18 @@ func (s *Store) defaultCounts(
 	// A label-killed row counts as HIDDEN, not suppressed, and never as
 	// eligible — compose's countOmitted tests row.Killed first for the same
 	// reason: killed is dead, empty or not.
-	err := s.db.QueryRowContext(ctx, `
+	err := s.logged().QueryRowContext(ctx, `
 SELECT
   COALESCE(SUM(CASE
+    WHEN `+transcriptSupersededSQL+` THEN 0
     WHEN h.uuid IS NOT NULL OR `+labelKilledSQL+`
     THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE
-    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+`
+    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+` AND NOT `+transcriptSupersededSQL+`
       AND (t.is_bg!=0 OR t.size<=0 OR t.prompt_count<=0)
     THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE
-    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+`
+    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+` AND NOT `+transcriptSupersededSQL+`
       AND t.is_bg=0 AND t.size>0 AND t.prompt_count>0
     THEN 1 ELSE 0 END), 0)
 FROM transcripts AS t
@@ -163,13 +178,14 @@ LEFT JOIN `+effectiveKilled+` AS h ON h.uuid=t.uuid`,
 		return CachedCounts{}, err
 	}
 	var codexKilled, codexSuppressed int
-	for _, lineage := range lineages {
-		if codexLineageKilled(lineage, killedByID) ||
-			codexLineageLabelKilled(lineage, cxNames) {
+	for index := range lineages {
+		lineage := &lineages[index]
+		if codexLineageKilled(*lineage, killedByID) ||
+			codexLineageLabelKilled(*lineage, cxNames) {
 			codexKilled++
 			continue
 		}
-		if codexLineageSuppressed(lineage) {
+		if codexLineageSuppressed(*lineage) {
 			codexSuppressed++
 			continue
 		}
@@ -286,7 +302,8 @@ func (s *Store) codexLineageRows(
 // this package.
 func CodexThreads(rollouts []Rollout) []naming.CodexThread {
 	threads := make([]naming.CodexThread, 0, len(rollouts))
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		threads = append(threads, naming.CodexThread{
 			ID:           rollout.ID,
 			SessionID:    rollout.SessionID,
@@ -300,7 +317,7 @@ func CodexThreads(rollouts []Rollout) []naming.CodexThread {
 
 // UpsertTranscript inserts or replaces all indexed fields for a transcript.
 func (s *Store) UpsertTranscript(ctx context.Context, transcript Transcript) error {
-	return upsertTranscript(ctx, s.db, transcript)
+	return upsertTranscript(ctx, s.logged(), transcript)
 }
 
 // UpsertTranscript inserts or replaces all indexed fields within tx.
@@ -312,8 +329,8 @@ func upsertTranscript(ctx context.Context, db queryExecer, transcript Transcript
 	_, err := execWrite(ctx, db, `
 INSERT INTO transcripts (
   uuid, path, size, mtime_ns, activity_ns, parsed_offset, cwd, custom_title, ai_title,
-  first_prompt, last_prompt, prompt_count, is_bg
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  first_prompt, last_prompt, prompt_count, is_bg, continued_in
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(uuid) DO UPDATE SET
   path=excluded.path,
   size=excluded.size,
@@ -326,7 +343,8 @@ ON CONFLICT(uuid) DO UPDATE SET
   first_prompt=excluded.first_prompt,
   last_prompt=excluded.last_prompt,
   prompt_count=excluded.prompt_count,
-  is_bg=excluded.is_bg`,
+  is_bg=excluded.is_bg,
+  continued_in=excluded.continued_in`,
 		transcript.UUID,
 		transcript.Path,
 		transcript.Size,
@@ -340,6 +358,7 @@ ON CONFLICT(uuid) DO UPDATE SET
 		transcript.LastPrompt,
 		transcript.PromptCount,
 		boolInteger(transcript.IsBG),
+		transcript.ContinuedIn,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert transcript %q: %w", transcript.UUID, err)
@@ -352,7 +371,7 @@ func (s *Store) Transcript(
 	ctx context.Context,
 	uuid string,
 ) (Transcript, bool, error) {
-	transcript, err := scanTranscript(s.db.QueryRowContext(
+	transcript, err := scanTranscript(s.logged().QueryRowContext(
 		ctx,
 		"SELECT "+transcriptColumns+" FROM transcripts AS t WHERE t.uuid=?",
 		uuid,
@@ -368,32 +387,18 @@ func (s *Store) Transcript(
 
 // Transcripts returns all transcripts ordered by UUID.
 func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
-	rows, err := s.db.QueryContext(
+	return queryRows(
 		ctx,
+		s.logged(),
 		"SELECT "+transcriptColumns+" FROM transcripts AS t ORDER BY t.uuid",
+		"transcript",
+		scanTranscript,
 	)
-	if err != nil {
-		return nil, fmt.Errorf("query transcripts: %w", err)
-	}
-	defer rows.Close()
-
-	var transcripts []Transcript
-	for rows.Next() {
-		transcript, err := scanTranscript(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan transcript: %w", err)
-		}
-		transcripts = append(transcripts, transcript)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate transcripts: %w", err)
-	}
-	return transcripts, nil
 }
 
 func scanTranscript(row rowScanner) (Transcript, error) {
 	var transcript Transcript
-	var isBG int
+	var isBG, superseded int
 	err := row.Scan(
 		&transcript.UUID,
 		&transcript.Path,
@@ -408,14 +413,17 @@ func scanTranscript(row rowScanner) (Transcript, error) {
 		&transcript.LastPrompt,
 		&transcript.PromptCount,
 		&isBG,
+		&transcript.ContinuedIn,
+		&superseded,
 	)
 	transcript.IsBG = isBG != 0
+	transcript.Superseded = superseded != 0
 	return transcript, err
 }
 
 // DeleteTranscript deletes a transcript by UUID.
 func (s *Store) DeleteTranscript(ctx context.Context, uuid string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM transcripts WHERE uuid=?", uuid); err != nil {
+	if _, err := s.logged().ExecContext(ctx, "DELETE FROM transcripts WHERE uuid=?", uuid); err != nil {
 		return fmt.Errorf("delete transcript %q: %w", uuid, err)
 	}
 	return nil
@@ -431,7 +439,7 @@ func (tx *ImmediateTx) DeleteTranscript(ctx context.Context, uuid string) error 
 
 // UpsertRollout inserts or replaces all indexed fields for a rollout.
 func (s *Store) UpsertRollout(ctx context.Context, rollout Rollout) error {
-	return upsertRollout(ctx, s.db, rollout)
+	return upsertRollout(ctx, s.logged(), rollout)
 }
 
 // UpsertRollout inserts or replaces all indexed fields within tx.
@@ -467,7 +475,7 @@ INSERT OR REPLACE INTO rollouts (
 
 // Rollout returns a rollout by ID.
 func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
-	rollout, err := scanRollout(s.db.QueryRowContext(
+	rollout, err := scanRollout(s.logged().QueryRowContext(
 		ctx,
 		"SELECT "+rolloutColumns+" FROM rollouts WHERE id=?",
 		id,
@@ -483,27 +491,43 @@ func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
 
 // Rollouts returns all rollouts ordered by ID.
 func (s *Store) Rollouts(ctx context.Context) ([]Rollout, error) {
-	rows, err := s.db.QueryContext(
+	return queryRows(
 		ctx,
+		s.logged(),
 		"SELECT "+rolloutColumns+" FROM rollouts ORDER BY id",
+		"rollout",
+		scanRollout,
 	)
-	if err != nil {
-		return nil, fmt.Errorf("query rollouts: %w", err)
-	}
-	defer rows.Close()
+}
 
-	var rollouts []Rollout
-	for rows.Next() {
-		rollout, err := scanRollout(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan rollout: %w", err)
+func queryRows[T any](
+	ctx context.Context,
+	db queryExecer,
+	query string,
+	rowName string,
+	scan func(rowScanner) (T, error),
+) (items []T, returnErr error) {
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query %ss: %w", rowName, err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s rows: %w", rowName, err))
 		}
-		rollouts = append(rollouts, rollout)
+	}()
+
+	for rows.Next() {
+		item, err := scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan %s: %w", rowName, err)
+		}
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate rollouts: %w", err)
+		return nil, fmt.Errorf("iterate %ss: %w", rowName, err)
 	}
-	return rollouts, nil
+	return items, nil
 }
 
 func scanRollout(row rowScanner) (Rollout, error) {
@@ -531,7 +555,7 @@ func scanRollout(row rowScanner) (Rollout, error) {
 
 // DeleteRollout deletes a rollout by ID.
 func (s *Store) DeleteRollout(ctx context.Context, id string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM rollouts WHERE id=?", id); err != nil {
+	if _, err := s.logged().ExecContext(ctx, "DELETE FROM rollouts WHERE id=?", id); err != nil {
 		return fmt.Errorf("delete rollout %q: %w", id, err)
 	}
 	return nil
@@ -547,7 +571,7 @@ func (tx *ImmediateTx) DeleteRollout(ctx context.Context, id string) error {
 
 // UpsertCxName inserts or replaces a Codex thread name.
 func (s *Store) UpsertCxName(ctx context.Context, name CxName) error {
-	return upsertCxName(ctx, s.db, name)
+	return upsertCxName(ctx, s.logged(), name)
 }
 
 // UpsertCxName inserts or replaces a Codex thread name within tx.
@@ -613,17 +637,21 @@ func (s *Store) CxNames(ctx context.Context) (map[string]string, error) {
 // CxNameRecords returns the full Codex name mirror, keyed by rollout ID,
 // including the provenance reconcileCodexNames needs to arbitrate a store
 // name against a session_index rename.
-func (s *Store) CxNameRecords(ctx context.Context) (map[string]CxName, error) {
-	rows, err := s.db.QueryContext(
+func (s *Store) CxNameRecords(ctx context.Context) (records map[string]CxName, returnErr error) {
+	rows, err := s.logged().QueryContext(
 		ctx,
 		"SELECT id, thread_name, source, renamed_at FROM cx_names ORDER BY id",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query cx name records: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close cx name rows: %w", err))
+		}
+	}()
 
-	records := make(map[string]CxName)
+	records = make(map[string]CxName)
 	for rows.Next() {
 		var record CxName
 		if err := rows.Scan(
@@ -644,7 +672,7 @@ func (s *Store) CxNameRecords(ctx context.Context) (map[string]CxName, error) {
 
 // SetMeta inserts or replaces a metadata value.
 func (s *Store) SetMeta(ctx context.Context, key, value string) error {
-	return setMeta(ctx, s.db, key, value)
+	return setMeta(ctx, s.logged(), key, value)
 }
 
 // SetMeta inserts or replaces a metadata value within tx.
@@ -668,7 +696,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
 // Meta returns a metadata value by key.
 func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 	var value string
-	err := s.db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", key).Scan(&value)
+	err := s.logged().QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -682,19 +710,23 @@ func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 // A caller that wants to audit a whole key FAMILY — the per-pane Codex
 // bindings, say — cannot do it one Meta() at a time, because the thing worth
 // auditing is what two keys say about each other.
-func (s *Store) MetaPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+func (s *Store) MetaPrefix(ctx context.Context, prefix string) (values map[string]string, returnErr error) {
 	if prefix == "" {
 		return nil, errors.New("meta prefix scan needs a prefix")
 	}
-	rows, err := s.db.QueryContext(
+	rows, err := s.logged().QueryContext(
 		ctx, "SELECT key, value FROM meta WHERE key LIKE ? ESCAPE '\\' ORDER BY key",
 		escapeLikePrefix(prefix)+"%",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query meta prefix %q: %w", prefix, err)
 	}
-	defer rows.Close()
-	values := make(map[string]string)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close meta prefix rows %q: %w", prefix, err))
+		}
+	}()
+	values = make(map[string]string)
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
@@ -717,7 +749,7 @@ func escapeLikePrefix(prefix string) string {
 
 // DeleteMeta deletes a metadata value by key.
 func (s *Store) DeleteMeta(ctx context.Context, key string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM meta WHERE key=?", key); err != nil {
+	if _, err := s.logged().ExecContext(ctx, "DELETE FROM meta WHERE key=?", key); err != nil {
 		return fmt.Errorf("delete meta %q: %w", key, err)
 	}
 	return nil
@@ -725,7 +757,7 @@ func (s *Store) DeleteMeta(ctx context.Context, key string) error {
 
 // IncrementMeta increments one decimal counter, creating it at one.
 func (s *Store) IncrementMeta(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.logged().ExecContext(ctx, `
 INSERT INTO meta (key, value) VALUES (?, '1')
 ON CONFLICT(key) DO UPDATE SET
   value=CAST(meta.value AS INTEGER)+1`,

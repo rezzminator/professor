@@ -2,15 +2,20 @@ package stale
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 )
 
 // fixture is a process table on disk — <root>/<pid>/{cmdline,exe} — the
@@ -19,14 +24,25 @@ import (
 type fixture struct {
 	t      *testing.T
 	root   string
+	home   string
 	binary string
 	old    string
+}
+
+func (fixture *fixture) markerPath() string {
+	return compatibleProxyMarker(fixture.home)
 }
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
-	fixture := &fixture{t: t, root: filepath.Join(root, "proc"), binary: filepath.Join(root, "bin", "pfm"), old: filepath.Join(root, "bin", "pfm.replaced")}
+	fixture := &fixture{
+		t:      t,
+		root:   filepath.Join(root, "proc"),
+		home:   filepath.Join(root, "home"),
+		binary: filepath.Join(root, "bin", "pfm"),
+		old:    filepath.Join(root, "bin", "pfm.replaced"),
+	}
 	for _, path := range []string{fixture.binary, fixture.old} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -46,13 +62,38 @@ func (fixture *fixture) process(pid int, image string, argv ...string) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		fixture.t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "cmdline"), []byte(strings.Join(argv, "\x00")+"\x00"), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Join(directory, "fd"), 0o700); err != nil {
+		fixture.t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(directory, "cmdline"),
+		[]byte(strings.Join(argv, "\x00")+"\x00"),
+		0o600,
+	); err != nil {
 		fixture.t.Fatal(err)
 	}
 	if image != "" {
 		if err := os.Symlink(image, filepath.Join(directory, "exe")); err != nil {
 			fixture.t.Fatal(err)
 		}
+	}
+}
+
+func (fixture *fixture) markProxy(pid, fd int) {
+	fixture.t.Helper()
+	marker := fixture.markerPath()
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		fixture.t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		fixture.t.Fatal(err)
+	}
+	target, err := filepath.EvalSymlinks(marker)
+	if err != nil {
+		fixture.t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(fixture.root, strconv.Itoa(pid), "fd", strconv.Itoa(fd))); err != nil {
+		fixture.t.Fatal(err)
 	}
 }
 
@@ -76,8 +117,9 @@ func (fixture *fixture) signaler(ignoreTerm, ignoreKill map[int]bool, sent *[]st
 }
 
 func TestFindNamesOnlyPfmProcessesRunningAReplacedBinary(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
-	fixture.process(101, fixture.old, fixture.binary, "mcp", "chat", "serve")
+	fixture.process(101, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
 	fixture.process(102, fixture.binary, fixture.binary, "mcp", "serve")
 	fixture.process(103, fixture.old, "/usr/bin/sleep", "60")
 	fixture.process(104, fixture.old, "pfm")
@@ -101,6 +143,7 @@ func TestFindNamesOnlyPfmProcessesRunningAReplacedBinary(t *testing.T) {
 // "Could not look" is never "nothing there": a live pfm whose image cannot be
 // read is named, and fails the scan, rather than passing as fresh.
 func TestFindNamesAProcessItCouldNotRead(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(201, "", fixture.binary, "ls")
 	var sent []string
@@ -113,9 +156,31 @@ func TestFindNamesAProcessItCouldNotRead(t *testing.T) {
 	}
 }
 
+// TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable is
+// hostfixture case 9 (StaleArtifacts): a pid that exited between the pid
+// listing and the image read must be SKIPPED, not folded into
+// scan.Unreadable — that column exists for a process still alive whose
+// image genuinely could not be read, and a real ESRCH from a dead pid is
+// evidence of neither.
+func TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable(t *testing.T) {
+	// hostfixture.StaleArtifacts uses t.Setenv internally (testjail.Fleet),
+	// which testing.T refuses to combine with t.Parallel.
+	artifacts := hostfixture.StaleArtifacts(t)
+	fixture := newFixture(t)
+	fixture.process(artifacts.StalePID, "", "pfm", "mcp", "serve")
+	scan, err := Find(gather.NewProcFS(fixture.root), fixture.binary, syscall.Kill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.Unreadable) != 0 {
+		t.Fatalf("scan.Unreadable = %v, want the exited pid skipped, not reported unreadable", scan.Unreadable)
+	}
+}
+
 // A table that cannot say which file a process runs is refused outright: the
 // sweep would otherwise classify every process as fresh and report clean.
 func TestFindRefusesATableThatCannotReadImages(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	var sent []string
 	_, err := Find(imageless{gather.NewProcFS(fixture.root)}, fixture.binary, fixture.signaler(nil, nil, &sent))
@@ -126,14 +191,35 @@ func TestFindRefusesATableThatCannotReadImages(t *testing.T) {
 
 type imageless struct{ gather.ProcFS }
 
+type unreadableDescriptors struct {
+	gather.ProcFS
+	err error
+}
+
+func (table unreadableDescriptors) FDLinks(int) ([]gather.FDLink, error) { return nil, table.err }
+
+func (table unreadableDescriptors) Image(pid int) (gather.FileID, error) {
+	return table.ProcFS.(gather.ProcImage).Image(pid)
+}
+
 func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(301, fixture.old, fixture.binary, "ls")
-	fixture.process(302, fixture.old, fixture.binary, "mcp", "chat", "serve")
+	fixture.process(302, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
 	fixture.process(303, fixture.binary, fixture.binary, "mcp", "serve")
 	var sent []string
 	var stdout bytes.Buffer
-	err := Sweep(gather.NewProcFS(fixture.root), fixture.binary, fixture.signaler(map[int]bool{302: true}, nil, &sent), &stdout, 10*time.Millisecond)
+	err := SweepStaleProcesses(
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.root,
+		fixture.home,
+		fixture.signaler(map[int]bool{302: true}, nil, &sent),
+		&stdout,
+		10*time.Millisecond,
+		clock.Real,
+	)
 	if err != nil {
 		t.Fatalf("sweep: %v\n%s", err, stdout.String())
 	}
@@ -150,33 +236,380 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 	}
 }
 
+func TestSweepKeepsMarkedProxyAndTermsUnmarkedServer(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(311, fixture.old, fixture.binary, "--config", "/tmp/pfm.json", "mcp", "serve", "--stdio")
+	fixture.markProxy(311, 9)
+	fixture.process(312, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	var sent []string
+	var stdout bytes.Buffer
+	err := SweepStaleProcesses(
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.root,
+		fixture.home,
+		fixture.signaler(nil, nil, &sent),
+		&stdout,
+		10*time.Millisecond,
+		clock.Real,
+	)
+	if err != nil {
+		t.Fatalf("sweep: %v\n%s", err, stdout.String())
+	}
+	if got := strings.Join(sent, ","); got != "terminated 312" {
+		t.Fatalf("signals = %q, want only the unmarked server terminated", got)
+	}
+	if _, err := os.Stat(filepath.Join(fixture.root, "311")); err != nil {
+		t.Fatalf("marked proxy was swept: %v", err)
+	}
+	if output := stdout.String(); !strings.Contains(output, "sweep: KEEP pid=311 compatible stdio proxy") ||
+		!strings.Contains(output, "reconnects it with /mcp") {
+		t.Fatalf("output = %q, want KEEP and reconnect notices", output)
+	}
+}
+
+func TestClassifyCompatibleProxies(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(313, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.markProxy(313, 9)
+	fixture.process(314, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	var sent []string
+	table := gather.NewProcFS(fixture.root)
+	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	obsolete, compatible, err := ClassifyCompatibleProxies(
+		table, fixture.root, fixture.home, fixture.signaler(nil, nil, &sent), scan.Stale,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obsolete) != 1 || obsolete[0].PID != 314 || len(compatible) != 1 || compatible[0].PID != 313 {
+		t.Fatalf("obsolete=%+v compatible=%+v, want 314 obsolete and 313 compatible", obsolete, compatible)
+	}
+}
+
+func TestClassifyCompatibleProxyCommandForms(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		argv       []string
+		compatible bool
+	}{
+		{name: "stdio", argv: []string{"pfm", "mcp", "serve", "--stdio"}, compatible: true},
+		{
+			name:       "stdio split config",
+			argv:       []string{"/opt/pfm", "--config", "/tmp/pfm.json", "mcp", "serve", "--stdio"},
+			compatible: true,
+		},
+		{
+			name:       "stdio joined config",
+			argv:       []string{"pfm", "--config=/tmp/pfm.json", "mcp", "serve", "--stdio"},
+			compatible: true,
+		},
+		{name: "daemon", argv: []string{"pfm", "mcp", "serve"}},
+		{name: "daemon split config", argv: []string{"pfm", "--config", "/tmp/pfm.json", "mcp", "serve"}},
+		{name: "daemon joined config", argv: []string{"pfm", "--config=/tmp/pfm.json", "mcp", "serve"}},
+		{name: "list", argv: []string{"pfm", "mcp", "ls"}},
+		{name: "chat enable", argv: []string{"pfm", "mcp", "chat", "enable"}},
+		{name: "trailing argument", argv: []string{"pfm", "mcp", "serve", "--stdio", "extra"}},
+		{name: "config after mcp", argv: []string{"pfm", "mcp", "serve", "--stdio", "--config", "/tmp/pfm.json"}},
+		{
+			name: "repeated split config",
+			argv: []string{"pfm", "--config", "/tmp/one.json", "--config", "/tmp/two.json", "mcp", "serve", "--stdio"},
+		},
+		{
+			name: "repeated joined config",
+			argv: []string{"pfm", "--config=/tmp/one.json", "--config=/tmp/two.json", "mcp", "serve", "--stdio"},
+		},
+		{name: "empty split config", argv: []string{"pfm", "--config", "", "mcp", "serve", "--stdio"}},
+		{name: "whitespace split config", argv: []string{"pfm", "--config", "   ", "mcp", "serve", "--stdio"}},
+		{name: "missing split config", argv: []string{"pfm", "--config"}},
+		{name: "empty joined config", argv: []string{"pfm", "--config=", "mcp", "serve", "--stdio"}},
+		{name: "whitespace joined config", argv: []string{"pfm", "--config=   ", "mcp", "serve", "--stdio"}},
+		{name: "unrelated leading flag", argv: []string{"pfm", "--verbose", "mcp", "serve", "--stdio"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newFixture(t)
+			fixture.process(401, fixture.old, test.argv...)
+			fixture.markProxy(401, 9)
+			if test.compatible {
+				fixture.process(402, fixture.old, test.argv...)
+			}
+			var sent []string
+			table := gather.NewProcFS(fixture.root)
+			scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+			if err != nil {
+				t.Fatal(err)
+			}
+			obsolete, compatible, err := ClassifyCompatibleProxies(
+				table, fixture.root, fixture.home, fixture.signaler(nil, nil, &sent), scan.Stale,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.compatible {
+				if len(compatible) != 1 || compatible[0].PID != 401 || len(obsolete) != 1 || obsolete[0].PID != 402 {
+					t.Fatalf(
+						"obsolete=%+v compatible=%+v, want unmarked 402 obsolete and marked 401 compatible",
+						obsolete,
+						compatible,
+					)
+				}
+			} else if len(compatible) != 0 || len(obsolete) != 1 || obsolete[0].PID != 401 {
+				t.Fatalf("obsolete=%+v compatible=%+v, want marked invalid command 401 obsolete", obsolete, compatible)
+			}
+		})
+	}
+}
+
+func TestClassifyCompatibleProxiesFailsClosedWhenDescriptorsAreUnreadable(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(315, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	var sent []string
+	table := gather.NewProcFS(fixture.root)
+	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeErr := errors.New("descriptor probe denied")
+	obsolete, compatible, err := ClassifyCompatibleProxies(
+		unreadableDescriptors{ProcFS: table, err: probeErr},
+		fixture.root,
+		fixture.home,
+		fixture.signaler(nil, nil, &sent),
+		scan.Stale,
+	)
+	if err == nil || !errors.Is(err, probeErr) || !strings.Contains(err.Error(), "pid=315") {
+		t.Fatalf("err=%v, want pid and descriptor cause", err)
+	}
+	if obsolete != nil || compatible != nil {
+		t.Fatalf("obsolete=%+v compatible=%+v, want no asserted partition on error", obsolete, compatible)
+	}
+}
+
+func TestClassifyCompatibleProxiesOmitsVanishedCandidate(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(316, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	var sent []string
+	table := gather.NewProcFS(fixture.root)
+	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	obsolete, compatible, err := ClassifyCompatibleProxies(
+		unreadableDescriptors{ProcFS: table, err: errors.New("process vanished")},
+		fixture.root,
+		fixture.home,
+		func(int, syscall.Signal) error { return syscall.ESRCH },
+		scan.Stale,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obsolete) != 0 || len(compatible) != 0 {
+		t.Fatalf("obsolete=%+v compatible=%+v, want vanished candidate omitted", obsolete, compatible)
+	}
+}
+
+func TestSweepDoesNotKeepMarkerFileWithoutHolder(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(321, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	marker := fixture.markerPath()
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var sent []string
+	err := SweepStaleProcesses(
+		gather.NewProcFS(fixture.root), fixture.binary, fixture.root, fixture.home,
+		fixture.signaler(nil, nil, &sent), io.Discard, 10*time.Millisecond, clock.Real,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(sent, ","); got != "terminated 321" {
+		t.Fatalf("signals = %q, want marker file without holder to preserve nothing", got)
+	}
+}
+
+func TestSweepFailsBeforeSignalsWhenProxyDescriptorsAreUnreadable(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(331, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	fixture.process(332, fixture.old, fixture.binary, "ls")
+	var sent []string
+	probeErr := errors.New("descriptor probe denied")
+	err := SweepStaleProcesses(
+		unreadableDescriptors{ProcFS: gather.NewProcFS(fixture.root), err: probeErr},
+		fixture.binary, fixture.root, fixture.home,
+		fixture.signaler(nil, nil, &sent), io.Discard, 10*time.Millisecond, clock.Real,
+	)
+	if err == nil || !strings.Contains(err.Error(), "pid=331") ||
+		!strings.Contains(err.Error(), fixture.markerPath()) || !errors.Is(err, probeErr) {
+		t.Fatalf("err = %v, want pid, marker path, and descriptor cause", err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("signals = %v, want classification failure before the first signal", sent)
+	}
+}
+
+func TestSweepFailsClosedWhenOneDescriptorIsOmitted(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(336, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	if err := os.WriteFile(filepath.Join(fixture.root, "336", "fd", "8"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var sent []string
+	err := SweepStaleProcesses(
+		gather.NewProcFS(fixture.root), fixture.binary, fixture.root, fixture.home,
+		fixture.signaler(nil, nil, &sent), io.Discard, 10*time.Millisecond, clock.Real,
+	)
+	if err == nil || !strings.Contains(err.Error(), "descriptor 8 was not readable") {
+		t.Fatalf("err = %v, want omitted descriptor named", err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("signals = %v, want incomplete descriptor census to fail before signalling", sent)
+	}
+}
+
+func TestSweepOmitsProxyThatExitsDuringDescriptorProbe(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(341, fixture.old, fixture.binary, "mcp", "serve", "--stdio")
+	var sent []string
+	signal := func(pid int, which syscall.Signal) error {
+		if which == 0 && pid == 341 {
+			return syscall.ESRCH
+		}
+		sent = append(sent, which.String()+" "+strconv.Itoa(pid))
+		return nil
+	}
+	err := SweepStaleProcesses(
+		unreadableDescriptors{ProcFS: gather.NewProcFS(fixture.root), err: errors.New("process vanished")},
+		fixture.binary, fixture.root, fixture.home, signal, io.Discard, 10*time.Millisecond, clock.Real,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("signals = %v, want vanished candidate omitted", sent)
+	}
+}
+
+func TestHoldCompatibleProxyOwnsDescriptorLifetime(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	handle, err := HoldCompatibleProxy(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := compatibleProxyMarker(home)
+	target, err := compatibleProxyMarkerTarget(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("marker mode = %o, want 600", info.Mode().Perm())
+	}
+	proc := gather.NewProcFS(filepath.Join(t.TempDir(), "missing-proc-root"))
+	links, err := proc.FDLinks(os.Getpid())
+	if err != nil || !slices.ContainsFunc(links, func(link gather.FDLink) bool { return link.Target == target }) {
+		t.Fatalf("marker descriptor is not live: links=%v err=%v", links, err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+	links, err = proc.FDLinks(os.Getpid())
+	if err != nil || slices.ContainsFunc(links, func(link gather.FDLink) bool { return link.Target == target }) {
+		t.Fatalf("marker descriptor after close: links=%v err=%v, want absent", links, err)
+	}
+}
+
 func TestSweepFailsLoudOnASurvivor(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(401, fixture.old, fixture.binary, "ls")
 	var sent []string
 	var stdout bytes.Buffer
-	err := Sweep(gather.NewProcFS(fixture.root), fixture.binary, fixture.signaler(map[int]bool{401: true}, map[int]bool{401: true}, &sent), &stdout, 10*time.Millisecond)
+	err := SweepStaleProcesses(
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.root,
+		fixture.home,
+		fixture.signaler(map[int]bool{401: true}, map[int]bool{401: true}, &sent),
+		&stdout,
+		10*time.Millisecond,
+		clock.Real,
+	)
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("err = %v, want the survivor named", err)
 	}
 }
 
 func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(501, fixture.binary, fixture.binary, "mcp", "serve")
 	var sent []string
 	var stdout, stderr bytes.Buffer
 	signal := fixture.signaler(nil, nil, &sent)
-	if code := run(nil, &stdout, &stderr, gather.NewProcFS(fixture.root), fixture.binary, signal); code != 0 || !strings.Contains(stdout.String(), "stale: none") {
+	if code := runStale(
+		nil,
+		&stdout,
+		&stderr,
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.root,
+		fixture.home,
+		signal,
+		clock.Real,
+	); code != 0 ||
+		!strings.Contains(stdout.String(), "stale: none") {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want none", code, stdout.String(), stderr.String())
 	}
 	fixture.process(502, fixture.old, fixture.binary, "ls")
 	stdout.Reset()
-	if code := run(nil, &stdout, &stderr, gather.NewProcFS(fixture.root), fixture.binary, signal); code != 0 ||
-		!strings.Contains(stdout.String(), "STALE pid=502") || !strings.Contains(stdout.String(), "make sweep-stale") {
+	if code := runStale(
+		nil,
+		&stdout,
+		&stderr,
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.root,
+		fixture.home,
+		signal,
+		clock.Real,
+	); code != 0 ||
+		!strings.Contains(stdout.String(), "STALE pid=502") ||
+		!strings.Contains(stdout.String(), "make sweep-stale") {
 		t.Fatalf("code=%d stdout=%q, want pid 502 listed with the sweep named", code, stdout.String())
 	}
-	if code := run([]string{"--bogus"}, &stdout, &stderr, gather.NewProcFS(fixture.root), fixture.binary, signal); code != 2 {
+	if code := runStale(
+		[]string{"--bogus"},
+		&stdout,
+		&stderr,
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.root,
+		fixture.home,
+		signal,
+		clock.Real,
+	); code != 2 {
 		t.Fatalf("code=%d, want a usage refusal", code)
 	}
 }
@@ -184,6 +617,7 @@ func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
 // kill(2) reads pid 0 as the caller's process group and -1 as every process
 // the user owns: the sweep must never hand either to a signal.
 func TestDeliverRefusesPidsThatNameMoreThanOneProcess(t *testing.T) {
+	t.Parallel()
 	var sent []int
 	record := func(pid int, _ syscall.Signal) error { sent = append(sent, pid); return nil }
 	for _, pid := range []int{0, -1, -42} {

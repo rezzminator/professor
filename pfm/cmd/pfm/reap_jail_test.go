@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The reaper KILLS things, so its fixtures run against real tmux servers on
@@ -56,7 +56,7 @@ func reapJail(t *testing.T) string {
 	t.Setenv("PFM_CLAUDE_ROOTS", accountRoot)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_TMUX_CONF", "/dev/null")
 	// The reaper reads the REAL /proc here on purpose: the jail's panes are
 	// real processes, and the non-chat guard is only proved by a real process
@@ -145,7 +145,7 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := shared.Open(context.Background(), resolved)
+	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	if state.Degraded() != nil {
 		t.Fatal(state.Degraded())
 	}
@@ -178,8 +178,12 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 	if reapServerAlive(root, socket) {
 		t.Fatalf("apply left untouched fork alive:\n%s", stdout.String())
 	}
-	state = shared.Open(context.Background(), resolved)
-	defer state.Close()
+	state = fleetdb.OpenSharedState(context.Background(), resolved)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	if _, found, err := state.Meta(context.Background(), "branch-seat:"+socket); err != nil || found {
 		t.Fatalf("branch marker after reap found=%t err=%v", found, err)
 	}

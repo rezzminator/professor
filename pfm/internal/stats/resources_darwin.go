@@ -3,27 +3,21 @@
 package stats
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-func readHostResources(root string, now int64, cpuCount int) (
-	uint64,
-	uint64,
-	Header,
-	map[int]processSample,
-	[]string,
-	error,
-) {
+func readHostResources(root string, now int64, cpuCount int) (hostResources, error) {
 	// An existing override is a Linux-shaped test jail. Honour it verbatim;
 	// only the absent native /proc path crosses to Darwin's kernel readers.
 	if root != "" {
@@ -45,21 +39,14 @@ func readDockerResources(root string) ([]Container, map[string]dockerSample, []s
 	return []Container{}, map[string]dockerSample{}, nil, nil
 }
 
-func readDarwinHostResources(now int64, cpuCount int) (
-	uint64,
-	uint64,
-	Header,
-	map[int]processSample,
-	[]string,
-	error,
-) {
+func readDarwinHostResources(now int64, cpuCount int) (hostResources, error) {
 	header, err := readDarwinHeader()
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
 	processes, busy, warnings, err := readDarwinProcesses()
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
 	// ps reports cumulative process CPU in centiseconds. A wall-clock counter
 	// multiplied by the logical CPU count gives the matching host-total unit;
@@ -72,16 +59,22 @@ func readDarwinHostResources(now int64, cpuCount int) (
 	if busy <= total {
 		idle = total - busy
 	}
-	return total, idle, header, processes, warnings, nil
+	return hostResources{total: total, idle: idle, header: header, processes: processes, warnings: warnings}, nil
 }
 
 func readDarwinProcesses() (map[int]processSample, uint64, []string, error) {
-	output, err := exec.Command(
-		deps.Executable("ps"), "-A", "-o", "pid=,ppid=,time=,rss=,comm=",
-	).Output()
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		context.Background(),
+		[]string{deps.Executable("ps"), "-A", "-o", "pid=,ppid=,time=,rss=,comm="},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("sample Darwin process counters via ps: %w", err)
 	}
+	output := result.Stdout
 	processes := make(map[int]processSample)
 	var busy uint64
 	var warnings []string
@@ -153,10 +146,15 @@ func readDarwinHeader() (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("read Darwin host memory size: %w", err)
 	}
-	output, err := exec.Command(deps.Executable("vm_stat")).Output()
+	result, err := obs.Runner(deps.RealRunner{}).
+		Run(context.Background(), []string{deps.Executable("vm_stat")}, deps.RunOptions{})
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
 	if err != nil {
 		return Header{}, fmt.Errorf("sample Darwin host memory via vm_stat: %w", err)
 	}
+	output := result.Stdout
 	pageSize, pages, err := parseDarwinVMStat(string(output))
 	if err != nil {
 		return Header{}, err
@@ -215,7 +213,7 @@ func parseDarwinVMStat(value string) (uint64, map[string]uint64, error) {
 	return pageSize, pages, nil
 }
 
-func parseDarwinSwap(value []byte) (total uint64, used uint64, err error) {
+func parseDarwinSwap(value []byte) (total, used uint64, err error) {
 	// Darwin's vm.swapusage sysctl is xsw_usage: total, available, used,
 	// page-size, encrypted. The first three fields are uint64 byte counts.
 	if len(value) < 24 {

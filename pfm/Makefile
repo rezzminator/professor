@@ -35,8 +35,26 @@ AGENT   := com.professor.pfm.mcp
 # F6). $(REPO)/VERSION, not a bare "VERSION" — this file runs from pfm/.
 VERSION := $(shell cat $(REPO)/VERSION 2>/dev/null)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+# Pinned tools (infra/fence/tools.env): the host keeps them in TOOLS_BIN (gitignored
+# tmp/), the fence image in /usr/local/bin. A tool missing from both is
+# TOOLCHAIN-MISSING, never "use whatever golangci-lint is on PATH".
+# Keyed by OS/arch: the fence mounts this tree read-only from a darwin host,
+# so a linux container must never pick the host's binary — it finds nothing
+# under its own key and falls through to PATH (/usr/local/bin in the image).
+TOOLS_BIN ?= $(REPO)/tmp/tools/$(shell go env GOOS)-$(shell go env GOARCH)/bin
+LINT  := $(firstword $(wildcard $(TOOLS_BIN)/golangci-lint) $(shell command -v golangci-lint 2>/dev/null))
+COVER := $(firstword $(wildcard $(TOOLS_BIN)/go-test-coverage) $(shell command -v go-test-coverage 2>/dev/null))
+# Coverage outputs: the fence mounts the tree read-only, so dev.sh iso points
+# COVER_DIR at container HOME; on the host it lands in gitignored tmp/.
+COVER_DIR ?= $(REPO)/tmp/cover
+# lint-new judges lines changed since this ref: a wave against develop; CI
+# passes origin/main so a release is judged on everything since the last one.
+LINT_BASE ?= origin/develop
+# The first provisional fenced capture uses conservative serial concurrency;
+# W5 re-measures the sweep and may ratchet this toward the observed knee.
+TESTFLAGS ?= -p 1 -parallel 1
 
-.PHONY: help build fmt fmt-check vet arch test iso gate install host-install rollback \
+.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover test testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
@@ -53,37 +71,99 @@ help: ## List every target
 build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
 
-fmt: ## Rewrite formatting in place
-	gofmt -w .
+tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
+	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh
 
-fmt-check: ## Fail if anything is unformatted, naming the files
-	@unformatted="$$(gofmt -l . | grep -v '^$$' || true)"; \
-	if [ -n "$$unformatted" ]; then \
-	  echo "UNFORMATTED:"; echo "$$unformatted"; exit 1; \
+# need-tool <var>: name the missing tool as TOOLCHAIN-MISSING instead of a bare
+# "command not found" three lines into a recipe.
+define need-tool
+	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/fence/tools.env)" >&2; exit 1; }
+endef
+
+fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt), both kernels
+	$(call need-tool,LINT)
+	@# Build-tagged files load only for the current GOOS, so each supported
+	@# kernel is formatted in turn; golines splits a long line and gofumpt
+	@# regroups the result, so a pass can leave a file the next pass still
+	@# changes: run until a pass is a no-op.
+	@for pass in 1 2 3; do \
+	  for goos in linux darwin; do GOOS=$$goos $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; done; \
+	  if [ -z "$$(GOOS=linux $(LINT) fmt --diff ./... 2>/dev/null)$$(GOOS=darwin $(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
+	done; echo "fmt: did not converge in 3 passes — a formatter fight; run 'make fmt-check' to see the files" >&2; exit 1
+
+fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
+	$(call need-tool,LINT)
+	@diff="$$(for goos in linux darwin; do GOOS=$$goos $(LINT) fmt --diff ./... 2>&1 || true; done)"; \
+	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||' | sort -u || true)"; \
+	if [ -n "$$files" ]; then \
+	  echo "UNFORMATTED — $$(echo "$$files" | wc -l | tr -d ' ') file(s), run 'make fmt' (first 20):"; \
+	  echo "$$files" | head -20; echo "--- first hunks:"; echo "$$diff" | grep -E '^(diff|[-+][^-+])' | head -30; exit 1; \
+	elif [ -n "$$diff" ]; then \
+	  echo "fmt-check: golangci-lint fmt did not run cleanly — NO file was checked:"; echo "$$diff" | tail -5; exit 2; \
 	fi; \
-	echo "gofmt: clean"
+	echo "fmt: clean (linux + darwin)"
+
+lint: ## Every finding in the module — the burn-down view
+	$(call need-tool,LINT)
+	$(LINT) run ./...
+
+# Inside the fence a linked worktree's .git names a host path; dev.sh iso hands
+# the mounted git dir over as PFM_DEV_REPO_GIT_DIR, and golangci-lint's own
+# `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
+# fence-wide it hijacks every `git init` the test suite runs.
+FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
+lint-new: ## Findings on lines changed since LINT_BASE (origin/develop) — the gate view
+	$(call need-tool,LINT)
+	$(FENCE_GIT) $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 
 vet: ## go vet the whole module
 	go vet ./...
+
+cover: ## Unit coverage (cross-package) + any e2e GOCOVERDIR run, merged and thresholded
+	$(call need-tool,COVER)
+	rm -rf "$(COVER_DIR)/unit" && mkdir -p "$(COVER_DIR)/unit"
+	go test ./... -count=1 -coverpkg=./... -covermode=atomic -args -test.gocoverdir="$(COVER_DIR)/unit"
+	@dirs="$(COVER_DIR)/unit"; \
+	if ls "$(COVER_DIR)/e2e"/covmeta.* >/dev/null 2>&1; then dirs="$$dirs,$(COVER_DIR)/e2e"; fi; \
+	echo "cover: merging $$dirs"; \
+	go tool covdata textfmt -i="$$dirs" -o "$(COVER_DIR)/merged.out"
+	$(COVER) --config=.testcoverage.yml --profile="$(COVER_DIR)/merged.out" \
+	  --breakdown-file-name="$(COVER_DIR)/breakdown.json"
 
 arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new twins (baselines in .arch/)
 	bash scripts/arch-check.sh
 
 # ----------------------------------------------------------------- gate ----
-# Both delegate. dev.sh is the single definition of this project's gate.
+# Both delegate. dev.sh is the single definition of this project's gate: it
+# runs `go test $(TESTFLAGS) -json ./...`, pipes the stream through
+# `scripts/test-timing.sh --check` (its own "pfm: test timing (budget)" row —
+# a run over pfm/.testtiming.yml's budgets is red, offender named), and the
+# e2e row the same way. TESTFLAGS travels through the environment so this
+# file stays a delegate, never a second definition of `go test`'s flags.
 
-test: ## Host test suite (delegates to dev.sh)
-	bash $(DEV) test pfm
+test: ## Host test suite (delegates to dev.sh; TESTFLAGS -> `go test`, piped through the timing check)
+	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh test pfm
 
-iso: ## Containerised test suite (delegates to dev.sh iso)
-	bash $(DEV) iso test pfm
+testflags:
+	@printf '%s\n' '$(TESTFLAGS)'
 
-gate: fmt-check vet arch test iso ## Everything a change must pass before it merges
+iso: ## Containerised test suite (delegates to dev.sh iso; same TESTFLAGS)
+	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh iso test pfm
+
+timing: ## Print the most recently written suite timing TSV
+	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(REPO)/tmp/timing"
+
+sweep: ## Measure the fenced concurrency sweep and publish its report
+	bash scripts/test-sweep.sh --preflight
+	cd "$(REPO)" && bash .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-sweep.sh --run --wait-quiet --label fence --out /pfm-timing/sweep-fence.tsv --json /pfm-timing/sweep-json'
+	bash scripts/test-sweep.sh --report "$(REPO)/tmp/timing/sweep-fence.tsv"
+
+gate: fmt-check lint-new vet arch test iso ## Everything a change must pass before it merges
 	@echo "gate: all passed"
 
 # -------------------------------------------------------------- install ----
 
-install: ## Swap in a new build atomically, restart the daemon, then sweep stale processes — any failure rolls back and sweeps nothing
+install: ## Swap in a new build, restart the daemon, sweep obsolete processes, and keep compatible stdio proxies
 	@$(MAKE) --no-print-directory host-install
 	@if ! $(MAKE) --no-print-directory mcp-restart; then \
 	  echo "install: FAILED at the MCP restart — rolling back to $(BIN).prev; no process was touched" >&2; \
@@ -92,14 +172,19 @@ install: ## Swap in a new build atomically, restart the daemon, then sweep stale
 	fi
 	@$(MAKE) --no-print-directory sweep-stale
 	@echo
-	@echo "install: complete — binary swapped, MCP daemon restarted, stale processes swept."
+	@echo "install: complete — binary swapped, MCP daemon restarted, obsolete processes swept; compatible stdio proxies kept."
 	@# Order is the safety: nothing is killed until the new binary is in place
 	@# AND the daemon is serving it. A failed build or smoke test changes
 	@# nothing; a failed restart restores the previous binary. Only a fully
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap it in atomically (previous kept as pfm.prev)
+host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1
+	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
+	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
+	@# build even starts — $(BIN) is never touched. FORCE=1 in the
+	@# environment (`FORCE=1 make host-install`) passes straight through to
+	@# the guard and prints a FORCED line instead of refusing.
 	@mkdir -p "$$(dirname "$(BIN)")"; \
 	tmp="$$(mktemp "$(BIN).new.XXXXXX")"; \
 	trap 'rm -f "$$tmp"' EXIT; \
@@ -134,7 +219,7 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  sleep 1; \
 	  state="$$(systemctl --user is-active $(UNIT) || true)"; \
 	  if [ "$$state" != "active" ]; then \
-	    echo "MCP-RESTART-FAILED: $(UNIT) is '$$state' after restart — the fleet has NO chat MCP server" >&2; \
+	    echo "MCP-RESTART-FAILED: $(UNIT) is '$$state' after restart — the fleet has NO professor MCP server" >&2; \
 	    exit 1; \
 	  fi; \
 	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
@@ -149,13 +234,13 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	    [ -n "$$pid" ] && [ "$$pid" != "$$old" ] && break; pid=""; sleep 0.5; \
 	  done; \
 	  if [ -z "$$pid" ]; then \
-	    echo "MCP-RESTART-FAILED: $(AGENT) has no NEW pid 5s after kickstart (was $${old:-none}) — the fleet may have NO fresh chat MCP server" >&2; \
+	    echo "MCP-RESTART-FAILED: $(AGENT) has no NEW pid 5s after kickstart (was $${old:-none}) — the fleet may have NO fresh professor MCP server" >&2; \
 	    exit 1; \
 	  fi; \
 	  echo "mcp: $(AGENT) restarted, pid $$pid"; \
-	elif pgrep -f 'pfm mcp serve' >/dev/null 2>&1; then \
+	elif pgrep -f 'mcp serve$$' >/dev/null 2>&1; then \
 	  echo "mcp: no $(UNIT) unit or $(AGENT) agent; killing unsupervised 'pfm mcp serve' so the next client starts a fresh one"; \
-	  pkill -f 'pfm mcp serve'; \
+	  pkill -f 'mcp serve$$'; \
 	else \
 	  echo "mcp: no daemon running and no $(UNIT) unit or $(AGENT) agent — nothing to restart"; \
 	fi
@@ -173,7 +258,7 @@ mcp-status: ## Report the daemon, then every pfm process still running a replace
 	  launchctl print "gui/$$(id -u)/$(AGENT)" | awk '($$1 == "state" || $$1 == "pid") && $$2 == "=" && !seen[$$1]++ { printf "%-6s %s\n", $$1 ":", $$3 }'; \
 	else \
 	  echo "unit:  not installed"; \
-	  pgrep -af 'pfm mcp serve' || echo "no 'pfm mcp serve' process running"; \
+	  pgrep -af 'mcp serve$$' || echo "no 'pfm mcp serve' process running"; \
 	fi
 	@"$(BIN)" internal stale --binary "$(BIN)"
 
@@ -186,7 +271,7 @@ stale: ## List pfm processes still running a replaced binary (Linux and macOS)
 	@# macOS — is not the file now at $(BIN), by device and inode. "none" and
 	@# "could not look" print differently and the latter exits non-zero.
 
-sweep-stale: ## Kill every pfm process still running a replaced binary, then prove none is left
+sweep-stale: ## Kill obsolete pfm processes running a replaced binary, keep compatible stdio proxies, then prove none obsolete remain
 	@"$(BIN)" internal stale --sweep --binary "$(BIN)"
 	@# TERM, KILL after 3s, then a re-scan that fails loudly on a survivor. It
 	@# signals only images that are not $(BIN), so the binary just installed —

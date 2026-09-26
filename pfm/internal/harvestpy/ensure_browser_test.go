@@ -12,7 +12,7 @@ import (
 
 // writeBrowserEnv lays down an environment whose interpreter exists and whose
 // record carries the given worker source and lock hashes.
-func writeBrowserEnv(t *testing.T, root string, sourceSHA, lockSHA string) Runtime {
+func writeBrowserEnv(t *testing.T, root, sourceSHA, lockSHA string) Runtime {
 	t.Helper()
 	current := BrowserRuntimeRoot(root, Platform{GOOS: goruntime.GOOS, GOARCH: goruntime.GOARCH})
 	python := filepath.Join(current, "project", ".venv", "bin", "python")
@@ -22,7 +22,9 @@ func writeBrowserEnv(t *testing.T, root string, sourceSHA, lockSHA string) Runti
 	if err := os.WriteFile(python, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	record, err := json.Marshal(EnvironmentDigest{Schema: 1, State: "ready", SourceSHA256: sourceSHA, LockSHA256: lockSHA})
+	record, err := json.Marshal(
+		EnvironmentDigest{Schema: 1, State: "ready", SourceSHA256: sourceSHA, LockSHA256: lockSHA},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +91,16 @@ func TestEnsureBrowserProvisionsAMissingEnvironmentUnderTheNormalizedPlatform(t 
 		t.Fatalf("missing environment provisioned %d time(s), want 1", *calls)
 	}
 	wantRoot := BrowserRuntimeRoot(root, Platform{GOOS: goruntime.GOOS, GOARCH: goruntime.GOARCH})
-	if got.Python != filepath.Join(wantRoot, "project", ".venv", "bin", "python") || strings.Contains(got.Python, string(filepath.Separator)+"-"+string(filepath.Separator)) {
+	if got.Python != filepath.Join(wantRoot, "project", ".venv", "bin", "python") ||
+		strings.Contains(got.Python, string(filepath.Separator)+"-"+string(filepath.Separator)) {
 		t.Fatalf("runtime %+v not under the normalized platform root %q", got, wantRoot)
 	}
 }
 
 func TestBrowserEnvironmentStaleNamesTheDrift(t *testing.T) {
-	if reason := BrowserEnvironmentStale(EnvironmentDigest{SourceSHA256: browserSourceSHA256(), LockSHA256: browserLockSHA256()}); reason != "" {
+	if reason := BrowserEnvironmentStale(
+		EnvironmentDigest{SourceSHA256: browserSourceSHA256(), LockSHA256: browserLockSHA256()},
+	); reason != "" {
 		t.Fatalf("current record reported stale: %q", reason)
 	}
 	reason := BrowserEnvironmentStale(EnvironmentDigest{SourceSHA256: "old", LockSHA256: "old"})

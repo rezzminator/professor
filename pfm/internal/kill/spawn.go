@@ -2,11 +2,12 @@ package kill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // CommandSpawner starts the binary's killed finisher under a new session.
@@ -15,12 +16,15 @@ type CommandSpawner struct {
 	Setsid     string
 	Nohup      string
 	ConfigPath string
+	// Runner is the deps.Runner seam Spawn launches the finisher through;
+	// nil defaults to obs.Runner(deps.RealRunner{}).
+	Runner deps.Runner
 }
 
 func (spawner CommandSpawner) Spawn(
 	ctx context.Context,
 	args ExitArgs,
-) error {
+) (returnErr error) {
 	executable := spawner.Executable
 	if executable == "" {
 		var err error
@@ -33,7 +37,8 @@ func (spawner CommandSpawner) Spawn(
 	if err != nil {
 		return fmt.Errorf("detach kill finisher: %w", err)
 	}
-	arguments := append(prefixArgs, executable)
+	arguments := append([]string{}, prefixArgs...)
+	arguments = append(arguments, executable)
 	if spawner.ConfigPath != "" {
 		arguments = append(arguments, "--config", spawner.ConfigPath)
 	}
@@ -53,34 +58,41 @@ func (spawner CommandSpawner) Spawn(
 		"--pane",
 		args.PaneID,
 	)
-	var command *exec.Cmd
-	if forked {
-		command = exec.CommandContext(ctx, launcher, arguments...)
-	} else {
-		// The POSIX floor has no `setsid -f`; start it asynchronously and
-		// release the process handle so the finisher outlives this caller —
-		// under nohup the launched process IS the finisher, so waiting on it
-		// would block until the finisher itself completes.
-		command = exec.Command(launcher, arguments...)
-	}
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("open null device for kill finisher: %w", err)
 	}
-	defer null.Close()
-	command.Stdin = null
-	command.Stdout = null
-	command.Stderr = null
-	if !forked {
-		if err := command.Start(); err != nil {
+	defer func() {
+		if err := null.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close null device for kill finisher: %w", err))
+		}
+	}()
+	runner := spawner.Runner
+	if runner == nil {
+		runner = obs.Runner(deps.RealRunner{})
+	}
+	// !forked (the POSIX floor with no `setsid -f`) starts asynchronously and
+	// releases the process handle so the finisher outlives this caller —
+	// under nohup the launched process IS the finisher, so waiting on it
+	// would block until the finisher itself completes.
+	process, err := runner.Start(ctx, append([]string{launcher}, arguments...), deps.StartOptions{
+		Stdout: null,
+		Stderr: null,
+		Detach: !forked,
+	})
+	if err != nil {
+		if !forked {
 			return fmt.Errorf("start detached kill finisher with nohup: %w", err)
 		}
-		if err := command.Process.Release(); err != nil {
+		return fmt.Errorf("start detached kill finisher with setsid: %w", err)
+	}
+	if !forked {
+		if err := process.Release(); err != nil {
 			return fmt.Errorf("release detached kill finisher: %w", err)
 		}
 		return nil
 	}
-	if err := command.Run(); err != nil {
+	if err := process.Wait(); err != nil {
 		return fmt.Errorf("start detached kill finisher with setsid: %w", err)
 	}
 	return nil

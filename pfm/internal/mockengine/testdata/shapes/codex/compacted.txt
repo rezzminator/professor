@@ -1,0 +1,4 @@
+UNPINNED — captured by Tier B E2.09/lanes/capture-shapes.sh (not yet written)
+# Codex's compaction receipt as the TUI paints it. internal/inject/guards.go:20
+# names the Codex spelling unconfirmed; mockengine refuses to render a Codex
+# pane until a scenario supplies pane.compacted from a real capture.

@@ -1,9 +1,6 @@
 package harvestpy
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,43 +8,47 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 var ErrOfflineUnavailable = errors.New("harvestpy input is unavailable offline")
 
-const incompleteMarkerName = "INCOMPLETE"
+const (
+	incompleteMarkerName, uvFlagFormat, uvFlagPython = "INCOMPLETE", "--format", "--python"
+	uvCommandPip, uvCommandList, uvListFormatFreeze  = "pip", "list", "freeze"
+	provisionStateReady, featureStateDisabled        = "ready", "disabled"
+	goosDarwin, goosLinux                            = "darwin", "linux"
+	goarchAMD64, goarchARM64                         = "amd64", "arm64"
+)
 
 var errProvisioningIncomplete = errors.New("harvestpy provisioning did not finish")
 
-// DownloadFunc is injected by tests/build tooling; the default is an atomic
-// HTTP downloader with no shell interpolation.
-type DownloadFunc func(context.Context, string, string) error
-
-// RunFunc executes uv commands.  The working directory is explicit and the
-// executable/arguments are never passed through a shell.
-type RunFunc func(context.Context, string, []string, string) ([]byte, error)
-
-// SmokeFunc verifies that one provisioned runtime can start the converter and
-// complete its no-download smoke protocol.
-type SmokeFunc func(context.Context, Runtime) (map[string]any, error)
-
-type ProvisionOptions struct {
-	Root     string
-	Cache    string
-	Platform Platform
-	Offline  bool
-	Download DownloadFunc
-	Run      RunFunc
-	Smoke    SmokeFunc
-}
+type (
+	DownloadFunc     func(context.Context, string, string) error
+	RunFunc          func(context.Context, string, []string, string) ([]byte, error)
+	SmokeFunc        func(context.Context, Runtime) (map[string]any, error)
+	ProvisionOptions struct {
+		Root, Cache string
+		Platform    Platform
+		Offline     bool
+		Runner      deps.Runner
+		Clock       clock.Clock
+		Download    DownloadFunc
+		Run         RunFunc
+		Smoke       SmokeFunc
+	}
+)
 
 type ProvisionResult struct {
 	Digest      string
@@ -55,10 +56,7 @@ type ProvisionResult struct {
 	Runtime     Runtime
 }
 
-// InstallPlan is the read-only, machine-renderable price of a pinned target.
-// PackageDownloadBytes is cold-cache measured for linux-amd64 and computed from
-// the exact pinned artifact set for the other supported targets; blocked targets
-// carry an explicit reason instead of an estimate.
+// InstallPlan is a pinned target's machine-readable price; blocked targets carry a reason.
 type InstallPlan struct {
 	Platform              string   `json:"platform"`
 	PythonVersion         string   `json:"python_version"`
@@ -77,9 +75,8 @@ type InstallPlan struct {
 	EnvironmentBytes      int64    `json:"environment_bytes"`
 }
 
-// Plan returns pinned URLs/hashes and measured/reported size fields without
-// touching disk or network.
-func Plan(platform Platform) (InstallPlan, error) {
+// PlanConversionEnvironment returns pinned inputs and measured sizes without touching disk or network.
+func PlanConversionEnvironment(platform Platform) (InstallPlan, error) {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = runtime.GOOS, runtime.GOARCH
 	}
@@ -99,49 +96,45 @@ func Plan(platform Platform) (InstallPlan, error) {
 }
 
 func environmentBytes(platform Platform) int64 {
-	if platform == (Platform{GOOS: "linux", GOARCH: "amd64"}) {
+	if platform == (Platform{GOOS: goosLinux, GOARCH: goarchAMD64}) {
 		return 5786939761
 	}
 	return -1
 }
 
-// This is the cold-cache uv/pip download closure measured from the embedded
-// frozen lock on 2026-08-18.  It includes source archives where the lock has
-// no compatible wheel, plus all CUDA/Torch/Docling artifacts required by the
-// old converter behavior.
-func packageDownloadBytes(platform Platform) int64 {
-	bytes, _, _ := packagePlan(platform)
-	return bytes
-}
-
 func packagePlan(platform Platform) (int64, string, []string) {
 	switch platform {
-	case Platform{GOOS: "linux", GOARCH: "amd64"}:
+	case Platform{GOOS: goosLinux, GOARCH: goarchAMD64}:
 		return 3106174573, "cold-cache-download", nil
-	case Platform{GOOS: "linux", GOARCH: "arm64"}:
+	case Platform{GOOS: goosLinux, GOARCH: goarchARM64}:
 		return 3179527419, "pinned-lock-artifact-sum", nil
-	case Platform{GOOS: "darwin", GOARCH: "arm64"}:
+	case Platform{GOOS: goosDarwin, GOARCH: goarchARM64}:
 		return 389353114, "pinned-lock-artifact-sum", nil
-	case Platform{GOOS: "darwin", GOARCH: "amd64"}:
-		return -1, "blocked-exact-lock", []string{"torch==2.12.1 has no compatible darwin-amd64 wheel or source", "torchvision==0.27.1 has no compatible darwin-amd64 wheel or source", "onnxruntime==1.27.0 has no compatible darwin-amd64 wheel or source"}
+	case Platform{GOOS: goosDarwin, GOARCH: goarchAMD64}:
+		return -1, "blocked-exact-lock", []string{
+			"torch==2.12.1 has no compatible darwin-amd64 wheel or source",
+			"torchvision==0.27.1 has no compatible darwin-amd64 wheel or source",
+			"onnxruntime==1.27.0 has no compatible darwin-amd64 wheel or source",
+		}
 	default:
 		return -1, "unmeasured-target", nil
 	}
 }
 
-// RuntimeRoot is the stable current pointer consumed by installer/doctor.
 func RuntimeRoot(root string, platform Platform) string {
 	return filepath.Join(root, "env", platform.String(), "current")
 }
 
-// Provision downloads/verifies inputs, converges an isolated environment at
-// its final versioned path, runs two no-download smokes, then atomically
-// publishes the current pointer.
+// Provision converges and smoke-tests a pinned environment before publishing it atomically.
 func Provision(ctx context.Context, options ProvisionOptions) (ProvisionResult, error) {
-	return provision(ctx, options, immutableTargets)
+	return provisionWithTargets(ctx, options, immutableTargets)
 }
 
-func provision(ctx context.Context, options ProvisionOptions, targets map[Platform]Target) (ProvisionResult, error) {
+func provisionWithTargets(
+	ctx context.Context,
+	options ProvisionOptions,
+	targets map[Platform]Target,
+) (result ProvisionResult, returnErr error) {
 	if options.Root == "" {
 		return ProvisionResult{}, errors.New("harvestpy provision root is empty")
 	}
@@ -156,8 +149,16 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if options.Cache == "" {
 		options.Cache = filepath.Join(options.Root, "cache")
 	}
+	if options.Runner == nil {
+		options.Runner = obs.Runner(deps.RealRunner{})
+	}
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
 	if options.Run == nil {
-		options.Run = runCommand
+		options.Run = func(ctx context.Context, executable string, arguments []string, directory string) ([]byte, error) {
+			return runCommandWithRunner(ctx, options.Runner, executable, arguments, directory)
+		}
 	}
 	if options.Smoke == nil {
 		options.Smoke = smokeRuntime
@@ -169,35 +170,64 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		Schema: 1, Target: platform.String(), Python: target.PythonVersion, UV: target.UVVersion,
 		PythonSHA256: target.Python.SHA256, UVSHA256: target.UV.SHA256,
 		LockSHA256: lockSHA256(), SourceSHA256: sourceSHA256(),
-		Features: FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"},
+		Features: FeatureStatus{OCR: featureStateDisabled, Layout: featureStateDisabled, Models: "not-requested"},
 	}
 	desired := digestID(base)
 	base.Digest = desired
 	current := RuntimeRoot(options.Root, platform)
-	if existing, err := ReadEnvironmentDigest(filepath.Join(current, "environment.json")); err == nil && existing.Digest == desired && existing.State == "ready" {
-		if _, checkErr := Check(ctx, options.Root, platform); checkErr == nil {
-			return ProvisionResult{
-				Digest: desired, Environment: existing,
-				Runtime: Runtime{Python: filepath.Join(current, "project", ".venv", "bin", "python"), Script: filepath.Join(current, "project", "converter.py")},
-			}, nil
+	envRoot := filepath.Join(options.Root, "env", platform.String())
+	// Single-flight from here on: reuse check, downloads, build and swap all
+	// touch this root, and a second pfm converging it at the same time is how
+	// one of them reads a tree the other is halfway through replacing —
+	// ProvisionBrowser's own lock (provision_browser.go) guards its sibling
+	// root the same way.
+	release, err := lockProvisionRoot(envRoot)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, releaseErr)
+		}
+	}()
+	if existing, err := ReadEnvironmentDigest(
+		filepath.Join(current, "environment.json"),
+	); err == nil && existing.Digest == desired &&
+		existing.State == provisionStateReady {
+		if _, checkErr := evaluateConversionEnvironment(ctx, options.Root, platform, options.Runner); checkErr == nil {
+			return ProvisionResult{Digest: desired, Environment: existing, Runtime: Runtime{
+				Python: filepath.Join(current, "project", ".venv", "bin", "python"),
+				Script: filepath.Join(current, "project", "converter.py"),
+				Runner: options.Runner,
+			}}, nil
 		}
 	}
 	uvArchive := filepath.Join(options.Cache, "uv-"+platform.String()+".tar.gz")
 	pythonArchive := filepath.Join(options.Cache, "python-"+platform.String()+".tar.gz")
-	if err := ensureInput(ctx, uvArchive, target.UV, options.Offline, options.Download); err != nil {
+	if err := ensureInputWithClock(
+		ctx,
+		uvArchive,
+		target.UV,
+		options.Offline,
+		options.Download,
+		options.Clock,
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare harvestpy uv input: %w", err)
 	}
-	if err := ensureInput(ctx, pythonArchive, target.Python, options.Offline, options.Download); err != nil {
+	if err := ensureInputWithClock(
+		ctx,
+		pythonArchive,
+		target.Python,
+		options.Offline,
+		options.Download,
+		options.Clock,
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare harvestpy Python input: %w", err)
-	}
-	envRoot := filepath.Join(options.Root, "env", platform.String())
-	if err := os.MkdirAll(envRoot, 0o700); err != nil {
-		return ProvisionResult{}, fmt.Errorf("create harvestpy environment root: %w", err)
 	}
 	final := filepath.Join(envRoot, desired)
 	backup := ""
 	if _, err := os.Stat(final); err == nil {
-		backup = final + fmt.Sprintf(".repair-%d", time.Now().UnixNano())
+		backup = final + fmt.Sprintf(".repair-%d", options.Clock.Now().UnixNano())
 		if err := os.Rename(final, backup); err != nil {
 			return ProvisionResult{}, fmt.Errorf("quarantine invalid harvestpy versioned environment: %w", err)
 		}
@@ -220,7 +250,10 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err := os.Mkdir(staging, 0o700); err != nil {
 		return ProvisionResult{}, fmt.Errorf("create harvestpy versioned environment: %w", err)
 	}
-	if err := writePrivate(filepath.Join(staging, incompleteMarkerName), []byte(errProvisioningIncomplete.Error()+"\n")); err != nil {
+	if err := writePrivate(
+		filepath.Join(staging, incompleteMarkerName),
+		[]byte(errProvisioningIncomplete.Error()+"\n"),
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("mark harvestpy environment incomplete: %w", err)
 	}
 	project := filepath.Join(staging, "project")
@@ -240,9 +273,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err := extractNamedBinary(uvArchive, "uv", uvPath); err != nil {
 		return ProvisionResult{}, fmt.Errorf("extract harvestpy uv: %w", err)
 	}
-	// The standalone archive already carries its top-level `python/` tree;
-	// extract into the final version root so the published layout is
-	// <digest>/python/{BUILD,bin,lib,...}, not a double python/python nesting.
+	// The archive includes `python/`, so extract into the version root rather than nesting python/python.
 	pythonPath, err := extractPython(pythonArchive, staging)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("extract harvestpy Python: %w", err)
@@ -253,7 +284,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err := checkPythonBuild(filepath.Join(staging, "python", "BUILD"), target.PythonVersion); err != nil {
 		return ProvisionResult{}, fmt.Errorf("verify harvestpy Python build: %w", err)
 	}
-	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, "--python", pythonPath}
+	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, uvFlagPython, pythonPath}
 	if options.Offline {
 		args = append(args, "--offline")
 	}
@@ -264,10 +295,28 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if _, err := os.Stat(venvPython); err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy uv sync did not create Python environment: %w", err)
 	}
-	if _, err := options.Run(ctx, uvPath, []string{"pip", "check", "--python", venvPython}, project); err != nil {
-		return ProvisionResult{}, fmt.Errorf("harvestpy locked dependency check failed: %w", err)
+	if _, err := options.Run(
+		ctx,
+		uvPath,
+		[]string{uvCommandPip, "check", uvFlagPython, venvPython},
+		project,
+	); err != nil {
+		allowed, inspectErr := acceptPinnedArm64SBSAFailure(platform, staging, err)
+		if inspectErr != nil {
+			return ProvisionResult{}, fmt.Errorf(
+				"harvestpy locked dependency check failed: %w",
+				errors.Join(err, inspectErr),
+			)
+		}
+		if allowed {
+			// The exact pinned arm64 wheel is verified by its lock, metadata,
+			// and library above; imports and conversion smoke still gate publish.
+		} else {
+			return ProvisionResult{}, fmt.Errorf("harvestpy locked dependency check failed: %w", err)
+		}
 	}
-	inventoryOutput, err := options.Run(ctx, uvPath, []string{"pip", "list", "--format", "freeze", "--python", venvPython}, project)
+	inventoryArgs := []string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, venvPython}
+	inventoryOutput, err := options.Run(ctx, uvPath, inventoryArgs, project)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy installed inventory failed: %w", err)
 	}
@@ -275,9 +324,10 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy installed inventory is invalid: %w", err)
 	}
-	base.InventorySHA256 = inventorySHA
-	base.InventoryCount = inventoryCount
-	smoke, err := options.Smoke(ctx, Runtime{Python: venvPython, Script: filepath.Join(project, "converter.py")})
+	base.InventorySHA256, base.InventoryCount = inventorySHA, inventoryCount
+	smoke, err := options.Smoke(ctx, Runtime{
+		Python: venvPython, Script: filepath.Join(project, "converter.py"), Runner: options.Runner,
+	})
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy no-download smoke: %w", err)
 	}
@@ -293,13 +343,13 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		return ProvisionResult{}, fmt.Errorf("harvestpy smoke live conversion failed: %#v", conversion)
 	}
 	base.Imports = imports
-	base.State = "ready"
+	base.State = provisionStateReady
 	base.Environment = final
-	// The environment is never renamed after uv sync; both smokes judge the
-	// same final runtime path.
+	// The environment is never renamed after uv sync; both smokes judge the same final runtime path.
 	finalRuntime := Runtime{
 		Python: filepath.Join(final, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(final, "project", "converter.py"),
+		Runner: options.Runner,
 	}
 	_, smokeErr := options.Smoke(ctx, finalRuntime)
 	if smokeErr != nil {
@@ -316,7 +366,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err := writePrivate(filepath.Join(final, "environment.json"), append(marker, '\n')); err != nil {
 		return ProvisionResult{}, err
 	}
-	if err := atomicCurrent(envRoot, desired); err != nil {
+	if err := atomicCurrentWithClock(envRoot, desired, options.Clock); err != nil {
 		return ProvisionResult{}, err
 	}
 	if backup != "" {
@@ -328,19 +378,18 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	return ProvisionResult{Digest: desired, Environment: base, Runtime: Runtime{
 		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(current, "project", "converter.py"),
+		Runner: options.Runner,
 	}}, nil
 }
 
-func smokeRuntime(ctx context.Context, runtime Runtime) (map[string]any, error) {
-	converter := NewConverter(runtime)
+func smokeRuntime(ctx context.Context, converterRuntime Runtime) (map[string]any, error) {
+	converter := NewConverter(converterRuntime)
 	result, err := converter.Smoke(ctx)
 	_ = converter.Close()
 	return result, err
 }
 
-// Inspect reads the current machine-readable environment record without
-// executing a converter.
-func Inspect(root string, platform Platform) (EnvironmentDigest, error) {
+func InspectConversionEnvironment(root string, platform Platform) (EnvironmentDigest, error) {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = runtime.GOOS, runtime.GOARCH
 	}
@@ -359,7 +408,8 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 		return EnvironmentDigest{}, false, nil
 	}
 	if err != nil {
-		return EnvironmentDigest{}, false, fmt.Errorf("inspect harvestpy environment root for incomplete provisioning: %w", err)
+		return EnvironmentDigest{}, false,
+			fmt.Errorf("inspect harvestpy environment root for incomplete provisioning: %w", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.Contains(entry.Name(), ".repair-") {
@@ -375,7 +425,10 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 			return EnvironmentDigest{}, false, fmt.Errorf("inspect harvestpy incomplete marker %s: %w", marker, err)
 		}
 		if !info.Mode().IsRegular() {
-			return EnvironmentDigest{}, false, fmt.Errorf("harvestpy incomplete marker is not a regular file: %s", marker)
+			return EnvironmentDigest{}, false, fmt.Errorf(
+				"harvestpy incomplete marker is not a regular file: %s",
+				marker,
+			)
 		}
 		return EnvironmentDigest{
 			Target: platform.String(), Environment: environment,
@@ -385,7 +438,15 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 	return EnvironmentDigest{}, false, nil
 }
 
-func ensureInput(ctx context.Context, path string, input Artifact, offline bool, download DownloadFunc) error {
+func ensureInput(ctx context.Context, path string, input Artifact, offline bool,
+	download DownloadFunc,
+) (returnErr error) {
+	return ensureInputWithClock(ctx, path, input, offline, download, clock.Real)
+}
+
+func ensureInputWithClock(ctx context.Context, path string, input Artifact, offline bool,
+	download DownloadFunc, now clock.Clock,
+) (returnErr error) {
 	if _, err := os.Stat(path); err == nil {
 		if err := VerifySHA256(path, input.SHA256); err == nil {
 			return nil
@@ -405,8 +466,12 @@ func ensureInput(ctx context.Context, path string, input Artifact, offline bool,
 			return downloadFile(ctx, url, destination, input.Size)
 		}
 	}
-	staging := path + fmt.Sprintf(".download-%d", time.Now().UnixNano())
-	defer os.Remove(staging)
+	staging := path + fmt.Sprintf(".download-%d", now.Now().UnixNano())
+	defer func() {
+		if err := os.Remove(staging); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove download staging %s: %w", staging, err))
+		}
+	}()
 	if err := download(ctx, input.URL, staging); err != nil {
 		return fmt.Errorf("download %s: %w", input.URL, err)
 	}
@@ -424,16 +489,48 @@ func ensureInput(ctx context.Context, path string, input Artifact, offline bool,
 	return nil
 }
 
-func downloadFile(ctx context.Context, url, path string, expectedSize int64) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// downloadCeiling bounds ONE pinned-artifact download end to end — connect,
+// headers and body. Nothing else in installer.Run → installHarvest →
+// Provision carries a deadline, so a server that stalls mid-body hung
+// `pfm install` forever. The largest pinned input is the ~31 MB standalone
+// CPython archive (assets/targets.json), which 20 minutes covers on a link as
+// slow as ~26 KB/s. A var so a test can shrink it; production never rewrites it.
+var downloadCeiling = 20 * time.Minute
+
+// downloadTimeoutError names the ceiling when the ceiling is what tripped, so
+// a stalled server reads as "we stopped waiting" rather than as an ordinary
+// transport error — and never as the caller's own cancellation.
+func downloadTimeoutError(parent, bounded context.Context, err error) error {
+	if bounded.Err() == nil || parent.Err() != nil {
+		return err
+	}
+	return fmt.Errorf(
+		"stopped after the %s harvestpy download ceiling (the server stalled or the link is too slow): %w",
+		downloadCeiling,
+		err,
+	)
+}
+
+func downloadFile(ctx context.Context, url, path string, expectedSize int64) (returnErr error) {
+	bounded, cancelCeiling := context.WithTimeout(ctx, downloadCeiling)
+	defer cancelCeiling()
+	request, err := http.NewRequestWithContext(bounded, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
 	}
-	response, err := http.DefaultClient.Do(request)
+	// A zero-value client IS http.DefaultClient's policy; never mutate the
+	// global itself, since downloadFile is the ONE caller reaching outside
+	// harvestpy's Python-sidecar protocol onto the open network. The deadline
+	// rides on the request context so it bounds the BODY too, not just connect.
+	response, err := obs.WrapClient(&http.Client{}).Do(request)
 	if err != nil {
-		return fmt.Errorf("download request: %w", err)
+		return fmt.Errorf("download request: %w", downloadTimeoutError(ctx, bounded, err))
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close download response: %w", err))
+		}
+	}()
 	if response.StatusCode/100 != 2 {
 		return fmt.Errorf("download returned HTTP %s", response.Status)
 	}
@@ -451,7 +548,7 @@ func downloadFile(ctx context.Context, url, path string, expectedSize int64) err
 	written, err := io.Copy(output, reader)
 	if err != nil {
 		_ = output.Close()
-		return fmt.Errorf("copy download: %w", err)
+		return fmt.Errorf("copy download: %w", downloadTimeoutError(ctx, bounded, err))
 	}
 	if expectedSize > 0 && written != expectedSize {
 		_ = output.Close()
@@ -463,12 +560,16 @@ func downloadFile(ctx context.Context, url, path string, expectedSize int64) err
 	return nil
 }
 
-func VerifySHA256(path, expected string) error {
+func VerifySHA256(path, expected string) (returnErr error) {
 	input, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s for SHA-256: %w", path, err)
 	}
-	defer input.Close()
+	defer func() {
+		if err := input.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s after SHA-256: %w", path, err))
+		}
+	}()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, input); err != nil {
 		return fmt.Errorf("hash %s: %w", path, err)
@@ -480,13 +581,17 @@ func VerifySHA256(path, expected string) error {
 	return nil
 }
 
-func writePrivate(path string, body []byte) error {
+func writePrivate(path string, body []byte) (returnErr error) {
 	staging, err := os.CreateTemp(filepath.Dir(path), ".asset-")
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	name := staging.Name()
-	defer os.Remove(name)
+	defer func() {
+		if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove private staging %s: %w", name, err))
+		}
+	}()
 	if err := staging.Chmod(0o600); err != nil {
 		_ = staging.Close()
 		return fmt.Errorf("chmod %s: %w", path, err)
@@ -504,243 +609,90 @@ func writePrivate(path string, body []byte) error {
 	return nil
 }
 
-func atomicCurrent(root, desired string) error {
-	temporary := filepath.Join(root, ".current-") + fmt.Sprintf("%d", time.Now().UnixNano())
+func atomicCurrentWithClock(root, desired string, now clock.Clock) (returnErr error) {
+	temporary := filepath.Join(root, ".current-") + fmt.Sprintf("%d", now.Now().UnixNano())
 	if err := os.Symlink(desired, temporary); err != nil {
 		return fmt.Errorf("stage harvestpy current pointer: %w", err)
 	}
-	defer os.Remove(temporary)
+	defer func() {
+		if err := os.Remove(temporary); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove current pointer staging %s: %w", temporary, err))
+		}
+	}()
 	if err := os.Rename(temporary, filepath.Join(root, "current")); err != nil {
 		return fmt.Errorf("publish harvestpy current pointer: %w", err)
 	}
 	return nil
 }
 
-func extractNamedBinary(path, name, destination string) error {
-	input, err := os.Open(path)
+// commandExitStatus carries a completed command's NON-ZERO exit into the
+// obs.Process record. deps.Runner's contract puts an ordinary non-zero exit in
+// RunResult.ExitCode with a NIL error (internal/deps/runner.go), so handing
+// that nil to Exited() recorded exit=0 for a command that failed — a failure
+// rendered as success on the one surface built to read failures back. The
+// module has no shared constructor for this shape: internal/deps
+// (runnerExitStatus) and internal/installer (commandExitError) each spell it
+// privately, and `interface{ ExitCode() int }` is the contract they share.
+type commandExitStatus struct {
+	command  string
+	exitCode int
+}
+
+func (status commandExitStatus) Error() string {
+	return fmt.Sprintf("%s exited %d", status.command, status.exitCode)
+}
+
+func (status commandExitStatus) ExitCode() int { return status.exitCode }
+
+// recordedExitStatus is the error Exited() should see: the Runner's own
+// failure when there was one, otherwise the completed command's non-zero exit,
+// otherwise nil for a clean run.
+func recordedExitStatus(command string, result deps.RunResult, err error) error {
 	if err != nil {
 		return err
 	}
-	defer input.Close()
-	gzipReader, err := gzip.NewReader(input)
-	if err != nil {
-		return err
-	}
-	defer gzipReader.Close()
-	archive := tar.NewReader(gzipReader)
-	for {
-		header, err := archive.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if filepath.Base(header.Name) != name || !header.FileInfo().Mode().IsRegular() {
-			continue
-		}
-		if err := copyLimited(destination, archive, header.Size); err != nil {
-			return err
-		}
-		return os.Chmod(destination, 0o700)
-	}
-	return fmt.Errorf("binary %q not found in archive", name)
-}
-
-func extractPython(path, destination string) (string, error) {
-	if err := os.MkdirAll(destination, 0o700); err != nil {
-		return "", fmt.Errorf("create Python extraction root: %w", err)
-	}
-	input, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer input.Close()
-	gzipReader, err := gzip.NewReader(input)
-	if err != nil {
-		return "", err
-	}
-	defer gzipReader.Close()
-	archive := tar.NewReader(gzipReader)
-	var total int64
-	for {
-		header, err := archive.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return "", err
-		}
-		name, err := safeArchiveName(header.Name)
-		if err != nil {
-			return "", err
-		}
-		destinationPath := filepath.Join(destination, filepath.FromSlash(name))
-		if header.Typeflag == tar.TypeXGlobalHeader || header.Typeflag == tar.TypeXHeader || header.Typeflag == tar.TypeGNULongName || header.Typeflag == tar.TypeGNULongLink {
-			continue
-		}
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := ensureArchiveParentSafe(destination, destinationPath); err != nil {
-				return "", err
-			}
-			if err := os.MkdirAll(destinationPath, header.FileInfo().Mode().Perm()); err != nil {
-				return "", fmt.Errorf("create Python directory %s: %w", name, err)
-			}
-		case tar.TypeReg, tar.TypeRegA:
-			if header.Size < 0 || header.Size > 512<<20 || total > 2<<30-header.Size {
-				return "", fmt.Errorf("Python archive is too large at %d bytes", total+header.Size)
-			}
-			if err := ensureArchiveParentSafe(destination, destinationPath); err != nil {
-				return "", err
-			}
-			if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
-				return "", fmt.Errorf("create Python parent directory: %w", err)
-			}
-			if err := copyLimited(destinationPath, archive, header.Size); err != nil {
-				return "", fmt.Errorf("extract Python file %s: %w", name, err)
-			}
-			total += header.Size
-			if err := os.Chmod(destinationPath, header.FileInfo().Mode().Perm()); err != nil {
-				return "", fmt.Errorf("preserve Python file mode %s: %w", name, err)
-			}
-		case tar.TypeSymlink:
-			target, err := safeSymlinkTarget(name, header.Linkname)
-			if err != nil {
-				return "", fmt.Errorf("unsafe Python symlink %s: %w", name, err)
-			}
-			if err := ensureArchiveParentSafe(destination, destinationPath); err != nil {
-				return "", err
-			}
-			if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
-				return "", err
-			}
-			if err := os.Symlink(target, destinationPath); err != nil {
-				return "", fmt.Errorf("extract Python symlink %s: %w", name, err)
-			}
-		case tar.TypeLink:
-			target, err := safeArchiveName(header.Linkname)
-			if err != nil {
-				return "", fmt.Errorf("unsafe Python hardlink %s: %w", name, err)
-			}
-			if err := ensureArchiveParentSafe(destination, destinationPath); err != nil {
-				return "", err
-			}
-			if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
-				return "", err
-			}
-			if err := os.Link(filepath.Join(destination, filepath.FromSlash(target)), destinationPath); err != nil {
-				return "", fmt.Errorf("extract Python hardlink %s: %w", name, err)
-			}
-		default:
-			return "", fmt.Errorf("unsupported Python archive entry %s (type %d)", name, header.Typeflag)
-		}
-	}
-	for _, relative := range []string{"python/bin/python3", "python/bin/python"} {
-		candidate := filepath.Join(destination, filepath.FromSlash(relative))
-		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
-			return candidate, nil
-		}
-	}
-	return "", errors.New("Python executable not found in extracted archive")
-}
-
-func safeArchiveName(name string) (string, error) {
-	name = filepath.ToSlash(name)
-	if name == "" || strings.HasPrefix(name, "/") || strings.ContainsRune(name, 0) {
-		return "", fmt.Errorf("unsafe archive path %q", name)
-	}
-	clean := filepath.ToSlash(filepath.Clean(name))
-	if clean == "." || clean != strings.TrimSuffix(name, "/") || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
-		return "", fmt.Errorf("unsafe archive path %q", name)
-	}
-	return strings.TrimSuffix(clean, "/"), nil
-}
-
-func safeSymlinkTarget(entry, linkname string) (string, error) {
-	linkname = filepath.ToSlash(linkname)
-	if linkname == "" || strings.HasPrefix(linkname, "/") || strings.ContainsRune(linkname, 0) {
-		return "", fmt.Errorf("unsafe symlink target %q", linkname)
-	}
-	resolved := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(entry), linkname)))
-	if resolved == ".." || strings.HasPrefix(resolved, "../") {
-		return "", fmt.Errorf("symlink target escapes archive root: %q", linkname)
-	}
-	return filepath.ToSlash(filepath.Clean(linkname)), nil
-}
-
-func ensureArchiveParentSafe(root, path string) error {
-	relative, err := filepath.Rel(root, filepath.Dir(path))
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("archive path escapes extraction root: %s", path)
-	}
-	current := root
-	if info, err := os.Lstat(current); err != nil || !info.IsDir() {
-		if err != nil {
-			return fmt.Errorf("inspect extraction root: %w", err)
-		}
-		return fmt.Errorf("extraction root is not a directory: %s", root)
-	}
-	for _, part := range strings.Split(relative, string(filepath.Separator)) {
-		if part == "." || part == "" {
-			continue
-		}
-		current = filepath.Join(current, part)
-		info, err := os.Lstat(current)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("inspect archive parent %s: %w", current, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("archive parent is a symlink: %s", current)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("archive parent is not a directory: %s", current)
-		}
+	if result.ExitCode != 0 {
+		return commandExitStatus{command: command, exitCode: result.ExitCode}
 	}
 	return nil
 }
 
-func copyLimited(destination string, source io.Reader, size int64) error {
-	if size < 0 || size > 512<<20 {
-		return fmt.Errorf("archive file size %d exceeds limit", size)
+func runCommandWithRunner(
+	ctx context.Context,
+	runner deps.Runner,
+	executable string,
+	arguments []string,
+	directory string,
+) ([]byte, error) {
+	process := obs.NewProcess(ctx, "provision")
+	process.Started(0, nil)
+	command := filepath.Base(executable)
+	end := process.Request(command)
+	result, err := runner.Run(ctx, append([]string{executable}, arguments...), deps.RunOptions{Dir: directory})
+	if len(result.Stderr) > 0 {
+		_, _ = process.Stderr(io.Discard).Write(result.Stderr)
 	}
-	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o700)
+	end(len(result.Stdout), err)
+	process.Exited(recordedExitStatus(command, result, err))
 	if err != nil {
-		return err
+		return result.Stdout, fmt.Errorf("%s %s: %w (stderr: %s)", executable, strings.Join(arguments, " "), err,
+			stderrTail(string(result.Stderr)))
 	}
-	written, err := io.Copy(output, io.LimitReader(source, size))
-	if err != nil {
-		_ = output.Close()
-		_ = os.Remove(destination)
-		return err
+	if result.ExitCode != 0 {
+		return result.Stdout, fmt.Errorf(
+			"%s %s: exit %d (stderr: %s)",
+			executable,
+			strings.Join(arguments, " "),
+			result.ExitCode,
+			stderrTail(string(result.Stderr)),
+		)
 	}
-	if written != size {
-		_ = output.Close()
-		_ = os.Remove(destination)
-		return fmt.Errorf("archive entry ended at %d bytes, want %d", written, size)
-	}
-	return output.Close()
-}
-
-func runCommand(ctx context.Context, executable string, arguments []string, directory string) ([]byte, error) {
-	command := exec.CommandContext(ctx, executable, arguments...)
-	command.Dir = directory
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
-	if err != nil {
-		return stdout.Bytes(), fmt.Errorf("%s %s: %w (stderr: %s)", executable, strings.Join(arguments, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
+	return result.Stdout, nil
 }
 
 func measureTree(root string) SizeReport {
 	var report SizeReport
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
 		if err != nil || info == nil {
 			return nil
 		}
@@ -756,7 +708,7 @@ func measureTree(root string) SizeReport {
 func stampPythonBuild(path, version string) error {
 	parts := strings.SplitN(version, "+", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("Python pin has no standalone build stamp: %q", version)
+		return fmt.Errorf("python pin has no standalone build stamp: %q", version)
 	}
 	want := []byte(parts[1] + "\n")
 	if body, err := os.ReadFile(path); err == nil {

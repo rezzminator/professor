@@ -9,7 +9,14 @@ import (
 	"sort"
 )
 
-const settingsHookOwnershipVersion = 1
+const (
+	settingsHookOwnershipName    = "settings-hook-ownership.json"
+	settingsHookOwnershipVersion = 1
+)
+
+func settingsHookOwnershipPath(managedRoot string) string {
+	return filepath.Join(managedRoot, settingsHookOwnershipName)
+}
 
 type settingsHookKey struct {
 	Event   string
@@ -164,7 +171,7 @@ func nextSettingsHookOwnership(
 
 func installerOwnedHookCommand(command, pfmBinary string) bool {
 	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
-	for _, hook := range append(claudeHookTemplates(home), codexHookTemplate(home)) {
+	for _, hook := range claudeHookTemplates(home) {
 		if hook.Command == command {
 			return true
 		}
@@ -174,7 +181,7 @@ func installerOwnedHookCommand(command, pfmBinary string) bool {
 
 func installerOwnedHookKey(key settingsHookKey, pfmBinary string) bool {
 	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
-	for _, hook := range append(claudeHookTemplates(home), codexHookTemplate(home)) {
+	for _, hook := range claudeHookTemplates(home) {
 		if hook.Event == key.Event && hook.Matcher == key.Matcher && hook.Command == key.Command {
 			return true
 		}

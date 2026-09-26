@@ -164,6 +164,7 @@ diff_excludes=(
   ':(exclude)scripts/leak-terms.txt'
   ':(exclude).githooks'
   ':(exclude)LICENSE'
+  ':(exclude).opencode/LICENSE'
 )
 for glob in ${ignore_paths[@]+"${ignore_paths[@]}"}; do
   diff_excludes+=(":(exclude,glob)$glob")
@@ -172,7 +173,7 @@ done
 is_excluded_path() {
   local p="$1" glob
   case "$p" in
-    scripts/placeholder-map.tsv|scripts/leak-terms.txt|LICENSE) return 0 ;;
+    scripts/placeholder-map.tsv|scripts/leak-terms.txt|LICENSE|.opencode/LICENSE) return 0 ;;
     .githooks/*|.githooks) return 0 ;;
   esac
   [[ -n "$terms_rel" && "$p" == "$terms_rel" ]] && return 0

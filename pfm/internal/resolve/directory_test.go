@@ -47,15 +47,27 @@ func TestDirectoryResolvesEveryIdentityShapeTheFleetRecords(t *testing.T) {
 		{"chat uuid", Address{ID: "01a0434f-c6e6-4a11"}, "P:DO"},
 		{"bare session name", Address{Session: "cc-1787705979-3980493-30867"}, "P:DO"},
 		{"full socket path", Address{Session: "/tmp/tmux-1000/cc-1787705979-3980493-30867"}, "P:DO"},
-		{"socket path plus pane (inject receiver)", Address{Session: "/tmp/tmux-1000/cc-1787705979-3980493-30867", Pane: "%0"}, "P:DO"},
-		{"socket path, empty pane (spawn receiver)", Address{Session: "/tmp/tmux-1000/cc-1787705979-3980493-30867", Pane: ""}, "P:DO"},
+		{
+			"socket path plus pane (inject receiver)",
+			Address{Session: "/tmp/tmux-1000/cc-1787705979-3980493-30867", Pane: "%0"},
+			"P:DO",
+		},
+		{
+			"socket path, empty pane (spawn receiver)",
+			Address{Session: "/tmp/tmux-1000/cc-1787705979-3980493-30867", Pane: ""},
+			"P:DO",
+		},
 		{"label with a colon", Address{Label: "P:DO"}, "P:DO"},
 		{"untyped target holding a label", Address{Text: "P:DO"}, "P:DO"},
 		{"untyped target holding a raw session id", Address{Text: "cc-1787705979-3980493-30867"}, "P:DO"},
 		{"untyped target holding a chat uuid", Address{Text: "01a0434f-c6e6-4a11"}, "P:DO"},
 		{"session name handed to the uuid field", Address{ID: "cc-1787705979-3980493-30867"}, "P:DO"},
 		{"uuid handed to the session field", Address{Session: "019ffd1e-300f-7872"}, "W5_TESTER"},
-		{"codex chat by socket path", Address{Session: "/tmp/tmux-1000/cx-1787757492-3196324-4837", Pane: "%1"}, "W5_TESTER"},
+		{
+			"codex chat by socket path",
+			Address{Session: "/tmp/tmux-1000/cx-1787757492-3196324-4837", Pane: "%1"},
+			"W5_TESTER",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -114,7 +126,11 @@ func TestDirectoryUnresolvedNeverRendersAsAName(t *testing.T) {
 		raw   string
 	}{
 		{"dead chat's session", Address{Session: "cc-1787827285-1466858-781"}, "cc-1787827285-1466858-781"},
-		{"dead chat's socket path", Address{Session: "/tmp/tmux-1000/cx-1787827285-1466858-782"}, "cx-1787827285-1466858-782"},
+		{
+			"dead chat's socket path",
+			Address{Session: "/tmp/tmux-1000/cx-1787827285-1466858-782"},
+			"cx-1787827285-1466858-782",
+		},
 		{"unknown uuid", Address{ID: "deadbeef-0000-0000"}, "deadbeef-0000-0000"},
 		{"raw session typed as a target", Address{Text: "cc-1787827285-1466858-783"}, "cc-1787827285-1466858-783"},
 	}

@@ -6,12 +6,12 @@ import (
 	"io"
 	"path/filepath"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/store"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Warn reports one tmux probe warning raised during a gather pass. One-shot
@@ -33,9 +33,27 @@ func KillDependencies(runtime pfmconfig.Runtime) kill.Dependencies {
 	return kill.Dependencies{
 		Paths:       runtime.Paths,
 		ClaudeRoots: append([]string(nil), runtime.Paths.Roots[pfmengine.Claude]...),
-		CodexRoots:  runtime.Config.CodexHomes(),
+		CodexHomes:  runtime.Config.CodexHomes(),
 		ConfigPath:  runtime.Config.Path,
 	}
+}
+
+// openCodeProbeSessions projects the indexed OpenCode sessions onto the probe
+// layer's own row shape. gather must not import store — the live probe has no
+// business opening a database — so the mapping happens here, at the one place
+// that already holds both.
+func openCodeProbeSessions(sessions []store.OpenCodeSession) []gather.OpenCodeSession {
+	probe := make([]gather.OpenCodeSession, 0, len(sessions))
+	for index := range sessions {
+		session := sessions[index]
+		probe = append(probe, gather.OpenCodeSession{
+			ID:            session.ID,
+			Title:         session.Title,
+			Directory:     session.Directory,
+			TimeCreatedMS: session.TimeCreatedMS,
+		})
+	}
+	return probe
 }
 
 // Gather probes every live tmux pane and engine process against the loaded
@@ -54,7 +72,7 @@ func Gather(
 		store.CodexThreads(data.Rollouts),
 		data.CxNames,
 	)
-	tmuxClient := gather.CommandTmux{
+	tmuxClient := gather.TmuxProbe{
 		TmuxTmpDir: filepath.Dir(env.Paths.TmuxDir),
 	}
 	// The pane-binding manager lets the rollout-less live-process resolver
@@ -77,11 +95,13 @@ func Gather(
 		CodexThread: store.NewCodexThreadResolverRoots(
 			ctx, env.Config.CodexHomes(), bindingManager.CodexPaneBound(ctx),
 		),
-		CodexRoots:   env.Config.CodexHomes(),
-		ClaudeBinary: env.Config.Claude.Binary,
-		CodexBinary:  env.Config.Codex.Binary,
-		LabelEmojis:  env.Config.LabelEmojis(),
-		ReadOnly:     readOnly,
+		CodexHomes:       env.Config.CodexHomes(),
+		ClaudeBinary:     env.Config.Claude.Binary,
+		CodexBinary:      env.Config.Codex.Binary,
+		OpenCodeBinary:   env.Config.OpenCode.Binary,
+		OpenCodeSessions: openCodeProbeSessions(data.OpenCodeSessions),
+		LabelEmojis:      env.Config.LabelEmojis(),
+		ReadOnly:         readOnly,
 	})
 	if err != nil {
 		return gather.Snapshot{}, err

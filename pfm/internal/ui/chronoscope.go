@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 // cosmosPlayRate is the chronoscope's playback speed: one real second replays
@@ -43,7 +43,7 @@ func (model Model) viewGraph() compose.CosmosGraph {
 // is non-nil even for an empty sample: a nil timeline means "never sampled",
 // which the scrub keys refuse on by name.
 func (model *Model) rebuildCosmosTimeline() {
-	timeline := make([]shared.CommsEvent, 0, len(model.cosmosEvents))
+	timeline := make([]fleetdb.CommsEvent, 0, len(model.cosmosEvents))
 	timeline = append(timeline, model.cosmosEvents...)
 	sort.SliceStable(timeline, func(left, right int) bool {
 		if timeline[left].AtNS != timeline[right].AtNS {
@@ -94,7 +94,7 @@ func (model Model) updateCosmosKey(key string) (tea.Model, tea.Cmd) {
 		model.toggleClassicSky()
 	case "up", "k":
 		model.moveCosmosSelection(-1)
-	case "down", "j":
+	case keyDown, "j":
 		model.moveCosmosSelection(1)
 	case "enter":
 		return model.openCosmosSelection()
@@ -342,10 +342,11 @@ func (model Model) openCosmosSelection() (tea.Model, tea.Cmd) {
 		model.cosmosStatus = "enter needs a live chat — " + label + " is gone; only the ledger remembers it"
 		return model, nil
 	}
-	for _, row := range model.rows {
-		if compose.RowKey(row) == node.RowKey {
+	for index := range model.rows {
+		row := &model.rows[index]
+		if compose.RowKey(*row) == node.RowKey {
 			model.outcome = OutcomeSelected
-			model.outcomeRow = row
+			model.outcomeRow = *row
 			return model, tea.Quit
 		}
 	}

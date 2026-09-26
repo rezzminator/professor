@@ -11,11 +11,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	pfmstats "hostops/pfm/internal/stats"
-	"hostops/pfm/internal/theme"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 type countingStatsSampler struct {
@@ -197,7 +197,7 @@ func TestStatsTabSamplesResourcesWithoutWaitingForLimits(t *testing.T) {
 	snapshot.StatsSampler = sampler
 	model := NewModel(snapshot)
 
-	model, command := applyKey(t, model, specialKey(tea.KeyTab))
+	_, command := applyKey(t, model, specialKey(tea.KeyTab))
 	if command == nil {
 		t.Fatal("entering Stats returned no sampling command")
 	}
@@ -222,7 +222,7 @@ func TestLimitsTabSamplesLimitsWithoutReadingResources(t *testing.T) {
 	model := NewModel(snapshot)
 
 	model, _ = applyKey(t, model, specialKey(tea.KeyTab))
-	model, command := applyKey(t, model, specialKey(tea.KeyTab))
+	_, command := applyKey(t, model, specialKey(tea.KeyTab))
 	if command == nil {
 		t.Fatal("entering Limits returned no sampling command")
 	}
@@ -239,7 +239,8 @@ func TestLimitsTabSamplesLimitsWithoutReadingResources(t *testing.T) {
 			sampler.resourceCalls,
 		)
 	}
-	if !message.snapshot.Ready || len(message.snapshot.Limits) != 1 || message.snapshot.Limits[0].Status != "credential rejected" {
+	if !message.snapshot.Ready || len(message.snapshot.Limits) != 1 ||
+		message.snapshot.Limits[0].Status != "credential rejected" {
 		t.Fatalf("Limits sample lost truthful account status: %#v", message.snapshot)
 	}
 }
@@ -301,7 +302,12 @@ func TestLimitsTabScrollsToAccountsBelowTheViewport(t *testing.T) {
 	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
 		{Account: 1, Engine: pfmengine.Claude, Label: "Claude 1", Windows: []pfmstats.Window{{Name: "5h", UsedPct: 1}}},
 		{Account: 2, Engine: pfmengine.Claude, Label: "Claude 2", Windows: []pfmstats.Window{{Name: "7d", UsedPct: 2}}},
-		{Account: 1, Engine: pfmengine.Codex, Label: "Codex 1", Windows: []pfmstats.Window{{Name: "5h-spark", UsedPct: 3}}},
+		{
+			Account: 1,
+			Engine:  pfmengine.Codex,
+			Label:   "Codex 1",
+			Windows: []pfmstats.Window{{Name: "5h-spark", UsedPct: 3}},
+		},
 	}}
 	before := ansi.Strip(model.renderLimitsPanel(80, 6))
 	if strings.Contains(before, "Codex 1") {
@@ -326,15 +332,29 @@ func TestLimitsTabScrollsAcrossClaudeCodexAndOpenCodeCardsAfterResize(t *testing
 		{Account: 2, Engine: pfmengine.Claude, Label: "Claude 2", Windows: []pfmstats.Window{{Name: "7d", UsedPct: 2}}},
 		{Account: 1, Engine: pfmengine.Codex, Label: "Codex 1", Windows: []pfmstats.Window{{Name: "5h", UsedPct: 3}}},
 		{Account: 2, Engine: pfmengine.Codex, Label: "Codex 2", Windows: []pfmstats.Window{{Name: "7d", UsedPct: 4}}},
-		{Account: 1, Engine: pfmengine.Opencode, Label: "OpenCode 1", Windows: []pfmstats.Window{{Name: "5h", UsedPct: 5}}},
-		{Account: 2, Engine: pfmengine.Opencode, Label: "OpenCode 2", Windows: []pfmstats.Window{{Name: "7d", UsedPct: 6}}},
+		{
+			Account: 1,
+			Engine:  pfmengine.OpenCode,
+			Label:   "OpenCode 1",
+			Windows: []pfmstats.Window{{Name: "5h", UsedPct: 5}},
+		},
+		{
+			Account: 2,
+			Engine:  pfmengine.OpenCode,
+			Label:   "OpenCode 2",
+			Windows: []pfmstats.Window{{Name: "7d", UsedPct: 6}},
+		},
 	}}
 	if before := ansi.Strip(model.renderLimitsPanel(50, 6)); strings.Contains(before, "OpenCode 2") {
 		t.Fatalf("tiny viewport unexpectedly showed the final card:\n%s", before)
 	}
 	model, command := applyKey(t, model, specialKey(tea.KeyEnd))
 	if command != nil || model.limitsOffset == 0 {
-		t.Fatalf("End did not reach the bottom of the tiny Limits viewport: command=%v offset=%d", command, model.limitsOffset)
+		t.Fatalf(
+			"End did not reach the bottom of the tiny Limits viewport: command=%v offset=%d",
+			command,
+			model.limitsOffset,
+		)
 	}
 	bottom := ansi.Strip(model.renderLimitsPanel(50, 6))
 	if !strings.Contains(bottom, "OpenCode") || !strings.Contains(bottom, " 6%") || !strings.Contains(bottom, "7d") {
@@ -399,7 +419,7 @@ func TestLimitsTabOmitsUnsupportedEngines(t *testing.T) {
 	model.tab = TabLimits
 	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
 		{Account: 1, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 5}}},
-		{Account: 1, Engine: pfmengine.Opencode, Unsupported: true, Status: "engine ox: no usage source registered"},
+		{Account: 1, Engine: pfmengine.OpenCode, Unsupported: true, Status: "engine ox: no usage source registered"},
 	}}
 	plain := ansi.Strip(model.renderLimitsPanel(120, 10))
 	if strings.Contains(plain, "no usage source") || strings.Contains(plain, "OpenCode") {
@@ -539,8 +559,18 @@ func TestLimitsTabRendersEngineAbsencesAsTwoDimLines(t *testing.T) {
 	model := NewModel(fixtureSnapshot(120))
 	model.tab = TabLimits
 	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
-		{Engine: pfmengine.Claude, Label: "no Claude accounts configured", Status: "no Claude accounts configured", Absent: true},
-		{Engine: pfmengine.Codex, Label: "no Codex accounts configured", Status: "no Codex accounts configured", Absent: true},
+		{
+			Engine: pfmengine.Claude,
+			Label:  "no Claude accounts configured",
+			Status: "no Claude accounts configured",
+			Absent: true,
+		},
+		{
+			Engine: pfmengine.Codex,
+			Label:  "no Codex accounts configured",
+			Status: "no Codex accounts configured",
+			Absent: true,
+		},
 	}}
 	plain := ansi.Strip(model.renderLimitsPanel(120, 8))
 	for _, want := range []string{"no Claude accounts configured", "no Codex accounts configured"} {
@@ -683,7 +713,7 @@ func TestStatsTablesRenderLabeledColumnsAndUsage(t *testing.T) {
 	model.statsSubtab = StatsDocker
 	dockerPanel := ansi.Strip(model.renderStatsPanel(140, 8))
 	header := strings.Split(dockerPanel, "\n")[1]
-	if strings.Index(header, "NAME") < 0 || strings.Index(header, "IMAGE") <= strings.Index(header, "NAME") {
+	if !strings.Contains(header, "NAME") || strings.Index(header, "IMAGE") <= strings.Index(header, "NAME") {
 		t.Fatalf("Docker header does not begin NAME then IMAGE: %q", header)
 	}
 	for _, want := range []string{"CPU", "MEMORY", "LIMIT", "MEM", "professor-web", "registry.example/professor:web"} {
@@ -698,8 +728,24 @@ func TestStatsChatLiveTokenRateRendersUnknownActiveAndIdle(t *testing.T) {
 	model.tab = TabStats
 	model.stats = pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{
 		{Name: "UNKNOWN", Engine: "claude", CPUValid: true, TokenCount: 100, TokensKnown: true},
-		{Name: "ACTIVE", Engine: "codex", CPUValid: true, TokenCount: 200, TokensKnown: true, TokensPerMinute: 125, TokenRateValid: true},
-		{Name: "IDLE", Engine: "claude", CPUValid: true, TokenCount: 300, TokensKnown: true, TokensPerMinute: 0, TokenRateValid: true},
+		{
+			Name:            "ACTIVE",
+			Engine:          "codex",
+			CPUValid:        true,
+			TokenCount:      200,
+			TokensKnown:     true,
+			TokensPerMinute: 125,
+			TokenRateValid:  true,
+		},
+		{
+			Name:            "IDLE",
+			Engine:          "claude",
+			CPUValid:        true,
+			TokenCount:      300,
+			TokensKnown:     true,
+			TokensPerMinute: 0,
+			TokenRateValid:  true,
+		},
 	}}
 	panel := ansi.Strip(model.renderStatsPanel(120, 10))
 	for name, want := range map[string]string{"UNKNOWN": "…", "ACTIVE": "125", "IDLE": "–"} {
@@ -759,15 +805,15 @@ func TestStatsPropertiesUseSemanticColors(t *testing.T) {
 	}
 }
 
-func TestStatsOpencodeEngineUsesItsOwnColor(t *testing.T) {
+func TestStatsOpenCodeEngineUsesItsOwnColor(t *testing.T) {
 	model := NewModel(fixtureSnapshot(120))
 	model.tab = TabStats
 	model.stats = pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{{
-		Name: "OPEN", Engine: pfmengine.MustLookup(pfmengine.Opencode).LongName,
+		Name: "OPEN", Engine: pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 		CPUValid: true,
 	}}}
 	panel := model.renderStatsPanel(120, 8)
-	want := statsEngineStyles[pfmengine.Opencode].Render("opencode")
+	want := statsEngineStyles[pfmengine.OpenCode].Render("opencode")
 	if !strings.Contains(panel, want) {
 		t.Fatalf("OpenCode stats row lacks its engine color %q:\n%s", want, panel)
 	}

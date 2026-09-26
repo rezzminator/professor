@@ -3,25 +3,25 @@ package reload
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-	"unicode"
 
-	"hostops/pfm/internal/action"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Usage leads with the flags because a caller who guesses is guessing
@@ -78,11 +78,15 @@ type Request struct {
 	CWD         string
 	Account     int
 	AccountIDs  []int
-	AccountHome string
+	CodexHome   string
 	CodexBinary string
 	CodexYolo   bool
 	Cache1H     bool
 	Then        string
+	// Name is the display name the chat wore before a --new reboot; the
+	// reborn pane takes it over and the abandoned session is relabelled
+	// (followName). "" carries nothing — a chat named from its prompts.
+	Name string
 	// Model and Effort pin the reborn seat's tier — the same pair
 	// HeadlessRequest carries for a fresh launch (internal/action/headless.go).
 	// "" means "inherit whatever the CLI/account would have chosen on its
@@ -91,6 +95,10 @@ type Request struct {
 	// because only there is the engine known.
 	Model  string
 	Effort string
+	// PromptChannel is already composed for the selected engine: a per-seat
+	// system-prompt file path for Claude, or the complete developer
+	// instructions value for Codex. Empty preserves an ordinary reload.
+	PromptChannel string
 	// Home and Machine are the Claude respawn's whole policy: the account's
 	// config dir, its autonomy posture and its system-prompt choice all come
 	// from them through action.ClaudeSpawn. A reload used to synthesize its
@@ -109,6 +117,8 @@ type Options struct {
 	ExitTries   int
 	IdleTries   int
 	ThenTries   int
+	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
+	Clock clock.Clock
 }
 
 type Result struct {
@@ -139,6 +149,9 @@ func (o *Options) defaults() {
 	if o.ThenTries == 0 {
 		o.ThenTries = 900
 	}
+	if o.Clock == nil {
+		o.Clock = clock.Real
+	}
 }
 
 // LockPath is the pane mutex Run holds for the whole reboot — from before the
@@ -152,7 +165,7 @@ func LockPath(sidDir, socketName, pane string) string {
 // SessionEnd hook can tell a reload's /exit (the pane is being rebooted —
 // leave its terminal alone) from a human's. A missing lock file is a plain
 // "no"; a lock that cannot be probed is an error, never a "no".
-func InFlight(sidDir, socketName, pane string) (bool, error) {
+func InFlight(sidDir, socketName, pane string) (inFlight bool, returnErr error) {
 	lock, err := os.OpenFile(LockPath(sidDir, socketName, pane), os.O_RDWR, 0o600)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -160,7 +173,14 @@ func InFlight(sidDir, socketName, pane string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("open reload lock: %w", err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			returnErr = errors.Join(
+				returnErr,
+				fmt.Errorf("close reload lock %s: %w", LockPath(sidDir, socketName, pane), err),
+			)
+		}
+	}()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return true, nil
@@ -176,7 +196,17 @@ func InFlight(sidDir, socketName, pane string) (bool, error) {
 // Run performs the graceful in-place reboot. The caller has already resolved
 // the target identity and account/cache birth values; this package owns every
 // tmux mutation and the pane lock.
-func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc Process, stderr io.Writer) (Result, error) {
+func Run(
+	ctx context.Context,
+	request Request,
+	options Options,
+	tmux Tmux,
+	proc Process,
+	stderr io.Writer,
+) (result Result, err error) {
+	// The state door: each phase below is one transition; a failure is attributed to its phase.
+	trail := obs.NewTrail(ctx, "reload", "requested")
+	defer func() { trail.End(err) }()
 	options.defaults()
 	if request.SocketPath == "" || request.Pane == "" {
 		return Result{}, errors.New("reload requires a socket and pane")
@@ -224,14 +254,11 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 	if tmux == nil {
 		return Result{}, errors.New("reload requires a tmux client")
 	}
+	trail.Reach("locked", "pane mutex held")
 
 	if options.Delay > 0 {
-		timer := time.NewTimer(options.Delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return Result{}, ctx.Err()
-		case <-timer.C:
+		if err := options.Clock.Sleep(ctx, options.Delay); err != nil {
+			return Result{}, err
 		}
 	}
 	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, true); err != nil {
@@ -254,13 +281,15 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 			return Result{}, fmt.Errorf("cancel pane mode: %w", err)
 		}
 	}
-	cap, err := waitCallerIdle(ctx, request, options, tmux, stderr)
+	capture, err := waitCallerIdle(ctx, request, options, tmux, stderr)
 	if err != nil {
 		return Result{}, err
 	}
-	if selectorOpen(cap) {
+	trail.Reach("idle", "caller turn ended")
+	if selectorOpen(capture) {
 		cause := errors.New("open selector menu on the pane — refusing to /exit")
-		if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, "reload ABORTED — answer the open menu first, then reload again"); displayErr != nil {
+		abort := "reload ABORTED — answer the open menu first, then reload again"
+		if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, abort); displayErr != nil {
 			return Result{}, errors.Join(cause, fmt.Errorf("display selector refusal: %w", displayErr))
 		}
 		return Result{}, cause
@@ -271,41 +300,39 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, "/exit"); err != nil {
 		return Result{}, fmt.Errorf("send /exit: %w", err)
 	}
-	if err := waitExitRendered(ctx, request, tmux, stderr); err != nil {
+	if err := waitExitRendered(ctx, request, options.Clock, tmux, stderr); err != nil {
 		return Result{}, err
 	}
 	if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 		return Result{}, fmt.Errorf("submit /exit: %w", err)
 	}
+	trail.Reach("exit-typed", "/exit submitted")
 
 	dead := false
 	empties := 0
 	dialogSeen := false
 	for i := 0; i < options.ExitTries; i++ {
 		panes, listErr := tmux.ListPanes(ctx, request.SocketPath)
-		if listErr != nil {
+		switch {
+		case listErr != nil:
 			return Result{}, fmt.Errorf("check pane exit state: %w", listErr)
-		} else if len(panes) == 0 {
+		case len(panes) == 0:
 			empties++
-			if empties >= 3 {
-				dead = true
-				break
-			}
-		} else {
+			dead = empties >= 3
+		default:
 			empties = 0
 			for _, pane := range panes {
-				if pane.ID == request.Pane && pane.Dead {
-					dead = true
-				}
-			}
-			if dead {
-				break
+				dead = dead || pane.ID == request.Pane && pane.Dead
 			}
 		}
+		if dead {
+			break
+		}
 		capture, captureErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
-		if captureErr != nil {
+		switch {
+		case captureErr != nil:
 			fmt.Fprintf(stderr, "pfm chat reload: confirm /exit submission (try %d): %v\n", i+1, captureErr)
-		} else if exitDialogOpen(capture) {
+		case exitDialogOpen(capture):
 			// Claude Code answers /exit with a confirmation whenever the chat
 			// has background work — a scheduled task, a background shell, a
 			// sub-agent — with "Exit and stop tasks" preselected. Nothing the
@@ -314,27 +341,27 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 			// IS the answer: everything in-flight dies with the pane anyway.
 			if !dialogSeen {
 				dialogSeen = true
-				fmt.Fprintln(stderr, "pfm chat reload: confirming the exit dialog — background work stops with the chat")
+				fmt.Fprintln(
+					stderr,
+					"pfm chat reload: confirming the exit dialog — background work stops with the chat",
+				)
 			}
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("confirm exit dialog: %w", err)
 			}
-		} else if composerShowsExit(capture) {
+		case composerShowsExit(capture):
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("retry /exit submission: %w", err)
 			}
 		}
-		timer := time.NewTimer(options.Poll)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return Result{}, ctx.Err()
-		case <-timer.C:
+		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
+			return Result{}, err
 		}
 	}
 	if !dead {
 		return Result{}, exitIncomplete(ctx, request, options, tmux)
 	}
+	trail.Reach("dead", "pane exited")
 	if err := tmux.Respawn(ctx, request.SocketPath, request.Pane, request.CWD, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
@@ -342,29 +369,27 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 		return Result{}, fmt.Errorf("clear pane remain-on-exit: %w", err)
 	}
 	clearRemain = false
+	trail.Reach("respawned", "pane respawned")
 	if request.Then != "" {
 		if request.Transcript != "" {
 			if info, statErr := os.Stat(request.Transcript); statErr == nil {
-				scaled := 90 + 30*int(info.Size()/1048576)
-				if scaled > 900 {
-					scaled = 900
-				}
 				if options.ThenTries == 900 {
-					options.ThenTries = scaled
+					options.ThenTries = min(900, 90+30*int(info.Size()/1048576))
 				}
 			}
 		}
 		if err := deliverThen(ctx, request, options, tmux, proc, stderr); err != nil {
-			return Result{}, errors.Join(
-				err,
-				failThen(ctx, request, options.SIDDir, tmux, err.Error()),
-			)
+			return Result{}, errors.Join(err, failThen(ctx, request, options.SIDDir, tmux, err.Error()))
 		}
+		trail.Reach("then-delivered", "--then delivered")
+	}
+	if request.SessionID == "" {
+		followName(ctx, request, options, tmux, proc, stderr)
 	}
 	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
 }
 
-func waitExitRendered(ctx context.Context, request Request, tmux Tmux, stderr io.Writer) error {
+func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmux Tmux, stderr io.Writer) error {
 	for attempt := 0; attempt < 40; attempt++ {
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
@@ -372,15 +397,38 @@ func waitExitRendered(ctx context.Context, request Request, tmux Tmux, stderr io
 		} else if composerShowsExit(capture) {
 			return nil
 		}
-		timer := time.NewTimer(50 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := clk.Sleep(ctx, 50*time.Millisecond); err != nil {
+			return err
 		}
 	}
-	return errors.New("typed /exit never rendered — refusing blind Enter")
+	cause := errors.New("typed /exit never rendered — refusing blind Enter")
+	if err := clearTypedExit(ctx, request, tmux); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
+}
+
+// clearTypedExit backspaces the "/exit" this worker itself just typed
+// (SendLiteral, over a composer C-s had already stashed empty) back out of
+// the composer, so a refusal to reboot never leaves that stray text sitting
+// there for a human to notice — or, worse, accidentally submit — then
+// confirms the composer actually cleared. Shared by waitExitRendered (never
+// confirmed rendering, so pressing Enter would be blind) and exitIncomplete
+// (rendered, then the pane never died on it).
+func clearTypedExit(ctx context.Context, request Request, tmux Tmux) error {
+	for range len("/exit") {
+		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "BSpace"); err != nil {
+			return fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err)
+		}
+	}
+	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+	if err != nil {
+		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
+	}
+	if composerShowsExit(capture) {
+		return errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand")
+	}
+	return nil
 }
 
 // waitCallerIdle holds the /exit until the pane's current turn has ended.
@@ -391,28 +439,70 @@ func waitExitRendered(ctx context.Context, request Request, tmux Tmux, stderr io
 // caller was given is "one short line, then end the turn", and this is the
 // worker keeping its half of it. Two quiet captures in a row are the idle
 // proof; a chat still busy at the bound is left untouched and told so.
-func waitCallerIdle(ctx context.Context, request Request, options Options, tmux Tmux, stderr io.Writer) (string, error) {
+func waitCallerIdle(
+	ctx context.Context,
+	request Request,
+	options Options,
+	tmux Tmux,
+	stderr io.Writer,
+) (string, error) {
 	stable := 0
 	announced := false
+	sawComposer := false
 	for attempt := 0; attempt < options.IdleTries; attempt++ {
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
 			return "", fmt.Errorf("capture pane before /exit: %w", err)
 		}
-		if inject.IsBusy(capture) {
+		showsComposer := composerDrawn(capture)
+		sawComposer = sawComposer || showsComposer
+		switch {
+		case inject.IsFooterBusy(request.Engine, capture):
 			stable = 0
 			if !announced {
 				announced = true
 				fmt.Fprintln(stderr, "pfm chat reload: the chat's turn is still running — holding /exit until it ends")
+				announcePane(
+					ctx, request, tmux, stderr, "pfm reload: waiting for this turn to end, then rebooting this chat",
+				)
 			}
-		} else if stable++; stable >= 2 {
-			return capture, nil
+		case !showsComposer:
+			// A pane with no input box on it is not an idle chat — it is a
+			// chat whose TUI has not drawn one yet, and it cannot be typed
+			// into at all. The pane is still in cooked mode, so /exit sent now
+			// is echoed by the line discipline and then DISCARDED by the
+			// raw-mode switch the TUI makes as it starts: the chat never reads
+			// a byte, nothing in the composer ever says /exit, and every exit
+			// try is spent on a chat nobody asked to quit.
+			stable = 0
+		default:
+			stable++
+			if stable >= 2 {
+				if announced {
+					announcePane(ctx, request, tmux, stderr, "pfm reload: rebooting now")
+				}
+				return capture, nil
+			}
 		}
-		if err := sleepPoll(ctx, options.Poll); err != nil {
+		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
 			return "", err
 		}
 	}
+	if !sawComposer {
+		return "", fmt.Errorf(
+			"the pane never showed a chat input box in %d polls — /exit was not typed, nothing changed",
+			options.IdleTries,
+		)
+	}
 	return "", fmt.Errorf("chat still busy after %d polls — /exit was not typed, nothing changed", options.IdleTries)
+}
+
+// announcePane puts a Display message on the caller's own pane; a failure
+// here is logged, never fatal — the pane is a courtesy, not the contract.
+func announcePane(ctx context.Context, request Request, tmux Tmux, stderr io.Writer, message string) {
+	if err := tmux.Display(ctx, request.SocketPath, request.Pane, message); err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: display %q: %v\n", message, err)
+	}
 }
 
 // exitIncomplete names the state a refused /exit leaves behind, because
@@ -426,72 +516,55 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 	cause := fmt.Errorf("/exit did not complete after %d tries; chat left running", options.ExitTries)
 	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 	if err != nil {
-		return errors.Join(cause, fmt.Errorf("could not read what the pane shows now — an exit dialog or the typed /exit may still be there, clear it by hand: %w", err))
+		return errors.Join(
+			cause,
+			fmt.Errorf(
+				"could not read what the pane shows now — an exit dialog or the typed /exit may still be there, clear it by hand: %w",
+				err,
+			),
+		)
 	}
 	switch {
 	case exitDialogOpen(capture):
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Escape"); err != nil {
-			return errors.Join(cause, fmt.Errorf("the exit dialog would not confirm and could NOT be dismissed — press Esc in the pane by hand: %w", err))
+			return errors.Join(
+				cause,
+				fmt.Errorf(
+					"the exit dialog would not confirm and could NOT be dismissed — press Esc in the pane by hand: %w",
+					err,
+				),
+			)
 		}
 		if capture, err = tmux.Capture(ctx, request.SocketPath, request.Pane); err != nil {
-			return errors.Join(cause, fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err))
+			return errors.Join(
+				cause,
+				fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err),
+			)
 		} else if exitDialogOpen(capture) {
-			return errors.Join(cause, errors.New("the exit dialog would not confirm and did not close on Esc — press Esc in the pane by hand"))
+			return errors.Join(
+				cause,
+				errors.New(
+					"the exit dialog would not confirm and did not close on Esc — press Esc in the pane by hand",
+				),
+			)
 		}
 		return errors.Join(cause, errors.New("the exit dialog would not confirm; dismissed it (Esc)"))
 	case composerShowsExit(capture):
-		for range len("/exit") {
-			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "BSpace"); err != nil {
-				return errors.Join(cause, fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err))
-			}
-		}
-		if capture, err = tmux.Capture(ctx, request.SocketPath, request.Pane); err != nil {
-			return errors.Join(cause, fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err))
-		} else if composerShowsExit(capture) {
-			return errors.Join(cause, errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand"))
+		if err := clearTypedExit(ctx, request, tmux); err != nil {
+			return errors.Join(cause, err)
 		}
 		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))
 	}
 	return errors.Join(cause, errors.New("the pane shows neither the typed /exit nor an exit dialog"))
 }
 
-func sleepPoll(ctx context.Context, poll time.Duration) error {
-	timer := time.NewTimer(poll)
-	select {
-	case <-ctx.Done():
-		timer.Stop()
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func composerShowsExit(capture string) bool {
-	return strings.Contains(strings.Join(strings.Fields(lastComposerLine(capture)), " "), "/exit")
-}
-
-// exitDialogPattern is the selected row of Claude Code's background-work
-// exit confirmation ("❯ 1. Exit and stop tasks"). The marker has to sit on
-// the Exit row: a human who moved it to "Stay" gets that choice respected.
-var exitDialogPattern = regexp.MustCompile(`❯[[:space:]]*[0-9]+\.[[:space:]]*Exit`)
-
-func exitDialogOpen(capture string) bool {
-	return exitDialogPattern.MatchString(capture)
+func sleepPoll(ctx context.Context, clk clock.Clock, poll time.Duration) error {
+	return clk.Sleep(ctx, poll)
 }
 
 func rosterContains(accounts []int, wanted int) bool {
 	for _, account := range accounts {
 		if account == wanted {
-			return true
-		}
-	}
-	return false
-}
-
-func selectorOpen(capture string) bool {
-	selector := regexp.MustCompile(`❯[[:space:]]*[0-9]+\.`)
-	for _, line := range strings.Split(capture, "\n") {
-		if selector.MatchString(line) {
 			return true
 		}
 	}
@@ -519,18 +592,23 @@ func claudeRun(request Request) (string, error) {
 	}
 	effort, err := action.ClaudeEffort(request.Effort)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve claude respawn effort: %w", err)
 	}
-	return action.ClaudeSpawn{
-		Purpose: action.PurposeResume,
-		Account: request.Account,
-		Cache1H: request.Cache1H,
-		Args:    arguments,
-		Home:    request.Home,
-		Machine: request.Machine,
-		Model:   request.Model,
-		Effort:  effort,
+	run, err := action.ClaudeSpawn{
+		Purpose:    action.PurposeResume,
+		Account:    request.Account,
+		Cache1H:    request.Cache1H,
+		Args:       arguments,
+		Home:       request.Home,
+		Machine:    request.Machine,
+		Model:      request.Model,
+		Effort:     effort,
+		PromptFile: request.PromptChannel,
 	}.ShellCommand()
+	if err != nil {
+		return "", fmt.Errorf("render claude respawn command: %w", err)
+	}
+	return run, nil
 }
 
 func engineRun(request Request) (string, error) {
@@ -547,14 +625,14 @@ func engineRun(request Request) (string, error) {
 func codexRun(request Request) (string, error) {
 	effort, err := action.CodexEffort(request.Effort)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve codex respawn effort: %w", err)
 	}
 	parts := []string{
 		"env", "-u", "CODEX_THREAD_ID", "-u", "CLAUDE_CODE_SESSION_ID",
 		"-u", "CLAUDECODE", "-u", "CLAUDE_CONFIG_DIR",
 	}
-	if request.AccountHome != "" {
-		parts = append(parts, "CODEX_HOME="+action.Quote(request.AccountHome))
+	if request.CodexHome != "" {
+		parts = append(parts, "CODEX_HOME="+action.Quote(request.CodexHome))
 	}
 	binary := request.CodexBinary
 	if binary == "" {
@@ -576,13 +654,26 @@ func codexRun(request Request) (string, error) {
 		flag := action.CodexEffortArg(effort)
 		parts = append(parts, flag[0], action.Quote(flag[1]))
 	}
+	if request.PromptChannel != "" {
+		flag := action.CodexDeveloperInstructionsArg(request.PromptChannel)
+		parts = append(parts, flag[0], action.Quote(flag[1]))
+	}
 	if request.SessionID != "" {
 		parts = append(parts, "resume", action.Quote(request.SessionID))
 	}
 	return strings.Join(parts, " "), nil
 }
 
-func deliverThen(ctx context.Context, request Request, options Options, tmux Tmux, proc Process, stderr io.Writer) error {
+func deliverThen(
+	ctx context.Context,
+	request Request,
+	options Options,
+	tmux Tmux,
+	proc Process,
+	stderr io.Writer,
+) error {
+	// Idempotent: a direct-call test never routes through Run's defaults().
+	options.defaults()
 	for i := 0; i < options.ThenTries; i++ {
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
@@ -600,16 +691,12 @@ func deliverThen(ctx context.Context, request Request, options Options, tmux Tmu
 			if trustPrompt {
 				continue
 			}
-			if lastComposerLine(capture) != "" {
+			if composerDrawn(capture) {
 				goto ready
 			}
 		}
-		timer := time.NewTimer(time.Second)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := options.Clock.Sleep(ctx, time.Second); err != nil {
+			return err
 		}
 	}
 	return fmt.Errorf("reload --then: input box never appeared")
@@ -674,7 +761,9 @@ ready:
 				typed = true
 				break
 			}
-			time.Sleep(200 * time.Millisecond)
+			if err := options.Clock.Sleep(ctx, 200*time.Millisecond); err != nil {
+				return err
+			}
 			continue
 		}
 		// capture != baseline is a weak, supporting signal only: both TUIs
@@ -689,10 +778,14 @@ ready:
 			typed = true
 			break
 		}
-		time.Sleep(200 * time.Millisecond)
+		if err := options.Clock.Sleep(ctx, 200*time.Millisecond); err != nil {
+			return err
+		}
 	}
 	if !typed {
-		return errors.New("reload --then: typed text never rendered in the composer — looked for the prompt's tail text and, when a pre-send baseline was captured, a paste placeholder there too, but neither appeared — refusing blind Enter")
+		return errors.New(
+			"reload --then: typed text never rendered in the composer — looked for the prompt's tail text and, when a pre-send baseline was captured, a paste placeholder there too, but neither appeared — refusing blind Enter",
+		)
 	}
 	// The submit proof reuses the SAME tail needle the typed proof just saw
 	// present. Evidence seen present and then seen absent is a real transition;
@@ -705,11 +798,15 @@ ready:
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 			return fmt.Errorf("reload --then: submit prompt: %w", err)
 		}
-		time.Sleep(150 * time.Millisecond)
+		if err := options.Clock.Sleep(ctx, 150*time.Millisecond); err != nil {
+			return err
+		}
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 			return fmt.Errorf("reload --then: confirm prompt submit: %w", err)
 		}
-		time.Sleep(400 * time.Millisecond)
+		if err := options.Clock.Sleep(ctx, 400*time.Millisecond); err != nil {
+			return err
+		}
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
 			return fmt.Errorf("reload --then: verify prompt submit: %w", err)
@@ -723,7 +820,12 @@ ready:
 			return nil
 		}
 	}
-	if err := tmux.Display(ctx, request.SocketPath, request.Pane, "reload --then typed but submit unconfirmed — press Enter"); err != nil {
+	if err := tmux.Display(
+		ctx,
+		request.SocketPath,
+		request.Pane,
+		"reload --then typed but submit unconfirmed — press Enter",
+	); err != nil {
 		return fmt.Errorf("reload --then: display unconfirmed submit: %w", err)
 	}
 	// Neither "submitted" nor "never typed" is true here: the prompt was
@@ -759,137 +861,8 @@ func currentPanePID(ctx context.Context, socket, wanted string, tmux Tmux) (int,
 	return 0, errors.New("reborn pane disappeared")
 }
 
-// composerText returns the ACTIVE composer's WHOLE draft: the marker line plus
-// every wrapped continuation line beneath it, up to the box's closing rule.
-//
-// A one-line read was the bug this replaces. Claude and Codex both wrap a long
-// draft inside the input box and print the ❯/› marker on the FIRST line only,
-// so a check that scanned the marker line alone saw the draft's head and never
-// its tail — and deliverThen proves delivery by the TAIL, which is the half
-// that proves nothing was truncated in transit. Every steer worth sending after
-// a reload is long enough to wrap, so the proof could never be satisfied and
-// the follow-up sat in the composer waiting for a human finger.
-//
-// The block ends at the box's horizontal rule. When a render carries no closing
-// rule the block runs to the end of the capture: the callers only ever ask
-// whether their OWN text is present, so trailing status rows cost nothing,
-// while a missing continuation line costs the whole delivery.
-func composerText(capture string) string {
-	lines := strings.Split(capture, "\n")
-	start := -1
-	for index := len(lines) - 1; index >= 0; index-- {
-		if strings.Contains(lines[index], "❯") || strings.Contains(lines[index], "›") {
-			start = index
-			break
-		}
-	}
-	if start < 0 {
-		return ""
-	}
-	block := lines[start : start+1]
-	for index := start + 1; index < len(lines); index++ {
-		if composerBoxRule(lines[index]) {
-			break
-		}
-		block = lines[start : index+1]
-	}
-	return strings.Join(block, "\n")
-}
-
-// composerBoxRule reports whether a captured line is one of the input box's
-// horizontal rules — visible content that is nothing but box-drawing glyphs.
-// Matching the CLASS (U+2500-U+257F) rather than one theme's glyph keeps a
-// restyled border from silently reopening the wrap bug.
-func composerBoxRule(line string) bool {
-	drawn := false
-	for _, character := range line {
-		switch {
-		case unicode.IsSpace(character):
-		case character >= 0x2500 && character <= 0x257F:
-			drawn = true
-		default:
-			return false
-		}
-	}
-	return drawn
-}
-
-// squashSpace drops every space so a comparison survives the composer's line
-// wrapping. Collapsing to single spaces survives a wrap at a word boundary and
-// NOT one inside a word, and a token wider than the box — a long path or URL,
-// the substance of most steers — is wrapped mid-word.
-func squashSpace(value string) string {
-	return strings.Join(strings.Fields(value), "")
-}
-
-func lastComposerLine(capture string) string {
-	lines := strings.Split(capture, "\n")
-	for index := len(lines) - 1; index >= 0; index-- {
-		if strings.Contains(lines[index], "❯") || strings.Contains(lines[index], "›") {
-			return lines[index]
-		}
-	}
-	return ""
-}
-
-func claudeLive(proc Process, panePID int) (bool, error) {
-	return engineLive(proc, panePID, pfmengine.Claude, "", "")
-}
-
 func engineLabel(id pfmengine.ID) string {
 	return pfmengine.MustLookup(id).Short
-}
-
-func engineLive(proc Process, panePID int, engine pfmengine.ID, claudeBinary, codexBinary string) (bool, error) {
-	if proc == nil {
-		return false, errors.New("process reader is unavailable")
-	}
-	if panePID <= 0 {
-		return false, errors.New("pane process id is unavailable")
-	}
-	pids, err := proc.PIDs()
-	if err != nil {
-		return false, err
-	}
-	matcher, err := gather.MatcherFor(engine)
-	if err != nil {
-		return false, err
-	}
-	binary := claudeBinary
-	if engine == pfmengine.Codex {
-		binary = codexBinary
-	}
-processes:
-	for _, pid := range pids {
-		argv, err := proc.Cmdline(pid)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return false, fmt.Errorf("read process %d command: %w", pid, err)
-		}
-		if !matcher.IsCommand(argv, binary) {
-			continue
-		}
-		current := pid
-		for depth := 0; depth <= 4; depth++ {
-			if current == panePID {
-				return true, nil
-			}
-			stat, statErr := proc.Stat(current)
-			if statErr != nil {
-				if errors.Is(statErr, fs.ErrNotExist) {
-					continue processes
-				}
-				return false, fmt.Errorf("read process %d ancestry: %w", current, statErr)
-			}
-			if stat.ParentPID <= 1 || stat.ParentPID == current {
-				break
-			}
-			current = stat.ParentPID
-		}
-	}
-	return false, nil
 }
 
 func failThen(ctx context.Context, request Request, sidDir string, tmux Tmux, reason string) error {
@@ -899,64 +872,71 @@ func failThen(ctx context.Context, request Request, sidDir string, tmux Tmux, re
 		if err := os.WriteFile(path, []byte(request.Then+"\n"), 0o600); err != nil {
 			failures = append(failures, fmt.Errorf("write reload --then sentinel %q: %w", path, err))
 		}
-		if err := tmux.Display(ctx, request.SocketPath, request.Pane, "reload --then NOT delivered ("+reason+") — prompt saved"); err != nil {
+		if err := tmux.Display(
+			ctx,
+			request.SocketPath,
+			request.Pane,
+			"reload --then NOT delivered ("+reason+") — prompt saved",
+		); err != nil {
 			failures = append(failures, fmt.Errorf("display reload --then failure: %w", err))
 		}
 	}
 	return errors.Join(failures...)
 }
 
-func TranscriptCWD(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open reload transcript %q: %w", path, err)
-	}
-	decoder := json.NewDecoder(file)
-	cwd := ""
-	for i := 0; i < 40; i++ {
-		var row map[string]any
-		if err := decoder.Decode(&row); errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			_ = file.Close()
-			return "", fmt.Errorf("decode reload transcript %q record %d: %w", path, i+1, err)
-		}
-		if value, ok := row["cwd"].(string); ok && value != "" {
-			cwd = value
-			break
-		}
-	}
-	if err := file.Close(); err != nil {
-		return "", fmt.Errorf("close reload transcript %q: %w", path, err)
-	}
-	return cwd, nil
-}
-
 func SessionFromCrumb(sidDir, socket, pane string) (string, string, error) {
 	for _, name := range []string{socket + "." + pane, socket} {
-		path := filepath.Join(sidDir, name)
-		content, err := os.ReadFile(path)
+		id, transcript, found, err := readSessionCrumb(filepath.Join(sidDir, name))
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return "", "", fmt.Errorf("read reload breadcrumb %q: %w", path, err)
+			return "", "", err
 		}
-		transcript := strings.TrimSpace(string(content))
-		if transcript == "" {
+		if !found {
 			continue
 		}
-		id := strings.TrimSuffix(filepath.Base(transcript), filepath.Ext(transcript))
 		return id, transcript, nil
 	}
 	return "", "", nil
 }
 
-func ParseIntEnv(name string, fallback int) int {
-	if value, err := strconv.Atoi(os.Getenv(name)); err == nil && value > 0 {
+// ErrInvalidPaneCrumb reports a socket/pane pair that cannot name one exact
+// pane breadcrumb under gather's strict filename grammar.
+var ErrInvalidPaneCrumb = errors.New("invalid pane breadcrumb name")
+
+// SessionFromPaneCrumb reads only the exact pane binding. It deliberately has
+// no socket-level fallback: split callers must prove which pane owns an ID.
+func SessionFromPaneCrumb(sidDir, socket, pane string) (string, string, error) {
+	if !filepath.IsAbs(sidDir) {
+		return "", "", fmt.Errorf("reload breadcrumb directory %q is not absolute", sidDir)
+	}
+	name := socket + "." + pane
+	parsedSocket, parsedPane, ok := gather.ParseCrumbName(name)
+	if pane == "" || !ok || parsedSocket != socket || parsedPane != pane {
+		return "", "", fmt.Errorf("%w: socket %q pane %q", ErrInvalidPaneCrumb, socket, pane)
+	}
+	id, transcript, _, err := readSessionCrumb(filepath.Join(sidDir, name))
+	return id, transcript, err
+}
+
+func readSessionCrumb(path string) (id, transcript string, found bool, err error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, fmt.Errorf("read reload breadcrumb %q: %w", path, err)
+	}
+	transcript = strings.TrimSpace(string(content))
+	if transcript == "" {
+		return "", "", false, nil
+	}
+	id = strings.TrimSuffix(filepath.Base(transcript), filepath.Ext(transcript))
+	return id, transcript, true, nil
+}
+
+// ParseIntEnv reads name through env and returns fallback when it is unset
+// or not a positive integer.
+func ParseIntEnv(env paths.Env, name string, fallback int) int {
+	if value, err := strconv.Atoi(env.Get(name)); err == nil && value > 0 {
 		return value
 	}
 	return fallback

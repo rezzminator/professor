@@ -1,0 +1,17 @@
+# Tier B known gaps — a listed beat reports `known-gap` and does not fail the suite;
+# a listed beat that PASSES is a red row ("known-gap now passes — remove the entry").
+# Source: docs/dev/trains/testing-foundation/waves/4-integration-dfs/spec.md
+#
+# Every entry needs `expires:` (Wave 8's law — a known issue is fixed, not
+# ledgered): no expires, or a date in the past, and the run is red before a
+# single lane starts (lib.sh `gaps_validate`, called by run.sh). An `arch:` entry
+# is a gap only on that architecture — anywhere else the beat must assert for
+# real, and reporting `known` there is itself a red row.
+# Wave 8 deletes each entry in the commit that fixes its gap.
+gaps:
+  - beat: O2.09-harvester
+    why: "the harvestpy pinned Python conversion sidecar has no verified provisioning path on linux-arm64"
+    owner: GOD
+    date: 2026-09-17
+    expires: 2026-10-15
+    arch: linux-arm64

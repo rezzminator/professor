@@ -31,10 +31,34 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 		content   []byte
 	}
 	helpers := []installedHelper{
-		{canonical, "cc-memory-wire.sh", "memory-wire.sh", 0o751, oldMemoryHelperFixture(t, "memory-wire.sh", "invented-vault")},
-		{canonical, "cc-memory-consolidate.sh", "memory-consolidate.sh", 0o705, oldMemoryHelperFixture(t, "memory-consolidate.sh", "invented-vault")},
-		{account, "cc-memory-wire.sh", "memory-wire.sh", 0o710, oldMemoryHelperFixture(t, "memory-wire.sh", "other-invented-vault")},
-		{account, "cc-memory-consolidate.sh", "memory-consolidate.sh", 0o740, oldMemoryHelperFixture(t, "memory-consolidate.sh", "other-invented-vault")},
+		{
+			canonical,
+			"cc-memory-wire.sh",
+			"memory-wire.sh",
+			0o751,
+			oldMemoryHelperFixture(t, "memory-wire.sh", "invented-vault"),
+		},
+		{
+			canonical,
+			"cc-memory-consolidate.sh",
+			"memory-consolidate.sh",
+			0o705,
+			oldMemoryHelperFixture(t, "memory-consolidate.sh", "invented-vault"),
+		},
+		{
+			account,
+			"cc-memory-wire.sh",
+			"memory-wire.sh",
+			0o710,
+			oldMemoryHelperFixture(t, "memory-wire.sh", "other-invented-vault"),
+		},
+		{
+			account,
+			"cc-memory-consolidate.sh",
+			"memory-consolidate.sh",
+			0o740,
+			oldMemoryHelperFixture(t, "memory-consolidate.sh", "other-invented-vault"),
+		},
 	}
 	for _, helper := range helpers {
 		oldPath := filepath.Join(helper.configDir, "scripts", helper.oldName)
@@ -43,7 +67,12 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 	// An already-copied byte-and-mode-identical destination is accepted and the
 	// old source is still retired; this is the interrupted prior-apply boundary.
 	existing := helpers[len(helpers)-1]
-	writeMemoryHelperFixture(t, filepath.Join(existing.configDir, "scripts", existing.newName), existing.content, existing.mode)
+	writeMemoryHelperFixture(
+		t,
+		filepath.Join(existing.configDir, "scripts", existing.newName),
+		existing.content,
+		existing.mode,
+	)
 
 	canonicalOld := filepath.Join(canonical, "scripts", "cc-memory-wire.sh")
 	canonicalNew := filepath.Join(canonical, "scripts", "memory-wire.sh")
@@ -62,7 +91,11 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: configDirs, Runner: &fakeRunner{}, Now: func() time.Time { return now },
+		Mode:       ModeApply,
+		Home:       home,
+		ConfigDirs: configDirs,
+		Runner:     &fakeRunner{},
+		Now:        func() time.Time { return now },
 	}); err != nil {
 		t.Fatalf("apply migration: %v", err)
 	}
@@ -101,7 +134,8 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 		}
 	}
 	for _, command := range settingsCommands {
-		if strings.Contains(command, canonicalOld) || strings.Contains(command, "$HOME/.claude/scripts/cc-memory-wire.sh") {
+		if strings.Contains(command, canonicalOld) ||
+			strings.Contains(command, "$HOME/.claude/scripts/cc-memory-wire.sh") {
 			t.Errorf("settings.json retained owned old path in %q:\n%s", command, settings)
 		}
 	}
@@ -163,12 +197,16 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 	}{
 		{
 			name: "custom old script",
-			prepare: func(t *testing.T, _ string, oldConsolidate string, _ string) {
+			prepare: func(t *testing.T, _, oldConsolidate, _ string) {
 				content, err := os.ReadFile(oldConsolidate)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(oldConsolidate, append(content, []byte("# operator customization\n")...), 0o700); err != nil {
+				if err := os.WriteFile(
+					oldConsolidate,
+					append(content, []byte("# operator customization\n")...),
+					0o700,
+				); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -176,9 +214,14 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 		},
 		{
 			name: "old script symlink",
-			prepare: func(t *testing.T, home, oldConsolidate string, _ string) {
+			prepare: func(t *testing.T, home, oldConsolidate, _ string) {
 				target := filepath.Join(home, "operator-consolidate.sh")
-				writeMemoryHelperFixture(t, target, oldMemoryHelperFixture(t, "memory-consolidate.sh", "conflict-vault"), 0o700)
+				writeMemoryHelperFixture(
+					t,
+					target,
+					oldMemoryHelperFixture(t, "memory-consolidate.sh", "conflict-vault"),
+					0o700,
+				)
 				if err := os.Remove(oldConsolidate); err != nil {
 					t.Fatal(err)
 				}
@@ -190,14 +233,14 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 		},
 		{
 			name: "destination content conflict",
-			prepare: func(t *testing.T, _ string, _ string, newConsolidate string) {
+			prepare: func(t *testing.T, _, _, newConsolidate string) {
 				writeMemoryHelperFixture(t, newConsolidate, []byte("operator destination\n"), 0o700)
 			},
 			wantErr: "content conflicts with owned source",
 		},
 		{
 			name: "destination symlink",
-			prepare: func(t *testing.T, home, _ string, newConsolidate string) {
+			prepare: func(t *testing.T, home, _, newConsolidate string) {
 				target := filepath.Join(home, "operator-destination.sh")
 				writeMemoryHelperFixture(t, target, []byte("operator destination\n"), 0o700)
 				if err := os.Symlink(target, newConsolidate); err != nil {
@@ -208,51 +251,76 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 		},
 		{
 			name: "destination mode conflict",
-			prepare: func(t *testing.T, _ string, _ string, newConsolidate string) {
-				writeMemoryHelperFixture(t, newConsolidate, oldMemoryHelperFixture(t, "memory-consolidate.sh", "conflict-vault"), 0o600)
+			prepare: func(t *testing.T, _, _, newConsolidate string) {
+				writeMemoryHelperFixture(
+					t,
+					newConsolidate,
+					oldMemoryHelperFixture(t, "memory-consolidate.sh", "conflict-vault"),
+					0o600,
+				)
 			},
 			wantErr: "mode 600 conflicts with owned source",
 		},
 		{
 			name: "compound old path hook",
-			prepare: func(t *testing.T, home, _ string, _ string) {
+			prepare: func(t *testing.T, home, _, _ string) {
 				oldWire := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
-				writeFixture(t, filepath.Join(home, ".claude", "settings.local.json"), memorySettingsFixture(oldWire+" && echo done"))
+				writeFixture(
+					t,
+					filepath.Join(home, ".claude", "settings.local.json"),
+					memorySettingsFixture(oldWire+" && echo done"),
+				)
 			},
 			wantErr: "requires manual migration",
 		},
 		{
 			name: "argument-bearing old path hook",
-			prepare: func(t *testing.T, home, _ string, _ string) {
+			prepare: func(t *testing.T, home, _, _ string) {
 				oldWire := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
-				writeFixture(t, filepath.Join(home, ".claude", "settings.local.json"), memorySettingsFixture("bash "+oldWire+" --operator-flag"))
+				writeFixture(
+					t,
+					filepath.Join(home, ".claude", "settings.local.json"),
+					memorySettingsFixture("bash "+oldWire+" --operator-flag"),
+				)
 			},
 			wantErr: "requires manual migration",
 		},
 		{
 			name: "braced HOME old path hook",
-			prepare: func(t *testing.T, home, _ string, _ string) {
-				writeFixture(t, filepath.Join(home, ".claude", "settings.local.json"), memorySettingsFixture("bash ${HOME}/.claude/scripts/cc-memory-wire.sh --operator-flag"))
+			prepare: func(t *testing.T, home, _, _ string) {
+				writeFixture(
+					t,
+					filepath.Join(home, ".claude", "settings.local.json"),
+					memorySettingsFixture("bash ${HOME}/.claude/scripts/cc-memory-wire.sh --operator-flag"),
+				)
 			},
 			wantErr: "requires manual migration",
 		},
 		{
 			name: "tilde old path hook",
-			prepare: func(t *testing.T, home, _ string, _ string) {
-				writeFixture(t, filepath.Join(home, ".claude", "settings.local.json"), memorySettingsFixture("~/.claude/scripts/cc-memory-wire.sh | cat"))
+			prepare: func(t *testing.T, home, _, _ string) {
+				writeFixture(
+					t,
+					filepath.Join(home, ".claude", "settings.local.json"),
+					memorySettingsFixture("~/.claude/scripts/cc-memory-wire.sh | cat"),
+				)
 			},
 			wantErr: "requires manual migration",
 		},
 		{
 			name: "split quoted old path hook",
-			prepare: func(t *testing.T, home, _ string, _ string) {
-				writeFixture(t, filepath.Join(home, ".claude", "settings.local.json"), memorySettingsFixture(`bash $HOME/.claude/scripts/'cc-memory'-wire.sh --operator-flag`))
+			prepare: func(t *testing.T, home, _, _ string) {
+				writeFixture(
+					t,
+					filepath.Join(home, ".claude", "settings.local.json"),
+					memorySettingsFixture(`bash $HOME/.claude/scripts/'cc-memory'-wire.sh --operator-flag`),
+				)
 			},
 			wantErr: "requires manual migration",
 		},
 		{
 			name: "non-command old path hook",
-			prepare: func(t *testing.T, home, _ string, _ string) {
+			prepare: func(t *testing.T, home, _, _ string) {
 				oldWire := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
 				document := memorySettingsDocument(oldWire)
 				events := document["hooks"].(map[string]any)
@@ -269,7 +337,7 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 		},
 		{
 			name: "settings symlink",
-			prepare: func(t *testing.T, home, _ string, _ string) {
+			prepare: func(t *testing.T, home, _, _ string) {
 				target := filepath.Join(home, "operator-settings.json")
 				writeFixture(t, target, memorySettingsFixture("echo operator"))
 				if err := os.Symlink(target, filepath.Join(home, ".claude", "settings.local.json")); err != nil {
@@ -280,7 +348,7 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 		},
 		{
 			name: "malformed settings shape",
-			prepare: func(t *testing.T, home, _ string, _ string) {
+			prepare: func(t *testing.T, home, _, _ string) {
 				writeFixture(t, filepath.Join(home, ".claude", "settings.local.json"), `{"hooks":[]}`)
 			},
 			wantErr: "settings hooks must be an object",
@@ -295,7 +363,12 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 			oldConsolidate := filepath.Join(config, "scripts", "cc-memory-consolidate.sh")
 			newConsolidate := filepath.Join(config, "scripts", "memory-consolidate.sh")
 			writeMemoryHelperFixture(t, oldWire, oldMemoryHelperFixture(t, "memory-wire.sh", "conflict-vault"), 0o751)
-			writeMemoryHelperFixture(t, oldConsolidate, oldMemoryHelperFixture(t, "memory-consolidate.sh", "conflict-vault"), 0o705)
+			writeMemoryHelperFixture(
+				t,
+				oldConsolidate,
+				oldMemoryHelperFixture(t, "memory-consolidate.sh", "conflict-vault"),
+				0o705,
+			)
 			writeFixture(t, filepath.Join(config, "settings.json"), memorySettingsFixture(oldWire))
 			test.prepare(t, home, oldConsolidate, newConsolidate)
 			before := snapshotMemoryMigrationTree(t, home)
@@ -303,7 +376,8 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 			_, err := Run(context.Background(), Options{
 				Mode: ModeApply, Home: home, ConfigDirs: []string{config}, Runner: &fakeRunner{},
 			})
-			if err == nil || !strings.Contains(err.Error(), "preflight apply plan") || !strings.Contains(err.Error(), test.wantErr) {
+			if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
+				!strings.Contains(err.Error(), test.wantErr) {
 				t.Fatalf("apply error = %v, want preflight refusal containing %q", err, test.wantErr)
 			}
 			if after := snapshotMemoryMigrationTree(t, home); !reflect.DeepEqual(after, before) {
@@ -378,7 +452,11 @@ func TestRewriteMemoryHelperHookPathsRejectsMalformedSettingsShapes(t *testing.T
 		{"hooks null", `{"hooks":null}`, "settings hooks must be an object"},
 		{"event object", `{"hooks":{"SessionStart":{}}}`, "settings hook event must be an array"},
 		{"entry scalar", `{"hooks":{"SessionStart":["bad"]}}`, "settings hook entry must be an object"},
-		{"entry hooks object", `{"hooks":{"SessionStart":[{"hooks":{}}]}}`, "settings hook entry hooks must be an array"},
+		{
+			"entry hooks object",
+			`{"hooks":{"SessionStart":[{"hooks":{}}]}}`,
+			"settings hook entry hooks must be an array",
+		},
 		{"hook scalar", `{"hooks":{"SessionStart":[{"hooks":["bad"]}]}}`, "settings hook must be an object"},
 	}
 	for _, test := range tests {
@@ -480,7 +558,12 @@ func oldMemoryHelperFixture(t *testing.T, newName, vault string) []byte {
 		content = bytes.Replace(content, []byte("# memory-wire.sh —"), []byte("# cc-memory-wire.sh —"), 1)
 	case "memory-consolidate.sh":
 		content = bytes.Replace(content, []byte("# memory-consolidate.sh —"), []byte("# cc-memory-consolidate.sh —"), 1)
-		content = bytes.Replace(content, []byte("SessionStart hook (memory-wire.sh)"), []byte("SessionStart hook (cc-memory-wire.sh)"), 1)
+		content = bytes.Replace(
+			content,
+			[]byte("SessionStart hook (memory-wire.sh)"),
+			[]byte("SessionStart hook (cc-memory-wire.sh)"),
+			1,
+		)
 	default:
 		t.Fatalf("unknown memory helper template %q", newName)
 	}
@@ -556,7 +639,7 @@ func containsString(values []string, wanted string) bool {
 func snapshotMemoryMigrationTree(t *testing.T, root string) map[string]string {
 	t.Helper()
 	snapshot := make(map[string]string)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, func(path string, _ os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

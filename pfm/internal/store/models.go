@@ -1,11 +1,11 @@
 package store
 
-import "hostops/pfm/internal/engine"
+import "github.com/rezzminator/professor/pfm/internal/engine"
 
-// OcSession is one indexed OpenCode session, read from OpenCode's own SQLite
+// OpenCodeSession is one indexed OpenCode session, read from OpenCode's own SQLite
 // store (opencode.db). It is the OpenCode twin of Transcript/Rollout: every
 // field is derived data, rebuildable by re-reading that store.
-type OcSession struct {
+type OpenCodeSession struct {
 	ID    string
 	Title string
 	// Directory is the session's working directory; ProjectDir the project
@@ -53,6 +53,16 @@ type Transcript struct {
 	LastPrompt   string
 	PromptCount  int64
 	IsBG         bool
+	// ContinuedIn is the session Claude Code moved this conversation into —
+	// the `continued-in` record it appends when a chat is sent to the
+	// background and resumes under a new session id. It is the raw recorded
+	// value and round-trips through the indexer untouched.
+	ContinuedIn string
+	// Superseded is read-only and derived by the store: ContinuedIn names a
+	// transcript that is itself indexed, so this one is an earlier segment of
+	// that chat, not a chat of its own. A successor that was never indexed
+	// leaves the predecessor standing, so no conversation drops out of view.
+	Superseded bool
 }
 
 // EffectiveActivityNS is the latest meaningful user-prompt timestamp. Older

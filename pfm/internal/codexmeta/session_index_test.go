@@ -6,7 +6,11 @@ import (
 )
 
 func TestDecodeSessionIndexLineReadsCodexRenameEntries(t *testing.T) {
-	entry, err := DecodeSessionIndexLine([]byte(`{"id":"01a09828-1306-74f3-9d73-81e3d3158ab9","thread_name":"PING_PROBE","updated_at":"2026-09-13T00:26:01.324772Z"}`))
+	entry, err := DecodeSessionIndexLine(
+		[]byte(
+			`{"id":"01a09828-1306-74f3-9d73-81e3d3158ab9","thread_name":"PING_PROBE","updated_at":"2026-09-13T00:26:01.324772Z"}`,
+		),
+	)
 	if err != nil {
 		t.Fatalf("DecodeSessionIndexLine() error = %v", err)
 	}

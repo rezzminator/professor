@@ -100,7 +100,8 @@ func TestInstallReportsAnArmedGateAsOK(t *testing.T) {
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	// Pre-arm the clone's git config directly, bypassing the step under test.
-	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", ".githooks").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", ".githooks").
+		CombinedOutput(); err != nil {
 		t.Fatalf("pre-arm clone: %v: %s", err, out)
 	}
 	// Pre-settle the other two writeUpdateMetadata steps (marker + binary
@@ -177,5 +178,50 @@ func TestInstallRefusesABrokenHook(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), hook) {
 		t.Fatalf("writeUpdateMetadata() error = %v, want it to name the broken hook path %s", err, hook)
+	}
+}
+
+// TestInstallReportsAnAbsoluteHooksPathAsArmed is a REGRESSION test for the
+// 2026-09-14 retro finding: a clone armed with the absolute equivalent of
+// .githooks (e.g. "<clone>/.githooks", which `pfm doctor`'s inspectPrePushGateWithRunner
+// already accepts as armed by resolving against the repo toplevel) must be
+// reported ok and left untouched — not rewritten to the relative spelling.
+// FAILS on unfixed code because armSourceRepoPrePushGate compares the raw
+// core.hooksPath string to the literal ".githooks" and issues a change line
+// instead of ok.
+func TestInstallReportsAnAbsoluteHooksPathAsArmed(t *testing.T) {
+	home := t.TempDir()
+	clone := buildSourceCloneWithPrePushHook(t)
+	absolute := filepath.Join(clone, ".githooks")
+	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", absolute).CombinedOutput(); err != nil {
+		t.Fatalf("pre-arm clone with absolute hooksPath: %v: %s", err, out)
+	}
+	if err := WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordCanonicalBinary(home); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	installer := &engine{options: Options{Home: home, SourceRepo: clone, Stdout: &stdout}, apply: true}
+	if err := installer.writeUpdateMetadata(); err != nil {
+		t.Fatalf("writeUpdateMetadata() error = %v", err)
+	}
+	if got := gitConfigValue(t, clone, "core.hooksPath"); got != absolute {
+		t.Fatalf(
+			"core.hooksPath = %q, want unchanged absolute path %q (an equivalent value must never be rewritten)",
+			got,
+			absolute,
+		)
+	}
+	want := "pre-push gate armed core.hooksPath=" + absolute + " in " + clone
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout = %q, want the ok line %q", stdout.String(), want)
+	}
+	if installer.report.Changed != 0 {
+		t.Fatalf(
+			"report.Changed = %d, want 0 — an already-armed absolute-path gate is ok, never a change",
+			installer.report.Changed,
+		)
 	}
 }

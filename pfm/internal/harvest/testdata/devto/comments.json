@@ -1,0 +1,162 @@
+[
+ {
+  "type_of": "comment",
+  "id_code": "38f1m",
+  "created_at": "2026-05-27T07:12:44Z",
+  "body_html": "<p>Comment 38f1m with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+  "user": {
+   "name": "User 0",
+   "username": "user-0",
+   "user_id": 1001
+  },
+  "children": []
+ },
+ {
+  "type_of": "comment",
+  "id_code": "38f46",
+  "created_at": "2026-05-27T08:23:56Z",
+  "body_html": "<p>Comment 38f46 with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+  "user": {
+   "name": "User 1",
+   "username": "user-1",
+   "user_id": 1002
+  },
+  "children": [
+   {
+    "type_of": "comment",
+    "id_code": "38f4k",
+    "created_at": "2026-05-27T08:44:06Z",
+    "body_html": "<p>Comment 38f4k with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+    "user": {
+     "name": "User 0",
+     "username": "user-0",
+     "user_id": 1002
+    },
+    "children": [
+     {
+      "type_of": "comment",
+      "id_code": "38f52",
+      "created_at": "2026-05-27T09:08:13Z",
+      "body_html": "<p>Comment 38f52 with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+      "user": {
+       "name": "User 2",
+       "username": "user-2",
+       "user_id": 1003
+      },
+      "children": [
+       {
+        "type_of": "comment",
+        "id_code": "38f56",
+        "created_at": "2026-05-27T09:12:07Z",
+        "body_html": "<p>Comment 38f56 with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+        "user": {
+         "name": "User 0",
+         "username": "user-0",
+         "user_id": 1003
+        },
+        "children": []
+       }
+      ]
+     },
+     {
+      "type_of": "comment",
+      "id_code": "38f5n",
+      "created_at": "2026-05-27T09:42:39Z",
+      "body_html": "<p>Comment 38f5n with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+      "user": {
+       "name": "User 1",
+       "username": "user-1",
+       "user_id": 1003
+      },
+      "children": [
+       {
+        "type_of": "comment",
+        "id_code": "38f63",
+        "created_at": "2026-05-27T09:59:55Z",
+        "body_html": "<p>Comment 38f63 with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+        "user": {
+         "name": "User 0",
+         "username": "user-0",
+         "user_id": 1003
+        },
+        "children": []
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "type_of": "comment",
+  "id_code": "38f4j",
+  "created_at": "2026-05-27T08:41:14Z",
+  "body_html": "<p>Comment 38f4j with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+  "user": {
+   "name": "User 3",
+   "username": "user-3",
+   "user_id": 1004
+  },
+  "children": [
+   {
+    "type_of": "comment",
+    "id_code": "38f54",
+    "created_at": "2026-05-27T09:10:09Z",
+    "body_html": "<p>Comment 38f54 with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+    "user": {
+     "name": "User 0",
+     "username": "user-0",
+     "user_id": 1004
+    },
+    "children": []
+   }
+  ]
+ },
+ {
+  "type_of": "comment",
+  "id_code": "38he8",
+  "created_at": "2026-05-29T05:01:42Z",
+  "body_html": "<p>[deleted]</p>",
+  "user": {},
+  "children": [
+   {
+    "type_of": "comment",
+    "id_code": "38hkl",
+    "created_at": "2026-05-29T09:21:29Z",
+    "body_html": "<p>Comment 38hkl with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+    "user": {
+     "name": "User 0",
+     "username": "user-0",
+     "user_id": 1004
+    },
+    "children": [
+     {
+      "type_of": "comment",
+      "id_code": "38i3e",
+      "created_at": "2026-05-29T13:03:06Z",
+      "body_html": "<p>Comment 38i3e with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+      "user": {
+       "name": "User 4",
+       "username": "user-4",
+       "user_id": 1005
+      },
+      "children": [
+       {
+        "type_of": "comment",
+        "id_code": "38i6e",
+        "created_at": "2026-05-29T14:04:00Z",
+        "body_html": "<p>Comment 38i6e with <em>emphasis</em> and a <a href=\"https://example.com/\" rel=\"nofollow\">link</a>.</p>\n\n<p>A second paragraph.</p>",
+        "user": {
+         "name": "User 0",
+         "username": "user-0",
+         "user_id": 1005
+        },
+        "children": []
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+]

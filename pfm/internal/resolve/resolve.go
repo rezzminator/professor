@@ -12,21 +12,29 @@ import (
 	"strings"
 	"sync"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/paths"
-	pfmtmux "hostops/pfm/internal/tmux"
-
 	"golang.org/x/sync/errgroup"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // Kind is one public resolution namespace.
 type Kind string
 
 const (
+	// CodeAmbiguous means more than one live target matched.
+	CodeAmbiguous = 2
+	// CodeUnknown means no live target matched the requested namespace.
+	CodeUnknown = 4
+	// CodeUndelivered means resolution could not complete because a probe failed.
+	CodeUndelivered = 6
+
 	Label    Kind = "label"
 	Session  Kind = "session"
 	CxWindow Kind = "cxwin"
+	tmuxName      = "tmux"
 )
 
 // Outcome is the exact stdout/stderr/return-code contract consumed by chat.sh.
@@ -37,7 +45,7 @@ type Outcome struct {
 }
 
 // Pane is one tmux pane row used by all three resolvers.
-type Pane struct {
+type ResolvedPane struct {
 	SocketPath     string
 	SessionName    string
 	PaneID         string
@@ -47,7 +55,7 @@ type Pane struct {
 
 // TmuxClient supplies the two read-only tmux operations resolution needs.
 type TmuxClient interface {
-	ListPanes(ctx context.Context, socketPath string) ([]Pane, error)
+	ListPanes(ctx context.Context, socketPath string) ([]ResolvedPane, error)
 	CapturePane(ctx context.Context, socketPath, paneID string) (string, error)
 }
 
@@ -76,7 +84,7 @@ func New(client TmuxClient, configured ...Binaries) (*Resolver, error) {
 		return nil, fmt.Errorf("resolve resolver paths: %w", err)
 	}
 	if client == nil {
-		client = CommandTmux{}
+		client = TmuxResolver{}
 	}
 	binaries := Binaries{}
 	if len(configured) != 0 {
@@ -121,7 +129,7 @@ func (resolver *Resolver) Resolve(
 	}
 }
 
-func (resolver *Resolver) allPanes(ctx context.Context) ([]Pane, error) {
+func (resolver *Resolver) allPanes(ctx context.Context) ([]ResolvedPane, error) {
 	entries, err := os.ReadDir(resolver.tmuxDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -140,7 +148,7 @@ func (resolver *Resolver) allPanes(ctx context.Context) ([]Pane, error) {
 	sort.Strings(socketPaths)
 
 	var mutex sync.Mutex
-	rowsBySocket := make(map[string][]Pane, len(socketPaths))
+	rowsBySocket := make(map[string][]ResolvedPane, len(socketPaths))
 	group, groupContext := errgroup.WithContext(ctx)
 	group.SetLimit(32)
 	for _, socketPath := range socketPaths {
@@ -168,7 +176,7 @@ func (resolver *Resolver) allPanes(ctx context.Context) ([]Pane, error) {
 	if err := group.Wait(); err != nil {
 		return nil, err
 	}
-	panes := make([]Pane, 0)
+	panes := make([]ResolvedPane, 0)
 	for _, socketPath := range socketPaths {
 		panes = append(panes, rowsBySocket[socketPath]...)
 	}
@@ -190,7 +198,7 @@ type captureResult struct {
 func (resolver *Resolver) resolveLabel(
 	ctx context.Context,
 	want string,
-	panes []Pane,
+	panes []ResolvedPane,
 ) (Outcome, error) {
 	results := make([]captureResult, 0)
 	var mutex sync.Mutex
@@ -199,7 +207,7 @@ func (resolver *Resolver) resolveLabel(
 	for order, pane := range panes {
 		order := order
 		pane := pane
-		if pane.PaneID == "" || pane.CurrentCommand == "tmux" {
+		if pane.PaneID == "" || pane.CurrentCommand == tmuxName {
 			continue
 		}
 		group.Go(func() error {
@@ -312,7 +320,7 @@ func (resolver *Resolver) sameChatWinner(
 		} else if candidateUUID != uuid {
 			return match{}, "", false
 		}
-		epoch := socketEpoch(socket)
+		epoch := socketStartedAt(socket)
 		if epoch > bestEpoch {
 			bestEpoch = epoch
 			winner = candidate
@@ -321,9 +329,9 @@ func (resolver *Resolver) sameChatWinner(
 	return winner, uuid, uuid != ""
 }
 
-func (resolver *Resolver) resolveSession(want string, panes []Pane) Outcome {
+func (resolver *Resolver) resolveSession(want string, panes []ResolvedPane) Outcome {
 	matches := make([]match, 0)
-	panesBySession := make(map[string][]Pane)
+	panesBySession := make(map[string][]ResolvedPane)
 	seen := make(map[string]struct{})
 	for _, pane := range panes {
 		if pane.SessionName != want {
@@ -347,7 +355,7 @@ func (resolver *Resolver) resolveSession(want string, panes []Pane) Outcome {
 		key := matches[0].socketPath + "\x00" + matches[0].session
 		sessionPanes := panesBySession[key]
 		if len(sessionPanes) > 1 {
-			claudePanes := make([]Pane, 0)
+			claudePanes := make([]ResolvedPane, 0)
 			for _, pane := range sessionPanes {
 				if isClaudePaneCommand(pane.CurrentCommand, resolver.binaries[pfmengine.Claude]) {
 					claudePanes = append(claudePanes, pane)
@@ -388,9 +396,9 @@ func (resolver *Resolver) resolveSession(want string, panes []Pane) Outcome {
 	}
 }
 
-func (resolver *Resolver) resolveCxWindow(want string, panes []Pane) Outcome {
+func (resolver *Resolver) resolveCxWindow(want string, panes []ResolvedPane) Outcome {
 	queryRunes := runeCount(want)
-	clippedWant := clipRunes(want, 24)
+	clippedWant := naming.ClipRunes(want, 24)
 	matches := make([]match, 0)
 	seen := make(map[string]struct{})
 	for _, pane := range panes {
@@ -399,7 +407,7 @@ func (resolver *Resolver) resolveCxWindow(want string, panes []Pane) Outcome {
 			strings.EqualFold(pane.WindowName, clippedWant)
 		id, known := pfmengine.FromSocket(filepath.Base(pane.SocketPath))
 		codexSocket := known && id == pfmengine.Codex
-		if (!codexSocket && !isCodexCommand(pane.CurrentCommand, resolver.binaries[pfmengine.Codex])) ||
+		if (!codexSocket && !isCodexPaneCommand(pane.CurrentCommand, resolver.binaries[pfmengine.Codex])) ||
 			pane.PaneID == "" ||
 			pane.WindowName == "" ||
 			(!exact && !clipped) {
@@ -442,63 +450,21 @@ func (resolver *Resolver) resolveCxWindow(want string, panes []Pane) Outcome {
 	}
 }
 
-// bookmarkLabel and containsMedal read the statusline through naming, the one
-// package that owns that scrape (K3).
-func bookmarkLabel(capture string) string {
-	return naming.BookmarkLabel(capture)
-}
-
-func containsMedal(value string) bool {
-	return naming.ContainsMedal(value)
-}
-
 func isClaudePaneCommand(command string, binaries ...string) bool {
-	return isClaudeCommand(command, binaries...)
+	return pfmengine.MatchCommand(pfmengine.Claude, []string{command}, true, binaries...)
 }
 
-func isClaudeCommand(command string, binaries ...string) bool {
-	descriptor := pfmengine.MustLookup(pfmengine.Claude)
-	name := filepath.Base(strings.TrimSpace(command))
-	if strings.HasPrefix(name, descriptor.Binary) {
-		return true
-	}
-	for _, binary := range binaries {
-		if binary != "" && name == filepath.Base(strings.TrimSpace(binary)) {
-			return true
-		}
-	}
-	dot := strings.IndexByte(name, '.')
-	if dot <= 0 {
-		return false
-	}
-	for _, character := range name[:dot] {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func isCodexCommand(command string, binaries ...string) bool {
-	name := filepath.Base(strings.TrimSpace(command))
-	if name == pfmengine.MustLookup(pfmengine.Codex).Binary {
-		return true
-	}
-	for _, binary := range binaries {
-		if binary != "" && name == filepath.Base(strings.TrimSpace(binary)) {
-			return true
-		}
-	}
-	return false
+func isCodexPaneCommand(command string, binaries ...string) bool {
+	return pfmengine.MatchCommand(pfmengine.Codex, []string{command}, false, binaries...)
 }
 
 func targetLine(socketPath, target string) string {
 	return socketPath + "\t" + target + "\n"
 }
 
-func readFirst(paths ...string) string {
-	for _, path := range paths {
-		content, err := os.ReadFile(path)
+func readFirst(candidates ...string) string {
+	for _, candidate := range candidates {
+		content, err := os.ReadFile(candidate)
 		if err == nil {
 			return strings.TrimRight(string(content), "\r\n")
 		}
@@ -506,7 +472,7 @@ func readFirst(paths ...string) string {
 	return ""
 }
 
-func socketEpoch(socket string) int64 {
+func socketStartedAt(socket string) int64 {
 	parts := strings.Split(socket, "-")
 	if len(parts) < 2 {
 		return 0
@@ -516,17 +482,6 @@ func socketEpoch(socket string) int64 {
 		return 0
 	}
 	return epoch
-}
-
-func clipRunes(value string, limit int) string {
-	count := 0
-	for index := range value {
-		if count == limit {
-			return value[:index]
-		}
-		count++
-	}
-	return value
 }
 
 func runeCount(value string) int {

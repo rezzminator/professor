@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -34,15 +35,15 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 	providerCtx, cancel := providerContext(ctx)
 	defer cancel()
 	endpoint := base + "/scholar?hl=en&q=" + url.QueryEscape(`"`+query+`"`)
-	response, err := r.providerHarvester().providerGet(providerCtx, endpoint, nil, providerHTMLMaxBody)
+	response, err := r.providerHarvester().providerSearch(providerCtx, endpoint)
 	if err != nil {
 		return nil, err
 	}
 	if response.status >= 400 {
-		return nil, fmt.Errorf("Google Scholar returned HTTP %d", response.status)
+		return nil, fmt.Errorf("request to Google Scholar returned HTTP %d", response.status)
 	}
 	if doiMirrorChallenge(response.body, response.status) {
-		return nil, errors.New("Google Scholar returned a challenge page")
+		return nil, errors.New("response from Google Scholar was a challenge page")
 	}
 	rows := parseGoogleScholarRows(response.body, limit, "")
 	candidates := scholarRowsWithVersions(providerCtx, r.providerHarvester(), response.finalURL, rows, limit, "")
@@ -53,7 +54,7 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 				return nil, nil
 			}
 		}
-		return nil, errors.New("Google Scholar page contained no recognizable results")
+		return nil, errors.New("page from Google Scholar contained no recognizable results")
 	}
 	return candidates, nil
 }
@@ -71,33 +72,41 @@ func (r *Resolver) googleScholarDOI(ctx context.Context, doi string, limit int) 
 	defer cancel()
 	endpoint := base + "/scholar?hl=en&q=" + url.QueryEscape(`"`+doi+`"`)
 	h := r.providerHarvester()
-	response, err := h.providerGet(providerCtx, endpoint, nil, providerHTMLMaxBody)
+	response, err := h.providerGet(providerCtx, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 	if response.status >= 400 {
-		return nil, fmt.Errorf("Google Scholar returned HTTP %d", response.status)
+		return nil, fmt.Errorf("request to Google Scholar returned HTTP %d", response.status)
 	}
 	if providerChallenge(response.body, response.status) {
-		return nil, errors.New("Google Scholar returned a challenge page")
+		return nil, errors.New("response from Google Scholar was a challenge page")
 	}
 	rows := parseGoogleScholarRows(response.body, limit, doi)
 	candidates := scholarRowsWithVersions(providerCtx, h, response.finalURL, rows, limit, doi)
 	if len(candidates) == 0 {
-		return nil, errors.New("Google Scholar had no exact DOI result")
+		return nil, errors.New("response from Google Scholar had no exact DOI result")
 	}
 	return candidates, nil
 }
 
 func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options FetchOptions) Result {
 	if strings.TrimSpace(h.settings.googleScholarURL) == "" {
-		return Result{Source: doi, Error: "Google Scholar is disabled", ErrorKind: "disabled"}
+		return Result{Source: doi, Error: "Google Scholar is disabled", ErrorKind: errorKindDisabled}
 	}
 	providerCtx, cancel := providerContext(ctx)
 	defer cancel()
 	candidates, err := h.resolver().googleScholarDOI(providerCtx, doi, providerCandidateMax)
 	if err != nil {
-		return providerResult(doi, "google-scholar", err.Error(), errorKind(err), 0, strings.Contains(strings.ToLower(err.Error()), "challenge"), []string{"google-scholar"})
+		return providerResult(
+			doi,
+			sourceGoogleScholar,
+			err.Error(),
+			errorKind(err),
+			0,
+			strings.Contains(strings.ToLower(err.Error()), errorKindChallenge),
+			[]string{sourceGoogleScholar},
+		)
 	}
 	var last Result
 	for _, candidate := range candidates {
@@ -106,16 +115,32 @@ func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options Fet
 		}
 		result := h.fetchURLWithPolicy(providerCtx, candidate.URL, options, false)
 		if result.Error == "" {
-			result.Method = "google-scholar"
-			result.Rungs = append([]string{"google-scholar"}, result.Rungs...)
+			result.Method = sourceGoogleScholar
+			result.Rungs = append([]string{sourceGoogleScholar}, result.Rungs...)
 			return result
 		}
-		last = providerResult(doi, "google-scholar", result.Error, result.ErrorKind, result.HTTPStatus, result.Challenge, append([]string{"google-scholar"}, result.Rungs...))
+		last = providerResult(
+			doi,
+			sourceGoogleScholar,
+			result.Error,
+			result.ErrorKind,
+			result.HTTPStatus,
+			result.Challenge,
+			append([]string{sourceGoogleScholar}, result.Rungs...),
+		)
 	}
 	if last.Error != "" {
 		return last
 	}
-	return providerResult(doi, "google-scholar", "no exact DOI candidate could be fetched", "missing", 0, false, []string{"google-scholar"})
+	return providerResult(
+		doi,
+		sourceGoogleScholar,
+		"no exact DOI candidate could be fetched",
+		errorKindMissing,
+		0,
+		false,
+		[]string{sourceGoogleScholar},
+	)
 }
 
 type scholarRow struct {
@@ -128,7 +153,8 @@ type scholarRow struct {
 func parseGoogleScholarFiltered(body []byte, limit int, wantedDOI string) []Candidate {
 	rows := parseGoogleScholarRows(body, limit, wantedDOI)
 	out := make([]Candidate, 0, len(rows))
-	for _, row := range rows {
+	for i := range rows {
+		row := &rows[i]
 		candidate := row.candidate
 		candidate.URL = row.citationURL
 		if row.directPDF != "" {
@@ -181,7 +207,9 @@ func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarR
 		if summary := firstClass(row, "gs_a"); summary != nil {
 			summaryText := strings.TrimSpace(nodeText(summary))
 			if match := scholarYearRe.FindString(summaryText); match != "" {
-				fmt.Sscanf(match, "%d", &year)
+				if _, err := fmt.Sscanf(match, "%d", &year); err != nil {
+					fmt.Fprintf(os.Stderr, "harvest: parse Google Scholar year %q: %v\n", match, err)
+				}
 			}
 			authors = summaryText
 			if separator := strings.Index(authors, " - "); separator >= 0 {
@@ -200,7 +228,8 @@ func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarR
 			if pdfAnchor := firstElement(pdf, "a"); pdfAnchor != nil {
 				pdfLink := nodeAttr(pdfAnchor, "href")
 				label := strings.ToLower(nodeText(pdfAnchor))
-				if strings.TrimSpace(pdfLink) != "" && (strings.Contains(label, "[pdf]") || strings.Contains(strings.ToLower(pdfLink), ".pdf")) {
+				if strings.TrimSpace(pdfLink) != "" &&
+					(strings.Contains(label, "[pdf]") || strings.Contains(strings.ToLower(pdfLink), ".pdf")) {
 					directPDF = pdfLink
 				}
 			}
@@ -225,7 +254,24 @@ func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarR
 		if titleLink == "" && directPDF == "" && versionsURL == "" {
 			continue
 		}
-		out = append(out, scholarRow{candidate: Candidate{URL: titleLink, Source: "google-scholar", Priority: 70, Kind: "paper", Title: title, Authors: authors, Year: year, Match: .7}, citationURL: titleLink, directPDF: directPDF, versionsURL: versionsURL})
+		out = append(
+			out,
+			scholarRow{
+				candidate: Candidate{
+					URL:      titleLink,
+					Source:   sourceGoogleScholar,
+					Priority: 70,
+					Kind:     kindPaper,
+					Title:    title,
+					Authors:  authors,
+					Year:     year,
+					Match:    .7,
+				},
+				citationURL: titleLink,
+				directPDF:   directPDF,
+				versionsURL: versionsURL,
+			},
+		)
 		if len(out) >= limit {
 			break
 		}
@@ -243,11 +289,12 @@ func scholarVersionURL(baseRaw, raw string) (string, bool) {
 		return "", false
 	}
 	resolved := base.ResolveReference(ref)
-	if !strings.EqualFold(resolved.Host, base.Host) || strings.TrimSuffix(resolved.Path, "/") != "/scholar" || resolved.Query().Get("cluster") == "" {
+	if !strings.EqualFold(resolved.Host, base.Host) || strings.TrimSuffix(resolved.Path, "/") != "/scholar" ||
+		resolved.Query().Get("cluster") == "" {
 		return "", false
 	}
 	resolved.Fragment = ""
-	if assertFetchable(resolved.String(), false) != nil {
+	if validateFetchURL(resolved.String(), false) != nil {
 		return "", false
 	}
 	return resolved.String(), true
@@ -263,23 +310,31 @@ func scholarResourceURL(baseRaw, raw string) string {
 		return ""
 	}
 	resolved := base.ResolveReference(ref)
-	if resolved.Host == "" || (resolved.Scheme != "http" && resolved.Scheme != "https") {
+	if resolved.Host == "" || (resolved.Scheme != schemeHTTP && resolved.Scheme != schemeHTTPS) {
 		return ""
 	}
 	resolved.Fragment = ""
-	if assertFetchable(resolved.String(), false) != nil {
+	if validateFetchURL(resolved.String(), false) != nil {
 		return ""
 	}
 	return resolved.String()
 }
 
-func scholarRowsWithVersions(ctx context.Context, h *Harvester, baseURL string, rows []scholarRow, limit int, wantedDOI string) []Candidate {
+func scholarRowsWithVersions(
+	ctx context.Context,
+	h *Harvester,
+	baseURL string,
+	rows []scholarRow,
+	limit int,
+	wantedDOI string,
+) []Candidate {
 	if limit <= 0 || limit > providerCandidateMax {
 		limit = providerCandidateMax
 	}
 	out := make([]Candidate, 0, limit)
 	versionAttempts := 0
-	for _, row := range rows {
+	for i := range rows {
+		row := &rows[i]
 		if len(out) >= limit {
 			break
 		}
@@ -292,10 +347,13 @@ func scholarRowsWithVersions(ctx context.Context, h *Harvester, baseURL string, 
 		} else if row.versionsURL != "" && versionAttempts < providerCandidateMax {
 			versionAttempts++
 			if versionURL, ok := scholarVersionURL(baseURL, row.versionsURL); ok {
-				response, err := h.providerGet(ctx, versionURL, nil, providerHTMLMaxBody)
+				response, err := h.providerGet(ctx, versionURL, nil)
 				if err == nil && response.status < 400 && !providerChallenge(response.body, response.status) {
-					for _, version := range parseGoogleScholarRows(response.body, providerCandidateMax, wantedDOI) {
-						if version.directPDF == "" || titleSimilarity(version.candidate.Title, row.candidate.Title) < .45 {
+					versions := parseGoogleScholarRows(response.body, providerCandidateMax, wantedDOI)
+					for i := range versions {
+						version := &versions[i]
+						if version.directPDF == "" ||
+							titleSimilarity(version.candidate.Title, row.candidate.Title) < .45 {
 							continue
 						}
 						if pdfURL := scholarResourceURL(response.finalURL, version.directPDF); pdfURL != "" {

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const dockerIdentityResponseLimit = 4 << 20
@@ -20,13 +22,26 @@ type dockerIdentity struct {
 	err   string
 }
 
-// NewSampler wires the production-only Docker identity resolver. Resource
-// pressure still comes exclusively from cgroups; the daemon is contacted at
-// most once for each newly observed immutable container ID.
+// dockerSocketPath is where a real Docker daemon's control socket lives.
+const dockerSocketPath = "/var/run/docker.sock"
+
+// NewSampler wires the Docker identity resolver against the real daemon
+// socket. Resource pressure still comes exclusively from cgroups; the
+// daemon is contacted at most once for each newly observed immutable
+// container ID.
 func NewSampler(procRoot, cgroupRoot string) *Sampler {
+	return NewSamplerWithDockerSocket(procRoot, cgroupRoot, dockerSocketPath)
+}
+
+// NewSamplerWithDockerSocket is NewSampler with the daemon socket path as a
+// seam: a test wires it to a jailed unix socket (hostfixture-style) instead
+// of the real, host-only /var/run/docker.sock, so the "production" wiring
+// path runs — and is proven — in the fence, not only newDockerInspector in
+// isolation.
+func NewSamplerWithDockerSocket(procRoot, cgroupRoot, dockerSocket string) *Sampler {
 	return &Sampler{
 		ProcRoot: procRoot, CgroupRoot: cgroupRoot,
-		DockerInspect: newDockerInspector("/var/run/docker.sock"),
+		DockerInspect: newDockerInspector(dockerSocket),
 	}
 }
 
@@ -44,7 +59,10 @@ func (sampler *Sampler) resolveDockerIdentities(containers []Container) []string
 		identity, found := sampler.dockerIdentities[containers[index].ID]
 		if !found {
 			name, image, err := sampler.DockerInspect(containers[index].ID)
-			identity = dockerIdentity{name: strings.TrimPrefix(strings.TrimSpace(name), "/"), image: strings.TrimSpace(image)}
+			identity = dockerIdentity{
+				name:  strings.TrimPrefix(strings.TrimSpace(name), "/"),
+				image: strings.TrimSpace(image),
+			}
 			if err != nil {
 				identity.err = err.Error()
 			} else if identity.name == "" || identity.image == "" {
@@ -73,12 +91,12 @@ func newDockerInspector(socketPath string) func(string) (string, string, error) 
 			return dialer.DialContext(ctx, "unix", socketPath)
 		},
 	}
-	client := &http.Client{Transport: transport, Timeout: time.Second}
+	client := obs.WrapClient(&http.Client{Transport: transport, Timeout: time.Second})
 	return func(id string) (string, string, error) {
 		request, err := http.NewRequest(
 			http.MethodGet,
 			"http://docker/containers/"+url.PathEscape(id)+"/json",
-			nil,
+			http.NoBody,
 		)
 		if err != nil {
 			return "", "", fmt.Errorf("build Docker identity request: %w", err)
@@ -94,9 +112,17 @@ func newDockerInspector(socketPath string) func(string) (string, string, error) 
 				return "", "", fmt.Errorf("query Docker identity: HTTP %s; read response: %w", response.Status, readErr)
 			}
 			if closeErr != nil {
-				return "", "", fmt.Errorf("query Docker identity: HTTP %s; close response: %w", response.Status, closeErr)
+				return "", "", fmt.Errorf(
+					"query Docker identity: HTTP %s; close response: %w",
+					response.Status,
+					closeErr,
+				)
 			}
-			return "", "", fmt.Errorf("query Docker identity: HTTP %s: %s", response.Status, strings.TrimSpace(string(body)))
+			return "", "", fmt.Errorf(
+				"query Docker identity: HTTP %s: %s",
+				response.Status,
+				strings.TrimSpace(string(body)),
+			)
 		}
 		var payload struct {
 			Name   string `json:"Name"`

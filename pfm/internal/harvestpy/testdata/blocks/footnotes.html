@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <title>Built-in Functions</title>
+  </head><body>
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+
+  <section id="built-in-functions">
+<span id="built-in-funcs"></span><h1>Built-in Functions<a class="headerlink" href="#built-in-functions" title="Link to this heading">¶</a></h1>
+<p>The Python interpreter has a number of functions and types built into it that
+are always available.  They are listed here in alphabetical order.</p>
+<dl class="py function" id="index-2">
+<dt class="sig sig-object py" id="exec">
+<span class="sig-name descname"><span class="pre">exec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#exec" title="Link to this definition">¶</a></dt>
+<dd><p>This function supports dynamic execution of Python code. <em>source</em> must be
+either a string or a code object.  If it is a string, the string is parsed as
+a suite of Python statements which is then executed (unless a syntax error
+occurs). <a class="footnote-reference brackets" href="#id2" id="id1" role="doc-noteref"><span class="fn-bracket">[</span>1<span class="fn-bracket">]</span></a> If it is a code object, it is simply executed.  In all cases,
+the code that’s executed is expected to be valid as file input (see the
+section <a class="reference internal" href="../reference/toplevel_components.html#file-input"><span class="std std-ref">File input</span></a> in the Reference Manual).</p>
+<p>In all cases, if the optional parts are omitted, the code is executed in the
+current scope.</p>
+</dd></dl>
+
+<p class="rubric">Footnotes</p>
+<aside class="footnote-list brackets">
+<aside class="footnote brackets" id="id2" role="doc-footnote">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id1">1</a><span class="fn-bracket">]</span></span>
+<p>Note that the parser only accepts the Unix-style end of line convention.
+If you are reading the code from a file, make sure to use newline conversion
+mode to convert Windows or Mac-style newlines.</p>
+</aside>
+</aside>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="constants.html"
+                          title="previous chapter">Built-in Constants</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="exceptions.html"
+                          title="next chapter">Built-in Exceptions</a></p>
+  </div>
+        </div>
+      </div>
+    </div>
+</body>
+</html>

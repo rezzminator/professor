@@ -3,14 +3,26 @@ package mcpserv
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
-	"time"
-
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
+
+// compMCP is the component mcpserv's own records belong to, the same one
+// obs.Tool scopes every tool call with.
+const compMCP = "mcp"
+
+// reporterLookupFailed marks an issue whose reporter lookup could not RUN —
+// the fleet scan behind a presented _meta.threadId failed. It is distinct
+// from fleetdb.UnidentifiedSender on purpose: that sentinel promises the
+// reporter was looked for and none could be proven, which is a different
+// fact from "the search itself broke."
+const reporterLookupFailed = fleetdb.UnidentifiedSender + "-LOOKUP-FAILED"
 
 // issueServicedesk files one agent complaint into the shared operator ledger.
 // It never refuses for want of identity: a complaint from a process whose
@@ -33,20 +45,20 @@ func (service *Service) issueServicedesk(
 	}
 	severity := strings.TrimSpace(input.Severity)
 	if severity == "" {
-		severity = shared.IssueSeverityMedium
+		severity = fleetdb.IssueSeverityMedium
 	}
-	if severity != shared.IssueSeverityLow &&
-		severity != shared.IssueSeverityMedium &&
-		severity != shared.IssueSeverityHigh {
+	if severity != fleetdb.IssueSeverityLow &&
+		severity != fleetdb.IssueSeverityMedium &&
+		severity != fleetdb.IssueSeverityHigh {
 		return nil, IssueOutput{}, fmt.Errorf(
 			"severity must be %q, %q, or %q, got %q",
-			shared.IssueSeverityLow, shared.IssueSeverityMedium, shared.IssueSeverityHigh,
+			fleetdb.IssueSeverityLow, fleetdb.IssueSeverityMedium, fleetdb.IssueSeverityHigh,
 			input.Severity,
 		)
 	}
 	reporter := service.issueReporter(ctx, request)
-	id, err := service.backend.sharedState.RecordIssue(ctx, shared.Issue{
-		AtNS:            time.Now().UnixNano(),
+	id, err := service.backend.sharedState.RecordIssue(ctx, fleetdb.Issue{
+		AtNS:            service.backend.clock.Now().UnixNano(),
 		Title:           title,
 		Detail:          detail,
 		Severity:        severity,
@@ -94,16 +106,29 @@ func (service *Service) issueReporter(
 			Engine:  caller.identity.Engine,
 		}
 	}
+	if err != nil {
+		// The scan that would have named this reporter could not run. Filing
+		// under UNIDENTIFIED here would say "we looked and found nobody" about
+		// a lookup that never completed, so the issue keeps a sentinel of its
+		// own and the cause is recorded rather than dropped on the floor.
+		scoped := obs.Component(ctx, compMCP)
+		obs.Logger(scoped).LogAttrs(scoped, slog.LevelError, "mcp.caller",
+			slog.String("op", "resolve"),
+			slog.String("tool", "servicedesk"),
+			slog.String(obs.FieldErr, err.Error()),
+		)
+		return issueReporter{Session: reporterLookupFailed}
+	}
 	if !service.backend.allowAmbientIdentity {
-		return issueReporter{Session: shared.UnidentifiedSender}
+		return issueReporter{Session: fleetdb.UnidentifiedSender}
 	}
 	identifier, identifierErr := resolve.NewWhoami(resolve.WhoamiDependencies{})
 	if identifierErr != nil {
-		return issueReporter{Session: shared.UnidentifiedSender}
+		return issueReporter{Session: fleetdb.UnidentifiedSender}
 	}
 	identity, identifyErr := identifier.Identify(ctx)
 	if identifyErr != nil || identity.Session == "" {
-		return issueReporter{Session: shared.UnidentifiedSender}
+		return issueReporter{Session: fleetdb.UnidentifiedSender}
 	}
 	reporter := issueReporter{
 		Session: identity.Session,
@@ -114,7 +139,8 @@ func (service *Service) issueReporter(
 	if listErr != nil {
 		return reporter
 	}
-	for _, row := range listed.Rows {
+	for index := range listed.Rows {
+		row := &listed.Rows[index]
 		if row.Session == identity.Session {
 			reporter.Label = row.Name
 			reporter.CWD = row.Dir

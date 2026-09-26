@@ -39,7 +39,17 @@ func TestHarvestAskE2E(t *testing.T) {
 		"codex": {
 			homeVariable: "CODEX_HOME",
 			answer:       "codex-e2e-answer",
-			wantArgs:     []string{"exec", "--model", "codex-e2e-model", "model_reasoning_effort=\"medium\"", "--ephemeral", "--skip-git-repo-check", "--color", "never", "-"},
+			wantArgs: []string{
+				"exec",
+				"--model",
+				"codex-e2e-model",
+				"model_reasoning_effort=\"medium\"",
+				"--ephemeral",
+				"--skip-git-repo-check",
+				"--color",
+				"never",
+				"-",
+			},
 		},
 	}
 	binaries := map[string]string{}
@@ -90,7 +100,17 @@ func TestHarvestAskE2E(t *testing.T) {
 
 	for name, engine := range engines {
 		t.Run(name, func(t *testing.T) {
-			args := []string{"--config", configPath, "harvest", "ask", "-p", "State the evidence", "--engine", name, source}
+			args := []string{
+				"--config",
+				configPath,
+				"harvest",
+				"ask",
+				"-p",
+				"State the evidence",
+				"--engine",
+				name,
+				source,
+			}
 			result := harness.pfm(home, args...)
 			harness.requireSuccess(name+" harvest ask", result)
 			if strings.TrimSpace(result.stdout) != engine.answer {

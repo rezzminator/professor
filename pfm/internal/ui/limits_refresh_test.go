@@ -10,9 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	pfmstats "hostops/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 )
 
 // contextLimitsSampler is deliberately incompatible with the legacy limits
@@ -83,7 +83,13 @@ func TestLimitsClockTickAdvancesLongIdleAgeAndResetCountdown(t *testing.T) {
 	updated, command := model.Update(clockTickMsg{nowNS: firstTick})
 	model = updated.(Model)
 	if command == nil || model.nowNS != firstTick || model.cosmosNowNS != firstTick {
-		t.Fatalf("first wall-clock tick: command=%v now=%d cosmosNow=%d want=%d", command, model.nowNS, model.cosmosNowNS, firstTick)
+		t.Fatalf(
+			"first wall-clock tick: command=%v now=%d cosmosNow=%d want=%d",
+			command,
+			model.nowNS,
+			model.cosmosNowNS,
+			firstTick,
+		)
 	}
 	middle := ansi.Strip(model.renderLimitsPanel(120, 8))
 	for _, want := range []string{"provider confirmed 1h ago", "↻ 1h 1m"} {
@@ -96,7 +102,13 @@ func TestLimitsClockTickAdvancesLongIdleAgeAndResetCountdown(t *testing.T) {
 	updated, command = model.Update(clockTickMsg{nowNS: finalTick})
 	model = updated.(Model)
 	if command == nil || model.nowNS != finalTick || model.cosmosNowNS != finalTick {
-		t.Fatalf("second wall-clock tick: command=%v now=%d cosmosNow=%d want=%d", command, model.nowNS, model.cosmosNowNS, finalTick)
+		t.Fatalf(
+			"second wall-clock tick: command=%v now=%d cosmosNow=%d want=%d",
+			command,
+			model.nowNS,
+			model.cosmosNowNS,
+			finalTick,
+		)
 	}
 	final := ansi.Strip(model.renderLimitsPanel(120, 8))
 	for _, want := range []string{"provider confirmed 3h ago", "↻ refreshing…"} {
@@ -122,7 +134,12 @@ func TestStatsSampleTimeAdvancesBothClocksAndNeverRewinds(t *testing.T) {
 	})
 	model = updated.(Model)
 	if model.nowNS != fresh || model.cosmosNowNS != fresh {
-		t.Fatalf("fresh SampleTime did not advance both clocks: now=%d cosmosNow=%d want=%d", model.nowNS, model.cosmosNowNS, fresh)
+		t.Fatalf(
+			"fresh SampleTime did not advance both clocks: now=%d cosmosNow=%d want=%d",
+			model.nowNS,
+			model.cosmosNowNS,
+			fresh,
+		)
 	}
 
 	older := fresh - int64(30*time.Minute)
@@ -132,7 +149,13 @@ func TestStatsSampleTimeAdvancesBothClocksAndNeverRewinds(t *testing.T) {
 	})
 	model = updated.(Model)
 	if model.nowNS != fresh || model.cosmosNowNS != fresh {
-		t.Fatalf("older SampleTime rewound clocks: now=%d cosmosNow=%d older=%d fresh=%d", model.nowNS, model.cosmosNowNS, older, fresh)
+		t.Fatalf(
+			"older SampleTime rewound clocks: now=%d cosmosNow=%d older=%d fresh=%d",
+			model.nowNS,
+			model.cosmosNowNS,
+			older,
+			fresh,
+		)
 	}
 }
 
@@ -143,7 +166,12 @@ func TestClockThenLateCosmosTickCannotRewindLedger(t *testing.T) {
 	updated, command := model.Update(clockTickMsg{nowNS: newNow})
 	model = updated.(Model)
 	if command == nil || model.cosmosNowNS != newNow {
-		t.Fatalf("clock tick did not advance cosmos clock: command=%v now=%d want=%d", command, model.cosmosNowNS, newNow)
+		t.Fatalf(
+			"clock tick did not advance cosmos clock: command=%v now=%d want=%d",
+			command,
+			model.cosmosNowNS,
+			newNow,
+		)
 	}
 
 	late := newNow - int64(30*time.Minute)
@@ -178,7 +206,12 @@ func TestLimitsSamplerKeepsTabContextAcrossPollsAndCancelsOnExit(t *testing.T) {
 	}
 	limitsContext := sampler.contexts[0]
 	if limitsContext == parent || limitsContext.Err() != nil {
-		t.Fatalf("first Limits context = %p parent=%p err=%v, want live tab child", limitsContext, parent, limitsContext.Err())
+		t.Fatalf(
+			"first Limits context = %p parent=%p err=%v, want live tab child",
+			limitsContext,
+			parent,
+			limitsContext.Err(),
+		)
 	}
 
 	updated, wait := model.Update(first)

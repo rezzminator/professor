@@ -27,7 +27,10 @@ func TestSearchReachesOperatorConfiguredLoopbackSearXNG(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"results":[{"title":"Q","url":"https://example.org/q","content":"snippet","engine":"duckduckgo"}]}`)
+		fmt.Fprint(
+			w,
+			`{"results":[{"title":"Q","url":"https://example.org/q","content":"snippet","engine":"duckduckgo"}]}`,
+		)
 	}))
 	defer server.Close()
 
@@ -41,7 +44,7 @@ func TestSearchReachesOperatorConfiguredLoopbackSearXNG(t *testing.T) {
 // answering with a 3xx to an internal address must not walk the request off.
 func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
 	var internalHits atomic.Int32
-	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		internalHits.Add(1)
 		fmt.Fprint(w, `{"results":[]}`)
 	}))
@@ -53,7 +56,11 @@ func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
 
 	_, backend, err := Search(context.Background(), "q", SearchOptions{SearXNGURL: searx.URL})
 	if err == nil || backend != "error" || !strings.Contains(err.Error(), "redirect") {
-		t.Fatalf("Search(redirecting SearXNG) backend=%q err=%v; want an error naming the refused redirect", backend, err)
+		t.Fatalf(
+			"Search(redirecting SearXNG) backend=%q err=%v; want an error naming the refused redirect",
+			backend,
+			err,
+		)
 	}
 	if internalHits.Load() != 0 {
 		t.Fatalf("redirect target was contacted %d time(s)", internalHits.Load())
@@ -63,15 +70,24 @@ func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
 // A failed search reports WHAT failed for each backend — never a generic
 // "unreachable or failing" that sends the operator to debug the wrong system.
 func TestSearchFailureCarriesEachBackendError(t *testing.T) {
-	searx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	searx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "upstream down", http.StatusBadGateway)
 	}))
 	defer searx.Close()
 	brave := &http.Client{Transport: searchRoundTrip(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}, Request: r}, nil
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Body:       io.NopCloser(strings.NewReader("{}")),
+			Header:     http.Header{},
+			Request:    r,
+		}, nil
 	})}
 
-	_, backend, err := Search(context.Background(), "q", SearchOptions{SearXNGURL: searx.URL, BraveAPIKey: "k", Brave: brave})
+	_, backend, err := Search(
+		context.Background(),
+		"q",
+		SearchOptions{SearXNGURL: searx.URL, BraveAPIKey: "k", Brave: brave},
+	)
 	if err == nil || backend != "error" {
 		t.Fatalf("Search(both failing) backend=%q err=%v; want backend error", backend, err)
 	}
@@ -87,7 +103,12 @@ func TestDisabledSearchNeverContactsABackend(t *testing.T) {
 	var hits atomic.Int32
 	counting := &http.Client{Transport: searchRoundTrip(func(r *http.Request) (*http.Response, error) {
 		hits.Add(1)
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[]}`)), Header: http.Header{}, Request: r}, nil
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"results":[]}`)),
+			Header:     http.Header{},
+			Request:    r,
+		}, nil
 	})}
 	_, _, err := Search(context.Background(), "q", SearchOptions{
 		SearXNGURL: "https://search.example.test", SearXNG: counting, DisableSearch: true,
@@ -104,17 +125,21 @@ func TestDisabledSearchNeverContactsABackend(t *testing.T) {
 // it: fetch URLs arrive from untrusted content and keep the full guard.
 func TestTrustedSearXNGOriginDoesNotOpenFetch(t *testing.T) {
 	var hits atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
 		fmt.Fprint(w, "<html><body>internal</body></html>")
 	}))
 	defer server.Close()
-	h, err := New(Options{CacheDir: t.TempDir(), SearXNGURL: server.URL})
+	h, err := New(Options{CacheDir: t.TempDir(), SearXNGURL: server.URL, ResolvePublic: publicResolveGuard(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result := h.Fetch(context.Background(), server.URL+"/admin")
 	if result.Error == "" || hits.Load() != 0 {
-		t.Fatalf("fetch of the SearXNG origin: error=%q hits=%d; want a policy refusal before any request", result.Error, hits.Load())
+		t.Fatalf(
+			"fetch of the SearXNG origin: error=%q hits=%d; want a policy refusal before any request",
+			result.Error,
+			hits.Load(),
+		)
 	}
 }

@@ -1,72 +1,109 @@
 # RELEASE — How the blueprint ships and how adopters pull it
 
-Two mechanisms ship on every tag: the portable blueprint tree (this repo, at `templates/`) and the compiled `pfm` CLI binaries (built from `pfm/`, attached to the GitHub Release). Both are versioned by the same git tag.
+Two things ship on every tag: the blueprint tree (this repo) and the `pfm` binaries built from `pfm/` and attached to the GitHub Release. One git tag versions both.
 
 ---
 
 ## Contents
 
 - [Versioning](#versioning)
-- [Release notes layout](#release-notes-layout)
+- [Release notes](#release-notes)
 - [Cutting a release](#cutting-a-release)
 - [What the tag push triggers](#what-the-tag-push-triggers)
-- [Pulling an update](#pulling-an-update-adopter)
+- [Pulling an update (adopter)](#pulling-an-update-adopter)
 
 ---
 
 ## Versioning
 
-[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one annotated git tag `v{MAJOR}.{MINOR}.{PATCH}` per release. Tags are immutable — never deleted or moved after push. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`: the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
+[Semantic Versioning](https://semver.org/), one `VERSION` file at the repo root as the source of truth, one annotated tag `v{MAJOR}.{MINOR}.{PATCH}` per release. Tags are immutable — never deleted or moved after push. Between releases `develop` carries the next development version, `{MAJOR}.{MINOR+1}.0-alpha`; the release commit drops the suffix, and the release's close opens the next `-alpha` line, so a build from `develop` never reports itself as the release it follows. Tags never carry a suffix.
 
-| Bump | When | Adopter impact |
+The bump has a floor set by the sections the release's note holds. While the major is 0, the minor is the breaking component, as in Cargo:
+
+| The note holds | Floor at 0.x | Floor at ≥ 1.0 |
 | --- | --- | --- |
-| **PATCH** | Bug fixes, doc tweaks, non-interface mechanic changes | Review reported project-template diffs; machine-global links update with the clone |
-| **MINOR** | New Tier B archetype, new mechanics command, new pipeline step | Review reported changes and adopt optional project files explicitly |
-| **MAJOR** | Breaking rename, removed command, changed core convention | Full manual migration walkthrough; no silent project-file writes |
+| `## Breaking`, `## Migration` or `## Removed` | minor | major |
+| `## Added` | minor | minor |
+| only `## Changed`, `## Fixed` | patch | patch |
 
-Magnitude for a multi-version update is the **largest single-release bump in the chain**, never the endpoint semver diff alone — one major release anywhere in the walked range makes the whole update major.
+`1.0.0` is a declared support commitment, never inferred from a diff. The magnitude of a multi-version update is the largest single-release bump in the chain, never the endpoint difference alone.
 
-## Release notes layout
+## Release notes
 
-Per-version notes live in `releases/v{X.Y.Z}.md`, one file per version, each titled `# v{X.Y.Z} — {YYYY-MM-DD}` with bullets grouped under `## Added/Changed/Fixed/Removed/Breaking/Migration`. `CHANGELOG.md` is a **slim index only** — one line per release (`- [v{X.Y.Z}](releases/v{X.Y.Z}.md) — {summary}`), prepended on every release. Never write full notes into `CHANGELOG.md` itself.
+One file per version, `releases/v{X.Y.Z}.md`, written for the adopter who updates onto it — usually their update chat, which reads every note after its installed version oldest first and follows the actions literally. `CHANGELOG.md` is an index only: one line per release, `- [v{X.Y.Z}](releases/v{X.Y.Z}.md) — {summary}`, prepended under `## Releases`. From `v0.78.0` on, every note passes `node scripts/release-check.mjs notes releases/v{X.Y.Z}.md`, which enforces the grammar below line by line.
 
-Bullets carry a category prefix and optional trailing tags, both read at update time:
+### The file, top to bottom
 
-- Prefix → `Tier A:` / `Tier B:` / `Mechanics:` / `Docs:` / `Scripts:`
-- Trailing tag → `(safe-auto)`, `(breaking)`, `(opt-in)`, `(cost)` (env var/hook/permission/model-config changes — always routed to manual review regardless of prefix)
+1. The title: `# v{X.Y.Z} — {YYYY-MM-DD}`.
+2. The lead: two to five sentences on what this release means for an adopter, the breaking change first when there is one.
+3. Required stops, when any: `#### → Stop: {reason}`. An adopter below this version updates to exactly this version first, finishes its actions, then continues.
+4. The sections, each optional, none empty, in this order: `## Breaking`, `## Migration`, `## Added`, `## Changed`, `## Fixed`, `## Removed`, `## Verification`. No other heading appears.
+
+### Bullets
+
+Every line under a category section is a bullet or an action line. A bullet is one line:
+
+```text
+- {Label}: {scope} — {what changed, as the adopter sees it}
+```
+
+The label is the route that delivers the change, from a closed set:
+
+| Label | Paths | Reaches the adopter |
+| --- | --- | --- |
+| `Global` | `templates/global/**`, `workflows/**` | when the source clone moves; machine-global files are linked live, Codex roles recompile at `pfm install` |
+| `Project` | `templates/project/**` | only by hand, through `pfm update check` in each project; the bullet names the template path |
+| `pfm` | `pfm/**` | with the binary `pfm update` rebuilds and installs |
+| `Repo` | everything else | never at runtime; informational |
+
+A bullet may end with `(opt-in)` for an optional addition or `(cost)` for an environment, hook, permission or model-configuration change that costs the adopter something.
+
+### Actions
+
+What a change asks of an adopter is one action line directly under its bullet, one line per step:
+
+```text
+#### → For: {audience} · {timing} · {surface} — {action}
+```
+
+- `{audience}`: who acts — `every adopter`, `Codex users`, `adopters who customized {template}`.
+- `{timing}`: exactly one of `before update` (in the source clone, before `pfm update --to`), `after update` (on the machine, after `pfm update` and `pfm doctor`), `per project` (in each adopted project, alongside `pfm update check`).
+- `{surface}`: the one thing the action touches — a path, a config key, a command, a template. A later release's action on the same surface supersedes an earlier one.
+- `{action}`: imperative and safe to re-run, ending with the command whose output shows it done when one exists.
+
+Example, with an invented key:
+
+```text
+- pfm: config — the `example.legacyKey` setting is retired; its behavior is now the default.
+#### → For: every adopter · after update · pfm config file — delete the `example.legacyKey` line, then `pfm config validate` exits 0.
+```
+
+Notes before `v0.78.0` wrote actions as `#### → For:`, `#### → For adopters …:` or `#### For:` without a timing; the update prompt reads all three and has the adopter's chat judge the timing.
+
+### Verification
+
+`## Verification` closes the note: how the release was proven — reviews, gates, the rehearsal — as facts and numbers. It holds prose only, never a bullet or an action.
 
 ## Cutting a release
 
-Maintainer command: `/pfm:release {patch|minor|major} "{summary}" [--from {live-root}]`, run in this repo (the upstream itself) only on an explicit publish request. The command file (`.claude/commands/pfm/release.md`) is the procedure; its phases:
+Maintainer command, run in this repo only:
 
-1. **Pre-flight** — owner auth, the `main-release-only` ruleset intact (pull request, green checks, no force-push, no deletion), `develop` fast-forwarded and containing `origin/main`.
-2. **Two worktrees** — `.worktrees/release/main` detached at `origin/main` (stable) and `.worktrees/release/develop` on `release/v{X.Y.Z}` (candidate). All release work lands in the candidate; the live checkout is never swept.
-3. **Scope** — `refresh-scope.sh ledgers` sweeps every linked `.professor/release.md`; with `--from`, the refresh pass re-derives `templates/**` from the live source per `docs/commands/pfm/references/refresh.md`.
-4. **Review** — reviewers read `origin/main...HEAD` per area and return defects plus bullets for un-ledgered changes; every defect is verified against the code, then fixed and committed on the candidate.
-5. **Notes** — `releases/v{X.Y.Z}.md` from the ledger bullets (verbatim) and the reviewers' bullets, the `CHANGELOG.md` index line, `VERSION`, the self-hosted install ledger.
-6. **Gates** — both worktrees run `dev.sh iso all` per project and `dev.sh iso e2e`; a stable red is inherited, a candidate red is fixed.
-7. **Rehearsal** — a Codex model installs the stable release on a fenced adopter machine exactly as the stable docs say, then updates it to the candidate exactly as the candidate's docs say (`infra/release-rehearsal.sh`, `docs/commands/pfm/references/release-rehearsal.md`); every friction is fixed, the machine reverted to its stable snapshot, and the update re-run until CLEAN.
-8. **Ship** — `develop` fast-forwards onto the candidate, `leak-check.sh` runs clean, `develop` is pushed, and the `develop → main` pull request merges on green checks; the annotated tag lands on the merge commit and `develop` fast-forwards back onto `main`. `develop` then opens the next `-alpha` line.
+- `/pfm:release prepare {patch|minor|major} "{summary}" [--from {live-root}]` — reviews the range past `main`, fixes what the review finds, writes the note, gates the candidate in the fence and rehearses the update on fenced adopter machines, until the candidate is stamped `READY`. It publishes nothing.
+- `/pfm:release publish v{X.Y.Z}` — only on the maintainer's explicit ask: lands exactly the commit `READY` names on `develop`, pushes, merges the `develop → main` pull request on green checks, tags, and verifies what GitHub serves.
 
-**Never:** push secrets or project identifiers (current/former brand, PII, internal URLs, machine-absolute home paths), force-push, push to `main` directly, ship a Tier A character with empty placeholders, publish a candidate whose rehearsal did not end CLEAN, or auto-bump the README version without re-checking the templates it describes.
+The procedure is `.claude/commands/pfm/release.md`; the design and the reasons are `docs/design/release/`.
 
 ## What the tag push triggers
 
-The workflow is `.github/workflows/release.yml`.
-
-A `v*` tag push (or manual `workflow_dispatch`) runs on GitHub Actions:
+The workflow is `.github/workflows/release.yml`. A `v*` tag push (or a manual `workflow_dispatch`) runs on GitHub Actions:
 
 1. **Build** — `pfm` for `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64` (Go, `-trimpath`, `CGO_ENABLED=0`); each platform binary uploads as its own workflow artifact.
 2. **Assemble** — downloads every platform binary, writes `SHA256SUMS`.
-3. **Require authored notes** — fails the run if `releases/{tag}.md` doesn't exist; a tag with no hand-written release file cannot publish.
-4. **Publish the GitHub Release** — attaches the `pfm_*` binaries + `SHA256SUMS`, with `releases/{tag}.md` as the release body verbatim (`generate_release_notes: false` — no auto-summary, the authored file is the only source of truth for the release body).
-
-The authored-notes gate is why phase 5 above (write `releases/v{X.Y.Z}.md` *before* tagging) is not optional — the tag push fails release assembly without it.
-
----
+3. **Require authored notes** — fails the run if `releases/{tag}.md` does not exist, then runs `release-check notes` on it.
+4. **Publish the GitHub Release** — attaches the `pfm_*` binaries and `SHA256SUMS`, with `releases/{tag}.md` as the release body verbatim (`generate_release_notes: false`).
 
 ## Pulling an update (adopter)
 
-State lives in `.professor/` inside the adopter's project: `VERSION` (installed version), `manifest.json` (user-owned interview record), `baseline.json` (pfm-owned local-to-template pins), `drift.md` (optional local customization notes), and `release.md` (framework changes queued to publish upstream — swept by the framework repo's release flow).
+State lives in `.professor/` inside the adopter's project: `VERSION` (installed version), `manifest.json` (the interview record), and `baseline.json` (pfm's local-to-template pins).
 
-First read every `releases/vX.Y.Z.md` between the installed version and the target and merge their `#### → For:` actions (`INSTALL.md` § Updating). Then run `pfm update` to advance the tagged clone, rebuild the binary, refresh machine-global links, and append the current project's report. Run `pfm update check` when only the read-only project report is wanted. For every `UPDATED` item, inspect the printed template diff, hand-apply what belongs in the local source, then run `pfm update pin <local>`. `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` print their own `pin --template` or `drop` actions. An install that predates `pfm init` runs `pfm update adopt [--at <ref>]` once to create its baseline; `pfm update ignore <template>...` keeps an unwanted template out of `NEW`. Generated engine mirrors remain whole-file compiler outputs; symlinked machine-global files update through their blueprint original. Source-fetched skills (`templates/project/skills/sources.json`) update from their own repos — compare the installed `version:` frontmatter against the skill repo's latest tag; never downgrade. Project files are never regenerated or merged during update.
+The update chat `pfm ls` opens reads every note between the installed version and the target, stops at each required stop, and merges the actions into one checklist by timing. Then `pfm update --to v{X.Y.Z}` advances the tagged clone, rebuilds the binary, refreshes machine-global links, and runs `pfm doctor`, rolling back when the doctor fails anew. The `after update` actions follow; then, in each project, `pfm update check` reports every template change — hand-apply each `UPDATED` diff and run `pfm update pin <local>` — and the `per project` actions finish the update. See `INSTALL.md` § Updating and `docs/SETUP.md` § Staying current.

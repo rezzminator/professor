@@ -2,27 +2,58 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	pfmchat "hostops/pfm/internal/chat"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/rearm"
-	"hostops/pfm/internal/recovery"
-	"hostops/pfm/internal/resolve"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/recovery"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
-func runChatRead(args []string, stdin io.Reader, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func renderNoSuchChat(name string, stdout, stderr io.Writer, asJSON bool) int {
+	if asJSON {
+		if err := writeJSON(stdout, headless.Missing(name)); err != nil {
+			fmt.Fprintf(stderr, "pfm chat: encode JSON: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
+	}
+	fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
+	return codeUnknownChat
+}
+
+func chatResolver(
+	handle string,
+	runtimes ...commandRuntime,
+) func(context.Context) (headless.Chat, bool, error) {
+	return func(ctx context.Context) (headless.Chat, bool, error) {
+		return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
+	}
+}
+
+func writeJSON(out io.Writer, value any) error {
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
+
+func runChatRead(args []string, _ io.Reader, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	if len(args) > 0 {
 		if info, err := os.Stat(args[0]); err == nil && info.Mode().IsRegular() &&
 			filepath.Ext(args[0]) != ".jsonl" {
@@ -36,9 +67,9 @@ func runChatOpen(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) int {
-	flags := newFlagSet("chat open", "usage: pfm chat open <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+) (exitCode int) {
+	flags := cli.NewFlagSet("chat open", "usage: pfm chat open <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -49,13 +80,25 @@ func runChatOpen(
 	if code != 0 {
 		return code
 	}
-	return openID(context.Background(), chat.ID, stdout, stderr, runtime)
+	return pfmchat.OpenID(context.Background(), chat.ID, stdout, stderr, &runtime)
 }
 
-func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
+func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (code int) {
+	return runChatKillContext(context.Background(), args, stdout, stderr, env, runtimes...)
+}
+
+func runChatKillContext(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	env paths.Env,
+	runtimes ...commandRuntime,
+) (code int) {
+	defer func() { pfmchat.RecordVerb(ctx, "kill", code) }()
+	env = defaultEnv(env)
+	flags := cli.NewFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
 	exit := flags.Bool("exit", false, "gracefully close after killing")
-	targets, code, ok := parseFlagsAnywhere(flags, args)
+	targets, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -64,11 +107,12 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		return 2
 	}
 	if targets[0] == "self" || targets[0] == "me" {
-		// Codex tool shells are served by app-server and carry no TMUX. Resolve
-		// their CODEX_THREAD_ID through the fleet store, then preserve the live
-		// row's immutable socket and pane for the detached exit finisher.
-		if os.Getenv("TMUX") == "" && os.Getenv(resolve.CodexThreadEnv) != "" {
-			chat, found, err := pfmchat.Resolve(context.Background(), "self", io.Discard, firstRuntime(runtimes))
+		if chat, scoped := pfmchat.ScopedSelf(ctx); scoped {
+			confirm := *exit || (chat.Live && chat.Socket != "" && chat.Pane != "")
+			return runResolvedChatKillContext(ctx, chat, confirm, stdout, stderr, runtimes...)
+		}
+		if env.Get("TMUX") == "" && env.Get(resolve.CodexThreadEnv) != "" {
+			chat, found, err := pfmchat.Resolve(ctx, targets[0], io.Discard, firstRuntime(runtimes))
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 				return 1
@@ -77,7 +121,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 				fmt.Fprintln(stderr, "pfm chat kill: this Codex chat has no live fleet seat")
 				return codeUnknownChat
 			}
-			return runResolvedChatKill(chat, *exit, stdout, stderr, runtimes...)
+			return runResolvedChatKillContext(ctx, chat, *exit, stdout, stderr, runtimes...)
 		}
 		killArgs := []string{"--self"}
 		if *exit {
@@ -87,12 +131,8 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	}
 	target := targets[0]
 	id := target
-	// Resolving FIRST is what makes a named kill a real kill: the resolved row
-	// carries the live socket and pane, and dropping them is why this command
-	// used to answer "killed" for a chat whose engine was still running. A
-	// target that resolves to nothing still reaches runKill below, which is
-	// the only path that can tombstone an id the composer no longer lists.
-	chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
+	// Resolve before killing so a live target retains its exact socket and pane.
+	chat, found, err := pfmchat.Resolve(ctx, target, io.Discard, firstRuntime(runtimes))
 	if err != nil {
 		if !fleet.ChatIDPattern.MatchString(target) {
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
@@ -112,7 +152,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	case found:
 		id = chat.ID
 		if chat.Live && chat.Socket != "" && chat.Pane != "" {
-			return runResolvedChatKill(chat, true, stdout, stderr, runtimes...)
+			return runResolvedChatKillContext(ctx, chat, true, stdout, stderr, runtimes...)
 		}
 		if chat.Live {
 			// Live with no address to close: say so instead of letting the
@@ -125,9 +165,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 			)
 		}
 	case !fleet.ChatIDPattern.MatchString(target):
-		fmt.Fprintf(stdout, "%s\tnot-found\n", target)
-		fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", target)
-		return codeUnknownChat
+		return renderNoSuchChat(target, stdout, stderr, false)
 	}
 	killArgs := make([]string, 0, 2)
 	if *exit {
@@ -149,43 +187,34 @@ func runResolvedChatKill(
 	exit bool,
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
-) int {
-	database, manager, code := openKillManager(stderr, runtimes...)
-	if code != 0 {
-		return code
-	}
-	defer database.Close()
-	target, err := manager.Kill(context.Background(), kill.Request{
-		ID:          chat.ID,
-		Engine:      chat.Engine,
-		RolloutPath: chat.Path,
-		SocketName:  chat.Socket,
-		PaneID:      chat.Pane,
-		Exit:        exit,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
-		return 1
-	}
-	// Name the mechanism: "killed" alone cannot tell a closed pane from a row
-	// that was merely de-listed, and that ambiguity is the whole defect this
-	// path exists to end.
-	if exit && target.SocketName != "" && target.PaneID != "" {
-		fmt.Fprintf(
-			stdout,
-			"killed %s\tclosing pane %s on socket %s\n",
-			target.ID, target.PaneID, target.SocketName,
-		)
-		return 0
-	}
-	fmt.Fprintf(stdout, "killed %s\tde-listed only, no live pane closed\n", target.ID)
-	return 0
+) (exitCode int) {
+	return pfmchat.KillResolved(context.Background(), chat, exit, stdout, stderr, firstRuntime(runtimes))
 }
 
-func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat unkill", "usage: pfm chat unkill <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
-		return code
+func runResolvedChatKillContext(
+	ctx context.Context,
+	chat headless.Chat,
+	exit bool,
+	stdout, stderr io.Writer,
+	runtimes ...commandRuntime,
+) (exitCode int) {
+	return pfmchat.KillResolved(ctx, chat, exit, stdout, stderr, firstRuntime(runtimes))
+}
+
+func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
+	return runChatUnkillContext(context.Background(), args, stdout, stderr, runtimes...)
+}
+
+func runChatUnkillContext(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	runtimes ...commandRuntime,
+) (code int) {
+	defer func() { pfmchat.RecordVerb(ctx, "unkill", code) }()
+	flags := cli.NewFlagSet("chat unkill", "usage: pfm chat unkill <target>", stderr)
+	if parseCode, ok := cli.ParseFlags(flags, args); !ok {
+		return parseCode
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
@@ -193,24 +222,23 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	}
 	target := flags.Arg(0)
 	if !fleet.ChatIDPattern.MatchString(target) {
-		chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
+		chat, found, err := pfmchat.Resolve(ctx, target, io.Discard, firstRuntime(runtimes))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
 			return 1
 		}
 		if !found {
-			fmt.Fprintf(stdout, "%s\tnot-found\n", target)
-			fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", target)
-			return codeUnknownChat
+			return renderNoSuchChat(target, stdout, stderr, false)
 		}
 		target = chat.ID
 	}
-	return runUnkill([]string{target}, stdout, stderr, runtimes...)
+	code = runUnkill([]string{target}, stdout, stderr, runtimes...)
+	return code
 }
 
 func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat resolve", "usage: pfm chat resolve <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat resolve", "usage: pfm chat resolve <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -218,7 +246,7 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 		return 2
 	}
 	name := flags.Arg(0)
-	engine, err := newInjectEngine(runtimes...)
+	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat resolve: %v\n", err)
 		return codeUndelivered
@@ -230,9 +258,7 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 	}
 	if code != 0 {
 		if code == inject.CodeUnknown {
-			fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
-			fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
-			return codeUnknownChat
+			return renderNoSuchChat(name, stdout, stderr, false)
 		}
 		if detail != "" {
 			fmt.Fprintln(stderr, detail)
@@ -250,8 +276,8 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 }
 
 func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat capture", "usage: pfm chat capture <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat capture", "usage: pfm chat capture <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -271,15 +297,8 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
 		return 1
 	}
-	target := chat.Pane
-	if target == "" {
-		target = chat.Session
-	}
-	if target == "" {
-		target = chat.Socket
-	}
-	capture, err := (inject.CommandTmux{}).Capture(
-		context.Background(), socketPath, target, true, inject.FullScrollback,
+	capture, err := (inject.TmuxInjector{}).Capture(
+		context.Background(), socketPath, pfmchat.PaneTarget(chat), true, inject.FullScrollback,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
@@ -293,15 +312,15 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 }
 
 func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat recover", "usage: pfm chat recover <thread-id|rollout-path>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat recover", "usage: pfm chat recover <thread-id|rollout-path>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
 		return 2
 	}
-	_, err := optionalCommandRuntime(runtimes)
+	_, err := pfmconfig.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat recover: load config: %v\n", err)
 		return 1
@@ -311,24 +330,43 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat recover: resolve source paths: %v\n", err)
 		return 1
 	}
-	codexRoot := resolved.FirstRoot(pfmengine.Codex)
-	result, err := recovery.Run(context.Background(), codexRoot, flags.Arg(0))
+	codexHome := resolved.FirstRoot(pfmengine.Codex)
+	result, err := recovery.Run(context.Background(), codexHome, flags.Arg(0))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat recover: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "messages=%d carried=%d malformed=%d\n", result.Messages, result.Carried, result.Malformed)
 	fmt.Fprintf(stdout, "recovered thread %s\n", result.ThreadID)
-	fmt.Fprintf(stdout, "  %s\n  %s\n  %s\n", filepath.Join(codexRoot, "recovered-"+result.ThreadID, "brief.md"), filepath.Join(codexRoot, "recovered-"+result.ThreadID, "compaction-memory.md"), filepath.Join(codexRoot, "recovered-"+result.ThreadID, "transcript.md"))
-	fmt.Fprintf(stdout, "\nBrief a replacement seat with:\n  pfm chat inject <socket> 'RECOVERY: read %s, then compaction-memory.md, then the end of transcript.md.'\n", filepath.Join(codexRoot, "recovered-"+result.ThreadID, "brief.md"))
+	fmt.Fprintf(
+		stdout,
+		"  %s\n  %s\n  %s\n",
+		filepath.Join(codexHome, "recovered-"+result.ThreadID, "brief.md"),
+		filepath.Join(codexHome, "recovered-"+result.ThreadID, "compaction-memory.md"),
+		filepath.Join(codexHome, "recovered-"+result.ThreadID, "transcript.md"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"\nBrief a replacement seat with:\n  pfm chat inject <socket> 'RECOVERY: read %s, then compaction-memory.md, then the end of transcript.md.'\n",
+		filepath.Join(codexHome, "recovered-"+result.ThreadID, "brief.md"),
+	)
 	return 0
 }
 
 func runChatName(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+	return runChatNameContext(context.Background(), args, stdout, stderr, runtimes...)
+}
+
+func runChatNameContext(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	runtimes ...commandRuntime,
+) int {
 	deliver := func(ctx context.Context, chat headless.Chat, name string) (int, string, error) {
 		return deliverChatNameWithRuntime(ctx, chat, name, runtimes...)
 	}
-	return runChatNameWith(args, stdout, stderr, deliver, runtimes...)
+	return runChatNameWithContext(ctx, args, stdout, stderr, deliver, runtimes...)
 }
 
 type chatNameDelivery func(
@@ -337,50 +375,24 @@ type chatNameDelivery func(
 	string,
 ) (int, string, error)
 
-func deliverChatName(
-	ctx context.Context,
-	chat headless.Chat,
-	name string,
-) (int, string, error) {
-	return deliverChatNameWithRuntime(ctx, chat, name)
-}
-
 func deliverChatNameWithRuntime(
 	ctx context.Context,
 	chat headless.Chat,
 	name string,
 	runtimes ...commandRuntime,
 ) (int, string, error) {
-	engine, err := newInjectEngine(runtimes...)
-	if err != nil {
-		return 1, "", err
-	}
-	// Inject through the live tmux namespace, not the transcript UUID. A newly
-	// spawned Codex seat can be addressable before its rollout has been indexed;
-	// converting that seat to its UUID makes the subsequent /rename miss it.
-	target := chatNameInjectTarget(chat)
-	result, err := engine.Inject(ctx, inject.Request{
-		Target:  target,
-		Message: "/rename " + name,
-	})
-	return result.Code, result.Message, err
+	return pfmchat.DeliverName(ctx, chat, name, firstRuntime(runtimes))
 }
 
-func chatNameInjectTarget(chat headless.Chat) string {
-	if chat.Session != "" {
-		return chat.Session
-	}
-	return chat.Socket
-}
-
-func runChatNameWith(
+func runChatNameWithContext(
+	ctx context.Context,
 	args []string,
 	stdout, stderr io.Writer,
 	deliver chatNameDelivery,
 	runtimes ...commandRuntime,
 ) int {
-	flags := newFlagSet("chat name", "usage: pfm chat name <target> <name>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat name", "usage: pfm chat name <target> <name>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() < 2 {
@@ -392,7 +404,7 @@ func runChatNameWith(
 		fmt.Fprintln(stderr, "pfm chat name: name must be one non-empty line")
 		return 2
 	}
-	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtimes...)
+	chat, code := headlessTarget(ctx, flags.Arg(0), stdout, stderr, false, runtimes...)
 	if code != 0 {
 		return code
 	}
@@ -400,7 +412,7 @@ func runChatNameWith(
 		fmt.Fprintf(stderr, "pfm chat name: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
-	code = applyChatName(context.Background(), chat, name, deliver, stderr)
+	code = applyChatName(ctx, chat, name, deliver, stderr)
 	if code != 0 {
 		return code
 	}
@@ -414,7 +426,8 @@ func applyChatName(
 	name string,
 	deliver chatNameDelivery,
 	stderr io.Writer,
-) int {
+) (code int) {
+	defer func() { pfmchat.RecordVerb(ctx, "name", code) }()
 	resultCode, resultMessage, err := deliver(ctx, chat, name)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat name: %v\n", err)
@@ -435,10 +448,11 @@ func applyChatName(
 	return 0
 }
 
-func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat end", "usage: pfm chat end <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
-		return code
+func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
+	defer func() { pfmchat.RecordVerb(context.Background(), "end", code) }()
+	flags := cli.NewFlagSet("chat end", "usage: pfm chat end <target>", stderr)
+	if parseCode, ok := cli.ParseFlags(flags, args); !ok {
+		return parseCode
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
@@ -457,22 +471,18 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
 		return 1
 	}
-	command := pfmtmux.Command(context.Background(), "", socketPath, "kill-server")
+	command := pfmtmux.Exec(context.Background(), "", socketPath, "kill-server")
 	if output, err := command.CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat end: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1
 	}
-	// T1 re-arm cleanup: this socket is dead, so any role crumb it carried
-	// (cmd/pfm/run_command.go's WriteCrumb) is litter — nothing on this kill
-	// path, or any other, will ever read it again. Best-effort: SIDDir
-	// accumulating one un-removed crumb per --role seat ever launched is
-	// exactly what this exists to prevent, but the chat is dead either way,
-	// so a removal failure is a visible WARNING here, never a reason to
-	// report `pfm chat end` itself as failed.
-	if endRuntime, err := optionalCommandRuntime(runtimes); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not resolve paths to remove its role re-arm crumb: %v\n", err)
-	} else if err := rearm.RemoveCrumb(endRuntime.Paths.SIDDir, filepath.Base(chat.Socket), chat.Pane); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not remove role re-arm crumb: %v\n", err)
+	// The seat is dead, so its prompt file is litter. Cleanup is best-effort:
+	// the end itself succeeded and a prompt-file failure must remain visible
+	// without changing that result.
+	if endRuntime, err := pfmconfig.OptionalRuntime(runtimes); err != nil {
+		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not resolve paths to remove its role prompt: %v\n", err)
+	} else if err := agentrole.RemoveSeatPrompt(endRuntime.Paths.SIDDir, chat.Socket, chat.Pane); err != nil {
+		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not remove role prompt: %v\n", err)
 	}
 	fmt.Fprintf(stdout, "ended %s\n", chat.ID)
 	return 0
@@ -489,7 +499,7 @@ func renameChatWindow(ctx context.Context, socket, target, name string) error {
 	if target == "" {
 		target = socket
 	}
-	command := pfmtmux.Command(ctx, "", socketPath, "rename-window", "-t", target, name)
+	command := pfmtmux.Exec(ctx, "", socketPath, "rename-window", "-t", target, name)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-window: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -503,19 +513,21 @@ func chatSocketPath(socket string) (string, error) {
 func runChatSatellite(
 	verb string,
 	args []string,
-	stdin io.Reader,
+	_ io.Reader,
 	stdout, stderr io.Writer,
+	env paths.Env,
+	clk clock.Clock,
 	runtimes ...commandRuntime,
 ) int {
 	switch verb {
 	case "find":
 		return runChatFind(args, stdout, stderr, runtimes...)
 	case "save":
-		return runChatSave(args, stdout, stderr, runtimes...)
-	case "branch":
-		return runChatBranch(args, stdout, stderr, runtimes...)
+		return runChatSave(args, stdout, stderr, env, runtimes...)
+	case branchAction:
+		return runChatBranch(args, stdout, stderr, env, clk, runtimes...)
 	case "ls":
-		return runChatLS(args, stdout, stderr, runtimes...)
+		return runChatLS(args, stdout, stderr, clk, runtimes...)
 	case "history":
 		return runChatHistory(args, stdout, stderr, runtimes...)
 	default:

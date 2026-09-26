@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func configuredMachinePolicy(home string) pfmconfig.Config {
@@ -134,9 +134,15 @@ func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.
 	}
 	if claudePlan.Line != attachLine("cc-configured-new-42", "cc-configured-new-42", false) ||
 		claudePlan.ChatServer == nil || claudePlan.ChatServer.Run != claudePlan.Run || claudePlan.ChatServer.CWD != "/work/project" {
-		t.Fatalf("new Claude picker line = %q, server = %#v, run = %q", claudePlan.Line, claudePlan.ChatServer, claudePlan.Run)
+		t.Fatalf(
+			"new Claude picker line = %q, server = %#v, run = %q",
+			claudePlan.Line,
+			claudePlan.ChatServer,
+			claudePlan.Run,
+		)
 	}
-	if !strings.Contains(claudePlan.Run, Quote(machine.Claude.Binary)) || strings.Contains(claudePlan.Run, "skip-permissions") {
+	if !strings.Contains(claudePlan.Run, Quote(machine.Claude.Binary)) ||
+		strings.Contains(claudePlan.Run, "skip-permissions") {
 		t.Fatalf("new Claude picker run ignored configured prompt policy: %q", claudePlan.Run)
 	}
 

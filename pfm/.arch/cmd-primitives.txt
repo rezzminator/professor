@@ -1,10 +1,2 @@
-cmd/pfm/chat_satellite_command.go 5
-cmd/pfm/harness_prompt_doctor.go 1
-cmd/pfm/harvest_command.go 1
-cmd/pfm/headless_command.go 1
+cmd/pfm/chat_satellite_command.go 1
 cmd/pfm/headless_exec_command.go 1
-cmd/pfm/prepush_doctor.go 2
-cmd/pfm/reload_command.go 1
-cmd/pfm/update_command.go 4
-cmd/pfm/update_notice_command.go 1
-cmd/pfm/update_project.go 1

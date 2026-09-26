@@ -30,7 +30,7 @@ func TestClaudeWindowNameConvergesOnARealServer(t *testing.T) {
 	}
 	jail.sockets = append(jail.sockets, socket)
 
-	tmux := CommandTmux{TmuxTmpDir: jail.root}
+	tmux := TmuxProbe{TmuxTmpDir: jail.root}
 	gatherer, err := New(Dependencies{
 		Tmux:       tmux,
 		TmuxTmpDir: jail.root,

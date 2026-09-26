@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // writeScript writes an executable shell fixture named name inside dir,
@@ -33,7 +35,12 @@ func writeScript(t *testing.T, dir, name, content string) string {
 // undetected.
 func poisonScript(t *testing.T, dir, marker, name string) {
 	t.Helper()
-	writeScript(t, dir, name, "#!/bin/sh\ntouch \"$POISON_MARKER_DIR/"+name+".ran\"\necho poisoned-"+name+" invoked >&2\nexit 1\n")
+	writeScript(
+		t,
+		dir,
+		name,
+		"#!/bin/sh\ntouch \"$POISON_MARKER_DIR/"+name+".ran\"\necho poisoned-"+name+" invoked >&2\nexit 1\n",
+	)
 	t.Setenv("POISON_MARKER_DIR", marker)
 }
 
@@ -80,6 +87,34 @@ func TestInstallMarkdownToolAlreadyPresentIsANoOp(t *testing.T) {
 	}
 }
 
+func TestInstallMarkdownToolUsesInjectedProcessRunner(t *testing.T) {
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath("rumdl", "/fixture/rumdl", nil)
+	runner.Script([]string{"/fixture/rumdl", "--version"}, deps.RunResult{
+		Stdout:   []byte("rumdl 0.2.73\n"),
+		ExitCode: 0,
+	}, nil)
+	var output bytes.Buffer
+	eng := &engine{options: Options{
+		Home:          t.TempDir(),
+		Stdout:        &output,
+		ProcessRunner: runner,
+	}, apply: true}
+
+	if err := eng.installMarkdownTool(context.Background()); err != nil {
+		t.Fatalf("installMarkdownTool: %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "rumdl already present (0.2.73)") {
+		t.Fatalf("output=%q, want injected runner's rumdl version", output.String())
+	}
+	if eng.report.OK != 1 || eng.report.Skipped != 0 {
+		t.Fatalf("report=%+v, want OK=1 Skipped=0", eng.report)
+	}
+	if calls := runner.Calls(); len(calls) != 1 || len(calls[0].Argv) != 2 || calls[0].Argv[0] != "/fixture/rumdl" {
+		t.Fatalf("runner calls=%+v, want only injected rumdl --version", calls)
+	}
+}
+
 // TestInstallMarkdownToolStaleVersionFallsThroughPastAlreadyPresent pins the
 // boundary on the other side of the pin: a rumdl one patch BELOW MinVersion
 // must not take the already-present branch — it must fall through to the
@@ -98,7 +133,11 @@ func TestInstallMarkdownToolStaleVersionFallsThroughPastAlreadyPresent(t *testin
 	}
 	want := "rumdl: offline, will not attempt uv tool install rumdl==0.2.73"
 	if !strings.Contains(output.String(), want) {
-		t.Fatalf("output=%q, want to contain %q (a stale rumdl must not short-circuit as already-present)", output.String(), want)
+		t.Fatalf(
+			"output=%q, want to contain %q (a stale rumdl must not short-circuit as already-present)",
+			output.String(),
+			want,
+		)
 	}
 	if eng.report.OK != 0 || eng.report.Skipped != 1 {
 		t.Fatalf("report=%+v, want OK=0 Skipped=1", eng.report)

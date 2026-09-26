@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // Solo closes every competing tmux host and stray Claude process for a
@@ -23,7 +25,9 @@ func (executor *Executor) Solo(
 	id, keepSocket string,
 	liveAgent bool,
 	claudeBinaries ...string,
-) error {
+) (returnErr error) {
+	trail := obs.NewTrail(ctx, "action", "multi")
+	defer func() { trail.End(returnErr) }()
 	if id == "" {
 		return nil
 	}
@@ -39,11 +43,19 @@ func (executor *Executor) Solo(
 	if err != nil {
 		return fmt.Errorf("open solo lock: %w", err)
 	}
-	defer lockFile.Close()
+	defer func() {
+		if err := lockFile.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close solo lock %s: %w", lockPath, err))
+		}
+	}()
 	if err := flockContext(ctx, lockFile); err != nil {
 		return err
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	defer func() {
+		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("unlock solo lock %s: %w", lockPath, err))
+		}
+	}()
 
 	entries, err := os.ReadDir(executor.sidDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -82,6 +94,12 @@ func (executor *Executor) Solo(
 			// A failed probe is not an empty server. The socket may still be
 			// live but temporarily unreadable; leave its crumb so a later
 			// pass does not mistake a working chat for an unowned one.
+			fmt.Fprintf(
+				executor.stderr,
+				"cc: solo — pane probe on %s failed; leaving its crumb: %v\n",
+				socket,
+				err,
+			)
 			continue
 		}
 		if len(panes) == 0 {
@@ -154,6 +172,7 @@ func (executor *Executor) Solo(
 			)
 		}
 	}
+	trail.Reach("solo", "other panes killed")
 	return nil
 }
 
@@ -169,12 +188,12 @@ func flockContext(ctx context.Context, file *os.File) error {
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			return fmt.Errorf("lock solo operation: %w", err)
 		}
-		timer := time.NewTimer(10 * time.Millisecond)
+		timer := clock.Real.NewTimer(10 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
-		case <-timer.C:
+		case <-timer.C():
 		}
 	}
 }
@@ -186,7 +205,7 @@ func removeFile(path string) error {
 	return nil
 }
 
-func paneExists(panes []Pane, paneID string) bool {
+func paneExists(panes []ActionPane, paneID string) bool {
 	for _, pane := range panes {
 		if pane.PaneID == paneID {
 			return true

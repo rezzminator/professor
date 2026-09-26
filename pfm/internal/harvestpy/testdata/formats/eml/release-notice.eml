@@ -1,0 +1,34 @@
+From: Release Desk <releases@example.org>
+To: Reader <reader@example.com>
+Subject: Release 2.4 is out
+Date: Mon, 1 Jan 2024 09:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: multipart/alternative; boundary="inner"
+
+--inner
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Release 2.4 ships the caption parser and the citation reader.
+
+The upgrade keeps every setting; read the changelog before you deploy.
+=E2=80=94 the release desk
+
+--inner
+Content-Type: text/html; charset="utf-8"
+
+<p>Release 2.4 ships the caption parser and the citation reader.</p>
+
+--inner--
+
+--outer
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="changelog.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcTl8uXrp/Og0MTGCjEgMCBvYmoKPDwgL1R5cGUgL0NhdGFsb2cgPj4KZW5kb2JqCg==
+
+--outer--

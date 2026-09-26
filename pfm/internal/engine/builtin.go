@@ -1,12 +1,40 @@
 package engine
 
-import "path/filepath"
+import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+)
 
 // OutputStyleDefaultSettings is the --settings payload every Claude launch
 // carries to disable Claude Code's own output style. Claude Code has no
 // "none" style; the built-in "default" style appends nothing, so naming it
 // is the off switch — see Claude's LaunchArgs below for why.
 const OutputStyleDefaultSettings = `{"outputStyle":"default"}`
+
+// claudeSettings is the --settings payload shape: outputStyle always
+// present, theme only when claude.theme resolved non-empty.
+type claudeSettings struct {
+	OutputStyle string `json:"outputStyle"`
+	Theme       string `json:"theme,omitempty"`
+}
+
+// ClaudeSettingsPayload is the --settings payload for a Claude launch: byte-
+// identical to OutputStyleDefaultSettings when theme is empty (so an
+// untouched account moves no goldens), else the same object with theme
+// merged in.
+func ClaudeSettingsPayload(theme string) string {
+	if theme == "" {
+		return OutputStyleDefaultSettings
+	}
+	payload, err := json.Marshal(claudeSettings{OutputStyle: "default", Theme: theme})
+	if err != nil {
+		// claudeSettings holds only plain strings — json.Marshal fails on
+		// channels, funcs, and cycles, none of which this type can hold.
+		panic(fmt.Sprintf("engine: marshal claude settings: %v", err))
+	}
+	return string(payload)
+}
 
 func init() {
 	Register(Descriptor{
@@ -20,7 +48,15 @@ func init() {
 		// CLI accepts any digits-only integer >= 1 with no ceiling, and a
 		// malformed value silently reverts to 200 — so this is the largest
 		// integer JavaScript holds exactly, spelled as plain digits.
-		LaunchEnv: []string{"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991"},
+		//
+		// Claude Code drops to 256 colours whenever TMUX is set unless
+		// CLAUDE_CODE_TMUX_TRUECOLOR is present; every pfm chat lives in a
+		// tmux pane, so without it every theme colour is quantised. A
+		// headless run carries it too and ignores it: no TMUX, no downgrade.
+		LaunchEnv: []string{
+			"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991",
+			"CLAUDE_CODE_TMUX_TRUECOLOR=1",
+		},
 		// pfm stages its own system prompt (--system-prompt-file); Claude
 		// Code's own output style (a project or user "outputStyle" setting,
 		// e.g. a checked-in .claude/settings.json) would otherwise apply a
@@ -43,13 +79,17 @@ func init() {
 		DefaultRoots: func(home string) []string { return []string{filepath.Join(home, ".codex")} },
 	})
 	Register(Descriptor{
-		ID: Opencode, Name: "OpenCode", Short: "OpenCode", LongName: "opencode",
-		Binary: "opencode", BinaryPathHints: nil,
-		SocketPrefix: "ox-",
-		SessionEnv:   "", // OpenCode exports no session variable; whoami uses SocketPrefix
-		HomeEnv:      "", // none today
-		RootEnv:      "PFM_OPENCODE_ROOT",
-		DefaultRoots: func(home string) []string { return []string{filepath.Join(home, ".local", "share", "opencode")} },
+		ID:              OpenCode,
+		Name:            "OpenCode",
+		Short:           "OpenCode",
+		LongName:        "opencode",
+		Binary:          "opencode",
+		BinaryPathHints: nil,
+		SocketPrefix:    "ox-",
+		SessionEnv:      "", // OpenCode exports no session variable; whoami uses SocketPrefix
+		HomeEnv:         "", // none today
+		RootEnv:         "PFM_OPENCODE_ROOT",
+		DefaultRoots:    func(home string) []string { return []string{filepath.Join(home, ".local", "share", "opencode")} },
 	})
 }
 

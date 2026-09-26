@@ -12,7 +12,7 @@ import (
 // CrumblessLive entry carrying the pane's own display fields, not silently
 // vanish the way crumb-driven gather used to leave it.
 func TestDetectCrumblessLiveNoCrumbEmitsOneEntry(t *testing.T) {
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket:      "cc-1700000000-111-222",
 		SessionName: "cc-1700000000-111-222",
 		WindowID:    "@1",
@@ -53,7 +53,7 @@ func TestDetectCrumblessLiveNoCrumbEmitsOneEntry(t *testing.T) {
 // on that socket gets a crumbless entry, even one whose own pane has no crumb
 // of its own.
 func TestDetectCrumblessLiveSocketCrumbSuppressesTheWholeSocket(t *testing.T) {
-	panes := []Pane{
+	panes := []ProbePane{
 		{Socket: "cc-1-2-3", PaneID: "%1", PID: 500},
 		{Socket: "cc-1-2-3", PaneID: "%2", PID: 501},
 	}
@@ -87,7 +87,7 @@ func TestDetectCrumblessLiveSocketCrumbSuppressesTheWholeSocket(t *testing.T) {
 // observed the night the bug was found: a teammate spawned through cc-new-*,
 // wedged at the MCP-approval prompt.
 func TestDetectCrumblessLiveAcceptsTheNewSocketShape(t *testing.T) {
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket: "cc-new-fixture-1",
 		PaneID: "%1",
 		PID:    500,
@@ -106,7 +106,7 @@ func TestDetectCrumblessLiveAcceptsTheNewSocketShape(t *testing.T) {
 // though it shares the crumb-name grammar) and a malformed cc-* name are both
 // declined.
 func TestDetectCrumblessLiveRejectsNonClaudeSocketShapes(t *testing.T) {
-	panes := []Pane{
+	panes := []ProbePane{
 		{Socket: "cx-1-2-3", PaneID: "%1", PID: 500},
 		{Socket: "cc-not-a-real-socket", PaneID: "%2", PID: 501},
 	}

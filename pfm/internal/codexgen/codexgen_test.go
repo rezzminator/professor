@@ -39,7 +39,11 @@ func TestGlobalCommandsCanBeDisabledWithoutTouchingGlobalOutputs(t *testing.T) {
 	beforeSkill := string(mustReadTestFile(t, globalSkill))
 
 	writeTestFile(t, filepath.Join(root, ".claude", "codex-build.json"), `{"version":1,"globalCommands":false}`)
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "global.md"), "---\ndescription: changed\n---\nchanged\n")
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "global.md"),
+		"---\ndescription: changed\n---\nchanged\n",
+	)
 	result, err := Run(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !result.OK {
 		t.Fatalf("opt-out build: result=%#v err=%v", result, err)
@@ -144,13 +148,70 @@ func TestGlobalCommandsOnlyReconcilePreservesForeignFilesAndDeletesManagedOrphan
 	}
 }
 
+// TestGlobalCommandUninstallDeletesTheOrphanedSkillDirectorySymlink is the
+// regression for a dangling `pfm uninstall` leftover: compileGlobalCommands
+// mirrors a skill-directory global command (a {home}/.claude/commands/<name>
+// directory carrying its own SKILL.md, e.g. "tokens") into
+// {home}/.codex/skills/<name> as a bare SYMLINK into that source directory —
+// the one output shape this compiler writes that cannot carry the marker
+// generatedBytes looks for. When the installer tears the command down
+// (unwireGlobalRegistries in the installer package) and then reconciles the
+// Codex mirror against an intentionally empty source, the old markerClaimable
+// treated every symlink in the managed registry as foreign and left the now
+// pointing-nowhere .codex/skills/<name> link behind — INSTALL.md § Uninstall
+// promises every installer-owned link is removed. Ownership here is decided
+// by the symlink's TARGET the same way global_unwire.go's ownedGlobalLink
+// decides registry-link ownership: pointing inside {home}/.claude/commands
+// names it as this compiler's, whatever else sits there afterward.
+func TestGlobalCommandUninstallDeletesTheOrphanedSkillDirectorySymlink(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".claude", "commands", "tokens", "SKILL.md")
+	writeTestFile(t, source, "---\ndescription: tokens\n---\nUse /tokens.\n")
+
+	build, err := RunGlobalCommands(GlobalCommandsOptions{Home: home, Mode: ModeBuild})
+	if err != nil || !build.OK {
+		t.Fatalf("initial global build: result=%#v err=%v", build, err)
+	}
+	link := filepath.Join(home, ".codex", "skills", "tokens")
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected %s to be a symlink after build: info=%#v err=%v", link, info, err)
+	}
+
+	// Simulate the uninstall order: the source command directory is gone
+	// (unwireGlobalRegistries already retired it) before the Codex mirror is
+	// reconciled against an intentionally empty SourceHome, the exact shape
+	// reconcileCodexCommands(nil) in installer.go uses for ModeUninstall.
+	if err := os.RemoveAll(filepath.Join(home, ".claude", "commands", "tokens")); err != nil {
+		t.Fatal(err)
+	}
+	emptySource := t.TempDir()
+	uninstallBuild, err := RunGlobalCommands(
+		GlobalCommandsOptions{Home: home, SourceHome: emptySource, Mode: ModeBuild},
+	)
+	if err != nil || !uninstallBuild.OK {
+		t.Fatalf("uninstall reconciliation: result=%#v err=%v", uninstallBuild, err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the dangling Codex skill symlink %s behind: %v", link, err)
+	}
+}
+
 func TestFullCheckAgreesWithInstallerGlobalReconciliation(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
 	writeTestFile(t, filepath.Join(root, ".claude", "commands", "dev.md"), "---\ndescription: dev\n---\nRun /dev.\n")
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "chat", "inject.md"), "---\ndescription: inject\n---\nInject.\n")
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "chat", "new.md"), "---\ndescription: new\n---\nContinue with /chat:inject.\n")
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "chat", "inject.md"),
+		"---\ndescription: inject\n---\nInject.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "chat", "new.md"),
+		"---\ndescription: new\n---\nContinue with /chat:inject.\n",
+	)
 
 	initial, err := Build(Options{Root: root, Home: home})
 	if err != nil || !initial.OK {
@@ -176,7 +237,11 @@ func TestMCPBackedChatCommandsRetireGlobalSkillsButKeepInterrogate(t *testing.T)
 		"chat/interrogate.md": true,
 		"reload.md":           true,
 	} {
-		writeTestFile(t, filepath.Join(home, ".claude", "commands", relative), "---\ndescription: fixture\n---\nfixture\n")
+		writeTestFile(
+			t,
+			filepath.Join(home, ".claude", "commands", relative),
+			"---\ndescription: fixture\n---\nfixture\n",
+		)
 	}
 	managedInject := filepath.Join(home, ".codex", "skills", "chat-inject", "SKILL.md")
 	writeTestFile(t, managedInject, generatedHeader("old-chat-inject")+"\n")
@@ -209,7 +274,11 @@ func TestCommandSwapNeverRewritesASlashContinuedPath(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(root, ".claude", "commands", "dev.md"), "---\ndescription: dev\n---\ndev\n")
-	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n\nTUI renders on /dev/tty. Use `/dev build pfm` for anything the pipeline reads.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, "CLAUDE.md"),
+		"# Fixture\n\nTUI renders on /dev/tty. Use `/dev build pfm` for anything the pipeline reads.\n",
+	)
 	result, err := Run(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !result.OK {
 		t.Fatalf("build: result=%#v err=%v", result, err)
@@ -224,7 +293,7 @@ func TestCommandSwapNeverRewritesASlashContinuedPath(t *testing.T) {
 }
 
 func TestFrontmatterAndRosterTransform(t *testing.T) {
-	raw := "---\ndescription: >-\n  A quoted \\\"description\\\"\n  over two lines.\nmodel: opus\nhooks:\n  PostToolUse:\n    - matcher: Edit\n---\nUse /wave:go, not /wave or /scripts/x. Read CLAUDE.md.\n"
+	raw := "---\ndescription: >-\n  A quoted \\\"description\\\"\n  over two lines.\nmodel: opus\nhooks:\n  PostToolUse:\n    - matcher: Edit\n---\nUse /tools:go, not /tools or /scripts/x. Read CLAUDE.md.\n"
 	fm, body, err := parseFrontmatter(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -234,13 +303,53 @@ func TestFrontmatterAndRosterTransform(t *testing.T) {
 	}
 	got := transformMarkdown(body, TransformOptions{
 		ModelMap:          map[string]string{"opus": "gpt-frontier"},
-		Commands:          map[string]string{"wave:go": "wave-go"},
+		Commands:          map[string]string{"tools:go": "tools-go"},
 		ReplaceClaudeFile: true,
 	})
-	for _, want := range []string{"$wave-go", "/wave or", "/scripts/x", "AGENTS.md"} {
+	for _, want := range []string{"$tools-go", "/tools or", "/scripts/x", "AGENTS.md"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("transform missing %q in %q", want, got)
 		}
+	}
+}
+
+func TestFrontmatterUnquotesYAMLScalars(t *testing.T) {
+	raw := "---\n" +
+		"single: 'a: b, \"c\" and it''s fine'\n" +
+		"double: \"line one\\n\\\"line two\\\" \\\\ end\"\n" +
+		"plain: unchanged: value\n" +
+		"---\nbody\n"
+	fields, _, err := parseFrontmatter(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"single": `a: b, "c" and it's fine`,
+		"double": "line one\n\"line two\" \\ end",
+		"plain":  "unchanged: value",
+	}
+	for key, expected := range want {
+		if got := fields[key]; got != expected {
+			t.Errorf("%s = %q, want %q", key, got, expected)
+		}
+	}
+}
+
+func TestFrontmatterStripsPlainScalarCommentAndPreservesQuotedHash(t *testing.T) {
+	raw := "---\nmodel: opus # pinned\nquoted: 'keep # this'\n---\nbody\n"
+	fields, _, err := parseFrontmatter(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fields["model"]; got != "opus" {
+		t.Fatalf("model = %q, want %q", got, "opus")
+	}
+	if got := fields["quoted"]; got != "keep # this" {
+		t.Fatalf("quoted = %q, want %q", got, "keep # this")
+	}
+	if _, _, err := parseFrontmatter("---\nbad: \"invalid\\x\"\n---\nbody\n"); err == nil ||
+		!strings.Contains(err.Error(), "frontmatter field bad") {
+		t.Fatalf("malformed quoted scalar error = %v", err)
 	}
 }
 
@@ -284,7 +393,7 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(root, ".claude", "codex-build.json"), `{
   "version": 1,
-  "modelMap": {"sonnet":"gpt-fixture"},
+  "modelMap": {"sonnet":"gpt-fixture","opus":"gpt-5.6-sol"},
   "rootAdapter": "\n## Fixture adapter\n",
   "agentPreamble": "Role ${name} starts here.\n\n",
   "excludeDirs": ["references"],
@@ -293,19 +402,64 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
   "suffixMode": "strip-prefix",
   "suffixPrefix": "sample-"
 }`)
-	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Root\n\nUse /wave:go with sonnet. Read CLAUDE.md.\n")
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Root\n\nUse /tools:go with sonnet. Read CLAUDE.md.\n")
 	writeTestFile(t, filepath.Join(root, "sample-api", "CLAUDE.md"), "# API\n")
 	writeTestFile(t, filepath.Join(root, "template", "CLAUDE.md"), "# Must stay excluded\n")
-	writeTestFile(t, filepath.Join(root, ".claude", "commands", "wave", "go.md"), "---\ndescription: >-\n  Run sonnet cards\n  safely\n---\nBody keeps CLAUDE.md and /wave:go with sonnet.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "commands", "tools", "go.md"),
+		"---\ndescription: >-\n  Run sonnet cards\n  safely\n---\nBody keeps CLAUDE.md and /tools:go with sonnet.\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".claude", "commands", "references", "killed.md"), "killed\n")
-	writeTestFile(t, filepath.Join(root, ".claude", "agents", "reviewer.md"), "---\ndescription: >-\n  Review \\\"quoted\\\" output\nmodel: sonnet\ntools: Read, Grep\n---\nFollow /wave:go.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "reviewer.md"),
+		"---\ndescription: >-\n  Review \\\"quoted\\\" output\nmodel: opus # pinned\neffort: high\ntools: Read, Grep\n---\nFollow /tools:go.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "unmapped.md"),
+		"---\ndescription: unmapped model\nmodel: something-else\n---\nunmapped\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "escaped.md"),
+		"---\ndescription: escaped values\nmodel: 'model\\path\"quoted'\neffort: 'effort\\path\"quoted'\n---\nescaped\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".claude", "agents", "private.md"), "---\ndescription: private\n---\nno\n")
-	writeTestFile(t, filepath.Join(root, "sample-api", ".claude", "agents", "worker.md"), "---\ndescription: child\n---\nchild\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "changelogger.md"),
+		"---\ndescription: writer\ntools: Read, Write, Edit, Bash, Glob, Grep, Agent\n---\nwriter\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "gitter.md"),
+		"---\ndescription: git writer\ntools: Read, Bash, Glob, Grep\n---\ngitter\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, "sample-api", ".claude", "agents", "gitter.md"),
+		"---\ndescription: nested git writer\ntools: Read, Bash, Glob, Grep\n---\ngitter\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, "sample-api", ".claude", "agents", "worker.md"),
+		"---\ndescription: child\n---\nchild\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".claude", "skills", "native", "SKILL.md"), "# Native\n")
 	writeTestFile(t, filepath.Join(home, ".claude", "commands", "global.md"), "---\ndescription: global\n---\nglobal\n")
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "side.md"), "---\ndescription: side\ndisable-model-invocation: true\n---\nside\n")
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "side.md"),
+		"---\ndescription: side\ndisable-model-invocation: true\n---\nside\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".codex", "config.toml"), "model = \"fixture\"\n")
-	writeTestFile(t, filepath.Join(root, ".mcp.json"), `{"mcpServers":{"fixture":{"command":"pfm","args":["mcp"],"future":true}}}`)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".mcp.json"),
+		`{"mcpServers":{"fixture":{"command":"pfm","args":["mcp"],"future":true}}}`,
+	)
 
 	build, err := Run(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !build.OK {
@@ -314,21 +468,85 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	if !containsFinding(build.Warnings, "fields not mapped") {
 		t.Fatalf("MCP warning missing: %#v", build.Warnings)
 	}
-	assertTestFileContains(t, filepath.Join(root, "AGENTS.md"), "Generated by pfm codex build", "$wave-go", "gpt-fixture", "AGENTS.md", "## Fixture adapter")
+	assertTestFileContains(
+		t,
+		filepath.Join(root, "AGENTS.md"),
+		"Generated by pfm codex build",
+		"$tools-go",
+		"gpt-fixture",
+		"AGENTS.md",
+		"## Fixture adapter",
+	)
 	if _, err := os.Stat(filepath.Join(root, "template", "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("excluded template AGENTS.md exists: %v", err)
 	}
-	assertTestFileContains(t, filepath.Join(root, ".codex", "agents", "reviewer.toml"), `description = "Review \\\"quoted\\\" output"`, `sandbox_mode = "read-only"`, "Role reviewer starts here.", "$wave-go")
-	assertTestFileContains(t, filepath.Join(root, ".codex", "agents", "worker-api.toml"), `name = "worker_api"`)
+	assertTestFileContains(
+		t,
+		filepath.Join(root, ".codex", "agents", "reviewer.toml"),
+		`description = "Review \\\"quoted\\\" output"`,
+		`model = "gpt-5.6-sol"`,
+		`model_reasoning_effort = "high"`,
+		`sandbox_mode = "read-only"`,
+		"Role reviewer starts here.",
+		"$tools-go",
+	)
+	reviewer := string(mustReadTestFile(t, filepath.Join(root, ".codex", "agents", "reviewer.toml")))
+	ordered := []string{
+		`name = "reviewer"`,
+		`description = "Review \\\"quoted\\\" output"`,
+		`model = "gpt-5.6-sol"`,
+		`model_reasoning_effort = "high"`,
+		`sandbox_mode = "read-only"`,
+		`developer_instructions = """`,
+	}
+	last := -1
+	for _, needle := range ordered {
+		index := strings.Index(reviewer, needle)
+		if index <= last {
+			t.Fatalf("reviewer.toml key %q at %d after prior key at %d:\n%s", needle, index, last, reviewer)
+		}
+		last = index
+	}
+	assertTestFileContains(t, filepath.Join(root, ".codex", "agents", "unmapped.toml"), `model = "something-else"`)
+	assertTestFileContains(
+		t,
+		filepath.Join(root, ".codex", "agents", "escaped.toml"),
+		`model = "model\\path\"quoted"`,
+		`model_reasoning_effort = "effort\\path\"quoted"`,
+	)
+	worker := string(mustReadTestFile(t, filepath.Join(root, ".codex", "agents", "worker-api.toml")))
+	if !strings.Contains(worker, `name = "worker_api"`) || strings.Contains(worker, "\nmodel =") ||
+		strings.Contains(worker, "\nmodel_reasoning_effort =") {
+		t.Fatalf("worker-api.toml must omit absent model and effort keys:\n%s", worker)
+	}
+	for _, writable := range []string{"changelogger", "gitter", "gitter-api", "unmapped"} {
+		content := string(mustReadTestFile(t, filepath.Join(root, ".codex", "agents", writable+".toml")))
+		if strings.Contains(content, "sandbox_mode") {
+			t.Fatalf("%s.toml must carry no sandbox_mode key:\n%s", writable, content)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(root, ".codex", "agents", "private.toml")); !os.IsNotExist(err) {
 		t.Fatalf("never-register agent exists: %v", err)
 	}
-	commandSkill := filepath.Join(root, ".codex", "skills", "wave-go", "SKILL.md")
-	assertTestFileContains(t, commandSkill, "name: wave-go", "Run sonnet cards", "safely", "Body keeps CLAUDE.md", "$wave-go", "gpt-fixture")
+	commandSkill := filepath.Join(root, ".codex", "skills", "tools-go", "SKILL.md")
+	assertTestFileContains(
+		t,
+		commandSkill,
+		"name: tools-go",
+		"Run sonnet cards",
+		"safely",
+		"Body keeps CLAUDE.md",
+		"$tools-go",
+		"gpt-fixture",
+	)
 	if strings.Contains(string(mustReadTestFile(t, commandSkill)), "Run gpt-fixture cards") {
 		t.Fatal("command frontmatter model alias was rewritten")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".codex", "skills", "references-killed", "SKILL.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(
+		filepath.Join(root, ".codex", "skills", "references-killed", "SKILL.md"),
+	); !os.IsNotExist(
+		err,
+	) {
 		t.Fatalf("excluded command exists: %v", err)
 	}
 	if target, err := os.Readlink(filepath.Join(root, ".codex", "skills", "native")); err != nil || target == "" {
@@ -338,7 +556,13 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".codex", "skills", "side", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("non-model-invocable global skill exists: %v", err)
 	}
-	assertTestFileContains(t, filepath.Join(root, ".codex", "config.toml"), `model = "fixture"`, "generated by pfm codex build", "[mcp_servers.fixture]")
+	assertTestFileContains(
+		t,
+		filepath.Join(root, ".codex", "config.toml"),
+		`model = "fixture"`,
+		"generated by pfm codex build",
+		"[mcp_servers.fixture]",
+	)
 
 	before := snapshotTestTree(t, root, home)
 	check, err := Run(Options{Root: root, Home: home, Mode: ModeCheck})
@@ -374,7 +598,11 @@ func TestReconcileFindingsAreNamedAndNonDestructive(t *testing.T) {
 			t.Fatalf("seed build: result=%#v err=%v", result, err)
 		}
 		writeTestFile(t, filepath.Join(root, "AGENTS.md"), "stale generated content\n")
-		writeTestFile(t, filepath.Join(root, ".codex", "agents", "orphan.toml"), generatedMarker+"\nname = \"orphan\"\n")
+		writeTestFile(
+			t,
+			filepath.Join(root, ".codex", "agents", "orphan.toml"),
+			generatedMarker+"\nname = \"orphan\"\n",
+		)
 		before := snapshotTestTree(t, root, home)
 
 		result, err := Run(Options{Root: root, Home: home, Mode: ModeCheck})
@@ -393,7 +621,11 @@ func TestReconcileFindingsAreNamedAndNonDestructive(t *testing.T) {
 		root := t.TempDir()
 		home := t.TempDir()
 		writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
-		writeTestFile(t, filepath.Join(root, ".claude", "agents", "reviewer.md"), "---\ndescription: reviewer\n---\nReview.\n")
+		writeTestFile(
+			t,
+			filepath.Join(root, ".claude", "agents", "reviewer.md"),
+			"---\ndescription: reviewer\n---\nReview.\n",
+		)
 		if result, err := Run(Options{Root: root, Home: home, Mode: ModeBuild}); err != nil || !result.OK {
 			t.Fatalf("seed build: result=%#v err=%v", result, err)
 		}

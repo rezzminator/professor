@@ -1,0 +1,7 @@
+{
+  "name": "Professor Bronze",
+  "overrides": {
+    "promptBorder": "#ff7a1a",
+    "promptBorderShimmer": "#ffc07a"
+  }
+}

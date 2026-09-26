@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func headlessJail(t *testing.T) {
@@ -147,7 +147,12 @@ printf '%s\n' '{"result":"selected","usage":{"input_tokens":2,"output_tokens":1}
 	if _, err := os.Stat(wrongMarker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("top-level binary launched instead of account binary; marker err=%v", err)
 	}
-	if got := strings.TrimSpace(string(mustRead(t, filepath.Join(capture, "config-dir")))); got != filepath.Join(parent, "cc-2") {
+	if got := strings.TrimSpace(
+		string(mustRead(t, filepath.Join(capture, "config-dir"))),
+	); got != filepath.Join(
+		parent,
+		"cc-2",
+	) {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want account 2 dir", got)
 	}
 	for name, path := range map[string]string{"ANTHROPIC_BASE_URL": filepath.Join(capture, "base-url"), "ANTHROPIC_AUTH_TOKEN": filepath.Join(capture, "auth-token")} {
@@ -179,11 +184,14 @@ func TestRunStripsAmbientProviderSecretsButPreservesExplicitOverrides(t *testing
 	}
 	capture := t.TempDir()
 	t.Setenv("CAPTURE_DIR", capture)
-	binary := writeEngineStub(t, `for name in ANTHROPIC_API_KEY OPENAI_API_KEY OPENAI_BASE_URL CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT; do
+	binary := writeEngineStub(
+		t,
+		`for name in ANTHROPIC_API_KEY OPENAI_API_KEY OPENAI_BASE_URL CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT; do
   value=$(/usr/bin/printenv "$name" || true)
   printf '%s=%s\n' "$name" "$value" >> "$CAPTURE_DIR/env"
 done
-printf '%s\n' '{"result":"ok"}'`)
+printf '%s\n' '{"result":"ok"}'`,
+	)
 	configDir := filepath.Join(t.TempDir(), "cc")
 	machine := claudeMachine(binary, configDir)
 	result, err := Run(context.Background(), Request{
@@ -343,13 +351,15 @@ func TestRunNormalizesClaudeAndCodexWithNullCost(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "claude envelope", engine: pfmengine.Claude,
+			name:   "claude envelope",
+			engine: pfmengine.Claude,
 			body:   `printf '%s\n' '{"engine":"cc","result":"hello","structured_output":{"answer":"hello"},"usage":{"prompt_tokens":4,"cache_read_input_tokens":2,"completion_tokens":3},"total_cost_usd":null}'`,
 			config: func(binary string) pfmconfig.Config { return claudeMachine(binary, filepath.Join(t.TempDir(), "cc")) },
 			want:   "hello",
 		},
 		{
-			name: "codex jsonl", engine: pfmengine.Codex,
+			name:   "codex jsonl",
+			engine: pfmengine.Codex,
 			body:   `printf '%s\n' '{"type":"thread.started","engine":"cx"}' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"answer\":\"hello\"}"}}' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":2,"output_tokens":3}}'`,
 			config: func(binary string) pfmconfig.Config { return codexMachine(binary, filepath.Join(t.TempDir(), "cx")) },
 			want:   `{"answer":"hello"}`,
@@ -358,7 +368,12 @@ func TestRunNormalizesClaudeAndCodexWithNullCost(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			binary := writeEngineStub(t, testCase.body)
-			request := Request{Config: testCase.config(binary), Engine: testCase.engine, Prompt: "hello", Schema: schema}
+			request := Request{
+				Config: testCase.config(binary),
+				Engine: testCase.engine,
+				Prompt: "hello",
+				Schema: schema,
+			}
 			result, err := Run(context.Background(), request)
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -369,7 +384,8 @@ func TestRunNormalizesClaudeAndCodexWithNullCost(t *testing.T) {
 			if result.Engine != testCase.engine {
 				t.Fatalf("engine = %q, want canonical %q", result.Engine, testCase.engine)
 			}
-			if result.Usage == nil || result.Usage.Input != 4 || result.Usage.CachedInput != 2 || result.Usage.Output != 3 {
+			if result.Usage == nil || result.Usage.Input != 4 || result.Usage.CachedInput != 2 ||
+				result.Usage.Output != 3 {
 				t.Fatalf("usage = %#v", result.Usage)
 			}
 			if result.TotalCostUSD != nil {
@@ -434,15 +450,51 @@ func TestRunReportsMalformedAbsentAndEngineErrorOutputs(t *testing.T) {
 		want       string
 	}{
 		{"Claude malformed JSON", pfmengine.Claude, "printf '%s\\n' 'not json'", false, "parse Claude JSON envelope"},
-		{"Claude engine error", pfmengine.Claude, "printf '%s\\n' '{\"is_error\":true,\"result\":\"no\"}'", false, "envelope reported an error"},
-		{"Claude missing structured output", pfmengine.Claude, "printf '%s\\n' '{\"result\":\"plain\"}'", true, "structured_output"},
+		{
+			"Claude engine error",
+			pfmengine.Claude,
+			"printf '%s\\n' '{\"is_error\":true,\"result\":\"no\"}'",
+			false,
+			"envelope reported an error",
+		},
+		{
+			"Claude missing structured output",
+			pfmengine.Claude,
+			"printf '%s\\n' '{\"result\":\"plain\"}'",
+			true,
+			"structured_output",
+		},
 		{"Claude malformed result", pfmengine.Claude, "printf '%s\\n' '{\"result\":123}'", false, ""},
-		{"Claude malformed usage", pfmengine.Claude, "printf '%s\\n' '{\"result\":\"plain\",\"usage\":\"bad\"}'", false, ""},
+		{
+			"Claude malformed usage",
+			pfmengine.Claude,
+			"printf '%s\\n' '{\"result\":\"plain\",\"usage\":\"bad\"}'",
+			false,
+			"",
+		},
 		{"Codex malformed JSONL", pfmengine.Codex, "printf '%s\\n' 'not json'", false, "parse Codex JSONL"},
-		{"Codex missing terminal", pfmengine.Codex, "printf '%s\\n' '{\"type\":\"item\",\"item\":{\"type\":\"agent_message\",\"text\":\"plain\"}}'", false, "missing terminal"},
-		{"Codex started agent message", pfmengine.Codex, "printf '%s\\n' '{\"type\":\"item.started\",\"item\":{\"type\":\"agent_message\",\"text\":\"started\"}}' '{\"type\":\"turn.completed\"}'", false, ""},
+		{
+			"Codex missing terminal",
+			pfmengine.Codex,
+			"printf '%s\\n' '{\"type\":\"item\",\"item\":{\"type\":\"agent_message\",\"text\":\"plain\"}}'",
+			false,
+			"missing terminal",
+		},
+		{
+			"Codex started agent message",
+			pfmengine.Codex,
+			"printf '%s\\n' '{\"type\":\"item.started\",\"item\":{\"type\":\"agent_message\",\"text\":\"started\"}}' '{\"type\":\"turn.completed\"}'",
+			false,
+			"",
+		},
 		{"Codex terminal without answer", pfmengine.Codex, "printf '%s\\n' '{\"type\":\"turn.completed\"}'", false, ""},
-		{"Codex engine error", pfmengine.Codex, "printf '%s\\n' '{\"type\":\"turn.failed\"}'", false, "event turn.failed"},
+		{
+			"Codex engine error",
+			pfmengine.Codex,
+			"printf '%s\\n' '{\"type\":\"turn.failed\"}'",
+			false,
+			"event turn.failed",
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -534,10 +586,15 @@ func TestCodexIsolationCapabilityErrorsHappenBeforeLaunch(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			capture := t.TempDir()
 			binary := writeEngineStub(t, "printf started > \"$CAPTURE_DIR/started\"")
-			request := Request{Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")), Engine: pfmengine.Codex, Prompt: "hello", Env: testEnv(capture)}
+			request := Request{
+				Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")),
+				Engine: pfmengine.Codex,
+				Prompt: "hello",
+				Env:    testEnv(capture),
+			}
 			testCase.mutate(&request)
 			_, err := Run(context.Background(), request)
-			if err == nil || !strings.Contains(err.Error(), "Codex headless") {
+			if err == nil || !strings.Contains(err.Error(), "headless runs with Codex") {
 				t.Fatalf("error = %v, want an explicit Codex capability error", err)
 			}
 			if _, statErr := os.Stat(filepath.Join(capture, "started")); !errors.Is(statErr, os.ErrNotExist) {
@@ -554,10 +611,19 @@ func TestCodexAllowUnsupportedKeepsSupportedControlsAndReportsDiagnostics(t *tes
 printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"ok\":true}"}}' '{"type":"turn.completed"}'`)
 	system := "supported system"
 	request := Request{
-		Config: codexMachine(binary, filepath.Join(t.TempDir(), "cx")), Engine: pfmengine.Codex,
-		Prompt: "hello", SystemPrompt: &system, Schema: json.RawMessage(`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`),
-		Tools: stringPtr("none"), SettingsSources: stringPtr(""), StrictMCP: true,
-		NoSessionPersistence: true, AllowUnsupported: true, Env: testEnv(capture),
+		Config:       codexMachine(binary, filepath.Join(t.TempDir(), "cx")),
+		Engine:       pfmengine.Codex,
+		Prompt:       "hello",
+		SystemPrompt: &system,
+		Schema: json.RawMessage(
+			`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`,
+		),
+		Tools:                stringPtr("none"),
+		SettingsSources:      stringPtr(""),
+		StrictMCP:            true,
+		NoSessionPersistence: true,
+		AllowUnsupported:     true,
+		Env:                  testEnv(capture),
 	}
 	result, err := Run(context.Background(), request)
 	if err != nil {
@@ -691,7 +757,12 @@ func TestRunTimeoutKillsProcessGroup(t *testing.T) {
 	binary := writeEngineStub(t, `(sleep 30) &
 echo "$!" > "$CAPTURE_DIR/child-pid"
 sleep 30`)
-	request := Request{Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude, Prompt: "hello", Env: testEnv(capture)}
+	request := Request{
+		Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")),
+		Engine: pfmengine.Claude,
+		Prompt: "hello",
+		Env:    testEnv(capture),
+	}
 	ctx := newArmedDeadlineContext()
 	type outcome struct {
 		result Result
@@ -755,7 +826,13 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{
 
 func TestArgumentsAllowFutureFlagsAndValidateSchemaBeforeLaunch(t *testing.T) {
 	headlessJail(t)
-	args, err := arguments(Request{Engine: pfmengine.Claude, Args: []string{"--new-future-flag", "value"}, Schema: json.RawMessage(`{"type":"string"}`)})
+	args, err := arguments(
+		Request{
+			Engine: pfmengine.Claude,
+			Args:   []string{"--new-future-flag", "value"},
+			Schema: json.RawMessage(`{"type":"string"}`),
+		},
+	)
 	if err != nil {
 		t.Fatalf("arguments() error = %v", err)
 	}
@@ -766,7 +843,14 @@ func TestArgumentsAllowFutureFlagsAndValidateSchemaBeforeLaunch(t *testing.T) {
 		t.Fatalf("Claude schema was not passed losslessly: %#v", args)
 	}
 	binary := writeEngineStub(t, "printf '%s\\n' '{\"result\":\"ok\"}'")
-	if _, err := Resolve(Request{Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")), Engine: pfmengine.Claude, Schema: json.RawMessage(`not-json`)}); err == nil || !strings.Contains(err.Error(), "invalid output schema") {
+	if _, err := Resolve(
+		Request{
+			Config: claudeMachine(binary, filepath.Join(t.TempDir(), "cc")),
+			Engine: pfmengine.Claude,
+			Schema: json.RawMessage(`not-json`),
+		},
+	); err == nil ||
+		!strings.Contains(err.Error(), "invalid output schema") {
 		t.Fatalf("invalid schema was accepted: %v", err)
 	}
 }

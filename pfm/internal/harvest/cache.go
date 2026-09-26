@@ -1,12 +1,11 @@
 package harvest
 
 import (
-	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,86 +14,27 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Cache is a type-partitioned markdown cache. Images and archives do not
 // expire; publication-like kinds do.
 type Cache struct {
-	root string
-	ttl  time.Duration
+	root  string
+	ttl   time.Duration
+	clock clock.Clock
 }
 
-type CacheSearchResult struct {
-	URL     string `json:"url"`
-	Path    string `json:"path"`
-	Matches int    `json:"matches"`
-	Sample  string `json:"sample"`
+func newCache(root string, ttl time.Duration, clocks ...clock.Clock) *Cache {
+	watch := clock.Real
+	if len(clocks) > 0 && clocks[0] != nil {
+		watch = clocks[0]
+	}
+	return &Cache{root: root, ttl: ttl, clock: watch}
 }
 
-func (c *Cache) Search(pattern string, maxResults int, ignoreCase bool) ([]CacheSearchResult, error) {
-	if maxResults <= 0 {
-		maxResults = 50
-	}
-	flags := pattern
-	if ignoreCase {
-		flags = "(?i)" + pattern
-	}
-	rx, err := regexp.Compile(flags)
-	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %w", err)
-	}
-	if _, statErr := os.Stat(c.root); errors.Is(statErr, os.ErrNotExist) {
-		return []CacheSearchResult{}, nil
-	}
-	out := []CacheSearchResult{}
-	err = filepath.WalkDir(c.root, func(path string, entry os.DirEntry, e error) error {
-		if e != nil {
-			return e
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".md" || len(out) >= maxResults {
-			return nil
-		}
-		raw, e := os.ReadFile(path)
-		if e != nil {
-			log.Printf("harvest cache search cannot read %s: %v", path, e)
-			return nil
-		}
-		meta, body := parseFrontmatter(string(raw))
-		hits := rx.FindAllString(body, -1)
-		if len(hits) == 0 {
-			return nil
-		}
-		sample := ""
-		for _, line := range strings.Split(body, "\n") {
-			if rx.MatchString(line) {
-				sample = strings.TrimSpace(line)
-				if len([]rune(sample)) > 200 {
-					sample = string([]rune(sample)[:200])
-				}
-				break
-			}
-		}
-		displayURL := meta["url"]
-		if displayURL == "" {
-			displayURL = path
-		}
-		out = append(out, CacheSearchResult{URL: displayURL, Path: path, Matches: len(hits), Sample: sample})
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search cache: %w", err)
-	}
-	return out, nil
-}
-
-func (h *Harvester) SearchCache(pattern string, maxResults int, ignoreCase bool) ([]CacheSearchResult, error) {
-	return h.cache.Search(pattern, maxResults, ignoreCase)
-}
-
-func newCache(root string, ttl time.Duration) *Cache { return &Cache{root: root, ttl: ttl} }
-
-func defaultCacheDir() (string, error) {
+func defaultHarvestCacheDir() (string, error) {
 	// The default cache lives in exactly ONE place: <home>/.professor/.cache
 	// (beside pfm's other home state such as ~/.professor/agents). It must
 	// never follow the process's working directory — the cwd-walking default
@@ -116,7 +56,7 @@ func CacheRoot(configured string) (string, error) {
 	if strings.TrimSpace(configured) != "" {
 		return filepath.Clean(configured), nil
 	}
-	return defaultCacheDir()
+	return defaultHarvestCacheDir()
 }
 
 // CacheKey returns a stable type-specific filesystem key.
@@ -141,17 +81,20 @@ func (c *Cache) load(source, kind string) (body string, meta map[string]string, 
 	if err != nil {
 		return "", nil, path, false
 	}
-	meta, body = parseFrontmatter(string(raw))
+	meta, body = parseCacheFrontmatter(string(raw))
 	if c.stale(path, kind, meta) {
 		return "", meta, path, false
 	}
-	if kind == "html" && contentChars(body) < 200 {
+	if kind == kindHTML && contentChars(body) < 200 {
 		return "", meta, path, false
 	}
 	return body, meta, path, true
 }
 
-func (c *Cache) loadAny(source string, kinds []string) (body, kind string, meta map[string]string, path string, ok bool) {
+func (c *Cache) loadAny(
+	source string,
+	kinds []string,
+) (body, kind string, meta map[string]string, path string, ok bool) {
 	for _, candidate := range kinds {
 		body, meta, path, ok = c.load(source, candidate)
 		if ok {
@@ -171,13 +114,16 @@ func (c *Cache) stale(path, kind string, meta map[string]string) bool {
 		if statErr != nil {
 			return false
 		}
-		return time.Since(info.ModTime()) > c.ttl
+		return c.clock.Now().Sub(info.ModTime()) > c.ttl
 	}
-	return time.Since(stamp) > c.ttl
+	return c.clock.Now().Sub(stamp) > c.ttl
 }
 
-func (c *Cache) save(source, kind, method, body string, rungs []string) (string, error) {
-	path := c.path(source, kind)
+// save stores body with its provenance. status is the HTTP status of the rung
+// that delivered it; 0 (a local document, or a status never learned) writes no
+// status line, so a later hit reports none rather than a made-up one.
+func (c *Cache) save(source, kind, method, body string, status int, rungs []string) (path string, returnErr error) {
+	path = c.path(source, kind)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return path, fmt.Errorf("create cache directory: %w", err)
 	}
@@ -187,7 +133,10 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (string,
 		return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(value)
 	}
 	meta := fmt.Sprintf("---\nurl: %s\nfetched_at: %s\nsource: harvester\nmethod: %s\ntoken_count: %d\n",
-		safe(source), time.Now().UTC().Format(time.RFC3339), safe(method), estimateTokens(body))
+		safe(source), c.clock.Now().UTC().Format(time.RFC3339), safe(method), EstimateTokens(body))
+	if status > 0 {
+		meta += fmt.Sprintf("http_status: %d\n", status)
+	}
 	if len(rungs) > 0 {
 		meta += "rungs: " + strings.Join(rungs, ", ") + "\n"
 	}
@@ -197,7 +146,11 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (string,
 		return path, fmt.Errorf("create cache temp: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() {
+		if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove cache temp %s: %w", tmpName, err))
+		}
+	}()
 	if _, err := tmp.WriteString(meta + body); err != nil {
 		_ = tmp.Close()
 		return path, fmt.Errorf("write cache: %w", err)
@@ -215,7 +168,7 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (string,
 	return path, nil
 }
 
-func parseFrontmatter(raw string) (map[string]string, string) {
+func parseCacheFrontmatter(raw string) (map[string]string, string) {
 	meta := map[string]string{}
 	if !strings.HasPrefix(raw, "---\n") {
 		return meta, raw
@@ -238,34 +191,66 @@ func parseFrontmatter(raw string) (map[string]string, string) {
 	return meta, body
 }
 
-func estimateTokens(text string) int {
+func EstimateTokens(text string) int {
 	if text == "" {
 		return 0
 	}
-	// Match the Python oracle: CJK/kana/Hangul 1.3×, symbol-heavy code 1/1.8,
-	// and ordinary prose 1/2, always rounded up.
+	// Weighted by share, not by the presence of one character: CJK/kana/Hangul
+	// runes cost 1.3x each; the REMAINING (non-CJK) runes cost 1/1.8 when
+	// symbols are >=5% of THOSE runes (code), else 1/2 (prose) - always
+	// rounded up. A pure-CJK, pure-prose or pure-code text reduces to its
+	// old whole-text rate exactly; only mixed text changes.
 	runes := []rune(text)
 	cjk := 0
 	symbols := 0
 	for _, r := range runes {
-		if (r >= 0x3040 && r <= 0x30ff) || (r >= 0x3400 && r <= 0x9fff) || (r >= 0xf900 && r <= 0xfaff) || (r >= 0xac00 && r <= 0xd7af) || (r >= 0xff00 && r <= 0xffef) {
+		if (r >= 0x3040 && r <= 0x30ff) || (r >= 0x3400 && r <= 0x9fff) || (r >= 0xf900 && r <= 0xfaff) ||
+			(r >= 0xac00 && r <= 0xd7af) ||
+			(r >= 0xff00 && r <= 0xffef) {
 			cjk++
+			continue
 		}
 		switch r {
-		case '{', '}', '[', ']', '(', ')', '<', '>', ';', '=', '+', '-', '*', '/', '\\', '|', '&', '^', '%', '$', '#', '@', '~', '`', '_':
+		case '{',
+			'}',
+			'[',
+			']',
+			'(',
+			')',
+			'<',
+			'>',
+			';',
+			'=',
+			'+',
+			'-',
+			'*',
+			'/',
+			'\\',
+			'|',
+			'&',
+			'^',
+			'%',
+			'$',
+			'#',
+			'@',
+			'~',
+			'`',
+			'_':
 			symbols++
 		}
 	}
 	n := len(runes)
-	if cjk > 0 {
-		return int(float64(n)*1.3 + 0.999999)
+	nonCJK := n - cjk
+	total := float64(cjk) * 1.3
+	if nonCJK > 0 {
+		if float64(symbols)/float64(nonCJK) >= 0.05 {
+			total += float64(nonCJK) / 1.8
+		} else {
+			total += float64(nonCJK) / 2
+		}
 	}
-	if float64(symbols)/float64(n) >= 0.05 {
-		return int(float64(n)/1.8 + 0.999999)
-	}
-	return (n + 1) / 2
+	return int(total + 0.999999)
 }
-func EstimateTokens(text string) int { return estimateTokens(text) }
 
 func truncateInline(body string, limit int) string {
 	if limit <= 0 {
@@ -278,13 +263,16 @@ func truncateInline(body string, limit int) string {
 	return string(runes[:limit]) + "\n\n[content truncated; read the cached path for the complete artifact]"
 }
 
-var volatileKinds = map[string]bool{"html": true, "pdf": true, "docx": true, "xlsx": true,
-	"pptx": true, "csv": true, "json": true, "txt": true}
+var volatileKinds = map[string]bool{
+	kindHTML: true, kindPDF: true, kindDOCX: true, kindXLSX: true,
+	kindPPTX: true, kindCSV: true, kindJSON: true, kindTXT: true,
+}
 
 type negativeCache struct {
 	mu        sync.Mutex
 	ttl       time.Duration
 	transient time.Duration
+	clock     clock.Clock
 	entries   map[string]negativeEntry
 }
 type negativeEntry struct {
@@ -293,14 +281,19 @@ type negativeEntry struct {
 	result Result
 }
 
-func newNegativeCache(ttl, transient time.Duration) *negativeCache {
-	return &negativeCache{ttl: ttl, transient: transient, entries: map[string]negativeEntry{}}
+func newNegativeCache(ttl, transient time.Duration, clocks ...clock.Clock) *negativeCache {
+	watch := clock.Real
+	if len(clocks) > 0 && clocks[0] != nil {
+		watch = clocks[0]
+	}
+	return &negativeCache{ttl: ttl, transient: transient, clock: watch, entries: map[string]negativeEntry{}}
 }
+
 func (c *negativeCache) get(key string) (Result, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
-	if !ok || time.Since(e.at) >= e.ttl {
+	if !ok || c.clock.Now().Sub(e.at) >= e.ttl {
 		if ok {
 			delete(c.entries, key)
 		}
@@ -311,7 +304,7 @@ func (c *negativeCache) get(key string) (Result, bool) {
 	// remain stable while a repeated request learns when retrying is worthwhile.
 	result := e.result
 	if result.Error != "" {
-		remaining := e.ttl - time.Since(e.at)
+		remaining := e.ttl - c.clock.Now().Sub(e.at)
 		seconds := int((remaining + 500*time.Millisecond) / time.Second)
 		if seconds < 0 {
 			seconds = 0
@@ -320,14 +313,15 @@ func (c *negativeCache) get(key string) (Result, bool) {
 	}
 	return result, true
 }
+
 func (c *negativeCache) put(key string, result Result) {
 	c.mu.Lock()
 	ttl := c.ttl
-	if result.HTTPStatus == http.StatusTooManyRequests || result.ErrorKind == "timeout" || result.ErrorKind == "connect" || result.ErrorKind == "dns" {
+	if result.HTTPStatus == http.StatusTooManyRequests || result.ErrorKind == errorKindTimeout ||
+		result.ErrorKind == errorKindConnect ||
+		result.ErrorKind == errorKindDNS {
 		ttl = c.transient
 	}
-	c.entries[key] = negativeEntry{at: time.Now(), ttl: ttl, result: result}
+	c.entries[key] = negativeEntry{at: c.clock.Now(), ttl: ttl, result: result}
 	c.mu.Unlock()
 }
-
-func cacheError(err error) bool { return err != nil && !errors.Is(err, context.Canceled) }

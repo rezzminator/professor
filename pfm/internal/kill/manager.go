@@ -5,17 +5,17 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/gather"
-	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // New constructs a manager from the already-open fleet store.
@@ -37,11 +37,11 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{}
+		tmux = TmuxKiller{}
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	spawner := dependencies.Spawner
 	if spawner == nil {
@@ -50,11 +50,19 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 			ConfigPath: dependencies.ConfigPath,
 		}
 	}
-	codexRoots := dependencies.CodexRoots
-	if codexRoots == nil {
-		codexRoots = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
+	codexHomes := dependencies.CodexHomes
+	if codexHomes == nil {
+		codexHomes = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
 	} else {
-		codexRoots = append([]string{}, codexRoots...)
+		codexHomes = append([]string{}, codexHomes...)
+	}
+	confirmEvery := dependencies.ConfirmEvery
+	if confirmEvery == 0 {
+		confirmEvery = defaultConfirmEvery
+	}
+	confirmAttempts := dependencies.ConfirmAttempts
+	if confirmAttempts == 0 {
+		confirmAttempts = defaultConfirmAttempts
 	}
 	return &Manager{
 		database: database,
@@ -65,18 +73,96 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 		paths: resolvedPaths{
 			home:       resolved.Home,
 			sidDir:     resolved.SIDDir,
-			codexRoots: codexRoots,
+			codexHomes: codexHomes,
 			tmuxDir:    resolved.TmuxDir,
 		},
+		confirmEvery:    confirmEvery,
+		confirmAttempts: confirmAttempts,
 	}, nil
 }
 
-// Environment reads the three caller values used by --self.
-func Environment() SelfEnvironment {
+// ConfirmExit must never race the detached finisher it verifies: that process
+// waits defaultExitDelay, types the engine's exit command, then gives the chat
+// defaultPollAttempts x defaultPollEvery to save its session and close before
+// its own fallback kill. The first confirm stage therefore outlasts that whole
+// window (it returns the moment the pane is gone, so a healthy kill is still
+// prompt); only a pane that outlived the finisher is escalated, and each
+// escalation stage then waits defaultEscalateAttempts polls.
+const (
+	defaultConfirmEvery     = 500 * time.Millisecond
+	defaultConfirmAttempts  = int((defaultExitDelay+defaultPollAttempts*defaultPollEvery)/defaultConfirmEvery) + 6
+	defaultEscalateAttempts = 6
+)
+
+// ConfirmExit verifies a killed live target's pane is actually gone within a
+// bounded wait instead of trusting that the detached finisher landed it.
+//
+// The detached finisher is spawned through `setsid -f`, which forks and
+// returns almost immediately — CommandSpawner.Spawn's own Wait() only
+// observes that harmless immediate return, never the finisher's real
+// completion, so nothing upstream of this call has ever verified the pane
+// actually closed. That is the defect this method exists to end: a caller
+// that reports "killed" the instant Kill() returns is reporting the spawn of
+// a detached process, not the state of the pane.
+//
+// When the pane is still there after the bounded wait, ConfirmExit escalates
+// exactly the way Finisher.Run's own fallback does — kill-pane, then (one
+// rung further, since the finisher's own kill-pane may itself be the thing
+// that never landed) kill-server of THIS target's own socket, never any
+// other. Only once every escalation has also failed to clear the pane does
+// it return a named error; a caller must never print success past that
+// point.
+func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
+	if target.SocketPath == "" || target.PaneID == "" {
+		return nil
+	}
+	landed, probeErr, err := pollPaneGone(
+		ctx, manager.tmux, target.SocketPath, target.PaneID, manager.confirmAttempts, manager.confirmEvery,
+	)
+	if err != nil {
+		return err
+	}
+	for _, escalate := range []func() error{
+		func() error { return manager.tmux.KillPane(ctx, target.SocketPath, target.PaneID) },
+		func() error { return manager.tmux.KillServer(ctx, target.SocketPath) },
+	} {
+		if landed {
+			break
+		}
+		if killErr := escalate(); killErr != nil {
+			probeErr = errors.Join(probeErr, killErr)
+		}
+		var stageErr error
+		var pollErr error
+		landed, pollErr, stageErr = pollPaneGone(
+			ctx, manager.tmux, target.SocketPath, target.PaneID,
+			min(manager.confirmAttempts, defaultEscalateAttempts), manager.confirmEvery,
+		)
+		probeErr = errors.Join(probeErr, pollErr)
+		if stageErr != nil {
+			return stageErr
+		}
+	}
+	if landed {
+		return nil
+	}
+	if probeErr != nil {
+		return fmt.Errorf("pane %s still alive after kill: %w", target.PaneID, probeErr)
+	}
+	return fmt.Errorf("pane %s still alive after kill", target.PaneID)
+}
+
+// Environment reads the three caller values used by --self, through env
+// (pfm/TESTPLAN.md § Seams, paths.Env); nil reads the real process
+// environment.
+func Environment(env paths.Env) SelfEnvironment {
+	if env == nil {
+		env = paths.OSEnv{}
+	}
 	return SelfEnvironment{
-		TMUX:            os.Getenv("TMUX"),
-		TMUXPane:        os.Getenv("TMUX_PANE"),
-		ClaudeSessionID: os.Getenv("CLAUDE_CODE_SESSION_ID"),
+		TMUX:            env.Get("TMUX"),
+		TMUXPane:        env.Get("TMUX_PANE"),
+		ClaudeSessionID: env.Get("CLAUDE_CODE_SESSION_ID"),
 	}
 }
 
@@ -91,9 +177,9 @@ func Environment() SelfEnvironment {
 func (manager *Manager) Kill(
 	ctx context.Context,
 	request Request,
-) (Target, error) {
-	var target Target
-	var err error
+) (target Target, err error) {
+	trail := killTrail(ctx)
+	defer func() { killed(trail, requestShape(request), err) }()
 	switch {
 	case request.Self:
 		target, err = manager.IdentifySelf(ctx, request.Environment)
@@ -121,23 +207,23 @@ func (manager *Manager) Kill(
 	}
 	live := target.SocketPath != "" && target.PaneID != ""
 
-	if err := manager.database.Kill(ctx, store.Killed{
-		ID:       target.ID,
-		Engine:   target.Engine,
-		KilledAt: manager.now().Unix(),
-	}); err != nil {
-		return Target{}, err
+	// A seat keyed on its own socket name has no identity to tombstone: the
+	// key names where the chat is, not which chat it is, and it stops meaning
+	// anything the moment the seat's session is pinned down. The composer
+	// already refuses to apply such a kill (compose.applyKill), so writing one
+	// only leaves a row nobody can unkill. The pane still closes below.
+	if !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName) {
+		if err := manager.database.Kill(ctx, store.Killed{
+			ID:       target.ID,
+			Engine:   target.Engine,
+			KilledAt: manager.now().Unix(),
+		}); err != nil {
+			return Target{}, err
+		}
 	}
 
 	if request.Exit || live {
-		if err := manager.spawner.Spawn(ctx, ExitArgs{
-			Engine:     target.Engine,
-			ID:         target.ID,
-			DataPath:   target.DataPath,
-			SocketPath: target.SocketPath,
-			SocketName: target.SocketName,
-			PaneID:     target.PaneID,
-		}); err != nil {
+		if err := manager.spawner.Spawn(ctx, ExitArgs(target)); err != nil {
 			return Target{}, err
 		}
 	}
@@ -151,7 +237,9 @@ func (manager *Manager) Kill(
 func (manager *Manager) KillCleared(
 	ctx context.Context,
 	id string,
-) (Target, bool, error) {
+) (target Target, found bool, err error) {
+	trail := killTrail(ctx)
+	defer func() { cleared(trail, found, err) }()
 	if id == "" {
 		return Target{}, false, nil
 	}
@@ -241,7 +329,9 @@ func (manager *Manager) AdvanceCodexPane(
 func (manager *Manager) KillClearedCodex(
 	ctx context.Context,
 	id string,
-) (Target, bool, error) {
+) (target Target, found bool, err error) {
+	trail := killTrail(ctx)
+	defer func() { cleared(trail, found, err) }()
 	if id == "" {
 		return Target{}, false, nil
 	}

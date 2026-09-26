@@ -10,10 +10,10 @@ import (
 
 // TestAssertFetchableConsultsTheDoHResolver pins the fix for net.go:335 (spec
 // doh-seams-spec.md, finding A): the SSRF/rebind pre-check that runs on every
-// gateway request (assertFetchable) must consult the SAME resolver every dial
+// gateway request (validateFetchURL) must consult the SAME resolver every dial
 // pins to (ResolvePublicHost / sharedDOHResolver), not the system resolver a
 // rewriting network can answer with an RFC1918 sinkhole. This test never
-// stubs lookupIP — the whole point is to prove assertFetchable is wired to
+// stubs lookupIP — the whole point is to prove validateFetchURL is wired to
 // the DoH resolver's answer, not to fake the wiring by stubbing the seam
 // directly. It uses the same test double doh_test.go uses
 // (newTestDOHResolver + refusingFallback) and installs it behind the
@@ -41,8 +41,14 @@ func TestAssertFetchableConsultsTheDoHResolver(t *testing.T) {
 	sharedDOHResolver = sync.OnceValue(func() *dohResolver {
 		return newTestDOHResolver(sinkhole.URL, refusingFallback(t))
 	})
-	if err := AssertFetchable("https://sinkhole.doh-seam.net/"); err == nil || !strings.Contains(err.Error(), "private") {
-		t.Fatalf("AssertFetchable(sinkhole.doh-seam.net) = %v, want a refusal naming the DoH-answered private address 10.0.0.1", err)
+	if err := AssertFetchable(
+		"https://sinkhole.doh-seam.net/",
+	); err == nil ||
+		!strings.Contains(err.Error(), "private") {
+		t.Fatalf(
+			"AssertFetchable(sinkhole.doh-seam.net) = %v, want a refusal naming the DoH-answered private address 10.0.0.1",
+			err,
+		)
 	}
 
 	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

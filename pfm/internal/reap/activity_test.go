@@ -120,7 +120,10 @@ func TestLastRecordTimeReportsUnknownWhenNothingParses(t *testing.T) {
 		body string
 	}{
 		{name: "entirely corrupt", body: "{not json at all\n{{{\n"},
-		{name: "valid JSON, no timestamp anywhere", body: `{"type":"custom-title"}` + "\n" + `{"type":"last-prompt"}` + "\n"},
+		{
+			name: "valid JSON, no timestamp anywhere",
+			body: `{"type":"custom-title"}` + "\n" + `{"type":"last-prompt"}` + "\n",
+		},
 		{name: "empty file", body: ""},
 	}
 	for _, testCase := range cases {

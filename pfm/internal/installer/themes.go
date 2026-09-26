@@ -13,12 +13,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -29,8 +31,9 @@ const (
 )
 
 type themeManifest struct {
-	Comment       string                 `json:"_comment,omitempty"`
-	SourceFetched map[string]themeSource `json:"source_fetched"`
+	Comment       string                  `json:"_comment,omitempty"`
+	SourceFetched map[string]themeSource  `json:"source_fetched,omitempty"`
+	Bundled       map[string]bundledTheme `json:"bundled,omitempty"`
 }
 
 type themeSource struct {
@@ -39,6 +42,34 @@ type themeSource struct {
 	Target   string `json:"target"`
 	Activate string `json:"activate"`
 	Requires string `json:"requires"`
+	// local is the absolute path of a bundled palette read from the source
+	// clone; empty for a source-fetched theme or a bundled one resolved
+	// against the release manifest, both of which download Raw.
+	local string
+	// base names the source_fetched theme a bundled overlay is merged onto;
+	// empty for a complete palette.
+	base string
+}
+
+// bundledTheme is a palette the blueprint ships itself under templates/themes/:
+// File names it beside sources.json, so it is read from the source clone
+// when the manifest is, or downloaded from beside the release manifest.
+// With Base set the file is an overlay — only `name` and the `overrides`
+// keys that differ — written merged onto the fetched base, so the base is
+// never vendored and cannot drift.
+type bundledTheme struct {
+	File     string `json:"file"`
+	Base     string `json:"base,omitempty"`
+	Target   string `json:"target"`
+	Activate string `json:"activate"`
+	Requires string `json:"requires"`
+}
+
+// themePalette is the Claude Code theme file shape both kinds share.
+type themePalette struct {
+	Name      string            `json:"name"`
+	Base      string            `json:"base,omitempty"`
+	Overrides map[string]string `json:"overrides"`
 }
 
 type themeOwnershipRecord struct {
@@ -62,6 +93,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 		return
 	}
 
+	bases := map[string][]byte{} // fetched base palettes, one download per run
 	for _, name := range sortedThemeNames(sources) {
 		source := sources[name]
 		target, targetErr := themeTarget(installer.options.Home, source.Target)
@@ -77,7 +109,9 @@ func (installer *engine) installThemes(ctx context.Context) {
 		record, owned := ownership[name]
 		if owned {
 			if filepath.Clean(record.Path) != filepath.Clean(target) {
-				installer.skip(fmt.Sprintf("theme %s ownership target drift: ledger=%s manifest=%s", name, record.Path, target))
+				installer.skip(
+					fmt.Sprintf("theme %s ownership target drift: ledger=%s manifest=%s", name, record.Path, target),
+				)
 				continue
 			}
 			if exists && contentSHA256(existing) != record.SHA256 {
@@ -93,21 +127,38 @@ func (installer *engine) installThemes(ctx context.Context) {
 			if owned && exists {
 				installer.ok("theme " + name + " currently installed; apply checks its source for updates")
 			} else {
-				if changeErr := installer.change("fetch theme "+name+" -> "+target, nil); changeErr != nil {
+				verb := "fetch theme"
+				if source.local != "" {
+					verb = "read bundled theme"
+				}
+				if changeErr := installer.change(verb+" "+name+" -> "+target, nil); changeErr != nil {
 					installer.skip("theme " + name + " preview failed: " + changeErr.Error())
 				}
 			}
 			continue
 		}
 
-		content, fetchErr := fetchTheme(ctx, installer.options.ThemeHTTPClient, source.Raw)
-		if fetchErr != nil {
-			installer.skip("theme " + name + " fetch failed: " + fetchErr.Error())
+		content, loadErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, source)
+		if loadErr != nil {
+			installer.skip("theme " + name + " " + loadErr.Error())
 			continue
 		}
-		if !json.Valid(content) {
-			installer.skip("theme " + name + " fetch failed: response is not valid JSON")
-			continue
+		if source.base != "" {
+			base, cached := bases[source.base]
+			if !cached {
+				fetched, baseErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, sources[source.base])
+				if baseErr != nil {
+					installer.skip("theme " + name + " base " + source.base + " " + baseErr.Error())
+					continue
+				}
+				base, bases[source.base] = fetched, fetched
+			}
+			merged, mergeErr := mergeThemeOverlay(base, content)
+			if mergeErr != nil {
+				installer.skip("theme " + name + " overlay onto " + source.base + " failed: " + mergeErr.Error())
+				continue
+			}
+			content = merged
 		}
 		digest := contentSHA256(content)
 		if exists && bytes.Equal(existing, content) && owned && record.SHA256 == digest {
@@ -160,7 +211,9 @@ func (installer *engine) uninstallThemes() {
 			continue
 		}
 		if exists && contentSHA256(content) != record.SHA256 {
-			installer.skip("theme " + name + " locally modified; left in place and retained recovery ownership at " + record.Path)
+			installer.skip(
+				"theme " + name + " locally modified; left in place and retained recovery ownership at " + record.Path,
+			)
 			continue
 		}
 		if !installer.apply {
@@ -197,37 +250,134 @@ func (installer *engine) uninstallThemes() {
 	}
 	if installer.apply {
 		themesDir := filepath.Join(installer.options.Home, ".claude", "themes")
-		if removeErr := os.Remove(themesDir); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) && !errors.Is(removeErr, fs.ErrExist) {
+		if removeErr := os.Remove(
+			themesDir,
+		); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) &&
+			!errors.Is(removeErr, fs.ErrExist) {
 			installer.skip("leave theme directory " + themesDir + ": " + removeErr.Error())
 		}
 	}
 }
 
+// loadThemeContent returns a theme's palette bytes: a bundled palette from the
+// source clone is read from disk ("read failed: ..." names the path), anything
+// else is downloaded ("fetch failed: ..."); either way non-JSON is refused.
+func loadThemeContent(ctx context.Context, client *http.Client, source themeSource) ([]byte, error) {
+	var content []byte
+	if source.local != "" {
+		read, err := os.ReadFile(source.local)
+		if err != nil {
+			return nil, fmt.Errorf("read failed: %w", err)
+		}
+		content = read
+	} else {
+		fetched, err := fetchTheme(ctx, client, source.Raw)
+		if err != nil {
+			return nil, fmt.Errorf("fetch failed: %w", err)
+		}
+		content = fetched
+	}
+	if !json.Valid(content) {
+		if source.local != "" {
+			return nil, fmt.Errorf("read failed: %s is not valid JSON", source.local)
+		}
+		return nil, errors.New("fetch failed: response is not valid JSON")
+	}
+	return content, nil
+}
+
+// mergeThemeOverlay writes the base palette with the overlay's name (when set)
+// and its overrides on top; a key the overlay does not name keeps the base value.
+func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
+	var basePalette, overlayPalette themePalette
+	if err := json.Unmarshal(base, &basePalette); err != nil {
+		return nil, fmt.Errorf("decode base palette: %w", err)
+	}
+	if err := json.Unmarshal(overlay, &overlayPalette); err != nil {
+		return nil, fmt.Errorf("decode overlay: %w", err)
+	}
+	if len(overlayPalette.Overrides) == 0 {
+		return nil, errors.New("overlay carries no overrides")
+	}
+	if len(basePalette.Overrides) == 0 {
+		return nil, errors.New("base palette carries no overrides")
+	}
+	for key, value := range overlayPalette.Overrides {
+		basePalette.Overrides[key] = value
+	}
+	if overlayPalette.Name != "" {
+		basePalette.Name = overlayPalette.Name
+	}
+	content, err := json.MarshalIndent(basePalette, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode merged palette: %w", err)
+	}
+	return append(content, '\n'), nil
+}
+
+// releaseManifestUnpublishedAlpha reports whether a release theme manifest
+// URL names an -alpha version reference. professorThemeManifestURL builds
+// this URL from VERSION, and pfm never publishes an -alpha tag on GitHub, so
+// that raw.githubusercontent.com URL 404s every time; loadThemeSources turns
+// that predictable failure into a named refusal instead of a bare HTTP
+// error, and skips the doomed fetch entirely.
+func releaseManifestUnpublishedAlpha(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if strings.HasSuffix(segment, "-alpha") {
+			return true
+		}
+	}
+	return false
+}
+
 func loadThemeSources(ctx context.Context, options Options) (map[string]themeSource, error) {
 	var content []byte
 	var origin string
+	var localThemes string // templates/themes/ in the source clone when the manifest was read there
 	var err error
 	if strings.TrimSpace(options.SourceRepo) != "" {
 		origin = filepath.Join(options.SourceRepo, filepath.FromSlash(themeManifestRelative))
+		localThemes = filepath.Dir(origin)
 		content, err = os.ReadFile(origin)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
 				return nil, fmt.Errorf("read local manifest %s: %w", origin, err)
 			}
 			localErr := err
+			localThemes = ""
 			origin = strings.TrimSpace(options.ThemeManifestURL)
 			if origin == "" {
 				return nil, fmt.Errorf("read local manifest: %w; no release manifest URL is configured", localErr)
 			}
+			if releaseManifestUnpublishedAlpha(origin) {
+				return nil, fmt.Errorf(
+					"local theme manifest unavailable: %v; release manifest for an unpublished -alpha build; run pfm install from the source clone",
+					localErr,
+				)
+			}
 			content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 			if err != nil {
-				return nil, fmt.Errorf("local theme manifest unavailable: %v; fetch release manifest %s: %w", localErr, origin, err)
+				return nil, fmt.Errorf(
+					"local theme manifest unavailable: %v; fetch release manifest %s: %w",
+					localErr,
+					origin,
+					err,
+				)
 			}
 		}
 	} else {
 		origin = strings.TrimSpace(options.ThemeManifestURL)
 		if origin == "" {
 			return nil, errors.New("no source repository or release manifest URL is configured")
+		}
+		if releaseManifestUnpublishedAlpha(origin) {
+			return nil, errors.New(
+				"release manifest for an unpublished -alpha build; run pfm install from the source clone",
+			)
 		}
 		content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 		if err != nil {
@@ -254,18 +404,66 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 		}
 		return nil, fmt.Errorf("decode %s trailing content: %w", origin, err)
 	}
-	if len(manifest.SourceFetched) == 0 {
-		return nil, fmt.Errorf("manifest %s has no source_fetched themes", origin)
+	if len(manifest.SourceFetched) == 0 && len(manifest.Bundled) == 0 {
+		return nil, fmt.Errorf("manifest %s has no source_fetched or bundled themes", origin)
 	}
+	sources := make(map[string]themeSource, len(manifest.SourceFetched)+len(manifest.Bundled))
 	for name, source := range manifest.SourceFetched {
-		if strings.TrimSpace(name) == "" || strings.TrimSpace(source.Raw) == "" || strings.TrimSpace(source.Target) == "" {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(source.Raw) == "" ||
+			strings.TrimSpace(source.Target) == "" {
 			return nil, fmt.Errorf("manifest %s theme %q is missing name, raw, or target", origin, name)
 		}
 		if err := validateThemeURL(source.Raw); err != nil {
 			return nil, fmt.Errorf("manifest %s theme %q raw URL: %w", origin, name, err)
 		}
+		sources[name] = source
 	}
-	return manifest.SourceFetched, nil
+	for name, bundled := range manifest.Bundled {
+		file := strings.TrimSpace(bundled.File)
+		if strings.TrimSpace(name) == "" || file == "" || strings.TrimSpace(bundled.Target) == "" {
+			return nil, fmt.Errorf("manifest %s bundled theme %q is missing name, file, or target", origin, name)
+		}
+		if file != path.Base(file) || file == "." || file == ".." {
+			return nil, fmt.Errorf(
+				"manifest %s bundled theme %q file %q must be a bare file name beside the manifest",
+				origin,
+				name,
+				file,
+			)
+		}
+		if _, clash := sources[name]; clash {
+			return nil, fmt.Errorf("manifest %s names theme %q as both source_fetched and bundled", origin, name)
+		}
+		base := strings.TrimSpace(bundled.Base)
+		if base != "" {
+			if _, known := manifest.SourceFetched[base]; !known {
+				return nil, fmt.Errorf(
+					"manifest %s bundled theme %q base %q is not a source_fetched theme",
+					origin,
+					name,
+					base,
+				)
+			}
+		}
+		source := themeSource{
+			Target:   bundled.Target,
+			Activate: bundled.Activate,
+			Requires: bundled.Requires,
+			base:     base,
+		}
+		if localThemes != "" {
+			source.local = filepath.Join(localThemes, file)
+		} else {
+			// The release manifest was fetched: the palette is published beside it.
+			source.Raw = strings.TrimSuffix(origin, path.Base(origin)) + file
+			source.Repo = source.Raw
+			if err := validateThemeURL(source.Raw); err != nil {
+				return nil, fmt.Errorf("manifest %s bundled theme %q release URL: %w", origin, name, err)
+			}
+		}
+		sources[name] = source
+	}
+	return sources, nil
 }
 
 func themeManifestOwner(options Options) (string, error) {
@@ -322,21 +520,23 @@ func validateThemeURL(raw string) error {
 		return nil
 	}
 	host := parsed.Hostname()
-	if parsed.Scheme == "http" && (host == "127.0.0.1" || host == "::1" || host == "localhost") {
+	if parsed.Scheme == httpProtocol && (host == "127.0.0.1" || host == "::1" || host == "localhost") {
 		return nil
 	}
 	return fmt.Errorf("must be HTTPS (HTTP is accepted only for loopback tests)")
 }
 
+// fetchTheme is the installer's http.out door (spec § Middleware): the client
+// it builds or is handed is wrapped, so every theme fetch leaves one record.
 func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = obs.WrapClient(&http.Client{Timeout: 30 * time.Second})
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("create GET %s: %w", raw, err)
 	}
-	response, err := client.Do(request)
+	response, err := obs.WrapClient(client).Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", raw, err)
 	}
@@ -344,7 +544,10 @@ func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, e
 		_, drainErr := io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 		closeErr := response.Body.Close()
 		if drainErr != nil {
-			return nil, errors.Join(fmt.Errorf("GET %s: HTTP %s; drain response: %w", raw, response.Status, drainErr), closeErr)
+			return nil, errors.Join(
+				fmt.Errorf("GET %s: HTTP %s; drain response: %w", raw, response.Status, drainErr),
+				closeErr,
+			)
 		}
 		if closeErr != nil {
 			return nil, fmt.Errorf("GET %s: HTTP %s; close response: %w", raw, response.Status, closeErr)
@@ -373,32 +576,33 @@ func themeTarget(home, target string) (string, error) {
 	resolved := filepath.Clean(filepath.Join(home, filepath.FromSlash(strings.TrimPrefix(target, "~/"))))
 	root := filepath.Join(filepath.Clean(home), ".claude", "themes")
 	relative, err := filepath.Rel(root, resolved)
-	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	if err != nil || relative == "." || relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("target %q must name a file beneath ~/.claude/themes", target)
 	}
 	return resolved, nil
 }
 
-func readOptionalRegularFile(path string) ([]byte, bool, error) {
-	info, err := os.Lstat(path)
+func readOptionalRegularFile(filePath string) ([]byte, bool, error) {
+	info, err := os.Lstat(filePath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("inspect %s: %w", path, err)
+		return nil, false, fmt.Errorf("inspect %s: %w", filePath, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, true, fmt.Errorf("%s is not a regular file", path)
+		return nil, true, fmt.Errorf("%s is not a regular file", filePath)
 	}
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, true, fmt.Errorf("read %s: %w", path, err)
+		return nil, true, fmt.Errorf("read %s: %w", filePath, err)
 	}
 	return content, true, nil
 }
 
-func readThemeOwnership(path string) (map[string]themeOwnershipRecord, error) {
-	content, err := os.ReadFile(path)
+func readThemeOwnership(filePath string) (map[string]themeOwnershipRecord, error) {
+	content, err := os.ReadFile(filePath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[string]themeOwnershipRecord{}, nil
 	}
@@ -420,10 +624,10 @@ func readThemeOwnership(path string) (map[string]themeOwnershipRecord, error) {
 	return records, nil
 }
 
-func writeThemeOwnership(path string, records map[string]themeOwnershipRecord) error {
+func writeThemeOwnership(filePath string, records map[string]themeOwnershipRecord) error {
 	if len(records) == 0 {
-		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove empty ownership ledger %s: %w", path, err)
+		if err := os.Remove(filePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove empty ownership ledger %s: %w", filePath, err)
 		}
 		return nil
 	}
@@ -432,17 +636,17 @@ func writeThemeOwnership(path string, records map[string]themeOwnershipRecord) e
 		return fmt.Errorf("encode ownership: %w", err)
 	}
 	content = append(content, '\n')
-	if err := atomicfile.Write(path, content, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	if err := atomicfile.Write(filePath, content, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", filePath, err)
 	}
 	return nil
 }
 
-func rollbackTheme(path string, previous []byte, existed bool) error {
+func rollbackTheme(filePath string, previous []byte, existed bool) error {
 	if existed {
-		return atomicfile.Write(path, previous, 0o644)
+		return atomicfile.Write(filePath, previous, 0o644)
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(filePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return nil

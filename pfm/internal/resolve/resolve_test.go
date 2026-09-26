@@ -8,14 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 type fakeTmux struct {
 	captures map[string]string
 }
 
-func (fake fakeTmux) ListPanes(context.Context, string) ([]Pane, error) {
+func (fake fakeTmux) ListPanes(context.Context, string) ([]ResolvedPane, error) {
 	return nil, nil
 }
 
@@ -27,7 +27,7 @@ func (fake fakeTmux) CapturePane(
 }
 
 func TestResolveLabelExactCaseInsensitiveAndMirrorSkip(t *testing.T) {
-	panes := []Pane{
+	panes := []ResolvedPane{
 		{
 			SocketPath:     "/jail/cc-100-1-1",
 			PaneID:         "%1",
@@ -69,7 +69,7 @@ func TestResolveLabelExactCaseInsensitiveAndMirrorSkip(t *testing.T) {
 // nothing can address.
 func TestResolveLabelAcceptsEveryMedalIncludingTheRetiredOne(t *testing.T) {
 	for _, medal := range []string{"🥇", "🥈", "🥉", "🍀"} {
-		panes := []Pane{{
+		panes := []ResolvedPane{{
 			SocketPath:     "/jail/cc-100-1-1",
 			PaneID:         "%1",
 			CurrentCommand: "claude",
@@ -91,7 +91,7 @@ func TestResolveLabelAcceptsEveryMedalIncludingTheRetiredOne(t *testing.T) {
 	resolver := &Resolver{tmux: fakeTmux{captures: map[string]string{
 		"/jail/cc-100-1-1\x00%1": "🔖 Elder │ main\n",
 	}}}
-	outcome, err := resolver.resolveLabel(context.Background(), "elder", []Pane{{
+	outcome, err := resolver.resolveLabel(context.Background(), "elder", []ResolvedPane{{
 		SocketPath:     "/jail/cc-100-1-1",
 		PaneID:         "%1",
 		CurrentCommand: "claude",
@@ -107,7 +107,7 @@ func TestResolveLabelAcceptsConfiguredAccountEmoji(t *testing.T) {
 		tmux:          fakeTmux{captures: map[string]string{"/jail/cc-custom\x00%1": "🟣 │ 🔖 Custom Seat │ main\n"}},
 		accountEmojis: []string{"🟣"},
 	}
-	outcome, err := resolver.resolveLabel(context.Background(), "custom seat", []Pane{{
+	outcome, err := resolver.resolveLabel(context.Background(), "custom seat", []ResolvedPane{{
 		SocketPath:     "/jail/cc-custom",
 		PaneID:         "%1",
 		CurrentCommand: "claude",
@@ -122,7 +122,7 @@ func TestResolveLabelAmbiguityAndSameChatNewestTieBreak(t *testing.T) {
 	sidDir := t.TempDir()
 	oldSocket := "/jail/cc-100-1-1"
 	newSocket := "/jail/cc-200-1-1"
-	panes := []Pane{
+	panes := []ResolvedPane{
 		{SocketPath: oldSocket, PaneID: "%1", CurrentCommand: "claude"},
 		{SocketPath: newSocket, PaneID: "%2", CurrentCommand: "claude"},
 	}
@@ -161,7 +161,7 @@ func TestResolveLabelAmbiguityAndSameChatNewestTieBreak(t *testing.T) {
 
 func TestResolveSessionExactAndSplitRules(t *testing.T) {
 	resolver := &Resolver{}
-	single := []Pane{{
+	single := []ResolvedPane{{
 		SocketPath:  "/jail/cc-1-1-1",
 		SessionName: "exact",
 		PaneID:      "%1",
@@ -175,7 +175,7 @@ func TestResolveSessionExactAndSplitRules(t *testing.T) {
 	)
 	assertOutcome(t, resolver.resolveSession("ex", single), 1, "", "")
 
-	split := []Pane{
+	split := []ResolvedPane{
 		{
 			SocketPath:     "/jail/cc-1-1-1",
 			SessionName:    "split",
@@ -196,7 +196,7 @@ func TestResolveSessionExactAndSplitRules(t *testing.T) {
 		"/jail/cc-1-1-1\t%2\n",
 		"",
 	)
-	split[0].CurrentCommand = "claude-wrapper"
+	split[0].CurrentCommand = "claude"
 	split[1].CurrentCommand = "bash"
 	assertOutcome(
 		t,
@@ -212,7 +212,8 @@ func TestResolveSessionExactAndSplitRules(t *testing.T) {
 		t.Fatalf("two-Claude split outcome = %+v", outcome)
 	}
 
-	multiple := append(single, Pane{
+	multiple := append([]ResolvedPane{}, single...)
+	multiple = append(multiple, ResolvedPane{
 		SocketPath:  "/jail/cc-2-1-1",
 		SessionName: "exact",
 		PaneID:      "%3",
@@ -227,7 +228,7 @@ func TestResolveCxWindowClipsQueryByRunes(t *testing.T) {
 	longName := strings.Repeat("界", 30)
 	clipped := strings.Repeat("界", 24)
 	resolver := &Resolver{}
-	panes := []Pane{
+	panes := []ResolvedPane{
 		{
 			SocketPath: "/jail/cx-10-1-1",
 			PaneID:     "%1",
@@ -250,7 +251,7 @@ func TestResolveCxWindowClipsQueryByRunes(t *testing.T) {
 	assertOutcome(t, resolver.resolveCxWindow("", panes), 1, "", "")
 	assertOutcome(
 		t,
-		resolver.resolveCxWindow(longName, []Pane{{
+		resolver.resolveCxWindow(longName, []ResolvedPane{{
 			SocketPath: "/jail/cx-30-1-1",
 			PaneID:     "%3",
 			WindowName: longName,
@@ -307,12 +308,20 @@ func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create socket: %v", err)
 	}
-	defer listener.Close()
-	resolver := &Resolver{tmux: CommandTmux{Binary: "pfm-test-missing-tmux"}, tmuxDir: tmuxDir}
+	defer func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	}()
+	resolver := &Resolver{tmux: TmuxResolver{Binary: "pfm-test-missing-tmux"}, tmuxDir: tmuxDir}
 	for _, kind := range []Kind{Session, Label, CxWindow} {
 		outcome, err := resolver.Resolve(context.Background(), kind, "any-chat")
 		if err == nil {
-			t.Fatalf("Resolve(%s) with an unstartable tmux = %+v, nil — a miss that means \"could not look\"", kind, outcome)
+			t.Fatalf(
+				"Resolve(%s) with an unstartable tmux = %+v, nil — a miss that means \"could not look\"",
+				kind,
+				outcome,
+			)
 		}
 		if !pfmtmux.CouldNotRun(err) {
 			t.Fatalf("Resolve(%s) error %v does not carry the could-not-run cause", kind, err)
@@ -333,8 +342,12 @@ func TestResolveStillMissesPastADeadSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create socket: %v", err)
 	}
-	defer listener.Close()
-	resolver := &Resolver{tmux: CommandTmux{Binary: binary}, tmuxDir: tmuxDir}
+	defer func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	}()
+	resolver := &Resolver{tmux: TmuxResolver{Binary: binary}, tmuxDir: tmuxDir}
 	outcome, err := resolver.Resolve(context.Background(), Session, "any-chat")
 	if err != nil {
 		t.Fatalf("a dead socket failed resolution: %v", err)

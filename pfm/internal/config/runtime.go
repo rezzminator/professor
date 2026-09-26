@@ -2,10 +2,14 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime/debug"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+const DevelopmentVersion = "dev"
 
 // Runtime is the resolved machine policy for one pfm process: the effective
 // config and the filesystem locations it implies. It is loaded exactly once
@@ -14,10 +18,67 @@ import (
 //
 // ConfigError is set only by LoadDiagnosticRuntime: a diagnostic command runs
 // on defaults over a broken config and must still report the original error.
+//
+// ConfigExplicit records whether the caller named a --config path other than
+// the location resolveExistingPath would select without the flag. An explicit path
+// that turns out not to exist (Config.Exists == false) is a caller error, not
+// a fresh machine — callers that converge host wiring from Config must not
+// treat that combination as "nothing configured yet".
 type Runtime struct {
-	Config      Config
-	Paths       paths.Values
-	ConfigError error
+	Config         Config
+	Paths          paths.Values
+	ConfigError    error
+	ConfigExplicit bool
+	Version        string
+}
+
+func (runtime Runtime) IsRelease() bool {
+	return runtime.Version != "" && runtime.Version != DevelopmentVersion
+}
+
+// DisplayVersion returns a stamped release version or an identifying VCS
+// suffix for an unstamped development build.
+func DisplayVersion(stamped string) string {
+	if stamped != DevelopmentVersion {
+		return stamped
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return stamped
+	}
+	return ResolveDevVersion(info.Settings)
+}
+
+// ResolveDevVersion formats the VCS settings embedded in a development build.
+func ResolveDevVersion(settings []debug.BuildSetting) string {
+	var revision string
+	var modified bool
+	for _, setting := range settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value == "true"
+		}
+	}
+	if revision == "" {
+		return DevelopmentVersion
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if modified {
+		return fmt.Sprintf("dev (%s, modified)", revision)
+	}
+	return fmt.Sprintf("dev (%s)", revision)
+}
+
+// OptionalRuntime returns the caller's first runtime, or loads the default.
+func OptionalRuntime(runtimes []Runtime) (Runtime, error) {
+	if len(runtimes) != 0 {
+		return runtimes[0], nil
+	}
+	return LoadRuntime("")
 }
 
 // LoadRuntime resolves paths, loads the config at configPath (the default
@@ -28,6 +89,9 @@ func LoadRuntime(configPath string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
 	}
+	if err := RefuseAmbientConfigHome(resolved.Home); err != nil {
+		return Runtime{}, err
+	}
 	effective, err := Load(
 		configPath,
 		resolved.Home,
@@ -37,9 +101,29 @@ func LoadRuntime(configPath string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	configExplicit, err := configPathIsExplicit(configPath, resolved.Home)
+	if err != nil {
+		return Runtime{}, err
+	}
 	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-	return Runtime{Config: effective, Paths: resolved}, nil
+	return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configExplicit}, nil
+}
+
+func configPathIsExplicit(configPath, home string) (bool, error) {
+	if configPath == "" {
+		return false, nil
+	}
+	named, err := filepath.Abs(configPath)
+	if err != nil {
+		return false, fmt.Errorf("resolve --config path %q: %w", configPath, err)
+	}
+	defaultPath := resolveExistingPath(home)
+	defaultAbsolute, err := filepath.Abs(defaultPath)
+	if err != nil {
+		return false, fmt.Errorf("resolve default config path %q: %w", defaultPath, err)
+	}
+	return named != defaultAbsolute, nil
 }
 
 // RuntimeOrDefault is the caller's runtime, or the default one loaded now —
@@ -59,11 +143,23 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
 	}
-	effective, configErr := Load(configPath, resolved.Home, resolved.Roots[pfmengine.Claude], resolved.FirstRoot(pfmengine.Codex))
+	if err := RefuseAmbientConfigHome(resolved.Home); err != nil {
+		return Runtime{}, err
+	}
+	effective, configErr := Load(
+		configPath,
+		resolved.Home,
+		resolved.Roots[pfmengine.Claude],
+		resolved.FirstRoot(pfmengine.Codex),
+	)
+	configExplicit, err := configPathIsExplicit(configPath, resolved.Home)
+	if err != nil {
+		return Runtime{}, err
+	}
 	if configErr == nil {
 		resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 		resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-		return Runtime{Config: effective, Paths: resolved}, nil
+		return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configExplicit}, nil
 	}
 	path := configPath
 	if path == "" {
@@ -74,5 +170,5 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	effective.Exists = true
 	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr}, nil
+	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr, ConfigExplicit: configExplicit}, nil
 }

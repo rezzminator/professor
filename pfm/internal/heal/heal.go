@@ -34,8 +34,15 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"hostops/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
+
+// healKind names heal's two foreign SQLite stores to the db component's
+// records — heal never opens a database of its own, only Codex's.
+var healKind = pfmengine.MustLookup(pfmengine.Codex).LongName
 
 // CodexProjectsPastAnomalies is the first Codex release whose projector skips a repeated,
 // regressed, or missing rollout ordinal instead of refusing the thread forever
@@ -120,21 +127,21 @@ type Stores struct {
 	Root    string
 }
 
-// FindStores locates the newest generation of each store under codexRoot.
+// FindStores locates the newest generation of each store under codexHome.
 // Codex leaves older generations behind when it migrates, and the highest N is
 // the live one.
-func FindStores(codexRoot string) (Stores, error) {
-	if codexRoot == "" {
+func FindStores(codexHome string) (Stores, error) {
+	if codexHome == "" {
 		return Stores{}, errors.New("no Codex home to heal")
 	}
-	entries, err := os.ReadDir(codexRoot)
+	entries, err := os.ReadDir(codexHome)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Stores{}, fmt.Errorf("no Codex home at %s", codexRoot)
+		return Stores{}, fmt.Errorf("no Codex home at %s", codexHome)
 	}
 	if err != nil {
-		return Stores{}, fmt.Errorf("read Codex home %q: %w", codexRoot, err)
+		return Stores{}, fmt.Errorf("read Codex home %q: %w", codexHome, err)
 	}
-	stores := Stores{Root: codexRoot}
+	stores := Stores{Root: codexHome}
 	stateGeneration, historyGeneration := -1, -1
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -143,19 +150,19 @@ func FindStores(codexRoot string) (Stores, error) {
 		if generation, ok := storeGeneration(entry.Name(), "state_"); ok &&
 			generation > stateGeneration {
 			stateGeneration = generation
-			stores.State = filepath.Join(codexRoot, entry.Name())
+			stores.State = filepath.Join(codexHome, entry.Name())
 		}
 		if generation, ok := storeGeneration(entry.Name(), "thread_history_"); ok &&
 			generation > historyGeneration {
 			historyGeneration = generation
-			stores.History = filepath.Join(codexRoot, entry.Name())
+			stores.History = filepath.Join(codexHome, entry.Name())
 		}
 	}
 	if stores.State == "" {
-		return Stores{}, fmt.Errorf("no state_N.sqlite under %s", codexRoot)
+		return Stores{}, fmt.Errorf("no state_N.sqlite under %s", codexHome)
 	}
 	if stores.History == "" {
-		return Stores{}, fmt.Errorf("no thread_history_N.sqlite under %s", codexRoot)
+		return Stores{}, fmt.Errorf("no thread_history_N.sqlite under %s", codexHome)
 	}
 	return stores, nil
 }
@@ -181,7 +188,7 @@ func storeGeneration(name, prefix string) (int, bool) {
 // would judge a store Codex is actively writing from a stale snapshot.
 //
 // only, when set, limits the sweep to one thread id.
-func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
+func Sweep(ctx context.Context, stores Stores, only string) (report Report, returnErr error) {
 	rolloutByID, err := rolloutPaths(ctx, stores.State)
 	if err != nil {
 		return Report{}, err
@@ -190,13 +197,17 @@ func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	defer history.Close()
+	defer func() {
+		if err := history.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close history store %q: %w", stores.History, err))
+		}
+	}()
 
-	rows, err := history.QueryContext(
-		ctx,
-		"SELECT thread_id, next_rollout_byte_offset, next_rollout_ordinal "+
-			"FROM thread_history_projection_state",
-	)
+	query := "SELECT thread_id, next_rollout_byte_offset, next_rollout_ordinal " +
+		"FROM thread_history_projection_state"
+	op := obs.SQL(ctx, healKind, query)
+	rows, err := history.QueryContext(ctx, query)
+	op.End(-1, err)
 	if err != nil {
 		return Report{}, fmt.Errorf(
 			"read the projection cursors in %q: %w",
@@ -204,9 +215,13 @@ func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
 			err,
 		)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close projection cursor rows: %w", err))
+		}
+	}()
 
-	report := Report{Totals: make(map[Verdict]int)}
+	report = Report{Totals: make(map[Verdict]int)}
 	for rows.Next() {
 		var state ThreadState
 		if err := rows.Scan(&state.ID, &state.Offset, &state.Ordinal); err != nil {
@@ -259,7 +274,11 @@ func classify(
 	if err != nil {
 		return VerdictNoRollout, err.Error(), size
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "heal: close rollout %s: %v\n", rolloutPath, err)
+		}
+	}()
 
 	if offset > 0 {
 		previous := make([]byte, 1)
@@ -384,12 +403,16 @@ var openRollout = func(path string) (io.ReadCloser, error) {
 // are not records and not anomalies, matching the projector's own skip; a
 // trailing partial line with no newline is not an anomaly either — Codex
 // leaves it for the next pass.
-func scanOrdinals(path string) (anomaly, bool, error) {
+func scanOrdinals(path string) (found anomaly, hasAnomaly bool, returnErr error) {
 	source, err := openRollout(path)
 	if err != nil {
 		return anomaly{}, false, fmt.Errorf("open %q to scan ordinals: %w", path, err)
 	}
-	defer source.Close()
+	defer func() {
+		if err := source.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %q: %w", path, err))
+		}
+	}()
 
 	reader := bufio.NewReader(source)
 	var offset int64
@@ -498,18 +521,29 @@ func indexByte(data []byte, target byte) int {
 }
 
 // rolloutPaths reads the thread → rollout mapping out of the state store.
-func rolloutPaths(ctx context.Context, statePath string) (map[string]string, error) {
+func rolloutPaths(ctx context.Context, statePath string) (paths map[string]string, returnErr error) {
 	state, err := openReadOnly(statePath)
 	if err != nil {
 		return nil, err
 	}
-	defer state.Close()
-	rows, err := state.QueryContext(ctx, "SELECT id, rollout_path FROM threads")
+	defer func() {
+		if err := state.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close state store %q: %w", statePath, err))
+		}
+	}()
+	const query = "SELECT id, rollout_path FROM threads"
+	op := obs.SQL(ctx, healKind, query)
+	rows, err := state.QueryContext(ctx, query)
+	op.End(-1, err)
 	if err != nil {
 		return nil, fmt.Errorf("read threads from %q: %w", statePath, err)
 	}
-	defer rows.Close()
-	paths := make(map[string]string)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close thread rows: %w", err))
+		}
+	}()
+	paths = make(map[string]string)
 	for rows.Next() {
 		var id string
 		var path sql.NullString
@@ -537,13 +571,17 @@ func openReadOnly(path string) (*sql.DB, error) {
 // A held lock means a running seat owns the thread and its in-memory cursor
 // would race a heal, so the thread is left alone. A lock file that exists but
 // is NOT held is the ordinary leftover of a closed seat.
-func Live(codexRoot, threadID string) bool {
-	path := filepath.Join(codexRoot, "thread-writer-locks", threadID+".lock")
+func Live(codexHome, threadID string) bool {
+	path := filepath.Join(codexHome, "thread-writer-locks", threadID+".lock")
 	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "heal: close writer lock %s: %v\n", path, err)
+		}
+	}()
 	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return true
 	}
@@ -575,7 +613,7 @@ func Backup(stores Stores, now time.Time) (string, error) {
 			return "", fmt.Errorf("read %s for backup: %w", source, err)
 		}
 		target := filepath.Join(destination, filepath.Base(source))
-		if err := os.WriteFile(target, content, 0o600); err != nil {
+		if err := atomicfile.Write(target, content, 0o600); err != nil {
 			return "", fmt.Errorf("write %s: %w", target, err)
 		}
 	}
@@ -586,12 +624,22 @@ func Backup(stores Stores, now time.Time) (string, error) {
 // rollout at the next resume. The three tables go in ONE immediate
 // transaction: a projection state without its items is a thread that resumes
 // empty, which is the very failure this repairs.
-func Delete(ctx context.Context, stores Stores, threadID string) error {
+func Delete(ctx context.Context, stores Stores, threadID string) (returnErr error) {
+	// The state door: present → deleted for the thread this call removes,
+	// ERROR-shaped when the delete never committed.
+	defer func() {
+		obs.Transition(ctx, "heal", "present", "deleted", "operator delete")(returnErr)
+	}()
+
 	database, err := sqlitedb.OpenReadWrite(stores.History, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", stores.History, err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close history store %q: %w", stores.History, err))
+		}
+	}()
 
 	transaction, err := database.BeginTx(ctx, nil)
 	if err != nil {
@@ -603,11 +651,11 @@ func Delete(ctx context.Context, stores Stores, threadID string) error {
 		"thread_items",
 		"thread_turns",
 	} {
-		if _, err := transaction.ExecContext(
-			ctx,
-			"DELETE FROM "+table+" WHERE thread_id = ?",
-			threadID,
-		); err != nil {
+		query := "DELETE FROM " + table + " WHERE thread_id = ?"
+		op := obs.SQL(ctx, healKind, query)
+		result, err := transaction.ExecContext(ctx, query, threadID)
+		op.End(deletedRows(result, err), err)
+		if err != nil {
 			return fmt.Errorf("clear %s for %s: %w", table, threadID, err)
 		}
 	}
@@ -615,4 +663,17 @@ func Delete(ctx context.Context, stores Stores, threadID string) error {
 		return fmt.Errorf("commit the heal for %s: %w", threadID, err)
 	}
 	return nil
+}
+
+// deletedRows reads a delete result's row count for the db door, or -1
+// (unknown) when there is none or the driver cannot say.
+func deletedRows(result sql.Result, err error) int64 {
+	if err != nil || result == nil {
+		return -1
+	}
+	affected, countErr := result.RowsAffected()
+	if countErr != nil {
+		return -1
+	}
+	return affected
 }

@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // IdentifySelf maps the caller environment to its exact indexed identity.
@@ -29,6 +29,20 @@ func (manager *Manager) IdentifySelf(
 			socketPath,
 			socketName,
 			environment.TMUXPane,
+		)
+	}
+	// OpenCode exports no session variable and pfm writes it no crumb, so
+	// there is nothing here to identify a seat BY. Falling through to the
+	// Claude path — which is what an implicit else did — reported an ox- seat
+	// as a Claude chat with a missing session id: an answer about the wrong
+	// engine entirely. A refusal that names the engine and the limit is the
+	// honest one.
+	if known && id == pfmengine.OpenCode {
+		return Target{}, fmt.Errorf(
+			"self-kill is not supported for OpenCode chats (socket %s): "+
+				"OpenCode exports no session id, so this pane cannot name itself — "+
+				"kill it by name or id from another chat",
+			socketName,
 		)
 	}
 	return manager.identifyClaudeSelf(
@@ -113,13 +127,13 @@ func (manager *Manager) identifyCodexSelf(
 	// through its open file descriptor exactly as before.
 	live, err := gather.DetectCodexThreadsInRoots(
 		manager.proc,
-		manager.paths.codexRoots,
-		[]gather.Pane{{
+		manager.paths.codexHomes,
+		[]gather.ProbePane{{
 			Socket: socketName,
 			PaneID: paneID,
 			PID:    panePID,
 		}},
-		store.NewCodexThreadResolverRoots(ctx, manager.paths.codexRoots, manager.CodexPaneBound(ctx)),
+		store.NewCodexThreadResolverRoots(ctx, manager.paths.codexHomes, manager.CodexPaneBound(ctx)),
 	)
 	if err != nil {
 		return Target{}, err
@@ -171,7 +185,8 @@ func rolloutByPath(
 		return "", false
 	}
 	clean := filepath.Clean(path)
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		if filepath.Clean(rollout.Path) == clean {
 			return rollout.ID, true
 		}

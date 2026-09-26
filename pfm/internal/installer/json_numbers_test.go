@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
 // beyondFloat64 is 2^53+1, the first integer a float64 cannot hold: decoded
@@ -43,14 +46,28 @@ func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
 	registry := filepath.Join(home, ".claude.json")
-	writeFixture(t, registry, `{"counter":`+beyondFloat64+`,"mcpServers":{"foreign":{"type":"stdio","command":"foreign"}}}`)
-	options := Options{Home: home, ConfigDir: primary, ConfigDirs: []string{primary}, CodexHomes: []string{}, Mode: ModeApply, Runner: &fakeRunner{}, Stdout: io.Discard, MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377}
+	writeFixture(
+		t,
+		registry,
+		`{"counter":`+beyondFloat64+`,"mcpServers":{"foreign":{"type":"stdio","command":"foreign"}}}`,
+	)
+	options := Options{
+		Home:       home,
+		ConfigDir:  primary,
+		ConfigDirs: []string{primary},
+		CodexHomes: []string{},
+		Mode:       ModeApply,
+		Runner:     &fakeRunner{},
+		Stdout:     io.Discard,
+		MCPEnabled: map[string]bool{"chat": true},
+		MCPPort:    8377,
+	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 	installed := readFixture(t, registry)
-	if !strings.Contains(installed, `"chat"`) {
-		t.Fatalf("install did not register chat: %s", installed)
+	if !strings.Contains(installed, `"professor"`) {
+		t.Fatalf("install did not register professor: %s", installed)
 	}
 	requireKeepsBeyondFloat64(t, "MCP install", []byte(installed))
 	options.Mode = ModeUninstall
@@ -58,8 +75,8 @@ func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 		t.Fatal(err)
 	}
 	uninstalled := readFixture(t, registry)
-	if strings.Contains(uninstalled, `"chat"`) {
-		t.Fatalf("uninstall left the chat registration: %s", uninstalled)
+	if strings.Contains(uninstalled, `"professor"`) {
+		t.Fatalf("uninstall left the professor registration: %s", uninstalled)
 	}
 	requireKeepsBeyondFloat64(t, "MCP uninstall", []byte(uninstalled))
 }
@@ -73,7 +90,13 @@ func TestClaudeSettingsRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 }
 
 func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
-	updated, changed, _, err := updateCodexHooks([]byte(`{"counter":`+beyondFloat64+`}`), t.TempDir(), false, nil)
+	// The Codex hook file is rewritten only to take something away now, so
+	// the fixture carries the retired appendix hook for the pass to remove.
+	home := t.TempDir()
+	raw := []byte(`{"counter":` + beyondFloat64 + `,"hooks":{"SessionStart":[{"matcher":` +
+		strconv.Quote(codexappendix.Matcher) + `,"hooks":[{"type":"command","command":` +
+		strconv.Quote(codexappendix.Command(home)) + `}]}]}}`)
+	updated, changed, _, err := updateCodexHooks(raw, home, false, nil)
 	if err != nil || !changed {
 		t.Fatalf("updateCodexHooks changed=%v err=%v; want a rewrite", changed, err)
 	}
@@ -84,7 +107,11 @@ func TestMemoryHelperHookRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 	home := t.TempDir()
 	oldPath := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
 	newPath := filepath.Join(home, ".claude", "scripts", "memory-wire.sh")
-	raw := fmt.Sprintf(`{"counter":%s,"hooks":{"Stop":[{"hooks":[{"type":"command","command":%q}]}]}}`, beyondFloat64, oldPath)
+	raw := fmt.Sprintf(
+		`{"counter":%s,"hooks":{"Stop":[{"hooks":[{"type":"command","command":%q}]}]}}`,
+		beyondFloat64,
+		oldPath,
+	)
 	updated, changed, err := rewriteMemoryHelperHookPaths([]byte(raw), map[string]string{oldPath: newPath}, home)
 	if err != nil || !changed {
 		t.Fatalf("rewriteMemoryHelperHookPaths changed=%v err=%v; want a rewrite", changed, err)

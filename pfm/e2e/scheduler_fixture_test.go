@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,12 @@ import (
 // fixture models loaded-but-idle jobs in this private HOME, never launchd.
 func stageSchedulerFixtures(t *testing.T, home string) {
 	t.Helper()
+	if err := writeSchedulerFixtures(home); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeSchedulerFixtures(home string) error {
 	scripts := map[string]string{
 		"systemctl": `#!/bin/sh
 [ "${PFM_E2E_HOME-}" = "$HOME" ] || exit 64
@@ -46,8 +53,9 @@ esac
 `,
 	}
 	for name, body := range scripts {
-		if err := os.WriteFile(filepath.Join(home, ".local", "bin", name), []byte(body), 0700); err != nil {
-			t.Fatal(err)
+		if err := os.WriteFile(filepath.Join(home, ".local", "bin", name), []byte(body), 0o700); err != nil {
+			return fmt.Errorf("write scheduler fixture %s: %w", name, err)
 		}
 	}
+	return nil
 }

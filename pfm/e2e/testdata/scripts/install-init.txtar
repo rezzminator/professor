@@ -1,0 +1,13 @@
+# Install from the private staged source, then initialize an entirely jailed project.
+exec jail-pfm install --yes --skip-harvest
+exec jail-pfm init $WORK/project
+exists $WORK/project/.professor/baseline.json
+
+# A fresh project is converged and the report still names all four state classes.
+cd $WORK/project
+exec jail-pfm-rc 3 update check
+stdout 'UPDATED[ ]+[0-9]+'
+stdout 'NEW[ ]+[0-9]+'
+stdout 'GONE-UPSTREAM[ ]+[0-9]+'
+stdout 'LOCAL-DELETED[ ]+[0-9]+'
+! stdout 'FAILED'

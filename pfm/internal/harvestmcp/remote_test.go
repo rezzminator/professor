@@ -13,7 +13,11 @@ import (
 	"golang.org/x/net/html"
 )
 
-func remoteRequest(t *testing.T, server *RemoteServer, method, path, body, contentType string) *httptest.ResponseRecorder {
+func remoteRequest(
+	t *testing.T,
+	server *RemoteServer,
+	method, path, body, contentType string,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, "https://harvester.example.test"+path, strings.NewReader(body))
 	req.Host = "harvester.example.test"
@@ -69,21 +73,44 @@ func TestConsentPageTxnInputIsHidden(t *testing.T) {
 
 func TestRemoteStaticGateway(t *testing.T) {
 	base := t.TempDir()
-	static, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", StaticToken: "example-fixture-token"})
+	static, err := NewRemote(
+		RemoteOptions{
+			Runtime:     Runtime{Home: base, CacheDir: base + "/cache"},
+			PublicURL:   "https://harvester.example.test",
+			StaticToken: "example-fixture-token",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec := remoteRequest(t, static, http.MethodGet, "/healthz", "", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"auth":true`) {
+	if rec := remoteRequest(
+		t,
+		static,
+		http.MethodGet,
+		"/healthz",
+		"",
+		"",
+	); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"auth":true`) {
 		t.Fatalf("static health = %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := remoteRequest(t, static, http.MethodGet, "/mcp/", "", ""); rec.Code == http.StatusPermanentRedirect || rec.Code == http.StatusTemporaryRedirect {
+	if rec := remoteRequest(
+		t,
+		static,
+		http.MethodGet,
+		"/mcp/",
+		"",
+		"",
+	); rec.Code == http.StatusPermanentRedirect ||
+		rec.Code == http.StatusTemporaryRedirect {
 		t.Fatalf("/mcp/ unexpectedly redirected: %d", rec.Code)
 	}
 	rec := remoteRequest(t, static, http.MethodGet, "/mcp", "", "")
-	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Header().Get("WWW-Authenticate"), "resource_metadata") {
+	if rec.Code != http.StatusUnauthorized ||
+		!strings.Contains(rec.Header().Get("WWW-Authenticate"), "resource_metadata") {
 		t.Fatalf("static challenge = %d %s", rec.Code, rec.Header().Get("WWW-Authenticate"))
 	}
-	req := httptest.NewRequest(http.MethodGet, "https://harvester.example.test/mcp", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://harvester.example.test/mcp", http.NoBody)
 	req.Host = "harvester.example.test"
 	req.Header.Set("Authorization", "Bearer example-fixture-token")
 	rec = httptest.NewRecorder()
@@ -95,11 +122,25 @@ func TestRemoteStaticGateway(t *testing.T) {
 
 func TestRemoteOAuthPKCEAndRefreshRotationInMemory(t *testing.T) {
 	base := t.TempDir()
-	server, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", Passphrase: "fixture-pass", StatePath: base + "/state/auth.json"})
+	server, err := NewRemote(
+		RemoteOptions{
+			Runtime:    Runtime{Home: base, CacheDir: base + "/cache"},
+			PublicURL:  "https://harvester.example.test",
+			Passphrase: "fixture-pass",
+			StatePath:  base + "/state/auth.json",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := remoteRequest(t, server, http.MethodPost, "/register", `{"client_name":"fixture","redirect_uris":["https://client.example/callback"],"token_endpoint_auth_method":"none"}`, "application/json")
+	reg := remoteRequest(
+		t,
+		server,
+		http.MethodPost,
+		"/register",
+		`{"client_name":"fixture","redirect_uris":["https://client.example/callback"],"token_endpoint_auth_method":"none"}`,
+		"application/json",
+	)
 	if reg.Code != http.StatusCreated {
 		t.Fatalf("register = %d %s", reg.Code, reg.Body.String())
 	}
@@ -111,13 +152,28 @@ func TestRemoteOAuthPKCEAndRefreshRotationInMemory(t *testing.T) {
 	verifier := strings.Repeat("v", 43)
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
-	query := url.Values{"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {"https://client.example/callback"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}, "state": {"s"}, "scope": {HarvesterScope}}
+	query := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {clientID},
+		"redirect_uri":          {"https://client.example/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"state":                 {"s"},
+		"scope":                 {HarvesterScope},
+	}
 	auth := remoteRequest(t, server, http.MethodGet, "/authorize?"+query.Encode(), "", "")
 	if auth.Code != http.StatusFound || !strings.Contains(auth.Header().Get("Location"), "/consent?txn=") {
 		t.Fatalf("authorize = %d %s", auth.Code, auth.Header().Get("Location"))
 	}
 	txn := strings.TrimPrefix(auth.Header().Get("Location"), "https://harvester.example.test/consent?txn=")
-	consent := remoteRequest(t, server, http.MethodPost, "/consent", "txn="+url.QueryEscape(txn)+"&passphrase=fixture-pass", "application/x-www-form-urlencoded")
+	consent := remoteRequest(
+		t,
+		server,
+		http.MethodPost,
+		"/consent",
+		"txn="+url.QueryEscape(txn)+"&passphrase=fixture-pass",
+		"application/x-www-form-urlencoded",
+	)
 	if consent.Code != http.StatusFound {
 		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
 	}
@@ -125,7 +181,13 @@ func TestRemoteOAuthPKCEAndRefreshRotationInMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenBody := url.Values{"grant_type": {"authorization_code"}, "code": {callback.Query().Get("code")}, "client_id": {clientID}, "redirect_uri": {"https://client.example/callback"}, "code_verifier": {verifier}}.Encode()
+	tokenBody := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {callback.Query().Get("code")},
+		"client_id":     {clientID},
+		"redirect_uri":  {"https://client.example/callback"},
+		"code_verifier": {verifier},
+	}.Encode()
 	token := remoteRequest(t, server, http.MethodPost, "/token", tokenBody, "application/x-www-form-urlencoded")
 	if token.Code != http.StatusOK {
 		t.Fatalf("token = %d %s", token.Code, token.Body.String())
@@ -134,7 +196,11 @@ func TestRemoteOAuthPKCEAndRefreshRotationInMemory(t *testing.T) {
 	if err := json.Unmarshal(token.Body.Bytes(), &first); err != nil {
 		t.Fatal(err)
 	}
-	refreshBody := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {first.RefreshToken}, "client_id": {clientID}}.Encode()
+	refreshBody := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {first.RefreshToken},
+		"client_id":     {clientID},
+	}.Encode()
 	rotated := remoteRequest(t, server, http.MethodPost, "/token", refreshBody, "application/x-www-form-urlencoded")
 	if rotated.Code != http.StatusOK {
 		t.Fatalf("refresh = %d %s", rotated.Code, rotated.Body.String())
@@ -142,6 +208,62 @@ func TestRemoteOAuthPKCEAndRefreshRotationInMemory(t *testing.T) {
 	old := remoteRequest(t, server, http.MethodPost, "/token", refreshBody, "application/x-www-form-urlencoded")
 	if old.Code == http.StatusOK {
 		t.Fatal("rotated refresh token remained usable")
+	}
+}
+
+// TestNewRemoteRefusesANonHTTPSPublicURL is L2-F6: the only publicURL check
+// used to be "has a hostname" — no scheme rule at all — while
+// validRedirectURI already demands https-or-loopback for client redirect
+// URIs. A plain http public_url would carry the passphrase and every bearer
+// and refresh token across the internet in cleartext.
+func TestNewRemoteRefusesANonHTTPSPublicURL(t *testing.T) {
+	base := t.TempDir()
+	_, err := NewRemote(RemoteOptions{
+		Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "http://harvester.example.com",
+		Passphrase: "pass",
+	})
+	if err == nil || !strings.Contains(err.Error(), "external.publicURL") || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("non-https public_url error = %v, want it to name external.publicURL and https", err)
+	}
+}
+
+// TestNewRemoteAllowsHTTPOnLoopbackAndHTTPSAnywhere is the positive control:
+// the exemption is loopback only, matching validRedirectURI, and never a
+// blanket http allowance.
+func TestNewRemoteAllowsHTTPOnLoopbackAndHTTPSAnywhere(t *testing.T) {
+	for _, publicURL := range []string{"https://harvester.example.test", "http://localhost:8080", "http://127.0.0.1:8080"} {
+		base := t.TempDir()
+		server, err := NewRemote(RemoteOptions{
+			Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: publicURL, Passphrase: "pass",
+		})
+		if err != nil {
+			t.Fatalf("NewRemote(%q) = %v, want it accepted", publicURL, err)
+		}
+		_ = server.Close()
+	}
+}
+
+// TestMCPRouteBoundsThePOSTBody is L2-F18: /mcp reached the SDK's
+// io.ReadAll(req.Body) with no bound at all (negative grep pre-fix); one
+// authenticated caller could exhaust memory with a single oversized POST.
+func TestMCPRouteBoundsThePOSTBody(t *testing.T) {
+	base := t.TempDir()
+	server, err := NewRemote(RemoteOptions{
+		Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test",
+		StaticToken: "example-fixture-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversized := strings.Repeat("x", mcpMaxBodyBytes+1024)
+	req := httptest.NewRequest(http.MethodPost, "https://harvester.example.test/mcp", strings.NewReader(oversized))
+	req.Host = "harvester.example.test"
+	req.Header.Set("Authorization", "Bearer example-fixture-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("an oversized /mcp body was accepted: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -156,15 +278,29 @@ func TestRemoteResourceRules(t *testing.T) {
 
 func TestRemoteMetadataAliasesAndRegistrationRules(t *testing.T) {
 	base := t.TempDir()
-	server, err := NewRemote(RemoteOptions{Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test", Passphrase: "pass"})
+	server, err := NewRemote(
+		RemoteOptions{
+			Runtime:    Runtime{Home: base, CacheDir: base + "/cache"},
+			PublicURL:  "https://harvester.example.test",
+			Passphrase: "pass",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/mcp", "/.well-known/openid-configuration", "/.well-known/openid-configuration/mcp"}
+	paths := []string{
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-protected-resource/mcp",
+		"/.well-known/oauth-authorization-server",
+		"/.well-known/oauth-authorization-server/mcp",
+		"/.well-known/openid-configuration",
+		"/.well-known/openid-configuration/mcp",
+	}
 	var first []byte
 	for _, path := range paths {
 		rec := remoteRequest(t, server, http.MethodGet, path, "", "")
-		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" || rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" ||
+			rec.Header().Get("Access-Control-Allow-Origin") != "*" {
 			t.Fatalf("metadata %s = %d headers=%v", path, rec.Code, rec.Header())
 		}
 		if strings.Contains(path, "protected") {
@@ -179,10 +315,17 @@ func TestRemoteMetadataAliasesAndRegistrationRules(t *testing.T) {
 	}
 	bare := remoteRequest(t, server, http.MethodGet, paths[0], "", "")
 	suffixed := remoteRequest(t, server, http.MethodGet, paths[1], "", "")
-	if string(bare.Body.Bytes()) != string(suffixed.Body.Bytes()) {
+	if bare.Body.String() != suffixed.Body.String() {
 		t.Fatal("protected-resource metadata aliases drifted")
 	}
-	badType := remoteRequest(t, server, http.MethodPost, "/register", "redirect_uris=x", "application/x-www-form-urlencoded")
+	badType := remoteRequest(
+		t,
+		server,
+		http.MethodPost,
+		"/register",
+		"redirect_uris=x",
+		"application/x-www-form-urlencoded",
+	)
 	if badType.Code != http.StatusBadRequest || !strings.Contains(badType.Body.String(), "invalid_client_metadata") {
 		t.Fatalf("registration wrong content type = %d %s", badType.Code, badType.Body.String())
 	}

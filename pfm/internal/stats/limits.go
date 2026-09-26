@@ -14,13 +14,15 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	headlessrun "hostops/pfm/internal/headless/run"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/statusline"
-	"hostops/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/statusline"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 const defaultCodexUsageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
@@ -42,6 +44,7 @@ type LimitAccount struct {
 type LimitsSampler struct {
 	Accounts []LimitAccount
 	Now      func() time.Time
+	Env      paths.Env // host-environment seam; nil defaults to paths.OSEnv{}
 	TTL      time.Duration
 	// CodexTTL overrides TTL for Codex accounts only. Zero means "no
 	// override" — Codex falls back to TTL exactly like before, which is
@@ -141,30 +144,29 @@ func NewLimitsSampler(accounts []LimitAccount) *LimitsSampler {
 	return sampler
 }
 
+// client and codexClient are http.out doors: constructed or injected, wrapped in place.
 func (sampler *LimitsSampler) client() *http.Client {
 	if sampler.Client != nil {
-		return sampler.Client
+		return obs.WrapClient(sampler.Client)
 	}
-	return &http.Client{Timeout: 6 * time.Second}
+	return obs.WrapClient(&http.Client{Timeout: 6 * time.Second})
 }
 
 func (sampler *LimitsSampler) codexClient() *http.Client {
 	if sampler.CodexClient != nil {
-		return sampler.CodexClient
+		return obs.WrapClient(sampler.CodexClient)
 	}
-	return &http.Client{
-		Timeout: 20 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	return obs.WrapClient(&http.Client{
+		Timeout:       20 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	})
 }
 
 func (sampler *LimitsSampler) now() time.Time {
 	if sampler.Now != nil {
 		return sampler.Now()
 	}
-	return time.Now()
+	return clock.Real.Now()
 }
 
 // fetchClaudeCached is the default Fetch implementation: it reads and writes
@@ -198,7 +200,11 @@ func (sampler *LimitsSampler) fetchClaude(
 func (sampler *LimitsSampler) fetchClaudeStatusline(
 	account LimitAccount,
 ) (usagehook.Usage, time.Time, bool, error) {
-	directory := statusline.ClaudeRateLimitDir(os.Getenv(paths.EnvHome), os.Getuid())
+	env := sampler.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	directory := statusline.ClaudeRateLimitDir(env.Get(paths.EnvHome), os.Getuid())
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -219,7 +225,10 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("stat statusline quota %s: %w", entry.Name(), err)
 		}
 		if !info.Mode().IsRegular() {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("statusline quota %s is not a regular file", entry.Name())
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"statusline quota %s is not a regular file",
+				entry.Name(),
+			)
 		}
 		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
 		if err != nil {
@@ -227,19 +236,26 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 		}
 		var snapshot statuslineClaudeLimits
 		if err := json.Unmarshal(body, &snapshot); err != nil {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("decode statusline quota %s: %w", entry.Name(), err)
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"decode statusline quota %s: %w",
+				entry.Name(),
+				err,
+			)
 		}
 		if snapshot.Account != account.ID {
 			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
 				"statusline quota %s claims account %d, want %d", entry.Name(), snapshot.Account, account.ID,
 			)
 		}
-		if snapshot.ConfigDir == "" || !sameConfigDirectory(snapshot.ConfigDir, account.ConfigDir) {
+		if snapshot.ConfigDir == "" || !sameConfigDir(snapshot.ConfigDir, account.ConfigDir) {
 			continue
 		}
 		confirmedAt := time.Unix(snapshot.ConfirmedAt, 0)
 		if snapshot.ConfirmedAt <= 0 || confirmedAt.After(sampler.now()) {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("statusline quota %s has invalid confirmation time", entry.Name())
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"statusline quota %s has invalid confirmation time",
+				entry.Name(),
+			)
 		}
 		if sampler.now().Sub(confirmedAt) > maxStaleLimitsAge {
 			continue
@@ -296,7 +312,7 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 	return usage, latestAt, true, nil
 }
 
-func sameConfigDirectory(left, right string) bool {
+func sameConfigDir(left, right string) bool {
 	leftResolved, leftErr := filepath.EvalSymlinks(left)
 	rightResolved, rightErr := filepath.EvalSymlinks(right)
 	if leftErr == nil && rightErr == nil {
@@ -471,7 +487,10 @@ func backoffFor(err error, now time.Time) (message string, retryAfter time.Time)
 			wait = 10 * time.Minute
 		}
 		retryAfter = now.Add(wait)
-		return fmt.Sprintf("limits unavailable: 429 Too Many Requests — retry at %s", retryAfter.Format("15:04")), retryAfter
+		return fmt.Sprintf(
+			"limits unavailable: 429 Too Many Requests — retry at %s",
+			retryAfter.Format("15:04"),
+		), retryAfter
 	}
 	return err.Error(), now.Add(time.Minute)
 }
@@ -483,11 +502,12 @@ func (sampler *LimitsSampler) Sample(ctx context.Context) ([]AccountLimits, []st
 	now := sampler.now()
 	limits := make([]AccountLimits, 0, len(sampler.Accounts))
 	warnings := make([]string, 0)
-	for _, account := range sampler.Accounts {
+	for index := range sampler.Accounts {
+		account := &sampler.Accounts[index]
 		key := account.cacheKey()
 		cached, found := sampler.cached(key, now, account.Engine)
 		if !found {
-			cached = sampler.refresh(ctx, account, key, now)
+			cached = sampler.refresh(ctx, *account, key, now)
 		}
 		limits = append(limits, cached.limits)
 		warnings = append(warnings, cached.warnings...)
@@ -507,10 +527,11 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 	now := sampler.now()
 	limits := make([]AccountLimits, 0, len(sampler.Accounts))
 	warnings := make([]string, 0)
-	for _, account := range sampler.Accounts {
+	for index := range sampler.Accounts {
+		account := &sampler.Accounts[index]
 		key := account.cacheKey()
-		if sampler.structuralAccount(account) {
-			entry := sampler.refresh(ctx, account, key, now)
+		if sampler.structuralAccount(*account) {
+			entry := sampler.refresh(ctx, *account, key, now)
 			limits = append(limits, entry.limits)
 			warnings = append(warnings, entry.warnings...)
 			continue
@@ -523,12 +544,12 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 
 		entry, found := sampler.cachedAny(key)
 		if !found {
-			entry = sampler.accountEntry(account, now)
+			entry = sampler.accountEntry(*account, now)
 			entry.limits.Status = "refreshing limits…"
 		}
 		limits = append(limits, entry.limits)
 		warnings = append(warnings, entry.warnings...)
-		sampler.startRefresh(ctx, account, key)
+		sampler.startRefresh(ctx, *account, key)
 	}
 	return limits, warnings
 }
@@ -570,7 +591,12 @@ func (sampler *LimitsSampler) ttlFor(engine pfmengine.ID) time.Duration {
 	return sampler.ttl()
 }
 
-func (sampler *LimitsSampler) refresh(ctx context.Context, account LimitAccount, key string, now time.Time) cachedLimits {
+func (sampler *LimitsSampler) refresh(
+	ctx context.Context,
+	account LimitAccount,
+	key string,
+	now time.Time,
+) cachedLimits {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -660,7 +686,8 @@ func (sampler *LimitsSampler) beginFlight(key string, engine pfmengine.ID) bool 
 	sampler.mu.Lock()
 	defer sampler.mu.Unlock()
 	now := sampler.now()
-	if entry, found := sampler.cache[key]; found && !entry.when.After(now) && now.Sub(entry.when) < sampler.ttlFor(engine) {
+	if entry, found := sampler.cache[key]; found && !entry.when.After(now) &&
+		now.Sub(entry.when) < sampler.ttlFor(engine) {
 		return false
 	}
 	if sampler.flights == nil {
@@ -744,7 +771,8 @@ func staleEligible(err error) bool {
 
 func staleStatus(err error) string {
 	message := strings.ToLower(err.Error())
-	if strings.HasPrefix(message, "write claude limits cache:") || strings.HasPrefix(message, "write codex limits cache:") {
+	if strings.HasPrefix(message, "write claude limits cache:") ||
+		strings.HasPrefix(message, "write codex limits cache:") {
 		return err.Error()
 	}
 	if strings.Contains(message, "429") || strings.Contains(message, "too many requests") {
@@ -852,7 +880,12 @@ func defaultAck(ctx context.Context, account LimitAccount) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("refresh account %d OAuth token: %w (%s)", account.ID, err, strings.TrimSpace(result.Stdout+result.Stderr))
+		return fmt.Errorf(
+			"refresh account %d OAuth token: %w (%s)",
+			account.ID,
+			err,
+			strings.TrimSpace(result.Stdout+result.Stderr),
+		)
 	}
 	return nil
 }
@@ -867,7 +900,7 @@ func usageWindows(usage usagehook.Usage, now time.Time) []Window {
 		}
 		resetAt, resetNote := parseReset(source.ResetsAt)
 		usedPct := *source.Utilization
-		if resetPassed(resetAt, now) {
+		if codexResetPassed(resetAt, now) {
 			// The reading belongs to a window that has already rolled over;
 			// show the row so the account keeps its shape, but no bar and no
 			// number until a refetch lands. UnknownUsedPct is what says "no
@@ -890,7 +923,7 @@ const expiredResetNote = "reset passed · awaiting refetch"
 // resetPassed reports whether a parsed reset moment is in the past. A window
 // with no parsable reset (zero time) is not expired — it is merely unknown,
 // and parseReset already says so.
-func resetPassed(resetAt, now time.Time) bool {
+func codexResetPassed(resetAt, now time.Time) bool {
 	return !resetAt.IsZero() && !resetAt.After(now)
 }
 
@@ -941,16 +974,16 @@ func loadCodexCredentials(path string) (accessToken, accountID string, err error
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("no local Codex sign-in")
 		}
-		return "", "", fmt.Errorf("Codex fetch failed: read local sign-in: %w", err)
+		return "", "", fmt.Errorf("fetch Codex usage failed: read local sign-in: %w", err)
 	}
 	var envelope codexCredentialEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return "", "", fmt.Errorf("Codex session incomplete")
+		return "", "", fmt.Errorf("session for Codex is incomplete")
 	}
 	accessToken = strings.TrimSpace(envelope.Tokens.AccessToken)
 	accountID = strings.TrimSpace(envelope.Tokens.AccountID)
 	if accessToken == "" || accountID == "" {
-		return "", "", fmt.Errorf("Codex session incomplete")
+		return "", "", fmt.Errorf("session for Codex is incomplete")
 	}
 	return accessToken, accountID, nil
 }
@@ -977,7 +1010,11 @@ func (sampler *LimitsSampler) fetchCodex(ctx context.Context, account LimitAccou
 			usage.Warning = "Codex App Server limits unavailable; showing direct usage only: " + appErr.Error()
 			return usage, nil
 		}
-		return codexUsage{}, fmt.Errorf("Codex App Server failed: %v; direct usage failed: %w", appErr, directErr)
+		return codexUsage{}, fmt.Errorf(
+			"request to Codex App Server failed: %v; direct usage failed: %w",
+			appErr,
+			directErr,
+		)
 	}
 	return sampler.fetchCodexHTTP(ctx, account)
 }
@@ -991,27 +1028,26 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	if endpoint == "" {
 		endpoint = defaultCodexUsageEndpoint
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", err)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	request.Header.Set("ChatGPT-Account-ID", accountID)
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Cache-Control", "no-cache")
 	request.Header.Set("Pragma", "no-cache")
-
 	response, err := sampler.codexClient().Do(request)
 	if err != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", err)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)
 	}
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	closeErr := response.Body.Close()
 	if readErr != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", readErr)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", readErr)
 	}
 	if closeErr != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", closeErr)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", closeErr)
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		return codexUsage{}, &usagehook.RateLimitError{
@@ -1019,15 +1055,19 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 		}
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return codexUsage{}, fmt.Errorf("Codex credential rejected (HTTP %d)", response.StatusCode)
+		return codexUsage{}, fmt.Errorf("credential for Codex rejected (HTTP %d)", response.StatusCode)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: HTTP %d", response.StatusCode)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: HTTP %d", response.StatusCode)
 	}
 
 	var usage codexUsage
-	if err := json.Unmarshal(body, &usage); err != nil || usage.RateLimit == nil || usage.RateLimit.PrimaryWindow == nil {
-		return codexUsage{}, fmt.Errorf("Codex payload unreadable")
+	if err := json.Unmarshal(
+		body,
+		&usage,
+	); err != nil || usage.RateLimit == nil ||
+		usage.RateLimit.PrimaryWindow == nil {
+		return codexUsage{}, fmt.Errorf("usage payload from Codex is unreadable")
 	}
 	return usage, nil
 }
@@ -1051,7 +1091,7 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 	if home == "" && account.CodexAuthPath != "" {
 		home = filepath.Dir(account.CodexAuthPath)
 	}
-	body, err := statusline.ReadGPTRateLimitsWithBinaryAtHome(ctx, account.CodexBinary, home)
+	body, err := statusline.ReadCodexRateLimitsWithBinaryAtHome(ctx, account.CodexBinary, home)
 	if err != nil {
 		return codexUsage{}, err
 	}
@@ -1062,8 +1102,12 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 			RateLimitsByLimitID map[string]codexAppBucket `json:"rateLimitsByLimitId"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(body, &message); err != nil || string(message.ID) != "1" || message.Result.RateLimits == nil {
-		return codexUsage{}, fmt.Errorf("Codex App Server payload unreadable")
+	if err := json.Unmarshal(
+		body,
+		&message,
+	); err != nil || string(message.ID) != "1" ||
+		message.Result.RateLimits == nil {
+		return codexUsage{}, fmt.Errorf("payload from Codex App Server is unreadable")
 	}
 	usage := codexUsage{
 		PlanType:            message.Result.RateLimits.PlanType,
@@ -1074,7 +1118,7 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 		usage.RateLimitsByLimitID[id] = *codexBucketFromApp(bucket)
 	}
 	if len(codexWindows(usage)) == 0 {
-		return codexUsage{}, fmt.Errorf("Codex App Server response carried no rate-limit windows")
+		return codexUsage{}, fmt.Errorf("response from Codex App Server carried no rate-limit windows")
 	}
 	return usage, nil
 }
@@ -1128,7 +1172,7 @@ func readCodexCacheRecord(path string) (codexCacheRecord, error) {
 }
 
 func writeCodexCacheRecord(path string, record codexCacheRecord) error {
-	if err := usagehook.EnsurePrivateDirectory(filepath.Dir(path)); err != nil {
+	if err := usagehook.EnsurePrivateDir(filepath.Dir(path)); err != nil {
 		return err
 	}
 	body, err := json.Marshal(record)
@@ -1162,7 +1206,8 @@ func (sampler *LimitsSampler) fetchCodexCached(
 	now := sampler.now()
 	path := codexCachePath(usagehook.DefaultCacheDir(), account.ID)
 	record, readErr := readCodexCacheRecord(path)
-	matches := readErr == nil && record.SourceVersion == codexUsageSourceVersion && record.CodexAuthPath == account.CodexAuthPath
+	matches := readErr == nil && record.SourceVersion == codexUsageSourceVersion &&
+		record.CodexAuthPath == account.CodexAuthPath
 	confirmedAt, confirmed := cacheConfirmedAt(record.FetchedAt, path)
 	confirmed = confirmed && !confirmedAt.After(now)
 	staleUsable := matches && confirmed && len(codexWindows(record.codexUsage)) > 0 &&
@@ -1258,7 +1303,7 @@ func appendCodexWindows(windows []Window, bucket codexRateLimitBucket, suffix st
 		if entry == nil {
 			continue
 		}
-		name := codexWindowName(entry.LimitWindowSeconds)
+		name := codexUsageWindowName(entry.LimitWindowSeconds)
 		if suffix != "" {
 			name += "-" + suffix
 		}
@@ -1290,7 +1335,7 @@ func codexBucketSuffix(id string, bucket codexRateLimitBucket) string {
 	return strings.ReplaceAll(value, "_", "-")
 }
 
-func codexWindowName(seconds int64) string {
+func codexUsageWindowName(seconds int64) string {
 	switch seconds {
 	case 18_000:
 		return "5h"

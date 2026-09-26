@@ -4,8 +4,8 @@ import (
 	"io"
 	"testing"
 
-	"hostops/pfm/internal/chat"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // newFixtureService is the package's protocol-test service over the real

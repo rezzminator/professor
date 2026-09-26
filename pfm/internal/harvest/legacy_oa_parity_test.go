@@ -8,14 +8,17 @@ import (
 )
 
 func TestLegacyOAMixedCaseArxivDOIShortCircuitsExactly(t *testing.T) {
-	resolver := &Resolver{Client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		t.Fatalf("mixed-case arXiv DOI unexpectedly used network: %s", request.URL)
-		return nil, nil
-	})}}
+	resolver := &Resolver{
+		Client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			t.Fatalf("mixed-case arXiv DOI unexpectedly used network: %s", request.URL)
+			return nil, nil
+		})},
+	}
 	candidates, err := resolver.ResolveDOI(context.Background(), "10.48550/arXiv.1706.03762")
 	// Since the wave: the direct PDF is joined by the ar5iv HTML insurance copy
 	// (parity with harvester oa.arxiv_candidates).
-	if err != nil || len(candidates) != 2 || candidates[0].URL != "https://arxiv.org/pdf/1706.03762" || candidates[1].URL != "https://ar5iv.labs.arxiv.org/html/1706.03762" {
+	if err != nil || len(candidates) != 2 || candidates[0].URL != "https://arxiv.org/pdf/1706.03762" ||
+		candidates[1].URL != "https://ar5iv.labs.arxiv.org/html/1706.03762" {
 		t.Fatalf("mixed-case arXiv candidates=%#v err=%v", candidates, err)
 	}
 }
@@ -90,7 +93,7 @@ func TestLegacyFindWorksMergesPaperArxivAndBookDiscovery(t *testing.T) {
 	}
 	for handle, found := range want {
 		if !found {
-			t.Errorf("findWorks missing %q: %#v", handle, got)
+			t.Errorf("search_literature missing %q: %#v", handle, got)
 		}
 	}
 	var paper Candidate
@@ -100,9 +103,9 @@ func TestLegacyFindWorksMergesPaperArxivAndBookDiscovery(t *testing.T) {
 		}
 	}
 	if paper.Authors != "C. E. Shannon" || paper.Year != 1948 || paper.Kind != "paper" {
-		t.Fatalf("findWorks paper metadata=%#v", got)
+		t.Fatalf("search_literature paper metadata=%#v", got)
 	}
-	if len(got) == 0 || strings.ToLower(got[0].Free) == "closed" {
+	if len(got) == 0 || strings.EqualFold(got[0].Free, "closed") {
 		t.Fatalf("free exact-match candidates did not outrank the closed copy: %#v", got)
 	}
 }

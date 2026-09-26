@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/spawn"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // startCodexStatusPane brings up a real tmux server on a scratch socket
@@ -46,9 +46,9 @@ func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 		t.Fatalf("start jailed codex pane %q: %v: %s", socket, err, output)
 	}
 	t.Cleanup(func() {
-		kill := exec.Command("tmux", "-L", socket, "kill-server")
-		kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
-		_ = kill.Run()
+		killCommand := exec.Command("tmux", "-L", socket, "kill-server")
+		killCommand.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
+		_ = killCommand.Run()
 	})
 	waitForPaneToPaint(t, tmuxTmpDir, socket, statusLine)
 }
@@ -69,19 +69,8 @@ func waitForPaneToPaint(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	// The fixture passes the line as a printf FORMAT; the trailing \n is the
 	// only escape it uses, so the painted text is the literal before it.
 	want := strings.TrimSpace(strings.TrimSuffix(statusLine, `\n`))
-	deadline := time.Now().Add(5 * time.Second)
-	var last string
-	for time.Now().Before(deadline) {
-		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p", "-t", socket)
-		capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
-		output, err := capture.CombinedOutput()
-		last = string(output)
-		if err == nil && strings.Contains(last, want) {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("FIXTURE: pane %q never painted %q within 5s; last capture=%q", socket, want, last)
+	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
+	waitForTmuxPaneText(t, socket, environment, want, 5*time.Second)
 }
 
 func codexJailRollout(
@@ -115,8 +104,8 @@ func codexJailRollout(
 	return rolloutPath
 }
 
-func codexPane(socket, paneID string) gather.Pane {
-	return gather.Pane{
+func codexPane(socket, paneID string) gather.ProbePane {
+	return gather.ProbePane{
 		Socket:         socket,
 		SessionName:    socket,
 		WindowID:       "@1",
@@ -138,19 +127,19 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 	const socket = "cx-1800000001-1-1"
 	const newID = "22222222-2222-4222-8222-222222222222"
 	startCodexStatusPane(t, tmuxTmpDir, socket, "  "+newID+` · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	const oldID = "11111111-1111-4111-8111-111111111111"
 	codexJailRollout(t, database, root, oldID, 1)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -158,16 +147,14 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", oldID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != newID {
 		t.Fatalf("binding = (%q, %v, %v), want the new thread: stderr=%q", bound, found, err, stderr.String())
@@ -193,19 +180,19 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 		t.Fatal(err)
 	}
 	const socket = "cx-1800000002-1-1"
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	const oldID = "33333333-3333-4333-8333-333333333333"
 	codexJailRollout(t, database, root, oldID, 1)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -213,17 +200,15 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", oldID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	// No server was ever started on this socket: capture-pane fails.
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	if !strings.Contains(stderr.String(), "capture failed") {
 		t.Fatalf("stderr = %q, want a capture-failed message", stderr.String())
 	}
@@ -250,16 +235,17 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	const clearedID = "44444444-4444-4444-8444-444444444444"
 	startCodexStatusPane(t, tmuxTmpDir, clearingSocket, "  "+clearedID+` · /work/shared · Full Access\n`)
 	startCodexStatusPane(t, tmuxTmpDir, steadySocket, `  STEADY_CHAT · /work/shared · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	const clearingOldID = "55555555-5555-4555-8555-555555555555"
 	const steadyID = "66666666-6666-4666-8666-666666666666"
 	codexJailRollout(t, database, root, clearingOldID, 1)
@@ -269,7 +255,6 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -280,24 +265,32 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), steadySocket, "%0", steadyID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{
+		gather.Snapshot{Panes: []gather.ProbePane{
 			codexPane(clearingSocket, "%0"),
 			codexPane(steadySocket, "%0"),
 		}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	if _, found, err := database.Killed(context.Background(), clearingOldID); err != nil || !found {
-		t.Fatalf("clearing pane's previous thread was not killed: found=%v error=%v stderr=%q", found, err, stderr.String())
+		t.Fatalf(
+			"clearing pane's previous thread was not killed: found=%v error=%v stderr=%q",
+			found,
+			err,
+			stderr.String(),
+		)
 	}
 	if _, found, err := database.Killed(context.Background(), steadyID); err != nil || found {
-		t.Fatalf("the steady pane's own thread was killed too: found=%v error=%v stderr=%q", found, err, stderr.String())
+		t.Fatalf(
+			"the steady pane's own thread was killed too: found=%v error=%v stderr=%q",
+			found,
+			err,
+			stderr.String(),
+		)
 	}
 	bound, found, err := manager.CodexPaneBinding(context.Background(), steadySocket, "%0")
 	if err != nil || !found || bound != steadyID {
@@ -317,15 +310,17 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	tmuxTmpDir := filepath.Join(root, "tmuxtmp")
 	const socket = "cx-1800000005-1-1"
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  FIX_HAND · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	const boundID = "99999999-9999-4999-8999-999999999999"
 	const duplicateID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	codexJailRollout(t, database, root, boundID, 1)
@@ -336,7 +331,6 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -344,16 +338,14 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", boundID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	if stderr.Len() != 0 {
 		t.Fatalf("steady duplicate name printed a shutdown warning: %q", stderr.String())
 	}
@@ -383,15 +375,17 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 			tmuxTmpDir := filepath.Join(root, "tmuxtmp")
 			socket := "cx-1800000006-" + strings.ReplaceAll(test.name, " ", "-")
 			startCodexStatusPane(t, tmuxTmpDir, socket, `  FIX_HAND · /work/example · Full Access\n`)
-
 			resolved := jailPaths(t)
 			resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 			database, err := store.Open()
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer database.Close()
-
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 			const firstID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 			const secondID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 			codexJailRollout(t, database, root, firstID, 1)
@@ -402,7 +396,6 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 			}); err != nil {
 				t.Fatal(err)
 			}
-
 			manager, err := kill.New(database, kill.Dependencies{})
 			if err != nil {
 				t.Fatal(err)
@@ -413,12 +406,11 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 					t.Fatal(err)
 				}
 			}
-
 			var stderr bytes.Buffer
 			fleet.ReconcileCodexPanes(
 				context.Background(),
 				database,
-				gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+				gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 				commandRuntime{Paths: resolved},
 				fleet.PrintWarn(&stderr),
 			)
@@ -449,15 +441,17 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 	tmuxTmpDir := filepath.Join(root, "tmuxtmp")
 	const socket = "cx-1800000007-1-1"
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	const boundID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 	codexJailRollout(t, database, root, boundID, 3)
 	manager, err := kill.New(database, kill.Dependencies{})
@@ -467,12 +461,11 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", boundID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -542,15 +535,17 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	const socket = "cx-1800000010-1-1"
 	// The pane shows its NAME again, because the post-clear rename landed.
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  W5_TESTER · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	const clearedID = "11111111-1111-4111-8111-111111111111"
 	const liveID = "22222222-2222-4222-8222-222222222222"
 	codexJailRollout(t, database, root, clearedID, 4)
@@ -561,7 +556,6 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -569,16 +563,14 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", liveID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != liveID {
 		t.Fatalf(
@@ -609,15 +601,17 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	for _, socket := range []string{first, second} {
 		startCodexStatusPane(t, tmuxTmpDir, socket, `  ENGINE_BUILDER · /work/example · Full Access\n`)
 	}
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	const sharedID = "33333333-3333-4333-8333-333333333333"
 	codexJailRollout(t, database, root, sharedID, 2)
 	if err := database.ReplaceCxNames(context.Background(), []store.CxName{
@@ -625,7 +619,6 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -634,11 +627,10 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(first, "%0"), codexPane(second, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(first, "%0"), codexPane(second, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bindings := 0
 	for _, socket := range []string{first, second} {
 		bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -672,18 +664,19 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 	const parentID = "44444444-4444-4444-8444-444444444444"
 	const childID = "55555555-5555-4555-8555-555555555555"
 	startCodexStatusPane(t, tmuxTmpDir, socket, "  "+childID+` · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	codexJailRollout(t, database, root, parentID, 6)
 	codexJailChildRollout(t, database, root, childID, parentID, 7)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -691,16 +684,14 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", parentID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != childID {
 		t.Fatalf("binding = (%q, %v, %v), want the child %q", bound, found, err, childID)
@@ -725,15 +716,17 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	const parentID = "66666666-6666-4666-8666-666666666666"
 	const rotatedID = "77777777-7777-4777-8777-777777777777"
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  ROTATED_CHAT · /work/current · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	codexJailRollout(t, database, root, parentID, 6)
 	codexJailRollout(t, database, root, rotatedID, 7)
 	rotated, found, err := database.Rollout(context.Background(), rotatedID)
@@ -749,7 +742,6 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -761,22 +753,21 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 		root, "codex", "sessions", "2030", "01", "02",
 		"rollout-2030-01-02T03-04-06-"+rotatedID+".jsonl",
 	)
-
 	var stderr bytes.Buffer
-	fleet.ReconcileCodexPanes(
+	fleet.ReconcileCodexPanesWith(
 		context.Background(),
 		database,
 		gather.Snapshot{
-			Panes: []gather.Pane{codexPane(socket, "%0")},
+			Panes: []gather.ProbePane{codexPane(socket, "%0")},
 			Codex: []gather.LiveCodex{{
 				Socket: socket, PaneID: "%0", RolloutPath: currentRollout,
 				RolloutHeld: true,
 			}},
 		},
 		commandRuntime{Paths: resolved},
+		fakeCodexRenamer{name: "ROTATED_CHAT"},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != rotatedID {
 		t.Fatalf(
@@ -795,7 +786,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	pane.CurrentPath = "/work/current"
 	output := compose.Compose(compose.Input{
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{pane},
+			Panes: []gather.ProbePane{pane},
 			Codex: []gather.LiveCodex{{
 				Socket: socket, PaneID: "%0", RolloutPath: currentRollout,
 			}},
@@ -841,18 +832,18 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 	const newID = "55555555-5555-4555-8555-555555555555"
 	startCodexStatusPane(t, tmuxTmpDir, socket, "  "+newID+` · /work/example · Full Access
 `)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	oldRollout := codexJailRollout(t, database, root, oldID, 1)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -860,13 +851,12 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", oldID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
 		gather.Snapshot{
-			Panes: []gather.Pane{codexPane(socket, "%0")},
+			Panes: []gather.ProbePane{codexPane(socket, "%0")},
 			Codex: []gather.LiveCodex{{
 				Socket: socket, PaneID: "%0",
 				RolloutPath: oldRollout,
@@ -896,22 +886,26 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 }
 
 // codexJailStateTitle writes a scratch Codex state store directly under
-// codexRoot as state_1.sqlite — the shape store.CodexStateFiles walks — with
+// codexHome as state_1.sqlite — the shape store.CodexStateFiles walks — with
 // one thread row carrying id and a title. Only the columns
 // store.readCodexState requires (id, cwd, created_at, thread_source) or
 // reads (title) are present: the full production schema fixture is
 // internal/store/codexstate_test.go's buildCodexState, unexported and in a
 // different package, so this is the cmd/pfm-side counterpart.
-func codexJailStateTitle(t *testing.T, codexRoot, id, title, cwd string) {
+func codexJailStateTitle(t *testing.T, codexHome, id, title, cwd string) {
 	t.Helper()
-	if err := os.MkdirAll(codexRoot, 0o700); err != nil {
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexRoot, "state_1.sqlite"))
+	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, "state_1.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	if _, err := state.Exec(`CREATE TABLE threads (
 		id TEXT PRIMARY KEY,
 		cwd TEXT,
@@ -960,7 +954,11 @@ func TestReconcileCodexPanesMovesABindingForwardOnATitleOnlyName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	aRollout := codexJailRollout(t, database, root, idA, 1)
 	codexJailRollout(t, database, root, idB, 1)
@@ -980,7 +978,7 @@ func TestReconcileCodexPanesMovesABindingForwardOnATitleOnlyName(t *testing.T) {
 		context.Background(),
 		database,
 		gather.Snapshot{
-			Panes: []gather.Pane{codexPane(socket, "%0")},
+			Panes: []gather.ProbePane{codexPane(socket, "%0")},
 			// A live process that holds no rollout file descriptor — the
 			// shared app-server shape — whose only guess (A, the stale
 			// binding) must never overrule the screen's own title.
@@ -1033,7 +1031,11 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	const deadID = "77777777-7777-4777-8777-777777777777"
@@ -1060,7 +1062,7 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		ctx,
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -1085,7 +1087,7 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		ctx,
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(reseated, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(reseated, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -1146,7 +1148,11 @@ func TestReconcileCodexPanesRecordsTheNameItReAppliedAfterAClear(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	codexJailRollout(t, database, root, oldID, 1)
 
 	if err := database.UpsertCxName(context.Background(), store.CxName{
@@ -1167,7 +1173,7 @@ func TestReconcileCodexPanesRecordsTheNameItReAppliedAfterAClear(t *testing.T) {
 	fleet.ReconcileCodexPanesWith(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fakeCodexRenamer{name: chatName},
 		fleet.PrintWarn(&stderr),
@@ -1194,7 +1200,6 @@ func TestAReAppliedNameReSeatsAnUnboundPane(t *testing.T) {
 	const retiredID = "88888888-8888-4888-8888-888888888888"
 	const liveID = "99999999-9999-4999-8999-999999999999"
 	const chatName = "ENGINE_BUILDER"
-
 	retired := func(id string) (bool, bool) { return id == retiredID, true }
 	observations := []fleet.CodexPaneObservation{
 		{Socket: "cx-1", PaneID: "%0", Name: chatName},

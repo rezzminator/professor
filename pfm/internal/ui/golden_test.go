@@ -16,11 +16,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
-	pfmstats "hostops/pfm/internal/stats"
-	"hostops/pfm/internal/theme"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 func TestRenderGoldens(t *testing.T) {
@@ -78,7 +78,7 @@ func TestRenderGoldens(t *testing.T) {
 			name: "OpenCode row ansi 80 columns",
 			path: "ui_opencode_80.ansi",
 			got: func() string {
-				return quoteANSI(opencodeGoldenSnapshot(80).View().Content)
+				return quoteANSI(openCodeGoldenSnapshot(80).View().Content)
 			},
 		},
 		{
@@ -206,10 +206,10 @@ func TestRenderGoldens(t *testing.T) {
 	}
 }
 
-func opencodeGoldenSnapshot(width int) Model {
+func openCodeGoldenSnapshot(width int) Model {
 	snapshot := fixtureSnapshot(width)
 	snapshot.Rows = []compose.Row{{
-		Kind: compose.ResumeOpencode, ID: "oc-golden", Name: "OpenCode session",
+		Kind: compose.ResumeOpenCode, ID: "oc-golden", Name: "OpenCode session",
 		Project: "alpha", CWD: "/work/alpha", PromptCount: 3,
 		ActivityNS: fixtureNowNS - int64(time.Minute),
 	}}
@@ -220,9 +220,10 @@ func opencodeGoldenSnapshot(width int) Model {
 func engineOnlyGoldenSnapshot(engine pfmengine.ID, width int) Model {
 	snapshot := fixtureSnapshot(width)
 	rows := make([]compose.Row, 0, len(snapshot.Rows))
-	for _, row := range snapshot.Rows {
+	for index := range snapshot.Rows {
+		row := &snapshot.Rows[index]
 		if compose.EngineForKind(row.Kind) == engine {
-			rows = append(rows, row)
+			rows = append(rows, *row)
 		}
 	}
 	snapshot.Rows = rows
@@ -280,23 +281,45 @@ func limitsGoldenModel(width int) Model {
 	now := time.Unix(0, fixtureNowNS)
 	model.stats = pfmstats.Snapshot{Ready: true, Limits: []pfmstats.AccountLimits{
 		{
-			Account: 1, Emoji: "🥇", Engine: pfmengine.Claude, Label: "account 1", Plan: "Max 20x", ConfirmedAt: now.Add(-12 * time.Second),
+			Account:     1,
+			Emoji:       "🥇",
+			Engine:      pfmengine.Claude,
+			Label:       "account 1",
+			Plan:        "Max 20x",
+			ConfirmedAt: now.Add(-12 * time.Second),
 			Windows: []pfmstats.Window{
 				{Name: "5h", UsedPct: 52.4, ResetAt: now.Add(2*time.Hour + 14*time.Minute)},
 				{Name: "7d-fable", UsedPct: 95, ResetAt: now.Add(14 * time.Minute)},
 			},
 		},
 		{
-			Account: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", Plan: "Pro", ConfirmedAt: now.Add(-40 * time.Second),
+			Account:     2,
+			Emoji:       "🥈",
+			Engine:      pfmengine.Claude,
+			Label:       "account 2",
+			Plan:        "Pro",
+			ConfirmedAt: now.Add(-40 * time.Second),
 			Windows: []pfmstats.Window{
 				{Name: "5h", UsedPct: 55, ResetAt: now.Add(4 * time.Hour)},
 				{Name: "7d", UsedPct: 100, ResetAt: now.Add(-time.Minute)},
 			},
 		},
-		{Engine: pfmengine.Codex, Label: "Codex", Plan: "pro", ConfirmedAt: now.Add(-2 * time.Minute), Windows: []pfmstats.Window{
-			{Name: "7d", UsedPct: 31, ResetAt: now.Add(6*24*time.Hour + 20*time.Hour)},
-		}},
-		{Account: 4, Emoji: "🍀", Engine: pfmengine.Claude, Label: "account 4", Status: "Claude credential rejected (HTTP 403)"},
+		{
+			Engine:      pfmengine.Codex,
+			Label:       "Codex",
+			Plan:        "pro",
+			ConfirmedAt: now.Add(-2 * time.Minute),
+			Windows: []pfmstats.Window{
+				{Name: "7d", UsedPct: 31, ResetAt: now.Add(6*24*time.Hour + 20*time.Hour)},
+			},
+		},
+		{
+			Account: 4,
+			Emoji:   "🍀",
+			Engine:  pfmengine.Claude,
+			Label:   "account 4",
+			Status:  "Claude credential rejected (HTTP 403)",
+		},
 		{Account: 3, Engine: pfmengine.Claude, Label: "account 3", Status: "skipped account 3: no valid credentials"},
 	}}
 	return model
@@ -304,7 +327,7 @@ func limitsGoldenModel(width int) Model {
 
 // cosmosGoldenSnapshot builds the fixed-clock cosmos snapshot both the
 // no-sky and the sky-enabled goldens render. The inject event is pinned
-// 300ms before "now" on purpose: with cosmosCometDuration(shared.KindInject)
+// 300ms before "now" on purpose: with cosmosCometDuration(fleetdb.KindInject)
 // at 1500ms, that lands the comet genuinely mid-flight for any caller that
 // renders with the sky on, rather than pinning a frame the gate could pass
 // whether the glow code ran or was never wired.
@@ -327,7 +350,12 @@ func cosmosGoldenSnapshot(width int, noSky bool) Snapshot {
 			snapshot.Rows[index].ActivityNS += clockShift
 		}
 	}
-	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, cosmosGoldenEvents(cosmosNowNS, snapshot.Rows), snapshot.NowNS, false)
+	snapshot.Cosmos = compose.BuildCosmos(
+		snapshot.Rows,
+		cosmosGoldenEvents(cosmosNowNS, snapshot.Rows),
+		snapshot.NowNS,
+		false,
+	)
 	return snapshot
 }
 
@@ -351,23 +379,28 @@ func cosmosGoldenSnapshotSeeded(width int) Snapshot {
 			snapshot.Rows[index].ActivityNS += clockShift
 		}
 	}
-	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, cosmosGoldenEvents(cosmosNowNS, snapshot.Rows), snapshot.NowNS, true)
+	snapshot.Cosmos = compose.BuildCosmos(
+		snapshot.Rows,
+		cosmosGoldenEvents(cosmosNowNS, snapshot.Rows),
+		snapshot.NowNS,
+		true,
+	)
 	return snapshot
 }
 
 // cosmosGoldenEvents is the fixed ledger every cosmos golden is cut from: one
 // inject 300ms old (mid-comet) and one spawn ten minutes old.
-func cosmosGoldenEvents(nowNS int64, rows []compose.Row) []shared.CommsEvent {
-	return []shared.CommsEvent{
+func cosmosGoldenEvents(nowNS int64, rows []compose.Row) []fleetdb.CommsEvent {
+	return []fleetdb.CommsEvent{
 		{
 			ID:   2,
-			AtNS: nowNS - int64(300*time.Millisecond), Kind: shared.KindInject,
+			AtNS: nowNS - int64(300*time.Millisecond), Kind: fleetdb.KindInject,
 			SenderUUID: rows[0].ID, Target: rows[1].Name,
 			Message: "QA: cosmos goldens are pinned",
 		},
 		{
 			ID:   1,
-			AtNS: nowNS - int64(10*time.Minute), Kind: shared.KindSpawn,
+			AtNS: nowNS - int64(10*time.Minute), Kind: fleetdb.KindSpawn,
 			SenderUUID: rows[0].ID, Target: rows[4].Name,
 			Message: "begin the child seat",
 		},
@@ -627,7 +660,7 @@ func displayIndex(value, marker string) int {
 }
 
 func firstDifference(want, got []byte) string {
-	limit := minInt(len(want), len(got))
+	limit := min(len(want), len(got))
 	for index := 0; index < limit; index++ {
 		if want[index] != got[index] {
 			return fmt.Sprintf(

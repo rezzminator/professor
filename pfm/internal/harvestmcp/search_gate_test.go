@@ -8,34 +8,69 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
-// TestServerInstructionsNameSearchOnlyWhenConfigured pins both shapes of the
-// top-level routing text: identical to today's when a backend is
-// configured, and search-free plus a one-sentence explanation when it is
-// not — never a routing guide that recommends a tool the server refuses.
+// TestServerInstructionsNameSearchOnlyWhenConfigured pins serverInstructions
+// to the contracts' harvester part, byte for byte, for each of the four
+// combinations: clause 3 (local documents) only when local, clause 6 (web
+// search) only when a backend is configured — never a routing guide that
+// recommends a tool the server does not register. Every combination ends with
+// the per-item empty-versus-error rule; search off adds the enable hint.
 func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
-	on := serverInstructions(true)
-	if !strings.Contains(on, `"search the web for X" is search`) || !strings.Contains(on, "for a topic — search, then fetch the URL") {
-		t.Fatalf("search-enabled instructions dropped their search routing: %q", on)
-	}
-	off := serverInstructions(false)
-	for _, absent := range []string{"is search (ranked URLs", "for a topic — search"} {
-		if strings.Contains(off, absent) {
-			t.Fatalf("search-disabled instructions still name search (%q):\n%s", absent, off)
-		}
-	}
-	if !strings.Contains(off, "Web search is not configured on this server") || !strings.Contains(off, "search.searxngURL or search.braveApiKey in harvester.config.json") {
-		t.Fatalf("search-disabled instructions lack the configuration hint:\n%s", off)
+	clause1 := `Read a web page → harvester_read with it in urls`
+	clause2 := `a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or harvester_search_literature handle → harvester_read with it in publications`
+	clause3 := `a local document → harvester_read with its path in files`
+	clause4 := `find papers or books by title → harvester_search_literature`
+	clause5 := `save a file's bytes unparsed → harvester_download_file`
+	clause6 := `search the web for a topic → harvester_search_web`
+
+	const perItem = ` Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
+	const searchOff = ` Web search is not configured on this server — set search.searxngURL or search.braveApiKey in harvester.config.json to enable web search.`
+	join := func(clauses ...string) string { return strings.Join(clauses, "; ") + "." + perItem }
+	joinOff := func(clauses ...string) string { return join(clauses...) + searchOff }
+
+	for _, test := range []struct {
+		name            string
+		searchAvailable bool
+		remote          bool
+		want            string
+	}{
+		{"local, search off", false, false, joinOff(clause1, clause2, clause3, clause4, clause5)},
+		{"local, search on", true, false, join(clause1, clause2, clause3, clause4, clause5, clause6)},
+		{"remote, search off", false, true, joinOff(clause1, clause2, clause4, clause5)},
+		{"remote, search on", true, true, join(clause1, clause2, clause4, clause5, clause6)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := serverInstructions(test.searchAvailable, test.remote)
+			if !test.searchAvailable && strings.Contains(got, "harvester_search_web") {
+				t.Fatalf("search off, instructions name harvester_search_web: %q", got)
+			}
+			if got != test.want {
+				t.Fatalf(
+					"serverInstructions(%v, %v) =\n%q\nwant\n%q",
+					test.searchAvailable,
+					test.remote,
+					got,
+					test.want,
+				)
+			}
+		})
 	}
 }
 
 // A failed search renders every backend's own error, one per line.
 func TestSearchFailureRendersEachBackend(t *testing.T) {
-	text := renderSearchFailure(errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")))
-	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "Retrieval failed") {
+	text := renderSearchFailure(
+		errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")),
+	)
+	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "could not classify") {
 		t.Fatalf("search failure lost safe public message: %q", text)
+	}
+	for _, name := range []string{"harvester_read", "harvester_search_literature", "harvester_download_file"} {
+		if !strings.Contains(text, name) {
+			t.Fatalf("search failure text %q does not name %q", text, name)
+		}
 	}
 	for _, secret := range []string{"searxng", "127.0.0.1", "HTTP 502", "brave: HTTP 401", "harvester.config.json"} {
 		if strings.Contains(text, secret) {
@@ -53,10 +88,18 @@ func TestSearchFailureRendersEachBackend(t *testing.T) {
 // them rather than through the generic backend/outage wording.
 func TestRenderSearchFailureRendersConfigurationStatesVerbatim(t *testing.T) {
 	if got := renderSearchFailure(harvest.ErrSearchNotConfigured); got != harvest.ErrSearchNotConfigured.Error() {
-		t.Fatalf("renderSearchFailure(not configured) = %q, want the sentinel verbatim %q", got, harvest.ErrSearchNotConfigured.Error())
+		t.Fatalf(
+			"renderSearchFailure(not configured) = %q, want the sentinel verbatim %q",
+			got,
+			harvest.ErrSearchNotConfigured.Error(),
+		)
 	}
 	if got := renderSearchFailure(harvest.ErrSearchDisabled); got != harvest.ErrSearchDisabled.Error() {
-		t.Fatalf("renderSearchFailure(disabled) = %q, want the sentinel verbatim %q", got, harvest.ErrSearchDisabled.Error())
+		t.Fatalf(
+			"renderSearchFailure(disabled) = %q, want the sentinel verbatim %q",
+			got,
+			harvest.ErrSearchDisabled.Error(),
+		)
 	}
 }
 
@@ -90,7 +133,7 @@ func TestRenderSearchFailureNamesTheBackendConnectionCause(t *testing.T) {
 // settings.yml turns on the json format, and the default HTTP-403 wording
 // ("forbidden") never says so.
 func TestRenderSearchFailureHintsSearXNGJSONFormatOn403(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
 	defer server.Close()

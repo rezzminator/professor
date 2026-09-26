@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // jailSelfCompactEnv points every path pfm's engine construction reads at a
@@ -41,7 +41,7 @@ func jailSelfCompactEnv(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("PFM_HOME", home)
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -127,7 +127,13 @@ func TestChatInjectRefusesCompactBeforeAnyResolveOrEngine(t *testing.T) {
 		"no-such-target", "/compact", "hold:", "state",
 	}, &stdout, &stderr)
 	if code != codeUndelivered {
-		t.Fatalf("exit=%d stdout=%q stderr=%q, want codeUndelivered (%d)", code, stdout.String(), stderr.String(), codeUndelivered)
+		t.Fatalf(
+			"exit=%d stdout=%q stderr=%q, want codeUndelivered (%d)",
+			code,
+			stdout.String(),
+			stderr.String(),
+			codeUndelivered,
+		)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("a banned /compact primary printed to stdout as if delivered: %q", stdout.String())

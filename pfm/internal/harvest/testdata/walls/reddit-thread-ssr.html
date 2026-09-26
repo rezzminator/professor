@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en-US"><head><meta charset="utf-8"><title>Placeholder thread title : r/examplesub</title>
+<script type="module" src="https://www.redditstatic.com/shreddit/en-US/app.js"></script>
+</head>
+<body>
+<shreddit-app>
+<header role="banner"><nav><a href="/">Home</a> <button>Log In</button></nav></header>
+<main id="main-content">
+<shreddit-post permalink="/r/examplesub/comments/abc123/placeholder_thread_title/" comment-count="12" created-timestamp="2026-09-01T10:00:00.000000+0000" id="t3_abc123" post-title="Placeholder thread title" post-type="text" score="321" subreddit-prefixed-name="r/examplesub" author="op_placeholder">
+  <h1 slot="title">Placeholder thread title</h1>
+  <div slot="text-body"><div class="md"><p>Opening post paragraph one about <a href="https://example.org/tool">an example tool</a> and its configuration.</p></div></div>
+</shreddit-post>
+<shreddit-comment-tree-stats total-comments="12"></shreddit-comment-tree-stats>
+<div id="comment-tree-slot"></div>
+</main>
+<template id="comment-tree-deferred">
+  <shreddit-comment-tree>
+    <shreddit-comment author="alpha_placeholder" thingid="t1_c0001" depth="0" score="101" created="2026-09-01T11:00:00.000000+0000">
+      <div class="md" slot="comment"><p>Top comment alpha, first paragraph.</p><p>Alpha second paragraph with <strong>emphasis</strong>.</p></div>
+      <shreddit-comment author="bravo_placeholder" thingid="t1_c0002" depth="1" parentid="t1_c0001" score="55" created="2026-09-01T12:00:00.000000+0000">
+        <div class="md" slot="comment"><p>Reply bravo under alpha.</p></div>
+      </shreddit-comment>
+    </shreddit-comment>
+    <shreddit-comment author="foxtrot_placeholder" thingid="t1_c0007" depth="0" score="40" created="2026-09-01T15:00:00.000000+0000">
+      <div class="md" slot="comment"><p>Second top-level comment foxtrot, with a <a href="/r/othersub/">subreddit link</a>.</p></div>
+    </shreddit-comment>
+    <faceplate-partial loading="action" src="/svc/shreddit/more-comments/examplesub/t3_abc123?top-level=1&amp;rootCommentOffset=2" method="post">
+      <input type="hidden" name="cursor" value="cursor-placeholder-0003">
+      <button><span>View more comments</span></button>
+    </faceplate-partial>
+  </shreddit-comment-tree>
+</template>
+<footer><a href="/policies">Reddit Rules</a></footer>
+</shreddit-app>
+</body></html>

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // This file is the fleet's chat DNS: you DIAL a chat by an address and you
@@ -284,7 +284,7 @@ func nameFor(address Address, found bool) DisplayName {
 //
 // It composes the engine registry's own prefix question — pfmengine.FromSocket,
 // the single implementation of "which engine owns this socket" — with the
-// shape a spawned session name actually has (cmd/pfm freshEngineSocket:
+// shape a spawned session name actually has (spawn.FreshSocket:
 // prefix, then unix seconds, pid and a random suffix). The shape half is not
 // optional: FromSocket answers a question about FILENAMES in the socket
 // directory, and applied to free human text on its own it would demote a chat

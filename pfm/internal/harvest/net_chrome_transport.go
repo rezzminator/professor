@@ -69,15 +69,18 @@ type chromeTransport struct {
 
 func newChromeTransport(resolve func(context.Context, string) ([]net.IP, error)) *chromeTransport {
 	t := &chromeTransport{resolve: resolve}
-	client, err := tlsclient.NewHttpClient(nil,
+	client, err := tlsclient.NewHttpClient(
+		nil,
 		tlsclient.WithClientProfile(chrome146OracleProfile()),
 		tlsclient.WithNotFollowRedirects(),
 		tlsclient.WithDisableHttp3(),
 		tlsclient.WithRandomTLSExtensionOrder(),
 		tlsclient.WithTimeoutMilliseconds(45_000),
-		tlsclient.WithProxyDialerFactory(func(proxyURL string, timeout time.Duration, _ *net.TCPAddr, _ fhttp.Header, _ tlsclient.Logger) (proxy.ContextDialer, error) {
-			return newChromeDialer(proxyURL, timeout, resolve)
-		}),
+		tlsclient.WithProxyDialerFactory(
+			func(proxyURL string, timeout time.Duration, _ *net.TCPAddr, _ fhttp.Header, _ tlsclient.Logger) (proxy.ContextDialer, error) {
+				return newChromeDialer(proxyURL, timeout, resolve)
+			},
+		),
 		tlsclient.WithTransportOptions(&tlsclient.TransportOptions{
 			MaxIdleConns:       32,
 			IdleConnTimeout:    durationPtr(30 * time.Second),
@@ -117,7 +120,22 @@ func chrome146OracleProfile() profiles.ClientProfile {
 		spec.Extensions = filtered
 		return spec, nil
 	}
-	return profiles.NewClientProfile(id, base.GetSettings(), base.GetSettingsOrder(), base.GetPseudoHeaderOrder(), base.GetConnectionFlow(), base.GetPriorities(), base.GetHeaderPriority(), base.GetStreamID(), base.GetAllowHTTP(), base.GetHttp3Settings(), base.GetHttp3SettingsOrder(), base.GetHttp3PriorityParam(), base.GetHttp3PseudoHeaderOrder(), base.GetHttp3SendGreaseFrames())
+	return profiles.NewClientProfile(
+		id,
+		base.GetSettings(),
+		base.GetSettingsOrder(),
+		base.GetPseudoHeaderOrder(),
+		base.GetConnectionFlow(),
+		base.GetPriorities(),
+		base.GetHeaderPriority(),
+		base.GetStreamID(),
+		base.GetAllowHTTP(),
+		base.GetHttp3Settings(),
+		base.GetHttp3SettingsOrder(),
+		base.GetHttp3PriorityParam(),
+		base.GetHttp3PseudoHeaderOrder(),
+		base.GetHttp3SendGreaseFrames(),
+	)
 }
 
 func durationPtr(d time.Duration) *time.Duration { return &d }
@@ -148,7 +166,7 @@ func (t *chromeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req == nil || req.URL == nil {
 		return nil, errors.New("Chrome_146 transport received a nil request")
 	}
-	if err := assertFetchable(req.URL.String(), false); err != nil {
+	if err := validateFetchURL(req.URL.String(), false); err != nil {
 		return nil, err
 	}
 	// Resolve before handing the request to the third-party transport. This
@@ -174,7 +192,10 @@ func (t *chromeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	freq := chromeFRequest(req)
 	fresp, err := client.Do(freq)
 	if err != nil {
-		return nil, fmt.Errorf("Chrome_146 request %s: %w", req.URL, err)
+		// safeURL, not req.URL directly: this transport also carries
+		// scholarly-provider requests whose query string holds an API key
+		// (books.go's Google Books lookup, for one) — see safeurl.go.
+		return nil, fmt.Errorf("Chrome_146 request %s: %w", safeURL(req.URL.String()), err)
 	}
 	return chromeResponse(req, fresp), nil
 }
@@ -189,7 +210,7 @@ func chromeFRequest(req *http.Request) *fhttp.Request {
 	// clients. Reapply them here so a direct adapter use cannot accidentally
 	// lose the Chrome surface.
 	header.Set("User-Agent", chromeUA)
-	header.Set("Accept", chromeAccept)
+	header.Set(headerAccept, chromeAccept)
 	header.Set("Accept-Encoding", chromeAcceptEncoding)
 	header.Set("Accept-Language", chromeAcceptLanguage)
 	header.Set("Priority", chromePriority)
@@ -201,6 +222,9 @@ func chromeFRequest(req *http.Request) *fhttp.Request {
 	header.Set("Sec-Fetch-Site", "none")
 	header.Set("Sec-Fetch-User", "?1")
 	header.Set("Upgrade-Insecure-Requests", "1")
+	for name, value := range callerHeadersAt(req.Context(), req.URL) {
+		header.Set(name, value) // the caller's header wins, on the target's origin only
+	}
 	header[fhttp.HeaderOrderKey] = append([]string(nil), chromeHeaderOrder...)
 	return (&fhttp.Request{
 		Method:        req.Method,
@@ -252,7 +276,11 @@ type chromeDialer struct {
 	resolve  func(context.Context, string) ([]net.IP, error)
 }
 
-func newChromeDialer(raw string, timeout time.Duration, resolve func(context.Context, string) ([]net.IP, error)) (proxy.ContextDialer, error) {
+func newChromeDialer(
+	raw string,
+	timeout time.Duration,
+	resolve func(context.Context, string) ([]net.IP, error),
+) (proxy.ContextDialer, error) {
 	if strings.TrimSpace(raw) == "" {
 		return &chromeDialer{timeout: timeout, resolve: resolve}, nil
 	}
@@ -261,7 +289,7 @@ func newChromeDialer(raw string, timeout time.Duration, resolve func(context.Con
 		return nil, fmt.Errorf("invalid proxy URL %q", raw)
 	}
 	switch strings.ToLower(u.Scheme) {
-	case "http", "https", "socks5", "socks5h":
+	case schemeHTTP, schemeHTTPS, "socks5", "socks5h":
 		return &chromeDialer{proxyURL: u, timeout: timeout, resolve: resolve}, nil
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme %q", u.Scheme)
@@ -322,7 +350,7 @@ func (d *chromeDialer) dialSOCKS(ctx context.Context, network, address string) (
 	return dialer.Dial(network, address)
 }
 
-func (d *chromeDialer) dialCONNECT(ctx context.Context, network, address string) (net.Conn, error) {
+func (d *chromeDialer) dialCONNECT(ctx context.Context, _, address string) (net.Conn, error) {
 	proxyDialer := &net.Dialer{Timeout: d.timeout}
 	raw, err := proxyDialer.DialContext(ctx, "tcp", d.proxyURL.Host)
 	if err != nil {
@@ -339,7 +367,12 @@ func (d *chromeDialer) dialCONNECT(ctx context.Context, network, address string)
 		}
 		raw = proxyTLS
 	}
-	request := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: address}, Host: address, Header: make(http.Header)}
+	request := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Host: address},
+		Host:   address,
+		Header: make(http.Header),
+	}
 	if d.proxyURL.User != nil {
 		request.Header.Set("Proxy-Authorization", basicProxyAuth(d.proxyURL))
 	}
@@ -374,7 +407,7 @@ func encodeBase64(value string) string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 	var out strings.Builder
 	for i := 0; i < len(value); i += 3 {
-		var n uint32 = uint32(value[i]) << 16
+		n := uint32(value[i]) << 16
 		if i+1 < len(value) {
 			n |= uint32(value[i+1]) << 8
 		}
@@ -397,5 +430,7 @@ func encodeBase64(value string) string {
 	return out.String()
 }
 
-var _ http.RoundTripper = (*chromeTransport)(nil)
-var _ proxy.ContextDialer = (*chromeDialer)(nil)
+var (
+	_ http.RoundTripper   = (*chromeTransport)(nil)
+	_ proxy.ContextDialer = (*chromeDialer)(nil)
+)

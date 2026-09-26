@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // A plan names the executable word it embeds so the spawn layer can prove the
@@ -39,7 +39,11 @@ func TestHeadlessPlansCarryTheEngineBinaryWord(t *testing.T) {
 				t.Fatalf("plan.Binary = %q, want the %q word", plan.Binary, testCase.want)
 			}
 			if !strings.Contains(plan.Run, plan.Binary) {
-				t.Fatalf("plan.Run = %q does not contain plan.Binary = %q — the preflight would prove a different file than the pane runs", plan.Run, plan.Binary)
+				t.Fatalf(
+					"plan.Run = %q does not contain plan.Binary = %q — the preflight would prove a different file than the pane runs",
+					plan.Run,
+					plan.Binary,
+				)
 			}
 		})
 	}

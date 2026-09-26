@@ -1,0 +1,15 @@
+# go-test-coverage (version: infra/fence/tools.env) takes whole-percent thresholds.
+# They ratchet like .arch/: raise only after merged coverage reaches the next
+# integer. The gate reads `make cover`'s merged unit + e2e binary profile.
+profile: tmp/cover/merged.out
+local-prefix: github.com/rezzminator/professor/pfm
+threshold:
+  file: 0
+  package: 52
+  total: 77
+exclude:
+  paths:
+    - ^internal/installer/assets/   # staged shell/JS/Python, not Go
+    - ^internal/harvestpy/          # pinned Python sidecar
+    - _test\.go$
+breakdown-file-name: tmp/cover/breakdown.json

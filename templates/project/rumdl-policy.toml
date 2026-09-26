@@ -28,9 +28,9 @@ respect-gitignore = true
 # block, so it cannot tell a nested fence from an unfenced one.
 disable = ["MD014", "MD036", "MD040", "MD046", "MD063", "MD072", "MD073"]
 
-# Report, never rewrite. MD018/MD020 read a line-initial `#20` — a wave, issue or
+# Report, never rewrite. MD018/MD020 read a line-initial `#20` — an issue or
 # PR number — as a heading missing its space and "fix" it into one, which also
-# re-levels every real heading below it (measured: a wave-train doc lost two
+# re-levels every real heading below it (measured: a design doc lost two
 # prose lines that way). MD056/MD075 rewrite a malformed table by DELETING
 # content (measured: an orphaned row lost a cell's word).
 unfixable = ["MD018", "MD020", "MD056", "MD075"]

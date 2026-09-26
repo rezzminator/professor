@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -37,7 +38,7 @@ WHERE NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.uuid=h.uuid)
 // QuickCheck runs SQLite's bounded integrity probe.
 func (s *Store) QuickCheck(ctx context.Context) (string, error) {
 	var result string
-	if err := s.db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&result); err != nil {
+	if err := s.logged().QueryRowContext(ctx, "PRAGMA quick_check").Scan(&result); err != nil {
 		return "", fmt.Errorf("SQLite quick_check: %w", err)
 	}
 	return result, nil
@@ -61,7 +62,7 @@ func (s *Store) Counts(ctx context.Context) (RowCounts, error) {
 		{"SELECT count(*) " + orphanedKilledSource, &counts.OrphanedKills},
 	}
 	for _, query := range queries {
-		if err := s.db.QueryRowContext(ctx, query.query).Scan(query.value); err != nil {
+		if err := s.logged().QueryRowContext(ctx, query.query).Scan(query.value); err != nil {
 			return RowCounts{}, fmt.Errorf("count fleet rows: %w", err)
 		}
 	}
@@ -93,17 +94,20 @@ func (s *Store) OrphanedKills(ctx context.Context) ([]Killed, error) {
 	return orphans, nil
 }
 
-func (s *Store) orphanedKillIDs(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(
+func (s *Store) orphanedKillIDs(ctx context.Context) (ids []string, returnErr error) {
+	rows, err := s.logged().QueryContext(
 		ctx,
 		"SELECT h.uuid "+orphanedKilledSource+" ORDER BY h.uuid",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query orphaned killed chats: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close orphaned killed rows: %w", err))
+		}
+	}()
 
-	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {

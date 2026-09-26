@@ -597,7 +597,8 @@ func TestJailedColonLabelResolvesToAPaneNeverATmuxTarget(t *testing.T) {
 	if labelErr == nil {
 		t.Logf(
 			"tmux answered %q for target colon-session:P:DO while the labelled chat is pane %q — a label interpolated into a tmux target silently addresses the WRONG chat",
-			strings.TrimSpace(string(labelTarget)), fields[1],
+			strings.TrimSpace(string(labelTarget)),
+			fields[1],
 		)
 	}
 }

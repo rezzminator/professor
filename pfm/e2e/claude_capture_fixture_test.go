@@ -12,11 +12,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	if os.Getenv("PFM_E2E_CLAUDE_CAPTURE") != "1" {
-		return
+		t.Skip("needs PFM_E2E_CLAUDE_CAPTURE=1")
 	}
 	home := os.Getenv("PFM_E2E_HOME")
 	if home == "" || home != os.Getenv("HOME") {
@@ -40,7 +42,7 @@ func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	default:
 		t.Fatalf("unexpected capture model %q", alias)
 	}
-	dir := filepath.Join(home, ".local/share/pfm/install/prompts")
+	dir := paths.HarnessBaselineDir(home)
 	pin, err := os.ReadFile(filepath.Join(dir, stem+".sha256"))
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +59,9 @@ func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(map[string]any{"model": strings.TrimSpace(string(model)), "system": strings.TrimSuffix(string(prompt), "\n")})
+	body, err := json.Marshal(
+		map[string]any{"model": strings.TrimSpace(string(model)), "system": strings.TrimSuffix(string(prompt), "\n")},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +70,11 @@ func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			t.Errorf("close response.Body: %v", err)
+		}
+	}()
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("sink status=%d", response.StatusCode)
 	}

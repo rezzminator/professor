@@ -37,7 +37,9 @@ const searchUA = "harvester-mcp/1.0"
 // folding them into the generic "retry later" backend wording.
 var (
 	ErrSearchDisabled      = errors.New("search is disabled (search.enabled=false in harvester.config.json)")
-	ErrSearchNotConfigured = errors.New("search is not configured: set search.searxngURL and/or search.braveApiKey in harvester.config.json")
+	ErrSearchNotConfigured = errors.New(
+		"search is not configured: set search.searxngURL and/or search.braveApiKey in harvester.config.json",
+	)
 )
 
 // SearchBackendError names which configured backend failed. Error() keeps the
@@ -70,17 +72,17 @@ func (e *SearchBackendError) SafeMessage() string {
 // misconfiguration (SearXNG's json format disabled) that a retry cannot fix.
 func backendCause(backend string, status int, err error) string {
 	switch {
-	case status == 403 && backend == "searxng":
+	case status == 403 && backend == searchBackendSearXNG:
 		return "returned HTTP 403 — SearXNG answers 403 when its settings.yml does not enable the json format"
 	case status >= 500:
 		return fmt.Sprintf("returned HTTP %d — retry", status)
 	case status > 0:
 		return fmt.Sprintf("returned HTTP %d", status)
-	case errorKind(err) == "timeout":
+	case errorKind(err) == errorKindTimeout:
 		return "timed out — retry"
-	case errorKind(err) == "connect":
+	case errorKind(err) == errorKindConnect:
 		return "did not answer (connection refused)"
-	case errorKind(err) == "dns":
+	case errorKind(err) == errorKindDNS:
 		return "could not be resolved (DNS lookup failed)"
 	default:
 		return "failed"
@@ -98,7 +100,7 @@ func SearchEnabled(options SearchOptions) bool {
 }
 
 // SearchHint is the one place every harvester message renders its "use
-// `search`" recommendation. Naming a disabled tool sends a caller straight
+// `search_web`" recommendation. Naming a disabled tool sends a caller straight
 // into a second dead end, so a message that would name it instead falls back
 // to withoutSearch, which keeps the rest of the sentence intact and names no
 // tool. Every caller — inside this package and across the MCP adapter —
@@ -135,26 +137,26 @@ func searchConfigured(ctx context.Context, query string, options SearchOptions) 
 	if options.SearXNGURL != "" {
 		out, status, e := searchSearXNG(ctx, query, options)
 		if e == nil && len(out) > 0 {
-			return out, "searxng", nil
+			return out, searchBackendSearXNG, nil
 		}
 		if e == nil && options.BraveAPIKey == "" {
-			return out, "searxng", nil
+			return out, searchBackendSearXNG, nil
 		}
 		if e != nil {
-			failures = append(failures, newBackendError("searxng", status, e))
+			failures = append(failures, newBackendError(searchBackendSearXNG, status, e))
 		}
 	}
 	if options.BraveAPIKey != "" {
 		out, status, e := searchBrave(ctx, query, options)
 		if e == nil {
-			return out, "brave", nil
+			return out, searchBackendBrave, nil
 		}
-		failures = append(failures, newBackendError("brave", status, e))
+		failures = append(failures, newBackendError(searchBackendBrave, status, e))
 	}
 	if len(failures) == 1 {
-		return nil, "error", failures[0]
+		return nil, resultDetailError, failures[0]
 	}
-	return nil, "error", errors.Join(failures...)
+	return nil, resultDetailError, errors.Join(failures...)
 }
 
 func (h *Harvester) Search(ctx context.Context, query string, options SearchOptions) ([]SearchResult, string, error) {
@@ -178,7 +180,7 @@ func (h *Harvester) Search(ctx context.Context, query string, options SearchOpti
 // Fetch, Brave, and every ladder rung keep the full SSRF guard.
 func searxngClient(configured string, timeout time.Duration) (*http.Client, error) {
 	origin, err := url.Parse(configured)
-	if err != nil || origin.Hostname() == "" || (origin.Scheme != "http" && origin.Scheme != "https") {
+	if err != nil || origin.Hostname() == "" || (origin.Scheme != schemeHTTP && origin.Scheme != schemeHTTPS) {
 		return nil, fmt.Errorf("configured SearXNG URL %q is not an absolute http(s) URL", configured)
 	}
 	port := origin.Port()
@@ -194,7 +196,11 @@ func searxngClient(configured string, timeout time.Duration) (*http.Client, erro
 		Proxy: nil,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			if address != allowed {
-				return nil, fmt.Errorf("refusing to dial %s: the search client is pinned to the configured SearXNG origin %s", address, allowed)
+				return nil, fmt.Errorf(
+					"refusing to dial %s: the search client is pinned to the configured SearXNG origin %s",
+					address,
+					allowed,
+				)
 			}
 			return dialer.DialContext(ctx, network, address)
 		},
@@ -238,7 +244,7 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 	const maxSearchBody = 10 * 1024 * 1024
 	response, e := gatewayAttempt(ctx, gatewayRequest{
 		url: u, client: client, ua: searchUA,
-		headers:       http.Header{"Accept": {"application/json"}},
+		headers:       http.Header{headerAccept: {mediaTypeJSON}},
 		max:           maxSearchBody,
 		trustedOrigin: true, // the operator's own SearXNG, which may be on loopback
 	})
@@ -268,7 +274,10 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 			if engine == "" {
 				engine = r.Engine
 			}
-			out = append(out, SearchResult{Title: r.Title, URL: r.URL, Snippet: truncateRunes(r.Content, 300), Engine: engine})
+			out = append(
+				out,
+				SearchResult{Title: r.Title, URL: r.URL, Snippet: truncateOutputRunes(r.Content, 300), Engine: engine},
+			)
 		}
 	}
 	if len(out) > o.Count {
@@ -300,7 +309,7 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 		client: client,
 		ua:     searchUA,
 		headers: http.Header{
-			"Accept":               {"application/json"},
+			headerAccept:           {mediaTypeJSON},
 			"X-Subscription-Token": {o.BraveAPIKey},
 		},
 		max:              10 * 1024 * 1024,
@@ -318,24 +327,32 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 			Results []struct{ Title, URL, Description string } `json:"results"`
 		} `json:"web"`
 	}
-	if e = json.Unmarshal(body, &data); e != nil {
+	if e := json.Unmarshal(body, &data); e != nil {
 		return nil, status, e
 	}
 	out := []SearchResult{}
 	for _, r := range data.Web.Results {
 		if r.URL != "" {
-			out = append(out, SearchResult{Title: r.Title, URL: r.URL, Snippet: truncateRunes(r.Description, 300), Engine: "brave"})
+			out = append(
+				out,
+				SearchResult{
+					Title:   r.Title,
+					URL:     r.URL,
+					Snippet: truncateOutputRunes(r.Description, 300),
+					Engine:  searchBackendBrave,
+				},
+			)
 		}
 	}
 	return out, status, nil
 }
 
-func truncateRunes(value string, max int) string {
+func truncateOutputRunes(value string, maxRunes int) string {
 	r := []rune(value)
-	if len(r) <= max {
+	if len(r) <= maxRunes {
 		return value
 	}
-	return string(r[:max])
+	return string(r[:maxRunes])
 }
 
 // SearchProbeState is the fixed set of health classes doctor may print — a
@@ -349,7 +366,7 @@ const (
 	SearchProbeConfigured  SearchProbeState = "configured"
 )
 
-// SearchProbe is doctor's one-line verdict on the harvester search tool.
+// SearchProbe is doctor's one-line verdict on the harvester search_web tool.
 // Warning is set only for a state an operator should act on — OFF and a
 // keyless-but-configured Brave key are named states, never warnings.
 type SearchProbe struct {
@@ -384,12 +401,30 @@ func ProbeSearch(ctx context.Context, options SearchOptions, client *http.Client
 			oversizeTruncate: true,
 		})
 		if err != nil {
-			return SearchProbe{State: SearchProbeUnreachable, Backend: "searxng", Detail: fmt.Sprintf("UNREACHABLE (%s)", backendCause("searxng", response.status, err)), Warning: true}
+			return SearchProbe{
+				State:   SearchProbeUnreachable,
+				Backend: searchBackendSearXNG,
+				Detail:  fmt.Sprintf("UNREACHABLE (%s)", backendCause(searchBackendSearXNG, response.status, err)),
+				Warning: true,
+			}
 		}
 		if response.status == http.StatusOK {
-			return SearchProbe{State: SearchProbeReachable, Backend: "searxng", Detail: "reachable (health only — the json format is not probed)"}
+			return SearchProbe{
+				State:   SearchProbeReachable,
+				Backend: searchBackendSearXNG,
+				Detail:  "reachable (health only — the json format is not probed)",
+			}
 		}
-		return SearchProbe{State: SearchProbeUnreachable, Backend: "searxng", Detail: fmt.Sprintf("UNREACHABLE (%s)", backendCause("searxng", response.status, nil)), Warning: true}
+		return SearchProbe{
+			State:   SearchProbeUnreachable,
+			Backend: searchBackendSearXNG,
+			Detail:  fmt.Sprintf("UNREACHABLE (%s)", backendCause(searchBackendSearXNG, response.status, nil)),
+			Warning: true,
+		}
 	}
-	return SearchProbe{State: SearchProbeConfigured, Backend: "brave", Detail: "configured (key set, not probed — every probe spends quota)"}
+	return SearchProbe{
+		State:   SearchProbeConfigured,
+		Backend: searchBackendBrave,
+		Detail:  "configured (key set, not probed — every probe spends quota)",
+	}
 }

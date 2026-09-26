@@ -7,23 +7,28 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const missingSourceHelper = "PFM_INDEX_MISSING_SOURCE_HELPER"
 
 type builtinTestSource struct{ id pfmengine.ID }
 
-func (source builtinTestSource) Sync(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
+func (source builtinTestSource) Sync(
+	ctx context.Context,
+	database *store.Store,
+	roots []string,
+	counters *Counters,
+) error {
 	switch source.id {
 	case pfmengine.Claude:
 		return SyncClaude(ctx, database, roots, counters)
 	case pfmengine.Codex:
 		return SyncCodex(ctx, database, roots, counters)
-	case pfmengine.Opencode:
-		return SyncOpencode(ctx, database, roots, counters)
+	case pfmengine.OpenCode:
+		return SyncOpenCode(ctx, database, roots, counters)
 	default:
 		return nil
 	}
@@ -32,7 +37,7 @@ func (source builtinTestSource) Sync(ctx context.Context, database *store.Store,
 func init() {
 	RegisterSource(pfmengine.Claude, builtinTestSource{id: pfmengine.Claude})
 	RegisterSource(pfmengine.Codex, builtinTestSource{id: pfmengine.Codex})
-	RegisterSource(pfmengine.Opencode, builtinTestSource{id: pfmengine.Opencode})
+	RegisterSource(pfmengine.OpenCode, builtinTestSource{id: pfmengine.OpenCode})
 }
 
 func TestUnknownEngineIsANamedError(t *testing.T) {
@@ -68,7 +73,7 @@ func TestRunRefusesAnEngineWithNoIndexSource(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close() })
 	indexer, err := NewWithRoots(database, paths.Values{}, map[pfmengine.ID][]string{
 		pfmengine.Claude: {fixture.claudeRoot},
-		pfmengine.Codex:  {fixture.codexRoot},
+		pfmengine.Codex:  {fixture.codexHome},
 	})
 	if err != nil {
 		t.Fatal(err)

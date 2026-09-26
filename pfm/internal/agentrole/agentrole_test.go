@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // mustMkdir and mustWrite are the two filesystem primitives every test below
@@ -50,9 +51,10 @@ func TestResolveClaudeSuccessReturnsBodyAfterFrontmatter(t *testing.T) {
 	}
 }
 
-// Test 2 — a .codex/agents/<role>.toml resolves to exactly its
-// developer_instructions value, byte-for-byte, and the other keys never leak
-// into it.
+// Test 2 — a .codex/agents/<role>.toml resolves to the Codex fleet prompt
+// followed by exactly its developer_instructions value, byte-for-byte: the
+// seat's developer_instructions replaces the config-level fleet prompt, and
+// the compiled role file carries only its own body. The other keys never leak.
 func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -68,12 +70,15 @@ func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	want := "Body line one.\nBody line two.\n"
-	if got != want {
-		t.Fatalf("Resolve() = %q, want %q", got, want)
+	fleetPrompt, err := codexgen.FleetPrompt()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(got, "name") || strings.Contains(got, "description") ||
-		strings.Contains(got, "reads diffs") {
+	role := "Body line one.\nBody line two.\n"
+	if want := fleetPrompt + "\n---\n\n" + role; got != want {
+		t.Fatalf("Resolve() = %q, want the fleet prompt then %q", got, role)
+	}
+	if strings.Contains(role, "name") || strings.Contains(got, "reads diffs") {
 		t.Fatalf("Resolve() = %q, want no leakage of the name/description keys", got)
 	}
 }
@@ -119,10 +124,10 @@ func TestStripFrontmatterThreeShapes(t *testing.T) {
 // anywhere must still say so explicitly rather than printing a bare empty
 // list. This is the repo's absence-vs-error law at a visible surface.
 func TestUnknownRoleReportsDistinctDirectoryStates(t *testing.T) {
-	// pinRepoBoundary anchors repoRoot(repo) at repo itself via a
+	// pinRepoBoundary anchors roleLadderRoot(repo) at repo itself via a
 	// .codex/agents marker, WITHOUT creating repo/.claude/agents — so the
 	// cc-side rung can independently be "not found", "empty", or "listing"
-	// while repoRoot still resolves deterministically to repo.
+	// while roleLadderRoot still resolves deterministically to repo.
 	pinRepoBoundary := func(t *testing.T, repo string) {
 		t.Helper()
 		mustMkdir(t, filepath.Join(repo, ".codex", "agents"))
@@ -193,7 +198,7 @@ func TestUnknownRoleReportsDistinctDirectoryStates(t *testing.T) {
 	})
 }
 
-// Test 6 — ladder dedupe. When repoRoot(cwd) resolves to the same directory
+// Test 6 — ladder dedupe. When roleLadderRoot(cwd) resolves to the same directory
 // as home, the unknown-role message must list that directory ONCE, not
 // twice: one directory searched once must not claim a breadth of search it
 // never had.
@@ -203,7 +208,7 @@ func TestUnknownRoleReportsDistinctDirectoryStates(t *testing.T) {
 // the red-then-green evidence in the report this test file shipped with).
 func TestLadderDedupeSameDirectoryListedOnce(t *testing.T) {
 	// home == cwd, and NEITHER has a .claude/agents or .codex/agents marker
-	// anywhere above it (t.TempDir() is a fresh leaf), so repoRoot(home)
+	// anywhere above it (t.TempDir() is a fresh leaf), so roleLadderRoot(home)
 	// falls through to "start" — home itself. Both ladder rungs would
 	// therefore name the exact same directory without the guard.
 	home := t.TempDir()
@@ -369,13 +374,9 @@ func TestRepoLocalBeatsHostGlobal(t *testing.T) {
 	}
 }
 
-// Test 11 — Resolve's Artifact: Path is always ABSOLUTE, and TOMLKey
-// matches the engine that resolved it (cc -> false, the whole .md file; cx
-// -> true, the developer_instructions value inside the .toml). T1 re-arm
-// persists exactly this bit alongside the role name so a later reload or
-// self-compact re-reads the SAME rung birth used.
-func TestResolveArtifactPathIsAbsoluteAndTOMLKeyMatchesEngine(t *testing.T) {
-	t.Run("cc: RELATIVE cwd still resolves an absolute .md path, TOMLKey false", func(t *testing.T) {
+// Resolve reports an absolute artifact path for either engine.
+func TestResolveArtifactPathIsAbsolute(t *testing.T) {
+	t.Run("cc: relative cwd still resolves an absolute md path", func(t *testing.T) {
 		// t.TempDir() itself already returns an absolute path, which would
 		// make Artifact.Path absolute by inheritance alone and prove
 		// nothing about Resolve's own filepath.Abs step. t.Chdir into the
@@ -402,12 +403,9 @@ func TestResolveArtifactPathIsAbsoluteAndTOMLKeyMatchesEngine(t *testing.T) {
 		if artifact.Path != wantPath {
 			t.Fatalf("Artifact.Path = %q, want %q", artifact.Path, wantPath)
 		}
-		if artifact.TOMLKey {
-			t.Fatal("Artifact.TOMLKey = true for a cc (.md) seat, want false")
-		}
 	})
 
-	t.Run("cx: RELATIVE cwd still resolves an absolute .toml path, TOMLKey true", func(t *testing.T) {
+	t.Run("cx: relative cwd still resolves an absolute toml path", func(t *testing.T) {
 		repo := t.TempDir()
 		home := t.TempDir()
 		tomlPath := filepath.Join(repo, ".codex", "agents", "reviewer.toml")
@@ -427,9 +425,6 @@ func TestResolveArtifactPathIsAbsoluteAndTOMLKeyMatchesEngine(t *testing.T) {
 		}
 		if artifact.Path != wantPath {
 			t.Fatalf("Artifact.Path = %q, want %q", artifact.Path, wantPath)
-		}
-		if !artifact.TOMLKey {
-			t.Fatal("Artifact.TOMLKey = false for a cx (.toml) seat, want true")
 		}
 	})
 }

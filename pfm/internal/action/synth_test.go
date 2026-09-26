@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestQuoteRoundTripsHostileWords(t *testing.T) {
@@ -67,7 +67,9 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	wantPrefix := hygiene +
 		" CLAUDE_CONFIG_DIR='/home/test/.cc/2'" +
 		" ENABLE_PROMPT_CACHING_1H=1" +
-		" " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) +
+		" " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) +
+		" " + truecolorName + "=" + Quote("1") +
+		" " + spawnDepthName + "=" + Quote("8") +
 		" claude"
 	if !strings.HasPrefix(plan.Run, wantPrefix) {
 		t.Fatalf("resume run = %q, want prefix %q", plan.Run, wantPrefix)
@@ -142,7 +144,7 @@ func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 			Home:           "/home/test",
 			FreshSocket:    "cc-roster-test",
 		})
-		if err == nil || !strings.Contains(err.Error(), "Claude account") {
+		if err == nil || !strings.Contains(err.Error(), "requested Claude account") {
 			t.Fatalf("account %d error = %v, want a roster rejection", account, err)
 		}
 	}
@@ -363,7 +365,7 @@ func TestSynthesizeRejectsNUL(t *testing.T) {
 func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 	prompt := "Explain v0.61.2, ask for approval, then run pfm update."
 	machine := testMachineConfig("/home/test")
-	machine.OpencodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/home/test/.local/share/opencode"}}
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/home/test/.local/share/opencode"}}
 
 	tests := []struct {
 		name string
@@ -382,7 +384,7 @@ func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 		},
 		{
 			name: "OpenCode",
-			row:  compose.Row{Kind: compose.NewOpencode, CWD: "/work/.professor"},
+			row:  compose.Row{Kind: compose.NewOpenCode, CWD: "/work/.professor"},
 			want: []string{"opencode", "--prompt", Quote(prompt)},
 		},
 	}
@@ -465,7 +467,7 @@ func writeActionFile(
 func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T) {
 	engineFor := map[Route]pfmengine.ID{
 		NewClaude: pfmengine.Claude, Agent: pfmengine.Claude, ResumeClaude: pfmengine.Claude,
-		NewOpencode: pfmengine.Opencode, ResumeOpencode: pfmengine.Opencode,
+		NewOpenCode: pfmengine.OpenCode, ResumeOpenCode: pfmengine.OpenCode,
 		ResumeCodex: pfmengine.Codex,
 	}
 	seen := make(map[Route]bool, len(engineFor))
@@ -487,13 +489,22 @@ func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T)
 			t.Fatalf("route %c plans no chat server; line = %s", plan.Route, plan.Line)
 		}
 		if server.Socket != request.FreshSocket || server.CWD != request.Row.CWD || server.Run != plan.Run {
-			t.Fatalf("route %c server = %#v, want the fresh socket, the row's cwd and the plan's run", plan.Route, server)
+			t.Fatalf(
+				"route %c server = %#v, want the fresh socket, the row's cwd and the plan's run",
+				plan.Route,
+				server,
+			)
 		}
 		if want := pfmengine.MustLookup(engine).Short; server.Window != want {
 			t.Fatalf("route %c window = %q, want %q", plan.Route, server.Window, want)
 		}
 		if server.Titles == nil || *server.Titles != request.Config.Tmux.Titles {
-			t.Fatalf("route %c titles = %v, want the machine's %v", plan.Route, server.Titles, request.Config.Tmux.Titles)
+			t.Fatalf(
+				"route %c titles = %v, want the machine's %v",
+				plan.Route,
+				server.Titles,
+				request.Config.Tmux.Titles,
+			)
 		}
 		prefix := "TMUX= "
 		if request.Bunker {

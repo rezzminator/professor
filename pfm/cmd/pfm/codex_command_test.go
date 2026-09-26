@@ -30,12 +30,22 @@ func TestCodexCommandHelpAndOnlyBuildCheckActions(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"codex", "generate"}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "unknown action") {
+	if code := run(
+		[]string{"codex", "generate"},
+		&stdout,
+		&stderr,
+	); code != 2 ||
+		!strings.Contains(stderr.String(), "unknown action") {
 		t.Fatalf("retired codex generate route code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"codex", "doctor"}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "unknown action") {
+	if code := run(
+		[]string{"codex", "doctor"},
+		&stdout,
+		&stderr,
+	); code != 2 ||
+		!strings.Contains(stderr.String(), "unknown action") {
 		t.Fatalf("retired codex doctor route code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -64,7 +74,12 @@ func TestCodexCommandBuildCheckAndCheckIsReadOnly(t *testing.T) {
 	before := codexCLISnapshot(t, repo)
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"codex", "check", repo}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "MISSING") {
+	if code := run(
+		[]string{"codex", "check", repo},
+		&stdout,
+		&stderr,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "MISSING") {
 		t.Fatalf("missing-output check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	after := codexCLISnapshot(t, repo)
@@ -80,20 +95,39 @@ func TestCodexCommandStrictRepoConfigAndCLIModelValidation(t *testing.T) {
 	writeCodexCLIFile(t, filepath.Join(repo, ".claude", "codex-build.json"), `{"version":1,"unexpected":true}`)
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"codex", "build", repo}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "unexpected") {
+	if code := run(
+		[]string{"codex", "build", repo},
+		&stdout,
+		&stderr,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "unexpected") {
 		t.Fatalf("unknown repo config key code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
-	writeCodexCLIFile(t, filepath.Join(repo, ".claude", "codex-build.json"), `{"version":1,"overridesDir":".claude/codex-overrides"}`)
+	writeCodexCLIFile(
+		t,
+		filepath.Join(repo, ".claude", "codex-build.json"),
+		`{"version":1,"overridesDir":".claude/codex-overrides"}`,
+	)
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"codex", "build", repo}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "overridesDir") {
+	if code := run(
+		[]string{"codex", "build", repo},
+		&stdout,
+		&stderr,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "overridesDir") {
 		t.Fatalf("retired overridesDir config key code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"codex", "build", "--model", "broken", repo}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "alias=value") {
+	if code := run(
+		[]string{"codex", "build", "--model", "broken", repo},
+		&stdout,
+		&stderr,
+	); code != 2 ||
+		!strings.Contains(stderr.String(), "alias=value") {
 		t.Fatalf("invalid model override code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

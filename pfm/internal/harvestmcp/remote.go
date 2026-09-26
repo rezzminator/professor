@@ -1,7 +1,6 @@
 package harvestmcp
 
 import (
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,14 +12,24 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
-	"hostops/pfm/internal/harvest"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const mcpPath = "/mcp"
+
+// mcpMaxBodyBytes bounds an authenticated /mcp POST body — unbounded before
+// this, the SDK's io.ReadAll(req.Body) let one token holder exhaust memory
+// with a single request. 1 MiB matches /register, /token and /revoke's own
+// cap (below) and comfortably fits the largest legitimate tool call: fetch
+// and download take up to 50 source URLs each, a few hundred bytes apiece.
+const mcpMaxBodyBytes = 1 << 20
 
 // RemoteOptions is the external gateway contract. The daemon (pfm mcp serve)
 // mounts it on its second, authenticated port; handler tests use it without
@@ -54,10 +63,27 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	if err != nil || parsed.Hostname() == "" {
 		return nil, fmt.Errorf("public_url must include a hostname, got %q", publicURL)
 	}
+	// validRedirectURI (auth.go) is the SAME https-or-loopback rule client
+	// redirect URIs must pass; reused rather than a second copy here. A plain
+	// http public_url would carry the passphrase, codes, and every bearer and
+	// refresh token in cleartext across the internet.
+	if !validRedirectURI(publicURL) {
+		return nil, fmt.Errorf(
+			"external.publicURL must be https (or http on loopback), got %q", publicURL,
+		)
+	}
 	if options.Passphrase == "" && options.StaticToken == "" {
-		return nil, errors.New("the external harvester gateway requires external.auth.passphrase and/or external.auth.staticToken; it is never unauthenticated")
+		return nil, errors.New(
+			"the external harvester gateway requires external.auth.passphrase and/or external.auth.staticToken; it is never unauthenticated",
+		)
 	}
 	runtime := options.Runtime
+	// The gateway's service is always the remote one: read without files, no
+	// server path in any result, download answers a signed url.
+	runtime.Remote = true
+	if runtime.Clock == nil {
+		runtime.Clock = clock.Real
+	}
 	cache, err := harvest.CacheRoot(runtime.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve harvester cache root: %w", err)
@@ -68,23 +94,33 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	if version == "" {
 		version = "dev"
 	}
-	service, err := NewConfigured(version, runtime)
+	service, err := NewConfiguredHarvester(version, runtime)
 	if err != nil {
 		return nil, err
 	}
+	links, err := newDownloadLinks(publicURL, runtime.Clock)
+	if err != nil {
+		return nil, errors.Join(err, service.Close())
+	}
+	service.links = links
 	r := &RemoteServer{publicURL: publicURL, resource: publicURL + mcpPath, parsed: parsed, service: service}
 	statePath := options.StatePath
 	if statePath == "" {
 		statePath = defaultAuthStatePath(service.runtime.CacheDir)
 	}
-	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath)
-	r.mcp = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return service.Server() }, &mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true})
+	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath, runtime.Clock)
+	r.mcp = mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return service.Server() },
+		&mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true},
+	)
 	return r, nil
 }
 
 // Handler returns a net/http handler suitable for httptest.NewRecorder or a
 // production server. It never redirects /mcp to /mcp/.
-func (r *RemoteServer) Handler() http.Handler { return http.HandlerFunc(r.serveHTTP) }
+func (r *RemoteServer) Handler() http.Handler {
+	return obs.Handler("harvester-remote", http.HandlerFunc(r.serveHTTP))
+}
 
 // Close releases the shared conversion worker. It is safe to call repeatedly,
 // which lets command setup failures clean up a partially constructed gateway.
@@ -100,6 +136,10 @@ func (r *RemoteServer) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "host is not allowed", http.StatusForbidden)
 		return
 	}
+	if strings.HasPrefix(req.URL.Path, filesPath) {
+		r.serveFile(w, req) // the signature is the access control, not the bearer
+		return
+	}
 	switch req.URL.Path {
 	case "/healthz":
 		if req.Method != http.MethodGet {
@@ -112,14 +152,26 @@ func (r *RemoteServer) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			r.unauthorized(w)
 			return
 		}
+		req.Body = http.MaxBytesReader(w, req.Body, mcpMaxBodyBytes)
 		r.mcp.ServeHTTP(w, req)
 	case "/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp":
 		if r.store == nil {
 			http.NotFound(w, req)
 			return
 		}
-		r.metadata(w, map[string]any{"resource": r.resource, "authorization_servers": []string{r.publicURL + "/"}, "scopes_supported": []string{HarvesterScope}, "resource_name": "harvester"})
-	case "/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/mcp", "/.well-known/openid-configuration", "/.well-known/openid-configuration/mcp":
+		r.metadata(
+			w,
+			map[string]any{
+				"resource":              r.resource,
+				"authorization_servers": []string{r.publicURL + "/"},
+				"scopes_supported":      []string{HarvesterScope},
+				"resource_name":         "harvester",
+			},
+		)
+	case "/.well-known/oauth-authorization-server",
+		"/.well-known/oauth-authorization-server/mcp",
+		"/.well-known/openid-configuration",
+		"/.well-known/openid-configuration/mcp":
 		if r.store == nil || r.store.passphrase == "" {
 			http.NotFound(w, req)
 			return
@@ -169,7 +221,9 @@ func (r *RemoteServer) allowedHost(host string) bool {
 	if err != nil || requested.Hostname() == "" {
 		return false
 	}
-	return strings.EqualFold(requested.Host, r.parsed.Host) || strings.EqualFold(requested.Hostname(), r.parsed.Hostname()) || isLoopback(requested.Hostname())
+	return strings.EqualFold(requested.Host, r.parsed.Host) ||
+		strings.EqualFold(requested.Hostname(), r.parsed.Hostname()) ||
+		isLoopback(requested.Hostname())
 }
 
 func isLoopback(host string) bool {
@@ -182,7 +236,8 @@ func (r *RemoteServer) bearerOK(req *http.Request) bool {
 }
 
 func (r *RemoteServer) unauthorized(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource/mcp", scope="%s"`, r.publicURL, HarvesterScope))
+	w.Header().
+		Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata=%q, scope=%q`, r.publicURL+"/.well-known/oauth-protected-resource/mcp", HarvesterScope))
 	r.oauthError(w, http.StatusUnauthorized, "invalid_token", "missing or invalid bearer token")
 }
 
@@ -194,7 +249,25 @@ func (r *RemoteServer) metadata(w http.ResponseWriter, value map[string]any) {
 func (r *RemoteServer) authMetadata() map[string]any {
 	issuer := r.publicURL + "/"
 	return map[string]any{
-		"issuer": issuer, "authorization_endpoint": r.publicURL + "/authorize", "token_endpoint": r.publicURL + "/token", "registration_endpoint": r.publicURL + "/register", "revocation_endpoint": r.publicURL + "/revoke", "scopes_supported": []string{HarvesterScope}, "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code", "refresh_token"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"none", "client_secret_post", "client_secret_basic"}, "revocation_endpoint_auth_methods_supported": []string{"none", "client_secret_post", "client_secret_basic"},
+		"issuer":                           issuer,
+		"authorization_endpoint":           r.publicURL + "/authorize",
+		"token_endpoint":                   r.publicURL + "/token",
+		"registration_endpoint":            r.publicURL + "/register",
+		"revocation_endpoint":              r.publicURL + "/revoke",
+		"scopes_supported":                 []string{HarvesterScope},
+		"response_types_supported":         []string{"code"},
+		"grant_types_supported":            []string{authorizationCodeGrant, refreshTokenGrant},
+		"code_challenge_methods_supported": []string{pkceMethodS256},
+		"token_endpoint_auth_methods_supported": []string{
+			tokenAuthNone,
+			tokenAuthClientSecretPost,
+			tokenAuthClientSecretBasic,
+		},
+		"revocation_endpoint_auth_methods_supported": []string{
+			tokenAuthNone,
+			tokenAuthClientSecretPost,
+			tokenAuthClientSecretBasic,
+		},
 	}
 }
 
@@ -219,20 +292,43 @@ func (r *RemoteServer) oauthError(w http.ResponseWriter, status int, code, descr
 
 func (r *RemoteServer) register(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost || !contentType(req, "application/json") {
-		r.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "registration requests must use application/json")
+		r.oauthError(
+			w,
+			http.StatusBadRequest,
+			"invalid_client_metadata",
+			"registration requests must use application/json",
+		)
 		return
 	}
 	var input persistedClient
-	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&input); err != nil {
+	if err := json.NewDecoder(io.LimitReader(req.Body, mcpMaxBodyBytes)).Decode(&input); err != nil {
 		r.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "registration body is not valid JSON")
 		return
 	}
 	client, secret, code := r.store.register(input)
+	if code == oauthErrorTooManyClients {
+		r.oauthError(
+			w,
+			http.StatusTooManyRequests,
+			code,
+			"the harvester gateway has reached its registered-client limit; ask the operator to remove an unused client",
+		)
+		return
+	}
 	if code != "" {
 		r.oauthError(w, http.StatusBadRequest, code, "client metadata is not supported")
 		return
 	}
-	response := map[string]any{"client_id": client.ClientID, "client_id_issued_at": client.ClientIDIssuedAt, "token_endpoint_auth_method": client.TokenEndpointAuthMethod, "redirect_uris": client.RedirectURIs, "grant_types": client.GrantTypes, "response_types": client.ResponseTypes, "scope": client.Scope, "client_secret_expires_at": client.ClientSecretExpiresAt}
+	response := map[string]any{
+		"client_id":                  client.ClientID,
+		"client_id_issued_at":        client.ClientIDIssuedAt,
+		"token_endpoint_auth_method": client.TokenEndpointAuthMethod,
+		"redirect_uris":              client.RedirectURIs,
+		"grant_types":                client.GrantTypes,
+		"response_types":             client.ResponseTypes,
+		"scope":                      client.Scope,
+		"client_secret_expires_at":   client.ClientSecretExpiresAt,
+	}
 	if secret != "" {
 		response["client_secret"] = secret
 	}
@@ -256,20 +352,38 @@ func (r *RemoteServer) authorize(w http.ResponseWriter, req *http.Request) {
 	r.store.mu.Lock()
 	client, known := r.store.clients[clientID]
 	r.store.mu.Unlock()
-	if !known || !containsString(client.RedirectURIs, redirect) {
+	if !known || !slices.Contains(client.RedirectURIs, redirect) {
 		r.oauthError(w, http.StatusBadRequest, "invalid_request", "unknown client or redirect_uri")
 		return
 	}
 	resource := q.Get("resource")
 	if resource != "" && !ResourceMatches(resource, r.resource) {
-		r.redirectError(w, redirect, q.Get("state"), "invalid_target", "resource does not identify this MCP server")
+		r.redirectError(
+			w,
+			redirect,
+			q.Get("state"),
+			oauthErrorInvalidTarget,
+			"resource does not identify this MCP server",
+		)
 		return
 	}
 	scope := strings.Fields(q.Get("scope"))
 	if len(scope) == 0 {
 		scope = []string{HarvesterScope}
 	}
-	txn, err := r.store.begin(client, redirect, q.Get("state"), q.Get("code_challenge"), q.Get("code_challenge_method"), resource, scope)
+	txn, err := r.store.begin(
+		client,
+		redirect,
+		q.Get("state"),
+		q.Get("code_challenge"),
+		q.Get("code_challenge_method"),
+		resource,
+		scope,
+	)
+	if errors.Is(err, errTooManyPendingConsents) {
+		r.redirectError(w, redirect, q.Get("state"), oauthErrorTooManyClients, err.Error())
+		return
+	}
 	if err != nil {
 		r.redirectError(w, redirect, q.Get("state"), "invalid_request", err.Error())
 		return
@@ -303,7 +417,14 @@ func (r *RemoteServer) consent(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		txn = req.Form.Get("txn")
-		code, ok, alive := r.store.consent(txn, req.Form.Get("passphrase"))
+		code, ok, alive := r.store.consent(txn, req.Form.Get("passphrase"), remoteAddr(req))
+		if ok && !alive {
+			// The store logged the cause; the page must not claim "expired".
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, "<p>The harvester could not issue an authorization code. Try again shortly.</p>")
+			return
+		}
 		if !alive {
 			expiredConsent(w)
 			return
@@ -340,7 +461,13 @@ func expiredConsent(w http.ResponseWriter) {
 	_, _ = io.WriteString(w, "<p>This authorization link has expired. Start again from Claude.</p>")
 }
 
-func (r *RemoteServer) redirectErrorOrCode(w http.ResponseWriter, redirect string, req *http.Request, code string, ac authorizationCode) {
+func (r *RemoteServer) redirectErrorOrCode(
+	w http.ResponseWriter,
+	redirect string,
+	req *http.Request,
+	code string,
+	ac authorizationCode,
+) {
 	u, err := url.Parse(redirect)
 	if err != nil {
 		http.Error(w, "invalid redirect", http.StatusBadRequest)
@@ -395,7 +522,12 @@ func consentPage(txn, message string) string {
 
 func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost || !contentType(req, "application/x-www-form-urlencoded") {
-		r.oauthError(w, http.StatusBadRequest, "invalid_request", "token requests must use application/x-www-form-urlencoded")
+		r.oauthError(
+			w,
+			http.StatusBadRequest,
+			"invalid_request",
+			"token requests must use application/x-www-form-urlencoded",
+		)
 		return
 	}
 	if err := req.ParseForm(); err != nil {
@@ -409,23 +541,33 @@ func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 	if secret == "" {
 		secret = req.Form.Get("client_secret")
 	}
-	if !r.authenticateClient(clientID, secret, req.Form.Get("client_secret") != "" || req.Header.Get("Authorization") != "") {
+	if !r.authenticateClient(
+		clientID,
+		secret,
+		req.Form.Get("client_secret") != "" || req.Header.Get("Authorization") != "",
+	) {
 		r.oauthError(w, http.StatusBadRequest, "invalid_client", "client authentication failed")
 		return
 	}
 	resource := req.Form.Get("resource")
 	if resource != "" && !ResourceMatches(resource, r.resource) {
-		r.oauthError(w, http.StatusBadRequest, "invalid_target", "resource does not identify this MCP server")
+		r.oauthError(w, http.StatusBadRequest, oauthErrorInvalidTarget, "resource does not identify this MCP server")
 		return
 	}
 	grant := req.Form.Get("grant_type")
 	var response tokenResponse
 	var code string
 	switch grant {
-	case "authorization_code":
-		response, code = r.store.exchange(req.Form.Get("code"), clientID, req.Form.Get("redirect_uri"), req.Form.Get("code_verifier"), resource)
-	case "refresh_token":
-		response, code = r.store.refreshExchange(req.Form.Get("refresh_token"), clientID, resource)
+	case authorizationCodeGrant:
+		response, code = r.store.exchange(
+			req.Form.Get("code"),
+			clientID,
+			req.Form.Get("redirect_uri"),
+			req.Form.Get("code_verifier"),
+			resource,
+		)
+	case refreshTokenGrant:
+		response, code = r.store.refreshExchange(req.Form.Get(refreshTokenGrant), clientID, resource)
 	default:
 		r.oauthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type is not supported")
 		return
@@ -464,17 +606,21 @@ func (r *RemoteServer) authenticateClient(id, secret string, presented bool) boo
 		return false
 	}
 	switch c.TokenEndpointAuthMethod {
-	case "none":
+	case tokenAuthNone:
 		return true
-	case "client_secret_post", "client_secret_basic":
-		return presented && subtle.ConstantTimeCompare([]byte(c.ClientSecret), []byte(secret)) == 1
+	case tokenAuthClientSecretPost, tokenAuthClientSecretBasic:
+		// c.ClientSecret is a read-compatibility door only (auth.go's
+		// persistedClient doc comment) — verify by digest, the stored shape
+		// since L2-F20, via the same equalSecret constant-time compare a
+		// bare secret would have used.
+		return presented && c.ClientSecretHash != "" && equalSecret(digest(secret), c.ClientSecretHash)
 	default:
 		return false
 	}
 }
 
 func tokenErrorDescription(code string) string {
-	if code == "invalid_target" {
+	if code == oauthErrorInvalidTarget {
 		return "resource does not identify this MCP server"
 	}
 	return "authorization grant is invalid"
@@ -482,7 +628,12 @@ func tokenErrorDescription(code string) string {
 
 func (r *RemoteServer) revoke(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost || !contentType(req, "application/x-www-form-urlencoded") {
-		r.oauthError(w, http.StatusBadRequest, "invalid_request", "revocation requests must use application/x-www-form-urlencoded")
+		r.oauthError(
+			w,
+			http.StatusBadRequest,
+			"invalid_request",
+			"revocation requests must use application/x-www-form-urlencoded",
+		)
 		return
 	}
 	if err := req.ParseForm(); err != nil {
@@ -493,7 +644,7 @@ func (r *RemoteServer) revoke(w http.ResponseWriter, req *http.Request) {
 	if id == "" {
 		id, secret = req.Form.Get("client_id"), req.Form.Get("client_secret")
 	}
-	if id != "" && !r.authenticateClient(id, secret, true) {
+	if id == "" || !r.authenticateClient(id, secret, true) {
 		r.oauthError(w, http.StatusBadRequest, "invalid_client", "client authentication failed")
 		return
 	}
@@ -502,13 +653,4 @@ func (r *RemoteServer) revoke(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

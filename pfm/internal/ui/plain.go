@@ -10,13 +10,13 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // sizeBadge is formatSize, but an OpenCode row (no file size, always 0) shows "—" rather than a lying "0B".
 func sizeBadge(row compose.Row) string {
-	if compose.EngineForKind(row.Kind) == pfmengine.Opencode {
+	if compose.EngineForKind(row.Kind) == pfmengine.OpenCode {
 		return "—"
 	}
 	return formatSize(row.Size)
@@ -59,7 +59,9 @@ func RenderPlain(snapshot Snapshot) string {
 	model := NewModel(snapshot)
 	var output strings.Builder
 	previous := ""
-	for _, row := range model.VisibleRows() {
+	rows := model.VisibleRows()
+	for index := range rows {
+		row := &rows[index]
 		project := cleanField(row.Project)
 		if project == "" {
 			project = "?"
@@ -73,16 +75,16 @@ func RenderPlain(snapshot Snapshot) string {
 		}
 		parts := []string{
 			rowMarker(row.Kind) + " " +
-				clipRunes(cleanField(row.Name), 30),
+				clipRunesEllipsis(cleanField(row.Name), 30),
 		}
-		if badges := stripANSI(model.rowBadges(row)); badges != "" {
+		if badges := stripANSI(model.rowBadges(*row)); badges != "" {
 			parts = append(parts, badges)
 		}
 		parts = append(
 			parts,
 			fmt.Sprintf("%dp", row.PromptCount),
-			sizeBadge(row),
-			formatAge(row, snapshot.NowNS),
+			sizeBadge(*row),
+			formatAge(*row, snapshot.NowNS),
 		)
 		fmt.Fprintln(&output, strings.Join(parts, "  "))
 	}
@@ -97,7 +99,9 @@ func RenderTSV(snapshot Snapshot) string {
 	output.WriteString(
 		"kind\tid\tproject\tcwd\tname\tprompts\tsize\tactivity_ns\taccount\tkilled\tsocket\n",
 	)
-	for _, row := range model.VisibleRows() {
+	rows := model.VisibleRows()
+	for index := range rows {
+		row := &rows[index]
 		fields := []string{
 			row.Kind.String(),
 			row.ID,

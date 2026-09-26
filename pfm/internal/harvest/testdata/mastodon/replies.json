@@ -1,0 +1,12 @@
+{
+ "@context": "https://www.w3.org/ns/activitystreams",
+ "id": "https://social.example/@user-0/117117221397911074/replies",
+ "type": "Collection",
+ "first": {
+  "id": "https://social.example/@user-0/117117221397911074/replies?page=true",
+  "type": "CollectionPage",
+  "next": "https://social.example/@user-0/117117221397911074/replies?only_other_accounts=true&page=true",
+  "partOf": "https://social.example/@user-0/117117221397911074/replies",
+  "items": []
+ }
+}

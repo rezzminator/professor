@@ -1,0 +1,78 @@
+{
+ "data": {
+  "project": {
+   "issue": {
+    "iid": "1822",
+    "title": "An issue title",
+    "webUrl": "https://gitlab.com/group-0/project-0/-/work_items/1822",
+    "createdAt": "2017-03-02T10:22:43Z",
+    "state": "opened",
+    "author": {
+     "username": "user-0"
+    },
+    "description": "The issue body, with **bold** and a list:\n\n- one\n- two",
+    "userNotesCount": 9,
+    "notes": {
+     "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": "bm90LWEtcmVhbC1jdXJzb3I"
+     },
+     "nodes": [
+      {
+       "id": "gid://gitlab/Note/25125120",
+       "system": false,
+       "body": "Note 0 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2017-03-10T12:00:48Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_25125120",
+       "author": {
+        "username": "user-2"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/7e8dcbc7070d6924aa88a0e3198f89b72090d30e"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/31975847",
+       "system": false,
+       "body": "Note 1 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2017-06-10T00:18:04Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_31975847",
+       "author": {
+        "username": "user-3"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/c4b888d9f3a83250cd010dcf24ceda13da59e6f0"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/70666834",
+       "system": false,
+       "body": "Note 2 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2018-04-27T16:09:26Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_70666834",
+       "author": {
+        "username": "user-4"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/2acebfa91289426865a6d1019b89d18e834b5d86"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/73710730",
+       "system": false,
+       "body": "Note 3 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2018-05-17T21:59:07Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_73710730",
+       "author": {
+        "username": "user-5"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/c2fc84ca9386ffbbc210f19915a76278e25c7f2c"
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

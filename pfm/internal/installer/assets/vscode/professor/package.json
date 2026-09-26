@@ -17,6 +17,9 @@
     "commands": [
       { "command": "professor.newChatTerminal", "title": "Professor: New Chat Terminal", "icon": "$(mortar-board)" }
     ],
+    "keybindings": [
+      { "command": "professor.newChatTerminal", "key": "ctrl+shift+alt+t", "mac": "cmd+shift+alt+t", "when": "terminalProcessSupported" }
+    ],
     "configuration": {
       "title": "Professor",
       "properties": {

@@ -15,25 +15,25 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestNewWithPathsUsesInjectedRoots(t *testing.T) {
 	fixture := setupIndexFixture(t)
 	wrongRoot := t.TempDir()
-	wrongCodexRoot := t.TempDir()
+	wrongCodexHome := t.TempDir()
 	t.Setenv(paths.EnvClaudeRoots, wrongRoot)
-	t.Setenv(paths.EnvCodexRoot, wrongCodexRoot)
+	t.Setenv(paths.EnvCodexHome, wrongCodexHome)
 
 	database := openIndexStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	indexer, err := NewWithPaths(database, paths.Values{
 		Roots: map[pfmengine.ID][]string{
 			pfmengine.Claude: {fixture.claudeRoot},
-			pfmengine.Codex:  {fixture.codexRoot},
+			pfmengine.Codex:  {fixture.codexHome},
 		},
 	})
 	if err != nil {
@@ -48,12 +48,12 @@ func TestNewWithPathsUsesInjectedRoots(t *testing.T) {
 	}
 }
 
-func TestIndexerIteratesEveryConfiguredCodexRoot(t *testing.T) {
+func TestIndexerIteratesEveryConfiguredCodexHome(t *testing.T) {
 	root := t.TempDir()
-	codexRoots := []string{filepath.Join(root, "codex-1"), filepath.Join(root, "codex-2")}
-	for index, codexRoot := range codexRoots {
+	codexHomes := []string{filepath.Join(root, "codex-1"), filepath.Join(root, "codex-2")}
+	for index, codexHome := range codexHomes {
 		id := fmt.Sprintf("codex-account-%d", index+1)
-		path := filepath.Join(codexRoot, "sessions", "2026", "08", fmt.Sprintf("rollout-%s.jsonl", id))
+		path := filepath.Join(codexHome, "sessions", "2026", "08", fmt.Sprintf("rollout-%s.jsonl", id))
 		rewriteJSONLines(t, path, []any{map[string]any{
 			"type": "response_item",
 			"payload": map[string]any{
@@ -64,7 +64,7 @@ func TestIndexerIteratesEveryConfiguredCodexRoot(t *testing.T) {
 	}
 	database := openIndexStore(t)
 	t.Cleanup(func() { _ = database.Close() })
-	indexer, err := NewWithRoots(database, paths.Values{}, map[pfmengine.ID][]string{pfmengine.Codex: codexRoots})
+	indexer, err := NewWithRoots(database, paths.Values{}, map[pfmengine.ID][]string{pfmengine.Codex: codexHomes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,9 +75,10 @@ func TestIndexerIteratesEveryConfiguredCodexRoot(t *testing.T) {
 	if counters.FilesSeen != 2 || counters.FullParsed != 2 {
 		t.Fatalf("multi-root counters=%+v, want both Codex rollouts parsed", counters)
 	}
-	for index := range codexRoots {
+	for index := range codexHomes {
 		id := fmt.Sprintf("codex-account-%d", index+1)
-		if rollout, found, err := database.Rollout(context.Background(), id); err != nil || !found || rollout.FirstPrompt != id {
+		rollout, found, err := database.Rollout(context.Background(), id)
+		if err != nil || !found || rollout.FirstPrompt != id {
 			t.Fatalf("Rollout(%q)=%#v found=%t err=%v", id, rollout, found, err)
 		}
 	}
@@ -85,7 +86,9 @@ func TestIndexerIteratesEveryConfiguredCodexRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if warm.FilesSeen != 2 || warm.FilesSkipped != 2 || warm.FullParsed != 0 || warm.RowsTouched != 0 || warm.BytesRead != 0 || warm.CxNamesReloaded {
+	if warm.FilesSeen != 2 || warm.FilesSkipped != 2 || warm.FullParsed != 0 || warm.RowsTouched != 0 ||
+		warm.BytesRead != 0 ||
+		warm.CxNamesReloaded {
 		t.Fatalf("warm multi-root counters=%+v, want two skips and no work", warm)
 	}
 }
@@ -116,7 +119,7 @@ func TestIndexGoldenAndIncrementalTransitions(t *testing.T) {
 		t.Fatalf("initial BytesRead = %d, want >70 KiB fixture coverage", initial.BytesRead)
 	}
 
-	gotGolden := dumpIndex(t, database, fixture.claudeRoot, fixture.codexRoot)
+	gotGolden := dumpIndex(t, database, fixture.claudeRoot, fixture.codexHome)
 	wantGolden, err := os.ReadFile(testdataPath(t, "golden", "index.tsv"))
 	if err != nil {
 		t.Fatalf("read index golden: %v", err)
@@ -289,7 +292,7 @@ func TestIndexGoldenAndIncrementalTransitions(t *testing.T) {
 		t.Fatalf("deleted Transcript() found = %v, error = %v; want false, nil", found, err)
 	}
 
-	appendJSONLine(t, filepath.Join(fixture.codexRoot, "session_index.jsonl"), map[string]any{
+	appendJSONLine(t, filepath.Join(fixture.codexHome, "session_index.jsonl"), map[string]any{
 		"id":          "cx-user",
 		"thread_name": "Own newest name",
 	})
@@ -343,7 +346,7 @@ func TestParseCodexSubagentMessagesNeverPromoteToUserThread(t *testing.T) {
 		Size:    info.Size(),
 		MTimeNS: info.ModTime().UnixNano(),
 	}
-	rollout, offset, err := parseCodex(file, 0, store.Rollout{})
+	rollout, offset, err := parseCodexRolloutFile(file, 0, store.Rollout{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +362,7 @@ func TestParseCodexSubagentMessagesNeverPromoteToUserThread(t *testing.T) {
 	}
 	file.Size = info.Size()
 	file.MTimeNS = info.ModTime().UnixNano()
-	rollout, _, err = parseCodex(file, offset, rollout)
+	rollout, _, err = parseCodexRolloutFile(file, offset, rollout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +388,7 @@ func TestClaudeMetadataAppendDoesNotRefreshPromptActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := diskFile{ID: "semantic-activity", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-	transcript, offset, err := parseClaude(file, 0, store.Transcript{})
+	transcript, offset, err := parseClaudeTranscriptFile(file, 0, store.Transcript{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +409,7 @@ func TestClaudeMetadataAppendDoesNotRefreshPromptActivity(t *testing.T) {
 	}
 	file.Size = info.Size()
 	file.MTimeNS = info.ModTime().UnixNano()
-	transcript, _, err = parseClaude(file, offset, transcript)
+	transcript, _, err = parseClaudeTranscriptFile(file, offset, transcript)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,8 +421,8 @@ func TestClaudeMetadataAppendDoesNotRefreshPromptActivity(t *testing.T) {
 
 func TestCodexFilenameIdentityPreventsForkCollisionAndWarmReparse(t *testing.T) {
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	sessionDir := filepath.Join(codexRoot, "sessions", "2026", "01", "01")
+	codexHome := filepath.Join(root, "codex")
+	sessionDir := filepath.Join(codexHome, "sessions", "2026", "01", "01")
 	for _, directory := range []string{
 		sessionDir,
 		filepath.Join(root, "claude"),
@@ -457,12 +460,16 @@ func TestCodexFilenameIdentityPreventsForkCollisionAndWarmReparse(t *testing.T) 
 	t.Setenv(paths.EnvDB, filepath.Join(root, "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatal(err)
@@ -535,12 +542,16 @@ func TestSDKSpawnedSessionsIndexAsBackgroundAndReparseOnVersionBump(t *testing.T
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, claudeRoot)
-	t.Setenv(paths.EnvCodexRoot, filepath.Join(root, "codex"))
+	t.Setenv(paths.EnvCodexHome, filepath.Join(root, "codex"))
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatal(err)
@@ -564,7 +575,7 @@ func TestSDKSpawnedSessionsIndexAsBackgroundAndReparseOnVersionBump(t *testing.T
 	// on disk is byte-identical, so only a parser version bump reparses it.
 	stale := spawned
 	stale.IsBG = false
-	if err := database.Batch(ctx, 1, func(tx *store.ImmediateTx, start, end int) error {
+	if err := database.Batch(ctx, 1, func(tx *store.ImmediateTx, _, _ int) error {
 		return tx.UpsertTranscript(ctx, stale)
 	}); err != nil {
 		t.Fatal(err)
@@ -612,7 +623,7 @@ func TestAttachmentMarkerAloneDoesNotFlagBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := diskFile{ID: "attached-interactive", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-	transcript, _, err := parseClaude(file, 0, store.Transcript{})
+	transcript, _, err := parseClaudeTranscriptFile(file, 0, store.Transcript{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +651,7 @@ func TestBackgroundMarkerOnLaterRecordDoesNotRetroactivelyFlagInteractiveSession
 		t.Fatal(err)
 	}
 	file := diskFile{ID: "sticky-interactive", Path: path, Size: info.Size(), MTimeNS: info.ModTime().UnixNano()}
-	transcript, _, err := parseClaude(file, 0, store.Transcript{})
+	transcript, _, err := parseClaudeTranscriptFile(file, 0, store.Transcript{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +666,11 @@ func TestBackgroundMarkerOnLaterRecordDoesNotRetroactivelyFlagInteractiveSession
 func TestPriorityProjectPassUpdatesOnlyLaunchCWDThenFullPass(t *testing.T) {
 	fixture := setupIndexFixture(t)
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatal(err)
@@ -710,7 +725,7 @@ func TestPriorityProjectPassUpdatesOnlyLaunchCWDThenFullPass(t *testing.T) {
 
 type indexFixture struct {
 	claudeRoot      string
-	codexRoot       string
+	codexHome       string
 	partialPath     string
 	userRolloutPath string
 }
@@ -720,9 +735,9 @@ func setupIndexFixture(t *testing.T) indexFixture {
 
 	root := t.TempDir()
 	claudeRoot := filepath.Join(root, "claude-physical")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	copyTree(t, testdataPath(t, "claude-store"), claudeRoot)
-	copyTree(t, testdataPath(t, "codex-store"), codexRoot)
+	copyTree(t, testdataPath(t, "codex-store"), codexHome)
 
 	largeLinePath := filepath.Join(claudeRoot, "project-alpha", "large-line.jsonl")
 	rewriteJSONLines(t, largeLinePath, []any{
@@ -773,23 +788,17 @@ func setupIndexFixture(t *testing.T) indexFixture {
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
-	t.Setenv(
-		paths.EnvClaudeRoots,
-		strings.Join(
-			[]string{linkOne, linkTwo, claudeRoot},
-			string(os.PathListSeparator),
-		),
-	)
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvClaudeRoots, strings.Join([]string{linkOne, linkTwo, claudeRoot}, string(os.PathListSeparator)))
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
 	return indexFixture{
 		claudeRoot:  claudeRoot,
-		codexRoot:   codexRoot,
+		codexHome:   codexHome,
 		partialPath: partialPath,
 		userRolloutPath: filepath.Join(
-			codexRoot,
+			codexHome,
 			"sessions",
 			"2026",
 			"01",
@@ -842,12 +851,7 @@ func assertSingleDelta(t *testing.T, counters Counters, files int, bytesRead int
 	}
 }
 
-func dumpIndex(
-	t *testing.T,
-	database *store.Store,
-	claudeRoot string,
-	codexRoot string,
-) string {
+func dumpIndex(t *testing.T, database *store.Store, claudeRoot, codexHome string) string {
 	t.Helper()
 
 	ctx := context.Background()
@@ -865,7 +869,8 @@ func dumpIndex(
 	}
 
 	var output strings.Builder
-	for _, transcript := range transcripts {
+	for i := range transcripts {
+		transcript := &transcripts[i]
 		fmt.Fprintf(
 			&output,
 			"T\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
@@ -882,12 +887,13 @@ func dumpIndex(
 			strconv.FormatBool(transcript.IsBG),
 		)
 	}
-	for _, rollout := range rollouts {
+	for i := range rollouts {
+		rollout := &rollouts[i]
 		fmt.Fprintf(
 			&output,
 			"R\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			rollout.ID,
-			fixtureRelativePath(rollout.Path, codexRoot, "codex"),
+			fixtureRelativePath(rollout.Path, codexHome, "codex"),
 			rollout.Size,
 			rollout.ParsedOffset,
 			rollout.CWD,

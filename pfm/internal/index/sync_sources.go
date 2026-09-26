@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // SyncClaude runs Claude's complete incremental transcript pass. It is
@@ -29,8 +29,9 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 	}
 	forceFull := counters.options.Full || !versionFound || storedVersion != claudeParserVersion
 	byPath := make(map[string]store.Transcript, len(existing))
-	for _, transcript := range existing {
-		byPath[transcript.Path] = transcript
+	for i := range existing {
+		transcript := &existing[i]
+		byPath[transcript.Path] = *transcript
 	}
 
 	updates := make([]store.Transcript, 0)
@@ -53,7 +54,7 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 		} else {
 			counters.FullParsed++
 		}
-		transcript, bytesRead, parseErr := parseClaude(file, start, base)
+		transcript, bytesRead, parseErr := parseClaudeTranscriptFile(file, start, base)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -63,7 +64,8 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 
 	deletes := make([]string, 0)
 	if !counters.options.PriorityOnly {
-		for _, transcript := range existing {
+		for i := range existing {
+			transcript := &existing[i]
 			_, pathPresent := presentPaths[transcript.Path]
 			_, idPresent := presentIDs[transcript.UUID]
 			if !pathPresent && !idPresent {
@@ -114,9 +116,10 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	forceFull := counters.options.Full || !versionFound || storedVersion != codexParserVersion
 	byPath := make(map[string]store.Rollout, len(existing))
 	byID := make(map[string]store.Rollout, len(existing))
-	for _, rollout := range existing {
-		byPath[rollout.Path] = rollout
-		byID[rollout.ID] = rollout
+	for i := range existing {
+		rollout := &existing[i]
+		byPath[rollout.Path] = *rollout
+		byID[rollout.ID] = *rollout
 	}
 
 	updates := make([]store.Rollout, 0)
@@ -139,7 +142,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		} else {
 			counters.FullParsed++
 		}
-		rollout, bytesRead, parseErr := parseCodex(file, start, base)
+		rollout, bytesRead, parseErr := parseCodexRolloutFile(file, start, base)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -150,7 +153,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 
 	threads := make([]store.CodexThread, 0)
 	for _, root := range roots {
-		found, readErr := readCodexThreads(ctx, root)
+		found, readErr := loadIndexedCodexThreads(ctx, root)
 		if readErr != nil {
 			return readErr
 		}
@@ -158,7 +161,8 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		updates = reconcileCodexState(found, root, updates, byID, presentIDs, counters)
 	}
 	deletes := make([]string, 0)
-	for _, rollout := range existing {
+	for i := range existing {
+		rollout := &existing[i]
 		_, pathPresent := presentPaths[rollout.Path]
 		_, idPresent := presentIDs[rollout.ID]
 		if !pathPresent && !idPresent {
@@ -177,7 +181,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	counters.Deleted += len(deletes)
 	counters.RowsTouched += len(updates) + len(deletes)
 
-	if counters.legacySingleCodexRoot && len(roots) == 1 {
+	if counters.legacySingleCodexHome && len(roots) == 1 {
 		err = reloadCxNames(ctx, database, roots[0], counters)
 	} else {
 		err = reloadCxNamesFromRoots(ctx, database, roots, counters)
@@ -196,13 +200,13 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	return nil
 }
 
-// SyncOpencode runs OpenCode's session-mirror pass.
-func SyncOpencode(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
+// SyncOpenCode runs OpenCode's session-mirror pass.
+func SyncOpenCode(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
 	if counters.options.PriorityOnly {
 		return nil
 	}
 	for _, root := range roots {
-		if err := syncOpencodeMirror(ctx, database, root, counters); err != nil {
+		if err := syncOpenCodeMirror(ctx, database, root, counters); err != nil {
 			return err
 		}
 	}

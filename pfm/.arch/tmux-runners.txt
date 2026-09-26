@@ -1,2 +1,1 @@
-internal/dream/seat/host.go
 internal/gather/tmuxprobe.go

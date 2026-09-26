@@ -21,10 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/transcript"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // The states a chat can be in, as reported by status and watch.
@@ -52,8 +54,12 @@ type Chat struct {
 // Status is the machine-readable verdict. Field names are a contract — a
 // consumer scripts against them.
 type Status struct {
-	Name          string       `json:"name"`
-	State         string       `json:"state"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+	// IdleSeconds is how long the chat has been idle — nonzero ONLY when State
+	// is idle. A working chat mid tool run writes nothing for minutes; that
+	// silence is not idleness, and reporting it as such made the number
+	// contradict the state beside it.
 	IdleSeconds   int64        `json:"idle_seconds"`
 	Engine        pfmengine.ID `json:"engine"`
 	Model         string       `json:"model,omitempty"`
@@ -161,10 +167,13 @@ func Inspect(
 	}
 
 	entries, _, err := transcript.Tail(ctx, chat.Path, string(chat.Engine), 1, transcript.TextCap)
-	if err == nil && len(entries) > 0 {
+	if err != nil {
+		return status, fmt.Errorf("read chat transcript tail %s: %w", chat.Path, err)
+	}
+	if len(entries) > 0 {
 		status.Last = transcript.Condensed(entries[len(entries)-1])
 		if chat.Live {
-			if entries[len(entries)-1].Role == transcript.RoleAssistant {
+			if assistantAnswered(entries[len(entries)-1].Role) {
 				status.State = StateIdle
 			} else {
 				status.State = StateWorking
@@ -173,7 +182,51 @@ func Inspect(
 	} else if chat.Live {
 		status.State = StateWorking
 	}
+	if chat.Live && chat.Engine == pfmengine.Claude && chat.ID != "" {
+		sidechainWorking, err := newerClaudeSidechain(chat.Path, chat.ID, meta.ModifiedUnixNS)
+		if err != nil {
+			return status, err
+		}
+		if sidechainWorking {
+			status.State = StateWorking
+		}
+	}
+	if status.State != StateIdle {
+		status.IdleSeconds = 0
+	}
 	return status, nil
+}
+
+func assistantAnswered(role string) bool {
+	return role == transcript.RoleAssistant
+}
+
+func newerClaudeSidechain(transcriptPath, sessionID string, parentModifiedUnixNS int64) (bool, error) {
+	directory := filepath.Join(filepath.Dir(transcriptPath), sessionID, "subagents")
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, lstatErr := os.Lstat(directory); errors.Is(lstatErr, fs.ErrNotExist) {
+			return false, nil
+		} else if lstatErr != nil {
+			return false, fmt.Errorf("inspect Claude sidechain directory %s: %w", directory, lstatErr)
+		}
+	}
+	if err != nil {
+		return false, fmt.Errorf("read Claude sidechain directory %s: %w", directory, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return false, fmt.Errorf("inspect Claude sidechain %s: %w", filepath.Join(directory, entry.Name()), err)
+		}
+		if info.ModTime().UnixNano() > parentModifiedUnixNS {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Missing is the status of a name nothing answers to. It is a value, not an

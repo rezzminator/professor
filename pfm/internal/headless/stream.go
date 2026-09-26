@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // StreamOptions controls a follow.
@@ -34,6 +35,8 @@ type StreamOptions struct {
 	// A stream that outlives its chat must END, not hang: silence is the one
 	// thing a dead chat and a thinking chat have in common.
 	Alive func() bool
+	// Clock controls polling in tests; nil uses the wall clock.
+	Clock clock.Clock
 	// Raw prints the entry's full text instead of the condensed line.
 	Raw bool
 }
@@ -47,7 +50,7 @@ func Stream(
 	engine pfmengine.ID,
 	options StreamOptions,
 	out io.Writer,
-) error {
+) (returnErr error) {
 	if path == "" {
 		return errors.New("this chat has no transcript to stream yet")
 	}
@@ -59,7 +62,11 @@ func Stream(
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 	if !options.FromStart {
 		if _, err := file.Seek(0, io.SeekEnd); err != nil {
 			return err
@@ -76,10 +83,11 @@ func Stream(
 		line, readErr := reader.ReadBytes('\n')
 		switch {
 		case len(line) > 0 && readErr == nil:
-			full := append(pending, line...)
+			pending = append(pending, line...)
+			full := pending
 			pending = nil
 			if entry, ok := transcript.Parse(full, string(engine)); ok {
-				if err := window.add(render(entry, options.Raw)); err != nil {
+				if err := window.add(renderStreamEntry(entry, options.Raw)); err != nil {
 					return err
 				}
 			}
@@ -100,10 +108,12 @@ func Stream(
 			}
 			return ErrChatGone
 		}
-		select {
-		case <-ctx.Done():
+		pollClock := options.Clock
+		if pollClock == nil {
+			pollClock = clock.Real
+		}
+		if err := waitForNextPoll(ctx, pollClock, poll); err != nil {
 			return window.flush()
-		case <-time.After(poll):
 		}
 	}
 }
@@ -111,7 +121,7 @@ func Stream(
 // ErrChatGone ends a follow whose chat stopped existing.
 var ErrChatGone = errors.New("the chat is gone")
 
-func render(entry transcript.Entry, raw bool) string {
+func renderStreamEntry(entry transcript.Entry, raw bool) string {
 	if !raw {
 		return transcript.Condensed(entry)
 	}

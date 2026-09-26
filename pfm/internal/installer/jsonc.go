@@ -44,11 +44,12 @@ func sanitizeJSONC(raw []byte) ([]byte, error) {
 	for index := 0; index < len(clean); index++ {
 		character := clean[index]
 		if inString {
-			if escaped {
+			switch {
+			case escaped:
 				escaped = false
-			} else if character == '\\' {
+			case character == '\\':
 				escaped = true
-			} else if character == '"' {
+			case character == '"':
 				inString = false
 			}
 			continue
@@ -171,13 +172,21 @@ func parseJSONCObject(raw []byte, start int) (jsoncObject, error) {
 		if err != nil {
 			return jsoncObject{}, err
 		}
-		property := jsoncProperty{name: name, keyStart: keyStart, valueStart: valueStart, valueEnd: valueEnd, commaStart: -1, commaEnd: -1}
-		if after < len(raw) && raw[after] == ',' {
+		property := jsoncProperty{
+			name:       name,
+			keyStart:   keyStart,
+			valueStart: valueStart,
+			valueEnd:   valueEnd,
+			commaStart: -1,
+			commaEnd:   -1,
+		}
+		switch {
+		case after < len(raw) && raw[after] == ',':
 			property.commaStart, property.commaEnd = after, after+1
 			index = after + 1
-		} else if after < len(raw) && raw[after] == '}' {
+		case after < len(raw) && raw[after] == '}':
 			index = after
-		} else {
+		default:
 			return jsoncObject{}, fmt.Errorf("expected comma or object end after %q", name)
 		}
 		result.properties = append(result.properties, property)
@@ -208,7 +217,9 @@ func setJSONCProperty(raw []byte, objectStart int, name string, value []byte) ([
 	// is valid strict JSON there, not merely JSONC. A LATER insertion into
 	// the same object still lands correctly — it is the "last property has
 	// no comma" case the prefix check above already exists to handle.
-	insertion := []byte(prefix + "\n" + childIndent + string(mustJSON(name)) + ": " + string(formatted) + "\n" + closingIndent)
+	insertion := []byte(
+		prefix + "\n" + childIndent + string(mustJSON(name)) + ": " + string(formatted) + "\n" + closingIndent,
+	)
 	return spliceBytes(raw, object.close, object.close, insertion), nil
 }
 
@@ -253,11 +264,12 @@ func scanJSONCValue(raw []byte, start int) (int, error) {
 		for index := start + 1; index < len(raw); index++ {
 			character := raw[index]
 			if inString {
-				if escaped {
+				switch {
+				case escaped:
 					escaped = false
-				} else if character == '\\' {
+				case character == '\\':
 					escaped = true
-				} else if character == '"' {
+				case character == '"':
 					inString = false
 				}
 				continue

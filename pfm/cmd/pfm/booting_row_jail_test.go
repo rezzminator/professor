@@ -175,8 +175,8 @@ func bootingRowsFromTSV(t *testing.T) map[string]string {
 // no killed-store write, no non-zero exit on quit — and Enter must
 // synthesize the same Live attach line an ordinary live row gets and really
 // execute it, the same subprocess-reexec and raw/inside-tmux technique
-// attach_e2e_test.go's proveAttach uses (stdout is a real tty here, so
-// dispatchAction's own terminal branch execs tmux directly — no zsh/eval
+// attach_jail_test.go's proveAttach uses (stdout is a real tty here, so
+// action.Dispatch's own terminal branch execs tmux directly — no zsh/eval
 // wrapper is needed for a TMUX= line).
 func TestBootingRowInteractivePickerJailed(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -213,10 +213,12 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 		// The picker paints its cached first frame, then promotes the row once
 		// the async gather goroutine finds the live pane; pressing keys before
 		// that settles risks landing on a frame that has not drawn it yet
-		// (attach_e2e_test.go:proveAttach uses the same wait for the same
+		// (attach_jail_test.go:proveAttach uses the same wait for the same
 		// reason). Down moves off row 0 ("New Claude chat") onto the booting
-		// row — the only other row this minimal jail composes.
-		time.Sleep(5 * time.Second)
+		// row — the only other row this minimal jail composes. Wait for "◐",
+		// the marker rowMarker() (internal/ui/render.go) paints ONLY for
+		// compose.Booting — the row itself never paints the word "booting".
+		waitForTmuxPaneText(t, driverSocket, jail.env, "◐", 5*time.Second)
 		for _, key := range []string{"Down", "C-x", "Escape"} {
 			send := jail.tmux(driverSocket, "send-keys", "-t", "driver:0.0", key)
 			if output, err := send.CombinedOutput(); err != nil {
@@ -266,7 +268,9 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 			_ = jail.tmux(driverSocket, "kill-server").Run()
 		})
 
-		time.Sleep(5 * time.Second)
+		// Same wait as above: "◐" is the row's own painted marker, not the
+		// word "booting".
+		waitForTmuxPaneText(t, driverSocket, jail.env, "◐", 5*time.Second)
 		for _, key := range []string{"Down", "Enter"} {
 			send := jail.tmux(driverSocket, "send-keys", "-t", "driver:0.0", key)
 			if output, err := send.CombinedOutput(); err != nil {
@@ -310,7 +314,7 @@ type bootingPickerJail struct {
 }
 
 // newBootingPickerJail wires the same subprocess-reexec technique
-// attach_e2e_test.go's newAttachJail uses, minus its pre-seeded transcript:
+// attach_jail_test.go's newAttachJail uses, minus its pre-seeded transcript:
 // this jail's Claude store starts empty, so the interactive picker composes
 // exactly ["New Claude chat", the one booting row under test] — nothing else
 // to navigate around.
@@ -329,11 +333,11 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	sidDir := filepath.Join(root, "sid")
 	claudeRoot := filepath.Join(root, "claude")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	procRoot := filepath.Join(root, "proc")
 	for _, directory := range []string{
 		filepath.Join(home, ".local", "bin"),
-		tmuxDir, sidDir, claudeRoot, codexRoot, procRoot,
+		tmuxDir, sidDir, claudeRoot, codexHome, procRoot,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -362,7 +366,7 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 		"PFM_DB":           filepath.Join(root, "fleet.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
-		"PFM_CODEX_ROOT":   codexRoot,
+		"PFM_CODEX_ROOT":   codexHome,
 		"PFM_TMUX_DIR":     tmuxDir,
 		"PFM_PROC_ROOT":    procRoot,
 	})

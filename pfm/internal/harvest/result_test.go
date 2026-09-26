@@ -15,7 +15,7 @@ func TestLegacyRungReceiptsGroupOnlyConsecutiveOACandidates(t *testing.T) {
 	if got := withRungs("boom", []string{"direct"}); got != "boom" {
 		t.Fatalf("single-rung receipt=%q", got)
 	}
-	want := "boom Rungs tried: direct, wayback — re-fetching will not help."
+	want := "boom Rungs tried: direct, wayback."
 	if got := withRungs("boom", []string{"direct", "wayback"}); got != want {
 		t.Fatalf("multi-rung receipt=%q, want %q", got, want)
 	}

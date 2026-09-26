@@ -1,6 +1,6 @@
-# QA Commons — shared rules for the pipeline QA gates
+# QA Commons — shared rules for a project's test gates
 
-Shared by the per-roster QA protocols (`{project}/.claude/agents/qa.md`), spawned as `qa-{project}` by `/wave:builder`, `/wave:orchestrator`, and `/wave:live`. Each child `qa.md` keeps only its project-specific delta (paths, commands, compliance checks) and cites this card for the rules below.
+The generic test law beside each project's testing manual (`.claude/commands/{project}-testing-manual.md`): the manual holds the project-specific delta (paths, commands, compliance checks); this card holds the rules every project shares.
 
 ## Diff-driven attack map
 
@@ -27,6 +27,22 @@ Acceptance gates for every test written.
 - Substring assertions name their subject: `"x" in PROMPT` matches anywhere in the text, including a different field. Assert the section or structure that must carry it.
 - Counts derived, never literal: `sorted(actual) == sorted(declared)`, not `len(x) == 21`. A literal count cannot name what changed, and drifts against its twin in another file.
 - A guard whose scan can return empty asserts non-empty first — a check that passes on nothing is not a check.
+
+## Run verdicts
+
+- A suite you did not watch run is not a pass: quote the verdict line you saw.
+- A filtered or partial run is a named gap in the report, never "tests pass".
+- A skipped suite, a missing toolchain, and a green suite are three outcomes; report which, verbatim from the runner.
+- "Could not reproduce" and "does not occur" are different claims; say which one you make.
+
+## Integration lanes
+
+Applies when the project's integration suite is lane-shaped (designed with `/quality:integration-suite`, whose body is the contract).
+
+- TARGETED runs the solo lanes that own the touched area; FULL and POST-MERGE run the whole sequence in its canonical order.
+- A new capability lands with its landscape row, its map row and its beat in the same change; the map gate is part of the FULL gate.
+- A beat is green on its asserted result plus a clean activity log; a red beat's report carries the stored evidence path, never a paraphrase.
+- A defect a lane exposes is the gate's own to fix; the known-gap list takes only what this repo cannot fix, each entry with an owner and an expiry.
 
 ## Affected-first
 

@@ -1,0 +1,137 @@
+name	lane	beat
+chat_capture	M	M.09-chat-tools
+chat_find	M	M.09-chat-tools
+chat_inject	M	M.09-chat-tools
+chat_keys	M	M.09-chat-tools
+chat_kill	M	M.10-chat-tools-gap
+chat_last	M	M.09-chat-tools
+chat_ls	M	M.09-chat-tools
+chat_name	M	M.10-chat-tools-gap
+chat_new	M	M.09-chat-tools
+chat_open	M	M.10-chat-tools-gap
+chat_read	M	M.09-chat-tools
+chat_resolve	M	M.09-chat-tools
+chat_save	M	M.10-chat-tools-gap
+chat_self_compact	M	M.09-chat-tools
+chat_status	M	M.09-chat-tools
+chat_unkill	M	M.10-chat-tools-gap
+chat_whoami	M	M.09-chat-tools
+harvester_download_file	M	M.11-harvester-tools
+harvester_read	M	M.11-harvester-tools
+harvester_search_literature	M	M.11-harvester-tools
+harvester_search_web	M	M.11-harvester-tools
+pfm archive	O2	O2.02-archive
+pfm callmeter report	O2	O2.05c-callmeter
+pfm chat ask	E1	E1.15-ask
+pfm chat ask	E2	E2.07-inject-ask-watch
+pfm chat branch	E1	E1.22-handoff
+pfm chat capture	E1	E1.14-capture-keys
+pfm chat end	E1	E1.25-end
+pfm chat find	F	F.15-addressing
+pfm chat history	F	F.15-addressing
+pfm chat inject	E1	E1.16-inject
+pfm chat inject	E1	E1.26-resolver-prefers-live
+pfm chat inject	E2	E2.07-inject-ask-watch
+pfm chat inject	F	F.18-e1-chat-survives-storm
+pfm chat keys	E1	E1.14-capture-keys
+pfm chat kill	E1	E1.19-kill-unkill
+pfm chat kill	E2	E2.08-kill-self
+pfm chat last	E1	E1.13-last-read-stream
+pfm chat last	F	F.18-e1-chat-survives-storm
+pfm chat ls	F	F.06-ls-rows
+pfm chat modal	F	F.15-addressing
+pfm chat name	E1	E1.18-name
+pfm chat new	F	F.01-new-engine
+pfm chat new	F	F.02-new-label-role
+pfm chat new	F	F.03-new-account-1h-model
+pfm chat new	F	F.04-new-await-attach
+pfm chat open	F	F.06-ls-rows
+pfm chat read	E1	E1.13-last-read-stream
+pfm chat recover	E2	E2.04-recover
+pfm chat reload	E1	E1.03-reload-account
+pfm chat reload	E1	E1.04-reload-model-effort
+pfm chat reload	E1	E1.05-reload-1h
+pfm chat reload	E1	E1.06-reload-new
+pfm chat reload	E1	E1.07-reload-then
+pfm chat reload	E1	E1.08-reload-sock
+pfm chat reload	E1	E1.11-role-reload
+pfm chat resolve	F	F.15-addressing
+pfm chat save	F	F.15-addressing
+pfm chat self-compact	E1	E1.20-self-compact
+pfm chat status	E1	E1.12-status
+pfm chat status	F	F.18-e1-chat-survives-storm
+pfm chat stream	E1	E1.13-last-read-stream
+pfm chat unkill	E1	E1.19-kill-unkill
+pfm chat watch	E1	E1.17-watch
+pfm chat watch	E2	E2.07-inject-ask-watch
+pfm chat whoami	O1	O1.13-misc-ops
+pfm codex agents	A	A.09-codex-agents
+pfm codex build	A	A.08-codex-mirror
+pfm codex check	A	A.08-codex-mirror
+pfm config init	O1	O1.13-misc-ops
+pfm config show	O1	O1.13-misc-ops
+pfm config validate	O1	O1.13-misc-ops
+pfm doctor	M	M.04-doctor-mcp
+pfm doctor	O1	O1.10-doctor-exit-contract
+pfm harvest	O2	O2.09-harvester
+pfm harvest ask	O2	O2.09-harvester
+pfm harvest download-file	M	M.11-harvester-tools
+pfm headless	O2	O2.04-headless
+pfm headless exec	O2	O2.04-headless
+pfm heal	O1	O1.11-heal
+pfm index	O2	O2.03-index
+pfm init	A	A.01-scaffold
+pfm install	F	F.10-concurrent-new
+pfm install	O1	O1.01-install-idempotent
+pfm internal agent-open	F	F.16-picker-plumbing
+pfm internal callmeter	O2	O2.05c-callmeter
+pfm internal chat-server	F	F.16-picker-plumbing
+pfm internal claude-launch	E1	E1.23-launcher
+pfm internal claude-version	O2	O2.05-internal-plumbing
+pfm internal clear-kill	O2	O2.05-internal-plumbing
+pfm internal codex-launch	E2	E2.10-codex-launch
+pfm internal compact-nudge	E1	E1.21-exit-close
+pfm internal epic-inject	O2	O2.05-internal-plumbing
+pfm internal exit-close	E1	E1.21-exit-close
+pfm internal exit-intercept	E1	E1.19-kill-unkill
+pfm internal explore-deny	O2	O2.05-internal-plumbing
+pfm internal git-guard	O2	O2.05-internal-plumbing
+pfm internal kill-exit	O2	O2.05-internal-plumbing
+pfm internal launch	E1	E1.23-launcher
+pfm internal launcher-repair	O2	O2.05-internal-plumbing
+pfm internal primary-get	O2	O2.05-internal-plumbing
+pfm internal primary-set	O2	O2.05-internal-plumbing
+pfm internal reload-intercept	E1	E1.09-reload-while-busy
+pfm internal reload-run	E1	E1.09-reload-while-busy
+pfm internal stale	O2	O2.05-internal-plumbing
+pfm internal statusline	E1	E1.23-launcher
+pfm internal then	E1	E1.07-reload-then
+pfm internal tmux-title-renudge	O2	O2.05-internal-plumbing
+pfm internal update-check	A	A.14-release-notice
+pfm issues	O1	O1.13-misc-ops
+pfm log	O2	O2.05b-activity-log
+pfm ls	A	A.15-fleet-unchanged-by-update
+pfm ls	F	F.06-ls-rows
+pfm ls	F	F.08-tui-picker
+pfm mcp	M	M.08-mcp-cli
+pfm mcp ls	M	M.08-mcp-cli
+pfm mcp serve	M	M.05-daemon-core
+pfm mcp serve	M	M.07-stdio-transports
+pfm mcp serve	M	M.08-mcp-cli
+pfm name-sync	F	F.13-name-sync
+pfm opencode	A	A.13-opencode-layer
+pfm reap	O2	O2.01-reap
+pfm statusline	E1	E1.02-statusline-theme
+pfm statusline	E2	E2.02-statusline
+pfm statusline	E3	E3.01-open-seat
+pfm statusline	O2	O2.05-internal-plumbing
+pfm uninstall	O2	O2.10-uninstall
+pfm update	A	A.07-self-update
+pfm update adopt	A	A.06-update-adopt
+pfm update drop	A	A.05-update-verbs
+pfm update ignore	A	A.05-update-verbs
+pfm update pin	A	A.05-update-verbs
+pfm usage-hook	O1	O1.13-misc-ops
+pfm version	O1	O1.13-misc-ops
+pfm whoami	O1	O1.13-misc-ops
+servicedesk	M	M.10-chat-tools-gap

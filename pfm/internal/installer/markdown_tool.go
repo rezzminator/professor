@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // rumdlPinnedVersion is the rumdl release pfm provisions via `uv tool
@@ -31,18 +31,28 @@ const maxRumdlFailureOutput = 4096
 // installHarvest's dry-run gate and ok/skip/say reporting idiom, but every
 // terminal state here returns nil).
 func (installer *engine) installMarkdownTool(ctx context.Context) error {
+	processRunner := installer.processRunner()
 	platform := installer.harvestPlatform()
 	provisionedUV := filepath.Join(harvestpy.RuntimeRoot(harvestPythonRoot(installer.options.Home), platform), "uv")
 
-	if path, err := deps.Resolve("rumdl"); err == nil {
-		if version, versionErr := rumdlVersion(ctx, path); versionErr == nil && deps.AtLeast(version, rumdlPinnedVersion) {
+	if path, err := processRunner.LookPath("rumdl"); err == nil {
+		if version, versionErr := rumdlVersionWithRunner(
+			ctx,
+			path,
+			processRunner,
+		); versionErr == nil &&
+			deps.AtLeast(version, rumdlPinnedVersion) {
 			installer.ok(fmt.Sprintf("rumdl already present (%s)", version))
 			return nil
 		}
 	}
 
 	if !installer.apply {
-		installer.say("rumdl dry-run: would install rumdl==%s via uv tool install (uv=%s)", rumdlPinnedVersion, provisionedUV)
+		installer.say(
+			"rumdl dry-run: would install rumdl==%s via uv tool install (uv=%s)",
+			rumdlPinnedVersion,
+			provisionedUV,
+		)
 		return nil
 	}
 
@@ -56,16 +66,21 @@ func (installer *engine) installMarkdownTool(ctx context.Context) error {
 	// binary is absent.
 	uvPath := provisionedUV
 	if info, statErr := os.Stat(uvPath); statErr != nil || info.IsDir() {
-		uvPath = deps.Executable("uv")
+		if path, lookupErr := processRunner.LookPath("uv"); lookupErr == nil {
+			uvPath = path
+		} else {
+			uvPath = "uv"
+		}
 	}
 
 	binDir := filepath.Join(installer.options.Home, ".local", "bin")
-	command := exec.CommandContext(ctx, uvPath, "tool", "install", "rumdl=="+rumdlPinnedVersion)
-	command.Env = append(os.Environ(), "UV_TOOL_BIN_DIR="+binDir)
-	output, runErr := command.CombinedOutput()
-	if runErr != nil {
+	result, runErr := processRunner.Run(ctx, []string{
+		uvPath, "tool", "install", "rumdl==" + rumdlPinnedVersion,
+	}, deps.RunOptions{Env: deps.EnvironmentWith("UV_TOOL_BIN_DIR", binDir)})
+	output := append(append([]byte(nil), result.Stdout...), result.Stderr...)
+	if runErr != nil || result.ExitCode != 0 {
 		var lookupErr *exec.Error
-		if errors.As(runErr, &lookupErr) {
+		if errors.Is(runErr, os.ErrNotExist) || errors.As(runErr, &lookupErr) {
 			installer.skip("rumdl: no uv available (checked provisioned harvestpy uv and PATH)")
 			return nil
 		}
@@ -79,14 +94,22 @@ func (installer *engine) installMarkdownTool(ctx context.Context) error {
 	return nil
 }
 
-// rumdlVersion runs `path --version` and parses rumdl's exact
-// "rumdl X.Y.Z" output shape.
-func rumdlVersion(ctx context.Context, path string) (string, error) {
-	output, err := exec.CommandContext(ctx, path, "--version").Output()
+// rumdlVersionWithRunner runs `path --version` through the installer's
+// process seam and parses rumdl's exact "rumdl X.Y.Z" output shape.
+func rumdlVersionWithRunner(ctx context.Context, path string, runner deps.Runner) (string, error) {
+	result, err := runner.Run(ctx, []string{path, "--version"}, deps.RunOptions{})
 	if err != nil {
 		return "", fmt.Errorf("run %s --version: %w", path, err)
 	}
-	line := deps.FirstLine(string(output))
+	if result.ExitCode != 0 {
+		return "", fmt.Errorf(
+			"run %s --version: exit %d stderr=%q",
+			path,
+			result.ExitCode,
+			strings.TrimSpace(string(result.Stderr)),
+		)
+	}
+	line := deps.FirstLine(string(result.Stdout))
 	version, ok := strings.CutPrefix(line, "rumdl ")
 	if !ok {
 		return "", fmt.Errorf("expected \"rumdl \" prefix in %q", line)
@@ -95,10 +118,10 @@ func rumdlVersion(ctx context.Context, path string) (string, error) {
 }
 
 // truncateOutput bounds command output before it reaches an install log line.
-func truncateOutput(output []byte, max int) string {
+func truncateOutput(output []byte, maxBytes int) string {
 	trimmed := strings.TrimSpace(string(output))
-	if len(trimmed) <= max {
+	if len(trimmed) <= maxBytes {
 		return trimmed
 	}
-	return trimmed[:max] + "...(truncated)"
+	return trimmed[:maxBytes] + "...(truncated)"
 }

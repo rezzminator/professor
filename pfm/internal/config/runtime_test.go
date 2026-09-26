@@ -3,15 +3,71 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestResolveDevVersion(t *testing.T) {
+	const fullRevision = "8f9b8bb29513ff82f0ce31d5fc4547f9e30b7071"
+	cases := []struct {
+		name     string
+		settings []debug.BuildSetting
+		want     string
+	}{
+		{name: "no settings", settings: nil, want: "dev"},
+		{
+			name:     "vcs present but no revision key",
+			settings: []debug.BuildSetting{{Key: "vcs", Value: "git"}},
+			want:     "dev",
+		},
+		{
+			name: "clean checkout",
+			settings: []debug.BuildSetting{
+				{Key: "vcs.revision", Value: fullRevision},
+				{Key: "vcs.modified", Value: "false"},
+			},
+			want: "dev (8f9b8bb29513)",
+		},
+		{
+			name: "modified checkout",
+			settings: []debug.BuildSetting{
+				{Key: "vcs.revision", Value: fullRevision},
+				{Key: "vcs.modified", Value: "true"},
+			},
+			want: "dev (8f9b8bb29513, modified)",
+		},
+		{
+			name: "short revision",
+			settings: []debug.BuildSetting{
+				{Key: "vcs.revision", Value: "8f9b8bb"},
+				{Key: "vcs.modified", Value: "false"},
+			},
+			want: "dev (8f9b8bb)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResolveDevVersion(tc.settings); got != tc.want {
+				t.Fatalf("ResolveDevVersion(%v) = %q, want %q", tc.settings, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDisplayVersionPrefersLdflagsStamp(t *testing.T) {
+	if got := DisplayVersion("v0.67.0"); got != "v0.67.0" {
+		t.Fatalf("DisplayVersion() = %q, want the ldflags-stamped version unchanged", got)
+	}
+}
 
 func brokenConfig(t *testing.T) string {
 	t.Helper()
 	t.Setenv(paths.EnvHome, t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("this is [not a config\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -51,15 +107,133 @@ func TestLoadDiagnosticRuntimeRunsOnDefaultsAndCarriesTheError(t *testing.T) {
 // resolved roots are the configured accounts', not the host defaults.
 func TestLoadRuntimePointsTheEngineRootsAtTheRoster(t *testing.T) {
 	t.Setenv(paths.EnvHome, t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 	runtime, err := LoadRuntime(filepath.Join(t.TempDir(), "absent.toml"))
 	if err != nil {
 		t.Fatalf("LoadRuntime() = %v", err)
 	}
-	if got, want := runtime.Paths.Roots[pfmengine.Codex], runtime.Config.CodexHomes(); len(got) != len(want) || (len(got) != 0 && got[0] != want[0]) {
+	if got, want := runtime.Paths.Roots[pfmengine.Codex], runtime.Config.CodexHomes(); len(got) != len(want) ||
+		(len(got) != 0 && got[0] != want[0]) {
 		t.Fatalf("codex roots = %v, want the roster's homes %v", got, want)
 	}
 	if runtime.ConfigError != nil {
 		t.Fatalf("ConfigError = %v on an absent config", runtime.ConfigError)
+	}
+}
+
+// TestLoadRuntimeRecordsWhetherConfigWasExplicit pins issue #24's missing
+// non-default config guard while treating a named spelling of the resolved
+// default path the same as an omitted flag.
+func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	implicit, err := LoadRuntime("")
+	if err != nil {
+		t.Fatalf("LoadRuntime(\"\") = %v", err)
+	}
+	if implicit.ConfigExplicit {
+		t.Fatalf("LoadRuntime(\"\").ConfigExplicit = true, want false for the default location")
+	}
+	defaultPath := ResolvePath(home)
+	namedDefault := filepath.Dir(defaultPath) + "/../pfm/" + filepath.Base(defaultPath)
+	named, err := LoadRuntime(namedDefault)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", namedDefault, err)
+	}
+	if named.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the default location", namedDefault)
+	}
+
+	// A relative spelling of the default, resolved against the working directory.
+	t.Chdir(home)
+	relativeDefault, err := filepath.Rel(home, defaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := LoadRuntime(relativeDefault)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", relativeDefault, err)
+	}
+	if relative.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the default location", relativeDefault)
+	}
+
+	explicitPath := filepath.Join(t.TempDir(), "explicit.json")
+	explicit, err := LoadRuntime(explicitPath)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", explicitPath, err)
+	}
+	if !explicit.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = false, want true for a named path", explicitPath)
+	}
+}
+
+// TestLoadRuntimeDefaultUnderAnXDGOverrideIsNotExplicit pins pfm-update-2#F29's
+// XDG half: with XDG_CONFIG_HOME moved off home/.config, the default is the
+// path under XDG_CONFIG_HOME — naming it is not explicit, and naming the
+// home/.config spelling (no longer the default) is.
+func TestLoadRuntimeDefaultUnderAnXDGOverrideIsNotExplicit(t *testing.T) {
+	home := t.TempDir()
+	jail := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv(paths.EnvTestJailHome, jail)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(jail, ".config"))
+	xdgDefault := filepath.Join(jail, ".config", "pfm", filepath.Base(ResolvePath(home)))
+	if got := ResolvePath(home); got != xdgDefault {
+		t.Fatalf("ResolvePath under XDG_CONFIG_HOME = %q, want %q", got, xdgDefault)
+	}
+	named, err := LoadRuntime(xdgDefault)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", xdgDefault, err)
+	}
+	if named.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the XDG default", xdgDefault)
+	}
+	homeSpelling := filepath.Join(home, ".config", "pfm", filepath.Base(xdgDefault))
+	other, err := LoadRuntime(homeSpelling)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", homeSpelling, err)
+	}
+	if !other.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = false, want true: it is not the XDG default", homeSpelling)
+	}
+}
+
+// TestConfigInitWritesInsideTheJailAndRefusesAnAmbientHome pins the write
+// half of L3-F9: `pfm config init` (cmd/pfm/config_command.go runConfigInit)
+// resolves its target through LoadRuntime before WriteDefault ever touches
+// disk, so a jailed PFM_HOME with a properly re-homed XDG_CONFIG_HOME writes
+// inside the jail, and the SAME jailed PFM_HOME with an ambient
+// XDG_CONFIG_HOME left pointing outside it is refused before WriteDefault
+// ever runs — never a silent write into the operator's real pfm/config.*.
+func TestConfigInitWritesInsideTheJailAndRefusesAnAmbientHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	runtime, err := LoadRuntime("")
+	if err != nil {
+		t.Fatalf("LoadRuntime() over a properly jailed home = %v", err)
+	}
+	if err := WriteDefault(
+		runtime.Config.Path, runtime.Paths.Home, runtime.Paths.Roots[pfmengine.Claude], false,
+	); err != nil {
+		t.Fatalf("WriteDefault() = %v", err)
+	}
+	if !strings.HasPrefix(runtime.Config.Path, home) {
+		t.Fatalf("config init wrote %q, want it inside the jailed home %q", runtime.Config.Path, home)
+	}
+	if _, statErr := os.Stat(runtime.Config.Path); statErr != nil {
+		t.Fatalf("stat written config %q: %v", runtime.Config.Path, statErr)
+	}
+
+	// The same jailed PFM_HOME, but XDG_CONFIG_HOME now points somewhere
+	// that does not derive from it — the ambient leak L3-F9 names.
+	ambient := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", ambient)
+	if _, err := LoadRuntime(""); err == nil {
+		t.Fatal("LoadRuntime() accepted an ambient XDG_CONFIG_HOME outside the jailed home")
 	}
 }
 

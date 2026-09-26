@@ -14,7 +14,9 @@ import (
 	"time"
 )
 
-var plistEnvironmentPath = regexp.MustCompile(`<key>EnvironmentVariables</key>\s*<dict>\s*<key>PATH</key>\s*<string>([^<]*)</string>`)
+var plistEnvironmentPath = regexp.MustCompile(
+	`<key>EnvironmentVariables</key>\s*<dict>\s*<key>PATH</key>\s*<string>([^<]*)</string>`,
+)
 
 // TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux is the regression for
 // the deaf shared daemon: the plist carried no EnvironmentVariables, so launchd
@@ -47,7 +49,10 @@ func TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux(t *testing.T) {
 	}
 	match := plistEnvironmentPath.FindSubmatch(written)
 	if match == nil {
-		t.Fatalf("installed MCP launch agent declares no EnvironmentVariables PATH; launchd will run the daemon on its bare default PATH:\n%s", written)
+		t.Fatalf(
+			"installed MCP launch agent declares no EnvironmentVariables PATH; launchd will run the daemon on its bare default PATH:\n%s",
+			written,
+		)
 	}
 	daemonPath := strings.Split(string(match[1]), ":")
 	for _, want := range []string{
@@ -79,7 +84,8 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 			return err
 		}
 		relative := strings.TrimPrefix(name, "assets/")
-		if !strings.HasPrefix(relative, "launchd/") && !(strings.HasPrefix(relative, "systemd/") && strings.HasSuffix(relative, ".service")) {
+		if !strings.HasPrefix(relative, "launchd/") &&
+			(!strings.HasPrefix(relative, "systemd/") || !strings.HasSuffix(relative, ".service")) {
 			return nil
 		}
 		content, err := readAsset(relative)
@@ -135,7 +141,10 @@ func TestNameSyncLaunchAgentGivesTheJobAPathThatFindsTmux(t *testing.T) {
 	}
 	match := plistEnvironmentPath.FindSubmatch(written)
 	if match == nil {
-		t.Fatalf("installed name-sync launch agent declares no EnvironmentVariables PATH; launchd will run it on its bare default PATH:\n%s", written)
+		t.Fatalf(
+			"installed name-sync launch agent declares no EnvironmentVariables PATH; launchd will run it on its bare default PATH:\n%s",
+			written,
+		)
 	}
 	if want := servicePath(home); string(match[1]) != want {
 		t.Fatalf("name-sync PATH = %q, want the one service path %q", match[1], want)
@@ -160,7 +169,12 @@ func TestLaunchAgentPlistsCarryLogPaths(t *testing.T) {
 		}
 		want := "<string>__PFM_HOME__/Library/Logs/pfm/" + tc.logFile + "</string>"
 		if got := strings.Count(string(content), want); got != 2 {
-			t.Errorf("%s: StandardOutPath/StandardErrorPath = %d occurrence(s) of %q, want 2 (one each)", tc.asset, got, want)
+			t.Errorf(
+				"%s: StandardOutPath/StandardErrorPath = %d occurrence(s) of %q, want 2 (one each)",
+				tc.asset,
+				got,
+				want,
+			)
 		}
 		for _, key := range []string{"<key>StandardOutPath</key>", "<key>StandardErrorPath</key>"} {
 			if !strings.Contains(string(content), key) {
@@ -212,5 +226,45 @@ func TestWireLaunchAgentPlansLogDirInDryRun(t *testing.T) {
 	}
 	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
 		t.Fatalf("dry run created %s; a preview must not touch the filesystem", logDir)
+	}
+}
+
+// TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom is a REGRESSION
+// test for issue #24 finding 3/4 (M3 change E): a rollback (or any install
+// run over a config with every MCP server disabled) removes the MCP launch
+// agent with a bare "remove <path>" — indistinguishable from a deliberate
+// opt-out. The removal must name the config it read the disabled state from,
+// so "enabled=false because that file is gone after a migration" reads
+// differently from "the operator turned it off". Unfixed: the change line is
+// "remove <path>" with no config named.
+func TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(home, ".config", "pfm", "pfm.config.json")
+	installer := &engine{
+		options: Options{
+			Home:          home,
+			Stdout:        io.Discard,
+			MCPEnabled:    map[string]bool{"chat": false, "harvester": false},
+			MCPConfigPath: configPath,
+			Runner:        &loadedRunner{},
+			Sleep:         func(time.Duration) {},
+		},
+		apply: false,
+		stamp: "test",
+	}
+	if err := os.MkdirAll(filepath.Dir(installer.mcpLaunchAgentPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installer.mcpLaunchAgentPath(), []byte("<plist/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout strings.Builder
+	installer.options.Stdout = &stdout
+	if err := installer.wireMCPLaunchAgent(context.Background()); err != nil {
+		t.Fatalf("wireMCPLaunchAgent() error = %v", err)
+	}
+	want := "(no MCP server is enabled in " + configPath + ")"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("wireMCPLaunchAgent() output=%q, want the removal to name %q", stdout.String(), want)
 	}
 }

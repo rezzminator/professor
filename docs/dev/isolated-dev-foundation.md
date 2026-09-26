@@ -8,7 +8,7 @@ pfm development happens on the live checkout and ships straight onto the live bo
 
 This mirrors the pattern already proven in the user's other projects: development lives in a worktree with a fully isolated environment (own database, own container, own ports) and only verified work mirrors out.
 
-## The fence — three layers
+## The fence — four layers
 
 ### 1. Worktree — code never changes on the live checkout
 
@@ -23,20 +23,29 @@ A dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.24, and pinned Node 
 - Own ports — the MCP HTTP daemon binds container-local; nothing publishes to the host unless a task explicitly asks.
 - Builds land in the container's `~/.local/bin`, never the host's.
 
-### 3. The mirror — landing on live is explicit and last
+### 3. The real-simulation fence — live traffic without the host
+
+`dev.sh iso sim '<command>'` runs the `pfm-sim` target of the same image (`infra/fence/pfm-dev.Dockerfile`): pfm-dev plus what a real desktop brings to live traffic.
+
+- Google Chrome from Google's apt repo, native on amd64 and arm64. The harvester's browser sidecar launches only Patchright's `chrome` channel, so Chromium would report MISSING. Google keeps only the current release, so Chrome is the fence's one unpinned tool; its version prints in every run's proof line.
+- Real fonts and 2 GB of `/dev/shm`, and no display: the harvester's browser renders headless only. Docker's 64 MB default crashes renderers on heavy pages.
+- `infra/fence/sim-entry.sh` bootstraps each run: it builds `pfm` from the worktree, runs `pfm install` into the container HOME, and writes `harvester.config.json` with `fetch.browser` on, the same opt-in a person uses. Any failed step prints `sim: BOOTSTRAP-FAILED — <step>` with its log tail, and the command never runs.
+- Harvester state (the converter and browser sidecars) lives in a volume keyed by the worktree path, `pfm-sim-harvest-<worktree>-<cksum>`. It provisions once per worktree, and each worktree's atomically published `current` environment is never flipped by another. uv's package cache lives inside the same volume, so uv hardlinks: every sidecar-script edit publishes a new environment (the script is part of its digest) in seconds, instead of copying the full environment per edit. `dev.sh iso sim-reset` drops the volume.
+
+### 4. The mirror — landing on live is explicit and last
 
 gitter merges worktree → develop only after in-fence verification (project gates + walker). The live install (`go build -o ~/.local/bin/pfm` + `pfm install --yes` on the host) is a separate, user-gated mirror step — never a side effect of a task finishing. "Ship = installed" is redefined: ship = installed **in the container**; the host install is the mirror.
 
 ## Mechanics
 
-- `dev.sh` provides `iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]` through Docker Compose. The active checkout is read-only; Go caches plus walker dependencies and generated cross-runtime candidates use container volumes, while its tracked legacy bundle and active pointer stay visible. Walker `all` builds before verifying the generated targets. Every invocation builds the current Dockerfile before running. Docker absent → loud `TOOLCHAIN-MISSING`, never a silent host fallback.
-- **Broken-state report:** every `iso` run prints the container id and the in-container `$HOME` as its first line — a run that cannot prove it is inside the fence did not run inside the fence. A host-toolchain fallback is impossible by construction (the verb IS the docker invocation).
+- `dev.sh` provides `iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]` and `iso {run|sim} <command…>` through Docker Compose. The active checkout is read-only; Go and npm caches use container volumes. Every invocation builds the current Dockerfile before running. Docker absent → loud `TOOLCHAIN-MISSING`, never a silent host fallback.
+- **Broken-state report:** every `iso` run prints the container id and the in-container `$HOME` as its first line (an `iso sim` run prints its `sim:` line first, and a BOOTSTRAP-FAILED run stops before the command and its fence line) — a run that cannot prove it is inside the fence did not run inside the fence. A host-toolchain fallback is impossible by construction (the verb IS the docker invocation).
 - Builder briefs change one clause: all build/test through `dev.sh iso`; never build to the host's `~/.local/bin`; never run `pfm install` on the host.
 - The CLAUDE.md § Process "no worktree pipeline — deliberate scope choice" clause is reversed for code waves (a /ptm change, ordered by the user 2026-08-20). Blueprint/docs-only waves are markdown and cannot destabilize the box — see decision (a).
 
 ## Unchanged
 
-gitter-only git writes; guarded files; the leak gate; the publication boundary; wave/walker verification order.
+gitter-only git writes; guarded files; the leak gate; the publication boundary; flight verification order.
 
 ## Sequence
 

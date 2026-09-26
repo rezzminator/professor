@@ -5,7 +5,7 @@ set -euo pipefail
 # repo's three projects. /dev drives it; agents call it directly.
 #
 # WHAT THIS SCRIPT REPORTS WHEN IT IS ITSELF BROKEN:
-#   - a missing toolchain (go/node/npm) is TOOLCHAIN-MISSING and exits non-zero.
+#   - a missing toolchain (go/node) is TOOLCHAIN-MISSING and exits non-zero.
 #     It is NEVER reported as a pass or a skip: "we could not look" and "there is
 #     nothing wrong" must not print the same word.
 #   - a project with no dependencies installed is NOT-INSTALLED, not "clean".
@@ -14,28 +14,31 @@ set -euo pipefail
 #   - every command's own exit status propagates; nothing is swallowed with `|| true`.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Scratch artifacts live outside the working tree: /tmp/<project>/<purpose>,
+# where <project> is the repo directory's basename with any leading dot stripped.
+# A run never dirties the checkout, and every artifact path printed is absolute.
+PROJECT_NAME="$(basename "$REPO_ROOT")"; PROJECT_NAME="${PROJECT_NAME#.}"
+TMP_BASE="/tmp/$PROJECT_NAME"
 cd "$REPO_ROOT"
 
-PROJECTS=(templates pfm walker)
+PROJECTS=(templates pfm)
 
 # project -> directory
 proj_dir() {
   case "$1" in
     templates) echo "templates" ;;
     pfm)  echo "pfm" ;;
-    walker)    echo "engines/wave-walker/engine" ;;
     *) return 1 ;;
   esac
 }
 
 # project -> the toolchain binaries that project's checks actually need. A tool
 # absent from the SCOPE being reported is a warn, not a failure: `status pfm`
-# must not fail on a missing npm, and must still fail on a missing go.
+# must not fail on a missing node, and must still fail on a missing go.
 proj_tools() {
   case "$1" in
-    templates) echo "node" ;;
+    templates) echo "node go" ;;
     pfm)       echo "go" ;;
-    walker)    echo "node npm" ;;
     *) return 1 ;;
   esac
 }
@@ -65,35 +68,6 @@ need_tool() { # need_tool <bin> <project>
   fi
 }
 
-node_installed() { # node_installed <dir> <project>
-  [[ -f "$1/node_modules/.package-lock.json" ]] && return 0
-  # A clean checkout with no node_modules is the common case, not a broken
-  # one — try an install before failing, but ONLY offline: `npm ci --offline`
-  # refuses instantly if the local cache cannot satisfy the lockfile, so this
-  # never becomes the silent mid-run network call the repo's other install
-  # hooks are deliberately kept out of. A cold cache falls straight through
-  # to the honest NOT-INSTALLED below.
-  if [[ -f "$1/package-lock.json" ]]; then
-    info "$2: no node_modules — trying an offline install from the local npm cache before failing"
-    if npm --prefix "$1" ci --offline >/dev/null 2>&1; then
-      ok "$2: installed from the local npm cache (offline, no network)"
-      return 0
-    fi
-  fi
-  local msg="$2: NOT-INSTALLED — no node_modules; run '$(basename "$0") install $2'"
-  # SWEEP_ALL is set only for the all-projects aggregate (`dev.sh test`, no
-  # project arg): there, a project the sweep never reached is a coverage
-  # gap the report must name AS a gap, not fold into the FAIL scroll a
-  # single broken project also produces. A targeted `dev.sh test walker`
-  # keeps the plain FAIL — the project named is the only one in scope.
-  if [[ "${SWEEP_ALL:-0}" == 1 ]]; then
-    gap_step "$msg"
-  else
-    fail_step "$msg"
-  fi
-  return 1
-}
-
 run() { # run <label> -- <cmd...>
   local label="$1"; shift
   [[ "${1:-}" == "--" ]] && shift
@@ -101,13 +75,86 @@ run() { # run <label> -- <cmd...>
   if "$@"; then ok "$label"; else fail_step "$label (exit $?)"; fi
 }
 
-repo_git() {
-  if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" && -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
-    git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
-      -c safe.directory="$PFM_DEV_REPO_WORK_TREE" "$@"
-  else
-    git "$@"
+# repo_git: the one fence-aware git reader, shared with the arch ratchets.
+# shellcheck source=../../pfm/scripts/repo-git.sh
+source "$REPO_ROOT/pfm/scripts/repo-git.sh" || { echo "dev.sh: cannot source pfm/scripts/repo-git.sh" >&2; exit 2; }
+
+# skip_gate <label> <go-test.json>: every skipped test must be named in
+# pfm/scripts/known-skips.tsv (scripts/skip-check.sh). An unlisted skip is a
+# GAP and non-zero; a skip list that could not be read is a FAIL, never a pass.
+skip_gate() {
+  local label="$1" rc=0
+  bash "$REPO_ROOT/pfm/scripts/skip-check.sh" "$2" || rc=$?
+  case "$rc" in
+    0) ok "$label" ;;
+    1) gap_step "$label — unlisted skipped test(s) named above" ;;
+    *) fail_step "$label — the skips could not be read (exit $rc)" ;;
+  esac
+}
+
+# go_test_report <go-test.json>: the failure-biased read of a `go test -json`
+# stream — the whole stream is megabytes of frames a caller cannot hold, so this
+# prints one block per FAILING test (package, test name, that test's own output
+# capped at GO_TEST_OUTPUT_LINES lines and GO_TEST_LINE_CHARS characters each —
+# a single assertion that embeds a whole captured stdout is one 6 KB line, so a
+# line count alone caps nothing), then packages that failed without a failing
+# test, then the artifact's ABSOLUTE path on every path, pass or fail, so the
+# caller never reconstructs it. What it reports when IT is broken: no jq is
+# TOOLCHAIN-MISSING, an absent or empty stream is REPORT-UNREADABLE, and a
+# stream holding no test event at all is NO TEST EVENTS (crash, kill, or build
+# failure) — never an empty summary that reads the same as a green run.
+# trim_line <chars>: cap each line, naming the cut so a truncated assertion is
+# never mistaken for the whole message.
+trim_line() {
+  awk -v n="$1" '{ if (length($0) > n) print substr($0, 1, n) " …[line truncated, full text in the log]"; else print }'
+}
+
+go_test_report() {
+  local json="$1" cap="${GO_TEST_OUTPUT_LINES:-25}" chars="${GO_TEST_LINE_CHARS:-400}" abs dir
+  dir="$(cd "$(dirname "$json")" 2>/dev/null && pwd)" || dir="$(dirname "$json")"
+  abs="$dir/$(basename "$json")"
+  if ! command -v jq >/dev/null 2>&1; then
+    fail_step "test report: TOOLCHAIN-MISSING — 'jq' not on PATH; the failure summary could not be built"
+    info "log: $abs"; return
   fi
+  if [[ ! -s "$json" ]]; then
+    fail_step "test report: REPORT-UNREADABLE — $abs is absent or empty; the run left no stream to read"
+    info "log: $abs"; return
+  fi
+  if [[ -z "$(jq -r 'select(.Test != null) | .Test' "$json" 2>/dev/null | head -1)" ]]; then
+    fail_step "test report: NO TEST EVENTS — the stream holds no test event; the run crashed, was killed, or failed to build"
+    jq -r 'select(.Action=="output") | .Output' "$json" 2>/dev/null \
+      | grep -vE '^[[:space:]]*$' | tail -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
+    info "log: $abs"; return
+  fi
+  local failed failpkgs pkg test body total n=0
+  failed="$(jq -r 'select(.Action=="fail" and .Test != null) | .Package + "\t" + .Test' "$json" | sort -u)"
+  failpkgs="$(jq -r 'select(.Action=="fail" and .Test == null) | .Package' "$json" | sort -u)"
+  if [[ -n "$failed" ]]; then
+    while IFS=$'\t' read -r pkg test; do
+      [[ -z "$pkg" ]] && continue
+      n=$((n + 1))
+      printf '  FAIL  %s %s\n' "$pkg" "$test"
+      body="$(jq -r --arg p "$pkg" --arg t "$test" \
+        'select(.Action=="output" and .Package==$p and .Test==$t) | .Output' "$json" \
+        | grep -vE '^(=== (RUN|PAUSE|CONT)|( *)--- (PASS|FAIL|SKIP))|^[[:space:]]*$' || true)"
+      if [[ -n "$body" ]]; then
+        total=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
+        printf '%s\n' "$body" | head -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
+        (( total > cap )) && printf '        (+%d more output line(s) in the log)\n' "$((total - cap))"
+      fi
+    done <<< "$failed"
+  fi
+  while read -r pkg; do
+    [[ -z "$pkg" ]] && continue
+    awk -F'\t' -v p="$pkg" '$1==p {found=1} END {exit !found}' <<< "$failed" && continue
+    n=$((n + 1))
+    printf '  FAIL  %s — the package failed with no failing test (build or setup error)\n' "$pkg"
+    jq -r --arg p "$pkg" 'select(.Action=="output" and .Package==$p and .Test==null) | .Output' "$json" \
+      | grep -vE '^(ok|FAIL|PASS)|^[[:space:]]*$' | head -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
+  done <<< "$failpkgs"
+  (( n > 0 )) && info "$n failing test(s)/package(s) summarised above, capped at $cap output line(s) each"
+  info "log: $abs"
 }
 
 # ─── status ──────────────────────────────────────────────────────────────────
@@ -128,7 +175,7 @@ cmd_status() { # cmd_status [project|all]
   for p in "${scope[@]}"; do required+="$(proj_tools "$p") "; done
 
   head_ "toolchain — scope: $target"
-  for t in go node npm git jq; do
+  for t in go node git jq; do
     if command -v "$t" >/dev/null 2>&1; then
       ok "$t — $(command -v "$t")"
     elif [[ "$required" == *" $t "* ]]; then
@@ -147,12 +194,6 @@ cmd_status() { # cmd_status [project|all]
         ok "$p — $d/ ($(find "$d" -type f -not -name refresh-map.json | wc -l | tr -d ' ') shipped files, no build)" ;;
       pfm)
         ok "$p — $d/ (go $(sed -n 's/^go //p' "$d/go.mod" | head -1))" ;;
-      walker)
-        if [[ -d "$d/node_modules" ]]; then
-          ok "$p — $d/ (npm, deps installed)"
-        else
-          warn "$p — $d/ (npm, NOT-INSTALLED — 'dev.sh install $p')"
-        fi ;;
     esac
   done
 
@@ -169,11 +210,47 @@ cmd_status() { # cmd_status [project|all]
 
 # ─── per-project actions ─────────────────────────────────────────────────────
 
+# node_test_suite LABEL TAP FILE... — runs node's test runner into TAP and
+# names every way it can fail to prove anything: a missing file, a red or
+# unrunnable suite, zero passing tests, a skipped or todo test.
+node_test_suite() {
+  local label="$1" tap="$2"
+  shift 2
+  local file
+  for file in "$@"; do
+    if [[ ! -f "$file" ]]; then
+      fail_step "$label tests NOT RUN — $file is missing; the suite was never executed"
+      return
+    fi
+  done
+  if ! node --test --test-reporter=tap "$@" >"$tap" 2>&1; then
+    cat "$tap"
+    fail_step "$label tests FAILED — a test regressed, or node could not run the suite (see output)"
+  elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$tap"; then
+    cat "$tap"
+    fail_step "$label tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
+  elif ! awk '/^# (skipped|todo) /{ if ($3 > 0) bad=1 } END{ exit bad }' "$tap"; then
+    cat "$tap"
+    fail_step "$label tests SKIPPED — a skipped or todo test is a named gap, never a pass"
+  else
+    ok "$label tests hold ($(awk '/^# pass /{print $3}' "$tap") passing)"
+  fi
+}
+
 act_templates() { # the shipped product: mechanical gates, no build
   local action="$1"
   case "$action" in
-    install|build|typecheck) info "templates: no $action step (markdown + shell)" ;;
+    install|build|typecheck|cover) info "templates: no $action step (markdown + shell)" ;;
     verify|test|all)
+      # Clone ratchet over the shell / JS / Python surface (scripts/clone-check.sh,
+      # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
+      # broken state is `CLONES ERROR` and rc 2, never a PASS.
+      run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
+      # The lane↔command map gate (infra/fence/lanes/check-map.sh). --no-derive
+      # skips the command/tool surface derive, which needs a built pfm; its own
+      # broken state is a named red line and rc 1/2, never a silent pass.
+      run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
+      run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
       head_ "templates — leak gate"
       # EVERY tracked file in this repo is published, so the changed set is the
       # whole working tree — not a `templates scripts README INSTALL CHANGELOG
@@ -231,8 +308,8 @@ act_templates() { # the shipped product: mechanical gates, no build
           if [[ -n "${PFM_DEV_FENCE:-}" ]]; then
             out="$(mktemp)"
           else
-            out="tmp/templates-unregistered-tokens.txt"
-            mkdir -p tmp
+            out="$TMP_BASE/templates/unregistered-tokens.txt"
+            mkdir -p "$TMP_BASE/templates"
           fi
           printf '%s\n' "$unregistered" > "$out"
           fail_step "$(wc -l <<<"$unregistered") of $(wc -l <<<"$used") markdown-template tokens are absent from PLACEHOLDERS.md — register each as an install placeholder or under § Runtime metavariables"
@@ -240,6 +317,74 @@ act_templates() { # the shipped product: mechanical gates, no build
           grep -rhoE '\{[A-Z][A-Z0-9_]+\}' --include='*.md' templates \
             | grep -xFf "$out" | sort | uniq -c | sort -rn | head -10 \
             | while read -r n tok; do info "  ${n}x  $tok"; done
+        fi
+      fi
+
+      head_ "templates — scratch-path policy"
+      # Scratch artifacts belong in /tmp/<project>/<purpose>, never in a repo-local
+      # tmp/. This catches the straggler an edit pass missed, which is the whole
+      # point: it enumerates tracked files rather than trusting that the sweep was
+      # complete. Its own broken state is distinct — a git listing that cannot be
+      # read is a FAIL naming git, never an empty sweep reported clean.
+      # NUL-delimited through a file: a command substitution drops NUL bytes, so
+      # capturing `ls-files -z` into a variable silently collapses the list into
+      # one blob and the scan reports clean because it scanned nothing.
+      mkdir -p "$TMP_BASE/templates"
+      if ! repo_git ls-files -z > "$TMP_BASE/templates/tracked.z" 2>/dev/null; then
+        fail_step "scratch-path policy: the tracked-file list could not be read from git — nothing was scanned"
+      else
+        # Excluded, and SAID so rather than filtered in silence: shipped release
+        # notes, the retro ledger, generated mirrors, and the two measurement
+        # records that name where a past capture actually landed — rewriting
+        # those would misstate history. An exclusion that hides its own work is
+        # the next bug, so the count and the list are printed on every run.
+        local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|\.professor/retro\.md$|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
+        # grep needs /dev/null as a second operand: BSD xargs runs the utility
+        # even on empty input, and a bare `grep PATTERN` then reads stdin and
+        # hangs the gate forever instead of reporting an empty sweep.
+        all_hits=$(xargs -0 grep -lE '(^|[^/[:alnum:]_.-])tmp/(timing|flights|lanes|guard|professor_)' /dev/null \
+          < "$TMP_BASE/templates/tracked.z" 2>/dev/null || true)
+        strays=$(printf '%s\n' "$all_hits" | grep -vE "$exclude" | grep -v '^$' || true)
+        excluded=$(printf '%s\n' "$all_hits" | grep -cE "$exclude" || true)
+        info "scratch-path scan: $excluded historical-record path(s) excluded by name (release notes, retro ledger, mirrors, measurement records)"
+        if [[ -z "$strays" ]]; then
+          ok "no tracked file names a migrated scratch purpose under a repo-local tmp/"
+        else
+          fail_step "$(wc -l <<<"$strays" | tr -d ' ') tracked file(s) still name a repo-local tmp/ path — repoint them at /tmp/<project>/<purpose>"
+          while read -r f; do [[ -n "$f" ]] && info "  $f"; done <<< "$strays"
+        fi
+
+        # The sweep above only knows the purposes one migration moved. The policy
+        # itself is checked on CODE (prose that merely mentions a path is not a
+        # write): (A) a repo-rooted tmp/ — `$ROOT/tmp/`, `path.join(repoRoot, 'tmp')`,
+        # Go's cwd-relative `filepath.Join("tmp", …)`; (B) a fixed-name bare
+        # `/tmp/<name>` a host run shares with every other checkout. Allowed: the
+        # derived `/tmp/$PROJECT/…` forms, anonymous `mktemp` templates (XXXXXX),
+        # and tmux's own `/tmp/tmux-<uid>` socket dir. Container-only code (the
+        # fence and demo lanes, the e2e docker run) and test fixtures are excluded
+        # BY NAME and counted, never filtered in silence; zero code files scanned
+        # is a broken scan, not a clean tree. A comment line names a path, it does
+        # not write one, so hits whose text opens with #, // or * are dropped.
+        local code_ext='\.(sh|bash|mjs|js|ts|py|go)$'
+        local code_skip='^(infra/(fence|demo)/|scripts/e2e-linux\.sh$)|(_test\.go|\.test\.(mjs|js|ts))$|/testdata/'
+        local code_z="$TMP_BASE/templates/tracked-code.z" code_n code_skipped repo_local bare
+        grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zvE "$code_skip" > "$code_z" || true
+        code_n=$(tr -cd '\0' < "$code_z" | wc -c | tr -d ' ')
+        code_skipped=$(grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zcE "$code_skip" || true)
+        if [[ "$code_n" -eq 0 ]]; then
+          fail_step "scratch-path policy: NO tracked code file was scanned — the SCAN is broken, not the tree"
+        else
+          repo_local=$(xargs -0 grep -nE '(\$\{?(ROOT|REPO_ROOT|repo_root|repoRoot|WORKTREE)\}?|\{repo-root\})/tmp/|path\.join\([A-Za-z_]+, *['"'"'"]tmp['"'"'"]|filepath\.Join\("tmp"' \
+            /dev/null < "$code_z" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' || true)
+          bare=$(xargs -0 grep -nE '(^|[^A-Za-z0-9_}.-])/tmp/[A-Za-z0-9_.-]' /dev/null < "$code_z" 2>/dev/null \
+            | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' | grep -vE 'XXXXXX|/tmp/tmux-' || true)
+          info "scratch-path policy: $code_n code file(s) scanned; $code_skipped excluded by name (container-only lanes, the e2e docker run, test fixtures)"
+          if [[ -z "$repo_local$bare" ]]; then
+            ok "no tracked code writes a repo-local tmp/ or a fixed-name bare /tmp path"
+          else
+            fail_step "$(printf '%s\n%s\n' "$repo_local" "$bare" | grep -c . | tr -d ' ') scratch write(s) outside /tmp/<project>/<purpose> — derive the project dir, or use an anonymous mktemp"
+            while read -r hit; do info "  $hit"; done < <(printf '%s\n%s\n' "$repo_local" "$bare" | grep .)
+          fi
         fi
       fi
 
@@ -262,6 +407,25 @@ act_templates() { # the shipped product: mechanical gates, no build
         esac
       fi
 
+      head_ "templates — generate the engine mirrors"
+      # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
+      # clone holds none, so verify generates them from the Claude sources
+      # before any gate reads them. Current mirrors are left alone (the fence
+      # mounts the tree read-only and CI generates on the host first); the
+      # tree's own compiler runs, never a host pfm binary (a stale host build
+      # rewrites what it does not understand).
+      if ! need_tool go templates || ! need_tool node templates; then
+        fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
+      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex check "$REPO_ROOT") >/dev/null 2>&1 \
+        && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode check "$REPO_ROOT") >/dev/null 2>&1; then
+        ok "engine mirrors current — nothing generated"
+      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex build "$REPO_ROOT") \
+        && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode build "$REPO_ROOT"); then
+        ok "engine mirrors generated from the Claude sources"
+      else
+        fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
+      fi
+
       head_ "templates — codex generated-marker claim"
       # The templates dir's shipped JS compiler and this repo's `pfm codex build`
       # write the same $HOME/.codex outputs on adopter hosts. A copy that stops
@@ -281,34 +445,103 @@ act_templates() { # the shipped product: mechanical gates, no build
         fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
       fi
 
-      head_ "templates — token-ledger pricing"
+      head_ "templates — token-audit pricing"
       if node scripts/check-token-pricing.mjs; then
         ok "every published model id resolves to its intended rate"
       else
         fail_step "token pricing FAILED — a published model id resolves to the wrong rate, or the PRICING table could not be read (see output)"
       fi
 
-      run "OpenCode installed symlink layout" -- node scripts/test-opencode-generation.mjs
+      head_ "templates — token-audit tests"
+      # node --test exits 0 when it finds no tests, so a moved or renamed suite
+      # would read as a pass: enumerate the files and count the passes instead.
+      local token_tests=(templates/global/commands/tokens/*.test.mjs)
+      local token_out="$TMP_BASE/templates/token-audit.tap"
+      mkdir -p "$TMP_BASE/templates"
+      if [[ ! -f "${token_tests[0]}" ]]; then
+        fail_step "token-audit tests NOT RUN — templates/global/commands/tokens/*.test.mjs matched no file; the suite was never executed"
+      elif ! node --test --test-reporter=tap "${token_tests[@]}" >"$token_out" 2>&1; then
+        cat "$token_out"
+        fail_step "token-audit tests FAILED — a measure, the flight selection, or an error path regressed, or node could not run the suite (see output)"
+      elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$token_out"; then
+        cat "$token_out"
+        fail_step "token-audit tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
+      else
+        ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
+      fi
 
-      head_ "templates — opencode mirror"
-      # The OpenCode mirror must be current AND valid: check re-derives every
-      # output from the Claude sources; doctor additionally parses each artifact.
-      if need_tool node templates && node .claude/scripts/build-opencode.mjs check \
-        && node .claude/scripts/build-opencode.mjs doctor | tail -1; then
+      head_ "templates — release-check tests and the notes grammar"
+      node_test_suite "release-check" "$TMP_BASE/templates/release-check.tap" scripts/release-check.test.mjs
+      if node scripts/release-check.mjs notes --all releases >"$TMP_BASE/templates/release-notes.txt" 2>&1; then
+        ok "release notes from v0.78.0 on follow docs/RELEASE.md § Release notes ($(grep -m1 '^CHECKED' "$TMP_BASE/templates/release-notes.txt" || echo 'CHECKED line MISSING'))"
+      else
+        cat "$TMP_BASE/templates/release-notes.txt"
+        fail_step "release notes grammar FAILED — a note breaks docs/RELEASE.md § Release notes, or release-check could not run (exit 2 is an ERROR, see output)"
+      fi
+
+      head_ "templates — codex-sync missing compiler"
+      local cs_copy
+      for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
+        if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
+          ok "codex-sync ($cs_copy) names unavailable compiler and retains dirty flag"
+        else
+          fail_step "codex-sync regression FAILED ($cs_copy) — unavailable compiler must be named and dirty flag retained"
+        fi
+      done
+
+      head_ "templates — go test report under pipefail"
+      if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
+        ok "go_test_report reaches its log line on filtered and over-cap failure output"
+      else
+        fail_step "go_test_report regression FAILED — a failing stream aborted the report before its verdict (see output)"
+      fi
+
+      head_ "templates — native opencode mirror"
+      # Build the source-under-test inside the fence; verification must never
+      # depend on or install a host binary. The ignored artifact also gives this
+      # repo's Stop hook a current compiler while develop remains uninstalled.
+      # /pfm-timing exists only as the fence's bind mount; on the host the same
+      # scratch is $TMP_BASE/timing, so resolve it the way the timing ledger does.
+      local opencode_scratch="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
+      local opencode_bin="$opencode_scratch/pfm-dev-bin"
+      local opencode_home="$opencode_scratch/opencode-verify-home"
+      if need_tool go templates && mkdir -p "$opencode_scratch" \
+        && go -C pfm build -o "$opencode_bin" ./cmd/pfm \
+        && "$opencode_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
+        && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
         ok "opencode mirror current and parseable"
       else
-        fail_step "opencode mirror FAILED — run: node .claude/scripts/build-opencode.mjs generate"
+        fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
       fi
 
-      head_ "templates — isolated-fence mount preflight"
-      if bash infra/fence-preflight-test.sh; then
-        ok "Docker Desktop mount targets are prepared before the read-only worktree bind"
+      head_ "templates — OpenCode writer check tests"
+      node_test_suite "opencode-writer check" "$TMP_BASE/templates/opencode-writer.tap" scripts/check-opencode-writer.test.mjs
+
+      head_ "templates — codeprobe skill tests"
+      local cp_out="$TMP_BASE/templates/codeprobe.txt"
+      if [[ ! -f templates/global/skills/codeprobe/codeprobe_test.py ]]; then
+        fail_step "codeprobe tests NOT RUN — templates/global/skills/codeprobe/codeprobe_test.py is missing"
+      elif ! python3 -m unittest templates/global/skills/codeprobe/codeprobe_test.py >"$cp_out" 2>&1; then
+        cat "$cp_out"
+        fail_step "codeprobe tests FAILED — a verb or probe command regressed, or python3 could not run the suite (see output)"
+      elif ! grep -Eq '^Ran [1-9][0-9]* tests?' "$cp_out"; then
+        cat "$cp_out"
+        fail_step "codeprobe tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
+      elif grep -Eq 'skipped=[1-9]' "$cp_out"; then
+        cat "$cp_out"
+        fail_step "codeprobe tests SKIPPED — a skipped test is a named gap, never a pass"
       else
-        fail_step "isolated-fence mount preflight FAILED — nested volume targets are not safely prepared"
+        ok "codeprobe verbs and probe commands hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
       fi
 
+      head_ "templates — OpenCode writer references"
+      if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then
+        ok "live surfaces use native pfm opencode"
+      else
+        fail_step "OpenCode writer reference FAILED — use native pfm opencode on every named surface"
+      fi
       head_ "templates — self-hosted manifest"
-      if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm engines/wave-walker/engine; then
+      if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm; then
         ok "self-hosted manifest version, roster, and hashes match the repository"
       else
         fail_step "self-hosted manifest FAILED — its install ledger is stale or unreadable"
@@ -319,71 +552,67 @@ act_templates() { # the shipped product: mechanical gates, no build
   esac
 }
 
-gofmt_clean() { # gofmt_clean <dir> — 1 when gofmt lists a file, 2 when gofmt could not run
-  local out
-  out="$(gofmt -l "$1")" || { echo "gofmt could not run over $1 — NO file was checked" >&2; return 2; }
-  [[ -z "$out" ]] && return 0
-  printf 'unformatted (run gofmt -w under the pinned Go):\n%s\n' "$out" >&2
-  return 1
-}
-
 act_pfm() {
   local action="$1" d; d="$(proj_dir pfm)"
   need_tool go pfm || return 0
+  # fmt-check, lint-new and cover run through pfm/Makefile.
+  need_tool make pfm || return 0
   case "$action" in
     install) run "pfm: go mod download" -- go -C "$d" mod download ;;
     build)   run "pfm: go build" -- go -C "$d" build ./... ;;
     typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
     verify)
       run "pfm: go vet" -- go -C "$d" vet ./...
-      # CI's gofmt step, under the same pinned Go: gofmt output differs across
-      # Go releases, so a host gofmt newer than go.mod's can call this clean
-      # while CI refuses it — run through `iso` for the verdict CI will give.
-      run "pfm: gofmt" -- gofmt_clean "$d"
-      # The architecture ratchet (C1–C16 vs pfm/.arch/). Its own broken state
+      # Formatting and lint through the pinned golangci-lint (infra/fence/tools.env):
+      # the Makefile names TOOLCHAIN-MISSING when the tool is absent — `make
+      # tools` on the host; the fence image bakes it in. lint-new judges only
+      # lines changed since origin/develop; `make lint` is the full backlog.
+      run "pfm: fmt-check (gofumpt + gci + golines)" -- make -C "$d" --no-print-directory fmt-check
+      run "pfm: lint-new (golangci-lint, changed lines)" -- make -C "$d" --no-print-directory lint-new
+      # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
       # is rc 2 (an enumerator or grep that could not run), never a PASS.
-      run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh" ;;
+      run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh"
+      # The gate scripts' own fixture suites: a ratchet nobody tests is trusted
+      # on faith. Each prints "N passed, M failed" and is non-zero on any FAIL.
+      run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d" ;;
     # -count=1 is not optional: without it a package whose inputs are unchanged
     # reports `ok  (cached)`, and this gate would call a run it never watched a
     # pass. -timeout is measured, not guessed — internal/index's OpenCode WAL
     # stress test alone takes ~4.5 minutes (268s watched), so the 10m default
     # turns an ordinary loaded host into a red suite that names the wrong cause.
-    test)    run "pfm: go test" -- go -C "$d" test ./... -count=1 -timeout 25m ;;
+    test)
+      local flags_text timing_base timing_run
+      local testflags=()
+      if ! flags_text="$(make -s -C "$d" --no-print-directory testflags)"; then
+        fail_step "pfm: TESTFLAGS could not be read from Makefile"; return
+      fi
+      read -r -a testflags <<< "$flags_text"
+      timing_base="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
+      mkdir -p "$timing_base"
+      timing_run="$(mktemp -d "$timing_base/run.XXXXXX")"
+      # Positional arguments keep flags and output paths out of shell code.
+      # The JSON is retained even on failure; timing is a separate verdict.
+      run "pfm: go test" -- bash -c '
+        go -C "$1" test "${@:3}" -count=1 -timeout 25m -json ./... >"$2"
+      ' _ "$d" "$timing_run/unit.json" "${testflags[@]}"
+      go_test_report "$timing_run/unit.json"
+      skip_gate "pfm: skipped tests are all listed (unit)" "$timing_run/unit.json"
+      run "pfm: test timing (budget)" -- bash "$d/scripts/test-timing.sh" \
+        --check --suite unit --out "$timing_run/unit.tsv" "$timing_run/unit.json"
+      # Tagged Tier A runs serially and has its own budget and artifact.
+      run "pfm: e2e (tagged)" -- bash -c '
+        go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
+      ' _ "$d" "$timing_run/e2e.json"
+      go_test_report "$timing_run/e2e.json"
+      skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
+      run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
+        --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json" ;;
+    # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
+    # by pfm/.testcoverage.yml (a ratchet: measured, raised, never lowered).
+    # COVER_DIR is where the profiles land — the fence sets it to container HOME
+    # because the worktree mount is read-only.
+    cover)   run "pfm: coverage (go-test-coverage)" -- make -C "$d" --no-print-directory cover ;;
     all)     act_pfm build; act_pfm verify; act_pfm test ;;
-  esac
-}
-
-act_npm() { # act_npm <project> <action> [extra script...]
-  local p="$1" action="$2" d; d="$(proj_dir "$p")"
-  need_tool npm "$p" || return 0
-  case "$action" in
-    install)
-      if [[ -f "$d/package-lock.json" ]]; then
-        run "$p: npm ci" -- npm --prefix "$d" ci
-      else
-        run "$p: npm install" -- npm --prefix "$d" install
-      fi ;;
-    *)
-      node_installed "$d" "$p" || return 0
-      case "$action" in
-        build)     run "$p: npm run build" -- npm --prefix "$d" run build ;;
-        typecheck) run "$p: npm run typecheck" -- npm --prefix "$d" run typecheck ;;
-        verify)
-          if npm --prefix "$d" run 2>/dev/null | grep -q '^  verify'; then
-            run "$p: npm run verify" -- npm --prefix "$d" run verify
-          else
-            info "$p: no verify script"
-          fi ;;
-        test)      run "$p: npm test" -- npm --prefix "$d" test ;;
-      esac ;;
-  esac
-}
-
-act_walker() {
-  local action="$1"
-  case "$action" in
-    all) act_npm walker build; act_npm walker verify; act_npm walker typecheck; act_npm walker test ;;
-    *) act_npm walker "$action" ;;
   esac
 }
 
@@ -391,12 +620,11 @@ dispatch() { # dispatch <project> <action>
   case "$1" in
     templates) act_templates "$2" ;;
     pfm)  act_pfm "$2" ;;
-    walker)    act_walker "$2" ;;
   esac
 }
 
 # ─── iso — the container fence ───────────────────────────────────────────────
-# Runs a command inside the pfm-dev container (infra/docker-compose.yml) with
+# Runs a command inside the pfm-dev container (infra/fence/docker-compose.yml) with
 # THIS checkout — the worktree this script belongs to — mounted at /work: a
 # fresh machine per run (own HOME, own tmux, no published ports). Files are
 # edited on the host; the container only builds and tests.
@@ -407,7 +635,16 @@ dispatch() { # dispatch <project> <action>
 # probed explicitly: an installed `docker` binary with nothing behind it is the
 # common failure, and it must be named as TOOLCHAIN-MISSING here rather than
 # surfacing later as an opaque compose connect error.
-cmd_iso() { # cmd_iso <action> [project]
+# sim_volume — this worktree's harvester volume for `iso sim`: the basename,
+# folded to docker's volume-name alphabet, plus a checksum of the full path so
+# two checkouts with one basename never share a sidecar.
+sim_volume() {
+  local wt
+  wt="$(basename "$REPO_ROOT" | tr -c 'A-Za-z0-9_.\n-' '-')"; wt="${wt#.}"
+  printf 'pfm-sim-harvest-%s-%s' "$wt" "$(printf '%s' "$REPO_ROOT" | cksum | cut -d' ' -f1)"
+}
+
+cmd_iso() { # cmd_iso <action> [project | command…]
   local action="${1:-}" target="${2:-pfm}"
   need_tool docker iso || exit 1
   need_tool git iso || exit 1
@@ -415,44 +652,67 @@ cmd_iso() { # cmd_iso <action> [project]
     fail_step "iso: TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed); start Docker and retry"
     exit 1
   fi
-  local compose="$REPO_ROOT/infra/docker-compose.yml"
+  local compose="$REPO_ROOT/infra/fence/docker-compose.yml"
   if [[ ! -f "$compose" ]]; then
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
   fi
-  if ! bash "$REPO_ROOT/infra/prepare-fence-mounts.sh" "$REPO_ROOT"; then
-    fail_step "iso: prepare nested Docker volume targets under $REPO_ROOT"; exit 1
-  fi
 
-  local git_common git_dir git_dir_relative
-  git_common="$(git -C "$REPO_ROOT" rev-parse --git-common-dir)"
-  if [[ "$git_common" != /* ]]; then git_common="$REPO_ROOT/$git_common"; fi
-  git_common="$(cd "$git_common" && pwd -P)"
-  git_dir="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)"
-  git_dir="$(cd "$git_dir" && pwd -P)"
-  case "$git_dir" in
-    "$git_common") git_dir_relative="." ;;
-    "$git_common"/*) git_dir_relative="${git_dir#"$git_common"/}" ;;
-    *) fail_step "iso: git directory $git_dir is outside common directory $git_common"; exit 1 ;;
-  esac
-  export PFM_DEV_WORKTREE="$REPO_ROOT"
-  export PFM_DEV_GIT_COMMON="$git_common"
-  export PFM_DEV_GIT_DIR_REL="$git_dir_relative"
+  # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
+  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the demo
+  # fence sources the same file, so the two never drift.
+  local git_common
+  ROOT="$REPO_ROOT" FENCE_CALLER="iso" . "$REPO_ROOT/infra/fence/fence-env.sh"
+  git_common="$PFM_DEV_GIT_COMMON"
   # The leak denylist is untracked and lives only in the main checkout, so a
   # linked worktree's mount never carries it; hand it in read-only (LEAK_TERMS
   # wins). Without one the in-fence leak gate fails loudly — never a fake pass.
   local terms="${LEAK_TERMS:-$(dirname "$git_common")/scripts/leak-terms.txt}"
   local extra=()
   [[ -f "$terms" ]] && extra=(-v "$terms:/pfm-leak-terms.txt:ro" -e LEAK_TERMS=/pfm-leak-terms.txt)
+  # The worktree mount is read-only; coverage profiles land in container HOME.
+  extra+=(-e COVER_DIR=/root/cover)
+  # Only generated timing artifacts are writable; the source mount stays read-only.
+  mkdir -p "$TMP_BASE/timing"
+  extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
+  if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   case "$action" in
     shell)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
     e2e)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
-    install|build|typecheck|verify|test|all|status)
+    install|build|typecheck|verify|test|cover|all|status)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
+    run)
+      # An arbitrary command inside the fence, from the worktree root — for the
+      # probes the fixed rows do not cover (`go test -json ./cmd/pfm`, a single
+      # package, `make -C pfm lint`). Exit status is the command's own.
+      local cmd="${*:2}"
+      [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
+    sim)
+      # The real-simulation fence: `run` on the pfm-sim service — Google Chrome
+      # (headless only), and pfm built + installed from this worktree with the
+      # harvester's browser rung on (infra/fence/sim-entry.sh prints its own
+      # `sim:` proof line or BOOTSTRAP-FAILED). The harvester state persists in
+      # a volume keyed by this worktree's path, so a second run skips
+      # provisioning and two worktrees never share a sidecar.
+      local cmd="${*:2}"
+      [[ -z "$cmd" ]] && { echo "usage: dev.sh iso sim <command…>" >&2; exit 2; }
+      extra+=(-v "$(sim_volume):/root/.local/state/pfm/harvest-python")
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-sim bash -c "$proof; $cmd" ;;
+    sim-reset)
+      # Drops this worktree's harvester volume (several GB of provisioned
+      # sidecars); the next `iso sim` provisions from scratch. An absent volume
+      # is reported as absent, a failed removal fails.
+      local volume; volume="$(sim_volume)"
+      if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+        info "iso sim-reset: $volume does not exist — nothing to drop"; return 0
+      fi
+      docker volume rm "$volume" >/dev/null || { fail_step "iso sim-reset: could not drop $volume (in use by a running sim?)"; exit 1; }
+      ok "iso sim-reset: dropped $volume" ;;
     *)
-      echo "usage: dev.sh iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]" >&2; exit 2 ;;
+      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project] | iso {run|sim} <command…> | iso sim-reset" >&2; exit 2 ;;
   esac
 }
 
@@ -466,11 +726,16 @@ commands:
   install                fetch dependencies
   build                  compile
   typecheck              vet / tsc --noEmit
-  verify                 pre-test gates (go vet + pfm's architecture ratchet, walker's verify, templates's leak + token gates)
+  verify                 pre-test gates (pfm: go vet, fmt-check, lint-new, architecture ratchet;
+                         templates: clone ratchet, leak + token gates)
   test                   run the test suite
+  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml)
   all                    verify + build + test for the project
   iso <cmd> [project]    run any command above — plus e2e | shell — inside the
                          pfm-dev container fence (infra/), worktree mounted
+  iso sim <command…>     run a command in the real-simulation fence: Google Chrome,
+                         an X display, pfm installed from the worktree, browser rung on
+  iso sim-reset          drop this worktree's sim harvester volume
 
 projects: ${PROJECTS[*]} | all (default)
 
@@ -482,20 +747,18 @@ EOF
 
 CMD="${1:-status}"
 TARGET="${2:-all}"
-SWEEP_ALL=0
 
 case "$CMD" in
   status) cmd_status "$TARGET" ;;
-  install|build|test|typecheck|verify|all)
+  install|build|test|typecheck|verify|cover|all)
     if [[ "$TARGET" == "all" ]]; then
-      SWEEP_ALL=1
       for p in "${PROJECTS[@]}"; do head_ "$p :: $CMD"; dispatch "$p" "$CMD"; done
     else
       proj_dir "$TARGET" >/dev/null 2>&1 || { echo "unknown project: $TARGET" >&2; usage; }
       head_ "$TARGET :: $CMD"
       dispatch "$TARGET" "$CMD"
     fi ;;
-  iso) cmd_iso "${2:-}" "${3:-pfm}" ;;
+  iso) cmd_iso "${@:2}" ;;
   -h|--help|help) usage ;;
   *) echo "unknown command: $CMD" >&2; usage ;;
 esac

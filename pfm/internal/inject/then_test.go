@@ -3,7 +3,6 @@ package inject
 import (
 	"context"
 	"errors"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,8 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {
@@ -25,12 +26,12 @@ func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {
 	engine.options.ThenIdleStable = 1
 	engine.options.ThenSettle = time.Nanosecond
 	recorded := 0
-	engine.recorder = func(context.Context, shared.CommsEvent) error {
+	engine.recorder = func(context.Context, fleetdb.CommsEvent) error {
 		recorded++
 		return nil
 	}
 
-	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
+	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil || !result.Typed || result.Code != 0 {
 		t.Fatalf("DeliverThen() = %+v, %v", result, err)
 	}
@@ -140,7 +141,7 @@ func TestCompactWithSteerArmsWaiterOnlyAfterConfirmedSubmit(t *testing.T) {
 	// collided across every chat sharing the fleet-standard %0 pane
 	// (the 2026-09-03 self-compact that ate an operator's live draft).
 	wantLog := engine.steerLogPath(Target{
-		SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-1-2-3"),
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-1-2-3"),
 		Pane:       "%1",
 	})
 	if spawned[0].LogPath != wantLog {
@@ -395,7 +396,11 @@ func TestCommandThenSpawnerFallsBackToNohup(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		raw, readErr := os.ReadFile(dump)
-		if readErr == nil {
+		// The stub's `> dump` redirect CREATES the file before printf writes a
+		// byte into it, so an empty read is "not yet", never "the stub ran and
+		// passed no arguments" — under a loaded parallel suite that race is the
+		// whole difference between this test and a false red.
+		if readErr == nil && len(raw) > 0 {
 			arguments := string(raw)
 			if !strings.Contains(arguments, "pfm-candidate internal then") ||
 				strings.Contains(arguments, "-f ") {
@@ -404,7 +409,9 @@ func TestCommandThenSpawnerFallsBackToNohup(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("nohup stub never ran: %v", readErr)
+			// Name which of the two happened: no dump file at all (the stub
+			// never ran) or an empty one (it ran and wrote nothing).
+			t.Fatalf("nohup stub wrote no arguments within the deadline: read error %v, bytes %d", readErr, len(raw))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -437,13 +444,15 @@ func TestSteerSpawnFailureIsReportedNotSwallowed(t *testing.T) {
 // TestLockNamespaceMatchesChatShell proves a Go inject and a chat.sh inject
 // into the same pane contend for the SAME lock directory (chat.sh:144-172).
 func TestLockNamespaceMatchesChatShell(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	key := "/tmp/tmux-1000/cc-1-2-3:%5"
 	want := "_tmp_tmux-1000_cc-1-2-3_%5.lock"
 	if got := lockDirName(key); got != want {
 		t.Fatalf("lockDirName(%q) = %q, want %q", key, got, want)
 	}
-	lock, err := acquireTargetLock(root, key, time.Second, time.Millisecond, time.Minute)
+	ctx := context.Background()
+	lock, err := acquireTargetLock(ctx, clock.Real, root, key, time.Second, time.Millisecond, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,6 +465,8 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 		t.Fatalf("owner file = %q, want \"<pid> <epoch>\"", owner)
 	}
 	if _, err := acquireTargetLock(
+		ctx,
+		clock.Real,
 		root,
 		key,
 		20*time.Millisecond,
@@ -465,7 +476,7 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 		t.Fatal("second holder acquired a held lock")
 	}
 	lock.release()
-	second, err := acquireTargetLock(root, key, time.Second, time.Millisecond, time.Minute)
+	second, err := acquireTargetLock(ctx, clock.Real, root, key, time.Second, time.Millisecond, time.Minute)
 	if err != nil {
 		t.Fatalf("lock not released: %v", err)
 	}
@@ -483,9 +494,135 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	stolen, err := acquireTargetLock(root, key, time.Second, time.Millisecond, time.Minute)
+	stolen, err := acquireTargetLock(ctx, clock.Real, root, key, time.Second, time.Millisecond, time.Minute)
 	if err != nil {
 		t.Fatalf("stale lock was not stolen: %v", err)
 	}
 	stolen.release()
+}
+
+// TestDeliverThenLeavesACodexSteerUndeliveredWithoutATurnBoundary is Wave 8
+// item 5's Codex ruling (the two 2026-09-18 sightings: a chat_self_compact
+// steer never landed on a Codex chat, its log said "no turn boundary was
+// observed"). The Claude busy regex does not know the Codex footer and the
+// receipt regex does not know its compaction line, so "the pane never went
+// busy" is what a Codex compaction IN PROGRESS looks like — the steady-idle
+// fallback typed the steer into it. A steer lost with a named cause beats
+// that: on a Codex pane an unobserved boundary is `undelivered`, by name,
+// with the steer text kept in the message (= the log). The Claude path is
+// unchanged: it still delivers, WITH the WARNING.
+func TestDeliverThenLeavesACodexSteerUndeliveredWithoutATurnBoundary(t *testing.T) {
+	quick := func(engine *Engine) {
+		engine.options.ThenMin = time.Nanosecond
+		engine.options.ThenBusyTries = 1
+		engine.options.ThenIdlePoll = time.Nanosecond
+		engine.options.ThenIdleTries = 1
+		engine.options.ThenIdleStable = 1
+		engine.options.ThenSettle = time.Nanosecond
+	}
+	t.Run("codex", func(t *testing.T) {
+		fake := &fakeTmux{capture: "conversation\n› ", submitOnEnter: true}
+		engine := newTestEngine(t, "cx-1-2-3", fake)
+		quick(engine)
+
+		result, err := engine.DeliverThen(context.Background(), ThenWait{
+			Target: "chat",
+			Steers: []string{"resume the wave"},
+			Engine: string(pfmengine.Codex),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Status != "undelivered" || result.Code != CodeUndelivered {
+			t.Fatalf("Codex waiter with no turn boundary = %+v, want an undelivered result by name", result)
+		}
+		for _, want := range []string{
+			"no turn boundary observed on a Codex pane",
+			"E2.09",
+			`"resume the wave"`,
+		} {
+			if !strings.Contains(result.Message, want) {
+				t.Fatalf("undelivered message %q lacks %q", result.Message, want)
+			}
+		}
+		if len(fake.literals) != 0 || len(fake.keys) != 0 {
+			t.Fatalf("the steer was typed into the Codex pane anyway: literals=%q keys=%q", fake.literals, fake.keys)
+		}
+	})
+	t.Run("claude", func(t *testing.T) {
+		fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
+		engine := newTestEngine(t, "cc-1-2-3", fake)
+		quick(engine)
+
+		result, err := engine.DeliverThen(context.Background(), ThenWait{
+			Target: "chat",
+			Steers: []string{"resume the wave"},
+			Engine: string(pfmengine.Claude),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Code != 0 || !result.Typed {
+			t.Fatalf("Claude waiter with no turn boundary = %+v, want the delivery it always made", result)
+		}
+		if !strings.Contains(result.Message, "WARNING: no turn boundary was observed") {
+			t.Fatalf("Claude delivery lost its WARNING: %q", result.Message)
+		}
+	})
+}
+
+// TestCommandThenSpawnerStatesTheEngineAndArmsTheRecord: the spawner hands
+// the waiter the target's engine (`--engine`), and writes the armed record
+// beside the log — unclaimed (pid 0), naming the first steer — BEFORE the
+// waiter starts. A chain hop (Append) writes none: it is the same arming.
+func TestCommandThenSpawnerStatesTheEngineAndArmsTheRecord(t *testing.T) {
+	scratch := t.TempDir()
+	dump := filepath.Join(scratch, "arguments.txt")
+	stub := filepath.Join(scratch, "setsid-stub")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + dump + "\n"
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	spawner := CommandThenSpawner{Executable: filepath.Join(scratch, "pfm"), Setsid: stub}
+	logPath := filepath.Join(scratch, "chat-then-cx_1_2_3._3.log")
+	before := time.Now().Unix()
+	err := spawner.Spawn(context.Background(), SteerSpawn{
+		SocketPath: filepath.Join(scratch, "cx-1-2-3"),
+		Target:     "%3",
+		Engine:     string(pfmengine.Codex),
+		Steers:     []string{"/compact", "resume the wave"},
+		LogPath:    logPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "--engine "+string(pfmengine.Codex)) {
+		t.Fatalf("waiter argv lacks the engine: %q", raw)
+	}
+	record, exists, err := readArmedRecord(strings.TrimSuffix(logPath, ".log") + ".armed")
+	if err != nil || !exists {
+		t.Fatalf("armed record beside the log: exists=%t err=%v", exists, err)
+	}
+	if record.PID != 0 || record.Pane != "%3" || record.Steer != "/compact" || record.Stamp < before {
+		t.Fatalf("armed record = %+v, want an unclaimed record naming pane %%3 and the first steer", record)
+	}
+
+	hopLog := filepath.Join(scratch, "chat-then-hop.log")
+	err = spawner.Spawn(context.Background(), SteerSpawn{
+		SocketPath: filepath.Join(scratch, "cx-1-2-3"),
+		Target:     "%3",
+		Steers:     []string{"resume the wave"},
+		LogPath:    hopLog,
+		Append:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists, err := readArmedRecord(strings.TrimSuffix(hopLog, ".log") + ".armed"); err != nil || exists {
+		t.Fatalf("a chain hop wrote its own armed record: exists=%t err=%v", exists, err)
+	}
 }

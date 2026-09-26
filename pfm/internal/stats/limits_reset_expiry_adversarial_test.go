@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/usagehook"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // an empty or unparsable resets_at is UNKNOWN, never expired. The row
@@ -102,7 +102,11 @@ func TestLegacySamplerKeepsTheThreeMinuteTTL(t *testing.T) {
 		t.Fatalf("legacy TTL=%s (default %s), want 3m", sampler.TTL, defaultLimitsTTL)
 	}
 	if sampler.ttl() != 3*time.Minute || sampler.ttlFor(pfmengine.Codex) != 3*time.Minute {
-		t.Fatalf("ttl=%s codex=%s, want 3m for both without an explicit override", sampler.ttl(), sampler.ttlFor(pfmengine.Codex))
+		t.Fatalf(
+			"ttl=%s codex=%s, want 3m for both without an explicit override",
+			sampler.ttl(),
+			sampler.ttlFor(pfmengine.Codex),
+		)
 	}
 	if LiveLimitsTTL < 60*time.Second {
 		t.Fatalf("LiveLimitsTTL=%s, want at least 60s (2026-09-11 rate-limit incident)", LiveLimitsTTL)
@@ -194,16 +198,21 @@ func TestExpiredWindowsUnderBackoffNeverFetchOnTheLivePath(t *testing.T) {
 	account := LimitAccount{ID: 12, Engine: pfmengine.Claude, Label: "account 12", ConfigDir: configDir}
 	fetchedAt := now.Add(-30 * time.Second)
 	hot := 96.0
-	if err := usagehook.WriteCacheRecord(usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID), usagehook.CacheRecord{
-		Usage: usagehook.Usage{
-			FiveHour: usagehook.Window{Utilization: &hot, ResetsAt: now.Add(-time.Second).Format(time.RFC3339)},
-			SevenDay: usagehook.Window{Utilization: &hot, ResetsAt: now.Add(-time.Hour).Format(time.RFC3339)},
+	if err := usagehook.WriteCacheRecord(
+		usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID),
+		usagehook.CacheRecord{
+			Usage: usagehook.Usage{
+				FiveHour: usagehook.Window{Utilization: &hot, ResetsAt: now.Add(-time.Second).Format(time.RFC3339)},
+				SevenDay: usagehook.Window{Utilization: &hot, ResetsAt: now.Add(-time.Hour).Format(time.RFC3339)},
+			},
+			ConfigDir: configDir, FetchedAt: &fetchedAt,
+			Backoff: &usagehook.CacheBackoff{
+				Message:    "limits unavailable: 429 Too Many Requests",
+				RetryAfter: now.Add(time.Hour),
+				RecordedAt: fetchedAt,
+			},
 		},
-		ConfigDir: configDir, FetchedAt: &fetchedAt,
-		Backoff: &usagehook.CacheBackoff{
-			Message: "limits unavailable: 429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: fetchedAt,
-		},
-	}); err != nil {
+	); err != nil {
 		t.Fatal(err)
 	}
 	var hits int

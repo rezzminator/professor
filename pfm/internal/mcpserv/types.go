@@ -2,12 +2,12 @@
 package mcpserv
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // LSInput selects the fleet view returned by chat_ls.
 type LSInput struct {
-	All     bool   `json:"all,omitempty" jsonschema:"include killed and background rows; the payload limit below still applies"`
+	All     bool   `json:"all,omitempty" jsonschema:"include killed and background rows from every repository; the payload limit below still applies (unlike pfm chat ls --all, which lists live chats only)"`
 	Killed  bool   `json:"killed,omitempty" jsonschema:"return killed rows only"`
 	Project string `json:"project,omitempty" jsonschema:"case-insensitive substring filter on a row's project or directory"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"maximum rows returned, default 200 and maximum 1000; total and truncated always report the full match count"`
@@ -15,18 +15,19 @@ type LSInput struct {
 
 // ChatRow is one structured live or resumable fleet row.
 type ChatRow struct {
-	Session string       `json:"session"`
-	ID      string       `json:"id"`
-	Engine  pfmengine.ID `json:"engine"`
-	State   string       `json:"state"`
-	Dir     string       `json:"dir"`
-	Project string       `json:"project"`
-	Name    string       `json:"name"`
-	Account int          `json:"account,omitempty"`
-	Kind    string       `json:"kind"`
-	Killed  bool         `json:"killed,omitempty"`
-	Socket  string       `json:"socket,omitempty"`
-	Pane    string       `json:"pane,omitempty"`
+	Session        string       `json:"session"`
+	ID             string       `json:"id"`
+	Engine         pfmengine.ID `json:"engine"`
+	State          string       `json:"state"`
+	Dir            string       `json:"dir"`
+	Project        string       `json:"project"`
+	Name           string       `json:"name"`
+	Account        int          `json:"account,omitempty"`
+	Kind           string       `json:"kind"`
+	Killed         bool         `json:"killed,omitempty"`
+	Socket         string       `json:"socket,omitempty"`
+	Pane           string       `json:"pane,omitempty"`
+	transcriptPath string
 }
 
 // LSOutput is chat_ls's structured response.
@@ -43,6 +44,12 @@ type LSOutput struct {
 	// Filter echoes the project filter that was applied, so a caller reading
 	// an empty result knows whether it filtered itself down to nothing.
 	Filter string `json:"filter,omitempty"`
+	// Scope is the repository listed, or why every repository was: "all
+	// repos" under all, "all repos — caller cwd unknown" when the caller did
+	// not resolve, so an unscoped answer is never silent. Elsewhere counts
+	// the rows a repository scope left out.
+	Scope     string `json:"scope"`
+	Elsewhere int    `json:"elsewhere,omitempty"`
 }
 
 // ResolveInput selects one chat.sh resolution namespace.
@@ -207,10 +214,14 @@ type ReadInput struct {
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 65536 and maximum 1048576"`
 }
 
-// Turn is one visible user, assistant, or summary transcript record.
+// Turn is one visible user, assistant, tool, or summary transcript record.
+// A tool call carries the tool's name in Tool and its condensed input as Text
+// — the transcript records no prose for it, and a turn with an empty Text
+// reads as a chat that said nothing rather than one that called a tool.
 type Turn struct {
 	Role      string `json:"role"`
 	Text      string `json:"text"`
+	Tool      string `json:"tool,omitempty"`
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
@@ -307,7 +318,7 @@ type SaveInput struct {
 }
 
 // IssueInput is one agent complaint filed against Professor itself. Reporter
-// identity is never accepted here — issue_servicedesk captures it the same
+// identity is never accepted here — servicedesk captures it the same
 // way chat_inject captures a sender, so a model can complain but never say
 // who is complaining.
 type IssueInput struct {
@@ -317,7 +328,7 @@ type IssueInput struct {
 	Area     string `json:"area,omitempty" jsonschema:"free text naming the command, agent, file, or surface this is about"`
 }
 
-// IssueOutput is issue_servicedesk's receipt: the filed issue's stable id.
+// IssueOutput is servicedesk's receipt: the filed issue's stable id.
 type IssueOutput struct {
 	Status string `json:"status"`
 	ID     int64  `json:"id,omitempty"`

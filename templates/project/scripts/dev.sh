@@ -19,7 +19,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DEV_DIR="${ROOT}/tmp/dev"
+# Scratch lives outside the tree: /tmp/<project>/dev, <project> = the repo
+# directory name with any leading dot stripped.
+DEV_PROJECT="$(basename "$ROOT")"; DEV_PROJECT="${DEV_PROJECT#.}"
+DEV_DIR="/tmp/${DEV_PROJECT}/dev"
 PID_FILE="${DEV_DIR}/dev-servers.pid"
 ARCHIVE_DIR="${DEV_DIR}/archive"
 
@@ -40,12 +43,13 @@ DEV_TMUX_SOCKET="{PROJECT_NAME_LOWER}-dev"
 #   key | label | dir | log | port_var | install_cmd | run_cmd | health
 #
 #   key         — short id used in the PID file, log filenames, and `log <svc>`
-#                 (e.g. backend, worker, frontend, web). Must be unique.
-#   label       — human label for report lines (e.g. "Backend", "{AI_SERVICE_NAME}").
+#                 (the roster entry's name, e.g. a, b, c). Must be unique.
+#   label       — human label for report lines (the entry's {PROJECT_ROLE}).
 #   dir         — project dir relative to repo root; "." for a single-project repo.
-#   log         — log basename under tmp/dev/ (e.g. be.log, worker.log).
-#   port_var    — name of the port variable this server binds (BE_PORT, FE_PORT,
-#                 WEB_PORT, WORKER_PORT). Resolved indirectly at runtime.
+#   log         — log basename under $DEV_DIR (e.g. a.log).
+#   port_var    — name of the port variable this server binds — the entry's
+#                 `{PROJECT}_PORT` (A_PORT, B_PORT …), the same name alloc-ports.sh
+#                 emits for it. Resolved indirectly at runtime.
 #   install_cmd — dependency install command run in the project dir before start.
 #                 "-" to skip.
 #   run_cmd     — the dev-server command. ${PORT} expands to this server's port and
@@ -62,6 +66,11 @@ PROJECTS=(
   # "{key}|{label}|{project}|{LOG_FILE}|{PORT_VAR}|{PROJECT_INSTALL_CMD}|{PROJECT_RUN_CMD}|{HEALTH_PROBE}"
 )
 
+# The roster entry whose Makefile owns infra (the docker {DATABASE} + {QUEUE} stack
+# and its db-create / ready / nuke targets). SETUP pins the directory; "-" when no
+# roster entry owns infra, which skips every infra step below.
+INFRA_MAKE_DIR="{project}"
+
 # Port discovery: if .dev-ports exists at project root, source it (isolated env).
 # Otherwise use defaults (normal local dev).
 DEV_PORTS_FILE="${ROOT}/.dev-ports"
@@ -74,7 +83,7 @@ if [ -f "$DEV_PORTS_FILE" ]; then
 else
   # Defaults (main local dev). SETUP fills the per-project port defaults below from
   # the roster — one `: "${PORT_VAR:=default}"` per server entry.
-  # {PORT_DEFAULTS} — e.g. BE_PORT={BACKEND_PORT}, FE_PORT=8081, WEB_PORT={WEB_PORT}, WORKER_PORT=3500
+  # {PORT_DEFAULTS} — one `: "${A_PORT:={PROJECT_PORT}}"` per server entry
   ISO_MODE=false
   ISO_PROFILE=""
 fi
@@ -85,9 +94,19 @@ proj_path() {
   if [ "$dir" = "." ]; then echo "$ROOT"; else echo "${ROOT}/${dir}"; fi
 }
 
-# Indirect port lookup: port_of BE_PORT → value of $BE_PORT.
+# Indirect port lookup: port_of A_PORT → value of $A_PORT.
 port_of() {
   echo "${!1}"
+}
+
+# Health-probe spec of a roster key (the entry's `health` field); empty when unknown.
+health_of() {
+  local entry key health
+  for entry in "${PROJECTS[@]}"; do
+    IFS='|' read -r key _ _ _ _ _ _ health <<< "$entry"
+    [ "$key" = "$1" ] && { echo "$health"; return 0; }
+  done
+  return 0
 }
 
 # All bound ports across the roster — used by clean_ports / kill verification.
@@ -246,6 +265,39 @@ service_pid_alive() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
+# Seconds a live PID may keep its port silent before it counts as HUNG.
+# Covers the slowest honest boot (a warm-up-heavy worker, first-run migrations).
+HUNG_PORT_GRACE_SECS=180
+
+pid_age_secs() {
+  local pid="$1" raw d=0 h=0 m s a b c
+  raw=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+  if [[ "$raw" =~ ^[0-9]+$ ]]; then echo "$raw"; return 0; fi
+  # BSD ps (macOS) has no etimes — parse etime's [[dd-]hh:]mm:ss instead.
+  raw=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+  [[ "$raw" == *-* ]] && { d=${raw%%-*}; raw=${raw#*-}; }
+  IFS=: read -r a b c <<< "$raw"
+  if [ -n "$c" ]; then h=$a; m=$b; s=$c; else m=$a; s=$b; fi
+  for a in "$d" "$h" "$m" "$s"; do [[ "$a" =~ ^[0-9]+$ ]] || return 1; done
+  echo $(( (10#$d * 24 + 10#$h) * 3600 + 10#$m * 60 + 10#$s ))
+}
+
+# A live PID whose port is still silent past the boot horizon is HUNG — the
+# process survived (a wedged bundler, a listener that died under a living
+# wrapper) but nothing will ever answer. Age is the distinguishing signal: a
+# younger silent PID is still starting and is left alone. An unreadable age
+# reports NOT hung — the check never claims what it cannot measure — and a
+# `proc` probe has no port to judge, so it never counts as hung.
+service_hung() {
+  local key="$1" pid="$2" port="$3" age code
+  [ "$(health_of "$key")" != "proc" ] || return 1
+  age=$(pid_age_secs "$pid") || return 1
+  [ "$age" -ge "$HUNG_PORT_GRACE_SECS" ] || return 1
+  # curl prints 000 itself on a refused port — a `|| echo 000` would double it.
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://localhost:$port" 2>/dev/null) || code="000"
+  [ "$code" = "000" ]
+}
+
 clean_ports() {
   local port
   for port in $(all_ports); do
@@ -322,7 +374,7 @@ start_server() {
 
 # Single source of truth for per-server kill — port-scoped (safe for ISO
 # coexistence) plus a $ROOT-scoped sweep of any matching dev process the port
-# kill missed (e.g. an {ai} consumer with no bound port). Used by the
+# kill missed (e.g. a queue consumer with no bound port). Used by the
 # partial-failure resurrection block and cmd_restart_service so the kill logic
 # lives in exactly one place. Takes a roster key; unknown key → fail.
 kill_server() {
@@ -433,7 +485,7 @@ report_statuses() {
 cmd_kill() {
   header "Stopping dev servers"
 
-  # Logs stay in tmp/dev/ after kill — user may want to inspect them.
+  # Logs stay in $DEV_DIR after kill — user may want to inspect them.
   # Archival happens at next server start (cmd_up) so fresh logs begin clean.
 
   if [ -f "$PID_FILE" ]; then
@@ -494,10 +546,17 @@ cmd_up() {
     local dead_names="" alive_entries=""
     while read -r name pid port; do
       [ -z "$name" ] && continue
-      if kill -0 "$pid" 2>/dev/null; then
+      if kill -0 "$pid" 2>/dev/null && ! service_hung "$name" "$pid" "$port"; then
         alive_count=$((alive_count + 1))
         alive_entries="${alive_entries}${name} ${pid} ${port}\n"
       else
+        # Dead, or alive-but-deaf past the boot horizon. A hung tree is killed
+        # HERE — the resurrect pass below is port-scoped and would otherwise
+        # start a second instance beside the deaf one.
+        if kill -0 "$pid" 2>/dev/null && ! is_ancestor "$pid"; then
+          warn "$name (PID $pid) alive but port $port silent past ${HUNG_PORT_GRACE_SECS}s — treating as hung"
+          force_kill_tree "$pid"
+        fi
         dead_count=$((dead_count + 1))
         dead_names="${dead_names} ${name}"
       fi
@@ -595,8 +654,8 @@ cmd_up() {
   check_prereqs
 
   # ── Step 1: Infrastructure ──
-  # No-op when the roster has no infra project ({INFRA_PROJECT} = "-").
-  if [ "{INFRA_PROJECT}" != "-" ]; then
+  # No-op when no roster entry owns infra (INFRA_MAKE_DIR = "-").
+  if [ "$INFRA_MAKE_DIR" != "-" ]; then
     header "Infrastructure"
     if $ISO_MODE; then
       info "Isolated mode — checking existing containers..."
@@ -615,15 +674,15 @@ cmd_up() {
       fi
     else
       info "Starting {DATABASE} + {QUEUE}..."
-      make -C "$ROOT/{INFRA_PROJECT}" up-local 2>&1 | tail -3
+      make -C "$(proj_path "$INFRA_MAKE_DIR")" up-local 2>&1 | tail -3
 
       local infra_ok=true
-      wait_for "{DATABASE} ({DB_PORT})" "make -C '$ROOT/{INFRA_PROJECT}' pg-ready-local" 20 || infra_ok=false
-      wait_for "{QUEUE} ({QUEUE_PORT})" "make -C '$ROOT/{INFRA_PROJECT}' ls-ready-local" 20 || infra_ok=false
+      wait_for "{DATABASE} ({DB_PORT})" "make -C '$(proj_path "$INFRA_MAKE_DIR")' pg-ready-local" 20 || infra_ok=false
+      wait_for "{QUEUE} ({QUEUE_PORT})" "make -C '$(proj_path "$INFRA_MAKE_DIR")' ls-ready-local" 20 || infra_ok=false
 
       if ! $infra_ok; then
         fail "Infrastructure not ready — aborting"
-        make -C "$ROOT/{INFRA_PROJECT}" ps-local
+        make -C "$(proj_path "$INFRA_MAKE_DIR")" ps-local
         exit 1
       fi
     fi
@@ -656,18 +715,18 @@ cmd_up() {
   fi
 
   # ── Step 2b: Post-install integrity hooks ──
-  # SETUP fills any project-specific post-install fixups here (e.g. an FE
-  # node_modules spot-check + clean reinstall, watchman reset). "-" / empty if none.
+  # SETUP fills any project-specific post-install fixups here (e.g. a project's
+  # node_modules spot-check + clean reinstall, a file-watcher reset). "-" / empty if none.
   # {POST_INSTALL_HOOKS}
 
   # ── Step 3: Per-project env bootstrap ──
   # SETUP fills any project-specific default-env-file creation here (e.g. writing a
-  # default backend .env.local with DB URL + port). "-" / empty if none.
+  # project's default .env.local with DB URL + port). "-" / empty if none.
   # {ENV_BOOTSTRAP}
 
   # ── Step 4: Database ──
-  # No-op when the roster has no infra project ({INFRA_PROJECT} = "-").
-  if [ "{INFRA_PROJECT}" != "-" ]; then
+  # No-op when no roster entry owns infra (INFRA_MAKE_DIR = "-").
+  if [ "$INFRA_MAKE_DIR" != "-" ]; then
     if $ISO_MODE; then
       header "Database"
       ok "ISO mode — schema applied during init (skipping migrations)"
@@ -683,7 +742,7 @@ cmd_up() {
       # empty ledger and re-run every file from 0001 on its own boot — safe only by
       # idempotency luck, and fatal the moment a later migration assumes a column an
       # earlier one already dropped.
-      make -C "$ROOT/{INFRA_PROJECT}" db-create-local
+      make -C "$(proj_path "$INFRA_MAKE_DIR")" db-create-local
       ok "Database created (migrations + seeding by the app on boot)"
     fi
   fi
@@ -843,18 +902,18 @@ cmd_drop() {
     echo ""
   fi
 
-  # Step 2: Nuke Docker containers + volumes (skip if no infra project)
-  if [ "{INFRA_PROJECT}" = "-" ]; then
+  # Step 2: Nuke Docker containers + volumes (skip when no roster entry owns infra)
+  if [ "$INFRA_MAKE_DIR" = "-" ]; then
     echo "---REPORT---"
     echo "WERE_RUNNING=$were_running"
-    echo "NUKE_RESULT=skipped (no infra project)"
+    echo "NUKE_RESULT=skipped (no roster entry owns infra)"
     echo "---END---"
     $were_running && { header "Restarting servers"; cmd_up; }
     return 0
   fi
 
   header "Nuking Docker containers"
-  if make -C "$ROOT/{INFRA_PROJECT}" nuke-local 2>&1 | tail -5; then
+  if make -C "$(proj_path "$INFRA_MAKE_DIR")" nuke-local 2>&1 | tail -5; then
     ok "Docker containers nuked"
   else
     fail "Failed to nuke Docker containers"
@@ -868,11 +927,11 @@ cmd_drop() {
 
   # Step 3: Bring fresh containers up
   header "Rebuilding infrastructure"
-  make -C "$ROOT/{INFRA_PROJECT}" up-local 2>&1 | tail -3
+  make -C "$(proj_path "$INFRA_MAKE_DIR")" up-local 2>&1 | tail -3
 
   local infra_ok=true
-  wait_for "{DATABASE} ({DB_PORT})" "make -C '$ROOT/{INFRA_PROJECT}' pg-ready-local" 30 || infra_ok=false
-  wait_for "{QUEUE} ({QUEUE_PORT})" "make -C '$ROOT/{INFRA_PROJECT}' ls-ready-local" 30 || infra_ok=false
+  wait_for "{DATABASE} ({DB_PORT})" "make -C '$(proj_path "$INFRA_MAKE_DIR")' pg-ready-local" 30 || infra_ok=false
+  wait_for "{QUEUE} ({QUEUE_PORT})" "make -C '$(proj_path "$INFRA_MAKE_DIR")' ls-ready-local" 30 || infra_ok=false
 
   if ! $infra_ok; then
     fail "Infrastructure not ready after rebuild"
@@ -888,7 +947,7 @@ cmd_drop() {
 
   # Step 4: Recreate database (the app migrates on boot — cmd_up starts it next)
   header "Database"
-  make -C "$ROOT/{INFRA_PROJECT}" db-create-local
+  make -C "$(proj_path "$INFRA_MAKE_DIR")" db-create-local
   ok "Database created (migrations + seeding by the app on boot)"
 
   # Step 5: Restart servers if they were running before
@@ -916,15 +975,15 @@ cmd_fresh() {
   cmd_kill
   echo ""
 
-  # Step 2: Nuke Docker containers + volumes (skip if no infra project)
-  if [ "{INFRA_PROJECT}" = "-" ]; then
+  # Step 2: Nuke Docker containers + volumes (skip when no roster entry owns infra)
+  if [ "$INFRA_MAKE_DIR" = "-" ]; then
     header "Starting servers"
     cmd_up
     return 0
   fi
 
   header "Nuking Docker containers"
-  if make -C "$ROOT/{INFRA_PROJECT}" nuke-local 2>&1 | tail -5; then
+  if make -C "$(proj_path "$INFRA_MAKE_DIR")" nuke-local 2>&1 | tail -5; then
     ok "Docker containers nuked"
   else
     fail "Failed to nuke Docker containers"
@@ -937,11 +996,11 @@ cmd_fresh() {
 
   # Step 3: Bring fresh containers up
   header "Rebuilding infrastructure"
-  make -C "$ROOT/{INFRA_PROJECT}" up-local 2>&1 | tail -3
+  make -C "$(proj_path "$INFRA_MAKE_DIR")" up-local 2>&1 | tail -3
 
   local infra_ok=true
-  wait_for "{DATABASE} ({DB_PORT})" "make -C '$ROOT/{INFRA_PROJECT}' pg-ready-local" 30 || infra_ok=false
-  wait_for "{QUEUE} ({QUEUE_PORT})" "make -C '$ROOT/{INFRA_PROJECT}' ls-ready-local" 30 || infra_ok=false
+  wait_for "{DATABASE} ({DB_PORT})" "make -C '$(proj_path "$INFRA_MAKE_DIR")' pg-ready-local" 30 || infra_ok=false
+  wait_for "{QUEUE} ({QUEUE_PORT})" "make -C '$(proj_path "$INFRA_MAKE_DIR")' ls-ready-local" 30 || infra_ok=false
 
   if ! $infra_ok; then
     fail "Infrastructure not ready after rebuild"
@@ -956,7 +1015,7 @@ cmd_fresh() {
 
   # Step 4: Recreate database (the app migrates on boot — cmd_up starts it next)
   header "Database"
-  make -C "$ROOT/{INFRA_PROJECT}" db-create-local
+  make -C "$(proj_path "$INFRA_MAKE_DIR")" db-create-local
   ok "Database created (migrations + seeding by the app on boot)"
 
   # Step 5: Always start servers
@@ -1143,6 +1202,10 @@ cmd_promote_demo() {
 
 # ─── MAIN ─────────────────────────────────────────────────────────
 
+if [ "${#PROJECTS[@]}" -eq 0 ]; then
+  fail "PROJECTS roster is empty — SETUP fills one entry per server-bearing roster project"
+  exit 1
+fi
 ensure_dirs
 
 case "${1:-up}" in

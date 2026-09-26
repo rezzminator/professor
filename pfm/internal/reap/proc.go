@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // ProcessTree is one snapshot of the machine's process relationships. Every

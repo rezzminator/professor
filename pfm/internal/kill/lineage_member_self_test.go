@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // THE BUG. A resumed Codex lineage member's rollout file lands on disk the
@@ -28,16 +28,20 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 		t.Run("rollout"+suffix, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
-			defer database.Close()
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 			ctx := context.Background()
 
 			rootID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 			memberID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 			rootPath := filepath.Join(
-				jail.codexRoot, "sessions", "rollout-2026-07-27T10-00-00-"+rootID+".jsonl",
+				jail.codexHome, "sessions", "rollout-2026-07-27T10-00-00-"+rootID+".jsonl",
 			)
 			memberPath := filepath.Join(
-				jail.codexRoot, "sessions", "rollout-2026-07-27T10-05-00-"+memberID+suffix+".jsonl",
+				jail.codexHome, "sessions", "rollout-2026-07-27T10-05-00-"+memberID+suffix+".jsonl",
 			)
 
 			// The root: an ordinary already-indexed conversation, exactly what the

@@ -9,13 +9,13 @@ import (
 	"sort"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 const maxCrumbNameLength = 128
 
 // ParseCrumbName validates the strict crumb filename grammar.
-func ParseCrumbName(name string) (socket string, paneID string, ok bool) {
+func ParseCrumbName(name string) (socket, paneID string, ok bool) {
 	if name == "" || len(name) > maxCrumbNameLength ||
 		strings.ContainsAny(name, "/\x00\n\r\t") {
 		return "", "", false
@@ -43,11 +43,11 @@ func validCrumbSocket(socket string) bool {
 			return false
 		}
 		for _, character := range name {
-			if !((character >= 'a' && character <= 'z') ||
-				(character >= 'A' && character <= 'Z') ||
-				(character >= '0' && character <= '9') ||
-				character == '_' ||
-				character == '-') {
+			if (character < 'a' || character > 'z') &&
+				(character < 'A' || character > 'Z') &&
+				(character < '0' || character > '9') &&
+				character != '_' &&
+				character != '-' {
 				return false
 			}
 		}
@@ -77,16 +77,16 @@ func allDigits(value string) bool {
 }
 
 // ReadCrumbs reads valid crumbs and removes pane crumbs whose pane vanished.
-func ReadCrumbs(sidDir string, panes []Pane) (CrumbProbe, error) {
-	return readCrumbs(sidDir, panes, true)
+func ReadCrumbs(sidDir string, panes []ProbePane) (CrumbProbe, error) {
+	return scanCrumbs(sidDir, panes, true)
 }
 
 // ReadCrumbsReadOnly reads live crumbs but leaves stale pane crumbs in place.
-func ReadCrumbsReadOnly(sidDir string, panes []Pane) (CrumbProbe, error) {
-	return readCrumbs(sidDir, panes, false)
+func ReadCrumbsReadOnly(sidDir string, panes []ProbePane) (CrumbProbe, error) {
+	return scanCrumbs(sidDir, panes, false)
 }
 
-func readCrumbs(sidDir string, panes []Pane, sweep bool) (CrumbProbe, error) {
+func scanCrumbs(sidDir string, panes []ProbePane, sweep bool) (CrumbProbe, error) {
 	var result CrumbProbe
 	entries, err := os.ReadDir(sidDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -97,7 +97,8 @@ func readCrumbs(sidDir string, panes []Pane, sweep bool) (CrumbProbe, error) {
 	}
 
 	livePanes := make(map[string]struct{}, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := panes[index]
 		livePanes[pane.Socket+"\x00"+pane.PaneID] = struct{}{}
 	}
 

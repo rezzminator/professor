@@ -25,6 +25,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pfm/go.mod
+          cache-dependency-path: pfm/go.sum
+
+      # The scanner scores `.opencode/` as its own package, including its
+      # generated LICENSE/SECURITY.md/opencode.jsonc — none of which are
+      # tracked (see .gitignore). Generate both mirrors before it runs, or
+      # it scores an absent, not a generated, tree.
+      - name: Generate Codex and OpenCode mirrors
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd pfm && go run ./cmd/pfm codex build ..)
+          (cd pfm && go run ./cmd/pfm opencode build ..)
+
       - name: Scan
         uses: hashgraph-online/ai-plugin-scanner-action@caba2e96aa8ad2feb6cf6fca52442b52e22e779f # v1.2.635
         with:

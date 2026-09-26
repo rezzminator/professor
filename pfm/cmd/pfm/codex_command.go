@@ -9,8 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 )
+
+const agentsCommand = "agents"
 
 // runCodex is the deliberately small command adapter around the pure compiler.
 // The compiler owns discovery and reconciliation; this layer owns argv, exit
@@ -21,17 +25,17 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		return 2
 	}
 	switch args[0] {
-	case "agents":
+	case agentsCommand:
 		return runCodexAgents(args[1:], stdout, stderr, runtime)
-	case "help", "-h", "--help":
+	case helpCommand, "-h", helpFlag:
 		printCodexUsage(stdout)
 		return 0
 	}
-	mode := codexgen.ModeBuild
+	var mode codexgen.Mode
 	switch args[0] {
 	case "build":
 		mode = codexgen.ModeBuild
-	case "check":
+	case checkAction:
 		mode = codexgen.ModeCheck
 	default:
 		fmt.Fprintf(stderr, "pfm codex: unknown action %q\n", args[0])
@@ -39,7 +43,7 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		return 2
 	}
 
-	flags := newFlagSet("codex "+args[0], "usage: pfm codex "+args[0]+" [repo-root] [options]", stderr)
+	flags := cli.NewFlagSet("codex "+args[0], "usage: pfm codex "+args[0]+" [repo-root] [options]", stderr)
 	home := flags.String("home", "", "Codex global source/output home")
 	var models, excludeDirs, excludeProjects, neverRegister repeatString
 	flags.Var(&models, "model", "model alias mapping alias=value; repeatable")
@@ -50,7 +54,7 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 	flags.Var(&neverRegister, "never-register", "do not register an agent; repeatable")
 	suffixMode := flags.String("suffix-mode", "", "agent suffix mode")
 	suffixPrefix := flags.String("suffix-prefix", "", "agent suffix prefix")
-	positionals, code, ok := parseFlagsAnywhere(flags, args[1:])
+	positionals, code, ok := cli.ParseFlagsAnywhere(flags, args[1:])
 	if !ok {
 		return code
 	}
@@ -83,7 +87,16 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		return 1
 	}
 
-	overrides, err := codexCLIOverrides(models, *rootAdapter, *agentPreamble, excludeDirs, excludeProjects, neverRegister, *suffixMode, *suffixPrefix)
+	overrides, err := codexCLIOverrides(
+		models,
+		*rootAdapter,
+		*agentPreamble,
+		excludeDirs,
+		excludeProjects,
+		neverRegister,
+		*suffixMode,
+		*suffixPrefix,
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm codex %s: %v\n", args[0], err)
 		return 2
@@ -122,9 +135,9 @@ func printCodexUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --suffix-mode MODE [--suffix-prefix TEXT]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "usage: pfm codex agents [--home PATH]")
-	fmt.Fprintln(w, "  compiles every {home}/.professor/templates/global/agents/*.md into a sibling .toml,")
-	fmt.Fprintln(w, "  then symlinks {home}/.claude/agents to the .md sources and {home}/.codex/agents")
-	fmt.Fprintln(w, "  to the compiled .tomls — the global (host-level) agent registry.")
+	fmt.Fprintln(w, "  compiles every {home}/.professor/templates/global/agents/*.md, symlinks")
+	fmt.Fprintln(w, "  {home}/.claude/agents to the .md sources, and writes {home}/.codex/agents/*.toml as")
+	fmt.Fprintln(w, "  regular files — Codex refuses to load a role through a symlink.")
 }
 
 // runCodexAgents is the command adapter for the global (host-level) Codex
@@ -133,9 +146,9 @@ func printCodexUsage(w io.Writer) {
 // repository root: its source and destinations are all anchored on --home
 // (default: this process's resolved HOME).
 func runCodexAgents(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("codex agents", "usage: pfm codex agents [--home PATH]", stderr)
+	flags := cli.NewFlagSet("codex agents", "usage: pfm codex agents [--home PATH]", stderr)
 	home := flags.String("home", "", "host HOME whose global agents get compiled and installed")
-	positionals, code, ok := parseFlagsAnywhere(flags, args)
+	positionals, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -161,7 +174,15 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, runtime commandRunt
 		fmt.Fprintf(stdout, "%s: %d B, parses clean\n", compiled.Path, compiled.Size)
 	}
 	for _, installed := range result.Installed {
-		fmt.Fprintf(stdout, "%s %s\n", installed.State, codexgen.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found))
+		fmt.Fprintf(
+			stdout,
+			"%s %s\n",
+			installed.State,
+			codexgen.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found),
+		)
+	}
+	for _, role := range result.Roles {
+		fmt.Fprintf(stdout, "%s %s\n", role.State, role.Describe())
 	}
 	for _, problem := range result.Problems {
 		fmt.Fprintf(stderr, "pfm codex agents: %s\n", problem)
@@ -181,7 +202,10 @@ func codexRepoRoot() (string, error) {
 			return dir, nil
 		}
 		if fallback == "" {
-			if info, statErr := os.Stat(filepath.Join(dir, "CLAUDE.md")); statErr == nil && info.Mode().IsRegular() {
+			if info, statErr := os.Stat(
+				filepath.Join(dir, professor.ClaudeInstructionsFile),
+			); statErr == nil &&
+				info.Mode().IsRegular() {
 				fallback = dir
 			}
 		}
@@ -207,7 +231,12 @@ func (list *repeatString) Set(value string) error {
 	return nil
 }
 
-func codexCLIOverrides(models repeatString, adapter, preamble string, dirs, projects, agents repeatString, suffixMode, suffixPrefix string) (codexgen.CLIOverrides, error) {
+func codexCLIOverrides(
+	models repeatString,
+	adapter, preamble string,
+	dirs, projects, agents repeatString,
+	suffixMode, suffixPrefix string,
+) (codexgen.CLIOverrides, error) {
 	result := codexgen.CLIOverrides{
 		RootAdapter:     adapter,
 		AgentPreamble:   preamble,
@@ -231,7 +260,7 @@ func codexCLIOverrides(models repeatString, adapter, preamble string, dirs, proj
 	return result, nil
 }
 
-func printCodexResult(stdout, stderr io.Writer, result codexgen.Result) {
+func printCodexResult(_, stderr io.Writer, result codexgen.Result) {
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(stderr, "pfm codex: warning: %s\n", warning)
 	}

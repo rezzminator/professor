@@ -1,0 +1,9 @@
+http:internal/harvest/doi_mirror.go 2
+http:internal/harvest/net.go 1
+http:internal/harvest/search.go 2
+http:internal/harvestpy/provision.go 1
+http:internal/usagehook/hook.go 1
+proc:internal/deps/registry.go 1
+proc:internal/gather/tmuxprobe.go 1
+proc:internal/statusline/process.go 1
+sql:internal/heal/heal.go 1

@@ -1,16 +1,18 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"strings"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // Purpose states WHY a Claude process is being started, and it is the only
@@ -92,10 +94,16 @@ type ClaudeSpawn struct {
 	Args []string
 	// Home is the managed root the staged professor prompt lives under.
 	Home string
+	// PromptFile overrides the staged professor prompt for an interactive or
+	// resumed role seat. The caller writes it before planning the launch.
+	PromptFile string
 	// Machine is the resolved machine config. Callers that normalize it
 	// (Synthesize does) normalize BEFORE building the spawn: the door never
 	// substitutes defaults for a config a caller deliberately assembled.
 	Machine pfmconfig.Config
+	// Runner is the process seam used by direct Claude launches. Nil selects
+	// the real runner; tests can script argv, environment, and lifecycle.
+	Runner deps.Runner
 
 	// strip widens the hygiene list for the headless routes, which must also
 	// drop CODEX_THREAD_ID. nil means the fleet-wide hygieneNames.
@@ -134,13 +142,11 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	if spawn.leanEnvironment(prefs) {
 		command.WriteString(" CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1")
 	}
-	for _, assignment := range pfmengine.MustLookup(pfmengine.Claude).LaunchEnv {
-		name, value, _ := strings.Cut(assignment, "=")
-		command.WriteByte(' ')
-		command.WriteString(name)
-		command.WriteByte('=')
-		command.WriteString(Quote(value))
+	if prefs.NativeCursor {
+		command.WriteString(" " + nativeCursorEnv)
 	}
+	writeAssignments(&command, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv)
+	writeAssignments(&command, prefs.SubagentEnv())
 	command.WriteByte(' ')
 	value, quote := spawn.binaryWord(prefs)
 	command.WriteString(binaryWord(value, pfmengine.MustLookup(pfmengine.Claude).Binary, quote))
@@ -148,7 +154,9 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))
 	}
-	for _, argument := range pfmengine.LaunchArgsFor(pfmengine.Claude, spawn.Args) {
+	for _, argument := range pfmengine.LaunchArgsWithSettings(
+		pfmengine.Claude, spawn.Args, pfmengine.ClaudeSettingsPayload(prefs.Theme),
+	) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))
 	}
@@ -175,7 +183,22 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 // environment minus the hygiene strip, plus the account's assignments, and the
 // argv the shell form would have produced. Stdout, Stderr and Dir belong to
 // the caller.
-func (spawn ClaudeSpawn) Command(ctx context.Context) (*exec.Cmd, error) {
+// ProcessCommand is the small command surface used by the direct Claude
+// callers. It keeps their stdio and directory controls while making process
+// creation cross the shared deps.Runner seam.
+type ProcessCommand struct {
+	ctx    context.Context
+	runner deps.Runner
+	Path   string
+	Args   []string
+	Env    []string
+	Dir    string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 	if err := spawn.validate(); err != nil {
 		return nil, err
 	}
@@ -184,9 +207,51 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*exec.Cmd, error) {
 	if value == "" {
 		value = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	command := exec.CommandContext(ctx, deps.Executable(value), spawn.argv(prefs)...)
-	command.Env = spawn.Environment(os.Environ())
-	return command, nil
+	path := deps.Executable(value)
+	return &ProcessCommand{
+		ctx:    ctx,
+		runner: spawn.runner(),
+		Path:   path,
+		Args:   append([]string{path}, spawn.argv(prefs)...),
+		Env:    spawn.Environment(os.Environ()),
+	}, nil
+}
+
+func (spawn ClaudeSpawn) runner() deps.Runner {
+	if spawn.Runner != nil {
+		return spawn.Runner
+	}
+	return obs.Runner(deps.RealRunner{})
+}
+
+func (command *ProcessCommand) start(stdout, stderr io.Writer) (deps.Process, error) {
+	return command.runner.Start(command.ctx, command.Args, deps.StartOptions{
+		Env: command.Env, Dir: command.Dir, Stdin: command.Stdin,
+		Stdout: stdout, Stderr: stderr,
+	})
+}
+
+func (command *ProcessCommand) Run() error {
+	process, err := command.start(command.Stdout, command.Stderr)
+	if err != nil {
+		return err
+	}
+	return process.Wait()
+}
+
+func (command *ProcessCommand) Output() ([]byte, error) {
+	if command.Stdout != nil {
+		return nil, errors.New("action: ProcessCommand.Output called with Stdout already set")
+	}
+	var output bytes.Buffer
+	process, err := command.start(&output, command.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	if err := process.Wait(); err != nil {
+		return output.Bytes(), err
+	}
+	return output.Bytes(), nil
 }
 
 // Environment applies the door's strip and assignments to one environment
@@ -214,7 +279,26 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 	if spawn.leanEnvironment(prefs) {
 		result = append(result, "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1")
 	}
-	return append(result, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv...)
+	if prefs.NativeCursor {
+		result = append(result, nativeCursorEnv)
+	}
+	result = append(result, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv...)
+	// Last duplicate wins at exec, so the door's caps land after anything the
+	// caller's own environment already carried.
+	return append(result, prefs.SubagentEnv()...)
+}
+
+// writeAssignments appends one NAME=value list to a shell command, each value
+// quoted. Both renderers' assignment lists go through it so a second list can
+// never be spelled a second way.
+func writeAssignments(command *strings.Builder, assignments []string) {
+	for _, assignment := range assignments {
+		name, value, _ := strings.Cut(assignment, "=")
+		command.WriteByte(' ')
+		command.WriteString(name)
+		command.WriteByte('=')
+		command.WriteString(Quote(value))
+	}
 }
 
 // argv is the executable's argument list — the unquoted twin of the tail
@@ -222,7 +306,9 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 func (spawn ClaudeSpawn) argv(prefs pfmconfig.ClaudePrefs) []string {
 	argv := make([]string, 0, len(spawn.Args)+8)
 	argv = append(argv, spawn.Args...)
-	argv = append(argv, pfmengine.LaunchArgsFor(pfmengine.Claude, spawn.Args)...)
+	argv = append(argv, pfmengine.LaunchArgsWithSettings(
+		pfmengine.Claude, spawn.Args, pfmengine.ClaudeSettingsPayload(prefs.Theme),
+	)...)
 	if spawn.Model != "" {
 		argv = append(argv, "--model", spawn.Model)
 	}
@@ -279,6 +365,10 @@ func (spawn ClaudeSpawn) cacheAssignment() string {
 	return "FORCE_PROMPT_CACHING_5M=1"
 }
 
+// nativeCursorEnv is the assignment claude.nativeCursor adds to a launch; both
+// renderers above spell it from here so they cannot drift.
+const nativeCursorEnv = "CLAUDE_CODE_NATIVE_CURSOR=1"
+
 // leanEnvironment reports whether CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1 travels
 // with the launch: the configured choice for a conversational spawn, and
 // unconditionally for a probe.
@@ -305,7 +395,7 @@ func (spawn ClaudeSpawn) leanEnvironment(prefs pfmconfig.ClaudePrefs) bool {
 // wiring one in here would print on every ordinary launch of an account that
 // simply has not run `pfm install` yet. The surface that DOES report this
 // gap already exists: `pfm doctor`'s spawn audit
-// (cmd/pfm/spawn_audit_doctor.go, spawnDoorStamp feeding classifySpawn)
+// (cmd/pfm/doctor_spawn_audit.go, spawnDoorStamp feeding classifySpawn)
 // reports a live Professor-policy launch with no --system-prompt-file in its
 // argv as VIOLATION, "fresh launch with no prompt material — some spawn site
 // bypassed the door".
@@ -319,6 +409,9 @@ func (spawn ClaudeSpawn) leanEnvironment(prefs pfmconfig.ClaudePrefs) bool {
 func (spawn ClaudeSpawn) promptFile(prefs pfmconfig.ClaudePrefs) string {
 	switch spawn.Purpose {
 	case PurposeInteractive, PurposeResume:
+		if spawn.PromptFile != "" {
+			return spawn.PromptFile
+		}
 		if prefs.SystemPrompt != pfmconfig.SystemPromptProfessor {
 			return ""
 		}

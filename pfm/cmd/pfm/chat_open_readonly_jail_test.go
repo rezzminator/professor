@@ -9,9 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
-// TestChatOpenScansReadOnly is the regression for openID's scanFleet call: it
+// TestChatOpenScansReadOnly is the regression for chat.OpenID's fleet.Scan call: it
 // must pass ReadOnly: true, because a WRITING gather wedges when the caller
 // already holds the fleet store open in the same process (this is what made
 // `pfm chat open` hang forever under `pfm mcp serve` while the identical call
@@ -23,10 +25,10 @@ import (
 // TestProbeTmuxReadOnlyLeavesOldCorpse in internal/gather for the same
 // contract one layer down). Planting a corpse socket, running `pfm chat
 // open`, and asserting the corpse survives is therefore a faithful proxy for
-// "openID's scan requested ReadOnly".
+// "chat.OpenID's scan requested ReadOnly".
 func TestChatOpenScansReadOnly(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(testFreshSocketEnv, "cc-1700000000-1-1")
+	t.Setenv(spawn.TestFreshSocketEnv, "cc-1700000000-1-1")
 
 	project := filepath.Join(root, "work", "project")
 	transcriptDir := filepath.Join(root, "claude", "project")

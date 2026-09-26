@@ -21,7 +21,7 @@ type injectTmuxJail struct {
 }
 
 type verifiedChatTmux struct {
-	CommandTmux
+	TmuxInjector
 	command string
 }
 
@@ -214,7 +214,7 @@ func (jail *injectTmuxJail) startBusyPane(
 	started := time.Now()
 	deadline := started.Add(jailPaneReadyBudget)
 	for {
-		capture, err := CommandTmux{}.Capture(
+		capture, err := TmuxInjector{}.Capture(
 			context.Background(),
 			filepath.Join(jail.tmuxDir, socket),
 			pane,
@@ -234,7 +234,11 @@ func (jail *injectTmuxJail) startBusyPane(
 			if err != nil {
 				t.Fatalf("jailed pane capture kept failing for %s; last error: %v: %q", waited, err, capture)
 			}
-			t.Fatalf("jailed pane never became busy within %s; capture succeeded throughout and the fixture never rendered a spinner: %q", waited, capture)
+			t.Fatalf(
+				"jailed pane never became busy within %s; capture succeeded throughout and the fixture never rendered a spinner: %q",
+				waited,
+				capture,
+			)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -284,7 +288,7 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 	started := time.Now()
 	deadline := started.Add(jailPaneReadyBudget)
 	for {
-		capture, captureErr := CommandTmux{}.Capture(
+		capture, captureErr := TmuxInjector{}.Capture(
 			context.Background(),
 			filepath.Join(jail.tmuxDir, socket),
 			pane,
@@ -300,9 +304,18 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 			// be read at all looked identical to a pane that stayed blank.
 			waited := time.Since(started)
 			if captureErr != nil {
-				t.Fatalf("compact transcript pane capture kept failing for %s; last error: %v: %q", waited, captureErr, capture)
+				t.Fatalf(
+					"compact transcript pane capture kept failing for %s; last error: %v: %q",
+					waited,
+					captureErr,
+					capture,
+				)
 			}
-			t.Fatalf("compact transcript pane never became ready within %s; capture succeeded throughout and the fixture never rendered its working line: %q", waited, capture)
+			t.Fatalf(
+				"compact transcript pane never became ready within %s; capture succeeded throughout and the fixture never rendered its working line: %q",
+				waited,
+				capture,
+			)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -356,14 +369,14 @@ func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	steer := "post compact steer landed"
-	result, err := engine.DeliverThen(ctx, socketPath, pane, []string{steer}, false)
+	result, err := engine.DeliverThen(ctx, ThenWait{SocketPath: socketPath, Target: pane, Steers: []string{steer}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Code != 0 || result.Status != "delivered" || !result.Typed {
 		t.Fatalf("DeliverThen() = %+v", result)
 	}
-	capture, err := CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err := TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +443,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 	if !strings.Contains(queued.Message, "queued into") {
 		t.Fatalf("queue receipt is not distinct: %q", queued.Message)
 	}
-	capture, err := CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err := TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +472,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 		fileQueued.AutoFilePath != "" {
 		t.Fatalf("long file-backed queue result = %+v", fileQueued)
 	}
-	capture, err = CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err = TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil || !strings.Contains(capture, long) {
 		t.Fatalf("busy fixture did not receive the full file-backed body byte-exact: err=%v capture=%q", err, capture)
 	}
@@ -509,7 +522,7 @@ func TestJailedBusyClaudeQueuesWithoutControlKeys(t *testing.T) {
 	if !strings.Contains(queued.Message, "busy Claude accepted") {
 		t.Fatalf("queue receipt does not identify Claude: %q", queued.Message)
 	}
-	capture, err := CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err := TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +553,7 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: pane},
-		Tmux:     verifiedChatTmux{CommandTmux: CommandTmux{}, command: "claude"},
+		Tmux:     verifiedChatTmux{TmuxInjector: TmuxInjector{}, command: "claude"},
 		Spawner:  &fakeSpawner{},
 		Options: Options{
 			Poll:            10 * time.Millisecond,
@@ -584,7 +597,7 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 	}
 	if result.Code != 0 || result.Status != "queued" || !result.Typed ||
 		result.AutoFilePath != "" || result.LiteralChunks < 2 {
-		capture, captureErr := CommandTmux{}.Capture(
+		capture, captureErr := TmuxInjector{}.Capture(
 			context.Background(),
 			socketPath,
 			pane,
@@ -615,7 +628,11 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 	}
 	wantRecord := "FIRED-BEGIN\n" + want + "\nFIRED-END\n"
 	if string(recorded) != wantRecord {
-		t.Fatalf("compact transcript changed or interleaved command: got %d bytes, want %d", len(recorded), len(wantRecord))
+		t.Fatalf(
+			"compact transcript changed or interleaved command: got %d bytes, want %d",
+			len(recorded),
+			len(wantRecord),
+		)
 	}
 	if !strings.Contains(result.Proof, "FIRED") {
 		t.Fatalf("delivery proof did not show the fired command: %q", result.Proof)
@@ -652,7 +669,7 @@ func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: session},
-		Tmux:     CommandTmux{},
+		Tmux:     TmuxInjector{},
 		Spawner:  &fakeSpawner{},
 		Options:  Options{LockRoot: filepath.Join(jail.root, "locks")},
 	})
@@ -710,7 +727,7 @@ func TestJailedClientActivityReportsUnattendedAndDeadSocket(t *testing.T) {
 	jail.sockets = append(jail.sockets, socket)
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 
-	tmux := CommandTmux{}
+	tmux := TmuxInjector{}
 	last, ok, err := tmux.ClientActivity(context.Background(), socketPath, session)
 	if err != nil {
 		t.Fatalf("ClientActivity() on an unattended live session returned an error instead of ok=false: %v", err)
@@ -722,6 +739,9 @@ func TestJailedClientActivityReportsUnattendedAndDeadSocket(t *testing.T) {
 	deadSocket := filepath.Join(jail.tmuxDir, "probe-pfm-client-activity-dead")
 	_, deadOK, deadErr := tmux.ClientActivity(context.Background(), deadSocket, session)
 	if deadErr == nil {
-		t.Fatalf("ClientActivity() against a dead socket returned no error (ok=%v) — a failure to look must never read as \"nobody typing\"", deadOK)
+		t.Fatalf(
+			"ClientActivity() against a dead socket returned no error (ok=%v) — a failure to look must never read as \"nobody typing\"",
+			deadOK,
+		)
 	}
 }

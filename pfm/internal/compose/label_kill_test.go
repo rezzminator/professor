@@ -1,11 +1,11 @@
 package compose
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
 	"testing"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // TestLabelKilledChatLeavesTheDefaultListing pins the rename-to-kill rule: a
@@ -92,7 +92,7 @@ func TestLabelKillCoversLiveAndCodexRowsAndFoldsCase(t *testing.T) {
 		Rollouts:    []store.Rollout{rollout},
 		CxNames:     map[string]string{"019f-worker": "_KILL codex worker"},
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{{Socket: "cc-1-2-3", PaneID: "%1"}},
+			Panes: []gather.ProbePane{{Socket: "cc-1-2-3", PaneID: "%1"}},
 			Crumbs: []gather.Crumb{{
 				Filename:       "cc-1-2-3",
 				Socket:         "cc-1-2-3",
@@ -185,7 +185,7 @@ func TestSplitRowKeepsItsJoinedName(t *testing.T) {
 	input := Input{
 		Transcripts: []store.Transcript{first, second},
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{
+			Panes: []gather.ProbePane{
 				{Socket: "cc-9-9-9", PaneID: "%1"},
 				{Socket: "cc-9-9-9", PaneID: "%2"},
 			},

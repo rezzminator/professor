@@ -2,65 +2,49 @@ package harvest
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// FetchImage downloads one image without invoking the document converter.
-// Images are immutable cache content and therefore do not expire.
-func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bool) Result {
-	if isLocalSource(source) {
-		path := source
-		if strings.HasPrefix(strings.ToLower(path), "file://") {
-			decoded, err := fileURLPath(path)
-			if err != nil {
-				return Result{Source: source, Error: err.Error()}
+// Download retrieves a source's bytes, unparsed, through Retrieve's file
+// policy — the download_file tool's path, for a file of any kind (a PDF, a zip, an
+// image, audio), capped at harvest.maxDownloadBytes. It never converts.
+func (h *Harvester) Download(ctx context.Context, source string) Result {
+	ctx, note := withRetryAfterNote(ctx)
+	if err := validateFetchURL(source, false); err != nil {
+		return Result{Source: source, Error: err.Error(), ErrorKind: errorKindInvalid}
+	}
+	if refused, ok := shareLinkRefusal(source); ok { // a sign-in-only share service, named before any fetch
+		return refused
+	}
+	req := retrieveRequest{target: source, want: WantFile, policy: PolicyFile, options: FetchOptions{Refresh: true}}
+	share, shared := shareDirectLink(source)
+	if shared { // the share link's direct form; a page in its place is never the file (share_links.go)
+		req.target, req.accept = share.target, func(kind string) bool { return kind != kindHTML }
+	}
+	got, err := h.retrieveWith(ctx, req)
+	if shared && errors.Is(err, errNoFileRung) {
+		if confirmed, ok := h.driveConfirmTarget(ctx, share); ok {
+			req.target = confirmed
+			got, err = h.retrieveWith(ctx, req)
+		}
+	}
+	if err != nil {
+		if shared && errors.Is(err, errNoFileRung) {
+			kind := shareInterstitialKind(got.Status, "")
+			if got.Status >= 400 {
+				kind = schemeHTTP
 			}
-			path = decoded
+			return shareFetchFailure(source, share, got.Status, kind, false, got.Rungs)
 		}
-		if reason := DenyLocalPath(path, h.options.LocalRoots); reason != "" {
-			return Result{Source: source, Error: reason}
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return Result{Source: source, Error: err.Error()}
-		}
-		if len(body) > maxImageBytes {
-			return Result{Source: source, Error: "image exceeds 10 MiB limit"}
-		}
-		return h.storeBinary(source, classifyKind(path, "", body), "local", body, refreshValue(refresh))
+		return note.apply(fileFailure(source, kindFile, got, err))
 	}
-	if err := assertFetchable(source, false); err != nil {
-		return Result{Source: source, Error: err.Error()}
-	}
-	if !refreshValue(refresh) {
-		if path, kind := h.binaryCachePath(source); path != "" {
-			if body, err := os.ReadFile(path); err == nil {
-				return Result{Source: source, Kind: kind, Path: path, Method: "cache", CacheStatus: "hit", Bytes: int64(len(body))}
-			}
-		}
-	}
-	for _, rung := range []struct {
-		name   string
-		client *http.Client
-		ua     string
-	}{
-		{"direct", h.binaryDirectOrClient(), h.userAgent}, {"chrome-impersonation", h.binaryChromeOrChrome(), chromeUA},
-	} {
-		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, maxImageBytes+1)
-		if err != nil || status >= 400 || len(body) > maxImageBytes {
-			continue
-		}
-		kind := classifyKind(source, contentType, body)
-		if !isImageKind(kind) {
-			continue
-		}
-		return h.storeBinary(source, kind, rung.name, body, refreshValue(refresh))
-	}
-	return Result{Source: source, Error: "image could not be downloaded"}
+	result := got.Result
+	result.Source, result.HTTPStatus = source, got.Status
+	return result
 }
 
 func (h *Harvester) binaryDirectOrClient() *http.Client {
@@ -79,20 +63,18 @@ func (h *Harvester) binaryChromeOrChrome() *http.Client {
 
 func isImageKind(kind string) bool {
 	switch kind {
-	case "jpg", "png", "gif", "webp", "bmp", "tiff", "svg", "image":
+	case kindJPG, kindPNG, kindGIF, kindWebP, kindBMP, kindTIFF, kindSVG, kindImage:
 		return true
 	}
 	return false
 }
 
-func refreshValue(v []bool) bool { return len(v) > 0 && v[0] }
-
 func (h *Harvester) binaryCachePath(source string) (string, string) {
-	for _, kind := range []string{"jpg", "png", "gif", "webp", "bmp", "tiff", "svg", "image", "zip", "tar", "7z", "rar"} {
+	for _, kind := range []string{kindJPG, kindPNG, kindGIF, kindWebP, kindBMP, kindTIFF, kindSVG, kindImage, kindZIP, kindTAR, kind7Z, kindRAR} {
 		path := filepath.Join(h.options.CacheDir, CacheKey(source, kind))
 		ext := filepath.Ext(path)
 		bin := strings.TrimSuffix(path, ext)
-		for _, candidateExt := range []string{".jpg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".zip", ".tar", ".7z", ".rar"} {
+		for _, candidateExt := range []string{extensionJPG, extensionPNG, extensionGIF, extensionWebP, extensionBMP, extensionTIFF, extensionSVG, extensionZIP, extensionTAR, extension7Z, extensionRAR} {
 			candidate := bin + candidateExt
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate, kind
@@ -102,86 +84,19 @@ func (h *Harvester) binaryCachePath(source string) (string, string) {
 	return "", ""
 }
 
-func (h *Harvester) storeBinary(source, kind, method string, body []byte, refresh bool) Result {
+// binaryPath is where the binary cache keeps source's bytes of kind.
+func (h *Harvester) binaryPath(source, kind string) string {
 	ext := filepath.Ext(strings.Split(strings.Split(source, "?")[0], "#")[0])
 	if ext == "" || len(ext) > 5 {
-		ext = map[string]string{"jpg": ".jpg", "png": ".png", "gif": ".gif", "webp": ".webp", "bmp": ".bmp", "tiff": ".tiff", "svg": ".svg", "image": ".png", "zip": ".zip", "tar": ".tar", "7z": ".7z", "rar": ".rar"}[kind]
+		ext = map[string]string{kindJPG: extensionJPG, kindPNG: extensionPNG, kindGIF: extensionGIF, kindWebP: extensionWebP, kindBMP: extensionBMP, kindTIFF: extensionTIFF, kindSVG: extensionSVG, kindImage: extensionPNG, kindZIP: extensionZIP, kindTAR: extensionTAR, kind7Z: extension7Z, kindRAR: extensionRAR}[kind]
 	}
 	if ext == "" {
 		ext = ".bin"
 	}
-	base := filepath.Join(h.options.CacheDir, CacheKey(source, kind))
-	path := strings.TrimSuffix(base, filepath.Ext(base)) + ext
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return Result{Source: source, Error: err.Error()}
+	root := h.options.CacheDir
+	if h.cache != nil {
+		root = h.cache.root // a call with caller headers keeps its files in its own partition
 	}
-	tmp, e := os.CreateTemp(filepath.Dir(path), ".harvest-bin-*")
-	if e != nil {
-		return Result{Source: source, Error: e.Error()}
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, e = tmp.Write(body); e == nil {
-		e = tmp.Chmod(0o600)
-	}
-	if closeErr := tmp.Close(); e == nil {
-		e = closeErr
-	}
-	if e == nil {
-		e = os.Rename(tmpName, path)
-	}
-	if e != nil {
-		return Result{Source: source, Kind: kind, Error: fmt.Sprintf("cache binary: %v", e)}
-	}
-	status := "miss"
-	if refresh {
-		status = "refresh"
-	}
-	return Result{Source: source, Kind: kind, Path: path, Method: method, CacheStatus: status, Bytes: int64(len(body))}
-}
-
-func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refresh bool) (string, Result) {
-	if isLocalSource(source) {
-		path := source
-		if strings.HasPrefix(strings.ToLower(path), "file://") {
-			decoded, err := fileURLPath(path)
-			if err != nil {
-				return "", Result{Source: source, Error: err.Error()}
-			}
-			path = decoded
-		}
-		if reason := DenyLocalPath(path, h.options.LocalRoots); reason != "" {
-			return "", Result{Source: source, Error: reason}
-		}
-		return path, Result{Source: source, Path: path}
-	}
-	if err := assertFetchable(source, false); err != nil {
-		return "", Result{Source: source, Error: err.Error()}
-	}
-	if !refresh {
-		if path, kind := h.binaryCachePath(source); path != "" {
-			return path, Result{Source: source, Kind: kind, Path: path, Method: "cache", CacheStatus: "hit"}
-		}
-	}
-	for _, rung := range []struct {
-		name   string
-		client *http.Client
-		ua     string
-	}{
-		{"direct", h.binaryDirectOrClient(), h.userAgent}, {"chrome-impersonation", h.binaryChromeOrChrome(), chromeUA},
-	} {
-		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, h.options.MaxBytes)
-		if err != nil || status >= 400 {
-			continue
-		}
-		kind := classifyKind(source, contentType, body)
-		if kind != "zip" && kind != "tar" && kind != "7z" && kind != "rar" {
-			continue
-		}
-		result := h.storeBinary(source, kind, rung.name, body, refresh)
-		if result.Error == "" {
-			return result.Path, result
-		}
-	}
-	return "", Result{Source: source, Error: "archive could not be downloaded"}
+	base := filepath.Join(root, CacheKey(source, kind))
+	return strings.TrimSuffix(base, filepath.Ext(base)) + ext
 }

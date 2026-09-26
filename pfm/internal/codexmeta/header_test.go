@@ -34,10 +34,10 @@ func TestReadDoesNotSearchAnUnboundedTranscript(t *testing.T) {
 		strings.Repeat(`{"type":"response_item"}`+"\n", 20) + `{"type":"session_meta","source":"cli"}`,
 		strings.Repeat("x", 1024*1024+1),
 	} {
-		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Read(path); err == nil {
+		if _, err := ReadHeader(path); err == nil {
 			t.Fatal("accepted metadata beyond bounded prefix")
 		}
 	}

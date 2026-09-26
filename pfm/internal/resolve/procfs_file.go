@@ -37,7 +37,11 @@ func (proc fileProcFS) Stat(pid int) (ProcStat, error) {
 	}
 	fields := strings.Fields(raw[closeParen+2:])
 	if len(fields) < 2 {
-		return ProcStat{}, fmt.Errorf("malformed proc stat for pid %d: expected parent field, got %d trailing fields", pid, len(fields))
+		return ProcStat{}, fmt.Errorf(
+			"malformed proc stat for pid %d: expected parent field, got %d trailing fields",
+			pid,
+			len(fields),
+		)
 	}
 	parent, err := strconv.Atoi(fields[1])
 	if err != nil {

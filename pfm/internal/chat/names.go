@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // NameResolver is the fleet roster rung of inject's target resolution, shared
@@ -104,8 +104,9 @@ func (resolver NameResolver) SenderName(
 // keeps only that engine's rows.
 func liveSeats(rows []compose.Row, requiredEngine string) []compose.Row {
 	seats := make([]compose.Row, 0, len(rows))
-	for _, row := range rows {
-		if !IsLive(row.Kind) || row.Killed || row.Socket == "" ||
+	for index := range rows {
+		row := rows[index]
+		if !row.Kind.IsAddressable() || row.Killed || row.Socket == "" ||
 			(row.PaneID == "" && row.SessionName == "") ||
 			(requiredEngine != "" && string(compose.EngineForKind(row.Kind)) != requiredEngine) {
 			continue

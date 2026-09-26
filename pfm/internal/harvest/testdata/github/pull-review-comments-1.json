@@ -1,0 +1,147 @@
+[
+ {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/comments/2374487307",
+  "pull_request_review_id": 3261102412,
+  "id": 2374487307,
+  "path": "lib/_http_client.js",
+  "user": {
+   "login": "user-45",
+   "type": "User"
+  },
+  "body": "Review comment 1 text.",
+  "created_at": "2025-09-24T05:51:22Z",
+  "updated_at": "2025-09-24T05:51:30Z",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857#discussion_r2374487307",
+  "pull_request_url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "author_association": "MEMBER",
+  "line": null,
+  "original_line": 945,
+  "side": "RIGHT",
+  "subject_type": "line"
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/comments/2377770305",
+  "pull_request_review_id": 3265764504,
+  "id": 2377770305,
+  "path": "lib/_http_client.js",
+  "user": {
+   "login": "user-40",
+   "type": "User"
+  },
+  "body": "Review comment 2 text.",
+  "created_at": "2025-09-25T05:25:57Z",
+  "updated_at": "2025-09-25T05:25:57Z",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857#discussion_r2377770305",
+  "pull_request_url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "author_association": "NONE",
+  "in_reply_to_id": 2374487307,
+  "line": null,
+  "original_line": 945,
+  "side": "RIGHT",
+  "subject_type": "line"
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/comments/2378223246",
+  "pull_request_review_id": 3266441573,
+  "id": 2378223246,
+  "path": "lib/_http_client.js",
+  "user": {
+   "login": "user-45",
+   "type": "User"
+  },
+  "body": "Review comment 3 text.",
+  "created_at": "2025-09-25T08:26:58Z",
+  "updated_at": "2025-09-25T08:26:58Z",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857#discussion_r2378223246",
+  "pull_request_url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "author_association": "MEMBER",
+  "line": null,
+  "original_line": 948,
+  "side": "RIGHT",
+  "subject_type": "line"
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/comments/2378224819",
+  "pull_request_review_id": 3266443647,
+  "id": 2378224819,
+  "path": "lib/_http_client.js",
+  "user": {
+   "login": "user-45",
+   "type": "User"
+  },
+  "body": "Review comment 4 text.",
+  "created_at": "2025-09-25T08:27:30Z",
+  "updated_at": "2025-09-25T08:27:30Z",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857#discussion_r2378224819",
+  "pull_request_url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "author_association": "MEMBER",
+  "in_reply_to_id": 2378223246,
+  "line": null,
+  "original_line": 948,
+  "side": "RIGHT",
+  "subject_type": "line"
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/comments/2384322751",
+  "pull_request_review_id": 3275110431,
+  "id": 2384322751,
+  "path": "lib/_http_client.js",
+  "user": {
+   "login": "user-40",
+   "type": "User"
+  },
+  "body": "Review comment 5 text.",
+  "created_at": "2025-09-27T20:46:40Z",
+  "updated_at": "2025-09-27T20:55:15Z",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857#discussion_r2384322751",
+  "pull_request_url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "author_association": "NONE",
+  "in_reply_to_id": 2378223246,
+  "line": null,
+  "original_line": 948,
+  "side": "RIGHT",
+  "subject_type": "line"
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/comments/2384362404",
+  "pull_request_review_id": 3275162798,
+  "id": 2384362404,
+  "path": "lib/_http_client.js",
+  "user": {
+   "login": "user-40",
+   "type": "User"
+  },
+  "body": "Review comment 6 text.",
+  "created_at": "2025-09-27T22:10:56Z",
+  "updated_at": "2025-09-27T22:10:56Z",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857#discussion_r2384362404",
+  "pull_request_url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "author_association": "NONE",
+  "in_reply_to_id": 2378223246,
+  "line": null,
+  "original_line": 948,
+  "side": "RIGHT",
+  "subject_type": "line"
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/comments/2393633637",
+  "pull_request_review_id": 3287811631,
+  "id": 2393633637,
+  "path": "lib/_http_client.js",
+  "user": {
+   "login": "user-40",
+   "type": "User"
+  },
+  "body": "Review comment 7 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "created_at": "2025-10-01T07:00:10Z",
+  "updated_at": "2025-10-01T07:00:11Z",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857#discussion_r2393633637",
+  "pull_request_url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "author_association": "NONE",
+  "in_reply_to_id": 2378223246,
+  "line": null,
+  "original_line": 948,
+  "side": "RIGHT",
+  "subject_type": "line"
+ }
+]

@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 func TestUIStress(t *testing.T) {
@@ -111,8 +111,9 @@ func stressRandomKeys(t *testing.T) {
 	large := NewModel(largeSnapshot(5_000))
 	rows := large.VisibleRows()
 	seen := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		key := compose.RowKey(row)
+	for index := range rows {
+		row := &rows[index]
+		key := compose.RowKey(*row)
 		if _, duplicate := seen[key]; duplicate {
 			t.Fatalf("natural order duplicated %q", key)
 		}
@@ -167,7 +168,7 @@ func stressRefreshStorm(t *testing.T) {
 	snapshot := largeSnapshot(1_000)
 	snapshot.InitialCursorID = snapshot.Rows[500].ID
 	model := NewModel(snapshot)
-	follow := model.SelectedKey()
+	var follow string
 	before := runtime.NumGoroutine()
 	const refreshes = 100
 	for refresh := 0; refresh < refreshes; refresh++ {

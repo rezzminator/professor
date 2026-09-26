@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type killTmuxJail struct {
@@ -24,7 +24,7 @@ type killTmuxJail struct {
 	sidDir     string
 	home       string
 	claudeRoot string
-	codexRoot  string
+	codexHome  string
 	sockets    []string
 }
 
@@ -43,14 +43,14 @@ func newKillTmuxJail(t *testing.T) *killTmuxJail {
 		sidDir:     filepath.Join(root, "sid"),
 		home:       filepath.Join(root, "home"),
 		claudeRoot: filepath.Join(root, "claude"),
-		codexRoot:  filepath.Join(root, "codex"),
+		codexHome:  filepath.Join(root, "codex"),
 	}
 	for _, directory := range []string{
 		jail.tmuxDir,
 		jail.sidDir,
 		jail.home,
 		jail.claudeRoot,
-		jail.codexRoot,
+		jail.codexHome,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -63,7 +63,7 @@ func newKillTmuxJail(t *testing.T) *killTmuxJail {
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
-	t.Setenv("PFM_CODEX_ROOT", jail.codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
 	t.Setenv("PFM_TMUX_DIR", jail.tmuxDir)
 	t.Cleanup(func() {
 		for _, socket := range jail.sockets {
@@ -143,7 +143,11 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	id := "88888888-8888-4888-8888-888888888888"
 	projectDir := filepath.Join(jail.claudeRoot, "project")
@@ -194,7 +198,7 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
 		ProcFS:  &fakeProc{},
-		Tmux:    CommandTmux{},
+		Tmux:    TmuxKiller{},
 		Spawner: spawner,
 		Now:     func() time.Time { return time.Unix(500, 0) },
 	})
@@ -217,7 +221,7 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	}
 
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux:         CommandTmux{},
+		Tmux:         TmuxKiller{},
 		Delay:        10 * time.Millisecond,
 		PollEvery:    10 * time.Millisecond,
 		PollAttempts: 200,
@@ -228,7 +232,9 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	if err := finisher.Run(ctx, spawner.args[0]); err != nil {
 		t.Fatal(err)
 	}
-	if (CommandTmux{}).PaneExists(ctx, socketPath, paneID) {
+	if exists, err := (TmuxKiller{}).PaneExists(ctx, socketPath, paneID); err != nil {
+		t.Fatalf("probe pane after kill-exit: %v", err)
+	} else if exists {
 		t.Fatal("target pane survived kill-exit")
 	}
 	for _, path := range []string{
@@ -252,12 +258,16 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const count = 10
 	args := make([]ExitArgs, 0, count)
-	for index := 0; index < count; index++ {
-		id := fmt.Sprintf("kill-exit-%02d", index)
+	for position := 0; position < count; position++ {
+		id := fmt.Sprintf("kill-exit-%02d", position)
 		path := filepath.Join(jail.claudeRoot, id+".jsonl")
 		if err := database.UpsertTranscript(ctx, store.Transcript{
 			UUID:        id,
@@ -269,15 +279,15 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		if err := database.Kill(ctx, store.Killed{
 			ID:       id,
 			Engine:   pfmengine.Claude,
-			KilledAt: int64(index + 1),
+			KilledAt: int64(position + 1),
 		}); err != nil {
 			t.Fatal(err)
 		}
-		socketName := fmt.Sprintf("cc-%d-1-1", 900+index)
+		socketName := fmt.Sprintf("cc-%d-1-1", 900+position)
 		paneID := jail.startReader(
 			t,
 			socketName,
-			fmt.Sprintf("kill-%02d", index),
+			fmt.Sprintf("kill-%02d", position),
 			path,
 			false,
 		)
@@ -297,7 +307,7 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		})
 	}
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux:         CommandTmux{},
+		Tmux:         TmuxKiller{},
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),
 		Delay:        5 * time.Millisecond,
 		PollEvery:    5 * time.Millisecond,
@@ -309,32 +319,34 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 	started := time.Now()
 	var group sync.WaitGroup
 	errorsByIndex := make([]error, len(args))
-	for index := range args {
-		index := index
+	for position := range args {
+		position := position
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			errorsByIndex[index] = finisher.Run(ctx, args[index])
+			errorsByIndex[position] = finisher.Run(ctx, args[position])
 		}()
 	}
 	group.Wait()
 	elapsed := time.Since(started)
-	for index, runErr := range errorsByIndex {
+	for position, runErr := range errorsByIndex {
 		if runErr != nil {
-			t.Fatalf("finisher %d: %v", index, runErr)
+			t.Fatalf("finisher %d: %v", position, runErr)
 		}
-		if (CommandTmux{}).PaneExists(
+		if exists, err := (TmuxKiller{}).PaneExists(
 			context.Background(),
-			args[index].SocketPath,
-			args[index].PaneID,
-		) {
-			t.Fatalf("pane %d survived", index)
+			args[position].SocketPath,
+			args[position].PaneID,
+		); err != nil {
+			t.Fatalf("probe pane %d after kill-exit: %v", position, err)
+		} else if exists {
+			t.Fatalf("pane %d survived", position)
 		}
 		for _, crumb := range []string{
-			filepath.Join(jail.sidDir, args[index].SocketName),
+			filepath.Join(jail.sidDir, args[position].SocketName),
 			filepath.Join(
 				jail.sidDir,
-				args[index].SocketName+"."+args[index].PaneID,
+				args[position].SocketName+"."+args[position].PaneID,
 			),
 		} {
 			if _, statErr := os.Stat(crumb); !errors.Is(statErr, os.ErrNotExist) {

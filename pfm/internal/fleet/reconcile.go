@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/spawn"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // CodexRolloutFingerprint is one Codex PID's FDLinks-observed rollout
@@ -106,7 +107,14 @@ func ReconcileCodexPanes(
 	runtime pfmconfig.Runtime,
 	warn Warn,
 ) bool {
-	return ReconcileCodexPanesWith(ctx, database, live, runtime, spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir}, warn)
+	return ReconcileCodexPanesWith(
+		ctx,
+		database,
+		live,
+		runtime,
+		spawn.TmuxSpawner{TmuxDir: runtime.Paths.TmuxDir},
+		warn,
+	)
 }
 
 // ReconcileCodexPanesWith is ReconcileCodexPanes re-applying names through
@@ -133,10 +141,11 @@ func ReconcileCodexPanesWith(
 		warn(fmt.Sprintf("Codex pane reconcile: read thread names: %v", err))
 		return changed
 	}
-	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
+	capturer := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
 
 	_, actions := ObserveCodexPanes(ctx, database, manager, capturer, live, runtime, cxNames, warn)
-	for _, action := range actions {
+	for index := range actions {
+		action := actions[index]
 		if action.Skip != "" && action.Bind == "" {
 			switch {
 			case action.Forget:
@@ -178,25 +187,42 @@ func ReconcileCodexPanesWith(
 			var recorded bool
 			target, recorded, err = manager.KillClearedCodex(ctx, action.ClearKill)
 			if err != nil {
-				warn(fmt.Sprintf("codex pane %s %s: record clear kill (binding retained for retry): %v", action.Socket, action.PaneID, err))
+				warn(
+					fmt.Sprintf(
+						"codex pane %s %s: record clear kill (binding retained for retry): %v",
+						action.Socket,
+						action.PaneID,
+						err,
+					),
+				)
 				continue
 			}
 			if !recorded {
-				warn(fmt.Sprintf("codex pane %s %s: clear lineage %s unavailable; binding retained for retry", action.Socket, action.PaneID, action.ClearKill))
+				warn(
+					fmt.Sprintf(
+						"codex pane %s %s: clear lineage %s unavailable; binding retained for retry",
+						action.Socket,
+						action.PaneID,
+						action.ClearKill,
+					),
+				)
 				continue
 			}
 			changed = true
 		}
-		if _, moved, err := manager.AdvanceCodexPane(
+		_, moved, err := manager.AdvanceCodexPane(
 			ctx, action.Socket, action.PaneID, action.Bind,
-		); err != nil {
+		)
+		if err != nil {
 			warn(fmt.Sprintf(
 				"codex pane %s %s: advance binding: %v", action.Socket, action.PaneID, err,
 			))
 			continue
-		} else {
-			changed = changed || moved
 		}
+		if moved {
+			obs.Transition(ctx, "fleet", "bound", "rebound", "codex pane advanced")(nil)
+		}
+		changed = changed || moved
 		if action.ClearKill == "" {
 			continue
 		}
@@ -215,11 +241,25 @@ func ReconcileCodexPanesWith(
 			ctx, renamer, action.Socket, action.PaneID, name, spawn.Defaults(), spawn.Trace{},
 		)
 		if renameErr != nil {
-			warn(fmt.Sprintf("codex pane %s %s: re-apply chat name after clear: %v", action.Socket, action.PaneID, renameErr))
+			warn(
+				fmt.Sprintf(
+					"codex pane %s %s: re-apply chat name after clear: %v",
+					action.Socket,
+					action.PaneID,
+					renameErr,
+				),
+			)
 			continue
 		}
 		if warning != "" {
-			warn(fmt.Sprintf("codex pane %s %s: chat name was not re-applied after clear: %s", action.Socket, action.PaneID, warning))
+			warn(
+				fmt.Sprintf(
+					"codex pane %s %s: chat name was not re-applied after clear: %s",
+					action.Socket,
+					action.PaneID,
+					warning,
+				),
+			)
 			continue
 		}
 		// Record the rename pfm just performed, rather than waiting for it to
@@ -237,7 +277,7 @@ func ReconcileCodexPanesWith(
 			ID:         action.Bind,
 			ThreadName: name,
 			Source:     store.CxNameSourceSessionIndex,
-			RenamedAt:  time.Now().UnixNano(),
+			RenamedAt:  clock.Real.Now().UnixNano(),
 		}); err != nil {
 			warn(fmt.Sprintf(
 				"codex pane %s %s: record re-applied chat name: %v",
@@ -273,7 +313,14 @@ func ObserveCodexPanes(
 	for _, process := range live.Codex {
 		if process.IdentityError != "" {
 			processConflicts[process.Socket+"\x00"+process.PaneID] = true
-			warn(fmt.Sprintf("codex pane %s %s: %s; binding not guessed", process.Socket, process.PaneID, process.IdentityError))
+			warn(
+				fmt.Sprintf(
+					"codex pane %s %s: %s; binding not guessed",
+					process.Socket,
+					process.PaneID,
+					process.IdentityError,
+				),
+			)
 			continue
 		}
 
@@ -366,13 +413,13 @@ func CodexTitleThreads(
 	warn Warn,
 ) map[string][]string {
 	titleThreads := make(map[string][]string)
-	codexRoots := runtime.Paths.Roots[pfmengine.Codex]
-	files := make([]string, 0, len(codexRoots))
-	for _, codexRoot := range codexRoots {
-		rootFiles, err := store.CodexStateFiles(codexRoot)
+	codexHomes := runtime.Paths.Roots[pfmengine.Codex]
+	files := make([]string, 0, len(codexHomes))
+	for _, codexHome := range codexHomes {
+		rootFiles, err := store.CodexStateFiles(codexHome)
 		if err != nil {
 			warn(fmt.Sprintf(
-				"codex pane reconcile: list Codex state store %q: %v", codexRoot, err,
+				"codex pane reconcile: list Codex state store %q: %v", codexHome, err,
 			))
 			continue
 		}
@@ -383,7 +430,8 @@ func CodexTitleThreads(
 		warn(fmt.Sprintf("codex pane reconcile: read Codex state stores: %v", err))
 		return titleThreads
 	}
-	for _, thread := range threads {
+	for index := range threads {
+		thread := threads[index]
 		if thread.Title == "" {
 			continue
 		}

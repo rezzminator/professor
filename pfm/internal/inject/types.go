@@ -6,27 +6,43 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const (
 	// CodeAmbiguous means more than one live target matched. It stays distinct
 	// from CodeUnknown so callers never report "not found" while listing the
 	// conflicting candidates in the same receipt.
-	CodeAmbiguous = 2
+	CodeAmbiguous = resolve.CodeAmbiguous
 	// CodeDead means the target resolved to a live pane that disappeared or
 	// became unreadable before delivery could complete.
 	CodeDead = 3
 	// CodeUnknown means no live target matched the requested namespace.
-	CodeUnknown = 4
+	CodeUnknown = resolve.CodeUnknown
 	// CodeUndelivered means the target exists but the guarded transaction did
 	// not put a turn into its model input.
-	CodeUndelivered = 6
+	CodeUndelivered = resolve.CodeUndelivered
 	// CodeBusy is the verdict a caller retries rather than escalates: the pane
 	// was working, so nothing was typed. It is internal retry telemetry; the
 	// CLI maps it to CodeUndelivered and never exposes rc 7.
 	CodeBusy = 7
+	// CodeLockLost means the delivery's own heartbeat found the lock
+	// directory now naming another owner mid-delivery — this holder cannot
+	// prove it still owns the pane, so it stopped rather than risk
+	// interleaving keystrokes with whoever stole it. The CLI has no named
+	// case for it and falls to its CodeUndelivered default.
+	CodeLockLost = 8
+	// CodeCaptureFailed means Engine.Capture's tmux call could not even run
+	// (pfmtmux.CouldNotRun) — the probe failed to look, distinct from
+	// CodeDead's "tmux ran and the pane answered gone". Every existing
+	// caller (mcpserv's chat_keys and chat_capture tools among them) already
+	// falls through an unrecognised code to its own generic failure branch,
+	// so this is additive: a caller that wants to tell the two apart can
+	// switch on it explicitly.
+	CodeCaptureFailed = 9
 	// ClaudeInlineMax and CodexInlineMax are 10% below the earliest
 	// empirically observed composer failure for each engine. Claude's smaller
 	// bracketed-paste edge is 801 characters; Codex's inline and paste edge is
@@ -178,9 +194,13 @@ type ThenSpawner interface {
 type SteerSpawn struct {
 	SocketPath string
 	Target     string
-	Steers     []string
-	LogPath    string
-	Append     bool
+	// Engine is the target's engine as the spawning chat resolved it
+	// (Target.Engine), handed to the waiter as `--engine` because a Codex
+	// pane's turn boundary is not readable yet (ThenWait.Engine).
+	Engine  string
+	Steers  []string
+	LogPath string
+	Append  bool
 	// Sender is the spawning chat's own identity, carried down because the
 	// waiter runs detached and can derive none of its own.
 	Sender Sender
@@ -191,6 +211,25 @@ type SteerSpawn struct {
 	// every other target the first busy IS the primary's turn, and waiting for
 	// an idle that already went by would delay the steer for nothing.
 	SelfTarget bool
+}
+
+// ThenWait is what the detached waiter (`pfm internal then`, hookentry.Then)
+// hands Engine.DeliverThen: the pane to ride out, the steers to deliver once
+// it settles, and the two facts about the pane the waiter cannot derive on
+// its own.
+type ThenWait struct {
+	SocketPath string
+	Target     string
+	Steers     []string
+	// SelfTarget: the pane being watched is the pane that asked for the
+	// wait, so the caller's own turn must end before any turn can be the
+	// primary's (SteerSpawn.SelfTarget).
+	SelfTarget bool
+	// Engine is Target.Engine as the spawning chat resolved it. On a Codex
+	// pane the busy/compaction footer is not pinned, so an unobserved turn
+	// boundary leaves the steer UNDELIVERED by name rather than typed into
+	// a compaction on the steady-idle guess (DeliverThen).
+	Engine string
 }
 
 // Options controls bounded retries. Zero values select chat.sh defaults.
@@ -215,9 +254,12 @@ type Options struct {
 	LockRoot          string
 	BodyRoot          string
 	BodyMaxAge        time.Duration
-	Now               func() time.Time
-	Sender            *Sender
-	DisableSignature  bool
+	// Clock is the time seam every Now/Sleep in this package crosses instead
+	// of the bare standard-library clock — nil defaults to clock.Real, so a
+	// caller outside the test suite behaves exactly as it always has.
+	Clock            clock.Clock
+	Sender           *Sender
+	DisableSignature bool
 	// AllowUnsigned permits delivery when no sender identity could be derived.
 	// It is OFF by default: an unsigned message asks its recipient to act on
 	// an instruction from nobody, and the recipient's only correct response is
@@ -253,15 +295,21 @@ type Dependencies struct {
 	// values to verify a live pane without assuming the defaults.
 	ClaudeBinary string
 	CodexBinary  string
-	// OpencodeBinary verifies a live OpenCode pane the same way.
-	OpencodeBinary string
+	// OpenCodeBinary verifies a live OpenCode pane the same way.
+	OpenCodeBinary string
 	AccountEmojis  []string
 	// CodexSeat is the last sender-identity rung. It maps this process's
 	// CODEX_THREAD_ID to the live fleet seat after ambient tmux and ancestry
 	// recovery both fail. Nil means that lookup is unavailable.
 	CodexSeat SelfIdentifier
-	Recorder  func(context.Context, shared.CommsEvent) error
+	Recorder  func(context.Context, fleetdb.CommsEvent) error
 	// WarningWriter receives non-fatal recorder failures. Nil uses stderr.
 	WarningWriter io.Writer
 	Options       Options
+	// Env is the process-environment seam every host-environment read in this
+	// package crosses instead — nil defaults to paths.OSEnv{}, so a caller
+	// outside the test suite reads the real environment exactly as it always
+	// has, and a test can inject paths.MapEnv (or hostfixture's Base.Env) to
+	// jail every read.
+	Env paths.Env
 }

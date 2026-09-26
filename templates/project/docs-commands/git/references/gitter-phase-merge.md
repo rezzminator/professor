@@ -2,15 +2,13 @@
 
 Gitter phase card — every core `gitter.md` rule (Remote Publication Boundary, Scoped-commit discipline, BANNED commands, commit convention) binds here. Gitter owns § Gotchas and self-updates it.
 
-Invoked **after QA** reports `Status: NONE` in `$DOCS/6-bugs.md`.
-
 ## 0. Acquire the merge lock + check for concurrent merges
 
 The advisory lock guards `main` against two pipelines merging at once; busy = another pipeline is mid-merge — report busy, retry shortly. Released in Step 6b. Then check concurrency:
 
 ```bash
 bash .claude/scripts/git-lock.sh acquire "pipeline/$PIPELINE"
-git status --short  # main may carry uncommitted WIP — a wave can launch dirty; expected
+git status --short  # main may carry uncommitted WIP — a flight can launch dirty; expected
 ls .worktrees/*/MERGING 2>/dev/null && echo "CONCURRENT MERGE DETECTED" || echo "Clear"
 ```
 
@@ -18,8 +16,7 @@ If another pipeline is actively merging, wait and retry.
 
 ## 1. Validate preconditions
 
-- Read `$DOCS/6-bugs.md` from disk and confirm it contains `Status: NONE` — file absent or status not NONE → refuse and report which. **Wave-v2 mode** (orchestrator passes `Wave-mode: v2`): `$DOCS` derives to `docs/dev/waves/$WAVE` instead, and the precondition is `$DOCS/gate1.md` ON DISK, all-green (per-project PASS, no unresolved `INTEGRATION-UNRUN`). The dispatch brief's own verdict text never substitutes for the file — a merge validated against an in-brief claim is ungated.
-- **Wave-train mode** (the brief names a train wave dir `docs/dev/trains/{train}/waves/{N}-{slug}/`): that dir's `REVIEW.md` must exist ON DISK with every `F{n}` finding `status: resolved @sha` or `waived — {ruling}` — file absent (the merge-gating review never ran) or any `open` finding → refuse and name it. Same law: the brief's verdict text never substitutes for the file.
+- The REPORT_PATH the brief names must exist ON DISK with every `F{n}` finding `status: resolved @sha` or `waived — {ruling}` — file absent (the merge-gating review never ran) or any `open` finding → refuse and name which. The dispatch brief's own verdict text never substitutes for the file — a merge validated against an in-brief claim is ungated.
 - Confirm worktree exists: `./.claude/scripts/worktree.sh list $PIPELINE`
 
 ## 2. Commit all worktree changes
@@ -35,7 +32,7 @@ cd -
 
 ## 3. Merge to main
 
-`main` may carry uncommitted WIP (a wave can launch dirty). Stash it, merge on a clean tree, restore — `--no-ff` guarantees an explicit merge commit for traceability:
+`main` may carry uncommitted WIP (a flight can launch dirty). Stash it, merge on a clean tree, restore — `--no-ff` guarantees an explicit merge commit for traceability:
 
 ```bash
 git checkout main
@@ -49,7 +46,7 @@ git merge pipeline/$PIPELINE --no-ff -m "..."  # type: merge($PIPELINE)
 
 **Branch merge conflicts** — `git diff --name-only --diff-filter=U` to list, resolve (implementation over scaffolding, newer over older, worktree branch when in doubt), commit: type `merge($PIPELINE)`, desc "resolve conflicts for $PIPELINE".
 
-**WIP stash-pop conflicts** (`WIP-POP-CONFLICT`) — main's uncommitted WIP critically overlaps the merged changes. The only condition that pauses the wave: STOP, list the conflicting files to the orchestrator address supplied in the merge brief (the user when no orchestrator is assigned), and ask for a commit-or-resolve ruling on the WIP — never discard it. A clean pop restores the WIP and the wave continues.
+**WIP stash-pop conflicts** (`WIP-POP-CONFLICT`) — main's uncommitted WIP critically overlaps the merged changes. The only condition that pauses the flight: STOP, list the conflicting files to the orchestrator address supplied in the merge brief (the user when no orchestrator is assigned), and ask for a commit-or-resolve ruling on the WIP — never discard it. A clean pop restores the WIP and the flight continues.
 
 Verify with `git log --oneline -5`.
 
@@ -59,7 +56,7 @@ For each roster project, compare worktree `.env.local`/`.env.test` with main; ap
 
 ## 5. Archive the audit trail, then clean up worktree — UNCONDITIONAL
 
-**This step runs in BOTH standalone and Wave-v2 mode, in the SAME dispatch as the merge itself — a MERGE that returns with `.worktrees/{name}` still on disk is INCOMPLETE.** The DOCS-COMMIT `Archive:` parameter governs docs archival only — `Archive: none` never skips this step. Salvage before removal: any wave/build doc dirty INSIDE the worktree's copy (`$WORKTREE/docs/dev/waves/**`, `$WORKTREE/docs/dev/builds/**` — builders sometimes write through worktree-relative paths) diffs against its root counterpart; unique or differing content is copied root-side first. Removal never touches the BRANCH (`pipeline/{name}` stays as the revert path).
+**This step runs in the SAME dispatch as the merge itself — a MERGE that returns with `.worktrees/{name}` still on disk is INCOMPLETE.** The DOCS-COMMIT `Archive:` parameter governs docs archival only — `Archive: none` never skips this step. Salvage before removal: any build doc dirty INSIDE the worktree's copy (`$WORKTREE/docs/dev/builds/**` — executors sometimes write through worktree-relative paths) diffs against its root counterpart; unique or differing content is copied root-side first. Removal never touches the BRANCH (`pipeline/{name}` stays as the revert path).
 
 ```bash
 bash .claude/scripts/checkpoint.sh archive "$WORKTREE" "$DOCS/audit-trail.json"
@@ -85,7 +82,7 @@ Confirm per template.
 
 Gitter's living memory of merge gotchas — self-updated when a structural change or recurring problem is discovered, never for routine merges. Seed it from your own repo. Common shapes:
 
-- **Stash pop vs concurrently-written untracked files (SETUP/MERGE/SYNC, any `stash push --include-untracked` on main):** untracked pipeline/wave docs are live append-only files another lane's orchestrator may write to _while your stash sits_. Pop can fail with `<file> already exists, no checkout` / `could not restore untracked files from stash` — the stash is kept, not dropped. Never overwrite the newer on-disk file or discard the stash blindly: diff `git show stash@{0}^3:<path>` (untracked blob) against the on-disk version, hand-merge (stashed history + on-disk's newer append, per each file's own append-only convention), write the merged result, verify the full stash is now redundant (`git diff --name-only stash@{0}^1 stash@{0}` for tracked + `git ls-tree -r --name-only stash@{0}^3` for untracked, both checked against `git status --porcelain`), then `git stash drop`.
+- **Stash pop vs concurrently-written untracked files (SETUP/MERGE, any `stash push --include-untracked` on main):** untracked pipeline docs are live append-only files another lane's orchestrator may write to _while your stash sits_. Pop can fail with `<file> already exists, no checkout` / `could not restore untracked files from stash` — the stash is kept, not dropped. Never overwrite the newer on-disk file or discard the stash blindly: diff `git show stash@{0}^3:<path>` (untracked blob) against the on-disk version, hand-merge (stashed history + on-disk's newer append, per each file's own append-only convention), write the merged result, verify the full stash is now redundant (`git diff --name-only stash@{0}^1 stash@{0}` for tracked + `git ls-tree -r --name-only stash@{0}^3` for untracked, both checked against `git status --porcelain`), then `git stash drop`.
 - **Worktree artifacts:** `.env.ports`, `.env.local`, `.env.test` get staged. Check `git status` and unstage generated files before committing.
 - **Dependency-symlink projects:** a roster project whose worktree symlinks the main checkout's dependency dir (e.g. `node_modules`, `.venv`) can appear in `git status` as a new tracked file — unstage before committing. If it slips to main, `git rm --cached {project}/{dep-dir}` and commit immediately.
 - **Concurrent pipeline conflicts:** when multiple pipelines modify the same files, keep the implementation version. The conflict-awareness check prevents simultaneous merges, not simultaneous development.

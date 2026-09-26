@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type Source interface {

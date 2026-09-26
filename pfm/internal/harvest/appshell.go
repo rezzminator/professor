@@ -58,7 +58,7 @@ func looksLikeClientApp(body []byte) bool {
 // query or fragment.
 func appShellProbeURL(source string) (string, bool) {
 	parsed, err := url.Parse(source)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != schemeHTTP && parsed.Scheme != schemeHTTPS) {
 		return "", false
 	}
 	dir := parsed.Path
@@ -73,10 +73,14 @@ func appShellProbeURL(source string) (string, bool) {
 	}
 	token := make([]byte, 8)
 	if _, err := rand.Read(token); err != nil {
-		log.Printf("harvest: app-shell probe token for %s: %v", source, err)
+		log.Printf("harvest: app-shell probe token for %s: %v", logSource(source), err)
 		return "", false
 	}
-	probe := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: dir + appShellProbePrefix + hex.EncodeToString(token)}
+	probe := &url.URL{
+		Scheme: parsed.Scheme,
+		Host:   parsed.Host,
+		Path:   dir + appShellProbePrefix + hex.EncodeToString(token),
+	}
 	return probe.String(), true
 }
 
@@ -105,13 +109,29 @@ func (h *Harvester) probeAppShell(ctx context.Context, client *http.Client, ua, 
 	if !ok {
 		return false
 	}
-	probeBody, status, _, err := getBody(ctx, client, probe, ua, h.options.MaxBytes)
+	// The probe arrives the way the page itself did — with the provenance
+	// Referer — or a Referer-gated host answers it with its wall, and the
+	// shell is never recognised.
+	probeBody, status, _, err := getBodyWithHeaders(
+		ctx,
+		client,
+		probe,
+		ua,
+		map[string]string{headerReferer: ProvenanceReferer},
+		h.options.MaxBytes,
+	)
 	if err != nil {
-		log.Printf("harvest: app-shell probe %s for %s could not run: %v", probe, source, err)
+		log.Printf("harvest: app-shell probe %s for %s could not run: %v", probe, logSource(source), err)
 		return false
 	}
 	if len(probeBody) == 0 || isChallenge(probeBody, status) {
-		log.Printf("harvest: app-shell probe %s for %s returned no comparable page (HTTP %d, %d bytes)", probe, source, status, len(probeBody))
+		log.Printf(
+			"harvest: app-shell probe %s for %s returned no comparable page (HTTP %d, %d bytes)",
+			probe,
+			source,
+			status,
+			len(probeBody),
+		)
 		return false
 	}
 	return shellFingerprint(probeBody) == want

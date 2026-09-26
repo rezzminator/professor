@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestPrimaryAccountGoesThroughTheStateStore fixtures the OUTCOME of a picker
@@ -15,8 +15,8 @@ import (
 func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	home := t.TempDir()
 	values := paths.Values{
-		Home:     home,
-		SharedDB: filepath.Join(home, ".cc", "fleet.db"),
+		Home:    home,
+		FleetDB: filepath.Join(home, ".cc", "fleet.db"),
 	}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
@@ -26,8 +26,8 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	if err := SetPrimaryAccount(values, machine, 3); err != nil {
 		t.Fatalf("SetPrimaryAccount() = %v", err)
 	}
-	if got := PrimaryAccount(values, machine); got != 3 {
-		t.Fatalf("PrimaryAccount() = %d", got)
+	if got, err := PrimaryAccount(values, machine); got != 3 || err != nil {
+		t.Fatalf("PrimaryAccount() = %d, %v", got, err)
 	}
 	content, err := os.ReadFile(filepath.Join(home, ".claude-primary"))
 	if err != nil {
@@ -49,14 +49,14 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	bareValues := paths.Values{
-		Home:     bare,
-		SharedDB: filepath.Join(blocked, "fleet.db"),
+		Home:    bare,
+		FleetDB: filepath.Join(blocked, "fleet.db"),
 	}
 	if err := SetPrimaryAccount(bareValues, machine, 2); err != nil {
 		t.Fatalf("fallback SetPrimaryAccount() = %v", err)
 	}
-	if got := PrimaryAccount(bareValues, machine); got != 2 {
-		t.Fatalf("fallback PrimaryAccount() = %d", got)
+	if got, err := PrimaryAccount(bareValues, machine); got != 2 || err != nil {
+		t.Fatalf("fallback PrimaryAccount() = %d, %v", got, err)
 	}
 	// A stale file naming a retired account reads back as the first account.
 	if err := os.WriteFile(
@@ -66,8 +66,8 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if got := PrimaryAccount(bareValues, machine); got != 1 {
-		t.Fatalf("off-roster file PrimaryAccount() = %d", got)
+	if got, err := PrimaryAccount(bareValues, machine); got != 1 || err != nil {
+		t.Fatalf("off-roster file PrimaryAccount() = %d, %v", got, err)
 	}
 }
 
@@ -89,12 +89,12 @@ func TestCurrentSocketReadsTheCallersOwnTmuxServer(t *testing.T) {
 // TestAccountRootsCanonicalizeProjectDirs pins that a symlinked project dir is
 // matched by its target — compose compares transcript paths against these.
 func TestAccountRootsCanonicalizeProjectDirs(t *testing.T) {
-	real := t.TempDir()
+	realHome := t.TempDir()
 	link := filepath.Join(t.TempDir(), "projects")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(realHome, link); err != nil {
 		t.Fatal(err)
 	}
-	canonical, err := filepath.EvalSymlinks(real)
+	canonical, err := filepath.EvalSymlinks(realHome)
 	if err != nil {
 		t.Fatal(err)
 	}

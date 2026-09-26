@@ -32,7 +32,7 @@ func ManifestPath(archiveDir string) string {
 }
 
 // AppendManifest records one completed move.
-func AppendManifest(archiveDir string, move Move, stamp string) error {
+func AppendManifest(archiveDir string, move Move, stamp string) (returnErr error) {
 	path := ManifestPath(archiveDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create the archive directory: %w", err)
@@ -43,7 +43,11 @@ func AppendManifest(archiveDir string, move Move, stamp string) error {
 	if err != nil {
 		return fmt.Errorf("open the manifest: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close the manifest: %w", err))
+		}
+	}()
 	if fresh {
 		if _, err := fmt.Fprintln(file, manifestHeader); err != nil {
 			return fmt.Errorf("write the manifest header: %w", err)
@@ -65,7 +69,7 @@ func AppendManifest(archiveDir string, move Move, stamp string) error {
 }
 
 // ReadManifest returns every recorded move, oldest first.
-func ReadManifest(archiveDir string) ([]ManifestRow, error) {
+func ReadManifest(archiveDir string) (rows []ManifestRow, returnErr error) {
 	file, err := os.Open(ManifestPath(archiveDir))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -73,8 +77,12 @@ func ReadManifest(archiveDir string) ([]ManifestRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open the manifest: %w", err)
 	}
-	defer file.Close()
-	rows := make([]ManifestRow, 0)
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close the manifest: %w", err))
+		}
+	}()
+	rows = make([]ManifestRow, 0)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()

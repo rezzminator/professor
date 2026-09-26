@@ -10,12 +10,16 @@
 package nudge
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func samplePath(sidDir, sessionID string) string {
@@ -60,7 +64,22 @@ func Band(percent, start, step int) int {
 // once when a band is first reached on the way up, never again inside it, and
 // again after the context fell (a compaction) and climbed back. The last band
 // spoken at is the only state.
-func Decide(sidDir, sessionID string, percent, start, step int) (int, bool, error) {
+func Decide(sidDir, sessionID string, percent, start, step int) (threshold int, fire bool, err error) {
+	defer func() {
+		next := "held"
+		if fire {
+			next = "nudged"
+		}
+		obs.Transition(
+			context.Background(),
+			"nudge",
+			"watching",
+			next,
+			fmt.Sprintf("%d%% vs threshold %d", percent, threshold),
+		)(
+			err,
+		)
+	}()
 	band := Band(percent, start, step)
 	last, _, err := readInt(bandPath(sidDir, sessionID))
 	if err != nil {
@@ -96,7 +115,7 @@ func Text(percent, band, step int) string {
 }
 
 func writeInt(path string, value int) error {
-	if err := os.WriteFile(path, []byte(strconv.Itoa(value)+"\n"), 0o600); err != nil {
+	if err := atomicfile.Write(path, []byte(strconv.Itoa(value)+"\n"), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

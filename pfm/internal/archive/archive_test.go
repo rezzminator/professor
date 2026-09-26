@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // fakeKills is the killed set with an audit trail of what was retired.
@@ -35,9 +36,20 @@ func (kills *fakeKills) Unkill(_ context.Context, id string) error {
 
 // emptyProc reports no processes: the fixtures declare liveness through the
 // sid crumbs instead, which is the reading that does not need a fake /proc.
-type emptyProc struct{}
+//
+// failPIDs lets a test drive the "process table unreadable" reading a real
+// jailed or denied /proc can produce — the case LiveSessions must report as
+// an error rather than silently reading as "no live processes".
+type emptyProc struct {
+	failPIDs bool
+}
 
-func (emptyProc) PIDs() ([]int, error)                   { return nil, nil }
+func (proc emptyProc) PIDs() ([]int, error) {
+	if proc.failPIDs {
+		return nil, errors.New("process table unreadable")
+	}
+	return nil, nil
+}
 func (emptyProc) Cmdline(int) ([]string, error)          { return nil, nil }
 func (emptyProc) Environ(int) (map[string]string, error) { return nil, nil }
 func (emptyProc) FDLinks(int) ([]gather.FDLink, error)   { return nil, nil }
@@ -51,7 +63,7 @@ func archiveJail(t *testing.T) paths.Values {
 		Roots: map[pfmengine.ID][]string{
 			pfmengine.Claude:   {filepath.Join(root, "home", ".cc", "1", "projects")},
 			pfmengine.Codex:    {filepath.Join(root, "home", ".codex")},
-			pfmengine.Opencode: {filepath.Join(root, "home", ".local", "share", "opencode")},
+			pfmengine.OpenCode: {filepath.Join(root, "home", ".local", "share", "opencode")},
 		},
 		SIDDir:     filepath.Join(root, "sid"),
 		ArchiveDir: filepath.Join(root, "home", ".claude-archive"),
@@ -75,9 +87,9 @@ func archiveJail(t *testing.T) paths.Values {
 // archive cannot move one session without moving all of them. A killed
 // OpenCode session must therefore stay killed and be reported as unsupported;
 // treating it as an orphan and retiring the kill makes the chat come back.
-func TestArchivePreservesUnsupportedOpencodeKill(t *testing.T) {
+func TestArchivePreservesUnsupportedOpenCodeKill(t *testing.T) {
 	values := archiveJail(t)
-	kills := &fakeKills{rows: []KilledChat{{ID: "ses-opencode", Engine: pfmengine.Opencode}}}
+	kills := &fakeKills{rows: []KilledChat{{ID: "ses-opencode", Engine: pfmengine.OpenCode}}}
 	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +104,35 @@ func TestArchivePreservesUnsupportedOpencodeKill(t *testing.T) {
 	}
 	if len(report.Unsupported) != 1 || report.Unsupported[0] != "ses-opencode" {
 		t.Fatalf("OpenCode archive limitation was hidden: report=%+v", report)
+	}
+}
+
+// TestRunRecordsTheArchivesStateTransitions: Run walks the state door (spec
+// § Middleware, `state`) — requested to planned to done — one comp=state
+// record per phase with dur_ms; an empty killed set plans and moves nothing.
+func TestRunRecordsTheArchivesStateTransitions(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	values := archiveJail(t)
+	runner, err := New(Dependencies{Paths: values, Kills: &fakeKills{}, Proc: emptyProc{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(ctx, Options{Apply: false}); err != nil {
+		t.Fatal(err)
+	}
+	var path []string
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "archive" {
+			continue
+		}
+		next, _ := record.Field("next")
+		path = append(path, next.(string))
+	}
+	if got := strings.Join(path, ","); got != "planned,done" {
+		t.Fatalf("archive state path = %s, want planned,done: %s", got, recorder.Raw())
 	}
 }
 
@@ -383,5 +424,71 @@ func TestArchiveSubagentsSkipsLiveTranscripts(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the live transcript is gone: %v", err)
+	}
+}
+
+// L1-F1: when the live-session reading itself could not run — an unreadable
+// process table — Run must refuse to decide anything at all rather than treat
+// the failure as "no chats are live". Nothing on disk moves and no kill is
+// retired.
+func TestArchiveRefusesToDecideWhenTheLiveReadingFails(t *testing.T) {
+	values := archiveJail(t)
+	const id = "11111111-1111-4111-8111-111111111111"
+	transcripts := filepath.Join(values.Roots[pfmengine.Claude][0], "-p")
+	original := filepath.Join(transcripts, id+".jsonl")
+	writeFile(t, original, "{}\n")
+	kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: "cc"}}}
+	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{failPIDs: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runner.Run(context.Background(), Options{Apply: true}); err == nil {
+		t.Fatal("Run() with an unreadable process table returned no error")
+	}
+	if _, err := os.Stat(original); err != nil {
+		t.Fatalf("Run() moved a transcript despite a failed live reading: %v", err)
+	}
+	if len(kills.unkilled) != 0 {
+		t.Fatalf("Run() retired a kill despite a failed live reading: %v", kills.unkilled)
+	}
+}
+
+// L1-F2: a transcript lookup that could not run — here, the claude projects
+// root cannot be read as a directory — must land the killed id in Unresolved, reported and
+// never un-killed, instead of being classed an orphan and having its kill row
+// retired.
+func TestArchiveMarksUnresolvedWhenTheTranscriptLookupCannotRun(t *testing.T) {
+	values := archiveJail(t)
+	const id = "11111111-1111-4111-8111-111111111111"
+	root := values.Roots[pfmengine.Claude][0]
+	// A regular file where the projects root should be: reading it as a
+	// directory fails with ENOTDIR for every user. chmod 000 would prove
+	// nothing under root, which is what the fence runs as.
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root, []byte("not a directory\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: "cc"}}}
+	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Run(context.Background(), Options{Apply: true})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(report.Orphans) != 0 {
+		t.Fatalf("a lookup that could not run was classed an orphan: %#v", report)
+	}
+	if len(report.Unresolved) != 1 || report.Unresolved[0] != id {
+		t.Fatalf("Unresolved = %v, want [%s]", report.Unresolved, id)
+	}
+	if len(kills.unkilled) != 0 {
+		t.Fatalf("an unresolved lookup's kill was retired: %v", kills.unkilled)
 	}
 }

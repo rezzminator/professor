@@ -2,7 +2,7 @@
 
 Gitter phase card — every core `gitter.md` rule (Remote Publication Boundary, Scoped-commit discipline, BANNED commands, commit convention) binds here.
 
-Invoked only by `/git push` or a direct user request that explicitly asks to push/publish to remote/origin. Orchestrator may provide `$MESSAGE`.
+Invoked only by a `Phase: PUSH` dispatch carrying a direct user request that explicitly asks to push/publish to remote/origin. Orchestrator may provide `$MESSAGE`.
 
 **Hard gate:** before any `git push`, verify this invocation carries explicit user push authority per core § Remote Publication Boundary; if it was triggered automatically or by an implicit "publish after success" workflow, refuse and stop with that section's refusal message.
 

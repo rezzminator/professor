@@ -1,11 +1,12 @@
 package gather
 
 import (
-	"hostops/pfm/internal/resolve"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // A Codex session that writes no rollout file holds no rollout descriptor
@@ -13,9 +14,9 @@ import (
 // the process stays invisible, which is the pre-0.146 behavior every other
 // caller still gets.
 func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
-	codexRoot := t.TempDir()
+	codexHome := t.TempDir()
 	declared := filepath.Join(
-		codexRoot,
+		codexHome,
 		"sessions",
 		"2026",
 		"rollout-2026-01-01T00-00-00-paginated.jsonl",
@@ -29,14 +30,14 @@ func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
 			birth:   1700,
 		},
 	}}
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket:      "cx-1-2-3",
 		PaneID:      "%4",
 		PID:         100,
 		CurrentPath: "/work/paginated",
 	}}
 
-	if invisible, err := DetectCodex(proc, codexRoot, panes); err != nil ||
+	if invisible, err := DetectCodex(proc, codexHome, panes); err != nil ||
 		len(invisible) != 0 {
 		t.Fatalf("DetectCodex() = %#v, error = %v; want no rollout-less rows", invisible, err)
 	}
@@ -45,7 +46,7 @@ func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
 	var gotBirth int64
 	got, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(exported, cwd string, birth int64, _, _ string) (string, string) {
 			gotExported, gotCWD, gotBirth = exported, cwd, birth
@@ -97,7 +98,7 @@ func TestDetectCodexThreadsIdentifiesResumedSessionsByArgv(t *testing.T) {
 			birth: 1786403951,
 		},
 	}}
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket:      "cx-1-2-3",
 		PaneID:      "%4",
 		PID:         100,
@@ -133,7 +134,7 @@ func TestDetectCodexThreadsPrefersResumeArgvOverAnInheritedEnvironment(t *testin
 			stat:    ProcStat{ParentPID: 100},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
 	var asked string
 	live, err := DetectCodexThreads(
@@ -187,7 +188,7 @@ func TestCodexResumeArgvTakesOnlyAUUID(t *testing.T) {
 // An unidentifiable codex process — the app-server daemon, for instance —
 // never becomes a live chat row.
 func TestDetectCodexThreadsSkipsUnidentifiedProcesses(t *testing.T) {
-	codexRoot := t.TempDir()
+	codexHome := t.TempDir()
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
@@ -196,11 +197,11 @@ func TestDetectCodexThreadsSkipsUnidentifiedProcesses(t *testing.T) {
 			birth:   1700,
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
 	live, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(string, string, int64, string, string) (string, string) { return "", "" },
 	)
@@ -216,8 +217,8 @@ func TestDetectCodexThreadsSkipsUnidentifiedProcesses(t *testing.T) {
 // can rotate it while argv and CODEX_THREAD_ID still name the old thread, so
 // the file must win without consulting the state-store resolver.
 func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing.T) {
-	codexRoot := t.TempDir()
-	rollout := filepath.Join(codexRoot, "sessions", "2026", "rollout-live.jsonl")
+	codexHome := t.TempDir()
+	rollout := filepath.Join(codexHome, "sessions", "2026", "rollout-live.jsonl")
 	writeRolloutMeta(t, rollout, "user", "")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
@@ -228,11 +229,11 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 			stat:    ProcStat{ParentPID: 100},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
 	live, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(string, string, int64, string, string) (string, string) {
 			t.Fatal("the resolver was consulted for a session holding a rollout descriptor")
@@ -262,13 +263,13 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 // resolver still gets a RolloutPath — the resolver's answer, for display and
 // lineage — but it must never be marked held, because fleet.ObserveCodexPanes uses
 // RolloutHeld to decide whether this identity is allowed to override the
-// pane's own screen (pipeline.go). Blanket-true here would silently restore
+// pane's own screen (ls_pipeline.go). Blanket-true here would silently restore
 // the defect this field exists to prevent.
 func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
-	codexRoot := t.TempDir()
-	heldRollout := filepath.Join(codexRoot, "sessions", "2026", "rollout-held.jsonl")
+	codexHome := t.TempDir()
+	heldRollout := filepath.Join(codexHome, "sessions", "2026", "rollout-held.jsonl")
 	writeRolloutMeta(t, heldRollout, "user", "")
-	resolvedRollout := filepath.Join(codexRoot, "sessions", "2026", "rollout-resolved-paginated.jsonl")
+	resolvedRollout := filepath.Join(codexHome, "sessions", "2026", "rollout-resolved-paginated.jsonl")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
@@ -283,14 +284,14 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 			stat:    ProcStat{ParentPID: 101},
 		},
 	}}
-	panes := []Pane{
+	panes := []ProbePane{
 		{Socket: "cx-1-2-3", PaneID: "%4", PID: 100},
 		{Socket: "cx-4-5-6", PaneID: "%5", PID: 101},
 	}
 
 	live, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(exported, _ string, _ int64, _, _ string) (string, string) {
 			return exported, resolvedRollout
@@ -350,7 +351,7 @@ func TestDetectCodexThreadsMatchesRolloutsUnderEveryConfiguredRoot(t *testing.T)
 			stat:    ProcStat{ParentPID: 100},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 	live, err := DetectCodexThreadsInRoots(proc, roots, panes, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -363,7 +364,7 @@ func TestDetectCodexThreadsMatchesRolloutsUnderEveryConfiguredRoot(t *testing.T)
 func TestHeldCodexRootOutranksSubagentDescriptor(t *testing.T) {
 	root := t.TempDir()
 	sessions := filepath.Join(root, "sessions")
-	if err := os.MkdirAll(sessions, 0700); err != nil {
+	if err := os.MkdirAll(sessions, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	child := filepath.Join(sessions, "rollout-child.jsonl")
@@ -372,15 +373,19 @@ func TestHeldCodexRootOutranksSubagentDescriptor(t *testing.T) {
 		child:  `{"type":"session_meta","payload":{"id":"child","source":{"subagent":{"thread_spawn":{"parent_thread_id":"root"}}}}}` + "\n",
 		parent: `{"type":"session_meta","payload":{"id":"root","source":"cli"}}` + "\n",
 	} {
-		if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
-		400: {cmdline: []string{"/usr/bin/codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 7, Target: parent}}},
+		400: {
+			cmdline: []string{"/usr/bin/codex"},
+			stat:    ProcStat{ParentPID: 100},
+			fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 7, Target: parent}},
+		},
 	}}
-	live, err := DetectCodexThreads(proc, root, []Pane{{Socket: "cx-1-2-3", PaneID: "%0", PID: 100}}, nil)
+	live, err := DetectCodexThreads(proc, root, []ProbePane{{Socket: "cx-1-2-3", PaneID: "%0", PID: 100}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

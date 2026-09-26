@@ -37,7 +37,7 @@ Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/mai
 
 ## 3. Section and exact insertion point
 
-**Section:** `### 🔬 <a name="research"></a>Research` in `README.md` (starts line 3259, description: "Tools for conducting research, surveys, interviews, and data collection."). This fits Harvester's fetch/findWorks/open-access-resolver/archive/paper-retrieval feature set better than "Search & Data Extraction" (which the README's own precedent — `mlava/scholar-sidekick-mcp`, `Liyux3/scholar-mcp`, `smeet666/mcp-archiveorg` — confirms is the home for citation/DOI/ISBN/paper-fetch tools, not general web scraping).
+**Section:** `### 🔬 <a name="research"></a>Research` in `README.md` (starts line 3259, description: "Tools for conducting research, surveys, interviews, and data collection."). This fits Harvester's `harvester_read`/`harvester_search_literature`/open-access-resolver/paper-retrieval feature set better than "Search & Data Extraction" (which the README's own precedent — `mlava/scholar-sidekick-mcp`, `Liyux3/scholar-mcp`, `smeet666/mcp-archiveorg` — confirms is the home for citation/DOI/ISBN/paper-fetch tools, not general web scraping).
 
 **Exact insertion point** (alphabetical by `owner/repo`, `m` cluster), `README.md`:
 
@@ -77,7 +77,7 @@ Both use the `owner/repo` (not `owner/repo/subpath`) link text with a `/tree/mai
 ### Entry (verbatim, to insert at the point in §3)
 
 ```
-- [rezzminator/professor](https://github.com/rezzminator/professor/tree/main/pfm/internal/harvestmcp) 🏎️ 🏠 - Public-document retrieval: fetch a URL, DOI, ISBN, PMID, PMCID, or local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR). Open-access resolvers for papers, plus web search, image fetch, cache search, and archive browsing. Tools: `fetch`, `findWorks`, `search`, `fetchImage`, `searchCache`, `archive`. Runs locally; MIT; lives at `pfm/internal/harvest(mcp)` inside the Professor monorepo.
+- [rezzminator/professor](https://github.com/rezzminator/professor/tree/main/pfm/internal/harvestmcp) 🏎️ 🏠 - Public-document retrieval: fetch a URL, DOI, ISBN, PMID, PMCID, or local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR). Open-access resolvers for papers, plus (when configured) web search. Tools: `harvester_read`, `harvester_search_literature`, `harvester_download_file`, and conditionally `harvester_search_web`. Runs locally; MIT; lives at `pfm/internal/harvest(mcp)` inside the Professor monorepo.
 ```
 
 - No Glama badge included — Harvester has no Glama listing today (see §6, Risks). CI will flag `missing-glama` and the maintainer will likely nag for one before merge, per §4 patterns.
@@ -116,7 +116,7 @@ This PR adds [rezzminator/professor](https://github.com/rezzminator/professor) (
 - **Repository:** https://github.com/rezzminator/professor
 - **Server location:** `pfm/internal/harvest` + `pfm/internal/harvestmcp` (one of two MCP servers in this monorepo)
 - **Language / Runtime:** Go, MIT license
-- **Capabilities:** Public-document retrieval — fetch a URL/DOI/ISBN/PMID/PMCID/local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR), open-access paper resolvers, web search, image fetch, cache search, and archive browsing. Tools: `fetch`, `findWorks`, `search`, `fetchImage`, `searchCache`, `archive`.
+- **Capabilities:** Public-document retrieval — fetch a URL/DOI/ISBN/PMID/PMCID/local file to Markdown through a multi-rung fallback ladder (direct → Chrome-fingerprint TLS → reader proxy → extractor → headless browser → Wayback → OCR), open-access paper resolvers, and (when configured) web search. Tools: `harvester_read`, `harvester_search_literature`, `harvester_download_file`, and conditionally `harvester_search_web`.
 - **Scope:** Local service, installed and run yourself.
 
 Alphabetical order and category structure preserved (inserted between `mnemox-ai/idea-reality-mcp` and `musharna/data-aggregator-mcp`).

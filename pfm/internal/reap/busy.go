@@ -8,11 +8,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"hostops/pfm/internal/action"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // BusyProbe reports the sessions the engine itself considers busy.
@@ -52,7 +53,7 @@ func NewClaudeAgentsConfigured(
 	if binaryName == "" {
 		binaryName = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	binary, err := deps.Resolve(binaryName)
+	binary, err := obs.Runner(deps.RealRunner{}).LookPath(binaryName)
 	if err != nil {
 		if filepath.IsAbs(binaryName) {
 			binary = binaryName

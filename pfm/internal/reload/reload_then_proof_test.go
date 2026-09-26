@@ -7,12 +7,48 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
+
+// driveFakeClock runs fn to completion, advancing clk whenever it has a
+// pending sleep, so a loop of real sleeps inside fn resolves in however
+// long the scheduler takes to hand control back — never the real duration
+// each sleep names. It fails the test if fn does not finish inside a
+// generous real wall-clock bound (a genuine hang, never the fake clock
+// running slow).
+func driveFakeClock(t *testing.T, clk *clock.Fake, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		if clk.Pending() > 0 {
+			clk.Advance(time.Hour)
+		} else {
+			runtime.Gosched()
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(
+				"driveFakeClock: fn did not finish before the real wall-clock bound — a genuine hang, not the fake clock",
+			)
+		}
+	}
+}
 
 // This file pins deliverThen's paste-placeholder proof (issue #12): a --then
 // prompt must be proven delivered from the ACTIVE composer only, a stale
@@ -56,6 +92,7 @@ func (tmux *composerPastePlaceholderTmux) SendKey(ctx context.Context, socket, p
 }
 
 func TestDeliverThenAcceptsAComposerPastePlaceholderAsProofOfDelivery(t *testing.T) {
+	t.Parallel()
 	tmux := &composerPastePlaceholderTmux{}
 	proc := fakeReloadProc{
 		pids: []int{801},
@@ -109,23 +146,28 @@ func (tmux *stalePlaceholderScrollbackTmux) SendKey(ctx context.Context, socket,
 }
 
 func TestDeliverThenRefusesAStalePlaceholderLeftInScrollback(t *testing.T) {
+	t.Parallel()
 	tmux := &stalePlaceholderScrollbackTmux{}
 	proc := fakeReloadProc{
 		pids: []int{801},
 		argv: map[int][]string{801: {"claude"}},
 		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
 	}
-	err := deliverThen(
-		context.Background(),
-		Request{
-			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-stale-scrollback", Pane: "%7",
-			PanePID: 700, Then: "continue the task",
-		},
-		Options{ThenTries: 2},
-		tmux,
-		proc,
-		io.Discard,
-	)
+	fakeClk := clock.NewFake(time.Unix(0, 0))
+	var err error
+	driveFakeClock(t, fakeClk, func() {
+		err = deliverThen(
+			context.Background(),
+			Request{
+				Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-stale-scrollback", Pane: "%7",
+				PanePID: 700, Then: "continue the task",
+			},
+			Options{ThenTries: 2, Clock: fakeClk},
+			tmux,
+			proc,
+			io.Discard,
+		)
+	})
 	if err == nil {
 		t.Fatal("deliverThen() = nil, want refusal — the placeholder is stale scrollback, not this send's composer")
 	}
@@ -182,6 +224,7 @@ func (tmux *baselineFailureTmux) SendKey(ctx context.Context, socket, pane, key 
 }
 
 func TestDeliverThenRequiresTheTailNeedleWhenTheBaselineCaptureFailed(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		composerMode string
@@ -192,23 +235,28 @@ func TestDeliverThenRequiresTheTailNeedleWhenTheBaselineCaptureFailed(t *testing
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 			tmux := &baselineFailureTmux{composerMode: testCase.composerMode, then: "continue the task"}
 			proc := fakeReloadProc{
 				pids: []int{801},
 				argv: map[int][]string{801: {"claude"}},
 				stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
 			}
-			err := deliverThen(
-				context.Background(),
-				Request{
-					Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-baseline-fail", Pane: "%7",
-					PanePID: 700, Then: tmux.then,
-				},
-				Options{ThenTries: 2},
-				tmux,
-				proc,
-				io.Discard,
-			)
+			fakeClk := clock.NewFake(time.Unix(0, 0))
+			var err error
+			driveFakeClock(t, fakeClk, func() {
+				err = deliverThen(
+					context.Background(),
+					Request{
+						Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-baseline-fail", Pane: "%7",
+						PanePID: 700, Then: tmux.then,
+					},
+					Options{ThenTries: 2, Clock: fakeClk},
+					tmux,
+					proc,
+					io.Discard,
+				)
+			})
 			if testCase.wantAccepted {
 				if err != nil {
 					t.Fatalf("deliverThen() error = %v, want the tail needle accepted despite the failed baseline", err)
@@ -257,6 +305,7 @@ func (tmux *stuckSubmitTmux) Respawn(_ context.Context, _, _, _, command string)
 }
 
 func TestRunReturnsAnErrorAndSavesTheSentinelWhenSubmitIsNeverConfirmed(t *testing.T) {
+	t.Parallel()
 	tmux := &stuckSubmitTmux{}
 	proc := fakeReloadProc{
 		pids: []int{801},
@@ -265,23 +314,27 @@ func TestRunReturnsAnErrorAndSavesTheSentinelWhenSubmitIsNeverConfirmed(t *testi
 	}
 	sidDir := t.TempDir()
 	socket := "/tmp/tmux-1000/probe-stuck-submit"
-	_, err := Run(
-		context.Background(),
-		Request{
-			Engine:     pfmengine.Claude,
-			SocketPath: socket,
-			Pane:       "%7",
-			PanePID:    700,
-			CWD:        "/jail/project",
-			Account:    1,
-			AccountIDs: []int{1},
-			Then:       "continue the task",
-		},
-		Options{SIDDir: sidDir, Delay: -1, Poll: -1, ExitTries: 2, ThenTries: 2},
-		tmux,
-		proc,
-		io.Discard,
-	)
+	fakeClk := clock.NewFake(time.Unix(0, 0))
+	var err error
+	driveFakeClock(t, fakeClk, func() {
+		_, err = Run(
+			context.Background(),
+			Request{
+				Engine:     pfmengine.Claude,
+				SocketPath: socket,
+				Pane:       "%7",
+				PanePID:    700,
+				CWD:        "/jail/project",
+				Account:    1,
+				AccountIDs: []int{1},
+				Then:       "continue the task",
+			},
+			Options{SIDDir: sidDir, Delay: -1, Poll: -1, ExitTries: 2, ThenTries: 2, Clock: fakeClk},
+			tmux,
+			proc,
+			io.Discard,
+		)
+	})
 	if err == nil {
 		t.Fatal("Run() = nil, want an error when the submit never confirms")
 	}

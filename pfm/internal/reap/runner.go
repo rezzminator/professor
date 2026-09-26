@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -58,12 +60,12 @@ type Dependencies struct {
 	Busy           BusyProbe
 	ClaudeBinary   string
 	CodexBinary    string
-	OpencodeBinary string
-	// CodexRoots is every configured Codex account home. The idle-horizon
+	OpenCodeBinary string
+	// CodexHomes is every configured Codex account home. The idle-horizon
 	// check resolves a Codex seat to its rollout by finding the live process
 	// that still holds it open, the same in-process path DetectCodex already
 	// used for the roster — never a shelled-out `pfm chat resolve`.
-	CodexRoots []string
+	CodexHomes []string
 	KillServer KillServerFunc
 	Now        func() time.Time
 }
@@ -76,8 +78,8 @@ type Runner struct {
 	busy           BusyProbe
 	claudeBinary   string
 	codexBinary    string
-	opencodeBinary string
-	codexRoots     []string
+	openCodeBinary string
+	codexHomes     []string
 	killServer     KillServerFunc
 	now            func() time.Time
 }
@@ -123,9 +125,8 @@ type Report struct {
 	AvailBefore int64
 	AvailAfter  int64
 	// Warnings are non-fatal apply-time failures that never affect the exit
-	// code — today, only an orphaned role- crumb (internal/rearm's format)
-	// that could not be removed. Reported so the failure is visible; never
-	// swallowed, never made destructive.
+	// code — today, only a role-seat prompt that could not be removed.
+	// Reported so the failure is visible; never swallowed, never destructive.
 	Warnings []string
 }
 
@@ -145,7 +146,7 @@ func New(dependencies Dependencies) (*Runner, error) {
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{TmuxDir: resolved.TmuxDir, Now: now}
+		tmux = TmuxReaper{TmuxDir: resolved.TmuxDir, Now: now}
 	}
 	proc := dependencies.Proc
 	if proc == nil {
@@ -165,8 +166,8 @@ func New(dependencies Dependencies) (*Runner, error) {
 		busy:           busy,
 		claudeBinary:   dependencies.ClaudeBinary,
 		codexBinary:    dependencies.CodexBinary,
-		opencodeBinary: dependencies.OpencodeBinary,
-		codexRoots:     dependencies.CodexRoots,
+		openCodeBinary: dependencies.OpenCodeBinary,
+		codexHomes:     dependencies.CodexHomes,
 		killServer:     dependencies.KillServer,
 		now:            now,
 	}, nil
@@ -177,7 +178,11 @@ func New(dependencies Dependencies) (*Runner, error) {
 func (runner *Runner) Run(
 	ctx context.Context,
 	options Options,
-) (Report, error) {
+) (report Report, err error) {
+	// The state door: one transition per sweep phase; a failure is
+	// attributed to the phase the sweep was in.
+	trail := obs.NewTrail(ctx, "reap", "requested")
+	defer func() { trail.End(err) }()
 	input := Input{
 		Self:         options.Self,
 		Apply:        options.Apply,
@@ -197,7 +202,6 @@ func (runner *Runner) Run(
 		input.ClientActive = defaultClientActive
 	}
 
-	var report Report
 	busyIDs, err := runner.busy.BusySessions(ctx)
 	input.AgentsOK = err == nil
 	input.BusyIDs = busyIDs
@@ -206,7 +210,7 @@ func (runner *Runner) Run(
 	}
 	report.AgentsOK = input.AgentsOK
 
-	tree, err := NewProcessTree(runner.proc, runner.claudeBinary, runner.codexBinary, runner.opencodeBinary)
+	tree, err := NewProcessTree(runner.proc, runner.claudeBinary, runner.codexBinary, runner.openCodeBinary)
 	if err != nil {
 		return Report{}, err
 	}
@@ -215,7 +219,7 @@ func (runner *Runner) Run(
 	if err != nil {
 		return Report{}, err
 	}
-	state := shared.Open(ctx, runner.paths)
+	state := fleetdb.OpenSharedState(ctx, runner.paths)
 	branchSeats, branchErr := state.BranchSeats(ctx)
 	closeErr := state.Close()
 	if branchErr != nil || closeErr != nil {
@@ -224,9 +228,7 @@ func (runner *Runner) Run(
 	for index := range sockets {
 		_, sockets[index].DetachedFork = branchSeats[sockets[index].Name]
 	}
-	if err := runner.probeIdleSignals(ctx, sockets); err != nil {
-		return Report{}, err
-	}
+	runner.probeIdleSignals(ctx, sockets)
 	input.Sockets = sockets
 	input.RecentIDs = runner.recentSessions(sockets, input.BusyRecent)
 
@@ -237,20 +239,38 @@ func (runner *Runner) Run(
 		return Report{}, fmt.Errorf("list bunker sessions: %w", err)
 	}
 	input.VSCT = sessions
+	trail.Reach("probed", "every socket classified")
 
 	decisions := Plan(input)
+	trail.Reach("planned", "decisions planned")
 	if options.Apply {
-		report.AvailBefore = runner.availableKB()
 		var warnings []string
-		decisions, warnings = runner.apply(ctx, decisions)
+		if avail, err := runner.availableKB(); err != nil {
+			warnings = append(warnings, fmt.Sprintf("read available memory before reap: %v", err))
+		} else {
+			report.AvailBefore = avail
+		}
+		var applyWarnings []string
+		decisions, applyWarnings = runner.apply(ctx, decisions)
+		warnings = append(warnings, applyWarnings...)
+		if avail, err := runner.availableKB(); err != nil {
+			warnings = append(warnings, fmt.Sprintf("read available memory after reap: %v", err))
+		} else {
+			report.AvailAfter = avail
+		}
 		report.Warnings = warnings
-		report.AvailAfter = runner.availableKB()
+		trail.Reach("applied", "decisions applied")
 	}
 	report.Decisions = decisions
 	for _, decision := range decisions {
+		// Each decision is its own state record: what the socket became and
+		// why — the reason is the classifier's shape, never chat content.
+		var failed error
 		if decision.Failed {
 			report.Failed++
+			failed = errors.New("apply failed: " + decision.Reason)
 		}
+		obs.Transition(ctx, "reap", "socket", string(decision.State), decision.Reason)(failed)
 		switch decision.State {
 		case StateOrphan, StateFork, StateIdle:
 			report.Orphans++
@@ -305,7 +325,7 @@ func (runner *Runner) probeSockets(
 		return files[left].name < files[right].name
 	})
 
-	allPanes := make([]gather.Pane, 0)
+	allPanes := make([]gather.ProbePane, 0)
 	sockets := make([]Socket, 0, len(files))
 	for _, file := range files {
 		socket := Socket{Name: file.name, Age: runner.now().Sub(file.modTime)}
@@ -320,8 +340,9 @@ func (runner *Runner) probeSockets(
 			socket.ProbeError = err.Error()
 		}
 		panePIDs := make([]int, 0, len(panes))
-		for _, pane := range panes {
-			allPanes = append(allPanes, pane)
+		for index := range panes {
+			pane := &panes[index]
+			allPanes = append(allPanes, *pane)
 			panePIDs = append(panePIDs, pane.PID)
 			if pane.Attached {
 				socket.Attached = true
@@ -345,8 +366,8 @@ func (runner *Runner) probeSockets(
 		return nil, fmt.Errorf("read session crumbs: %w", err)
 	}
 	byName := make(map[string]int, len(sockets))
-	for index, socket := range sockets {
-		byName[socket.Name] = index
+	for index := range sockets {
+		byName[sockets[index].Name] = index
 	}
 	for _, crumb := range crumbs.Crumbs {
 		index, found := byName[crumb.Socket]
@@ -374,9 +395,9 @@ func (runner *Runner) probeSockets(
 	// `pfm chat resolve`. A resolution failure here is soft on purpose — it
 	// leaves those sockets' ActivityPaths empty, which the idle check reads
 	// as UNKNOWN (never reaped), not as "no Codex chats exist".
-	if len(runner.codexRoots) > 0 {
+	if len(runner.codexHomes) > 0 {
 		liveCodex, err := gather.DetectCodexThreadsInRoots(
-			runner.proc, runner.codexRoots, allPanes, nil, runner.codexBinary,
+			runner.proc, runner.codexHomes, allPanes, nil, runner.codexBinary,
 		)
 		if err == nil {
 			for _, thread := range liveCodex {
@@ -409,7 +430,7 @@ func isReapSocketName(name string) bool {
 func (runner *Runner) listPanes(
 	ctx context.Context,
 	socket string,
-) ([]gather.Pane, error) {
+) ([]gather.ProbePane, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	panes, err := runner.tmux.ListPanes(probeCtx, socket)
@@ -432,7 +453,8 @@ func (runner *Runner) recentSessions(
 ) map[string]struct{} {
 	recent := make(map[string]struct{})
 	cutoff := runner.now().Add(-window)
-	for _, socket := range sockets {
+	for socketIndex := range sockets {
+		socket := &sockets[socketIndex]
 		for index, path := range socket.transcripts {
 			info, err := os.Stat(path)
 			if err != nil || !info.ModTime().After(cutoff) {
@@ -453,7 +475,7 @@ func (runner *Runner) recentSessions(
 // moved. It only asks tmux for client activity on ATTACHED sockets — the
 // only ones planAttached ever reads it for — so a fleet of mostly-detached
 // sockets costs no extra probe calls.
-func (runner *Runner) probeIdleSignals(ctx context.Context, sockets []Socket) error {
+func (runner *Runner) probeIdleSignals(ctx context.Context, sockets []Socket) {
 	now := runner.now()
 	for index := range sockets {
 		if stamp, ok := socketActivity(sockets[index].ActivityPaths); ok {
@@ -486,7 +508,6 @@ func (runner *Runner) probeIdleSignals(ctx context.Context, sockets []Socket) er
 			sockets[index].ClientIdle = idle
 		}
 	}
-	return nil
 }
 
 // apply performs the plan. Every kill re-verifies the socket at kill time:
@@ -522,9 +543,9 @@ func (runner *Runner) apply(
 				decision.Failed = true
 				break
 			}
-			if _, err := removeRoleCrumb(runner.paths.SIDDir, decision.Socket); err != nil {
+			if err := removeRoleSeatPrompt(runner.paths.SIDDir, decision.Socket); err != nil {
 				warnings = append(warnings, fmt.Sprintf(
-					"%s: remove role crumb: %v", decision.Socket, err,
+					"%s: remove role prompt: %v", decision.Socket, err,
 				))
 			}
 		case ActionKillServer:
@@ -536,8 +557,8 @@ func (runner *Runner) apply(
 				break
 			}
 			attached := false
-			for _, pane := range panes {
-				if pane.Attached {
+			for index := range panes {
+				if panes[index].Attached {
 					attached = true
 				}
 			}
@@ -557,9 +578,9 @@ func (runner *Runner) apply(
 				break
 			}
 			decision.State = StateKilled
-			if _, err := removeRoleCrumb(runner.paths.SIDDir, decision.Socket); err != nil {
+			if err := removeRoleSeatPrompt(runner.paths.SIDDir, decision.Socket); err != nil {
 				warnings = append(warnings, fmt.Sprintf(
-					"%s: remove role crumb: %v", decision.Socket, err,
+					"%s: remove role prompt: %v", decision.Socket, err,
 				))
 			}
 		case ActionKillSession:
@@ -578,42 +599,29 @@ func (runner *Runner) apply(
 	return applied, warnings
 }
 
-// roleCrumbPath is the socket-scoped role crumb the T1 seat re-arm wave
-// writes into SIDDir as "role-<socket>" for a `--role` seat — a sibling
-// worktree, internal/rearm there, owns that format and this branch does not
-// import it (it does not exist here and this branch must build alone). T1
-// removes its own crumb on the canonical kill path; every OTHER path that
-// ends a chat's server, including every one below, orphans it, so clearing
-// it here is this sweep's job. Match by filename only; reconcile the two at
-// merge if the shape moves.
-func roleCrumbPath(sidDir, socket string) string {
-	return filepath.Join(sidDir, "role-"+socket)
-}
-
-// removeRoleCrumb is best-effort: a missing crumb is the ordinary case (most
-// seats carry no --role), never a warning. A removal that fails for any
-// other reason IS a warning — never swallowed, never turned into a non-zero
-// exit, since it holds up nothing this sweep's own exit code answers for.
-func removeRoleCrumb(sidDir, socket string) (removed bool, err error) {
-	if sidDir == "" {
-		return false, nil
+func removeRoleSeatPrompt(sidDir, socket string) error {
+	if sidDir == "" || socket == "" {
+		return nil
 	}
-	if err := os.Remove(roleCrumbPath(sidDir, socket)); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+	return agentrole.RemoveSeatPrompt(sidDir, socket, "")
 }
 
 // availableKB reads the machine's own available memory, which is the only
 // honest measure of what a reap reclaimed — summed RSS double-counts the
-// runtime pages several node processes share.
-func (runner *Runner) availableKB() int64 {
-	content, err := os.ReadFile(filepath.Join(runner.paths.ProcRoot, "meminfo"))
+// runtime pages several node processes share. meminfo not existing at all —
+// no /proc on this platform, or a jail fixture that never staged one — is a
+// genuine absence: (0, nil). Any other read or parse failure is returned,
+// never folded into that same 0: a probe that could not run must not render
+// identically to "0 KB available", the one number here that would itself be
+// alarming.
+func (runner *Runner) availableKB() (int64, error) {
+	path := filepath.Join(runner.paths.ProcRoot, "meminfo")
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("read %s: %w", path, err)
 	}
 	for _, line := range strings.Split(string(content), "\n") {
 		if !strings.HasPrefix(line, "MemAvailable:") {
@@ -621,15 +629,15 @@ func (runner *Runner) availableKB() int64 {
 		}
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
-			return 0
+			return 0, fmt.Errorf("parse MemAvailable line %q in %s", line, path)
 		}
 		value, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {
-			return 0
+			return 0, fmt.Errorf("parse MemAvailable value in %s: %w", path, err)
 		}
-		return value
+		return value, nil
 	}
-	return 0
+	return 0, fmt.Errorf("no MemAvailable line in %s", path)
 }
 
 // sessionIDFromPath reads the session id out of a transcript pathname.

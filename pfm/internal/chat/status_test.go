@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestStatusReportsADeadChatAsAStatusNotAnError pins the verb's contract: a

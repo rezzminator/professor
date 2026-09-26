@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/transcript"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // ReadEntries is the transcript tail of one chat, newest last: the shared

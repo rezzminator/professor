@@ -19,7 +19,7 @@ func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
 	})
 	transport := &userAgentTransport{base: base, ua: "harvester-test/1.0"}
-	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,10 @@ func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
 		t.Fatalf("base transport saw User-Agent = %q, want the wrapper's own %q", seenUA, "harvester-test/1.0")
 	}
 	if req.Header.Get("User-Agent") != "caller-supplied/0.0" {
-		t.Fatalf("RoundTrip mutated the caller's own request; User-Agent = %q, want the original untouched", req.Header.Get("User-Agent"))
+		t.Fatalf(
+			"RoundTrip mutated the caller's own request; User-Agent = %q, want the original untouched",
+			req.Header.Get("User-Agent"),
+		)
 	}
 	sameRequest = req.Header.Get("User-Agent") == "caller-supplied/0.0"
 	if !sameRequest {
@@ -44,7 +47,7 @@ func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
 }
 
 // TestUserAgentTransportRefusesPrivateHostBeforeForwarding: RoundTrip
-// re-validates every request through assertFetchable before it ever reaches
+// re-validates every request through validateFetchURL before it ever reaches
 // the wrapped transport — the SSRF guard the gateway relies on holds even at
 // this innermost layer, not only at gatewayAttempt's own check.
 func TestUserAgentTransportRefusesPrivateHostBeforeForwarding(t *testing.T) {
@@ -54,7 +57,7 @@ func TestUserAgentTransportRefusesPrivateHostBeforeForwarding(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
 	})
 	transport := &userAgentTransport{base: base, ua: "harvester-test/1.0"}
-	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:9/secret", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:9/secret", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +78,7 @@ func TestUserAgentTransportChromeAddsFingerprintHeaders(t *testing.T) {
 		seen = r.Header
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
 	})
-	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +90,7 @@ func TestUserAgentTransportChromeAddsFingerprintHeaders(t *testing.T) {
 	}
 
 	seen = nil
-	req2, err := http.NewRequest(http.MethodGet, "https://example.test/doc", nil)
+	req2, err := http.NewRequest(http.MethodGet, "https://example.test/doc", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // A chat is watched through a terminal, and that terminal is owned by a shell.
@@ -59,7 +59,7 @@ type ClientLister interface {
 
 // ClientPIDs lists the `tmux attach` processes currently attached to this
 // server — one per terminal the chat is being watched through.
-func (tmux CommandTmux) ClientPIDs(
+func (tmux TmuxKiller) ClientPIDs(
 	ctx context.Context,
 	socketPath string,
 ) ([]int, error) {
@@ -85,7 +85,12 @@ func (tmux CommandTmux) ClientPIDs(
 }
 
 // CommandProcessTable reads the real process table through ps.
-type CommandProcessTable struct{ Binary string }
+type CommandProcessTable struct {
+	Binary string
+	// Runner is the deps.Runner seam Info reads ps through; nil defaults to
+	// obs.Runner(deps.RealRunner{}).
+	Runner deps.Runner
+}
 
 // Info returns one process's pid, parent, and command name.
 func (table CommandProcessTable) Info(
@@ -96,12 +101,22 @@ func (table CommandProcessTable) Info(
 	if binary == "" {
 		binary = deps.Executable("ps")
 	}
-	output, err := exec.CommandContext(
-		ctx, binary, "-o", "pid=,ppid=,comm=", "-p", strconv.Itoa(pid),
-	).Output()
+	runner := table.Runner
+	if runner == nil {
+		runner = obs.Runner(deps.RealRunner{})
+	}
+	result, err := runner.Run(
+		ctx,
+		[]string{binary, "-o", "pid=,ppid=,comm=", "-p", strconv.Itoa(pid)},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
 	if err != nil {
 		return ProcessInfo{}, fmt.Errorf("read process %d: %w", pid, err)
 	}
+	output := result.Stdout
 	fields := strings.Fields(strings.TrimSpace(string(output)))
 	if len(fields) < 3 {
 		return ProcessInfo{}, fmt.Errorf(

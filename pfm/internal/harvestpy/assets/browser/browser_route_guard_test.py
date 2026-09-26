@@ -220,6 +220,68 @@ def test_websocket_guard_closes_on_raising_ask():
     assert ws.close_code is not None, "a raising ask must close the websocket, never leave it open"
 
 
+def test_no_proxy_refuses_to_launch():
+    # L2-F7: Go pinned exactly ONE host into Chrome's resolver (the initial
+    # URL's). Every redirect/subresource/XHR host was re-ASKED, but Chrome
+    # then resolved it AGAIN itself — a TTL-0 rebind lands on 127.0.0.1 or
+    # 169.254.169.254 while the ask saw a public address. Only a proxy Go owns
+    # makes the validated address the dialled one, so with no proxy the rung
+    # renders NOTHING.
+    from browser import PROXY_REQUIRED, fetch_browser
+
+    html, status, error = run(fetch_browser("https://example.test/", None, proxy_url=None))
+    assert error == PROXY_REQUIRED, f"an unproxied fetch was not refused: {error!r}"
+    assert html == "" and status is None, f"an unproxied fetch rendered something: {html!r}/{status!r}"
+
+
+def test_launch_arguments_refuse_an_empty_proxy():
+    from browser import launch_arguments
+
+    try:
+        launch_arguments("")
+    except ValueError:
+        return
+    raise AssertionError("launch_arguments() composed a launch with no proxy")
+
+
+def test_launch_arguments_leave_chrome_no_resolver_of_its_own():
+    from browser import NO_LOCAL_DNS_RULE, WEBRTC_POLICY_ARG, launch_arguments
+
+    args = launch_arguments("http://127.0.0.1:8431", "MAP publisher.example.test 93.184.216.34")
+    rules = [a for a in args if a.startswith("--host-resolver-rules=")]
+    assert len(rules) == 1, f"exactly one resolver-rules switch, got {rules!r}"
+    value = rules[0].split("=", 1)[1]
+    assert value.endswith(NO_LOCAL_DNS_RULE), (
+        f"Chrome keeps a resolver of its own — a rebind is still dialled: {value!r}"
+    )
+    assert value.startswith("MAP publisher.example.test 93.184.216.34"), (
+        f"the Go-validated pin was dropped: {value!r}"
+    )
+    assert "EXCLUDE 127.0.0.1" in value, f"the proxy's own host cannot resolve: {value!r}"
+    assert WEBRTC_POLICY_ARG in args, "WebRTC can still dial an ICE candidate past the proxy and the guard"
+
+
+def test_launch_arguments_keep_a_named_proxy_resolvable():
+    from browser import launch_arguments
+
+    value = [
+        a for a in launch_arguments("http://proxy.internal.test:3128") if a.startswith("--host-resolver-rules=")
+    ][0]
+    assert "EXCLUDE proxy.internal.test" in value, f"a named proxy host cannot resolve: {value!r}"
+
+
+def test_proxy_settings_strip_chromes_loopback_bypass():
+    from browser import proxy_settings
+
+    assert proxy_settings(None) is None
+    settings = proxy_settings("http://127.0.0.1:8431")
+    assert settings["server"] == "http://127.0.0.1:8431"
+    assert settings["bypass"] == "<-loopback>", (
+        "Chrome's implicit loopback bypass survives — 127.0.0.1 and 169.254.169.254 "
+        f"would be dialled DIRECTLY, past the proxy: {settings!r}"
+    )
+
+
 if __name__ == "__main__":
     failures = 0
     for name, case in sorted(globals().items()):

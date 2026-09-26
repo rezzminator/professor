@@ -34,9 +34,7 @@ func buildMinimalEpub(t *testing.T) []byte {
 	// Every member is written STORED (compression method 0) — the fixture only
 	// needs the mimetype member's bytes to sit where the spec puts them.
 	appendFile := func(name string, data []byte) {
-		out = append(out, 'P', 'K', 3, 4)
-		out = append(out, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-		out = append(out, byte(len(name)), 0)
+		out = append(out, 'P', 'K', 3, 4, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(len(name)), 0)
 		out = append(out, name...)
 		out = append(out, data...)
 	}
@@ -164,9 +162,9 @@ func TestWaveStatsWrittenByRealFetch(t *testing.T) {
 		ContactEmail: "test@example.org",
 		CacheDir:     dir,
 		Client:       client,
-		Chrome:       client,
+		Chrome:       fixtureTwin(client),
 		Jina:         client,
-		OA:           client,
+		OA:           fixtureTwin(client),
 	})
 	_ = h.Fetch(context.Background(), "10.9999/no-copy")
 	if _, err := os.Stat(filepath.Join(dir, "stats.jsonl")); err != nil {

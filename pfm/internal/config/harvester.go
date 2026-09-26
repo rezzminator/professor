@@ -22,8 +22,8 @@ const (
 	LegacyFileName = "config.json"
 	// HarvesterFileName holds every Harvester setting, beside FileName.
 	HarvesterFileName = "harvester.config.json"
-	// legacyBackupName is where the migration parks the pre-split file.
-	legacyBackupName = "config.json.pre-split"
+	// LegacyBackupName is where the migration parks the pre-split file.
+	LegacyBackupName = "config.json.pre-split"
 
 	// DefaultMCPPort is the loopback daemon port (chat + harvester, no auth).
 	DefaultMCPPort = 18377
@@ -49,6 +49,7 @@ type HarvesterConfig struct {
 	Convert   HarvesterConvert
 	Cache     HarvesterCache
 	Output    HarvesterOutput
+	Harvest   HarvesterLimits
 
 	Path   string
 	Exists bool
@@ -113,6 +114,15 @@ type HarvesterCache struct {
 	NegativeTransientTTL time.Duration
 }
 
+// HarvesterLimits caps what one retrieval may hold: MaxDownloadBytes one file
+// download (harvest.maxDownloadBytes), MaxResourceBytes one blob the remote
+// server sends through resources/read (harvest.maxResourceBytes). 0 = the
+// harvester default (2 GiB, 25 MiB).
+type HarvesterLimits struct {
+	MaxDownloadBytes int64
+	MaxResourceBytes int64
+}
+
 type HarvesterOutput struct {
 	MaxInlineChars int
 }
@@ -126,6 +136,7 @@ type rawHarvester struct {
 	Convert   *rawHarvesterConvert   `json:"convert,omitempty"`
 	Cache     *rawHarvesterCache     `json:"cache,omitempty"`
 	Output    *rawHarvesterOutput    `json:"output,omitempty"`
+	Harvest   *rawHarvesterLimits    `json:"harvest,omitempty"`
 }
 
 type rawHarvesterExternal struct {
@@ -175,6 +186,11 @@ type rawHarvesterCache struct {
 	NegativeTransientTTLSeconds *int    `json:"negativeTransientTtlSeconds,omitempty"`
 }
 
+type rawHarvesterLimits struct {
+	MaxDownloadBytes *int64 `json:"maxDownloadBytes,omitempty"`
+	MaxResourceBytes *int64 `json:"maxResourceBytes,omitempty"`
+}
+
 type rawHarvesterOutput struct {
 	MaxInlineChars *int `json:"maxInlineChars,omitempty"`
 }
@@ -214,6 +230,7 @@ var harvesterSourceKeys = []string{
 	"harvester.cache.dir", "harvester.cache.ttlSeconds", "harvester.cache.negativeTtlSeconds",
 	"harvester.cache.negativeTransientTtlSeconds",
 	"harvester.output.maxInlineChars",
+	"harvester.harvest.maxDownloadBytes", "harvester.harvest.maxResourceBytes",
 }
 
 // HarvesterSourceKeys returns the reported harvester keys in display order.
@@ -251,7 +268,7 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 	file := func(key string) { result.Sources["harvester."+key] = SourceFile }
 	if raw.Enabled != nil {
 		harvester.Enabled = *raw.Enabled
-		file("enabled")
+		file(jsonKeyEnabled)
 	}
 	if external := raw.External; external != nil {
 		if external.Enabled != nil {
@@ -261,7 +278,11 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 		if external.Host != nil {
 			host := strings.TrimSpace(*external.Host)
 			if host == "" || strings.ContainsAny(host, " /\x00") {
-				return fmt.Errorf("harvester config %s: external.host must be a bare host or IP, got %q", path, *external.Host)
+				return fmt.Errorf(
+					"harvester config %s: external.host must be a bare host or IP, got %q",
+					path,
+					*external.Host,
+				)
 			}
 			harvester.External.Host = host
 			file("external.host")
@@ -381,7 +402,11 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 			if value != "" {
 				parsed, err := url.Parse(value)
 				if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-					return fmt.Errorf("harvester config %s: fetch.proxyURL must be an absolute proxy URL, got %q", path, value)
+					return fmt.Errorf(
+						"harvester config %s: fetch.proxyURL must be an absolute proxy URL, got %q",
+						path,
+						value,
+					)
 				}
 			}
 			harvester.Fetch.ProxyURL = value
@@ -419,7 +444,12 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 				continue
 			}
 			if *pair.raw < 0 {
-				return fmt.Errorf("harvester config %s: cache.%s must be 0 or more (0 = never expire / never cache failures), got %d", path, key, *pair.raw)
+				return fmt.Errorf(
+					"harvester config %s: cache.%s must be 0 or more (0 = never expire / never cache failures), got %d",
+					path,
+					key,
+					*pair.raw,
+				)
 			}
 			*pair.target = time.Duration(*pair.raw) * time.Second
 			file("cache." + key)
@@ -427,22 +457,60 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 	}
 	if raw.Output != nil && raw.Output.MaxInlineChars != nil {
 		if *raw.Output.MaxInlineChars < 1 {
-			return fmt.Errorf("harvester config %s: output.maxInlineChars must be at least 1, got %d", path, *raw.Output.MaxInlineChars)
+			return fmt.Errorf(
+				"harvester config %s: output.maxInlineChars must be at least 1, got %d",
+				path,
+				*raw.Output.MaxInlineChars,
+			)
 		}
 		harvester.Output.MaxInlineChars = *raw.Output.MaxInlineChars
 		file("output.maxInlineChars")
 	}
+	if raw.Harvest != nil {
+		for key, pair := range map[string]struct {
+			raw    *int64
+			target *int64
+		}{
+			"maxDownloadBytes": {raw.Harvest.MaxDownloadBytes, &harvester.Harvest.MaxDownloadBytes},
+			"maxResourceBytes": {raw.Harvest.MaxResourceBytes, &harvester.Harvest.MaxResourceBytes},
+		} {
+			if pair.raw == nil {
+				continue
+			}
+			if *pair.raw < 0 {
+				return fmt.Errorf(
+					"harvester config %s: harvest.%s must not be negative (0 = the default), got %d",
+					path,
+					key,
+					*pair.raw,
+				)
+			}
+			*pair.target = *pair.raw
+			file("harvest." + key)
+		}
+	}
 
 	if harvester.External.Enabled {
 		if harvester.External.PublicURL == "" {
-			return fmt.Errorf("harvester config %s: external.enabled requires external.publicURL (the URL clients reach the gateway at)", path)
+			return fmt.Errorf(
+				"harvester config %s: external.enabled requires external.publicURL (the URL clients reach the gateway at)",
+				path,
+			)
 		}
 		if harvester.External.Passphrase == "" && harvester.External.StaticToken == "" {
-			return fmt.Errorf("harvester config %s: external.enabled requires external.auth.passphrase and/or external.auth.staticToken — the external gateway is never unauthenticated", path)
+			return fmt.Errorf(
+				"harvester config %s: external.enabled requires external.auth.passphrase and/or external.auth.staticToken — the external gateway is never unauthenticated",
+				path,
+			)
 		}
 	}
 	if harvester.holdsSecret() && info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("harvester config %s holds secrets but is readable by others (mode %04o); run: chmod 600 %s", path, info.Mode().Perm(), path)
+		return fmt.Errorf(
+			"harvester config %s holds secrets but is readable by others (mode %04o); run: chmod 600 %s",
+			path,
+			info.Mode().Perm(),
+			path,
+		)
 	}
 	return nil
 }
@@ -481,7 +549,7 @@ func validateHTTPURL(value string, allowPath bool) error {
 // MCPServerSource reports where a registered server's enabled flag came from.
 // The harvester's lives in harvester.config.json.
 func (config Config) MCPServerSource(name string) Source {
-	if name == "harvester" {
+	if name == MCPServerHarvester {
 		return config.Source("harvester.enabled")
 	}
 	return config.Source("mcp.servers." + name + ".enabled")
@@ -505,7 +573,7 @@ func SetHarvesterEnabled(config Config, enabled bool) (bool, error) {
 		}
 		top = existing
 	}
-	top["enabled"], _ = json.Marshal(enabled)
+	top[jsonKeyEnabled], _ = json.Marshal(enabled)
 	content, err := json.MarshalIndent(top, "", "  ")
 	if err != nil {
 		return false, fmt.Errorf("encode harvester config %s: %w", path, err)
@@ -526,16 +594,22 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 		return value
 	}
 	value := map[string]any{
-		"enabled": harvester.Enabled,
+		jsonKeyEnabled: harvester.Enabled,
 		"external": map[string]any{
-			"enabled": harvester.External.Enabled, "host": harvester.External.Host, "port": harvester.External.Port,
-			"publicURL": harvester.External.PublicURL, "stateDir": harvester.External.StateDir,
+			jsonKeyEnabled: harvester.External.Enabled,
+			"host":         harvester.External.Host,
+			jsonKeyPort:    harvester.External.Port,
+			"publicURL":    harvester.External.PublicURL,
+			"stateDir":     harvester.External.StateDir,
 			"auth": map[string]any{
-				"passphrase": secret(harvester.External.Passphrase), "staticToken": secret(harvester.External.StaticToken),
+				"passphrase": secret(
+					harvester.External.Passphrase,
+				),
+				"staticToken": secret(harvester.External.StaticToken),
 			},
 		},
 		"search": map[string]any{
-			"enabled": harvester.Search.Enabled, "searxngURL": harvester.Search.SearXNGURL,
+			jsonKeyEnabled: harvester.Search.Enabled, "searxngURL": harvester.Search.SearXNGURL,
 			"braveApiKey": secret(harvester.Search.BraveAPIKey),
 		},
 		"scholarly": map[string]any{
@@ -557,6 +631,10 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			"negativeTransientTtlSeconds": int(harvester.Cache.NegativeTransientTTL / time.Second),
 		},
 		"output": map[string]any{"maxInlineChars": harvester.Output.MaxInlineChars},
+		"harvest": map[string]any{
+			"maxDownloadBytes": harvester.Harvest.MaxDownloadBytes,
+			"maxResourceBytes": harvester.Harvest.MaxResourceBytes,
+		},
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -595,7 +673,11 @@ func scholarlyBaseURL(path, key, raw string) (string, error) {
 		return "", fmt.Errorf("harvester config %s: scholarly.%s: %w", path, key, err)
 	}
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment", path, key)
+		return "", fmt.Errorf(
+			"harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment",
+			path,
+			key,
+		)
 	}
 	return value, nil
 }

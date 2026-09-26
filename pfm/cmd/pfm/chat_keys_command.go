@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/chatkeys"
-	"hostops/pfm/internal/inject"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 const chatKeysUsage = "usage: pfm chat keys [--delay ms] [--literal] [--capture] <target> <key>..."
@@ -22,10 +24,11 @@ const chatKeysDefaultDelay = 120 * time.Millisecond
 // chatKeysSettle lets the pane finish redrawing before --capture reads it.
 const chatKeysSettle = 400 * time.Millisecond
 
-func validKey(key string) bool { return chatkeys.Valid(key) }
+func validKey(key string) bool { return pfmchat.KeyValid(key) }
 
-func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat keys", chatKeysUsage, stderr)
+func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
+	clk = defaultClock(clk)
+	flags := cli.NewFlagSet("chat keys", chatKeysUsage, stderr)
 	delay := flags.Duration(
 		"delay", chatKeysDefaultDelay, "pause between keys (e.g. 250ms)",
 	)
@@ -35,7 +38,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	capture := flags.Bool(
 		"capture", false, "print the pane after the keys land",
 	)
-	rest, code, ok := parseFlagsAnywhere(flags, args)
+	rest, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -47,7 +50,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 
 	if !*literal {
 		for _, key := range keys {
-			if chatkeys.Valid(key) {
+			if pfmchat.KeyValid(key) {
 				continue
 			}
 			fmt.Fprintf(
@@ -55,7 +58,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 				"pfm chat keys: %q is not a tmux key — tmux would type it as "+
 					"text; pass --literal to mean that, or use one of: %s\n",
 				key,
-				chatkeys.Names(),
+				pfmchat.KeyNames(),
 			)
 			return 2
 		}
@@ -77,10 +80,13 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	}
 	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
 
-	tmux := inject.CommandTmux{}
+	tmux := inject.TmuxInjector{}
 	for index, key := range keys {
 		if index > 0 && *delay > 0 {
-			time.Sleep(*delay)
+			if err := clk.Sleep(ctx, *delay); err != nil {
+				fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
+				return 1
+			}
 		}
 		var err error
 		if *literal {
@@ -98,14 +104,17 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	if !*capture {
 		return 0
 	}
-	time.Sleep(chatKeysSettle)
-	pane_, err := tmux.Capture(ctx, socketPath, pane, false, 0)
+	if err := clk.Sleep(ctx, chatKeysSettle); err != nil {
+		fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
+		return 1
+	}
+	captureText, err := tmux.Capture(ctx, socketPath, pane, false, 0)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat keys: capture: %v\n", err)
 		return codeDeadChat
 	}
-	fmt.Fprint(stdout, pane_)
-	if !strings.HasSuffix(pane_, "\n") {
+	fmt.Fprint(stdout, captureText)
+	if !strings.HasSuffix(captureText, "\n") {
 		fmt.Fprintln(stdout)
 	}
 	return 0

@@ -58,13 +58,34 @@ func resolverContext(ctx context.Context, r *Resolver) context.Context {
 }
 
 func candidatePriority(source, status, version, kind string) int {
-	bases := map[string]int{"arxiv": 0, "osf": 2, "citation_pdf_url": 4, "unpaywall": 10, "openalex": 12, "semanticscholar": 14, "europepmc": 16, "openaire": 20, "zenodo": 26, "elife": 21, "plos": 23, "nber": 24,
-		"crossref": 30, "core": 40, "doaj": 45, "gutenberg": 5, "oapen": 8, "internetarchive": 18, "doab": 22, "hathitrust": 24, "googlebooks": 50}
+	bases := map[string]int{
+		sourceArXiv:           0,
+		sourceOSF:             2,
+		"citation_pdf_url":    4,
+		sourceUnpaywall:       10,
+		sourceOpenAlex:        12,
+		sourceSemanticScholar: 14,
+		sourceEuropePMC:       16,
+		sourceOpenAIRE:        20,
+		sourceZenodo:          26,
+		sourceELife:           21,
+		sourcePLOS:            23,
+		sourceNBER:            24,
+		sourceCrossref:        30,
+		sourceCORE:            40,
+		sourceDOAJ:            45,
+		sourceGutenberg:       5,
+		"oapen":               8,
+		sourceInternetArchive: 18,
+		"doab":                22,
+		"hathitrust":          24,
+		"googlebooks":         50,
+	}
 	base, known := bases[source]
 	if !known {
 		base = 50
 	}
-	if kind != "pdf" {
+	if kind != kindPDF {
 		base += 8
 	}
 	if status == "bronze" {
@@ -112,10 +133,17 @@ func (h *Harvester) resolver() *Resolver {
 	if h == nil {
 		return &Resolver{}
 	}
-	return &Resolver{Client: h.oa, ContactEmail: h.settings.contactEmail, GoogleBooksAPIKey: h.settings.googleBooksAPIKey,
-		CoreAPIKey: h.settings.coreAPIKey, SemanticScholarAPIKey: h.settings.semanticScholarKey,
-		IPFSCatalogURL: h.settings.ipfsCatalogURL, DOIViewerURL: h.settings.doiViewerURL, MD5CatalogURL: h.settings.md5CatalogURL,
-		GoogleScholarURL: h.settings.googleScholarURL}
+	return &Resolver{
+		Client:                h.oa,
+		ContactEmail:          h.settings.contactEmail,
+		GoogleBooksAPIKey:     h.settings.googleBooksAPIKey,
+		CoreAPIKey:            h.settings.coreAPIKey,
+		SemanticScholarAPIKey: h.settings.semanticScholarKey,
+		IPFSCatalogURL:        h.settings.ipfsCatalogURL,
+		DOIViewerURL:          h.settings.doiViewerURL,
+		MD5CatalogURL:         h.settings.md5CatalogURL,
+		GoogleScholarURL:      h.settings.googleScholarURL,
+	}
 }
 
 func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, error) {
@@ -132,25 +160,52 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 	if strings.HasPrefix(strings.ToLower(doi), arxivDOIPrefix) {
 		id := doi[len(arxivDOIPrefix):]
 		return []Candidate{
-			{URL: "https://arxiv.org/pdf/" + id, Source: "arxiv", Priority: candidatePriority("arxiv", "", "", "pdf"), Kind: "pdf"},
+			{
+				URL:      "https://arxiv.org/pdf/" + id,
+				Source:   sourceArXiv,
+				Priority: candidatePriority(sourceArXiv, "", "", kindPDF),
+				Kind:     kindPDF,
+			},
 			// ar5iv's HTML rendering (verified live 2026-08-22) is the insurance copy
 			// for when the PDF endpoint rate-limits or a wall appears on the CDN.
-			{URL: "https://ar5iv.labs.arxiv.org/html/" + id, Source: "ar5iv", Priority: candidatePriority("arxiv", "", "", "html"), Kind: "html"},
+			{
+				URL:      "https://ar5iv.labs.arxiv.org/html/" + id,
+				Source:   "ar5iv",
+				Priority: candidatePriority(sourceArXiv, "", "", kindHTML),
+				Kind:     kindHTML,
+			},
 		}, nil
 	}
-	if strings.HasPrefix(strings.ToLower(doi), "10.31235/") || strings.HasPrefix(strings.ToLower(doi), "10.31234/") || strings.HasPrefix(strings.ToLower(doi), "10.31219/") || strings.HasPrefix(strings.ToLower(doi), "10.31730/") || strings.HasPrefix(strings.ToLower(doi), "10.35542/") || strings.HasPrefix(strings.ToLower(doi), "10.33767/") {
+	if strings.HasPrefix(strings.ToLower(doi), "10.31235/") || strings.HasPrefix(strings.ToLower(doi), "10.31234/") ||
+		strings.HasPrefix(strings.ToLower(doi), "10.31219/") ||
+		strings.HasPrefix(strings.ToLower(doi), "10.31730/") ||
+		strings.HasPrefix(strings.ToLower(doi), "10.35542/") ||
+		strings.HasPrefix(strings.ToLower(doi), "10.33767/") {
 		candidates, err := r.osf(ctx, client, doi)
 		if err == nil && len(candidates) > 0 {
 			return candidates, nil
 		}
 		if err != nil && !doiMetadataAbsence(err) {
-			specialFailure = &doiMetadataFailure{provider: "osf", err: err}
+			specialFailure = &doiMetadataFailure{provider: sourceOSF, err: err}
 		}
 	}
 	// Providers are independent and the Python resolver fans them out. Gather
 	// concurrently, then apply the explicit priority sort/dedupe so completion
 	// order never changes the public candidate order.
-	sources := []string{"unpaywall", "openalex", "semanticscholar", "europepmc", "openaire", "zenodo", "elife", "plos", "nber", "crossref", "core", "doaj"}
+	sources := []string{
+		sourceUnpaywall,
+		sourceOpenAlex,
+		sourceSemanticScholar,
+		sourceEuropePMC,
+		sourceOpenAIRE,
+		sourceZenodo,
+		sourceELife,
+		sourcePLOS,
+		sourceNBER,
+		sourceCrossref,
+		sourceCORE,
+		sourceDOAJ,
+	}
 	results := make([][]Candidate, len(sources))
 	errorsBySource := make([]error, len(sources))
 	var wg sync.WaitGroup
@@ -158,32 +213,33 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 		wg.Add(1)
 		go func(i int, source string) {
 			defer wg.Done()
+			defer recoverItem(func(e error) { errorsBySource[i] = e })
 			var candidates []Candidate
 			var err error
 			switch source {
-			case "unpaywall":
+			case sourceUnpaywall:
 				candidates, err = r.unpaywall(ctx, client, doi)
-			case "openalex":
+			case sourceOpenAlex:
 				candidates, err = r.openAlexDOI(ctx, client, doi)
-			case "semanticscholar":
+			case sourceSemanticScholar:
 				candidates, err = r.semanticScholar(ctx, client, doi)
-			case "europepmc":
+			case sourceEuropePMC:
 				candidates, err = r.europePMCDOI(ctx, client, doi)
-			case "openaire":
+			case sourceOpenAIRE:
 				candidates, err = r.openAIRE(ctx, client, doi)
-			case "zenodo":
+			case sourceZenodo:
 				candidates, err = r.zenodo(ctx, client, doi)
-			case "elife":
+			case sourceELife:
 				candidates, err = r.eLife(ctx, client, doi)
-			case "plos":
+			case sourcePLOS:
 				candidates = plosCandidates(doi)
-			case "nber":
+			case sourceNBER:
 				candidates = nberCandidates(doi)
-			case "crossref":
+			case sourceCrossref:
 				candidates, err = r.crossref(ctx, client, doi)
-			case "core":
+			case sourceCORE:
 				candidates, err = r.core(ctx, client, doi)
-			case "doaj":
+			case sourceDOAJ:
 				candidates, err = r.doaj(ctx, client, doi)
 			}
 			errorsBySource[i] = err
@@ -210,7 +266,7 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 		failures = append(failures, doiMetadataFailure{provider: sources[i], err: providerErr})
 	}
 	if len(out) == 0 && len(failures) > 0 {
-		kind := "connect"
+		kind := errorKindConnect
 		for _, failure := range failures {
 			if candidateKind := doiMetadataFailureKind(failure.err); candidateKind != "" {
 				kind = candidateKind
@@ -229,7 +285,7 @@ func (r *Resolver) ResolveTitle(ctx context.Context, title string) ([]Candidate,
 	}
 	ctx = resolverContext(ctx, r)
 	client := r.client()
-	doi := r.titleToDOI(ctx, client, title)
+	doi, titleErr := r.titleToDOI(ctx, client, title)
 	if doi != "" {
 		candidates, err := r.ResolveDOI(ctx, doi)
 		if err == nil && len(candidates) > 0 {
@@ -243,10 +299,26 @@ func (r *Resolver) ResolveTitle(ctx context.Context, title string) ([]Candidate,
 			return nil, err
 		}
 	}
-	return r.arxivByTitle(ctx, client, title), nil
+	fallback := r.arxivByTitle(ctx, client, title)
+	if len(fallback) > 0 {
+		return fallback, nil
+	}
+	if titleErr != nil {
+		// Both title-lookup providers were down (F13) and arXiv's own title
+		// search also found nothing: report the outage rather than an
+		// ordinary empty match — the caller could not otherwise tell "no such
+		// title" from "we could not look".
+		return nil, titleErr
+	}
+	return nil, nil
 }
 
-func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title string) string {
+// titleToDOI returns the confident title match's DOI, "" for an ordinary
+// no-match, and — when BOTH OpenAlex and Crossref failed to answer at all
+// (F13) — a non-nil error alongside "" so ResolveTitle can tell that outage
+// apart from "no title in either catalogue looked close enough", mirroring
+// ResolveDOI's own provider-failure aggregation above.
+func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title string) (string, error) {
 	var data struct {
 		Results []struct {
 			DOI   string `json:"doi"`
@@ -254,15 +326,25 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 			Title string `json:"title"`
 		} `json:"results"`
 	}
-	_ = getJSON(ctx, client, r.withContact("https://api.openalex.org/works?filter=title.search:"+url.QueryEscape(title)+"&per_page=5", "mailto"), &data)
-	for _, row := range data.Results {
-		name := row.Name
-		if name == "" {
-			name = row.Title
-		}
-		if titleSimilarity(title, name) >= .6 {
-			if doi := DOIFrom(row.DOI); doi != "" {
-				return doi
+	openAlexErr := getJSON(
+		ctx,
+		client,
+		r.withContact(
+			"https://api.openalex.org/works?filter=title.search:"+url.QueryEscape(title)+"&per_page=5",
+			"mailto",
+		),
+		&data,
+	)
+	if openAlexErr == nil {
+		for _, row := range data.Results {
+			name := row.Name
+			if name == "" {
+				name = row.Title
+			}
+			if titleSimilarity(title, name) >= .6 {
+				if doi := DOIFrom(row.DOI); doi != "" {
+					return doi, nil
+				}
 			}
 		}
 	}
@@ -274,7 +356,16 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 			} `json:"items"`
 		} `json:"message"`
 	}
-	if crossErr := getJSON(ctx, client, r.withContact("https://api.crossref.org/works?query.bibliographic="+url.QueryEscape(title)+"&rows=5&select=DOI,title", "mailto"), &crossref); crossErr == nil {
+	crossErr := getJSON(
+		ctx,
+		client,
+		r.withContact(
+			"https://api.crossref.org/works?query.bibliographic="+url.QueryEscape(title)+"&rows=5&select=DOI,title",
+			"mailto",
+		),
+		&crossref,
+	)
+	if crossErr == nil {
 		for _, item := range crossref.Message.Items {
 			name := ""
 			if len(item.Title) > 0 {
@@ -282,15 +373,38 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 			}
 			match := titleSimilarity(title, name)
 			if match >= .6 && DOIFrom(item.DOI) != "" {
-				return DOIFrom(item.DOI)
+				return DOIFrom(item.DOI), nil
 			}
 		}
 	}
-	return ""
+	var failures []doiMetadataFailure
+	if openAlexErr != nil && !doiMetadataAbsence(openAlexErr) {
+		failures = append(failures, doiMetadataFailure{provider: sourceOpenAlex, err: openAlexErr})
+	}
+	if crossErr != nil && !doiMetadataAbsence(crossErr) {
+		failures = append(failures, doiMetadataFailure{provider: sourceCrossref, err: crossErr})
+	}
+	if len(failures) != 2 {
+		return "", nil
+	}
+	kind := errorKindConnect
+	for _, failure := range failures {
+		if candidateKind := doiMetadataFailureKind(failure.err); candidateKind != "" {
+			kind = candidateKind
+			break
+		}
+	}
+	return "", &doiMetadataError{subject: "title lookup", failures: failures, kind: kind}
 }
 
 func (r *Resolver) arxivByTitle(ctx context.Context, client *http.Client, title string) []Candidate {
-	body, status, _, err := getBody(ctx, client, "https://export.arxiv.org/api/query?search_query=ti:%22"+url.QueryEscape(title)+"%22&max_results=3", r.scholarlyUA(), 2*1024*1024)
+	body, status, _, err := getBody(
+		ctx,
+		client,
+		"https://export.arxiv.org/api/query?search_query=ti:%22"+url.QueryEscape(title)+"%22&max_results=3",
+		r.scholarlyUA(),
+		2*1024*1024,
+	)
 	if err != nil || status >= 400 {
 		return nil
 	}
@@ -303,7 +417,16 @@ func (r *Resolver) arxivByTitle(ctx context.Context, client *http.Client, title 
 		if len(titleMatch) > 1 && len(idMatch) > 1 {
 			name := strings.TrimSpace(space.ReplaceAllString(titleMatch[1], " "))
 			if titleSimilarity(title, name) >= .6 {
-				return []Candidate{{URL: "https://arxiv.org/pdf/" + strings.TrimSpace(idMatch[1]), Source: "arxiv", Priority: 0, Kind: "pdf", Free: "green", Title: name}}
+				return []Candidate{
+					{
+						URL:      "https://arxiv.org/pdf/" + strings.TrimSpace(idMatch[1]),
+						Source:   sourceArXiv,
+						Priority: 0,
+						Kind:     kindPDF,
+						Free:     accessGreen,
+						Title:    name,
+					},
+				}
 			}
 		}
 	}
@@ -334,21 +457,36 @@ func (r *Resolver) osf(ctx context.Context, client *http.Client, doi string) ([]
 			} `json:"relationships"`
 		} `json:"data"`
 	}
-	if err := getJSONWithHeaders(ctx, client, "https://api.osf.io/v2/preprints/"+url.PathEscape(guid)+"/", map[string]string{"Accept": "application/json"}, &data); err != nil {
+	if err := getJSONWithHeaders(
+		ctx,
+		client,
+		"https://api.osf.io/v2/preprints/"+url.PathEscape(guid)+"/",
+		map[string]string{headerAccept: mediaTypeJSON},
+		&data,
+	); err != nil {
 		return nil, err
 	}
 	if id := data.Data.Relationships.PrimaryFile.Data.ID; id != "" {
-		return []Candidate{{URL: "https://osf.io/download/" + url.PathEscape(id) + "/", Source: "osf", Priority: 2, Kind: "pdf"}}, nil
+		return []Candidate{
+			{URL: "https://osf.io/download/" + url.PathEscape(id) + "/", Source: sourceOSF, Priority: 2, Kind: kindPDF},
+		}, nil
 	}
 	return nil, nil
 }
 
-func (r *Resolver) ResolvePMCID(ctx context.Context, pmcid string) ([]Candidate, error) {
+func (r *Resolver) ResolvePMCID(_ context.Context, pmcid string) ([]Candidate, error) {
 	pmcid = strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(pmcid)), "pmcid:")))
 	if !strings.HasPrefix(pmcid, "PMC") {
 		pmcid = "PMC" + pmcid
 	}
-	return []Candidate{{URL: "https://europepmc.org/articles/" + pmcid + "?pdf=render", Source: "europepmc", Priority: 0, Kind: "pdf"}}, nil
+	return []Candidate{
+		{
+			URL:      "https://europepmc.org/articles/" + pmcid + "?pdf=render",
+			Source:   sourceEuropePMC,
+			Priority: 0,
+			Kind:     kindPDF,
+		},
+	}, nil
 }
 
 func (r *Resolver) ResolvePMID(ctx context.Context, pmid string) ([]Candidate, error) {
@@ -362,7 +500,17 @@ func (r *Resolver) ResolvePMID(ctx context.Context, pmid string) ([]Candidate, e
 			PMCID string `json:"pmcid"`
 		} `json:"records"`
 	}
-	if err := getJSON(ctx, r.client(), r.withContact("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids="+url.QueryEscape(pmid)+"&format=json&tool=harvester-mcp", "email"), &data); err != nil {
+	if err := getJSON(
+		ctx,
+		r.client(),
+		r.withContact(
+			"https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids="+url.QueryEscape(
+				pmid,
+			)+"&format=json&tool=harvester-mcp",
+			"email",
+		),
+		&data,
+	); err != nil {
 		return nil, err
 	}
 	if len(data.Records) == 0 || data.Records[0].PMCID == "" {
@@ -382,7 +530,7 @@ func getJSON(ctx context.Context, client *http.Client, raw string, dst any) erro
 // "unexpected end of JSON input" decode failure.
 const resolverJSONMaxBody = 10 * 1024 * 1024
 
-func postJSON(ctx context.Context, client *http.Client, raw string, payload any, dst any) error {
+func postJSON(ctx context.Context, client *http.Client, raw string, payload, dst any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode JSON: %w", err)
@@ -398,8 +546,8 @@ func postJSON(ctx context.Context, client *http.Client, raw string, payload any,
 		client: client,
 		ua:     contextualUA(ctx),
 		headers: http.Header{
-			"Accept":       {"application/json"},
-			"Content-Type": {"application/json"},
+			headerAccept:   {mediaTypeJSON},
+			"Content-Type": {mediaTypeJSON},
 		},
 		max:              resolverJSONMaxBody,
 		policy:           gatewayNoEscalate,
@@ -437,7 +585,14 @@ func contextualUA(ctx context.Context) string {
 // different byte ceiling (the legacy book/mirror lookups, each pinned to its
 // own historical max) calls this directly instead of duplicating the
 // gateway/decode plumbing.
-func getJSONBody(ctx context.Context, client *http.Client, raw, ua string, headers map[string]string, max int64, dst any) error {
+func getJSONBody(
+	ctx context.Context,
+	client *http.Client,
+	raw, ua string,
+	headers map[string]string,
+	maxBytes int64,
+	dst any,
+) error {
 	header := make(http.Header, len(headers))
 	for key, value := range headers {
 		header.Set(key, value)
@@ -447,7 +602,7 @@ func getJSONBody(ctx context.Context, client *http.Client, raw, ua string, heade
 		client:           client,
 		ua:               ua,
 		headers:          header,
-		max:              max,
+		max:              maxBytes,
 		oversizeTruncate: false,
 	})
 	if err != nil {
@@ -462,7 +617,13 @@ func getJSONBody(ctx context.Context, client *http.Client, raw, ua string, heade
 	return nil
 }
 
-func getJSONWithHeaders(ctx context.Context, client *http.Client, raw string, headers map[string]string, dst any) error {
+func getJSONWithHeaders(
+	ctx context.Context,
+	client *http.Client,
+	raw string,
+	headers map[string]string,
+	dst any,
+) error {
 	return getJSONBody(ctx, client, raw, contextualUA(ctx), headers, resolverJSONMaxBody, dst)
 }
 

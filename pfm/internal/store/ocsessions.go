@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -9,13 +10,13 @@ import (
 // rebuildable derived data as transcripts and rollouts. One writer —
 // internal/index — and these queries.
 
-const ocSessionColumns = `
+const openCodeSessionColumns = `
   id, title, directory, project_dir, parent_id, agent, model,
   first_prompt, prompt_count, assistant_count, tokens_input, tokens_output,
   cost_millicents, time_created_ms, time_updated_ms, time_archived_ms`
 
-func scanOcSession(row interface{ Scan(...any) error }) (OcSession, error) {
-	var session OcSession
+func scanOpenCodeSession(row interface{ Scan(...any) error }) (OpenCodeSession, error) {
+	var session OpenCodeSession
 	err := row.Scan(
 		&session.ID,
 		&session.Title,
@@ -35,17 +36,17 @@ func scanOcSession(row interface{ Scan(...any) error }) (OcSession, error) {
 		&session.TimeArchivedMS,
 	)
 	if err != nil {
-		return OcSession{}, err
+		return OpenCodeSession{}, err
 	}
 	return session, nil
 }
 
-// ReplaceOcSessions atomically mirrors one indexing pass's full view of
+// ReplaceOpenCodeSessions atomically mirrors one indexing pass's full view of
 // OpenCode's session store: every session seen on disk is upserted, every row
 // no longer present is deleted. A full replace (rather than delta upserts)
 // matches the source: OpenCode's database is a single file whose mtime is the
 // only change signal pfm gets, so per-row offsets do not exist.
-func (s *Store) ReplaceOcSessions(ctx context.Context, sessions []OcSession) (err error) {
+func (s *Store) ReplaceOpenCodeSessions(ctx context.Context, sessions []OpenCodeSession) (err error) {
 	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
 		rows, err := tx.QueryContext(ctx, "SELECT id FROM oc_sessions")
 		if err != nil {
@@ -55,20 +56,21 @@ func (s *Store) ReplaceOcSessions(ctx context.Context, sessions []OcSession) (er
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return fmt.Errorf("scan existing oc session id: %w", err)
+				return errors.Join(fmt.Errorf("scan existing oc session id: %w", err), rows.Close())
 			}
 			existing[id] = true
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
-			return fmt.Errorf("iterate existing oc sessions: %w", err)
+			return errors.Join(fmt.Errorf("iterate existing oc sessions: %w", err), rows.Close())
 		}
-		rows.Close()
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("close existing oc session rows: %w", err)
+		}
 
-		for _, session := range sessions {
+		for index := range sessions {
+			session := &sessions[index]
 			_, err := tx.ExecContext(ctx, `
-INSERT INTO oc_sessions (`+ocSessionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO oc_sessions (`+openCodeSessionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   title=excluded.title,
   directory=excluded.directory,
@@ -117,18 +119,22 @@ ON CONFLICT(id) DO UPDATE SET
 	})
 }
 
-// OcSessions returns every indexed OpenCode session, newest activity first.
-func (s *Store) OcSessions(ctx context.Context) ([]OcSession, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT `+ocSessionColumns+` FROM oc_sessions ORDER BY time_updated_ms DESC`)
+// OpenCodeSessions returns every indexed OpenCode session, newest activity first.
+func (s *Store) OpenCodeSessions(ctx context.Context) (sessions []OpenCodeSession, returnErr error) {
+	rows, err := s.logged().QueryContext(ctx, `
+SELECT `+openCodeSessionColumns+` FROM oc_sessions ORDER BY time_updated_ms DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query oc sessions: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close oc session rows: %w", err))
+		}
+	}()
 
-	sessions := make([]OcSession, 0)
+	sessions = make([]OpenCodeSession, 0)
 	for rows.Next() {
-		session, err := scanOcSession(rows)
+		session, err := scanOpenCodeSession(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan oc session: %w", err)
 		}
@@ -140,12 +146,12 @@ SELECT `+ocSessionColumns+` FROM oc_sessions ORDER BY time_updated_ms DESC`)
 	return sessions, nil
 }
 
-// CountOcSessions returns the number of indexed OpenCode sessions. A count of
+// CountOpenCodeSessions returns the number of indexed OpenCode sessions. A count of
 // zero means "no sessions indexed"; whether that is emptiness or a store that
 // was never scanned is meta-key business, not this query's.
-func (s *Store) CountOcSessions(ctx context.Context) (int, error) {
+func (s *Store) CountOpenCodeSessions(ctx context.Context) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM oc_sessions").Scan(&count)
+	err := s.logged().QueryRowContext(ctx, "SELECT COUNT(*) FROM oc_sessions").Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count oc sessions: %w", err)
 	}

@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	pfmstatusline "hostops/pfm/internal/statusline"
-	"hostops/pfm/internal/usagehook"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmstatusline "github.com/rezzminator/professor/pfm/internal/statusline"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 func TestLimitsSamplerUsesIdentityMatchedStatuslineQuotaWithoutCredentialFile(t *testing.T) {
@@ -70,9 +70,16 @@ func TestLimitsSamplerRejectsStatuslineQuotaFromPreviousAccountIdentity(t *testi
 		t.Fatal(err)
 	}
 	now := time.Unix(1_800_000_000, 0)
-	writeStatuslineQuotaFixture(t, filepath.Join(home, "tmp", "cc-rate-limits"), filepath.Join(home, ".old-account-2"), now)
+	writeStatuslineQuotaFixture(
+		t,
+		filepath.Join(home, "tmp", "cc-rate-limits"),
+		filepath.Join(home, ".old-account-2"),
+		now,
+	)
 
-	sampler := NewLimitsSampler([]LimitAccount{{ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: currentConfig}})
+	sampler := NewLimitsSampler(
+		[]LimitAccount{{ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: currentConfig}},
+	)
 	sampler.Now = func() time.Time { return now }
 	var acks int
 	sampler.Ack = func(context.Context, LimitAccount) error {
@@ -86,7 +93,12 @@ func TestLimitsSamplerRejectsStatuslineQuotaFromPreviousAccountIdentity(t *testi
 	// identity is never adopted, however the account is repaired afterwards.
 	if acks != 1 || len(warnings) != 1 || len(limits) != 1 || len(limits[0].Windows) != 0 ||
 		!strings.Contains(limits[0].Status, ".credentials.json") {
-		t.Fatalf("acks=%d warnings=%v limits=%#v, want old identity refused and missing credentials surfaced", acks, warnings, limits)
+		t.Fatalf(
+			"acks=%d warnings=%v limits=%#v, want old identity refused and missing credentials surfaced",
+			acks,
+			warnings,
+			limits,
+		)
 	}
 }
 
@@ -103,7 +115,13 @@ func TestLimitsSamplerRejectsLegacyUnboundStatuslineQuota(t *testing.T) {
 	sampler.Now = func() time.Time { return now }
 	usage, confirmedAt, found, err := sampler.fetchClaudeStatusline(sampler.Accounts[0])
 	if err != nil || found || !confirmedAt.IsZero() || len(usage.NamedWindowsAt(now)) != 0 {
-		t.Fatalf("legacy unbound snapshot accepted: usage=%#v confirmedAt=%s found=%v err=%v", usage, confirmedAt, found, err)
+		t.Fatalf(
+			"legacy unbound snapshot accepted: usage=%#v confirmedAt=%s found=%v err=%v",
+			usage,
+			confirmedAt,
+			found,
+			err,
+		)
 	}
 }
 
@@ -149,7 +167,8 @@ func TestLimitsSamplerMapsCanonicalAndScopedWindowsAndCaches(t *testing.T) {
 	if len(warnings) != 0 || len(first) != 1 || calls != 1 || !first[0].ConfirmedAt.Equal(now) {
 		t.Fatalf("first limits=%#v warnings=%v calls=%d", first, warnings, calls)
 	}
-	if len(first[0].Windows) != 3 || first[0].Windows[0].Name != "5h" || first[0].Windows[1].Name != "7d" || first[0].Windows[2].Name != "7d-fable" {
+	if len(first[0].Windows) != 3 || first[0].Windows[0].Name != "5h" || first[0].Windows[1].Name != "7d" ||
+		first[0].Windows[2].Name != "7d-fable" {
 		t.Fatalf("windows=%#v", first[0].Windows)
 	}
 	if _, warnings = sampler.Sample(context.Background()); len(warnings) != 0 || calls != 1 {
@@ -237,7 +256,9 @@ func TestLimitsSamplerCredentialRefreshCanRetryBeforeBackoff(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sampler := NewLimitsSampler([]LimitAccount{{ID: 6, Engine: pfmengine.Claude, Label: "account 6", ConfigDir: configDir}})
+	sampler := NewLimitsSampler(
+		[]LimitAccount{{ID: 6, Engine: pfmengine.Claude, Label: "account 6", ConfigDir: configDir}},
+	)
 	sampler.Now = func() time.Time { return now }
 	sampler.Endpoint = server.URL
 	sampler.Ack = func(context.Context, LimitAccount) error {
@@ -246,7 +267,13 @@ func TestLimitsSamplerCredentialRefreshCanRetryBeforeBackoff(t *testing.T) {
 	}
 	limits, warnings := sampler.Sample(context.Background())
 	if hits != 2 || acks != 1 || len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 2 {
-		t.Fatalf("credential refresh retry was blocked: hits=%d acks=%d warnings=%v limits=%#v", hits, acks, warnings, limits)
+		t.Fatalf(
+			"credential refresh retry was blocked: hits=%d acks=%d warnings=%v limits=%#v",
+			hits,
+			acks,
+			warnings,
+			limits,
+		)
 	}
 }
 
@@ -337,7 +364,9 @@ func TestLimitsSamplerIgnoresStaleCodexCacheForLiveFetch(t *testing.T) {
 		t.Fatalf("limits=%#v warnings=%v", limits, warnings)
 	}
 	window := limits[0].Windows[0]
-	if liveFetches != 1 || limits[0].Plan != "pro" || limits[0].ConfirmedAt.IsZero() || window.Name != "7d" || window.UsedPct != 57 || window.ResetAt.Unix() != 1785902971 {
+	if liveFetches != 1 || limits[0].Plan != "pro" || limits[0].ConfirmedAt.IsZero() || window.Name != "7d" ||
+		window.UsedPct != 57 ||
+		window.ResetAt.Unix() != 1785902971 {
 		t.Fatalf("liveFetches=%d limits=%#v, want the live weekly fixture and no stale-cache read", liveFetches, limits)
 	}
 }
@@ -354,7 +383,7 @@ func TestCodexWindowNameUsesServerSeconds(t *testing.T) {
 		{seconds: 5_400, want: "90m"},
 		{seconds: 45, want: "45s"},
 	} {
-		if got := codexWindowName(test.seconds); got != test.want {
+		if got := codexUsageWindowName(test.seconds); got != test.want {
 			t.Errorf("codexWindowName(%d)=%q, want %q", test.seconds, got, test.want)
 		}
 	}
@@ -408,7 +437,7 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 		if err := os.WriteFile(path, []byte(`{"tokens":{"access_token":"fixture-access"}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		assertCodexStatus(t, path, "", nil, "Codex session incomplete")
+		assertCodexStatus(t, path, "", nil, "session for Codex is incomplete")
 	})
 	for _, code := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(fmt.Sprintf("HTTP %d", code), func(t *testing.T) {
@@ -418,7 +447,13 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 				w.WriteHeader(code)
 			}))
 			defer server.Close()
-			assertCodexStatus(t, path, server.URL, server.Client(), fmt.Sprintf("Codex credential rejected (HTTP %d)", code))
+			assertCodexStatus(
+				t,
+				path,
+				server.URL,
+				server.Client(),
+				fmt.Sprintf("credential for Codex rejected (HTTP %d)", code),
+			)
 		})
 	}
 	t.Run("unreadable payload", func(t *testing.T) {
@@ -428,7 +463,7 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 			fmt.Fprint(w, `{"rate_limit":`)
 		}))
 		defer server.Close()
-		assertCodexStatus(t, path, server.URL, server.Client(), "Codex payload unreadable")
+		assertCodexStatus(t, path, server.URL, server.Client(), "usage payload from Codex is unreadable")
 	})
 	t.Run("network failure", func(t *testing.T) {
 		root := t.TempDir()
@@ -437,7 +472,7 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 		endpoint := server.URL
 		client := server.Client()
 		server.Close()
-		assertCodexStatusPrefix(t, path, endpoint, client, "Codex fetch failed: ")
+		assertCodexStatusPrefix(t, path, endpoint, client, "fetch Codex usage failed: ")
 	})
 }
 
@@ -546,16 +581,23 @@ func TestLimitsSamplerServesLastGoodClaudeCacheDuringSharedBackoff(t *testing.T)
 	samplerB.Endpoint = server.URL
 	cached, warnings := samplerB.Sample(context.Background())
 	if hits != 1 || len(warnings) != 0 || len(cached) != 1 || !cached[0].ConfirmedAt.Equal(now.Add(-30*time.Second)) {
-		t.Fatalf("fresh shared-cache sample invented confirmation time: hits=%d warnings=%v limits=%#v", hits, warnings, cached)
+		t.Fatalf(
+			"fresh shared-cache sample invented confirmation time: hits=%d warnings=%v limits=%#v",
+			hits,
+			warnings,
+			cached,
+		)
 	}
 
 	failed = true
 	now = now.Add(defaultLimitsTTL)
 	stale, warnings := samplerA.Sample(context.Background())
-	if hits != 2 || len(stale) != 1 || len(stale[0].Windows) != 2 || stale[0].Status != "provider temporarily unavailable; showing cached limits" {
+	if hits != 2 || len(stale) != 1 || len(stale[0].Windows) != 2 ||
+		stale[0].Status != "provider temporarily unavailable; showing cached limits" {
 		t.Fatalf("failed refresh discarded last good payload: hits=%d warnings=%v limits=%#v", hits, warnings, stale)
 	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "503 Service Unavailable") || !stale[0].ConfirmedAt.Equal(now.Add(-defaultLimitsTTL-30*time.Second)) {
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "503 Service Unavailable") ||
+		!stale[0].ConfirmedAt.Equal(now.Add(-defaultLimitsTTL-30*time.Second)) {
 		t.Fatalf("failed refresh lost diagnostic/provenance: warnings=%v limits=%#v", warnings, stale)
 	}
 
@@ -571,7 +613,7 @@ func TestLimitsSamplerServesLastGoodClaudeCacheDuringSharedBackoff(t *testing.T)
 
 // --- shared on-disk cache regression coverage -------------------------------
 //
-// Every picker process constructs its own LimitsSampler (cmd/pfm/commands.go,
+// Every picker process constructs its own LimitsSampler (cmd/pfm/ls_command.go,
 // `statsSampler.Limits = pfmstats.NewLimitsSampler(...)` runs once per `pfm ls`
 // invocation). LimitsSampler.cache today (limits.go:47-48) is an unexported,
 // in-process map — nothing on disk backs it — so two samplers standing in for
@@ -634,7 +676,12 @@ func TestLimitsSamplerSharesFetchAcrossProcessesWithinTTL(t *testing.T) {
 	samplerA.Endpoint = server.URL
 	limitsA, warningsA := samplerA.Sample(context.Background())
 	if hits != 1 || len(warningsA) != 0 || len(limitsA) != 1 || len(limitsA[0].Windows) != 2 {
-		t.Fatalf("sampler A (first process): hits=%d warnings=%v limits=%#v, want one clean fetch", hits, warningsA, limitsA)
+		t.Fatalf(
+			"sampler A (first process): hits=%d warnings=%v limits=%#v, want one clean fetch",
+			hits,
+			warningsA,
+			limitsA,
+		)
 	}
 
 	// A fresh LimitsSampler value, same account, same endpoint — a second
@@ -643,10 +690,17 @@ func TestLimitsSamplerSharesFetchAcrossProcessesWithinTTL(t *testing.T) {
 	samplerB.Endpoint = server.URL
 	limitsB, warningsB := samplerB.Sample(context.Background())
 	if hits != 1 {
-		t.Fatalf("sampler B (second process) fetched independently: hits=%d, want 1 (shared cache hit, 0 new fetches)", hits)
+		t.Fatalf(
+			"sampler B (second process) fetched independently: hits=%d, want 1 (shared cache hit, 0 new fetches)",
+			hits,
+		)
 	}
 	if len(warningsB) != 0 || len(limitsB) != 1 || len(limitsB[0].Windows) != len(limitsA[0].Windows) {
-		t.Fatalf("sampler B limits=%#v warnings=%v, want the same windows sampler A already fetched", limitsB, warningsB)
+		t.Fatalf(
+			"sampler B limits=%#v warnings=%v, want the same windows sampler A already fetched",
+			limitsB,
+			warningsB,
+		)
 	}
 }
 
@@ -779,7 +833,9 @@ func TestLimitsSamplerReadsCachePayloadTheHookWroteWithoutFetching(t *testing.T)
 	}))
 	defer limitsServer.Close()
 
-	sampler := NewLimitsSampler([]LimitAccount{{ID: 1, Engine: pfmengine.Claude, Label: "account 1", ConfigDir: configDir}})
+	sampler := NewLimitsSampler(
+		[]LimitAccount{{ID: 1, Engine: pfmengine.Claude, Label: "account 1", ConfigDir: configDir}},
+	)
 	sampler.Endpoint = limitsServer.URL
 	limits, warnings := sampler.Sample(context.Background())
 	if samplerHits != 0 {
@@ -855,11 +911,16 @@ func TestLimitsSamplerDoesNotReuseClaudeCacheAcrossConfigDirectories(t *testing.
 			}
 			if testcase.serverFail {
 				if len(limits) != 1 || len(limits[0].Windows) != 0 || !strings.Contains(limits[0].Status, "503") {
-					t.Fatalf("foreign stale cache leaked after provider failure: limits=%#v warnings=%v", limits, warnings)
+					t.Fatalf(
+						"foreign stale cache leaked after provider failure: limits=%#v warnings=%v",
+						limits,
+						warnings,
+					)
 				}
 				return
 			}
-			if len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 2 || limits[0].Windows[0].UsedPct != 13 {
+			if len(warnings) != 0 || len(limits) != 1 || len(limits[0].Windows) != 2 ||
+				limits[0].Windows[0].UsedPct != 13 {
 				t.Fatalf("limits=%#v warnings=%v, want current identity's fetched 13/29 windows", limits, warnings)
 			}
 		})
@@ -1217,8 +1278,13 @@ func TestLimitsSamplerLiveHonorsSeparateCodexTTL(t *testing.T) {
 			t.Fatalf("tick %d (elapsed %s): claude calls=%d, want %d", tick, time.Duration(tick)*step, got, tick+1)
 		}
 		if got := codexCalls.Load(); got != 1 {
-			t.Fatalf("tick %d (elapsed %s, still under CodexLiveLimitsTTL=%s): codex calls=%d, want 1 (no re-invocation within its TTL)",
-				tick, time.Duration(tick)*step, CodexLiveLimitsTTL, got)
+			t.Fatalf(
+				"tick %d (elapsed %s, still under CodexLiveLimitsTTL=%s): codex calls=%d, want 1 (no re-invocation within its TTL)",
+				tick,
+				time.Duration(tick)*step,
+				CodexLiveLimitsTTL,
+				got,
+			)
 		}
 	}
 
@@ -1262,21 +1328,36 @@ func TestLimitsSamplerStaleRateLimitStatusPreservesRetryTime(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
 	now := time.Unix(1_800_000_000, 0)
-	account := LimitAccount{ID: 9, Engine: pfmengine.Claude, Label: "account 9", ConfigDir: filepath.Join(home, "claude")}
+	account := LimitAccount{
+		ID:        9,
+		Engine:    pfmengine.Claude,
+		Label:     "account 9",
+		ConfigDir: filepath.Join(home, "claude"),
+	}
 	confirmedAt := now.Add(-10 * time.Minute)
 	usage := liveClaudeUsage(confirmedAt, 49)
 	retryMessage := "limits unavailable: 429 Too Many Requests — retry at 15:04"
-	if err := usagehook.WriteCacheRecord(usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID), usagehook.CacheRecord{
-		Usage: usage, ConfigDir: account.ConfigDir, FetchedAt: &confirmedAt,
-		Backoff: &usagehook.CacheBackoff{Message: retryMessage, RetryAfter: now.Add(10 * time.Minute), RecordedAt: now},
-	}); err != nil {
+	if err := usagehook.WriteCacheRecord(
+		usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID),
+		usagehook.CacheRecord{
+			Usage:     usage,
+			ConfigDir: account.ConfigDir,
+			FetchedAt: &confirmedAt,
+			Backoff: &usagehook.CacheBackoff{
+				Message:    retryMessage,
+				RetryAfter: now.Add(10 * time.Minute),
+				RecordedAt: now,
+			},
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
 
 	sampler := NewLimitsSampler([]LimitAccount{account})
 	sampler.Now = func() time.Time { return now }
 	limits, warnings := sampler.Sample(context.Background())
-	if len(limits) != 1 || len(limits[0].Windows) != 2 || limits[0].Status != "provider rate-limited; retry at 15:04; showing cached limits" {
+	if len(limits) != 1 || len(limits[0].Windows) != 2 ||
+		limits[0].Status != "provider rate-limited; retry at 15:04; showing cached limits" {
 		t.Fatalf("rate-limited stale card=%#v, want retry time and cached windows", limits)
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "retry at 15:04") {
@@ -1299,12 +1380,15 @@ func TestLimitsSamplerSuccessfulFetchReportsClaudeCacheWriteFailure(t *testing.T
 	}))
 	defer server.Close()
 
-	sampler := NewLimitsSampler([]LimitAccount{{ID: 10, Engine: pfmengine.Claude, Label: "account 10", ConfigDir: configDir}})
+	sampler := NewLimitsSampler(
+		[]LimitAccount{{ID: 10, Engine: pfmengine.Claude, Label: "account 10", ConfigDir: configDir}},
+	)
 	sampler.Now = func() time.Time { return now }
 	sampler.Endpoint = server.URL
 	sampler.Client = server.Client()
 	limits, warnings := sampler.Sample(context.Background())
-	if len(limits) != 1 || len(limits[0].Windows) != 2 || !strings.HasPrefix(limits[0].Status, "write Claude limits cache:") {
+	if len(limits) != 1 || len(limits[0].Windows) != 2 ||
+		!strings.HasPrefix(limits[0].Status, "write Claude limits cache:") {
 		t.Fatalf("successful provider fetch hid cache write error: limits=%#v", limits)
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "write Claude limits cache:") {
@@ -1384,7 +1468,8 @@ func waitForNoCachedEntry(t *testing.T, sampler *LimitsSampler, accountID int) {
 
 func limitTestAccountKey(t *testing.T, sampler *LimitsSampler, accountID int) string {
 	t.Helper()
-	for _, account := range sampler.Accounts {
+	for index := range sampler.Accounts {
+		account := &sampler.Accounts[index]
 		if account.ID == accountID {
 			return account.cacheKey()
 		}
@@ -1431,7 +1516,11 @@ func TestLimitsSamplerKeepsStatuslineQuotaAfterACredentialBackoffIsRecorded(t *t
 	// reads whatever the first call left on disk.
 	limits, warnings := newSampler().Sample(context.Background())
 	if len(limits) != 1 || len(limits[0].Windows) != 2 {
-		t.Fatalf("replayed sample = %#v warnings=%v, want the SAME two statusline windows, not an empty card", limits, warnings)
+		t.Fatalf(
+			"replayed sample = %#v warnings=%v, want the SAME two statusline windows, not an empty card",
+			limits,
+			warnings,
+		)
 	}
 	if limits[0].Windows[0].UsedPct != 31 || limits[0].Windows[1].UsedPct != 47 ||
 		!limits[0].ConfirmedAt.Equal(now) {
@@ -1510,23 +1599,46 @@ func TestLimitsSamplerReadsFableWrittenByStatuslineRender(t *testing.T) {
 	}
 	now := time.Now().Truncate(time.Second)
 	runtime := pfmstatusline.Runtime{
-		Now: func() time.Time { return now }, Home: home, ConfigDir: configDir,
-		CacheDir: filepath.Join(home, "cache"), RateLimitDir: filepath.Join(home, "tmp", "cc-rate-limits"),
-		SIDDir: filepath.Join(home, "sid"), TmuxDir: filepath.Join(home, "tmux"), ProcRoot: filepath.Join(home, "proc"),
-		Columns: 120, UID: os.Getuid(), AccountDirs: map[string]int{configDir: 2}, AccountEmojis: map[int]string{2: "🥈"}, Env: map[string]string{},
-		Command: quietStatuslineCommand{},
+		Now:           func() time.Time { return now },
+		Home:          home,
+		ConfigDir:     configDir,
+		CacheDir:      filepath.Join(home, "cache"),
+		RateLimitDir:  filepath.Join(home, "tmp", "cc-rate-limits"),
+		SIDDir:        filepath.Join(home, "sid"),
+		TmuxDir:       filepath.Join(home, "tmux"),
+		ProcRoot:      filepath.Join(home, "proc"),
+		Columns:       120,
+		UID:           os.Getuid(),
+		AccountDirs:   map[string]int{configDir: 2},
+		AccountEmojis: map[int]string{2: "🥈"},
+		Env:           map[string]string{},
+		Command:       quietStatuslineCommand{},
 	}
 	fableReset := now.Add(5 * 24 * time.Hour)
-	input := []byte(fmt.Sprintf(`{"model":{"display_name":"Fable"},"session_id":"roundtrip","rate_limits":{"five_hour":{"used_percentage":11,"resets_at":%d},"seven_day":{"used_percentage":31,"resets_at":%d},"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":0,"resets_at":%q,"is_active":true}]}}`, now.Add(4*time.Hour).Unix(), now.Add(6*24*time.Hour).Unix(), fableReset.UTC().Format(time.RFC3339)))
+	input := []byte(
+		fmt.Sprintf(
+			`{"model":{"display_name":"Fable"},"session_id":"roundtrip","rate_limits":{"five_hour":{"used_percentage":11,"resets_at":%d},"seven_day":{"used_percentage":31,"resets_at":%d},"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":0,"resets_at":%q,"is_active":true}]}}`,
+			now.Add(4*time.Hour).Unix(),
+			now.Add(6*24*time.Hour).Unix(),
+			fableReset.UTC().Format(time.RFC3339),
+		),
+	)
 	rendered, err := pfmstatusline.Render(context.Background(), input, runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
 	entries, _ := os.ReadDir(runtime.RateLimitDir)
 	if len(entries) != 1 {
-		t.Fatalf("statusline did not write its Fable snapshot: entries=%v dir=%s render=%q", entries, runtime.RateLimitDir, rendered)
+		t.Fatalf(
+			"statusline did not write its Fable snapshot: entries=%v dir=%s render=%q",
+			entries,
+			runtime.RateLimitDir,
+			rendered,
+		)
 	}
-	sampler := NewLimitsSampler([]LimitAccount{{ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir}})
+	sampler := NewLimitsSampler(
+		[]LimitAccount{{ID: 2, Engine: pfmengine.Claude, Label: "account 2", ConfigDir: configDir}},
+	)
 	sampler.Now = func() time.Time { return now }
 	sampler.Ack = func(context.Context, LimitAccount) error {
 		return fmt.Errorf("credential refresh must not run")
@@ -1674,7 +1786,11 @@ func TestLimitsSamplerIgnoresAPeerCredentialBackoffWhenCredentialsAreAbsent(t *t
 	}
 	limits, warnings := sampler.Sample(context.Background())
 	if len(limits) != 1 || len(limits[0].Windows) != 2 {
-		t.Fatalf("limits=%#v warnings=%v, want the statusline snapshot to render through a peer's backoff", limits, warnings)
+		t.Fatalf(
+			"limits=%#v warnings=%v, want the statusline snapshot to render through a peer's backoff",
+			limits,
+			warnings,
+		)
 	}
 }
 
@@ -1806,7 +1922,12 @@ func TestLimitsRefetchesCacheWhoseWindowsAllExpiredUnlessBackedOff(t *testing.T)
 			home := t.TempDir()
 			t.Setenv(paths.EnvHome, home)
 			now := time.Unix(1_800_000_000, 0)
-			account := LimitAccount{ID: 24, Engine: pfmengine.Claude, Label: "fixture account", ConfigDir: filepath.Join(home, "claude")}
+			account := LimitAccount{
+				ID:        24,
+				Engine:    pfmengine.Claude,
+				Label:     "fixture account",
+				ConfigDir: filepath.Join(home, "claude"),
+			}
 			writeFixtureCredentials(t, account.ConfigDir)
 			// Fetched one second ago — well inside the live TTL — but every
 			// window in it reset before now.
@@ -1814,7 +1935,10 @@ func TestLimitsRefetchesCacheWhoseWindowsAllExpiredUnlessBackedOff(t *testing.T)
 			stale := 96.0
 			record := usagehook.CacheRecord{
 				Usage: usagehook.Usage{
-					FiveHour: usagehook.Window{Utilization: &stale, ResetsAt: now.Add(-time.Minute).Format(time.RFC3339)},
+					FiveHour: usagehook.Window{
+						Utilization: &stale,
+						ResetsAt:    now.Add(-time.Minute).Format(time.RFC3339),
+					},
 					SevenDay: usagehook.Window{Utilization: &stale, ResetsAt: now.Add(-time.Hour).Format(time.RFC3339)},
 				},
 				ConfigDir: account.ConfigDir, FetchedAt: &fetchedAt,
@@ -1824,7 +1948,10 @@ func TestLimitsRefetchesCacheWhoseWindowsAllExpiredUnlessBackedOff(t *testing.T)
 					Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: fetchedAt,
 				}
 			}
-			if err := usagehook.WriteCacheRecord(usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID), record); err != nil {
+			if err := usagehook.WriteCacheRecord(
+				usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID),
+				record,
+			); err != nil {
 				t.Fatal(err)
 			}
 			var hits atomic.Int32

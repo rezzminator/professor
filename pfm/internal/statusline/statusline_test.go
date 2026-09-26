@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestEngineFromEnvironmentRefusesMissingEngine(t *testing.T) {
@@ -58,7 +58,12 @@ func TestDefaultRuntimeUsesTheCodexSeatsOwnHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.Engine != pfmengine.Codex || runtime.ConfigDir != codexHome {
-		t.Fatalf("DefaultRuntime() engine=%q account home=%q, want codex/%q", runtime.Engine, runtime.ConfigDir, codexHome)
+		t.Fatalf(
+			"DefaultRuntime() engine=%q account home=%q, want codex/%q",
+			runtime.Engine,
+			runtime.ConfigDir,
+			codexHome,
+		)
 	}
 }
 
@@ -203,12 +208,13 @@ func (quietRunner) Output(
 func TestStatuslineCapturedInputGoldens(t *testing.T) {
 	for _, sample := range []struct {
 		name    string
+		fixture string
 		account int
 		engine  string
 		env     map[string]string
 	}{
-		{name: "primary", account: 1, engine: "claude", env: map[string]string{"PFM_TEST_PROBE_SOCKETS": "1"}},
-		{name: "gpt", account: 4, engine: "codex", env: map[string]string{
+		{name: "primary", fixture: "primary", account: 1, engine: "claude", env: map[string]string{"PFM_TEST_PROBE_SOCKETS": "1"}},
+		{name: "codex", fixture: "gpt", account: 4, engine: "codex", env: map[string]string{
 			"PFM_TEST_PROBE_SOCKETS": "1",
 			"ANTHROPIC_MODEL":        "gpt-5.6-sol[1m]",
 		}},
@@ -230,16 +236,22 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 				}
 			}
 			if sample.account == 4 {
-				writeGoldenCache(t, filepath.Join(cacheDir, "cc-gpt-usage-1000.json"),
+				writeGoldenCache(
+					t,
+					filepath.Join(cacheDir, "cc-gpt-usage-1000.json"),
 					`{"primary":{"usedPercent":32,"windowDurationMins":300,"resetsAt":1786845600},"secondary":{"usedPercent":71,"windowDurationMins":10080,"resetsAt":1787443200},"planType":"plus"}`,
 					now,
 				)
 				writeGoldenCache(t, filepath.Join(cacheDir, "cc-sl-gptreq"), "7 0\n", now)
-				if err := os.WriteFile(filepath.Join(procRoot, "net", "tcp"), []byte(" 00000000:494D "), 0o600); err != nil {
+				if err := os.WriteFile(
+					filepath.Join(procRoot, "net", "tcp"),
+					[]byte(" 00000000:494D "),
+					0o600,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}
-			raw, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.name+".json"))
+			raw, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.fixture+".json"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -251,7 +263,7 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 			raw = []byte(strings.ReplaceAll(
 				string(raw),
 				"__TRANSCRIPT__",
-				writeGoldenTranscript(t, root, now.Add(-12*time.Minute)),
+				writeGoldenTranscript(t, root, now.Add(-12*time.Minute), sample.engine),
 			))
 			engineID, parseErr := pfmengine.Parse(sample.engine)
 			if parseErr != nil {
@@ -275,7 +287,7 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.name+".golden"))
+			want, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.fixture+".golden"))
 			if err != nil {
 				t.Fatalf("golden is missing; captured output is:\n%s", strconv.Quote(got))
 			}
@@ -288,10 +300,17 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 
 // writeGoldenTranscript lays down a one-turn transcript inside the jail and
 // returns its path, so a golden can anchor the cache window at a fixed offset.
-func writeGoldenTranscript(t *testing.T, root string, turn time.Time) string {
+func writeGoldenTranscript(t *testing.T, root string, turn time.Time, engine string) string {
 	t.Helper()
 	path := filepath.Join(root, "transcript.jsonl")
-	body := `{"type":"user","timestamp":"` + turn.UTC().Format(time.RFC3339Nano) + `"}` + "\n"
+	body := `{"type":"assistant","timestamp":"` + turn.UTC().Format(time.RFC3339Nano) + `"}` + "\n"
+	if engine == "codex" {
+		body += `{"payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":136000},"model_context_window":272000}}}` + "\n"
+	} else {
+		body = `{"type":"assistant","timestamp":"` + turn.UTC().
+			Format(time.RFC3339Nano) +
+			`","message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":419000}}}` + "\n"
+	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +374,7 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	for _, want := range []string{
-		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "💠 high", "sample",
+		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·🏎️ high", "sample",
 		"42%", "🧮10.3K", "💰$3.42", "⏳ 5m32s", "·2 ·1",
 	} {
 		if !strings.Contains(plain, want) {
@@ -364,7 +383,186 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	}
 }
 
-func TestCodexEngineOwnsGPTUsageIndependentOfAccountID(t *testing.T) {
+func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	transcriptBody := strings.Join([]string{
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":699000,"cache_creation_input_tokens":0,"output_tokens":1000}}}`,
+		`{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":150000}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	xdgCache := filepath.Join(root, "xdg-cache")
+	floorDir := filepath.Join(xdgCache, "pfm-statusline")
+	if err := os.MkdirAll(floorDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(floorDir, "claude-work-sample.txt"), []byte("50000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	encodedTranscriptPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := []byte(`{
+  "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
+  "cwd":"/work/sample",
+  "context_window":{"used_percentage":77},
+  "transcript_path":` + string(encodedTranscriptPath) + `
+}`)
+	got, err := Render(context.Background(), input, Runtime{
+		Home:     root,
+		CacheDir: filepath.Join(root, "cache"),
+		TmuxDir:  filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"),
+		Columns:  120,
+		UID:      1000,
+		Env:      map[string]string{"XDG_CACHE_HOME": xdgCache},
+		Command:  quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "▰▰▱▱▱▱▱▱▱▱ ~20%") || strings.Contains(plain, "77%") {
+		t.Fatalf(
+			"post-compact gauge did not use floor + postTokens estimate, or retained stale self-report:\n%q",
+			plain,
+		)
+	}
+}
+
+func TestRenderMarksCompactBoundaryEstimateWithoutPostTokens(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	transcriptBody := strings.Join([]string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":699000}}}`,
+		`{"type":"system","subtype":"compact_boundary","compactMetadata":{}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Render(context.Background(), []byte(`{
+  "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
+  "cwd":"/work/sample",
+  "context_window":{"used_percentage":77},
+  "transcript_path":`+string(encodedPath)+`
+}`), Runtime{
+		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000, Env: map[string]string{},
+		Command: quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "~70%") || strings.Contains(plain, "77%") {
+		t.Fatalf("compact boundary without postTokens did not mark the prior occupancy as estimated:\n%q", plain)
+	}
+}
+
+func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	transcriptBody := strings.Join([]string{
+		`{"type":"user","message":{"content":"first"}}`,
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":249000}}}`,
+		`{"type":"user","message":{"content":"second"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Render(context.Background(), []byte(`{
+  "model":{"display_name":"Opus 4"},
+  "cwd":"/work/sample",
+  "context_window":{"used_percentage":77,"current_usage":{"input_tokens":1000}},
+  "transcript_path":`+string(encodedPath)+`
+}`), Runtime{
+		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000, Env: map[string]string{},
+		Command: quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "25%") || strings.Contains(plain, "77%") || !strings.Contains(plain, "🧮1.0K ✎2") {
+		t.Fatalf("measured transcript gauge or prompt count missing:\n%q", plain)
+	}
+	floor, err := os.ReadFile(filepath.Join(root, ".cache", "pfm-statusline", "claude-work-sample.txt"))
+	if err != nil || string(floor) != "250000\n" {
+		t.Fatalf("cached floor = %q, %v; want 250000", floor, err)
+	}
+}
+
+func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"assistant","message":{"usage":{"input_tokens":1000}}}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Env is pinned empty on purpose: a chat spawned by the fleet carries
+	// FORCE_PROMPT_CACHING_5M=1, and reading the ambient environment made this
+	// assertion depend on where the suite was run rather than on the default.
+	segment := cacheWindowSegment(
+		Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}},
+		time.Now(),
+		transcriptPath,
+		-1,
+		nil,
+	)
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(segment, "")
+	if !strings.Contains(plain, "💾1h∞") || strings.Contains(plain, "1h?") {
+		t.Fatalf("unknown default cache window = %q, want 1h∞", plain)
+	}
+}
+
+func TestCodexSegmentDoesNotOverwriteTranscriptGauge(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "rollout.jsonl")
+	transcriptBody := `{"payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":68000},"model_context_window":272000}}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Render(context.Background(), []byte(`{
+  "context_window":{"used_percentage":77,"current_usage":{"input_tokens":136000}},
+  "transcript_path":`+string(encodedPath)+`
+}`), Runtime{
+		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000, Engine: pfmengine.Codex,
+		Env: map[string]string{"ANTHROPIC_MODEL": "gpt-5.6-sol"}, Command: quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "25% of 272.0K") || strings.Contains(plain, "50%") || strings.Contains(plain, "77%") {
+		t.Fatalf("Codex overwrote transcript gauge:\n%q", plain)
+	}
+}
+
+func TestCodexEngineOwnsCodexUsageIndependentOfAccountID(t *testing.T) {
 	root := t.TempDir()
 	input := []byte(`{
   "model":{"display_name":"Claude"},
@@ -497,7 +695,7 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestGPTAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
+func TestCodexAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
 	root := t.TempDir()
 	logDir := filepath.Join(root, ".local", "state", "claude-code-proxy")
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
@@ -511,7 +709,7 @@ func TestGPTAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(logDir, "proxy.log"), []byte(log), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	count, reject := gptRequestCount(Runtime{
+	count, reject := codexRequestCount(Runtime{
 		Now:  func() time.Time { return time.Date(2026, 8, 16, 5, 0, 0, 0, time.UTC) },
 		Home: root, CacheDir: filepath.Join(root, "cache"),
 	}, time.Date(2026, 8, 16, 5, 0, 0, 0, time.UTC))

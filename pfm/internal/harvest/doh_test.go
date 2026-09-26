@@ -109,9 +109,12 @@ func TestDOHResolverReportsBothFailures(t *testing.T) {
 // NXDOMAIN. Asking anyway costs a round trip, emits a misleading degradation
 // warning on every lookup, and drags local fixture hosts onto the network.
 func TestDOHResolverSkipsSpecialUseNames(t *testing.T) {
-	resolver := newTestDOHResolver("http://doh.invalid/should-never-be-called", func(_ context.Context, host string) ([]net.IP, error) {
-		return []net.IP{net.ParseIP("127.0.0.1")}, nil
-	})
+	resolver := newTestDOHResolver(
+		"http://doh.invalid/should-never-be-called",
+		func(_ context.Context, _ string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("127.0.0.1")}, nil
+		},
+	)
 	for _, host := range []string{"fixture.test", "thing.invalid", "printer.local", "a.example", "svc.internal", "localhost"} {
 		ips, err := resolver.LookupIP(context.Background(), host)
 		if err != nil || len(ips) != 1 || ips[0].String() != "127.0.0.1" {
@@ -211,7 +214,12 @@ func TestDOHResolverRequeriesAfterTTLExpires(t *testing.T) {
 // here would silently return every rung to the poisoned answer.
 func TestNewInstallsTheDoHResolverByDefault(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Converter: &fakeConverter{}})
+	// Opt-out of mustNew's publicResolveGuard: that default would fill the
+	// very field this test pins. Constructing resolves nothing.
+	h, err := New(Options{CacheDir: t.TempDir(), Converter: &fakeConverter{}})
+	if err != nil {
+		t.Fatalf("harvest.New: %v", err)
+	}
 	if h.options.ResolvePublic == nil {
 		t.Fatal("Options.ResolvePublic = nil after New; want the DoH resolver installed by default")
 	}
@@ -253,7 +261,10 @@ func TestBrowserHostResolverRulePinsTheDoHAnswer(t *testing.T) {
 	if err != nil || len(ips) == 0 {
 		t.Fatalf("LookupIP = %v, %v", ips, err)
 	}
-	if rule := browserHostResolverRuleFrom("https://mirror.example.com/doc", ips); rule != "MAP mirror.example.com 198.51.100.7" {
+	if rule := browserHostResolverRuleFrom(
+		"https://mirror.example.com/doc",
+		ips,
+	); rule != "MAP mirror.example.com 198.51.100.7" {
 		t.Fatalf("rule = %q, want Chrome pinned to the DoH answer", rule)
 	}
 }
@@ -286,11 +297,17 @@ func TestBrowserHostResolverRuleRefusesPrivateAndUnpinnable(t *testing.T) {
 // while every HTTP rung succeeds over IPv4.
 func TestBrowserHostResolverRulePrefersIPv4(t *testing.T) {
 	ips := []net.IP{net.ParseIP("2001:db8::1"), net.ParseIP("198.51.100.7")}
-	if rule := browserHostResolverRuleFrom("https://mirror.example.com/doc", ips); rule != "MAP mirror.example.com 198.51.100.7" {
+	if rule := browserHostResolverRuleFrom(
+		"https://mirror.example.com/doc",
+		ips,
+	); rule != "MAP mirror.example.com 198.51.100.7" {
 		t.Fatalf("rule = %q, want the IPv4 address pinned", rule)
 	}
 	only6 := []net.IP{net.ParseIP("2001:db8::1")}
-	if rule := browserHostResolverRuleFrom("https://mirror.example.com/doc", only6); rule != "MAP mirror.example.com 2001:db8::1" {
+	if rule := browserHostResolverRuleFrom(
+		"https://mirror.example.com/doc",
+		only6,
+	); rule != "MAP mirror.example.com 2001:db8::1" {
 		t.Fatalf("rule = %q, want the IPv6 address when it is the only one", rule)
 	}
 }

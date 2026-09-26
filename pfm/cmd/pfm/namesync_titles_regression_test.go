@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/gather"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 func TestNameSyncTitlesReportsAnUnreadableServerAsUnverified(t *testing.T) {
@@ -18,7 +18,7 @@ func TestNameSyncTitlesReportsAnUnreadableServerAsUnverified(t *testing.T) {
 		t.Skip("tmux is not installed")
 	}
 	root := t.TempDir()
-	client := gather.CommandTmux{Binary: "tmux", TmuxTmpDir: root}
+	client := gather.TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
 	titles := pfmconfig.DefaultTmuxTitles()
 	var stdout, stderr bytes.Buffer
 	unverified := convergeChatServerOptions(
@@ -32,52 +32,14 @@ func TestNameSyncTitlesReportsAnUnreadableServerAsUnverified(t *testing.T) {
 		t.Fatalf("stdout=%q, want nothing counted converged for an unreadable server", stdout.String())
 	}
 	if unverified == 0 {
-		t.Fatalf("unverified=%d, want title probe failure carried into command result; stderr=%q", unverified, stderr.String())
+		t.Fatalf(
+			"unverified=%d, want title probe failure carried into command result; stderr=%q",
+			unverified,
+			stderr.String(),
+		)
 	}
 	if !strings.Contains(stderr.String(), "could not read set-titles") {
 		t.Fatalf("stderr=%q, want the failed title read named", stderr.String())
-	}
-}
-
-func TestTmuxTitlesDoctorReportsStringDriftAsDivergent(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux is not installed")
-	}
-	root := t.TempDir()
-	socket := "titles-doctor"
-	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-	start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "fixture", "sleep", "120")
-	start.Env = environment
-	if output, err := start.CombinedOutput(); err != nil {
-		t.Fatalf("start tmux fixture: %v: %s", err, output)
-	}
-	t.Cleanup(func() {
-		kill := exec.Command("tmux", "-L", socket, "kill-server")
-		kill.Env = environment
-		_ = kill.Run()
-	})
-	set := exec.Command("tmux", "-L", socket, "set-option", "-g", "set-titles", "on")
-	set.Env = environment
-	if output, err := set.CombinedOutput(); err != nil {
-		t.Fatalf("set-titles: %v: %s", err, output)
-	}
-	set = exec.Command("tmux", "-L", socket, "set-option", "-g", "set-titles-string", "custom-host-title")
-	set.Env = environment
-	if output, err := set.CombinedOutput(); err != nil {
-		t.Fatalf("set-titles-string: %v: %s", err, output)
-	}
-
-	state, detail := readTmuxTitlesState(
-		context.Background(),
-		gather.CommandTmux{Binary: "tmux", TmuxTmpDir: root},
-		socket,
-		true,
-	)
-	if state != titlesDivergent {
-		t.Fatalf("state=%q detail=%q, want %q for custom string drift", state, detail, titlesDivergent)
-	}
-	if !strings.Contains(detail, "custom-host-title") || !strings.Contains(detail, pfmconfig.TmuxTitlesString) {
-		t.Fatalf("detail=%q, want actual and expected title strings", detail)
 	}
 }
 
@@ -98,7 +60,19 @@ func TestNameSyncFreezesAWindowNameTheServerStillAutoRenames(t *testing.T) {
 		t.Cleanup(func() { _ = os.RemoveAll(root) })
 		socket := "cc-1800000031-1-1"
 		environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
-		start := exec.Command("tmux", "-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", socket, "sleep", "120")
+		start := exec.Command(
+			"tmux",
+			"-L",
+			socket,
+			"-f",
+			"/dev/null",
+			"new-session",
+			"-d",
+			"-s",
+			socket,
+			"sleep",
+			"120",
+		)
 		start.Env = environment
 		if output, err := start.CombinedOutput(); err != nil {
 			t.Fatalf("start tmux fixture: %v: %s", err, output)
@@ -108,7 +82,7 @@ func TestNameSyncFreezesAWindowNameTheServerStillAutoRenames(t *testing.T) {
 			kill.Env = environment
 			_ = kill.Run()
 		})
-		client := gather.CommandTmux{Binary: "tmux", TmuxTmpDir: root}
+		client := gather.TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
 		var stdout, stderr bytes.Buffer
 		unverified := convergeChatServerOptions(
 			context.Background(), client, []string{socket},

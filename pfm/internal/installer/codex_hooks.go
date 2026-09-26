@@ -3,8 +3,9 @@ package installer
 import (
 	"encoding/json"
 	"fmt"
-	"hostops/pfm/internal/codexappendix"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
 // codexClearMatcher is the matcher the retired Codex SessionStart clear-kill
@@ -12,8 +13,15 @@ import (
 // current ownership path recognizes or writes this retired shape.
 const codexClearMatcher = "startup|resume|clear"
 
-// updateCodexHooks preserves personal handlers, retires clear-kill, and owns the appendix.
-func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHookCounts) ([]byte, bool, settingsHookCounts, error) {
+// updateCodexHooks preserves personal handlers and retires pfm's own: the
+// clear-kill hook, and the SessionStart appendix hook whose truncated,
+// compaction-dropped delivery developer_instructions replaced.
+func updateCodexHooks(
+	raw []byte,
+	home string,
+	uninstall bool,
+	owned settingsHookCounts,
+) ([]byte, bool, settingsHookCounts, error) {
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
 		return nil, false, nil, err
@@ -23,12 +31,6 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 	}
 	oldBinary := home + "/.local/bin/cc-fleet"
 	pfmBinary := home + "/.local/bin/pfm"
-	retiredCommands := map[string]bool{
-		pfmBinary + " internal clear-kill":                  true,
-		oldBinary + " internal clear-kill":                  true,
-		pfmBinary + ` internal clear-kill --parent "$PPID"`: true,
-		oldBinary + ` internal clear-kill --parent "$PPID"`: true,
-	}
 
 	before := countSettingsHookCommands(document)
 	changed := false
@@ -42,7 +44,7 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 			return command
 		})
 	}
-	if removeRetiredHookCommands(document) {
+	if removeRetiredHookCommands(document, pfmBinary) {
 		changed = true
 	}
 
@@ -51,8 +53,9 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 		kept := hooks[:0]
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
-			command, _ := hook["command"].(string)
-			if isRetiredHookCommand(command) || retiredCommands[command] {
+			command, _ := hook[configCommandKey].(string)
+			if _, retired := codexRetiredSessionStartHookName(command, home); retired ||
+				isRetiredHookCommand(command, pfmBinary) {
 				changed = true
 				continue
 			}
@@ -67,29 +70,14 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 		}
 	}
 
-	if !uninstall && !hasHookCommandWithMatcher(hookEntries(document, "SessionStart", false), codexappendix.Command(home), codexappendix.Matcher) {
-		appendHookWithMatcher(document, "SessionStart", codexappendix.Matcher, codexappendix.Command(home))
-		changed = true
-	}
-	if !uninstall {
-		for _, entry := range hookEntries(document, "SessionStart", false) {
-			if entry["matcher"] != codexappendix.Matcher {
-				continue
-			}
-			handlers, _ := entry["hooks"].([]any)
-			for _, value := range handlers {
-				handler, _ := value.(map[string]any)
-				if handler["command"] == codexappendix.Command(home) {
-					if handler["type"] != "command" || !jsonNumberIs(handler["timeout"], 10) {
-						handler["type"] = "command"
-						handler["timeout"] = float64(10)
-						changed = true
-					}
-				}
-			}
-		}
-	}
-	nextOwned := nextSettingsHookOwnership(before, countSettingsHookCommands(document), owned, pfmBinary, uninstall, settingsDocumentHasMixedOwnershipEntry(document, pfmBinary))
+	nextOwned := nextSettingsHookOwnership(
+		before,
+		countSettingsHookCommands(document),
+		owned,
+		pfmBinary,
+		uninstall,
+		settingsDocumentHasMixedOwnershipEntry(document, pfmBinary),
+	)
 	if !changed {
 		return raw, false, nextOwned, nil
 	}
@@ -98,6 +86,25 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 		return nil, false, nil, fmt.Errorf("encode Codex hooks: %w", err)
 	}
 	return append(updated, '\n'), true, nextOwned, nil
+}
+
+// codexRetiredSessionStartHookName names a Codex SessionStart command pfm
+// used to own and now only removes: the clear-kill hook in each of its shapes
+// and binaries, and the appendix hook developer_instructions replaced. The
+// writer above strips it and doctor's probe reports it STALE.
+func codexRetiredSessionStartHookName(command, home string) (string, bool) {
+	oldBinary := home + "/.local/bin/cc-fleet"
+	pfmBinary := home + "/.local/bin/pfm"
+	switch command {
+	case pfmBinary + " internal clear-kill",
+		oldBinary + " internal clear-kill",
+		pfmBinary + ` internal clear-kill --parent "$PPID"`,
+		oldBinary + ` internal clear-kill --parent "$PPID"`:
+		return "codex-clear-kill", true
+	case codexappendix.Command(home):
+		return "codex-appendix", true
+	}
+	return "", false
 }
 
 func validateCodexHooks(document map[string]any) error {

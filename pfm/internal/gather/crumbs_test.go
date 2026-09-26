@@ -69,7 +69,7 @@ func TestReadCrumbsAndSweepStalePane(t *testing.T) {
 		}
 	}
 
-	probe, err := ReadCrumbs(sidDir, []Pane{{
+	probe, err := ReadCrumbs(sidDir, []ProbePane{{
 		Socket: "cc-1-2-3",
 		PaneID: "%1",
 	}})

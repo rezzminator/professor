@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestExcerptNeedlesStripsDecorationAndKeepsTheFiveLongest pins the needle
@@ -47,7 +48,14 @@ func TestExcerptNeedlesStripsDecorationAndKeepsTheFiveLongest(t *testing.T) {
 func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 	root := testjail.Fleet(t)
 	ctx := context.Background()
-	if _, err := Find(ctx, nil, FindRequest{Excerpt: "the verb layer answers every surface"}); !errors.Is(err, ErrNoTranscriptRegistry) {
+	if _, err := Find(
+		ctx,
+		nil,
+		FindRequest{Excerpt: "the verb layer answers every surface"},
+	); !errors.Is(
+		err,
+		ErrNoTranscriptRegistry,
+	) {
 		t.Fatalf("Find over an empty registry = %v, want ErrNoTranscriptRegistry", err)
 	}
 	const first, second = "the verb layer answers every surface", "one implementation behind each tool"
@@ -77,11 +85,61 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 		len(matches) != 1 || matches[0].ID != "one" {
 		t.Fatalf("Find(Self: both) = %+v, %v; want the asking session's transcript left out", matches, err)
 	}
-	if _, err := Find(ctx, nil, FindRequest{Excerpt: "a sentence no transcript here holds"}); !errors.Is(err, ErrNoExcerptMatch) {
+	if _, err := Find(
+		ctx,
+		nil,
+		FindRequest{Excerpt: "a sentence no transcript here holds"},
+	); !errors.Is(
+		err,
+		ErrNoExcerptMatch,
+	) {
 		t.Fatalf("Find(absent) = %v, want ErrNoExcerptMatch", err)
 	}
 	if _, err := Find(ctx, nil, FindRequest{Excerpt: "  "}); !errors.Is(err, ErrNoExcerpt) {
 		t.Fatalf("Find(blank) = %v, want ErrNoExcerpt", err)
+	}
+}
+
+// TestClaudeTranscriptsListsASymlinkedRootOnce is a REGRESSION test for the
+// seat roots that share ONE projects directory by symlink: the seen map was
+// keyed by the literal path, so ~/.cc/1/projects/p/x.jsonl and
+// ~/.cc/2/projects/p/x.jsonl — the same file — were both listed, and chat_find
+// reported one session three times. A file entry whose own link is dangling
+// still has to be listed (EvalSymlinks fails there, and a file that cannot be
+// resolved is not a reason to drop it or to fail the whole search).
+func TestClaudeTranscriptsListsASymlinkedRootOnce(t *testing.T) {
+	root := testjail.Fleet(t)
+	shared := filepath.Join(root, "seat-a", "projects")
+	third := filepath.Join(root, "seat-c", "projects")
+	for _, directory := range []string{filepath.Join(shared, "p"), filepath.Join(third, "q")} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(shared, "p", "live.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "gone", "dangle.jsonl"),
+		filepath.Join(third, "q", "dangle.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	mirror := filepath.Join(root, "seat-b", "projects")
+	if err := os.MkdirAll(filepath.Dir(mirror), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, mirror); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_CLAUDE_ROOTS", strings.Join([]string{mirror, shared, third}, string(os.PathListSeparator)))
+
+	files, err := ClaudeTranscripts(nil)
+	if err != nil {
+		t.Fatalf("ClaudeTranscripts() error = %v, want the roots listed", err)
+	}
+	want := []string{filepath.Join(mirror, "p", "live.jsonl"), filepath.Join(third, "q", "dangle.jsonl")}
+	sort.Strings(want)
+	if !reflect.DeepEqual(files, want) {
+		t.Fatalf("ClaudeTranscripts() = %q, want one entry per distinct file %q", files, want)
 	}
 }
 

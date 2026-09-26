@@ -14,123 +14,16 @@ set -euo pipefail
 # Re-baselining around a missing source is what keeps a zombie template alive forever.
 # ENUMERATION-FAILED exits 1 when a source glob cannot be read or expanded;
 # an incomplete scan never emits a clean scope summary.
-
-# `ledgers` is the other half of a release's scope, and it is mechanical for the
-# same reason `scan` is. A pending `.professor/release.md` bullet in a LINKED
-# project is a framework change waiting to ship, and before this subcommand
-# existed nothing ever opened one: /pfm:release read this repo's own ledger and
-# no other, so a release that swept every linked project and a release that
-# swept none printed the identical output. This enumerates the ledgers, counts
-# what is pending in each, and — the part that matters — refuses to be silent
-# about a ledger it could not read. Bullet TEXT is emitted for a human or an
-# LLM to judge; which bullet maps to which template is judgment, not shell.
 MISSING_SOURCE_EXIT=3
-LEDGER_UNREADABLE_EXIT=4
 
 usage() {
   echo "usage: $(basename "$0") scan|regen <project_root> [map_path]" >&2
-  echo "       $(basename "$0") ledgers <root> [root...]" >&2
   echo "  exit ${MISSING_SOURCE_EXIT}: unruled MISSING-SOURCE entries (see above)" >&2
-  echo "  exit ${LEDGER_UNREADABLE_EXIT}: a .professor/release.md could not be read" >&2
   exit 1
 }
 
 [[ $# -ge 2 ]] || usage
 CMD="$1"
-
-# ledgers enumerates every `.professor/release.md` reachable from the named
-# roots — each root itself, plus the sub-projects its own manifest names by
-# role, which refresh-map.json already treats as first-class live sources.
-#
-# Every ledger gets a verdict, and the four verdicts are deliberately distinct:
-# ABSENT means the directory is not a Professor install, EMPTY means the ledger
-# was opened and holds nothing pending, UNREADABLE means the look FAILED, and
-# PENDING carries a count plus the bullet text. Collapsing UNREADABLE into
-# EMPTY is the exact defect this whole subcommand exists to prevent: a release
-# is allowed to ship with nothing pending, and is never allowed to ship because
-# it could not find out.
-ledgers() {
-  [[ $# -ge 1 ]] || usage
-  local swept=0 pending=0 bullets=0 empty=0 absent=0 unreadable=0
-  local -a queue=() seen=()
-  local root abs manifest sub dir ledger count already prior
-
-  for root in "$@"; do
-    if [[ ! -d "$root" ]]; then
-      echo "refresh-scope: ledger root not found: $root" >&2
-      return 1
-    fi
-    abs="$(cd "$root" && pwd)"
-    queue+=("$abs")
-    manifest="$abs/.professor/manifest.json"
-    if [[ -f "$manifest" ]]; then
-      while IFS= read -r sub; do
-        [[ -z "$sub" ]] && continue
-        case "$sub" in
-          /*) ;;
-          "~/"*) sub="${HOME}/${sub#\~/}" ;;
-          *) sub="$abs/$sub" ;;
-        esac
-        if [[ -d "$sub" ]]; then
-          queue+=("$(cd "$sub" && pwd)")
-        else
-          echo "LEDGER-ROOT-MISSING ${sub} (named by ${manifest})"
-        fi
-      done < <(jq -r '.interview.projects // {} | to_entries[]? | .value // empty' "$manifest" 2>/dev/null || true)
-    fi
-  done
-
-  for dir in "${queue[@]}"; do
-    already=0
-    for prior in ${seen[@]+"${seen[@]}"}; do
-      if [[ "$prior" == "$dir" ]]; then
-        already=1
-      fi
-    done
-    (( already )) && continue
-    seen+=("$dir")
-    swept=$((swept + 1))
-    ledger="$dir/.professor/release.md"
-
-    if [[ ! -e "$ledger" ]]; then
-      echo "LEDGER-ABSENT ${dir}"
-      absent=$((absent + 1))
-      continue
-    fi
-    if [[ ! -r "$ledger" ]] || ! head -c 1 "$ledger" >/dev/null 2>&1; then
-      echo "LEDGER-UNREADABLE ${ledger}"
-      unreadable=$((unreadable + 1))
-      continue
-    fi
-
-    count="$(awk '/^## Pending/{inside=1;next} /^## /{inside=0} inside && /^- /{n++} END{print n+0}' "$ledger")"
-    if (( count == 0 )); then
-      echo "LEDGER-EMPTY ${ledger}"
-      empty=$((empty + 1))
-      continue
-    fi
-    pending=$((pending + 1))
-    bullets=$((bullets + count))
-    echo "LEDGER-PENDING ${ledger} bullets=${count}"
-    awk '/^## Pending/{inside=1;next} /^## /{inside=0} inside' "$ledger" | sed 's/^/  | /'
-  done
-
-  echo "refresh-scope: ledgers swept=${swept} pending=${pending} bullets=${bullets} empty=${empty} absent=${absent} unreadable=${unreadable}"
-
-  if (( unreadable > 0 )); then
-    echo "refresh-scope: BLOCKED — ${unreadable} ledger(s) could not be READ; a release cannot claim it swept a ledger it never opened. Fix the permission or name the root correctly, then re-run" >&2
-    return "$LEDGER_UNREADABLE_EXIT"
-  fi
-  return 0
-}
-
-# ledgers takes N roots and no map, so it is dispatched before the single-root
-# argument handling below claims $2.
-if [[ "$CMD" == "ledgers" ]]; then
-  shift
-  ledgers "$@"
-  exit $?
-fi
 
 PROJECT_ROOT_ARG="$2"
 case "$CMD" in

@@ -4,18 +4,18 @@ import (
 	"sort"
 )
 
-type projectDirectory struct {
+type projectDir struct {
 	path       string
 	activityNS int64
 	seeded     bool
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
-	copy := make(map[string]string, len(values))
+	cloned := make(map[string]string, len(values))
 	for key, value := range values {
-		copy[key] = value
+		cloned[key] = value
 	}
-	return copy
+	return cloned
 }
 
 func withNewRows(output Output) Output {
@@ -47,7 +47,7 @@ func withNewRows(output Output) Output {
 	}
 	if output.includeNewOpenCode {
 		rows = append(rows, Row{
-			Kind:    NewOpencode,
+			Kind:    NewOpenCode,
 			Name:    "New OpenCode chat",
 			Project: project,
 			CWD:     directory,
@@ -65,7 +65,7 @@ func newTarget(output Output) (string, string) {
 		project = output.ProjectOrder[0]
 	}
 	if project == "" {
-		project = projectName(output.fallbackDir)
+		project = output.projects.of(output.fallbackDir)
 	}
 	directory := output.ProjectDirs[project]
 	if directory == "" {
@@ -87,7 +87,7 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 	if currentDir == "" {
 		return output
 	}
-	current := projectName(currentDir)
+	current := output.projects.of(currentDir)
 	if current == "" || current == "?" {
 		return output
 	}
@@ -104,7 +104,8 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 	}
 
 	rowsByProject := make(map[string][]Row, len(order))
-	for _, row := range output.Rows {
+	for index := range output.Rows {
+		row := output.Rows[index]
 		if isNewChatKind(row.Kind) {
 			continue
 		}
@@ -127,12 +128,13 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 }
 
 func isNewChatKind(kind Kind) bool {
-	return kind == NewClaude || kind == NewCodex || kind == NewOpencode
+	return kind == NewClaude || kind == NewCodex || kind == NewOpenCode
 }
 
 func sortProjectRows(rows []Row) ([]Row, []string) {
 	rowsByProject := make(map[string][]Row)
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		rowsByProject[row.Project] = append(rowsByProject[row.Project], row)
 	}
 	type projectBlock struct {
@@ -170,20 +172,23 @@ func sortProjectRows(rows []Row) ([]Row, []string) {
 }
 
 func projectDirs(input Input) map[string]string {
-	directories := make(map[string]projectDirectory)
+	names := projectNames{}
+	directories := make(map[string]projectDir)
 	if input.Options.CurrentDir != "" {
-		project := projectName(input.Options.CurrentDir)
-		directories[project] = projectDirectory{
+		project := names.of(input.Options.CurrentDir)
+		directories[project] = projectDir{
 			path:   cleanPath(input.Options.CurrentDir),
 			seeded: true,
 		}
 	}
-	for _, transcript := range input.Transcripts {
-		rememberProjectDir(directories, transcript.CWD, transcript.EffectiveActivityNS())
+	for index := range input.Transcripts {
+		transcript := input.Transcripts[index]
+		rememberProjectDir(names, directories, transcript.CWD, transcript.EffectiveActivityNS())
 	}
-	for _, rollout := range input.Rollouts {
+	for index := range input.Rollouts {
+		rollout := input.Rollouts[index]
 		if rollout.UserThread {
-			rememberProjectDir(directories, rollout.CWD, rollout.MTimeNS)
+			rememberProjectDir(names, directories, rollout.CWD, rollout.MTimeNS)
 		}
 	}
 	result := make(map[string]string, len(directories))
@@ -194,20 +199,23 @@ func projectDirs(input Input) map[string]string {
 }
 
 func rememberProjectDir(
-	directories map[string]projectDirectory,
+	names projectNames,
+	directories map[string]projectDir,
 	path string,
 	activityNS int64,
 ) {
 	if path == "" {
 		return
 	}
-	project := projectName(path)
-	incumbent, found := directories[project]
+	ref := names.resolve(path)
+	incumbent, found := directories[ref.name]
 	if found && (incumbent.seeded || incumbent.activityNS > activityNS) {
 		return
 	}
-	directories[project] = projectDirectory{
-		path:       cleanPath(path),
+	// A project's launch directory is its repository root: a new chat in
+	// the repo never opens inside a worktree that a merge will delete.
+	directories[ref.name] = projectDir{
+		path:       cleanPath(ref.root),
 		activityNS: activityNS,
 	}
 }

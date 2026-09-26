@@ -5,18 +5,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (
@@ -31,13 +32,13 @@ const (
 type indexRefresher struct {
 	database    *store.Store
 	claudeRoots []string
-	codexRoots  []string
+	codexHomes  []string
 }
 
 func (refresher indexRefresher) Refresh(ctx context.Context) error {
 	indexer, err := index.NewWithRoots(refresher.database, paths.Values{}, map[pfmengine.ID][]string{
 		pfmengine.Claude: refresher.claudeRoots,
-		pfmengine.Codex:  refresher.codexRoots,
+		pfmengine.Codex:  refresher.codexHomes,
 	})
 	if err != nil {
 		return err
@@ -64,17 +65,17 @@ func NewFinisher(
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{}
+		tmux = TmuxKiller{}
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
-	codexRoots := dependencies.CodexRoots
-	if codexRoots == nil {
-		codexRoots = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
+	codexHomes := dependencies.CodexHomes
+	if codexHomes == nil {
+		codexHomes = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
 	} else {
-		codexRoots = append([]string{}, codexRoots...)
+		codexHomes = append([]string{}, codexHomes...)
 	}
 	refresher := dependencies.Refresher
 	if refresher == nil {
@@ -88,7 +89,7 @@ func NewFinisher(
 		refresher = indexRefresher{
 			database:    database,
 			claudeRoots: append([]string(nil), claudeRoots...),
-			codexRoots:  append([]string(nil), codexRoots...),
+			codexHomes:  append([]string(nil), codexHomes...),
 		}
 	}
 	delay := dependencies.Delay
@@ -114,10 +115,20 @@ func NewFinisher(
 		paths: resolvedPaths{
 			home:       resolved.Home,
 			sidDir:     resolved.SIDDir,
-			codexRoots: codexRoots,
+			codexHomes: codexHomes,
 			tmuxDir:    resolved.TmuxDir,
 		},
 	}, nil
+}
+
+// exitCommands is the graceful-close command each engine's TUI answers to,
+// and the set of engines this finisher knows how to close at all. OpenCode's
+// command palette lists "/exit — close OpenCode" (its parser also accepts
+// /quit and :q); Codex spells the same thing /quit.
+var exitCommands = map[pfmengine.ID]string{
+	pfmengine.Claude:   "/exit",
+	pfmengine.Codex:    "/quit",
+	pfmengine.OpenCode: "/exit",
 }
 
 // Run performs the delayed graceful close, fallback kill, cleanup, refresh,
@@ -126,7 +137,8 @@ func (finisher *Finisher) Run(
 	ctx context.Context,
 	args ExitArgs,
 ) error {
-	if args.Engine != pfmengine.Claude && args.Engine != pfmengine.Codex {
+	command, known := exitCommands[args.Engine]
+	if !known {
 		return fmt.Errorf("unknown kill-exit engine %q", args.Engine)
 	}
 	if args.ID == "" || args.SocketPath == "" || args.PaneID == "" {
@@ -140,20 +152,25 @@ func (finisher *Finisher) Run(
 	// and they are the only evidence of which panes were watching it.
 	viewports := finisher.viewportPanes(ctx, args.SocketPath)
 
-	command := "/exit"
-	if args.Engine == pfmengine.Codex {
-		command = "/quit"
-	}
 	_ = finisher.tmux.SendLine(ctx, args.SocketPath, args.PaneID, command)
-	for attempt := 0; attempt < finisher.pollAttempts; attempt++ {
-		if !finisher.tmux.PaneExists(ctx, args.SocketPath, args.PaneID) {
-			break
-		}
-		if err := waitContext(ctx, finisher.pollEvery); err != nil {
-			return err
-		}
+	landed, probeErr, err := pollPaneGone(
+		ctx, finisher.tmux, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
+	)
+	if err != nil {
+		return err
 	}
-	_ = finisher.tmux.KillPane(ctx, args.SocketPath, args.PaneID)
+	// The fallback kill always runs, matching the graceful-close-then-
+	// fallback-kill choreography regardless of what the grace window saw —
+	// but its error only MATTERS when the loop itself never confirmed the
+	// pane gone: against an already-confirmed-gone pane a forced kill is
+	// expected to fail ("can't find pane") and that is not itself evidence
+	// of anything. A kill the finisher has not seen land either way is
+	// never the one it records.
+	if killErr := finisher.tmux.KillPane(ctx, args.SocketPath, args.PaneID); killErr == nil {
+		landed = true
+	} else if !landed {
+		probeErr = errors.Join(probeErr, killErr)
+	}
 	finisher.closeViewports(ctx, viewports)
 
 	var cleanupErrors []error
@@ -168,8 +185,15 @@ func (finisher *Finisher) Run(
 
 	if err := finisher.refresher.Refresh(ctx); err != nil {
 		cleanupErrors = append(cleanupErrors, fmt.Errorf("refresh post-exit index: %w", err))
-	} else if err := finisher.recordPostExitKill(ctx, args); err != nil {
-		cleanupErrors = append(cleanupErrors, err)
+	} else if landed {
+		if err := finisher.recordPostExitKill(ctx, args); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	} else {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf(
+			"kill-exit for %s: pane %s was never confirmed gone: %w",
+			args.ID, args.PaneID, probeErr,
+		))
 	}
 	if err := finisher.reapTeammates(ctx, args.ID); err != nil {
 		cleanupErrors = append(cleanupErrors, err)
@@ -269,7 +293,7 @@ func (finisher *Finisher) reapTeammates(
 		".cc-new-children",
 		id,
 	)
-	detached, err := finisher.children(ctx, shared.KindNew, id, detachedPath)
+	detached, err := finisher.children(ctx, fleetdb.KindNew, id, detachedPath)
 	if err != nil {
 		reapErrors = append(reapErrors, err)
 	}
@@ -285,7 +309,7 @@ func (finisher *Finisher) reapTeammates(
 			reapErrors = append(reapErrors, err)
 		}
 	}
-	if err := state.ClearChildren(ctx, shared.KindNew, id); err != nil {
+	if err := state.ClearChildren(ctx, fleetdb.KindNew, id); err != nil {
 		reapErrors = append(reapErrors, err)
 	}
 	if err := os.Remove(detachedPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -298,7 +322,7 @@ func (finisher *Finisher) reapTeammates(
 		".cc-pane-children",
 		id,
 	)
-	panes, err := finisher.children(ctx, shared.KindPane, id, panePath)
+	panes, err := finisher.children(ctx, fleetdb.KindPane, id, panePath)
 	if err != nil {
 		reapErrors = append(reapErrors, err)
 	}
@@ -313,7 +337,7 @@ func (finisher *Finisher) reapTeammates(
 			pane,
 		)
 	}
-	if err := state.ClearChildren(ctx, shared.KindPane, id); err != nil {
+	if err := state.ClearChildren(ctx, fleetdb.KindPane, id); err != nil {
 		reapErrors = append(reapErrors, err)
 	}
 	if err := os.Remove(panePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -346,7 +370,7 @@ func (finisher *Finisher) children(
 }
 
 // readChildFile reads one flat teammate file from an older install.
-func readChildFile(path string) ([]string, error) {
+func readChildFile(path string) (values []string, returnErr error) {
 	file, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -354,8 +378,11 @@ func readChildFile(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	var values []string
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close child file %s: %w", path, err))
+		}
+	}()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		values = append(values, scanner.Text())
@@ -367,12 +394,36 @@ func readChildFile(path string) ([]string, error) {
 }
 
 func waitContext(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
+	return clock.Real.Sleep(ctx, duration)
+}
+
+// pollPaneGone asks tmux up to attempts times, waiting every between checks,
+// whether paneID is still on socketPath. probeErr carries the last "could not
+// ask" failure — never folded into landed, because a transient tmux error
+// must not be read as a pane that already closed (the same distinction
+// TmuxClient.PaneExists documents). Both Finisher.Run's graceful-close window
+// and Manager.ConfirmExit's bounded caller-side check share this one loop so
+// "is it actually gone yet" has exactly one implementation.
+func pollPaneGone(
+	ctx context.Context,
+	tmux TmuxClient,
+	socketPath, paneID string,
+	attempts int,
+	every time.Duration,
+) (landed bool, probeErr, waitErr error) {
+	for attempt := 0; attempt < attempts; attempt++ {
+		exists, err := tmux.PaneExists(ctx, socketPath, paneID)
+		switch {
+		case err != nil:
+			probeErr = err
+		case !exists:
+			return true, nil, nil
+		}
+		if attempt < attempts-1 {
+			if err := waitContext(ctx, every); err != nil {
+				return false, probeErr, err
+			}
+		}
 	}
+	return false, probeErr, nil
 }

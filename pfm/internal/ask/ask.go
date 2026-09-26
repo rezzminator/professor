@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	headlessrun "hostops/pfm/internal/headless/run"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 )
 
 const engineTimeout = 60 * time.Second
@@ -81,7 +81,11 @@ func ResolveInput(input AskInput, machine pfmconfig.Config) (AskInput, error) {
 		}
 	}
 	if len(input.SourceLabels) != 0 && len(input.SourceLabels) != len(input.ContentFiles) {
-		return AskInput{}, fmt.Errorf("source labels length %d does not match content files length %d", len(input.SourceLabels), len(input.ContentFiles))
+		return AskInput{}, fmt.Errorf(
+			"source labels length %d does not match content files length %d",
+			len(input.SourceLabels),
+			len(input.ContentFiles),
+		)
 	}
 	resolved := input
 	if resolved.Engine == "" {
@@ -112,16 +116,26 @@ func BuildPrompt(input AskInput) (string, error) {
 		return "", fmt.Errorf("prompt must not be empty")
 	}
 	if len(input.SourceLabels) != len(input.ContentFiles) {
-		return "", fmt.Errorf("source labels length %d does not match content files length %d", len(input.SourceLabels), len(input.ContentFiles))
+		return "", fmt.Errorf(
+			"source labels length %d does not match content files length %d",
+			len(input.SourceLabels),
+			len(input.ContentFiles),
+		)
 	}
 	var builder strings.Builder
-	builder.WriteString("Read the prepared content files listed below. Work ONLY from them; no network access, no other files.\n")
+	builder.WriteString(
+		"Read the prepared content files listed below. Work ONLY from them; no network access, no other files.\n",
+	)
 	for index, file := range input.ContentFiles {
 		fmt.Fprintf(&builder, "%d. %s — source: %s\n", index+1, file, input.SourceLabels[index])
 	}
 	fmt.Fprintf(&builder, "TASK: %s\n", input.Prompt)
-	builder.WriteString("Rules: if a file is truncated or unusable, say so explicitly for that file instead of guessing.\n")
-	builder.WriteString("After your answer, append a section titled exactly \"EVIDENCE\" listing one line per load-bearing claim:\n")
+	builder.WriteString(
+		"Rules: if a file is truncated or unusable, say so explicitly for that file instead of guessing.\n",
+	)
+	builder.WriteString(
+		"After your answer, append a section titled exactly \"EVIDENCE\" listing one line per load-bearing claim:\n",
+	)
 	builder.WriteString("  [file N] <location: line range, turn number, or chunk id> — \"<short verbatim quote>\"")
 	return builder.String(), nil
 }
@@ -183,10 +197,18 @@ func (engine processEngine) Run(parent context.Context, input AskInput) (AskResu
 	result, runErr := headlessrun.Run(parent, request)
 	if runErr != nil {
 		if errors.Is(runErr, context.DeadlineExceeded) {
-			return AskResult{}, fmt.Errorf("%s ask timed out: %w", pfmengine.MustLookup(engine.engine).LongName, context.DeadlineExceeded)
+			return AskResult{}, fmt.Errorf(
+				"%s ask timed out: %w",
+				pfmengine.MustLookup(engine.engine).LongName,
+				context.DeadlineExceeded,
+			)
 		}
 		if parent.Err() != nil {
-			return AskResult{}, fmt.Errorf("%s ask canceled: %w", pfmengine.MustLookup(engine.engine).LongName, parent.Err())
+			return AskResult{}, fmt.Errorf(
+				"%s ask canceled: %w",
+				pfmengine.MustLookup(engine.engine).LongName,
+				parent.Err(),
+			)
 		}
 		return AskResult{}, fmt.Errorf("%s ask failed: %w", pfmengine.MustLookup(engine.engine).LongName, runErr)
 	}

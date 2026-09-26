@@ -26,9 +26,9 @@ func TestProvisionBrowserConvergesUnderThePlatformRoot(t *testing.T) {
 
 	var mu sync.Mutex
 	smokes := 0
-	result, err := provisionBrowser(context.Background(), ProvisionOptions{
+	result, err := provisionBrowserWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
-		Download: func(_ context.Context, url string, _ string) error {
+		Download: func(_ context.Context, url, _ string) error {
 			t.Fatalf("unit provisioning hit the network (%s) — the targets seam is not injected", url)
 			return fmt.Errorf("network refused in unit test")
 		},
@@ -63,7 +63,11 @@ func TestProvisionBrowserConvergesUnderThePlatformRoot(t *testing.T) {
 	// must still resolve INSIDE this digest directory — a staging→final
 	// rename would leave it dangling at the abandoned staging path.
 	if info, statErr := os.Stat(resolved); statErr != nil || !info.Mode().IsRegular() {
-		t.Fatalf("interpreter symlink resolves outside/at %s (err=%v): a rename after uv sync dangles absolute links", resolved, statErr)
+		t.Fatalf(
+			"interpreter symlink resolves outside/at %s (err=%v): a rename after uv sync dangles absolute links",
+			resolved,
+			statErr,
+		)
 	}
 	if !strings.HasPrefix(resolved, final+string(filepath.Separator)) {
 		t.Fatalf("interpreter resolved to %q, outside the digest root %q", resolved, final)

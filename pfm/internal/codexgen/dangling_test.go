@@ -129,7 +129,10 @@ func TestDanglingRepoSkillLinkGatesCheckAndPopulatesDangling(t *testing.T) {
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(root, "does-not-exist-skill-target"), filepath.Join(skillsDir, "broken-skill")); err != nil {
+	if err := os.Symlink(
+		filepath.Join(root, "does-not-exist-skill-target"),
+		filepath.Join(skillsDir, "broken-skill"),
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,12 +199,21 @@ func TestCyclicWarningMentioningDanglingDoesNotGateCheck(t *testing.T) {
 		t.Fatalf("check: %v", err)
 	}
 	if !containsFinding(check.Warnings, "dangling") {
-		t.Fatalf("fixture did not produce a warning mentioning \"dangling\" via the cyclic path — test no longer exercises the coincidence case: %#v", check.Warnings)
+		t.Fatalf(
+			"fixture did not produce a warning mentioning \"dangling\" via the cyclic path — test no longer exercises the coincidence case: %#v",
+			check.Warnings,
+		)
 	}
 	if len(check.Dangling) != 0 {
-		t.Fatalf("Result.Dangling must stay empty for a merely-named cyclic path, not a real dangling source: %#v", check.Dangling)
+		t.Fatalf(
+			"Result.Dangling must stay empty for a merely-named cyclic path, not a real dangling source: %#v",
+			check.Dangling,
+		)
 	}
 	if !check.OK {
-		t.Fatalf("a warning that merely CONTAINS the word \"dangling\" gated Check; classification must be typed (Result.Dangling), never a textual scan of Warnings: %#v", check.Problems)
+		t.Fatalf(
+			"a warning that merely CONTAINS the word \"dangling\" gated Check; classification must be typed (Result.Dangling), never a textual scan of Warnings: %#v",
+			check.Problems,
+		)
 	}
 }

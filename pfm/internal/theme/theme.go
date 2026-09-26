@@ -5,7 +5,15 @@ import (
 	"fmt"
 	"os"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+)
+
+const (
+	orangeColor       = "#ff9e64"
+	defaultGreenColor = "#5eead4"
+	tokyoGreenColor   = "#73daca"
+	tokyoAccentColor  = "#7dcfff"
+	tokyoWarningColor = "#e0af68"
 )
 
 // Palette is the color vocabulary shared by the picker and status panels.
@@ -67,11 +75,11 @@ type Palette struct {
 
 var defaultPalette = Palette{
 	EngineRow: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ff9e64", pfmengine.Codex: "#38bdf8", pfmengine.Opencode: "#5eead4",
+		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.OpenCode: defaultGreenColor,
 	},
 	AgentRow: "#fb923c",
 	StatsEngine: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ff9e64", pfmengine.Codex: "#38bdf8", pfmengine.Opencode: "#5eead4",
+		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.OpenCode: defaultGreenColor,
 	},
 	StatsCPU:      "#4ade80",
 	StatsRAM:      "#60a5fa",
@@ -86,7 +94,7 @@ var defaultPalette = Palette{
 	CosmosSunHot:  "#BFD7FF",
 	Header:        "#ffffff",
 	HeaderBg:      "#5f3dc4",
-	GroupA:        "#5eead4",
+	GroupA:        defaultGreenColor,
 	GroupB:        "#7dd3fc",
 	Border:        "#64748b",
 	Selected:      "#334155",
@@ -104,18 +112,18 @@ var defaultPalette = Palette{
 
 var tokyoNightPalette = Palette{
 	EngineRow: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: "#73daca",
+		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.OpenCode: tokyoGreenColor,
 	},
 	AgentRow: "#bb9af7",
 	StatsEngine: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: "#73daca",
+		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.OpenCode: tokyoGreenColor,
 	},
 	StatsCPU:      "#9ece6a",
 	StatsRAM:      "#7aa2f7",
 	StatsName:     "#2ac3de",
-	Accent:        "#7dcfff",
+	Accent:        tokyoAccentColor,
 	Muted:         "#565f89",
-	Warn:          "#e0af68",
+	Warn:          tokyoWarningColor,
 	CosmosLineage: "#828CA5",
 	CosmosStar:    "#52586E",
 	CosmosBright:  "#E1E6F0",
@@ -123,18 +131,18 @@ var tokyoNightPalette = Palette{
 	CosmosSunHot:  "#B4C8FF",
 	Header:        "#c0caf5",
 	HeaderBg:      "#414868",
-	GroupA:        "#73daca",
-	GroupB:        "#7dcfff",
+	GroupA:        tokyoGreenColor,
+	GroupB:        tokyoAccentColor,
 	Border:        "#3b4261",
 	Selected:      "#292e42",
 	Dim:           "#565f89",
-	StatsHeader:   "#7dcfff",
+	StatsHeader:   tokyoAccentColor,
 	StatsMemory:   "#7aa2f7",
-	StatsToken:    "#e0af68",
-	StatsGear:     "#ff9e64",
+	StatsToken:    tokyoWarningColor,
+	StatsGear:     orangeColor,
 	StatsImage:    "#bb9af7",
 	LimitGreen:    "#9ece6a",
-	LimitAmber:    "#e0af68",
+	LimitAmber:    tokyoWarningColor,
 	LimitRed:      "#f7768e",
 	Label:         "#2ac3de",
 }

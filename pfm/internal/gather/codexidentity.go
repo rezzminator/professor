@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // CodexIdentity is one live codex pane's own observed thread identity, read
@@ -30,13 +30,14 @@ type CodexIdentity struct {
 func CaptureCodexIdentity(
 	ctx context.Context,
 	capturer PaneCapturer,
-	panes []Pane,
+	panes []ProbePane,
 ) []CodexIdentity {
 	if capturer == nil {
 		return nil
 	}
-	candidates := make([]Pane, 0, len(panes))
-	for _, pane := range panes {
+	candidates := make([]ProbePane, 0, len(panes))
+	for index := range panes {
+		pane := panes[index]
 		if id, ok := pfmengine.FromSocket(pane.Socket); !ok || id != pfmengine.Codex {
 			continue
 		}
@@ -55,8 +56,9 @@ func CaptureCodexIdentity(
 	identities := make([]CodexIdentity, len(candidates))
 	var waitGroup sync.WaitGroup
 	slots := make(chan struct{}, labelCaptureLimit)
-	for index, pane := range candidates {
-		index, pane := index, pane
+	for index := range candidates {
+		pane := candidates[index]
+		index := index
 		waitGroup.Add(1)
 		slots <- struct{}{}
 		go func() {
@@ -95,7 +97,7 @@ func parseCodexIdentity(capture string) (name, threadID string) {
 	if field == "" {
 		return "", ""
 	}
-	if isUUID(field) {
+	if pfmengine.IsUUID(field) {
 		return "", field
 	}
 	return field, ""

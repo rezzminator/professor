@@ -8,4 +8,4 @@ Type=oneshot
 # path every pfm unit shares (installer servicePath), so the tmux it probes is
 # found under every service manager.
 Environment=PATH=__PFM_SERVICE_PATH__
-ExecStart=%h/.local/bin/pfm name-sync
+ExecStart=%h/.local/bin/pfm name-sync --apply

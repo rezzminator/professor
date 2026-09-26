@@ -10,8 +10,8 @@ import (
 // exhausts the cap stops searching mid-task. These pin the lift on both
 // renderers of the spawn door, for every purpose.
 const (
-	webSearchBudgetName  = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
-	webSearchBudgetValue = "9007199254740991"
+	maxWebSearchesName  = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
+	maxWebSearchesValue = "9007199254740991"
 )
 
 func TestClaudeSpawnCarriesWebSearchBudget(t *testing.T) {
@@ -23,15 +23,15 @@ func TestClaudeSpawnCarriesWebSearchBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s shell spawn: %v", purpose, err)
 		}
-		if want := " " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) + " "; !strings.Contains(shell, want) {
+		if want := " " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) + " "; !strings.Contains(shell, want) {
 			t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, want)
 		}
 		// An inherited lower cap must not win: exec keeps the LAST duplicate,
 		// so the door's assignment has to land after the inherited entry.
-		environment := spawn.Environment([]string{webSearchBudgetName + "=5", "PATH=/usr/bin"})
-		if got := lastEnvironmentValue(environment, webSearchBudgetName); got != webSearchBudgetValue {
+		environment := spawn.Environment([]string{maxWebSearchesName + "=5", "PATH=/usr/bin"})
+		if got := lastEnvironmentValue(environment, maxWebSearchesName); got != maxWebSearchesValue {
 			t.Fatalf("%s spawn environment %q resolves %s=%q, want %q",
-				purpose, environment, webSearchBudgetName, got, webSearchBudgetValue)
+				purpose, environment, maxWebSearchesName, got, maxWebSearchesValue)
 		}
 	}
 }

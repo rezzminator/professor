@@ -5,16 +5,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // readCodexThreads loads the Codex CLI's own view of its conversations, newest
 // state generation first.
-func readCodexThreads(
+func loadIndexedCodexThreads(
 	ctx context.Context,
-	codexRoot string,
+	codexHome string,
 ) ([]store.CodexThread, error) {
-	files, err := store.CodexStateFiles(codexRoot)
+	files, err := store.CodexStateFiles(codexHome)
 	if err != nil {
 		return nil, err
 	}
@@ -32,17 +32,18 @@ func readCodexThreads(
 // rollout file was parsed keep their file-derived size and prompt count.
 func reconcileCodexState(
 	threads []store.CodexThread,
-	codexRoot string,
+	codexHome string,
 	updates []store.Rollout,
 	existing map[string]store.Rollout,
 	presentIDs map[string]struct{},
 	counters *Counters,
 ) []store.Rollout {
 	positionByID := make(map[string]int, len(updates))
-	for position, rollout := range updates {
-		positionByID[rollout.ID] = position
+	for position := range updates {
+		positionByID[updates[position].ID] = position
 	}
-	for _, thread := range threads {
+	for i := range threads {
+		thread := &threads[i]
 		if thread.Listed() {
 			counters.CodexThreads++
 			// The rollout file may be absent or already deleted; the store
@@ -51,11 +52,11 @@ func reconcileCodexState(
 			presentIDs[thread.ID] = struct{}{}
 		}
 		if position, found := positionByID[thread.ID]; found {
-			updates[position] = applyCodexThread(updates[position], thread)
+			updates[position] = applyCodexThread(updates[position], *thread)
 			continue
 		}
 		if row, found := existing[thread.ID]; found {
-			adjusted := applyCodexThread(row, thread)
+			adjusted := applyCodexThread(row, *thread)
 			if adjusted != row {
 				positionByID[thread.ID] = len(updates)
 				updates = append(updates, adjusted)
@@ -67,7 +68,7 @@ func reconcileCodexState(
 		}
 		counters.CodexRowsCreated++
 		positionByID[thread.ID] = len(updates)
-		updates = append(updates, codexStoreRollout(thread, codexRoot))
+		updates = append(updates, codexStoreRollout(*thread, codexHome))
 	}
 	return updates
 }
@@ -113,14 +114,14 @@ func applyCodexThread(
 // store's own recency, which is the only timestamp such a thread has.
 func codexStoreRollout(
 	thread store.CodexThread,
-	codexRoot string,
+	codexHome string,
 ) store.Rollout {
 	path := thread.RolloutPath
 	if path == "" {
 		// The rollout row's path is a unique key as well as a location. A
 		// placeholder keeps the key without claiming a file that Codex never
 		// wrote; walkCodexRollouts only ever collects rollout-*.jsonl names.
-		path = filepath.Join(codexRoot, "sessions", thread.ID+".jsonl")
+		path = filepath.Join(codexHome, "sessions", thread.ID+".jsonl")
 	}
 	activityNS := int64(0)
 	if thread.ActivityAt > 0 {
@@ -171,7 +172,8 @@ func reconcileCodexNames(
 		return err
 	}
 	updates := make([]store.CxName, 0)
-	for _, thread := range threads {
+	for i := range threads {
+		thread := &threads[i]
 		if !thread.Listed() || thread.Name == "" {
 			continue
 		}

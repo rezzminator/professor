@@ -13,9 +13,9 @@ import (
 	"strings"
 	"unicode"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 var (
@@ -25,7 +25,12 @@ var (
 	ErrNoTranscriptRegistry = errors.New("no transcript registry is available")
 	// ErrNoExcerptMatch: the registry was searched and no transcript holds the
 	// excerpt — an answer, distinct from a registry that could not be read.
-	ErrNoExcerptMatch = errors.New("no session contains the excerpt; try a longer or more distinctive chunk")
+	// It names its own scope: only Claude transcripts are searched, so a Codex
+	// or OpenCode chat holding the text is "not looked at", never "not there".
+	ErrNoExcerptMatch = errors.New(
+		"no session contains the excerpt in the Claude transcripts searched " +
+			"(Codex and OpenCode sessions are not searched); try a longer or more distinctive chunk",
+	)
 )
 
 // TranscriptMatch is one Claude transcript an excerpt was found in: how many
@@ -106,7 +111,7 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 // (CLAUDE_CODE_SESSION_ID), or "" outside one — the Self a surface whose
 // process is the asking chat hands Find.
 func AskingSession() string {
-	return os.Getenv("CLAUDE_CODE_SESSION_ID")
+	return (paths.OSEnv{}).Get("CLAUDE_CODE_SESSION_ID")
 }
 
 // ExcerptNeedles splits an excerpt into the needles Find searches for: its
@@ -139,7 +144,8 @@ func ExcerptNeedles(value string) []string {
 }
 
 // ClaudeTranscripts lists every Claude transcript under the runtime's Claude
-// roots, sorted. Without a config-file account list — or with no runtime at
+// roots, sorted, each distinct file once under the first root that reaches it.
+// Without a config-file account list — or with no runtime at
 // all — the legacy primary root (~/.claude/projects) is searched first too.
 func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 	var resolved paths.Values
@@ -182,10 +188,21 @@ func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 					continue
 				}
 				path := filepath.Join(directory, entry.Name())
-				if _, exists := seen[path]; exists {
+				// Seat roots commonly share ONE projects directory by
+				// symlink, so the same transcript is reachable under every
+				// root: key by the resolved file, not by its spelling, or one
+				// session is listed once per root. A path that will not
+				// resolve (a dangling link) keys by its literal self — it is
+				// still listed once, never dropped and never an error for the
+				// whole search.
+				key := path
+				if physical, err := filepath.EvalSymlinks(path); err == nil {
+					key = physical
+				}
+				if _, exists := seen[key]; exists {
 					continue
 				}
-				seen[path] = struct{}{}
+				seen[key] = struct{}{}
 				files = append(files, path)
 			}
 		}

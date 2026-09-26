@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/headless"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {
@@ -151,10 +153,81 @@ func TestRenameChatWindowClipsNamesLongerThanWindowNameRunes(t *testing.T) {
 	}
 }
 
-func TestChatNameInjectsThroughTheLiveSessionNotTranscriptUUID(t *testing.T) {
-	chat := headless.Chat{ID: "thread-not-indexed", Session: "cx-live-socket", Socket: "cx-live-socket"}
-	if got := chatNameInjectTarget(chat); got != "cx-live-socket" {
-		t.Fatalf("chatNameInjectTarget() = %q", got)
+func TestChatNameInjectsThroughTheExactLivePaneNotTranscriptUUID(t *testing.T) {
+	chat := headless.Chat{
+		ID: "thread-not-indexed", Session: "cx-live-socket", Socket: "cx-live-socket", Pane: "%7",
+	}
+	if got := pfmchat.PaneTarget(chat); got != "%7" {
+		t.Fatalf("PaneTarget() = %q", got)
+	}
+}
+
+func TestCodexSelfRetainsTheFleetMatchedPane(t *testing.T) {
+	jail := newKillCLIJail(t)
+	socket := "cx-self-pane-" + strconv.Itoa(os.Getpid())
+	if output, err := exec.Command(
+		"tmux", "-L", socket, "-f", "/dev/null",
+		"new-session", "-d", "-s", socket, "sleep", "120",
+	).CombinedOutput(); err != nil {
+		t.Fatalf("start tmux: %v: %s", err, output)
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	paneOutput, err := exec.Command(
+		"tmux", "-L", socket, "list-panes", "-t", socket, "-F", "#{pane_pid}",
+	).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	panePID, err := strconv.Atoi(strings.TrimSpace(string(paneOutput)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output, splitErr := exec.Command(
+		"tmux", "-L", socket, "split-window", "-d", "-t", socket, "sleep", "120",
+	).CombinedOutput(); splitErr != nil {
+		t.Fatalf("split tmux: %v: %s", splitErr, output)
+	}
+	const id = "c6666666-6666-4666-8666-666666666666"
+	writeFakeProcess(t, jail.procRoot, fakeProcessSpec{
+		pid: 90103, parentPID: panePID, comm: "codex",
+		cmdline: []string{"/usr/local/bin/codex"},
+		environ: map[string]string{"CODEX_THREAD_ID": id}, withFD: true,
+	})
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CODEX_THREAD_ID", id)
+	named, err := pfmchat.Target(context.Background(), id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := pfmchat.Target(context.Background(), "self", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if self.Socket != named.Socket || self.Session != named.Session || self.Pane != named.Pane {
+		t.Fatalf("self = %+v, want exact fleet address from %+v", self, named)
+	}
+}
+
+func TestScopedLiveKillConfirmsClosureWithoutExitFlag(t *testing.T) {
+	jailTest(t)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "setsid"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	self := headless.Chat{
+		ID: "a1111111-1111-4111-8111-111111111111", Engine: "cc",
+		Socket: "cc-new-review", Session: "cc-new-review", Pane: "%0", Live: true,
+	}
+	ctx := pfmchat.WithResolvedSelf(context.Background(), self)
+	var stdout, stderr bytes.Buffer
+	if code := runChatKillContext(ctx, []string{"self"}, &stdout, &stderr, paths.OSEnv{}); code != 0 {
+		t.Fatalf("kill self code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "closing pane %0 on socket cc-new-review") {
+		t.Fatalf("kill self output=%q, want confirmed live-pane closure", stdout.String())
 	}
 }
 

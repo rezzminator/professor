@@ -1,11 +1,23 @@
 package action
 
 import (
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+func TestCodexDeveloperInstructionsArgKeepsOneCompleteTripleQuotedValue(t *testing.T) {
+	prompt := strings.Repeat("0123456789abcdef", 820) + ` a triple quote """ and slash \\ survive`
+	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+	want := []string{"-c", "developer_instructions=\"\"\"\n" + escaped + "\"\"\""}
+	if got := CodexDeveloperInstructionsArg(prompt); !reflect.DeepEqual(got, want) {
+		t.Fatalf("CodexDeveloperInstructionsArg() = %#v, want one complete %d-byte value", got, len(want[1]))
+	}
+}
 
 // TestHeadlessClaudeCarriesTheFullLaunchCeremony pins the command a headless
 // Claude chat runs. Every clause is load-bearing: the environment strip (a
@@ -29,6 +41,7 @@ func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
 		t.Fatal("Claude takes its prompt on the command line")
 	}
 	want := "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR" +
+		" -u CLAUDE_PROJECT_DIR" +
 		" -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT" +
 		" -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_MODEL" +
 		" -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW" +
@@ -37,12 +50,63 @@ func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
 		" -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" +
 		" -u CODEX_THREAD_ID" +
 		" CLAUDE_CONFIG_DIR='/home/tester/.cc/2' FORCE_PROMPT_CACHING_5M=1" +
-		" " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) +
+		" " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) +
+		" " + truecolorName + "=" + Quote("1") +
+		" " + spawnDepthName + "=" + Quote("8") +
 		" claude '--name' '_KILL worker 3' 'audit the firewall rules'" +
 		" '--settings' " + Quote(pfmengine.OutputStyleDefaultSettings) +
 		" --allow-dangerously-skip-permissions --dangerously-skip-permissions"
 	if plan.Run != want {
 		t.Fatalf("run command\n got: %s\nwant: %s", plan.Run, want)
+	}
+}
+
+func TestHeadlessClaudeUsesRolePromptFileAndKeepsCallerPromptAlone(t *testing.T) {
+	home := t.TempDir()
+	rolePrompt := filepath.Join(home, "sid", "role-prompt-cc-worker.md")
+	machine := testMachineConfig(home)
+	machine.Claude.SystemPrompt = "professor"
+	plan, err := HeadlessRun(HeadlessRequest{
+		Engine: pfmengine.Claude, Name: "worker", CWD: "/work/alpha",
+		Prompt: "caller prompt", PromptChannel: rolePrompt, Home: home,
+		PrimaryAccount: 1, Config: machine,
+	})
+	if err != nil {
+		t.Fatalf("HeadlessRun() error = %v", err)
+	}
+	if !strings.Contains(plan.Run, " --system-prompt-file "+Quote(rolePrompt)) {
+		t.Fatalf("Claude command does not carry per-seat prompt file: %s", plan.Run)
+	}
+	if strings.Contains(plan.Run, Quote(ProfessorPromptPath(home))) {
+		t.Fatalf("Claude command still carries staged fleet prompt: %s", plan.Run)
+	}
+	if strings.Count(plan.Run, "caller prompt") != 1 {
+		t.Fatalf("Claude caller prompt is not its own lone argument: %s", plan.Run)
+	}
+}
+
+func TestHeadlessCodexCarriesWholeRoleAsDeveloperInstructions(t *testing.T) {
+	constitution := strings.Repeat("0123456789abcdef", 820) + ` a triple quote """ and slash \\ survive`
+	plan, err := headlessWithTestConfig(HeadlessRequest{
+		Engine: pfmengine.Codex, Name: "worker", CWD: "/work/alpha",
+		Prompt: "caller prompt", PromptChannel: constitution, Home: "/home/tester",
+		PrimaryAccount: 1,
+	})
+	if err != nil {
+		t.Fatalf("HeadlessRun() error = %v", err)
+	}
+	escaped := strings.ReplaceAll(constitution, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+	want := Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
+	if !strings.Contains(plan.Run, " '-c' "+want) {
+		t.Fatalf(
+			"Codex command does not carry complete developer instructions (%d bytes): %s",
+			len(constitution),
+			plan.Run,
+		)
+	}
+	if strings.Contains(plan.Run, "caller prompt") {
+		t.Fatalf("Codex caller prompt leaked onto argv: %s", plan.Run)
 	}
 }
 

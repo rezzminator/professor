@@ -1,36 +1,86 @@
 package installer
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-// ClaudeUserRegistry is Claude's user scope: the default account stores it
-// beside .claude; an explicit alternate config directory stores it inside.
-func ClaudeUserRegistry(home, configDir string, implicit bool) string {
-	if implicit || filepath.Clean(configDir) == filepath.Join(home, ".claude") {
-		return filepath.Join(home, ".claude.json")
+// ClaudeRegistry is one user-scope Claude Code registry (.claude.json) a
+// pfm-launched `claude` process can actually read, and why: the account it
+// belongs to (0 for the ambient entry, which is not tied to one account) and
+// the human-readable reason ClaudeUserRegistries derived it from.
+type ClaudeRegistry struct {
+	Path    string
+	Reason  string
+	Account int
+}
+
+// ClaudeUserRegistries resolves every user-scope Claude Code registry a
+// pfm-launched claude process can read: one per configured account (the
+// implicit account — the one pfm spawns without CLAUDE_CONFIG_DIR — at
+// $HOME/.claude.json, every other account at its own ConfigDir/.claude.json),
+// plus the ambient CLAUDE_CONFIG_DIR the invoking shell exported, when that
+// path is not already listed (the launcher shim passes it straight through —
+// internal_launch.go). Deduplicated by physical path so one file is never
+// listed twice under two reasons.
+func ClaudeUserRegistries(home string, accounts []pfmconfig.Account, ambientConfigDir string) []ClaudeRegistry {
+	seen := map[string]bool{}
+	registries := make([]ClaudeRegistry, 0, len(accounts)+1)
+	add := func(path, reason string, account int) {
+		physical := physicalSettingsPath(path)
+		if seen[physical] {
+			return
+		}
+		seen[physical] = true
+		registries = append(registries, ClaudeRegistry{Path: path, Reason: reason, Account: account})
 	}
-	return filepath.Join(configDir, ".claude.json")
+	for _, account := range accounts {
+		if account.Implicit {
+			add(filepath.Join(home, ".claude.json"),
+				fmt.Sprintf("account %d (pfm spawns it without CLAUDE_CONFIG_DIR)", account.ID), account.ID)
+			continue
+		}
+		add(
+			filepath.Join(account.ConfigDir, ".claude.json"),
+			fmt.Sprintf(
+				"account %d (CLAUDE_CONFIG_DIR=%s when pfm spawns it)",
+				account.ID,
+				account.ConfigDir,
+			),
+			account.ID,
+		)
+	}
+	if ambient := strings.TrimSpace(ambientConfigDir); ambient != "" {
+		add(
+			filepath.Join(ambient, ".claude.json"),
+			fmt.Sprintf(
+				"ambient CLAUDE_CONFIG_DIR=%s (the claude launcher passes it through — internal_launch.go)",
+				ambient,
+			),
+			0,
+		)
+	}
+	return registries
 }
 
 func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
-	ownership := mcpOwnership{Registrations: map[string]map[string]any{}}
-	raw, err := os.ReadFile(installer.mcpOwnershipPath())
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	// One reader for this ledger: loadMCPOwnership (mcp.go) already renders a
+	// missing file as an empty ownership and every other failure — unreadable
+	// or undecodable — as a named error, which is exactly what this used to
+	// restate inline.
+	ownership, err := installer.loadMCPOwnership()
+	if err != nil {
 		return nil, err
-	}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &ownership); err != nil {
-			return nil, fmt.Errorf("decode MCP ownership: %w", err)
-		}
 	}
 	if ownership.Registrations == nil {
 		ownership.Registrations = map[string]map[string]any{}
@@ -55,16 +105,43 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		*receipts = canonical
 	}
 	wantedPaths := map[string]bool{}
-	if len(names) > 0 {
-		registries := installer.options.ClaudeRegistries
-		if registries == nil {
-			for _, dir := range installer.claudeConfigDirs() {
-				registries = append(registries, ClaudeUserRegistry(installer.options.Home, dir, false))
-			}
+	// scanPaths are the registries visited only to remove pfm's legacy entries
+	// (install with nothing enabled, and uninstall): they gain no professor.
+	scanPaths := map[string]bool{}
+	reasons := map[string]string{}
+	registries := installer.options.ClaudeRegistries
+	registryReasons := installer.options.ClaudeRegistryReasons
+	if registries == nil {
+		accounts := make([]pfmconfig.Account, 0, len(installer.claudeConfigDirs()))
+		for index, dir := range installer.claudeConfigDirs() {
+			// A direct caller's fanout has no Implicit flag of its own; a
+			// dir that cleans to the canonical ~/.claude carries the same
+			// registry pfm's own implicit account does (the historical
+			// ClaudeUserRegistry special case this fallback preserves).
+			accounts = append(accounts, pfmconfig.Account{
+				ID:        index + 1,
+				ConfigDir: dir,
+				Implicit:  filepath.Clean(dir) == filepath.Join(installer.options.Home, ".claude"),
+			})
 		}
-		for _, path := range registries {
-			if strings.TrimSpace(path) != "" {
-				wantedPaths[physicalSettingsPath(path)] = true
+		resolved := ClaudeUserRegistries(installer.options.Home, accounts, pfmconfig.AmbientClaudeConfigDir())
+		registries = make([]string, 0, len(resolved))
+		registryReasons = map[string]string{}
+		for _, registry := range resolved {
+			registries = append(registries, registry.Path)
+			registryReasons[registry.Path] = registry.Reason
+		}
+	}
+	for _, path := range registries {
+		if strings.TrimSpace(path) != "" {
+			physical := physicalSettingsPath(path)
+			if len(names) == 0 {
+				scanPaths[physical] = true
+				continue
+			}
+			wantedPaths[physical] = true
+			if reason, ok := registryReasons[path]; ok && reason != "" {
+				reasons[physical] = reason
 			}
 		}
 	}
@@ -74,13 +151,33 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 	}
 	for path := range ownership.Registrations {
 		paths[path] = true
+		delete(scanPaths, path)
 	}
 	for path := range ownership.Pending {
 		paths[path] = true
+		delete(scanPaths, path)
 	}
+	for path := range scanPaths {
+		paths[path] = true
+	}
+	// ~/.mcp.json is where the names-only predecessor ledger registered; pfm's
+	// legacy entries there go whether or not that ledger lists them, so it is
+	// always visited, as a scan-only path when nothing else claims it.
 	legacy := physicalSettingsPath(filepath.Join(installer.options.Home, ".mcp.json"))
-	if len(ownership.Clients) > 0 {
-		paths[legacy] = true
+	if len(ownership.Clients) == 0 && !paths[legacy] {
+		scanPaths[legacy] = true
+	}
+	paths[legacy] = true
+	// $HOME/.claude.json is the registry a plain `claude` reads; when no account
+	// wires it (every account has its own ConfigDir), pfm's legacy entries there
+	// still go, as a scan-only path: it gains no professor and nothing else in
+	// it is touched.
+	homeRegistry := physicalSettingsPath(filepath.Join(installer.options.Home, ".claude.json"))
+	if _, err := os.Stat(homeRegistry); err == nil && !paths[homeRegistry] {
+		scanPaths[homeRegistry] = true
+		paths[homeRegistry] = true
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("stat MCP registry %s: %w", homeRegistry, err)
 	}
 	ordered := make([]string, 0, len(paths))
 	for path := range paths {
@@ -96,6 +193,14 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 				err = errors.New("registry must be an object")
 			}
 		}
+		// A registry visited only to remove pfm's legacy entries is named and
+		// passed over when it cannot be scanned: pfm registers nothing there, so
+		// the rest of the install must not stop on it. A registry pfm owns or
+		// registers into still fails the install.
+		if err != nil && scanPaths[path] {
+			installer.skip("could not scan " + path + " for pfm legacy MCP entries: " + err.Error())
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read MCP registry %s: %w", path, err)
 		}
@@ -103,17 +208,29 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		if value, present := document["mcpServers"]; present {
 			var ok bool
 			servers, ok = value.(map[string]any)
+			if (!ok || servers == nil) && scanPaths[path] {
+				installer.skip("could not scan " + path + " for pfm legacy MCP entries: mcpServers must be an object")
+				continue
+			}
 			if !ok || servers == nil {
 				return nil, fmt.Errorf("MCP registry %s: mcpServers must be an object", path)
 			}
 		}
 		before, _ := json.Marshal(document)
+		removedLegacy := installer.removePFMLegacyClients(servers)
+		for _, name := range removedLegacy {
+			delete(ownership.Registrations[path], name)
+			delete(ownership.Pending[path], name)
+			if path == legacy {
+				ownership.Clients = without(ownership.Clients, name)
+			}
+		}
 		owned := ownership.Registrations[path]
 		if owned == nil {
 			owned = map[string]any{}
 		}
 		for name, registration := range ownership.Pending[path] {
-			if sameJSONValue(servers[name], registration) {
+			if sameClaudeRegistration(servers[name], registration) {
 				owned[name] = registration
 			}
 		}
@@ -134,7 +251,7 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		}
 		for name, registration := range owned {
 			current, present := servers[name]
-			if present && sameJSONValue(current, registration) {
+			if present && sameClaudeRegistration(current, registration) {
 				if wanted[name] {
 					next[name] = registration
 				} else {
@@ -143,11 +260,16 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 			}
 		}
 		for name := range wanted {
-			registration := installer.mcpClientRegistration(name)
+			registration := installer.mcpClientRegistration()
 			_, present := servers[name]
 			_, ours := next[name]
 			if present && !ours {
 				installer.skip("preserve conflicting manual MCP client " + name + " in " + path)
+				continue
+			}
+			// An owned entry Claude rewrote with its shape-neutral `"env": {}` is
+			// already correct: rewriting it would only undo Claude's own edit.
+			if present && sameClaudeRegistration(servers[name], registration) {
 				continue
 			}
 			servers[name] = registration
@@ -160,7 +282,24 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		// Keep the last receipt until the registry write succeeds. Pending exact
 		// values cover a crash between that write and the final receipt commit.
 		ownership.Pending[path] = next
-		if string(before) != string(after) {
+		message := changeDescription(path, existed)
+		okMessage := path + " wiring"
+		// Append the registry's reason rather than replacing changeDescription's
+		// create/rewrite wording or the plain "<path> wiring" ok line: both are
+		// pinned verbatim by earlier regression tests (backup-claim and
+		// owned-stdio-recognition), and a reason is extra context, not a
+		// different report.
+		if wantedPaths[path] && len(names) > 0 {
+			if reason := reasons[path]; reason != "" {
+				suffix := fmt.Sprintf(" — register %s (%s)", strings.Join(names, ","), reason)
+				message += suffix
+				okMessage += suffix
+			}
+		}
+		if len(removedLegacy) > 0 {
+			message += " — remove pfm's legacy MCP clients " + strings.Join(removedLegacy, ",")
+		}
+		if !bytes.Equal(before, after) {
 			if err := installer.saveMCPOwnership(ownership); err != nil {
 				return nil, err
 			}
@@ -168,13 +307,13 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := installer.change(changeDescription(path, existed), func() error {
+			if err := installer.change(message, func() error {
 				return installer.writeMCPFile(path, original, append(encoded, '\n'), existed)
 			}); err != nil {
 				return nil, err
 			}
-		} else {
-			installer.ok(path + " wiring")
+		} else if !scanPaths[path] {
+			installer.ok(okMessage)
 		}
 		if len(next) > 0 {
 			ownership.Registrations[path] = next
@@ -195,9 +334,33 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 	return names, nil
 }
 
+// removePFMLegacyClients deletes from servers each legacy key holding one of
+// pfm's own pre-professor shapes and returns the removed keys, sorted.
+func (installer *engine) removePFMLegacyClients(servers map[string]any) []string {
+	var removed []string
+	for _, name := range mcpLegacyNames {
+		if registration, ok := servers[name].(map[string]any); ok && installer.isPFMLegacyClient(name, registration) {
+			delete(servers, name)
+			removed = append(removed, name)
+		}
+	}
+	return removed
+}
+
+func without(values []string, drop string) []string {
+	kept := values[:0:0]
+	for _, value := range values {
+		if value != drop {
+			kept = append(kept, value)
+		}
+	}
+	return kept
+}
+
 func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 	path := installer.mcpOwnershipPath()
-	if len(ownership.Clients) == 0 && len(ownership.Registrations) == 0 && len(ownership.Pending) == 0 {
+	if len(ownership.Clients) == 0 && len(ownership.Registrations) == 0 && len(ownership.Pending) == 0 &&
+		len(ownership.OpenCodeRegistrations) == 0 && len(ownership.OpenCodePending) == 0 {
 		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 			return nil
 		} else if err != nil {
@@ -210,8 +373,8 @@ func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 		return err
 	}
 	encoded = append(encoded, '\n')
-	if sameFile(path, encoded, 0600) {
+	if sameFile(path, encoded, 0o600) {
 		return nil
 	}
-	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0600) })
+	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0o600) })
 }

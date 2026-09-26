@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // State is one socket's verdict, as reported.
@@ -210,7 +210,8 @@ func (decision Decision) Reapable() bool {
 // not match the run it previews is not a preview.
 func Plan(input Input) []Decision {
 	decisions := make([]Decision, 0, len(input.Sockets)+len(input.VSCT))
-	for _, socket := range input.Sockets {
+	for index := range input.Sockets {
+		socket := input.Sockets[index]
 		decisions = append(decisions, planSocket(input, socket))
 	}
 	for _, session := range input.VSCT {

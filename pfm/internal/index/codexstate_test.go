@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type codexStateThread struct {
@@ -48,11 +48,16 @@ func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
 	if err != nil {
 		t.Fatalf("create scratch Codex state store: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	if _, err := database.Exec(string(schema)); err != nil {
 		t.Fatalf("apply Codex state schema: %v", err)
 	}
-	for _, thread := range threads {
+	for i := range threads {
+		thread := &threads[i]
 		historyMode := thread.HistoryMode
 		if historyMode == "" {
 			historyMode = "legacy"
@@ -103,14 +108,18 @@ func execCodexState(t *testing.T, path, statement string, args ...any) {
 	if err != nil {
 		t.Fatalf("open scratch Codex state store: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	if _, err := database.Exec(statement, args...); err != nil {
 		t.Fatalf("update scratch Codex state store: %v", err)
 	}
 }
 
 type codexStateFixture struct {
-	codexRoot       string
+	codexHome       string
 	statePath       string
 	fileRolloutPath string
 }
@@ -119,35 +128,36 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 	t.Helper()
 
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	sessions := filepath.Join(codexRoot, "sessions", "2026", "01", "01")
+	codexHome := filepath.Join(root, "codex")
+	sessions := filepath.Join(codexHome, "sessions", "2026", "01", "01")
 	if err := os.MkdirAll(sessions, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	fileRollout := filepath.Join(
-		sessions,
-		"rollout-2026-01-01T00-00-00-file-thread.jsonl",
-	)
-	writeLines(t, fileRollout,
+	fileRollout := filepath.Join(sessions, "rollout-2026-01-01T00-00-00-file-thread.jsonl")
+	writeLines(
+		t,
+		fileRollout,
 		`{"type":"session_meta","payload":{"id":"file-thread","thread_source":"user","cwd":"/work/kept"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"kept first prompt"}]}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"kept second prompt"}]}}`,
 	)
 	// The rollout file alone looks like a top-level chat; only the state store
 	// knows Codex spawned it as a subagent.
-	writeLines(t, filepath.Join(
-		sessions,
-		"rollout-2026-01-01T00-00-02-killed-subagent.jsonl",
-	),
+	writeLines(
+		t,
+		filepath.Join(
+			sessions,
+			"rollout-2026-01-01T00-00-02-killed-subagent.jsonl",
+		),
 		`{"type":"session_meta","payload":{"id":"killed-subagent","cwd":"/work/kept"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"delegated work"}]}}`,
 	)
-	writeLines(t, filepath.Join(codexRoot, "session_index.jsonl"),
+	writeLines(t, filepath.Join(codexHome, "session_index.jsonl"),
 		`{"id":"file-thread","thread_name":"SESSION INDEX NAME"}`,
 		`{"id":"legacy-named","thread_name":"ONLY IN SESSION INDEX"}`,
 	)
 
-	statePath := filepath.Join(codexRoot, "state_5.sqlite")
+	statePath := filepath.Join(codexHome, "state_5.sqlite")
 	buildCodexState(t, statePath,
 		codexStateThread{
 			ID:               "file-thread",
@@ -194,15 +204,11 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
-	return codexStateFixture{
-		codexRoot:       codexRoot,
-		statePath:       statePath,
-		fileRolloutPath: fileRollout,
-	}
+	return codexStateFixture{codexHome: codexHome, statePath: statePath, fileRolloutPath: fileRollout}
 }
 
 func writeLines(t *testing.T, path string, lines ...string) {
@@ -243,9 +249,10 @@ func codexRows(t *testing.T, database *store.Store) []compose.Row {
 		Options:  compose.Options{View: compose.AllView},
 	})
 	codex := make([]compose.Row, 0, len(output.Rows))
-	for _, row := range output.Rows {
+	for i := range output.Rows {
+		row := &output.Rows[i]
 		if row.Kind == compose.ResumeCodex {
-			codex = append(codex, row)
+			codex = append(codex, *row)
 		}
 	}
 	return codex
@@ -362,7 +369,7 @@ INSERT INTO threads (
 ) VALUES ('resumed-thread', '', 500, 600, 'cli', 'openai', '/work/resumed',
   '', 'workspace-write', 'on-request', 7, 0, 'verify the dispatch claim', '',
   'user', 600, 'paginated', NULL)`)
-	indexPath := filepath.Join(fixture.codexRoot, "session_index.jsonl")
+	indexPath := filepath.Join(fixture.codexHome, "session_index.jsonl")
 	appendJSONLine(t, indexPath, map[string]any{
 		"id":          "resumed-thread",
 		"thread_name": "AWCX",
@@ -413,7 +420,7 @@ INSERT INTO threads (
 // undated store name.
 func TestCodexSessionIndexRenameBeatsStaleStoreName(t *testing.T) {
 	fixture := setupCodexStateFixture(t)
-	indexPath := filepath.Join(fixture.codexRoot, "session_index.jsonl")
+	indexPath := filepath.Join(fixture.codexHome, "session_index.jsonl")
 	appendJSONLine(t, indexPath, map[string]any{
 		"id":          "file-thread",
 		"thread_name": "FRESH RENAME",
@@ -566,7 +573,9 @@ func TestCodexStateRowYieldsToTheRolloutFileWhenItArrives(t *testing.T) {
 		t.Fatalf("store-only Rollout() found = %v, error = %v", found, err)
 	}
 
-	writeLines(t, declared.Path,
+	writeLines(
+		t,
+		declared.Path,
 		`{"type":"session_meta","payload":{"id":"store-only","thread_source":"user","cwd":"/work/paginated"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"paginated first prompt"}]}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"paginated second prompt"}]}}`,
@@ -631,7 +640,7 @@ func TestCodexStateKeepsThreadWhoseRolloutFileIsDeleted(t *testing.T) {
 // prompt — so nothing but the entry point and the owner's rename can tell them
 // apart:
 //
-//   - verify-twin-a / verify-twin-b: the wave-walker verify twins. Two
+//   - verify-twin-a / verify-twin-b: two headless verify twins. Two
 //     `codex exec` threads created a second apart with the SAME first prompt,
 //     each its own lineage root. Hiding one used to leave the other listed.
 //   - agent-worktree: an exec thread whose cwd is a workflow worktree.
@@ -642,8 +651,8 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	sessions := filepath.Join(codexRoot, "sessions", "2026", "08", "10")
+	codexHome := filepath.Join(root, "codex")
+	sessions := filepath.Join(codexHome, "sessions", "2026", "08", "10")
 	const twinPrompt = "Trace one planned API field through directly evidenced repos"
 
 	threads := []codexStateThread{
@@ -715,17 +724,17 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 				strconv.Quote(threads[index].FirstUserMessage)+`}]}}`,
 		)
 	}
-	buildCodexState(t, filepath.Join(codexRoot, "state_5.sqlite"), threads...)
+	buildCodexState(t, filepath.Join(codexHome, "state_5.sqlite"), threads...)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvSharedDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
-	return codexRoot
+	return codexHome
 }
 
 // THE TWIN REGRESSION. A workflow's verify twins used to list as two of the
@@ -838,8 +847,8 @@ func setupPaginatedContentFixture(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	sessions := filepath.Join(codexRoot, "sessions", "2026", "08", "12")
+	codexHome := filepath.Join(root, "codex")
+	sessions := filepath.Join(codexHome, "sessions", "2026", "08", "12")
 
 	threads := []codexStateThread{
 		{
@@ -884,17 +893,17 @@ func setupPaginatedContentFixture(t *testing.T) string {
 				`","thread_source":"user","cwd":"`+threads[index].CWD+`"}}`,
 		)
 	}
-	buildCodexState(t, filepath.Join(codexRoot, "state_5.sqlite"), threads...)
+	buildCodexState(t, filepath.Join(codexHome, "state_5.sqlite"), threads...)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvSharedDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
-	return codexRoot
+	return codexHome
 }
 
 // THE BUG. A header-only rollout file has nonzero Size once parsed — bytes on
@@ -917,21 +926,21 @@ func TestHeaderOnlyRolloutIsEnrichedFromTheStateStore(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	real, found, err := database.Rollout(ctx, "real-paginated")
+	realRollout, found, err := database.Rollout(ctx, "real-paginated")
 	if err != nil || !found {
 		t.Fatalf("real-paginated Rollout() found = %v, error = %v", found, err)
 	}
-	if real.Size <= 0 {
+	if realRollout.Size <= 0 {
 		t.Fatalf(
 			"real-paginated row = %#v, want a header-only file's nonzero size",
-			real,
+			realRollout,
 		)
 	}
-	if real.PromptCount == 0 {
+	if realRollout.PromptCount == 0 {
 		t.Fatalf(
 			"real-paginated row = %#v, want the state store's content evidence "+
 				"(tokens_used=500) to fill prompt_count",
-			real,
+			realRollout,
 		)
 	}
 
@@ -1036,7 +1045,8 @@ func defaultCodexIDs(t *testing.T, database *store.Store) []string {
 		t.Fatalf("DefaultCandidates() error = %v", err)
 	}
 	cached := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
+	for i := range candidates {
+		candidate := &candidates[i]
 		cached = append(cached, candidate.LineageRoot)
 	}
 	sort.Strings(cached)
@@ -1050,7 +1060,8 @@ func defaultCodexIDs(t *testing.T, database *store.Store) []string {
 		Options:  compose.Options{View: compose.DefaultView},
 	})
 	composed := make([]string, 0, len(output.Rows))
-	for _, row := range output.Rows {
+	for i := range output.Rows {
+		row := &output.Rows[i]
 		if row.Kind == compose.ResumeCodex {
 			composed = append(composed, row.ID)
 		}

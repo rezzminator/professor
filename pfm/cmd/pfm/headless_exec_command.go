@@ -15,13 +15,19 @@ import (
 	"syscall"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	headlessrun "hostops/pfm/internal/headless/run"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
+)
+
+const (
+	textFormat   = "text"
+	nativeFormat = "native"
 )
 
 func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
-		"  --engine claude|codex --model MODEL --effort EFFORT --account ID\n"+
+	flags := cli.NewFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
+		"  --engine claude|codex|opencode --model MODEL --effort EFFORT --account ID\n"+
 		"  --prompt TEXT | --prompt-file FILE | stdin\n"+
 		"  --files FILE... --labels LABEL... --task TEXT | --task-file FILE\n"+
 		"  --system TEXT | --system-file FILE --schema FILE | --json-schema JSON\n"+
@@ -53,11 +59,23 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	settings := flags.String("setting-sources", "", "inherited settings sources (empty disables them)")
 	strictMCP := flags.Bool("strict-mcp-config", false, "ignore inherited MCP servers")
 	noPersistence := flags.Bool("no-session-persistence", false, "discard session persistence")
-	sealed := flags.Bool("sealed", false, "scratch working directory, replacement system, no inherited settings/tools/MCP or session persistence")
-	allowUnsupported := flags.Bool("allow-unsupported", false, "continue without unsupported common controls and report them")
+	sealed := flags.Bool(
+		"sealed",
+		false,
+		"scratch working directory, replacement system, no inherited settings/tools/MCP or session persistence",
+	)
+	allowUnsupported := flags.Bool(
+		"allow-unsupported",
+		false,
+		"continue without unsupported common controls and report them",
+	)
 	cwd := flags.String("cwd", "", "working directory")
 	timeout := flags.Float64("timeout", 600, "wall-clock timeout in seconds; 0 unlimited")
-	format := flags.String("output-format", "text", "text, json (common result envelope), or native (engine stream)")
+	format := flags.String(
+		"output-format",
+		textFormat,
+		"text, json (common result envelope), or native (engine stream)",
+	)
 	out := flags.String("out", "", "write structured output, or the text answer, to this file")
 	receipt := flags.String("receipt", "", "append a content-free JSON execution receipt")
 	var engineArgs, environment repeatString
@@ -71,14 +89,15 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		}
 	}
 	args, hasFiles := expandHeadlessFileArgs(flags, args)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
-	if flags.NArg() != 0 || *account < 0 || math.IsNaN(*timeout) || math.IsInf(*timeout, 0) || *timeout < 0 || *timeout >= float64(math.MaxInt64)/float64(time.Second) {
+	if flags.NArg() != 0 || *account < 0 || math.IsNaN(*timeout) || math.IsInf(*timeout, 0) || *timeout < 0 ||
+		*timeout >= float64(math.MaxInt64)/float64(time.Second) {
 		flags.Usage()
 		return 2
 	}
-	if *format != "text" && *format != "json" && *format != "native" {
+	if *format != textFormat && *format != jsonFormat && *format != nativeFormat {
 		fmt.Fprintln(stderr, "pfm headless: --output-format must be text, json, or native")
 		return 2
 	}
@@ -92,8 +111,13 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			promptSources++
 		}
 	}
-	if promptSources > 1 || (hasSystem && (present["system-file"] || present["system-prompt-file"])) || (present["schema"] && present["json-schema"]) || (*format == "native" && *out != "") {
-		fmt.Fprintln(stderr, "pfm headless: choose one source per prompt/system/schema; --out requires normalized output")
+	if promptSources > 1 || (hasSystem && (present["system-file"] || present["system-prompt-file"])) ||
+		(present["schema"] && present["json-schema"]) ||
+		(*format == nativeFormat && *out != "") {
+		fmt.Fprintln(
+			stderr,
+			"pfm headless: choose one source per prompt/system/schema; --out requires normalized output",
+		)
 		return 2
 	}
 	if len(labels) != 0 && len(labels) != len(files) {
@@ -104,17 +128,13 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		Config: runtime.Config, Account: *account, ConfigDir: *configDir,
 		Model: *model, Effort: *effort, Prompt: *prompt, CWD: *cwd, TempDir: runtime.Paths.SIDDir,
 		Timeout: time.Duration(*timeout * float64(time.Second)), StrictMCP: *strictMCP,
-		NoSessionPersistence: *noPersistence, Sealed: *sealed, Native: *format == "native",
+		NoSessionPersistence: *noPersistence, Sealed: *sealed, Native: *format == nativeFormat,
 		AllowUnsupported: *allowUnsupported,
 		Args:             append([]string(engineArgs), tail...),
 	}
-	if *engine != "" {
-		id, err := pfmengine.Parse(*engine)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm headless: %v\n", err)
-			return 2
-		}
-		request.Engine = id
+	if err := headlessrun.ApplyEngineSelector(&request, *engine); err != nil {
+		fmt.Fprintf(stderr, "pfm headless: %v\n", err)
+		return 2
 	}
 	read := func(path string) (string, error) {
 		body, err := os.ReadFile(path)
@@ -125,14 +145,15 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	}
 	var err error
 	framed := hasFiles || present["task"] || present["task-file"]
-	if present["task-file"] {
+	switch {
+	case present["task-file"]:
 		request.Prompt, err = read(*taskFile)
 		request.Prompt = strings.TrimSpace(request.Prompt)
-	} else if present["task"] {
+	case present["task"]:
 		request.Prompt = *task
-	} else if present["prompt-file"] {
+	case present["prompt-file"]:
 		request.Prompt, err = read(*promptFile)
-	} else if !hasPrompt {
+	case !hasPrompt:
 		if request.Native && !framed {
 			request.Stdin = stdin
 		} else {
@@ -153,7 +174,10 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			if len(labels) != 0 {
 				label = labels[index]
 			}
-			parts = append(parts, fmt.Sprintf("===== FILE %d: %s =====\n%s\n===== END FILE %d =====", index+1, label, body, index+1))
+			parts = append(
+				parts,
+				fmt.Sprintf("===== FILE %d: %s =====\n%s\n===== END FILE %d =====", index+1, label, body, index+1),
+			)
 		}
 		parts = append(parts, "TASK: "+request.Prompt)
 		request.Prompt = strings.Join(parts, "\n\n") + "\n"
@@ -199,7 +223,8 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 					kept = append(kept, old)
 				}
 			}
-			request.Env = append(kept, entry)
+			kept = append(kept, entry)
+			request.Env = kept
 		}
 	}
 	if request.Native {
@@ -221,12 +246,12 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		}
 		fmt.Fprintf(stderr, "pfm headless: %v\n", runErr)
 	}
-	if *format == "json" {
+	if *format == jsonFormat {
 		if err := json.NewEncoder(stdout).Encode(result); err != nil {
 			fmt.Fprintf(stderr, "pfm headless: write result: %v\n", err)
 			code = 4
 		}
-	} else if *format == "text" && runErr == nil {
+	} else if *format == textFormat && runErr == nil {
 		if _, err := fmt.Fprintln(stdout, result.Answer); err != nil {
 			fmt.Fprintf(stderr, "pfm headless: write answer: %v\n", err)
 			code = 4
@@ -253,8 +278,9 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			Exit        int                     `json:"exit"`
 			EngineExit  int                     `json:"engine_exit"`
 			Timeout     bool                    `json:"timeout"`
-			Diagnostics []string                `json:"diagnostics,omitempty"`
-		}{result.Engine, result.Model, result.Effort, result.Duration.Seconds(), result.TotalCostUSD, result.Usage, code, result.ExitCode, result.TimedOut, result.Diagnostics})
+			Error       string                  `json:"error,omitempty"`
+			Diagnostics int                     `json:"diagnostics_count,omitempty"`
+		}{result.Engine, result.Model, result.Effort, result.Duration.Seconds(), result.TotalCostUSD, result.Usage, code, result.ExitCode, result.TimedOut, receiptError(runErr), len(result.Diagnostics)})
 		if err == nil {
 			var file *os.File
 			file, err = os.OpenFile(*receipt, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
@@ -269,6 +295,31 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		}
 	}
 	return code
+}
+
+// receiptError is the run failure as the CONTENT-FREE receipt records it:
+// one word from a closed vocabulary, never the error's own text. A failed
+// headless run reports itself with up to a KiB each of the engine's stdout
+// and stderr tails spliced into the message (internal/headless/run/run.go),
+// and for a normalized run that stdout tail IS the model's answer — content
+// the one file a caller keeps must not carry. Nothing is lost: the whole
+// message goes to stderr above, the diagnostics print there one per line,
+// and the receipt still carries this class, both exit codes and the timeout
+// flag. The count of diagnostics travels for the same reason — their text is
+// engine-authored, their number is not.
+func receiptError(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, headlessrun.ErrStructuredOutput):
+		return "structured-output"
+	default:
+		return "run-failed"
+	}
 }
 
 // Expand the lab's multi-value file options into stdlib flag's repeatable form.

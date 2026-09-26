@@ -3,8 +3,8 @@ package ask
 import (
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 type builtinTestRunner struct{ id pfmengine.ID }
@@ -29,7 +29,7 @@ func TestUnknownEngineIsANamedError(t *testing.T) {
 }
 
 func TestKnownUnsupportedEngineGetsProductFacingError(t *testing.T) {
-	_, err := RunnerFor(pfmengine.Opencode)
+	_, err := RunnerFor(pfmengine.OpenCode)
 	if err == nil || err.Error() != "OpenCode does not support ask" {
 		t.Fatalf("RunnerFor(OpenCode) error = %v", err)
 	}

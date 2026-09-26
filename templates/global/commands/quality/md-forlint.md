@@ -62,7 +62,7 @@ The five categories and the reader each serves:
 - prompt: `.claude/**`, `CLAUDE.md`, any shipped prompt template, and every injected prompt asset (`**/*.prompt.md`, an engine's staged prompts). An LLM reads it whole at runtime, so bytes are the cost. Exempt from the reader-facing rules (repeated headings, inline HTML, leading H1, link text) and from heading-level rewriting — a prompt's heading levels are addressing.
 - doc: `docs/**`, engine specs, child-project docs. An agent greps, then reads one file. Table de-padding and link integrity (dangling relative links, dead anchors) earn the most here.
 - public: `README.md`, `INSTALL.md`, `CHANGELOG.md`. Rendered for a person; repeated version headings and dated entries are the format, not a smell.
-- generated: `AGENTS.md`, `.codex/**`, `.opencode/**`. Excluded. Format the Claude source and recompile (`pfm codex build .`, `build-opencode.mjs`); formatting a mirror is drift its own check will flag.
+- generated: `AGENTS.md`, `.codex/**`, `.opencode/**`. Excluded. Format the Claude source and recompile (`pfm codex build .`, `pfm opencode build .`); formatting a mirror is drift its own check will flag.
 - record: `releases/**`, `.professor/**` ledgers, `**/testdata/**`. Excluded. Published history, machine-parsed ledgers, and byte-exact fixtures — a reformat is a falsified record or a red suite.
 
 ## What formatting buys — and what it does not
@@ -102,4 +102,4 @@ Step 3 is the one that matters. A merged sentinel fails loudly; a dissolved untr
 
 ## Changing the policy
 
-`.rumdl.toml` is a prompt-adjacent framework file: it routes through `/pfm`, and its twin ships as `templates/project/rumdl-policy.toml` (scaffolded to an adopter's `.rumdl.toml`; the shipped copy must NOT be named `rumdl.toml`, a name rumdl discovers as the governing config for everything beneath it). Every added or removed rule arrives with the three numbers from `audit` — bytes, lines, word-damage — and the control file that proves the new rule fires.
+`.rumdl.toml` is a prompt-adjacent framework file: it routes through `/pcm`, and its twin ships as `templates/project/rumdl-policy.toml` (scaffolded to an adopter's `.rumdl.toml`; the shipped copy must NOT be named `rumdl.toml`, a name rumdl discovers as the governing config for everything beneath it). Every added or removed rule arrives with the three numbers from `audit` — bytes, lines, word-damage — and the control file that proves the new rule fires.

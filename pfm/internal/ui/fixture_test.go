@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 const fixtureNowNS = int64(1_800_000_000) * int64(time.Second)

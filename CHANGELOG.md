@@ -10,29 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## How release notes guide adoption
 
-Each release file (`releases/vX.Y.Z.md`) uses categorized headings the update flow understands:
-
-| Heading | Review guidance |
-| --- | --- |
-| `## Added` | Decide whether to adopt each new project file or optional role |
-| `## Changed` | Review the reported template diff and hand-apply relevant parts |
-| `## Fixed` | Review the reported fix before applying it to a customized local file |
-| `## Removed` | Decide whether the local file remains project-owned or should be removed |
-| `## Breaking` | Follow the explicit manual migration steps |
-| `## Migration` | Apply the step-by-step adopter transformation |
-
-Bullets MUST follow this shape:
-
-```
-- {Tier}: {file path or scope} — {what changed semantically}
-```
-
-`{Tier}` is a non-empty display/routing label, not a closed enum. The `##` heading is the authoritative semantic category; a prefix never reclassifies a Fixed bullet as Changed, for example. Optional trailing tags: `(opt-in)` for optional additions, `(breaking)` if it requires migration even outside a Breaking section, `(safe-auto)` for machine-global installer changes that need no project-file edit, and `(cost)` for environment, hook, permission, or model/config cost. No tag authorizes automatic rewriting of a scaffolded project file.
+Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its sections, bullet labels, action lines (`#### → For: {audience} · {timing} · {surface} — {action}`) and required stops (`#### → Stop:`) are specified in [`docs/RELEASE.md` § Release notes](docs/RELEASE.md#release-notes).
 
 ---
 
 ## Releases
 
+- [v0.78.0](releases/v0.78.0.md) — one `professor` MCP server and four harvester tools named for their intent (no aliases), the flights family in place of the wave engine with a machine-global flights cast, a machine-wide git-guard that leaves git writes to `gitter`, OpenCode as a live fleet engine, the callmeter and activity log, and whole-thread harvesting across two dozen sites.
 - [v0.77.2](releases/v0.77.2.md) — the repository clears the HOL AI Plugin Scanner bar (56/F with 11 high findings → 88/B with none): no fixture that reads as a credential, the pricing check parses instead of `eval`, SHA-pinned actions, `SECURITY.md`, Dependabot, and the scanner in CI; `pfm update` from the source clone names `pfm update check` as its next step instead of `pfm init`.
 - [v0.77.1](releases/v0.77.1.md) — `pfm heal` never rebuilds a Codex thread whose rollout ordinals repeat or skip (openai/codex#38792; NONCANONICAL and UNSCANNED verdicts, Codex 0.154.0 named as the projector that recovers it), Harvester's SSRF pre-check and MCP resolver client dial through DNS-over-HTTPS, and a terminal opened by an app launched inside a chat opens the picker again.
 - [v0.77.0](releases/v0.77.0.md) — Harvester gains Google Scholar discovery and stops caching app shells, the Professor VS Code extension ships inside pfm, `pfm update` takes a detached source clone and lists every release note it moved past, source installs record their clone again, the chat MCP drops `chat_goal`/`chat_reload`, `/quality:description` rewrites every routing description, and `/pfm:release` rehearses the adopter update in a fresh machine.

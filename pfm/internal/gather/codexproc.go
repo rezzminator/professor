@@ -8,7 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/resolve"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // CodexThreadResolver names the conversation behind a live codex process that
@@ -26,13 +27,13 @@ type CodexThreadResolver func(
 	birth int64,
 	socket string,
 	paneID string,
-) (id string, rolloutPath string)
+) (id, rolloutPath string)
 
 // DetectCodex maps live codex processes to panes using pid ancestry. It sees
 // only sessions that hold a rollout file descriptor or state the thread they
 // resumed in their own argv.
-func DetectCodex(proc ProcFS, codexRoot string, panes []Pane) ([]LiveCodex, error) {
-	return DetectCodexThreads(proc, codexRoot, panes, nil)
+func DetectCodex(proc ProcFS, codexHome string, panes []ProbePane) ([]LiveCodex, error) {
+	return DetectCodexThreads(proc, codexHome, panes, nil)
 }
 
 // DetectCodexThreads is DetectCodex plus state-store identity, so a Codex
@@ -40,12 +41,11 @@ func DetectCodex(proc ProcFS, codexRoot string, panes []Pane) ([]LiveCodex, erro
 // thread since Codex 0.146.1 — is still a live chat instead of a missing one.
 func DetectCodexThreads(
 	proc ProcFS,
-	codexRoot string,
-	panes []Pane,
-	identify CodexThreadResolver,
+	codexHome string,
+	panes []ProbePane, identify CodexThreadResolver,
 	binaries ...string,
 ) ([]LiveCodex, error) {
-	return DetectCodexThreadsInRoots(proc, []string{codexRoot}, panes, identify, binaries...)
+	return DetectCodexThreadsInRoots(proc, []string{codexHome}, panes, identify, binaries...)
 }
 
 // DetectCodexThreadsInRoots is DetectCodexThreads over every configured
@@ -53,16 +53,15 @@ func DetectCodexThreads(
 // its rollout descriptor; rollout-less sessions use the roster-wide resolver.
 func DetectCodexThreadsInRoots(
 	proc ProcFS,
-	codexRoots []string,
-	panes []Pane,
-	identify CodexThreadResolver,
+	codexHomes []string,
+	panes []ProbePane, identify CodexThreadResolver,
 	binaries ...string,
 ) ([]LiveCodex, error) {
 	cmdlines, err := processCmdlines(proc)
 	if err != nil {
 		return nil, fmt.Errorf("list processes for Codex scan: %w", err)
 	}
-	return detectCodexThreadsInRootsFrom(cmdlines, proc, codexRoots, panes, identify, binaries...)
+	return detectCodexThreadsInRootsFrom(cmdlines, proc, codexHomes, panes, identify, binaries...)
 }
 
 // detectCodexThreadsInRootsFrom is DetectCodexThreadsInRoots over an
@@ -70,9 +69,8 @@ func DetectCodexThreadsInRoots(
 func detectCodexThreadsInRootsFrom(
 	cmdlines map[int][]string,
 	proc ProcFS,
-	codexRoots []string,
-	panes []Pane,
-	identify CodexThreadResolver,
+	codexHomes []string,
+	panes []ProbePane, identify CodexThreadResolver,
 	binaries ...string,
 ) ([]LiveCodex, error) {
 	pids := sortedPIDs(cmdlines)
@@ -90,15 +88,33 @@ func detectCodexThreadsInRootsFrom(
 		}
 		links, err := proc.FDLinks(pid)
 		if err != nil {
-			live = append(live, LiveCodex{PID: pid, PanePID: pane.PID, Socket: pane.Socket, PaneID: pane.PaneID, IdentityError: fmt.Sprintf("read Codex descriptors: %v", err)})
+			live = append(
+				live,
+				LiveCodex{
+					PID:           pid,
+					PanePID:       pane.PID,
+					Socket:        pane.Socket,
+					PaneID:        pane.PaneID,
+					IdentityError: fmt.Sprintf("read Codex descriptors: %v", err),
+				},
+			)
 			continue
 		}
-		rolloutPath, _, identityErr := heldCodexRoot(links, codexRoots)
+		rolloutPath, identityErr := heldCodexRoot(links, codexHomes)
 		if errors.Is(identityErr, errHeldSubagents) && hasCodexAncestor(proc, pid, pane.PID, cmdlines, binaries) {
 			continue
 		}
 		if identityErr != nil {
-			live = append(live, LiveCodex{PID: pid, PanePID: pane.PID, Socket: pane.Socket, PaneID: pane.PaneID, IdentityError: identityErr.Error()})
+			live = append(
+				live,
+				LiveCodex{
+					PID:           pid,
+					PanePID:       pane.PID,
+					Socket:        pane.Socket,
+					PaneID:        pane.PaneID,
+					IdentityError: identityErr.Error(),
+				},
+			)
 			continue
 		}
 		// True only when the loop above actually found the rollout among
@@ -181,7 +197,7 @@ func CodexRolloutID(path string) string {
 
 // CodexThreadID names the live conversation a detected Codex process owns.
 // A current rollout always wins; ThreadID is the rollout-less resolver rung.
-func CodexThreadID(process LiveCodex) string {
+func LiveCodexThreadID(process LiveCodex) string {
 	if id := CodexRolloutID(process.RolloutPath); id != "" {
 		return id
 	}
@@ -196,7 +212,7 @@ func codexResumeArgv(cmdline []string) string {
 		if cmdline[index] != "resume" {
 			continue
 		}
-		if candidate := cmdline[index+1]; isUUID(candidate) {
+		if candidate := cmdline[index+1]; pfmengine.IsUUID(candidate) {
 			return candidate
 		}
 	}
@@ -244,7 +260,7 @@ func RefreshCodexHeldRollouts(proc ProcFS, previous []LiveCodex, roots []string)
 			live = append(live, process)
 			continue
 		}
-		path, _, identityErr := heldCodexRoot(links, roots)
+		path, identityErr := heldCodexRoot(links, roots)
 		process.RolloutPath, process.ThreadID, process.RolloutHeld = path, CodexRolloutID(path), path != ""
 		process.IdentityError = ""
 		if identityErr != nil {
@@ -267,15 +283,16 @@ func isRolloutUnder(root, target string) bool {
 		!strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
-func panesByPID(panes []Pane) map[int]Pane {
-	paneByPID := make(map[int]Pane, len(panes))
-	for _, pane := range panes {
+func panesByPID(panes []ProbePane) map[int]ProbePane {
+	paneByPID := make(map[int]ProbePane, len(panes))
+	for index := range panes {
+		pane := panes[index]
 		paneByPID[pane.PID] = pane
 	}
 	return paneByPID
 }
 
-func paneForProcess(proc ProcFS, pid int, paneByPID map[int]Pane) (Pane, bool) {
+func paneForProcess(proc ProcFS, pid int, paneByPID map[int]ProbePane) (ProbePane, bool) {
 	current := pid
 	for depth := 0; depth <= 4; depth++ {
 		if pane, found := paneByPID[current]; found {
@@ -290,5 +307,5 @@ func paneForProcess(proc ProcFS, pid int, paneByPID map[int]Pane) (Pane, bool) {
 		}
 		current = stat.ParentPID
 	}
-	return Pane{}, false
+	return ProbePane{}, false
 }

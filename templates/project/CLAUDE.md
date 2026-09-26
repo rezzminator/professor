@@ -1,5 +1,20 @@
 # {PROJECT_NAME} — {PROJECT_TAGLINE}
 
+## Spawned as a sub-agent? Your first move
+
+Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
+
+- A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
+- A brief carrying the user's ruling to skip the ceremony (no `flights-speccer`, no orchestrator): do it yourself, start to finish, whatever its size.
+- Otherwise take the lowest rung that fits; a higher rung needs its named reason. You finish within 45 calls; at the cap, return what landed, what is left and the next step.
+  1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish, when it fits your 45 calls; otherwise one or two sub-agents, in sequence or in parallel.
+  2. The solution is in hand but the volume is more than one or two agents finish (about 80 calls) — many clear tasks, each with nameable files: your first tool call spawns `general-orchestrator` (Agent tool, `subagent_type: general-orchestrator`), handing it the work, everything you already hold and the check that proves the batch done. It cuts the batch, runs one short executor per task and returns once.
+  3. The solution is not in hand — a design to choose, a failure of unknown cause, files you cannot name — and the work is large: your first tool call spawns `flights-speccer` (Agent tool, `subagent_type: flights-speccer`), handing it the work, everything you already hold and a directory under `$HOME/.local/state/pfm/flights/{project}/`. Its return is your orders: a directory of one task file you execute yourself; of several, you execute none and hand the directory to `flights-orchestrator` (Agent tool, `subagent_type: flights-orchestrator`), which runs one fresh executor per task file and returns once. Below opus you never write a spec yourself.
+- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no `flights-speccer`, no spawn.
+- ✓ "Add the timeout flag to each of the 12 subcommands" is a batch of clear tasks: `general-orchestrator`, no `flights-speccer`.
+- ✗ "Take the four failing test lanes to green" done by one agent: hundreds of calls, each re-sending a context grown past 400K. ✓ `flights-speccer` first, then `flights-orchestrator` runs one executor per task file.
+- Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
+
 > **Domain Scope (optional):** Add domain-specific scope/safety disclaimers here, or delete the block. _Example:_ "{DOMAIN_ADJ} assistant tool. No {FORBIDDEN_DOMAIN_OUTPUTS}. {USER_NOUN} retains full {DOMAIN_ADJ} responsibility."
 
 **Architecture:** {PROJECT_NAME} is a roster of 1..N projects connected by {the project's integration boundaries, if any}.
@@ -13,7 +28,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 
 Each project with its own `.claude/` carries a `CLAUDE.md`, agents, and skills. A single-project install (roster of one) is the repo root itself — no per-project subdirectories, no cross-project boundaries.
 
-**Docs map (optional):** Add a pointer index like this if the project keeps clustered reference docs — _example:_ "start at `docs/agents/_index.md` — the hub linking every architecture, API, system-map, feature, and child-project doc. Reference docs are **clusters**: read the cluster `_index.md`, then `grep` it for the exact code/DB symbol and open the matching topic file. Doc identifiers match code verbatim, so a code symbol greps straight to its doc. The whole database — every table, column, and FK under its real {DATABASE} name — is one diagram: `docs/agents/graph/db/postgres.mmd`." _Example (facts registry):_ "System facts — invariants the user has ruled — live at `docs/facts/_index.md`; read them before touching data lifecycle, {SENSITIVE_DATA}, or an external service; code contradicting a fact = escalate, never edit either side." _Example (truth hierarchy + doc trees):_ "Code truth: grep the code. Schema truth: introspect the live DB. How-to: `docs/runbooks/{project}/`. Feature registry: `docs/features/`; runtime reference cards: `docs/references/`; business/marketing/compliance: `docs/business/` (`marketing/`, `compliance/`)." Delete the block if the project has no such registry.
+**Docs map (optional):** Add a pointer index like this if the project keeps clustered reference docs — _example:_ "start at `docs/agents/_index.md` — the hub linking every architecture, API, system-map, feature, and child-project doc. Reference docs are **clusters**: read the cluster `_index.md`, then `grep` it for the exact code/DB symbol and open the matching topic file. Doc identifiers match code verbatim, so a code symbol greps straight to its doc. The whole database — every table, column, and FK under its real {DATABASE} name — is one diagram: `docs/agents/graph/db/postgres.mmd`." _Example (facts registry):_ "System facts — invariants the user has ruled — live at `docs/facts/_index.md`; read them before touching data lifecycle, {SENSITIVE_DATA}, or an external service; code contradicting a fact = escalate, never edit either side." _Example (truth hierarchy + doc trees):_ "Code truth: grep the code. Schema truth: introspect the live DB. How-to: `docs/runbooks/{project}/`. Feature registry: `docs/features/`; runtime reference cards: `docs/references/`; business/marketing: `docs/business/` (`marketing/`); legal & compliance: `docs/epics/legal/`." Delete the block if the project has no such registry.
 
 <!-- DELETE THIS SECTION if you are NOT using Codex (OpenAI). If you ARE using Codex, fill in the details and remove this comment. -->
 
@@ -23,7 +38,7 @@ Each project with its own `.claude/` carries a `CLAUDE.md`, agents, and skills. 
 
 > **Skip this entire section if you don't use OpenAI Codex.** Everything works with Claude Code alone. This section is for projects that want a second runtime for cheaper implementation.
 
-This project runs two AI runtimes as a team. Full protocol: `docs/commands/pfm/references/codex-protocol.md`
+This project runs two AI runtimes as a team. Full protocol: `.codex/README.md`
 
 **Quick ID:** `CLAUDE.md` and `AGENTS.md` are the same shared contract. Claude and Codex both carry the persona and rules; runtime-specific wrappers only translate mechanics (slash commands, agents, git execution), never identity or protocol.
 
@@ -33,7 +48,7 @@ This project runs two AI runtimes as a team. Full protocol: `docs/commands/pfm/r
 
 ## Persona
 
-Voice and delivery law live in Professor's harness prompts: `templates/prompts/professor.md` for the Claude replacement and `templates/prompts/codex-appendix.md` for configured Codex accounts. Claude's `production` mode uses its native prompt.
+Voice and delivery law live in Professor's harness prompts under `pfm/harness-prompts/`: `share/head.md` and `share/tail.md` wrap each engine's own `{claude,codex,opencode}/professor.md`, and `pfm install` composes one prompt per engine. Claude's `production` mode uses its native prompt.
 
 ## Path vars
 
@@ -41,6 +56,7 @@ Voice and delivery law live in Professor's harness prompts: `templates/prompts/p
 - $REFS = references
 - $RESEARCH: research
 - $RESOURCE: resource
+- Scratch: `/tmp/{project}/{purpose}/` — outside the tree, never the repo. `{project}` is this repo's directory name with any leading dot stripped, derived, never hardcoded; one subdirectory per purpose, each owned by a named protocol (`timing/`, `guard/`). A scratch path named to a human or a model is absolute. Flights are not scratch: a flight's directory is created, run and audited in `$HOME/.local/state/pfm/flights/{project}/{flight}/`, kept across reboots.
 
 ## MANDATORY Rules
 
@@ -52,7 +68,6 @@ Voice and delivery law live in Professor's harness prompts: `templates/prompts/p
 - **AI-generated content is marked at the RENDERED SURFACE** — verify the component that displays it, never the data hop that carries the flag; a fetched-but-unrendered marker is unmarked AI prose in a {USER_NOUN}'s hands.
 - Never assert by only the existence or count of data, read it: ("{SUBJECT_NOUN} stated:" over a quote whose `speakerRole` says {USER_NOUN} puts the {USER_NOUN}'s words in the {SUBJECT_NOUN}'s mouth, in the {RECORD_NOUN}). The type system cannot see it: the field is present, typed, and simply never read.
 - Validate at the entry of data, never `as`-cast it — jsonb columns, LLM output, external payloads are parsed/validated (Zod, pydantic) where they enter; an `as` cast blinds `tsc` to the exact nullability mismatch that crashes at the first real row.
-- Generated artifacts → `ROOT/tmp/`
 
 <!-- KEEP the next rule only if the roster has a project with its own SQL/migrations directory; drop it for a roster with no database. -->
 
@@ -65,28 +80,21 @@ Voice and delivery law live in Professor's harness prompts: `templates/prompts/p
 
 ### Process
 
-- NEVER edit code on `main`: worktree branches only, gitter-merged after QA, unless with explicit command which QA will always come afterwards to cover the tests
+- NEVER edit code on `main`: worktree branches only, gitter-merged after its gate passes; a change made on `main` by explicit command still gets its gate pass afterwards
 - Only gitter WRITES git — commit/merge/checkout/branch/stash/reset/push and any other state-changing git are gitter-only for every agent; read-only git (status/diff/log/show/rev-parse) is open to all.
-- NEVER commit broken code or merge before QA passes
-
-<!-- KEEP the "`{AI_PROJECT}/knowledge/` (route: `/km`)" clause only if the KM Tier-B opt-in is installed for this roster; otherwise drop it. -->
-
-- Only /documenter writes permanent docs: `docs/business/` belongs to `/officer` (`compliance/`), `/mentor`, `/marketer` (`marketing/`); `/km` → `{AI_PROJECT}/knowledge/`; `docs/facts/` — main loop only, solely on the user's explicit ruling
+- NEVER commit broken code or merge before the gate passes
+- Only the main-loop session writes permanent docs (`docs/agents/`, each project's `docs/`), under the `/quality:doc` Approval gate; `docs/epics/legal/` belongs to `/officer`; `docs/business/` to `/mentor` and `/marketer` (`marketing/`); `docs/facts/` — main loop only, solely on the user's explicit ruling
 - Never install unvalidated libraries
 
-<!-- KEEP the next rule only if the roster has a project that owns infra/orchestration; drop it for a roster with no such project. -->
+<!-- KEEP the next rule only if the roster has a project that owns infra/orchestration (its directory is `{PROJECT}`); drop it for a roster with no such project. -->
 
-- All infra ops via `make -C {INFRA_PROJECT}`: never direct `{CONTAINER_RUNTIME} exec` / `{DB_CLI}` / `{CLOUD_CLI} {QUEUE}`
-
-<!-- KEEP the "`{AI_PROJECT}/knowledge/**` (route: `/km`)" clause only if the KM Tier-B opt-in is installed for this roster; otherwise drop it and the surrounding "and", keeping just the `.claude/`+`CLAUDE.md` clause. -->
-
-- Guarded files: PreToolUse hooks gate `.claude/**` + every `CLAUDE.md` (route: `/pfm`) and `{AI_PROJECT}/knowledge/**` (route: `/km`); the deny message carries the unlock steps
+- Infra ops go through the owning project's `Makefile` (`make -C {PROJECT}`) — never direct `{CONTAINER_RUNTIME} exec` / `{DB_CLI}` / `{CLOUD_CLI} {QUEUE}` calls
+- Guarded files: PreToolUse hooks gate `.claude/**` + every `CLAUDE.md` (route: `/pcm`); the deny message carries the unlock steps
 - Worktrees are costly: batch a session's related changes into one, and ask before creating one.
 
 ### Testing & Environment
 
-- MANDATORY: load `/test` before running ANY test — it carries the whole testing law.
-- CI verifies, never debugs: reproduce and fix locally under `/test`, then trigger CI.
+- CI verifies, never debugs: reproduce and fix locally, then trigger CI.
 
 ### Meta
 

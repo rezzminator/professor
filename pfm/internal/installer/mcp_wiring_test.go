@@ -5,10 +5,60 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
+
+func TestJailPinsClaudeConfigDir(t *testing.T) {
+	const (
+		childEnv    = "PFM_TEST_INSTALLER_JAIL_CHILD"
+		sentinelEnv = "PFM_TEST_INSTALLER_JAIL_SENTINEL"
+	)
+	if os.Getenv(childEnv) == "1" {
+		sentinel := os.Getenv(sentinelEnv)
+		home := t.TempDir()
+		canonical := filepath.Join(home, ".claude")
+		writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
+		if _, err := Run(context.Background(), Options{
+			Mode: ModeApply, Home: home, ConfigDir: canonical,
+			ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
+			MCPPort: 8377, Runner: &fakeRunner{}, Stdout: io.Discard,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := os.ReadDir(sentinel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("ModeApply wrote through inherited CLAUDE_CONFIG_DIR %s: %v", sentinel, entries)
+		}
+		return
+	}
+
+	sentinel := t.TempDir()
+	command := exec.Command(os.Args[0], "-test.run=^TestJailPinsClaudeConfigDir$", "-test.v")
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "CLAUDE_CONFIG_DIR=") &&
+			!strings.HasPrefix(entry, childEnv+"=") &&
+			!strings.HasPrefix(entry, sentinelEnv+"=") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	command.Env = append(command.Env,
+		"CLAUDE_CONFIG_DIR="+sentinel,
+		childEnv+"=1",
+		sentinelEnv+"="+sentinel,
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("installer test process escaped its CLAUDE_CONFIG_DIR jail: %v\n%s", err, output)
+	}
+}
 
 func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
 	raw, err := readAsset("systemd/pfm-mcp.service")
@@ -30,7 +80,10 @@ func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(rendered), "Environment=PATH="+filepath.Join(home, ".local", "bin")+":") {
-		t.Fatalf("pfm-mcp.service does not extend PATH with ~/.local/bin; a daemon-spawned chat cannot resolve its engine:\n%s", rendered)
+		t.Fatalf(
+			"pfm-mcp.service does not extend PATH with ~/.local/bin; a daemon-spawned chat cannot resolve its engine:\n%s",
+			rendered,
+		)
 	}
 }
 
@@ -93,13 +146,8 @@ func TestMCPInstallCreatesClientJSONWithoutClaimingABackup(t *testing.T) {
 }
 
 // TestMCPInstallWiresConfigDrivenUnauthenticatedLoopbackClients pins a fresh
-// install's default client wiring (required test #10 for the identity-blind
-// "chat" transport fix). It used to hard-assert an HTTP URL for "chat" — that
-// was the very defect this wave fixes (a self-addressed chat_* call over the
-// shared HTTP daemon can never carry _meta.threadId, so it always failed);
-// the observable contract changed on purpose, and harvester is now enabled
-// alongside chat so both the new stdio shape and the unchanged HTTP shape are
-// pinned in the same run.
+// install's client wiring: with both families enabled, the Claude registry
+// gains the one professor stdio registration and the ledger owns it.
 func TestMCPInstallWiresConfigDrivenUnauthenticatedLoopbackClients(t *testing.T) {
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
@@ -154,30 +202,31 @@ func TestMCPInstallWiresConfigDrivenUnauthenticatedLoopbackClients(t *testing.T)
 	if err := json.Unmarshal([]byte(clientJSON), &clients); err != nil {
 		t.Fatal(err)
 	}
-	// Claude's "chat" server gets the stdio shape (regression test #10 for the
-	// task B fix): a self-addressed chat_* call over the shared HTTP daemon
-	// can never carry a caller identity, so a fresh install must not wire
-	// Claude to it by default. Every other server (harvester) keeps the HTTP
-	// shape unchanged — asserted immediately below.
 	servers, _ := clients["mcpServers"].(map[string]any)
-	chatEntry, _ := servers["chat"].(map[string]any)
-	if chatEntry["type"] != "stdio" || chatEntry["command"] != home+"/.local/bin/pfm" {
-		t.Fatalf("chat client registration is not the stdio shape: %#v", chatEntry)
+	wantProfessor := map[string]any{
+		"type": "stdio", "command": home + "/.local/bin/pfm", "args": []any{"mcp", "serve", "--stdio"},
 	}
-	if args, ok := chatEntry["args"].([]any); !ok || len(args) != 3 ||
-		args[0] != "mcp" || args[1] != "chat" || args[2] != "serve" {
-		t.Fatalf("chat client stdio args=%v, want [mcp chat serve]", chatEntry["args"])
+	if len(servers) != 1 || !sameJSONValue(servers[professorName], wantProfessor) {
+		t.Fatalf("Claude registry servers=%#v, want only professor=%#v", servers, wantProfessor)
 	}
-	harvesterEntry, _ := servers["harvester"].(map[string]any)
-	if harvesterEntry["type"] != "http" || harvesterEntry["url"] != "http://127.0.0.1:8456/mcp/harvester" {
-		t.Fatalf("harvester client registration lost its HTTP shape: %#v", harvesterEntry)
+	ownership, err := readMCPOwnership(filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := ownership.Registrations[physicalSettingsPath(filepath.Join(home, ".claude.json"))]
+	if len(owned) != 1 || !sameJSONValue(owned[professorName], wantProfessor) {
+		t.Fatalf("ledger owns %#v, want professor alone", owned)
 	}
 	for _, forbidden := range []string{"Authorization", "Bearer", "headers"} {
 		if strings.Contains(clientJSON, forbidden) {
 			t.Fatalf("client registration retained MCP authentication %q: %s", forbidden, clientJSON)
 		}
 	}
-	if codex := readFixture(t, filepath.Join(home, ".codex", "config.toml")); strings.Contains(codex, "Authorization") || strings.Contains(codex, "Bearer") {
+	if codex := readFixture(
+		t,
+		filepath.Join(home, ".codex", "config.toml"),
+	); strings.Contains(codex, "Authorization") ||
+		strings.Contains(codex, "Bearer") {
 		t.Fatalf("Codex registration retained MCP authentication: %s", codex)
 	}
 	if config := readFixture(t, configPath); strings.Contains(config, "authToken") {
@@ -221,10 +270,22 @@ func TestMCPInstallRemovesLegacyCredentialAndAuthHeadersEverywhere(t *testing.T)
 	configPath := filepath.Join(home, ".config", "pfm", "config.json")
 	credentialPath := filepath.Join(home, ".local", "share", "pfm", "install", mcpCredentialName)
 	legacyToken := strings.Repeat("a", 64)
-	writeFixture(t, configPath, `{"version":2,"mcp":{"servers":{"chat":{"enabled":true}},"authToken":"`+legacyToken+`"}}`)
+	writeFixture(
+		t,
+		configPath,
+		`{"version":2,"mcp":{"servers":{"chat":{"enabled":true}},"authToken":"`+legacyToken+`"}}`,
+	)
 	writeFixture(t, credentialPath, legacyToken+"\n")
-	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName), `{"credential":"`+credentialPath+`","clients":["chat"]}`)
-	writeFixture(t, filepath.Join(home, ".mcp.json"), `{"mcpServers":{"chat":{"type":"http","url":"http://127.0.0.1:8377/mcp/chat","headers":{"Authorization":"Bearer `+legacyToken+`"}}}}`)
+	writeFixture(
+		t,
+		filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName),
+		`{"credential":"`+credentialPath+`","clients":["chat"]}`,
+	)
+	writeFixture(
+		t,
+		filepath.Join(home, ".mcp.json"),
+		`{"mcpServers":{"chat":{"type":"http","url":"http://127.0.0.1:8377/mcp/chat","headers":{"Authorization":"Bearer `+legacyToken+`"}}}}`,
+	)
 	writeFixture(t, filepath.Join(home, ".codex", "config.toml"), mcpFenceBegin+"\n"+
 		"[mcp_servers.chat]\n"+
 		"url = \"http://127.0.0.1:8377/mcp/chat\"\n"+
@@ -298,14 +359,11 @@ func TestMCPManualConflictIsNotClaimedOrRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	owned := ownership.Registrations[physicalSettingsPath(filepath.Join(home, ".claude.json"))]
-	if len(owned) != 1 || owned["chat"] == nil {
-		t.Fatalf("owned registrations=%v, want chat only", owned)
+	if len(owned) != 1 || owned[professorName] == nil {
+		t.Fatalf("owned registrations=%v, want professor only", owned)
 	}
 	codexConfig := readFixture(t, filepath.Join(home, ".codex", "config.toml"))
-	if !strings.Contains(codexConfig, "[mcp_servers.chat]") {
-		t.Fatalf("Codex registration omitted owned chat client: %s", codexConfig)
-	}
-	if !strings.Contains(codexConfig, "[mcp_servers.harvester]") {
+	if !strings.Contains(codexConfig, "[mcp_servers.professor]") {
 		t.Fatalf("an unrelated Claude conflict prevented Codex wiring: %s", codexConfig)
 	}
 
@@ -324,171 +382,572 @@ func TestMCPManualConflictIsNotClaimedOrRemoved(t *testing.T) {
 	if _, ok := servers["harvester"]; !ok {
 		t.Fatal("uninstall removed the conflicting manual Harvester registration")
 	}
-	if _, ok := servers["chat"]; ok {
-		t.Fatal("uninstall retained PFM's owned chat registration")
+	if _, ok := servers[professorName]; ok {
+		t.Fatal("uninstall retained PFM's owned professor registration")
 	}
 }
 
-// TestMCPInstallMigratesAnOwnedHTTPChatClientToStdio pins required test #11:
-// pfm's own PREVIOUS HTTP "chat" registration (the shape every install wrote
-// before this wave) is recognized as owned and migrated to the new stdio
-// shape on the next apply, rather than being frozen in place forever or
-// treated as a manual conflict.
-func TestMCPInstallMigratesAnOwnedHTTPChatClientToStdio(t *testing.T) {
+func TestMCPOpenCodeWiringPreservesJSONCAndUnownedServers(t *testing.T) {
 	home := t.TempDir()
+	configPath := OpenCodeConfigPath(home)
+	original := `{
+  // OpenCode owns this comment.
+  "name": "operator-config",
+  "mcp": {
+    // The operator owns this server.
+    "manual": {"type": "remote", "url": "https://manual.invalid/mcp", "enabled": true}
+  }
+}
+`
+	writeFixture(t, configPath, original)
+	e := engine{
+		options: Options{
+			Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456,
+			Stdout: io.Discard,
+		},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	raw := readFixture(t, configPath)
+	if !strings.Contains(raw, "OpenCode owns this comment") || !strings.Contains(raw, `"name": "operator-config"`) ||
+		!strings.Contains(raw, `"manual":`) {
+		t.Fatalf("OpenCode wiring discarded comments or unowned keys:\n%s", raw)
+	}
+	document, err := decodeJSONCObject([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers, _ := document["mcp"].(map[string]any)
+	if want := openCodeProfessorShape(home); !sameJSONValue(servers[professorName], want) {
+		t.Fatalf("professor registration=%#v, want %#v", servers[professorName], want)
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, configPath); got != raw {
+		t.Fatalf("idempotent OpenCode apply rewrote the machine config:\nbefore=%s\nafter=%s", raw, got)
+	}
+
+	dry := e
+	dry.apply = false
+	dry.options.Stdout = io.Discard
+	before := readFixture(t, configPath)
+	if err := dry.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, configPath); got != before {
+		t.Fatal("OpenCode dry-run mutated the machine config")
+	}
+}
+
+func TestMCPOpenCodeUninstallRemovesOnlyExactOwnedRegistrations(t *testing.T) {
+	home := t.TempDir()
+	configPath := OpenCodeConfigPath(home)
+	writeFixture(
+		t,
+		configPath,
+		`{"mcp":{"manual":{"type":"remote","url":"https://manual.invalid/mcp","enabled":true}}}`,
+	)
+	e := engine{
+		options:     Options{Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456, Stdout: io.Discard},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+	openCodeServers := func() map[string]any {
+		document, err := decodeJSONCObject([]byte(readFixture(t, configPath)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		servers, _ := document["mcp"].(map[string]any)
+		return servers
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.removeMCPOpenCodeJSON(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := openCodeServers()[professorName]; ok {
+		t.Fatal("uninstall retained PFM-owned professor")
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	// A manual replacement has precedence over the receipt and must survive.
+	raw := readFixture(t, configPath)
+	updated := strings.Replace(raw, `"type":"local"`, `"type":"remote","url":"https://manual.invalid/professor"`, 1)
+	if updated == raw {
+		t.Fatalf("fixture did not replace the owned professor registration:\n%s", raw)
+	}
+	writeFixture(t, configPath, updated)
+	if err := e.removeMCPOpenCodeJSON(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := openCodeServers()[professorName]; !ok {
+		t.Fatal("uninstall removed a manual replacement of PFM professor")
+	}
+}
+
+func openCodeProfessorShape(home string) map[string]any {
+	return map[string]any{
+		"type": "local", "enabled": true,
+		"command": []any{filepath.Join(home, ".local", "bin", "pfm"), "mcp", "serve", "--stdio"},
+	}
+}
+
+// TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed pins that
+// pfm's own pre-professor OpenCode entries go by exact shape alone — no
+// ledger entry names them — while every comment and foreign key survives.
+func TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed(t *testing.T) {
+	home := t.TempDir()
+	configPath := OpenCodeConfigPath(home)
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	writeFixture(t, configPath, `{
+  // Operator comment.
+  "mcp": {
+    // Legacy pfm entries.
+    "chat": {"type": "local", "command": ["`+bin+`", "mcp", "chat", "serve"], "enabled": true},
+    "harvester": {"type": "remote", "url": "http://127.0.0.1:8456/mcp/harvester", "enabled": true},
+    "manual": {"type": "remote", "url": "https://gateway.example.invalid/mcp", "enabled": true}
+  }
+}
+`)
+	e := engine{
+		options:     Options{Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456, Stdout: io.Discard},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	raw := readFixture(t, configPath)
+	if !strings.Contains(raw, "// Operator comment.") || !strings.Contains(raw, "// Legacy pfm entries.") {
+		t.Fatalf("OpenCode legacy cleanup discarded comments:\n%s", raw)
+	}
+	document, err := decodeJSONCObject([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers, _ := document["mcp"].(map[string]any)
+	if _, ok := servers[chatName]; ok {
+		t.Fatalf("legacy local chat survived:\n%s", raw)
+	}
+	if _, ok := servers[mcpServerHarvester]; ok {
+		t.Fatalf("legacy remote harvester survived:\n%s", raw)
+	}
+	if servers["manual"] == nil || !sameJSONValue(servers[professorName], openCodeProfessorShape(home)) {
+		t.Fatalf("servers=%#v, want manual kept and professor in its local stdio shape", servers)
+	}
+}
+
+func readClaudeServers(t *testing.T, path string) map[string]any {
+	t.Helper()
+	var document map[string]any
+	if err := json.Unmarshal([]byte(readFixture(t, path)), &document); err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	servers, _ := document["mcpServers"].(map[string]any)
+	return servers
+}
+
+func claudeProfessorShape(home string) map[string]any {
+	return map[string]any{
+		"type": "stdio", "command": home + "/.local/bin/pfm", "args": []any{"mcp", "serve", "--stdio"},
+	}
+}
+
+func applyChatMCP(t *testing.T, home string) string {
+	t.Helper()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
+	var applied strings.Builder
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, ConfigDir: canonical,
+		ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
+		MCPPort: 8377, Runner: &fakeRunner{}, Stdout: &applied,
+	}); err != nil {
+		t.Fatalf("apply: %v\n%s", err, applied.String())
+	}
+	return applied.String()
+}
+
+// TestMCPInstallRemovesPFMLegacyClaudeEntriesTheLedgerNeverListed pins that
+// pfm's own pre-professor Claude entries — stdio chat, HTTP chat and
+// harvester, the retired bearer shape included — go by exact shape alone,
+// with an empty ledger, while every other key stays as it was.
+func TestMCPInstallRemovesPFMLegacyClaudeEntriesTheLedgerNeverListed(t *testing.T) {
+	bearer := `{"type":"http","url":"http://127.0.0.1:8377/mcp/chat","headers":{"Authorization":"Bearer ` +
+		strings.Repeat("0f", 32) + `"}}`
+	for name, fixture := range map[string]struct{ legacy, removed string }{
+		"stdio chat and http harvester": {
+			legacy: `"chat":{"type":"stdio","command":"HOME/.local/bin/pfm","args":["mcp","chat","serve"]},` +
+				`"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"}`,
+			removed: "chat,harvester",
+		},
+		"bearer http chat": {legacy: `"chat":` + bearer, removed: "chat"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			home := t.TempDir()
+			clientPath := filepath.Join(home, ".claude.json")
+			writeFixture(t, clientPath, `{"theme":"dark","mcpServers":{`+
+				strings.ReplaceAll(fixture.legacy, "HOME", home)+`,"foreign":{"command":"custom","args":["x"]}}}`)
+			applied := applyChatMCP(t, home)
+			if !strings.Contains(applied, "remove pfm's legacy MCP clients "+fixture.removed) {
+				t.Fatalf("change line does not name the removed legacy keys %s:\n%s", fixture.removed, applied)
+			}
+			var document map[string]any
+			if err := json.Unmarshal([]byte(readFixture(t, clientPath)), &document); err != nil {
+				t.Fatal(err)
+			}
+			servers, _ := document["mcpServers"].(map[string]any)
+			want := map[string]any{
+				"foreign":     map[string]any{"command": "custom", "args": []any{"x"}},
+				professorName: claudeProfessorShape(home),
+			}
+			if document["theme"] != "dark" || !sameJSONValue(servers, want) {
+				t.Fatalf("registry=%#v, want theme kept and servers=%#v", document, want)
+			}
+		})
+	}
+}
+
+// TestMCPInstallMigratesALedgerListedLegacyHTTPChatClient pins the names-only
+// predecessor ledger: its listed HTTP chat at ~/.mcp.json is pfm's own legacy
+// entry, removed rather than treated as a manual conflict, and professor
+// lands in the registry a pfm-launched Claude reads.
+func TestMCPInstallMigratesALedgerListedLegacyHTTPChatClient(t *testing.T) {
+	// Issue #24 F11: pin CLAUDE_CONFIG_DIR to empty so a host that exports it
+	// ambiently cannot steer MCP registration at an extra, real
+	// $CLAUDE_CONFIG_DIR/.claude.json this fixture never wrote (host-only —
+	// cannot be watched failing inside a fence that does not export it).
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".mcp.json"),
 		`{"mcpServers":{"chat":{"type":"http","url":"http://127.0.0.1:8377/mcp/chat"}}}`)
 	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName), `{"clients":["chat"]}`)
-	options := Options{
-		Mode: ModeApply, Home: home, ConfigDir: canonical,
-		ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
-		MCPPort: 8377, Runner: &fakeRunner{},
+	applied := applyChatMCP(t, home)
+	if strings.Contains(applied, "preserve conflicting manual MCP client") {
+		t.Fatalf("pfm's own legacy HTTP chat registration was treated as a manual conflict:\n%s", applied)
 	}
-	var applied strings.Builder
-	options.Stdout = &applied
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatalf("migrate an owned HTTP chat registration: %v\n%s", err, applied.String())
+	if servers := readClaudeServers(t, filepath.Join(home, ".mcp.json")); len(servers) != 0 {
+		t.Fatalf("legacy .mcp.json kept %#v", servers)
 	}
-	if strings.Contains(applied.String(), "preserve conflicting manual MCP client chat") {
-		t.Fatalf("pfm's own previous HTTP chat registration was treated as a manual conflict:\n%s", applied.String())
+	servers := readClaudeServers(t, filepath.Join(home, ".claude.json"))
+	if !sameJSONValue(servers[professorName], claudeProfessorShape(home)) {
+		t.Fatalf("professor was not registered: %#v", servers)
 	}
-	var document map[string]any
-	if err := json.Unmarshal([]byte(readFixture(t, filepath.Join(home, ".claude.json"))), &document); err != nil {
+	// Doctor reads the registration install just wrote as pfm's own, never
+	// as a foreign one it would tell the operator to reinstall over.
+	for _, report := range InspectClaudeServers(filepath.Join(home, ".claude.json"), home, 8377, professorName) {
+		if report.State != MCPClientPFM {
+			t.Fatalf("doctor classifies install's own professor as %s, want %s", report.State, MCPClientPFM)
+		}
+	}
+}
+
+// TestMCPInstallRemovesRootMCPJSONLegacyEntriesTheLedgerNeverListed pins the
+// remediation doctor's cutover row prints for a legacy-pfm harvester at
+// ~/.mcp.json ("run pfm install --yes"): install removes pfm's legacy entries
+// there by exact shape alone, with no ledger naming them, and leaves every
+// other key as it was.
+func TestMCPInstallRemovesRootMCPJSONLegacyEntriesTheLedgerNeverListed(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	root := filepath.Join(home, ".mcp.json")
+	writeFixture(t, root, `{"mcpServers":{`+
+		`"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"},`+
+		`"chat":{"type":"http","url":"http://127.0.0.1:8377/mcp/chat"},`+
+		`"manual":{"command":"custom"}}}`)
+	applyChatMCP(t, home)
+	if servers := readClaudeServers(t, root); !sameJSONValue(
+		servers, map[string]any{"manual": map[string]any{"command": "custom"}},
+	) {
+		t.Fatalf("~/.mcp.json servers=%#v, want the manual entry alone", servers)
+	}
+	for _, report := range InspectClaudeServers(root, home, 8377, mcpServerHarvester, chatName) {
+		if report.State != MCPClientAbsent {
+			t.Fatalf("doctor still classifies %s at %s as %s after install", report.Name, root, report.State)
+		}
+	}
+}
+
+// TestMCPDoctorLegacyStateMatchesWhatInstallRemoves pins doctor's legacy-pfm
+// state to install's exact legacy shapes: an entry under a legacy key that
+// differs from pfm's shape by one key or its binary path is kept by install,
+// so doctor must not prescribe "run pfm install --yes" for it.
+func TestMCPDoctorLegacyStateMatchesWhatInstallRemoves(t *testing.T) {
+	for name, fixture := range map[string]struct{ key, entry string }{
+		"http with an extra key": {
+			"harvester", `{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester","timeout":30}`,
+		},
+		"stdio chat on another binary": {
+			"chat", `{"type":"stdio","command":"/opt/pfm/bin/pfm","args":["mcp","chat","serve"]}`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			home := t.TempDir()
+			path := filepath.Join(home, ".claude.json")
+			writeFixture(t, path, `{"mcpServers":{"`+fixture.key+`":`+fixture.entry+`}}`)
+			applyChatMCP(t, home)
+			if _, kept := readClaudeServers(t, path)[fixture.key]; !kept {
+				t.Fatalf("install removed the non-pfm %s entry %s", fixture.key, fixture.entry)
+			}
+			for _, report := range InspectClaudeServers(path, home, 8377, fixture.key) {
+				if report.State == MCPClientLegacyPFM {
+					t.Fatalf("doctor classifies %s (kept by install) as %s", fixture.entry, report.State)
+				}
+			}
+		})
+	}
+}
+
+// TestMCPInstallPreservesAForeignChatClientRegistration pins that a chat
+// entry differing from pfm's legacy stdio shape — the operator's bare "pfm"
+// command instead of the installer's absolute path — is not pfm's: it stays
+// untouched beside the new professor registration.
+func TestMCPInstallPreservesAForeignChatClientRegistration(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	foreign := `{"type":"stdio","command":"pfm","args":["mcp","chat","serve"]}`
+	writeFixture(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"chat":`+foreign+`}}`)
+	applyChatMCP(t, home)
+	servers := readClaudeServers(t, filepath.Join(home, ".claude.json"))
+	var want map[string]any
+	if err := json.Unmarshal([]byte(foreign), &want); err != nil {
 		t.Fatal(err)
 	}
-	servers, _ := document["mcpServers"].(map[string]any)
-	chatEntry, _ := servers["chat"].(map[string]any)
-	if chatEntry["type"] != "stdio" || chatEntry["command"] != home+"/.local/bin/pfm" {
-		t.Fatalf("owned HTTP chat client was not migrated to the stdio shape: %#v", chatEntry)
+	if !sameJSONValue(servers[chatName], want) {
+		t.Fatalf("lookalike chat entry changed to %#v, want untouched %s", servers[chatName], foreign)
+	}
+	if !sameJSONValue(servers[professorName], claudeProfessorShape(home)) {
+		t.Fatalf("professor was not added beside the lookalike: %#v", servers)
 	}
 }
 
-// TestMCPInstallPreservesAForeignChatClientRegistration pins required test
-// #12: a chat registration that is neither pfm's HTTP shape nor its stdio
-// shape — the operator's real hand-edit from the root-cause report, a bare
-// "pfm" command instead of the installer's own absolute path — stays a
-// manual conflict, preserved untouched with the same skip message as every
-// other foreign registration.
-func TestMCPInstallPreservesAForeignChatClientRegistration(t *testing.T) {
+// TestMCPInstallPreservesAManualProfessorRegistration pins that a professor
+// entry pfm did not write is a manual conflict: kept, named on a skip line,
+// never claimed.
+func TestMCPInstallPreservesAManualProfessorRegistration(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
-	canonical := filepath.Join(home, ".claude")
-	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
-	foreign := `{"mcpServers":{"chat":{"type":"stdio","command":"pfm","args":["mcp","chat","serve"]}}}`
-	writeFixture(t, filepath.Join(home, ".claude.json"), foreign)
-	options := Options{
-		Mode: ModeApply, Home: home, ConfigDir: canonical,
-		ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
-		MCPPort: 8377, Runner: &fakeRunner{},
-	}
-	var applied strings.Builder
-	options.Stdout = &applied
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatalf("apply over a foreign chat registration: %v\n%s", err, applied.String())
-	}
-	if !strings.Contains(applied.String(), "preserve conflicting manual MCP client chat") {
-		t.Fatalf("a bare \"pfm\" chat command was not treated as a manual conflict:\n%s", applied.String())
-	}
-	if got := readFixture(t, filepath.Join(home, ".claude.json")); got != foreign {
-		t.Fatalf(".mcp.json chat entry changed=%s, want untouched %s", got, foreign)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName)); !os.IsNotExist(err) {
-		t.Fatalf("manual registration was claimed: %v", err)
-	}
-}
-
-// TestMCPInstallRecognizesAnOwnedStdioChatClientWithoutRewriteOrConflict
-// pins required test #13: once a chat registration already matches the
-// stdio shape a previous apply wrote, a later apply must recognize it as
-// pfm's own — no spurious rewrite (no backup file, unchanged bytes) and no
-// "manual conflict" skip — the whole point of isPFMStdioClient existing
-// alongside isPFMHTTPClient.
-func TestMCPInstallRecognizesAnOwnedStdioChatClientWithoutRewriteOrConflict(t *testing.T) {
-	home := t.TempDir()
-	canonical := filepath.Join(home, ".claude")
-	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
 	clientPath := filepath.Join(home, ".claude.json")
-	owned := `{"mcpServers":{"chat":{"type":"stdio","command":"` + home + `/.local/bin/pfm","args":["mcp","chat","serve"]}}}`
+	manual := `{"mcpServers":{"professor":{"type":"http","url":"http://127.0.0.1:8377/mcp/professor"}}}`
+	writeFixture(t, clientPath, manual)
+	applied := applyChatMCP(t, home)
+	if want := "preserve conflicting manual MCP client professor in " + physicalSettingsPath(
+		clientPath,
+	); !strings.Contains(
+		applied,
+		want,
+	) {
+		t.Fatalf("output lacks %q:\n%s", want, applied)
+	}
+	if got := readFixture(t, clientPath); got != manual {
+		t.Fatalf("manual professor changed=%s, want untouched %s", got, manual)
+	}
+}
+
+// TestMCPInstallRecognizesAnOwnedStdioProfessorClientWithoutRewriteOrConflict
+// pins that an owned professor already in the stdio shape is recognized as
+// pfm's own: no rewrite, no backup, no manual-conflict skip.
+func TestMCPInstallRecognizesAnOwnedStdioProfessorClientWithoutRewriteOrConflict(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	clientPath := filepath.Join(home, ".claude.json")
+	owned := `{"mcpServers":{"professor":{"type":"stdio","command":"` + home +
+		`/.local/bin/pfm","args":["mcp","serve","--stdio"]}}}`
 	writeFixture(t, clientPath, owned)
 	var existing map[string]map[string]any
 	if err := json.Unmarshal([]byte(owned), &existing); err != nil {
 		t.Fatal(err)
 	}
-	ledger, _ := json.Marshal(mcpOwnership{Registrations: map[string]map[string]any{clientPath: existing["mcpServers"]}})
+	ledger, _ := json.Marshal(
+		mcpOwnership{Registrations: map[string]map[string]any{clientPath: existing["mcpServers"]}},
+	)
 	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName), string(ledger))
-	options := Options{
-		Mode: ModeApply, Home: home, ConfigDir: canonical,
-		ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
-		MCPPort: 8377, Runner: &fakeRunner{},
+	applied := applyChatMCP(t, home)
+	if strings.Contains(applied, "preserve conflicting manual MCP client professor") {
+		t.Fatalf("an owned stdio professor registration was treated as a manual conflict:\n%s", applied)
 	}
-	var applied strings.Builder
-	options.Stdout = &applied
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatalf("apply over an already-owned stdio chat registration: %v\n%s", err, applied.String())
-	}
-	if strings.Contains(applied.String(), "preserve conflicting manual MCP client chat") {
-		t.Fatalf("an owned stdio chat registration was treated as a manual conflict:\n%s", applied.String())
-	}
-	if !strings.Contains(applied.String(), "ok      "+physicalSettingsPath(clientPath)+" wiring") {
-		t.Fatalf("an already-correct stdio chat registration was rewritten instead of recognized:\n%s", applied.String())
+	if !strings.Contains(applied, "ok      "+physicalSettingsPath(clientPath)+" wiring") {
+		t.Fatalf("an already-correct professor registration was rewritten instead of recognized:\n%s", applied)
 	}
 	if got := readFixture(t, clientPath); got != owned {
-		t.Fatalf(".mcp.json changed=%s, want byte-identical %s", got, owned)
+		t.Fatalf(".claude.json changed=%s, want byte-identical %s", got, owned)
 	}
 	if matches, _ := filepath.Glob(clientPath + ".pre-professor-*"); len(matches) != 0 {
 		t.Fatalf("a spurious backup was written for an unchanged, already-owned registration: %v", matches)
 	}
 }
 
-// TestMCPInstallCodexChatStaysOnHTTPDespiteClaudeStdio pins required test
-// #14: the Claude/Codex asymmetry is deliberate (Codex's own MCP client
-// attaches _meta.threadId on every call, so HTTP resolves callers correctly
-// there), and must stay pinned on its own so a later "harmonize the two
-// clients" pass does not silently regress Codex onto the costlier stdio
-// transport it never needed.
-func TestMCPInstallCodexChatStaysOnHTTPDespiteClaudeStdio(t *testing.T) {
+// TestMCPInstallRegistersTheStdioProfessorInAFreshCodexHome pins the one
+// transport law on Codex: one fence at the end of the file holding the stdio
+// command and args, and no url line.
+func TestMCPInstallRegistersTheStdioProfessorInAFreshCodexHome(t *testing.T) {
+	home := t.TempDir()
+	applyChatMCP(t, home)
+	codexConfig := readFixture(t, filepath.Join(home, ".codex", "config.toml"))
+	want := strings.Join([]string{
+		mcpFenceBegin,
+		"[mcp_servers.professor]",
+		`command = "` + home + `/.local/bin/pfm"`,
+		`args = ["mcp", "serve", "--stdio"]`,
+		mcpFenceEnd,
+	}, "\n") + "\n"
+	if !strings.HasSuffix(codexConfig, want) || strings.Count(codexConfig, mcpFenceBegin) != 1 {
+		t.Fatalf("Codex config does not end in the one professor fence:\n%s", codexConfig)
+	}
+	if strings.Contains(codexConfig, "url = ") {
+		t.Fatalf("Codex registration carries a url line:\n%s", codexConfig)
+	}
+}
+
+// TestInstallRegistersMCPServersInEveryRegistryAPFMLaunchedClaudeReads pins
+// issue #24 finding 5 under the one professor server: every registry a
+// pfm-launched Claude reads — the implicit account's $HOME/.claude.json, a
+// second account's, and the ambient CLAUDE_CONFIG_DIR's — gains professor,
+// loses pfm's legacy entries, and the ledger owns professor in each.
+func TestInstallRegistersMCPServersInEveryRegistryAPFMLaunchedClaudeReads(t *testing.T) {
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
+	second := filepath.Join(home, "account-two")
+	ambient := filepath.Join(home, ".cc", "1")
+	t.Setenv("CLAUDE_CONFIG_DIR", ambient)
+
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: canonical, Implicit: true}, {ID: 2, ConfigDir: second}}
+	resolved := ClaudeUserRegistries(home, accounts, pfmconfig.AmbientClaudeConfigDir())
+	claudeRegistries := make([]string, 0, len(resolved))
+	reasons := make(map[string]string, len(resolved))
+	for _, registry := range resolved {
+		claudeRegistries = append(claudeRegistries, registry.Path)
+		reasons[registry.Path] = registry.Reason
+	}
+	paths := []string{
+		filepath.Join(home, ".claude.json"),
+		filepath.Join(second, ".claude.json"),
+		filepath.Join(ambient, ".claude.json"),
+	}
+	for _, path := range paths {
+		writeFixture(t, path, `{"mcpServers":{"chat":{"type":"http","url":"http://127.0.0.1:8377/mcp/chat"},`+
+			`"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"}}}`)
+	}
+
 	options := Options{
 		Mode: ModeApply, Home: home, ConfigDir: canonical,
-		ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
-		MCPPort: 8377, Runner: &fakeRunner{},
+		ConfigDirs: []string{canonical}, ClaudeRegistries: claudeRegistries, ClaudeRegistryReasons: reasons,
+		MCPEnabled: map[string]bool{"chat": true, "harvester": true}, MCPPort: 8377,
+		Runner: &fakeRunner{}, Stdout: io.Discard,
 	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
-	codexConfig := readFixture(t, filepath.Join(home, ".codex", "config.toml"))
-	if !strings.Contains(codexConfig, "[mcp_servers.chat]") ||
-		!strings.Contains(codexConfig, `url = "http://127.0.0.1:8377/mcp/chat"`) {
-		t.Fatalf("Codex chat registration lost its HTTP shape:\n%s", codexConfig)
+
+	ledger, err := readMCPOwnership(filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(codexConfig, "command") || strings.Contains(codexConfig, "stdio") {
-		t.Fatalf("Codex chat registration picked up the Claude-only stdio shape:\n%s", codexConfig)
-	}
-	clientJSON := readFixture(t, filepath.Join(home, ".claude.json"))
-	if !strings.Contains(clientJSON, `"type": "stdio"`) {
-		t.Fatalf("Claude chat registration is not stdio, so this test cannot pin the asymmetry:\n%s", clientJSON)
+	for _, path := range paths {
+		servers := readClaudeServers(t, path)
+		if len(servers) != 1 || !sameJSONValue(servers[professorName], claudeProfessorShape(home)) {
+			t.Fatalf("registry %s servers=%#v, want professor alone", path, servers)
+		}
+		owned := ledger.Registrations[physicalSettingsPath(path)]
+		if len(owned) != 1 || owned[professorName] == nil {
+			t.Fatalf("ledger does not own professor alone in %s: %#v", path, ledger.Registrations)
+		}
 	}
 }
 
-func TestInspectHarvesterClientCutoverNamesHealthyLegacyAndUnreadableStates(t *testing.T) {
+func TestInspectHarvesterClientCutoverNamesPFMLegacyStandaloneAndUnreadableStates(t *testing.T) {
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"}}}`)
-	writeFixture(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.harvester]\ncommand = \"uv\"\nargs = [\"--directory\", \"/fixture/harvester\", \"run\", \"harvester\"]\n")
+	writeFixture(
+		t,
+		filepath.Join(home, ".claude.json"),
+		`{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"}}}`,
+	)
+	writeFixture(
+		t,
+		filepath.Join(home, ".codex", "config.toml"),
+		"[mcp_servers.harvester]\ncommand = \"uv\"\nargs = [\"--directory\", \"/fixture/harvester\", \"run\", \"harvester\"]\n",
+	)
 
-	reports := InspectHarvesterClientCutover(home, 8377, nil, nil)
-	if len(reports) != 3 || reports[0].Client != "claude" || reports[0].State != MCPClientPFM || reports[0].Error != nil {
-		t.Fatalf("Claude cutover report=%#v, want healthy PFM route", reports)
+	registries := []string{filepath.Join(home, ".claude.json")}
+	reports := InspectHarvesterClientCutover(home, 8377, registries, nil)
+	if len(reports) != 3 || reports[0].Client != "claude" || reports[0].State != MCPClientLegacyPFM ||
+		reports[0].Error != nil {
+		t.Fatalf("Claude cutover report=%#v, want pfm legacy route", reports)
 	}
 	if reports[1].Client != "codex" || reports[1].State != MCPClientLegacyStandalone || reports[1].Error != nil {
 		t.Fatalf("Codex cutover report=%#v, want legacy standalone route", reports)
 	}
 
 	writeFixture(t, filepath.Join(home, ".codex", "config.toml"), "broken = [\n")
-	reports = InspectHarvesterClientCutover(home, 8377, nil, nil)
-	if reports[1].State != MCPClientUnreadable || reports[1].Error == nil || !strings.Contains(reports[1].Error.Error(), "config.toml") {
+	reports = InspectHarvesterClientCutover(home, 8377, registries, nil)
+	if reports[1].State != MCPClientUnreadable || reports[1].Error == nil ||
+		!strings.Contains(reports[1].Error.Error(), "config.toml") {
 		t.Fatalf("Codex unreadable report=%#v, want path-bearing parse error", reports[1])
+	}
+}
+
+// TestMCPInstallRemovesTheBarePFMMCPChatEntry pins the oldest pfm chat
+// shape, `<bin> mcp` with no subcommand: install removes it as pfm's legacy
+// entry and doctor classifies it legacy-pfm, the state that prescribes the
+// reinstall which removes it.
+func TestMCPInstallRemovesTheBarePFMMCPChatEntry(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude.json")
+	bare := `{"type":"stdio","command":"` + filepath.Join(home, ".local", "bin", "pfm") + `","args":["mcp"]}`
+	writeFixture(t, path, `{"mcpServers":{"chat":`+bare+`}}`)
+	for _, report := range InspectClaudeServers(path, home, 8377, chatName) {
+		if report.State != MCPClientLegacyPFM {
+			t.Fatalf("doctor classifies the bare pfm mcp chat entry as %s, want %s", report.State, MCPClientLegacyPFM)
+		}
+	}
+	applied := applyChatMCP(t, home)
+	if _, kept := readClaudeServers(t, path)[chatName]; kept {
+		t.Fatalf("install kept the bare pfm mcp chat entry:\n%s", readFixture(t, path))
+	}
+	if !strings.Contains(applied, "remove pfm's legacy MCP clients chat") {
+		t.Fatalf("change line does not name the removed bare chat entry:\n%s", applied)
+	}
+}
+
+// TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine pins that the OpenCode
+// writer names the pfm legacy keys it removes, in the Claude writer's words.
+func TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine(t *testing.T) {
+	home := t.TempDir()
+	configPath := OpenCodeConfigPath(home)
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	writeFixture(t, configPath,
+		`{"mcp":{"chat":{"type":"local","command":["`+bin+`","mcp","chat","serve"],"enabled":true}}}`)
+	var out strings.Builder
+	e := engine{
+		options:     Options{Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456, Stdout: &out},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	var changeLine string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "rewrite "+physicalSettingsPath(configPath)) {
+			changeLine = line
+			break
+		}
+	}
+	if !strings.HasSuffix(changeLine, " — remove pfm's legacy MCP clients chat") {
+		t.Fatalf("OpenCode change line %q does not end naming the removed legacy chat:\n%s", changeLine, out.String())
 	}
 }

@@ -23,21 +23,21 @@ import (
 func (h *Harvester) PublicCandidates(candidates []Candidate) ([]Candidate, error) {
 	out := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		copy := candidate
-		copy.Source = ""
-		copy.Priority = 0
+		publicCandidate := candidate
+		publicCandidate.Source = ""
+		publicCandidate.Priority = 0
 		if strings.TrimSpace(candidate.URL) != "" {
 			if publicIdentityHandle(candidate.URL) {
-				copy.URL = strings.TrimSpace(candidate.URL)
+				publicCandidate.URL = strings.TrimSpace(candidate.URL)
 			} else {
 				handle, err := h.PublicHandle(candidate.URL)
 				if err != nil {
 					return nil, err
 				}
-				copy.URL = handle
+				publicCandidate.URL = handle
 			}
 		}
-		out = append(out, copy)
+		out = append(out, publicCandidate)
 	}
 	return out, nil
 }
@@ -65,8 +65,12 @@ func publicIdentityHandle(source string) bool {
 		return NormalizeISBN(value) != ""
 	}
 	parsed, err := url.Parse(s)
-	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User == nil && parsed.Port() == "" &&
-		(strings.EqualFold(parsed.Hostname(), "doi.org") || strings.EqualFold(parsed.Hostname(), "dx.doi.org")) && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Opaque == "" {
+	if err == nil && (parsed.Scheme == schemeHTTP || parsed.Scheme == schemeHTTPS) && parsed.User == nil &&
+		parsed.Port() == "" &&
+		(strings.EqualFold(parsed.Hostname(), "doi.org") || strings.EqualFold(parsed.Hostname(), "dx.doi.org")) &&
+		parsed.RawQuery == "" &&
+		parsed.Fragment == "" &&
+		parsed.Opaque == "" {
 		return publicBareDOI.MatchString(strings.TrimPrefix(parsed.Path, "/"))
 	}
 	return false
@@ -79,11 +83,11 @@ func (h *Harvester) PublicHandle(source string) (string, error) {
 	if source == "" {
 		return "", errors.New("public handle requires a public HTTP(S) URL")
 	}
-	if err := assertFetchable(source, false); err != nil {
-		log.Printf("harvest: public handle rejected %q: %v", source, err)
+	if err := validateFetchURL(source, false); err != nil {
+		log.Printf("harvest: public handle rejected %q: %v", logSource(source), err)
 		return "", errors.New("public handle requires a public HTTP(S) URL")
 	}
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -96,11 +100,11 @@ func (h *Harvester) PublicHandle(source string) (string, error) {
 	path := filepath.Join(dir, hex.EncodeToString(key[:])+".json")
 	mapping, err := json.Marshal(publicHandleRecord{Target: source})
 	if err != nil {
-		log.Printf("harvest: public handle mapping encode failed for %q: %v", source, err)
+		log.Printf("harvest: public handle mapping encode failed for %q: %v", logSource(source), err)
 		return "", errors.New("could not create public source handle")
 	}
 	if err := h.writeAtomic(path, mapping, 0o600); err != nil {
-		log.Printf("harvest: public handle mapping write failed for %q: %v", source, err)
+		log.Printf("harvest: public handle mapping write failed for %q: %v", logSource(source), err)
 		return "", errors.New("could not create public source handle")
 	}
 	return handle, nil
@@ -118,8 +122,8 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := assertFetchable(target, false); err != nil {
-			log.Printf("harvest: stored public handle target rejected %q: %v", target, err)
+		if err := validateFetchURL(target, false); err != nil {
+			log.Printf("harvest: stored public handle target rejected %q: %v", logSource(target), err)
 			return "", errors.New("stored public source is no longer fetchable")
 		}
 		return target, nil
@@ -145,7 +149,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 	if err != nil {
 		return "", errors.New("local source cannot be resolved")
 	}
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +161,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 	if lexicalErr != nil {
 		return "", errors.New("cache directory cannot be resolved")
 	}
-	lexicalPublicRoot := filepath.Join(lexicalCacheRoot, "public")
+	lexicalPublicRoot := filepath.Join(lexicalCacheRoot, publicDirName)
 	if isPathInside(lexicalPath, lexicalCacheRoot) && !isPathInside(lexicalPath, lexicalPublicRoot) {
 		return "", errors.New("internal retrieval metadata is not available")
 	}
@@ -193,7 +197,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 }
 
 func (h *Harvester) readPublicHandle(source string) (string, error) {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -216,7 +220,7 @@ func (h *Harvester) readPublicHandle(source string) (string, error) {
 	}
 	data, err := readBoundedFile(path, 16*1024)
 	if err != nil {
-		log.Printf("harvest: public handle mapping read failed for %q: %v", source, err)
+		log.Printf("harvest: public handle mapping read failed for %q: %v", logSource(source), err)
 		return "", errors.New("public source handle is unavailable")
 	}
 	var record publicHandleRecord
@@ -225,7 +229,7 @@ func (h *Harvester) readPublicHandle(source string) (string, error) {
 	}
 	target := strings.TrimSpace(record.Target)
 	u, err := url.Parse(target)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+	if err != nil || (u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS) || u.Host == "" || u.User != nil {
 		return "", errors.New("public source handle is invalid")
 	}
 	return target, nil
@@ -238,8 +242,8 @@ func (h *Harvester) publicDisplayHandle(identity, exportedPath string) (string, 
 	if isLocalSource(identity) || strings.HasPrefix(strings.ToLower(identity), "file://") {
 		return exportedPath, nil
 	}
-	if err := assertFetchable(identity, false); err != nil {
-		log.Printf("harvest: cache identity is not a public URL %q: %v", identity, err)
+	if err := validateFetchURL(identity, false); err != nil {
+		log.Printf("harvest: cache identity is not a public URL %q: %v", logSource(identity), err)
 		return "", errors.New("cache match has no public identity")
 	}
 	return h.PublicHandle(identity)

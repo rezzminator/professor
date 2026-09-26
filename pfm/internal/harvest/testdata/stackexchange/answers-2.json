@@ -1,0 +1,131 @@
+{
+ "items": [
+  {
+   "owner": {
+    "display_name": "user-200",
+    "user_id": 1200,
+    "link": "https://stackoverflow.com/u/1200"
+   },
+   "comment_count": 3,
+   "is_accepted": false,
+   "score": 26,
+   "creation_date": 1736082352,
+   "answer_id": 79330767,
+   "question_id": 927358,
+   "body": "<p>Placeholder answer 101.</p>",
+   "comments": [
+    {
+     "owner": {
+      "display_name": "user-201",
+      "user_id": 1201,
+      "link": "https://stackoverflow.com/u/1201"
+     },
+     "score": 1,
+     "post_id": 79330767,
+     "creation_date": 1736089107,
+     "comment_id": 139893155,
+     "body": "Placeholder comment 140."
+    },
+    {
+     "owner": {
+      "display_name": "user-202",
+      "user_id": 1202,
+      "link": "https://stackoverflow.com/u/1202"
+     },
+     "score": 3,
+     "post_id": 79330767,
+     "creation_date": 1736847678,
+     "comment_id": 139938763,
+     "body": "Placeholder comment 141."
+    },
+    {
+     "owner": {
+      "display_name": "user-203",
+      "user_id": 1203,
+      "link": "https://stackoverflow.com/u/1203"
+     },
+     "score": 1,
+     "post_id": 79330767,
+     "creation_date": 1741972174,
+     "comment_id": 140219996,
+     "body": "Placeholder comment 142."
+    }
+   ]
+  },
+  {
+   "owner": {
+    "display_name": "user-204",
+    "user_id": 1204,
+    "link": "https://stackoverflow.com/u/1204"
+   },
+   "comment_count": 1,
+   "is_accepted": false,
+   "score": 2,
+   "creation_date": 1737717962,
+   "answer_id": 79384186,
+   "question_id": 927358,
+   "body": "<p>Placeholder answer 102.</p>",
+   "comments": [
+    {
+     "owner": {
+      "display_name": "user-205",
+      "user_id": 1205,
+      "link": "https://stackoverflow.com/u/1205"
+     },
+     "score": 0,
+     "post_id": 79384186,
+     "creation_date": 1740738640,
+     "comment_id": 140160809,
+     "body": "Placeholder comment 143."
+    }
+   ]
+  },
+  {
+   "owner": {
+    "display_name": "user-206",
+    "user_id": 1206,
+    "link": "https://stackoverflow.com/u/1206"
+   },
+   "comment_count": 0,
+   "is_accepted": false,
+   "score": 5,
+   "creation_date": 1748747283,
+   "answer_id": 79647146,
+   "question_id": 927358,
+   "body": "<p>Placeholder answer 103.</p>"
+  },
+  {
+   "owner": {
+    "display_name": "user-207",
+    "user_id": 1207,
+    "link": "https://stackoverflow.com/u/1207"
+   },
+   "comment_count": 0,
+   "is_accepted": false,
+   "score": -1,
+   "creation_date": 1759919229,
+   "answer_id": 79785345,
+   "question_id": 927358,
+   "body": "<p>Placeholder answer 104.</p>"
+  },
+  {
+   "owner": {
+    "display_name": "user-208",
+    "user_id": 1208,
+    "link": "https://stackoverflow.com/u/1208"
+   },
+   "comment_count": 0,
+   "is_accepted": false,
+   "score": -5,
+   "creation_date": 1768896680,
+   "answer_id": 79871785,
+   "question_id": 927358,
+   "body": "<p>Placeholder answer 105.</p>"
+  }
+ ],
+ "has_more": false,
+ "quota_max": 300,
+ "quota_remaining": 291,
+ "page": 2,
+ "page_size": 100
+}

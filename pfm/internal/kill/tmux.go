@@ -3,19 +3,18 @@ package kill
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
-// CommandTmux invokes tmux only through an explicit socket pathname.
-type CommandTmux struct {
+// TmuxKiller invokes tmux only through an explicit socket pathname.
+type TmuxKiller struct {
 	Binary string
 }
 
-func (tmux CommandTmux) PanePID(
+func (tmux TmuxKiller) PanePID(
 	ctx context.Context,
 	socketPath, paneID string,
 ) (int, error) {
@@ -39,10 +38,17 @@ func (tmux CommandTmux) PanePID(
 	return pid, nil
 }
 
-func (tmux CommandTmux) PaneExists(
+// PaneExists asks tmux whether paneID is still live. tmux itself failing to
+// run (pfmtmux.CouldNotRun) is reported as an error, never folded into
+// "false": the caller (the kill-exit grace window) must not read a probe
+// that could not run as a pane that has already gone. tmux RUNNING and
+// answering "no server on this socket" is the ordinary shape of the pane's
+// last server closing behind it — the exact moment a graceful /exit
+// succeeds — and stays a plain "gone", not an error.
+func (tmux TmuxKiller) PaneExists(
 	ctx context.Context,
 	socketPath, paneID string,
-) bool {
+) (bool, error) {
 	output, err := tmux.command(
 		ctx,
 		socketPath,
@@ -52,17 +58,20 @@ func (tmux CommandTmux) PaneExists(
 		"#{pane_id}",
 	).Output()
 	if err != nil {
-		return false
+		if pfmtmux.CouldNotRun(err) {
+			return false, err
+		}
+		return false, nil
 	}
 	for _, candidate := range strings.Split(string(output), "\n") {
 		if candidate == paneID {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func (tmux CommandTmux) SendLine(
+func (tmux TmuxKiller) SendLine(
 	ctx context.Context,
 	socketPath, paneID, line string,
 ) error {
@@ -91,16 +100,16 @@ func (tmux CommandTmux) SendLine(
 	return nil
 }
 
-func (tmux CommandTmux) KillPane(
+func (tmux TmuxKiller) KillPane(
 	ctx context.Context,
 	socketPath, paneID string,
 ) error {
-	return tmux.command(ctx, socketPath, "kill-pane", "-t", paneID).Run()
+	return tmux.socket().KillPane(ctx, socketPath, paneID)
 }
 
 // ClientTTYs lists the terminals attached to this server. A chat's clients ARE
 // its viewports — the panes a person is watching it through.
-func (tmux CommandTmux) ClientTTYs(
+func (tmux TmuxKiller) ClientTTYs(
 	ctx context.Context,
 	socketPath string,
 ) ([]string, error) {
@@ -127,7 +136,7 @@ func (tmux CommandTmux) ClientTTYs(
 // merely defines $TMUX, and a row that arrives "_"-joined is silently
 // unsplittable. A tty is /dev/pts/N and a pane is %N, so a space cannot be
 // ambiguous.
-func (tmux CommandTmux) PanesByTTY(
+func (tmux TmuxKiller) PanesByTTY(
 	ctx context.Context,
 	socketPath string,
 ) (map[string]string, error) {
@@ -147,17 +156,24 @@ func (tmux CommandTmux) PanesByTTY(
 	return panes, nil
 }
 
-func (tmux CommandTmux) KillServer(
+func (tmux TmuxKiller) KillServer(
 	ctx context.Context,
 	socketPath string,
 ) error {
-	return tmux.command(ctx, socketPath, "kill-server").Run()
+	return tmux.socket().KillServer(ctx, socketPath)
 }
 
-func (tmux CommandTmux) command(
+// socket is the one tmux-addressing wrapper (internal/tmux.Socket): Dir
+// stays empty because every TmuxKiller caller already holds a full
+// socketPath, not a bare socket name.
+func (tmux TmuxKiller) socket() pfmtmux.Socket {
+	return pfmtmux.Socket{Binary: tmux.Binary}
+}
+
+func (tmux TmuxKiller) command(
 	ctx context.Context,
 	socketPath string,
 	arguments ...string,
-) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, socketPath, arguments...)
+) *pfmtmux.Cmd {
+	return tmux.socket().Command(ctx, socketPath, arguments...)
 }

@@ -12,8 +12,11 @@ import (
 	"os/exec"
 	"strings"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
+
+// Binary is the executable name shared by every tmux caller.
+const Binary = "tmux"
 
 // CouldNotRun reports whether err means tmux itself never started — the
 // binary is absent from PATH, a configured path does not exist, or it is not
@@ -49,7 +52,7 @@ func Command(ctx context.Context, binary, socketPath string, arguments ...string
 // (spawn's durable systemd scope).
 func Invocation(binary, socketPath string, arguments ...string) (string, []string, []string) {
 	if binary == "" {
-		binary = deps.Executable("tmux")
+		binary = deps.Executable(Binary)
 	}
 	return binary, append([]string{"-S", socketPath}, arguments...), append(os.Environ(), "TMUX=")
 }

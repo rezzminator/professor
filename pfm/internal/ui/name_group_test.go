@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 func groupRow(kind compose.Kind, id, name, project string) compose.Row {
@@ -136,7 +136,7 @@ func TestNonMemberRowSharingAPrefixIsNeverDropped(t *testing.T) {
 func TestProseColonsAreNotGroupDeclarations(t *testing.T) {
 	for _, name := range []string{
 		"fix: the bug",
-		"wave 3: rework",
+		"flight 3: rework",
 		"note:",
 		":BUILDER",
 		"P: BUILDER",

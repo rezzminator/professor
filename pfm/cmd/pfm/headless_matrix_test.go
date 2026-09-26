@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/action"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestHeadlessCompatibilityAliasExposesPublicHelp(t *testing.T) {
@@ -55,7 +55,8 @@ func TestChatArgumentMatrix(t *testing.T) {
 func TestCLIEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"chat", "new", "--name", "x", "--engine", "bogus"}, &stdout, &stderr)
-	if code != 2 || !strings.Contains(stderr.String(), `unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`) {
+	if code != 2 ||
+		!strings.Contains(stderr.String(), `unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`) {
 		t.Fatalf("chat new bogus exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -193,8 +194,15 @@ func TestScanFailureIsRc2NeverUnknownChat(t *testing.T) {
 	for _, args := range [][]string{{"chat", "status", "ghost", "--json"}, {"chat", "last", "ghost"}} {
 		var stdout, stderr bytes.Buffer
 		code := run(args, &stdout, &stderr)
-		if code != 2 || strings.Contains(stderr.String(), "no chat named") || strings.Contains(stdout.String(), "not-found") {
-			t.Fatalf("%v with a broken index = %d stdout=%q stderr=%q; want rc 2 naming the failure", args, code, stdout.String(), stderr.String())
+		if code != 2 || strings.Contains(stderr.String(), "no chat named") ||
+			strings.Contains(stdout.String(), "not-found") {
+			t.Fatalf(
+				"%v with a broken index = %d stdout=%q stderr=%q; want rc 2 naming the failure",
+				args,
+				code,
+				stdout.String(),
+				stderr.String(),
+			)
 		}
 	}
 }

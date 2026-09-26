@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 type claudeTestLauncher struct{}
@@ -32,7 +32,14 @@ func TestCodexDefaultFooterComposerIsReady(t *testing.T) {
 		t.Fatal("Codex 0.149 default footer composer was not recognized")
 	}
 }
-func (codexTestLauncher) Rename(ctx context.Context, tmux Tmux, socket, target, name string, timings Timings, trace Trace) (string, error) {
+
+func (codexTestLauncher) Rename(
+	ctx context.Context,
+	tmux Tmux,
+	socket, target, name string,
+	timings Timings,
+	trace Trace,
+) (string, error) {
 	return RenameCodex(ctx, tmux, socket, target, name, timings, trace)
 }
 

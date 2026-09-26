@@ -5,15 +5,17 @@ package installer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ErrNameSyncRunning refuses a mutating install while the Linux name-sync
@@ -31,6 +33,15 @@ const (
 	ModeDryRun Mode = iota
 	ModeApply
 	ModeUninstall
+)
+
+const (
+	configTypeKey     = "type"
+	configCommandKey  = "command"
+	configArgsKey     = "args"
+	configEnvKey      = "env"
+	commandType       = "command"
+	legacyFleetBinary = "cc-fleet"
 )
 
 type CommandRunner interface {
@@ -66,12 +77,20 @@ type Options struct {
 	// ClaudeRegistries carries actual user-scope paths, including implicit accounts.
 	// Nil derives legacy paths from ConfigDirs; empty means no Claude clients.
 	ClaudeRegistries []string
+	// ClaudeRegistryReasons explains, for a path also present in
+	// ClaudeRegistries, why that file is a registry a pfm-launched Claude
+	// reads (see ClaudeUserRegistries). A path with no entry writes with the
+	// historical unreasoned message; callers that populate ClaudeRegistries
+	// from ClaudeUserRegistries populate this too.
+	ClaudeRegistryReasons map[string]string
 	// CodexHomes is the config-driven hooks.json fanout. A nil value retains
 	// the historical single ~/.codex target for direct legacy callers; an
 	// explicitly empty roster installs no Codex hook.
 	CodexHomes []string
 	// CodexBinary enables native hook trust registration for command callers.
 	CodexBinary string
+	Clock       clock.Clock
+	Env         paths.Env
 	// SourceRepo is the clone whose templates and binary are being installed.
 	// Empty preserves an existing marker when install is invoked elsewhere.
 	SourceRepo string
@@ -82,12 +101,20 @@ type Options struct {
 	Sleep  func(time.Duration)
 	Stdout io.Writer
 	Runner CommandRunner
+	// ProcessRunner owns installer commands whose stdout/stderr and exit code
+	// are part of the result (for example rumdl and uv). Runner remains the
+	// compatibility seam for simple command/status probes.
+	ProcessRunner deps.Runner
 
 	MCPEnabled    map[string]bool
 	MCPPort       int
 	MCPConfigPath string
-	ClaudeBinary  string
-	CodexYolo     map[int]bool
+	// OpenCodeConfigPath is the machine-scope JSONC registry OpenCode reads.
+	// Command callers always resolve it from the effective home; direct legacy
+	// callers may leave it empty to opt out of OpenCode wiring.
+	OpenCodeConfigPath string
+	ClaudeBinary       string
+	CodexYolo          map[int]bool
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches
@@ -119,7 +146,14 @@ type Options struct {
 	HarvestPlatform    harvestpy.Platform
 	HarvestOffline     bool
 
-	// InstallThemes enables the optional source-fetched Claude Code themes.
+	// ProcRoot is the process table pruneClaudeVersions reads to tell a
+	// version a live chat is executing from one it is safe to remove. Empty
+	// resolves to PFM_PROC_ROOT-or-/proc in normalizeInstallerOptions, same as the rest of
+	// the fleet; jail tests set it directly so the probe never touches a
+	// real /proc.
+	ProcRoot string
+
+	// InstallThemes enables the optional Claude Code themes, source-fetched and bundled.
 	// Command callers set it by default; unit callers opt in explicitly so a
 	// test can never acquire network access by accident.
 	InstallThemes bool
@@ -146,27 +180,86 @@ type Report struct {
 
 type execCommandRunner struct{}
 
+type commandExitError struct {
+	name string
+	code int
+	text string
+}
+
+func (err commandExitError) Error() string {
+	return fmt.Sprintf("%s exited %d: %s", err.name, err.code, err.text)
+}
+
+func (err commandExitError) ExitCode() int { return err.code }
+
+func (installer *engine) env() paths.Env {
+	if installer.options.Env != nil {
+		return installer.options.Env
+	}
+	return paths.OSEnv{}
+}
+
+func (installer *engine) now() time.Time {
+	if installer.options.Now != nil {
+		return installer.options.Now()
+	}
+	if installer.options.Clock != nil {
+		return installer.options.Clock.Now()
+	}
+	return clock.Real.Now()
+}
+
+func (installer *engine) processRunner() deps.Runner {
+	if installer.options.ProcessRunner != nil {
+		return installer.options.ProcessRunner
+	}
+	return obs.Runner(deps.RealRunner{})
+}
+
 func (execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
-	command := exec.CommandContext(ctx, deps.Executable(name), args...)
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
-	return command.Run()
+	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return commandExitError{name: name, code: result.ExitCode, text: string(result.Stderr)}
+	}
+	return nil
 }
 
 func (execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, deps.Executable(name), args...).Output()
+	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if result.ExitCode != 0 {
+		return result.Stdout, commandExitError{name: name, code: result.ExitCode, text: string(result.Stderr)}
+	}
+	return result.Stdout, nil
 }
 
-func normalize(options Options) (Options, error) {
+func normalizeInstallerOptions(options Options) (Options, error) {
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
+	if options.Env == nil {
+		options.Env = paths.OSEnv{}
+	}
 	if options.Home == "" {
 		var err error
-		options.Home, err = os.UserHomeDir()
+		options.Home, err = options.Env.Home()
 		if err != nil {
 			return options, err
 		}
 	}
 	if options.ConfigDir == "" {
 		options.ConfigDir = options.Home + "/.claude"
+	}
+	if options.ProcRoot == "" {
+		options.ProcRoot = options.Env.Get(paths.EnvProcRoot)
+		if options.ProcRoot == "" {
+			options.ProcRoot = "/proc"
+		}
 	}
 	if options.MCPPort == 0 {
 		options.MCPPort = pfmconfig.DefaultMCPPort
@@ -175,10 +268,7 @@ func normalize(options Options) (Options, error) {
 		options.CodexYolo = map[int]bool{1: true, 2: true, 3: true}
 	}
 	if options.Now == nil {
-		options.Now = time.Now
-	}
-	if options.Sleep == nil {
-		options.Sleep = time.Sleep
+		options.Now = options.Clock.Now
 	}
 	if options.Stdout == nil {
 		options.Stdout = io.Discard
@@ -186,8 +276,63 @@ func normalize(options Options) (Options, error) {
 	if options.Runner == nil {
 		options.Runner = execCommandRunner{}
 	}
+	if options.ProcessRunner == nil {
+		options.ProcessRunner = obs.Runner(deps.RealRunner{})
+	}
 	if options.ProvisionHarvest && options.HarvestProvisioner == nil {
 		options.HarvestProvisioner = NewHarvestProvisioner()
 	}
 	return options, nil
+}
+
+// harvestModelStager is the optional OCR-model half of a HarvestProvisioner:
+// the production adapter stages the models; test doubles need not.
+type harvestModelStager interface {
+	StageOCRModels(context.Context, harvestpy.OCRStageOptions) (harvestpy.OCRStaging, error)
+}
+
+func (pinnedHarvestProvisioner) StageOCRModels(
+	ctx context.Context,
+	options harvestpy.OCRStageOptions,
+) (harvestpy.OCRStaging, error) {
+	return harvestpy.StageOCRModels(ctx, options)
+}
+
+// stageHarvestModels stages the OCR models after the environment is healthy:
+// it names the download and its size before it starts, answers a warm cache
+// without a download, and names an offline install that could not stage.
+func (installer *engine) stageHarvestModels(
+	ctx context.Context,
+	provider HarvestProvisioner,
+	root string,
+	platform harvestpy.Platform,
+) error {
+	stager, ok := provider.(harvestModelStager)
+	if !ok {
+		return nil
+	}
+	staging, err := stager.StageOCRModels(ctx, harvestpy.OCRStageOptions{
+		Root: root, Platform: platform, Offline: installer.options.HarvestOffline,
+		Announce: func(message string) { installer.say("harvestpy OCR models: %s", message) },
+	})
+	if errors.Is(err, harvestpy.ErrOCRModelsOffline) {
+		installer.say(
+			"harvestpy OCR models: NOT staged — %v; scanned PDFs fail by name until `pfm install` runs with network",
+			err,
+		)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("harvestpy OCR model staging: %w", err)
+	}
+	if staging.AlreadyStaged {
+		installer.ok("harvestpy OCR models already staged in " + staging.ModelRoot + " (no download)")
+		return nil
+	}
+	installer.ok(fmt.Sprintf("harvestpy OCR models staged in %s (%d bytes on disk); Hebrew: %s",
+		staging.ModelRoot, staging.Bytes, staging.Hebrew))
+	for set, reason := range staging.Skipped {
+		installer.say("harvestpy OCR models: %s not staged — %s", set, reason)
+	}
+	return nil
 }

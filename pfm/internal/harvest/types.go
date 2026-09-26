@@ -14,7 +14,158 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
+
+const (
+	schemeHTTP        = "http"
+	schemeHTTPS       = "https"
+	headerAccept      = "Accept"
+	headerReferer     = "Referer"
+	headerContentType = "Content-Type"
+
+	extension7Z   = ".7z"
+	extensionBMP  = ".bmp"
+	extensionGIF  = ".gif"
+	extensionJPG  = ".jpg"
+	extensionJPEG = ".jpeg"
+	extensionMD   = ".md"
+	extensionPDF  = ".pdf"
+	extensionPNG  = ".png"
+	extensionRAR  = ".rar"
+	extensionSVG  = ".svg"
+	extensionTAR  = ".tar"
+	extensionTIF  = ".tif"
+	extensionTIFF = ".tiff"
+	extensionTXT  = ".txt"
+	extensionWebP = ".webp"
+	extensionZIP  = ".zip"
+
+	mediaTypeHTML     = "text/html"
+	mediaTypePlain    = "text/plain"
+	mediaTypePDF      = "application/pdf"
+	mediaTypeJSON     = "application/json"
+	mediaTypeForm     = "application/x-www-form-urlencoded"
+	mediaTypeXHTML    = "application/xhtml+xml"
+	mediaTypeXML      = "application/xml"
+	mediaTypeTextXML  = "text/xml"
+	mediaTypeMarkdown = "text/markdown"
+
+	kindArchive       = "archive"
+	kindArchiveMember = "archive_member"
+	kind7Z            = "7z"
+	kindBMP           = "bmp"
+	kindBook          = "book"
+	kindCSV           = "csv"
+	kindDOCX          = "docx"
+	kindEPUB          = "epub"
+	kindGIF           = "gif"
+	kindHTML          = "html"
+	kindImage         = "image"
+	kindJPG           = "jpg"
+	kindJSON          = "json"
+	kindPaper         = "paper"
+	kindPDF           = "pdf"
+	kindPNG           = "png"
+	kindPPTX          = "pptx"
+	kindRAR           = "rar"
+	kindSVG           = "svg"
+	kindTAR           = "tar"
+	kindTIFF          = "tiff"
+	kindTXT           = "txt"
+	kindWebP          = "webp"
+	kindXLSX          = "xlsx"
+	kindZIP           = "zip"
+
+	errorKindChallenge  = "challenge"
+	errorKindBlocked    = "blocked"
+	errorKindCancelled  = "cancelled"
+	errorKindConnect    = "connect"
+	errorKindConversion = "conversion"
+	errorKindDisabled   = "disabled"
+	errorKindConvert    = "convert"
+	errorKindDNS        = "dns"
+	errorKindInternal   = "internal"
+	errorKindInvalid    = "invalid"
+	errorKindMissing    = "missing"
+	errorKindMissingPDF = "missing_pdf"
+	errorKindOversized  = "oversized"
+	errorKindRefused    = "refused"
+	errorKindTimeout    = "timeout"
+	errorKindTooLarge   = "too_large"
+	errorKindWrongKind  = "wrong_kind"
+
+	accessGold   = "gold"
+	accessGreen  = "green"
+	accessPublic = "public"
+
+	sourceArXiv           = "arxiv"
+	sourceCORE            = "core"
+	sourceCrossref        = "crossref"
+	sourceDOAJ            = "doaj"
+	sourceDOIMirror       = "doi-mirror"
+	sourceDOIViewer       = "doi-viewer"
+	sourceELife           = "elife"
+	sourceEuropePMC       = "europepmc"
+	sourceGoogleScholar   = "google-scholar"
+	sourceGutenberg       = "gutenberg"
+	sourceInternetArchive = "internetarchive"
+	sourceNBER            = "nber"
+	sourceIPFSCatalog     = "ipfs-catalog"
+	sourceMD5Catalog      = "md5-catalog"
+	sourceOpenAlex        = "openalex"
+	sourceOpenAIRE        = "openaire"
+	sourceOSF             = "osf"
+	sourcePLOS            = "plos"
+	sourceSemanticScholar = "semanticscholar"
+	sourceUnpaywall       = "unpaywall"
+	sourceZenodo          = "zenodo"
+
+	cacheLabel                 = "cache"
+	challengeMarkerCaptcha     = "captcha"
+	challengeMarkerCloudflare  = "cloudflare"
+	cacheStatusHit             = "hit"
+	cacheStatusMiss            = "miss"
+	cacheStatusRefresh         = "refresh"
+	frontmatterSourceHarvester = "harvester"
+	localLabel                 = "local"
+	localhostName              = "localhost"
+	publicDirName              = "public"
+	rungChromeImpersonation    = "chrome-impersonation"
+	rungDirect                 = "direct"
+	searchBackendBrave         = "brave"
+	searchBackendSearXNG       = "searxng"
+	resultDetailError          = "error"
+)
+
+// forumWallWidgetMarkers are markup signals for an actual captcha widget — a
+// reCAPTCHA/hCaptcha/Turnstile script src or class attribute — never a prose
+// word like "captcha" alone, which a real article discussing a wall can use
+// in passing without embedding the widget itself.
+var forumWallWidgetMarkers = []string{
+	"g-recaptcha", "recaptcha/api.js",
+	"h-captcha", "hcaptcha.com/1/api.js",
+	"cf-turnstile", "challenges.cloudflare.com/turnstile",
+}
+
+// hasCaptchaWidgetMarkup reports whether low (an already-lowercased body)
+// embeds an actual captcha widget, by its script src or class markup.
+func hasCaptchaWidgetMarkup(low string) bool {
+	for _, marker := range forumWallWidgetMarkers {
+		if strings.Contains(low, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// ProvenanceReferer is the Referer every page-facing request sends — the web
+// ladder's direct and chrome rungs, the browser rung's navigation, the image
+// loop and the app-shell probe: a visitor arriving from a search result. Some
+// anti-bot walls open for a plain GET that carries ANY Referer and refuse a
+// Referer-less one.
+const ProvenanceReferer = "https://www.google.com/"
 
 // ErrBrowserPolicyDenied marks a browser fetch the SSRF guard refused — a
 // private or internal address. It is POLICY, not an outage: the terminal
@@ -26,7 +177,7 @@ var ErrBrowserPolicyDenied = errors.New("fetch refused by policy (private or int
 // mutate body. kind is the detected content kind and source is the original
 // source URL/path.
 type Converter interface {
-	Convert(ctx context.Context, kind string, source string, body []byte) (string, error)
+	Convert(ctx context.Context, kind, source string, body []byte) (string, error)
 }
 
 // OCRConverter is implemented by converters that can force one OCR pass for a
@@ -36,12 +187,27 @@ type OCRConverter interface {
 	ConvertOCR(ctx context.Context, kind, source string, body []byte) (string, error)
 }
 
+// FullDOMConverter is implemented by converters that can convert an HTML
+// page's WHOLE DOM, boilerplate included, instead of extracting its main
+// content — the recall gate's fallback when main-content extraction kept too
+// little of the page's visible text (recall.go). Optional: without it a
+// low-recall conversion is flagged partial instead.
+type FullDOMConverter interface {
+	ConvertFullDOM(ctx context.Context, source string, body []byte) (string, error)
+}
+
 // BrowserFetcher is implemented by adapters that can render one URL in a real
 // browser (the ladder's last wall-bypass rung). Optional: a plain Converter
-// never escalates to it. headless false asks for a VISIBLE window — the
-// ladder spends that only on a wall the headless render could not pass.
+// never escalates to it. The render is always headless: nothing in this
+// contract can ask for a visible window.
+// finalURL is the address of the document html holds, after every redirect;
+// "" when the adapter cannot tell, which never proves the render is the page
+// requested (browserRenderWins).
 type BrowserFetcher interface {
-	FetchBrowser(ctx context.Context, source string, headless bool) (html string, status int, err error)
+	FetchBrowser(
+		ctx context.Context,
+		source string,
+	) (html string, status int, finalURL string, err error)
 }
 
 // Options configures a Harvester. Nil HTTP clients use safe defaults.
@@ -49,6 +215,7 @@ type BrowserFetcher interface {
 // explicit zero: CacheTTL < 0 never expires cached documents, NegativeTTL /
 // NegativeTransientTTL < 0 never cache failures.
 type Options struct {
+	Clock          clock.Clock
 	CacheDir       string
 	CacheTTL       time.Duration
 	Client         *http.Client
@@ -95,11 +262,14 @@ type Options struct {
 	GoogleScholarURL      string
 	DisableSearch         bool
 	// SearchAvailable tells the ladder's own failure messages whether the
-	// `search` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
+	// `search_web` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
 	// verdict, not re-derived here: the adapter already resolved
 	// SearXNGURL/BraveAPIKey/DisableSearch once, and re-deriving it a second
 	// way is how a hint drifts from the tool it names.
 	SearchAvailable bool
+	// MaxDownloadBytes caps one file download (harvest.maxDownloadBytes);
+	// 0 uses the 2 GiB default.
+	MaxDownloadBytes int64
 }
 
 // settings is the resolved scholarly/search/browser configuration New takes
@@ -143,10 +313,13 @@ const (
 )
 
 // FetchOptions controls one fetch. Refresh bypasses both positive and
-// negative caches; SizeOnly still fetches/caches the complete artifact.
+// negative caches; SizeOnly still fetches/caches the complete artifact;
+// OCRLang (ParseOCRLang) names the script a scan is OCR'd in, overriding
+// what the document states, and forces a fresh read (withOCRLang).
 type FetchOptions struct {
 	Refresh  bool
 	SizeOnly bool
+	OCRLang  string
 }
 
 // Result is deliberately JSON-friendly so the MCP adapter can return it
@@ -167,12 +340,19 @@ type Result struct {
 	ErrorKind    string   `json:"error_kind,omitempty"`
 	Challenge    bool     `json:"challenge,omitempty"`
 	HTTPStatus   int      `json:"http_status,omitempty"`
-	Members      []Member `json:"members,omitempty"`
+	RetryAfter   string   `json:"retry_after,omitempty"`
+	// Partial names why the artifact is known to be INCOMPLETE — a recall gate
+	// below its floor, lazy-loaded content still arriving when the browser
+	// rung's scroll cap hit, a thread whose comments are only partly in the
+	// page. It mirrors the marker line the content itself opens with
+	// (partialMarkerPrefix), so every surface that shows the content shows it.
+	Partial string `json:"partial,omitempty"`
 }
 
 // Harvester owns transport, policy and cache state.
 type Harvester struct {
 	options      Options
+	clock        clock.Clock
 	client       *http.Client
 	chrome       *http.Client
 	binaryDirect *http.Client
@@ -187,6 +367,13 @@ type Harvester struct {
 	settings     settings
 }
 
+func (h *Harvester) nowClock() clock.Clock {
+	if h != nil && h.clock != nil {
+		return h.clock
+	}
+	return clock.Real
+}
+
 type fetchFlight struct {
 	done   chan struct{}
 	result Result
@@ -198,19 +385,22 @@ type fetchFlight struct {
 // CacheDir was given and the one default (<home>/.professor/.cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
 	doiMirrorURL, err := normalizeDOIMirrorURL(options.DOIMirrorURL)
 	if err != nil {
 		return nil, err
 	}
-	ipfsCatalogURL, err := normalizeProviderBaseURL("ipfs-catalog", options.IPFSCatalogURL)
+	ipfsCatalogURL, err := normalizeProviderBaseURL(sourceIPFSCatalog, options.IPFSCatalogURL)
 	if err != nil {
 		return nil, err
 	}
-	doiViewerURL, err := normalizeProviderBaseURL("doi-viewer", options.DOIViewerURL)
+	doiViewerURL, err := normalizeProviderBaseURL(sourceDOIViewer, options.DOIViewerURL)
 	if err != nil {
 		return nil, err
 	}
-	md5CatalogURL, err := normalizeProviderBaseURL("md5-catalog", options.MD5CatalogURL)
+	md5CatalogURL, err := normalizeProviderBaseURL(sourceMD5Catalog, options.MD5CatalogURL)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +430,7 @@ func New(options Options) (*Harvester, error) {
 	options.MD5CatalogURL = resolved.md5CatalogURL
 	options.GoogleScholarURL = resolved.googleScholarURL
 	if options.CacheDir == "" {
-		dir, err := defaultCacheDir()
+		dir, err := defaultHarvestCacheDir()
 		if err != nil {
 			return nil, err
 		}
@@ -323,8 +513,21 @@ func New(options Options) (*Harvester, error) {
 	setUserAgent(client, userAgent)
 	setUserAgent(binaryDirect, userAgent)
 	setUserAgent(jina, userAgent)
-	return &Harvester{options: options, client: client, chrome: chrome, binaryDirect: binaryDirect, binaryChrome: binaryChrome, jina: jina, oa: oa,
-		userAgent: userAgent, cache: newCache(options.CacheDir, options.CacheTTL), neg: newNegativeCache(options.NegativeTTL, options.NegativeTransientTTL), flights: make(map[string]*fetchFlight), settings: resolved}, nil
+	return &Harvester{
+		options:      options,
+		clock:        options.Clock,
+		client:       client,
+		chrome:       chrome,
+		binaryDirect: binaryDirect,
+		binaryChrome: binaryChrome,
+		jina:         jina,
+		oa:           oa,
+		userAgent:    userAgent,
+		cache:        newCache(options.CacheDir, options.CacheTTL, options.Clock),
+		neg:          newNegativeCache(options.NegativeTTL, options.NegativeTransientTTL, options.Clock),
+		flights:      make(map[string]*fetchFlight),
+		settings:     resolved,
+	}, nil
 }
 
 // Fetch executes one request with default options.
@@ -345,7 +548,12 @@ func NewChromeClient(resolve func(context.Context, string) ([]net.IP, error)) *h
 // the transport's own wrapper stamps it on every request, so an adapter's
 // outer wrapper cannot lose to it. A nil resolve installs the
 // DNS-over-HTTPS resolver (ResolvePublicHost).
-func NewDirectClient(timeout time.Duration, proxy *url.URL, ua string, resolve func(context.Context, string) ([]net.IP, error)) *http.Client {
+func NewDirectClient(
+	timeout time.Duration,
+	proxy *url.URL,
+	ua string,
+	resolve func(context.Context, string) ([]net.IP, error),
+) *http.Client {
 	if resolve == nil {
 		resolve = ResolvePublicHost
 	}

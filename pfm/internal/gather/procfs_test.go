@@ -64,9 +64,9 @@ func TestNativeProcFSSmokeOwnProcessOnly(t *testing.T) {
 }
 
 func TestDetectCodexRootMetadataAndAncestorMatching(t *testing.T) {
-	codexRoot := t.TempDir()
-	first := filepath.Join(codexRoot, "sessions", "2026", "rollout-first.jsonl")
-	second := filepath.Join(codexRoot, "sessions", "2026", "rollout-second.jsonl")
+	codexHome := t.TempDir()
+	first := filepath.Join(codexHome, "sessions", "2026", "rollout-first.jsonl")
+	second := filepath.Join(codexHome, "sessions", "2026", "rollout-second.jsonl")
 	writeRolloutMeta(t, first, "user", "")
 	writeRolloutMeta(t, second, "subagent", "first")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
@@ -87,9 +87,9 @@ func TestDetectCodexRootMetadataAndAncestorMatching(t *testing.T) {
 			fdLinks: []FDLink{{FD: 1, Target: first}},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
-	got, err := DetectCodex(proc, codexRoot, panes)
+	got, err := DetectCodex(proc, codexHome, panes)
 	if err != nil {
 		t.Fatalf("DetectCodex() error = %v", err)
 	}
@@ -143,9 +143,9 @@ func TestDetectAgentsAndCache1H(t *testing.T) {
 			stat: ProcStat{ParentPID: 500},
 		},
 	}}
-	panes := []Pane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
+	panes := []ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
 
-	agents, err := DetectAgents(proc, home, panes)
+	agents, _, err := DetectAgents(proc, home, panes)
 	if err != nil {
 		t.Fatalf("DetectAgents() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestCache1HBadgeFollowsTheOptOut(t *testing.T) {
 					stat:       ProcStat{ParentPID: 500},
 				},
 			}}
-			panes := []Pane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
+			panes := []ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
 			sockets, err := DetectCache1H(proc, panes)
 			if err != nil {
 				t.Fatalf("DetectCache1H() error = %v", err)
@@ -281,7 +281,7 @@ func TestCache1HSharedSocketTakesTheColdestBirth(t *testing.T) {
 		processes[forced] = cold
 		sockets, err := DetectCache1H(
 			&fakeProcFS{processes: processes},
-			[]Pane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}},
+			[]ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}},
 		)
 		if err != nil {
 			t.Fatalf("DetectCache1H() error = %v", err)
@@ -294,7 +294,7 @@ func TestCache1HSharedSocketTakesTheColdestBirth(t *testing.T) {
 
 func TestWindowConvergenceClipsRunesOnlyHere(t *testing.T) {
 	longName := strings.Repeat("界", 25)
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket:      "cx-1-2-3",
 		SessionName: "cx-session",
 		WindowID:    "@1",
@@ -335,7 +335,11 @@ func TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime(t *testing.T)
 	if err := os.MkdirAll(pidDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "stat"), []byte("cpu  1 2 3 4\nbtime 1700000000\nprocesses 9\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(root, "stat"),
+		[]byte("cpu  1 2 3 4\nbtime 1700000000\nprocesses 9\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	// A comm holding ") " pins the last-paren parse; field 22 (starttime) is 12345 ticks.
@@ -349,7 +353,13 @@ func TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime(t *testing.T)
 	}
 	got, err := RealProcFS{Root: root}.Birth(4242)
 	if want := int64(1_700_000_000 + 12345/100); err != nil || got != want {
-		t.Fatalf("Birth = %d, %v; want %d (btime + starttime/USER_HZ), not the pid dir mtime %d", got, err, want, lazy.Unix())
+		t.Fatalf(
+			"Birth = %d, %v; want %d (btime + starttime/USER_HZ), not the pid dir mtime %d",
+			got,
+			err,
+			want,
+			lazy.Unix(),
+		)
 	}
 
 	// No btime to count from: an error, never a zero that reads as "unknown

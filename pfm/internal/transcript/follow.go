@@ -3,6 +3,8 @@ package transcript
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 )
@@ -36,7 +38,7 @@ func From(
 	ctx context.Context,
 	path, engine string,
 	offset int64,
-) ([]Entry, int64, error) {
+) (entries []Entry, consumed int64, returnErr error) {
 	if path == "" {
 		return nil, offset, nil
 	}
@@ -47,7 +49,11 @@ func From(
 		}
 		return nil, offset, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, offset, err
@@ -62,8 +68,8 @@ func From(
 		return nil, offset, err
 	}
 	reader := bufio.NewReaderSize(file, 64<<10)
-	entries := make([]Entry, 0, 8)
-	consumed := offset
+	entries = make([]Entry, 0, 8)
+	consumed = offset
 	for {
 		if err := ctx.Err(); err != nil {
 			return entries, consumed, err

@@ -489,6 +489,49 @@ type errNoSession struct{}
 
 func (errNoSession) Error() string { return "no server running on socket" }
 
+// cancelledCapturePane models the context-bound tmux capture process: it
+// blocks until cancellation kills the command, then reports the process error.
+type cancelledCapturePane struct {
+	fakeCodex
+	started chan struct{}
+}
+
+func (fake *cancelledCapturePane) Capture(ctx context.Context, _, _ string) (string, error) {
+	close(fake.started)
+	<-ctx.Done()
+	return "", errors.New("signal: killed")
+}
+
+func TestChatCancellationWinsKilledBootCapture(t *testing.T) {
+	fake := &cancelledCapturePane{started: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := Run(ctx, fake, codexRequest())
+		runDone <- err
+	}()
+
+	select {
+	case <-fake.started:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("boot capture did not start")
+	}
+
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+		if strings.Contains(err.Error(), "died at birth") {
+			t.Fatalf("Run() misclassified cancellation as chat death: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not return after cancellation")
+	}
+}
+
 func TestChatThatDiesAtBirthIsReportedAsSuch(t *testing.T) {
 	fake := &deadPane{}
 	_, err := Run(context.Background(), fake, codexRequest())
@@ -560,11 +603,19 @@ func (fake *fakeCodex) recordRename() {
 	if fake.ledger == "" {
 		return
 	}
-	file, err := os.OpenFile(filepath.Join(fake.ledger, "session_index.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(
+		filepath.Join(fake.ledger, "session_index.jsonl"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o600,
+	)
 	if err != nil {
 		panic(err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			panic(fmt.Errorf("close fake Codex rename ledger: %w", err))
+		}
+	}()
 	fmt.Fprintf(file, "{\"id\":\"fake-thread\",\"thread_name\":%q,\"updated_at\":%q}\n",
 		fake.name, time.Now().UTC().Format(time.RFC3339Nano))
 }
@@ -611,7 +662,12 @@ func TestCodexSilentRenameIsProvenFromTheIndex(t *testing.T) {
 		t.Fatalf("thread name = %q, want %q", fake.name, request.Name)
 	}
 	if got := countKey(fake.keys, "literal:"+codexRenameCommand); got != 1 {
-		t.Fatalf("%s typed %d times, want once — a proven rename is never retried: %v", codexRenameCommand, got, fake.keys)
+		t.Fatalf(
+			"%s typed %d times, want once — a proven rename is never retried: %v",
+			codexRenameCommand,
+			got,
+			fake.keys,
+		)
 	}
 }
 
@@ -657,7 +713,8 @@ func TestCodexRenameThatCannotBeVerifiedSaysSo(t *testing.T) {
 		t.Fatalf("an unverifiable rename was reported as proven: %#v", result)
 	}
 	joined := strings.Join(result.Warnings, " | ")
-	if !strings.Contains(joined, "could not verify") || !strings.Contains(joined, "session_index.jsonl") || strings.Contains(joined, "unnamed") {
+	if !strings.Contains(joined, "could not verify") || !strings.Contains(joined, "session_index.jsonl") ||
+		strings.Contains(joined, "unnamed") {
 		t.Fatalf("warnings = %q, want the unverifiable rename named with its cause", result.Warnings)
 	}
 	if got := countKey(fake.keys, "literal:"+codexRenameCommand); got != 1 {

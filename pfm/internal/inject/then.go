@@ -2,13 +2,17 @@ package inject
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // DeliverThen is the waiter half of chat.sh's __then subcommand
@@ -18,13 +22,16 @@ import (
 // confirmed delivery at a time: steer N+1 always waits out steer N's whole
 // turn. It runs in a DETACHED process because for a self-inject the waiter
 // waits on the very turn that spawned it.
-func (engine *Engine) DeliverThen(
-	ctx context.Context,
-	socketPath, target string,
-	steers []string,
-	selfTarget bool,
-) (Result, error) {
+//
+// The armed record beside the steer log (armed.go) names this waiter for as
+// long as the chain runs: claimed on entry, handed to the next hop when this
+// one delivered and armed it, removed on the chain's last delivery or on any
+// refusal — so ScheduleAfterCurrentTurn can refuse a second arming by name.
+func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Result, err error) {
+	states := trail(ctx, "then")
+	defer func() { outcome(states, result, err) }()
 	ctx = withSender(ctx, engine.sender(ctx))
+	socketPath, target, steers := wait.SocketPath, wait.Target, wait.Steers
 	if target == "" || len(steers) == 0 || steers[0] == "" {
 		return refused(
 			1,
@@ -38,7 +45,63 @@ func (engine *Engine) DeliverThen(
 			return Result{}, err
 		}
 	}
-	observed := engine.waitForSettledTurn(ctx, socketPath, target, selfTarget)
+	armed := armedPathFor(engine.steerLogPath(Target{SocketPath: socketPath, Pane: target}))
+	if claimErr := engine.claimArmed(armed, steers[0]); claimErr != nil {
+		// The record could not be READ. Claiming it anyway would overwrite an
+		// arming whose identity is unknown — see claimArmed. Nothing is typed
+		// and nothing is released: the record stays exactly as it was found,
+		// for whoever wrote it.
+		return Result{
+			Status: statusUndelivered,
+			Code:   CodeUndelivered,
+			Message: fmt.Sprintf(
+				"then steer NOT delivered: could not read the armed steer record %s: %v — refusing to claim it over an arming this waiter cannot identify; steer kept in the log: %q",
+				armed,
+				claimErr,
+				steers[0],
+			),
+		}, nil
+	}
+	defer func() {
+		engine.releaseArmed(armed, err == nil && result.Code == 0 && result.Steers > 0)
+	}()
+	observed, baselineErr := engine.waitForSettledTurn(
+		ctx, socketPath, target, wait.SelfTarget, pfmengine.ID(wait.Engine),
+	)
+	if baselineErr != nil {
+		// Not one capture of the pane succeeded, so the waiter never had a
+		// reference frame to judge a compaction receipt against. Delivering
+		// here would be delivering blind — and reporting the strong guarantee
+		// over a pane that was never read once is the exact shape this waiter
+		// exists to refuse.
+		return Result{
+			Status: statusUndelivered,
+			Code:   CodeUndelivered,
+			Message: fmt.Sprintf(
+				"then steer NOT delivered: could not read pane %q even once for a baseline (last tmux error: %v) — the waiter never had a reference frame for this turn; steer kept in the log: %q",
+				target,
+				baselineErr,
+				steers[0],
+			),
+		}, nil
+	}
+	if !observed && wait.Engine == string(pfmengine.Codex) {
+		// The steady-idle fallback below is a GUESS, and on a Codex pane it
+		// is the wrong one: the Claude busy regex does not know the Codex
+		// footer and the receipt regex does not know its compaction line
+		// (guards.go), so "never went busy" is what a Codex compaction in
+		// progress looks like, and the two 2026-09-18 sightings were steers
+		// typed into exactly that. A steer lost with a named cause beats one
+		// typed into a compacting pane; the spelling lands with Tier B E2.09.
+		return Result{
+			Status: statusUndelivered,
+			Code:   CodeUndelivered,
+			Message: fmt.Sprintf(
+				"then steer NOT delivered: no turn boundary observed on a Codex pane — the Codex busy/compaction footer is not yet pinned (Tier B beat E2.09 captures it); steer kept in the log: %q",
+				steers[0],
+			),
+		}, nil
+	}
 	if quiet, readErr := engine.waitForQuietTypist(ctx, socketPath, target); !quiet {
 		// Never deliver over a typing human, and never force: the waiter has
 		// no operator standing by to authorize force_now, and the whole point
@@ -51,7 +114,7 @@ func (engine *Engine) DeliverThen(
 		// anti-pattern this guard exists to police.
 		if readErr != nil {
 			return Result{
-				Status: "undelivered",
+				Status: statusUndelivered,
 				Code:   CodeUndelivered,
 				Message: fmt.Sprintf(
 					"then steer NOT delivered: could not read who is at %q for %s (last tmux error: %v); chain aborted with %d steer(s) undelivered",
@@ -73,7 +136,7 @@ func (engine *Engine) DeliverThen(
 			),
 		}, nil
 	}
-	result, err := engine.inject(ctx, Request{
+	result, err = engine.inject(ctx, Request{
 		Target:  target,
 		Message: steers[0],
 		Then:    steers[1:],
@@ -92,147 +155,9 @@ func (engine *Engine) DeliverThen(
 	return result, err
 }
 
-// paneSample is one observation of the target pane. Busy alone cannot answer
-// "is the turn I was sent to ride out over yet" — it is true for ANY turn,
-// including the caller's own and the one the session starts by itself after a
-// compaction. The receipt is the only positive evidence in the pane that a
-// compaction actually ran.
-type paneSample struct {
-	busy    bool
-	receipt bool
-}
-
-func (engine *Engine) samplePane(
-	ctx context.Context,
-	socketPath, target string,
-) paneSample {
-	capture, err := engine.tmux.Capture(ctx, socketPath, target, false, 0)
-	if err != nil {
-		// An unreadable pane is not busy; the delivery attempt reports the
-		// dead pane truthfully instead of spinning here.
-		return paneSample{}
-	}
-	return paneSample{
-		busy:    IsBusy(capture),
-		receipt: CompactionReceipt(capture),
-	}
-}
-
-// waitForSettledTurn rides out the turn the PRIMARY started and reports whether
-// it ever actually saw that turn.
-//
-// The old shape (chat.sh:1062-1077) waited for the pane to go busy and then for
-// idle to hold steady. That works only if the busy it latches onto belongs to
-// the primary — and busy carries no identity. For a self-inject the pane is
-// already busy with the caller's own turn when the waiter wakes up, so the
-// waiter would ride out the WRONG turn and then race whichever idle came first,
-// losing in one of two directions depending on nothing but timing:
-//
-//   - caller stops promptly -> the waiter sees the idle BEFORE the queued
-//     /compact has run and delivers the steer into a session that is about to
-//     be compacted away, taking the steer with it.
-//   - caller keeps working -> the brief idle right after the compaction is
-//     shorter than the stability window, so the waiter sleeps through the one
-//     usable moment and delivers on top of work that already resumed.
-//
-// Both are the same defect. The fix is to stop inferring the turn from a
-// coincidence and identify it instead:
-//
-//  1. the caller's own turn must END first (an idle observation) — until then
-//     nothing on screen can belong to the primary;
-//  2. a turn must START after that (a busy observation) — that one is the
-//     primary's;
-//  3. a compaction receipt seen after BOTH is positive proof the primary was a
-//     compaction and that it finished, so the first quiet sample after it is
-//     the delivery point.
-//
-// Requiring the receipt to arrive after step 2 is what keeps step 3 from
-// becoming a coincidence detector in its own right: a receipt already on screen
-// when the waiter wakes up is scrollback from an EARLIER compaction and proves
-// nothing about this one.
-//
-// Step 3 cannot apply to a primary that prints no receipt — a reload steer, a
-// plain queued message, and (a NAMED gap) a Codex compaction, whose receipt
-// spelling nobody here has confirmed. Those fall back to steps 1-2 plus the
-// steady-idle window, which is strictly better than the old behaviour because
-// the caller's own turn can no longer be mistaken for the primary's.
-//
-// The returned bool is false when the bound expired without ever observing a
-// turn boundary. It is not an error — refusing to deliver would strand the
-// chain, which is worse — but it is a WEAKER guarantee than the caller asked
-// for, and DeliverThen says so on the visible result rather than only in a log.
-func (engine *Engine) waitForSettledTurn(
-	ctx context.Context,
-	socketPath, target string,
-	selfTarget bool,
-) bool {
-	sleepContext(ctx, engine.options.ThenMin)
-
-	// Step 1 exists only for a self-inject, where the pane is busy with the
-	// CALLER's turn when the waiter wakes up. For any other target nothing else
-	// owns that pane, so its first busy already belongs to the primary and
-	// insisting on a prior idle would wait out a boundary that never comes.
-	callerYielded := !selfTarget
-	turnStarted := false
-	stable := 0
-	sinceYield := 0
-
-	tries := engine.options.ThenBusyTries + engine.options.ThenIdleTries
-	for attempt := 0; attempt < tries; attempt++ {
-		sample := engine.samplePane(ctx, socketPath, target)
-
-		switch {
-		case !callerYielded:
-			callerYielded = !sample.busy
-		case !turnStarted:
-			turnStarted = sample.busy
-			sinceYield++
-		}
-
-		// Positive proof outranks the busy/idle dance: once this turn's own
-		// compaction receipt is on screen and the pane has gone quiet, the
-		// turn we were sent to ride out is provably over.
-		if turnStarted && sample.receipt && !sample.busy {
-			sleepContext(ctx, engine.options.ThenSettle)
-			return true
-		}
-
-		if turnStarted {
-			if sample.busy {
-				stable = 0
-			} else {
-				stable++
-			}
-			if stable >= engine.options.ThenIdleStable {
-				sleepContext(ctx, engine.options.ThenSettle)
-				return true
-			}
-		}
-
-		// The primary's turn never began. Either it started and finished
-		// inside ThenMin, or this pane does not report busy at all. Holding
-		// out for a boundary that already went by would burn the whole idle
-		// budget — minutes — and strand the steer, which is a worse failure
-		// than delivering on a weaker guarantee. So fall back to steady idle
-		// and return false, which is what puts the warning on the result
-		// instead of letting a guess pass for proof.
-		if callerYielded && !turnStarted &&
-			sinceYield > engine.options.ThenBusyTries {
-			if sample.busy {
-				stable = 0
-			} else {
-				stable++
-			}
-			if stable >= engine.options.ThenIdleStable {
-				sleepContext(ctx, engine.options.ThenSettle)
-				return false
-			}
-		}
-		sleepContext(ctx, engine.options.ThenIdlePoll)
-	}
-	sleepContext(ctx, engine.options.ThenSettle)
-	return false
-}
+// statusUndelivered is the Result.Status of a waiter that gave up without
+// typing: the steer is in the log, nothing reached the pane.
+const statusUndelivered = "undelivered"
 
 // waitForQuietTypist holds the waiter back from delivering a steer over a
 // human mid-keystroke — the same guard engine.inject applies to a live
@@ -272,10 +197,10 @@ func (engine *Engine) waitForQuietTypist(
 				target,
 				err,
 			)
-		case !typing || engine.options.Now().Sub(last) >= engine.options.TypistQuiet:
+		case !typing || engine.options.Clock.Now().Sub(last) >= engine.options.TypistQuiet:
 			return true, nil
 		}
-		sleepContext(ctx, engine.options.ThenIdlePoll)
+		engine.sleepContext(ctx, engine.options.ThenIdlePoll)
 	}
 	if engine.options.ThenIdleTries > 0 && errCount == engine.options.ThenIdleTries {
 		return false, lastErr
@@ -290,13 +215,18 @@ type CommandThenSpawner struct {
 	ConfigPath string
 	Setsid     string
 	Nohup      string
+	// Runner is the deps.Runner seam Spawn launches the waiter through; nil
+	// defaults to obs.Runner(deps.RealRunner{}).
+	Runner deps.Runner
+	// Clock stamps the armed record (armed.go); nil defaults to clock.Real.
+	Clock clock.Clock
 }
 
 // Spawn launches the detached waiter and returns as soon as it is running.
 func (spawner CommandThenSpawner) Spawn(
 	ctx context.Context,
 	request SteerSpawn,
-) error {
+) (returnErr error) {
 	executable := spawner.Executable
 	if executable == "" {
 		var err error
@@ -320,6 +250,9 @@ func (spawner CommandThenSpawner) Spawn(
 	if request.SelfTarget {
 		arguments = append(arguments, "--self")
 	}
+	if request.Engine != "" {
+		arguments = append(arguments, "--engine", request.Engine)
+	}
 	for _, steer := range request.Steers {
 		arguments = append(arguments, "--steer", steer)
 	}
@@ -332,14 +265,6 @@ func (spawner CommandThenSpawner) Spawn(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var command *exec.Cmd
-	if usingNohup {
-		// The POSIX floor has no `setsid -f`; start it asynchronously and
-		// release the process handle so the waiter outlives this caller.
-		command = exec.Command(launcher, arguments...)
-	} else {
-		command = exec.CommandContext(ctx, launcher, arguments...)
-	}
 	stated := []string{
 		"CHAT_INJECT_SOCKET=" + request.SocketPath,
 		"CHAT_THEN_CHAIN=1",
@@ -349,38 +274,80 @@ func (spawner CommandThenSpawner) Spawn(
 	// answers with the FIRST match, so appending over an inherited value would
 	// leave the inherited one winning, and a chain hop would sign as whoever
 	// spawned the hop before it.
-	command.Env = append(withoutNames(os.Environ(), stated), stated...)
+	env := append(withoutNames(os.Environ(), stated), stated...)
+	// Stdin is left unset: a deps.Runner.Start child reads from the null
+	// device by default (os/exec's own contract for a nil Stdin) exactly as
+	// the explicit /dev/null wiring this replaced did.
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("open null device for then waiter: %w", err)
 	}
-	defer null.Close()
-	command.Stdin = null
+	defer func() {
+		if err := null.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close null device for then waiter: %w", err))
+		}
+	}()
 	// A fresh chain truncates the log; a HOP appends — truncating on a hop
 	// would wipe the chain's earlier hops while they are still being written.
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if request.Append {
 		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
 	}
+	var stdout, stderr io.Writer = null, null
 	log, err := os.OpenFile(request.LogPath, flags, 0o600)
-	if err != nil {
-		command.Stdout = null
-		command.Stderr = null
-	} else {
-		defer log.Close()
-		command.Stdout = log
-		command.Stderr = log
+	if err == nil {
+		defer func() {
+			if err := log.Close(); err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("close then waiter log %s: %w", request.LogPath, err))
+			}
+		}()
+		stdout, stderr = log, log
 	}
-	if usingNohup {
-		if err := command.Start(); err != nil {
+	runner := spawner.Runner
+	if runner == nil {
+		runner = obs.Runner(deps.RealRunner{})
+	}
+	opts := deps.StartOptions{
+		Env:    env,
+		Stdout: stdout,
+		Stderr: stderr,
+		// The nohup floor detaches by releasing the process handle right
+		// after Start (deps.StartOptions' Detach shape); the setsid launcher
+		// already forks and returns on its own (setsid -f), so Spawn waits
+		// on it exactly as it waited on command.Run() before this seam.
+		Detach: usingNohup,
+	}
+	// The armed record goes down BEFORE the waiter starts, so a schedule
+	// racing this one already sees the pane armed; a chain hop (Append) is
+	// the same arming and leaves the record to the hop that owns it.
+	if !request.Append && request.LogPath != "" && len(request.Steers) != 0 {
+		clk := spawner.Clock
+		if clk == nil {
+			clk = clock.Real
+		}
+		if err := armRecord(request, clk.Now()); err != nil {
+			return err
+		}
+	}
+	process, err := runner.Start(ctx, append([]string{launcher}, arguments...), opts)
+	if err != nil {
+		if !request.Append && request.LogPath != "" {
+			if removeErr := os.Remove(armedPathFor(request.LogPath)); removeErr != nil {
+				err = errors.Join(err, fmt.Errorf("remove armed steer record after a failed start: %w", removeErr))
+			}
+		}
+		if usingNohup {
 			return fmt.Errorf("start detached then waiter with nohup: %w", err)
 		}
-		if err := command.Process.Release(); err != nil {
+		return fmt.Errorf("start detached then waiter with setsid: %w", err)
+	}
+	if usingNohup {
+		if err := process.Release(); err != nil {
 			return fmt.Errorf("release detached then waiter: %w", err)
 		}
 		return nil
 	}
-	if err := command.Run(); err != nil {
+	if err := process.Wait(); err != nil {
 		return fmt.Errorf("start detached then waiter with setsid: %w", err)
 	}
 	return nil
@@ -406,7 +373,7 @@ func senderEnvironment(sender Sender) []string {
 
 // withoutNames drops every definition of the names the given NAME=value pairs
 // set, so the caller's own definitions are the only ones in the child.
-func withoutNames(environment []string, pairs []string) []string {
+func withoutNames(environment, pairs []string) []string {
 	names := make(map[string]bool, len(pairs))
 	for _, pair := range pairs {
 		if name, _, ok := strings.Cut(pair, "="); ok {

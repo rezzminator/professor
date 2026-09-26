@@ -15,7 +15,7 @@ import (
 // applying a pending ⌃X kill or a pending ⌃S primary-account switch. It
 // drives the REAL Bubble Tea picker inside a scratch tmux pane — the same
 // subprocess-reexec technique TestJailedEvalAttachFromPlainAndNestedTmux uses
-// (attach_e2e_test.go) — because the bug lives in the command loop wired
+// (attach_jail_test.go) — because the bug lives in the command loop wired
 // around the picker (runLS), not in the pure Model in isolation.
 func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -54,8 +54,8 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	// The picker paints its cached first frame, then promotes the row once
 	// the async gather goroutine finishes. Pressing keys before that settles
 	// risks landing on a frame that has not drawn the row yet
-	// (attach_e2e_test.go:proveAttach uses the same wait for the same reason).
-	time.Sleep(5 * time.Second)
+	// (attach_jail_test.go:proveAttach uses the same wait for the same reason).
+	waitForTmuxPaneText(t, socket, jail.env, "PICKERCANCEL", 5*time.Second)
 	for _, key := range []string{"C-x", "C-s", "Escape"} {
 		send := exec.Command("tmux", "-L", socket, "send-keys", "-t", "picker", key)
 		send.Env = jail.env
@@ -94,6 +94,23 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	}
 }
 
+func waitForTmuxPaneText(t *testing.T, socket string, environment []string, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last string
+	for time.Now().Before(deadline) {
+		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p")
+		capture.Env = environment
+		output, err := capture.CombinedOutput()
+		last = string(output)
+		if err == nil && strings.Contains(last, want) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("tmux pane did not paint %q within %s; last capture=%q", want, timeout, last)
+}
+
 type pickerCancelJail struct {
 	root   string
 	home   string
@@ -118,7 +135,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 	claudeRoot := filepath.Join(root, "claude")
 	project := filepath.Join(root, "work", "picker-cancel-project")
 	procRoot := filepath.Join(root, "proc")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	for _, directory := range []string{
 		filepath.Join(home, ".local", "bin"),
 		tmuxDir,
@@ -126,7 +143,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		claudeRoot,
 		project,
 		procRoot,
-		codexRoot,
+		codexHome,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -144,20 +161,13 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		t.Fatal(err)
 	}
 
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrapper := "#!/bin/sh\nexec " + shellQuote(executable) +
-		" -test.run '^TestPFMAttachHelper$' -- \"$@\"\n"
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := os.WriteFile(binary, []byte(wrapper), 0o700); err != nil {
+	if err := os.Symlink(testPFMBinary, binary); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(home, ".local", "bin") + string(os.PathListSeparator) +
 		os.Getenv("PATH")
 	env := replaceAttachEnv(os.Environ(), map[string]string{
-		attachHelperEnv:    "1",
 		"HOME":             home,
 		"PATH":             path,
 		"TERM":             "xterm-256color",
@@ -167,7 +177,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		"PFM_DB":           filepath.Join(root, "fleet.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
-		"PFM_CODEX_ROOT":   codexRoot,
+		"PFM_CODEX_ROOT":   codexHome,
 		"PFM_TMUX_DIR":     tmuxDir,
 		"PFM_PROC_ROOT":    procRoot,
 	})

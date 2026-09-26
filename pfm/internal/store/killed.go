@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"sort"
 	"time"
 
-	"hostops/pfm/internal/shared"
-
 	modernsqlite "modernc.org/sqlite"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -60,24 +61,33 @@ func (s *Store) killedWrite(
 	id string,
 	write func() error,
 ) error {
+	// The ONLY busy-retry loop in the package, so Retries lives here: the
+	// fleetdb statement underneath write() already records its own verb and
+	// table, and this record adds the retry count around the whole attempt.
+	op := obs.SQL(ctx, storeKind, "UPDATE hidden")
 	err := write()
-	if !isBusy(err) {
+	if !isSQLiteBusy(err) {
+		op.End(1, err)
 		return err
 	}
 
-	timer := time.NewTimer(busyRetryDelay)
+	timer := s.clockTimer(busyRetryDelay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
+		op.End(1, ctx.Err())
 		return ctx.Err()
-	case <-timer.C:
+	case <-timer.C():
 	}
 
+	op.Retries++
 	err = write()
-	if !isBusy(err) {
+	if !isSQLiteBusy(err) {
+		op.End(1, err)
 		return err
 	}
 
+	op.End(1, err)
 	s.warningf(
 		"WARNING: pfm could not %s %q in %s: SQLite remained busy after "+
 			"retry; the change was NOT written\n",
@@ -87,11 +97,19 @@ func (s *Store) killedWrite(
 	)
 	counterCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_ = s.IncrementMeta(counterCtx, "busy_"+action+"_warnings")
+	if counterErr := s.IncrementMeta(counterCtx, "busy_"+action+"_warnings"); counterErr != nil {
+		s.warningf(
+			"WARNING: pfm could not record the busy-warning counter for %s %q in %s: %v\n",
+			action,
+			id,
+			s.state.Path(),
+			counterErr,
+		)
+	}
 	return err
 }
 
-func isBusy(err error) bool {
+func isSQLiteBusy(err error) bool {
 	var sqliteError *modernsqlite.Error
 	return errors.As(err, &sqliteError) &&
 		sqliteError.Code()&0xff == sqliteBusyCode
@@ -153,7 +171,7 @@ func (s *Store) KilledChats(ctx context.Context) ([]Killed, error) {
 	for id, record := range records {
 		killedAt[id] = record.KilledAt
 	}
-	ids := shared.SortedIDs(killedAt)
+	ids := fleetdb.SortedIDs(killedAt)
 	engines, err := s.deriveEngines(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -179,7 +197,7 @@ func (s *Store) KilledChats(ctx context.Context) ([]Killed, error) {
 // /clear or explicit permanent kill from the stale read/delete race.
 func (s *Store) activeKilledRecords(
 	ctx context.Context,
-) (map[string]shared.KilledRecord, error) {
+) (map[string]fleetdb.KilledRecord, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		records, err := s.state.KilledRecords(ctx)
 		if err != nil {
@@ -234,7 +252,7 @@ func (s *Store) transcriptPromptCounts(
 		for index, id := range chunk {
 			arguments[index] = id
 		}
-		rows, err := s.db.QueryContext(
+		rows, err := s.logged().QueryContext(
 			ctx,
 			"SELECT uuid,prompt_count FROM transcripts WHERE uuid IN ("+placeholders(len(chunk))+")",
 			arguments...,
@@ -272,7 +290,8 @@ func (s *Store) transcriptPromptCounts(
 		return nil, fmt.Errorf("query clear-kill Codex prompt counts: %w", err)
 	}
 	lineages, _ := ResolveCodexLineages(rollouts)
-	for _, lineage := range lineages {
+	for index := range lineages {
+		lineage := &lineages[index]
 		if _, found := unresolved[lineage.RootID]; found {
 			counts[lineage.RootID] = lineage.PromptCount
 		}
@@ -289,7 +308,7 @@ func (s *Store) transcriptPromptCounts(
 // stored column. The shared killed table is keyed by uuid alone, so the engine
 // is read back out of whichever index table claims the id:
 // a transcript uses engine.Claude, a rollout or lineage root uses engine.Codex,
-// and an OpenCode mirror row uses engine.Opencode. An id no table knows is an
+// and an OpenCode mirror row uses engine.OpenCode. An id no table knows is an
 // orphaned kill and keeps an empty engine, which
 // compose reads as "killed whatever the engine".
 func (s *Store) deriveEngines(
@@ -314,7 +333,7 @@ func (s *Store) deriveEngineChunk(
 	ctx context.Context,
 	ids []string,
 	engines map[string]pfmengine.ID,
-) error {
+) (returnErr error) {
 	marks := placeholders(len(ids))
 	query := `
 SELECT uuid, ? FROM transcripts WHERE uuid IN (` + marks + `)
@@ -328,18 +347,22 @@ UNION ALL
 SELECT id, ? FROM oc_sessions WHERE id IN (` + marks + `)`
 	// One bound id list per IN clause: five clauses, five copies.
 	arguments := make([]any, 0, (len(ids)+1)*5)
-	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.Codex, pfmengine.Codex, pfmengine.Opencode} {
+	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.Codex, pfmengine.Codex, pfmengine.OpenCode} {
 		arguments = append(arguments, string(id))
 		for _, id := range ids {
 			arguments = append(arguments, id)
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, arguments...)
+	rows, err := s.logged().QueryContext(ctx, query, arguments...)
 	if err != nil {
 		return fmt.Errorf("derive killed chat engines: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close killed chat engine rows: %w", err))
+		}
+	}()
 	for rows.Next() {
 		var id, engine string
 		if err := rows.Scan(&id, &engine); err != nil {
@@ -413,10 +436,10 @@ func (s *Store) syncEffectiveKilled(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, effectiveKilledDDL); err != nil {
+	if _, err := s.logged().ExecContext(ctx, effectiveKilledDDL); err != nil {
 		return fmt.Errorf("create effective killed mirror: %w", err)
 	}
-	if _, err := s.db.ExecContext(
+	if _, err := s.logged().ExecContext(
 		ctx,
 		"DELETE FROM "+effectiveKilled,
 	); err != nil {
@@ -438,7 +461,7 @@ func (s *Store) syncEffectiveKilled(ctx context.Context) error {
 			values = append(values, "(?,?)"...)
 			arguments = append(arguments, ids[index], records[ids[index]].KilledAt)
 		}
-		if _, err := s.db.ExecContext(
+		if _, err := s.logged().ExecContext(
 			ctx,
 			"INSERT INTO "+effectiveKilled+"(uuid,killed_at) VALUES "+string(values),
 			arguments...,

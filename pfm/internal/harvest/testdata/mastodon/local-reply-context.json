@@ -1,0 +1,29 @@
+{
+ "ancestors": [],
+ "descendants": [
+  {
+   "id": "117117412950212446",
+   "created_at": "2026-08-18T16:18:19.184Z",
+   "in_reply_to_id": "117117378316307585",
+   "sensitive": false,
+   "spoiler_text": "",
+   "visibility": "public",
+   "language": "en",
+   "replies_count": 0,
+   "reblogs_count": 0,
+   "favourites_count": 1,
+   "edited_at": null,
+   "media_attachments": [],
+   "uri": "https://social.example/@user-0/117117412950212446",
+   "url": "https://social.example/@user-0/117117412950212446",
+   "content": "<p>The author answers the local reply.</p>",
+   "account": {
+    "id": "1000",
+    "username": "user-0",
+    "acct": "user-0",
+    "display_name": "User 0",
+    "url": "https://social.example/@user-0"
+   }
+  }
+ ]
+}

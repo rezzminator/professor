@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // ErrAwaitTimeout ends a wait that ran out of patience. It is not a failure of
@@ -38,6 +39,20 @@ type Turn struct {
 	// Offset is the transcript frontier this turn ended on, so a caller
 	// holding a conversation open can wait for the NEXT answer from here.
 	Offset int64 `json:"-"`
+}
+
+func waitForNextPoll(ctx context.Context, timerClock clock.Clock, duration time.Duration) error {
+	if timerClock == nil {
+		timerClock = clock.Real
+	}
+	timer := timerClock.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C():
+		return nil
+	}
 }
 
 // AwaitOptions bounds one wait.
@@ -70,6 +85,7 @@ type AwaitOptions struct {
 	// a fleet-wide scan, the transcript read is one file.
 	ResolveEvery time.Duration
 	Now          func() time.Time
+	Clock        clock.Clock
 }
 
 func (options AwaitOptions) orDefaults() AwaitOptions {
@@ -83,7 +99,12 @@ func (options AwaitOptions) orDefaults() AwaitOptions {
 		options.ResolveEvery = 3 * time.Second
 	}
 	if options.Now == nil {
-		options.Now = time.Now
+		if options.Clock == nil {
+			options.Clock = clock.Real
+		}
+		options.Now = options.Clock.Now
+	} else if options.Clock == nil {
+		options.Clock = clock.Real
 	}
 	return options
 }
@@ -136,10 +157,8 @@ func Await(
 				turn.State = StateMissing
 				return finish(turn, answers, start, options.Now()), ErrAwaitTimeout
 			}
-			select {
-			case <-ctx.Done():
-				return finish(turn, answers, start, options.Now()), ctx.Err()
-			case <-time.After(options.Poll):
+			if err := waitForNextPoll(ctx, options.Clock, options.Poll); err != nil {
+				return finish(turn, answers, start, options.Now()), err
 			}
 			continue
 		}
@@ -193,7 +212,7 @@ func Await(
 			return finish(turn, answers, start, options.Now()), nil
 		}
 		answered := len(answers) > 0 &&
-			newestRole == transcript.RoleAssistant &&
+			assistantAnswered(newestRole) &&
 			options.Now().Sub(quietSince) >= options.Settle
 		if answered {
 			turn.State = StateIdle
@@ -210,10 +229,8 @@ func Await(
 			turn.State = StateWorking
 			return finish(turn, answers, start, options.Now()), ErrAwaitTimeout
 		}
-		select {
-		case <-ctx.Done():
-			return finish(turn, answers, start, options.Now()), ctx.Err()
-		case <-time.After(options.Poll):
+		if err := waitForNextPoll(ctx, options.Clock, options.Poll); err != nil {
+			return finish(turn, answers, start, options.Now()), err
 		}
 	}
 }

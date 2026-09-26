@@ -3,7 +3,7 @@ package fleet
 import (
 	"testing"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // TestCodexRolloutFingerprintsCaptureIdentityPerPID pins the shape the
@@ -50,7 +50,11 @@ func TestCodexRolloutFingerprintsEqualDetectsEveryKindOfChange(t *testing.T) {
 			111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: false},
 		},
 		"identity error appeared": {
-			111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: true, identityError: "read Codex descriptors: boom"},
+			111: {
+				rolloutPath:   "/codex/rollout-a.jsonl",
+				rolloutHeld:   true,
+				identityError: "read Codex descriptors: boom",
+			},
 		},
 		"a second PID joined": {
 			111: {rolloutPath: "/codex/rollout-a.jsonl", rolloutHeld: true},

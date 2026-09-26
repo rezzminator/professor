@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,11 @@ func (talk *conversation) say(lines ...string) {
 	if err != nil {
 		panic(err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			panic(fmt.Errorf("close conversation transcript: %w", err))
+		}
+	}()
 	for _, line := range lines {
 		if _, err := file.WriteString(line + "\n"); err != nil {
 			panic(err)

@@ -75,11 +75,19 @@ func TestVolatileCacheTTLBackdatedStampAndZeroOverride(t *testing.T) {
 	}
 	path := cacheHTMLPath(t, cacheDir)
 	setCacheStamp(t, path, time.Now().Add(-23*time.Hour))
-	if result := harvester.Fetch(context.Background(), source); result.Error != "" || result.CacheStatus != "hit" || hits != 1 {
+	if result := harvester.Fetch(
+		context.Background(),
+		source,
+	); result.Error != "" || result.CacheStatus != "hit" ||
+		hits != 1 {
 		t.Fatalf("young cache=%#v hits=%d", result, hits)
 	}
 	setCacheStamp(t, path, time.Now().Add(-25*time.Hour))
-	if result := harvester.Fetch(context.Background(), source); result.Error != "" || result.CacheStatus != "miss" || hits != 2 {
+	if result := harvester.Fetch(
+		context.Background(),
+		source,
+	); result.Error != "" || result.CacheStatus != "miss" ||
+		hits != 2 {
 		t.Fatalf("old cache=%#v hits=%d", result, hits)
 	}
 
@@ -91,7 +99,11 @@ func TestVolatileCacheTTLBackdatedStampAndZeroOverride(t *testing.T) {
 	zeroPath := cacheHTMLPath(t, noExpiry.options.CacheDir)
 	setCacheStamp(t, zeroPath, time.Now().Add(-72*time.Hour))
 	before := hits
-	if result := noExpiry.Fetch(context.Background(), zeroSource); result.Error != "" || result.CacheStatus != "hit" || hits != before {
+	if result := noExpiry.Fetch(
+		context.Background(),
+		zeroSource,
+	); result.Error != "" || result.CacheStatus != "hit" ||
+		hits != before {
 		t.Fatalf("zero ttl cache=%#v hits=%d before=%d", result, hits, before)
 	}
 }

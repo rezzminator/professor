@@ -6,8 +6,10 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/reap"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/reap"
 )
 
 // runReap sweeps the chat socket graveyard: the tmux servers (and their
@@ -22,12 +24,16 @@ import (
 // The default is a DRY RUN. A wrongly kept socket costs memory; a wrongly
 // killed one costs a chat nobody can get back, so killing has to be asked for.
 func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"reap",
 		"usage: pfm reap [--apply] [--horizon 48h] [--busy-recent SECONDS] [--json]",
 		stderr,
 	)
-	apply := flags.Bool("apply", false, "kill idle-past-horizon and unattached orphan chats, and remove dead socket files")
+	apply := flags.Bool(
+		"apply",
+		false,
+		"kill idle-past-horizon and unattached orphan chats, and remove dead socket files",
+	)
 	horizon := flags.Duration(
 		"horizon",
 		48*time.Hour,
@@ -38,8 +44,8 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		60,
 		"seconds of transcript writes that count as a working chat",
 	)
-	asJSON := flags.Bool("json", false, "emit one JSON report instead of the text table")
-	if code, ok := parseFlags(flags, args); !ok {
+	asJSON := flags.Bool(jsonFormat, false, "emit one JSON report instead of the text table")
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *busyRecent < 0 || *horizon < 0 {
@@ -58,10 +64,10 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		Busy:           reap.NewClaudeAgentsConfigured(resolved, runtime.Config.Claude.Binary, configDirs),
 		ClaudeBinary:   runtime.Config.Claude.Binary,
 		CodexBinary:    runtime.Config.Codex.Binary,
-		OpencodeBinary: runtime.Config.OpenCode.Binary,
-		CodexRoots:     runtime.Config.CodexHomes(),
+		OpenCodeBinary: runtime.Config.OpenCode.Binary,
+		CodexHomes:     runtime.Config.CodexHomes(),
 		KillServer: func(ctx context.Context, socket string) error {
-			return killChatServer(ctx, resolved, socket)
+			return pfmchat.KillServer(ctx, resolved, socket)
 		},
 	})
 	if err != nil {
@@ -78,7 +84,10 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		fmt.Fprintf(stderr, "pfm reap: %v\n", err)
 		return 1
 	}
-	printReapReport(report, *apply, *asJSON, stdout, stderr)
+	if err := printReapReport(report, *apply, *asJSON, stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "pfm reap: encode JSON: %v\n", err)
+		return 1
+	}
 	// A sweep that reports success having failed to kill is the failure mode
 	// this command exists to prevent: any decision apply actually attempted
 	// and could not complete forces the exit code non-zero.
@@ -114,7 +123,7 @@ func printReapReport(
 	apply bool,
 	asJSON bool,
 	stdout, stderr io.Writer,
-) {
+) error {
 	if !report.AgentsOK {
 		fmt.Fprintf(
 			stderr,
@@ -126,7 +135,7 @@ func printReapReport(
 	reapGroup, sparedGroup, unknownGroup := groupReapDecisions(report.Decisions)
 
 	if asJSON {
-		writeJSON(stdout, reapJSONReport{
+		return writeJSON(stdout, reapJSONReport{
 			Apply:     apply,
 			Reap:      toReapJSONRows(reapGroup),
 			Spared:    toReapJSONRows(sparedGroup),
@@ -137,7 +146,6 @@ func printReapReport(
 			Failed:    report.Failed,
 			Warnings:  report.Warnings,
 		})
-		return
 	}
 
 	fmt.Fprintf(stdout, "%-38s %-6s %8s  %s\n", "SOCKET", "STATE", "RAM(MB)", "LABEL [cwd]")
@@ -161,7 +169,7 @@ func printReapReport(
 			stdout,
 			"dry run — nothing changed. Re-run with --apply to reap.",
 		)
-		return
+		return nil
 	}
 	fmt.Fprintf(
 		stdout,
@@ -189,6 +197,7 @@ func printReapReport(
 			report.AvailAfter/1024,
 		)
 	}
+	return nil
 }
 
 func printReapSection(w io.Writer, name string, decisions []reap.Decision) {

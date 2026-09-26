@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // fableRuntime builds a jailed Runtime for account, with an explicit
@@ -90,7 +90,11 @@ func TestFableWindowFallsBackToUsageCacheWhenHarnessOmitsLimits(t *testing.T) {
 	now := time.Now()
 	runtime := fableRuntime(root, 2, now)
 	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-		Usage:     usagehook.Usage{Limits: []usagehook.ScopedLimit{fableScopedLimit(38, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true)}},
+		Usage: usagehook.Usage{
+			Limits: []usagehook.ScopedLimit{
+				fableScopedLimit(38, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+			},
+		},
 		ConfigDir: runtime.ConfigDir,
 		FetchedAt: &now,
 	})
@@ -100,7 +104,10 @@ func TestFableWindowFallsBackToUsageCacheWhenHarnessOmitsLimits(t *testing.T) {
 	}
 	plain := stripANSICodes(got)
 	if !strings.Contains(plain, "7d-fable-used:38%") {
-		t.Fatalf("fable window did not fall back to pfm's own usage cache when the harness sent no limits array:\n%q", plain)
+		t.Fatalf(
+			"fable window did not fall back to pfm's own usage cache when the harness sent no limits array:\n%q",
+			plain,
+		)
 	}
 }
 
@@ -113,12 +120,19 @@ func TestFableWindowPrefersHarnessLimitsOverCache(t *testing.T) {
 	now := time.Now()
 	runtime := fableRuntime(root, 2, now)
 	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-		Usage:     usagehook.Usage{Limits: []usagehook.ScopedLimit{fableScopedLimit(90, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true)}},
+		Usage: usagehook.Usage{
+			Limits: []usagehook.ScopedLimit{
+				fableScopedLimit(90, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+			},
+		},
 		ConfigDir: runtime.ConfigDir,
 		FetchedAt: &now,
 	})
 	limits := `[{"kind":"weekly_scoped","percent":23,"resets_at":"` +
-		now.Add(7*24*time.Hour).UTC().Format(time.RFC3339) + `","scope":{"model":{"display_name":"Fable"}},"is_active":true}]`
+		now.Add(7*24*time.Hour).
+			UTC().
+			Format(time.RFC3339) +
+		`","scope":{"model":{"display_name":"Fable"}},"is_active":true}]`
 	got, err := Render(context.Background(), harnessPayloadWithFiveAndSeven(now, limits), runtime)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +157,11 @@ func TestFableWindowPresentButEmptyLimitsArrayIsNotCacheFallback(t *testing.T) {
 	now := time.Now()
 	runtime := fableRuntime(root, 2, now)
 	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-		Usage:     usagehook.Usage{Limits: []usagehook.ScopedLimit{fableScopedLimit(77, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true)}},
+		Usage: usagehook.Usage{
+			Limits: []usagehook.ScopedLimit{
+				fableScopedLimit(77, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+			},
+		},
 		ConfigDir: runtime.ConfigDir,
 		FetchedAt: &now,
 	})
@@ -256,7 +274,11 @@ func TestFableWindowAbsentWhenUsageCacheIsBeyondTheStalenessBound(t *testing.T) 
 			runtime := fableRuntime(root, 2, now)
 			fetchedAt := now.Add(-testcase.age)
 			writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-				Usage:     usagehook.Usage{Limits: []usagehook.ScopedLimit{fableScopedLimit(44, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true)}},
+				Usage: usagehook.Usage{
+					Limits: []usagehook.ScopedLimit{
+						fableScopedLimit(44, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+					},
+				},
 				ConfigDir: runtime.ConfigDir,
 				FetchedAt: &fetchedAt,
 			})
@@ -286,7 +308,11 @@ func TestFableWindowAbsentWhileUsageCacheBackoffIsActive(t *testing.T) {
 	now := time.Now()
 	runtime := fableRuntime(root, 2, now)
 	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-		Usage:     usagehook.Usage{Limits: []usagehook.ScopedLimit{fableScopedLimit(61, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true)}},
+		Usage: usagehook.Usage{
+			Limits: []usagehook.ScopedLimit{
+				fableScopedLimit(61, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+			},
+		},
 		ConfigDir: runtime.ConfigDir,
 		FetchedAt: &now,
 		Backoff:   &usagehook.CacheBackoff{Message: "429", RetryAfter: now.Add(15 * time.Minute), RecordedAt: now},
@@ -314,7 +340,9 @@ func TestFableWindowAbsentWhenCachedEntryResetsInThePast(t *testing.T) {
 	now := time.Now()
 	runtime := fableRuntime(root, 2, now)
 	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-		Usage:     usagehook.Usage{Limits: []usagehook.ScopedLimit{fableScopedLimit(44, now.Add(-time.Hour).UTC().Format(time.RFC3339), true)}},
+		Usage: usagehook.Usage{
+			Limits: []usagehook.ScopedLimit{fableScopedLimit(44, now.Add(-time.Hour).UTC().Format(time.RFC3339), true)},
+		},
 		ConfigDir: runtime.ConfigDir,
 		FetchedAt: &now,
 	})
@@ -342,9 +370,17 @@ func TestFableWindowNeverSourcesFiveHourOrSevenDayFromCache(t *testing.T) {
 	runtime := fableRuntime(root, 2, now)
 	writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
 		Usage: usagehook.Usage{
-			FiveHour: usagehook.Window{Utilization: floatPtr(77), ResetsAt: now.Add(4 * time.Hour).UTC().Format(time.RFC3339)},
-			SevenDay: usagehook.Window{Utilization: floatPtr(66), ResetsAt: now.Add(6 * 24 * time.Hour).UTC().Format(time.RFC3339)},
-			Limits:   []usagehook.ScopedLimit{fableScopedLimit(38, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true)},
+			FiveHour: usagehook.Window{
+				Utilization: floatPtr(77),
+				ResetsAt:    now.Add(4 * time.Hour).UTC().Format(time.RFC3339),
+			},
+			SevenDay: usagehook.Window{
+				Utilization: floatPtr(66),
+				ResetsAt:    now.Add(6 * 24 * time.Hour).UTC().Format(time.RFC3339),
+			},
+			Limits: []usagehook.ScopedLimit{
+				fableScopedLimit(38, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+			},
 		},
 		ConfigDir: runtime.ConfigDir,
 		FetchedAt: &now,
@@ -378,7 +414,11 @@ func TestFableWindowRejectsCacheFromAnotherSeatOrLegacyRecord(t *testing.T) {
 			now := time.Now()
 			runtime := fableRuntime(root, 2, now)
 			writeFableCacheRecord(t, runtime.CacheDir, runtime.UID, 2, usagehook.CacheRecord{
-				Usage:     usagehook.Usage{Limits: []usagehook.ScopedLimit{fableScopedLimit(88, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true)}},
+				Usage: usagehook.Usage{
+					Limits: []usagehook.ScopedLimit{
+						fableScopedLimit(88, now.Add(7*24*time.Hour).UTC().Format(time.RFC3339), true),
+					},
+				},
 				ConfigDir: testcase.configDir,
 				FetchedAt: &now,
 			})
@@ -414,8 +454,17 @@ func TestHarvestRateLimitsPersistsAValidFableWithoutUsableFlatWindows(t *testing
 		t.Run(testcase.name, func(t *testing.T) {
 			root := t.TempDir()
 			runtime := fableRuntime(root, 2, now)
-			input := []byte(fmt.Sprintf(`{"model":{"display_name":"Opus 4"},"rate_limits":{"five_hour":{"used_percentage":%d,"resets_at":%d},"seven_day":{"used_percentage":%d,"resets_at":%d},"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":%d,"resets_at":%q,"is_active":true}]}}`,
-				testcase.five, testcase.fiveReset.Unix(), testcase.seven, testcase.sevenReset.Unix(), testcase.fable, testcase.fableReset.UTC().Format(time.RFC3339)))
+			input := []byte(
+				fmt.Sprintf(
+					`{"model":{"display_name":"Opus 4"},"rate_limits":{"five_hour":{"used_percentage":%d,"resets_at":%d},"seven_day":{"used_percentage":%d,"resets_at":%d},"limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":%d,"resets_at":%q,"is_active":true}]}}`,
+					testcase.five,
+					testcase.fiveReset.Unix(),
+					testcase.seven,
+					testcase.sevenReset.Unix(),
+					testcase.fable,
+					testcase.fableReset.UTC().Format(time.RFC3339),
+				),
+			)
 			if _, err := Render(context.Background(), input, runtime); err != nil {
 				t.Fatal(err)
 			}
@@ -438,7 +487,12 @@ func TestHarvestRateLimitsPersistsAValidFableWithoutUsableFlatWindows(t *testing
 				t.Fatal(err)
 			}
 			if snapshot.FableUsed != int64(testcase.fable) || snapshot.FableResetsAt != testcase.fableReset.Unix() {
-				t.Fatalf("snapshot=%#v, want Fable %d resetting at %d", snapshot, testcase.fable, testcase.fableReset.Unix())
+				t.Fatalf(
+					"snapshot=%#v, want Fable %d resetting at %d",
+					snapshot,
+					testcase.fable,
+					testcase.fableReset.Unix(),
+				)
 			}
 		})
 	}

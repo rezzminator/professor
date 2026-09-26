@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestModelKeysKillModifiersAndCancel(t *testing.T) {
@@ -137,10 +137,10 @@ func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
 	snapshot.Rows = []compose.Row{
 		{Kind: compose.NewClaude, Name: "New Claude chat", Project: "new"},
 		{Kind: compose.NewCodex, Name: "New Codex chat", Project: "new"},
-		{Kind: compose.NewOpencode, Name: "New OpenCode chat", Project: "new", Account: 5},
+		{Kind: compose.NewOpenCode, Name: "New OpenCode chat", Project: "new", Account: 5},
 	}
-	snapshot.OpencodePrimaryAccount = 5
-	snapshot.OpencodeAccountIDs = []int{5}
+	snapshot.OpenCodePrimaryAccount = 5
+	snapshot.OpenCodeAccountIDs = []int{5}
 	snapshot.MergeNewChat = true
 	model := NewModel(snapshot)
 	if model.NewChatEngine() != pfmengine.Claude {
@@ -151,11 +151,12 @@ func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
 		t.Fatalf("right new-chat engine=%q command=%v", model.NewChatEngine(), command)
 	}
 	model, command = applyKey(t, model, specialKey(tea.KeyRight))
-	if command != nil || model.NewChatEngine() != pfmengine.Opencode {
+	if command != nil || model.NewChatEngine() != pfmengine.OpenCode {
 		t.Fatalf("second right new-chat engine=%q command=%v", model.NewChatEngine(), command)
 	}
 	model, command = applyKey(t, model, specialKey(tea.KeyEnter))
-	if command == nil || model.Result().Kind != OutcomeSelected || model.Result().Row.Kind != compose.NewOpencode || model.Result().PrimaryAccount != 5 {
+	if command == nil || model.Result().Kind != OutcomeSelected || model.Result().Row.Kind != compose.NewOpenCode ||
+		model.Result().PrimaryAccount != 5 {
 		t.Fatalf("new-chat Enter result=%#v command=%v", model.Result(), command)
 	}
 
@@ -206,15 +207,15 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 			},
 			{Kind: compose.NewClaude, Name: "New Claude chat", Project: "project", CWD: "/work/project"},
 			{Kind: compose.NewCodex, Name: "New Codex chat", Project: "project", CWD: "/work/project"},
-			{Kind: compose.NewOpencode, Name: "New OpenCode chat", Project: "project", CWD: "/work/project"},
+			{Kind: compose.NewOpenCode, Name: "New OpenCode chat", Project: "project", CWD: "/work/project"},
 		},
 		View:                   compose.DefaultView,
 		PrimaryAccount:         1,
 		AccountIDs:             []int{1},
 		CodexPrimaryAccount:    2,
 		CodexAccountIDs:        []int{2},
-		OpencodePrimaryAccount: 3,
-		OpencodeAccountIDs:     []int{3},
+		OpenCodePrimaryAccount: 3,
+		OpenCodeAccountIDs:     []int{3},
 		MergeNewChat:           true,
 		NowNS:                  fixtureNowNS,
 		Width:                  120,
@@ -222,12 +223,17 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 	}
 	model := NewModel(snapshot)
 	visible := model.VisibleRows()
-	if len(visible) < 2 || visible[0].Kind != compose.ProfessorUpdate || !isNewChatKind(visible[1].Kind) {
+	if len(visible) < 2 || visible[0].Kind != compose.ProfessorUpdate || !isNewChatActionKind(visible[1].Kind) {
 		t.Fatalf("visible order = %#v, want update immediately before merged new-chat row", visible)
 	}
 	model, command := applyKey(t, model, controlKey('x'))
 	if command != nil || len(model.Result().KillChanges) != 0 || !strings.Contains(model.killStatus, "not a chat") {
-		t.Fatalf("update banner accepted hide: status=%q result=%#v command=%v", model.killStatus, model.Result(), command)
+		t.Fatalf(
+			"update banner accepted hide: status=%q result=%#v command=%v",
+			model.killStatus,
+			model.Result(),
+			command,
+		)
 	}
 
 	refresh := snapshot
@@ -248,6 +254,39 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 	if command == nil || result.Kind != OutcomeProfessorUpdate || result.Engine != pfmengine.Codex ||
 		result.PrimaryAccount != 2 || result.Row.CWD != "/home/test/.professor" {
 		t.Fatalf("update selection result=%#v command=%v", result, command)
+	}
+}
+
+// TestProfessorUpdateFailureRowPersistsAcrossRefresh: the failure row is
+// read once from the cache before the picker opens, exactly like the update
+// row; a refresh snapshot never carries it, so dropping it on the first
+// refresh turns a failing checker back into silence mid-session.
+func TestProfessorUpdateFailureRowPersistsAcrossRefresh(t *testing.T) {
+	snapshot := Snapshot{
+		Rows: []compose.Row{
+			{
+				Kind: compose.ProfessorUpdateFailed, ID: "pfm-update-check-failed-2026-01-02T03:04:05Z",
+				Name: "failing since 2026-01-02 03:04 (network): 503", Project: ".professor",
+				CWD: "/home/test/.professor",
+			},
+			{
+				Kind: compose.LiveClaude, ID: "professor-work", Name: "Professor work",
+				Project: ".professor", CWD: "/home/test/.professor",
+			},
+		},
+		View:           compose.DefaultView,
+		PrimaryAccount: 1,
+		AccountIDs:     []int{1},
+		NowNS:          fixtureNowNS,
+		Width:          120,
+		Height:         20,
+	}
+	refresh := snapshot
+	refresh.Rows = snapshot.Rows[1:]
+	updated, _ := NewModel(snapshot).Update(RefreshMsg{Snapshot: refresh})
+	visible := updated.(Model).VisibleRows()
+	if len(visible) != 2 || visible[0].Kind != compose.ProfessorUpdateFailed {
+		t.Fatalf("refresh dropped the update-check failure row: %#v", visible)
 	}
 }
 
@@ -275,7 +314,11 @@ func TestProfessorUpdateCtrlSCyclesVisibleClaudeAccountEvenWhenCodexChosen(t *te
 	}
 	model, command = applyKey(t, model, controlKey('s'))
 	if command != nil || model.PrimaryAccount() != 1 {
-		t.Fatalf("Ctrl+S on update selected for Codex left visible Claude account=%d command=%v, want 1", model.PrimaryAccount(), command)
+		t.Fatalf(
+			"Ctrl+S on update selected for Codex left visible Claude account=%d command=%v, want 1",
+			model.PrimaryAccount(),
+			command,
+		)
 	}
 }
 
@@ -285,10 +328,10 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 			{Kind: compose.ProfessorUpdate, ID: "pfm-update-v0.61.2", Name: "v0.61.2", Project: ".professor"},
 			{Kind: compose.NewClaude, Name: "New Claude chat", Project: ".professor"},
 			{Kind: compose.NewCodex, Name: "New Codex chat", Project: ".professor"},
-			{Kind: compose.NewOpencode, Name: "New OpenCode chat", Project: ".professor"},
+			{Kind: compose.NewOpenCode, Name: "New OpenCode chat", Project: ".professor"},
 		},
 		View: compose.DefaultView, MergeNewChat: true, NowNS: fixtureNowNS,
-		AccountIDs: []int{1}, CodexAccountIDs: []int{1}, OpencodeAccountIDs: []int{1},
+		AccountIDs: []int{1}, CodexAccountIDs: []int{1}, OpenCodeAccountIDs: []int{1},
 		Width: 120, Height: 20,
 	}
 	model := NewModel(snapshot)
@@ -303,14 +346,21 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 		t.Fatalf("update banner width=%d raw=%q, want full width and ANSI blink", ansi.StringWidth(line), line)
 	}
 	model.nowNS += int64(500 * time.Millisecond)
-	if next := ansi.Strip(model.renderRow(snapshot.Rows[0], false, 118)); !strings.Contains(next, "✧ PROFESSOR UPDATE ✧") {
+	if next := ansi.Strip(
+		model.renderRow(snapshot.Rows[0], false, 118),
+	); !strings.Contains(
+		next,
+		"✧ PROFESSOR UPDATE ✧",
+	) {
 		t.Fatalf("animated update banner = %q, want alternate sparkle phase", next)
 	}
 }
 
 func TestNewChatUsesOnlyPresentEnginesAndCyclesTheirOwnRoster(t *testing.T) {
 	codexOnly := Snapshot{
-		Rows:                []compose.Row{{Kind: compose.NewCodex, Name: "New Codex chat", CWD: "/work/new", Account: 7}},
+		Rows: []compose.Row{
+			{Kind: compose.NewCodex, Name: "New Codex chat", CWD: "/work/new", Account: 7},
+		},
 		CodexPrimaryAccount: 7,
 		CodexAccountIDs:     []int{7, 9},
 		MergeNewChat:        true,
@@ -376,7 +426,13 @@ func TestLiveSelectionKeepsBirthAccountSeparateFromSelectedAccount(t *testing.T)
 			selected, command := applyKey(t, model, specialKey(tea.KeyEnter))
 			result := selected.Result()
 			if command == nil || result.Row.Account != test.row.Account || result.PrimaryAccount != test.chosen {
-				t.Fatalf("live handoff row account=%d selected=%d, want birth=%d selected=%d", result.Row.Account, result.PrimaryAccount, test.row.Account, test.chosen)
+				t.Fatalf(
+					"live handoff row account=%d selected=%d, want birth=%d selected=%d",
+					result.Row.Account,
+					result.PrimaryAccount,
+					test.row.Account,
+					test.chosen,
+				)
 			}
 		})
 	}
@@ -503,7 +559,7 @@ func TestToggleKilledCarriesTheRowsPaneOnlyWhenItIsLive(t *testing.T) {
 			}
 			model := NewModel(snapshot)
 
-			model, _ = applyKey(t, model, controlKey('x'))
+			_, _ = applyKey(t, model, controlKey('x'))
 			if len(applied) != 1 {
 				t.Fatalf("⌃X did not apply on the keypress: %#v", applied)
 			}
@@ -572,7 +628,7 @@ func TestEnterOutcomeEveryKindAndLiveReboot(t *testing.T) {
 		// Reboot is ⌃O, never ⌃B: the picker always runs inside tmux, and C-b is
 		// tmux's prefix — it never reaches the picker.
 		reboot, rebootCommand := applyKey(t, model, controlKey('o'))
-		if isLive(row.Kind) {
+		if row.Kind.IsLiveSeat() {
 			if rebootCommand == nil ||
 				reboot.Result().Kind != OutcomeReboot ||
 				compose.RowKey(reboot.Result().Row) != compose.RowKey(row) {
@@ -904,7 +960,7 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 		},
 		{
 			name:    "landed kill prints its receipt",
-			mutate:  func(snapshot *Snapshot) {},
+			mutate:  func(_ *Snapshot) {},
 			receipt: "hidden — ",
 		},
 	}

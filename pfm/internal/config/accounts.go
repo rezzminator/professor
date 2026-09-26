@@ -1,6 +1,10 @@
 package config
 
-import pfmengine "hostops/pfm/internal/engine"
+import (
+	"path/filepath"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+)
 
 // Account projections: the per-engine views of the roster that the fleet scan,
 // the picker and the runtime loader each need. They live here, beside the
@@ -61,26 +65,55 @@ func (config Config) PrimaryAccountFor(engine pfmengine.ID, claudePrimary int) i
 	switch engine {
 	case pfmengine.Codex:
 		return config.PrimaryCodexAccount()
-	case pfmengine.Opencode:
-		return config.PrimaryOpencodeAccount()
+	case pfmengine.OpenCode:
+		return config.PrimaryOpenCodeAccount()
 	default:
 		return claudePrimary
 	}
 }
 
-// OpencodeAccountIDs lists every OpenCode account id, in roster order.
-func (config Config) OpencodeAccountIDs() []int {
-	result := make([]int, 0, len(config.OpencodeAccounts))
-	for _, account := range config.OpencodeAccounts {
+// AccountForConfigDir returns the Claude account represented by configDir.
+func (config Config) AccountForConfigDir(configDir string) int {
+	if len(config.Accounts) == 0 {
+		return 1
+	}
+	if configDir == "" {
+		for _, account := range config.Accounts {
+			if account.Implicit {
+				return account.ID
+			}
+		}
+		return config.Accounts[0].ID
+	}
+	if resolved, err := filepath.EvalSymlinks(configDir); err == nil {
+		configDir = resolved
+	}
+	configDir = filepath.Clean(configDir)
+	for _, account := range config.Accounts {
+		candidate := filepath.Clean(account.ConfigDir)
+		if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
+			candidate = resolved
+		}
+		if configDir == candidate {
+			return account.ID
+		}
+	}
+	return config.Accounts[0].ID
+}
+
+// OpenCodeAccountIDs lists every OpenCode account id, in roster order.
+func (config Config) OpenCodeAccountIDs() []int {
+	result := make([]int, 0, len(config.OpenCodeAccounts))
+	for _, account := range config.OpenCodeAccounts {
 		result = append(result, account.ID)
 	}
 	return result
 }
 
-// PrimaryOpencodeAccount is the first OpenCode account's id, or 0 with none.
-func (config Config) PrimaryOpencodeAccount() int {
-	if len(config.OpencodeAccounts) == 0 {
+// PrimaryOpenCodeAccount is the first OpenCode account's id, or 0 with none.
+func (config Config) PrimaryOpenCodeAccount() int {
+	if len(config.OpenCodeAccounts) == 0 {
 		return 0
 	}
-	return config.OpencodeAccounts[0].ID
+	return config.OpenCodeAccounts[0].ID
 }

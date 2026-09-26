@@ -1,0 +1,1218 @@
+{
+  "items": [
+    {
+      "tags": [
+        "time",
+        "benchmarking",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-299",
+        "user_id": 946299,
+        "reputation": 3327
+      },
+      "is_answered": true,
+      "view_count": 132683,
+      "accepted_answer_id": 13326510,
+      "answer_count": 9,
+      "score": 204,
+      "last_activity_date": 1672570831,
+      "creation_date": 1352554284,
+      "last_edit_date": 1672570831,
+      "question_id": 13322479,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/13322479/how-to-benchmark-programs-in-rust",
+      "title": "How to benchmark programs in Rust?"
+    },
+    {
+      "tags": [
+        "casting",
+        "rust",
+        "numbers"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-982",
+        "user_id": 775982,
+        "reputation": 7939
+      },
+      "is_answered": true,
+      "view_count": 254695,
+      "accepted_answer_id": 28280042,
+      "answer_count": 2,
+      "score": 204,
+      "last_activity_date": 1770401617,
+      "creation_date": 1422863433,
+      "last_edit_date": 1592644375,
+      "question_id": 28273169,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/28273169/how-do-i-convert-between-numeric-types-safely-and-idiomatically",
+      "title": "How do I convert between numeric types safely and idiomatically?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-012",
+        "user_id": 871012,
+        "reputation": 14844
+      },
+      "is_answered": true,
+      "view_count": 116640,
+      "accepted_answer_id": 25574952,
+      "answer_count": 4,
+      "score": 203,
+      "last_activity_date": 1758790562,
+      "creation_date": 1389239746,
+      "last_edit_date": 1610032958,
+      "question_id": 21011330,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/21011330/how-do-i-invoke-a-system-command-and-capture-its-output",
+      "title": "How do I invoke a system command and capture its output?"
+    },
+    {
+      "tags": [
+        "rust",
+        "error-handling"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-572",
+        "user_id": 4140572,
+        "reputation": 22402
+      },
+      "is_answered": true,
+      "view_count": 155654,
+      "accepted_answer_id": 36362163,
+      "answer_count": 2,
+      "score": 202,
+      "last_activity_date": 1763567584,
+      "creation_date": 1459530446,
+      "last_edit_date": 1688252470,
+      "question_id": 36362020,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/36362020/what-is-unwrap-in-rust-and-what-is-it-used-for",
+      "title": "What is unwrap in Rust, and what is it used for?"
+    },
+    {
+      "tags": [
+        "reference",
+        "rust",
+        "move-semantics",
+        "borrow-checker"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-187",
+        "user_id": 2592187,
+        "reputation": 2913
+      },
+      "is_answered": true,
+      "view_count": 119515,
+      "accepted_answer_id": 28159407,
+      "answer_count": 2,
+      "score": 201,
+      "last_activity_date": 1754083289,
+      "creation_date": 1422306281,
+      "last_edit_date": 1566909778,
+      "question_id": 28158738,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/28158738/cannot-move-out-of-borrowed-content-cannot-move-out-of-behind-a-shared-referen",
+      "title": "Cannot move out of borrowed content / cannot move out of behind a shared reference"
+    },
+    {
+      "tags": [
+        "callback",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-521",
+        "user_id": 265521,
+        "reputation": 100181
+      },
+      "is_answered": true,
+      "view_count": 76591,
+      "accepted_answer_id": 41081702,
+      "answer_count": 4,
+      "score": 200,
+      "last_activity_date": 1678798116,
+      "creation_date": 1481410970,
+      "last_edit_date": 1664384989,
+      "question_id": 41081240,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/41081240/idiomatic-callbacks-in-rust",
+      "title": "Idiomatic callbacks in Rust"
+    },
+    {
+      "tags": [
+        "string",
+        "rust",
+        "type-conversion",
+        "integer"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-302",
+        "user_id": 3358302,
+        "reputation": 2191
+      },
+      "is_answered": true,
+      "view_count": 240994,
+      "accepted_answer_id": 24990987,
+      "answer_count": 1,
+      "score": 200,
+      "last_activity_date": 1774612284,
+      "creation_date": 1406533048,
+      "last_edit_date": 1774612284,
+      "question_id": 24990520,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/24990520/how-do-i-convert-from-an-integer-to-a-string",
+      "title": "How do I convert from an integer to a string?"
+    },
+    {
+      "tags": [
+        "rust",
+        "x86-64",
+        "bigint",
+        "int128",
+        "llvm-codegen"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-872",
+        "user_id": 9835872,
+        "reputation": 25001
+      },
+      "is_answered": true,
+      "view_count": 41927,
+      "protected_date": 1613641621,
+      "accepted_answer_id": 57340670,
+      "answer_count": 4,
+      "score": 199,
+      "last_activity_date": 1638260883,
+      "creation_date": 1564850646,
+      "last_edit_date": 1638260883,
+      "question_id": 57340308,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/57340308/how-does-rusts-128-bit-integer-i128-work-on-a-64-bit-system",
+      "title": "How does Rust&#39;s 128-bit integer `i128` work on a 64-bit system?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-050",
+        "user_id": 80050,
+        "reputation": 3477
+      },
+      "is_answered": true,
+      "view_count": 37813,
+      "accepted_answer_id": 22049510,
+      "answer_count": 2,
+      "score": 198,
+      "last_activity_date": 1661105049,
+      "creation_date": 1393435360,
+      "last_edit_date": 1661105049,
+      "question_id": 22048673,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/22048673/what-are-the-identifiers-denoted-with-a-single-apostrophe",
+      "title": "What are the identifiers denoted with a single apostrophe (&#39;)?"
+    },
+    {
+      "tags": [
+        "enums",
+        "iteration",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-828",
+        "user_id": 3238828,
+        "reputation": 2083
+      },
+      "is_answered": true,
+      "view_count": 136565,
+      "accepted_answer_id": 21373995,
+      "answer_count": 11,
+      "score": 196,
+      "last_activity_date": 1727869703,
+      "creation_date": 1390785540,
+      "last_edit_date": 1480695926,
+      "question_id": 21371534,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/21371534/in-rust-is-there-a-way-to-iterate-through-the-values-of-an-enum",
+      "title": "In Rust, is there a way to iterate through the values of an enum?"
+    },
+    {
+      "tags": [
+        "rust",
+        "rustup"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-749",
+        "user_id": 5446749,
+        "reputation": 33224
+      },
+      "is_answered": true,
+      "view_count": 184751,
+      "accepted_answer_id": 52045967,
+      "answer_count": 5,
+      "score": 194,
+      "last_activity_date": 1747940538,
+      "creation_date": 1535398693,
+      "last_edit_date": 1535402237,
+      "question_id": 52045966,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/52045966/how-to-uninstall-rust-that-was-installed-via-rustup",
+      "title": "How to uninstall Rust that was installed via rustup?"
+    },
+    {
+      "tags": [
+        "pointers",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-867",
+        "user_id": 2408867,
+        "reputation": 91592
+      },
+      "is_answered": true,
+      "view_count": 43477,
+      "accepted_answer_id": 57754902,
+      "answer_count": 2,
+      "score": 190,
+      "last_activity_date": 1696322005,
+      "creation_date": 1567418219,
+      "last_edit_date": 1610032935,
+      "question_id": 57754901,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/57754901/what-is-a-fat-pointer",
+      "title": "What is a &quot;fat pointer&quot;?"
+    },
+    {
+      "tags": [
+        "hashmap",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-158",
+        "user_id": 4381158,
+        "reputation": 2071
+      },
+      "is_answered": true,
+      "view_count": 87049,
+      "accepted_answer_id": 27582993,
+      "answer_count": 9,
+      "score": 188,
+      "last_activity_date": 1677189645,
+      "creation_date": 1419097554,
+      "last_edit_date": 1607634717,
+      "question_id": 27582739,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/27582739/how-do-i-create-a-hashmap-literal",
+      "title": "How do I create a HashMap literal?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-589",
+        "user_id": 2813589,
+        "reputation": 35654
+      },
+      "is_answered": true,
+      "view_count": 200393,
+      "answer_count": 9,
+      "score": 188,
+      "last_activity_date": 1756536336,
+      "creation_date": 1414431254,
+      "last_edit_date": 1515632926,
+      "question_id": 26593387,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/26593387/how-can-i-get-the-current-time-in-milliseconds",
+      "title": "How can I get the current time in milliseconds?"
+    },
+    {
+      "tags": [
+        "unit-testing",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-890",
+        "user_id": 208890,
+        "reputation": 7057
+      },
+      "is_answered": true,
+      "view_count": 74426,
+      "accepted_answer_id": 26470361,
+      "answer_count": 8,
+      "score": 187,
+      "last_activity_date": 1687706710,
+      "creation_date": 1413819992,
+      "last_edit_date": 1488895436,
+      "question_id": 26469715,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/26469715/how-do-i-write-a-rust-unit-test-that-ensures-that-a-panic-has-occurred",
+      "title": "How do I write a Rust unit test that ensures that a panic has occurred?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-274",
+        "user_id": 1744274,
+        "reputation": 2667
+      },
+      "is_answered": true,
+      "view_count": 189819,
+      "accepted_answer_id": 29530932,
+      "answer_count": 4,
+      "score": 187,
+      "last_activity_date": 1520957105,
+      "creation_date": 1428555034,
+      "last_edit_date": 1428632675,
+      "question_id": 29530011,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/29530011/creating-a-vector-of-zeros-for-a-specific-size",
+      "title": "Creating a vector of zeros for a specific size"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-572",
+        "user_id": 4140572,
+        "reputation": 22402
+      },
+      "is_answered": true,
+      "view_count": 152288,
+      "accepted_answer_id": 36390748,
+      "answer_count": 2,
+      "score": 185,
+      "last_activity_date": 1573155454,
+      "creation_date": 1459714696,
+      "last_edit_date": 1573155271,
+      "question_id": 36390665,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/36390665/how-do-you-pass-a-rust-function-as-a-parameter",
+      "title": "How do you pass a Rust function as a parameter?"
+    },
+    {
+      "tags": [
+        "debugging",
+        "rust",
+        "rust-cargo",
+        "preprocessor",
+        "conditional-compilation"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-509",
+        "user_id": 432509,
+        "reputation": 49896
+      },
+      "is_answered": true,
+      "view_count": 101636,
+      "protected_date": 1692389118,
+      "accepted_answer_id": 39205417,
+      "answer_count": 1,
+      "score": 184,
+      "last_activity_date": 1724595358,
+      "creation_date": 1472469264,
+      "last_edit_date": 1724595358,
+      "question_id": 39204908,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/39204908/how-to-check-release-debug-builds-using-cfg-in-rust",
+      "title": "How to check release / debug builds using cfg in Rust?"
+    },
+    {
+      "tags": [
+        "rust",
+        "iterator"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-839",
+        "user_id": 717839,
+        "reputation": 12243
+      },
+      "is_answered": true,
+      "view_count": 219672,
+      "accepted_answer_id": 30558370,
+      "answer_count": 2,
+      "score": 182,
+      "last_activity_date": 1715122389,
+      "creation_date": 1433080456,
+      "last_edit_date": 1715122389,
+      "question_id": 30558246,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/30558246/how-do-i-find-the-index-of-an-element-in-an-array-vector-or-slice",
+      "title": "How do I find the index of an element in an array, vector or slice?"
+    },
+    {
+      "tags": [
+        "hashmap",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-084",
+        "user_id": 1078084,
+        "reputation": 87022
+      },
+      "is_answered": true,
+      "view_count": 132169,
+      "accepted_answer_id": 30414450,
+      "answer_count": 6,
+      "score": 181,
+      "last_activity_date": 1723640801,
+      "creation_date": 1432394789,
+      "last_edit_date": 1553106685,
+      "question_id": 30414424,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/30414424/how-can-i-update-a-value-in-a-mutable-hashmap",
+      "title": "How can I update a value in a mutable HashMap?"
+    },
+    {
+      "tags": [
+        "rust",
+        "rustup"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-477",
+        "user_id": 7546477,
+        "reputation": 2960
+      },
+      "is_answered": true,
+      "view_count": 92840,
+      "accepted_answer_id": 46864309,
+      "answer_count": 4,
+      "score": 172,
+      "last_activity_date": 1664035724,
+      "creation_date": 1496309881,
+      "last_edit_date": 1664035724,
+      "question_id": 44303915,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/44303915/no-default-toolchain-configured-after-installing-rustup",
+      "title": "No default toolchain configured after installing rustup"
+    },
+    {
+      "tags": [
+        "sorting",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-906",
+        "user_id": 141906,
+        "reputation": 16036
+      },
+      "is_answered": true,
+      "view_count": 123573,
+      "accepted_answer_id": 26836633,
+      "answer_count": 3,
+      "score": 172,
+      "last_activity_date": 1671378762,
+      "creation_date": 1415591696,
+      "last_edit_date": 1671378762,
+      "question_id": 26836488,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/26836488/how-to-sort-a-vector-in-rust",
+      "title": "How to sort a vector in Rust?"
+    },
+    {
+      "tags": [
+        "string",
+        "indexing",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-502",
+        "user_id": 3799502,
+        "reputation": 2512
+      },
+      "is_answered": true,
+      "view_count": 196091,
+      "accepted_answer_id": 24542502,
+      "answer_count": 10,
+      "score": 171,
+      "last_activity_date": 1763117649,
+      "creation_date": 1404340150,
+      "last_edit_date": 1649640342,
+      "question_id": 24542115,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/24542115/how-to-index-a-string-in-rust",
+      "title": "How to index a String in Rust"
+    },
+    {
+      "tags": [
+        "vector",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-142",
+        "user_id": 856142,
+        "reputation": 4530
+      },
+      "is_answered": true,
+      "view_count": 207745,
+      "accepted_answer_id": 39785759,
+      "answer_count": 2,
+      "score": 170,
+      "last_activity_date": 1590179900,
+      "creation_date": 1475219031,
+      "last_edit_date": 1521209623,
+      "question_id": 39785597,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/39785597/how-do-i-get-a-slice-of-a-vect-in-rust",
+      "title": "How do I get a slice of a Vec&lt;T&gt; in Rust?"
+    },
+    {
+      "tags": [
+        "string",
+        "rust",
+        "syntax",
+        "string-literals"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-589",
+        "user_id": 2813589,
+        "reputation": 35654
+      },
+      "is_answered": true,
+      "view_count": 93826,
+      "accepted_answer_id": 26611854,
+      "answer_count": 3,
+      "score": 168,
+      "last_activity_date": 1662284348,
+      "creation_date": 1414508675,
+      "last_edit_date": 1611154814,
+      "question_id": 26611664,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/26611664/what-is-the-r-operator-in-rust",
+      "title": "What is the r#&quot;&quot;# operator in Rust?"
+    },
+    {
+      "tags": [
+        "string",
+        "iterator",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-584",
+        "user_id": 2171584,
+        "reputation": 1703
+      },
+      "is_answered": true,
+      "view_count": 214727,
+      "answer_count": 3,
+      "score": 168,
+      "last_activity_date": 1664186394,
+      "creation_date": 1393697284,
+      "last_edit_date": 1476994742,
+      "question_id": 22118221,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/22118221/how-do-you-iterate-over-a-string-by-character",
+      "title": "How do you iterate over a string by character"
+    },
+    {
+      "tags": [
+        "rust",
+        "println"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-758",
+        "user_id": 1846758,
+        "reputation": 1891
+      },
+      "is_answered": true,
+      "view_count": 154888,
+      "accepted_answer_id": 30320140,
+      "answer_count": 8,
+      "score": 167,
+      "last_activity_date": 1714336148,
+      "creation_date": 1432022992,
+      "last_edit_date": 1554236521,
+      "question_id": 30320083,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/30320083/how-to-print-a-vec",
+      "title": "How to print a Vec?"
+    },
+    {
+      "tags": [
+        "memory",
+        "rust",
+        "memory-management",
+        "garbage-collection"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-781",
+        "user_id": 1004781,
+        "reputation": 10796
+      },
+      "is_answered": true,
+      "view_count": 108456,
+      "accepted_answer_id": 32677591,
+      "answer_count": 5,
+      "score": 167,
+      "last_activity_date": 1785363434,
+      "creation_date": 1442738251,
+      "last_edit_date": 1720423152,
+      "question_id": 32677420,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/32677420/what-does-rust-have-instead-of-a-garbage-collector",
+      "title": "What does Rust have instead of a garbage collector?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-338",
+        "user_id": 3551338,
+        "reputation": 3160
+      },
+      "is_answered": true,
+      "view_count": 180995,
+      "answer_count": 4,
+      "score": 166,
+      "last_activity_date": 1744743212,
+      "creation_date": 1411830247,
+      "last_edit_date": 1439198270,
+      "question_id": 26076005,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/26076005/how-can-i-list-files-of-a-directory-in-rust",
+      "title": "How can I list files of a directory in Rust?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-618",
+        "user_id": 3364618,
+        "reputation": 5730
+      },
+      "is_answered": true,
+      "view_count": 141631,
+      "accepted_answer_id": 32384768,
+      "answer_count": 3,
+      "score": 164,
+      "last_activity_date": 1729777044,
+      "creation_date": 1441310997,
+      "last_edit_date": 1498437872,
+      "question_id": 32384594,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/32384594/how-to-check-whether-a-path-exists",
+      "title": "How to check whether a path exists?"
+    },
+    {
+      "tags": [
+        "rust",
+        "terminology",
+        "lifetime",
+        "lifetime-scoping"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-153",
+        "user_id": 7076153,
+        "reputation": 27256
+      },
+      "is_answered": true,
+      "view_count": 30859,
+      "answer_count": 1,
+      "score": 164,
+      "last_activity_date": 1618716317,
+      "creation_date": 1525862706,
+      "last_edit_date": 1618716317,
+      "question_id": 50251487,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/50251487/what-are-non-lexical-lifetimes",
+      "title": "What are non-lexical lifetimes?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-736",
+        "user_id": 1830736,
+        "reputation": 16163
+      },
+      "is_answered": true,
+      "view_count": 61247,
+      "accepted_answer_id": 53485793,
+      "answer_count": 5,
+      "score": 162,
+      "last_activity_date": 1701826514,
+      "creation_date": 1436122957,
+      "last_edit_date": 1662597218,
+      "question_id": 31233938,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/31233938/converting-from-optionstring-to-optionstr",
+      "title": "Converting from Option&lt;String&gt; to Option&lt;&amp;str&gt;"
+    },
+    {
+      "tags": [
+        "rust",
+        "operators",
+        "exponentiation"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-954",
+        "user_id": 775954,
+        "reputation": 35012
+      },
+      "is_answered": true,
+      "view_count": 194441,
+      "accepted_answer_id": 51208704,
+      "answer_count": 6,
+      "score": 160,
+      "last_activity_date": 1685977093,
+      "creation_date": 1530874001,
+      "last_edit_date": 1614524581,
+      "question_id": 51208703,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/51208703/how-to-raise-a-number-to-a-power",
+      "title": "How to raise a number to a power?"
+    },
+    {
+      "tags": [
+        "arrays",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-778",
+        "user_id": 2558778,
+        "reputation": 17274
+      },
+      "is_answered": true,
+      "view_count": 149586,
+      "accepted_answer_id": 50080940,
+      "answer_count": 9,
+      "score": 159,
+      "last_activity_date": 1750706272,
+      "creation_date": 1408631138,
+      "last_edit_date": 1598806153,
+      "question_id": 25428920,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/25428920/how-to-get-a-slice-as-an-array-in-rust",
+      "title": "How to get a slice as an array in Rust?"
+    },
+    {
+      "tags": [
+        "for-loop",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-670",
+        "user_id": 1452670,
+        "reputation": 1771
+      },
+      "is_answered": true,
+      "view_count": 154267,
+      "accepted_answer_id": 25170192,
+      "answer_count": 2,
+      "score": 158,
+      "last_activity_date": 1646535441,
+      "creation_date": 1407358837,
+      "last_edit_date": 1646535441,
+      "question_id": 25170091,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/25170091/how-to-make-a-reverse-ordered-for-loop",
+      "title": "How to make a reverse ordered for loop?"
+    },
+    {
+      "tags": [
+        "variables",
+        "syntax",
+        "reference",
+        "rust",
+        "mutable"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-061",
+        "user_id": 690061,
+        "reputation": 5170
+      },
+      "is_answered": true,
+      "view_count": 28992,
+      "accepted_answer_id": 28587902,
+      "answer_count": 4,
+      "score": 157,
+      "last_activity_date": 1670823684,
+      "creation_date": 1424274414,
+      "last_edit_date": 1552906896,
+      "question_id": 28587698,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/28587698/whats-the-difference-between-placing-mut-before-a-variable-name-and-after-the",
+      "title": "What&#39;s the difference between placing &quot;mut&quot; before a variable name and after the &quot;:&quot;?"
+    },
+    {
+      "tags": [
+        "string",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-561",
+        "user_id": 3596561,
+        "reputation": 1575
+      },
+      "is_answered": true,
+      "view_count": 114204,
+      "answer_count": 3,
+      "score": 156,
+      "last_activity_date": 1789131213,
+      "creation_date": 1399041421,
+      "last_edit_date": 1499768693,
+      "question_id": 23430735,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/23430735/how-to-convert-vecchar-to-a-string",
+      "title": "How to convert Vec&lt;char&gt; to a string"
+    },
+    {
+      "tags": [
+        "string",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-497",
+        "user_id": 4465497,
+        "reputation": 3739
+      },
+      "is_answered": true,
+      "view_count": 161702,
+      "accepted_answer_id": 30811312,
+      "answer_count": 7,
+      "score": 156,
+      "last_activity_date": 1672662815,
+      "creation_date": 1434138553,
+      "last_edit_date": 1593043760,
+      "question_id": 30811107,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/30811107/how-do-i-get-the-first-character-out-of-a-string",
+      "title": "How do I get the first character out of a string?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "does_not_exist",
+        "display_name": "example-user-0",
+        "user_id": 0,
+        "reputation": null
+      },
+      "is_answered": true,
+      "view_count": 53568,
+      "accepted_answer_id": 32306132,
+      "answer_count": 4,
+      "score": 155,
+      "last_activity_date": 1725611789,
+      "creation_date": 1440999564,
+      "last_edit_date": 1518356352,
+      "question_id": 32304595,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/32304595/whats-the-difference-between-self-and-self",
+      "title": "What&#39;s the difference between self and Self?"
+    },
+    {
+      "tags": [
+        "string",
+        "rust",
+        "uppercase"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-188",
+        "user_id": 1602188,
+        "reputation": 1825
+      },
+      "is_answered": true,
+      "view_count": 52291,
+      "accepted_answer_id": 38406885,
+      "answer_count": 11,
+      "score": 154,
+      "last_activity_date": 1698260133,
+      "creation_date": 1468631242,
+      "last_edit_date": 1495540925,
+      "question_id": 38406793,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/38406793/why-is-capitalizing-the-first-letter-of-a-string-so-convoluted-in-rust",
+      "title": "Why is capitalizing the first letter of a string so convoluted in Rust?"
+    },
+    {
+      "tags": [
+        "rust",
+        "modulo"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-958",
+        "user_id": 2979958,
+        "reputation": 3786
+      },
+      "is_answered": true,
+      "view_count": 101240,
+      "answer_count": 4,
+      "score": 154,
+      "last_activity_date": 1598398058,
+      "creation_date": 1435937972,
+      "last_edit_date": 1542767849,
+      "question_id": 31210357,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/31210357/is-there-a-modulus-not-remainder-function-operation",
+      "title": "Is there a modulus (not remainder) function / operation?"
+    },
+    {
+      "tags": [
+        "module",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-727",
+        "user_id": 1938727,
+        "reputation": 3063
+      },
+      "is_answered": true,
+      "view_count": 81777,
+      "accepted_answer_id": 22597760,
+      "answer_count": 8,
+      "score": 153,
+      "last_activity_date": 1717633958,
+      "creation_date": 1395607987,
+      "last_edit_date": 1566744264,
+      "question_id": 22596920,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/22596920/split-a-module-across-several-files",
+      "title": "Split a module across several files"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-206",
+        "user_id": 419206,
+        "reputation": 2747
+      },
+      "is_answered": true,
+      "view_count": 77500,
+      "accepted_answer_id": 29592369,
+      "answer_count": 1,
+      "score": 153,
+      "last_activity_date": 1689783365,
+      "creation_date": 1428859215,
+      "question_id": 29592256,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/29592256/whats-the-difference-between-usize-and-u32",
+      "title": "What&#39;s the difference between `usize` and `u32`?"
+    },
+    {
+      "tags": [
+        "rust",
+        "constants",
+        "immutability"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-216",
+        "user_id": 5460216,
+        "reputation": 4492
+      },
+      "is_answered": true,
+      "view_count": 34087,
+      "accepted_answer_id": 37881340,
+      "answer_count": 8,
+      "score": 151,
+      "last_activity_date": 1717324233,
+      "creation_date": 1466154187,
+      "last_edit_date": 1662597903,
+      "question_id": 37877381,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/37877381/what-is-the-difference-between-immutable-and-const-variables-in-rust",
+      "title": "What is the difference between immutable and const variables in Rust?"
+    },
+    {
+      "tags": [
+        "string-formatting",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-703",
+        "user_id": 288703,
+        "reputation": 28613
+      },
+      "is_answered": true,
+      "view_count": 58705,
+      "accepted_answer_id": 25570140,
+      "answer_count": 1,
+      "score": 150,
+      "last_activity_date": 1539002494,
+      "creation_date": 1409320742,
+      "question_id": 25569865,
+      "content_license": "CC BY-SA 3.0",
+      "link": "https://stackoverflow.com/questions/25569865/how-to-escape-curly-braces-in-a-format-string-in-rust",
+      "title": "How to escape curly braces in a format string in Rust"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-749",
+        "user_id": 1034749,
+        "reputation": 9514
+      },
+      "is_answered": true,
+      "view_count": 123001,
+      "accepted_answer_id": 37890739,
+      "answer_count": 2,
+      "score": 149,
+      "last_activity_date": 1664557543,
+      "creation_date": 1466197794,
+      "last_edit_date": 1664557543,
+      "question_id": 37890405,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/37890405/is-there-a-way-to-simplify-converting-an-option-into-a-result-without-a-macro",
+      "title": "Is there a way to simplify converting an Option into a Result without a macro?"
+    },
+    {
+      "tags": [
+        "for-loop",
+        "rust",
+        "iterator"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-500",
+        "user_id": 4651500,
+        "reputation": 2151
+      },
+      "is_answered": true,
+      "view_count": 88349,
+      "accepted_answer_id": 28991157,
+      "answer_count": 2,
+      "score": 149,
+      "last_activity_date": 1768222003,
+      "creation_date": 1426088427,
+      "last_edit_date": 1573067698,
+      "question_id": 28991050,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/28991050/how-to-iterate-a-vect-with-the-indexed-position",
+      "title": "How to iterate a Vec&lt;T&gt; with the indexed position?"
+    },
+    {
+      "tags": [
+        "debugging",
+        "rust"
+      ],
+      "owner": {
+        "user_type": "does_not_exist",
+        "display_name": "example-user-0",
+        "user_id": 0,
+        "reputation": null
+      },
+      "is_answered": true,
+      "view_count": 92647,
+      "closed_date": 1737071516,
+      "answer_count": 6,
+      "score": 149,
+      "last_activity_date": 1737066360,
+      "creation_date": 1464855221,
+      "last_edit_date": 1464860560,
+      "question_id": 37586216,
+      "link": "https://stackoverflow.com/questions/37586216/step-by-step-interactive-debugger-for-rust",
+      "closed_reason": "Not suitable for this site",
+      "title": "Step by step interactive debugger for Rust?"
+    },
+    {
+      "tags": [
+        "rust"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-336",
+        "user_id": 2009336,
+        "reputation": 4274
+      },
+      "is_answered": true,
+      "view_count": 163798,
+      "accepted_answer_id": 28800493,
+      "answer_count": 3,
+      "score": 148,
+      "last_activity_date": 1554651843,
+      "creation_date": 1425249828,
+      "last_edit_date": 1554651711,
+      "question_id": 28800121,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/28800121/what-do-i-have-to-do-to-solve-a-use-of-moved-value-error",
+      "title": "What do I have to do to solve a &quot;use of moved value&quot; error?"
+    },
+    {
+      "tags": [
+        "string",
+        "rust",
+        "type-conversion"
+      ],
+      "owner": {
+        "user_type": "registered",
+        "display_name": "example-user-679",
+        "user_id": 437679,
+        "reputation": 13820
+      },
+      "is_answered": true,
+      "view_count": 66622,
+      "accepted_answer_id": 41034751,
+      "answer_count": 1,
+      "score": 148,
+      "last_activity_date": 1617907409,
+      "creation_date": 1481184541,
+      "last_edit_date": 1617907409,
+      "question_id": 41034635,
+      "content_license": "CC BY-SA 4.0",
+      "link": "https://stackoverflow.com/questions/41034635/how-do-i-convert-between-string-str-vecu8-and-u8",
+      "title": "How do I convert between String, &amp;str, Vec&lt;u8&gt; and &amp;[u8]?"
+    }
+  ],
+  "has_more": true,
+  "quota_max": 300,
+  "quota_remaining": 290
+}

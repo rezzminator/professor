@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // labelCaptureLimit bounds how many capture-pane forks run at once. Every live
@@ -35,14 +35,14 @@ type PaneLabel struct {
 func CaptureClaudeLabels(
 	ctx context.Context,
 	capturer PaneCapturer,
-	panes []Pane,
-	configured ...[]string,
+	panes []ProbePane, configured ...[]string,
 ) []PaneLabel {
 	if capturer == nil {
 		return nil
 	}
-	candidates := make([]Pane, 0, len(panes))
-	for _, pane := range panes {
+	candidates := make([]ProbePane, 0, len(panes))
+	for index := range panes {
+		pane := panes[index]
 		if id, ok := pfmengine.FromSocket(pane.Socket); !ok || id != pfmengine.Claude {
 			continue
 		}
@@ -61,8 +61,9 @@ func CaptureClaudeLabels(
 	labels := make([]PaneLabel, len(candidates))
 	var waitGroup sync.WaitGroup
 	slots := make(chan struct{}, labelCaptureLimit)
-	for index, pane := range candidates {
-		index, pane := index, pane
+	for index := range candidates {
+		pane := candidates[index]
+		index := index
 		waitGroup.Add(1)
 		slots <- struct{}{}
 		go func() {

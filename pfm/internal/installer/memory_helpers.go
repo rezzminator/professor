@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 const (
@@ -72,6 +72,34 @@ func (installer *engine) migrateMemoryHelpers() error {
 			for _, alias := range migration.aliases {
 				hookPaths[alias] = filepath.Join(filepath.Dir(alias), filepath.Base(migration.newPath))
 			}
+			physical, resolveErr := filepath.EvalSymlinks(migration.oldPath)
+			if resolveErr != nil {
+				return fmt.Errorf(
+					"resolve retired memory helper %s for hook aliases: %w",
+					migration.oldPath,
+					resolveErr,
+				)
+			}
+			// A seat directory alias is visited only once, but settings may still
+			// spell the helper through any configured lexical path.
+			lexicalDirs := []string{filepath.Join(installer.options.Home, ".claude"), installer.options.ConfigDir}
+			lexicalDirs = append(lexicalDirs, installer.options.ConfigDirs...)
+			for _, dir := range lexicalDirs {
+				if strings.TrimSpace(dir) == "" {
+					continue
+				}
+				oldPath := filepath.Join(filepath.Clean(dir), "scripts", filepath.Base(migration.oldPath))
+				resolved, aliasErr := filepath.EvalSymlinks(oldPath)
+				if errors.Is(aliasErr, fs.ErrNotExist) {
+					continue
+				}
+				if aliasErr != nil {
+					return fmt.Errorf("resolve retired memory helper hook alias %s: %w", oldPath, aliasErr)
+				}
+				if filepath.Clean(resolved) == filepath.Clean(physical) {
+					hookPaths[oldPath] = filepath.Join(filepath.Dir(oldPath), filepath.Base(migration.newPath))
+				}
+			}
 		}
 	}
 	settings, err := installer.planMemoryHelperSettingsRewrites(hookPaths)
@@ -99,16 +127,24 @@ func (installer *engine) migrateMemoryHelpers() error {
 	}
 	for _, rewrite := range settings {
 		rewrite := rewrite
-		if err := installer.change("rewrite memory helper hook path in "+rewrite.path+" (backup preserved)", func() error {
-			backup := availableBackup(rewrite.path, installer.stamp)
-			if err := copyBackup(rewrite.path, backup); err != nil {
-				return fmt.Errorf("backup settings before memory helper hook migration %s to %s: %w", rewrite.path, backup, err)
-			}
-			if err := atomicfile.Write(rewrite.path, rewrite.content, rewrite.mode); err != nil {
-				return fmt.Errorf("rewrite memory helper hook path in %s: %w", rewrite.path, err)
-			}
-			return nil
-		}); err != nil {
+		if err := installer.change(
+			"rewrite memory helper hook path in "+rewrite.path+" (backup preserved)",
+			func() error {
+				backup := availableBackup(rewrite.path, installer.stamp)
+				if err := copyBackup(rewrite.path, backup); err != nil {
+					return fmt.Errorf(
+						"backup settings before memory helper hook migration %s to %s: %w",
+						rewrite.path,
+						backup,
+						err,
+					)
+				}
+				if err := atomicfile.Write(rewrite.path, rewrite.content, rewrite.mode); err != nil {
+					return fmt.Errorf("rewrite memory helper hook path in %s: %w", rewrite.path, err)
+				}
+				return nil
+			},
+		); err != nil {
 			return err
 		}
 	}
@@ -140,7 +176,11 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 				return nil, fmt.Errorf("inspect retired memory helper %s: %w", oldPath, err)
 			}
 			if !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("refuse to migrate unowned memory helper %s: expected a regular file, found mode %s", oldPath, info.Mode())
+				return nil, fmt.Errorf(
+					"refuse to migrate unowned memory helper %s: expected a regular file, found mode %s",
+					oldPath,
+					info.Mode(),
+				)
 			}
 			resolved, err := filepath.EvalSymlinks(oldPath)
 			if err != nil {
@@ -159,7 +199,10 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 				return nil, fmt.Errorf("refuse to migrate unowned memory helper %s: %w", oldPath, err)
 			}
 			if fingerprint != helper.normalizedSHA256 {
-				return nil, fmt.Errorf("refuse to migrate unowned memory helper %s: content differs from the canonical Professor helper", oldPath)
+				return nil, fmt.Errorf(
+					"refuse to migrate unowned memory helper %s: content differs from the canonical Professor helper",
+					oldPath,
+				)
 			}
 
 			newPath := filepath.Join(configDir, "scripts", helper.newName)
@@ -171,17 +214,31 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 			case err != nil:
 				return nil, fmt.Errorf("inspect memory helper destination %s: %w", newPath, err)
 			case !destinationInfo.Mode().IsRegular():
-				return nil, fmt.Errorf("refuse to overwrite memory helper destination %s: expected a regular file, found mode %s", newPath, destinationInfo.Mode())
+				return nil, fmt.Errorf(
+					"refuse to overwrite memory helper destination %s: expected a regular file, found mode %s",
+					newPath,
+					destinationInfo.Mode(),
+				)
 			default:
 				destination, readErr := os.ReadFile(newPath)
 				if readErr != nil {
 					return nil, fmt.Errorf("read memory helper destination %s: %w", newPath, readErr)
 				}
 				if !bytes.Equal(destination, content) {
-					return nil, fmt.Errorf("refuse to overwrite memory helper destination %s: content conflicts with owned source %s", newPath, oldPath)
+					return nil, fmt.Errorf(
+						"refuse to overwrite memory helper destination %s: content conflicts with owned source %s",
+						newPath,
+						oldPath,
+					)
 				}
 				if destinationInfo.Mode().Perm() != info.Mode().Perm() {
-					return nil, fmt.Errorf("refuse to overwrite memory helper destination %s: mode %o conflicts with owned source %s mode %o", newPath, destinationInfo.Mode().Perm(), oldPath, info.Mode().Perm())
+					return nil, fmt.Errorf(
+						"refuse to overwrite memory helper destination %s: mode %o conflicts with owned source %s mode %o",
+						newPath,
+						destinationInfo.Mode().Perm(),
+						oldPath,
+						info.Mode().Perm(),
+					)
 				}
 			}
 			physical[resolved] = len(migrations)
@@ -194,7 +251,9 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 	return migrations, nil
 }
 
-func (installer *engine) planMemoryHelperSettingsRewrites(hookPaths map[string]string) ([]memoryHelperSettingsRewrite, error) {
+func (installer *engine) planMemoryHelperSettingsRewrites(
+	hookPaths map[string]string,
+) ([]memoryHelperSettingsRewrite, error) {
 	if len(hookPaths) == 0 {
 		return nil, nil
 	}
@@ -230,7 +289,10 @@ func (installer *engine) planMemoryHelperSettingsRewrites(hookPaths map[string]s
 				return nil, fmt.Errorf("parse settings for memory helper hook migration %s: %w", path, err)
 			}
 			if changed {
-				rewrites = append(rewrites, memoryHelperSettingsRewrite{path: path, content: updated, mode: info.Mode().Perm()})
+				rewrites = append(
+					rewrites,
+					memoryHelperSettingsRewrite{path: path, content: updated, mode: info.Mode().Perm()},
+				)
 			}
 		}
 	}
@@ -238,26 +300,8 @@ func (installer *engine) planMemoryHelperSettingsRewrites(hookPaths map[string]s
 }
 
 func (installer *engine) memoryHelperConfigDirs() []string {
-	dirs := []string{filepath.Join(installer.options.Home, ".claude")}
-	if installer.options.ConfigDirs == nil {
-		dirs = append(dirs, installer.options.ConfigDir)
-	} else {
-		dirs = append(dirs, installer.options.ConfigDirs...)
-	}
-	seen := make(map[string]bool, len(dirs))
-	result := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		if strings.TrimSpace(dir) == "" {
-			continue
-		}
-		dir = filepath.Clean(dir)
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		result = append(result, dir)
-	}
-	return result
+	dirs := append([]string{filepath.Join(installer.options.Home, ".claude")}, installer.claudeConfigDirs()...)
+	return installer.dedupePhysicalDirs(dirs)
 }
 
 func normalizedMemoryHelperFingerprint(content []byte) (string, error) {

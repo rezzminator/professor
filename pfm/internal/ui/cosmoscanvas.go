@@ -175,10 +175,10 @@ func BezierPoint(x0, y0, cx, cy, x1, y1, t float64) (float64, float64) {
 // golden draws a dead-straight rail down pixel column 78 whose 22 samples are
 // all mathematically exactly 78; with the products rounded separately, two of
 // them land on 77.999999999999986 and int() drops those to column 77 — that
-// pair of dots IS the ⢈ (U+2888) glyph the golden holds. Fused, sample 9
-// rounds to exactly 78, the dot leaves that cell, and the glyph becomes ⠈
-// (U+2808): one byte, 0xa2 → 0xa0. Unpinned, these goldens pin the CPU that
-// generated them instead of the code.
+// pair of dots, with the halo rows a hot rail carries, IS the ⢸ (U+28B8)
+// glyph the golden holds. Fused, sample 9 rounds to exactly 78, its dots
+// leave that cell, and the glyph becomes ⠘ (U+2818): one byte, 0xb8 → 0x98.
+// Unpinned, these goldens pin the CPU that generated them instead of the code.
 func bezierAt(p0, control, p1, t float64) float64 {
 	mt := 1 - t
 	return float64(mt*mt*p0) + float64(2*mt*t*control) + float64(t*t*p1)
@@ -208,7 +208,7 @@ func (c *Canvas) render() string {
 		styleValid := false
 		for x := 0; x < c.Cols; x++ {
 			idx := y*c.Cols + x
-			var ch rune = ' '
+			ch := ' '
 			fg := RGB{}
 			bold := false
 			switch {

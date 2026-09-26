@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Serve pfm chat and Harvester MCP over loopback HTTP (pfm mcp serve).
+  Serve pfm's professor MCP (chat and harvester tools) over loopback HTTP (pfm mcp serve).
 
   PATH is rendered at install from the one service
   search path every pfm unit shares (installer servicePath): launchd starts

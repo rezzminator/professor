@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestMatchPrefersTheLiveSeat covers resolution: a name, an id, a socket, the
@@ -120,8 +120,8 @@ func TestFromRowCarriesTheRowAndItsLiveness(t *testing.T) {
 		t.Fatalf("FromRow() = %#v, want %#v", got, want)
 	}
 	for _, kind := range []compose.Kind{compose.ResumeClaude, compose.ResumeCodex} {
-		if IsLive(kind) {
-			t.Fatalf("IsLive(%v) = true for a resumable row", kind)
+		if kind.IsAddressable() {
+			t.Fatalf("IsAddressable(%v) = true for a resumable row", kind)
 		}
 	}
 }
@@ -132,6 +132,100 @@ func TestTargetErrorKeepsAScanFailureDistinctFromAbsence(t *testing.T) {
 	failure := &TargetError{Name: "x", Err: errors.New("open index: disk I/O error")}
 	if errors.Is(failure, ErrUnknownChat) || failure.Error() != "open index: disk I/O error" {
 		t.Fatalf("scan failure rendered as %q (unknown=%v)", failure.Error(), errors.Is(failure, ErrUnknownChat))
+	}
+}
+
+func TestResolvedSelfIsRequestLocalAndExact(t *testing.T) {
+	testjail.Fleet(t)
+	want := headless.Chat{
+		Name: "second", ID: "split-second", Engine: "cc", Path: "/jail/second.jsonl",
+		CWD: "/work/second", Socket: "cc-shared", Session: "renamed", Pane: "%8", Live: true,
+	}
+	ctx := WithResolvedSelf(context.Background(), want)
+	for _, name := range []string{"self", "me", " self ", `"me"`} {
+		got, found, err := Resolve(ctx, name, io.Discard, nil)
+		if err != nil || !found || got != want {
+			t.Fatalf("Resolve(%q) = %+v found=%t err=%v, want exact scoped chat %+v", name, got, found, err, want)
+		}
+	}
+	if _, found, err := Resolve(ctx, "somebody-else", io.Discard, nil); err != nil || found {
+		t.Fatalf("explicit target used scoped self: found=%t err=%v", found, err)
+	}
+}
+
+func TestScopedRawPaneUsesOnlyTheCallerSocket(t *testing.T) {
+	testjail.Fleet(t)
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	daemonSocket := filepath.Join(values.TmuxDir, "cc-daemon")
+	t.Setenv("CHAT_INJECT_SOCKET", daemonSocket)
+	t.Setenv("TMUX", filepath.Join(values.TmuxDir, "cc-other")+",123,0")
+
+	t.Run("scoped socket wins without copying caller identity", func(t *testing.T) {
+		ctx := WithResolvedSelf(context.Background(), headless.Chat{
+			Socket: "cx-caller", Session: "caller-session", Pane: "%1", ID: "thread-caller",
+		})
+		for _, target := range []string{"%2", " %2 ", `"%2"`} {
+			got, found, err := Resolve(ctx, target, io.Discard, nil)
+			if err != nil || !found || got.Socket != "cx-caller" || got.Pane != "%2" {
+				t.Fatalf("Resolve(scoped %q) = %+v found=%t err=%v", target, got, found, err)
+			}
+			if got.ID != "" || got.Session != "" {
+				t.Fatalf("scoped raw pane %q inherited caller identity: %+v", target, got)
+			}
+		}
+	})
+
+	t.Run("missing scoped socket refuses ambient fallback", func(t *testing.T) {
+		ctx := WithResolvedSelf(context.Background(), headless.Chat{
+			Session: "caller-session", Pane: "%1", ID: "thread-caller",
+		})
+		for _, target := range []string{"%2", " %2 ", `"%2"`} {
+			got, found, err := Resolve(ctx, target, io.Discard, nil)
+			if err != nil || found || got != (headless.Chat{}) {
+				t.Fatalf("Resolve(scoped %q without socket) = %+v found=%t err=%v", target, got, found, err)
+			}
+		}
+	})
+
+	t.Run("metadata-free raw pane retains ambient resolution", func(t *testing.T) {
+		got, found, err := Resolve(context.Background(), "%3", io.Discard, nil)
+		if err != nil || !found || got.Socket != filepath.Base(daemonSocket) || got.Pane != "%3" {
+			t.Fatalf("Resolve(ambient %%3) = %+v found=%t err=%v", got, found, err)
+		}
+	})
+}
+
+func TestAmbientSelfEnrichmentRestoresTheRosterPaneAndSession(t *testing.T) {
+	seat := headless.Chat{
+		Name: "Codex chat", ID: "c6666666-6666-4666-8666-666666666666", Engine: "cx",
+		Socket: "cx-shared", Session: "renamed-session", Pane: "%0", Live: true,
+	}
+	resolved := headless.Chat{
+		ID: seat.ID, Engine: "cx", Socket: seat.Socket,
+		Session: seat.Socket, Pane: seat.Socket, Live: true,
+	}
+	resolved = enrichResolvedSelf(resolved, seat)
+	if resolved != seat {
+		t.Fatalf("ambient self enrichment = %+v, want exact roster seat %+v", resolved, seat)
+	}
+}
+
+func TestAmbientSplitSelfEnrichmentKeepsTheLivePane(t *testing.T) {
+	resolved := headless.Chat{
+		ID: "b2222222-2222-4222-8222-222222222222", Engine: "cc",
+		Socket: "cc-shared", Session: "renamed", Pane: "%1", Live: true,
+	}
+	indexed := headless.Chat{
+		Name: "second", ID: resolved.ID, Engine: "cc", Path: "/jail/second.jsonl",
+		CWD: "/work/second",
+	}
+	got := enrichResolvedSelf(resolved, indexed)
+	if got.ID != indexed.ID || got.Path != indexed.Path || got.CWD != indexed.CWD ||
+		got.Socket != resolved.Socket || got.Session != resolved.Session || got.Pane != resolved.Pane || !got.Live {
+		t.Fatalf("split self enrichment = %+v, want metadata from %+v with address from %+v", got, indexed, resolved)
 	}
 }
 

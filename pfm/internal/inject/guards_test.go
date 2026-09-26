@@ -1,8 +1,13 @@
 package inject
 
-import "testing"
+import (
+	"testing"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+)
 
 func TestSelectorLineExactChatShGuards(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		capture string
@@ -47,6 +52,7 @@ func TestSelectorLineExactChatShGuards(t *testing.T) {
 }
 
 func TestIsBusyExactMarkers(t *testing.T) {
+	t.Parallel()
 	for _, capture := range []string{
 		"esc to interrupt",
 		"Working… (12s · ↓ 100 tokens)",
@@ -65,6 +71,7 @@ func TestIsBusyExactMarkers(t *testing.T) {
 }
 
 func TestHasDraftRecognizesUnicodeTextButNotFormatPlaceholders(t *testing.T) {
+	t.Parallel()
 	// Format controls are not visible draft text. The ASCII space between them
 	// must not turn an otherwise invisible placeholder into a real draft.
 	if hasDraft("❯ \u200b \u200b") {
@@ -81,6 +88,7 @@ func TestHasDraftRecognizesUnicodeTextButNotFormatPlaceholders(t *testing.T) {
 }
 
 func TestLastComposerLineUsesStructuralScreenOrder(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		capture string
@@ -95,6 +103,22 @@ func TestLastComposerLineUsesStructuralScreenOrder(t *testing.T) {
 			name:    "claude agent activity is not an editable composer",
 			capture: "❯ \n❯ ● qa-cortex  Verifying results",
 			want:    "❯ ",
+		},
+		{
+			name: "the agents panel's selected main row is not the composer",
+			capture: "──────── OPUS ─\n❯ \n────────\n  ↑/↓ to select · Enter to view\n❯ ⏺ main\n" +
+				"  ◯ general-purpose (+3)  T1: port the pieces      12m 59s · ↓ 60.4k tokens",
+			want: "❯ ",
+		},
+		{
+			name:    "a selected agent row carrying a count is not the composer",
+			capture: "❯ \n❯ ◯ general-purpose (+3)  T1: port the pieces",
+			want:    "❯ ",
+		},
+		{
+			name:    "a draft that opens with a bullet stays a draft",
+			capture: "❯ \n❯ ⏺ mainly a typed note",
+			want:    "❯ ⏺ mainly a typed note",
 		},
 		{
 			name:    "mixed markers follow screen order",
@@ -124,13 +148,14 @@ func TestLastComposerLineUsesStructuralScreenOrder(t *testing.T) {
 // silently widened into "any placeholder counts, however it got there" for
 // the literal transport, which never asked tmux to bracket anything.
 func TestDeliveryProvenPlaceholderOnlyCountsForPasteTransport(t *testing.T) {
+	t.Parallel()
 	before := "conversation\n❯ "
 	after := "conversation\n[Pasted text #1 +12 lines]\n❯ "
 	message := "the original long message body, never itself visible in the capture"
-	if !deliveryProven(before, after, message, false, true) {
+	if !deliveryProven(pfmengine.Claude, before, after, message, false, true) {
 		t.Fatalf("collapsed-paste placeholder did not count as proof for the paste transport")
 	}
-	if deliveryProven(before, after, message, false, false) {
+	if deliveryProven(pfmengine.Claude, before, after, message, false, false) {
 		t.Fatalf("collapsed-paste placeholder incorrectly counted as proof for the literal transport")
 	}
 }
@@ -147,7 +172,7 @@ func FuzzSelectorLine(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
-	f.Fuzz(func(t *testing.T, capture string) {
+	f.Fuzz(func(_ *testing.T, capture string) {
 		_ = SelectorLine(capture)
 	})
 }

@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	configVersion = 1
-	configRelPath = ".claude/codex-build.json"
+	configVersion         = 1
+	configRelPath         = ".claude/codex-build.json"
+	suffixModeNone        = "none"
+	suffixModeStripPrefix = "strip-prefix"
 )
 
 // Config is the project-local policy for the Codex compiler.  It deliberately
@@ -99,10 +101,15 @@ func loadConfig(root string, cli CLIOverrides) (Config, error) {
 			return Config{}, err
 		}
 		if file.Version == nil {
-			return Config{}, fmt.Errorf("Codex compiler config %s: version is required", path)
+			return Config{}, fmt.Errorf("config for Codex compiler %s: version is required", path)
 		}
 		if *file.Version != configVersion {
-			return Config{}, fmt.Errorf("Codex compiler config %s: unsupported version %d (want %d)", path, *file.Version, configVersion)
+			return Config{}, fmt.Errorf(
+				"config for Codex compiler %s: unsupported version %d (want %d)",
+				path,
+				*file.Version,
+				configVersion,
+			)
 		}
 		if file.GlobalCommands != nil {
 			cfg.GlobalCommands = *file.GlobalCommands
@@ -140,7 +147,7 @@ func loadConfig(root string, cli CLIOverrides) (Config, error) {
 
 	applyCLIOverrides(&cfg, cli)
 	if err := validateConfig(cfg); err != nil {
-		return Config{}, fmt.Errorf("Codex compiler config: %w", err)
+		return Config{}, fmt.Errorf("config for Codex compiler: %w", err)
 	}
 	return cfg, nil
 }
@@ -232,21 +239,27 @@ func validateConfig(cfg Config) error {
 		}
 	}
 	for _, project := range cfg.Projects {
-		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project || project == "." || project == ".." || strings.ContainsAny(project, `/\\`) {
+		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project ||
+			project == "." ||
+			project == ".." ||
+			strings.ContainsAny(project, `/\\`) {
 			return fmt.Errorf("invalid projects entry %q", project)
 		}
 	}
 	for _, project := range cfg.ExcludeProjects {
-		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project || project == "." || project == ".." || strings.ContainsAny(project, `/\\`) {
+		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project ||
+			project == "." ||
+			project == ".." ||
+			strings.ContainsAny(project, `/\\`) {
 			return fmt.Errorf("invalid excludeProjects entry %q", project)
 		}
 	}
 	switch cfg.SuffixMode {
-	case "project", "strip-prefix", "none":
+	case "project", suffixModeStripPrefix, suffixModeNone:
 	default:
 		return fmt.Errorf("suffixMode %q must be project, strip-prefix, or none", cfg.SuffixMode)
 	}
-	if cfg.SuffixMode == "strip-prefix" && cfg.SuffixPrefix == "" {
+	if cfg.SuffixMode == suffixModeStripPrefix && cfg.SuffixPrefix == "" {
 		return errors.New("suffixPrefix is required when suffixMode is strip-prefix")
 	}
 	return nil

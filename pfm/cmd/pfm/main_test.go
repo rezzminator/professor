@@ -3,23 +3,84 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
-	"io"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+func TestRRDirEntryUsesInjectedHome(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(root, "unmanaged")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]string{"cwd": cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "injected-home")
+
+	var stdout, stderr bytes.Buffer
+	if code := runRRDirEntry(bytes.NewReader(payload), &stdout, &stderr, &paths.MapEnv{HomeDir: home}); code != 0 {
+		t.Fatalf("runRRDirEntry code = %d, want fail-open 0; stderr = %q", code, stderr.String())
+	}
+	want := filepath.Join(home, ".professor", ".professor", "RR")
+	if got := stdout.String(); !strings.Contains(got, want) {
+		t.Fatalf("runRRDirEntry stdout = %q, want injected fallback %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runRRDirEntry stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRRDirEntryReportsHomeErrorAndContinues(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]string{"cwd": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runRRDirEntry(
+		bytes.NewReader(payload),
+		&stdout,
+		&stderr,
+		&paths.MapEnv{HomeErr: errors.New("home unavailable")},
+	); code != 0 {
+		t.Fatalf("runRRDirEntry code = %d, want fail-open 0; stderr = %q", code, stderr.String())
+	}
+	if got := stderr.String(); !strings.Contains(
+		got,
+		"pfm internal rr-dir: resolve home directory: home unavailable\n",
+	) {
+		t.Fatalf("runRRDirEntry stderr = %q, want visible home error", got)
+	}
+	if got := stdout.String(); !strings.Contains(got, "RR-DIR-ERROR:") || !strings.Contains(got, "no home directory") {
+		t.Fatalf("runRRDirEntry stdout = %q, want fail-open hook response for empty home", got)
+	}
+}
 
 func TestVersion(t *testing.T) {
 	jailTest(t)
@@ -33,71 +94,6 @@ func TestVersion(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("run(version) stderr = %q, want empty", stderr.String())
-	}
-}
-
-// TestResolveDevVersion is the issue-14 F6 regression: an unstamped "dev"
-// build alone told nobody which commit they were running. go test's own
-// binary carries no VCS stamp (verified against `go test -c`), which is why
-// TestVersion above still asserts a bare "pfm dev\n" — this test drives the
-// fallback's pure half directly with fabricated debug.BuildSetting values
-// instead of needing a real VCS-stamped binary.
-func TestResolveDevVersion(t *testing.T) {
-	const fullRevision = "8f9b8bb29513ff82f0ce31d5fc4547f9e30b7071"
-	cases := []struct {
-		name     string
-		settings []debug.BuildSetting
-		want     string
-	}{
-		{name: "no settings", settings: nil, want: "dev"},
-		{
-			name:     "vcs present but no revision key",
-			settings: []debug.BuildSetting{{Key: "vcs", Value: "git"}},
-			want:     "dev",
-		},
-		{
-			name: "clean checkout",
-			settings: []debug.BuildSetting{
-				{Key: "vcs.revision", Value: fullRevision},
-				{Key: "vcs.modified", Value: "false"},
-			},
-			want: "dev (8f9b8bb29513)",
-		},
-		{
-			name: "modified checkout",
-			settings: []debug.BuildSetting{
-				{Key: "vcs.revision", Value: fullRevision},
-				{Key: "vcs.modified", Value: "true"},
-			},
-			want: "dev (8f9b8bb29513, modified)",
-		},
-		{
-			name: "revision shorter than the truncation width is left alone",
-			settings: []debug.BuildSetting{
-				{Key: "vcs.revision", Value: "8f9b8bb"},
-				{Key: "vcs.modified", Value: "false"},
-			},
-			want: "dev (8f9b8bb)",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveDevVersion(tc.settings); got != tc.want {
-				t.Fatalf("resolveDevVersion(%v) = %q, want %q", tc.settings, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestDisplayVersionPrefersLdflagsStamp proves the VCS fallback never
-// overrides a release build's `-X main.version=...` stamp, even though this
-// test binary itself carries no VCS info to fall back to.
-func TestDisplayVersionPrefersLdflagsStamp(t *testing.T) {
-	original := version
-	t.Cleanup(func() { version = original })
-	version = "v0.67.0"
-	if got := displayVersion(); got != "v0.67.0" {
-		t.Fatalf("displayVersion() = %q, want the ldflags-stamped version unchanged", got)
 	}
 }
 
@@ -204,7 +200,11 @@ func TestKillKilledUnkillCLI(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcriptPath, []byte(`{"type":"user","cwd":"/work/example","message":{"content":"kill fixture"}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"user","cwd":"/work/example","message":{"content":"kill fixture"}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	database, err := store.Open()
@@ -229,7 +229,9 @@ func TestKillKilledUnkillCLI(t *testing.T) {
 	if code := run([]string{"chat", "kill", id}, &stdout, &stderr); code != 0 {
 		t.Fatalf("kill code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if stdout.String() != "killed "+id+"\n" || stderr.Len() != 0 {
+	// The kill names its own mechanism (chat.KillOutcome): this fixture has no
+	// live pane, so it de-lists and says so.
+	if stdout.String() != "killed "+id+"\tde-listed only, no live pane closed\n" || stderr.Len() != 0 {
 		t.Fatalf("kill stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 
@@ -365,7 +367,9 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 	if code := run([]string{"chat", "kill", "self"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("kill --self code=%d stderr=%q", code, stderr.String())
 	}
-	if stdout.String() != "killed "+id+"\n" {
+	// A self-kill DOES carry a tmux address, so its line names the pane it is
+	// closing rather than a de-listing.
+	if stdout.String() != "killed "+id+"\tclosing pane %1 on socket cc-1-1-1\n" {
 		t.Fatalf("kill --self stdout=%q", stdout.String())
 	}
 
@@ -407,7 +411,7 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 
 func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(testFreshSocketEnv, "cc-1700000000-1-1")
+	t.Setenv(spawn.TestFreshSocketEnv, "cc-1700000000-1-1")
 	project := filepath.Join(root, "work", "project")
 	transcriptDir := filepath.Join(root, "claude", "project")
 	if err := os.MkdirAll(project, 0o700); err != nil {
@@ -489,7 +493,7 @@ func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"doctor"}, &stdout, &stderr); code != 1 {
+	if code := run([]string{"doctor"}, &stdout, &stderr); code != 3 {
 		t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "doctor: config path=") ||
@@ -502,9 +506,9 @@ func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 // the repository shipped the hook but no diagnostic distinguished "armed"
 // from "file exists and Git will never execute it".
 func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
-	savedProbe := prePushGateProbeOverride
-	prePushGateProbeOverride = nil
-	t.Cleanup(func() { prePushGateProbeOverride = savedProbe })
+	savedProbe := doctor.PrePushGateProbeOverride
+	doctor.PrePushGateProbeOverride = nil
+	t.Cleanup(func() { doctor.PrePushGateProbeOverride = savedProbe })
 
 	root := jailTest(t)
 	repository := filepath.Join(root, "repository")
@@ -580,78 +584,6 @@ func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
 	}
 }
 
-func TestDoctorRecognizesThenFailedAsSatelliteMetadata(t *testing.T) {
-	root := jailTest(t)
-	sidDir := filepath.Join(root, "sid")
-	for name, content := range map[string]string{
-		"cc-1-2-3":              "/transcripts/live.jsonl",
-		"cc-1-2-3.then-failed":  "prompt preserved for retry",
-		"reload-cc-1-2-3.log":   "completed fleet reload",
-		"reload-vsct.log":       "completed bunker reload",
-		"reload-probe.log":      "not a fleet reload",
-		".open.uuid":            "lock metadata",
-		"cc-1-2-3.not-metadata": "invalid",
-	} {
-		if err := os.WriteFile(
-			filepath.Join(sidDir, name),
-			[]byte(content),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-	entries, invalid, err := crumbHealth(sidDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entries != 7 || invalid != 2 {
-		t.Fatalf("crumbHealth() entries=%d invalid=%d", entries, invalid)
-	}
-}
-
-// The live sid directory holds two classes doctor must not call rot: crumbs
-// the statusline writes for chats on servers the fleet excludes (the vsct
-// bunker) and the dot-prefixed lock DIRECTORIES the zsh creates with mkdir to
-// serialize opens.
-func TestDoctorIgnoresBunkerCrumbsAndOpenLockDirectories(t *testing.T) {
-	root := jailTest(t)
-	sidDir := filepath.Join(root, "sid")
-	for name, content := range map[string]string{
-		"cc-1-2-3":  "/transcripts/live.jsonl",
-		"vsct":      "/transcripts/bunker.jsonl",
-		"vsct.%187": "/transcripts/bunker.jsonl",
-		"rotten":    "neither a crumb nor sid metadata",
-	} {
-		if err := os.WriteFile(
-			filepath.Join(sidDir, name),
-			[]byte(content),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, directory := range []string{
-		".open.88888888-8888-4888-8888-888888888888",
-		"rotten-directory",
-	} {
-		if err := os.Mkdir(filepath.Join(sidDir, directory), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	entries, invalid, err := crumbHealth(sidDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entries != 6 || invalid != 2 {
-		t.Fatalf(
-			"crumbHealth() entries=%d invalid=%d, want 6 and 2 (rotten + rotten-directory)",
-			entries,
-			invalid,
-		)
-	}
-}
-
 func TestUsageErrors(t *testing.T) {
 	jailTest(t)
 	for _, args := range [][]string{
@@ -671,187 +603,50 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
-func TestActionDispatchPipeGoldenAndTTYExec(t *testing.T) {
-	originalTerminal := actionOutputIsTerminal
-	originalLookPath := actionLookPath
-	originalExec := actionExec
-	t.Cleanup(func() {
-		actionOutputIsTerminal = originalTerminal
-		actionLookPath = originalLookPath
-		actionExec = originalExec
-	})
-
-	const attachLine = "TMUX= tmux -L 'cc-1-2-3' attach -t 'live-session'"
-	var stdout bytes.Buffer
-	actionOutputIsTerminal = func(io.Writer) bool { return false }
-	if err := dispatchAction(&stdout, attachLine); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := stdout.String(), attachLine+"\n"; got != want {
-		t.Fatalf("pipe action = %q, want byte-identical %q", got, want)
-	}
-
-	type execCall struct {
-		path string
-		args []string
-		env  []string
-	}
-	var calls []execCall
-	execReturned := errors.New("exec test return")
-	actionOutputIsTerminal = func(io.Writer) bool { return true }
-	actionLookPath = func(file string) (string, error) {
-		return "/jail/bin/" + file, nil
-	}
-	actionExec = func(path string, args, env []string) error {
-		calls = append(calls, execCall{
-			path: path,
-			args: append([]string(nil), args...),
-			env:  append([]string(nil), env...),
-		})
-		return execReturned
-	}
-
-	t.Setenv("TMUX", "/tmp/driver,1,0")
-	stdout.Reset()
-	if err := dispatchAction(&stdout, attachLine); !errors.Is(err, execReturned) {
-		t.Fatalf("terminal attach error = %v", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("terminal attach printed %q", stdout.String())
-	}
-	if len(calls) != 1 ||
-		calls[0].path != "/jail/bin/tmux" ||
-		!reflect.DeepEqual(
-			calls[0].args,
-			[]string{
-				"tmux", "-L", "cc-1-2-3",
-				"attach", "-t", "live-session",
-			},
-		) ||
-		environmentValue(calls[0].env, "TMUX") != "" {
-		t.Fatalf("terminal tmux exec = %#v", calls)
-	}
-
-	const shellLine = "(cd -- '/work/project' && CODEX_HOME='/work/codex' cx)"
-	if err := dispatchAction(&stdout, shellLine); !errors.Is(err, execReturned) {
-		t.Fatalf("terminal shell error = %v", err)
-	}
-	if len(calls) != 2 ||
-		calls[1].path != "/jail/bin/zsh" ||
-		!reflect.DeepEqual(
-			calls[1].args,
-			[]string{"zsh", "-ic", shellLine},
-		) {
-		t.Fatalf("terminal zsh exec = %#v", calls)
-	}
-}
-
-func TestDirectTmuxArgumentsPreserveQuotedData(t *testing.T) {
-	line := `TMUX= exec tmux -L 'cc-1'"'"'quoted' new-session -c '/work/a b' 'printf "$HOME;*"!'`
-	got, direct, err := directTmuxArguments(line)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		"-L", "cc-1'quoted",
-		"new-session", "-c", "/work/a b",
-		`printf "$HOME;*"!`,
-	}
-	if !direct || !reflect.DeepEqual(got, want) {
-		t.Fatalf("directTmuxArguments() = %q, %v; want %q, true", got, direct, want)
-	}
-}
-
-func environmentValue(environment []string, key string) string {
-	prefix := key + "="
-	for _, entry := range environment {
-		if strings.HasPrefix(entry, prefix) {
-			return strings.TrimPrefix(entry, prefix)
-		}
-	}
-	return "\x00missing"
-}
-
 // harnessPromptFixtureCaptured is the fixed "live" prompt every jailed
-// doctor test observes through harnessCaptureOverride (set in TestMain).
+// doctor test observes through doctor.HarnessCaptureOverride (set in TestMain).
 // Its content is arbitrary — the check only ever hashes it and compares
 // against whatever baseline stageHarnessPromptBaseline pins alongside it.
 const harnessPromptFixtureCaptured = "pfm jail fixture harness prompt\n"
 
 // stageHarnessPromptBaseline writes the managed baseline pin a wired machine
-// carries after `pfm install` — internal/installer/assets/prompts/harness-original.sha256,
-// staged verbatim by stageAssets — so a hand-built "wired" doctor fixture can
+// carries after `pfm install` —
+// harness-prompts/claude/baselines/harness-original.sha256, embedded by the
+// pfm/harness-prompts package and staged verbatim by stageAssets — so a
+// hand-built "wired" doctor fixture can
 // reach the same matches-baseline verdict a real install produces, without
 // re-deriving or re-pinning the real embedded asset.
 func stageHarnessPromptBaseline(t *testing.T, home string) {
 	t.Helper()
-	for _, model := range harnessPromptModels {
+	for _, model := range doctor.HarnessPromptModels {
 		stageModelHarnessPromptBaseline(t, home, model, harnessPromptFixtureCaptured, "harness-prompt-fixture.md")
 	}
 }
 
-func stageModelHarnessPromptBaseline(t *testing.T, home string, model harnessPromptModel, captured, name string) {
+func stageModelHarnessPromptBaseline(
+	t *testing.T,
+	home string,
+	model doctor.HarnessPromptModel,
+	captured, name string,
+) {
 	t.Helper()
-	sum := sha256.Sum256([]byte(captured))
-	pin := hex.EncodeToString(sum[:]) + "  " + name + "\n"
-	dir := filepath.Join(home, ".local", "share", "pfm", "install", "prompts")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	for filename, data := range map[string]string{model.stem + ".sha256": pin, name: captured, model.stem + ".model": "claude-" + model.alias + "-5\n"} {
-		if err := os.WriteFile(filepath.Join(dir, filename), []byte(data), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	testjail.StageHarnessPromptBaseline(t, home, model.Alias, model.Stem, captured, name)
 }
 
 func jailTest(t *testing.T) string {
 	t.Helper()
-
-	root := testjail.Fleet(t)
-	jailedHome := filepath.Join(root, "home")
-	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	canonical := filepath.Join(root, "home", ".local", "bin", "pfm")
-	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	managedClaude := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", "claude")
-	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(managedClaude, filepath.Join(root, "home", ".local", "bin", "claude")); err != nil {
-		t.Fatal(err)
-	}
-	// The pfm-statusline and tmux-title-renudge host overlays are contracted
-	// pfm-install artifacts (issue #14 F1) the same way the Claude launcher
-	// is — a jail meant to represent a healthy install carries both, same
-	// managed-copy-then-symlink shape.
-	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
-		managedOverlay := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", overlay)
-		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(managedOverlay, filepath.Join(root, "home", ".local", "bin", overlay)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stageHarnessPromptBaseline(t, jailedHome)
-	testPath := []string{filepath.Dir(canonical)}
-	for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
-		if _, err := os.Stat(filepath.Join(directory, "pfm")); os.IsNotExist(err) {
-			testPath = append(testPath, directory)
-		}
-	}
-	t.Setenv("PATH", strings.Join(testPath, string(os.PathListSeparator)))
+	root := testjail.InstalledHome(t)
+	stageHarnessPromptBaseline(t, filepath.Join(root, "home"))
 	return root
+}
+
+func jailPaths(t *testing.T) paths.Values {
+	t.Helper()
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatalf("resolve jail paths: %v", err)
+	}
+	return resolved
 }
 
 func writeJailedCodexAuth(t *testing.T, root string) {
@@ -890,5 +685,144 @@ func holdClaudeOpen(t *testing.T, root, socket string) func(format string) strin
 			t.Fatalf("read the opened server %s: %v", socket, err)
 		}
 		return strings.TrimSpace(string(output))
+	}
+}
+
+// argsZeroStringLiterals walks body and collects every string literal a
+// "==" or "!=" comparison holds against an args[0] index expression — the
+// shape both run's top-level switch cases and runInternal's if-chain (plus
+// its final "!= kill-exit" negation) use to name a subcommand. It is the
+// structural half of issue #24 F1's reachability proof: reading the actual
+// dispatch, never trusting a second hand-copied list to match it.
+func argsZeroStringLiterals(body *ast.BlockStmt) map[string]bool {
+	literals := map[string]bool{}
+	isArgsZero := func(expr ast.Expr) bool {
+		index, ok := expr.(*ast.IndexExpr)
+		if !ok {
+			return false
+		}
+		ident, ok := index.X.(*ast.Ident)
+		return ok && ident.Name == "args"
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		binary, ok := n.(*ast.BinaryExpr)
+		if !ok || (binary.Op != token.EQL && binary.Op != token.NEQ) {
+			return true
+		}
+		var literal *ast.BasicLit
+		switch {
+		case isArgsZero(binary.X):
+			literal, _ = binary.Y.(*ast.BasicLit)
+		case isArgsZero(binary.Y):
+			literal, _ = binary.X.(*ast.BasicLit)
+		}
+		if literal == nil || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err == nil {
+			literals[value] = true
+		}
+		return true
+	})
+	return literals
+}
+
+// switchCaseStringLiterals collects every string literal a top-level
+// "switch args[0]" case clause names.
+// switchCaseStringLiterals collects every case's plain string literal AND
+// the printed source text of every non-literal case expression — run's own
+// "codex" case matches on pfmengine.MustLookup(pfmengine.Codex).LongName,
+// not a bare "codex" literal, so a caller that needs that one name checks
+// the printed-text set with pfmengine's own known selector text instead.
+func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literals, printedExprs map[string]bool) {
+	literals = map[string]bool{}
+	printedExprs = map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		clause, ok := n.(*ast.CaseClause)
+		if !ok {
+			return true
+		}
+		for _, expr := range clause.List {
+			if literal, ok := expr.(*ast.BasicLit); ok && literal.Kind == token.STRING {
+				if value, err := strconv.Unquote(literal.Value); err == nil {
+					literals[value] = true
+				}
+				continue
+			}
+			var buf bytes.Buffer
+			if err := printer.Fprint(&buf, fset, expr); err == nil {
+				printedExprs[buf.String()] = true
+			}
+		}
+		return true
+	})
+	return literals, printedExprs
+}
+
+// findFuncDecl parses main.go once and returns the *ast.FuncDecl body for
+// name — "run" or "runInternal", the two functions topLevelSubcommands and
+// internalSubcommands must stay in lockstep with.
+func findFuncDecl(t *testing.T, name string) (*ast.BlockStmt, *token.FileSet) {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse main.go: %v", err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name {
+			return fn.Body, fset
+		}
+	}
+	t.Fatalf("main.go declares no func %s", name)
+	return nil, nil
+}
+
+// TestTopLevelSubcommandsReachTheirHandler pins issue #24 F1's top-level
+// door: every name topLevelSubcommands lists (the same list
+// installer.SetImplementedSubcommands teaches the installer at process
+// start) must be a case run's own "switch args[0]" actually matches — a name
+// listed but unmatched would silently fall to the default "unknown command"
+// arm, and, worse, unknownPFMHookCommand would then treat an operator's own
+// hook naming it as implemented when this binary's dispatch disagrees.
+func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
+	body, fset := findFuncDecl(t, "run")
+	literals, printedExprs := switchCaseStringLiterals(fset, body)
+	// Engine cases match on registry LongName expressions, not bare literals;
+	// topLevelSubcommands carries those same runtime values.
+	selectors := map[string]string{
+		pfmengine.MustLookup(pfmengine.Codex).LongName:    "pfmengine.MustLookup(pfmengine.Codex).LongName",
+		pfmengine.MustLookup(pfmengine.OpenCode).LongName: "pfmengine.MustLookup(pfmengine.OpenCode).LongName",
+	}
+	for _, name := range topLevelSubcommands {
+		if literals[name] {
+			continue
+		}
+		if selector, ok := selectors[name]; ok && printedExprs[selector] {
+			continue
+		}
+		t.Fatalf(
+			"topLevelSubcommands names %q, but run's switch has no matching case — it falls through to the default \"unknown command\" arm",
+			name,
+		)
+	}
+}
+
+// TestInternalSubcommandsReachTheirHandler is TestTopLevelSubcommandsReachTheirHandler's
+// twin for runInternal's if-chain, including "kill-exit"'s
+// "args[0] != \"kill-exit\"" negation — the one entry not shaped like the
+// rest's "args[0] == name" branches.
+func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
+	body, _ := findFuncDecl(t, "runInternal")
+	comparisons := argsZeroStringLiterals(body)
+	for _, name := range internalSubcommands {
+		if !comparisons[name] {
+			t.Fatalf(
+				"internalSubcommands names %q, but runInternal's if-chain never compares args[0] against it — it falls through to \"pfm internal: unknown subcommand\"",
+				name,
+			)
+		}
 	}
 }

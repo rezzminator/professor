@@ -4,14 +4,15 @@ package gather
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-
 	"golang.org/x/sync/errgroup"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // CodexNameResolver resolves the indexed display name for a rollout path.
@@ -33,30 +34,39 @@ type Dependencies struct {
 	CodexName   CodexNameResolver
 	CodexIDName CodexIDNameResolver
 	CodexThread CodexThreadResolver
-	// CodexRoots is the config-owned roster. Nil preserves the historical
-	// paths.CodexRoot singleton for direct callers; an empty non-nil slice
+	// CodexHomes is the config-owned roster. Nil preserves the historical
+	// paths.CodexHome singleton for direct callers; an empty non-nil slice
 	// means no configured Codex engine.
-	CodexRoots   []string
+	CodexHomes   []string
 	ClaudeBinary string
 	CodexBinary  string
-	LabelEmojis  []string
-	ReadOnly     bool
+	// OpenCodeBinary is the configured OpenCode launch command, used to
+	// recognise an OpenCode process whose executable is not the default name.
+	OpenCodeBinary string
+	// OpenCodeSessions is the indexed OpenCode session set DetectOpenCode
+	// names a live pane from. gather never opens opencode.db itself — the
+	// rows arrive already read (fleet.Gather).
+	OpenCodeSessions []OpenCodeSession
+	LabelEmojis      []string
+	ReadOnly         bool
 }
 
 // Gatherer creates immutable live-state snapshots.
 type Gatherer struct {
-	paths        paths.Values
-	proc         ProcFS
-	tmux         TmuxClient
-	now          func() time.Time
-	codexName    CodexNameResolver
-	codexIDName  CodexIDNameResolver
-	codexThread  CodexThreadResolver
-	codexRoots   []string
-	claudeBinary string
-	codexBinary  string
-	labelEmojis  []string
-	readOnly     bool
+	paths            paths.Values
+	proc             ProcFS
+	tmux             TmuxClient
+	now              func() time.Time
+	codexName        CodexNameResolver
+	codexIDName      CodexIDNameResolver
+	codexThread      CodexThreadResolver
+	codexHomes       []string
+	claudeBinary     string
+	codexBinary      string
+	openCodeBinary   string
+	openCodeSessions []OpenCodeSession
+	labelEmojis      []string
+	readOnly         bool
 }
 
 // New resolves paths and fills real implementations for omitted interfaces.
@@ -71,48 +81,51 @@ func New(dependencies Dependencies) (*Gatherer, error) {
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
 		tmuxTmpDir := dependencies.TmuxTmpDir
 		if tmuxTmpDir == "" {
-			tmuxTmpDir = os.Getenv("TMUX_TMPDIR")
+			tmuxTmpDir = paths.OSEnv{}.Get("TMUX_TMPDIR")
 			if tmuxTmpDir == "" {
 				tmuxTmpDir = "/tmp"
 			}
 		}
-		tmux = CommandTmux{
+		tmux = TmuxProbe{
 			Binary:     dependencies.TmuxBinary,
 			TmuxTmpDir: tmuxTmpDir,
 		}
 	}
-	codexRoots := dependencies.CodexRoots
-	if codexRoots == nil {
-		codexRoots = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
+	codexHomes := dependencies.CodexHomes
+	if codexHomes == nil {
+		codexHomes = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
 	} else {
-		codexRoots = append([]string{}, codexRoots...)
+		codexHomes = append([]string{}, codexHomes...)
 	}
 	return &Gatherer{
-		paths:        resolved,
-		proc:         proc,
-		tmux:         tmux,
-		now:          now,
-		codexName:    dependencies.CodexName,
-		codexIDName:  dependencies.CodexIDName,
-		codexThread:  dependencies.CodexThread,
-		codexRoots:   codexRoots,
-		claudeBinary: dependencies.ClaudeBinary,
-		codexBinary:  dependencies.CodexBinary,
-		labelEmojis:  append([]string(nil), dependencies.LabelEmojis...),
-		readOnly:     dependencies.ReadOnly,
+		paths:          resolved,
+		proc:           proc,
+		tmux:           tmux,
+		now:            now,
+		codexName:      dependencies.CodexName,
+		codexIDName:    dependencies.CodexIDName,
+		codexThread:    dependencies.CodexThread,
+		codexHomes:     codexHomes,
+		claudeBinary:   dependencies.ClaudeBinary,
+		codexBinary:    dependencies.CodexBinary,
+		openCodeBinary: dependencies.OpenCodeBinary,
+		openCodeSessions: append(
+			[]OpenCodeSession(nil), dependencies.OpenCodeSessions...),
+		labelEmojis: append([]string(nil), dependencies.LabelEmojis...),
+		readOnly:    dependencies.ReadOnly,
 	}, nil
 }
 
 // Gather probes live state. Pane-dependent filesystem and ProcFS probes run
 // concurrently after the one-command-per-socket tmux snapshot is available.
 func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
-	var tmuxProbe TmuxProbe
+	var tmuxProbe TmuxSnapshot
 	var err error
 	if gatherer.readOnly {
 		tmuxProbe, err = ProbeTmuxReadOnly(
@@ -145,8 +158,10 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 
 	var crumbs CrumbProbe
 	var codex []LiveCodex
+	var openCode []LiveOpenCode
 	var claudeProcesses []ClaudeProcess
 	var agents []Agent
+	var agentWarnings []string
 	var cacheSockets []string
 	var paneLabels []PaneLabel
 	group, _ := errgroup.WithContext(ctx)
@@ -172,7 +187,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		codex, err = detectCodexThreadsInRootsFrom(
 			cmdlines,
 			gatherer.proc,
-			gatherer.codexRoots,
+			gatherer.codexHomes,
 			tmuxProbe.Panes,
 			gatherer.codexThread,
 			gatherer.codexBinary,
@@ -181,7 +196,18 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	})
 	group.Go(func() error {
 		var err error
-		agents, err = detectAgentsFrom(
+		openCode, err = detectOpenCodeFrom(
+			cmdlines,
+			gatherer.proc,
+			tmuxProbe.Panes,
+			gatherer.openCodeSessions,
+			gatherer.openCodeBinary,
+		)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		agents, agentWarnings, err = detectAgentsFrom(
 			cmdlines,
 			gatherer.proc,
 			gatherer.paths.Home,
@@ -217,9 +243,10 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	)
 
 	return Snapshot{
-		Panes:           append([]Pane(nil), tmuxProbe.Panes...),
+		Panes:           append([]ProbePane(nil), tmuxProbe.Panes...),
 		Crumbs:          append([]Crumb(nil), crumbs.Crumbs...),
 		Codex:           append([]LiveCodex(nil), codex...),
+		OpenCode:        append([]LiveOpenCode(nil), openCode...),
 		ClaudeProcesses: append([]ClaudeProcess(nil), claudeProcesses...),
 		Agents:          append([]Agent(nil), agents...),
 		Cache1HSockets:  append([]string(nil), cacheSockets...),
@@ -233,7 +260,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		CrumblessLive: append([]CrumblessLive(nil), crumblessLive...),
 		CorpseSwept:   append([]string(nil), tmuxProbe.CorpseSwept...),
 		StaleSwept:    append([]string(nil), crumbs.StaleSwept...),
-		Warnings:      append([]string(nil), tmuxProbe.ProbeWarnings...),
+		Warnings:      append(append([]string(nil), tmuxProbe.ProbeWarnings...), agentWarnings...),
 	}, nil
 }
 
@@ -244,8 +271,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 // how a chat ends up answering to something nobody typed, so this is the only
 // one.
 func computeWindowRenames(
-	panes []Pane,
-	codex []LiveCodex,
+	panes []ProbePane, codex []LiveCodex,
 	labels []PaneLabel,
 	resolveRollout CodexNameResolver,
 	resolveID CodexIDNameResolver,
@@ -253,8 +279,9 @@ func computeWindowRenames(
 	if resolveRollout == nil && resolveID == nil && len(labels) == 0 {
 		return nil
 	}
-	paneByTarget := make(map[string]Pane, len(panes))
-	for _, pane := range panes {
+	paneByTarget := make(map[string]ProbePane, len(panes))
+	for index := range panes {
+		pane := panes[index]
 		paneByTarget[pane.Socket+"\x00"+pane.PaneID] = pane
 	}
 	seenWindows := make(map[string]struct{})
@@ -318,12 +345,11 @@ func computeWindowRenames(
 // capture is not an absent label: renaming from the sibling that DID answer
 // would stamp one chat's name on a window hosting two.
 func claudeWindowRenames(
-	paneByTarget map[string]Pane,
-	labels []PaneLabel,
+	paneByTarget map[string]ProbePane, labels []PaneLabel,
 	seenWindows map[string]struct{},
 ) []WindowRename {
 	type windowPlan struct {
-		pane  Pane
+		pane  ProbePane
 		label string
 		skip  bool
 	}
@@ -414,16 +440,5 @@ const WindowNameRunes = 24
 // for the name-sync timer). Two writers that clipped differently would each
 // see the other's name as drift and rename the window back and forth forever.
 func WindowNameFor(name string) string {
-	return clipRunes(name, WindowNameRunes)
-}
-
-func clipRunes(value string, limit int) string {
-	count := 0
-	for index := range value {
-		if count == limit {
-			return value[:index]
-		}
-		count++
-	}
-	return value
+	return naming.ClipRunes(name, WindowNameRunes)
 }

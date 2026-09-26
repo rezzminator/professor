@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestPaneCommandEngineAcceptsConfiguredBinaryBasenames(t *testing.T) {
@@ -38,7 +38,7 @@ func TestInjectUsesConfiguredBinaryToDescribeBusyPane(t *testing.T) {
 	t.Setenv("CHAT_INJECT_SOCKET", "")
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{
-			socket: filepath.Join("/tmp", "tmux-jail", "cc-configured"),
+			socket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-configured"),
 			target: "%1",
 		},
 		Tmux:         fake,

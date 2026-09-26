@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -78,28 +78,32 @@ func (row killedRowFixture) Scan(dest ...any) error {
 
 func TestDatabaseEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 	_, err := scanKilled(killedRowFixture{id: "row-7", engine: "bogus"})
-	if err == nil || !strings.Contains(err.Error(), `fleet.db row row-7: unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`) {
+	if err == nil ||
+		!strings.Contains(
+			err.Error(),
+			`fleet.db row row-7: unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`,
+		) {
 		t.Fatalf("scanKilled(bogus) error = %v", err)
 	}
 }
 
-func TestKilledChatsDeriveOpencodeEngineFromMirror(t *testing.T) {
+func TestKilledChatsDeriveOpenCodeEngineFromMirror(t *testing.T) {
 	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
 	const id = "ses-opencode"
-	if err := database.ReplaceOcSessions(ctx, []OcSession{{ID: id, Title: "fixture"}}); err != nil {
+	if err := database.ReplaceOpenCodeSessions(ctx, []OpenCodeSession{{ID: id, Title: "fixture"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.Opencode, KilledAt: 1}); err != nil {
+	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.OpenCode, KilledAt: 1}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := database.KilledChats(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Engine != pfmengine.Opencode {
+	if len(rows) != 1 || rows[0].Engine != pfmengine.OpenCode {
 		t.Fatalf("KilledChats()=%#v, want one OpenCode row", rows)
 	}
 	counts, err := database.Counts(ctx)
@@ -117,16 +121,16 @@ func TestOpenCodeKillBecomesPrunableOnlyAfterMirrorRemoval(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
 	const id = "ses-opencode-prunable"
-	if err := database.ReplaceOcSessions(ctx, []OcSession{{ID: id, Title: "fixture"}}); err != nil {
+	if err := database.ReplaceOpenCodeSessions(ctx, []OpenCodeSession{{ID: id, Title: "fixture"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.Opencode, KilledAt: 1}); err != nil {
+	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.OpenCode, KilledAt: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if counts, err := database.Counts(ctx); err != nil || counts.OrphanedKills != 0 {
 		t.Fatalf("mirrored OpenCode kill counts=%+v err=%v, want non-orphan", counts, err)
 	}
-	if err := database.ReplaceOcSessions(ctx, nil); err != nil {
+	if err := database.ReplaceOpenCodeSessions(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	counts, err := database.Counts(ctx)
@@ -189,6 +193,43 @@ func TestKilledBusyPolicyWarnsAndRejectsTheChange(t *testing.T) {
 		t.Fatalf("Killed() after a busy unkill found = %v, error = %v; want true, nil", found, err)
 	}
 	release()
+}
+
+// L1-F18: the busy-warning counter write is fire-and-forget by design (it
+// must never mask the real busy error), but its own failure must not be
+// silent — it is logged with context, the same way the busy rejection itself
+// is.
+func TestKilledWriteLogsWhenTheBusyWarningCounterCannotBeWritten(t *testing.T) {
+	setStoreTestJail(t)
+
+	var warnings bytes.Buffer
+	writer := openTestStore(t, WithWarningWriter(&warnings))
+	t.Cleanup(func() { _ = writer.Close() })
+	ctx := context.Background()
+
+	if err := writer.Kill(ctx, Killed{ID: "seed", KilledAt: 1}); err != nil {
+		t.Fatalf("seed Kill() error = %v", err)
+	}
+	if err := writer.state.SetBusyTimeout(ctx, 1); err != nil {
+		t.Fatalf("shorten shared busy timeout: %v", err)
+	}
+	release := holdSharedWriteLock(t, writer.SharedPath())
+	defer release()
+
+	// The busy-warning counter lives in this Store's OWN local index db,
+	// never the shared store the busy retry above targets — closing it here
+	// fails only the counter write, not the kill/unkill path under test.
+	if err := writer.db.Close(); err != nil {
+		t.Fatalf("close local index db: %v", err)
+	}
+
+	if err := writer.Kill(ctx, Killed{ID: "busy-kill", KilledAt: 2}); err == nil {
+		t.Fatal("Kill() under persistent SQLITE_BUSY reported success")
+	}
+	got := warnings.String()
+	if !strings.Contains(got, "WARNING:") || !strings.Contains(got, "busy-warning counter") {
+		t.Fatalf("warnings = %q, want the counter write failure named", got)
+	}
 }
 
 // holdSharedWriteLock takes the shared database's write lock from a separate
@@ -433,7 +474,11 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 	}
 
 	store := openTestStore(t)
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
 	ready := os.Getenv(helperReadyEnv)
 	gate := os.Getenv(helperGateEnv)
 	if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
@@ -464,14 +509,14 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 	}
 }
 
-func waitForPaths(ctx context.Context, paths ...string) error {
+func waitForPaths(ctx context.Context, filePaths ...string) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		allPresent := true
-		for _, path := range paths {
-			if _, err := os.Stat(path); err != nil {
+		for _, filePath := range filePaths {
+			if _, err := os.Stat(filePath); err != nil {
 				if !os.IsNotExist(err) {
 					return err
 				}

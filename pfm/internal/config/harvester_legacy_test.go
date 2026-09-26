@@ -24,8 +24,13 @@ func rot13(s string) string {
 func TestHarvesterRetiredScholarlyKeysFoldIntoMirrors(t *testing.T) {
 	home := t.TempDir()
 	dir := t.TempDir()
-	body := fmt.Sprintf(`{"scholarly":{"contactEmail":"ops@example.com",%q:"https://a.example.invalid",%q:"https://b.example.invalid",%q:"https://c.example.invalid",%q:"https://d.example.invalid","googleScholarURL":"https://scholar.example.invalid"}}`,
-		rot13("fpvUhoHEY"), rot13("fpvQOHEY"), rot13("yvoTraHEY"), rot13("naanfHEY"))
+	body := fmt.Sprintf(
+		`{"scholarly":{"contactEmail":"ops@example.com",%q:"https://a.example.invalid",%q:"https://b.example.invalid",%q:"https://c.example.invalid",%q:"https://d.example.invalid","googleScholarURL":"https://scholar.example.invalid"}}`,
+		rot13("fpvUhoHEY"),
+		rot13("fpvQOHEY"),
+		rot13("yvoTraHEY"),
+		rot13("naanfHEY"),
+	)
 	writeFile(t, filepath.Join(dir, HarvesterFileName), body, 0o600)
 	got, err := Load(filepath.Join(dir, FileName), home, nil)
 	if err != nil {
@@ -42,7 +47,10 @@ func TestHarvesterRetiredScholarlyKeysFoldIntoMirrors(t *testing.T) {
 func TestHarvesterMirrorsWinOverRetiredKeys(t *testing.T) {
 	home := t.TempDir()
 	dir := t.TempDir()
-	body := fmt.Sprintf(`{"scholarly":{%q:"https://old.example.invalid","mirrors":{"doi-mirror":"https://new.example.invalid"}}}`, rot13("fpvUhoHEY"))
+	body := fmt.Sprintf(
+		`{"scholarly":{%q:"https://old.example.invalid","mirrors":{"doi-mirror":"https://new.example.invalid"}}}`,
+		rot13("fpvUhoHEY"),
+	)
 	writeFile(t, filepath.Join(dir, HarvesterFileName), body, 0o600)
 	got, err := Load(filepath.Join(dir, FileName), home, nil)
 	if err != nil {

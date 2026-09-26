@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (
@@ -106,7 +106,11 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 	elapsed := time.Since(started)
 
 	database = jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	killed, err := database.KilledChats(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +147,7 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 
 func TestKillStressProcessHelper(t *testing.T) {
 	if os.Getenv(killStressHelperEnv) != "1" {
-		return
+		t.Skip("kill stress fixture runs only as a helper process")
 	}
 	index := 0
 	if _, err := fmt.Sscanf(os.Getenv(killStressIndexEnv), "%d", &index); err != nil {
@@ -153,7 +157,11 @@ func TestKillStressProcessHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	manager, err := New(database, Dependencies{})
 	if err != nil {
 		t.Fatal(err)

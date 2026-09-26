@@ -129,7 +129,7 @@ func TestRunRescuesAPromptStrandedByAnOverlay(t *testing.T) {
 	defer jail.killSockets(t)
 	t.Setenv("CC_STUB_OVERLAY", "1")
 	restoreGrace, restoreWindow := launchGrace, launchProofWindow
-	launchGrace, launchProofWindow = 3*time.Second, 6*time.Second
+	launchGrace, launchProofWindow = 50*time.Millisecond, 250*time.Millisecond
 	t.Cleanup(func() { launchGrace, launchProofWindow = restoreGrace, restoreWindow })
 
 	var stdout, stderr bytes.Buffer

@@ -1,9 +1,10 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 // TestKillKeyRefusesALabelKilledRow pins the one place the two kill kinds must
@@ -41,5 +42,34 @@ func TestKillKeyRefusesALabelKilledRow(t *testing.T) {
 	}
 	if !model.rows[0].Killed || !model.rows[0].NameKilled {
 		t.Fatalf("label-killed row was flipped in the model: %#v", model.rows[0])
+	}
+}
+
+// TestKillKeyRefusesTheUpdateCheckFailureRow: the failure row is a notice
+// carried from the update-check marker, not a chat — a kill keyed by its
+// synthetic id would write a ledger entry that holds nothing down.
+func TestKillKeyRefusesTheUpdateCheckFailureRow(t *testing.T) {
+	snapshot := Snapshot{
+		View:           compose.DefaultView,
+		PrimaryAccount: 1,
+		NowNS:          fixtureNowNS,
+		Width:          120,
+		Height:         17,
+		Rows: []compose.Row{{
+			Kind:    compose.ProfessorUpdateFailed,
+			ID:      "pfm-update-check-failed-2026-01-02T03:04:05Z",
+			Name:    "failing since 2026-01-02 03:04 (network): 503",
+			Project: ".professor",
+			CWD:     "/home/test/.professor",
+		}},
+	}
+
+	model := NewModel(snapshot)
+	model, _ = applyKey(t, model, controlKey('x'))
+	if changes := model.Result().KillChanges; len(changes) != 0 {
+		t.Fatalf("kill key wrote a change for the update-check failure row: %#v", changes)
+	}
+	if !strings.Contains(model.killStatus, "notice, not a chat") {
+		t.Fatalf("killStatus = %q, want the refusal to name the row a notice", model.killStatus)
 	}
 }

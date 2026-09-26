@@ -106,7 +106,7 @@ type gatedTmuxClient struct {
 func (client gatedTmuxClient) ListPanes(
 	ctx context.Context,
 	socket string,
-) ([]Pane, error) {
+) ([]ProbePane, error) {
 	select {
 	case client.started <- socket:
 	case <-ctx.Done():
@@ -142,7 +142,7 @@ func stressSocketStorm(t *testing.T) {
 			"pane",
 		)
 	}
-	client := CommandTmux{Binary: "tmux", TmuxTmpDir: jail.root}
+	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: jail.root}
 
 	firstContext, cancelFirst := context.WithTimeout(context.Background(), timeout)
 	defer cancelFirst()
@@ -168,7 +168,7 @@ func stressSocketStorm(t *testing.T) {
 		release: release,
 	}
 	type probeResult struct {
-		probe TmuxProbe
+		probe TmuxSnapshot
 		err   error
 	}
 	resultChannel := make(chan probeResult, 1)
@@ -242,7 +242,7 @@ func stressProcFSScale(t *testing.T) {
 		codexCount   = 200
 		fdCount      = 100
 	)
-	codexRoot := "/fixture/codex"
+	codexHome := "/fixture/codex"
 	processes := make(map[int]fakeProcess, processCount)
 	for pid := 1; pid <= processCount; pid++ {
 		processes[pid] = fakeProcess{
@@ -251,7 +251,7 @@ func stressProcFSScale(t *testing.T) {
 		}
 	}
 
-	panes := make([]Pane, 0, codexCount)
+	panes := make([]ProbePane, 0, codexCount)
 	for index := 0; index < codexCount; index++ {
 		codexPID := index + 1
 		panePID := 1001 + index
@@ -263,7 +263,7 @@ func stressProcFSScale(t *testing.T) {
 			})
 		}
 		rollout := filepath.Join(
-			codexRoot,
+			codexHome,
 			"sessions",
 			"stress",
 			fmt.Sprintf("rollout-%03d.jsonl", index),
@@ -274,7 +274,7 @@ func stressProcFSScale(t *testing.T) {
 			fdLinks: links,
 			stat:    ProcStat{ParentPID: panePID, StartTime: uint64(codexPID)},
 		}
-		panes = append(panes, Pane{
+		panes = append(panes, ProbePane{
 			Socket: fmt.Sprintf("cx-%d-1-1", index+1),
 			PaneID: fmt.Sprintf("%%%d", index),
 			PID:    panePID,
@@ -283,7 +283,7 @@ func stressProcFSScale(t *testing.T) {
 	proc := &fakeProcFS{processes: processes}
 
 	started := time.Now()
-	live, err := DetectCodex(proc, codexRoot, panes)
+	live, err := DetectCodex(proc, codexHome, panes)
 	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatalf("DetectCodex(5k/20k fds) error = %v", err)

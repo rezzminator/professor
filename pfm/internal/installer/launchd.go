@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
@@ -136,13 +138,17 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 			domain := "gui/" + strconv.Itoa(os.Getuid())
 			_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+mcpLaunchdLabel)
 		}
-		return installer.change("remove "+path, func() error { return os.Remove(path) })
+		message := fmt.Sprintf("remove %s (no MCP server is enabled in %s)", path, installer.options.MCPConfigPath)
+		return installer.change(message, func() error { return os.Remove(path) })
 	}
 	template, err := readAsset(mcpLaunchdAsset)
 	if err != nil {
 		return fmt.Errorf("read embedded MCP launch agent: %w", err)
 	}
-	wanted, err := renderServicePath([]byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home)), installer.options.Home)
+	wanted, err := renderServicePath(
+		[]byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home)),
+		installer.options.Home,
+	)
 	if err != nil {
 		return fmt.Errorf("render MCP launch agent: %w", err)
 	}
@@ -204,13 +210,24 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 		if loaded {
 			return fmt.Errorf(
 				"launchctl bootstrap %s failed AFTER its running job was stopped to load the new plist; the agent file is installed and the service is now DOWN — restart it with `launchctl bootstrap %s %s`: %w",
-				label, domain, path, err,
+				label,
+				domain,
+				path,
+				err,
 			)
 		}
-		return fmt.Errorf("launchctl bootstrap %s failed; agent file is installed but service is not loaded: %w", label, err)
+		return fmt.Errorf(
+			"launchctl bootstrap %s failed; agent file is installed but service is not loaded: %w",
+			label,
+			err,
+		)
 	}
 	if err := installer.options.Runner.Run(ctx, "launchctl", "print", domain+"/"+label); err != nil {
-		return fmt.Errorf("launchctl bootstrap %s returned success but loaded-agent verification failed: %w", label, err)
+		return fmt.Errorf(
+			"launchctl bootstrap %s returned success but loaded-agent verification failed: %w",
+			label,
+			err,
+		)
 	}
 	installer.ok("launchctl bootstrap " + label)
 	installer.say("")
@@ -225,7 +242,13 @@ func (installer *engine) pause(d time.Duration) {
 		installer.options.Sleep(d)
 		return
 	}
-	time.Sleep(d)
+	waiter := installer.options.Clock
+	if waiter == nil {
+		waiter = clock.Real
+	}
+	if err := waiter.Sleep(context.Background(), d); err != nil {
+		installer.say("installer: launchd retry sleep failed: %v", err)
+	}
 }
 
 // bootstrapWithRetry re-registers the job, retrying while launchd finishes a
@@ -237,7 +260,7 @@ func (installer *engine) pause(d time.Duration) {
 // nothing to restart it. Retrying the bootstrap closes the window without
 // asking anyone to predict how long a teardown takes, and it costs a healthy
 // host nothing: the first attempt succeeds and no wait is ever taken.
-func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, label string) error {
+func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, _ string) error {
 	var err error
 	for attempt := 0; attempt < launchdBootstrapAttempts; attempt++ {
 		if attempt > 0 {
@@ -281,13 +304,27 @@ func (installer *engine) unwireMCPLaunchAgent(ctx context.Context) error {
 	return installer.change("remove "+path, func() error { return os.Remove(path) })
 }
 
+// probeAnswered reports whether err came from a probe that ran to completion
+// and reported a status, rather than one that never got an answer at all
+// (the tool missing from PATH, permission denied, or a signal). A positive
+// coded exit means the tool ran and answered; deps.ExitCode reports -1 for
+// anything else, including the production runner's plain errors and a
+// signal-killed *exec.ExitError.
+func probeAnswered(err error) bool {
+	return deps.ExitCode(err) > 0
+}
+
 // launchAgentRunning reports whether the name-sync job is executing right now,
 // and whether the question could be asked at all.
 //
 // "state = not running" contains "running", so the state line is compared whole
 // rather than searched — a substring match here would refuse every install on a
-// perfectly idle agent.
-func launchAgentRunning(ctx context.Context, runner CommandRunner) (running bool, probed bool) {
+// perfectly idle agent. An `Output` error is inspected the same way the systemd
+// gate's is: a positive coded exit means launchctl ran and answered (a label it
+// does not know is not an error to report — nothing is installed yet, so
+// nothing can be mid-execution); anything else means the probe never got an
+// answer at all.
+func launchAgentRunning(ctx context.Context, runner CommandRunner) (running, probed bool) {
 	reader, ok := runner.(OutputRunner)
 	if !ok {
 		return false, false
@@ -296,9 +333,12 @@ func launchAgentRunning(ctx context.Context, runner CommandRunner) (running bool
 		ctx, "launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+launchdLabel,
 	)
 	if err != nil {
-		// A label launchd does not know is not an error to report: nothing is
-		// installed yet, so nothing can be mid-execution.
-		return false, true
+		if probeAnswered(err) {
+			// A label launchd does not know is not an error to report: nothing is
+			// installed yet, so nothing can be mid-execution.
+			return false, true
+		}
+		return false, false
 	}
 	for _, line := range strings.Split(string(output), "\n") {
 		if strings.TrimSpace(line) == "state = running" {

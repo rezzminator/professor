@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // TestReadEntriesTailsNewestLastAndSaysWhenItCut pins chat read's shared

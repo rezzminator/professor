@@ -7,8 +7,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/sky"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/sky"
 )
 
 func TestSkyHeaderAtThreeFixedTimesAndKillSwitch(t *testing.T) {

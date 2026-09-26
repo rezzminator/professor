@@ -1,16 +1,14 @@
 package action
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // RealProcesses reads the small /proc subset needed by the stray sweep.
@@ -49,7 +47,7 @@ func (processes RealProcesses) Processes(
 		if err != nil || len(content) == 0 {
 			continue
 		}
-		argv := splitNUL(content)
+		argv := gather.SplitNUL(content)
 		tty := ""
 		if target, err := os.Readlink(
 			filepath.Join(root, entry.Name(), "fd", "0"),
@@ -65,20 +63,5 @@ func (processes RealProcesses) Processes(
 }
 
 func (RealProcesses) Terminate(pid int) error {
-	err := syscall.Kill(pid, syscall.SIGTERM)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
-}
-
-func splitNUL(content []byte) []string {
-	fields := bytes.Split(content, []byte{0})
-	values := make([]string, 0, len(fields))
-	for _, field := range fields {
-		if len(field) != 0 {
-			values = append(values, string(field))
-		}
-	}
-	return values
+	return gather.Terminate(pid)
 }

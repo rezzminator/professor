@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestMain gives this package a short, canonical TMPDIR and a jailed PFM_HOME

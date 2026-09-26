@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // The fetch gateway: the ONE function every harvester HTTP egress goes through.
@@ -33,10 +35,9 @@ import (
 //
 //  1. the caller's client (plain, or the binary tier for downloads)
 //  2. Chrome impersonation (uTLS fingerprint; still no JS, no browser surface)
-//  3. the real browser, HEADLESS
-//  4. the real browser, HEADED — the last resort, and only ever after 3 ran
+//  3. the real browser, HEADLESS — never a visible window
 //
-// Rungs 3 and 4 are reached only with gatewayEscalate, only when the rung below
+// Rung 3 is reached only with gatewayEscalate, only when the rung below
 // actually hit a wall, and never for a binary download: the browser rung returns
 // rendered HTML, so it cannot produce a PDF's bytes and must not be spent
 // pretending it might.
@@ -67,7 +68,7 @@ type gatewayRequest struct {
 	headers http.Header
 	max     int64
 	jar     http.CookieJar
-	// policy is read ONLY by gatewayFetch's ladder, to decide whether to
+	// policy is read ONLY by retrieveGateway's ladder, to decide whether to
 	// escalate past req.client. gatewayAttempt performs exactly one HTTP
 	// attempt and never consults this field — a caller that calls
 	// gatewayAttempt directly (bypassing the ladder) has nothing to set here.
@@ -80,6 +81,10 @@ type gatewayRequest struct {
 	// binary marks a request whose BYTES are the artifact (a PDF, an EPUB).
 	// The browser rungs return rendered HTML and can never satisfy one.
 	binary bool
+	// noBrowser keeps a discovery search off the browser rungs: a search answers
+	// inside the search_literature deadline, and a walled search page is reported as a
+	// challenge the moment its body arrives, not after a browser waits on it.
+	noBrowser bool
 	// trustedOrigin marks a URL the OPERATOR configured (a self-hosted SearXNG,
 	// which is legitimately allowed to be on loopback). The generic SSRF
 	// assertion refuses private hosts, which is right for attacker-supplied
@@ -114,10 +119,11 @@ type gatewayResponse struct {
 // looked and were walled, not that we failed to look.
 var errGatewayNoRung = errors.New("every gateway rung was exhausted")
 
-// fetch runs one request through the gateway ladder.
-func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
+// retrieveGateway is Retrieve's PolicyGateway step: one request up the challenge
+// ladder. Only retrieve calls it; there is no second ladder entry.
+func (h *Harvester) retrieveGateway(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	if !req.trustedOrigin {
-		if err := assertFetchable(req.url, false); err != nil {
+		if err := validateFetchURL(req.url, false); err != nil {
 			return gatewayResponse{}, err
 		}
 	}
@@ -128,7 +134,7 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 		req.ua = h.userAgent
 	}
 
-	response, err := h.gatewayRung(ctx, req, req.client, "direct", req.ua)
+	response, err := h.gatewayRung(ctx, req, req.client, rungDirect, req.ua)
 	if req.policy == gatewayNoEscalate {
 		return response, err
 	}
@@ -169,8 +175,8 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 	// the Chrome client: repeating an identical fingerprint against the same
 	// wall is a wasted round trip, not a second chance.
 	if chrome := h.chromeForGateway(req); chrome != nil {
-		attempted = append(attempted, "chrome-impersonation")
-		chromeResponse, chromeErr := h.gatewayRung(ctx, req, chrome, "chrome-impersonation", chromeUA)
+		attempted = append(attempted, rungChromeImpersonation)
+		chromeResponse, chromeErr := h.gatewayRung(ctx, req, chrome, rungChromeImpersonation, chromeUA)
 		if chromeErr == nil && !chromeResponse.challenge {
 			chromeResponse.rungs = attempted
 			return chromeResponse, nil
@@ -178,8 +184,7 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 		keep(chromeResponse, chromeErr)
 	}
 
-	// Rungs 3 and 4 — the real browser. Headless first, always; headed only
-	// after headless ran and still met a wall.
+	// Rung 3 — the real browser, headless only.
 	if browserResponse, ok := h.gatewayBrowser(ctx, req, &attempted); ok {
 		browserResponse.rungs = attempted
 		return browserResponse, nil
@@ -195,7 +200,7 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 		// caller renders the challenge diagnostic rather than a connect error.
 		return best, nil
 	}
-	return best, fmt.Errorf("%w for %s", errGatewayNoRung, req.url)
+	return best, fmt.Errorf("%w for %s", errGatewayNoRung, safeURL(req.url))
 }
 
 // chromeForGateway returns the Chrome-impersonation client to escalate to, or
@@ -213,7 +218,12 @@ func (h *Harvester) chromeForGateway(req gatewayRequest) *http.Client {
 
 // gatewayRung performs exactly one HTTP attempt with the given client, naming
 // the rung for the receipt.
-func (h *Harvester) gatewayRung(ctx context.Context, req gatewayRequest, client *http.Client, name, ua string) (gatewayResponse, error) {
+func (h *Harvester) gatewayRung(
+	ctx context.Context,
+	req gatewayRequest,
+	client *http.Client,
+	name, ua string,
+) (gatewayResponse, error) {
 	req.client, req.ua = client, ua
 	out, err := gatewayAttempt(ctx, req)
 	out.rungs = []string{name}
@@ -228,37 +238,7 @@ func (h *Harvester) gatewayRung(ctx context.Context, req gatewayRequest, client 
 // same code path as the provider ladder.
 func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	var out gatewayResponse
-	if !req.trustedOrigin {
-		if err := assertFetchable(req.url, false); err != nil {
-			return out, err
-		}
-	}
-	if req.trustedOrigin && req.client == nil {
-		// gatewayRequestClient below dereferences *req.client unconditionally
-		// for a trusted origin, matching the base client's own redirect
-		// policy. A nil client here is a caller bug, not a network failure —
-		// name it rather than let the dereference panic the process.
-		return out, fmt.Errorf("gateway: trusted-origin request to %s has no client configured", req.url)
-	}
-	method := req.method
-	if method == "" {
-		method = http.MethodGet
-	}
-	var payload io.Reader = http.NoBody
-	if len(req.body) > 0 {
-		payload = bytes.NewReader(req.body) // a fresh reader per rung; see gatewayRequest.body
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, req.url, payload)
-	if err != nil {
-		return out, fmt.Errorf("build request: %w", err)
-	}
-	httpReq.Header.Set("User-Agent", req.ua)
-	for key, values := range req.headers {
-		for _, value := range values {
-			httpReq.Header.Add(key, value)
-		}
-	}
-	resp, err := gatewayRequestClient(req).Do(httpReq)
+	resp, err := gatewayDo(ctx, req)
 	if err != nil {
 		return out, err
 	}
@@ -284,23 +264,28 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 // keeps its own client's redirect policy untouched — that policy refuses every
 // redirect by name, and wrapping it in the generic SSRF check would report a
 // walked-off redirect as a private-host error, naming the wrong cause.
+//
+// Both clones are the harvester's http.out door (spec § Middleware): the
+// per-request copy is wrapped, so every attempt of every rung leaves one
+// record, while the shared client's Transport — the one configureProxy,
+// setUserAgent and IsPinnedClient inspect by type — is never touched.
 func gatewayRequestClient(req gatewayRequest) *http.Client {
 	if req.trustedOrigin {
 		clone := *req.client
 		if req.jar != nil {
 			clone.Jar = req.jar
 		}
-		return &clone
+		return obs.WrapClient(&clone)
 	}
-	return gatewayClient(req.client, req.jar)
+	return obs.WrapClient(gatewayClient(req.client, req.jar))
 }
 
 // gatewayReadBody decodes the response and applies the byte ceiling under the
 // caller's oversize rule. truncate keeps the permitted prefix; otherwise an
 // over-ceiling body is an error and no partial artifact is returned.
-func gatewayReadBody(resp *http.Response, max int64, truncate bool) ([]byte, int, string, error) {
+func gatewayReadBody(resp *http.Response, maxBytes int64, truncate bool) ([]byte, int, string, error) {
 	if !truncate {
-		return readDOIMirrorResponse(resp, max)
+		return readDOIMirrorResponse(resp, maxBytes)
 	}
 	if resp == nil {
 		return nil, 0, "", errors.New("gateway received no HTTP response")
@@ -311,30 +296,39 @@ func gatewayReadBody(resp *http.Response, max int64, truncate bool) ([]byte, int
 		return nil, status, contentType, errors.New("gateway received an empty response body")
 	}
 	decoded, closeBody, err := decodedResponseBody(resp)
-	if err != nil {
-		return nil, status, contentType, err
-	}
+	// decodedResponseBody returns a LIVE closer on every return path, including
+	// its unsupported-encoding error arm (net.go) — register the close before
+	// checking err, or that arm leaks the body and the connection (F5).
 	defer func() {
 		if closeErr := closeBody(); closeErr != nil {
 			log.Printf("harvest: closing gateway response body: %v", closeErr)
 		}
 	}()
-	body, err := io.ReadAll(io.LimitReader(decoded, max+1))
+	if err != nil {
+		return nil, status, contentType, err
+	}
+	body, err := io.ReadAll(io.LimitReader(decoded, maxBytes+1))
 	if err != nil {
 		return nil, status, contentType, fmt.Errorf("read response: %w", err)
 	}
-	if int64(len(body)) > max {
-		body = body[:max]
+	if int64(len(body)) > maxBytes {
+		body = body[:maxBytes]
 	}
 	return body, status, contentType, nil
 }
 
-// gatewayBrowser runs the browser rungs: HEADLESS first, and a HEADED window
-// only as the final resort after headless met a wall. It reports ok only when a
+// gatewayBrowser runs the browser rung, headless. It reports ok only when the
 // render produced content that is not itself a wall.
-func (h *Harvester) gatewayBrowser(ctx context.Context, req gatewayRequest, attempted *[]string) (gatewayResponse, bool) {
+func (h *Harvester) gatewayBrowser(
+	ctx context.Context,
+	req gatewayRequest,
+	attempted *[]string,
+) (gatewayResponse, bool) {
 	if req.binary {
 		return gatewayResponse{}, false // the rung renders HTML; it has no bytes to give.
+	}
+	if req.noBrowser {
+		return gatewayResponse{}, false
 	}
 	if !h.settings.browser {
 		return gatewayResponse{}, false // opt-in (fetch.browser); off means never launched.
@@ -344,72 +338,117 @@ func (h *Harvester) gatewayBrowser(ctx context.Context, req gatewayRequest, atte
 	}
 	fetcher, ok := h.options.Converter.(BrowserFetcher)
 	if !ok {
-		log.Printf("harvest: gateway could not escalate %s to the browser rung: no BrowserFetcher adapter is wired into this Harvester", req.url)
+		log.Printf(
+			"harvest: gateway could not escalate %s to the browser rung: no BrowserFetcher adapter is wired into this Harvester",
+			safeURL(req.url),
+		)
 		return gatewayResponse{}, false
 	}
 
-	// renderHeadlessFirst owns the headless-then-headed sequencing; the gateway
-	// only records which rungs it spent and judges the result.
+	// renderHeadless owns the render; the gateway only records the rung it
+	// spent and judges the result.
 	*attempted = append(*attempted, "browser-headless")
-	outcome := renderHeadlessFirst(ctx, fetcher, req.url)
-	if outcome.headed {
-		*attempted = append(*attempted, "browser-headed")
-	}
+	outcome := renderHeadless(ctx, fetcher, req.url)
 	switch {
 	case errors.Is(outcome.err, ErrBrowserPolicyDenied):
-		log.Printf("harvest: gateway browser rung refused %s by policy: %v", req.url, outcome.err)
+		log.Printf("harvest: gateway browser rung refused %s by policy: %v", safeURL(req.url), outcome.err)
 		return gatewayResponse{}, false
 	case outcome.err != nil:
-		log.Printf("harvest: gateway browser rung could not run for %s: %v", req.url, outcome.err)
+		log.Printf("harvest: gateway browser rung could not run for %s: %v", safeURL(req.url), outcome.err)
 		return gatewayResponse{}, false
 	}
 	if outcome.html != "" && !outcome.wall {
 		return browserGatewayResponse(req.url, outcome.html, outcome.status), true
 	}
-	log.Printf("harvest: gateway browser rungs met a wall for %s (HTTP %d) — this wall is not passable unattended from this network", req.url, outcome.status)
+	log.Printf(
+		"harvest: gateway browser rung met a wall for %s (HTTP %d) — this wall is not passable unattended from this network",
+		safeURL(req.url),
+		outcome.status,
+	)
 	return gatewayResponse{}, false
 }
 
-// browserRenderOutcome is what the browser rungs produced. It names a WALL
+// browserRenderOutcome is what the browser rung produced. It names a WALL
 // separately from an OUTAGE and from an empty render, so a caller never has to
 // re-derive which of the three it got.
 type browserRenderOutcome struct {
-	html   string
-	status int
-	headed bool  // a VISIBLE window was spent
-	wall   bool  // the render completed and is still a challenge page
-	err    error // the rung could not run at all
+	html     string
+	status   int
+	finalURL string // the address of the document html holds; "" when unknown
+	wall     bool   // the render completed and is still a challenge page
+	err      error  // the rung could not run at all
 }
 
-// renderHeadlessFirst is the ONE implementation of the headless-first /
-// headed-last policy, shared by the gateway and the generic web ladder. Two
-// copies of this sequencing would drift, and the direction it drifts in is a
-// browser window opening on the operator's desktop when it should not.
-//
-// Headless is ALWAYS attempted. A visible window is spent only on a wall the
-// headless render actually met, and a headed launch that fails (a display-less
-// host) leaves the completed headless verdict standing rather than masking it.
-func renderHeadlessFirst(ctx context.Context, fetcher BrowserFetcher, source string) browserRenderOutcome {
-	html, status, err := fetcher.FetchBrowser(ctx, source, true)
+// renderHeadless is the ONE browser render, shared by the gateway and the
+// generic web ladder: headless, and never a visible window — a challenge the
+// headless render does not pass is the verdict, reported as a wall.
+func renderHeadless(ctx context.Context, fetcher BrowserFetcher, source string) browserRenderOutcome {
+	html, status, finalURL, err := fetcher.FetchBrowser(ctx, source)
 	if err != nil {
 		return browserRenderOutcome{err: err}
 	}
-	if html == "" || !isChallenge([]byte(html), status) {
-		return browserRenderOutcome{html: html, status: status}
-	}
-	headedHTML, headedStatus, headedErr := fetcher.FetchBrowser(ctx, source, false)
-	if headedErr != nil {
-		log.Printf("harvest: headed browser retry for %s could not run after a headless wall: %v", source, headedErr)
-		return browserRenderOutcome{html: html, status: status, wall: true}
-	}
 	return browserRenderOutcome{
-		html:   headedHTML,
-		status: headedStatus,
-		headed: true,
-		wall:   headedHTML != "" && isChallenge([]byte(headedHTML), headedStatus),
+		html:     html,
+		status:   status,
+		finalURL: finalURL,
+		wall:     html != "" && isChallenge([]byte(html), status),
 	}
 }
 
 func browserGatewayResponse(source, html string, status int) gatewayResponse {
-	return gatewayResponse{body: []byte(html), status: status, contentType: "text/html; charset=utf-8", finalURL: source}
+	return gatewayResponse{
+		body:        []byte(html),
+		status:      status,
+		contentType: "text/html; charset=utf-8",
+		finalURL:    source,
+	}
+}
+
+// gatewayDo sends one request and hands back the live response: the SSRF
+// assertion, the User-Agent, the headers and the wrapped client every rung
+// shares. gatewayAttempt reads the body whole; a file rung streams it.
+func gatewayDo(ctx context.Context, req gatewayRequest) (*http.Response, error) {
+	if !req.trustedOrigin {
+		if err := validateFetchURL(req.url, false); err != nil {
+			return nil, err
+		}
+	}
+	if req.trustedOrigin && req.client == nil {
+		// gatewayRequestClient below dereferences *req.client unconditionally
+		// for a trusted origin, matching the base client's own redirect
+		// policy. A nil client here is a caller bug, not a network failure —
+		// name it rather than let the dereference panic the process.
+		return nil, fmt.Errorf("gateway: trusted-origin request to %s has no client configured", safeURL(req.url))
+	}
+	method := req.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	var payload io.Reader = http.NoBody
+	if len(req.body) > 0 {
+		payload = bytes.NewReader(req.body) // a fresh reader per rung; see gatewayRequest.body
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, req.url, payload)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	httpReq.Header.Set("User-Agent", req.ua)
+	for key, values := range req.headers {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
+	}
+	defaults := httpReq.Header.Clone()
+	applyCallerHeaders(httpReq) // the caller's headers, on the target's origin only (caller_headers.go)
+	resp, err := scopeCallerRedirects(ctx, gatewayRequestClient(req), defaults).Do(httpReq)
+	if err != nil {
+		// http.Client wraps a transport failure in *url.Error, which carries
+		// the full request URL — query string included, and with it any
+		// credential a provider puts there (books.go's Google Books key, for
+		// one). This is the ONE place that wrapping happens for every rung of
+		// every caller (see the package doc above), so sanitizing here covers
+		// the whole package rather than each caller's own error text.
+		return nil, sanitizeTransportError(err, req.url)
+	}
+	return resp, nil
 }

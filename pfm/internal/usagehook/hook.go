@@ -4,6 +4,7 @@ package usagehook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,14 +16,23 @@ import (
 	"syscall"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const defaultEndpoint = "https://api.anthropic.com/api/oauth/usage"
+const (
+	defaultEndpoint  = "https://api.anthropic.com/api/oauth/usage"
+	fiveHourKey      = "five_hour"
+	sevenDayKey      = "seven_day"
+	sevenDayFableKey = "seven_day_fable"
+)
 
 // Options is the complete, jail-replaceable hook environment.
 type Options struct {
+	Clock       clock.Clock
+	Env         paths.Env
 	Now         func() time.Time
 	Home        string
 	ConfigDir   string
@@ -82,9 +92,9 @@ type NamedWindow struct {
 }
 
 var knownWindowDescriptors = []WindowDescriptor{
-	{Key: "five_hour", Label: "5h", Known: true},
-	{Key: "seven_day", Label: "7d", Known: true},
-	{Key: "seven_day_fable", Label: "7d-fable", Known: true},
+	{Key: fiveHourKey, Label: "5h", Known: true},
+	{Key: sevenDayKey, Label: "7d", Known: true},
+	{Key: sevenDayFableKey, Label: "7d-fable", Known: true},
 }
 
 // AllWindows returns every window this build knows how to render, in canonical
@@ -115,18 +125,18 @@ func DescribeWindows(keys []string) []WindowDescriptor {
 // NamedWindows returns only windows actually carried by the response. A zero
 // utilization pointer is still present and therefore remains visible.
 func (usage Usage) NamedWindows() []NamedWindow {
-	return usage.NamedWindowsAt(time.Now())
+	return usage.NamedWindowsAt(clock.Real.Now())
 }
 
 // NamedWindowsAt is the deterministic form used by samplers and renderers that
 // already own a clock.
 func (usage Usage) NamedWindowsAt(now time.Time) []NamedWindow {
 	windows := map[string]Window{
-		"five_hour": usage.FiveHour,
-		"seven_day": usage.SevenDay,
+		fiveHourKey: usage.FiveHour,
+		sevenDayKey: usage.SevenDay,
 	}
 	if fable, ok := usage.fableWindow(now); ok {
-		windows["seven_day_fable"] = fable
+		windows[sevenDayFableKey] = fable
 	}
 	keys := make([]string, 0, len(windows))
 	for key, window := range windows {
@@ -168,8 +178,10 @@ func (usage Usage) fableWindow(now time.Time) (Window, bool) {
 	return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true
 }
 
-type usage = Usage
-type usageWindow = Window
+type (
+	usage       = Usage
+	usageWindow = Window
+)
 
 type credentials struct {
 	OAuth struct {
@@ -192,7 +204,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		return "", err
 	}
 	account := accountNumber(options.Home, options.ConfigDir, options.AccountDirs)
-	if err := EnsurePrivateDirectory(options.CacheDir); err != nil {
+	if err := EnsurePrivateDir(options.CacheDir); err != nil {
 		return "", err
 	}
 	now := options.Now()
@@ -223,12 +235,12 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	opus := currentUtilization(cached.SevenOpus, now, -1)
 	fable := -1
 	for _, named := range cached.NamedWindowsAt(now) {
-		if named.Key == "seven_day_fable" {
+		if named.Key == sevenDayFableKey {
 			fable = utilization(named.Window, -1)
 			break
 		}
 	}
-	maximum := max(five, seven, opus, fable)
+	maximum := maximumInt(five, seven, opus, fable)
 	flagPath := filepath.Join(options.CacheDir, fmt.Sprintf("warned-%d", account))
 	if maximum < options.Warn {
 		flag, err := os.ReadFile(flagPath)
@@ -316,36 +328,43 @@ func criticalGuidance(five, seven, opus, fable, critical int) string {
 }
 
 func normalize(options Options) Options {
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
+	if options.Env == nil {
+		options.Env = paths.OSEnv{}
+	}
 	if options.Now == nil {
-		options.Now = time.Now
+		options.Now = options.Clock.Now
 	}
 	if options.Home == "" {
-		options.Home = os.Getenv(paths.EnvHome)
+		options.Home = options.Env.Get(paths.EnvHome)
 		if options.Home == "" {
-			options.Home, _ = os.UserHomeDir()
+			options.Home, _ = options.Env.Home()
 		}
 	}
 	if options.ConfigDir == "" {
-		options.ConfigDir = os.Getenv("CLAUDE_CONFIG_DIR")
+		options.ConfigDir = options.Env.Get("CLAUDE_CONFIG_DIR")
 		if options.ConfigDir == "" {
 			options.ConfigDir = filepath.Join(options.Home, ".claude")
 		}
 	}
 	if options.CacheDir == "" {
-		options.CacheDir = DefaultCacheDir()
+		options.CacheDir = cacheDirForEnv(options.Env)
 	}
 	if options.Warn <= 0 {
-		options.Warn = envInt("CC_USAGE_WARN", 80)
+		options.Warn = envInt(options.Env, "CC_USAGE_WARN", 80)
 	}
 	if options.Critical <= 0 {
-		options.Critical = envInt("CC_USAGE_CRIT", 95)
+		options.Critical = envInt(options.Env, "CC_USAGE_CRIT", 95)
 	}
 	if options.TTL <= 0 {
-		options.TTL = time.Duration(envInt("CC_USAGE_TTL", 180)) * time.Second
+		options.TTL = time.Duration(envInt(options.Env, "CC_USAGE_TTL", 180)) * time.Second
 	}
 	if options.Client == nil {
 		options.Client = &http.Client{Timeout: 6 * time.Second}
 	}
+	options.Client = obs.WrapClient(options.Client)
 	if options.Endpoint == "" {
 		options.Endpoint = defaultEndpoint
 	}
@@ -405,7 +424,11 @@ func UsageCacheDir(base string, uid int) string {
 // and writes the one file this hook already owns instead of keeping a
 // second, per-process cache.
 func DefaultCacheDir() string {
-	if jailHome := os.Getenv(paths.EnvHome); jailHome != "" {
+	return cacheDirForEnv(paths.OSEnv{})
+}
+
+func cacheDirForEnv(env paths.Env) string {
+	if jailHome := env.Get(paths.EnvHome); jailHome != "" {
 		return UsageCacheDir(filepath.Join(jailHome, "tmp"), os.Getuid())
 	}
 	return UsageCacheDir(os.TempDir(), os.Getuid())
@@ -454,7 +477,7 @@ func CachedFableWindow(base string, uid, account int, configDir string, now time
 	if cacheAge(record, path, now) > time.Hour {
 		return Window{}, false
 	}
-	return record.Usage.fableWindow(now)
+	return record.fableWindow(now)
 }
 
 // CacheBackoff records a rate-limited or otherwise failed fetch so every
@@ -501,7 +524,7 @@ func ReadCacheRecord(path string) (CacheRecord, error) {
 // directory and atomic-rename discipline this hook's own refresh() has
 // always used.
 func WriteCacheRecord(path string, record CacheRecord) error {
-	if err := EnsurePrivateDirectory(filepath.Dir(path)); err != nil {
+	if err := EnsurePrivateDir(filepath.Dir(path)); err != nil {
 		return err
 	}
 	body, err := json.Marshal(record)
@@ -542,7 +565,7 @@ func ParseRetryAfter(value string, now time.Time) time.Duration {
 	return 0
 }
 
-func EnsurePrivateDirectory(path string) error {
+func EnsurePrivateDir(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
@@ -560,12 +583,12 @@ func EnsurePrivateDirectory(path string) error {
 	return os.Chmod(path, 0o700)
 }
 
-func refresh(ctx context.Context, options Options, cachePath string) error {
+func refresh(ctx context.Context, options Options, cachePath string) (returnErr error) {
 	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -575,7 +598,11 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close usage response: %w", err))
+		}
+	}()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("usage endpoint returned %s", response.Status)
 	}
@@ -589,7 +616,7 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 	}
 	logUnknownUsageKeys(fresh, options.Log)
 	if decoded.FiveHour.Utilization == nil {
-		return fmt.Errorf("usage response omitted five_hour utilization")
+		return fmt.Errorf("usage response omitted %s utilization", fiveHourKey)
 	}
 	fetchedAt := options.Now()
 	return WriteCacheRecord(cachePath, CacheRecord{
@@ -599,13 +626,13 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 
 // Fetch reads one account's current OAuth usage without touching the warning
 // cache. It is the shared fetch seam for the Limits tab and the prompt hook.
-func Fetch(ctx context.Context, options Options) (Usage, error) {
+func Fetch(ctx context.Context, options Options) (usageResult Usage, returnErr error) {
 	options = normalize(options)
 	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
 		return Usage{}, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, http.NoBody)
 	if err != nil {
 		return Usage{}, fmt.Errorf("build usage request: %w", err)
 	}
@@ -615,7 +642,11 @@ func Fetch(ctx context.Context, options Options) (Usage, error) {
 	if err != nil {
 		return Usage{}, fmt.Errorf("fetch usage endpoint: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close usage response: %w", err))
+		}
+	}()
 	if response.StatusCode == http.StatusTooManyRequests {
 		return Usage{}, &RateLimitError{RetryAfter: ParseRetryAfter(response.Header.Get("Retry-After"), options.Now())}
 	}
@@ -632,7 +663,7 @@ func Fetch(ctx context.Context, options Options) (Usage, error) {
 	}
 	logUnknownUsageKeys(fresh, options.Log)
 	if decoded.FiveHour.Utilization == nil {
-		return Usage{}, fmt.Errorf("usage response omitted five_hour utilization")
+		return Usage{}, fmt.Errorf("usage response omitted %s utilization", fiveHourKey)
 	}
 	return decoded, nil
 }
@@ -647,7 +678,7 @@ func logUnknownUsageKeys(body []byte, logger io.Writer) {
 		return
 	}
 	known := map[string]bool{
-		"five_hour": true, "seven_day": true, "seven_day_opus": true, "limits": true,
+		fiveHourKey: true, sevenDayKey: true, "seven_day_opus": true, "limits": true,
 	}
 	unknown := make([]string, 0, len(fields))
 	for key := range fields {
@@ -749,15 +780,15 @@ func formatReset(raw string, now time.Time, layout string) string {
 	return parsed.In(now.Location()).Format(layout)
 }
 
-func envInt(name string, fallback int) int {
-	value, err := strconv.Atoi(os.Getenv(name))
+func envInt(env paths.Env, name string, fallback int) int {
+	value, err := strconv.Atoi(env.Get(name))
 	if err != nil {
 		return fallback
 	}
 	return value
 }
 
-func max(values ...int) int {
+func maximumInt(values ...int) int {
 	maximum := values[0]
 	for _, value := range values[1:] {
 		if value > maximum {

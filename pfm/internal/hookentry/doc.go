@@ -1,0 +1,2 @@
+// Package hookentry holds the body of every pfm internal <entry>: the harness hooks (explore-deny, epic-inject, reload-intercept, exit-intercept, exit-close, compact-nudge, prompt block) and the entries the installer wires as units and shim calls (launch, then, chat-server, claude-version, clear-kill, agent-open, codex-launch, launcher-repair, update-check). Argv and stdin in, exit code out — the harness's own contract.
+package hookentry

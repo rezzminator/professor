@@ -1,11 +1,34 @@
 {
-  "_comment": "Claude Code themes the blueprint does NOT vendor. SETUP fetches each from its canonical public repo at install into ~/.claude/themes/ (always latest). Single source of truth — the blueprint never holds a copy that can drift. Activate with /theme. Themes install to the user's home, not the project, so they are shared across all the user's projects.",
+  "_comment": "Claude Code themes pfm install places into ~/.claude/themes/ (a user-level dir, shared by every project and, when their themes/ dirs are symlinked, by the fleet accounts). Two kinds. source_fetched: fetched at install from the theme's canonical public repo, always latest — the blueprint never vendors a copy. bundled: a `file` beside this manifest, read from the source clone or downloaded from beside the release manifest; with `base` it is an overlay — only `name` and the differing `overrides` — written merged onto the fetched base. Both kinds are recorded in the install ownership ledger. Activate with /theme, or set `theme` in an account's settings.json.",
   "source_fetched": {
     "tokyo-night": {
       "repo": "https://github.com/{GH_USER}/claude-code-tokyo-night",
       "raw": "https://raw.githubusercontent.com/{GH_USER}/claude-code-tokyo-night/main/tokyo-night.json",
       "target": "~/.claude/themes/tokyo-night.json",
       "activate": "/theme → \"Tokyo Night\"",
+      "requires": "Claude Code v2.1.118+"
+    }
+  },
+  "bundled": {
+    "professor-gold": {
+      "file": "professor-gold.json",
+      "base": "tokyo-night",
+      "target": "~/.claude/themes/professor-gold.json",
+      "activate": "/theme → \"Professor Gold\" — Tokyo Night with the 🥇 account 1 input bar (#ffd60a); per account: \"theme\": \"custom:professor-gold\" in that account's settings.json",
+      "requires": "Claude Code v2.1.118+"
+    },
+    "professor-silver": {
+      "file": "professor-silver.json",
+      "base": "tokyo-night",
+      "target": "~/.claude/themes/professor-silver.json",
+      "activate": "/theme → \"Professor Silver\" — Tokyo Night with the 🥈 account 2 input bar (#c8d9ff); per account: \"theme\": \"custom:professor-silver\" in that account's settings.json",
+      "requires": "Claude Code v2.1.118+"
+    },
+    "professor-bronze": {
+      "file": "professor-bronze.json",
+      "base": "tokyo-night",
+      "target": "~/.claude/themes/professor-bronze.json",
+      "activate": "/theme → \"Professor Bronze\" — Tokyo Night with the 🥉 account 3 input bar (#ff7a1a); per account: \"theme\": \"custom:professor-bronze\" in that account's settings.json",
       "requires": "Claude Code v2.1.118+"
     }
   }

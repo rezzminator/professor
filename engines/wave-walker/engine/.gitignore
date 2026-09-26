@@ -1,4 +1,0 @@
-# deps + coverage + generated test artifacts
-node_modules
-coverage
-test/.gen

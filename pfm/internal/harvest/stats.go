@@ -12,12 +12,12 @@ package harvest
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const statsFilename = "stats.jsonl"
@@ -35,16 +35,17 @@ func (h *Harvester) recordStat(item string, result Result) {
 		return
 	}
 	rec := statRecord{
-		TS:   time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		Item: truncateRunes(item, 500),
+		TS:   h.nowClock().Now().UTC().Format("2006-01-02T15:04:05Z"),
+		Item: truncateOutputRunes(item, 500),
 		OK:   result.Error == "",
 	}
-	if rec.OK {
-		rec.Detail = truncateRunes(result.Method, 200)
-	} else if result.ErrorKind != "" {
-		rec.Detail = truncateRunes(result.ErrorKind, 200)
-	} else {
-		rec.Detail = "error"
+	switch {
+	case rec.OK:
+		rec.Detail = truncateOutputRunes(result.Method, 200)
+	case result.ErrorKind != "":
+		rec.Detail = truncateOutputRunes(result.ErrorKind, 200)
+	default:
+		rec.Detail = resultDetailError
 	}
 	line, err := json.Marshal(rec)
 	if err != nil {
@@ -81,7 +82,7 @@ type StatBucket struct {
 // records by detail → {total, ok, rate}. Missing/empty data is a healthy empty
 // map; malformed records are counted under _corrupt, and an all-corrupt file
 // returns an error so failed enumeration never renders as absence.
-func SummarizeStats(cacheDir string, lastN int) (map[string]*StatBucket, error) {
+func SummarizeStats(cacheDir string, lastN int) (summary map[string]*StatBucket, returnErr error) {
 	path := filepath.Join(cacheDir, statsFilename)
 	file, err := os.Open(path)
 	if err != nil {
@@ -90,7 +91,11 @@ func SummarizeStats(cacheDir string, lastN int) (map[string]*StatBucket, error) 
 		}
 		return nil, fmt.Errorf("open stats file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close stats file: %w", err))
+		}
+	}()
 	if lastN <= 0 {
 		lastN = 5000
 	}

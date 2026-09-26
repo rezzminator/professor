@@ -1,8 +1,8 @@
 package reload
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type reloadTestMatcher struct{ id pfmengine.ID }

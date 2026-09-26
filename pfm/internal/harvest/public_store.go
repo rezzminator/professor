@@ -11,13 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-func (h *Harvester) cacheRoot() (string, error) {
+func (h *Harvester) resolvedCacheRoot() (string, error) {
 	if h == nil || strings.TrimSpace(h.options.CacheDir) == "" {
 		return "", errors.New("harvester cache directory is unavailable")
 	}
@@ -29,7 +30,7 @@ func (h *Harvester) cacheRoot() (string, error) {
 }
 
 func (h *Harvester) publicRoot() (string, error) {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -40,13 +41,13 @@ func (h *Harvester) publicRoot() (string, error) {
 // but never permits the public namespace to be one. Otherwise public/ could
 // silently point at .private/ and turn private cache files into public files.
 func publicNamespace(root string, create bool) (string, error) {
-	path := filepath.Join(root, "public")
+	path := filepath.Join(root, publicDirName)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if !create {
 			return canonicalPublicPath(path)
 		}
-		if err := os.Mkdir(path, 0o700); err != nil {
+		if err := mkdirRaced(path); err != nil {
 			return "", err
 		}
 		info, err = os.Lstat(path)
@@ -68,7 +69,7 @@ func ensureNamespaceDir(path string, create bool) error {
 		if !create {
 			return os.ErrNotExist
 		}
-		if err := os.Mkdir(path, 0o700); err != nil {
+		if err := mkdirRaced(path); err != nil {
 			return err
 		}
 		info, err = os.Lstat(path)
@@ -85,8 +86,19 @@ func ensureNamespaceDir(path string, create bool) error {
 	return nil
 }
 
+// mkdirRaced creates a namespace directory. Two calls on a fresh cache (two
+// search_literature at once) race to create it: the loser's "exists" is not a
+// failure, since its caller re-reads the path with Lstat and still refuses a
+// symlink or a non-directory in its place.
+func mkdirRaced(path string) error {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	return nil
+}
+
 func (h *Harvester) publicArtifactPath(source, kind, oldPath, ext string) (string, error) {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -97,30 +109,32 @@ func (h *Harvester) publicArtifactPath(source, kind, oldPath, ext string) (strin
 		}
 	}
 	key := sha256.Sum256([]byte("harvester-public\x00" + source + "\x00" + kind + "\x00" + canonical))
-	return filepath.Join(root, "public", hex.EncodeToString(key[:])+ext), nil
+	return filepath.Join(root, publicDirName, hex.EncodeToString(key[:])+ext), nil
 }
 
 func (h *Harvester) writePublicMarkdown(path, body string, fetchedAt ...string) error {
-	stamp := time.Now().UTC().Format(time.RFC3339)
+	stamp := h.nowClock().Now().UTC().Format(time.RFC3339)
 	if len(fetchedAt) > 0 {
 		candidate := strings.TrimSpace(fetchedAt[0])
 		if _, err := time.Parse(time.RFC3339, candidate); err == nil {
 			stamp = candidate
 		}
 	}
-	meta := "---\nfetched_at: " + stamp + "\ntoken_count: " + fmt.Sprint(estimateTokens(body)) + "\nsource: harvester\n---\n\n"
+	meta := "---\nfetched_at: " + stamp + "\ntoken_count: " + fmt.Sprint(
+		EstimateTokens(body),
+	) + "\nsource: harvester\n---\n\n"
 	return h.writePublicFile(path, []byte(meta+body))
 }
 
 func (h *Harvester) writePublicFile(path string, data []byte) error {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("create cache directory: %w", err)
 	}
-	publicRoot := filepath.Join(root, "public")
+	publicRoot := filepath.Join(root, publicDirName)
 	if _, err := publicNamespace(root, true); err != nil {
 		return fmt.Errorf("create public directory: %w", err)
 	}
@@ -138,7 +152,7 @@ func (h *Harvester) writePublicFile(path string, data []byte) error {
 	return h.writeAtomic(path, data, 0o600)
 }
 
-func (h *Harvester) writeAtomic(path string, data []byte, mode os.FileMode) error {
+func (h *Harvester) writeAtomic(path string, data []byte, mode os.FileMode) (returnErr error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -147,7 +161,11 @@ func (h *Harvester) writeAtomic(path string, data []byte, mode os.FileMode) erro
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() {
+		if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove public temp %s: %w", tmpName, err))
+		}
+	}()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
@@ -186,7 +204,7 @@ func (h *Harvester) readPublicArtifact(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +219,7 @@ func (h *Harvester) readPublicArtifact(path string) ([]byte, error) {
 	if isPrivateMetadataPath(lexicalPath, root) {
 		return nil, errors.New("internal metadata is not a document artifact")
 	}
-	lexicalPublicRoot := filepath.Join(root, "public")
+	lexicalPublicRoot := filepath.Join(root, publicDirName)
 	if isPathInside(lexicalPath, lexicalPublicRoot) {
 		if symlinked, symlinkErr := symlinkBelow(lexicalPath, lexicalPublicRoot); symlinkErr != nil || symlinked {
 			return nil, errors.New("public artifact path is not a safe namespace")
@@ -243,7 +261,7 @@ func isPrivateMetadataPath(path, root string) bool {
 	return false
 }
 
-func readBoundedFile(path string, limit int64) ([]byte, error) {
+func readBoundedFile(path string, limit int64) (data []byte, returnErr error) {
 	if limit <= 0 {
 		limit = publicReadLimit
 	}
@@ -251,7 +269,11 @@ func readBoundedFile(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close artifact %s: %w", path, err))
+		}
+	}()
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
 		if err != nil {
 			return nil, err
@@ -260,7 +282,7 @@ func readBoundedFile(path string, limit int64) ([]byte, error) {
 	} else if info.Size() > limit {
 		return nil, errors.New("artifact exceeds public size limit")
 	}
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	data, err = io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}

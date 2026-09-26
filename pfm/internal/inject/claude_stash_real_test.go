@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestRealClaudeStashSemantics pins Claude Code's Ctrl+S ("chat:stash")
@@ -162,7 +162,7 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tmux := CommandTmux{}
+	tmux := TmuxInjector{}
 	capture := func() string {
 		text, err := tmux.Capture(ctx, socket, session, false, 0)
 		if err != nil {
@@ -212,7 +212,7 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 	// would silently break with zero signal from the one test built to
 	// catch exactly that. This closes the gap.
 	stashedMarkerPresent := func(text string) bool {
-		return strings.Contains(strings.ToLower(lastLines(text, 8)), "stashed")
+		return strings.Contains(strings.ToLower(captureLastLines(text, 8)), "stashed")
 	}
 	// clearComposer backspaces whatever is CURRENTLY visible in the composer
 	// down to empty, self-correcting against whatever case-to-case semantics
@@ -284,17 +284,27 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 		t.Fatalf("PINNED OBSERVATION 1 violated: C-s on a non-empty composer did not empty it, got %q", got)
 	}
 	if !stashedMarkerPresent(afterStash) {
-		t.Fatalf("PINNED OBSERVATION 1 violated: C-s on a non-empty composer did not grow a \"stashed\" status marker (this is the exact string production's DraftStashed heuristic keys off — engine.go's strings.Contains(strings.ToLower(lastLines(capture, 8)), \"stashed\")):\n%s", afterStash)
+		t.Fatalf(
+			"PINNED OBSERVATION 1 violated: C-s on a non-empty composer did not grow a \"stashed\" status marker (this is the exact string production's DraftStashed heuristic keys off — engine.go's strings.Contains(strings.ToLower(lastLines(capture, 8)), \"stashed\")):\n%s",
+			afterStash,
+		)
 	}
 
 	// --- case 2: C-s on empty -> draft pops back.
 	sendKey("C-s")
 	afterPop := logCapture("case2: after C-s on the now-empty composer")
 	if got := composerTail(afterPop); got != draftAlpha {
-		t.Fatalf("PINNED OBSERVATION 2 violated: C-s on an empty composer did not restore the parked draft, got %q want %q", got, draftAlpha)
+		t.Fatalf(
+			"PINNED OBSERVATION 2 violated: C-s on an empty composer did not restore the parked draft, got %q want %q",
+			got,
+			draftAlpha,
+		)
 	}
 	if stashedMarkerPresent(afterPop) {
-		t.Fatalf("PINNED OBSERVATION 2 violated: the \"stashed\" status marker was still present after C-s popped the draft back:\n%s", afterPop)
+		t.Fatalf(
+			"PINNED OBSERVATION 2 violated: the \"stashed\" status marker was still present after C-s popped the draft back:\n%s",
+			afterPop,
+		)
 	}
 	clearComposer("case2: cleanup")
 
@@ -318,10 +328,17 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 		afterHelp = logCapture("case3: after Esc closing the /help overlay")
 	}
 	if got := composerTail(afterHelp); got != draftBeta {
-		t.Fatalf("PINNED OBSERVATION 3 violated: a /help command submit did not restore the parked draft, got %q want %q", got, draftBeta)
+		t.Fatalf(
+			"PINNED OBSERVATION 3 violated: a /help command submit did not restore the parked draft, got %q want %q",
+			got,
+			draftBeta,
+		)
 	}
 	if strings.Contains(afterHelp, "Draft restored") {
-		t.Fatalf("PINNED OBSERVATION 3 violated: a /help command submit printed the \"Draft restored\" hint — that hint is pinned (case 5) to fire ONLY on a real message submit, never on a slash-command submit:\n%s", afterHelp)
+		t.Fatalf(
+			"PINNED OBSERVATION 3 violated: a /help command submit printed the \"Draft restored\" hint — that hint is pinned (case 5) to fire ONLY on a real message submit, never on a slash-command submit:\n%s",
+			afterHelp,
+		)
 	}
 	clearComposer("case3: cleanup")
 
@@ -339,12 +356,19 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 	sendKey("C-s")
 	afterSecondStash := logCapture("case4: C-s after draft B while A is parked — overwrite/swap/refuse?")
 	if got := composerTail(afterSecondStash); got != "" {
-		t.Fatalf("PINNED OBSERVATION 4 violated: stashing B while A was parked did not empty the composer (a refusal would leave B behind), got %q", got)
+		t.Fatalf(
+			"PINNED OBSERVATION 4 violated: stashing B while A was parked did not empty the composer (a refusal would leave B behind), got %q",
+			got,
+		)
 	}
 	sendKey("C-s")
 	afterFinalPop := logCapture("case4: C-s on the now-empty composer — which text pops?")
 	if got := composerTail(afterFinalPop); got != draftB {
-		t.Fatalf("PINNED OBSERVATION 4 violated: the second stash did not overwrite the first — popped %q, want the LAST-stashed draft %q (draft A must be gone, not swapped back or refused)", got, draftB)
+		t.Fatalf(
+			"PINNED OBSERVATION 4 violated: the second stash did not overwrite the first — popped %q, want the LAST-stashed draft %q (draft A must be gone, not swapped back or refused)",
+			got,
+			draftB,
+		)
 	}
 	clearComposer("case4: cleanup")
 	flushStash("post-case4")
@@ -404,10 +428,17 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 	}
 	t.Logf("case5: final capture after the turn settled:\n%s", final)
 	if got := composerTail(final); got != draftFive {
-		t.Fatalf("PINNED OBSERVATION 5 violated: a real message submit did not restore the parked draft, got %q want %q", got, draftFive)
+		t.Fatalf(
+			"PINNED OBSERVATION 5 violated: a real message submit did not restore the parked draft, got %q want %q",
+			got,
+			draftFive,
+		)
 	}
 	if !strings.Contains(final, "Draft restored") {
-		t.Fatalf("PINNED OBSERVATION 5 violated: a real message submit restored the draft without printing the explicit \"Draft restored\" hint — the one case this hint is pinned to fire on:\n%s", final)
+		t.Fatalf(
+			"PINNED OBSERVATION 5 violated: a real message submit restored the draft without printing the explicit \"Draft restored\" hint — the one case this hint is pinned to fire on:\n%s",
+			final,
+		)
 	}
 	clearComposer("case5: cleanup")
 }
@@ -429,7 +460,11 @@ func killPfmLaunchedSessions(t *testing.T, root, project string) {
 		// never returns 'nothing found.'" Silently returning here (t.Logf
 		// and no failure) let a real, running claude fleet session leak
 		// onto the live machine with the test still reporting green.
-		t.Errorf("cleanup: could not scan %q for a launcher-spawned session — cleanup cannot prove it caught everything: %v", root, err)
+		t.Errorf(
+			"cleanup: could not scan %q for a launcher-spawned session — cleanup cannot prove it caught everything: %v",
+			root,
+			err,
+		)
 		return
 	}
 	for _, entry := range entries {

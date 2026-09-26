@@ -69,7 +69,21 @@ func TestLegacyConcurrentFailuresShareOneInFlightFetch(t *testing.T) {
 		return nil, fmt.Errorf("fixture connection failure")
 	})
 	client := func() *http.Client { return &http.Client{Transport: transport} }
-	h := mustNew(t, Options{ContactEmail: "test@example.org", CacheDir: t.TempDir(), Client: client(), Chrome: client(), Jina: client(), OA: client(), Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) { return "", nil }), BrowserRung: browserOff()})
+	h := mustNew(
+		t,
+		Options{
+			ContactEmail: "test@example.org",
+			CacheDir:     t.TempDir(),
+			Client:       client(),
+			Chrome:       client(),
+			Jina:         client(),
+			OA:           client(),
+			Converter: legacyConverterFunc(
+				func(context.Context, string, string, []byte) (string, error) { return "", nil },
+			),
+			BrowserRung: browserOff(),
+		},
+	)
 	start := make(chan struct{})
 	results := make(chan Result, 2)
 	for range 2 {
@@ -118,7 +132,10 @@ func TestLegacyDOINegativeCacheFormsShareOneKey(t *testing.T) {
 }
 
 func TestLegacyPDFErrorBodiesNeverBecomeConvertedSuccess(t *testing.T) {
-	wall := `<html><head><title>Article unavailable</title></head><body>` + strings.Repeat("the requested document is unavailable ", 80) + `</body></html>`
+	wall := `<html><head><title>Article unavailable</title></head><body>` + strings.Repeat(
+		"the requested document is unavailable ",
+		80,
+	) + `</body></html>`
 	wallTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusNotFound, "text/html", wall), nil
 	})
@@ -171,9 +188,10 @@ func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
 		}),
 	})
 	result := h.Fetch(context.Background(), "https://scanned.example.test/paper.pdf")
-	// SearchAvailable defaults false here, so the recovery hint names findWorks
-	// rather than the unavailable `search` tool — see SearchHint.
-	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") || !strings.Contains(strings.ToLower(result.Error), "alternative copy") {
+	// SearchAvailable defaults false here, so the recovery hint names harvester_search_literature
+	// rather than the unavailable `harvester_search_web` tool — see SearchHint.
+	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") ||
+		!strings.Contains(strings.ToLower(result.Error), "alternative copy") {
 		t.Fatalf("empty PDF conversion receipt=%#v", result)
 	}
 }
@@ -200,7 +218,9 @@ func TestLegacyPlainTextPassesThroughVerbatimAndCaches(t *testing.T) {
 	})
 	url := "https://public.example.test/book.txt"
 	first := h.Fetch(context.Background(), url)
-	if first.Error != "" || first.Method != "plain-text" || !strings.HasPrefix(first.Content, "CHAPTER I\n\nNapoleon") || !strings.Contains(first.Content, "content truncated") {
+	if first.Error != "" || first.Method != "plain-text" ||
+		!strings.HasPrefix(first.Content, "CHAPTER I\n\nNapoleon") ||
+		!strings.Contains(first.Content, "content truncated") {
 		t.Fatalf("plain-text fetch=%#v", first)
 	}
 	cachedBody, err := os.ReadFile(first.Path)
@@ -216,9 +236,13 @@ func TestLegacyPlainTextPassesThroughVerbatimAndCaches(t *testing.T) {
 	if err := os.WriteFile(localPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	local := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{filepath.Dir(localPath)}, Converter: h.options.Converter}).Fetch(context.Background(), localPath)
+	local := mustNew(
+		t,
+		Options{CacheDir: t.TempDir(), LocalRoots: []string{filepath.Dir(localPath)}, Converter: h.options.Converter},
+	).Fetch(context.Background(), localPath)
 	localBody, localReadErr := os.ReadFile(local.Path)
-	if local.Error != "" || !strings.HasPrefix(local.Content, "CHAPTER I\n\nNapoleon") || localReadErr != nil || !strings.Contains(string(localBody), body) {
+	if local.Error != "" || !strings.HasPrefix(local.Content, "CHAPTER I\n\nNapoleon") || localReadErr != nil ||
+		!strings.Contains(string(localBody), body) {
 		t.Fatalf("local plain-text fetch=%#v", local)
 	}
 }
@@ -249,7 +273,10 @@ func TestLegacyDOISuccessCachesUnderCanonicalIdentifierBeforeProviderResolution(
 	oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		providerCalls.Add(1)
 		if strings.Contains(request.URL.Host, "unpaywall") {
-			return jsonResponse(request, `{"is_oa":true,"oa_status":"green","best_oa_location":{"url_for_pdf":"https://public.example.test/paper.pdf","version":"publishedVersion"}}`), nil
+			return jsonResponse(
+				request,
+				`{"is_oa":true,"oa_status":"green","best_oa_location":{"url_for_pdf":"https://public.example.test/paper.pdf","version":"publishedVersion"}}`,
+			), nil
 		}
 		return jsonResponse(request, `{}`), nil
 	})
@@ -283,12 +310,21 @@ func TestLegacyDOISuccessCachesUnderCanonicalIdentifierBeforeProviderResolution(
 		t.Fatalf("canonical DOI cache fetch=%#v", second)
 	}
 	if providerCalls.Load() != providersAfterFirst || documentCalls.Load() != documentsAfterFirst {
-		t.Fatalf("canonical DOI cache re-resolved providers=%d->%d documents=%d->%d", providersAfterFirst, providerCalls.Load(), documentsAfterFirst, documentCalls.Load())
+		t.Fatalf(
+			"canonical DOI cache re-resolved providers=%d->%d documents=%d->%d",
+			providersAfterFirst,
+			providerCalls.Load(),
+			documentsAfterFirst,
+			documentCalls.Load(),
+		)
 	}
 }
 
 func TestLegacyPDFAddressMustContainPDFBytesLocallyAndRemotely(t *testing.T) {
-	wall := "<html><head><title>Subscriber access</title></head><body>" + strings.Repeat("paywall login required ", 100) + "</body></html>"
+	wall := "<html><head><title>Subscriber access</title></head><body>" + strings.Repeat(
+		"paywall login required ",
+		100,
+	) + "</body></html>"
 	t.Run("local renamed HTML", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "renamed.pdf")
 		if err := os.WriteFile(path, []byte(wall), 0o600); err != nil {
@@ -304,7 +340,8 @@ func TestLegacyPDFAddressMustContainPDFBytesLocallyAndRemotely(t *testing.T) {
 			}),
 		})
 		result := h.Fetch(context.Background(), path)
-		if result.Error == "" || !strings.Contains(result.Error, "has a .pdf extension but is not a PDF file") || converts.Load() != 0 {
+		if result.Error == "" || !strings.Contains(result.Error, "has a .pdf extension but is not a PDF file") ||
+			converts.Load() != 0 {
 			t.Fatalf("renamed local PDF=%#v converts=%d", result, converts.Load())
 		}
 	})
@@ -323,13 +360,14 @@ func TestLegacyPDFAddressMustContainPDFBytesLocallyAndRemotely(t *testing.T) {
 			Chrome:   &http.Client{Transport: wallTransport},
 			Jina:     &http.Client{Transport: missingTransport},
 			OA:       &http.Client{Transport: missingTransport},
-			Converter: legacyConverterFunc(func(_ context.Context, _ string, _ string, raw []byte) (string, error) {
+			Converter: legacyConverterFunc(func(_ context.Context, _, _ string, raw []byte) (string, error) {
 				converts.Add(1)
 				return string(raw), nil
 			}),
 		})
 		result := h.Fetch(context.Background(), "https://publisher.example.test/paper.pdf")
-		if result.Error == "" || !strings.Contains(result.Error, "has a .pdf address but did not return a PDF") || converts.Load() != 0 {
+		if result.Error == "" || !strings.Contains(result.Error, "has a .pdf address but did not return a PDF") ||
+			converts.Load() != 0 {
 			t.Fatalf("remote PDF paywall=%#v converts=%d", result, converts.Load())
 		}
 		if artifacts, _ := filepath.Glob(filepath.Join(h.options.CacheDir, "pdf", "*.md")); len(artifacts) != 0 {
@@ -343,11 +381,19 @@ func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *t
 		oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return jsonResponse(request, `{}`), nil
 		})
-		h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: oaTransport}, SearchAvailable: true, Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
-			return "", nil
-		})})
+		h := mustNew(
+			t,
+			Options{
+				CacheDir:        t.TempDir(),
+				OA:              &http.Client{Transport: oaTransport},
+				SearchAvailable: true,
+				Converter: legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
+					return "", nil
+				}),
+			},
+		)
 		result := h.Fetch(context.Background(), "10.1234/paywalled")
-		for _, want := range []string{"likely paywalled", "Unpaywall", "OpenAlex", "Semantic Scholar", "Europe PMC", "CORE", "DOAJ", "Wayback Machine", "`search`"} {
+		for _, want := range []string{"likely paywalled", "Unpaywall", "OpenAlex", "Semantic Scholar", "Europe PMC", "CORE", "DOAJ", "Wayback Machine", "`harvester_search_web`"} {
 			if !strings.Contains(result.Error, want) {
 				t.Fatalf("paywall receipt missing %q: %#v", want, result)
 			}
@@ -362,11 +408,17 @@ func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *t
 		oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			providerCalls.Add(1)
 			if request.URL.Host == "archive.org" {
-				return jsonResponse(request, `{"archived_snapshots":{"closest":{"available":true,"timestamp":"20230601123456"}}}`), nil
+				return jsonResponse(
+					request,
+					`{"archived_snapshots":{"closest":{"available":true,"timestamp":"20230601123456"}}}`,
+				), nil
 			}
 			return jsonResponse(request, `{}`), nil
 		})
-		page := "<html><body><h1>Archived paper</h1>" + strings.Repeat("complete scientific text ", 100) + "</body></html>"
+		page := "<html><body><h1>Archived paper</h1>" + strings.Repeat(
+			"complete scientific text ",
+			100,
+		) + "</body></html>"
 		pageTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return response(request, http.StatusOK, "text/html", page), nil
 		})
@@ -376,12 +428,13 @@ func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *t
 			Chrome:   &http.Client{Transport: pageTransport},
 			Jina:     &http.Client{Transport: pageTransport},
 			OA:       &http.Client{Transport: oaTransport},
-			Converter: legacyConverterFunc(func(_ context.Context, _ string, _ string, raw []byte) (string, error) {
+			Converter: legacyConverterFunc(func(_ context.Context, _, _ string, raw []byte) (string, error) {
 				return string(raw), nil
 			}),
 		})
 		first := h.Fetch(context.Background(), "doi:10.1234/archived")
-		if first.Error != "" || first.Method != "mirror:wayback" || first.Source != "doi:10.1234/archived" || first.Content == "" {
+		if first.Error != "" || first.Method != "mirror:wayback" || first.Source != "doi:10.1234/archived" ||
+			first.Content == "" {
 			t.Fatalf("Wayback DOI fetch=%#v", first)
 		}
 		firstCalls := providerCalls.Load()

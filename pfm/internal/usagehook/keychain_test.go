@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func writeKeychainFixture(t *testing.T, body string, exitCode int) string {
@@ -82,5 +85,24 @@ func TestRunKeychainHonorsCallerCancellation(t *testing.T) {
 	_, err := runKeychain(ctx, binary, "cancelled-service")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("runKeychain() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunKeychainUsesWaitDelay(t *testing.T) {
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{"security", "find-generic-password"}, deps.RunResult{Stdout: []byte("token\n")}, nil)
+	got, err := runKeychainWithRunner(context.Background(), "security", "service-name", fake)
+	if err != nil {
+		t.Fatalf("runKeychainWithRunner(): %v", err)
+	}
+	if string(got) != "token" {
+		t.Fatalf("runKeychainWithRunner() = %q, want token", got)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("Run calls = %d, want 1", len(calls))
+	}
+	if got := calls[0].Opts.WaitDelay; got != time.Second {
+		t.Fatalf("RunOptions.WaitDelay = %s, want 1s", got)
 	}
 }

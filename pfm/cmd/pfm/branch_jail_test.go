@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller is the hard
@@ -55,7 +55,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 	t.Setenv("PFM_HOME", filepath.Join(root, "home"))
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", claudeRoot)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -135,7 +135,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	before := branchCallerShape(t, callerPath)
 	started := time.Now()
 	var stdout, stderr bytes.Buffer
-	if code := runChatBranch(nil, &stdout, &stderr); code != 0 {
+	if code := runChatBranch(nil, &stdout, &stderr, nil, nil); code != 0 {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
@@ -145,7 +145,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := shared.Open(context.Background(), resolved)
+	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	seats, seatsErr := state.BranchSeats(context.Background())
 	closeErr := state.Close()
 	if seatsErr != nil || closeErr != nil {

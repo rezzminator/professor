@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 // TestRenderSkipsListPanelBuildOnLimitsStatsAndCosmos pins the fix in
@@ -47,22 +47,24 @@ func TestRenderSkipsListPanelBuildOnLimitsStatsAndCosmos(t *testing.T) {
 	func() {
 		defer func() {
 			if r := recover(); r == nil {
-				t.Fatal("TabChats render() did not panic on a poisoned filtered index — fixture no longer exercises renderListPanel")
+				t.Fatal(
+					"TabChats render() did not panic on a poisoned filtered index — fixture no longer exercises renderListPanel",
+				)
 			}
 		}()
 		_ = model.render()
 	}()
 }
 
-// TestOpencodeRowShowsUnmeasuredSizeNotZeroBytes pins the size badge: an
+// TestOpenCodeRowShowsUnmeasuredSizeNotZeroBytes pins the size badge: an
 // OpenCode session has no file size of its own, so its Row.Size is always 0
 // — never a measurement. formatSize(0) would print "0B", which claims a
 // byte count nothing ever measured; the picker must show "—" instead, while
 // an ordinary Claude/Codex row with a real zero-byte size still shows "0B".
-func TestOpencodeRowShowsUnmeasuredSizeNotZeroBytes(t *testing.T) {
+func TestOpenCodeRowShowsUnmeasuredSizeNotZeroBytes(t *testing.T) {
 	rows := []compose.Row{
 		{
-			Kind: compose.ResumeOpencode, ID: "oc-1", Name: "OC session",
+			Kind: compose.ResumeOpenCode, ID: "oc-1", Name: "OC session",
 			Project: "alpha", CWD: "/work/alpha", PromptCount: 1,
 			ActivityNS: fixtureNowNS - int64(time.Minute),
 		},

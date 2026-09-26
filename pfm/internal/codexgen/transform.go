@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -15,8 +16,10 @@ type TransformOptions struct {
 	ReplaceClaudeFile bool
 }
 
-var frontmatterScalar = regexp.MustCompile(`^([A-Za-z-]+):\s*([>|])[-+]?\s*$`)
-var frontmatterField = regexp.MustCompile(`^([A-Za-z-]+):\s*(.*)$`)
+var (
+	frontmatterScalar = regexp.MustCompile(`^([A-Za-z-]+):\s*([>|])[-+]?\s*$`)
+	frontmatterField  = regexp.MustCompile(`^([A-Za-z-]+):\s*(.*)$`)
+)
 
 // parseFrontmatter reads the two-fence YAML subset used by command files. It
 // deliberately rejects malformed fences: silently treating a malformed
@@ -24,12 +27,12 @@ var frontmatterField = regexp.MustCompile(`^([A-Za-z-]+):\s*(.*)$`)
 func parseFrontmatter(text string) (map[string]string, string, error) {
 	lines := strings.Split(text, "\n")
 	fields := make(map[string]string)
-	if len(lines) == 0 || lines[0] != "---" {
+	if len(lines) == 0 || lines[0] != frontmatterFence {
 		return fields, text, nil
 	}
 	end := -1
 	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
+		if lines[i] == frontmatterFence {
 			end = i
 			break
 		}
@@ -81,14 +84,46 @@ func parseFrontmatter(text string) (map[string]string, string, error) {
 			// would make a valid Claude agent impossible to mirror.
 			continue
 		}
-		fields[match[1]] = match[2]
+		rawValue := match[2]
+		if rawValue == "" || rawValue[0] != '\'' && rawValue[0] != '"' {
+			if comment := strings.Index(rawValue, " #"); comment >= 0 {
+				rawValue = strings.TrimSpace(rawValue[:comment])
+			}
+		}
+		value, err := unquoteFrontmatterScalar(rawValue)
+		if err != nil {
+			return nil, "", fmt.Errorf("frontmatter field %s: %w", match[1], err)
+		}
+		fields[match[1]] = value
 	}
 	return fields, strings.Join(lines[end+1:], "\n"), nil
+}
+
+func unquoteFrontmatterScalar(value string) (string, error) {
+	if len(value) < 2 || value[0] != value[len(value)-1] {
+		return value, nil
+	}
+	switch value[0] {
+	case '\'':
+		return strings.ReplaceAll(value[1:len(value)-1], "''", "'"), nil
+	case '"':
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", fmt.Errorf("decode double-quoted YAML scalar: %w", err)
+		}
+		return unquoted, nil
+	default:
+		return value, nil
+	}
 }
 
 func transformMarkdown(text string, options TransformOptions) string {
 	text = swapModels(text, options.ModelMap)
 	text = swapCommands(text, options.Commands)
+	// swapCommands only knows the discovered roster, and /code-review is a
+	// Claude built-in that is in no roster — see review.go for why leaving it
+	// spelled costs a Codex seat the whole branch diff.
+	text = rewriteCodeReview(text, options.ModelMap)
 	if options.ReplaceClaudeFile {
 		text = strings.ReplaceAll(text, "CLAUDE.md", "AGENTS.md")
 	}
@@ -111,7 +146,7 @@ func swapModels(text string, modelMap map[string]string) string {
 		pattern := regexp.MustCompile(`(^|[^\w-])` + regexp.QuoteMeta(key) + `([^\w-]|$)`)
 		text = pattern.ReplaceAllStringFunc(text, func(match string) string {
 			start := 0
-			if len(match) > 0 && !isModelChar(match[0]) {
+			if match != "" && !isModelChar(match[0]) {
 				start = 1
 			}
 			end := len(match)

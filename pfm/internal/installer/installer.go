@@ -9,19 +9,17 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goRuntime "runtime"
 	"sort"
 	"strings"
-	"syscall"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/codexappendix"
-	"hostops/pfm/internal/codexgen"
-	"hostops/pfm/internal/harvestpy"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type engine struct {
@@ -32,28 +30,45 @@ type engine struct {
 	managedRoot string
 	outputErr   error
 	planErrors  []error
+	// removedPaths are the paths this pass removed, or — in a dry run, where
+	// nothing is removed at all — planned to remove. retireEmptyDir discounts
+	// them before refusing a non-empty directory (retire_empty_dir.go).
+	removedPaths map[string]bool
+	// reportedConfigDirs remembers the account config dirs whose physical
+	// path could not be resolved, so the one diagnostic is reported once per
+	// run instead of once per claudeConfigDirs() call (account_migrations.go).
+	reportedConfigDirs map[string]bool
 }
 
 type pinnedHarvestProvisioner struct{}
 
 func (pinnedHarvestProvisioner) Plan(platform harvestpy.Platform) (harvestpy.InstallPlan, error) {
-	return harvestpy.Plan(platform)
+	return harvestpy.PlanConversionEnvironment(platform)
 }
 
-func (pinnedHarvestProvisioner) Provision(ctx context.Context, options harvestpy.ProvisionOptions) (harvestpy.ProvisionResult, error) {
+func (pinnedHarvestProvisioner) Provision(
+	ctx context.Context,
+	options harvestpy.ProvisionOptions,
+) (harvestpy.ProvisionResult, error) {
 	return harvestpy.Provision(ctx, options)
 }
 
-func (pinnedHarvestProvisioner) Check(ctx context.Context, root string, platform harvestpy.Platform) (harvestpy.CheckReport, error) {
-	return harvestpy.Check(ctx, root, platform)
+func (pinnedHarvestProvisioner) Check(
+	ctx context.Context,
+	root string,
+	platform harvestpy.Platform,
+) (harvestpy.CheckReport, error) {
+	return harvestpy.CheckConversionEnvironment(ctx, root, platform)
 }
 
 // NewHarvestProvisioner returns the production pinned-runtime adapter. Tests
 // should inject their own HarvestProvisioner through Options instead.
 func NewHarvestProvisioner() HarvestProvisioner { return pinnedHarvestProvisioner{} }
 
-func Run(ctx context.Context, options Options) (Report, error) {
-	options, err := normalize(options)
+func Run(ctx context.Context, options Options) (report Report, err error) {
+	endRun := runSpan(ctx, options.Mode)
+	defer func() { endRun(err) }()
+	options, err = normalizeInstallerOptions(options)
 	if err != nil {
 		return Report{}, fmt.Errorf("resolve installer options: %w", err)
 	}
@@ -84,7 +99,7 @@ func Run(ctx context.Context, options Options) (Report, error) {
 		options:     options,
 		apply:       options.Mode != ModeDryRun,
 		stamp:       options.Now().Format("20060102-150405"),
-		managedRoot: filepath.Join(options.Home, ".local", "share", "pfm", "install"),
+		managedRoot: managedRootForHome(options.Home),
 	}
 	installer.say("pfm install: home=%s config=%s", options.Home, options.ConfigDir)
 	switch options.Mode {
@@ -96,13 +111,8 @@ func Run(ctx context.Context, options Options) (Report, error) {
 		installer.say("MODE: uninstall")
 	}
 	installer.say("")
-	if options.Mode == ModeApply {
-		if err := installer.preflightInstall(ctx); err != nil {
-			return installer.report, err
-		}
-	}
-	if options.Mode == ModeUninstall {
-		if err := installer.preflightUninstall(ctx); err != nil {
+	if options.Mode != ModeDryRun {
+		if err := installer.preflight(ctx, options.Mode); err != nil {
 			return installer.report, err
 		}
 	}
@@ -116,88 +126,48 @@ func Run(ctx context.Context, options Options) (Report, error) {
 		err = errors.Join(append([]error{err}, installer.planErrors...)...)
 	}
 	installer.say("")
-	installer.say(
-		"summary changed=%d ok=%d skipped=%d",
-		installer.report.Changed,
-		installer.report.OK,
-		installer.report.Skipped,
-	)
+	installer.say("summary changed=%d ok=%d skipped=%d", installer.report.Changed,
+		installer.report.OK, installer.report.Skipped)
 	if installer.outputErr != nil {
 		err = errors.Join(err, installer.outputErr)
 	}
 	return installer.report, err
 }
 
-// nameSyncServiceRunning reports whether the Linux name-sync service is
-// executing right now, and whether the question could be asked at all.
-//
-// `systemctl is-active --quiet` exits non-zero both when the service is
-// inactive AND when the probe itself never ran: systemctl missing from PATH,
-// the user bus unreachable, permission denied. Those are opposite answers to
-// two different questions ("it is idle" vs "we do not know"), so the error is
-// inspected rather than treated as one signal: an *exec.ExitError means
-// systemctl started, ran to completion, and reported a status — inactive is
-// proceed-safe, as before. Anything else means the probe never got an
-// answer, and the caller must not read that silence as safety.
-func nameSyncServiceRunning(ctx context.Context, runner CommandRunner) (running bool, probed bool) {
-	err := runner.Run(ctx, "systemctl", "--user", "is-active", "--quiet", "pfm-name-sync.service")
-	if err == nil {
-		return true, true
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return false, true
-	}
-	return false, false
-}
-
-// preflightInstall executes the complete dry planner against the same host
-// snapshot immediately before apply. Every planner stays read-only, but all
-// conflicts and future paths are computed before installHarvest or asset
-// staging can mutate the machine.
-func (installer *engine) preflightInstall(ctx context.Context) error {
+// preflight executes the selected complete planner against the same host
+// snapshot immediately before mutation. Every planner stays read-only, but all
+// conflicts and future paths are computed before install or uninstall can
+// mutate the machine.
+func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 	options := installer.options
-	options.Mode = ModeDryRun
 	options.Stdout = io.Discard
 	preview := &engine{
-		options:     options,
-		apply:       false,
-		stamp:       installer.stamp,
-		managedRoot: installer.managedRoot,
+		options: options, apply: false, stamp: installer.stamp, managedRoot: installer.managedRoot,
 	}
-	installErr := preview.install(ctx)
+	var (
+		planErr error
+		label   string
+	)
+	switch mode {
+	case ModeApply:
+		preview.options.Mode = ModeDryRun
+		planErr = preview.install(ctx)
+		label = "preflight apply plan"
+	case ModeUninstall:
+		preview.options.Mode = ModeUninstall
+		planErr = preview.uninstall(ctx)
+		label = "preflight uninstall plan"
+	default:
+		return fmt.Errorf("preflight unknown installer mode %d", mode)
+	}
 	if len(preview.planErrors) != 0 {
-		installErr = errors.Join(append([]error{installErr}, preview.planErrors...)...)
+		planErr = errors.Join(append([]error{planErr}, preview.planErrors...)...)
 	}
-	if installErr != nil {
-		return fmt.Errorf("preflight apply plan: %w", installErr)
+	if planErr != nil {
+		return fmt.Errorf("%s: %w", label, planErr)
 	}
 	if preview.outputErr != nil {
-		return fmt.Errorf("preflight apply plan output: %w", preview.outputErr)
-	}
-	return nil
-}
-
-// preflightUninstall runs the complete removal planner before any installed
-// launcher, command, hook, unit, or ownership artifact is touched. Codex
-// command conflicts are therefore refusals, never half-uninstalled hosts.
-func (installer *engine) preflightUninstall(ctx context.Context) error {
-	options := installer.options
-	options.Mode = ModeUninstall
-	options.Stdout = io.Discard
-	preview := &engine{
-		options: options, apply: false, stamp: installer.stamp,
-		managedRoot: installer.managedRoot,
-	}
-	uninstallErr := preview.uninstall(ctx)
-	if len(preview.planErrors) != 0 {
-		uninstallErr = errors.Join(append([]error{uninstallErr}, preview.planErrors...)...)
-	}
-	if uninstallErr != nil {
-		return fmt.Errorf("preflight uninstall plan: %w", uninstallErr)
-	}
-	if preview.outputErr != nil {
-		return fmt.Errorf("preflight uninstall plan output: %w", preview.outputErr)
+		return fmt.Errorf("%s output: %w", label, preview.outputErr)
 	}
 	return nil
 }
@@ -218,7 +188,13 @@ func (installer *engine) install(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := installer.stageHarnessPrompts(); err != nil {
+		return err
+	}
 	if err := installer.wireClaudeLauncher(); err != nil {
+		return err
+	}
+	if err := installer.pruneClaudeVersions(); err != nil {
 		return err
 	}
 	if err := installer.wireHostOverlays(); err != nil {
@@ -260,6 +236,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.retireLegacySwapCommand(); err != nil {
 		return err
 	}
+	if err := installer.wireCodexAgents(); err != nil {
+		return err
+	}
 	if len(installer.codexHomes()) == 0 {
 		installer.skip("no Codex accounts configured — command mirror has nothing to write")
 		installer.skip("no Codex accounts configured — agent mirror has nothing to write")
@@ -268,9 +247,6 @@ func (installer *engine) install(ctx context.Context) error {
 			return err
 		}
 		if err := installer.wireCodexDefaults(); err != nil {
-			return err
-		}
-		if err := installer.wireCodexAgents(); err != nil {
 			return err
 		}
 		if err := installer.retireOrphanCodexAgents(); err != nil {
@@ -284,7 +260,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if schedulerIsLaunchd {
 		if installer.apply {
 			if installer.options.launchGateUnprobed {
-				installer.skip("launch-agent gate NOT probed (runner cannot read output); an apply during a name-sync run is not refused")
+				installer.skip(
+					"launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync run is not refused",
+				)
 			} else {
 				installer.ok("launch-agent gate: name-sync is not mid-execution")
 			}
@@ -300,7 +278,9 @@ func (installer *engine) install(ctx context.Context) error {
 		}
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
-			installer.skip("name-sync gate NOT probed (systemctl is-active could not run); an apply during a name-sync run is not refused")
+			installer.skip(
+				"name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync run is not refused",
+			)
 		}
 		unitChanged, err := installer.wireUnits(ctx)
 		if err != nil {
@@ -330,6 +310,12 @@ func (installer *engine) install(ctx context.Context) error {
 	if mcpErr != nil {
 		return mcpErr
 	}
+	if err := installer.wireOpenCodeInstructions(); err != nil {
+		return err
+	}
+	if err := installer.wireLogDefault(); err != nil {
+		return err
+	}
 	if err := installer.wireShell(false); err != nil {
 		return err
 	}
@@ -342,6 +328,10 @@ func (installer *engine) install(ctx context.Context) error {
 	return nil
 }
 
+// wireCodexAgents runs on every install: it serves the Claude agent
+// registries (links, orphaned-link and undeclared-variant retirement) whatever
+// the Codex roster, and compiles, writes and retires Codex roles only in the
+// Codex homes configured — an empty roster plans none.
 func (installer *engine) wireCodexAgents() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
@@ -358,6 +348,7 @@ func (installer *engine) wireCodexAgents() error {
 		Home:             installer.options.Home,
 		SourceRepo:       sourceRepo,
 		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		CodexHomes:       installer.codexHomes(),
 		Mode:             codexgen.ModeCheck,
 	})
 	if err != nil {
@@ -375,6 +366,14 @@ func (installer *engine) wireCodexAgents() error {
 	for _, problem := range plan.Problems {
 		installer.skip(problem)
 	}
+	// Before the early dry-run return, so the preview IS the apply's plan:
+	// installer.retire only removes when this run applies.
+	if err := installer.retireOrphanCodexRoles(sourceRepo, plan.Roles); err != nil {
+		return err
+	}
+	if err := installer.retireOrphanGlobalAgents(plan.Installed); err != nil {
+		return err
+	}
 	if !installer.apply {
 		return nil
 	}
@@ -382,6 +381,7 @@ func (installer *engine) wireCodexAgents() error {
 		Home:             installer.options.Home,
 		SourceRepo:       sourceRepo,
 		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		CodexHomes:       installer.codexHomes(),
 		Mode:             codexgen.ModeBuild,
 	})
 	if err != nil {
@@ -610,9 +610,32 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 	if !installer.apply {
 		return nil
 	}
+	sourceHome := ""
+	if installer.options.Mode == ModeUninstall {
+		// Uninstall must never WRITE a fresh Codex command mirror entry — only
+		// retire the ones this installer already owns. RunGlobalCommands derives
+		// its "wanted" set by scanning SourceHome/.claude/commands; pointing it
+		// at a fresh, guaranteed-empty directory makes that set unconditionally
+		// empty, so the ModeBuild call below can only ever delete managed
+		// entries, never create one for whatever still happens to sit in
+		// ~/.claude/commands at this point in the teardown — one of this
+		// installer's own not-yet-unwired commands, or a user's own foreign one
+		// sharing the directory.
+		empty, err := os.MkdirTemp("", "pfm-uninstall-codex-commands-")
+		if err != nil {
+			return fmt.Errorf("create empty Codex command source for uninstall: %w", err)
+		}
+		defer func() {
+			if removeErr := os.RemoveAll(empty); removeErr != nil {
+				installer.say("warning: remove temporary uninstall command source %s: %v", empty, removeErr)
+			}
+		}()
+		sourceHome = empty
+	}
 	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home: installer.options.Home,
-		Mode: codexgen.ModeBuild,
+		Home:       installer.options.Home,
+		SourceHome: sourceHome,
+		Mode:       codexgen.ModeBuild,
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile Codex global commands: %w", err)
@@ -632,7 +655,8 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 func codexPlanBlockers(problems []string) []string {
 	blockers := make([]string, 0)
 	for _, problem := range problems {
-		if strings.HasPrefix(problem, "MISSING ") || strings.HasPrefix(problem, "STALE ") || strings.HasPrefix(problem, "ORPHAN ") {
+		if strings.HasPrefix(problem, "MISSING ") || strings.HasPrefix(problem, "STALE ") ||
+			strings.HasPrefix(problem, "ORPHAN ") {
 			continue
 		}
 		blockers = append(blockers, problem)
@@ -643,7 +667,8 @@ func codexPlanBlockers(problems []string) []string {
 func (installer *engine) planCodexCommands(assets []assetFile, future bool) (result codexgen.Result, returnErr error) {
 	sourceHome := ""
 	cleanup := func() error { return nil }
-	if future && filepath.Clean(installer.options.ConfigDir) == filepath.Join(filepath.Clean(installer.options.Home), ".claude") {
+	if future && filepath.Clean(installer.options.ConfigDir) ==
+		filepath.Join(filepath.Clean(installer.options.Home), ".claude") {
 		var err error
 		sourceHome, cleanup, err = installer.futureCommandSource(assets)
 		if err != nil {
@@ -760,7 +785,10 @@ func copyPlanTree(source, target string) error {
 			return err
 		}
 		for _, entry := range entries {
-			if err := copyPlanTree(filepath.Join(source, entry.Name()), filepath.Join(target, entry.Name())); err != nil {
+			if err := copyPlanTree(
+				filepath.Join(source, entry.Name()),
+				filepath.Join(target, entry.Name()),
+			); err != nil {
 				return err
 			}
 		}
@@ -797,7 +825,17 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.unwireSkills(assets); err != nil {
 		return err
 	}
+	// Before the Codex mirror is reconciled: that step's wanted set is
+	// derived from the Claude command registries this call just emptied, so
+	// unwiring first is what lets the mirror drop the same globals instead of
+	// recompiling them for an install that is going away.
+	if err := installer.unwireGlobalRegistries(); err != nil {
+		return err
+	}
 	if err := installer.reconcileCodexCommands(nil); err != nil {
+		return err
+	}
+	if err := installer.unwireGeneratedCodexAgents(); err != nil {
 		return err
 	}
 	if err := installer.retireBBInstall(); err != nil {
@@ -813,7 +851,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	managerAvailable := installer.userManagerAvailable(ctx)
 	if managerAvailable && installer.apply {
-		installer.runSystemctl(ctx, "disable", "--now", "pfm-name-sync.path", "pfm-name-sync.timer", mcpUnitName)
+		installer.runSystemctl(ctx, "disable", "--now", "pfm-name-sync.path", nameSyncTimerUnit, mcpUnitName)
 	}
 	if _, err := installer.retireUnitEnablements(
 		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
@@ -835,7 +873,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		}
 	}
 	for _, name := range append(append([]string(nil), unitNames...), mcpUnitName) {
-		if err := installer.unlinkOne(filepath.Join(installer.options.Home, ".config", "systemd", "user", name)); err != nil {
+		if err := installer.unlinkOne(
+			filepath.Join(installer.options.Home, ".config", "systemd", "user", name),
+		); err != nil {
 			return err
 		}
 	}
@@ -851,6 +891,15 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.wireMCP(); err != nil {
 		return err
 	}
+	if err := installer.wireOpenCodeInstructions(); err != nil {
+		return err
+	}
+	if err := installer.removeStagedHarnessPrompts(); err != nil {
+		return err
+	}
+	if err := installer.removeCodexDeveloperInstructions(); err != nil {
+		return err
+	}
 	if err := installer.wireShell(true); err != nil {
 		return err
 	}
@@ -864,74 +913,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		if err := installer.removeUpdateMetadata(); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (installer *engine) removeUpdateMetadata() error {
-	for _, path := range []string{SourceRepoPath(installer.options.Home), binaryOwnershipPath(installer.options.Home)} {
-		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		if err := installer.change("remove "+path, func() error { return os.Remove(path) }); err != nil {
-			return err
-		}
-	}
-	if err := os.Remove(installer.managedRoot); err != nil &&
-		!errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
-		return err
-	}
-	return nil
-}
-
-func (installer *engine) writeUpdateMetadata() error {
-	if installer.options.SourceRepo != "" {
-		content, err := sourceRepoMarkerContent(installer.options.SourceRepo)
-		if err != nil {
-			return err
-		}
-		path := SourceRepoPath(installer.options.Home)
-		if !sameFile(path, content, 0o600) {
-			if err := installer.change("write "+path, func() error {
-				return WriteSourceRepoMarker(installer.options.Home, installer.options.SourceRepo)
-			}); err != nil {
-				return err
-			}
-		} else {
-			installer.ok(path)
-		}
-		abs, err := filepath.Abs(installer.options.SourceRepo)
-		if err != nil {
-			return fmt.Errorf("resolve source repository %q: %w", installer.options.SourceRepo, err)
-		}
-		if err := installer.armSourceRepoPrePushGate(filepath.Clean(abs)); err != nil {
-			return err
-		}
-	} else {
-		if err := installer.reportSourceRepoMarker(); err != nil {
-			return err
-		}
-		if recorded, err := ReadSourceRepoMarker(installer.options.Home); err == nil {
-			if err := installer.armSourceRepoPrePushGate(recorded); err != nil {
-				return err
-			}
-		}
-	}
-	content, err := canonicalBinaryOwnershipContent(installer.options.Home)
-	if err != nil {
-		return err
-	}
-	path := binaryOwnershipPath(installer.options.Home)
-	if !sameFile(path, content, 0o600) {
-		if err := installer.change("write "+path, func() error {
-			return RecordCanonicalBinary(installer.options.Home)
-		}); err != nil {
-			return err
-		}
-	} else {
-		installer.ok(path)
 	}
 	return nil
 }
@@ -986,14 +967,17 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 		return fmt.Errorf("harvestpy target %s is blocked-exact-lock", platform)
 	}
 	if !installer.apply {
-		installer.say("harvestpy dry-run: Plan only; writes=0 network=0 offline=%t (apply requires valid cached pins or network)", installer.options.HarvestOffline)
+		installer.say(
+			"harvestpy dry-run: Plan only; writes=0 network=0 offline=%t (apply requires valid cached pins or network)",
+			installer.options.HarvestOffline,
+		)
 		return nil
 	}
 	root := harvestPythonRoot(installer.options.Home)
 	check, checkErr := provider.Check(ctx, root, platform)
 	if checkErr == nil && check.Healthy {
 		installer.ok("harvestpy environment already healthy (Check fast-path; no download)")
-		return nil
+		return installer.stageHarvestModels(ctx, provider, root, platform)
 	}
 	if checkErr != nil {
 		installer.say("harvestpy Check did not establish a healthy environment; provisioning: %v", checkErr)
@@ -1008,13 +992,18 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 	})
 	if provisionErr != nil {
 		if errors.Is(provisionErr, harvestpy.ErrOfflineUnavailable) {
-			installer.say("harvestpy offline: required pinned input is not in the verified cached inputs; prewarm the cache or rerun with network")
-			return fmt.Errorf("harvestpy provisioning offline; verified cached inputs are unavailable: %w", provisionErr)
+			installer.say(
+				"harvestpy offline: required pinned input is not in the verified cached inputs; prewarm the cache or rerun with network",
+			)
+			return fmt.Errorf(
+				"harvestpy provisioning offline; verified cached inputs are unavailable: %w",
+				provisionErr,
+			)
 		}
 		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
 	}
 	installer.ok("harvestpy environment provisioned digest=" + result.Digest)
-	return nil
+	return installer.stageHarvestModels(ctx, provider, root, platform)
 }
 
 func (installer *engine) uninstallHarvest() error {
@@ -1034,7 +1023,7 @@ func (installer *engine) uninstallHarvest() error {
 		return fmt.Errorf("refuse to remove managed harvestpy root that is not a directory: %s", root)
 	}
 	hasManaged := false
-	for _, name := range []string{"env", "cache"} {
+	for _, name := range []string{harvestEnvDirName, harvestCacheDirName} {
 		if _, statErr := os.Lstat(filepath.Join(root, name)); statErr == nil {
 			hasManaged = true
 		} else if !errors.Is(statErr, fs.ErrNotExist) {
@@ -1046,7 +1035,7 @@ func (installer *engine) uninstallHarvest() error {
 		return nil
 	}
 	return installer.change("remove managed harvestpy runtime and cache", func() error {
-		for _, name := range []string{"env", "cache"} {
+		for _, name := range []string{harvestEnvDirName, harvestCacheDirName} {
 			if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
 				return fmt.Errorf("remove managed harvestpy %s: %w", name, err)
 			}
@@ -1075,9 +1064,12 @@ func (installer *engine) change(message string, action func() error) error {
 	installer.say("  change  %s", message)
 	installer.report.Changed++
 	if !installer.apply || action == nil {
+		installer.record("change", message, nil)
 		return nil
 	}
-	return action()
+	err := action()
+	installer.record("change", message, err)
+	return err
 }
 
 // changeDescription selects the message installer.change reports for a
@@ -1096,11 +1088,13 @@ func changeDescription(path string, existed bool) string {
 func (installer *engine) ok(message string) {
 	installer.say("  ok      %s", message)
 	installer.report.OK++
+	installer.record("ok", message, nil)
 }
 
 func (installer *engine) skip(message string) {
 	installer.say("  skip    %s", message)
 	installer.report.Skipped++
+	installer.record("skip", message, nil)
 }
 
 func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
@@ -1114,15 +1108,14 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("read embedded asset %s: %w", asset.path, err)
 		}
-		if asset.path == "shim/pfm.zsh" {
+		switch {
+		case asset.path == "shim/pfm.zsh":
 			content, err = renderShimAsset(content, installer.options)
-		} else if asset.path == "bin/claude" {
-			content, err = renderClaudeLauncherAsset(content, installer.options)
-		} else if asset.path == "reload.command.md" {
+		case asset.path == "reload.command.md":
 			content, err = renderReloadCommandAsset(content)
-		} else if asset.path == "systemd/"+nameSyncTimerUnit {
+		case asset.path == "systemd/"+nameSyncTimerUnit:
 			content, err = renderNameSyncTimerAsset(content, installer.options)
-		} else if strings.HasPrefix(asset.path, "systemd/") {
+		case strings.HasPrefix(asset.path, "systemd/"):
 			content, err = renderServicePath(content, installer.options.Home)
 		}
 		if err != nil {
@@ -1146,7 +1139,12 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		for _, relative := range []string{"systemd/pfm-mcp.service", "launchd/com.professor.pfm.mcp.plist"} {
 			mcpAsset := filepath.Join(installer.managedRoot, filepath.FromSlash(relative))
 			if _, err := os.Lstat(mcpAsset); err == nil {
-				if err := installer.change("remove "+mcpAsset, func() error { return os.Remove(mcpAsset) }); err != nil {
+				message := fmt.Sprintf(
+					"remove %s (no MCP server is enabled in %s)",
+					mcpAsset,
+					installer.options.MCPConfigPath,
+				)
+				if err := installer.change(message, func() error { return os.Remove(mcpAsset) }); err != nil {
 					return false, err
 				}
 				systemdChanged = systemdChanged || strings.HasPrefix(relative, "systemd/")
@@ -1191,7 +1189,10 @@ func (installer *engine) removeManagedAssets(assets []assetFile) error {
 				strings.Count(ordered[right], string(filepath.Separator))
 		})
 		for _, directory := range ordered {
-			if err := os.Remove(directory); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrInvalid) {
+			if err := os.Remove(
+				directory,
+			); err != nil && !errors.Is(err, fs.ErrNotExist) &&
+				!errors.Is(err, fs.ErrInvalid) {
 				if !errors.Is(err, fs.ErrExist) {
 					installer.skip("leave non-empty managed directory " + directory + ": " + err.Error())
 				}
@@ -1260,6 +1261,7 @@ func (installer *engine) retire(path, reason string) error {
 	if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 		return fmt.Errorf("refuse to retire directory %s", path)
 	}
+	installer.markRemoved(path)
 	return installer.change("retire "+path+" ("+reason+")", func() error { return os.Remove(path) })
 }
 
@@ -1317,22 +1319,28 @@ func RawStatusLineCommand(home, command string) bool {
 	return command == "pfm statusline" || command == home+"/.local/bin/pfm statusline"
 }
 
-// ReadStatusLineCommand reads a Claude settings.json's statusLine.command,
-// empty when the file is absent, unreadable, malformed, or carries no
-// statusLine.command — so doctor can check a live host's actual wiring
-// without duplicating updateSettings' JSON shape.
-func ReadStatusLineCommand(path string) string {
+// ReadStatusLineCommand reads a Claude settings.json's statusLine.command, so
+// doctor can check a live host's actual wiring without duplicating
+// updateSettings' JSON shape. A settings file that does not exist is a
+// genuine "not configured" — empty command, nil error. A settings file that
+// exists but cannot be read or parsed is a DIFFERENT state: the command is
+// unknown, not absent, and is reported as an error rather than folded into
+// the same empty string a clean "not configured" returns.
+func ReadStatusLineCommand(path string) (string, error) {
 	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("read %s: %w", path, err)
 	}
 	var document map[string]any
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return ""
+		return "", fmt.Errorf("decode %s: %w", path, err)
 	}
 	status, _ := document["statusLine"].(map[string]any)
 	command, _ := status["command"].(string)
-	return command
+	return command, nil
 }
 
 // HostOverlayState mirrors LauncherState for the two host-overlay scripts.
@@ -1408,16 +1416,22 @@ func (installer *engine) unwireHostOverlays() error {
 	return nil
 }
 
+// wireCommands links pfm's own commands (/reload) into EVERY configured Claude
+// seat's commands/, the way the global registries are wired — a seat whose
+// commands/ is a real directory rather than a symlink to the primary's would
+// otherwise have no /reload at all.
 func (installer *engine) wireCommands(assets []assetFile) error {
-	installer.say("commands -> %s", filepath.Join(installer.options.ConfigDir, "commands"))
-	for _, asset := range assets {
-		target, found := installer.commandTarget(asset.path)
-		if !found {
-			continue
-		}
-		source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
-		if _, err := installer.ensureLink(source, target); err != nil {
-			return err
+	for _, config := range installer.claudeConfigDirs() {
+		installer.say("commands -> %s", filepath.Join(config, "commands"))
+		for _, asset := range assets {
+			target, found := installer.commandTargetIn(config, asset.path)
+			if !found {
+				continue
+			}
+			source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
+			if _, err := installer.ensureLink(source, target); err != nil {
+				return err
+			}
 		}
 	}
 	installer.say("")
@@ -1425,14 +1439,16 @@ func (installer *engine) wireCommands(assets []assetFile) error {
 }
 
 func (installer *engine) unwireCommands(assets []assetFile) error {
-	installer.say("commands -> %s", filepath.Join(installer.options.ConfigDir, "commands"))
-	for _, asset := range assets {
-		target, found := installer.commandTarget(asset.path)
-		if !found {
-			continue
-		}
-		if err := installer.unlinkOne(target); err != nil {
-			return err
+	for _, config := range installer.claudeConfigDirs() {
+		installer.say("commands -> %s", filepath.Join(config, "commands"))
+		for _, asset := range assets {
+			target, found := installer.commandTargetIn(config, asset.path)
+			if !found {
+				continue
+			}
+			if err := installer.unlinkOne(target); err != nil {
+				return err
+			}
 		}
 	}
 	if err := installer.retireLegacySwapCommand(); err != nil {
@@ -1443,9 +1459,12 @@ func (installer *engine) unwireCommands(assets []assetFile) error {
 }
 
 func (installer *engine) commandTarget(asset string) (string, bool) {
-	commands := filepath.Join(installer.options.ConfigDir, "commands")
-	switch asset {
-	case "reload.command.md":
+	return installer.commandTargetIn(installer.options.ConfigDir, asset)
+}
+
+func (installer *engine) commandTargetIn(config, asset string) (string, bool) {
+	commands := filepath.Join(config, "commands")
+	if asset == "reload.command.md" {
 		return filepath.Join(commands, "reload.md"), true
 	}
 	return "", false
@@ -1483,7 +1502,7 @@ func (installer *engine) unwireSkills(assets []assetFile) error {
 			// The skill's own directory (e.g. skills/handoff/) is created by
 			// ensureLink's MkdirAll on link; remove it here once its one link is
 			// gone, tolerantly — an operator file left beside it must survive.
-			if err := installer.retireEmptyDirectoryTolerant(filepath.Dir(target)); err != nil {
+			if err := installer.retireEmptyDirTolerant(filepath.Dir(target)); err != nil {
 				return err
 			}
 		}
@@ -1497,8 +1516,7 @@ func (installer *engine) unwireSkills(assets []assetFile) error {
 // account gets the skill, never the primary alone.
 func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
 	skills := filepath.Join(configDir, "skills")
-	switch asset {
-	case "handoff.skill.md":
+	if asset == "handoff.skill.md" {
 		return filepath.Join(skills, "handoff", "SKILL.md"), true
 	}
 	return "", false
@@ -1507,7 +1525,10 @@ func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
 func (installer *engine) retireLegacySwapCommand() error {
 	for _, configDir := range installer.claudeConfigDirs() {
 		path := filepath.Join(configDir, "commands", "swap.md")
-		if target, linked := resolvedLink(path); !linked || target != filepath.Join(installer.managedRoot, "swap.command.md") {
+		if target, linked := resolvedLink(
+			path,
+		); !linked ||
+			target != filepath.Join(installer.managedRoot, "swap.command.md") {
 			continue
 		}
 		if err := installer.unlinkOne(path); err != nil {
@@ -1561,12 +1582,17 @@ func (installer *engine) retireBBInstall() error {
 		"codex-skills/bb/SKILL.md",
 		"codex-skills/bb/agents/openai.yaml",
 	} {
-		if err := installer.retire(filepath.Join(installer.managedRoot, filepath.FromSlash(relative)), "retired /bb surface"); err != nil {
+		if err := installer.retire(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+			"retired /bb surface",
+		); err != nil {
 			return err
 		}
 	}
 	for _, relative := range []string{"codex-skills/bb/agents", "codex-skills/bb", "codex-skills"} {
-		if err := installer.retireEmptyDirectory(filepath.Join(installer.managedRoot, filepath.FromSlash(relative))); err != nil {
+		if err := installer.retireEmptyDir(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+		); err != nil {
 			return err
 		}
 	}
@@ -1627,23 +1653,30 @@ func (installer *engine) retireChatCommands() error {
 		"chat/group/read.command.md", "chat/group/send.command.md", "chat/group/subscribe.command.md",
 		"chat/self/compact.command.md", "chat/chat.sh", "chat/history.sh",
 	} {
-		if err := installer.retire(filepath.Join(installer.managedRoot, filepath.FromSlash(relative)), "retired /chat: slash command — superseded by the chat MCP tools"); err != nil {
+		if err := installer.retire(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+			"retired /chat: slash command — superseded by the chat MCP tools",
+		); err != nil {
 			return err
 		}
 	}
-	for _, relative := range []string{"chat/group", "chat/self", "chat"} {
-		if err := installer.retireEmptyDirectory(filepath.Join(installer.managedRoot, filepath.FromSlash(relative))); err != nil {
+	for _, relative := range []string{"chat/group", "chat/self", chatName} {
+		if err := installer.retireEmptyDir(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+		); err != nil {
 			return err
 		}
 	}
 	// The host side is never unconditionally empty the way managedRoot is: an
 	// operator's own file, or one of the links above skipped as unowned,
-	// legitimately survives here. retireEmptyDirectory's hard failure on a
+	// legitimately survives here. retireEmptyDir's hard failure on a
 	// non-empty directory is right for managedRoot's fully pfm-owned tree; it
 	// would wrongly abort every future install for an operator with one
 	// leftover file, so the host cleanup is best-effort instead.
-	for _, relative := range []string{"chat/group", "chat/self", "chat"} {
-		if err := installer.retireEmptyDirectoryTolerant(filepath.Join(commands, filepath.FromSlash(relative))); err != nil {
+	for _, relative := range []string{"chat/group", "chat/self", chatName} {
+		if err := installer.retireEmptyDirTolerant(
+			filepath.Join(commands, filepath.FromSlash(relative)),
+		); err != nil {
 			return err
 		}
 	}
@@ -1676,36 +1709,13 @@ func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
 	return repos, nil
 }
 
-func (installer *engine) retireEmptyDirectory(path string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refuse to retire non-directory %s", path)
-	}
-	if installer.apply {
-		entries, readErr := os.ReadDir(path)
-		if readErr != nil {
-			return readErr
-		}
-		if len(entries) != 0 {
-			return fmt.Errorf("refuse to retire non-empty directory %s", path)
-		}
-	}
-	return installer.change("remove empty "+path, func() error { return os.Remove(path) })
-}
-
-// retireEmptyDirectoryTolerant removes path only once it has actually turned
-// out empty. Unlike retireEmptyDirectory, a directory left non-empty is a
+// retireEmptyDirTolerant removes path only once it has actually turned out
+// empty. Unlike retireEmptyDir, a directory left non-empty is a
 // routine, visible skip rather than a hard failure — the same tolerant
 // os.Remove-and-skip idiom removeManagedAssets uses for its own directory
 // sweep, appropriate wherever content the operator (not this installer)
 // controls can legitimately remain.
-func (installer *engine) retireEmptyDirectoryTolerant(path string) error {
+func (installer *engine) retireEmptyDirTolerant(path string) error {
 	if !installer.apply {
 		return nil
 	}
@@ -1723,10 +1733,15 @@ func (installer *engine) retireEmptyDirectoryTolerant(path string) error {
 var unitNames = []string{
 	"pfm-name-sync.path",
 	"pfm-name-sync.service",
-	"pfm-name-sync.timer",
+	nameSyncTimerUnit,
 }
 
-const mcpUnitName = "pfm-mcp.service"
+const (
+	mcpUnitName         = "pfm-mcp.service"
+	harvestEnvDirName   = "env"
+	harvestCacheDirName = "cache"
+	systemdDefaultWants = "default.target.wants"
+)
 
 var retiredUnitNames = []string{
 	"cc-fleet-name-sync.path", "cc-fleet-name-sync.service", "cc-fleet-name-sync.timer",
@@ -1737,9 +1752,9 @@ var unitEnablements = []struct {
 	unit  string
 	wants string
 }{
-	{unit: "pfm-name-sync.path", wants: "default.target.wants"},
-	{unit: "pfm-name-sync.timer", wants: "timers.target.wants"},
-	{unit: mcpUnitName, wants: "default.target.wants"},
+	{unit: "pfm-name-sync.path", wants: systemdDefaultWants},
+	{unit: nameSyncTimerUnit, wants: "timers.target.wants"},
+	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
 
 func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
@@ -1838,7 +1853,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 
 func (installer *engine) retireUnitEnablements(directory string, names []string) (bool, error) {
 	changed := false
-	for _, wants := range []string{"default.target.wants", "timers.target.wants"} {
+	for _, wants := range []string{systemdDefaultWants, "timers.target.wants"} {
 		for _, name := range names {
 			target := filepath.Join(directory, wants, name)
 			info, err := os.Lstat(target)
@@ -1866,7 +1881,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		return
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
-	installer.runSystemctl(ctx, "enable", "--now", "pfm-name-sync.path", "pfm-name-sync.timer")
+	installer.runSystemctl(ctx, "enable", "--now", "pfm-name-sync.path", nameSyncTimerUnit)
 	if installer.mcpAnyEnabled() {
 		installer.runSystemctl(ctx, "enable", "--now", mcpUnitName)
 	}
@@ -1893,7 +1908,7 @@ func (installer *engine) runSystemctl(ctx context.Context, arguments ...string) 
 }
 
 func (installer *engine) wireSettings() error {
-	ownershipPath := filepath.Join(installer.managedRoot, "settings-hook-ownership.json")
+	ownershipPath := settingsHookOwnershipPath(installer.managedRoot)
 	ownership, ownershipRaw, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
 		return fmt.Errorf("read settings hook ownership %s: %w", ownershipPath, err)
@@ -1950,8 +1965,8 @@ func (installer *engine) wireSettings() error {
 			installer.skip("invalid settings JSON at " + candidate + ": " + err.Error())
 			continue
 		}
-		if installer.options.Mode != ModeUninstall && hasPreservedMixedExploreDenyMatcher(updated, filepath.Join(installer.options.Home, ".local", "bin", "pfm")) {
-			installer.skip("mixed PreToolUse hook entry preserved with its existing matcher at " + candidate)
+		if installer.options.Mode != ModeUninstall {
+			installer.reportPreservedMixedTemplateHooks(updated, candidate)
 		}
 		if len(nextOwned) == 0 {
 			delete(ownership, physical)
@@ -1972,19 +1987,8 @@ func (installer *engine) wireSettings() error {
 			return err
 		}
 	}
-	if installer.options.Mode == ModeUninstall {
-		for path := range ownership {
-			if seenOwnershipPaths[path] {
-				continue
-			}
-			if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-				delete(ownership, path)
-				continue
-			} else if err != nil {
-				return fmt.Errorf("inspect unvisited owned settings path %s: %w", path, err)
-			}
-			return fmt.Errorf("refuse to strand hooks in unvisited owned settings path %s", path)
-		}
+	if err := installer.reconcileUnvisitedSettingsOwnership(ownership, seenOwnershipPaths); err != nil {
+		return err
 	}
 	return installer.writeSettingsHookOwnership(ownershipPath, ownershipRaw, ownership)
 }
@@ -2015,7 +2019,7 @@ func (installer *engine) writeSettingsHookOwnership(
 }
 
 func (installer *engine) wireCodexHooks() error {
-	ownershipPath := filepath.Join(installer.managedRoot, "settings-hook-ownership.json")
+	ownershipPath := settingsHookOwnershipPath(installer.managedRoot)
 	ownership, ownershipRaw, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
 		return fmt.Errorf("read settings hook ownership %s: %w", ownershipPath, err)
@@ -2035,7 +2039,7 @@ func (installer *engine) wireCodexHooks() error {
 		existed := true
 		if errors.Is(readErr, fs.ErrNotExist) {
 			if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("Codex hooks file is a dangling symlink: %s", path)
+				return fmt.Errorf("hooks file for Codex is a dangling symlink: %s", path)
 			} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
 				return fmt.Errorf("inspect Codex hooks %s: %w", path, statErr)
 			}
@@ -2058,7 +2062,13 @@ func (installer *engine) wireCodexHooks() error {
 			if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {
 				return fmt.Errorf("refuse to strand owned hooks in invalid Codex hooks JSON at %s: %w", path, updateErr)
 			}
-			return fmt.Errorf("invalid Codex hooks JSON at %s: %w", path, updateErr)
+			// Same contract as the Claude sibling wireSettings (above): a
+			// hooks file the operator broke by hand is skipped loudly and the
+			// run continues. Only owned hooks that would be stranded justify
+			// stopping — one unparseable seat file must not cost the machine
+			// its MCP clients, log default, shell line and update metadata.
+			installer.skip("invalid Codex hooks JSON at " + path + ": " + updateErr.Error())
+			continue
 		}
 		if len(nextOwned) == 0 {
 			delete(ownership, physical)
@@ -2101,16 +2111,18 @@ func (installer *engine) wireCodexHooks() error {
 			continue
 		}
 		seenAccounts[physical] = true
-		if installer.options.Mode == ModeUninstall {
-			if err := installer.change("remove appendix hook trust "+account, func() error { return codexappendix.Unregister(account) }); err != nil {
-				return err
-			}
-		} else if installer.options.CodexBinary != "" {
-			if err := installer.change("trust Professor appendix hook "+account, func() error {
-				return codexappendix.Register(context.Background(), installer.options.CodexBinary, installer.options.Home, account, false)
-			}); err != nil {
-				return err
-			}
+		// The SessionStart appendix hook is retired: the fleet prompt now
+		// reaches Codex through developer_instructions. An install cleans up
+		// after it exactly as an uninstall does — an existing install carries
+		// the recorded trust until something takes it away.
+		if !codexappendix.TrustRecorded(account) {
+			continue
+		}
+		if err := installer.change(
+			"remove retired appendix hook trust "+account,
+			func() error { return codexappendix.Unregister(account) },
+		); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -2181,7 +2193,7 @@ func (installer *engine) reportEarlyFleetCalls(content string) {
 }
 
 func (installer *engine) migrateOldState() error {
-	oldState := filepath.Join(installer.options.Home, ".local", "state", "cc-fleet")
+	oldState := filepath.Join(installer.options.Home, ".local", "state", legacyFleetBinary)
 	state := filepath.Join(installer.options.Home, ".local", "state", "pfm")
 	oldInfo, oldErr := os.Stat(oldState)
 	_, stateErr := os.Stat(state)
@@ -2199,7 +2211,7 @@ func (installer *engine) migrateOldState() error {
 	return nil
 }
 
-func (installer *engine) migrateLegacyCarrier(ctx context.Context) error {
+func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr error) {
 	carrier := filepath.Join(installer.options.Home, ".claude", ".cc-ls-hidden")
 	file, err := os.Open(carrier)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -2208,7 +2220,11 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read retired kill carrier: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close retired kill carrier: %w", err))
+		}
+	}()
 	seen := map[string]bool{}
 	var ids []string
 	scanner := bufio.NewScanner(file)
@@ -2223,30 +2239,40 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) error {
 		return fmt.Errorf("scan retired kill carrier: %w", err)
 	}
 	sort.Strings(ids)
-	return installer.change(fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)), func() error {
-		values := paths.Values{
-			Home:     installer.options.Home,
-			SharedDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
-		}
-		state := shared.Open(ctx, values)
-		defer state.Close()
-		if err := state.Degraded(); err != nil {
-			return fmt.Errorf("open shared store before carrier retirement: %w", err)
-		}
-		existing, err := state.KilledAt(ctx)
-		if err != nil {
-			return fmt.Errorf("read shared kills before carrier retirement: %w", err)
-		}
-		for _, id := range ids {
-			if _, found := existing[id]; found {
-				continue
+	return installer.change(
+		fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)),
+		func() (returnErr error) {
+			values := paths.Values{
+				Home:    installer.options.Home,
+				FleetDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
 			}
-			if err := state.Kill(ctx, id, 0); err != nil {
-				return fmt.Errorf("import retired carrier kill %q: %w", id, err)
+			state := fleetdb.OpenSharedState(ctx, values)
+			defer func() {
+				if err := state.Close(); err != nil {
+					returnErr = errors.Join(
+						returnErr,
+						fmt.Errorf("close shared store after carrier retirement: %w", err),
+					)
+				}
+			}()
+			if err := state.Degraded(); err != nil {
+				return fmt.Errorf("open shared store before carrier retirement: %w", err)
 			}
-		}
-		return nil
-	})
+			existing, err := state.KilledAt(ctx)
+			if err != nil {
+				return fmt.Errorf("read shared kills before carrier retirement: %w", err)
+			}
+			for _, id := range ids {
+				if _, found := existing[id]; found {
+					continue
+				}
+				if err := state.Kill(ctx, id, 0); err != nil {
+					return fmt.Errorf("import retired carrier kill %q: %w", id, err)
+				}
+			}
+			return nil
+		},
+	)
 }
 
 func (installer *engine) retirePredecessors() error {
@@ -2261,7 +2287,10 @@ func (installer *engine) retirePredecessors() error {
 				return err
 			}
 		}
-		if err := installer.retireGlob(filepath.Join(config, "bin", "cx-recover.sh.pre-professor-*"), "retired recovery artifact"); err != nil {
+		if err := installer.retireGlob(
+			filepath.Join(config, "bin", "cx-recover.sh.pre-professor-*"),
+			"retired recovery artifact",
+		); err != nil {
 			return err
 		}
 		for _, name := range []string{
@@ -2272,15 +2301,32 @@ func (installer *engine) retirePredecessors() error {
 			"statusline/gpt-usage.py",
 			"statusline/vertex_daily_tokens.py",
 		} {
-			if err := installer.retire(filepath.Join(config, filepath.FromSlash(name)), "native pfm statusline"); err != nil {
+			if err := installer.retire(
+				filepath.Join(config, filepath.FromSlash(name)),
+				"native pfm statusline",
+			); err != nil {
 				return err
 			}
 		}
 		for _, name := range []string{"dump.md", "chat-ops.sh", "group.sh"} {
-			if err := installer.retire(filepath.Join(config, "commands", "chat", name), "native pfm chat command"); err != nil {
+			if err := installer.retire(
+				filepath.Join(config, "commands", "chat", name),
+				"native pfm chat command",
+			); err != nil {
 				return err
 			}
 		}
+	}
+	// The per-engine harness-prompts tree replaced the flat staged prompts/
+	// directory; a host installed before the move still carries its files.
+	if err := installer.retireGlob(
+		filepath.Join(installer.managedRoot, "prompts", "*"),
+		"harness prompts moved to harness-prompts/",
+	); err != nil {
+		return err
+	}
+	if err := installer.retireEmptyDirTolerant(filepath.Join(installer.managedRoot, "prompts")); err != nil {
+		return err
 	}
 	carrier := filepath.Join(installer.options.Home, ".claude", ".cc-ls-hidden")
 	for _, path := range []string{carrier, carrier + ".at", carrier + ".lock"} {
@@ -2294,8 +2340,10 @@ func (installer *engine) retirePredecessors() error {
 // Retire executable predecessors across the configured account roster while
 // leaving account credentials, transcript directories, and live sockets alone.
 func (installer *engine) retireLegacyCommands() error {
-	for _, name := range []string{"cc-fleet", "cc-ls", "cc-open", "cc-swap", "cc-revive", "cc-clean"} {
-		if err := installer.retireLegacyCommand(filepath.Join(installer.options.Home, ".local", "bin", name)); err != nil {
+	for _, name := range []string{legacyFleetBinary, "cc-ls", "cc-open", "cc-swap", "cc-revive", "cc-clean"} {
+		if err := installer.retireLegacyCommand(
+			filepath.Join(installer.options.Home, ".local", "bin", name),
+		); err != nil {
 			return err
 		}
 	}
@@ -2337,7 +2385,10 @@ func (installer *engine) retireLegacyCommand(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("refuse to retire non-regular command %s", path)
 	}
-	backup := availableBackup(filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-commands", filepath.Base(path)), installer.stamp)
+	backup := availableBackup(
+		filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-commands", filepath.Base(path)),
+		installer.stamp,
+	)
 	return installer.change("retire "+path+" (backup: "+backup+")", func() error {
 		if err := copyBackup(path, backup); err != nil {
 			return fmt.Errorf("backup retired command %s: %w", path, err)
@@ -2356,7 +2407,7 @@ func (installer *engine) retireLegacyCommand(path string) error {
 // cleaned up on its own). frr -> rr (3976b53, "/ptm→/pfm, frr→rr, /rr→/deep-rr")
 // is the only rename `git log -- templates/global/agents` holds; a future
 // rename adds its OLD name here rather than inventing a second mechanism.
-var retiredGlobalAgents = []string{"frr"}
+var retiredGlobalAgents = []string{"frr", "rr-super"}
 
 // retireRenamedGlobalAgents deletes a stale pre-rename identity from the
 // global Claude agent registry — but only when the file is unambiguously
@@ -2409,7 +2460,9 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 					return fmt.Errorf("read retired global agent %s: %w", path, readErr)
 				}
 				if frontmatterName != retired {
-					installer.skip(path + " is not the retired " + retired + " agent (frontmatter name=" + frontmatterName + ") — left alone")
+					installer.skip(
+						path + " is not the retired " + retired + " agent (frontmatter name=" + frontmatterName + ") — left alone",
+					)
 					continue
 				}
 			}

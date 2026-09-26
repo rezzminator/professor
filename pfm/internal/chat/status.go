@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // StatusRequest selects one chat and the optional answers to attach.
@@ -23,6 +23,10 @@ type StatusRequest struct {
 	// Engine and Model override the configured ask runner for Summary/Ask.
 	Engine pfmengine.ID
 	Model  string
+	// Capture overrides the tmux pane read Status falls back to when the
+	// transcript cannot decide working-vs-idle (statusFromPane). Nil is the
+	// real capture.
+	Capture PaneCapture
 }
 
 // Status inspects the target. A dead chat is a status, not an error: the
@@ -37,9 +41,19 @@ func Status(
 	if err != nil {
 		return headless.Status{}, err
 	}
-	status, err := headless.Inspect(ctx, target, time.Now())
+	status, err := headless.Inspect(ctx, target, clock.Real.Now())
 	if err != nil {
 		return headless.Status{}, err
+	}
+	// headless.Inspect stays pure — transcript and socket only. A live chat it
+	// could read no turn for (OpenCode writes no transcript this process
+	// reads; a fresh Claude or Codex seat has not taken a turn yet) gets its
+	// state from the one place the evidence exists: its own pane.
+	if needsPaneState(target, status) {
+		status, err = statusFromPane(ctx, target, status, request.Capture, runtime)
+		if err != nil {
+			return headless.Status{}, err
+		}
 	}
 	if !request.Summary && !request.Ask {
 		return status, nil
@@ -57,11 +71,14 @@ func Status(
 			Config: machine.Config, Database: database,
 			Engine: request.Engine, Model: request.Model,
 		})
+		status.Summary = summary.Text
+		status.SummaryCached = summary.Cached
+		if summary.Warning != nil && warnings != nil {
+			fmt.Fprintf(warnings, "pfm chat status: summary cleanup warning: %v\n", summary.Warning)
+		}
 		if err := database.Close(); err != nil {
 			return headless.Status{}, fmt.Errorf("close summary cache: %w", err)
 		}
-		status.Summary = summary.Text
-		status.SummaryCached = summary.Cached
 	}
 	if request.Ask {
 		// No cache: a pane changes continuously, so Ask pays an ask runner on
@@ -73,6 +90,9 @@ func Status(
 			Engine: request.Engine, Model: request.Model,
 		})
 		status.Ask = answer.Text
+		if answer.Warning != nil && warnings != nil {
+			fmt.Fprintf(warnings, "pfm chat status: ask cleanup warning: %v\n", answer.Warning)
+		}
 	}
 	return status, nil
 }

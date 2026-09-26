@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // pfm takes over a host-level surface when it sets the title options, so the
@@ -36,7 +36,7 @@ func newTitlesProbeServer(t *testing.T, socket string, titles *pfmconfig.TmuxTit
 	// set-titles itself, and the question here is what pfm applied.
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
 
-	tmux := CommandTmux{TmuxDir: tmuxDir, Titles: titles}
+	tmux := TmuxSpawner{TmuxDir: tmuxDir, Titles: titles}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Claude", CWD: root,
 		Width: 180, Height: 45, Run: "sleep 120",
@@ -89,7 +89,13 @@ func TestSpawnLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) {
 	}
 	// The window name is the fleet's DNS record either way: automatic-rename
 	// is never gated by the title policy.
-	if got := showOption(t, socketPath, "show-window-options", "-g", "automatic-rename"); got != "automatic-rename off" {
+	if got := showOption(
+		t,
+		socketPath,
+		"show-window-options",
+		"-g",
+		"automatic-rename",
+	); got != "automatic-rename off" {
 		t.Fatalf("automatic-rename = %q, want off regardless of the title policy", got)
 	}
 }
@@ -118,7 +124,7 @@ func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
 	socket := "probe-cc-1800000014-1-1"
-	tmux := CommandTmux{TmuxDir: tmuxDir}
+	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Claude", CWD: root, Run: "sleep 120",
 	}); err != nil {

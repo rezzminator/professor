@@ -86,7 +86,8 @@ func renderScenario(output *bytes.Buffer, name string, result Output) {
 	for _, project := range projects {
 		fmt.Fprintf(output, "DIR\t%s\t%s\n", project, result.ProjectDirs[project])
 	}
-	for _, row := range result.Rows {
+	for index := range result.Rows {
+		row := result.Rows[index]
 		fmt.Fprintf(
 			output,
 			"ROW\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\n",

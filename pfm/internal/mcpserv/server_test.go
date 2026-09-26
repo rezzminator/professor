@@ -19,12 +19,12 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 var originalTestHome = os.Getenv("HOME")
@@ -34,10 +34,7 @@ type protocolClient struct {
 	serverSession *mcp.ServerSession
 }
 
-func connectInMemory(
-	t *testing.T,
-	server *mcp.Server,
-) protocolClient {
+func connectInMemory(t *testing.T, server *mcp.Server) protocolClient {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -65,12 +62,7 @@ func connectInMemory(
 	}
 }
 
-func callTool[T any](
-	t *testing.T,
-	session *mcp.ClientSession,
-	name string,
-	arguments any,
-) T {
+func callTool[T any](t *testing.T, session *mcp.ClientSession, name string, arguments any) T {
 	t.Helper()
 	// One bound covers every call here, and the heaviest is not close to the
 	// others: the oversize-paste case drives a full megabyte through bracketed
@@ -117,7 +109,7 @@ func (fake resolveGateInjector) Resolve(context.Context, string) (inject.Target,
 	return fake.target, 0, "", nil
 }
 
-func (fake resolveGateInjector) ResolveEngine(_ context.Context, _ string, engine string) (inject.Target, int, string, error) {
+func (fake resolveGateInjector) ResolveEngine(_ context.Context, _, engine string) (inject.Target, int, string, error) {
 	if engine != string(pfmengine.Codex) {
 		return inject.Target{}, inject.CodeUnknown, "", nil
 	}
@@ -140,7 +132,7 @@ func (resolveGateInjector) ScheduleSelfCompact(context.Context, string, []string
 	return inject.Result{}, nil
 }
 
-func TestChatResolveCxWindowUsesTheInjectionResolutionGate(t *testing.T) {
+func TestChatResolveEveryKindUsesTheInjectionResolutionGate(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", t.TempDir())
 	t.Setenv("PFM_SID_DIR", t.TempDir())
 	raw, err := resolve.New(nil)
@@ -153,12 +145,14 @@ func TestChatResolveCxWindowUsesTheInjectionResolutionGate(t *testing.T) {
 		injector: resolveGateInjector{target: want},
 	})
 	protocol := connectInMemory(t, service.Server())
-	resolved := callTool[ResolveOutput](t, protocol.clientSession, "chat_resolve", ResolveInput{
-		Kind: "cxwin", Name: "same name",
-	})
-	if resolved.Status != "ok" || resolved.Code != 0 ||
-		resolved.SocketPath != want.SocketPath || resolved.Pane != want.Pane {
-		t.Fatalf("chat_resolve=%+v, want injection gate target %+v", resolved, want)
+	for _, kind := range []string{"label", "session", "cxwin"} {
+		resolved := callTool[ResolveOutput](t, protocol.clientSession, "chat_resolve", ResolveInput{
+			Kind: kind, Name: "same name",
+		})
+		if resolved.Status != "ok" || resolved.Code != 0 ||
+			resolved.SocketPath != want.SocketPath || resolved.Pane != want.Pane {
+			t.Fatalf("chat_resolve kind %s=%+v, want injection gate target %+v", kind, resolved, want)
+		}
 	}
 }
 
@@ -209,7 +203,7 @@ func setupBackendFixture(t *testing.T) string {
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, sid)
 	t.Setenv(paths.EnvClaudeRoots, claude)
-	t.Setenv(paths.EnvCodexRoot, codex)
+	t.Setenv(paths.EnvCodexHome, codex)
 	t.Setenv(paths.EnvTmuxDir, tmux)
 	t.Setenv(paths.EnvProcRoot, proc)
 	return root
@@ -238,7 +232,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	}
 	jail := newStdioJail(t)
 	binary := buildFleetBinary(t, jail.root)
-	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, jail.root), "mcp")
+	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, jail.root), "mcp", "serve", "--stdio")
 	command.Env = jail.environment()
 	var serverStderr bytes.Buffer
 	command.Stderr = &serverStderr
@@ -255,7 +249,11 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stdio handshake: %v\nstderr:\n%s", err, serverStderr.String())
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	}()
 
 	var toolNames []string
 	for tool, err := range session.Tools(ctx, nil) {
@@ -354,22 +352,14 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Fatalf("post-inject capture = %+v", after)
 	}
 
-	selectorBefore := callTool[CaptureOutput](
-		t,
-		session,
-		"chat_capture",
-		CaptureInput{Target: jail.selectorSession},
-	)
+	selectorBefore := callTool[CaptureOutput](t, session, "chat_capture",
+		CaptureInput{Target: jail.selectorSession})
 	selector := callTool[InjectOutput](t, session, "chat_inject", InjectInput{
 		Target:  jail.selectorSession,
 		Message: "must not type",
 	})
-	selectorAfter := callTool[CaptureOutput](
-		t,
-		session,
-		"chat_capture",
-		CaptureInput{Target: jail.selectorSession},
-	)
+	selectorAfter := callTool[CaptureOutput](t, session, "chat_capture",
+		CaptureInput{Target: jail.selectorSession})
 	if selector.Code != 6 ||
 		selector.Typed ||
 		selector.Status != "refused" ||
@@ -387,12 +377,8 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Target:  jail.busySession,
 		Message: "wait until idle",
 	})
-	busyAfter := callTool[CaptureOutput](
-		t,
-		session,
-		"chat_capture",
-		CaptureInput{Target: jail.busySession},
-	)
+	busyAfter := callTool[CaptureOutput](t, session, "chat_capture",
+		CaptureInput{Target: jail.busySession})
 	if busy.Code != 0 || busy.Status != "queued" ||
 		!busy.Typed || !busy.Busy ||
 		!strings.Contains(busyAfter.Text, "QUEUED:wait until idle") ||
@@ -464,7 +450,11 @@ func TestChatKeysMCPRejectsUnknownNamesBeforeResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	protocol := connectInMemory(t, service.Server())
 	result, err := protocol.clientSession.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "chat_keys",
@@ -693,10 +683,7 @@ while True:
 	return jail
 }
 
-func (jail *stdioJail) startUI(
-	t *testing.T,
-	socket, session, script, mode, label, marker, initial string,
-) {
+func (jail *stdioJail) startUI(t *testing.T, socket, session, script, mode, label, marker, initial string) {
 	t.Helper()
 	command := exec.Command(
 		"tmux",
@@ -724,7 +711,7 @@ func (jail *stdioJail) environment() []string {
 		paths.EnvDB+"="+jail.database,
 		paths.EnvSIDDir+"="+jail.sid,
 		paths.EnvClaudeRoots+"="+jail.claude,
-		paths.EnvCodexRoot+"="+jail.codex,
+		paths.EnvCodexHome+"="+jail.codex,
 		paths.EnvTmuxDir+"="+jail.tmuxDir,
 		paths.EnvProcRoot+"="+jail.proc,
 		// A jailed daemon has no tmux server, no session id and no ancestry to
@@ -772,7 +759,11 @@ func buildFleetBinary(t *testing.T, destination string) string {
 func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	_ = callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{
 		Excerpt: "alpha unique",
@@ -826,7 +817,11 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	clients := make([]protocolClient, 8)
 	for index := range clients {
 		clients[index] = connectInMemory(t, service.Server())
@@ -897,7 +892,11 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -921,7 +920,7 @@ func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
 	root := setupBackendFixture(t)
 	binary := buildFleetBinary(t, root)
-	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, root), "mcp")
+	command := exec.Command(binary, "--config", writeEnabledMCPConfig(t, root), "mcp", "serve", "--stdio")
 	command.Env = os.Environ()
 	stdin, err := command.StdinPipe()
 	if err != nil {
@@ -1004,7 +1003,11 @@ func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
 func writeEnabledMCPConfig(t *testing.T, root string) string {
 	t.Helper()
 	path := filepath.Join(root, "mcp-enabled.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true}}}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true},"harvester":{"enabled":false}}}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -1032,7 +1035,11 @@ func TestChatReadBudgetsAndJunkFilter(t *testing.T) {
 		},
 	})
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	output := callTool[ReadOutput](t, client.clientSession, "chat_read", ReadInput{
 		Source:   "budget",

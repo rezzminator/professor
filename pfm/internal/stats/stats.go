@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 type Header struct {
@@ -154,7 +154,7 @@ func (sampler *Sampler) SampleResources(rows []compose.Row) (Snapshot, error) {
 // counters. Provider failures remain visible in the returned cards and
 // warnings; they do not make the snapshot unready.
 func (sampler *Sampler) SampleLimits() Snapshot {
-	now := time.Now().UnixNano()
+	now := clock.Real.Now().UnixNano()
 	if sampler.Clock != nil {
 		now = sampler.Clock()
 	}
@@ -170,7 +170,7 @@ func (sampler *Sampler) SampleLimits() Snapshot {
 // keeps stale windows visible while it refreshes due accounts asynchronously;
 // the caller's context bounds those refresh workers to its lifetime.
 func (sampler *Sampler) SampleLiveLimits(ctx context.Context) Snapshot {
-	now := time.Now().UnixNano()
+	now := clock.Real.Now().UnixNano()
 	if sampler.Clock != nil {
 		now = sampler.Clock()
 	}
@@ -183,7 +183,7 @@ func (sampler *Sampler) SampleLiveLimits(ctx context.Context) Snapshot {
 }
 
 func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot, error) {
-	now := time.Now().UnixNano()
+	now := clock.Real.Now().UnixNano()
 	if sampler.Clock != nil {
 		now = sampler.Clock()
 	}
@@ -192,10 +192,12 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 		cpuCount = runtime.NumCPU()
 	}
 
-	total, idle, header, processes, warnings, err := readHostResources(sampler.ProcRoot, now, cpuCount)
+	resources, err := readHostResources(sampler.ProcRoot, now, cpuCount)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	total, idle := resources.total, resources.idle
+	header, processes, warnings := resources.header, resources.processes, resources.warnings
 	docker, dockerRaw, dockerWarnings, err := readDockerResources(sampler.CgroupRoot)
 	if err != nil {
 		return Snapshot{}, err
@@ -262,27 +264,28 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 	}, nil
 }
 
-func readLinuxHostResources(root string) (
-	total uint64,
-	idle uint64,
-	header Header,
-	processes map[int]processSample,
-	warnings []string,
-	err error,
-) {
-	total, idle, err = readLinuxSystemCPU(root)
+type hostResources struct {
+	total     uint64
+	idle      uint64
+	header    Header
+	processes map[int]processSample
+	warnings  []string
+}
+
+func readLinuxHostResources(root string) (hostResources, error) {
+	total, idle, err := readLinuxSystemCPU(root)
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
-	header, err = readLinuxHeader(root)
+	header, err := readLinuxHeader(root)
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
-	processes, warnings, err = readLinuxProcesses(root)
+	processes, warnings, err := readLinuxProcesses(root)
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
-	return total, idle, header, processes, warnings, nil
+	return hostResources{total: total, idle: idle, header: header, processes: processes, warnings: warnings}, nil
 }
 
 func readLinuxSystemCPU(root string) (total, idle uint64, err error) {
@@ -429,15 +432,23 @@ type chatTree struct {
 	roots []int
 }
 
-func chatTrees(rows []compose.Row, current map[int]processSample, previous *rawSample, systemTotal uint64, cpuCount int, memoryTotal uint64) []Chat {
+func chatTrees(
+	rows []compose.Row,
+	current map[int]processSample,
+	previous *rawSample,
+	systemTotal uint64,
+	cpuCount int,
+	memoryTotal uint64,
+) []Chat {
 	bySocket := make(map[string]*chatTree)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.Socket == "" || !liveKind(row.Kind) {
 			continue
 		}
 		tree := bySocket[row.Socket]
 		if tree == nil {
-			tree = &chatTree{chat: Chat{Socket: row.Socket, Name: row.Name, Engine: engineName(row.Kind)}}
+			tree = &chatTree{chat: Chat{Socket: row.Socket, Name: row.Name, Engine: statsEngineName(row.Kind)}}
 			bySocket[row.Socket] = tree
 		}
 		tree.roots = append(tree.roots, row.PanePIDs...)
@@ -498,7 +509,12 @@ func chatTrees(rows []compose.Row, current map[int]processSample, previous *rawS
 			tree.chat.RAMPercent = percent(tree.chat.RSSBytes, memoryTotal)
 		}
 		if previous != nil && systemTotal > previous.systemTotal && currentTicks >= priorTicks {
-			tree.chat.CPUPercent = percent(currentTicks-priorTicks, systemTotal-previous.systemTotal) * float64(cpuCount)
+			tree.chat.CPUPercent = percent(
+				currentTicks-priorTicks,
+				systemTotal-previous.systemTotal,
+			) * float64(
+				cpuCount,
+			)
 			tree.chat.CPUValid = true
 		}
 		chats = append(chats, tree.chat)
@@ -509,17 +525,25 @@ func chatTrees(rows []compose.Row, current map[int]processSample, previous *rawS
 
 func liveKind(kind compose.Kind) bool {
 	return kind == compose.LiveClaude || kind == compose.LiveCodex ||
-		kind == compose.LiveSplit || kind == compose.Agent || kind == compose.Booting
+		kind == compose.LiveOpenCode || kind == compose.LiveSplit ||
+		kind == compose.Agent || kind == compose.Booting
 }
 
-func engineName(kind compose.Kind) string {
-	if kind == compose.LiveCodex {
+// statsEngineName names the engine a live row's resource usage is charged to.
+// Its fallback is CLAUDE, not "unknown", so a kind with no arm here does not
+// read as unidentified — it reads as somebody else's chat, which is why every
+// non-Claude live kind must be named explicitly.
+func statsEngineName(kind compose.Kind) string {
+	switch kind {
+	case compose.LiveCodex:
 		return pfmengine.MustLookup(pfmengine.Codex).LongName
-	}
-	if kind == compose.LiveSplit {
+	case compose.LiveOpenCode:
+		return pfmengine.MustLookup(pfmengine.OpenCode).LongName
+	case compose.LiveSplit:
 		return "mixed"
+	default:
+		return pfmengine.MustLookup(pfmengine.Claude).LongName
 	}
-	return pfmengine.MustLookup(pfmengine.Claude).LongName
 }
 
 func engineCommand(command string) bool {

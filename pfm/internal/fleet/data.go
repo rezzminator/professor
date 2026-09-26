@@ -5,18 +5,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Data is the index DB's side of one scan: every indexed chat the view can
 // compose, plus the operator's kills.
 type Data struct {
-	Transcripts []store.Transcript
-	Rollouts    []store.Rollout
-	OcSessions  []store.OcSession
-	CxNames     map[string]string
-	Killed      []store.Killed
+	Transcripts      []store.Transcript
+	Rollouts         []store.Rollout
+	OpenCodeSessions []store.OpenCodeSession
+	CxNames          map[string]string
+	Killed           []store.Killed
 	// CachedCounts, when set, carries the default view's killed/suppressed
 	// totals — LoadDefaultData reads capped candidates, so compose cannot
 	// count them from the rows it was given.
@@ -33,7 +33,7 @@ func LoadData(ctx context.Context, database *store.Store) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
-	ocSessions, err := database.OcSessions(ctx)
+	openCodeSessions, err := database.OpenCodeSessions(ctx)
 	if err != nil {
 		return Data{}, err
 	}
@@ -46,11 +46,11 @@ func LoadData(ctx context.Context, database *store.Store) (Data, error) {
 		return Data{}, err
 	}
 	return Data{
-		Transcripts: transcripts,
-		Rollouts:    rollouts,
-		OcSessions:  ocSessions,
-		CxNames:     cxNames,
-		Killed:      killed,
+		Transcripts:      transcripts,
+		Rollouts:         rollouts,
+		OpenCodeSessions: openCodeSessions,
+		CxNames:          cxNames,
+		Killed:           killed,
 	}, nil
 }
 
@@ -62,8 +62,8 @@ func LoadDefaultData(ctx context.Context, database *store.Store) (Data, error) {
 	}
 	// The default view caps resume rows per engine; the OpenCode mirror is a
 	// full read (it has no per-file delta machinery), so it bypasses
-	// DefaultCandidates by design and compose applies ocResumeCap itself.
-	ocSessions, err := database.OcSessions(ctx)
+	// DefaultCandidates by design and compose applies openCodeResumeCap itself.
+	openCodeSessions, err := database.OpenCodeSessions(ctx)
 	if err != nil {
 		return Data{}, err
 	}
@@ -76,12 +76,12 @@ func LoadDefaultData(ctx context.Context, database *store.Store) (Data, error) {
 		return Data{}, err
 	}
 	return Data{
-		Transcripts:  transcripts,
-		Rollouts:     rollouts,
-		OcSessions:   ocSessions,
-		CxNames:      cxNames,
-		Killed:       killed,
-		CachedCounts: &counts,
+		Transcripts:      transcripts,
+		Rollouts:         rollouts,
+		OpenCodeSessions: openCodeSessions,
+		CxNames:          cxNames,
+		Killed:           killed,
+		CachedCounts:     &counts,
 	}, nil
 }
 
@@ -94,9 +94,10 @@ func EnrichLive(
 	data Data,
 	live gather.Snapshot,
 ) (Data, error) {
-	transcriptIDs := make(map[string]struct{}, len(data.Transcripts))
-	for _, transcript := range data.Transcripts {
-		transcriptIDs[transcript.UUID] = struct{}{}
+	transcriptIDs := make(map[string]int, len(data.Transcripts))
+	for index := range data.Transcripts {
+		transcript := data.Transcripts[index]
+		transcriptIDs[transcript.UUID] = index
 	}
 	wantedTranscripts := make(map[string]struct{})
 	for _, crumb := range live.Crumbs {
@@ -113,22 +114,38 @@ func EnrichLive(
 			wantedTranscripts[agent.SessionID] = struct{}{}
 		}
 	}
+	// Each live chat's whole continued-in chain is loaded, not just the id
+	// its crumb or agent names: Claude moves a running chat into a background
+	// job under a new session id while the host keeps the old one, and
+	// followContinuations can only follow the handoff to a successor it was
+	// given.
 	for id := range wantedTranscripts {
-		if _, found := transcriptIDs[id]; found {
-			continue
-		}
-		transcript, found, err := database.Transcript(ctx, id)
-		if err != nil {
-			return Data{}, err
-		}
-		if found {
-			data.Transcripts = append(data.Transcripts, transcript)
-			transcriptIDs[id] = struct{}{}
+		seen := make(map[string]struct{})
+		for id != "" {
+			if _, cycle := seen[id]; cycle {
+				break
+			}
+			seen[id] = struct{}{}
+			index, found := transcriptIDs[id]
+			if !found {
+				transcript, stored, err := database.Transcript(ctx, id)
+				if err != nil {
+					return Data{}, err
+				}
+				if !stored {
+					break
+				}
+				data.Transcripts = append(data.Transcripts, transcript)
+				index = len(data.Transcripts) - 1
+				transcriptIDs[id] = index
+			}
+			id = data.Transcripts[index].ContinuedIn
 		}
 	}
 
 	rolloutIDs := make(map[string]struct{}, len(data.Rollouts))
-	for _, rollout := range data.Rollouts {
+	for index := range data.Rollouts {
+		rollout := data.Rollouts[index]
 		rolloutIDs[rollout.ID] = struct{}{}
 	}
 	for _, process := range live.Codex {
@@ -143,7 +160,8 @@ func EnrichLive(
 		if err != nil {
 			return Data{}, err
 		}
-		for _, rollout := range family {
+		for index := range family {
+			rollout := family[index]
 			if _, found := rolloutIDs[rollout.ID]; found {
 				continue
 			}

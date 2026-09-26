@@ -14,7 +14,11 @@ import (
 func TestLabelKilledCandidatesNeverSpendAFrameSlot(t *testing.T) {
 	setStoreTestJail(t)
 	database := openTestStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	// The two workers are NEWER than the real chat, so a window of one returns
@@ -61,7 +65,11 @@ func TestLabelKilledCandidatesNeverSpendAFrameSlot(t *testing.T) {
 func TestLabelKilledCodexLineageLeavesTheCachedFrame(t *testing.T) {
 	setStoreTestJail(t)
 	database := openTestStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	for _, rollout := range []Rollout{

@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,8 +16,11 @@ func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
 		wantKind string
 	}{
 		{
-			name:     "html beats plain text when both present",
-			formats:  map[string]string{"text/plain; charset=utf-8": "https://g.example/book.txt", "text/html; charset=utf-8": "https://g.example/book.html"},
+			name: "html beats plain text when both present",
+			formats: map[string]string{
+				"text/plain; charset=utf-8": "https://g.example/book.txt",
+				"text/html; charset=utf-8":  "https://g.example/book.html",
+			},
 			wantURL:  "https://g.example/book.html",
 			wantKind: "html",
 		},
@@ -27,8 +31,11 @@ func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
 			wantKind: "txt",
 		},
 		{
-			name:     "lexicographically first matching html MIME wins",
-			formats:  map[string]string{"text/html; charset=us-ascii": "https://g.example/ascii.html", "text/html; charset=utf-8": "https://g.example/utf8.html"},
+			name: "lexicographically first matching html MIME wins",
+			formats: map[string]string{
+				"text/html; charset=us-ascii": "https://g.example/ascii.html",
+				"text/html; charset=utf-8":    "https://g.example/utf8.html",
+			},
 			wantURL:  "https://g.example/ascii.html",
 			wantKind: "html",
 		},
@@ -49,7 +56,14 @@ func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			gotURL, gotKind := preferredTextFormat(tc.formats)
 			if gotURL != tc.wantURL || gotKind != tc.wantKind {
-				t.Fatalf("preferredTextFormat(%#v) = (%q, %q), want (%q, %q)", tc.formats, gotURL, gotKind, tc.wantURL, tc.wantKind)
+				t.Fatalf(
+					"preferredTextFormat(%#v) = (%q, %q), want (%q, %q)",
+					tc.formats,
+					gotURL,
+					gotKind,
+					tc.wantURL,
+					tc.wantKind,
+				)
 			}
 		})
 	}
@@ -70,11 +84,17 @@ func TestResolveBookOrdersISBNCandidatesByPriorityAndDedupes(t *testing.T) {
 		case strings.Contains(u, "openlibrary.org/isbn/"):
 			return jsonResponse(r, `{"ocaid":"testocaid"}`), nil
 		case strings.Contains(u, "archive.org/metadata/testocaid"):
-			return jsonResponse(r, `{"metadata":{"access-restricted-item":"false"},"files":[{"name":"book.pdf"},{"name":"book_djvu.txt"}]}`), nil
+			return jsonResponse(
+				r,
+				`{"metadata":{"access-restricted-item":"false"},"files":[{"name":"book.pdf"},{"name":"book_djvu.txt"}]}`,
+			), nil
 		case strings.Contains(u, "directory.doabooks.org"):
 			return jsonResponse(r, `[]`), nil
 		case strings.Contains(u, "catalog.hathitrust.org/api/volumes/brief/isbn/"):
-			return jsonResponse(r, `{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=test.vol1"}]}`), nil
+			return jsonResponse(
+				r,
+				`{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=test.vol1"}]}`,
+			), nil
 		default:
 			t.Fatalf("unexpected request to %s", u)
 			return nil, nil
@@ -126,7 +146,7 @@ func TestResolverHathitrustKeepsOnlyFullViewVolumes(t *testing.T) {
 	resolver := &Resolver{}
 	got, err := resolver.hathitrust(context.Background(), client, "978-0-306-40615-7")
 	if err != nil {
-		t.Fatalf("hathitrust error: %v", err)
+		t.Fatalf("hathitrust error = %v, want nil", err)
 	}
 	if len(got) != 1 || got[0].URL != "https://babel.hathitrust.org/cgi/pt?id=open.vol2" {
 		t.Fatalf("hathitrust candidates=%#v, want exactly the Full view volume", got)
@@ -134,17 +154,28 @@ func TestResolverHathitrustKeepsOnlyFullViewVolumes(t *testing.T) {
 }
 
 // TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence pins the outage
-// gate: a non-2xx HathiTrust response returns (nil, nil) — no error bubbled
-// to the caller, and no candidate fabricated — matching the log comment
-// distinguishing "no full-view volume exists" from "the lookup failed".
+// gate: a non-2xx HathiTrust response never fabricates a candidate. Fixed for
+// F14: the lookup failure is no longer silently swallowed into the same nil
+// a genuine "no full-view volume exists" answer gets — the caller now gets
+// the error back too, distinguishing "the lookup failed" from "no copy
+// exists".
 func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 500, Status: "500 Internal Server Error", Body: http.NoBody, Request: r, Header: http.Header{}}, nil
+		return &http.Response{
+			StatusCode: 500,
+			Status:     "500 Internal Server Error",
+			Body:       http.NoBody,
+			Request:    r,
+			Header:     http.Header{},
+		}, nil
 	})}
 	resolver := &Resolver{}
 	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
-	if err != nil || got != nil {
-		t.Fatalf("hathitrust(failed lookup) = (%#v, %v), want (nil, nil)", got, err)
+	if got != nil {
+		t.Fatalf("hathitrust(failed lookup) candidates = %#v, want nil", got)
+	}
+	if err == nil {
+		t.Fatal("hathitrust(failed lookup) error = nil, want the lookup failure surfaced (F14)")
 	}
 }
 
@@ -157,32 +188,88 @@ func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 	oversize := strings.Repeat("a", 10<<20+1<<20)
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(r, `{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=`+oversize+`"}]}`), nil
+		return jsonResponse(
+			r,
+			`{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=`+oversize+`"}]}`,
+		), nil
 	})}
 	resolver := &Resolver{}
 	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
 	if got != nil {
 		t.Fatalf("hathitrust(oversize) candidates = %#v, want nil", got)
 	}
-	// hathitrust treats every lookup failure (outage AND oversize alike) as
-	// "no copy" rather than bubbling an error — TestResolverHathitrustTreats
-	// FailedLookupAsNoCopyNotAbsence pins that contract. The byte-ceiling
-	// proof therefore lives at the shared helper directly: it fails outright,
-	// and its error must name the ceiling rather than describe a decode
-	// failure, whichever caller reaches it.
-	if err != nil {
-		t.Fatalf("hathitrust(oversize) error = %v, want nil (outage semantics)", err)
+	if err == nil {
+		t.Fatal("hathitrust(oversize) error = nil, want the lookup failure surfaced (F14)")
 	}
+	// The byte-ceiling proof lives at the shared helper directly: it fails
+	// outright, and its error must name the ceiling rather than describe a
+	// decode failure, whichever caller reaches it.
 	var data any
-	getErr := getJSONBody(context.Background(), client, "https://catalog.hathitrust.org/api/volumes/brief/isbn/9780306406157.json", defaultUA, nil, 10<<20, &data)
+	getErr := getJSONBody(
+		context.Background(),
+		client,
+		"https://catalog.hathitrust.org/api/volumes/brief/isbn/9780306406157.json",
+		defaultUA,
+		nil,
+		10<<20,
+		&data,
+	)
 	if getErr == nil {
 		t.Fatal("getJSONBody(oversize) error = nil, want an oversize refusal")
 	}
-	if strings.Contains(getErr.Error(), "unexpected end of JSON input") || strings.Contains(getErr.Error(), "decode JSON") {
-		t.Fatalf("getJSONBody(oversize) error = %q, want it to name the byte ceiling rather than a decode failure", getErr)
+	if strings.Contains(getErr.Error(), "unexpected end of JSON input") ||
+		strings.Contains(getErr.Error(), "decode JSON") {
+		t.Fatalf(
+			"getJSONBody(oversize) error = %q, want it to name the byte ceiling rather than a decode failure",
+			getErr,
+		)
 	}
 	if !strings.Contains(getErr.Error(), "exceeds") {
 		t.Fatalf("getJSONBody(oversize) error = %q, want it to name the byte ceiling", getErr)
+	}
+}
+
+// TestResolveBookAllProvidersDownReturnsError pins F14: five of the six book
+// providers used to drop their own error silently and ResolveBook always
+// returned a nil error, so a total outage rendered as an empty candidate
+// list — the exact shape the harvester's own server instructions promise
+// never happens for "nothing found" vs "the lookup failed". Watched FAILING
+// before the fix (err was nil for a query with zero live providers).
+func TestResolveBookAllProvidersDownReturnsError(t *testing.T) {
+	down := errors.New("provider unreachable")
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, down
+	})}
+	resolver := &Resolver{Client: client}
+	candidates, err := resolver.ResolveBook(context.Background(), "9780306406157")
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %#v, want none", candidates)
+	}
+	if err == nil {
+		t.Fatal("ResolveBook with every provider down returned a nil error (F14)")
+	}
+}
+
+// TestResolveBookPartialFailureStillReturnsCandidates guards the non-outage
+// path: one provider failing while another succeeds must still return that
+// provider's candidates with no error, matching ResolveDOI's own precedent.
+func TestResolveBookPartialFailureStillReturnsCandidates(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Host, "gutendex.com") {
+			return jsonResponse(
+				r,
+				`{"results":[{"title":"A Public Domain Book","copyright":false,"formats":{"text/html":"https://gutendex.example/book.html"}}]}`,
+			), nil
+		}
+		return nil, errors.New("provider unreachable")
+	})}
+	resolver := &Resolver{Client: client}
+	candidates, err := resolver.ResolveBook(context.Background(), "A Public Domain Book")
+	if err != nil {
+		t.Fatalf("ResolveBook with a partial success returned an error: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Source != sourceGutenberg {
+		t.Fatalf("candidates = %#v, want the one gutendex candidate", candidates)
 	}
 }
 
@@ -193,7 +280,7 @@ func TestResolverHathitrustSkipsNonISBNQueries(t *testing.T) {
 	})}
 	resolver := &Resolver{}
 	got, err := resolver.hathitrust(context.Background(), client, "not an isbn at all")
-	if err != nil || got != nil {
-		t.Fatalf("hathitrust(non-ISBN) = (%#v, %v), want (nil, nil)", got, err)
+	if got != nil || err != nil {
+		t.Fatalf("hathitrust(non-ISBN) = %#v, err=%v, want (nil, nil)", got, err)
 	}
 }

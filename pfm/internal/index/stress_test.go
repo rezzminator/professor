@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -123,11 +123,11 @@ func setupIndexStressCorpus(t *testing.T) (root, giantPath string, elapsed time.
 	root = t.TempDir()
 	claudeRoot := filepath.Join(root, "claude")
 	project := filepath.Join(claudeRoot, "project")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	if err := os.MkdirAll(project, 0o700); err != nil {
 		t.Fatalf("create stress Claude project: %v", err)
 	}
-	if err := os.MkdirAll(codexRoot, 0o700); err != nil {
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatalf("create stress Codex root: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func setupIndexStressCorpus(t *testing.T) (root, giantPath string, elapsed time.
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, claudeRoot)
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 	return root, giantPath, time.Since(started)
@@ -195,7 +195,11 @@ func TestIndexStressHelper(t *testing.T) {
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

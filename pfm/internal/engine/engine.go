@@ -15,7 +15,7 @@ type ID string
 const (
 	Claude   ID = "cc"
 	Codex    ID = "cx"
-	Opencode ID = "ox"
+	OpenCode ID = "ox"
 )
 
 // Descriptor is everything pfm knows about an engine that is DATA. Behaviour
@@ -64,22 +64,46 @@ var registry = map[ID]Descriptor{}
 // it can only happen at init time, never from user input.
 func Register(d Descriptor) {
 	if d.ID == "" || strings.TrimSpace(d.LongName) == "" || d.SocketPrefix == "" {
-		panic(fmt.Sprintf("engine descriptor is incomplete: id=%q long_name=%q socket_prefix=%q", d.ID, d.LongName, d.SocketPrefix))
+		panic(
+			fmt.Sprintf(
+				"engine descriptor is incomplete: id=%q long_name=%q socket_prefix=%q",
+				d.ID,
+				d.LongName,
+				d.SocketPrefix,
+			),
+		)
 	}
 	if _, dup := registry[d.ID]; dup {
 		panic(fmt.Sprintf("engine %q registered twice", d.ID))
 	}
-	for id, existing := range registry {
+	for id := range registry {
+		existing := registry[id]
 		for _, candidate := range []string{string(d.ID), d.LongName} {
 			for _, registered := range []string{string(id), existing.LongName} {
 				if strings.EqualFold(candidate, registered) {
-					panic(fmt.Sprintf("engine %q alias %q collides with engine %q alias %q", d.ID, candidate, id, registered))
+					panic(
+						fmt.Sprintf(
+							"engine %q alias %q collides with engine %q alias %q",
+							d.ID,
+							candidate,
+							id,
+							registered,
+						),
+					)
 				}
 			}
 		}
 		if strings.HasPrefix(d.SocketPrefix, existing.SocketPrefix) ||
 			strings.HasPrefix(existing.SocketPrefix, d.SocketPrefix) {
-			panic(fmt.Sprintf("engine %q socket prefix %q collides with engine %q prefix %q", d.ID, d.SocketPrefix, id, existing.SocketPrefix))
+			panic(
+				fmt.Sprintf(
+					"engine %q socket prefix %q collides with engine %q prefix %q",
+					d.ID,
+					d.SocketPrefix,
+					id,
+					existing.SocketPrefix,
+				),
+			)
 		}
 	}
 	registry[d.ID] = d
@@ -117,7 +141,8 @@ func Parse(value string) (ID, error) {
 	}
 	for _, id := range All() {
 		d := registry[id]
-		if want == string(d.ID) || want == strings.ToLower(d.LongName) {
+		longName := strings.ToLower(d.LongName)
+		if want == string(d.ID) || want == longName {
 			return d.ID, nil
 		}
 	}
@@ -193,6 +218,26 @@ func LaunchArgsFor(id ID, callerArgs []string) []string {
 		kept = append(kept, flag)
 		if hasValue {
 			kept = append(kept, value)
+		}
+	}
+	return kept
+}
+
+// LaunchArgsWithSettings behaves like LaunchArgsFor, except when settings is
+// non-empty it replaces the value following a kept --settings flag — letting
+// a caller with resolved Claude prefs (a theme) override the baseline
+// --settings payload while leaving the caller-stated-flag drop rule (above)
+// unchanged. settings is ignored (and the plain LaunchArgsFor result kept)
+// when empty, or when the caller's own --settings already won the drop.
+func LaunchArgsWithSettings(id ID, callerArgs []string, settings string) []string {
+	kept := LaunchArgsFor(id, callerArgs)
+	if settings == "" {
+		return kept
+	}
+	for index, flag := range kept {
+		if flag == "--settings" && index+1 < len(kept) {
+			kept[index+1] = settings
+			break
 		}
 	}
 	return kept

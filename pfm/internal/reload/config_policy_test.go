@@ -6,18 +6,20 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/action"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestRosterContainsFailsClosedWhenRosterIsEmpty(t *testing.T) {
+	t.Parallel()
 	if rosterContains(nil, 1) {
 		t.Fatal("rosterContains(nil, 1) accepted an account invented outside config")
 	}
 }
 
 func TestRunRespawnsWithConfiguredClaudePolicy(t *testing.T) {
+	t.Parallel()
 	tmux := &fakeReloadTmux{}
 	configDir := filepath.Join(t.TempDir(), "account 42")
 	customBinary := "/opt/tools/claude enterprise"

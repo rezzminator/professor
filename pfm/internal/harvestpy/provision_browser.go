@@ -12,6 +12,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // BrowserRuntimeRoot is the stable current pointer for the opt-in real-browser
@@ -29,10 +33,63 @@ func BrowserRuntimeRoot(root string, platform Platform) string {
 // downloads Chromium — patchright drives system Chrome via channel="chrome".
 // The conversion environment is not touched.
 func ProvisionBrowser(ctx context.Context, options ProvisionOptions) (ProvisionResult, error) {
-	return provisionBrowser(ctx, options, immutableTargets)
+	return provisionBrowserWithTargets(ctx, options, immutableTargets)
 }
 
-func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map[Platform]Target) (ProvisionResult, error) {
+// browserRebuildSuffix marks the sibling directory a rebuild of the LIVE
+// digest is staged in. It is never the published name unless the swap
+// succeeded, so a directory carrying it that `current` does not resolve to is
+// an abandoned attempt and is cleared on the next run.
+const browserRebuildSuffix = ".rebuild-"
+
+// browserBuildTarget answers where this run may build, and which tree the
+// successful swap replaces. uv records .venv/bin/python as an ABSOLUTE symlink
+// into the extracted interpreter, so the build directory can never be renamed
+// afterwards — the swap is the `current` pointer moving, never a rename. When
+// the digest path is the very tree `current` resolves to, the rebuild is
+// staged beside it: `current` keeps pointing at a working environment until
+// the pointer moves, so a crash in between leaves the old one live and a
+// concurrent fetch never reads a half-deleted tree. A leftover nothing points
+// at is unreachable and is cleared in place.
+func browserBuildTarget(envRoot, current, desired string, now clock.Clock) (build, replaced string, err error) {
+	want := filepath.Join(envRoot, desired)
+	live := ""
+	if resolved, resolveErr := filepath.EvalSymlinks(current); resolveErr == nil {
+		live = resolved
+	} else if !errors.Is(resolveErr, os.ErrNotExist) {
+		return "", "", fmt.Errorf("resolve browser current pointer %s: %w", current, resolveErr)
+	}
+	attempts, globErr := filepath.Glob(want + browserRebuildSuffix + "*")
+	if globErr != nil {
+		return "", "", fmt.Errorf("find abandoned browser rebuild directories under %s: %w", envRoot, globErr)
+	}
+	for _, attempt := range attempts {
+		if attempt == live {
+			continue
+		}
+		if err := os.RemoveAll(attempt); err != nil {
+			return "", "", fmt.Errorf("remove abandoned browser rebuild directory %s: %w", attempt, err)
+		}
+	}
+	if _, statErr := os.Stat(want); errors.Is(statErr, os.ErrNotExist) {
+		return want, "", nil
+	} else if statErr != nil {
+		return "", "", fmt.Errorf("inspect browser environment %s: %w", want, statErr)
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(want); resolveErr == nil && resolved == live {
+		return want + fmt.Sprintf("%s%d", browserRebuildSuffix, now.Now().UnixNano()), want, nil
+	}
+	if err := os.RemoveAll(want); err != nil {
+		return "", "", fmt.Errorf("clear stale browser environment %s: %w", want, err)
+	}
+	return want, "", nil
+}
+
+func provisionBrowserWithTargets(
+	ctx context.Context,
+	options ProvisionOptions,
+	targets map[Platform]Target,
+) (result ProvisionResult, returnErr error) {
 	if options.Root == "" {
 		return ProvisionResult{}, errors.New("harvestpy provision root is empty")
 	}
@@ -47,8 +104,16 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 	if options.Cache == "" {
 		options.Cache = filepath.Join(options.Root, "cache")
 	}
+	if options.Runner == nil {
+		options.Runner = obs.Runner(deps.RealRunner{})
+	}
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
 	if options.Run == nil {
-		options.Run = runCommand
+		options.Run = func(ctx context.Context, executable string, arguments []string, directory string) ([]byte, error) {
+			return runCommandWithRunner(ctx, options.Runner, executable, arguments, directory)
+		}
 	}
 	if options.Smoke == nil {
 		options.Smoke = smokeBrowserRuntime
@@ -60,45 +125,75 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 		Schema: 1, Target: platform.String(), Python: target.PythonVersion, UV: target.UVVersion,
 		PythonSHA256: target.Python.SHA256, UVSHA256: target.UV.SHA256,
 		LockSHA256: browserLockSHA256(), SourceSHA256: browserSourceSHA256(),
-		Features: FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"},
+		Features: FeatureStatus{OCR: featureStateDisabled, Layout: featureStateDisabled, Models: "not-requested"},
 	}
 	desired := digestID(base)
 	base.Digest = desired
 	current := BrowserRuntimeRoot(options.Root, platform)
 	envRoot := filepath.Join(options.Root, "env-browser", platform.String())
-	if existing, err := ReadEnvironmentDigest(filepath.Join(current, "environment.json")); err == nil && existing.Digest == desired && existing.State == "ready" {
-		runtime := Runtime{Python: filepath.Join(current, "project", ".venv", "bin", "python"), Script: filepath.Join(current, "project", "browser.py")}
-		if _, smokeErr := options.Smoke(ctx, runtime); smokeErr == nil {
-			return ProvisionResult{Digest: desired, Environment: existing, Runtime: runtime}, nil
+	// Single-flight from here on: reuse check, downloads, build and swap all
+	// touch this root, and a second pfm converging it at the same time is how
+	// one of them reads a tree the other is halfway through replacing.
+	release, err := lockProvisionRoot(envRoot)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, releaseErr)
+		}
+	}()
+	if existing, err := ReadEnvironmentDigest(
+		filepath.Join(current, "environment.json"),
+	); err == nil && existing.Digest == desired &&
+		existing.State == provisionStateReady {
+		browserRuntime := Runtime{
+			Python: filepath.Join(current, "project", ".venv", "bin", "python"),
+			Script: filepath.Join(current, "project", "browser.py"),
+			Runner: options.Runner,
+		}
+		if _, smokeErr := options.Smoke(ctx, browserRuntime); smokeErr == nil {
+			return ProvisionResult{Digest: desired, Environment: existing, Runtime: browserRuntime}, nil
 		}
 	}
 	uvArchive := filepath.Join(options.Cache, "uv-"+platform.String()+".tar.gz")
 	pythonArchive := filepath.Join(options.Cache, "python-"+platform.String()+".tar.gz")
-	if err := ensureInput(ctx, uvArchive, target.UV, options.Offline, options.Download); err != nil {
+	if err := ensureInputWithClock(
+		ctx,
+		uvArchive,
+		target.UV,
+		options.Offline,
+		options.Download,
+		options.Clock,
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare browser uv input: %w", err)
 	}
-	if err := ensureInput(ctx, pythonArchive, target.Python, options.Offline, options.Download); err != nil {
+	if err := ensureInputWithClock(
+		ctx,
+		pythonArchive,
+		target.Python,
+		options.Offline,
+		options.Download,
+		options.Clock,
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare browser Python input: %w", err)
 	}
-	if err := os.MkdirAll(envRoot, 0o700); err != nil {
-		return ProvisionResult{}, fmt.Errorf("create browser environment root: %w", err)
+	final, replaced, err := browserBuildTarget(envRoot, current, desired, options.Clock)
+	if err != nil {
+		return ProvisionResult{}, err
 	}
-	final := filepath.Join(envRoot, desired)
-	if _, err := os.Stat(final); err == nil {
-		// A stale or broken environment at the exact digest path is replaced
-		// wholesale; there is nothing inside worth keeping.
-		if err := os.RemoveAll(final); err != nil {
-			return ProvisionResult{}, fmt.Errorf("clear stale browser environment: %w", err)
-		}
-	}
-	// Build DIRECTLY at the final path, like the conversion provisioner:
-	// uv records .venv/bin/python as an absolute symlink into the extracted
-	// interpreter, so a staging→final rename would dangle every link.
+	published := false
 	defer func() {
 		// A failed provision leaves nothing behind: honest absence
-		// (NOT_PROVISIONED) instead of a half-built tree.
-		if _, statErr := os.Stat(filepath.Join(final, "environment.json")); errors.Is(statErr, os.ErrNotExist) {
-			_ = os.RemoveAll(final)
+		// (NOT_PROVISIONED) instead of a half-built tree. Until the swap,
+		// final is never the directory `current` resolves to, so this can only
+		// remove a tree no reader can reach; AFTER the swap it is the live one
+		// and must survive even a failure on the way out.
+		if returnErr == nil || published {
+			return
+		}
+		if err := os.RemoveAll(final); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove failed browser environment %s: %w", final, err))
 		}
 	}()
 	if err := os.Mkdir(final, 0o700); err != nil {
@@ -128,7 +223,7 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 	if err := stampPythonBuild(filepath.Join(final, "python", "BUILD"), target.PythonVersion); err != nil {
 		return ProvisionResult{}, fmt.Errorf("stamp browser Python build: %w", err)
 	}
-	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, "--python", pythonPath}
+	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, uvFlagPython, pythonPath}
 	if options.Offline {
 		args = append(args, "--offline")
 	}
@@ -142,7 +237,12 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 	if _, err := os.Stat(venvPython); err != nil {
 		return ProvisionResult{}, fmt.Errorf("browser uv sync did not create Python environment: %w", err)
 	}
-	inventoryOutput, err := options.Run(ctx, uvPath, []string{"pip", "list", "--format", "freeze", "--python", venvPython}, project)
+	inventoryOutput, err := options.Run(
+		ctx,
+		uvPath,
+		[]string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, venvPython},
+		project,
+	)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("browser installed inventory failed: %w", err)
 	}
@@ -152,7 +252,10 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 	}
 	base.InventorySHA256 = inventorySHA
 	base.InventoryCount = inventoryCount
-	smoke, err := options.Smoke(ctx, Runtime{Python: venvPython, Script: filepath.Join(project, "browser.py")})
+	smoke, err := options.Smoke(
+		ctx,
+		Runtime{Python: venvPython, Script: filepath.Join(project, "browser.py"), Runner: options.Runner},
+	)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("browser no-download smoke: %w", err)
 	}
@@ -160,11 +263,12 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 		"patchright":  smoke["patchright"],
 		"chrome_path": smoke["chrome_path"],
 	}
-	base.State = "ready"
+	base.State = provisionStateReady
 	base.Environment = final
 	finalRuntime := Runtime{
 		Python: filepath.Join(final, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(final, "project", "browser.py"),
+		Runner: options.Runner,
 	}
 	// The environment is never renamed after uv sync (the venv interpreter
 	// symlink is absolute); both smokes judge the same final runtime path.
@@ -179,17 +283,27 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 	if err := writePrivate(filepath.Join(final, "environment.json"), append(marker, '\n')); err != nil {
 		return ProvisionResult{}, err
 	}
-	if err := atomicCurrent(envRoot, desired); err != nil {
+	// THE swap: until this line `current` still resolves to the previous,
+	// working environment.
+	if err := atomicCurrentWithClock(envRoot, filepath.Base(final), options.Clock); err != nil {
 		return ProvisionResult{}, err
+	}
+	published = true
+	if replaced != "" {
+		// Unreachable now that the pointer moved.
+		if err := os.RemoveAll(replaced); err != nil {
+			return ProvisionResult{}, fmt.Errorf("remove replaced browser environment %s: %w", replaced, err)
+		}
 	}
 	return ProvisionResult{Digest: desired, Environment: base, Runtime: Runtime{
 		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(current, "project", "browser.py"),
+		Runner: options.Runner,
 	}}, nil
 }
 
-func smokeBrowserRuntime(ctx context.Context, runtime Runtime) (map[string]any, error) {
-	worker := NewBrowserWorker(runtime)
+func smokeBrowserRuntime(ctx context.Context, browserRuntime Runtime) (map[string]any, error) {
+	worker := NewBrowserWorker(browserRuntime)
 	result, err := worker.Smoke(ctx)
 	_ = worker.Close()
 	return result, err
@@ -219,7 +333,11 @@ func EnsureBrowser(ctx context.Context, options ProvisionOptions) (Runtime, erro
 		options.Platform = Platform{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	}
 	current := BrowserRuntimeRoot(options.Root, options.Platform)
-	resolved := Runtime{Python: filepath.Join(current, "project", ".venv", "bin", "python"), Script: filepath.Join(current, "project", "browser.py")}
+	resolved := Runtime{
+		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
+		Script: filepath.Join(current, "project", "browser.py"),
+		Runner: options.Runner,
+	}
 	reason := ""
 	if _, statErr := os.Stat(resolved.Python); errors.Is(statErr, os.ErrNotExist) {
 		reason = "NOT provisioned"
@@ -235,7 +353,11 @@ func EnsureBrowser(ctx context.Context, options ProvisionOptions) (Runtime, erro
 	}
 	log.Printf("harvestpy: browser environment is %s — provisioning before this fetch", reason)
 	if _, err := ensureProvision(ctx, options); err != nil {
-		return Runtime{}, fmt.Errorf("browser environment is %s and provisioning failed (%v) — it provisions on the first browser fetch once fetch.browser is true in harvester.config.json; check uv and network access, then retry", reason, err)
+		return Runtime{}, fmt.Errorf(
+			"browser environment is %s and provisioning failed (%v) — it provisions on the first browser fetch once fetch.browser is true in harvester.config.json; check uv and network access, then retry",
+			reason,
+			err,
+		)
 	}
 	return resolved, nil
 }

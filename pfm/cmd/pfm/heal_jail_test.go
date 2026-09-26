@@ -17,15 +17,15 @@ import (
 func healJail(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	if err := os.MkdirAll(filepath.Join(codexRoot, "sessions"), 0o700); err != nil {
+	codexHome := filepath.Join(root, "codex")
+	if err := os.MkdirAll(filepath.Join(codexHome, "sessions"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_HOME", root)
-	t.Setenv("PFM_CODEX_ROOT", codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", codexHome)
 
 	const id = "33333333-3333-4333-8333-333333333333"
-	rollout := filepath.Join(codexRoot, "sessions", "rollout-"+id+".jsonl")
+	rollout := filepath.Join(codexHome, "sessions", "rollout-"+id+".jsonl")
 	// Three records; the cursor will point at the third while claiming the
 	// first's ordinal — the 0.146.1 desync.
 	content := `{"ordinal":0,"type":"event_msg"}` + "\n" +
@@ -37,11 +37,15 @@ func healJail(t *testing.T) string {
 	offset := len(`{"ordinal":0,"type":"event_msg"}`+"\n") +
 		len(`{"ordinal":1,"type":"event_msg"}`+"\n")
 
-	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexRoot, "state_1.sqlite"))
+	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, "state_1.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	if _, err := state.Exec(
 		"CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT)",
 	); err != nil {
@@ -55,12 +59,16 @@ func healJail(t *testing.T) string {
 
 	history, err := sql.Open(
 		"sqlite",
-		"file:"+filepath.Join(codexRoot, "thread_history_1.sqlite"),
+		"file:"+filepath.Join(codexHome, "thread_history_1.sqlite"),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer history.Close()
+	defer func() {
+		if err := history.Close(); err != nil {
+			t.Errorf("close history: %v", err)
+		}
+	}()
 	if _, err := history.Exec(`
 		CREATE TABLE thread_history_projection_state (
 			thread_id TEXT PRIMARY KEY,
@@ -85,16 +93,20 @@ func healJail(t *testing.T) string {
 	return id
 }
 
-func healProjectionRows(t *testing.T, codexRoot, id string) int {
+func healProjectionRows(t *testing.T, codexHome, id string) int {
 	t.Helper()
 	history, err := sql.Open(
 		"sqlite",
-		"file:"+filepath.Join(codexRoot, "thread_history_1.sqlite")+"?mode=ro",
+		"file:"+filepath.Join(codexHome, "thread_history_1.sqlite")+"?mode=ro",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer history.Close()
+	defer func() {
+		if err := history.Close(); err != nil {
+			t.Errorf("close history: %v", err)
+		}
+	}()
 	var count int
 	if err := history.QueryRow(
 		"SELECT count(*) FROM thread_history_projection_state WHERE thread_id = ?",
@@ -110,7 +122,7 @@ func healProjectionRows(t *testing.T, codexRoot, id string) int {
 // makes the pre-resume call free.
 func TestHealCommandReportsThenRepairs(t *testing.T) {
 	id := healJail(t)
-	codexRoot := os.Getenv("PFM_CODEX_ROOT")
+	codexHome := os.Getenv("PFM_CODEX_ROOT")
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"heal"}, &stdout, &stderr); code != 0 {
@@ -122,7 +134,7 @@ func TestHealCommandReportsThenRepairs(t *testing.T) {
 	if !strings.Contains(stdout.String(), "totals: WEDGED=1") {
 		t.Fatalf("totals line missing:\n%s", stdout.String())
 	}
-	if healProjectionRows(t, codexRoot, id) != 1 {
+	if healProjectionRows(t, codexHome, id) != 1 {
 		t.Fatal("the report deleted a projection row")
 	}
 
@@ -134,7 +146,7 @@ func TestHealCommandReportsThenRepairs(t *testing.T) {
 	if !strings.Contains(stderr.String(), id) {
 		t.Fatalf("the repair said nothing about what it repaired: %q", stderr.String())
 	}
-	if healProjectionRows(t, codexRoot, id) != 0 {
+	if healProjectionRows(t, codexHome, id) != 0 {
 		t.Fatal("--thread reported a repair but left the projection in place")
 	}
 

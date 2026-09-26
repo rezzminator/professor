@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // The Codex rename markers below are read from the codex binary's own strings
@@ -115,7 +118,7 @@ func Run(
 		return Result{}, err
 	}
 	timings := request.Timings.orDefaults()
-	trace := newTracer(request.Trace, time.Now())
+	trace := newTracer(request.Trace, clock.Real.Now())
 	window := WindowName(request.Name)
 	spec := SessionSpec{
 		Socket:  request.Socket,
@@ -207,19 +210,23 @@ func Run(
 // waitForBoot returns once the pane has drawn something and stopped changing,
 // which is the only readiness signal both engines share. A capture error means
 // the session is gone — the chat died at birth, and saying so beats reporting
-// a socket nothing is listening on.
+// a socket nothing is listening on. Cancellation still takes precedence when
+// it kills the context-bound capture command.
 func waitForBoot(
 	ctx context.Context,
 	tmux Tmux,
 	socket, target string,
 	timings Timings,
 ) (string, error) {
-	deadline := time.Now().Add(timings.Boot)
+	deadline := clock.Real.Now().Add(timings.Boot)
 	previous := ""
 	settled := false
 	for {
 		capture, err := tmux.Capture(ctx, socket, target)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", ctxErr
+			}
 			return "", fmt.Errorf(
 				"the chat died at birth on socket %s: %w",
 				socket,
@@ -236,7 +243,7 @@ func waitForBoot(
 			settled = false
 		}
 		previous = trimmed
-		if time.Now().After(deadline) {
+		if clock.Real.Now().After(deadline) {
 			if trimmed == "" {
 				return "", fmt.Errorf(
 					"the chat drew nothing within %s on socket %s",
@@ -303,7 +310,7 @@ func waitForComposer(
 	trace tracer,
 	ready func(string) bool,
 ) bool {
-	deadline := time.Now().Add(timings.Boot)
+	deadline := clock.Real.Now().Add(timings.Boot)
 	previous := ""
 	dismissals := 0
 	held := 0
@@ -333,7 +340,7 @@ func waitForComposer(
 		default:
 			held = 0
 		}
-		if time.Now().After(deadline) {
+		if clock.Real.Now().After(deadline) {
 			return false
 		}
 		if err := sleep(ctx, timings.Poll); err != nil {
@@ -369,7 +376,7 @@ func nameCodexThread(
 	trace tracer,
 	proof renameProof,
 ) (named bool, warning string, blocked bool) {
-	since := time.Now().Add(-renameClockSlack)
+	since := clock.Real.Now().Add(-renameClockSlack)
 	for attempt := 0; attempt < renameAttempts; attempt++ {
 		if attempt > 0 && proof != nil {
 			landed, err := proof(name, since)
@@ -411,7 +418,10 @@ func nameCodexThread(
 // nothing on screen and its ledger could not be read. That is "could not
 // verify", never "unnamed" — the rename may well have landed.
 func unverifiedRename(err error) string {
-	return fmt.Sprintf("could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls", err)
+	return fmt.Sprintf(
+		"could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls",
+		err,
+	)
 }
 
 // renameCodexThread drives Codex's own rename UI and verifies each step before
@@ -639,7 +649,7 @@ func composerNeedle(text string) string {
 	if index := strings.IndexAny(first, "\r\n"); index >= 0 {
 		first = first[:index]
 	}
-	return clipRunes(flatten(first), composerNeedleMax)
+	return naming.ClipRunes(flattenComposerText(first), composerNeedleMax)
 }
 
 // composerHolds reports whether the composer — the LAST marker line, below
@@ -652,7 +662,7 @@ func composerHolds(capture, needle string) bool {
 	if line == "" {
 		return false
 	}
-	return strings.Contains(flatten(line), needle)
+	return strings.Contains(flattenComposerText(line), needle)
 }
 
 func lastLineContaining(capture, marker string) string {
@@ -665,7 +675,7 @@ func lastLineContaining(capture, marker string) string {
 	return last
 }
 
-func flatten(value string) string {
+func flattenComposerText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
@@ -712,13 +722,13 @@ func pollCapture(
 	timings Timings,
 	satisfied func(string) bool,
 ) bool {
-	deadline := time.Now().Add(timings.Step)
+	deadline := clock.Real.Now().Add(timings.Step)
 	for {
 		capture, err := tmux.Capture(ctx, socket, target)
 		if err == nil && satisfied(capture) {
 			return true
 		}
-		if time.Now().After(deadline) {
+		if clock.Real.Now().After(deadline) {
 			return false
 		}
 		if err := sleep(ctx, timings.Poll); err != nil {
@@ -728,17 +738,7 @@ func pollCapture(
 }
 
 func sleep(ctx context.Context, duration time.Duration) error {
-	if duration <= 0 {
-		return ctx.Err()
-	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return clock.Real.Sleep(ctx, duration)
 }
 
 // WindowName reduces a chat name to something tmux can carry as a window name:
@@ -760,16 +760,5 @@ func WindowName(name string) string {
 	if cleaned == "" {
 		return "chat"
 	}
-	return clipRunes(cleaned, 40)
-}
-
-func clipRunes(value string, limit int) string {
-	count := 0
-	for index := range value {
-		if count == limit {
-			return value[:index]
-		}
-		count++
-	}
-	return value
+	return naming.ClipRunes(cleaned, 40)
 }

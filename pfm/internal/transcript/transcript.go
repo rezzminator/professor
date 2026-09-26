@@ -10,14 +10,15 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"unicode/utf8"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // Roles an Entry can carry.
@@ -158,9 +159,12 @@ func parseCodex(parsed record) (Entry, bool) {
 	case "user_message":
 		role = RoleUser
 		content = parsed.Payload.Message
-	case "agent_message":
-		role = RoleAssistant
-		content = parsed.Payload.Message
+	// "agent_message" is not handled here: it is an event_msg record that
+	// always pairs with a response_item message carrying the identical text
+	// (internal/mockengine/codex.go's recordAssistant writes both; real
+	// Codex rollouts do the same). internal/index/codex.go treats the
+	// response_item as the one canonical record for a turn already paired
+	// with an event — counting the event too reports the same reply twice.
 	case "message":
 		role = parsed.Payload.Role
 		content = parsed.Payload.Content
@@ -269,7 +273,7 @@ func Truncate(value string, limit int) string {
 		return value
 	}
 	value = value[:limit]
-	for !utf8.ValidString(value) && len(value) > 0 {
+	for !utf8.ValidString(value) && value != "" {
 		value = value[:len(value)-1]
 	}
 	return value
@@ -281,7 +285,7 @@ func Tail(
 	ctx context.Context,
 	path, engine string,
 	lastN, maxBytes int,
-) ([]Entry, bool, error) {
+) (entries []Entry, truncated bool, returnErr error) {
 	if lastN < 1 {
 		return nil, false, fmt.Errorf("tail count must be positive, got %d", lastN)
 	}
@@ -289,7 +293,11 @@ func Tail(
 	if err != nil {
 		return nil, false, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 
 	reader := bufio.NewReaderSize(file, 64<<10)
 	ring := make([]Entry, 0, lastN)
@@ -327,14 +335,17 @@ func Tail(
 // All returns every visible transcript entry in file order. It shares Parse
 // with tail/status so save and excerpt loading cannot invent a second record
 // interpretation.
-func All(ctx context.Context, path, engine string) ([]Entry, error) {
+func All(ctx context.Context, path, engine string) (entries []Entry, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 	reader := bufio.NewReaderSize(file, 64<<10)
-	var entries []Entry
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err

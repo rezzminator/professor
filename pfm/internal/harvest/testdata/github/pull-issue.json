@@ -1,0 +1,24 @@
+{
+ "url": "https://api.github.com/repos/example-org/example-runtime/issues/54857",
+ "repository_url": "https://api.github.com/repos/example-org/example-runtime",
+ "html_url": "https://github.com/example-org/example-runtime/pull/54857",
+ "id": 2513065657,
+ "number": 54857,
+ "title": "Example pull request",
+ "state": "open",
+ "locked": false,
+ "comments": 51,
+ "created_at": "2024-09-09T06:50:00Z",
+ "updated_at": "2026-09-13T17:10:13Z",
+ "closed_at": null,
+ "author_association": "NONE",
+ "user": {
+  "login": "user-40",
+  "type": "User"
+ },
+ "body": "The report.\n\n```\n$ example run\nfailure\n```",
+ "pull_request": {
+  "url": "https://api.github.com/repos/example-org/example-runtime/pulls/54857",
+  "html_url": "https://github.com/example-org/example-runtime/pull/54857"
+ }
+}

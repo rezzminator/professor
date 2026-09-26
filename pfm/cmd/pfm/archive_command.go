@@ -6,10 +6,13 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/archive"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/archive"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // killStoreAdapter exposes the kill manager as the archive's killed-chat
@@ -46,9 +49,9 @@ func (adapter killStoreAdapter) Unkill(ctx context.Context, id string) error {
 // The default is a DRY RUN, and the whole design is reversibility: every move
 // is recorded in the manifest, and --restore puts one back exactly where it
 // came from. Nothing here deletes anything, ever.
-func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet(
-		"archive",
+func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
+	flags := cli.NewFlagSet(
+		archiveCommand,
 		"usage: pfm archive [--apply] [--subagents [--older-than DAYS]] [--restore id] [--prune-orphans]",
 		stderr,
 	)
@@ -66,7 +69,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	restore := flags.String("restore", "", "put one archived chat back")
 	pruneOrphans := flags.Bool("prune-orphans", false, "report orphaned kill rows")
 	yes := flags.Bool("yes", false, "with --prune-orphans, delete the reported rows")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *olderThan < 0 || (*yes && !*pruneOrphans) ||
@@ -87,21 +90,21 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		return 0
 	}
 	if *pruneOrphans {
-		database, _, code := openKillManager(stderr, runtime)
+		database, _, code := fleet.OpenKillManager(stderr, runtime)
 		if code != 0 {
 			return code
 		}
-		defer database.Close()
+		defer func() { cli.CloseResource(database, "pfm archive: close database", stderr, &exitCode) }()
 		return pruneOrphanedKills(
 			context.Background(), database, *yes || *apply, stdout, stderr,
 		)
 	}
 
-	database, manager, code := openKillManager(stderr, runtime)
+	database, manager, code := fleet.OpenKillManager(stderr, runtime)
 	if code != 0 {
 		return code
 	}
-	defer database.Close()
+	defer func() { cli.CloseResource(database, "pfm archive: close database", stderr, &exitCode) }()
 	runner, err := archive.New(archive.Dependencies{
 		Paths:            resolved,
 		Kills:            killStoreAdapter{manager: manager},
@@ -122,6 +125,39 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		return 1
 	}
 	printArchiveReport(report, *apply, *subagents, resolved, stdout)
+	return 0
+}
+
+// pruneOrphanedKills reports, and only with confirm deletes, the kills doctor
+// counts as orphaned_killed. A kill cannot be recovered once deleted, so the
+// dry run is the default and the count is always printed.
+func pruneOrphanedKills(
+	ctx context.Context,
+	database *store.Store,
+	confirm bool,
+	stdout, stderr io.Writer,
+) int {
+	orphans, err := database.OrphanedKills(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm archive: %v\n", err)
+		return 1
+	}
+	if !confirm {
+		for _, orphan := range orphans {
+			fmt.Fprintf(stdout, "would prune\t%s\t%s\t%d\n", orphan.ID, orphan.Engine, orphan.KilledAt)
+		}
+		fmt.Fprintf(stdout, "pfm archive: %d orphaned kill(s); re-run with --yes to delete\n", len(orphans))
+		return 0
+	}
+	deleted, err := database.DeleteOrphanedKills(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm archive: %v\n", err)
+		return 1
+	}
+	for _, orphan := range orphans {
+		fmt.Fprintf(stdout, "pruned\t%s\t%s\t%d\n", orphan.ID, orphan.Engine, orphan.KilledAt)
+	}
+	fmt.Fprintf(stdout, "pfm archive: pruned %d orphaned kill(s)\n", deleted)
 	return 0
 }
 
@@ -147,7 +183,11 @@ func printArchiveReport(
 		}
 	}
 	for _, id := range report.Unsupported {
-		fmt.Fprintf(stdout, "  kept   %s killed — OpenCode stores all sessions in one shared database; single-session file archive is unsupported\n", id)
+		fmt.Fprintf(
+			stdout,
+			"  kept   %s killed — OpenCode stores all sessions in one shared database; single-session file archive is unsupported\n",
+			id,
+		)
 	}
 	fmt.Fprintln(stdout)
 	fmt.Fprintf(

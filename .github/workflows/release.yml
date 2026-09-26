@@ -116,6 +116,11 @@ jobs:
             exit 1
           fi
 
+      - name: Check the release notes grammar
+        if: github.event_name == 'push'
+        shell: bash
+        run: node scripts/release-check.mjs notes "releases/${GITHUB_REF_NAME}.md" --version "${GITHUB_REF_NAME}"
+
       - name: Attach files to the GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Configuring the example scheduler — Example Docs</title>
+<script type="module" src="/assets/docs-app.js"></script>
+<template id="tooltip-template"><div role="tooltip">Copy to clipboard</div></template>
+</head>
+<body>
+<nav class="sidebar"><ul><li><a href="/docs/">Overview</a></li><li><a href="/docs/install/">Install</a></li><li><a href="/docs/scheduler/">Scheduler</a></li><li><a href="/docs/api/">API reference</a></li></ul></nav>
+<main id="docs-root">
+  <h1>Configuring the example scheduler</h1>
+  <p class="lede">A short teaser that the static page shows before hydration.</p>
+  <div id="article-mount"></div>
+</main>
+<noscript><p>This documentation site needs JavaScript for search and navigation.</p></noscript>
+<template id="article-stream" data-hydrate="article-mount">
+  <article>
+    <h2>Queues and workers</h2>
+    <p>The scheduler assigns every job to a named queue. Each queue owns a pool of workers, and a worker pulls the oldest ready job whose dependencies have all completed. Queues are declared in the scheduler file with a concurrency limit, a retry budget and an optional rate cap measured in jobs per minute.</p>
+    <p>A job that fails is retried with exponential backoff until its retry budget is spent. The first retry waits ten seconds, each later retry doubles the wait, and the ceiling is one hour. A job that exhausts its budget moves to the dead-letter queue, where an operator can inspect its last error and requeue it by hand.</p>
+    <h2>Priorities</h2>
+    <p>Priorities break ties inside one queue only. A high-priority job never jumps to another queue, and a low-priority job is never starved for longer than the starvation window, after which it is promoted one level. The window defaults to fifteen minutes and can be tuned per queue when a workload needs stricter fairness.</p>
+    <h2>Observability</h2>
+    <p>Every state change of a job is written to the event log with the queue, the worker, the attempt number and the elapsed time. The metrics endpoint exposes queue depth, oldest ready age and the retry rate, which together are enough to alert on a stuck queue before its backlog becomes visible to users of the system.</p>
+  </article>
+</template>
+<footer><p>Example Docs is maintained by the example project contributors.</p></footer>
+</body></html>

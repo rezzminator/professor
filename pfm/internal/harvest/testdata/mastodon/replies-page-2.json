@@ -1,0 +1,9 @@
+{
+ "@context": "https://www.w3.org/ns/activitystreams",
+ "id": "https://social.example/@user-0/117117221397911074/replies?min_id=117117378316307585&only_other_accounts=true&page=true",
+ "type": "CollectionPage",
+ "partOf": "https://social.example/@user-0/117117221397911074/replies",
+ "items": [
+  "https://remote.example/@user-2/117117253204748361"
+ ]
+}

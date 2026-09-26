@@ -77,7 +77,7 @@
       ],
       "raw_bytes": 154701,
       "raw_sha256": "6585a1852d52a7ce1f4382b8a919423bcfd6c76f1945ba4146d2bad89227aaf6",
-      "oracle_sha256": "dafda7b01134a8c2d0a9e8d7d4c171446b8200bd249033fc27c15355b8d5cb7f",
+      "oracle_sha256": "c7c728d42b73f02874fb32bf4ec27571f30eb6c6d2e32f174567b9a89ec02d3d",
       "raw_sha256s": [
         "6585a1852d52a7ce1f4382b8a919423bcfd6c76f1945ba4146d2bad89227aaf6"
       ]
@@ -101,7 +101,7 @@
       ],
       "raw_bytes": 656574,
       "raw_sha256": "a3ac82bb9eb8664b93961a2a9ff6def3d70e3a9f63d92721143c1f391d04edec",
-      "oracle_sha256": "e859a9dc715dc7209c4d7a1d8bc2179d406d0f94507b350d0e2e8efaaf6b18a6",
+      "oracle_sha256": "a00578321ec90d1bc53dce67b61ab7683e95e09f113ac0cf06503e93b39a67e2",
       "raw_sha256s": [
         "a3ac82bb9eb8664b93961a2a9ff6def3d70e3a9f63d92721143c1f391d04edec"
       ]
@@ -125,7 +125,7 @@
       ],
       "raw_bytes": 19434,
       "raw_sha256": "b71c7f4477d3b986f8bd13b48938faff7e0efb034b463af757f3cbd7daab6873",
-      "oracle_sha256": "7a4bb02eee6b2645c8c6a9ab164e553fc54b5016d3ed7b51c117f8de772cf721",
+      "oracle_sha256": "a50138ae9d76bf7a6bb09a11a7bce8e7e60d0bc6d3006db1a1e5ede9d50ffafc",
       "raw_sha256s": [
         "b71c7f4477d3b986f8bd13b48938faff7e0efb034b463af757f3cbd7daab6873"
       ]
@@ -149,7 +149,7 @@
       ],
       "raw_bytes": 50244,
       "raw_sha256": "73cd8ecdcf33b5923f3c092fba6d8f8c3faecf64d84a9ecfa6c5e028f980211a",
-      "oracle_sha256": "2abe23d16ceb072cbc9dbb27265ffff20387949efedef6026467f17ed1ccae6d",
+      "oracle_sha256": "1d1c300a26f2f88b335c4e6e6d0edb779a6ceca71f4704371046f9398ff3bf8b",
       "raw_sha256s": [
         "73cd8ecdcf33b5923f3c092fba6d8f8c3faecf64d84a9ecfa6c5e028f980211a"
       ]
@@ -173,7 +173,7 @@
       ],
       "raw_bytes": 21223,
       "raw_sha256": "d0850096c26e9c888acaf2d6e2ac029e86f66f51a87461b77b94f1639d309b79",
-      "oracle_sha256": "88c9da46644721064a50ffba3659095c5aa37dc29ecc4a088903c79cab90cc30",
+      "oracle_sha256": "7a63299015f6f807477d4122e6e03a916341ea8f2dfa496993fef2c1b1354572",
       "raw_sha256s": [
         "d0850096c26e9c888acaf2d6e2ac029e86f66f51a87461b77b94f1639d309b79"
       ]
@@ -197,7 +197,7 @@
       ],
       "raw_bytes": 22496,
       "raw_sha256": "6ff39e5bf94129a072b74e34765d7e0508240096cec474a8e74a7de2eca6b84d",
-      "oracle_sha256": "e0ed2a103738b15c20025de9d39204f418bf1e4227c26718c45f62307b1dc7e3",
+      "oracle_sha256": "e0c2b7e1417fc5a6c03826d47e3d354f8c09855fb6c6891999fe9c6a98a97de5",
       "raw_sha256s": [
         "6ff39e5bf94129a072b74e34765d7e0508240096cec474a8e74a7de2eca6b84d"
       ]
@@ -221,7 +221,7 @@
       ],
       "raw_bytes": 221304,
       "raw_sha256": "715eae7f5608055ec186a0e6c6134ec68f8d103fae6156ac3d6e10176132ce50",
-      "oracle_sha256": "865ba0d92e60c030877687a570329b5188d99fc92c6e12b3897db98c85b34866",
+      "oracle_sha256": "03d4dbd8cf4e20ab81d142e73d2f482c09c255572ea42366db849c09efca538b",
       "raw_sha256s": [
         "715eae7f5608055ec186a0e6c6134ec68f8d103fae6156ac3d6e10176132ce50"
       ]
@@ -234,7 +234,7 @@
       "fetch_latency_ms": 1151.5,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://www.reuters.com/ is behind a bot/Cloudflare challenge (e.g. 'Are you a robot?') and no open-access copy was found \u2014 content not retrievable. Use `search` to find a mirror or alternative copy. Rungs tried: direct, chrome-impersonation, jina, wayback \u2014 re-fetching will not help."
+      "error": "The source is behind an access challenge (Cloudflare); the harvester never solves a challenge. Rungs tried: direct, chrome-impersonation, jina, wayback. Retrying will meet the same wall: find another copy at another URL (harvester_search_web, when configured) and read it with harvester_read (urls), or with harvester_search_literature and harvester_read (publications) if it is a scholarly work."
     },
     {
       "id": "html-npm-whisper",
@@ -244,7 +244,7 @@
       "fetch_latency_ms": 1134.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://www.npmjs.com/package/whisper.cpp is behind a bot/Cloudflare challenge (e.g. 'Are you a robot?') and no open-access copy was found \u2014 content not retrievable. Use `search` to find a mirror or alternative copy. Rungs tried: direct, chrome-impersonation, jina, wayback \u2014 re-fetching will not help."
+      "error": "The source is behind an access challenge (Cloudflare); the harvester never solves a challenge. Rungs tried: direct, chrome-impersonation, jina, wayback. Retrying will meet the same wall: find another copy at another URL (harvester_search_web, when configured) and read it with harvester_read (urls), or with harvester_search_literature and harvester_read (publications) if it is a scholarly work."
     },
     {
       "id": "html-go-docs",
@@ -265,7 +265,7 @@
       ],
       "raw_bytes": 47862,
       "raw_sha256": "e66dc23a8305e76a96517efc885b0b530005126b22a4bb1f1d225a4aa8a1d865",
-      "oracle_sha256": "98aa78c0443c7c5c8550278db0fa990ee8be4d6e4c40090e34bb6b97048cba49",
+      "oracle_sha256": "fe4e52eba8d1cce96933ceb98bea5d10901eba19c045f12da76c1b63467ed0d3",
       "raw_sha256s": [
         "e66dc23a8305e76a96517efc885b0b530005126b22a4bb1f1d225a4aa8a1d865"
       ]
@@ -289,7 +289,7 @@
       ],
       "raw_bytes": 18550,
       "raw_sha256": "be84fcf5b05585cc2ec99c06740f153200b820928a83f160d24d8255d049bd8e",
-      "oracle_sha256": "db8bd0a2d05df8e284384a4e0e07fb8c3f996728c45b98064e3fc9a4378a5343",
+      "oracle_sha256": "aeafce0920b89b1d5180acfee55cbf2fa18f9755d314aa233e29982b207e4362",
       "raw_sha256s": [
         "be84fcf5b05585cc2ec99c06740f153200b820928a83f160d24d8255d049bd8e"
       ]
@@ -313,7 +313,7 @@
       ],
       "raw_bytes": 77733,
       "raw_sha256": "ab09d01bc5e7be5f5dbc34f3cb568918d911d9113dd2fd59309fae78d975d09f",
-      "oracle_sha256": "6e7704bef13fa49c89b79c4d606bf490ab92a1f9692a16a52f95ff102f6371cd",
+      "oracle_sha256": "382dda6b1fdc1b6d97d65e8e1f89179e35d17d360f8d5a981032aab4d669ce6d",
       "raw_sha256s": [
         "ab09d01bc5e7be5f5dbc34f3cb568918d911d9113dd2fd59309fae78d975d09f"
       ]
@@ -364,7 +364,7 @@
       ],
       "raw_bytes": 47816,
       "raw_sha256": "84a385b3036fae7eb82c4e79c99a3ed77ee41e8623e5f94727899400d8f1d849",
-      "oracle_sha256": "630fb5731f6bcfa42743bec4df913ad79c7b92f7ce74d6b8c8efdb7e21b11144",
+      "oracle_sha256": "70da616e7101d2bfad3abaa356a5f3adec6ba6ea65daf2fb5cdf395ce4712eb0",
       "raw_sha256s": [
         "84a385b3036fae7eb82c4e79c99a3ed77ee41e8623e5f94727899400d8f1d849"
       ]
@@ -489,7 +489,7 @@
       "fetch_latency_ms": 860.0,
       "status": "failed",
       "failure_stage": "converter",
-      "error": "Downloaded the DOCX from https://file-examples.com/wp-content/storage/2017/02/file-sample_100kB.docx but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected. Use `search` to find an alternative copy. Rungs tried: direct, meta-scrape, wayback \u2014 re-fetching will not help."
+      "error": "The source was retrieved but yielded no readable content (empty after extraction). Rungs tried: direct, meta-scrape, wayback. Find another copy at another URL (harvester_search_web, when configured) and read it with harvester_read (urls), or with harvester_search_literature and harvester_read (publications) if it is a scholarly work."
     },
     {
       "id": "office-learningcontainer-docx",
@@ -499,7 +499,7 @@
       "fetch_latency_ms": 3245.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-word-document.docx returned HTTP 404 (page not found). Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title. Rungs tried: direct, chrome-impersonation, wayback \u2014 re-fetching will not help."
+      "error": "The source answered HTTP 404 Not Found to every rung that ran: the page was not found, or the site serves 404 to automated clients. Rungs tried: direct, chrome-impersonation, wayback. The harvester cannot tell a missing page from a refusal served as 404. Check the URL; if it is right, find another copy at another URL (harvester_search_web, when configured) and read it with harvester_read (urls), or with harvester_search_literature and harvester_read (publications) if it is a scholarly work."
     },
     {
       "id": "office-microsoft-xlsx",
@@ -536,7 +536,7 @@
       "fetch_latency_ms": 822.4,
       "status": "failed",
       "failure_stage": "converter",
-      "error": "Downloaded the XLSX from https://file-examples.com/wp-content/storage/2017/02/file_example_XLSX_10.xlsx but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected. Use `search` to find an alternative copy. Rungs tried: direct, meta-scrape, wayback \u2014 re-fetching will not help."
+      "error": "The source was retrieved but yielded no readable content (empty after extraction). Rungs tried: direct, meta-scrape, wayback. Find another copy at another URL (harvester_search_web, when configured) and read it with harvester_read (urls), or with harvester_search_literature and harvester_read (publications) if it is a scholarly work."
     },
     {
       "id": "archive-githubtraining-zip",
@@ -630,7 +630,7 @@
       "fetch_latency_ms": 1435.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://raw.githubusercontent.com/SheetJS/test_files/master/2014-08-10.xlsx returned HTTP 404 (page not found). Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title. Rungs tried: direct, chrome-impersonation, wayback \u2014 re-fetching will not help."
+      "error": "The source answered HTTP 404 Not Found to every rung that ran: the page was not found, or the site serves 404 to automated clients. Rungs tried: direct, chrome-impersonation, wayback. The harvester cannot tell a missing page from a refusal served as 404. Check the URL; if it is right, find another copy at another URL (harvester_search_web, when configured) and read it with harvester_read (urls), or with harvester_search_literature and harvester_read (publications) if it is a scholarly work."
     },
     {
       "id": "html-gnu-free-sw",
@@ -651,7 +651,7 @@
       ],
       "raw_bytes": 50511,
       "raw_sha256": "0459a78c1793e00b874a8d7ee1bb6bc44997527e7fdef30657a54bb64a8cd05f",
-      "oracle_sha256": "97e73f0fd82b7a6006c3ec92b5cd5b8d5831c4e5bb5f32086ef854e56ad0a200",
+      "oracle_sha256": "3a305e2606f669e772dcd50e1e8e9de4784be522e690fa07f22050052602c3c0",
       "raw_sha256s": [
         "0459a78c1793e00b874a8d7ee1bb6bc44997527e7fdef30657a54bb64a8cd05f"
       ]
@@ -675,7 +675,7 @@
       ],
       "raw_bytes": 16779,
       "raw_sha256": "7af315635f9d1e39b2b0df9be70f4cd6436f31816379ecf9dfd16023400aa115",
-      "oracle_sha256": "cf431ffa5ec35ebba1c4288271bf9c5979dd91cadd72051f3873b47c8ea3c64a",
+      "oracle_sha256": "93b5ed76b6d776fbb5d8c6394bc2613f188648866972fb4c2dc79bab5edbc3e4",
       "raw_sha256s": [
         "7af315635f9d1e39b2b0df9be70f4cd6436f31816379ecf9dfd16023400aa115"
       ]
@@ -699,7 +699,7 @@
       ],
       "raw_bytes": 34250,
       "raw_sha256": "553c24101f0d975f1af72161806475ed71b1401363794f0a67dfdd500a1c2737",
-      "oracle_sha256": "463520130c87792eb2cbcdb1ba04ffb0f8ec3d1015e1ace7226cc967ed29234d",
+      "oracle_sha256": "cde233ba34659f0cb4f59317dec420153c5ae1607c8d77532f19a70d34770a40",
       "raw_sha256s": [
         "553c24101f0d975f1af72161806475ed71b1401363794f0a67dfdd500a1c2737"
       ]
@@ -723,7 +723,7 @@
       ],
       "raw_bytes": 1040954,
       "raw_sha256": "78d0eefbe60cfe7345ffdafede7294f055b04e53bd520360ff699b24f81e2b4b",
-      "oracle_sha256": "dd1aadf0e10ed69d32beb915853ac4856cff67aa7f73584f7495ac6b597d9abd",
+      "oracle_sha256": "6da76131f60bca6f6ff7de4bbb0c6aebcad56d46ab30794a1f59f6af4b638871",
       "raw_sha256s": [
         "78d0eefbe60cfe7345ffdafede7294f055b04e53bd520360ff699b24f81e2b4b"
       ]
@@ -747,7 +747,7 @@
       ],
       "raw_bytes": 22046,
       "raw_sha256": "f26f106918539b83ad6e7339ba62fac92a344ed8338d91386c504875fe848388",
-      "oracle_sha256": "00475891d14b672e0fceac018508d484aee33c507729802977a830f878e92114",
+      "oracle_sha256": "9a7c9d67f9912ae7566b824e257c3618c920f8730b8916ecba52b2e0a81e2ab4",
       "raw_sha256s": [
         "f26f106918539b83ad6e7339ba62fac92a344ed8338d91386c504875fe848388"
       ]
@@ -771,7 +771,7 @@
       ],
       "raw_bytes": 20299,
       "raw_sha256": "99859c285333b1a2cab55a1f05a2c68828dd9cb473c9c6143e74e92fb0e1e03d",
-      "oracle_sha256": "1386f9879c435be5983f41fb82177926c20ca9cefbfcc7bef8b90218184986b9",
+      "oracle_sha256": "9010b1ba81f6ba6ebca2e013f4382bfee121983be10f84072257accb87b6f93e",
       "raw_sha256s": [
         "99859c285333b1a2cab55a1f05a2c68828dd9cb473c9c6143e74e92fb0e1e03d"
       ]
@@ -795,7 +795,7 @@
       ],
       "raw_bytes": 25445,
       "raw_sha256": "98787ade3f63879beb49817a2881046b4b0d247ea9e39bd940dd95360435ec99",
-      "oracle_sha256": "658ff90bbbdcbd6a1ef2eecca4cf03dc5b1ad5b1e8ba1e738dc424988ceab182",
+      "oracle_sha256": "e4095716c34a4f8aa09c590d3c2dbda1766ceeb656adcecfa0fe2eb363a9f66a",
       "raw_sha256s": [
         "98787ade3f63879beb49817a2881046b4b0d247ea9e39bd940dd95360435ec99"
       ]

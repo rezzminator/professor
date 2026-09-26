@@ -7,14 +7,20 @@ import (
 	"strings"
 )
 
-func (h *Harvester) storeResult(source, kind, method, content string, bytes int64, statusCode int, rungs []string, options FetchOptions) Result {
-	path, err := h.cache.save(source, kind, method, content, rungs)
+func (h *Harvester) storeResult(
+	source, kind, method, content string,
+	bytes int64,
+	statusCode int,
+	rungs []string,
+	options FetchOptions,
+) Result {
+	path, err := h.cache.save(source, kind, method, content, statusCode, rungs)
 	if err != nil {
 		return Result{Source: source, Kind: kind, Error: err.Error(), Rungs: rungs}
 	}
-	status := "miss"
+	status := cacheStatusMiss
 	if options.Refresh {
-		status = "refresh"
+		status = cacheStatusRefresh
 	}
 	// The public receipt reports the on-disk artifact size, including its
 	// provenance frontmatter, just like the Python cache result. Fall back to
@@ -23,23 +29,50 @@ func (h *Harvester) storeResult(source, kind, method, content string, bytes int6
 		bytes = info.Size()
 	}
 	chars := contentChars(content)
-	return Result{Source: source, Kind: kind, Content: truncateInline(content, h.options.MaxInlineChars), Path: path, Method: method,
-		CacheStatus: status, Bytes: bytes, Chars: chars, ContentChars: chars, Tokens: estimateTokens(content), HTTPStatus: statusCode, Rungs: rungs}
+	return Result{
+		Source:       source,
+		Kind:         kind,
+		Content:      truncateInline(content, h.options.MaxInlineChars),
+		Path:         path,
+		Method:       method,
+		CacheStatus:  status,
+		Bytes:        bytes,
+		Chars:        chars,
+		ContentChars: chars,
+		Tokens:       EstimateTokens(content),
+		HTTPStatus:   statusCode,
+		Rungs:        rungs,
+		Partial:      partialReason(content),
+	}
 }
 
-func (h *Harvester) storeResultAlias(source, canonicalSource string, result Result, rungs []string, options FetchOptions) Result {
+func (h *Harvester) storeResultAlias(
+	source, canonicalSource string,
+	result Result,
+	rungs []string,
+	options FetchOptions,
+) Result {
 	content := result.Content
 	if result.Path != "" {
 		if raw, err := os.ReadFile(result.Path); err == nil {
-			_, content = parseFrontmatter(string(raw))
+			_, content = parseCacheFrontmatter(string(raw))
 		}
 	}
-	stored := h.storeResult(canonicalSource, result.Kind, result.Method, content, result.Bytes, result.HTTPStatus, rungs, options)
+	stored := h.storeResult(
+		canonicalSource,
+		result.Kind,
+		result.Method,
+		content,
+		result.Bytes,
+		result.HTTPStatus,
+		rungs,
+		options,
+	)
 	stored.Source = source
 	return stored
 }
 
-func (h *Harvester) resultFromCache(source, kind string, content string, meta map[string]string, path string) Result {
+func (h *Harvester) resultFromCache(source, kind, content string, meta map[string]string, path string) Result {
 	rungs := []string{}
 	if raw := meta["rungs"]; raw != "" {
 		for _, rung := range strings.Split(raw, ",") {
@@ -54,13 +87,32 @@ func (h *Harvester) resultFromCache(source, kind string, content string, meta ma
 	} else {
 		bytes = int64(len(content))
 	}
-	tokens := estimateTokens(content)
+	tokens := EstimateTokens(content)
 	if stored, parseErr := strconv.Atoi(meta["token_count"]); parseErr == nil && stored >= 0 {
 		tokens = stored
 	}
+	// The delivering rung's status travels with the entry; an entry stored
+	// without one (a local document, an older cache) reports none, never 200.
+	status := 0
+	if stored, parseErr := strconv.Atoi(meta["http_status"]); parseErr == nil && stored >= 100 && stored < 600 {
+		status = stored
+	}
 	chars := contentChars(content)
-	return Result{Source: source, Kind: kind, Content: truncateInline(content, h.options.MaxInlineChars), Path: path, Method: meta["method"], CacheStatus: "hit",
-		Bytes: bytes, Chars: chars, ContentChars: chars, Tokens: tokens, Rungs: rungs}
+	return Result{
+		Source:       source,
+		Kind:         kind,
+		Content:      truncateInline(content, h.options.MaxInlineChars),
+		Path:         path,
+		Method:       meta["method"],
+		CacheStatus:  cacheStatusHit,
+		Bytes:        bytes,
+		Chars:        chars,
+		ContentChars: chars,
+		Tokens:       tokens,
+		HTTPStatus:   status,
+		Rungs:        rungs,
+		Partial:      partialReason(content),
+	}
 }
 
 func rungsSummary(rungs []string) string { return strings.Join(rungs, ", ") }
@@ -92,5 +144,5 @@ func withRungs(message string, rungs []string) string {
 	if len(rungs) <= 1 {
 		return message
 	}
-	return message + " Rungs tried: " + rungsPhrase(rungs) + " — re-fetching will not help."
+	return message + " Rungs tried: " + rungsPhrase(rungs) + "."
 }

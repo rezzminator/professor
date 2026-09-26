@@ -1,0 +1,86 @@
+{
+	// The live-demo fence as a VS Code window: every folder, editor and terminal
+	// lives INSIDE the pfm-demo container (Dev Containers "attach"). Open with
+	//   code infra/demo/pfm-demo.code-workspace
+	// The authority is the container name hex-encoded — `attached-container+` +
+	// hex("pfm-demo") — which is how VS Code addresses a running container; a
+	// container started under another --name needs its own encoding here.
+	// The first open installs VS Code Server into the container (about a minute).
+	"remoteAuthority": "attached-container+70666d2d64656d6f",
+	"folders": [
+		{ "name": "express (Professor installed)", "uri": "vscode-remote://attached-container+70666d2d64656d6f/work/express" },
+		{ "name": "professor (~/.professor, read-only mount)", "uri": "vscode-remote://attached-container+70666d2d64656d6f/root/.professor" },
+	],
+	"settings": {
+		// The demo window is painted magenta so it can never be mistaken for a
+		// real project window while screen-sharing.
+		"window.title": "pfm-demo · ${activeEditorShort}",
+		"editor.formatOnSave": false,
+		"files.trimTrailingWhitespace": true,
+		"files.readonlyInclude": { "**/.professor/**": true, "**/worktree/**": true },
+		// Terminals as on the host: "Professor" is the pfm VS Code extension's own
+		// profile — it opens the fleet picker and names the tab after the chat
+		// (15 cycling icons, 6 colours); "shell" is a plain zsh for storm-up,
+		// idle-down and friends.
+		"terminal.integrated.profiles.linux": {
+			"shell": { "path": "/usr/bin/zsh", "args": ["-l"], "icon": "terminal", "color": "terminal.ansiCyan" }
+		},
+		"terminal.integrated.defaultProfile.linux": "Professor",
+		"terminal.integrated.tabs.title": "${sequence}",
+		"terminal.integrated.enablePersistentSessions": true,
+		"terminal.integrated.persistentSessionReviveProcess": "never",
+		"terminal.integrated.showExitAlert": false,
+		"terminal.integrated.confirmOnKill": "never",
+		"terminal.integrated.shellIntegration.decorationsEnabled": "never",
+		"terminal.integrated.minimumContrastRatio": 1,
+		"terminal.integrated.cwd": "/work/express",
+		"terminal.integrated.env.linux": { "TERM": "xterm-256color", "COLORTERM": "truecolor" },
+		"terminal.integrated.fontSize": 15,
+		"terminal.integrated.gpuAcceleration": "off",
+		"search.exclude": {
+			"**/node_modules": true,
+			"**/.worktrees": true,
+			"**/tmp": true,
+			"**/dist": true,
+		},
+		"workbench.colorCustomizations": {
+			"activityBar.activeBackground": "#ff70e5",
+			"activityBar.activeBorder": "#15202b",
+			"activityBar.background": "#ff70e5",
+			"activityBar.foreground": "#15202b",
+			"activityBar.inactiveForeground": "#15202b99",
+			"activityBarBadge.background": "#d1ff00",
+			"activityBarBadge.foreground": "#15202b",
+			"activityBarTop.activeBackground": "#ff70e5",
+			"activityBarTop.activeBorder": "#15202b",
+			"activityBarTop.background": "#ff70e5",
+			"activityBarTop.foreground": "#15202b",
+			"activityBarTop.inactiveForeground": "#15202b99",
+			"commandCenter.border": "#15202b99",
+			"commandCenter.foreground": "#15202b",
+			"sash.hoverBorder": "#ff70e5",
+			"statusBar.background": "#ff3ddc",
+			"statusBar.debuggingBackground": "#ff3ddc",
+			"statusBar.debuggingForeground": "#15202b",
+			"statusBar.foreground": "#15202b",
+			"statusBarItem.hoverBackground": "#ff0ad3",
+			"statusBarItem.remoteBackground": "#4e6000",
+			"statusBarItem.remoteForeground": "#15202b",
+			"titleBar.activeBackground": "#ff3ddc",
+			"titleBar.activeForeground": "#15202b",
+			"titleBar.inactiveBackground": "#ff3ddc99",
+			"titleBar.inactiveForeground": "#15202b99"
+		},
+	},
+	"extensions": {
+		"recommendations": [
+			"ms-vscode-remote.remote-containers",
+			"ms-azuretools.vscode-docker",
+			"golang.go",
+			"timonwong.shellcheck",
+			"foxundermoon.shell-format",
+			"mads-hartmann.bash-ide-vscode",
+			"redhat.vscode-yaml",
+		],
+	}
+}

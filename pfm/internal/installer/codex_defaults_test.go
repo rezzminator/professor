@@ -42,7 +42,8 @@ func TestCodexDefaultsInstall(t *testing.T) {
 	if feature["default_wait_timeout_ms"] != int64(900000) || feature["wait_agent_enabled"] != true {
 		t.Fatalf("incorrect defaults: %#v", feature)
 	}
-	if !strings.Contains(first, "# local preference\nmodel = 'custom'") || !strings.Contains(first, "# BEGIN pfm mcp\n[mcp_servers.chat]\nurl = 'http://localhost:1234'\n# END pfm mcp") {
+	if !strings.Contains(first, "# local preference\nmodel = 'custom'") ||
+		!strings.Contains(first, "# BEGIN pfm mcp\n[mcp_servers.chat]\nurl = 'http://localhost:1234'\n# END pfm mcp") {
 		t.Fatal("unrelated config or ownership fence changed")
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -62,13 +63,24 @@ func TestCodexDefaultsFreshHomes(t *testing.T) {
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
 	homes := []string{filepath.Join(home, "account-one"), filepath.Join(home, "account-two")}
-	if _, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, CodexHomes: homes, Runner: &fakeRunner{}}); err != nil {
+	if _, err := Run(
+		context.Background(),
+		Options{Mode: ModeApply, Home: home, CodexHomes: homes, Runner: &fakeRunner{}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := codexHarnessPrompt()
+	if err != nil {
 		t.Fatal(err)
 	}
 	for _, dir := range homes {
 		raw, err := os.ReadFile(filepath.Join(dir, "config.toml"))
-		if err != nil || !strings.Contains(string(raw), "wait_agent_enabled = true") || strings.Contains(string(raw), "developer_instructions") {
+		if err != nil || !strings.Contains(string(raw), "wait_agent_enabled = true") {
 			t.Fatalf("home %s: %s %v", dir, raw, err)
+		}
+		if got, _ := decodeCodexConfig(t, string(raw))[codexInstructionsKey].(string); got != string(prompt) {
+			t.Fatalf("home %s carries %d bytes of %s, want the %d-byte fleet prompt",
+				dir, len(got), codexInstructionsKey, len(prompt))
 		}
 	}
 }
@@ -145,9 +157,67 @@ func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
 func TestCodexDefaultsRejectsInconsistentTimeouts(t *testing.T) {
 	defaults := "[features.multi_agent_v2]\nmin_wait_timeout_ms = 150000\ndefault_wait_timeout_ms = 750000\nmax_wait_timeout_ms = 1500000\n"
 	for _, value := range []string{"30000", "-1", "3600001", "'wrong type'"} {
-		if _, err := mergeCodexDefaults("[features.multi_agent_v2]\nmax_wait_timeout_ms = "+value+"\n", defaults); err == nil {
+		if _, err := mergeCodexDefaults(
+			"[features.multi_agent_v2]\nmax_wait_timeout_ms = "+value+"\n",
+			defaults,
+		); err == nil {
 			t.Fatalf("accepted incompatible maximum %s", value)
 		}
+	}
+}
+
+// Codex clamps every command wait at ~31s unless both long-yield keys are set,
+// which turns one wait into a poll loop; a user's own value still wins.
+func TestCodexDefaultsLongCommandWaits(t *testing.T) {
+	defaults := "[features.multi_agent_v2]\nwait_agent_enabled = true\n"
+	for _, testCase := range []struct {
+		name       string
+		input      string
+		yield      int64
+		background int64
+	}{
+		{"fresh config", "", codexLongYieldMs, codexLongYieldMs},
+		{"features table of booleans", "[features]\ngoals = true\nhooks = true\n", codexLongYieldMs, codexLongYieldMs},
+		{"code_mode table with siblings", "[features.code_mode]\nenabled = true\n", codexLongYieldMs, codexLongYieldMs},
+		{"user yield wins", "[features.code_mode]\ndefault_exec_yield_time_ms = 60000\n", 60000, codexLongYieldMs},
+		{"dotted user yield wins", "features.code_mode.default_exec_yield_time_ms = 45000\n", 45000, codexLongYieldMs},
+		{"user background wait wins", "background_terminal_max_timeout = 90000\n", codexLongYieldMs, 90000},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			merged, err := mergeCodexDefaults(testCase.input, defaults)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]any
+			if _, err := toml.Decode(merged, &document); err != nil {
+				t.Fatalf("invalid TOML: %v\n%s", err, merged)
+			}
+			codeMode, ok := document["features"].(map[string]any)["code_mode"].(map[string]any)
+			if !ok {
+				t.Fatalf("missing features.code_mode: %s", merged)
+			}
+			if codeMode[codexDefaultExecYieldTime] != testCase.yield {
+				t.Fatalf("yield %#v, want %d in %s", codeMode[codexDefaultExecYieldTime], testCase.yield, merged)
+			}
+			if document[codexBackgroundTerminalMaxTimeout] != testCase.background {
+				t.Fatalf(
+					"background wait %#v, want %d in %s",
+					document[codexBackgroundTerminalMaxTimeout],
+					testCase.background,
+					merged,
+				)
+			}
+			if strings.Contains(testCase.input, "enabled = true") && codeMode["enabled"] != true {
+				t.Fatalf("sibling key lost: %s", merged)
+			}
+			again, err := mergeCodexDefaults(merged, defaults)
+			if err != nil || again != merged {
+				t.Fatalf("not idempotent: %v\n%s\n%s", err, merged, again)
+			}
+		})
+	}
+	if _, err := mergeCodexDefaults("[features]\ncode_mode = true\n", defaults); err == nil {
+		t.Fatal("accepted a non-table features.code_mode")
 	}
 }
 

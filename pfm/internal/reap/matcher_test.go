@@ -1,10 +1,11 @@
 package reap
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
-	opencodeengine "hostops/pfm/internal/engine/opencode"
-	"hostops/pfm/internal/gather"
 	"testing"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type reapTestMatcher struct{ id pfmengine.ID }
@@ -13,7 +14,7 @@ func (matcher reapTestMatcher) IsCommand(argv []string, binaries ...string) bool
 	switch matcher.id {
 	case pfmengine.Codex:
 		return gather.IsCodexCommand(argv, binaries...)
-	case pfmengine.Opencode:
+	case pfmengine.OpenCode:
 		return opencodeengine.Matcher{}.IsCommand(argv, binaries...)
 	default:
 		return gather.IsClaudeCommand(argv, binaries...)
@@ -23,7 +24,7 @@ func (matcher reapTestMatcher) IsCommand(argv []string, binaries ...string) bool
 func init() {
 	gather.RegisterMatcher(pfmengine.Claude, reapTestMatcher{id: pfmengine.Claude})
 	gather.RegisterMatcher(pfmengine.Codex, reapTestMatcher{id: pfmengine.Codex})
-	gather.RegisterMatcher(pfmengine.Opencode, reapTestMatcher{id: pfmengine.Opencode})
+	gather.RegisterMatcher(pfmengine.OpenCode, reapTestMatcher{id: pfmengine.OpenCode})
 }
 
 func TestProcessTreeLoadsEveryRegisteredEngineMatcher(t *testing.T) {

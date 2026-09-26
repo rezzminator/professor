@@ -1,6 +1,7 @@
 # {PROJECT_NAME} repo law at the execpolicy layer — loads for EVERY trusted Codex
-# session in this repo (builder lanes AND interactive use; the law binds both).
-# Mirrors the CLAUDE.md infra law. Validate after every edit:
+# session in this repo (executor lanes AND interactive use; the law binds both).
+# Mirrors the CLAUDE.md infra law; {PROJECT} is the roster entry whose Makefile
+# owns the infra targets. Validate after every edit:
 #
 #   codex execpolicy check --pretty --rules .codex/rules/repo-law.rules -- git status
 #
@@ -19,19 +20,19 @@
 prefix_rule(
     pattern = ["{DB_CLI}"],
     decision = "forbidden",
-    justification = "All infra ops via make -C {INFRA_PROJECT} (repo law); schema changes ship as migration files applied by the test-setup target.",
+    justification = "Infra ops go through the owning project's Makefile — make -C {PROJECT} (repo law); schema changes ship as migration files applied by the test-setup target.",
 )
 
 prefix_rule(
     pattern = ["{CONTAINER_RUNTIME}"],
     decision = "forbidden",
-    justification = "All infra ops via make -C {INFRA_PROJECT} (repo law) — make wraps the container runtime; never call it directly.",
+    justification = "Infra ops go through the owning project's Makefile — make -C {PROJECT} (repo law); make wraps the container runtime, never call it directly.",
 )
 
 prefix_rule(
     pattern = ["{CLOUD_CLI}"],
     decision = "forbidden",
-    justification = "All infra ops (queues included) via make -C {INFRA_PROJECT} (repo law).",
+    justification = "Infra ops (queues included) go through the owning project's Makefile — make -C {PROJECT} (repo law).",
 )
 
 # ─── OPTIONAL: promoting the git law from prose to a pin ─────────────────────

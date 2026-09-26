@@ -2,20 +2,25 @@ package harvestmcp
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvest"
-	"hostops/pfm/internal/paths"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+func TestStableFourToolSurface(t *testing.T) {
+	service, err := NewConfiguredHarvester(
+		"test",
+		Runtime{
+			Home:       t.TempDir(),
+			CacheDir:   filepath.Join(t.TempDir(), "cache"),
+			SearXNGURL: "http://searxng.example.test",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,13 +29,21 @@ func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer serverSession.Close()
+	defer func() {
+		if err := serverSession.Close(); err != nil {
+			t.Errorf("close serverSession: %v", err)
+		}
+	}()
 	client := mcp.NewClient(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	}()
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -39,16 +52,9 @@ func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
 	for _, tool := range tools.Tools {
 		got = append(got, tool.Name)
 	}
-	want := []string{"archive", "fetch", "fetchImage", "findWorks", "search", "searchCache"}
+	want := []string{"harvester_download_file", "harvester_read", "harvester_search_literature", "harvester_search_web"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tool names = %#v, want %#v", got, want)
-	}
-	prompts, err := session.ListPrompts(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(prompts.Prompts) != 1 || prompts.Prompts[0].Name != "fetch" {
-		t.Fatalf("prompts = %#v, want one fetch prompt", prompts.Prompts)
 	}
 }
 
@@ -63,13 +69,21 @@ func listToolNames(t *testing.T, service *Service) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer serverSession.Close()
+	defer func() {
+		if err := serverSession.Close(); err != nil {
+			t.Errorf("close serverSession: %v", err)
+		}
+	}()
 	client := mcp.NewClient(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	}()
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -81,21 +95,24 @@ func listToolNames(t *testing.T, service *Service) []string {
 	return names
 }
 
-// TestSearchToolHiddenWithoutABackend is the regression for a `search` tool
+// TestSearchToolHiddenWithoutABackend is the regression for a `harvester_search_web` tool
 // advertised with nowhere to search: register() used to gate only on
 // !DisableSearch, so a Service with neither SearXNGURL nor BraveAPIKey set
-// still listed `search`, and calling it always failed with a configuration
+// still listed `harvester_search_web`, and calling it always failed with a configuration
 // error the caller had no way to see in advance.
 func TestSearchToolHiddenWithoutABackend(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	service, err := NewConfiguredHarvester(
+		"test",
+		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = service.Close() }()
 	names := listToolNames(t, service)
 	for _, name := range names {
-		if name == "search" {
-			t.Fatalf("tool list %v advertises `search` with no backend configured", names)
+		if name == "harvester_search_web" {
+			t.Fatalf("tool list %v advertises `harvester_search_web` with no backend configured", names)
 		}
 	}
 }
@@ -103,7 +120,14 @@ func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 // TestSearchToolListedWithSearXNGConfigured is TestSearchToolHiddenWithoutABackend's
 // positive twin: a configured backend must still register the tool.
 func TestSearchToolListedWithSearXNGConfigured(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	service, err := NewConfiguredHarvester(
+		"test",
+		Runtime{
+			Home:       t.TempDir(),
+			CacheDir:   filepath.Join(t.TempDir(), "cache"),
+			SearXNGURL: "http://searxng.example.test",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,95 +135,12 @@ func TestSearchToolListedWithSearXNGConfigured(t *testing.T) {
 	names := listToolNames(t, service)
 	found := false
 	for _, name := range names {
-		if name == "search" {
+		if name == "harvester_search_web" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("tool list %v does not advertise `search` with SearXNGURL configured", names)
-	}
-}
-
-func TestOracleReceiptRenderers(t *testing.T) {
-	listing := renderArchiveListing("/tmp/sample.zip", []harvest.Member{{Name: "a|b.txt", UncompressedSize: 7}})
-	if want := `archive(source="/tmp/sample.zip", member="<name>")`; !contains(listing, want) {
-		t.Fatalf("archive listing does not teach archive member call: %q", listing)
-	}
-	if !contains(listing, `| a\|b.txt | 7 | file |`) {
-		t.Fatalf("archive listing does not escape table member: %q", listing)
-	}
-}
-
-func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
-	tests := []struct {
-		name   string
-		result harvest.Result
-		want   []string
-	}{
-		{
-			name:   "invalid URL",
-			result: harvest.Result{ErrorKind: "invalid"},
-			want:   []string{"input is invalid", "findWorks"},
-		},
-		{
-			name:   "timeout",
-			result: harvest.Result{ErrorKind: "timeout"},
-			want:   []string{"timed out", "Retry later"},
-		},
-		{
-			name:   "challenge",
-			result: harvest.Result{Challenge: true, HTTPStatus: 200},
-			want:   []string{"access challenge", "another copy"},
-		},
-		{
-			name:   "HTTP 404",
-			result: harvest.Result{Content: "tiny", ContentChars: 4, HTTPStatus: 404},
-			want:   []string{"not found", "findWorks"},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := (*Service)(nil).describeFetch("https://fixture.example/source", test.result, false)
-			for _, want := range test.want {
-				if !strings.Contains(got, want) {
-					t.Fatalf("describe receipt missing %q: %q", want, got)
-				}
-			}
-		})
-	}
-}
-
-// TestDescribeThinExtractionNamesSearchOnlyWhenAvailable is
-// TestDescribeLegacyFailureKindsNameTheSameRecovery's search-gated sibling:
-// the "thin extraction" (JS-rendered/bot-blocked, no readable content)
-// message must recommend `search` only when a backend is actually
-// configured, and fall back to findWorks/another-URL wording when it is not.
-func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
-	result := harvest.Result{HTTPStatus: 200}
-
-	searchOn, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = searchOn.Close() }()
-	got := searchOn.describeFetch("https://fixture.example/source", result, false)
-	for _, want := range []string{"no readable content", "`search`", "`findWorks`"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("search-on describe receipt missing %q: %q", want, got)
-		}
-	}
-
-	searchOff, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = searchOff.Close() }()
-	got = searchOff.describeFetch("https://fixture.example/source", result, false)
-	if strings.Contains(got, "`search`") {
-		t.Fatalf("search-off describe receipt names the unavailable `search` tool: %q", got)
-	}
-	if !strings.Contains(got, "`findWorks`") {
-		t.Fatalf("search-off describe receipt missing findWorks fallback: %q", got)
+		t.Fatalf("tool list %v does not advertise `harvester_search_web` with SearXNGURL configured", names)
 	}
 }
 
@@ -212,7 +153,7 @@ func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	t.Setenv(paths.EnvHome, home)
 	t.Setenv("WEBFETCH_DIR", filepath.Join(t.TempDir(), "legacy"))
-	service, err := NewConfigured("test", Runtime{Home: home})
+	service, err := NewConfiguredHarvester("test", Runtime{Home: home})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +165,7 @@ func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 
 func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 	home := t.TempDir()
-	service, err := NewConfigured("test", Runtime{
+	service, err := NewConfiguredHarvester("test", Runtime{
 		Home:             home,
 		CacheDir:         filepath.Join(home, "cache"),
 		DOIMirrorURL:     "https://mirror.example/doi-mirror",
@@ -248,49 +189,6 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 			t.Errorf("service runtime %s = %q, want %q", tc.name, tc.got, tc.want)
 		}
 	}
-}
-
-// TestSearchCacheMissHintsSearchOnlyWhenAvailable pins the searchCache
-// empty-match hint, the one harvestmcp-side message in the closed
-// `use `search“ list: it must not point at a `search` tool the server does
-// not advertise.
-func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
-	off, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = off.Close() }()
-	result, _, err := off.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
-	if err != nil {
-		t.Fatalf("searchCache(no backend) error: %v", err)
-	}
-	offText := result.Content[0].(*mcp.TextContent).Text
-	if strings.Contains(offText, "`search`") {
-		t.Fatalf("searchCache miss text %q names `search` with no backend configured", offText)
-	}
-
-	on, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = on.Close() }()
-	result, _, err = on.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
-	if err != nil {
-		t.Fatalf("searchCache(with backend) error: %v", err)
-	}
-	onText := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(onText, "`search`") {
-		t.Fatalf("searchCache miss text %q dropped `search` with a backend configured", onText)
-	}
-}
-
-func mustWorkingDir(t *testing.T) string {
-	t.Helper()
-	working, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return working
 }
 
 func contains(value, needle string) bool {

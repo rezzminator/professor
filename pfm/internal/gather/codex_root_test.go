@@ -9,14 +9,19 @@ import (
 
 func writeRolloutMeta(t *testing.T, path, source, parent string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(map[string]any{"type": "session_meta", "payload": map[string]any{"id": CodexRolloutID(path), "thread_source": source, "parent_thread_id": parent}})
+	raw, err := json.Marshal(
+		map[string]any{
+			"type":    "session_meta",
+			"payload": map[string]any{"id": CodexRolloutID(path), "thread_source": source, "parent_thread_id": parent},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, append(raw, '\n'), 0600); err != nil {
+	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -29,10 +34,14 @@ func TestCodexHeldRootWinsOverChildFirstDescriptors(t *testing.T) {
 	writeRolloutMeta(t, child, "subagent", "parent")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
-		400: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 8, Target: parent}}},
+		400: {
+			cmdline: []string{"codex"},
+			stat:    ProcStat{ParentPID: 100},
+			fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 8, Target: parent}},
+		},
 		401: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 400}, fdLinks: []FDLink{{FD: 2, Target: child}}},
 	}}
-	panes := []Pane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}}
+	panes := []ProbePane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}}
 	live, err := DetectCodex(proc, root, panes)
 	if err != nil || len(live) != 1 || live[0].ThreadID != "parent" {
 		t.Fatalf("root identity=%#v err=%v", live, err)
@@ -56,11 +65,11 @@ func TestCodexUnknownAndConflictingHeldMetadataCannotClaimPane(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "malformed":
-				if err := os.WriteFile(path, []byte("{broken\n"), 0600); err != nil {
+				if err := os.WriteFile(path, []byte("{broken\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			case "no-header":
-				if err := os.WriteFile(path, []byte("{\"type\":\"response_item\"}\n"), 0600); err != nil {
+				if err := os.WriteFile(path, []byte("{\"type\":\"response_item\"}\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			case "only-child":
@@ -70,9 +79,15 @@ func TestCodexUnknownAndConflictingHeldMetadataCannotClaimPane(t *testing.T) {
 				writeRolloutMeta(t, other, "user", "")
 				links = append(links, FDLink{FD: 8, Target: other})
 			}
-			proc := &fakeProcFS{processes: map[int]fakeProcess{100: {}, 400: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: links}}}
-			live, err := DetectCodex(proc, root, []Pane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
-			if err != nil || len(live) != 1 || live[0].RolloutHeld || live[0].ThreadID != "" || live[0].IdentityError == "" {
+			proc := &fakeProcFS{
+				processes: map[int]fakeProcess{
+					100: {},
+					400: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: links},
+				},
+			}
+			live, err := DetectCodex(proc, root, []ProbePane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
+			if err != nil || len(live) != 1 || live[0].RolloutHeld || live[0].ThreadID != "" ||
+				live[0].IdentityError == "" {
 				t.Fatalf("unproven root=%#v err=%v", live, err)
 			}
 			refreshed, err := RefreshCodexHeldRollouts(proc, live, []string{root})
@@ -86,15 +101,28 @@ func TestCodexUnknownAndConflictingHeldMetadataCannotClaimPane(t *testing.T) {
 func TestRevertedCodexRolloutKeepsStableThreadIdentity(t *testing.T) {
 	root := t.TempDir()
 	const id = "11111111-1111-4111-8111-111111111111"
-	path := filepath.Join(root, "sessions", "rollout-2026-09-05T12-00-00-"+id+"_22222222-2222-4222-8222-222222222222.jsonl")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	path := filepath.Join(
+		root,
+		"sessions",
+		"rollout-2026-09-05T12-00-00-"+id+"_22222222-2222-4222-8222-222222222222.jsonl",
+	)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{"id":"`+id+`","source":"cli"}}`), 0600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"type":"session_meta","payload":{"id":"`+id+`","source":"cli"}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
-	proc := &fakeProcFS{processes: map[int]fakeProcess{100: {}, 400: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: []FDLink{{FD: 3, Target: path}}}}}
-	live, err := DetectCodex(proc, root, []Pane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
+	proc := &fakeProcFS{
+		processes: map[int]fakeProcess{
+			100: {},
+			400: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: []FDLink{{FD: 3, Target: path}}},
+		},
+	}
+	live, err := DetectCodex(proc, root, []ProbePane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
 	if err != nil || len(live) != 1 || live[0].ThreadID != id || !live[0].RolloutHeld {
 		t.Fatalf("reverted root=%+v err=%v", live, err)
 	}

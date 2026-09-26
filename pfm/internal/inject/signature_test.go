@@ -3,15 +3,15 @@ package inject
 import (
 	"context"
 	"errors"
-	pfmengine "hostops/pfm/internal/engine"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/resolve"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 type fakeIdentifier struct {
@@ -53,7 +53,7 @@ func newSignatureEngineWith(
 	clearStatedSender(t)
 	dependencies := Dependencies{
 		Resolver: fakeResolver{
-			socket: filepath.Join("/tmp", "tmux-jail", socket),
+			socket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", socket),
 			target: "%1",
 		},
 		Tmux:       tmux,
@@ -534,7 +534,11 @@ func TestSignatureLabelIsReadPerDeliveryFromTheRosterFirst(t *testing.T) {
 	fourth := deliver("fourth, roster unavailable")
 	if !strings.Contains(fourth, "to reply: chat_inject LUNA:ORCHESTRATOR <message>") ||
 		!strings.Contains(warnings.String(), "pfm: sender label: fleet database busy") {
-		t.Fatalf("footer with the roster down %q (warnings %q), want the screen's label and the failure reported", fourth, warnings.String())
+		t.Fatalf(
+			"footer with the roster down %q (warnings %q), want the screen's label and the failure reported",
+			fourth,
+			warnings.String(),
+		)
 	}
 }
 

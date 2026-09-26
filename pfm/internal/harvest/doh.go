@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // DNS-over-HTTPS resolution for every harvester dial.
@@ -84,7 +87,11 @@ func BrowserHostResolverRule(ctx context.Context, rawURL string) string {
 	if err != nil {
 		// Not fatal: Chrome falls back to its own resolution. Say so, because a
 		// silent miss here is exactly how the rewritten answer would creep back.
-		log.Printf("harvest: could not pin %s for the browser rung (%v) — Chrome will resolve it itself, which this network may rewrite", host, err)
+		log.Printf(
+			"harvest: could not pin %s for the browser rung (%v) — Chrome will resolve it itself, which this network may rewrite",
+			host,
+			err,
+		)
 		return ""
 	}
 	return browserHostResolverRuleFrom(rawURL, ips)
@@ -110,7 +117,11 @@ func browserHostResolverRuleFrom(rawURL string, ips []net.IP) string {
 	// refuse, so the rule is withheld rather than narrowed.
 	for _, ip := range ips {
 		if privateIP(ip) {
-			log.Printf("harvest: refusing to pin %s for the browser rung: the resolver returned the private address %s", host, ip)
+			log.Printf(
+				"harvest: refusing to pin %s for the browser rung: the resolver returned the private address %s",
+				host,
+				ip,
+			)
 			return ""
 		}
 	}
@@ -134,6 +145,7 @@ func browserHostResolverRuleFrom(rawURL string, ips []net.IP) string {
 type dohResolver struct {
 	endpoint string
 	client   *http.Client
+	clock    clock.Clock
 
 	mu    sync.Mutex
 	cache map[string]dohEntry
@@ -186,7 +198,8 @@ func newDOHResolver() *dohResolver {
 	}
 	return &dohResolver{
 		endpoint: dohEndpoint,
-		client:   &http.Client{Transport: transport, Timeout: dohTimeout},
+		client:   obs.WrapClient(&http.Client{Transport: transport, Timeout: dohTimeout}),
+		clock:    clock.Real,
 		cache:    make(map[string]dohEntry),
 		warned:   make(map[string]bool),
 		fallback: func(ctx context.Context, host string) ([]net.IP, error) {
@@ -240,7 +253,12 @@ func (r *dohResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	if fallbackErr != nil {
 		// Report BOTH failures. One of them alone reads as "the host does not
 		// exist" when the real story may be "our resolver was unreachable".
-		return nil, fmt.Errorf("DoH lookup failed for %s (%v) and the system resolver also failed: %w", host, err, fallbackErr)
+		return nil, fmt.Errorf(
+			"DoH lookup failed for %s (%v) and the system resolver also failed: %w",
+			host,
+			err,
+			fallbackErr,
+		)
 	}
 	return fallbackIPs, nil
 }
@@ -264,15 +282,23 @@ func (r *dohResolver) warnOnce(host string, err error) {
 	r.warned[host] = true
 	r.mu.Unlock()
 	if !already {
-		log.Printf("harvest: DNS-over-HTTPS could not resolve %s (%v) — falling back to the system resolver, whose answers this network may rewrite", host, err)
+		log.Printf(
+			"harvest: DNS-over-HTTPS could not resolve %s (%v) — falling back to the system resolver, whose answers this network may rewrite",
+			host,
+			err,
+		)
 	}
 }
 
 func (r *dohResolver) cached(host string) ([]net.IP, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	watch := r.clock
+	if watch == nil {
+		watch = clock.Real
+	}
 	entry, ok := r.cache[host]
-	if !ok || time.Now().After(entry.expires) {
+	if !ok || watch.Now().After(entry.expires) {
 		return nil, false
 	}
 	return append([]net.IP(nil), entry.ips...), true
@@ -290,7 +316,11 @@ func (r *dohResolver) store(host string, ips []net.IP, ttl time.Duration) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.cache[host] = dohEntry{ips: append([]net.IP(nil), ips...), expires: time.Now().Add(ttl)}
+	watch := r.clock
+	if watch == nil {
+		watch = clock.Real
+	}
+	r.cache[host] = dohEntry{ips: append([]net.IP(nil), ips...), expires: watch.Now().Add(ttl)}
 }
 
 // dohNXDomainError marks a DoH answer of Status 3 (NXDOMAIN): the resolver
@@ -337,6 +367,7 @@ func (r *dohResolver) query(ctx context.Context, host string) ([]net.IP, error) 
 		wg.Add(1)
 		go func(i int, qtype string) {
 			defer wg.Done()
+			defer recoverItem(func(e error) { results[i].err = e })
 			ips, ttl, err := r.queryType(ctx, host, qtype)
 			results[i] = outcome{ips: ips, ttl: ttl, err: err}
 		}(i, qtype)
@@ -390,7 +421,7 @@ func (r *dohResolver) queryType(ctx context.Context, host, qtype string) ([]net.
 	if err != nil {
 		return nil, 0, fmt.Errorf("build DoH %s request for %s: %w", qtype, host, err)
 	}
-	req.Header.Set("Accept", "application/dns-json")
+	req.Header.Set(headerAccept, "application/dns-json")
 	req.Header.Set("User-Agent", defaultUA)
 	resp, err := r.client.Do(req)
 	if err != nil {

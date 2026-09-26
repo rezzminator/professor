@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 type fakeResolver struct {
@@ -154,7 +155,7 @@ func TestScheduleAfterCurrentTurnComposedSelfCompactKeepsThenAndNoticeOnce(t *te
 	engine := newTestEngineWith(t, "cc-self-compact-schedule", fake, spawner)
 	engine.whoami = fakeSelf{identity: resolve.Identity{
 		Session:    "cc-self-compact-schedule",
-		SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-self-compact-schedule"),
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-schedule"),
 		Pane:       "%1",
 		Engine:     "claude",
 		Source:     "test",
@@ -373,7 +374,7 @@ func newTestEngineWith(
 	clearStatedSender(t)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{
-			socket: filepath.Join("/tmp", "tmux-jail", socket),
+			socket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", socket),
 			target: "%1",
 		},
 		Tmux:    tmux,
@@ -500,7 +501,7 @@ func TestInjectGuardAndDeliveryMatrix(t *testing.T) {
 			name:   "busy claude agent overlay row is not a composer draft",
 			socket: "cc-1-2-3",
 			capture: "Working (2s · 9 tokens)\n" +
-				"❯ ● qa-cortex  Verifying 6-bugs.md is untracked",
+				"❯ ● flights-lander  Verifying the worktree is clean",
 			configure: func(fake *fakeTmux) {
 				fake.submitOnEnter = true
 			},
@@ -614,20 +615,20 @@ func TestInjectGuardAndDeliveryMatrix(t *testing.T) {
 }
 
 func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
-	newEngine := func(t *testing.T, recorder func(context.Context, shared.CommsEvent) error) (*Engine, *bytes.Buffer) {
+	newEngine := func(t *testing.T, recorder func(context.Context, fleetdb.CommsEvent) error) (*Engine, *bytes.Buffer) {
 		t.Helper()
 		fake := &fakeTmux{capture: "› ", submitOnEnter: true}
 		engine := newTestEngine(t, "cc-1-2-3", fake)
 		warnings := &bytes.Buffer{}
 		engine.recorder = recorder
 		engine.warningWriter = warnings
-		engine.options.Now = func() time.Time { return time.Unix(0, 123) }
+		engine.options.Clock = fixedClock{Clock: clock.Real, now: time.Unix(0, 123)}
 		return engine, warnings
 	}
 
 	t.Run("direct delivery", func(t *testing.T) {
-		var recorded []shared.CommsEvent
-		engine, warnings := newEngine(t, func(_ context.Context, event shared.CommsEvent) error {
+		var recorded []fleetdb.CommsEvent
+		engine, warnings := newEngine(t, func(_ context.Context, event fleetdb.CommsEvent) error {
 			recorded = append(recorded, event)
 			return nil
 		})
@@ -635,10 +636,10 @@ func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 		if err != nil || result.Code != 0 || !result.Typed {
 			t.Fatalf("Inject() = %+v, %v", result, err)
 		}
-		want := []shared.CommsEvent{{
-			AtNS: 123, Kind: shared.KindInject, SenderSession: "sender",
+		want := []fleetdb.CommsEvent{{
+			AtNS: 123, Kind: fleetdb.KindInject, SenderSession: "sender",
 			SenderLabel: "Operator", SenderUUID: "1234567890", Target: "beta",
-			ReceiverSocket: filepath.Join("/tmp", "tmux-jail", "cc-1-2-3"),
+			ReceiverSocket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-1-2-3"),
 			ReceiverPane:   "%1", Message: "hello\nverbatim",
 		}}
 		if !reflect.DeepEqual(recorded, want) {
@@ -650,7 +651,7 @@ func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 	})
 
 	t.Run("recorder failure warns without changing delivery", func(t *testing.T) {
-		engine, warnings := newEngine(t, func(context.Context, shared.CommsEvent) error {
+		engine, warnings := newEngine(t, func(context.Context, fleetdb.CommsEvent) error {
 			return errors.New("database unavailable")
 		})
 		result, err := engine.Inject(context.Background(), Request{Target: "beta", Message: "delivered"})
@@ -667,7 +668,7 @@ func TestInjectDoesNotRecordTypedButUndeliveredMessage(t *testing.T) {
 	fake := &fakeTmux{capture: "› "}
 	engine := newTestEngine(t, "cx-undelivered-ledger", fake)
 	recorded := 0
-	engine.recorder = func(context.Context, shared.CommsEvent) error {
+	engine.recorder = func(context.Context, fleetdb.CommsEvent) error {
 		recorded++
 		return nil
 	}
@@ -703,10 +704,20 @@ func TestInjectBodyAboveFormerAbsoluteCapUsesPaste(t *testing.T) {
 		strings.Contains(result.Message, "AUTO-FILE") ||
 		!strings.Contains(result.Message, "PASTE") ||
 		!fake.pasted || len(fake.literals) != 1 {
-		t.Fatalf("former absolute cap result=%+v pasted=%v literals=%d err=%v", result, fake.pasted, len(fake.literals), err)
+		t.Fatalf(
+			"former absolute cap result=%+v pasted=%v literals=%d err=%v",
+			result,
+			fake.pasted,
+			len(fake.literals),
+			err,
+		)
 	}
 	if !strings.HasPrefix(fake.literals[0], body) {
-		t.Fatalf("paste transport did not carry the megabyte body byte-exact: got %d bytes, want prefix of %d bytes", len(fake.literals[0]), len(body))
+		t.Fatalf(
+			"paste transport did not carry the megabyte body byte-exact: got %d bytes, want prefix of %d bytes",
+			len(fake.literals[0]),
+			len(body),
+		)
 	}
 }
 
@@ -744,7 +755,13 @@ func TestInjectPasteBoundaryAndKillerBody(t *testing.T) {
 				underFake.pasted ||
 				strings.Contains(underResult.Message, "AUTO-FILE") ||
 				strings.Contains(underResult.Message, "PASTE") {
-				t.Fatalf("one-under delivery result=%+v literals=%q pasted=%v err=%v", underResult, underFake.literals, underFake.pasted, err)
+				t.Fatalf(
+					"one-under delivery result=%+v literals=%q pasted=%v err=%v",
+					underResult,
+					underFake.literals,
+					underFake.pasted,
+					err,
+				)
 			}
 
 			overFake := &fakeTmux{capture: underFake.capture, submitOnEnter: true}
@@ -783,7 +800,12 @@ func TestInjectPasteBoundaryAndKillerBody(t *testing.T) {
 				killerFake.literals[0] != killerBody ||
 				!killerFake.pasted ||
 				strings.Contains(killerResult.Message, "AUTO-FILE") {
-				t.Fatalf("killer body was not delivered byte-exact via paste: result=%+v literal len=%d err=%v", killerResult, len(killerFake.literals[0]), err)
+				t.Fatalf(
+					"killer body was not delivered byte-exact via paste: result=%+v literal len=%d err=%v",
+					killerResult,
+					len(killerFake.literals[0]),
+					err,
+				)
 			}
 		})
 	}
@@ -969,7 +991,12 @@ func TestLongProseAutoFilePreservesBodySignatureAndProof(t *testing.T) {
 	if delivered != expectedSigned ||
 		!strings.HasPrefix(delivered, body) ||
 		!strings.Contains(delivered, "to reply: chat_inject Operator <message>") {
-		t.Fatalf("paste transport changed body/signature semantics: got %d bytes, want %d bytes matching engine.signedMessage; delivered=%q", len(delivered), len(expectedSigned), delivered)
+		t.Fatalf(
+			"paste transport changed body/signature semantics: got %d bytes, want %d bytes matching engine.signedMessage; delivered=%q",
+			len(delivered),
+			len(expectedSigned),
+			delivered,
+		)
 	}
 	if strings.Contains(result.Message, "AUTO-FILE") ||
 		!strings.Contains(result.Message, "PASTE") ||
@@ -981,7 +1008,7 @@ func TestLongProseAutoFilePreservesBodySignatureAndProof(t *testing.T) {
 func TestPersistBodyPrunesExpiredMarkdownByAge(t *testing.T) {
 	engine := newTestEngine(t, "cc-body-prune", &fakeTmux{capture: "❯ "})
 	now := time.Date(2031, 2, 3, 4, 5, 6, 7, time.UTC)
-	engine.options.Now = func() time.Time { return now }
+	engine.options.Clock = fixedClock{Clock: clock.Real, now: now}
 	engine.options.BodyMaxAge = 24 * time.Hour
 	if err := os.MkdirAll(engine.options.BodyRoot, 0o700); err != nil {
 		t.Fatal(err)
@@ -1383,7 +1410,10 @@ func TestEnterConfirmsWhenPostSubmitComposerRowIsNotVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Code != 0 || result.Status == "typed_unconfirmed" {
-		t.Fatalf("result = %+v, want a confirmed delivery even though the post-submit capture carries no visible composer row", result)
+		t.Fatalf(
+			"result = %+v, want a confirmed delivery even though the post-submit capture carries no visible composer row",
+			result,
+		)
 	}
 	enters := 0
 	for _, key := range fake.keys {
@@ -1392,7 +1422,10 @@ func TestEnterConfirmsWhenPostSubmitComposerRowIsNotVisible(t *testing.T) {
 		}
 	}
 	if enters != 1 {
-		t.Fatalf("keys=%q, want exactly one Enter — confirmation must not loop when there is no positive evidence the composer still holds the message", fake.keys)
+		t.Fatalf(
+			"keys=%q, want exactly one Enter — confirmation must not loop when there is no positive evidence the composer still holds the message",
+			fake.keys,
+		)
 	}
 }
 
@@ -1556,6 +1589,7 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 		attached    bool
 		activityAgo time.Duration
 		forceNow    bool
+		draft       string
 		clientErr   error
 		wantCode    int
 		wantStatus  string
@@ -1564,9 +1598,20 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 		refuseNever string
 	}{
 		{
-			name:        "recent activity refuses",
+			// tmux's client_activity moves on focus events, mouse reports and
+			// the terminal's own query replies, not only keystrokes — an
+			// attached VS Code tab looks "typing" forever. Only a draft in the
+			// composer proves a human mid-sentence.
+			name:        "recent activity with an empty composer delivers",
 			attached:    true,
 			activityAgo: time.Second,
+			wantDeliver: true,
+		},
+		{
+			name:        "recent activity with a draft refuses",
+			attached:    true,
+			activityAgo: time.Second,
+			draft:       "❯ half a sentence",
 			wantCode:    CodeBusy,
 			wantStatus:  "typing",
 			wantSubstr:  []string{"%1", "force_now"},
@@ -1596,12 +1641,15 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
+			if test.draft != "" {
+				fake.capture = "conversation\n" + test.draft
+			}
 			fake.clientAttached = test.attached
 			fake.clientErr = test.clientErr
 			engine := newTestEngine(t, "cc-typist-guard", fake)
 			now := time.Unix(1_700_000_000, 0)
 			fake.clientActivity = now.Add(-test.activityAgo)
-			engine.options.Now = func() time.Time { return now }
+			engine.options.Clock = fixedClock{Clock: clock.Real, now: now}
 			result, err := engine.Inject(context.Background(), Request{
 				Target:   "chat",
 				Message:  "ordinary message, not a command",
@@ -1620,7 +1668,12 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 				t.Fatalf("Inject() = %+v, want code=%d status=%q", result, test.wantCode, test.wantStatus)
 			}
 			if len(fake.keys) != 0 || len(fake.literals) != 0 || fake.literal != "" {
-				t.Fatalf("guard typed despite refusing: keys=%q literals=%q literal=%q", fake.keys, fake.literals, fake.literal)
+				t.Fatalf(
+					"guard typed despite refusing: keys=%q literals=%q literal=%q",
+					fake.keys,
+					fake.literals,
+					fake.literal,
+				)
 			}
 			for _, substr := range test.wantSubstr {
 				if !strings.Contains(result.Message, substr) {
@@ -1628,7 +1681,11 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 				}
 			}
 			if test.refuseNever != "" && strings.Contains(result.Message, test.refuseNever) {
-				t.Fatalf("a tmux error rendered as %q, an answer rather than a failure to look: %q", test.refuseNever, result.Message)
+				t.Fatalf(
+					"a tmux error rendered as %q, an answer rather than a failure to look: %q",
+					test.refuseNever,
+					result.Message,
+				)
 			}
 		})
 	}
@@ -1673,7 +1730,12 @@ func TestInjectRefusesCompactPrimaryPointingToSelfCompact(t *testing.T) {
 		})
 	}
 	if len(fake.keys) != 0 || len(fake.literals) != 0 || fake.literal != "" {
-		t.Fatalf("a banned /compact primary was typed: keys=%q literals=%q literal=%q", fake.keys, fake.literals, fake.literal)
+		t.Fatalf(
+			"a banned /compact primary was typed: keys=%q literals=%q literal=%q",
+			fake.keys,
+			fake.literals,
+			fake.literal,
+		)
 	}
 	// The internal chain path is the one production route left to a /compact
 	// primary (DeliverThen -> engine.inject with Chain: true) — it must
@@ -1720,7 +1782,7 @@ func TestSteerLogPathScopedBySocketAsWellAsPane(t *testing.T) {
 	// component alias with the join delimiter, so two distinct (socket,
 	// pane) pairs whose hyphen boundary fell in a different place could
 	// still collide on one sanitized path. This repo's own socket names are
-	// hyphen-joined numeric triples (cmd/pfm/commands.go's freshEngineSocket,
+	// hyphen-joined numeric triples (spawn.FreshSocket,
 	// "%s%d-%d-%d"), so this is not a contrived pair.
 	hyphenA := engine.steerLogPath(Target{SocketPath: "/tmp/tmux-jail/cc-1787705979-3980493", Pane: "30867"})
 	hyphenB := engine.steerLogPath(Target{SocketPath: "/tmp/tmux-jail/cc-1787705979", Pane: "3980493-30867"})
@@ -1728,8 +1790,10 @@ func TestSteerLogPathScopedBySocketAsWellAsPane(t *testing.T) {
 		t.Fatalf(
 			"two distinct (socket, pane) pairs whose hyphen boundary fell differently collided on one log path: %q (pairs: (%q,%q) and (%q,%q))",
 			hyphenA,
-			"/tmp/tmux-jail/cc-1787705979-3980493", "30867",
-			"/tmp/tmux-jail/cc-1787705979", "3980493-30867",
+			"/tmp/tmux-jail/cc-1787705979-3980493",
+			"30867",
+			"/tmp/tmux-jail/cc-1787705979",
+			"3980493-30867",
 		)
 	}
 }

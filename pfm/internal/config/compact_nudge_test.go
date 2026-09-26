@@ -58,11 +58,15 @@ func TestCompactNudgeFileAndAccountOverrides(t *testing.T) {
 	if source := got.Source("claude.compactNudge.start"); source != SourceFile {
 		t.Fatalf("file-set start reports source %q, want file", source)
 	}
-	if effective, want := got.EffectiveClaude(1).CompactNudge, (CompactNudge{Enabled: false, Start: 50, Step: 20}); effective != want {
+	if effective, want := got.EffectiveClaude(
+		1,
+	).CompactNudge, (CompactNudge{Enabled: false, Start: 50, Step: 20}); effective != want {
 		t.Fatalf("EffectiveClaude(1).CompactNudge = %+v, want inherited %+v", effective, want)
 	}
 	// Account 2 touched only step: enabled and start come from the top level.
-	if effective, want := got.EffectiveClaude(2).CompactNudge, (CompactNudge{Enabled: false, Start: 50, Step: 5}); effective != want {
+	if effective, want := got.EffectiveClaude(
+		2,
+	).CompactNudge, (CompactNudge{Enabled: false, Start: 50, Step: 5}); effective != want {
 		t.Fatalf("EffectiveClaude(2).CompactNudge = %+v, want %+v", effective, want)
 	}
 }

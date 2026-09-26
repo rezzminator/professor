@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
-	"hostops/pfm/internal/ask"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const askPrompt = "State this chat's CURRENT status in <= 40 words: what it is doing right now, and whether it is working, waiting on input, blocked, finished, or errored. Ground the answer in the live pane capture; use the last human exchange only as background context."
@@ -28,7 +27,8 @@ type AskOptions struct {
 
 // AskResult is Ask's answer. There is no Cached flag: Ask never caches.
 type AskResult struct {
-	Text string
+	Text    string
+	Warning error
 }
 
 // Ask answers what a chat is doing RIGHT NOW, grounded in its live tmux pane
@@ -45,13 +45,13 @@ type AskResult struct {
 // root law): a chat that is not live, or whose capture errors, states so
 // explicitly in the returned text instead of silently falling back to a
 // transcript-only answer presented as a full status.
-func Ask(ctx context.Context, chat Chat, options AskOptions) AskResult {
+func Ask(ctx context.Context, chat Chat, options AskOptions) (result AskResult) {
 	var contentFiles, sourceLabels []string
-	removeAll := func() {
-		for _, path := range contentFiles {
-			_ = os.Remove(path)
+	defer func() {
+		if err := removePreparedFiles(contentFiles); err != nil {
+			result.Warning = errors.Join(result.Warning, err)
 		}
-	}
+	}()
 
 	var captureNote string
 	if !chat.Live {
@@ -63,7 +63,6 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) AskResult {
 		} else {
 			capturePath, writeErr := writePreparedCapture(options.TempDir, chat, capture)
 			if writeErr != nil {
-				removeAll()
 				return failedAsk(writeErr)
 			}
 			contentFiles = append(contentFiles, capturePath)
@@ -73,24 +72,28 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) AskResult {
 
 	var exchangeNote string
 	exchangeComplete := true
-	entries, _, transcriptErr := transcript.From(ctx, chat.Path, string(chat.Engine), 0)
-	if transcriptErr != nil {
+	exchange, foundExchange, transcriptErr := readLatestExchange(ctx, chat)
+	switch {
+	case transcriptErr != nil:
 		exchangeNote = "read exchange failed: " + flattenErrorText(transcriptErr)
-	} else if prompt, response, ok := transcript.LastExchange(entries); ok {
-		exchangeComplete = len(entries) != 0 && entries[len(entries)-1].Role == transcript.RoleAssistant
-		exchangePath, writeErr := writePreparedExchange(options.TempDir, prompt, response, exchangeComplete)
+	case foundExchange:
+		exchangeComplete = exchange.complete
+		exchangePath, writeErr := writePreparedExchange(
+			options.TempDir,
+			exchange.prompt,
+			exchange.response,
+			exchange.complete,
+		)
 		if writeErr != nil {
-			removeAll()
 			return failedAsk(writeErr)
 		}
 		contentFiles = append(contentFiles, exchangePath)
 		sourceLabels = append(sourceLabels, chat.Name+" last exchange")
-	} else {
+	default:
 		exchangeNote = "no human exchange recorded yet"
 	}
 
 	if len(contentFiles) == 0 {
-		removeAll()
 		return AskResult{Text: fmt.Sprintf("unavailable (%s; %s)", captureNote, exchangeNote)}
 	}
 
@@ -99,13 +102,11 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) AskResult {
 		var err error
 		engineName, err = options.Config.DefaultEngine()
 		if err != nil {
-			removeAll()
 			return failedAsk(err)
 		}
 	}
 	runner, engineErr := ask.ResolveEngine(engineName, options.Config)
 	if engineErr != nil {
-		removeAll()
 		var missing *ask.BinaryMissingError
 		if errors.As(engineErr, &missing) {
 			return AskResult{Text: fmt.Sprintf("unavailable (%s binary MISSING)", missing.Engine)}
@@ -132,11 +133,9 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) AskResult {
 		Model:        options.Model,
 	}, options.Config)
 	if resolveErr != nil {
-		removeAll()
 		return failedAsk(resolveErr)
 	}
 	answer, runErr := runner.Run(ctx, input)
-	removeAll()
 	if runErr != nil {
 		return failedAsk(runErr)
 	}
@@ -147,7 +146,7 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) AskResult {
 	case exchangeNote != "":
 		text = "PANE-ONLY (" + exchangeNote + "): " + text
 	}
-	text = limitSummaryWords(text, 40)
+	text = limitWords(text, 40)
 	return AskResult{Text: text}
 }
 
@@ -155,7 +154,7 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) AskResult {
 // the same socket-resolution and tmux-capture sequence runChatCapture uses
 // in cmd/pfm's chat_command.go (chatSocketPath, then chat.Pane else
 // chat.Session else chat.Socket as the target, then a styled
-// inject.CommandTmux.Capture over the full scrollback). internal/headless
+// inject.TmuxInjector.Capture over the full scrollback). internal/headless
 // cannot import cmd/pfm (package main) to call chatSocketPath directly, so
 // resolveChatSocketPath below mirrors its two-branch shape exactly instead of
 // inventing a different resolution rule.
@@ -171,7 +170,7 @@ func capturePane(ctx context.Context, chat Chat) (string, error) {
 	if target == "" {
 		target = chat.Socket
 	}
-	capture, err := (inject.CommandTmux{}).Capture(ctx, socketPath, target, true, inject.FullScrollback)
+	capture, err := (inject.TmuxInjector{}).Capture(ctx, socketPath, target, true, inject.FullScrollback)
 	if err != nil {
 		return "", fmt.Errorf("capture pane: %w", err)
 	}
@@ -181,39 +180,17 @@ func capturePane(ctx context.Context, chat Chat) (string, error) {
 // writePreparedCapture mirrors writePreparedExchange's temp-file approach: a
 // labeled, disposable file the caller removes on every path.
 func writePreparedCapture(directory string, chat Chat, capture string) (string, error) {
-	directory, err := preparedScratchDir(directory)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return "", fmt.Errorf("create prepared capture directory: %w", err)
-	}
-	file, err := os.CreateTemp(directory, "capture-*.md")
-	if err != nil {
-		return "", fmt.Errorf("create prepared capture: %w", err)
-	}
-	path := file.Name()
 	var content strings.Builder
 	content.WriteString("LIVE PANE CAPTURE (" + chat.Name + ")\n")
 	content.WriteString(capture)
 	if !strings.HasSuffix(capture, "\n") {
 		content.WriteByte('\n')
 	}
-	_, writeErr := file.WriteString(content.String())
-	closeErr := file.Close()
-	if writeErr != nil || closeErr != nil {
-		removeErr := os.Remove(path)
-		return "", fmt.Errorf("write prepared capture: %w", errors.Join(writeErr, closeErr, removeErr))
-	}
-	return path, nil
+	return writePreparedFile(directory, "capture", paths.SIDCaptureScratchPattern, content.String())
 }
 
 func failedAsk(err error) AskResult {
-	detail := "unknown error"
-	if err != nil {
-		detail = flattenErrorText(err)
-	}
-	return AskResult{Text: "failed (" + detail + ")"}
+	return AskResult{Text: failedResultText(err)}
 }
 
 func flattenErrorText(err error) string {

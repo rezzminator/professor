@@ -2,13 +2,13 @@ package kill
 
 import (
 	"context"
-	pfmengine "hostops/pfm/internal/engine"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // A chat is watched THROUGH a bunker pane. Ending the chat has to end that pane
@@ -49,7 +49,11 @@ func TestExitClosesTheBunkerPaneWatchingTheChat(t *testing.T) {
 		panesByTTY: map[string]string{"/dev/pts/9": "%42", "/dev/pts/3": "%7"},
 	}
 	finisher, database, id := exitFinisher(t, jail, tmux)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	if err := finisher.Run(context.Background(), ExitArgs{
 		Engine:     pfmengine.Claude,
@@ -75,7 +79,11 @@ func TestExitLeavesPanesThatWereNotWatchingAlone(t *testing.T) {
 		panesByTTY: map[string]string{"/dev/pts/3": "%7", "/dev/pts/4": "%8"},
 	}
 	finisher, database, id := exitFinisher(t, jail, tmux)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	if err := finisher.Run(context.Background(), ExitArgs{
 		Engine:     pfmengine.Claude,
@@ -96,7 +104,11 @@ func TestExitWithNoViewportKillsOnlyTheChat(t *testing.T) {
 	jail := newKillJail(t)
 	tmux := &fakeTmux{}
 	finisher, database, id := exitFinisher(t, jail, tmux)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	if err := finisher.Run(context.Background(), ExitArgs{
 		Engine:     pfmengine.Claude,

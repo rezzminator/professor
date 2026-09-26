@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // TestPreparedScratchDirReturnsInjectedDirectoryUnchanged pins the pass-
@@ -131,6 +131,10 @@ func TestPreparedScratchDirResolutionFailureIsAnErrorNotAGuess(t *testing.T) {
 		t.Fatalf("writePreparedExchange(empty directory) = (%q, nil), want the resolution error propagated", path)
 	}
 	if _, statErr := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(statErr) {
-		t.Fatalf("a tmp/ directory appeared in the working directory %s despite the resolution failure: stat err=%v", cwd, statErr)
+		t.Fatalf(
+			"a tmp/ directory appeared in the working directory %s despite the resolution failure: stat err=%v",
+			cwd,
+			statErr,
+		)
 	}
 }

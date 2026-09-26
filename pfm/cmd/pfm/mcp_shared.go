@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/mcpserv"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 // mcpRuntime is the one bridge from the command package into MCP: the typed
@@ -23,16 +25,17 @@ func mcpRuntime(runtime commandRuntime, ambient bool) mcpserv.Runtime {
 		ConfigPath:           runtime.Config.Path,
 		ClaudeBinary:         runtime.Config.Claude.Binary,
 		CodexBinary:          runtime.Config.Codex.Binary,
-		OpencodeBinary:       runtime.Config.OpenCode.Binary,
+		OpenCodeBinary:       runtime.Config.OpenCode.Binary,
+		DaemonAddress:        "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port),
 		Chat:                 pfmchat.Verbs{Runtime: &runtime, Warnings: os.Stderr},
 		Names:                pfmchat.NameResolver{Runtime: &runtime},
 		AllowAmbientIdentity: ambient,
 		Dispatch: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-			if len(args) == 0 || args[0] != "chat" {
+			if len(args) == 0 || args[0] != config.MCPServerChat {
 				fmt.Fprintln(stderr, "pfm: MCP dispatch requires chat argv")
 				return 2
 			}
-			return runChatWithRuntime(args[1:], strings.NewReader(""), stdout, stderr, runtime)
+			return runChatWithRuntime(args[1:], strings.NewReader(""), stdout, stderr, runtime, ctx)
 		},
 	}
 }

@@ -15,21 +15,21 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type tmuxJail struct {
 	root      string
 	tmuxDir   string
 	sidDir    string
-	codexRoot string
+	codexHome string
 	home      string
 	sockets   []string
 }
 
 type alwaysFailTmux struct{}
 
-func (alwaysFailTmux) ListPanes(context.Context, string) ([]Pane, error) {
+func (alwaysFailTmux) ListPanes(context.Context, string) ([]ProbePane, error) {
 	return nil, fmt.Errorf("dead server")
 }
 
@@ -40,12 +40,12 @@ type failOnceTmux struct {
 func (tmux *failOnceTmux) ListPanes(
 	context.Context,
 	string,
-) ([]Pane, error) {
+) ([]ProbePane, error) {
 	tmux.calls++
 	if tmux.calls == 1 {
 		return nil, fmt.Errorf("transient server race")
 	}
-	return []Pane{{Socket: "cc-1-2-3", PaneID: "%1"}}, nil
+	return []ProbePane{{Socket: "cc-1-2-3", PaneID: "%1"}}, nil
 }
 
 func newTmuxJail(t *testing.T) *tmuxJail {
@@ -59,7 +59,7 @@ func newTmuxJail(t *testing.T) *tmuxJail {
 		root:      root,
 		tmuxDir:   filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid())),
 		sidDir:    filepath.Join(root, "sid"),
-		codexRoot: filepath.Join(root, "codex"),
+		codexHome: filepath.Join(root, "codex"),
 		home:      filepath.Join(root, "home"),
 	}
 	setGatherTestEnv(t, jail.root, jail.tmuxDir)
@@ -81,8 +81,8 @@ func setGatherTestEnv(t *testing.T, root, tmuxDir string) {
 
 	home := filepath.Join(root, "home")
 	sidDir := filepath.Join(root, "sid")
-	codexRoot := filepath.Join(root, "codex")
-	for _, directory := range []string{home, sidDir, codexRoot, tmuxDir} {
+	codexHome := filepath.Join(root, "codex")
+	for _, directory := range []string{home, sidDir, codexHome, tmuxDir} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatalf("create gather jail directory %q: %v", directory, err)
 		}
@@ -95,7 +95,7 @@ func setGatherTestEnv(t *testing.T, root, tmuxDir string) {
 	t.Setenv(paths.EnvDB, filepath.Join(root, "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, sidDir)
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude-projects"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, tmuxDir)
 	// A chat server loads the user's ~/.tmux.conf in real life; a fixture must
 	// not, or the machine it runs on steers the test.
@@ -270,7 +270,7 @@ func TestServerGoneReadsTmuxOwnWords(t *testing.T) {
 
 type goneServerTmux struct{}
 
-func (goneServerTmux) ListPanes(_ context.Context, socket string) ([]Pane, error) {
+func (goneServerTmux) ListPanes(_ context.Context, socket string) ([]ProbePane, error) {
 	return nil, fmt.Errorf("%w: %s", ErrServerGone, socket)
 }
 
@@ -296,10 +296,7 @@ func TestProbeTmuxRetriesOneTransientReadFailure(t *testing.T) {
 }
 
 func TestParseLegacyPaneFallback(t *testing.T) {
-	output := strings.Join([]string{
-		"session\tpane title\t/work/project\t4\t1\t100\t%7\t/dev/pts/9\tClaude\t321",
-		"",
-	}, "\n")
+	output := "session\tpane title\t/work/project\t4\t1\t100\t%7\t/dev/pts/9\tClaude\t321\n"
 	panes, err := parseLegacyPaneOutput("cc-1-2-3", []byte(output))
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +335,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 	createCorpseSocket(t, oldCorpsePath, now.Add(-2*time.Hour))
 	createCorpseSocket(t, freshCorpsePath, now.Add(-30*time.Minute))
 
-	client := CommandTmux{Binary: "tmux", TmuxTmpDir: jail.root}
+	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: jail.root}
 	probe, err := ProbeTmux(context.Background(), jail.tmuxDir, client, now)
 	if err != nil {
 		t.Fatalf("ProbeTmux() error = %v", err)
@@ -377,7 +374,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 		t.Fatalf("fresh corpse was removed: %v", err)
 	}
 
-	paneBySocket := make(map[string]Pane)
+	paneBySocket := make(map[string]ProbePane)
 	for _, pane := range probe.Panes {
 		paneBySocket[pane.Socket] = pane
 	}
@@ -416,16 +413,16 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 		agentPID = 900002
 		session  = "01234567-89ab-cdef-0123-456789abcdef"
 	)
-	rolloutPath := filepath.Join(jail.codexRoot, "sessions", "2026", "rollout-live.jsonl")
+	rolloutPath := filepath.Join(jail.codexHome, "sessions", "2026", "rollout-live.jsonl")
 	writeRolloutMeta(t, rolloutPath, "user", "")
-	writeRolloutMeta(t, filepath.Join(jail.codexRoot, "sessions", "rollout-later.jsonl"), "subagent", "live")
+	writeRolloutMeta(t, filepath.Join(jail.codexHome, "sessions", "rollout-later.jsonl"), "subagent", "live")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		cxPane.PID: {},
 		ccPane.PID: {},
 		codexPID: {
 			cmdline: []string{"/usr/bin/codex"},
 			fdLinks: []FDLink{
-				{FD: 9, Target: filepath.Join(jail.codexRoot, "sessions", "rollout-later.jsonl")},
+				{FD: 9, Target: filepath.Join(jail.codexHome, "sessions", "rollout-later.jsonl")},
 				{FD: 3, Target: rolloutPath},
 			},
 			stat: ProcStat{ParentPID: cxPane.PID, StartTime: 10},
@@ -526,18 +523,18 @@ func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
 	}
 
 	now := time.Now()
-	client := CommandTmux{Binary: "tmux", TmuxTmpDir: jail.root}
+	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: jail.root}
 	probe, err := ProbeTmux(context.Background(), jail.tmuxDir, client, now)
 	if err != nil {
 		t.Fatalf("ProbeTmux() error = %v", err)
 	}
-	paneBySocket := make(map[string]Pane, len(probe.Panes))
+	paneBySocket := make(map[string]ProbePane, len(probe.Panes))
 	for _, pane := range probe.Panes {
 		paneBySocket[pane.Socket] = pane
 	}
 
 	rolloutPath := filepath.Join(
-		jail.codexRoot,
+		jail.codexHome,
 		"sessions",
 		"2026",
 		"rollout-fresh.jsonl",
@@ -636,9 +633,10 @@ func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
 	}
 }
 
-func paneSockets(panes []Pane) []string {
+func paneSockets(panes []ProbePane) []string {
 	sockets := make([]string, 0, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := panes[index]
 		sockets = append(sockets, pane.Socket)
 	}
 	return sockets

@@ -32,72 +32,95 @@ func errorKind(err error) string {
 		return ""
 	}
 	if errors.Is(err, errResponseTooLarge) {
-		return "too_large"
+		return errorKindTooLarge
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "timeout"
+		return errorKindTimeout
 	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
-		return "dns"
+		return errorKindDNS
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		return "timeout"
+		return errorKindTimeout
 	}
 	low := strings.ToLower(err.Error())
 	for _, marker := range []string{"no such host", "name or service not known", "temporary failure in name resolution", "nodename nor servname", "no address associated"} {
 		if strings.Contains(low, marker) {
-			return "dns"
+			return errorKindDNS
 		}
 	}
 	for _, marker := range []string{"connection refused", "connection reset", "connect:", "host is down", "network is unreachable"} {
 		if strings.Contains(low, marker) {
-			return "connect"
+			return errorKindConnect
 		}
 	}
-	if strings.Contains(low, "unsupported protocol") || strings.Contains(low, "unsupported scheme") || strings.Contains(low, "invalid url") {
-		return "invalid"
+	if strings.Contains(low, "unsupported protocol") || strings.Contains(low, "unsupported scheme") ||
+		strings.Contains(low, "invalid url") {
+		return errorKindInvalid
 	}
 	if strings.Contains(low, "private") || strings.Contains(low, "internal") || strings.Contains(low, "not allowed") {
-		return "blocked"
+		return errorKindBlocked
 	}
-	return "connect"
+	return errorKindConnect
 }
 
-func failureMessage(item string, status int, kind string, challenge bool, searchAvailable bool) string {
-	if kind == "invalid" {
+// FailureMessage returns the transport core's canonical terminal diagnostic.
+// Protocol adapters, negative-cache errors, and direct-fetch errors share this
+// renderer so their actionable guidance cannot drift.
+func FailureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
+	if kind == errorKindInvalid {
 		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
-			"check it for typos, or use `search` to find the source.",
+			"check it for typos, or use `harvester_search_web` to find the source.",
 			"check it for typos, or find the source via another URL.",
 		))
 	}
-	if kind == "blocked" {
-		return fmt.Sprintf("refusing to fetch a private or internal host: %s — harvester only fetches public internet resources; use the resource's public URL instead.", item)
+	if kind == errorKindBlocked {
+		return fmt.Sprintf(
+			"refusing to fetch a private or internal host: %s — harvester only fetches public internet resources; use the resource's public URL instead.",
+			item,
+		)
 	}
-	if kind == "timeout" {
-		return fmt.Sprintf("Could not reach %s: the server did not respond in time (connection timed out). %s", item, SearchHint(searchAvailable,
-			"Retry later, or use `search` to find an alternative copy.",
-			"Retry later, or find an alternative copy with findWorks or another URL.",
-		))
+	if kind == errorKindTimeout {
+		return fmt.Sprintf(
+			"Could not reach %s: the server did not respond in time (connection timed out). %s",
+			item,
+			SearchHint(searchAvailable,
+				"Retry later, or use `harvester_search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
+			),
+		)
 	}
-	if kind == "dns" {
-		return fmt.Sprintf("Could not reach %s: DNS resolution failed (host not found). %s", item, SearchHint(searchAvailable,
-			"Retry later, or use `search` to find an alternative copy.",
-			"Retry later, or find an alternative copy with findWorks or another URL.",
-		))
+	if kind == errorKindDNS {
+		return fmt.Sprintf(
+			"Could not reach %s: DNS resolution failed (host not found). %s",
+			item,
+			SearchHint(searchAvailable,
+				"Retry later, or use `harvester_search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
+			),
+		)
 	}
-	if kind == "connect" {
-		return fmt.Sprintf("Could not reach %s: the connection failed (refused or host unreachable). %s", item, SearchHint(searchAvailable,
-			"Retry later, or use `search` to find an alternative copy.",
-			"Retry later, or find an alternative copy with findWorks or another URL.",
-		))
+	if kind == errorKindConnect {
+		return fmt.Sprintf(
+			"Could not reach %s: the connection failed (refused or host unreachable). %s",
+			item,
+			SearchHint(searchAvailable,
+				"Retry later, or use `harvester_search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
+			),
+		)
 	}
 	if challenge {
-		return fmt.Sprintf("%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s", item, SearchHint(searchAvailable,
-			"Use `search` to find a mirror or alternative copy.",
-			"Find a mirror or alternative copy with findWorks or another URL.",
-		))
+		return fmt.Sprintf(
+			"%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s",
+			item,
+			SearchHint(searchAvailable,
+				"Use `harvester_search_web` to find a mirror or alternative copy.",
+				"Find a mirror or alternative copy with harvester_search_literature or another URL.",
+			),
+		)
 	}
 	if status >= 400 {
 		meaning := map[int]string{400: "bad request", 401: "unauthorized", 403: "forbidden", 404: "page not found", 405: "method not allowed", 408: "request timeout", 410: "gone", 429: "too many requests", 500: "internal server error", 502: "bad gateway", 503: "service unavailable", 504: "gateway timeout"}[status]
@@ -108,22 +131,16 @@ func failureMessage(item string, status int, kind string, challenge bool, search
 		if status == 403 || status == 429 || status == 503 {
 			note = " — likely a bot-block or rate limit"
 		}
-		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(searchAvailable,
-			"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
-			"Use `findWorks` if it is a scholarly title, or find an alternative copy at another URL.",
+		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(
+			searchAvailable,
+			"Use `harvester_search_web` to find an alternative copy, or `harvester_search_literature` if it is a scholarly title.",
+			"Use `harvester_search_literature` if it is a scholarly title, or find an alternative copy at another URL.",
 		))
 	}
 	return fmt.Sprintf("Could not download %s — %s", item, SearchHint(searchAvailable,
-		"try `search` for an alternative source.",
-		"try `findWorks` or another URL for an alternative source.",
+		"try `harvester_search_web` for an alternative source.",
+		"try `harvester_search_literature` or another URL for an alternative source.",
 	))
-}
-
-// FailureMessage exposes the transport core's canonical terminal diagnostic
-// to protocol adapters. Keeping one renderer prevents MCP receipts from
-// drifting away from negative-cache and direct-fetch errors.
-func FailureMessage(item string, status int, kind string, challenge bool, searchAvailable bool) string {
-	return failureMessage(item, status, kind, challenge, searchAvailable)
 }
 
 func safeHTTPClient(chrome bool, resolve ...func(context.Context, string) ([]net.IP, error)) *http.Client {
@@ -138,7 +155,11 @@ func safeHTTPClient(chrome bool, resolve ...func(context.Context, string) ([]net
 	return safeHTTPClientTimeoutWithResolver(chrome, timeout, resolver)
 }
 
-func safeHTTPClientTimeout(chrome bool, timeout time.Duration, resolve ...func(context.Context, string) ([]net.IP, error)) *http.Client {
+func safeHTTPClientTimeout(
+	chrome bool,
+	timeout time.Duration,
+	resolve ...func(context.Context, string) ([]net.IP, error),
+) *http.Client {
 	var resolver func(context.Context, string) ([]net.IP, error)
 	if len(resolve) > 0 {
 		resolver = resolve[0]
@@ -146,9 +167,15 @@ func safeHTTPClientTimeout(chrome bool, timeout time.Duration, resolve ...func(c
 	return safeHTTPClientTimeoutWithResolver(chrome, timeout, resolver)
 }
 
-func safeHTTPClientTimeoutWithResolver(chrome bool, timeout time.Duration, resolver func(context.Context, string) ([]net.IP, error)) *http.Client {
-	var transport http.RoundTripper = &http.Transport{Proxy: http.ProxyFromEnvironment,
-		ForceAttemptHTTP2: !chrome, MaxIdleConns: 32, IdleConnTimeout: 30 * time.Second}
+func safeHTTPClientTimeoutWithResolver(
+	chrome bool,
+	timeout time.Duration,
+	resolver func(context.Context, string) ([]net.IP, error),
+) *http.Client {
+	var transport http.RoundTripper = &http.Transport{
+		Proxy:             http.ProxyFromEnvironment,
+		ForceAttemptHTTP2: !chrome, MaxIdleConns: 32, IdleConnTimeout: 30 * time.Second,
+	}
 	if chrome {
 		transport = newChromeTransport(resolver)
 	} else {
@@ -159,46 +186,57 @@ func safeHTTPClientTimeoutWithResolver(chrome bool, timeout time.Duration, resol
 		ua = chromeUA
 	}
 	client := &http.Client{Transport: &userAgentTransport{base: transport, ua: ua, chrome: chrome}, Timeout: timeout}
-	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error { return assertFetchable(req.URL.String(), false) }
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error { return validateFetchURL(req.URL.String(), false) }
 	return client
 }
 
-// PinnedDialContext resolves once and dials only the validated public address;
-// the original hostname is retained for TLS SNI by the caller.
-func pinnedDialContext(resolve func(context.Context, string) ([]net.IP, error)) func(context.Context, string, string) (net.Conn, error) {
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := publicIPs(ctx, host, resolve)
-		if err != nil {
-			return nil, err
-		}
-		d := &net.Dialer{Timeout: 20 * time.Second}
-		var last error
-		for _, ip := range ips {
-			conn, e := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-			if e == nil {
-				return conn, nil
-			}
-			last = e
-		}
-		if last != nil {
-			return nil, last
-		}
-		return nil, fmt.Errorf("no public address for %s", host)
-	}
+// pinnedDialTimeout bounds one pinned connect attempt for the direct clients
+// and the browser proxy alike.
+const pinnedDialTimeout = 20 * time.Second
+
+// pinnedDialContext resolves once and dials only the validated public address;
+// the original hostname is retained for TLS SNI by the caller. The dial itself
+// is chromeDialer.dialPinned (net_chrome_transport.go): ONE pinned-dial
+// implementation serves the direct clients, the Chrome transport and the
+// browser proxy, so a change to the resolve-then-dial policy cannot land in
+// one copy and miss the other.
+func pinnedDialContext(
+	resolve func(context.Context, string) ([]net.IP, error),
+) func(context.Context, string, string) (net.Conn, error) {
+	dialer := &chromeDialer{timeout: pinnedDialTimeout, resolve: resolve}
+	return dialer.dialPinned
 }
 
-func publicIPs(ctx context.Context, host string, resolve func(context.Context, string) ([]net.IP, error)) ([]net.IP, error) {
+// loopbackListener is the whole listener surface the browser proxy uses:
+// accept a connection, report the address to hand Chrome, close. Nothing in
+// this package listens for anything else, so the narrow interface — not the
+// full stdlib type — is what listenLoopback hands out, and browser_proxy.go
+// can be read (and its accept loop faked) without a second look at net/http.
+type loopbackListener interface {
+	Accept() (net.Conn, error)
+	Addr() net.Addr
+	Close() error
+}
+
+// listenLoopback opens the browser proxy's ephemeral loopback listener
+// (browser_proxy.go). The listen call lives HERE, beside pinnedDialContext,
+// because net.go is this package's network-primitive file: every socket the
+// harvester creates itself is opened in one place a reviewer can read at once.
+// 127.0.0.1 is not a default — nothing off this box may reach the proxy.
+func listenLoopback() (loopbackListener, error) { return net.Listen("tcp", "127.0.0.1:0") }
+
+func publicIPs(
+	ctx context.Context,
+	host string,
+	resolve func(context.Context, string) ([]net.IP, error),
+) ([]net.IP, error) {
 	if ip := literalIP(host); ip != nil {
 		if privateIP(ip) {
 			return nil, fmt.Errorf("refusing private/internal host %s", host)
 		}
 		return []net.IP{ip}, nil
 	}
-	if host == "localhost" || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+	if host == localhostName || strings.HasSuffix(strings.ToLower(host), ".localhost") {
 		return nil, fmt.Errorf("refusing private/internal host %s", host)
 	}
 	var ips []net.IP
@@ -246,7 +284,7 @@ func configureProxy(client *http.Client, raw string) {
 	if err != nil || proxyURL.Scheme == "" || proxyURL.Host == "" {
 		return
 	}
-	var base http.RoundTripper = client.Transport
+	base := client.Transport
 	if wrapped, ok := base.(*userAgentTransport); ok {
 		base = wrapped.base
 	}
@@ -277,12 +315,12 @@ func setUserAgent(client *http.Client, ua string) {
 // net_ua_transport.go — transport-internal, below the fetch gateway, like
 // net_chrome_transport.go. This file only builds and reads it.
 
-func assertFetchable(raw string, strictDNS bool) error {
+func validateFetchURL(raw string, strictDNS bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return fmt.Errorf("invalid URL: %s", raw)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
 		return fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
 	if u.User != nil {
@@ -298,8 +336,11 @@ func assertFetchable(raw string, strictDNS bool) error {
 		}
 		return nil
 	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" || strings.HasSuffix(host, ".local") || host == "metadata.google.internal" ||
-		strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".ts.net") {
+	if host == localhostName || strings.HasSuffix(host, ".localhost") || host == localLabel ||
+		strings.HasSuffix(host, ".local") ||
+		host == "metadata.google.internal" ||
+		strings.HasSuffix(host, ".internal") ||
+		strings.HasSuffix(host, ".ts.net") {
 		return fmt.Errorf("refusing private/internal host %s", host)
 	}
 	// DNS rebind defense. Strict mode FAILS CLOSED: Chrome performs its own
@@ -330,7 +371,7 @@ func assertFetchable(raw string, strictDNS bool) error {
 	return nil
 }
 
-// lookupIP is the resolver seam behind assertFetchable. Its default is the
+// lookupIP is the resolver seam behind validateFetchURL. Its default is the
 // same DNS-over-HTTPS resolver every dial pins to (ResolvePublicHost): a
 // system resolver the network rewrites must not decide what the pre-check
 // refuses. query (doh.go) bounds its own timeout, so context.Background()
@@ -342,7 +383,7 @@ var lookupIP = func(host string) ([]net.IP, error) {
 
 // AssertFetchable is the public SSRF/scheme chokepoint for adapters whose
 // transport dials only the address it validated itself.
-func AssertFetchable(raw string) error { return assertFetchable(raw, false) }
+func AssertFetchable(raw string) error { return validateFetchURL(raw, false) }
 
 // AssertFetchableStrict additionally FAILS CLOSED on resolver failure. It is
 // the authority for the browser worker: Chrome re-resolves every URL with no
@@ -352,10 +393,10 @@ func AssertFetchable(raw string) error { return assertFetchable(raw, false) }
 // approval, so a DNS change after the second check remains a documented
 // residual risk until the browser transport can pin a validated address.
 func AssertFetchableStrict(raw string) error {
-	if err := assertFetchable(raw, true); err != nil {
+	if err := validateFetchURL(raw, true); err != nil {
 		return err
 	}
-	return assertFetchable(raw, true)
+	return validateFetchURL(raw, true)
 }
 
 func IsPrivateHost(raw string) bool {
@@ -367,25 +408,16 @@ func IsPrivateHost(raw string) bool {
 	if ip := literalIP(host); ip != nil {
 		return privateIP(ip)
 	}
-	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".ts.net")
-}
-
-// RobotsURL is retained for callers that display the source's policy URL.
-// Harvester intentionally does not enforce robots.txt (matching the Python
-// server's documented --ignore-robots-txt compatibility flag).
-func RobotsURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return ""
-	}
-	u.Path = "/robots.txt"
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
+	return host == localhostName || strings.HasSuffix(host, ".localhost") || host == localLabel ||
+		strings.HasSuffix(host, ".local") ||
+		strings.HasSuffix(host, ".internal") ||
+		strings.HasSuffix(host, ".ts.net")
 }
 
 func privateIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast() {
 		return true
 	}
 	if v4 := ip.To4(); v4 != nil {
@@ -402,6 +434,15 @@ func privateIP(ip net.IP) bool {
 		if n >= 0xf0000000 {
 			return true
 		}
+	}
+	// NAT64 (RFC 6052) and 6to4 (RFC 3056) fold an IPv4 address into an IPv6
+	// one; every check above judges the WRAPPER's own (public) prefix, never
+	// the address a NAT64/6to4 gateway actually dials (F28). A standard
+	// IPv4-mapped ::ffff:0:0/96 address needs no separate handling here:
+	// ip.To4() above already unwraps it, and every ip.IsXxx call at the top
+	// of this function does the same internally.
+	if embedded := embeddedIPv4(ip); embedded != nil {
+		return privateIP(embedded)
 	}
 	return false
 }
@@ -431,8 +472,8 @@ func literalIP(host string) net.IP {
 	return nil
 }
 
-func getBody(ctx context.Context, client *http.Client, rawURL, ua string, max int64) ([]byte, int, string, error) {
-	return getBodyWithHeaders(ctx, client, rawURL, ua, nil, max)
+func getBody(ctx context.Context, client *http.Client, rawURL, ua string, maxBytes int64) ([]byte, int, string, error) {
+	return getBodyWithHeaders(ctx, client, rawURL, ua, nil, maxBytes)
 }
 
 // getBodyWithHeaders is the generic web ladder's egress. It runs through the
@@ -442,20 +483,15 @@ func getBody(ctx context.Context, client *http.Client, rawURL, ua string, max in
 // it was asked for and leave the sequencing to the caller. Oversize truncates
 // here — the oracle's streaming cap keeps the permitted prefix and lets the
 // converter judge whether it is usable.
-func getBodyWithHeaders(ctx context.Context, client *http.Client, rawURL, ua string, headers map[string]string, max int64) ([]byte, int, string, error) {
-	header := make(http.Header, len(headers))
-	for key, value := range headers {
-		header.Set(key, value)
-	}
-	response, err := gatewayAttempt(ctx, gatewayRequest{
-		url:              rawURL,
-		client:           client,
-		ua:               ua,
-		headers:          header,
-		max:              max,
-		oversizeTruncate: true,
-	})
-	return response.body, response.status, response.contentType, err
+func getBodyWithHeaders(
+	ctx context.Context,
+	client *http.Client,
+	rawURL, ua string,
+	headers map[string]string,
+	maxBytes int64,
+) ([]byte, int, string, error) {
+	body, status, contentType, _, err := fetchPage(ctx, client, rawURL, ua, headers, maxBytes)
+	return body, status, contentType, err
 }
 
 // decodedResponseBody keeps the Chrome fingerprint's advertised encodings
@@ -463,6 +499,7 @@ func getBodyWithHeaders(ctx context.Context, client *http.Client, rawURL, ua str
 // that header itself; Chrome sends the complete gzip/deflate/br/zstd list, so
 // decode the response chain explicitly (outermost encoding is last).
 func decodedResponseBody(resp *http.Response) (io.Reader, func() error, error) {
+	noteRetryAfter(resp) // a rate limit's wait reaches the caller (retry_after.go)
 	readers := []io.Reader{resp.Body}
 	closers := []io.Closer{resp.Body}
 	encodings := strings.Split(strings.ToLower(resp.Header.Get("Content-Encoding")), ",")
@@ -490,7 +527,10 @@ func decodedResponseBody(resp *http.Response) (io.Reader, func() error, error) {
 			decoder, err = zstd.NewReader(current)
 			next, closer = decoder, noErrorCloser{closeFn: decoder.Close}
 		default:
-			return nil, func() error { return resp.Body.Close() }, fmt.Errorf("unsupported content encoding %q", encoding)
+			return nil, func() error { return resp.Body.Close() }, fmt.Errorf(
+				"unsupported content encoding %q",
+				encoding,
+			)
 		}
 		if err != nil {
 			for j := len(closers) - 1; j >= 0; j-- {
@@ -525,61 +565,61 @@ func (c noErrorCloser) Close() error {
 func classifyKind(source, contentType string, body []byte) string {
 	ct := baseContentType(contentType)
 	switch ct {
-	case "application/pdf":
-		return "pdf"
+	case mediaTypePDF:
+		return kindPDF
 	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-		return "docx"
+		return kindDOCX
 	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		return "xlsx"
+		return kindXLSX
 	case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-		return "pptx"
+		return kindPPTX
 	case "application/zip", "application/x-zip-compressed":
-		return "zip"
+		return kindZIP
 	case "application/x-zip":
-		return "zip"
+		return kindZIP
 	case "application/x-7z-compressed":
-		return "7z"
+		return kind7Z
 	case "application/x-rar-compressed", "application/vnd.rar":
-		return "rar"
+		return kindRAR
 	case "application/x-tar", "application/gzip", "application/x-gzip", "application/x-bzip2", "application/x-xz":
-		return "tar"
-	case "application/json", "text/json", "application/ld+json":
-		return "json"
+		return kindTAR
+	case mediaTypeJSON, "text/json", "application/ld+json":
+		return kindJSON
 	case "text/csv", "application/csv":
-		return "csv"
+		return kindCSV
 	case "image/jpeg":
-		return "jpg"
+		return kindJPG
 	case "image/png":
-		return "png"
+		return kindPNG
 	case "image/gif":
-		return "gif"
+		return kindGIF
 	case "image/webp":
-		return "webp"
+		return kindWebP
 	case "image/bmp":
-		return "bmp"
+		return kindBMP
 	case "image/tiff":
-		return "tiff"
+		return kindTIFF
 	case "image/svg+xml":
-		return "svg"
-	case "text/plain", "text/markdown":
-		return "txt"
-	case "text/html", "application/xhtml+xml", "application/xml", "text/xml":
-		return "html"
+		return kindSVG
+	case mediaTypePlain, mediaTypeMarkdown:
+		return kindTXT
+	case mediaTypeHTML, mediaTypeXHTML, mediaTypeXML, mediaTypeTextXML:
+		return kindHTML
 	}
 	if strings.Contains(ct, "openxmlformats-officedocument") {
 		switch {
 		case strings.Contains(ct, "wordprocessingml"):
-			return "docx"
+			return kindDOCX
 		case strings.Contains(ct, "spreadsheetml"):
-			return "xlsx"
+			return kindXLSX
 		case strings.Contains(ct, "presentationml"):
-			return "pptx"
+			return kindPPTX
 		default:
-			return "zip"
+			return kindZIP
 		}
 	}
 	if strings.HasPrefix(ct, "image/") {
-		return "image"
+		return kindImage
 	}
 	// Every OOXML document (.docx/.xlsx/.pptx) IS a zip container, so its body
 	// always matches the "PK\x03\x04" magic sniff below. The extension must
@@ -591,55 +631,56 @@ func classifyKind(source, contentType string, body []byte) string {
 		return kind
 	}
 	if strings.HasPrefix(string(body), "%PDF-") {
-		return "pdf"
+		return kindPDF
 	}
 	if len(body) >= 4 && string(body[:4]) == "PK\x03\x04" {
-		return "zip"
+		return kindZIP
 	}
 	if len(body) >= 6 && string(body[:6]) == "7z\xbc\xaf\x27\x1c" {
-		return "7z"
+		return kind7Z
 	}
 	if len(body) >= 7 && string(body[:7]) == "Rar!\x1a\x07" {
-		return "rar"
+		return kindRAR
 	}
 	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
-		return "tar"
+		return kindTAR
 	}
 	if len(body) >= 3 && string(body[:3]) == "BZh" {
-		return "tar"
+		return kindTAR
 	}
 	if len(body) >= 6 && string(body[:6]) == "\xfd7zXZ\x00" {
-		return "tar"
+		return kindTAR
 	}
 	if len(body) >= 8 && string(body[:8]) == "\x89PNG\r\n\x1a\n" {
-		return "png"
+		return kindPNG
 	}
 	if len(body) >= 3 && body[0] == 0xff && body[1] == 0xd8 && body[2] == 0xff {
-		return "jpg"
+		return kindJPG
 	}
 	if len(body) >= 6 && (string(body[:6]) == "GIF87a" || string(body[:6]) == "GIF89a") {
-		return "gif"
+		return kindGIF
 	}
 	if len(body) >= 12 && string(body[:4]) == "RIFF" && string(body[8:12]) == "WEBP" {
-		return "webp"
+		return kindWebP
 	}
 	if len(body) >= 2 && string(body[:2]) == "BM" {
-		return "bmp"
+		return kindBMP
 	}
 	if len(body) >= 4 && (string(body[:4]) == "II*\x00" || string(body[:4]) == "MM\x00*") {
-		return "tiff"
+		return kindTIFF
 	}
-	if strings.HasPrefix(strings.TrimSpace(string(body)), "<svg") || strings.Contains(strings.ToLower(string(body[:minInt(len(body), 512)])), "<svg") {
-		return "svg"
+	if strings.HasPrefix(strings.TrimSpace(string(body)), "<svg") ||
+		strings.Contains(strings.ToLower(string(body[:min(len(body), 512)])), "<svg") {
+		return kindSVG
 	}
 	if strings.HasSuffix(strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0]), ".pdf") {
-		return "pdf"
+		return kindPDF
 	}
 	lowSource := strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0])
 	for ext, kind := range map[string]string{
-		".jpg": "jpg", ".jpeg": "jpg", ".png": "png", ".gif": "gif", ".webp": "webp", ".bmp": "bmp", ".tif": "tiff", ".tiff": "tiff", ".svg": "svg",
-		".zip": "zip", ".tar": "tar", ".tar.gz": "tar", ".tgz": "tar", ".tar.bz2": "tar", ".tbz2": "tar", ".tar.xz": "tar", ".txz": "tar", ".gz": "tar", ".bz2": "tar", ".xz": "tar",
-		".7z": "7z", ".rar": "rar", ".pdf": "pdf", ".csv": "csv",
+		extensionJPG: kindJPG, extensionJPEG: kindJPG, extensionPNG: kindPNG, extensionGIF: kindGIF, extensionWebP: kindWebP, extensionBMP: kindBMP, extensionTIF: kindTIFF, extensionTIFF: kindTIFF, extensionSVG: kindSVG,
+		extensionZIP: kindZIP, extensionTAR: kindTAR, ".tar.gz": kindTAR, ".tgz": kindTAR, ".tar.bz2": kindTAR, ".tbz2": kindTAR, ".tar.xz": kindTAR, ".txz": kindTAR, ".gz": kindTAR, ".bz2": kindTAR, ".xz": kindTAR,
+		extension7Z: kind7Z, extensionRAR: kindRAR, extensionPDF: kindPDF, ".csv": kindCSV,
 		// .docx/.xlsx/.pptx are handled by ooxmlExtensionKind above, before the
 		// zip magic sniff — listing them again here would never be reached.
 	} {
@@ -648,21 +689,21 @@ func classifyKind(source, contentType string, body []byte) string {
 		}
 	}
 	if strings.HasSuffix(strings.ToLower(source), ".json") {
-		return "json"
+		return kindJSON
 	}
 	if strings.HasSuffix(strings.ToLower(source), ".csv") {
-		return "csv"
+		return kindCSV
 	}
 	lowSource = strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0])
-	for _, ext := range []string{".txt", ".text", ".md", ".markdown", ".rst", ".log", ".tex", ".org"} {
+	for _, ext := range []string{extensionTXT, ".text", extensionMD, ".markdown", ".rst", ".log", ".tex", ".org"} {
 		if strings.HasSuffix(lowSource, ext) {
-			return "txt"
+			return kindTXT
 		}
 	}
 	if strings.HasSuffix(strings.ToLower(source), ".txt") || strings.HasSuffix(strings.ToLower(source), ".md") {
-		return "txt"
+		return kindTXT
 	}
-	return "html"
+	return kindHTML
 }
 
 // ooxmlExtensionKind reports the OOXML kind implied by source's file
@@ -674,39 +715,39 @@ func ooxmlExtensionKind(source string) (string, bool) {
 	name := strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0])
 	switch {
 	case strings.HasSuffix(name, ".docx"):
-		return "docx", true
+		return kindDOCX, true
 	case strings.HasSuffix(name, ".xlsx"):
-		return "xlsx", true
+		return kindXLSX, true
 	case strings.HasSuffix(name, ".pptx"):
-		return "pptx", true
+		return kindPPTX, true
 	}
 	return "", false
 }
 
 func isChallenge(body []byte, status int) bool {
-	low := strings.ToLower(string(body))
-	// Strong, specific bot-wall phrases (mirrors the retired Python net.py's
-	// _CHALLENGE_PHRASES) flag at any body length — plus the real Cloudflare
-	// "Sorry, you have been blocked" (error 1020) block-page copy, which the
-	// Python oracle's list also lacks.
-	for _, marker := range []string{"just a moment", "checking your browser", "checking your browser before", "cf-browser-verification", "cf-chl-", "are you a robot", "confirm you are a human", "enable javascript and cookies", "captcha challenge", "completing the captcha", "verify you are human", "verifying you are human", "sorry, you have been blocked", "why have i been blocked", "attention required! | cloudflare"} {
+	low := strings.ToLower(string(withoutConsentMarkup(body))) // a banner's vendor list is never a wall
+	// Strong bot-wall phrases (net.py's _CHALLENGE_PHRASES, Cloudflare's "blocked"/1020 page, the Sucuri,
+	// CloudFront, Akamai and Imperva block pages) flag at any length; forum phrases below need corroboration.
+	for _, marker := range []string{"just a moment", "checking your browser", "checking your browser before", "cf-browser-verification", "cf-chl-", "are you a robot", "confirm you are a human", "enable javascript and cookies", "captcha challenge", "completing the captcha", "verify you are human", "verifying you are human", "sorry, you have been blocked", "why have i been blocked", "attention required! | cloudflare", "sucuri website firewall", "generated by cloudfront (cloudfront)", "error code: 1020", "errors.edgesuite.net", "incapsula incident id", "_incapsula_resource"} {
 		if strings.Contains(low, marker) {
 			return true
 		}
 	}
-	weakMarkers := []string{"captcha", "cloudflare", "turnstile", "attention required"}
-	if contentChars(string(body)) <= 4000 {
-		for _, marker := range weakMarkers {
+	// short is shared by both gates below so they cannot disagree at the boundary.
+	short := contentChars(string(body)) <= 4000
+	cf403 := status == http.StatusForbidden || status == http.StatusServiceUnavailable
+	// A Cloudflare interstitial can ship KBs of CSS past the short gate.
+	if short || cf403 {
+		for _, marker := range []string{challengeMarkerCaptcha, challengeMarkerCloudflare, "turnstile", "attention required"} {
 			if strings.Contains(low, marker) {
 				return true
 			}
 		}
-	} else if status == http.StatusForbidden || status == http.StatusServiceUnavailable {
-		// A real Cloudflare interstitial ships several KB of inline CSS, well
-		// past the short-body heuristic above — but a 403/503 carrying ANY
-		// Cloudflare marker is never a legitimate long article, so the length
-		// gate does not apply for these two status codes.
-		for _, marker := range weakMarkers {
+	}
+	// Forum phrases ("prove your humanity", "blocked by network security",
+	// "blocked due to a network policy") need a 403/429/503, a short body, or a captcha widget.
+	if cf403 || status == http.StatusTooManyRequests || short || hasCaptchaWidgetMarkup(low) {
+		for _, marker := range []string{"prove your humanity", "blocked by network security", "blocked due to a network policy"} {
 			if strings.Contains(low, marker) {
 				return true
 			}
@@ -747,11 +788,4 @@ func stripJinaEnvelope(text string) string {
 		}
 	}
 	return strings.TrimLeft(strings.Join(lines[i:], "\n"), "\r\n")
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

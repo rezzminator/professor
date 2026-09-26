@@ -13,17 +13,28 @@ type doiMetadataFailure struct {
 	err      error
 }
 
+// doiMetadataError aggregates every provider's own failure for one lookup
+// that came back with nothing usable. subject names what was being looked up
+// ("DOI metadata" when unset, for ResolveDOI's original caller; "title
+// lookup" for ResolveTitle's F13 fix; "book" for ResolveBook's F14 fix) so
+// the rendered message never claims a DOI lookup failed when the query was
+// actually a book title.
 type doiMetadataError struct {
+	subject  string
 	failures []doiMetadataFailure
 	kind     string
 }
 
 func (e *doiMetadataError) Error() string {
+	subject := e.subject
+	if subject == "" {
+		subject = "DOI metadata"
+	}
 	details := make([]string, 0, len(e.failures))
 	for _, failure := range e.failures {
 		details = append(details, failure.provider+":"+doiMetadataFailureKind(failure.err))
 	}
-	return fmt.Sprintf("DOI metadata lookup failed; %s: providers %s", e.kind, strings.Join(details, ", "))
+	return fmt.Sprintf("%s lookup failed; %s: providers %s", subject, e.kind, strings.Join(details, ", "))
 }
 
 func (e *doiMetadataError) Unwrap() error {
@@ -56,20 +67,20 @@ func doiMetadataFailureKind(err error) string {
 		return ""
 	}
 	if errors.Is(err, context.Canceled) {
-		return "cancelled"
+		return errorKindCancelled
 	}
 	status := doiMetadataHTTPStatus(err)
 	switch {
 	case status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout:
-		return "timeout"
+		return errorKindTimeout
 	case status == http.StatusTooManyRequests:
-		return "connect"
+		return errorKindConnect
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return "blocked"
+		return errorKindBlocked
 	case status >= 400 && status < 500:
-		return "invalid"
+		return errorKindInvalid
 	case status >= 500:
-		return "connect"
+		return errorKindConnect
 	default:
 		return errorKind(err)
 	}
@@ -98,7 +109,7 @@ func mergeResolverFailure(failure, fallback Result) Result {
 	failure.Error += "; " + fallback.Error
 	// A missing fallback cannot establish absence while metadata lookup failed.
 	// Keep this precedence identical for direct identifiers and publisher pivots.
-	missing := fallback.ErrorKind == "missing" || fallback.ErrorKind == "missing_pdf" ||
+	missing := fallback.ErrorKind == errorKindMissing || fallback.ErrorKind == errorKindMissingPDF ||
 		fallback.HTTPStatus == http.StatusNotFound || fallback.HTTPStatus == http.StatusGone
 	if fallback.ErrorKind != "" && !missing {
 		failure.ErrorKind = fallback.ErrorKind

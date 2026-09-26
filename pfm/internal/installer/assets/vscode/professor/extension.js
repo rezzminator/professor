@@ -5,6 +5,11 @@
 // fleet, whose tab carries the attached chat's live name, and which puts you in the terminal
 // you just made. Each new terminal also takes the next icon+colour pair — icons and colours
 // advance on independent counters persisted in globalState — so tabs read apart at a glance.
+//
+// Two entry points reach the terminal: the contributed profile (the + dropdown's "Professor"
+// entry) and the professor.newChatTerminal command (palette + its keybinding). Both resolve
+// through provideTerminalProfile -> nextTerminal, the ONE builder below, so both carry the same
+// icon/colour and env. The onDidOpenTerminal focus hook covers both entry points too.
 const vscode = require('vscode');
 
 // Terminals this activation handed to VS Code and has not yet seen open, keyed by the marker
@@ -58,8 +63,18 @@ function activate(context) {
     vscode.window.registerTerminalProfileProvider('professor.terminal', {
       provideTerminalProfile: () => new vscode.TerminalProfile(nextTerminal(context)),
     }),
+    // Delegates to the SAME contributed-profile route the + dropdown uses — never
+    // vscode.window.createTerminal(options) with its own options, which renders the default
+    // profile's icon/colour instead of the extension's own (issue #24 finding 10).
+    // extensionIdentifier is 'publisher.name' from this extension's own manifest; id/title match
+    // the profile declared in package.json's contributes.terminal.profiles.
     vscode.commands.registerCommand('professor.newChatTerminal', () => {
-      vscode.window.createTerminal(nextTerminal(context)).show();
+      vscode.commands.executeCommand('workbench.action.terminal.newWithProfile', {
+        config: { extensionIdentifier: context.extension.id, id: 'professor.terminal', title: 'Professor' },
+      }).then(undefined, (err) => {
+        // A refused route (profile not registered, VS Code too old) is shown, never dropped.
+        vscode.window.showErrorMessage(`Professor: could not open a chat terminal — ${err?.message ?? err}`);
+      });
     }),
   );
 }

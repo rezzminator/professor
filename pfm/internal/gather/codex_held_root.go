@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 var errHeldSubagents = errors.New("held rollouts identify only subagents")
 
 // heldCodexRoot examines every held rollout. Descriptor order cannot establish
 // authority: a parent commonly opens its children's transcripts as well.
-func heldCodexRoot(links []FDLink, roots []string) (string, bool, error) {
+func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 	seen := map[string]bool{}
 	selected := ""
 	observed := false
@@ -34,25 +34,25 @@ func heldCodexRoot(links []FDLink, roots []string) (string, bool, error) {
 		}
 		observed = true
 		seen[path] = true
-		header, err := codexmeta.Read(path)
+		header, err := codexmeta.ReadHeader(path)
 		if err != nil {
-			return "", true, fmt.Errorf("read held rollout %s: %w", path, err)
+			return "", fmt.Errorf("read held rollout %s: %w", path, err)
 		}
 		if header.Kind == codexmeta.Subagent {
 			continue
 		}
 		if header.Kind != codexmeta.User || header.ID == "" || header.ID != CodexRolloutID(path) {
-			return "", true, fmt.Errorf("held rollout %s has unverified root metadata", path)
+			return "", fmt.Errorf("held rollout %s has unverified root metadata", path)
 		}
 		if selected != "" && CodexRolloutID(selected) != header.ID {
-			return "", true, fmt.Errorf("conflicting held root rollouts %s and %s", selected, path)
+			return "", fmt.Errorf("conflicting held root rollouts %s and %s", selected, path)
 		}
 		selected = path
 	}
 	if observed && selected == "" {
-		return "", true, errHeldSubagents
+		return "", errHeldSubagents
 	}
-	return selected, observed, nil
+	return selected, nil
 }
 
 func hasCodexAncestor(proc ProcFS, pid, panePID int, cmdlines map[int][]string, binaries []string) bool {

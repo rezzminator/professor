@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -16,8 +19,48 @@ const (
 
 var markdownImageRE = regexp.MustCompile(`!\[[^\]]*\]\(\s*([^\s)]+)`)
 
+// localizedImages is converted with its images localized (LocalizeImages) when
+// kind is HTML. The web ladder calls it for the page it stores and no other, so
+// a page the browser rung then supersedes never spends a fetch per image. A
+// localization that fails keeps the remote links, and says so in the log.
+func (h *Harvester) localizedImages(ctx context.Context, kind, converted, source string) string {
+	if kind != kindHTML {
+		return converted
+	}
+	localized, err := h.LocalizeImages(ctx, converted, source)
+	if err != nil {
+		obs.Logger(ctx).Warn("harvest: images were not localized; the remote links stay",
+			"target", logSource(source), obs.FieldErr, err.Error())
+		return converted
+	}
+	return localized
+}
+
+// pageRelativeLink is imagePath as a link relative to the directory of the
+// HTML page stored for source (Cache.path; an alias of that page lands in the
+// same kind directory), so the stored page names no server path and its
+// images resolve from wherever the file is opened. ok is false when no
+// relative form exists; the caller then keeps the remote link.
+func (h *Harvester) pageRelativeLink(source, imagePath string) (string, bool) {
+	root := h.options.CacheDir
+	if h.cache != nil {
+		root = h.cache.root
+	}
+	pageDir := filepath.Dir(filepath.Join(root, CacheKey(source, kindHTML)))
+	rel, err := filepath.Rel(pageDir, imagePath)
+	if err != nil || filepath.IsAbs(rel) {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if !strings.HasPrefix(rel, ".") {
+		rel = "./" + rel // publicImagePath reads a dot-led link as page-relative
+	}
+	return rel, true
+}
+
 // LocalizeImages downloads article images referenced by Markdown and rewrites
-// successful links to immutable cache paths. It intentionally skips data URIs,
+// successful links to immutable cache files, each linked relative to the page
+// stored for baseSource (pageRelativeLink). It intentionally skips data URIs,
 // favicons, sprites, non-image responses, and anything beyond the oracle's
 // fifty-image/ten-megabyte limits. Failed links remain untouched.
 func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource string) (string, error) {
@@ -47,7 +90,7 @@ func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource str
 		seen[remote] = true
 		count++
 		u, err := base.Parse(remote)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		if err != nil || (u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS) {
 			continue
 		}
 		targets = append(targets, remote+"\x00"+u.String())
@@ -64,20 +107,36 @@ func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource str
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// A recovered panic (F1) is swallowed exactly like every other
+			// failure this loop already answers silently (fetchErr, a bad
+			// status, a non-image kind — none of them log either): the C23
+			// activity-log ratchet (arch-check.sh) refuses a new bare
+			// log call, and this function has no per-item error
+			// report to attach one to either way.
+			defer recoverItem(func(error) {})
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			body, status, contentType, fetchErr := getBody(ctx, h.client, full, h.userAgent, maxImageBytes+1)
-			if fetchErr != nil || status >= 400 || len(body) == 0 || len(body) > maxImageBytes {
-				return
-			}
-			kind := classifyKind(full, contentType, body)
-			if !isImageKind(kind) {
-				return
-			}
-			stored := h.storeBinary(full, kind, "image-localize", body, false)
-			if stored.Error == "" && stored.Path != "" {
+			// This image was REACHED from baseSource — the harvested page — so
+			// it carries that page's own URL as Referer (F-referer), never the
+			// Google provenance one: a hotlink-protected host allows a same-site
+			// Referer and 403s a foreign one.
+			// PolicyInlineImage: direct, then Chrome impersonation, never a
+			// browser — a page with 60 figures must not start 60 browsers.
+			got, fetchErr := h.retrieveWith(ctx, retrieveRequest{
+				target:   full,
+				want:     WantFile,
+				policy:   PolicyInlineImage,
+				referer:  baseSource,
+				accept:   isImageKind,
+				maxBytes: maxImageBytes,
+			})
+			if fetchErr == nil && got.Result.Path != "" {
+				link, ok := h.pageRelativeLink(baseSource, got.Result.Path)
+				if !ok {
+					return // the remote link stays: a server path never enters stored content
+				}
 				mu.Lock()
-				replacements[remote] = stored.Path
+				replacements[remote] = link
 				mu.Unlock()
 			}
 		}()

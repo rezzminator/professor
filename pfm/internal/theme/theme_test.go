@@ -5,13 +5,15 @@ import (
 	"reflect"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 func TestLoadEmbeddedPalettes(t *testing.T) {
 	defaultPalette := Load("default")
-	if defaultPalette.EngineRow[pfmengine.Codex] != "#38bdf8" || defaultPalette.AgentRow != "#fb923c" || defaultPalette.StatsEngine[pfmengine.Claude] != "#ff9e64" || defaultPalette.StatsCPU != "#4ade80" {
+	if defaultPalette.EngineRow[pfmengine.Codex] != "#38bdf8" || defaultPalette.AgentRow != "#fb923c" ||
+		defaultPalette.StatsEngine[pfmengine.Claude] != "#ff9e64" ||
+		defaultPalette.StatsCPU != "#4ade80" {
 		t.Fatalf("default palette = %#v", defaultPalette)
 	}
 	if tokyo := Load("tokyo-night"); reflect.DeepEqual(tokyo, defaultPalette) {
@@ -53,7 +55,7 @@ func TestConfiguredEmojiAndLegacyMedalsAreRecognized(t *testing.T) {
 // the hue, not the exact shade, so a theme stays free to restyle.
 func TestEngineIdentityHuesHoldAcrossPalettes(t *testing.T) {
 	wantHue := map[pfmengine.ID]string{
-		pfmengine.Claude: "orange", pfmengine.Codex: "blue", pfmengine.Opencode: "green",
+		pfmengine.Claude: "orange", pfmengine.Codex: "blue", pfmengine.OpenCode: "green",
 	}
 	for _, paletteName := range []string{"default", "tokyo-night"} {
 		palette := Load(paletteName)

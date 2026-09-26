@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Array and built-in functions · Inline code</title></head>
+<body>
+<nav class="navbar"><a href="/docs">Docs</a> <a href="/blog">Blog</a></nav>
+<main>
+<article>
+<h1>Array</h1>
+<section aria-labelledby="relationship_between_length_and_numerical_properties"><h3 id="relationship_between_length_and_numerical_properties"><a href="#relationship_between_length_and_numerical_properties">Relationship between length and numerical properties</a></h3><div class="section-content"><p>A JavaScript array's <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length"><code>length</code></a> property and numerical properties are connected.</p>
+<p>Several of the built-in array methods (e.g., <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/join"><code>join()</code></a>, <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/slice"><code>slice()</code></a>, <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/indexOf"><code>indexOf()</code></a>, etc.) take into account the value of an array's <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length"><code>length</code></a> property when they're called.</p>
+<p>Other methods (e.g., <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/push"><code>push()</code></a>, <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/splice"><code>splice()</code></a>, etc.) also result in updates to an array's <a href="/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length"><code>length</code></a> property.</p></div></section>
+<section aria-labelledby="array-like_objects"><h4 id="array-like_objects">Array-like objects</h4>
+<p>The term <a href="/en-US/docs/Web/JavaScript/Guide/Indexed_collections#working_with_array-like_objects"><em>array-like object</em></a> refers to any object that doesn't throw during the <code>length</code> conversion process described above. In practice, such object is expected to actually have a <code>length</code> property and to have indexed elements in the range <code>0</code> to <code>length - 1</code>. (If it doesn't have all indices, it will be functionally equivalent to a <a href="#array_methods_and_empty_slots">sparse array</a>.) Any integer index less than zero or greater than <code>length - 1</code> is ignored when an array method operates on an array-like object.</p></section>
+<dl class="py function">
+<dt class="sig sig-object py" id="abs">
+<span class="sig-name descname"><span class="pre">abs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">number</span></span></em>, <em class="sig-param"><span class="positional-only-separator o"><abbr title="Positional-only parameter separator (PEP 570)"><span class="pre">/</span></abbr></span></em><span class="sig-paren">)</span><a class="headerlink" href="#abs" title="Link to this definition">¶</a></dt>
+<dd><p>Return the absolute value of a number.  The argument may be an
+integer, a floating-point number, or an object implementing
+<a class="reference internal" href="../reference/datamodel.html#object.__abs__" title="object.__abs__"><code class="xref py py-meth docutils literal notranslate"><span class="pre">__abs__()</span></code></a>.
+If the argument is a complex number, its magnitude is returned.</p>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="locals">
+<span class="sig-name descname"><span class="pre">locals</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#locals" title="Link to this definition">¶</a></dt>
+<dd><p>Calling <code class="docutils literal notranslate"><span class="pre">locals()</span></code> as part of a generator expression is equivalent to
+calling it in a nested generator function.</p>
+<div class="versionchanged">
+<p><span class="versionmodified changed">Changed in version 3.12: </span>The behaviour of <code class="docutils literal notranslate"><span class="pre">locals()</span></code> in a comprehension has been updated as
+described in <span class="target" id="index-5"></span><a class="pep reference external" href="https://peps.python.org/pep-0709/"><strong>PEP 709</strong></a>.</p>
+</div>
+</dd></dl>
+<dl class="py function">
+<dt class="sig sig-object py" id="import__">
+<span class="sig-name descname"><span class="pre">__import__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#import__" title="Link to this definition">¶</a></dt>
+<dd><p>Here, the <code class="docutils literal notranslate"><span class="pre">spam.ham</span></code> module is returned from <code class="xref py py-func docutils literal notranslate"><span class="pre">__import__()</span></code>.  From this
+object, the names to import are retrieved and assigned to their respective
+names.</p>
+<div class="versionchanged">
+<p><span class="versionmodified changed">Changed in version 3.9: </span>When the command line options <a class="reference internal" href="../using/cmdline.html#cmdoption-E"><code class="xref std std-option docutils literal notranslate"><span class="pre">-E</span></code></a> or <a class="reference internal" href="../using/cmdline.html#cmdoption-I"><code class="xref std std-option docutils literal notranslate"><span class="pre">-I</span></code></a> are being used,
+the environment variable <span class="target" id="index-18"></span><a class="reference internal" href="../using/cmdline.html#envvar-PYTHONCASEOK"><code class="xref std std-envvar docutils literal notranslate"><span class="pre">PYTHONCASEOK</span></code></a> is now ignored.</p>
+</div>
+</dd></dl>
+</article>
+</main>
+<footer><a href="/privacy">Privacy</a> <a href="/careers">Careers</a></footer>
+</body>
+</html>

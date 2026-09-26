@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
 	_ "modernc.org/sqlite"
 )
 
@@ -104,17 +103,21 @@ func (jail *codexJail) addThread(t *testing.T, id string, records int) []int64 {
 	offsets := make([]int64, 0, records)
 	for index := 0; index < records; index++ {
 		offsets = append(offsets, int64(content.Len()))
-		content.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&content,
 			`{"ordinal":%d,"type":"event_msg","payload":{"n":%d}}`+"\n",
 			index,
 			index,
-		))
+		)
 	}
 	if err := os.WriteFile(path, []byte(content.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	state := openJailDB(t, jail.stores.State)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	execJail(
 		t,
 		state,
@@ -163,18 +166,22 @@ func (jail *codexJail) addThreadWithRecords(t *testing.T, id string, records []j
 		if record.Ordinal != nil {
 			ordinalField = strconv.FormatInt(*record.Ordinal, 10)
 		}
-		content.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&content,
 			`{"ordinal":%s,"type":%q,"payload":{"type":%q}}`+"\n",
 			ordinalField,
 			recordType,
 			payloadType,
-		))
+		)
 	}
 	if err := os.WriteFile(path, []byte(content.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	state := openJailDB(t, jail.stores.State)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	execJail(
 		t,
 		state,
@@ -206,7 +213,11 @@ func (jail *codexJail) addThreadWithLines(t *testing.T, id string, lines []strin
 		t.Fatal(err)
 	}
 	state := openJailDB(t, jail.stores.State)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	execJail(
 		t,
 		state,
@@ -434,7 +445,11 @@ func TestLiveThreadsAreSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			t.Errorf("close lock: %v", err)
+		}
+	}()
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		t.Fatalf("hold the writer lock: %v", err)
 	}
@@ -739,7 +754,7 @@ func TestUnreadableRolloutIsUnscanned(t *testing.T) {
 
 	original := openRollout
 	t.Cleanup(func() { openRollout = original })
-	openRollout = func(path string) (io.ReadCloser, error) {
+	openRollout = func(_ string) (io.ReadCloser, error) {
 		return io.NopCloser(iotest.ErrReader(errors.New("disk fell off"))), nil
 	}
 

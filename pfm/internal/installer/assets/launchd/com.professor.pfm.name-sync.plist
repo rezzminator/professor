@@ -35,6 +35,7 @@
 	<array>
 		<string>__PFM_HOME__/.local/bin/pfm</string>
 		<string>name-sync</string>
+		<string>--apply</string>
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>

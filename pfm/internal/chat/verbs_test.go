@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	claudeengine "hostops/pfm/internal/engine/claude"
-	codexengine "hostops/pfm/internal/engine/codex"
-	opencodeengine "hostops/pfm/internal/engine/opencode"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/testjail"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
+	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
+	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestMain(m *testing.M) {
@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 	// refuses an engine it cannot index — and the matchers its gathers use.
 	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
 	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
-	index.RegisterSource(pfmengine.Opencode, opencodeengine.Source{})
+	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
 	os.Exit(testjail.Run(m))

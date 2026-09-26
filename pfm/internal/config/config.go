@@ -14,11 +14,21 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 const Version = 2
+
+const (
+	jsonKeyEnabled  = "enabled"
+	engineKeyBinary = "binary"
+	engineKeyYolo   = "yolo"
+	jsonKeyPort     = "port"
+	// defaultAskEffort is the reasoning effort every engine's ask defaults
+	// carry until an operator sets one.
+	defaultAskEffort = "low"
+)
 
 type Source string
 
@@ -66,74 +76,23 @@ type AccountSkip struct {
 
 type ClaudePrefs struct {
 	PermissionMode string
-	Binary         string
+	Binary, Theme  string
 	// SystemPrompt is one of the SystemPrompt* values; empty means
 	// SystemPromptProduction.
 	SystemPrompt string
 	// Cache1H is Claude Code's prompt-cache TTL choice: true selects the
 	// ~32%-cheaper 1-hour TTL (ENABLE_PROMPT_CACHING_1H), false the 5-minute
 	// TTL. Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
-	Cache1H bool
+	Cache1H      bool
+	NativeCursor bool
+	// MaxSubagentSpawnDepth and MaxConcurrentSubagents lift Claude Code's
+	// sub-agent ceilings on every managed launch — see subagents.go. Zero is
+	// the unset sentinel on both.
+	MaxSubagentSpawnDepth  int
+	MaxConcurrentSubagents int
 	// CompactNudge governs the UserPromptSubmit reminder that a self-compact
 	// is due at a context milestone — see decodeClaudePrefs for the defaults.
 	CompactNudge CompactNudge
-}
-
-// CompactNudge is the milestone reminder's policy: whether the hook speaks at
-// all, the context percentage it first speaks at, and how many points of
-// context pass between reminders. A reminder, never an order — the hook only
-// says the milestone is here.
-type CompactNudge struct {
-	Enabled bool
-	Start   int
-	Step    int
-}
-
-// DefaultCompactNudge is the fleet's milestone policy when the file says
-// nothing: on, first at 35% of context, then every 10 points.
-func DefaultCompactNudge() CompactNudge {
-	return CompactNudge{Enabled: true, Start: 35, Step: 10}
-}
-
-// applyCompactNudge overlays the fields a file actually set onto base — the
-// resolved top-level policy for an account, the default for the top level —
-// so an account that touched only step keeps the file's enabled and start.
-func applyCompactNudge(base CompactNudge, raw *rawCompactNudge, path, scope string, index int) (CompactNudge, error) {
-	if raw == nil {
-		return base, nil
-	}
-	result := base
-	if raw.Enabled != nil {
-		result.Enabled = *raw.Enabled
-	}
-	if raw.Start != nil {
-		if *raw.Start < 1 || *raw.Start > 100 {
-			return CompactNudge{}, fmt.Errorf("config %s: %s.compactNudge.start must be 1..100 (a context percentage), got %d", path, configScope(scope, index), *raw.Start)
-		}
-		result.Start = *raw.Start
-	}
-	if raw.Step != nil {
-		if *raw.Step < 1 || *raw.Step > 100 {
-			return CompactNudge{}, fmt.Errorf("config %s: %s.compactNudge.step must be 1..100 (context points between reminders), got %d", path, configScope(scope, index), *raw.Step)
-		}
-		result.Step = *raw.Step
-	}
-	return result, nil
-}
-
-func recordCompactNudgeSources(sources map[string]Source, prefix string, raw *rawCompactNudge) {
-	if raw == nil {
-		return
-	}
-	if raw.Enabled != nil {
-		sources[prefix+".compactNudge.enabled"] = SourceFile
-	}
-	if raw.Start != nil {
-		sources[prefix+".compactNudge.start"] = SourceFile
-	}
-	if raw.Step != nil {
-		sources[prefix+".compactNudge.step"] = SourceFile
-	}
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -234,12 +193,13 @@ type Config struct {
 	Accounts         []Account
 	AccountSkips     []AccountSkip
 	CodexAccounts    []CodexAccount
-	OpencodeAccounts []OpenCodeAccount
+	OpenCodeAccounts []OpenCodeAccount
 	Claude           Claude
 	Codex            Codex
 	OpenCode         OpenCode
 	Tmux             Tmux
 	NameSync         NameSync
+	Log              Log
 	MCPServers       map[string]MCPServer
 	MCP              MCPConfig
 	Ask              AskConfig
@@ -254,8 +214,8 @@ type Config struct {
 
 func productionMCPServers() map[string]MCPServer {
 	return map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
+		"chat":             {Enabled: false},
+		MCPServerHarvester: {Enabled: false},
 	}
 }
 
@@ -269,6 +229,7 @@ type rawConfig struct {
 	Tmux     *rawTmux      `json:"tmux,omitempty"`
 	NameSync *rawNameSync  `json:"nameSync,omitempty"`
 	MCP      *rawMCP       `json:"mcp,omitempty"`
+	Log      *rawLog       `json:"log,omitempty"`
 	Ask      *rawAsk       `json:"ask,omitempty"`
 }
 
@@ -295,15 +256,14 @@ type rawAccount struct {
 type rawClaude struct {
 	PermissionMode *string          `json:"permissionMode,omitempty"`
 	Binary         *string          `json:"binary,omitempty"`
+	Theme          *string          `json:"theme,omitempty"`
 	Cache1H        *bool            `json:"cache1h,omitempty"`
+	NativeCursor   *bool            `json:"nativeCursor,omitempty"`
 	SystemPrompt   *string          `json:"systemPrompt,omitempty"`
 	CompactNudge   *rawCompactNudge `json:"compactNudge,omitempty"`
-}
-
-type rawCompactNudge struct {
-	Enabled *bool `json:"enabled,omitempty"`
-	Start   *int  `json:"start,omitempty"`
-	Step    *int  `json:"step,omitempty"`
+	// The sub-agent ceilings — see subagents.go.
+	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
 }
 
 type rawOpenCode struct {
@@ -380,15 +340,6 @@ func (raw *rawAsk) UnmarshalJSON(content []byte) error {
 	return nil
 }
 
-// ResolvePath applies pfm's XDG rule: only an absolute XDG_CONFIG_HOME wins.
-func ResolvePath(home string) string {
-	root := os.Getenv("XDG_CONFIG_HOME")
-	if !filepath.IsAbs(root) {
-		root = filepath.Join(home, ".config")
-	}
-	return filepath.Join(filepath.Clean(root), "pfm", FileName)
-}
-
 // resolveExistingPath is ResolvePath, except that a machine which still has
 // only the pre-split config.json reads that file until `pfm install`
 // migrates it — every command keeps working across the binary upgrade.
@@ -407,8 +358,8 @@ func resolveExistingPath(home string) string {
 // Defaults returns today's effective behavior over the supplied discovery
 // roots. The roots are preserved byte-for-byte as discovery inputs; only the
 // corresponding launch directory is derived.
-func Defaults(home string, projectRoots []string, codexRoots ...string) Config {
-	return defaultsWithMCPServers(home, projectRoots, productionMCPServers(), codexRoots...)
+func Defaults(home string, projectRoots []string, codexHomes ...string) Config {
+	return defaultsWithMCPServers(home, projectRoots, productionMCPServers(), codexHomes...)
 }
 
 func engineConfigKey(id pfmengine.ID, field string) string {
@@ -419,7 +370,7 @@ func defaultsWithMCPServers(
 	home string,
 	projectRoots []string,
 	registered map[string]MCPServer,
-	codexRoots ...string,
+	codexHomes ...string,
 ) Config {
 	accounts := make([]Account, 0, len(projectRoots))
 	var accountSkips []AccountSkip
@@ -436,35 +387,44 @@ func defaultsWithMCPServers(
 	if len(accounts) == 0 {
 		accounts, accountSkips = discoverAccounts(home)
 	}
-	codexRoot := pfmengine.MustLookup(pfmengine.Codex).DefaultRoots(home)[0]
-	if len(codexRoots) != 0 && strings.TrimSpace(codexRoots[0]) != "" {
-		codexRoot = filepath.Clean(codexRoots[0])
+	codexHome := pfmengine.MustLookup(pfmengine.Codex).DefaultRoots(home)[0]
+	if len(codexHomes) != 0 && strings.TrimSpace(codexHomes[0]) != "" {
+		codexHome = filepath.Clean(codexHomes[0])
 	}
 	var codexAccounts []CodexAccount
-	codexValid, codexErr := hasValidCodexCredentials(codexRoot)
+	codexValid, codexErr := hasValidCodexCredentials(codexHome)
 	if codexErr != nil {
 		accountSkips = append(accountSkips, AccountSkip{
-			ConfigDir: codexRoot, Reason: fmt.Sprintf("codex discovery failed: %v", codexErr),
+			ConfigDir: codexHome, Reason: fmt.Sprintf("codex discovery failed: %v", codexErr),
 		})
 	} else if codexValid {
-		codexAccounts = []CodexAccount{{ID: 1, Home: codexRoot, Emoji: DefaultEmoji(1)}}
+		codexAccounts = []CodexAccount{{ID: 1, Home: codexHome, Emoji: DefaultEmoji(1)}}
 	}
-	var opencodeAccounts []OpenCodeAccount
-	opencodeHome := pfmengine.MustLookup(pfmengine.Opencode).DefaultRoots(home)[0]
-	if _, err := os.Stat(filepath.Join(opencodeHome, "opencode.db")); err == nil {
-		opencodeAccounts = []OpenCodeAccount{{ID: 1, Home: opencodeHome}}
+	var openCodeAccounts []OpenCodeAccount
+	openCodeHome := openCodeAccountHome(home)
+	if exists, openCodeErr := openCodeStoreExists(openCodeHome); openCodeErr != nil {
+		accountSkips = append(accountSkips, AccountSkip{
+			ConfigDir: openCodeHome,
+			Reason:    fmt.Sprintf("OpenCode discovery failed: %v", openCodeErr),
+		})
+	} else if exists {
+		openCodeAccounts = []OpenCodeAccount{{ID: 1, Home: openCodeHome}}
 	}
 	sources := map[string]Source{
 		"version":  SourceDefault,
 		"theme":    SourceDefault,
 		"accounts": SourceDefault,
-		engineConfigKey(pfmengine.Claude, "permissionMode"): SourceDefault,
-		engineConfigKey(pfmengine.Claude, "binary"):         SourceDefault,
-		engineConfigKey(pfmengine.Claude, "cache1h"):        SourceDefault,
-		engineConfigKey(pfmengine.Codex, "yolo"):            SourceDefault,
-		engineConfigKey(pfmengine.Codex, "binary"):          SourceDefault,
-		engineConfigKey(pfmengine.Codex, "homes"):           SourceDefault,
-		engineConfigKey(pfmengine.Opencode, "binary"):       SourceDefault,
+		engineConfigKey(pfmengine.Claude, "permissionMode"):  SourceDefault,
+		engineConfigKey(pfmengine.Claude, engineKeyBinary):   SourceDefault,
+		engineConfigKey(pfmengine.Claude, "theme"):           SourceDefault,
+		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
+		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
+		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
+		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
+		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
+		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
+		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
+		engineConfigKey(pfmengine.OpenCode, engineKeyBinary): SourceDefault,
 		"mcp.http.port":       SourceDefault,
 		"ask.engine":          SourceDefault,
 		"tmux.titles.enabled": SourceDefault,
@@ -478,12 +438,12 @@ func defaultsWithMCPServers(
 	servers := make(map[string]MCPServer, len(registered))
 	for name, server := range registered {
 		servers[name] = server
-		if name != "harvester" {
+		if name != MCPServerHarvester {
 			sources["mcp.servers."+name+".enabled"] = SourceDefault
 		}
 	}
 	harvester := DefaultHarvester()
-	if server, found := registered["harvester"]; found {
+	if server, found := registered[MCPServerHarvester]; found {
 		harvester.Enabled = server.Enabled
 	}
 	for _, key := range harvesterSourceKeys {
@@ -496,20 +456,29 @@ func defaultsWithMCPServers(
 		Accounts:         accounts,
 		AccountSkips:     accountSkips,
 		CodexAccounts:    codexAccounts,
-		OpencodeAccounts: opencodeAccounts,
-		Claude:           Claude{PermissionMode: PermissionBypass, Binary: pfmengine.MustLookup(pfmengine.Claude).Binary, Cache1H: true, CompactNudge: DefaultCompactNudge()},
-		Codex:            Codex{Yolo: true, Binary: pfmengine.MustLookup(pfmengine.Codex).Binary},
-		OpenCode:         OpenCode{Binary: pfmengine.MustLookup(pfmengine.Opencode).Binary},
-		Tmux:             Tmux{Titles: DefaultTmuxTitles()},
-		NameSync:         DefaultNameSync(),
-		MCPServers:       servers,
-		MCP:              MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: DefaultMCPPort}},
-		Harvester:        harvester,
+		OpenCodeAccounts: openCodeAccounts,
+		Claude: Claude{
+			PermissionMode: PermissionBypass,
+			Binary:         pfmengine.MustLookup(pfmengine.Claude).Binary,
+			Cache1H:        true,
+			CompactNudge:   DefaultCompactNudge(),
+
+			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
+		},
+		Codex:      Codex{Yolo: true, Binary: pfmengine.MustLookup(pfmengine.Codex).Binary},
+		OpenCode:   OpenCode{Binary: pfmengine.MustLookup(pfmengine.OpenCode).Binary},
+		Tmux:       Tmux{Titles: DefaultTmuxTitles()},
+		NameSync:   DefaultNameSync(),
+		Log:        DefaultLog(),
+		MCPServers: servers,
+		MCP:        MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: DefaultMCPPort}},
+		Harvester:  harvester,
 		Ask: AskConfig{
 			Engine: pfmengine.Codex,
 			Prefs: map[pfmengine.ID]EnginePrefs{
-				pfmengine.Codex:  {Model: "gpt-5.6-luna", Effort: "low"},
-				pfmengine.Claude: {Model: "claude-haiku-4-5", Effort: "low"},
+				pfmengine.Codex:    {Model: "gpt-5.6-luna", Effort: defaultAskEffort},
+				pfmengine.OpenCode: {Model: "gpt-5.6-luna", Effort: defaultAskEffort},
+				pfmengine.Claude:   {Model: "claude-haiku-4-5", Effort: defaultAskEffort},
 			},
 		},
 		Sources: sources,
@@ -620,32 +589,7 @@ func hasValidAccountCredentials(configDir string) bool {
 	return json.Unmarshal(body, &marker) == nil && strings.TrimSpace(marker.OAuth.AccessToken) != ""
 }
 
-// hasValidCodexCredentials reports whether home/auth.json is the real Codex
-// CLI shape: access_token and account_id both live INSIDE tokens. An absent
-// file is the ordinary "no account here" case (ok=false, err=nil). Any other
-// read failure (permission denied, etc.) is NOT folded into that silence —
-// it comes back as a non-nil error the caller must surface, never swallow.
-func hasValidCodexCredentials(home string) (bool, error) {
-	body, err := os.ReadFile(filepath.Join(home, "auth.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var marker struct {
-		Tokens struct {
-			AccessToken string `json:"access_token"`
-			AccountID   string `json:"account_id"`
-		} `json:"tokens"`
-	}
-	valid := json.Unmarshal(body, &marker) == nil &&
-		strings.TrimSpace(marker.Tokens.AccessToken) != "" &&
-		strings.TrimSpace(marker.Tokens.AccountID) != ""
-	return valid, nil
-}
-
-func skipsOutsideDirectory(skips []AccountSkip, root string) []AccountSkip {
+func skipsOutsideDir(skips []AccountSkip, root string) []AccountSkip {
 	filtered := make([]AccountSkip, 0, len(skips))
 	for _, skip := range skips {
 		relative, err := filepath.Rel(root, skip.ConfigDir)
@@ -660,17 +604,21 @@ func skipsOutsideDirectory(skips []AccountSkip, root string) []AccountSkip {
 
 // Load reads a machine config over defaults. An absent file returns defaults;
 // every present-file error is returned with the file path attached.
-func Load(path, home string, projectRoots []string, codexRoots ...string) (Config, error) {
-	return loadWithMCPServers(path, home, projectRoots, productionMCPServers(), codexRoots...)
+func Load(path, home string, projectRoots []string, codexHomes ...string) (Config, error) {
+	return loadWithMCPServers(path, home, projectRoots, productionMCPServers(), codexHomes...)
 }
 
 func loadWithMCPServers(
 	path, home string,
 	projectRoots []string,
 	registered map[string]MCPServer,
-	codexRoots ...string,
+	codexHomes ...string,
 ) (Config, error) {
-	result := defaultsWithMCPServers(home, projectRoots, registered, codexRoots...)
+	openCodeHome := openCodeAccountHome(home)
+	if _, err := openCodeStoreExists(openCodeHome); err != nil {
+		return Config{}, fmt.Errorf("discover OpenCode account data %s: %w", openCodeHome, err)
+	}
+	result := defaultsWithMCPServers(home, projectRoots, registered, codexHomes...)
 	if path == "" {
 		path = resolveExistingPath(home)
 	} else if !filepath.IsAbs(path) {
@@ -723,38 +671,42 @@ func loadWithMCPServers(
 	// PermissionMode/Binary do, so "unset at this account" is decided here,
 	// once, instead of guessed from a materialized zero value later.
 	if raw.Claude != nil {
-		prefs, err := decodeClaudePrefs(*raw.Claude, result.Path, pfmengine.MustLookup(pfmengine.Claude).LongName, -1)
+		name := pfmengine.MustLookup(pfmengine.Claude).LongName
+		prefs, err := decodeClaudePrefs(*raw.Claude, result.Path, name, -1)
 		if err != nil {
 			return Config{}, err
 		}
 		if raw.Claude.PermissionMode != nil {
 			result.Sources[engineConfigKey(pfmengine.Claude, "permissionMode")] = SourceFile
-		}
-		if raw.Claude.Binary != nil {
-			result.Sources[engineConfigKey(pfmengine.Claude, "binary")] = SourceFile
-		}
-		if raw.Claude.Cache1H != nil {
-			result.Sources[engineConfigKey(pfmengine.Claude, "cache1h")] = SourceFile
-		}
-		if raw.Claude.PermissionMode != nil {
 			result.Claude.PermissionMode = prefs.PermissionMode
 		}
 		if raw.Claude.Binary != nil {
+			result.Sources[engineConfigKey(pfmengine.Claude, engineKeyBinary)] = SourceFile
 			result.Claude.Binary = prefs.Binary
 		}
 		if raw.Claude.Cache1H != nil {
+			result.Sources[engineConfigKey(pfmengine.Claude, "cache1h")] = SourceFile
 			result.Claude.Cache1H = prefs.Cache1H
 		}
+		if err := applyTheme(&result.Claude, raw.Claude.Theme, name, -1, result.Sources); err != nil {
+			return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
+		}
+		applyNativeCursor(&result.Claude, raw.Claude.NativeCursor, false, result.Sources, -1)
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
 		}
-		applied, err := applyCompactNudge(result.Claude.CompactNudge, raw.Claude.CompactNudge, result.Path, pfmengine.MustLookup(pfmengine.Claude).LongName, -1)
+		applied, err := applyCompactNudge(result.Claude.CompactNudge, raw.Claude.CompactNudge, result.Path, name, -1)
 		if err != nil {
 			return Config{}, err
 		}
 		result.Claude.CompactNudge = applied
-		recordCompactNudgeSources(result.Sources, pfmengine.MustLookup(pfmengine.Claude).LongName, raw.Claude.CompactNudge)
+		recordCompactNudgeSources(result.Sources, name, raw.Claude.CompactNudge)
+		if err := applySubagentCaps(
+			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
+		); err != nil {
+			return Config{}, err
+		}
 	}
 	if raw.Accounts != nil {
 		accounts, err := validateAccounts(*raw.Accounts, home)
@@ -765,7 +717,7 @@ func loadWithMCPServers(
 		// An explicit Claude roster is authoritative. Diagnostics from default
 		// ~/.cc discovery must not re-enter observers as phantom skipped
 		// accounts; unrelated discovery failures remain visible.
-		result.AccountSkips = skipsOutsideDirectory(result.AccountSkips, filepath.Join(home, ".cc"))
+		result.AccountSkips = skipsOutsideDir(result.AccountSkips, filepath.Join(home, ".cc"))
 		result.Sources["accounts"] = SourceFile
 		for index, value := range *raw.Accounts {
 			if value.Emoji != "" {
@@ -788,14 +740,30 @@ func loadWithMCPServers(
 				} else {
 					result.Sources[fmt.Sprintf("accounts[%d].claude.cache1h", index)] = SourceFile
 				}
+				if err := applyTheme(&prefs, value.Claude.Theme, "accounts", index, result.Sources); err != nil {
+					return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
+				}
+				applyNativeCursor(&prefs, value.Claude.NativeCursor, result.Claude.NativeCursor, result.Sources, index)
 				// Same inheritance for the nudge policy: seeded from the
 				// resolved top level, then only the fields this account set.
-				applied, err := applyCompactNudge(result.Claude.CompactNudge, value.Claude.CompactNudge, result.Path, "accounts", index)
+				applied, err := applyCompactNudge(
+					result.Claude.CompactNudge,
+					value.Claude.CompactNudge,
+					result.Path,
+					"accounts",
+					index,
+				)
 				if err != nil {
 					return Config{}, err
 				}
 				prefs.CompactNudge = applied
-				recordCompactNudgeSources(result.Sources, fmt.Sprintf("accounts[%d].claude", index), value.Claude.CompactNudge)
+				key := fmt.Sprintf("accounts[%d].claude", index)
+				recordCompactNudgeSources(result.Sources, key, value.Claude.CompactNudge)
+				if err := applySubagentCaps(
+					&prefs, *value.Claude, result.Claude, result.Path, "accounts", index, result.Sources,
+				); err != nil {
+					return Config{}, err
+				}
 				result.Accounts[index].Claude = &prefs
 			}
 			if value.Codex != nil {
@@ -814,11 +782,11 @@ func loadWithMCPServers(
 		}
 		if raw.Codex.Yolo != nil {
 			result.Codex.Yolo = prefs.Yolo
-			result.Sources[engineConfigKey(pfmengine.Codex, "yolo")] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.Codex, engineKeyYolo)] = SourceFile
 		}
 		if raw.Codex.Binary != nil {
 			result.Codex.Binary = prefs.Binary
-			result.Sources[engineConfigKey(pfmengine.Codex, "binary")] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.Codex, engineKeyBinary)] = SourceFile
 		}
 		if raw.Codex.Homes != nil {
 			accounts, err := validateCodexHomes(*raw.Codex.Homes, home, result.CodexAccounts, result.Path)
@@ -836,7 +804,7 @@ func loadWithMCPServers(
 				return Config{}, fmt.Errorf("config %s: opencode.binary must be a non-empty command", result.Path)
 			}
 			result.OpenCode.Binary = binary
-			result.Sources[engineConfigKey(pfmengine.Opencode, "binary")] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.OpenCode, engineKeyBinary)] = SourceFile
 		}
 	}
 
@@ -852,6 +820,9 @@ func loadWithMCPServers(
 		result.NameSync.Interval = interval
 		result.Sources["nameSync.interval"] = SourceFile
 	}
+	if err := applyLog(&result, raw.Log); err != nil {
+		return Config{}, err
+	}
 
 	var legacyHarvesterEnabled *bool
 	if raw.MCP != nil {
@@ -860,9 +831,13 @@ func loadWithMCPServers(
 				return Config{}, fmt.Errorf("config %s: unknown key %q", result.Path, "mcp.servers."+name)
 			}
 			if server.Enabled == nil {
-				return Config{}, fmt.Errorf("config %s: required key %q is missing", result.Path, "mcp.servers."+name+".enabled")
+				return Config{}, fmt.Errorf(
+					"config %s: required key %q is missing",
+					result.Path,
+					"mcp.servers."+name+".enabled",
+				)
 			}
-			if name == "harvester" {
+			if name == MCPServerHarvester {
 				// Pre-split layout: the flag now lives in harvester.config.json.
 				// Honored until `pfm install` migrates it (PlanMigration).
 				enabled := *server.Enabled
@@ -911,16 +886,30 @@ func loadWithMCPServers(
 		switch result.Ask.Engine {
 		case pfmengine.Claude:
 			if counts[pfmengine.Claude] == 0 {
-				return Config{}, fmt.Errorf("config %s: ask.engine %q has zero Claude accounts; add an accounts entry or choose codex", result.Path, result.Ask.Engine)
+				return Config{}, fmt.Errorf(
+					"config %s: ask.engine %q has zero Claude accounts; add an accounts entry or choose codex",
+					result.Path,
+					result.Ask.Engine,
+				)
 			}
 		case pfmengine.Codex:
 			if counts[pfmengine.Codex] == 0 {
-				return Config{}, fmt.Errorf("config %s: ask.engine %q has zero Codex accounts; authenticate the default Codex home, add codex.homes, or choose claude", result.Path, result.Ask.Engine)
+				return Config{}, fmt.Errorf(
+					"config %s: ask.engine %q has zero Codex accounts; authenticate the default Codex home, add codex.homes, or choose claude",
+					result.Path,
+					result.Ask.Engine,
+				)
 			}
-		case pfmengine.Opencode:
-			if counts[pfmengine.Opencode] == 0 {
-				descriptor := pfmengine.MustLookup(pfmengine.Opencode)
-				return Config{}, fmt.Errorf("config %s: ask.engine %q has zero %s accounts; create %s or choose another engine", result.Path, result.Ask.Engine, descriptor.Short, filepath.Join(descriptor.DefaultRoots(home)[0], "opencode.db"))
+		case pfmengine.OpenCode:
+			if counts[pfmengine.OpenCode] == 0 {
+				descriptor := pfmengine.MustLookup(pfmengine.OpenCode)
+				return Config{}, fmt.Errorf(
+					"config %s: ask.engine %q has zero %s accounts; create %s or choose another engine",
+					result.Path,
+					result.Ask.Engine,
+					descriptor.Short,
+					filepath.Join(descriptor.DefaultRoots(home)[0], "opencode.db"),
+				)
 			}
 		}
 	}
@@ -936,13 +925,17 @@ func finishHarvester(result *Config, home string, registered map[string]MCPServe
 	if err := loadHarvester(result, home, legacyEnabled); err != nil {
 		return err
 	}
-	if _, found := registered["harvester"]; found {
-		result.MCP.Servers["harvester"] = MCPServer{Enabled: result.Harvester.Enabled}
+	if _, found := registered[MCPServerHarvester]; found {
+		result.MCP.Servers[MCPServerHarvester] = MCPServer{Enabled: result.Harvester.Enabled}
 	}
 	result.MCPServers = cloneMCPServers(result.MCP.Servers)
 	if result.Harvester.External.Enabled && result.Harvester.External.Port == result.MCP.HTTP.Port {
-		return fmt.Errorf("harvester config %s: external.port %d collides with mcp.http.port in %s; the two gateways need distinct ports",
-			result.Harvester.Path, result.Harvester.External.Port, result.Path)
+		return fmt.Errorf(
+			"harvester config %s: external.port %d collides with mcp.http.port in %s; the two gateways need distinct ports",
+			result.Harvester.Path,
+			result.Harvester.External.Port,
+			result.Path,
+		)
 	}
 	return nil
 }
@@ -954,10 +947,20 @@ func finishHarvester(result *Config, home string, registered map[string]MCPServe
 func parseNameSyncInterval(value, path string) (time.Duration, error) {
 	interval, err := time.ParseDuration(strings.TrimSpace(value))
 	if err != nil {
-		return 0, fmt.Errorf("config %s: nameSync.interval must be a Go duration such as %q, got %q", path, DefaultNameSyncInterval.String(), value)
+		return 0, fmt.Errorf(
+			"config %s: nameSync.interval must be a Go duration such as %q, got %q",
+			path,
+			DefaultNameSyncInterval.String(),
+			value,
+		)
 	}
 	if interval < MinNameSyncInterval {
-		return 0, fmt.Errorf("config %s: nameSync.interval must be at least %s, got %s", path, MinNameSyncInterval, interval)
+		return 0, fmt.Errorf(
+			"config %s: nameSync.interval must be at least %s, got %s",
+			path,
+			MinNameSyncInterval,
+			interval,
+		)
 	}
 	return interval, nil
 }
@@ -1003,13 +1006,24 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			mode = PermissionPrompt
 		}
 		if mode != PermissionBypass && mode != PermissionPrompt {
-			return ClaudePrefs{}, fmt.Errorf("config %s: %s.permissionMode must be %q or %q, got %q", path, configScope(scope, index), PermissionBypass, PermissionPrompt, *raw.PermissionMode)
+			return ClaudePrefs{}, fmt.Errorf(
+				"config %s: %s.permissionMode must be %q or %q, got %q",
+				path,
+				configScope(scope, index),
+				PermissionBypass,
+				PermissionPrompt,
+				*raw.PermissionMode,
+			)
 		}
 		prefs.PermissionMode = mode
 	}
 	if raw.Binary != nil {
 		if strings.TrimSpace(*raw.Binary) == "" || strings.ContainsRune(*raw.Binary, '\x00') {
-			return ClaudePrefs{}, fmt.Errorf("config %s: %s.binary must be a non-empty command", path, configScope(scope, index))
+			return ClaudePrefs{}, fmt.Errorf(
+				"config %s: %s.binary must be a non-empty command",
+				path,
+				configScope(scope, index),
+			)
 		}
 		prefs.Binary = *raw.Binary
 	}
@@ -1019,7 +1033,15 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 	if raw.SystemPrompt != nil {
 		value := *raw.SystemPrompt
 		if value != SystemPromptProduction && value != SystemPromptLean && value != SystemPromptProfessor {
-			return ClaudePrefs{}, fmt.Errorf("config %s: %s.systemPrompt must be %q, %q or %q, got %q", path, configScope(scope, index), SystemPromptProduction, SystemPromptLean, SystemPromptProfessor, value)
+			return ClaudePrefs{}, fmt.Errorf(
+				"config %s: %s.systemPrompt must be %q, %q or %q, got %q",
+				path,
+				configScope(scope, index),
+				SystemPromptProduction,
+				SystemPromptLean,
+				SystemPromptProfessor,
+				value,
+			)
 		}
 		prefs.SystemPrompt = value
 	}
@@ -1041,7 +1063,11 @@ func decodeCodexPrefValues(yolo *bool, binary *string, path, scope string, index
 	}
 	if binary != nil {
 		if strings.TrimSpace(*binary) == "" || strings.ContainsRune(*binary, '\x00') {
-			return CodexPrefs{}, fmt.Errorf("config %s: %s.binary must be a non-empty command", path, configScope(scope, index))
+			return CodexPrefs{}, fmt.Errorf(
+				"config %s: %s.binary must be a non-empty command",
+				path,
+				configScope(scope, index),
+			)
 		}
 		prefs.Binary = *binary
 	}
@@ -1089,7 +1115,12 @@ func validateAccounts(values []rawAccount, home string) ([]Account, error) {
 	return accounts, nil
 }
 
-func validateCodexHomes(values []rawCodexHome, home string, existing []CodexAccount, path string) ([]CodexAccount, error) {
+func validateCodexHomes(
+	values []rawCodexHome,
+	home string,
+	existing []CodexAccount,
+	path string,
+) ([]CodexAccount, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -1120,7 +1151,11 @@ func validateCodexHomes(values []rawCodexHome, home string, existing []CodexAcco
 			return nil, fmt.Errorf("config %s: %s auth.json: %w", path, scope, credErr)
 		}
 		if !valid {
-			return nil, fmt.Errorf("config %s: %s must contain a valid auth.json with tokens.access_token and account_id", path, scope)
+			return nil, fmt.Errorf(
+				"config %s: %s must contain a valid auth.json with tokens.access_token and account_id",
+				path,
+				scope,
+			)
 		}
 		emoji := value.Emoji
 		if emoji == "" {
@@ -1137,7 +1172,12 @@ func validateCodexHomes(values []rawCodexHome, home string, existing []CodexAcco
 		cleanHome := filepath.Clean(codexHome)
 		if existingIndex, found := homes[cleanHome]; found {
 			if accounts[existingIndex].ID != value.ID {
-				return nil, fmt.Errorf("config %s: %s home duplicates Codex account %d", path, scope, accounts[existingIndex].ID)
+				return nil, fmt.Errorf(
+					"config %s: %s home duplicates Codex account %d",
+					path,
+					scope,
+					accounts[existingIndex].ID,
+				)
 			}
 			accounts[existingIndex].Emoji = emoji
 			accounts[existingIndex].Prefs = prefs
@@ -1198,8 +1238,7 @@ func (config Config) AccountByID(id int) (Account, bool) {
 	return Account{}, false
 }
 
-// EffectiveClaude resolves an account override over the top-level Claude
-// posture and binary. Unknown accounts receive the top-level posture.
+// EffectiveClaude resolves an account override over the top-level Claude posture, binary, and theme; unknown accounts receive the top-level posture.
 func (config Config) EffectiveClaude(id int) ClaudePrefs {
 	result := config.Claude
 	if account, ok := config.AccountByID(id); ok && account.Claude != nil {
@@ -1209,11 +1248,18 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		if account.Claude.Binary != "" {
 			result.Binary = account.Claude.Binary
 		}
+		if account.Claude.Theme != "" {
+			result.Theme = account.Claude.Theme
+		}
 		// Unconditional, like EffectiveCodex's Yolo: Load already seeded an
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
-		result.Cache1H = account.Claude.Cache1H
+		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
 		result.CompactNudge = account.Claude.CompactNudge
+		// Zero is unset on both caps, so Load's inheritance already put the
+		// resolved top-level value here — same unconditional copy as Cache1H.
+		result.MaxSubagentSpawnDepth = account.Claude.MaxSubagentSpawnDepth
+		result.MaxConcurrentSubagents = account.Claude.MaxConcurrentSubagents
 		if account.Claude.SystemPrompt != "" {
 			result.SystemPrompt = account.Claude.SystemPrompt
 		}
@@ -1231,9 +1277,9 @@ func (config Config) CodexAccountByID(id int) (CodexAccount, bool) {
 	return CodexAccount{}, false
 }
 
-// OpencodeAccountByID returns the implicit OpenCode seat when its store exists.
-func (config Config) OpencodeAccountByID(id int) (OpenCodeAccount, bool) {
-	for _, account := range config.OpencodeAccounts {
+// OpenCodeAccountByID returns the implicit OpenCode seat when its store exists.
+func (config Config) OpenCodeAccountByID(id int) (OpenCodeAccount, bool) {
+	for _, account := range config.OpenCodeAccounts {
 		if account.ID == id {
 			return account, true
 		}
@@ -1301,8 +1347,8 @@ func (config Config) Engines() EngineCounts {
 	if count := len(config.CodexAccounts); count != 0 {
 		counts[pfmengine.Codex] = count
 	}
-	if count := len(config.OpencodeAccounts); count != 0 {
-		counts[pfmengine.Opencode] = count
+	if count := len(config.OpenCodeAccounts); count != 0 {
+		counts[pfmengine.OpenCode] = count
 	}
 	return counts
 }
@@ -1323,9 +1369,9 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 		if counts[pfmengine.Codex] > 0 {
 			return pfmengine.Codex, nil
 		}
-	case pfmengine.Opencode:
-		if counts[pfmengine.Opencode] > 0 {
-			return pfmengine.Opencode, nil
+	case pfmengine.OpenCode:
+		if counts[pfmengine.OpenCode] > 0 {
+			return pfmengine.OpenCode, nil
 		}
 	}
 	if counts[pfmengine.Claude] > 0 {
@@ -1334,8 +1380,8 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 	if counts[pfmengine.Codex] > 0 {
 		return pfmengine.Codex, nil
 	}
-	if counts[pfmengine.Opencode] > 0 {
-		return pfmengine.Opencode, nil
+	if counts[pfmengine.OpenCode] > 0 {
+		return pfmengine.OpenCode, nil
 	}
 	return "", errors.New("no engines configured: Claude roster empty; Codex roster empty; OpenCode store absent")
 }
@@ -1365,7 +1411,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 	if !registered {
 		return false, fmt.Errorf("unknown MCP server %q", name)
 	}
-	if name == "harvester" {
+	if name == MCPServerHarvester {
 		return SetHarvesterEnabled(config, enabled)
 	}
 	if server.Enabled == enabled {
@@ -1397,7 +1443,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 			return false, fmt.Errorf("decode config %s mcp.servers for update: %w", config.Path, err)
 		}
 	}
-	serverObject := map[string]bool{"enabled": enabled}
+	serverObject := map[string]bool{jsonKeyEnabled: enabled}
 	serverContent, _ := json.Marshal(serverObject)
 	servers[name] = serverContent
 	serversContent, _ := json.Marshal(servers)
@@ -1476,7 +1522,9 @@ func configWithoutMCPAuthToken(config Config) ([]byte, bool, error) {
 // init`. It deliberately emits resolved defaults so the file is useful as a
 // documented starting point while the loader remains backward compatible.
 func MarshalDefault(home string, projectRoots []string) ([]byte, error) {
-	return Marshal(Defaults(home, projectRoots), false)
+	defaults := Defaults(home, projectRoots)
+	defaults.Log.Level = InstallLogLevel
+	return Marshal(defaults, false)
 }
 
 // WriteDefault installs the default machine file atomically. Existing files
@@ -1506,20 +1554,22 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	for _, account := range config.Accounts {
 		value := map[string]any{
 			"id":        account.ID,
-			"configDir": displayPath(account.ConfigDir, configHome(config)),
+			"configDir": account.ConfigDir,
 			"emoji":     account.Emoji,
 		}
 		if account.Claude != nil {
 			value[claudeName] = map[string]any{
 				"permissionMode": account.Claude.PermissionMode,
-				"binary":         account.Claude.Binary,
+				engineKeyBinary:  account.Claude.Binary,
+				"theme":          themeMarshalValue(account.Claude.Theme),
 				"cache1h":        account.Claude.Cache1H,
+				"nativeCursor":   account.Claude.NativeCursor,
 			}
 		}
 		if account.Codex != nil {
 			value[codexName] = map[string]any{
-				"yolo":   account.Codex.Yolo,
-				"binary": account.Codex.Binary,
+				engineKeyYolo:   account.Codex.Yolo,
+				engineKeyBinary: account.Codex.Binary,
 			}
 		}
 		accounts = append(accounts, value)
@@ -1527,23 +1577,23 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	codexHomes := make([]map[string]any, 0, len(config.CodexAccounts))
 	for _, account := range config.CodexAccounts {
 		value := map[string]any{
-			"id": account.ID, "home": displayPath(account.Home, configHome(config)), "emoji": account.Emoji,
+			"id": account.ID, "home": account.Home, "emoji": account.Emoji,
 		}
 		if account.Prefs != nil {
-			value["prefs"] = map[string]any{"yolo": account.Prefs.Yolo, "binary": account.Prefs.Binary}
+			value["prefs"] = map[string]any{engineKeyYolo: account.Prefs.Yolo, engineKeyBinary: account.Prefs.Binary}
 		}
 		codexHomes = append(codexHomes, value)
 	}
 	servers := make(map[string]any, len(config.MCP.Servers))
 	for name, server := range config.MCP.Servers {
-		if name == "harvester" {
+		if name == MCPServerHarvester {
 			continue // lives in harvester.config.json (MarshalHarvester)
 		}
-		servers[name] = map[string]any{"enabled": server.Enabled}
+		servers[name] = map[string]any{jsonKeyEnabled: server.Enabled}
 	}
 	codexValue := map[string]any{
-		"yolo":   config.Codex.Yolo,
-		"binary": config.Codex.Binary,
+		engineKeyYolo:   config.Codex.Yolo,
+		engineKeyBinary: config.Codex.Binary,
 	}
 	if len(codexHomes) != 0 || config.Source(engineConfigKey(pfmengine.Codex, "homes")) == SourceFile {
 		codexValue["homes"] = codexHomes
@@ -1567,24 +1617,27 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		"accounts": accounts,
 		claudeName: map[string]any{
 			"permissionMode": config.Claude.PermissionMode,
-			"binary":         config.Claude.Binary,
+			engineKeyBinary:  config.Claude.Binary,
+			"theme":          themeMarshalValue(config.Claude.Theme),
 			"cache1h":        config.Claude.Cache1H,
+			"nativeCursor":   config.Claude.NativeCursor,
 			"compactNudge": map[string]any{
-				"enabled": config.Claude.CompactNudge.Enabled,
-				"start":   config.Claude.CompactNudge.Start,
-				"step":    config.Claude.CompactNudge.Step,
+				jsonKeyEnabled: config.Claude.CompactNudge.Enabled,
+				"start":        config.Claude.CompactNudge.Start,
+				"step":         config.Claude.CompactNudge.Step,
 			},
 		},
 		codexName: codexValue,
 		"tmux": map[string]any{
-			"titles": map[string]any{"enabled": config.Tmux.Titles.Enabled},
+			"titles": map[string]any{jsonKeyEnabled: config.Tmux.Titles.Enabled},
 		},
 		"nameSync": map[string]any{"interval": config.NameSync.Interval.String()},
 		"mcp": map[string]any{
 			"servers": servers,
-			"http":    map[string]any{"port": config.MCP.HTTP.Port},
+			"http":    map[string]any{jsonKeyPort: config.MCP.HTTP.Port},
 		},
 		"ask": askValue,
+		"log": MarshalLog(config.Log),
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -1594,59 +1647,4 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		return RedactSecrets(append(content, '\n')), nil
 	}
 	return append(content, '\n'), nil
-}
-
-func configHome(config Config) string {
-	if len(config.Accounts) == 0 {
-		return ""
-	}
-	// Config paths are already expanded at load time. The serialized default
-	// uses absolute paths; this helper exists to keep the conversion explicit
-	// and avoid guessing a user's home from an arbitrary account roster.
-	return ""
-}
-
-func displayPath(value, home string) string {
-	if home != "" && (value == home || strings.HasPrefix(value, home+string(filepath.Separator))) {
-		return "~" + strings.TrimPrefix(value, home)
-	}
-	return value
-}
-
-// RedactSecrets preserves JSON shape while replacing secret-looking object
-// fields. It is intentionally generic so future credentials are safe by
-// default without another display-path audit.
-func RedactSecrets(content []byte) []byte {
-	var value any
-	if err := json.Unmarshal(content, &value); err != nil {
-		return content
-	}
-	redactJSON(value)
-	var encoded bytes.Buffer
-	encoder := json.NewEncoder(&encoded)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err != nil {
-		return content
-	}
-	return encoded.Bytes()
-}
-
-func redactJSON(value any) {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, child := range typed {
-			lower := strings.ToLower(key)
-			if strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "credential") || strings.Contains(lower, "password") ||
-				strings.Contains(lower, "passphrase") || strings.Contains(lower, "apikey") {
-				typed[key] = "<redacted>"
-				continue
-			}
-			redactJSON(child)
-		}
-	case []any:
-		for _, child := range typed {
-			redactJSON(child)
-		}
-	}
 }

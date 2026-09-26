@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/transcript"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // lastWindow is how many trailing entries Last searches for the newest
@@ -28,7 +28,7 @@ type LastResult struct {
 // Last reads the target's newest assistant turn. A chat with no transcript
 // yet is ErrNoTranscript and one that has not answered is ErrNoAnswer; both
 // carry the resolved chat in the result.
-func Last(ctx context.Context, runtime *pfmconfig.Runtime, request LastRequest) (LastResult, error) {
+func LastAnswer(ctx context.Context, runtime *pfmconfig.Runtime, request LastRequest) (LastResult, error) {
 	target, err := Target(ctx, request.Target, runtime)
 	if err != nil {
 		return LastResult{}, err

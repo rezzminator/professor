@@ -70,13 +70,13 @@ func loadTargets() map[Platform]Target {
 		var platform Platform
 		switch name {
 		case "linux-amd64":
-			platform = Platform{GOOS: "linux", GOARCH: "amd64"}
+			platform = Platform{GOOS: goosLinux, GOARCH: goarchAMD64}
 		case "linux-arm64":
-			platform = Platform{GOOS: "linux", GOARCH: "arm64"}
+			platform = Platform{GOOS: goosLinux, GOARCH: goarchARM64}
 		case "darwin-amd64":
-			platform = Platform{GOOS: "darwin", GOARCH: "amd64"}
+			platform = Platform{GOOS: goosDarwin, GOARCH: goarchAMD64}
 		case "darwin-arm64":
-			platform = Platform{GOOS: "darwin", GOARCH: "arm64"}
+			platform = Platform{GOOS: goosDarwin, GOARCH: goarchARM64}
 		default:
 			panic(fmt.Sprintf("harvestpy embedded target manifest has unknown target %q", name))
 		}
@@ -88,7 +88,13 @@ func loadTargets() map[Platform]Target {
 				panic(fmt.Sprintf("harvestpy target %s has invalid %s sha256: %v", name, label, err))
 			}
 		}
-		result[platform] = Target{Platform: platform, UV: entry.UV, Python: entry.Python, UVVersion: manifest.UVVersion, PythonVersion: manifest.PythonVersion}
+		result[platform] = Target{
+			Platform:      platform,
+			UV:            entry.UV,
+			Python:        entry.Python,
+			UVVersion:     manifest.UVVersion,
+			PythonVersion: manifest.PythonVersion,
+		}
 	}
 	return result
 }
@@ -96,8 +102,8 @@ func loadTargets() map[Platform]Target {
 // Targets returns a copy so callers cannot mutate the process-wide pins.
 func Targets() map[Platform]Target {
 	result := make(map[Platform]Target, len(immutableTargets))
-	for platform, target := range immutableTargets {
-		result[platform] = target
+	for platform := range immutableTargets {
+		result[platform] = immutableTargets[platform]
 	}
 	return result
 }

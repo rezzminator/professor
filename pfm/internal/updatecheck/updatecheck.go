@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -36,6 +38,29 @@ type Notice struct {
 	Latest     string    `json:"latest"`
 	ReleaseURL string    `json:"release_url"`
 	CheckedAt  time.Time `json:"checked_at"`
+}
+
+// failureClass is a short, stable, machine-readable reason a check failed —
+// never prose, so a marker's class can be switched on without parsing an
+// error string whose wording is free to change between versions.
+type failureClass string
+
+const (
+	failureLock    failureClass = "lock"
+	failureCache   failureClass = "cache"
+	failureNetwork failureClass = "network"
+)
+
+// FailureMarker is the durable "last check failed" record written beside the
+// cache whenever a check does not end in a fresh success. Read alone cannot
+// tell a permanently failing checker from a machine that genuinely has no
+// update — both answer found=false — so a caller that wants to warn about a
+// checker that has been failing needs this file too. Cleared the next time a
+// check actually succeeds (including a "still fresh" short-circuit).
+type FailureMarker struct {
+	At     time.Time    `json:"at"`
+	Class  failureClass `json:"class"`
+	Reason string       `json:"reason"`
 }
 
 type semanticVersion struct {
@@ -61,7 +86,7 @@ func Read(path, current string) (Notice, bool, error) {
 	if err := json.Unmarshal(raw, &notice); err != nil {
 		return Notice{}, false, fmt.Errorf("decode update cache: %w", err)
 	}
-	installed, installedOK := parseVersion(current)
+	installed, installedOK := parseNoticeVersion(current)
 	latest, latestOK := parseReleaseVersion(notice.Latest)
 	if !installedOK || !latestOK || !newer(latest, installed) {
 		return Notice{}, false, nil
@@ -70,64 +95,102 @@ func Read(path, current string) (Notice, bool, error) {
 	return notice, true, nil
 }
 
-// Check performs one bounded latest-release lookup and atomically replaces the
-// cache only after a complete, valid response. A failed lookup leaves the last
-// successful notice intact, so temporary network failures cannot make an
-// already-known update disappear.
-func Check(ctx context.Context, path, current, latestURL string, client *http.Client) error {
-	if _, ok := parseVersion(current); !ok {
+// CheckForUpdate performs one bounded latest-release lookup and atomically
+// replaces the cache only after a complete, valid response. A failed lookup
+// leaves the last successful notice intact, so temporary network failures
+// cannot make an already-known update disappear.
+//
+// Every path that does not end in a confirmed-fresh cache writes a durable
+// FailureMarker beside path first; every path that does clears it. A checker
+// that has been failing for days must never look identical, through Read
+// alone, to a machine that genuinely has no update — see ReadFailure.
+func CheckForUpdate(ctx context.Context, path, current, latestURL string, client *http.Client) error {
+	clk := clock.Real
+	if _, ok := parseNoticeVersion(current); !ok {
 		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH[-prerelease]", current)
 	}
-	release, err := acquire(path + ".lock")
+	release, err := acquire(path+".lock", clk.Now())
 	if err != nil {
-		return err
+		return recordFailure(path, clk.Now().UTC(), failureLock, err)
 	}
 	if release == nil {
+		// Another invocation already holds the lock: THIS call performed no
+		// check of its own, so the durable marker is left exactly as it was
+		// — neither written nor cleared on its behalf.
 		return nil
 	}
 	defer release()
 
-	now := time.Now().UTC()
+	now := clk.Now().UTC()
+	class, checkErr := performCheck(ctx, path, current, latestURL, client, now)
+	if checkErr != nil {
+		return recordFailure(path, now, class, checkErr)
+	}
+	if err := clearFailure(path); err != nil {
+		// The check itself succeeded and the cache is fresh: a stale marker
+		// that would not go is logged, never turned into a failed check.
+		obs.Logger(ctx).Warn("update check: the stale failure marker could not be cleared after a successful check",
+			"cache", path, "marker", failurePath(path), obs.FieldErr, err.Error())
+	}
+	return nil
+}
+
+// performCheck is CheckForUpdate's body once the lock is held: the
+// freshness short-circuit, the network lookup, and the cache write. Its
+// failureClass return is "" on success — recordFailure is never called with
+// a nil error, so the class is never read in that case.
+func performCheck(
+	ctx context.Context,
+	path, current, latestURL string,
+	client *http.Client,
+	now time.Time,
+) (failureClass, error) {
 	recent, err := checkedRecently(path, current, now)
 	if err != nil {
-		return err
+		return failureCache, err
 	}
 	if recent {
-		return nil
+		return "", nil
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 12 * time.Second}
+		client = obs.WrapClient(&http.Client{Timeout: 12 * time.Second})
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("build latest-release request: %w", err)
+		return failureNetwork, fmt.Errorf("build latest-release request: %w", err)
 	}
 	request.Header.Set("User-Agent", "pfm-update-check/"+normalizeVersion(current))
+	// Wrap a shallow copy: the caller's client keeps its own Transport and
+	// CheckRedirect.
 	noFollow := *client
+	obs.WrapClient(&noFollow)
 	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
 	resolved, location, err := follow(&noFollow, request)
 	if err != nil {
-		return err
+		return failureNetwork, err
 	}
 	if hop := renameHopURL(request.URL, resolved); hop != "" {
-		hopRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, hop, nil)
+		hopRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, hop, http.NoBody)
 		if err != nil {
-			return fmt.Errorf("build renamed Professor release request: %w", err)
+			return failureNetwork, fmt.Errorf("build renamed Professor release request: %w", err)
 		}
 		hopRequest.Header.Set("User-Agent", request.Header.Get("User-Agent"))
 		resolved, location, err = follow(&noFollow, hopRequest)
 		if err != nil {
-			return err
+			return failureNetwork, err
 		}
 		if second := renameHopURL(hopRequest.URL, resolved); second != "" {
-			return fmt.Errorf("renamed Professor release redirect %q renamed again to %q", hop, second)
+			return failureNetwork, fmt.Errorf("renamed Professor release redirect %q renamed again to %q", hop, second)
 		}
 	}
 	latest := pathVersion(resolved)
 	if _, ok := parseReleaseVersion(latest); !ok {
-		return fmt.Errorf("latest Professor release redirect %q has no vMAJOR.MINOR.PATCH tag", location)
+		return failureNetwork, fmt.Errorf(
+			"latest Professor release redirect %q has no vMAJOR.MINOR.PATCH tag",
+			location,
+		)
 	}
 	notice := Notice{
 		Current:    normalizeVersion(current),
@@ -136,9 +199,61 @@ func Check(ctx context.Context, path, current, latestURL string, client *http.Cl
 		CheckedAt:  now,
 	}
 	if err := writeNotice(path, notice); err != nil {
-		return fmt.Errorf("write update cache: %w", err)
+		return failureCache, fmt.Errorf("write update cache: %w", err)
+	}
+	return "", nil
+}
+
+// recordFailure writes the durable failure marker beside path and returns
+// the ORIGINAL cause — a marker write that itself fails is joined in, never
+// allowed to swallow the check failure it exists to report.
+func recordFailure(path string, at time.Time, class failureClass, cause error) error {
+	if markErr := writeFailure(path, FailureMarker{At: at, Class: class, Reason: cause.Error()}); markErr != nil {
+		return errors.Join(cause, fmt.Errorf("record update check failure: %w", markErr))
+	}
+	return cause
+}
+
+// failurePath is where the durable failure marker lives, beside the cache
+// itself and its own ".lock" file.
+func failurePath(path string) string { return path + ".failure" }
+
+func writeFailure(path string, marker FailureMarker) error {
+	encoded, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode update check failure marker: %w", err)
+	}
+	return atomicfile.Write(failurePath(path), append(encoded, '\n'), 0o600)
+}
+
+// clearFailure removes the failure marker on a confirmed success. A marker
+// that was never there is not an error — the ordinary state after the very
+// first successful check.
+func clearFailure(path string) error {
+	if err := os.Remove(failurePath(path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("clear update check failure marker: %w", err)
 	}
 	return nil
+}
+
+// ReadFailure reports the durable "last check failed" marker beside path, if
+// one exists. Absent is an ordinary state (no failure since the last
+// success, or the checker has never run) — but a marker that exists and
+// cannot be read or decoded is reported as an error, never folded into
+// absence, the same rule Read applies to the cache itself.
+func ReadFailure(path string) (FailureMarker, bool, error) {
+	raw, err := os.ReadFile(failurePath(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return FailureMarker{}, false, nil
+	}
+	if err != nil {
+		return FailureMarker{}, false, fmt.Errorf("read update check failure marker: %w", err)
+	}
+	var marker FailureMarker
+	if err := json.Unmarshal(raw, &marker); err != nil {
+		return FailureMarker{}, false, fmt.Errorf("decode update check failure marker: %w", err)
+	}
+	return marker, true, nil
 }
 
 // checkedRecently recognizes only a complete, successful notice. Malformed
@@ -167,7 +282,7 @@ func checkedRecently(path, current string, now time.Time) (bool, error) {
 	return age >= 0 && age <= checkFreshFor, nil
 }
 
-func acquire(path string) (func(), error) {
+func acquire(path string, now time.Time) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create update cache directory: %w", err)
 	}
@@ -190,7 +305,7 @@ func acquire(path string) (func(), error) {
 			}
 			return nil, fmt.Errorf("inspect update lock: %w", statErr)
 		}
-		if time.Since(info.ModTime()) <= lockStaleAfter {
+		if now.Sub(info.ModTime()) <= lockStaleAfter {
 			return nil, nil
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -211,20 +326,27 @@ func writeNotice(path string, notice Notice) error {
 // follow issues one HEAD request and returns its redirect target, both parsed
 // and as the raw Location header (kept for error messages). A non-3xx status
 // or a missing/unparsable Location is an error, never a silent "no update".
-func follow(client *http.Client, request *http.Request) (*url.URL, string, error) {
+func follow(
+	client *http.Client,
+	request *http.Request,
+) (resolved *url.URL, location string, returnErr error) {
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, "", fmt.Errorf("request latest Professor release: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close latest release response: %w", err))
+		}
+	}()
 	if response.StatusCode < 300 || response.StatusCode >= 400 {
 		return nil, "", fmt.Errorf("latest Professor release returned %s", response.Status)
 	}
-	location := strings.TrimSpace(response.Header.Get("Location"))
+	location = strings.TrimSpace(response.Header.Get("Location"))
 	if location == "" {
 		return nil, "", errors.New("latest Professor release redirect omitted Location")
 	}
-	resolved, err := request.URL.Parse(location)
+	resolved, err = request.URL.Parse(location)
 	if err != nil {
 		return nil, "", fmt.Errorf("parse latest Professor release redirect: %w", err)
 	}
@@ -281,7 +403,7 @@ func normalizeVersion(value string) string {
 	return value
 }
 
-func parseVersion(value string) (semanticVersion, bool) {
+func parseNoticeVersion(value string) (semanticVersion, bool) {
 	value = strings.TrimPrefix(normalizeVersion(value), "v")
 	var prerelease bool
 	if separator := strings.IndexAny(value, "-+"); separator >= 0 {
@@ -317,7 +439,7 @@ func parseReleaseVersion(value string) (semanticVersion, bool) {
 	if strings.ContainsAny(normalized, "-+") {
 		return semanticVersion{}, false
 	}
-	return parseVersion(normalized)
+	return parseNoticeVersion(normalized)
 }
 
 func newer(candidate, current semanticVersion) bool {

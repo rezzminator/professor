@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>requests · PyPI</title></head>
+<body>
+<main id="content">
+<div id="description"
+     data-project-tabs-target="content"
+     role="tabpanel"
+     aria-labelledby="description-tab"
+     tabindex="-1">
+  <div class="project-description">
+    <div class="project-description__main">
+        <div class="project-description__content"><h1><a href=#user-content-requests id=user-content-requests rel=nofollow></a>Requests</h1>
+<p><a href="https://pypi.org/project/requests/" rel=nofollow><img src="https://pypi-camo.freetls.fastly.net/506b1a4c6b40f7ef7d0602fddd7a98ff5ac8467d/68747470733a2f2f696d672e736869656c64732e696f2f707970692f762f72657175657374732e7376673f6d61784167653d3836343030" alt=Version></a>
+<a href="https://pypi.org/project/requests" rel=nofollow><img src="https://pypi-camo.freetls.fastly.net/508b21fb70f4bc69e3d62730b3ac3c307a209bca/68747470733a2f2f696d672e736869656c64732e696f2f707970692f707976657273696f6e732f72657175657374732e737667" alt="Supported Versions"></a>
+<a href="https://pepy.tech/project/requests" rel=nofollow><img src="https://pypi-camo.freetls.fastly.net/2757478eed0aacd27f29fb7253fdc8b8ca900354/68747470733a2f2f7374617469632e706570792e746563682f62616467652f72657175657374732f6d6f6e7468" alt=Downloads></a>
+<a href="https://github.com/psf/requests/graphs/contributors" rel=nofollow><img src="https://pypi-camo.freetls.fastly.net/ea4a3e8164c289858e9bdc8e83e5425979d1fb3e/68747470733a2f2f696d672e736869656c64732e696f2f6769746875622f636f6e7472696275746f72732f7073662f72657175657374732e737667" alt=Contributors></a>
+<a href="https://requests.readthedocs.io" rel=nofollow><img src="https://pypi-camo.freetls.fastly.net/3c4d0123fd7c83cd9f16c559866a2cf1cb569a96/68747470733a2f2f72656164746865646f63732e6f72672f70726f6a656374732f72657175657374732f62616467652f3f76657273696f6e3d6c6174657374" alt=Documentation></a></p>
+<p><strong>Requests</strong> is a simple, yet elegant, HTTP library.</p>
+<pre lang=python><span class=o>&gt;&gt;&gt;</span> <span class=kn>import</span><span class=w> </span><span class=nn>requests</span>
+<span class=o>&gt;&gt;&gt;</span> <span class=n>r</span> <span class=o>=</span> <span class=n>requests</span><span class=o>.</span><span class=n>get</span><span class=p>(</span><span class=s1>'https://httpbin.org/basic-auth/user/pass'</span><span class=p>,</span> <span class=n>auth</span><span class=o>=</span><span class=p>(</span><span class=s1>'user'</span><span class=p>,</span> <span class=s1>'pass'</span><span class=p>))</span>
+<span class=o>&gt;&gt;&gt;</span> <span class=n>r</span><span class=o>.</span><span class=n>status_code</span>
+<span class=mi>200</span>
+<span class=o>&gt;&gt;&gt;</span> <span class=n>r</span><span class=o>.</span><span class=n>headers</span><span class=p>[</span><span class=s1>'content-type'</span><span class=p>]</span>
+<span class=s1>'application/json; charset=utf8'</span>
+<span class=o>&gt;&gt;&gt;</span> <span class=n>r</span><span class=o>.</span><span class=n>encoding</span>
+<span class=s1>'utf-8'</span>
+<span class=o>&gt;&gt;&gt;</span> <span class=n>r</span><span class=o>.</span><span class=n>text</span>
+<span class=s1>'{"authenticated": true, ...'</span>
+<span class=o>&gt;&gt;&gt;</span> <span class=n>r</span><span class=o>.</span><span class=n>json</span><span class=p>()</span>
+<span class=p>{</span><span class=s1>'authenticated'</span><span class=p>:</span> <span class=kc>True</span><span class=p>,</span> <span class=o>...</span><span class=p>}</span>
+</pre>
+<p>Requests allows you to send HTTP/1.1 requests extremely easily. There’s no need to manually add query strings to your URLs, or to form-encode your <code>PUT</code> &amp; <code>POST</code> data — but nowadays, just use the <code>json</code> method!</p>
+<p>Requests is one of the most downloaded Python packages today, pulling in around <code>300M downloads / week</code> — according to GitHub, Requests is currently <a href="https://github.com/psf/requests/network/dependents?package_id=UGFja2FnZS01NzA4OTExNg%3D%3D" rel=nofollow>depended upon</a> by <code>4,000,000+</code> repositories.</p>
+<h2><a href=#user-content-installing-requests-and-supported-versions id=user-content-installing-requests-and-supported-versions rel=nofollow></a>Installing Requests and Supported Versions</h2>
+<p>Requests is available on PyPI:</p>
+<pre lang=console><span class=gp>$ </span>python<span class=w> </span>-m<span class=w> </span>pip<span class=w> </span>install<span class=w> </span>requests
+</pre>
+<p>Requests officially supports Python 3.10+.</p>
+<h2><a href=#user-content-supported-features--bestpractices id=user-content-supported-features--bestpractices rel=nofollow></a>Supported Features &amp; Best–Practices</h2>
+<p>Requests is ready for the demands of building robust and reliable HTTP–speaking applications, for the needs of today.</p>
+<ul>
+<li>Keep-Alive &amp; Connection Pooling</li>
+<li>International Domains and URLs</li>
+<li>Sessions with Cookie Persistence</li>
+<li>Browser-style TLS/SSL Verification</li>
+<li>Basic &amp; Digest Authentication</li>
+<li>Familiar <code>dict</code>–like Cookies</li>
+<li>Automatic Content Decompression and Decoding</li>
+<li>Multi-part File Uploads</li>
+<li>SOCKS Proxy Support</li>
+<li>Connection Timeouts</li>
+<li>Streaming Downloads</li>
+<li>Automatic honoring of <code>.netrc</code></li>
+<li>Chunked HTTP Requests</li>
+</ul>
+<h2><a href=#user-content-cloning-the-repository id=user-content-cloning-the-repository rel=nofollow></a>Cloning the repository</h2>
+<p>When cloning the Requests repository, you may need to add the <code>-c fetch.fsck.badTimezone=ignore</code> flag to avoid an error about a bad commit timestamp (see
+<a href="https://github.com/psf/requests/issues/2690" rel=nofollow>this issue</a> for more background):</p>
+<pre lang=shell>git<span class=w> </span>clone<span class=w> </span>-c<span class=w> </span>fetch.fsck.badTimezone<span class=o>=</span>ignore<span class=w> </span>https://github.com/psf/requests.git
+</pre>
+<p>You can also apply this setting to your global Git config:</p>
+<pre lang=shell>git<span class=w> </span>config<span class=w> </span>--global<span class=w> </span>fetch.fsck.badTimezone<span class=w> </span>ignore
+</pre>
+<hr>
+<p><a href="https://kennethreitz.org" rel=nofollow><img src="https://pypi-camo.freetls.fastly.net/9ccac975f9a405d76d40072b700ba9137de9c19a/68747470733a2f2f7261772e67697468756275736572636f6e74656e742e636f6d2f7073662f72657175657374732f6d61696e2f6578742f6b722e706e67" alt="Kenneth Reitz"></a> <a href="https://www.python.org/psf" rel=nofollow><img src="https://pypi-camo.freetls.fastly.net/78df7a4e37f894af3fe57b07e37c10f51822d696/68747470733a2f2f7261772e67697468756275736572636f6e74656e742e636f6d2f7073662f72657175657374732f6d61696e2f6578742f7073662e706e67" alt="Python Software Foundation"></a></p>
+</div>
+    </div>
+  </div>
+</div>
+</main>
+</body>
+</html>

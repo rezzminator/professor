@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // harvestProvisionerFake is deliberately small: installer tests must be able
@@ -33,14 +33,21 @@ func (fake *harvestProvisionerFake) Plan(_ harvestpy.Platform) (harvestpy.Instal
 	return fake.plan, fake.planErr
 }
 
-func (fake *harvestProvisionerFake) Check(ctx context.Context, root string, platform harvestpy.Platform) (harvestpy.CheckReport, error) {
+func (fake *harvestProvisionerFake) Check(
+	_ context.Context,
+	root string,
+	platform harvestpy.Platform,
+) (harvestpy.CheckReport, error) {
 	fake.checkCalls++
 	fake.lastCheckRoot = root
 	fake.lastCheckPlat = platform
 	return fake.check, fake.checkErr
 }
 
-func (fake *harvestProvisionerFake) Provision(ctx context.Context, options harvestpy.ProvisionOptions) (harvestpy.ProvisionResult, error) {
+func (fake *harvestProvisionerFake) Provision(
+	_ context.Context,
+	options harvestpy.ProvisionOptions,
+) (harvestpy.ProvisionResult, error) {
 	fake.provisionCalls++
 	fake.lastOptions = options
 	return fake.provision, fake.provisionErr
@@ -77,7 +84,12 @@ func TestInstallHarvestDryRunPlansOnlyAndWritesNothing(t *testing.T) {
 		t.Fatalf("dry-run: %v\n%s", err, output.String())
 	}
 	if fake.planCalls != 1 || fake.provisionCalls != 0 || fake.checkCalls != 0 {
-		t.Fatalf("dry-run calls plan=%d check=%d provision=%d, want 1/0/0", fake.planCalls, fake.checkCalls, fake.provisionCalls)
+		t.Fatalf(
+			"dry-run calls plan=%d check=%d provision=%d, want 1/0/0",
+			fake.planCalls,
+			fake.checkCalls,
+			fake.provisionCalls,
+		)
 	}
 	if entries, readErr := os.ReadDir(home); readErr != nil || len(entries) != 0 {
 		t.Fatalf("dry-run wrote files: entries=%v err=%v", entries, readErr)
@@ -125,7 +137,13 @@ func TestInstallHarvestSkipReportsExactStateForApplyAndPreview(t *testing.T) {
 				t.Fatalf("skip %s output=%q, want one %q", test.name, output.String(), test.want)
 			}
 			if fake.planCalls != 0 || fake.checkCalls != 0 || fake.provisionCalls != 0 {
-				t.Fatalf("skip %s called provisioner plan=%d check=%d provision=%d", test.name, fake.planCalls, fake.checkCalls, fake.provisionCalls)
+				t.Fatalf(
+					"skip %s called provisioner plan=%d check=%d provision=%d",
+					test.name,
+					fake.planCalls,
+					fake.checkCalls,
+					fake.provisionCalls,
+				)
 			}
 		})
 	}
@@ -151,10 +169,21 @@ func TestInstallHarvestApplyUsesCentralRuntimeRootAndCheckFastPath(t *testing.T)
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
 	if fake.planCalls != 2 || fake.checkCalls != 1 || fake.provisionCalls != 1 {
-		t.Fatalf("repair calls plan=%d check=%d provision=%d, want 2/1/1 (preflight + apply plans)", fake.planCalls, fake.checkCalls, fake.provisionCalls)
+		t.Fatalf(
+			"repair calls plan=%d check=%d provision=%d, want 2/1/1 (preflight + apply plans)",
+			fake.planCalls,
+			fake.checkCalls,
+			fake.provisionCalls,
+		)
 	}
 	if fake.lastOptions.Root != root || fake.lastOptions.Cache != filepath.Join(root, "cache") {
-		t.Fatalf("provision root/cache = %q/%q, want %q/%q", fake.lastOptions.Root, fake.lastOptions.Cache, root, filepath.Join(root, "cache"))
+		t.Fatalf(
+			"provision root/cache = %q/%q, want %q/%q",
+			fake.lastOptions.Root,
+			fake.lastOptions.Cache,
+			root,
+			filepath.Join(root, "cache"),
+		)
 	}
 
 	// A subsequent apply with a healthy check must not reprovision. This is the
@@ -176,10 +205,20 @@ func TestInstallHarvestApplyUsesCentralRuntimeRootAndCheckFastPath(t *testing.T)
 		t.Fatalf("healthy fast-path apply: %v\n%s", err, output.String())
 	}
 	if fast.planCalls != 2 || fast.checkCalls != 1 || fast.provisionCalls != 0 {
-		t.Fatalf("healthy fast-path calls plan=%d check=%d provision=%d, want 2/1/0 (preflight + apply plans)", fast.planCalls, fast.checkCalls, fast.provisionCalls)
+		t.Fatalf(
+			"healthy fast-path calls plan=%d check=%d provision=%d, want 2/1/0 (preflight + apply plans)",
+			fast.planCalls,
+			fast.checkCalls,
+			fast.provisionCalls,
+		)
 	}
 	if fast.lastCheckRoot != root || fast.lastCheckPlat != (harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"}) {
-		t.Fatalf("healthy fast-path check root/platform=%q/%s, want %q/linux-amd64", fast.lastCheckRoot, fast.lastCheckPlat, root)
+		t.Fatalf(
+			"healthy fast-path check root/platform=%q/%s, want %q/linux-amd64",
+			fast.lastCheckRoot,
+			fast.lastCheckPlat,
+			root,
+		)
 	}
 }
 

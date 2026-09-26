@@ -36,11 +36,18 @@ import (
 //     into net.go, precisely so the exemption stays narrow: net.go is the
 //     package's main network file, and a future bypass added there must
 //     still be caught.
+//   - find_works_sources.go hosts the per-source failure probe FindWorksReport
+//     installs into the client it hands gatewayDo: an http.RoundTripper
+//     wrapper whose RoundTrip forwards to its base transport to record a
+//     provider's status, the same wire-send shape as net_ua_transport.go and
+//     never an application call bypassing the gateway. It is its own file for
+//     the same reason: find_works.go stays under the guard.
 var gatewayExemptFiles = map[string]string{
 	"gateway.go":              "is the gateway",
 	"doh.go":                  "resolves DNS; routing it through the gateway would be a cycle",
 	"net_chrome_transport.go": "is transport-internal, below the gateway",
 	"net_ua_transport.go":     "is transport-internal: the User-Agent wrapper installed into every gateway client, forwarding to its base transport",
+	"find_works_sources.go":   "is transport-internal: the per-source failure probe FindWorksReport installs into the client it hands the gateway, forwarding to its base transport",
 }
 
 // gatewayEgressFinding is one call site scanGatewayEgress judged as HTTP
@@ -58,8 +65,17 @@ type gatewayEgressFinding struct {
 // http.Header.Get and url.Values.Get share the method name "Get" with
 // http.Client.Get but resolve to a different receiver type entirely, and only
 // go/types can tell them apart from the syntax alone.
-var gatewayEgressClientMethods = map[string]bool{"Do": true, "Get": true, "Post": true, "Head": true, "PostForm": true}
-var gatewayEgressPackageFuncs = map[string]bool{"Get": true, "Post": true, "Head": true, "PostForm": true, "NewRequest": true, "NewRequestWithContext": true}
+var (
+	gatewayEgressClientMethods = map[string]bool{"Do": true, "Get": true, "Post": true, "Head": true, "PostForm": true}
+	gatewayEgressPackageFuncs  = map[string]bool{
+		"Get":                   true,
+		"Post":                  true,
+		"Head":                  true,
+		"PostForm":              true,
+		"NewRequest":            true,
+		"NewRequestWithContext": true,
+	}
+)
 
 // scanGatewayEgress type-checks files as one synthetic package and returns
 // every call that issues, or could issue, outbound HTTP: a method
@@ -210,8 +226,11 @@ func TestEveryEgressGoesThroughTheGateway(t *testing.T) {
 	}
 	sort.Strings(offenders)
 	if len(offenders) > 0 {
-		t.Fatalf("HTTP egress outside the fetch gateway (%d site(s)); route these through gatewayFetch/gatewayAttempt, or justify an entry in gatewayExemptFiles:\n  %s",
-			len(offenders), strings.Join(offenders, "\n  "))
+		t.Fatalf(
+			"HTTP egress outside the fetch gateway (%d site(s)); route these through retrieveGateway/gatewayAttempt, or justify an entry in gatewayExemptFiles:\n  %s",
+			len(offenders),
+			strings.Join(offenders, "\n  "),
+		)
 	}
 	t.Logf("egress chokepoint holds: %d source file(s) scanned, %d exempt", scanned, len(gatewayExemptFiles))
 }

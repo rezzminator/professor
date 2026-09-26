@@ -1,15 +1,15 @@
 package compose
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestComposeCanonicalizesSymlinkedAccountRoots(t *testing.T) {
@@ -95,7 +95,7 @@ func TestCrumbPrecedenceAndSocketTrust(t *testing.T) {
 		1400,
 	)
 	input.Transcripts = append(input.Transcripts, distrusted)
-	input.Snapshot.Panes = append(input.Snapshot.Panes, gather.Pane{
+	input.Snapshot.Panes = append(input.Snapshot.Panes, gather.ProbePane{
 		Socket: "cc-500-1-1",
 		PaneID: "%5",
 	})
@@ -136,7 +136,7 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 		Transcripts: []store.Transcript{claude},
 		Rollouts:    []store.Rollout{codex},
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{
+			Panes: []gather.ProbePane{
 				{Socket: "cc-1-2-3", PaneID: "%1"},
 				{Socket: "cx-4-5-6", PaneID: "%2"},
 			},
@@ -156,7 +156,7 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 		},
 		Options: Options{
 			View:       AllView,
-			CurrentDir: "/work/host-ops",
+			CurrentDir: "/work/projd",
 		},
 	}
 	output := Compose(input)
@@ -179,7 +179,7 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 func TestLiveProjectFallsBackToPaneCurrentPath(t *testing.T) {
 	output := Compose(Input{
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cc-7-8-9",
 				PaneID:      "%7",
 				CurrentPath: "/work/proja",
@@ -191,7 +191,7 @@ func TestLiveProjectFallsBackToPaneCurrentPath(t *testing.T) {
 				TranscriptPath: "/missing/zero-prompt.jsonl",
 			}},
 		},
-		Options: Options{View: AllView, CurrentDir: "/work/host-ops"},
+		Options: Options{View: AllView, CurrentDir: "/work/projd"},
 	})
 	row, found := rowByID(output.Rows, "zero-prompt")
 	if !found || row.Kind != LiveClaude || row.Project != "proja" ||
@@ -262,7 +262,7 @@ func splitFixtureInput() Input {
 		},
 		AccountRoots: fixtureAccountRoots(),
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{
+			Panes: []gather.ProbePane{
 				{Socket: "cc-100-1-1", PaneID: "%1", PaneTitle: "one"},
 				{Socket: "cc-100-1-1", PaneID: "%2", PaneTitle: "two"},
 				{Socket: "cc-200-1-1", PaneID: "%3"},
@@ -404,7 +404,7 @@ func TestBootingRowSurfacesFromCrumblessLiveAndResistsHiding(t *testing.T) {
 			}},
 		},
 		Killed:  []store.Killed{{ID: "cc-new-fixture-1", Engine: "cc"}},
-		Options: Options{View: DefaultView, CurrentDir: "/work/host-ops"},
+		Options: Options{View: DefaultView, CurrentDir: "/work/projd"},
 	}
 
 	output := Compose(input)
@@ -668,7 +668,7 @@ func fixtureInput(view View) Input {
 		},
 		AccountRoots: fixtureAccountRoots(),
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{
+			Panes: []gather.ProbePane{
 				{
 					Socket:      "cc-100-1-1",
 					SessionName: "cc-old",
@@ -769,7 +769,8 @@ func fixtureAccountRoots() []AccountRoot {
 }
 
 func rowByID(rows []Row, id string) (Row, bool) {
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID == id {
 			return row, true
 		}
@@ -779,7 +780,8 @@ func rowByID(rows []Row, id string) (Row, bool) {
 
 func rowsByKind(rows []Row, kind Kind) []Row {
 	var result []Row
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.Kind == kind {
 			result = append(result, row)
 		}
@@ -789,7 +791,8 @@ func rowsByKind(rows []Row, kind Kind) []Row {
 
 func rowIDs(rows []Row) []string {
 	var ids []string
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID != "" {
 			ids = append(ids, row.ID)
 		}
@@ -832,7 +835,7 @@ func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 				PaneID:   "%3",
 				ThreadID: paginated.ID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-300-1-1",
 				SessionName: "cx-300-1-1",
 				PaneID:      "%3",
@@ -869,7 +872,7 @@ func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 				PaneID:   "%3",
 				ThreadID: paginated.ID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-300-1-1",
 				SessionName: "cx-300-1-1",
 				PaneID:      "%3",
@@ -903,7 +906,7 @@ func TestLiveCodexIsExemptFromEmptinessSuppression(t *testing.T) {
 				PaneID:   "%4",
 				ThreadID: threadID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-400-1-1",
 				SessionName: "cx-400-1-1",
 				PaneID:      "%4",
@@ -942,7 +945,7 @@ func TestLiveMachineSpawnedCodexStaysSuppressed(t *testing.T) {
 				PaneID:   "%5",
 				ThreadID: threadID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-401-1-1",
 				SessionName: "cx-401-1-1",
 				PaneID:      "%5",

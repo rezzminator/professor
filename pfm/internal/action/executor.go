@@ -10,9 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // New constructs an action executor using only K4-overridable paths.
@@ -23,7 +24,7 @@ func New(dependencies Dependencies) (*Executor, error) {
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{TmuxDir: resolved.TmuxDir}
+		tmux = TmuxExecutor{TmuxDir: resolved.TmuxDir}
 	}
 	processes := dependencies.Processes
 	if processes == nil {
@@ -59,13 +60,13 @@ func New(dependencies Dependencies) (*Executor, error) {
 func (executor *Executor) Open(
 	ctx context.Context,
 	request Request,
-) (string, error) {
+) (line string, err error) {
+	trail := obs.NewTrail(ctx, "action", "requested")
+	defer func() { trail.End(err) }()
 	if executor == nil {
 		return "", errors.New("action executor is nil")
 	}
-	if request.Row.Kind == compose.LiveClaude ||
-		request.Row.Kind == compose.LiveCodex ||
-		request.Row.Kind == compose.LiveSplit {
+	if request.Row.Kind.IsLiveSeat() {
 		if !executor.tmux.SocketAlive(ctx, request.Row.Socket) {
 			if request.Row.ID == "" {
 				return "", fmt.Errorf(
@@ -79,11 +80,7 @@ func (executor *Executor) Open(
 				request.Row.Socket,
 				request.Row.ID,
 			)
-			if request.Row.Kind == compose.LiveCodex {
-				request.Row.Kind = compose.ResumeCodex
-			} else {
-				request.Row.Kind = compose.ResumeClaude
-			}
+			request.Row.Kind = compose.ResumeKindFor(request.Row.Kind)
 			request.Row.Socket = ""
 			request.Row.SessionName = ""
 			request.Row.WindowName = ""
@@ -104,6 +101,7 @@ func (executor *Executor) Open(
 				request.Row.Socket,
 				request.Config.Claude.Binary,
 				request.Config.Codex.Binary,
+				request.Config.OpenCode.Binary,
 			) {
 				return "", nil
 			}
@@ -111,6 +109,7 @@ func (executor *Executor) Open(
 			if err != nil {
 				return "", err
 			}
+			trail.Reach("opened", "pane attached")
 			return plan.Line, nil
 		}
 	}
@@ -148,6 +147,7 @@ func (executor *Executor) Open(
 			return "", err
 		}
 	}
+	trail.Reach("opened", "pane attached")
 	return plan.Line, nil
 }
 
@@ -160,6 +160,15 @@ func (executor *Executor) verifiedCodexWindow(
 	}
 	panes, err := executor.tmux.ListPanes(ctx, socket)
 	if err != nil {
+		// A failed probe is not proof the cached window name is stale — it
+		// is a probe that could not run. Falling back to unverified (the
+		// caller attaches without naming a window, tmux picks its own last-
+		// active one) stays the conservative choice; only the silence was
+		// wrong.
+		obs.Logger(ctx).WarnContext(
+			ctx, "verify codex window: list panes failed",
+			"err", err, "socket", socket,
+		)
 		return ""
 	}
 	for _, pane := range panes {
@@ -194,7 +203,15 @@ func (executor *Executor) prepareLive(
 			if request.Cache1H {
 				cacheValue = "1"
 			}
-			arguments := []string{"chat", "reload", "--sock", request.Row.Socket, strconv.Itoa(request.PrimaryAccount), "--1h", cacheValue}
+			arguments := []string{
+				"chat",
+				"reload",
+				"--sock",
+				request.Row.Socket,
+				strconv.Itoa(request.PrimaryAccount),
+				"--1h",
+				cacheValue,
+			}
 			if request.Config.Path != "" {
 				arguments = append([]string{"--config", request.Config.Path}, arguments...)
 			}
@@ -237,10 +254,21 @@ func (executor *Executor) SelfSwitch(
 	}
 	panes, err := executor.tmux.ListPanes(ctx, targetSocket)
 	if err != nil || len(panes) == 0 {
+		if err != nil {
+			// A probe failure folds into the same "refuse to nest" outcome a
+			// genuinely empty pane list gets — refusing is the conservative
+			// choice either way — but the cause is never the same thing as
+			// "no panes" and must not vanish silently.
+			obs.Logger(ctx).WarnContext(
+				ctx, "self-switch: list panes failed",
+				"err", err, "socket", targetSocket,
+			)
+		}
 		fmt.Fprintln(
 			executor.stderr,
 			"pfm: already inside this chat's tmux — refusing to nest it inside itself; switch windows yourself (prefix + w)",
 		)
+		obs.Transition(ctx, "action", "attached", "switched", "self-switch")(nil)
 		return true
 	}
 	sort.SliceStable(panes, func(left, right int) bool {
@@ -256,16 +284,18 @@ func (executor *Executor) SelfSwitch(
 			executor.stderr,
 			"pfm: already inside this chat's tmux — refusing to nest it inside itself; switch windows yourself (prefix + w)",
 		)
+		obs.Transition(ctx, "action", "attached", "switched", "self-switch")(nil)
 		return true
 	}
 	fmt.Fprintln(
 		executor.stderr,
 		"pfm: already inside this chat's tmux — switched to its window (a session must never nest inside itself)",
 	)
+	obs.Transition(ctx, "action", "attached", "switched", "self-switch")(nil)
 	return true
 }
 
-func chooseEngineWindow(panes []Pane, engineCommands ...string) int {
+func chooseEngineWindow(panes []ActionPane, engineCommands ...string) int {
 	engines := make(map[string]bool, len(pfmengine.All())+len(engineCommands))
 	for _, id := range pfmengine.All() {
 		engines[pfmengine.MustLookup(id).Binary] = true
@@ -282,14 +312,14 @@ func chooseEngineWindow(panes []Pane, engineCommands ...string) int {
 	}
 	for _, pane := range panes {
 		if pane.CurrentCommand == "node" ||
-			numericVersion(pane.CurrentCommand) {
+			isNumericVersion(pane.CurrentCommand) {
 			return pane.WindowIndex
 		}
 	}
 	return panes[0].WindowIndex
 }
 
-func numericVersion(command string) bool {
+func isNumericVersion(command string) bool {
 	dot := strings.IndexByte(command, '.')
 	if dot <= 0 {
 		return false

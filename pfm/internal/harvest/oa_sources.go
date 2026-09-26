@@ -30,52 +30,122 @@ func (r *Resolver) unpaywall(ctx context.Context, client *http.Client, doi strin
 	if r.contact() == "" {
 		return nil, nil
 	}
-	if err := getJSON(ctx, client, r.withContact("https://api.unpaywall.org/v2/"+url.PathEscape(doi), "email"), &data); err != nil || !data.IsOA {
+	if err := getJSON(
+		ctx,
+		client,
+		r.withContact("https://api.unpaywall.org/v2/"+url.PathEscape(doi), "email"),
+		&data,
+	); err != nil ||
+		!data.IsOA {
 		return nil, err
 	}
 	link := data.Best.PDF
-	kind := "pdf"
+	kind := kindPDF
 	if link == "" {
 		link = data.Best.URL
-		kind = "html"
+		kind = kindHTML
 	}
 	if link == "" {
 		return nil, nil
 	}
-	out := []Candidate{{URL: link, Source: "unpaywall", Priority: candidatePriority("unpaywall", data.Status, data.Best.Version, kind), Kind: kind, Free: data.Status}}
+	out := []Candidate{
+		{
+			URL:      link,
+			Source:   sourceUnpaywall,
+			Priority: candidatePriority(sourceUnpaywall, data.Status, data.Best.Version, kind),
+			Kind:     kind,
+			Free:     data.Status,
+		},
+	}
 	for _, location := range data.Locations {
 		if location.PDF != "" {
-			out = append(out, Candidate{URL: location.PDF, Source: "unpaywall", Priority: candidatePriority("unpaywall", data.Status, location.Version, "pdf") + 5, Kind: "pdf", Free: data.Status})
+			out = append(
+				out,
+				Candidate{
+					URL:      location.PDF,
+					Source:   sourceUnpaywall,
+					Priority: candidatePriority(sourceUnpaywall, data.Status, location.Version, kindPDF) + 5,
+					Kind:     kindPDF,
+					Free:     data.Status,
+				},
+			)
 		}
 	}
 	return out, nil
 }
+
 func (r *Resolver) openAlexDOI(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	type location struct {
+		IsOA    bool   `json:"is_oa"`
+		PDF     string `json:"pdf_url"`
+		Version string `json:"version"`
+	}
 	var data struct {
 		OA struct {
 			URL    string `json:"oa_url"`
 			Status string `json:"oa_status"`
 		} `json:"open_access"`
-		Locations []struct {
-			IsOA    bool   `json:"is_oa"`
-			PDF     string `json:"pdf_url"`
-			Version string `json:"version"`
-		} `json:"locations"`
+		Best      *location  `json:"best_oa_location"`
+		Locations []location `json:"locations"`
 	}
-	if err := getJSON(ctx, client, r.withContact("https://api.openalex.org/works/https://doi.org/"+url.PathEscape(doi), "mailto"), &data); err != nil {
+	if err := getJSON(
+		ctx,
+		client,
+		r.withContact("https://api.openalex.org/works/https://doi.org/"+url.PathEscape(doi), "mailto"),
+		&data,
+	); err != nil {
 		return nil, err
 	}
-	out := []Candidate{}
-	if data.OA.URL != "" {
-		out = append(out, Candidate{URL: data.OA.URL, Source: "openalex", Priority: candidatePriority("openalex", data.OA.Status, "", "pdf"), Kind: "pdf", Free: data.OA.Status})
+	locations := data.Locations
+	if data.Best != nil {
+		locations = append([]location{*data.Best}, locations...)
 	}
-	for _, l := range data.Locations {
+	// oa_url is the best copy's PDF when it has one, else its landing page —
+	// for 10.1038/nature14539 a HAL record page, abstract and metadata only.
+	// It is a PDF only when a location names it as its pdf_url or its path
+	// says so; otherwise it is read as the HTML page it is.
+	pdfs := map[string]bool{}
+	for _, l := range locations {
 		if l.IsOA && l.PDF != "" {
-			out = append(out, Candidate{URL: l.PDF, Source: "openalex", Priority: candidatePriority("openalex", data.OA.Status, l.Version, "pdf") + 4, Kind: "pdf", Free: data.OA.Status})
+			pdfs[l.PDF] = true
+		}
+	}
+	out := []Candidate{}
+	if link := data.OA.URL; link != "" {
+		kind := kindHTML
+		if pdfs[link] || strings.HasSuffix(strings.ToLower(strings.SplitN(link, "?", 2)[0]), ".pdf") {
+			kind = kindPDF
+		}
+		out = append(
+			out,
+			Candidate{
+				URL:      link,
+				Source:   sourceOpenAlex,
+				Priority: candidatePriority(sourceOpenAlex, data.OA.Status, "", kind),
+				Kind:     kind,
+				Free:     data.OA.Status,
+			},
+		)
+	}
+	seen := map[string]bool{data.OA.URL: true}
+	for _, l := range locations {
+		if l.IsOA && l.PDF != "" && !seen[l.PDF] {
+			seen[l.PDF] = true
+			out = append(
+				out,
+				Candidate{
+					URL:      l.PDF,
+					Source:   sourceOpenAlex,
+					Priority: candidatePriority(sourceOpenAlex, data.OA.Status, l.Version, kindPDF) + 4,
+					Kind:     kindPDF,
+					Free:     data.OA.Status,
+				},
+			)
 		}
 	}
 	return out, nil
 }
+
 func (r *Resolver) crossref(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
 	var data struct {
 		Message struct {
@@ -85,13 +155,18 @@ func (r *Resolver) crossref(ctx context.Context, client *http.Client, doi string
 			} `json:"link"`
 		} `json:"message"`
 	}
-	if err := getJSON(ctx, client, r.withContact("https://api.crossref.org/works/"+url.PathEscape(doi), "mailto"), &data); err != nil {
+	if err := getJSON(
+		ctx,
+		client,
+		r.withContact("https://api.crossref.org/works/"+url.PathEscape(doi), "mailto"),
+		&data,
+	); err != nil {
 		return nil, err
 	}
 	out := []Candidate{}
 	for _, l := range data.Message.Links {
-		if l.URL != "" && strings.Contains(l.Type, "pdf") {
-			out = append(out, Candidate{URL: l.URL, Source: "crossref", Priority: 30, Kind: "pdf"})
+		if l.URL != "" && strings.Contains(l.Type, kindPDF) {
+			out = append(out, Candidate{URL: l.URL, Source: sourceCrossref, Priority: 30, Kind: kindPDF})
 		}
 	}
 	return out, nil
@@ -109,24 +184,51 @@ func (r *Resolver) semanticScholar(ctx context.Context, client *http.Client, doi
 	if key := strings.TrimSpace(r.SemanticScholarAPIKey); key != "" {
 		headers["x-api-key"] = key
 	}
-	if err := getJSONWithHeaders(ctx, client, "https://api.semanticscholar.org/graph/v1/paper/DOI:"+url.PathEscape(doi)+"?fields=openAccessPdf,externalIds", headers, &data); err != nil {
+	if err := getJSONWithHeaders(
+		ctx,
+		client,
+		"https://api.semanticscholar.org/graph/v1/paper/DOI:"+url.PathEscape(doi)+"?fields=openAccessPdf,externalIds",
+		headers,
+		&data,
+	); err != nil {
 		return nil, err
 	}
 	out := []Candidate{}
 	if data.PDF != nil && data.PDF.URL != "" {
-		out = append(out, Candidate{URL: data.PDF.URL, Source: "semanticscholar", Priority: candidatePriority("semanticscholar", data.PDF.Status, "", "pdf"), Kind: "pdf", Free: data.PDF.Status})
+		out = append(
+			out,
+			Candidate{
+				URL:      data.PDF.URL,
+				Source:   sourceSemanticScholar,
+				Priority: candidatePriority(sourceSemanticScholar, data.PDF.Status, "", kindPDF),
+				Kind:     kindPDF,
+				Free:     data.PDF.Status,
+			},
+		)
 	}
 	if arxiv := data.External["ArXiv"]; arxiv != "" {
-		out = append(out, Candidate{URL: "https://arxiv.org/pdf/" + arxiv, Source: "arxiv", Priority: 0, Kind: "pdf"})
+		out = append(
+			out,
+			Candidate{URL: "https://arxiv.org/pdf/" + arxiv, Source: sourceArXiv, Priority: 0, Kind: kindPDF},
+		)
 	}
 	if pmc := data.External["PubMedCentral"]; pmc != "" {
 		if !strings.HasPrefix(strings.ToUpper(pmc), "PMC") {
 			pmc = "PMC" + pmc
 		}
-		out = append(out, Candidate{URL: "https://europepmc.org/articles/" + pmc + "?pdf=render", Source: "europepmc", Priority: 16, Kind: "pdf"})
+		out = append(
+			out,
+			Candidate{
+				URL:      "https://europepmc.org/articles/" + pmc + "?pdf=render",
+				Source:   sourceEuropePMC,
+				Priority: 16,
+				Kind:     kindPDF,
+			},
+		)
 	}
 	return out, nil
 }
+
 func (r *Resolver) core(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
 	var data struct {
 		Download string   `json:"downloadUrl"`
@@ -149,15 +251,16 @@ func (r *Resolver) core(ctx context.Context, client *http.Client, doi string) ([
 	}
 	out := []Candidate{}
 	if data.Download != "" {
-		out = append(out, Candidate{URL: data.Download, Source: "core", Priority: 40, Kind: "pdf"})
+		out = append(out, Candidate{URL: data.Download, Source: sourceCORE, Priority: 40, Kind: kindPDF})
 	}
 	for _, s := range data.Sources {
 		if s != "" {
-			out = append(out, Candidate{URL: s, Source: "core", Priority: 41, Kind: "pdf"})
+			out = append(out, Candidate{URL: s, Source: sourceCORE, Priority: 41, Kind: kindPDF})
 		}
 	}
 	return out, nil
 }
+
 func (r *Resolver) doaj(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
 	var data struct {
 		Results []struct {
@@ -173,21 +276,38 @@ func (r *Resolver) doaj(ctx context.Context, client *http.Client, doi string) ([
 		return nil, err
 	}
 	out := []Candidate{}
-	for _, row := range data.Results[:minInt(len(data.Results), 1)] {
+	for _, row := range data.Results[:min(len(data.Results), 1)] {
 		for _, link := range row.Bib.Links {
 			if link.URL != "" && link.Type == "fulltext" {
-				out = append(out, Candidate{URL: link.URL, Source: "doaj", Priority: candidatePriority("doaj", "", "", "html"), Kind: "html"})
+				out = append(
+					out,
+					Candidate{
+						URL:      link.URL,
+						Source:   sourceDOAJ,
+						Priority: candidatePriority(sourceDOAJ, "", "", kindHTML),
+						Kind:     kindHTML,
+					},
+				)
 			}
 		}
 	}
 	return out, nil
 }
+
 func (r *Resolver) europePMCDOI(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
 	pmcid, err := idToPMCID(ctx, client, doi, r)
 	if err != nil || pmcid == "" {
 		return nil, err
 	}
-	return []Candidate{{URL: "https://europepmc.org/articles/" + pmcid + "?pdf=render", Source: "europepmc", Priority: candidatePriority("europepmc", "green", "", "pdf"), Kind: "pdf", Free: "green"}}, nil
+	return []Candidate{
+		{
+			URL:      "https://europepmc.org/articles/" + pmcid + "?pdf=render",
+			Source:   sourceEuropePMC,
+			Priority: candidatePriority(sourceEuropePMC, accessGreen, "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGreen,
+		},
+	}, nil
 }
 
 // ── wave additions: OpenAIRE / Zenodo / eLife / PLOS / NBER / HathiTrust ──────
@@ -203,7 +323,12 @@ var (
 // ITERATIVE walk (a recursive walk blew the stack on deeply nested input).
 func (r *Resolver) openAIRE(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
 	var data interface{}
-	if err := getJSON(ctx, client, "https://api.openaire.eu/search/publications?doi="+url.QueryEscape(doi)+"&format=json", &data); err != nil {
+	if err := getJSON(
+		ctx,
+		client,
+		"https://api.openaire.eu/search/publications?doi="+url.QueryEscape(doi)+"&format=json",
+		&data,
+	); err != nil {
 		return nil, err
 	}
 	out := []Candidate{}
@@ -253,15 +378,24 @@ func appendOpenAireResources(out []Candidate, seen map[string]bool, wr interface
 				link = s
 			}
 		}
-		if link == "" || !strings.HasPrefix(link, "http") || seen[link] {
+		if link == "" || !strings.HasPrefix(link, schemeHTTP) || seen[link] {
 			continue
 		}
 		seen[link] = true
-		kind := "html"
+		kind := kindHTML
 		if strings.HasSuffix(strings.ToLower(link), ".pdf") {
-			kind = "pdf"
+			kind = kindPDF
 		}
-		out = append(out, Candidate{URL: link, Source: "openaire", Priority: candidatePriority("openaire", "", "", kind), Kind: kind, Free: "green"})
+		out = append(
+			out,
+			Candidate{
+				URL:      link,
+				Source:   sourceOpenAIRE,
+				Priority: candidatePriority(sourceOpenAIRE, "", "", kind),
+				Kind:     kind,
+				Free:     accessGreen,
+			},
+		)
 	}
 	return out
 }
@@ -282,7 +416,12 @@ func (r *Resolver) zenodo(ctx context.Context, client *http.Client, doi string) 
 			} `json:"hits"`
 		} `json:"hits"`
 	}
-	if err := getJSON(ctx, client, "https://zenodo.org/api/records?q=doi:"+url.QueryEscape(doi)+"&size=3&sort=mostrecent", &data); err != nil {
+	if err := getJSON(
+		ctx,
+		client,
+		"https://zenodo.org/api/records?q=doi:"+url.QueryEscape(doi)+"&size=3&sort=mostrecent",
+		&data,
+	); err != nil {
 		return nil, err
 	}
 	out := []Candidate{}
@@ -294,14 +433,24 @@ func (r *Resolver) zenodo(ctx context.Context, client *http.Client, doi string) 
 		for _, file := range hit.Files {
 			low := strings.ToLower(file.Key)
 			url2 := strings.ToLower(file.Links.Self)
-			if file.Links.Self == "" || (!strings.HasSuffix(low, ".pdf") && !strings.HasSuffix(low, ".epub") && !strings.HasSuffix(url2, ".pdf") && !strings.HasSuffix(url2, ".epub")) {
+			if file.Links.Self == "" ||
+				(!strings.HasSuffix(low, ".pdf") && !strings.HasSuffix(low, ".epub") && !strings.HasSuffix(url2, ".pdf") && !strings.HasSuffix(url2, ".epub")) {
 				continue
 			}
-			kind := "pdf"
+			kind := kindPDF
 			if strings.HasSuffix(low, ".epub") {
-				kind = "epub"
+				kind = kindEPUB
 			}
-			out = append(out, Candidate{URL: file.Links.Self, Source: "zenodo", Priority: candidatePriority("zenodo", "", "", kind), Kind: kind, Free: "green"})
+			out = append(
+				out,
+				Candidate{
+					URL:      file.Links.Self,
+					Source:   sourceZenodo,
+					Priority: candidatePriority(sourceZenodo, "", "", kind),
+					Kind:     kind,
+					Free:     accessGreen,
+				},
+			)
 		}
 	}
 	return out, nil
@@ -318,13 +467,26 @@ func (r *Resolver) eLife(ctx context.Context, client *http.Client, doi string) (
 			PDF string `json:"pdf"`
 		} `json:"items"`
 	}
-	if err := getJSON(ctx, client, "https://api.elifesciences.org/articles?by-doi="+url.QueryEscape(doi), &data); err != nil {
+	if err := getJSON(
+		ctx,
+		client,
+		"https://api.elifesciences.org/articles?by-doi="+url.QueryEscape(doi),
+		&data,
+	); err != nil {
 		return nil, err
 	}
 	if len(data.Items) == 0 || data.Items[0].PDF == "" {
 		return nil, nil
 	}
-	return []Candidate{{URL: data.Items[0].PDF, Source: "elife", Priority: candidatePriority("elife", "", "", "pdf"), Kind: "pdf", Free: "gold"}}, nil
+	return []Candidate{
+		{
+			URL:      data.Items[0].PDF,
+			Source:   sourceELife,
+			Priority: candidatePriority(sourceELife, "", "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGold,
+		},
+	}, nil
 }
 
 // plosCandidates derives the printable-PDF URL offline from the DOI's journal
@@ -335,8 +497,20 @@ func plosCandidates(doi string) []Candidate {
 	if matched == nil {
 		return nil
 	}
-	target := "https://journals.plos.org/" + strings.ToLower(matched[1]) + "/article/file?id=" + url.QueryEscape(doi) + "&type=printable"
-	return []Candidate{{URL: target, Source: "plos", Priority: candidatePriority("plos", "", "", "pdf"), Kind: "pdf", Free: "gold"}}
+	target := "https://journals.plos.org/" + strings.ToLower(
+		matched[1],
+	) + "/article/file?id=" + url.QueryEscape(
+		doi,
+	) + "&type=printable"
+	return []Candidate{
+		{
+			URL:      target,
+			Source:   sourcePLOS,
+			Priority: candidatePriority(sourcePLOS, "", "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGold,
+		},
+	}
 }
 
 // nberCandidates derives the free working-paper PDF offline from the
@@ -350,5 +524,13 @@ func nberCandidates(doi string) []Candidate {
 		return nil
 	}
 	target := "https://www.nber.org/system/files/working_papers/" + wp + "/" + wp + ".pdf"
-	return []Candidate{{URL: target, Source: "nber", Priority: candidatePriority("nber", "", "", "pdf"), Kind: "pdf", Free: "green"}}
+	return []Candidate{
+		{
+			URL:      target,
+			Source:   sourceNBER,
+			Priority: candidatePriority(sourceNBER, "", "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGreen,
+		},
+	}
 }

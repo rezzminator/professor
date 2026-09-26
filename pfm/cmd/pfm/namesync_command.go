@@ -8,12 +8,13 @@ import (
 	"sort"
 	"strings"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/gather"
-	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // runNameSync converges every live chat's tmux WINDOW name — the fleet's DNS
@@ -25,22 +26,25 @@ import (
 // applied by the same gather pass the picker runs, so there is exactly ONE
 // writer of a window name however this command is reached — a systemd path
 // unit on a codex rename, a timer, or a picker refresh.
-func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("name-sync", "usage: pfm name-sync [--dry-run]", stderr)
-	dryRun := flags.Bool("dry-run", false, "report the renames without applying them")
-	if code, ok := parseFlags(flags, args); !ok {
+func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
+	flags := cli.NewFlagSet("name-sync", "usage: pfm name-sync [--apply] [--dry-run]", stderr)
+	apply, dryRun := flags.Bool("apply", false, "perform renames"), flags.Bool("dry-run", false, "preview alias")
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
 		flags.Usage()
 		return 2
 	}
+	if *dryRun {
+		fmt.Fprintln(stderr, "dry run is the default; --apply performs the renames")
+	}
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	defer database.Close()
+	defer func() { cli.CloseResource(database, "pfm name-sync: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 
 	// A delta index first: a codex rename lands in session_index.jsonl or the
@@ -66,10 +70,9 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	// ReadOnly is what makes --dry-run a dry run: the gather pass applies the
-	// renames it plans, and only a read-only pass plans without applying.
+	// Only an explicit --apply lets the gather pass perform its planned renames.
 	live, err := fleet.Gather(ctx, database, environment, data,
-		*dryRun,
+		!*apply,
 		fleet.PrintWarn(stderr),
 		stderr,
 	)
@@ -77,11 +80,11 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	if !*dryRun {
+	if *apply {
 		fleet.ReconcileCodexPanes(ctx, database, live, runtime, fleet.PrintWarn(stderr))
 	}
 	verb := "renamed"
-	if *dryRun {
+	if !*apply {
 		verb = "would rename"
 	}
 	for _, rename := range live.Renames {
@@ -95,14 +98,12 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 			rename.TargetName,
 		)
 	}
-	if *dryRun {
-		// A dry run applied nothing, so it has nothing to verify. It reports
-		// the PLAN, and says so — a plan counted as an outcome is exactly the
-		// lie this command used to tell.
+	if !*apply {
+		// A preview reports its plan; it has no applied outcome to verify.
 		fmt.Fprintf(stdout, "windows planned: %d\n", len(live.Renames))
 		return 0
 	}
-	titlesTmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
+	titlesTmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
 	titlesUnverified := convergeChatServerOptions(
 		ctx,
 		titlesTmux,
@@ -140,7 +141,7 @@ func verifyRenames(
 	renames []gather.WindowRename,
 	stderr io.Writer,
 ) (converged, unverified int) {
-	reader := inject.CommandTmux{}
+	reader := inject.TmuxInjector{}
 	for _, rename := range renames {
 		socketPath := filepath.Join(runtime.Paths.TmuxDir, rename.Socket)
 		actual, err := reader.WindowName(ctx, socketPath, rename.WindowID)
@@ -171,10 +172,11 @@ func verifyRenames(
 // already probed these servers to plan window renames; titles convergence
 // reuses that same enumeration rather than probing the tmux directory a
 // second time.
-func liveSockets(panes []gather.Pane) []string {
+func liveSockets(panes []gather.ProbePane) []string {
 	seen := make(map[string]bool, len(panes))
 	sockets := make([]string, 0, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := &panes[index]
 		if seen[pane.Socket] {
 			continue
 		}
@@ -187,7 +189,7 @@ func liveSockets(panes []gather.Pane) []string {
 
 // convergeChatServerOptions is the ONE place an EXISTING live server is
 // brought onto pfmconfig.ChatServerOptions — the list the one chat-server
-// creator (spawn.CommandTmux.NewSession) applies at birth — so a server that
+// creator (spawn.TmuxSpawner.NewSession) applies at birth — so a server that
 // predates a policy change, one a scheduler outage left behind, or one born
 // before its door went through the creator converges on the next scheduled
 // name-sync. A HOST-owned title policy contributes no title option, so a host
@@ -201,7 +203,7 @@ func liveSockets(panes []gather.Pane) []string {
 // count closes it.
 func convergeChatServerOptions(
 	ctx context.Context,
-	tmux gather.CommandTmux,
+	tmux gather.TmuxProbe,
 	sockets []string,
 	titles pfmconfig.TmuxTitles,
 	stdout, stderr io.Writer,

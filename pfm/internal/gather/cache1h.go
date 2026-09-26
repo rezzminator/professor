@@ -17,7 +17,7 @@ import (
 // another's environment, and "unreadable" and "flagless" mean the same thing
 // under a 1h default. The badge is then wrong only for a chat deliberately born
 // 5m, and it errs by NOT promising a cheaper window than the chat actually has.
-func DetectCache1H(proc ProcFS, panes []Pane, binaries ...string) ([]string, error) {
+func DetectCache1H(proc ProcFS, panes []ProbePane, binaries ...string) ([]string, error) {
 	cmdlines, err := processCmdlines(proc)
 	if err != nil {
 		return nil, fmt.Errorf("list processes for cache scan: %w", err)
@@ -27,13 +27,18 @@ func DetectCache1H(proc ProcFS, panes []Pane, binaries ...string) ([]string, err
 
 // detectCache1HFrom is DetectCache1H over an already-fetched pid->cmdline
 // snapshot — see processCmdlines.
-func detectCache1HFrom(cmdlines map[int][]string, proc ProcFS, panes []Pane, binaries ...string) ([]string, error) {
+func detectCache1HFrom(
+	cmdlines map[int][]string,
+	proc ProcFS,
+	panes []ProbePane,
+	binaries ...string,
+) ([]string, error) {
 	pids := sortedPIDs(cmdlines)
 	paneByPID := panesByPID(panes)
 	sockets := make(map[string]bool)
 
 	for _, pid := range pids {
-		if !isClaudeCommand(cmdlines[pid], binaries...) {
+		if !IsClaudeCommand(cmdlines[pid], binaries...) {
 			continue
 		}
 		pane, found := paneForProcess(proc, pid, paneByPID)

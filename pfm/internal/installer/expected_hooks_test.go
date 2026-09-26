@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestProbeExpectedHooksStatesAndOwnership(t *testing.T) {
@@ -45,9 +45,8 @@ func TestProbeExpectedHooksStatesAndOwnership(t *testing.T) {
 		if err := os.WriteFile(hook.File, []byte(stale), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		assertHookState(t, ProbeExpectedHooks(home, machine), hook, "broken")
+		assertHookState(t, ProbeExpectedHooks(home, machine), hook, stateHookDrift)
 	})
-
 }
 
 // TestProbeExpectedHooksFlagsRetiredHookCommandsAsStale pins the deep-doctor
@@ -106,6 +105,68 @@ func TestProbeExpectedHooksFlagsRetiredHookCommandsAsStale(t *testing.T) {
 	}
 }
 
+// TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale pins issue #24
+// finding 2's doctor half: a settings.json carrying a hook of pfm's own
+// shape naming a subcommand THIS binary does not implement — left behind by
+// a rollback to an older pfm, or by a newer pfm's own hook surviving a
+// revert — produces NO probe row before unknownPFMHookCommand exists,
+// exactly like the already-fixed table-retired case above, but for a
+// subcommand no table entry or template will ever know by name.
+func TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale(t *testing.T) {
+	setTestImplementedSubcommands(t)
+	home, machine := stageExpectedHookFixtures(t)
+	hook := findExpectedHook(t, home, machine, "claude[2]", "exit-intercept")
+	unknown := strings.Replace(hook.Command, "internal exit-intercept", "internal hook-from-a-newer-pfm", 1)
+	if unknown == hook.Command {
+		t.Fatalf("fixture command %q did not contain internal exit-intercept", hook.Command)
+	}
+
+	raw, err := os.ReadFile(hook.File)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	appendHookWithMatcher(document, hook.Event, hook.Matcher, unknown)
+	updated, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook.File, append(updated, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	results := ProbeExpectedHooks(home, machine)
+	var unknownResult *HookProbeResult
+	for index, result := range results {
+		if strings.Contains(result.Hook.Command, "hook-from-a-newer-pfm") {
+			unknownResult = &results[index]
+		}
+	}
+	if unknownResult == nil {
+		t.Fatalf("doctor hook probe said nothing about the unknown pfm hook %q: %#v", unknown, results)
+	}
+	if unknownResult.State != "stale" {
+		t.Fatalf("unknown pfm hook result state=%q, want stale: %#v", unknownResult.State, unknownResult)
+	}
+	if unknownResult.Hook.Name != "unknown:hook-from-a-newer-pfm" {
+		t.Fatalf(
+			"unknown pfm hook result name=%q, want %q: %#v",
+			unknownResult.Hook.Name,
+			"unknown:hook-from-a-newer-pfm",
+			unknownResult,
+		)
+	}
+	if !strings.Contains(unknownResult.Error, "does not implement") {
+		t.Fatalf(
+			"unknown pfm hook result error=%q, want it to say this pfm does not implement the subcommand",
+			unknownResult.Error,
+		)
+	}
+}
+
 // TestClaudeHookTemplatesIncludesReloadIntercept pins T2's installer half
 // directly at the template source doctor and the settings wiring both read:
 // the `/reload` UserPromptSubmit hook must be present, on the right event,
@@ -132,17 +193,19 @@ func TestClaudeHookTemplatesIncludesReloadIntercept(t *testing.T) {
 	}
 }
 
-func TestExpectedHooksIncludesCodexAppendixAcrossAccounts(t *testing.T) {
+// pfm owns no Codex hook any more: the fleet prompt reaches a session through
+// config.toml's developer_instructions, so a Codex account contributes no
+// expected hook and doctor has no Codex hook row to converge.
+func TestExpectedHooksExpectNoCodexHook(t *testing.T) {
 	home := t.TempDir()
-	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}, {ID: 2, Home: filepath.Join(home, ".codex-2")}}}
-	hooks := ExpectedHooks(home, machine)
-	if len(hooks) != 2 {
-		t.Fatalf("hooks=%#v", hooks)
+	machine := pfmconfig.Config{
+		CodexAccounts: []pfmconfig.CodexAccount{
+			{ID: 1, Home: filepath.Join(home, ".codex")},
+			{ID: 2, Home: filepath.Join(home, ".codex-2")},
+		},
 	}
-	for _, hook := range hooks {
-		if hook.Name != "codex-appendix" || hook.Event != "SessionStart" {
-			t.Fatalf("hook=%#v", hook)
-		}
+	if hooks := ExpectedHooks(home, machine); len(hooks) != 0 {
+		t.Fatalf("Codex accounts still expect hooks: %#v", hooks)
 	}
 }
 
@@ -168,8 +231,8 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	if !changed {
 		t.Fatal("Codex hook wiring did not strip the leftover clear-kill hook")
 	}
-	if len(owned) != 1 {
-		t.Fatalf("appendix ownership=%#v", owned)
+	if len(owned) != 0 {
+		t.Fatalf("Codex hook ownership=%#v, want none owned", owned)
 	}
 	if got := hookCommandCount(t, string(updated), "SessionStart", canonical); got != 0 {
 		t.Fatalf("canonical clear-kill count=%d, want zero:\n%s", got, updated)
@@ -177,8 +240,8 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	if got := hookCommandCount(t, string(updated), "SessionStart", legacyParent); got != 0 {
 		t.Fatalf("shell-parent clear-kill count=%d, want zero:\n%s", got, updated)
 	}
-	if hookCommandCount(t, string(updated), "SessionStart", codexHookTemplate(home).Command) != 1 {
-		t.Fatalf("missing appendix: %s", updated)
+	if strings.Contains(string(updated), "SessionStart") {
+		t.Fatalf("SessionStart survived with nothing left to hold: %s", updated)
 	}
 
 	// Idempotent: a second pass over the already-converged file changes
@@ -218,7 +281,18 @@ func stageExpectedHookFixtures(t *testing.T) (string, pfmconfig.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"), string(encoded))
+	writeFixture(
+		t,
+		settingsHookOwnershipPath(managedRootForHome(home)),
+		string(encoded),
+	)
+	// Every hook command's first word is this executable; doctor proves it
+	// resolves to a regular file with an execute bit.
+	binary := filepath.Join(home, ".local", "bin", "pfm")
+	writeFixture(t, binary, "#!/bin/sh\n")
+	if err := os.Chmod(binary, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return home, machine
 }
 
@@ -258,8 +332,10 @@ func removeHookFixture(t *testing.T, hook ExpectedHook) {
 
 func assertHookState(t *testing.T, results []HookProbeResult, hook ExpectedHook, state string) {
 	t.Helper()
-	for _, result := range results {
-		if result.Hook.File == hook.File && result.Hook.Event == hook.Event && result.Hook.Name == hook.Name && result.State == state {
+	for index := range results {
+		result := &results[index]
+		if result.Hook.File == hook.File && result.Hook.Event == hook.Event && result.Hook.Name == hook.Name &&
+			result.State == state {
 			return
 		}
 	}
@@ -278,6 +354,28 @@ func TestClaudeHookTemplatesIncludesCompactNudge(t *testing.T) {
 		if template.Name == "compact-nudge" && (template.Event != "UserPromptSubmit" || template.Matcher != "") {
 			t.Fatalf("compact-nudge template=%#v, want UserPromptSubmit with an empty matcher", template)
 		}
+	}
+}
+
+// git-guard reads every Bash call before it runs, in every account and every
+// repository: PreToolUse, matcher Bash, the binary's own subcommand, and never
+// async — an async hook cannot deny.
+func TestClaudeHookTemplatesIncludesGitGuard(t *testing.T) {
+	home := filepath.Join("neutral", "home")
+	found := 0
+	for _, template := range claudeHookTemplates(home) {
+		if template.Name != "git-guard" {
+			continue
+		}
+		found++
+		if template.Event != "PreToolUse" || template.Matcher != "Bash" || template.Async ||
+			template.Command != home+"/.local/bin/pfm internal git-guard" {
+			t.Fatalf("git-guard template=%#v, want PreToolUse, matcher Bash, not async, "+
+				"pfm internal git-guard", template)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("git-guard templates=%d, want exactly 1 among the expected hooks", found)
 	}
 }
 
@@ -330,11 +428,14 @@ func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
 	home, machine := stageExpectedHookFixtures(t)
 	var output bytes.Buffer
-	warnings := ReportHooks(&output, home, machine, true)
-	if warnings != 0 {
-		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	warnings, failures := ReportHooks(&output, home, machine, true)
+	if warnings != 0 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 	}
-	if got := strings.Count(output.String(), "doctor: hook claude[2] skipped (no Claude Code binary installed)"); got != 1 {
+	if got := strings.Count(
+		output.String(),
+		"doctor: hook claude[2] skipped (no Claude Code binary installed)",
+	); got != 1 {
 		t.Fatalf("want exactly one skip line for claude[2], got %d:\n%s", got, output.String())
 	}
 	if strings.Contains(output.String(), "MISSING") {
@@ -342,52 +443,143 @@ func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
 	}
 }
 
-// TestReportHooksClaudePresentStillWarnsOnAMissingHook pins the other half:
-// with Claude present, a missing hook must still warn exactly as before —
-// the absence skip never masks a genuine installer defect.
-func TestReportHooksClaudePresentStillWarnsOnAMissingHook(t *testing.T) {
+// TestReportHooksClaudePresentStillFailsOnAMissingHook pins the other half:
+// with Claude present, a missing hook must still count as a failure exactly
+// as before — the absence skip never masks a genuine installer defect.
+func TestReportHooksClaudePresentStillFailsOnAMissingHook(t *testing.T) {
 	home, machine := stageExpectedHookFixtures(t)
 	hook := findExpectedHook(t, home, machine, "claude[2]", "usage")
 	removeHookFixture(t, hook)
 	var output bytes.Buffer
-	warnings := ReportHooks(&output, home, machine, false)
-	if warnings == 0 {
-		t.Fatalf("a genuinely missing hook must still warn with Claude present:\n%s", output.String())
+	_, failures := ReportHooks(&output, home, machine, false)
+	if failures == 0 {
+		t.Fatalf("a genuinely missing hook must still fail with Claude present:\n%s", output.String())
 	}
-	if !strings.Contains(output.String(), "doctor: hook claude[2] settings.json UserPromptSubmit usage MISSING — run pfm install") {
+	if !strings.Contains(
+		output.String(),
+		"doctor: hook claude[2] settings.json UserPromptSubmit usage MISSING — run pfm install",
+	) {
 		t.Fatalf("missing the expected MISSING row:\n%s", output.String())
 	}
 }
 
-// TestReportHooksRowsCountMissingBrokenAndDriftWarnings pins every row shape
-// ReportHooks prints and which states earn a warning — ok is silent, while
-// missing, broken, drift, and stale each count one.
-func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
+// TestReportHooksRowsCountMissingUnreadableAndDriftWarnings pins the row shapes
+// ReportHooks prints from a stubbed probe and its two-tier split — ok is
+// silent; missing, unreadable and stale are each a failure (owned by
+// install); a ledger drift is a warning.
+func TestReportHooksRowsCountMissingUnreadableAndDriftWarnings(t *testing.T) {
 	saved := HookProbeOverride
 	t.Cleanup(func() { HookProbeOverride = saved })
 	home := t.TempDir()
 	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
 		return []HookProbeResult{
-			{Hook: ExpectedHook{Target: "claude[1]", File: filepath.Join(home, ".claude", "settings.json"), Event: "SessionEnd", Name: "clear-kill"}, State: "ok"},
-			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "SessionStart", Name: "clear-kill"}, State: "missing"},
-			{Hook: ExpectedHook{Target: "claude[2]", File: filepath.Join(home, ".cc", "2", "settings.json"), Event: "UserPromptSubmit", Name: "usage"}, State: "broken", Error: "parse error"},
-			{Hook: ExpectedHook{Target: "ownership", File: filepath.Join(home, "ledger.json"), Event: "SessionEnd", Name: "unexpected"}, State: "drift", Error: "ledger owns 1 hook absent from expectations"},
-			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "Stop", Name: "usage"}, State: "stale"},
+			{
+				Hook: ExpectedHook{
+					Target: "claude[1]",
+					File:   filepath.Join(home, ".claude", "settings.json"),
+					Event:  "SessionEnd",
+					Name:   "clear-kill",
+				},
+				State: "ok",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "codex",
+					File:   filepath.Join(home, ".codex", "hooks.json"),
+					Event:  "SessionStart",
+					Name:   "clear-kill",
+				},
+				State: "missing",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "claude[2]",
+					File:   filepath.Join(home, ".cc", "2", "settings.json"),
+					Event:  "UserPromptSubmit",
+					Name:   "usage",
+				},
+				State: stateUnreadable,
+				Error: "parse error",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "ownership",
+					File:   filepath.Join(home, "ledger.json"),
+					Event:  "SessionEnd",
+					Name:   "unexpected",
+				},
+				State: "drift",
+				Want:  "1",
+				Got:   "not-expected",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "codex",
+					File:   filepath.Join(home, ".codex", "hooks.json"),
+					Event:  "Stop",
+					Name:   "usage",
+				},
+				State: "stale",
+			},
 		}
 	}
 	var output bytes.Buffer
-	if warnings := ReportHooks(&output, home, pfmconfig.Config{}, false); warnings != 4 {
-		t.Fatalf("warnings=%d, want 4\n%s", warnings, output.String())
+	if warnings, failures := ReportHooks(&output, home, pfmconfig.Config{}, false); warnings != 1 || failures != 3 {
+		t.Fatalf("warnings=%d failures=%d, want 1/3\n%s", warnings, failures, output.String())
 	}
 	for _, wanted := range []string{
 		"doctor: hook claude[1] settings.json SessionEnd clear-kill ok",
 		"doctor: hook codex hooks.json SessionStart clear-kill MISSING — run pfm install",
-		"doctor: hook claude[2] settings.json UserPromptSubmit usage broken error=parse error",
-		"doctor: hook ownership ledger.json SessionEnd unexpected drift error=ledger owns 1 hook absent from expectations",
-		"doctor: hook codex hooks.json Stop usage stale — run pfm install",
+		"doctor: hook claude[2] settings.json UNREADABLE error=parse error",
+		"doctor: hook ownership ledger.json SessionEnd unexpected DRIFT ledger ownership=1 file=not-expected",
+		"doctor: hook codex hooks.json Stop usage STALE usage — run pfm install",
 	} {
 		if !strings.Contains(output.String(), wanted) {
 			t.Errorf("output missing %q:\n%s", wanted, output.String())
 		}
+	}
+}
+
+// TestReportHooksCountsMissingAsFailureAndDriftAsWarning is M2's regression
+// test for issue #24 finding 1: ReportHooks must split into (warnings,
+// failures) so `pfm update` can gate on failures alone while still reporting
+// advisory drift. A missing hook is a state `pfm install --yes` owns and did
+// not produce (failure); a drift row is advisory (warning). Unfixed, ReportHooks
+// returns a single int and this test does not compile — that compile failure
+// IS the watched-failing run.
+func TestReportHooksCountsMissingAsFailureAndDriftAsWarning(t *testing.T) {
+	saved := HookProbeOverride
+	t.Cleanup(func() { HookProbeOverride = saved })
+	home := t.TempDir()
+	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
+		return []HookProbeResult{
+			{
+				Hook: ExpectedHook{
+					Target: "codex",
+					File:   filepath.Join(home, ".codex", "hooks.json"),
+					Event:  "SessionStart",
+					Name:   "clear-kill",
+				},
+				State: "missing",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "ownership",
+					File:   filepath.Join(home, "ledger.json"),
+					Event:  "SessionEnd",
+					Name:   "unexpected",
+				},
+				State: "drift",
+				Error: "ledger owns 1 hook absent from expectations",
+			},
+		}
+	}
+	var output bytes.Buffer
+	warnings, failures := ReportHooks(&output, home, pfmconfig.Config{}, false)
+	if warnings != 1 {
+		t.Fatalf("warnings=%d, want 1 (the drift row)\n%s", warnings, output.String())
+	}
+	if failures != 1 {
+		t.Fatalf("failures=%d, want 1 (the missing hook)\n%s", failures, output.String())
 	}
 }

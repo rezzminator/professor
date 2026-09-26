@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // RefreshCodexLineage catches up only the known rollout files about to be
@@ -18,7 +18,7 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 		return fmt.Errorf("read Codex clear lineage %q: %w", id, err)
 	}
 	if len(family) == 0 {
-		return fmt.Errorf("Codex clear lineage %q is not indexed yet", id)
+		return fmt.Errorf("clear lineage for Codex %q is not indexed yet", id)
 	}
 	version, found, err := database.Meta(ctx, codexParserVersionKey)
 	if err != nil {
@@ -26,7 +26,8 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 	}
 	full := !found || version != codexParserVersion
 	updates := make([]store.Rollout, 0, len(family))
-	for _, previous := range family {
+	for i := range family {
+		previous := &family[i]
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("refresh Codex clear lineage %q: %w", id, err)
 		}
@@ -40,11 +41,16 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 		}
 		start := int64(0)
 		// Parent metadata can also come from the Codex state store.
-		base := store.Rollout{ParentThread: previous.ParentThread, SessionID: previous.SessionID, CWD: previous.CWD, UserThread: previous.UserThread}
-		if shouldDelta(file, true, previous.Size, previous.ParsedOffset, full) {
-			start, base = previous.ParsedOffset, previous
+		base := store.Rollout{
+			ParentThread: previous.ParentThread,
+			SessionID:    previous.SessionID,
+			CWD:          previous.CWD,
+			UserThread:   previous.UserThread,
 		}
-		rollout, _, err := parseCodex(file, start, base)
+		if shouldDelta(file, true, previous.Size, previous.ParsedOffset, full) {
+			start, base = previous.ParsedOffset, *previous
+		}
+		rollout, _, err := parseCodexRolloutFile(file, start, base)
 		if err != nil {
 			return fmt.Errorf("refresh Codex clear rollout %q: %w", previous.Path, err)
 		}

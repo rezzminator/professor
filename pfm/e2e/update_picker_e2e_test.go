@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
@@ -49,11 +49,11 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		}
 	})
 	tmuxDir := filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))
-	for _, directory := range []string{
+	for _, dir := range []string{
 		home, professor, binDir, configDir, codexHome, opencodeHome, managed, state, tmuxDir,
 		filepath.Join(home, ".config", "pfm"),
 	} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -157,7 +157,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		"TMUX_TMPDIR":             tmuxBase,
 		"PFM_HOME":                home,
 		"PFM_DB":                  filepath.Join(state, "fleet.db"),
-		"PFM_SHARED_DB":           filepath.Join(state, "shared.db"),
+		"PFM_FLEET_DB":            filepath.Join(state, "shared.db"),
 		"PFM_SID_DIR":             filepath.Join(root, "sid"),
 		"PFM_CLAUDE_ROOTS":        filepath.Join(root, "claude"),
 		"PFM_CODEX_ROOT":          codexHome,
@@ -169,11 +169,11 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		"PFM_UPDATE_LATEST_URL":   server.URL,
 		"PFM_UPDATE_LAUNCH_PROOF": proof,
 	})
-	for _, directory := range []string{
+	for _, dir := range []string{
 		filepath.Join(root, "sid"), filepath.Join(root, "claude"),
 		filepath.Join(root, "proc"), filepath.Join(root, "cgroup"),
 	} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -252,7 +252,10 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 			t.Fatalf("launched Codex proof %q lacks %q", launch, want)
 		}
 	}
-	t.Logf("UPDATE_PICKER first-run-nonblocking=true next-run-banner=true selected=Codex cwd=%s approval-first=true", professor)
+	t.Logf(
+		"UPDATE_PICKER first-run-nonblocking=true next-run-banner=true selected=Codex cwd=%s approval-first=true",
+		professor,
+	)
 }
 
 func startUpdatePickerE2E(t *testing.T, socket, pfm string, environment []string) {

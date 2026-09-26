@@ -14,8 +14,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 func freeLoopbackPort(t *testing.T) int {
@@ -60,6 +61,7 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 		t.Fatalf("external state = %q", got)
 	}
 	base := "http://127.0.0.1:" + strconv.Itoa(port)
+	sessionID := ""
 	do := func(method, path, token, body string) *http.Response {
 		t.Helper()
 		request, err := http.NewRequest(method, base+path, strings.NewReader(body))
@@ -71,6 +73,9 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 		request.Header.Set("Accept", "application/json, text/event-stream")
 		if token != "" {
 			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		if sessionID != "" {
+			request.Header.Set("Mcp-Session-Id", sessionID)
 		}
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
@@ -88,12 +93,62 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 	}
 	response := do(http.MethodPost, "/mcp", "example-gateway-token", initialize)
 	body, _ := io.ReadAll(response.Body)
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "harvester") {
-		t.Fatalf("authenticated /mcp = %d %s", response.StatusCode, body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "harvester_read") ||
+		!strings.Contains(string(body), `"name":"harvester"`) {
+		t.Fatalf("authenticated /mcp = %d %s, want serverInfo harvester and harvester_read", response.StatusCode, body)
 	}
-	for _, path := range []string{"/mcp/chat", "/mcp/harvester", "/status"} {
-		if response := do(http.MethodPost, path, "example-gateway-token", initialize); response.StatusCode != http.StatusNotFound {
-			t.Errorf("external %s = %d, want 404 — the external port serves the harvester only", path, response.StatusCode)
+	sessionID = response.Header.Get("Mcp-Session-Id")
+	do(http.MethodPost, "/mcp", "example-gateway-token", `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	listed := do(http.MethodPost, "/mcp", "example-gateway-token", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	var tools struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				InputSchema struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	listBody, _ := io.ReadAll(listed.Body)
+	// The gateway answers as a server-sent event: the JSON-RPC reply is its data line.
+	payload := string(listBody)
+	for _, line := range strings.Split(payload, "\n") {
+		if data, found := strings.CutPrefix(line, "data: "); found {
+			payload = data
+		}
+	}
+	if err := json.Unmarshal([]byte(payload), &tools); err != nil || len(tools.Result.Tools) == 0 {
+		t.Fatalf("external tools/list = %d %s (decode: %v)", listed.StatusCode, listBody, err)
+	}
+	sawRead := false
+	for _, tool := range tools.Result.Tools {
+		if !strings.HasPrefix(tool.Name, "harvester_") {
+			t.Fatalf("external gateway lists %q, want harvester_* only: %s", tool.Name, listBody)
+		}
+		if tool.Name == "harvester_read" {
+			sawRead = true
+			if _, hasFiles := tool.InputSchema.Properties["files"]; hasFiles {
+				t.Fatalf("external harvester_read takes files: %s", listBody)
+			}
+		}
+	}
+	if !sawRead {
+		t.Fatalf("external tools/list has no harvester_read: %s", listBody)
+	}
+	sessionID = ""
+	for _, path := range []string{"/mcp/professor", "/mcp/professor/chat", "/mcp/professor/harvester", "/status"} {
+		if response := do(
+			http.MethodPost,
+			path,
+			"example-gateway-token",
+			initialize,
+		); response.StatusCode != http.StatusNotFound {
+			t.Errorf(
+				"external %s = %d, want 404 — the external port serves the harvester only",
+				path,
+				response.StatusCode,
+			)
 		}
 	}
 }
@@ -105,7 +160,11 @@ func TestHarvesterExternalGatewayReportsBindFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer occupied.Close()
+	defer func() {
+		if err := occupied.Close(); err != nil {
+			t.Errorf("close occupied: %v", err)
+		}
+	}()
 	runtime := externalRuntime(t, occupied.Addr().(*net.TCPAddr).Port)
 	var state atomic.Pointer[string]
 	stop, err := startHarvesterExternal(runtime, io.Discard, func(value string) { state.Store(&value) })
@@ -126,36 +185,15 @@ func TestMCPDaemonStatusReportsHarvesterExternalState(t *testing.T) {
 	var state atomic.Pointer[string]
 	failed := "failed: listen 127.0.0.1:18378: address already in use"
 	state.Store(&failed)
-	handler := newMCPDaemonHandler(mcpDaemonOptions{Version: "test", External: &state})
+	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{Version: "test", External: &state})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", nil))
-	var status mcpDaemonStatus
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
+	var status mcpserv.DaemonStatus
 	if err := json.NewDecoder(recorder.Body).Decode(&status); err != nil {
 		t.Fatal(err)
 	}
 	if status.HarvesterExternal != failed {
 		t.Fatalf("status harvesterExternal = %q, want %q", status.HarvesterExternal, failed)
-	}
-}
-
-// A stale registration that passes a retired flag fails loudly with the key
-// that replaced it.
-func TestHarvesterServeRetiredFlagsNameTheirConfigKey(t *testing.T) {
-	cases := map[string]string{
-		"--user-agent=UA":         "fetch.userAgent",
-		"--port":                  "external.port",
-		"--internal-port":         "loopback port",
-		"--allow-unauthenticated": "always authenticates",
-	}
-	for flag, want := range cases {
-		var stdout, stderr bytes.Buffer
-		if code := runHarvesterMCP([]string{flag}, &stdout, &stderr, commandRuntime{}); code != 2 || !strings.Contains(stderr.String(), want) {
-			t.Errorf("serve %s: code=%d stderr=%q, want 2 naming %q", flag, code, stderr.String(), want)
-		}
-	}
-	var stdout, stderr bytes.Buffer
-	if code := runHarvesterMCP([]string{"--transport", "http"}, &stdout, &stderr, commandRuntime{}); code != 2 || !strings.Contains(stderr.String(), "pfm mcp serve") {
-		t.Fatalf("--transport http: code=%d stderr=%q", code, stderr.String())
 	}
 }
 
@@ -171,7 +209,13 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacy := filepath.Join(dir, config.LegacyFileName)
-	if err := os.WriteFile(legacy, []byte(`{"version":2,"mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		legacy,
+		[]byte(
+			`{"version":2,"mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`,
+		),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err := config.LoadRuntime("")
@@ -180,8 +224,15 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	preview, code := migrateMachineConfig(installer.ModeDryRun, &stdout, &stderr, runtime)
-	if code != 0 || preview.Config.MCP.HTTP.Port != config.DefaultMCPPort || !strings.Contains(stdout.String(), "change  rename") {
-		t.Fatalf("preview code=%d port=%d stdout=%q stderr=%q", code, preview.Config.MCP.HTTP.Port, stdout.String(), stderr.String())
+	if code != 0 || preview.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
+		!strings.Contains(stdout.String(), "change  rename") {
+		t.Fatalf(
+			"preview code=%d port=%d stdout=%q stderr=%q",
+			code,
+			preview.Config.MCP.HTTP.Port,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if _, err := os.Stat(legacy); err != nil {
 		t.Fatalf("preview touched the pre-split file: %v", err)
@@ -190,65 +241,22 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("apply code=%d stderr=%q", code, stderr.String())
 	}
-	if applied.Config.Path != filepath.Join(dir, config.FileName) || applied.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
-		!applied.Config.Harvester.Enabled || applied.Config.MCPServerSource("harvester") != config.SourceFile {
+	if applied.Config.Path != filepath.Join(dir, config.FileName) ||
+		applied.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
+		!applied.Config.Harvester.Enabled ||
+		applied.Config.MCPServerSource("harvester") != config.SourceFile {
 		t.Fatalf("applied path=%q port=%d harvester=%t source=%q", applied.Config.Path, applied.Config.MCP.HTTP.Port,
 			applied.Config.Harvester.Enabled, applied.Config.MCPServerSource("harvester"))
 	}
-	if options := newInstallerOptions(installer.ModeApply, "", true, io.Discard, applied); options.MCPPort != config.DefaultMCPPort {
+	if options := newInstallerOptions(
+		installer.ModeApply,
+		"",
+		true,
+		io.Discard,
+		io.Discard,
+		applied,
+	); options.MCPPort != config.DefaultMCPPort {
 		t.Fatalf("installer would wire port %d, want %d", options.MCPPort, config.DefaultMCPPort)
-	}
-}
-
-// A retired harvester variable still exported, or a pre-split layout not yet
-// migrated, is a setting that silently stopped applying — doctor warns on each.
-func TestDoctorWarnsOnRetiredHarvesterEnvAndPreSplitLayout(t *testing.T) {
-	clearRetiredHarvesterEnv(t)
-	t.Setenv("SEARXNG_URL", "http://127.0.0.1:8888")
-	t.Setenv("HARVESTER_LOCAL_ROOTS", "/srv")
-	runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
-	runtime.Config.Path = filepath.Join(t.TempDir(), config.LegacyFileName)
-	runtime.Config.Harvester.Path = filepath.Join(filepath.Dir(runtime.Config.Path), config.HarvesterFileName)
-	runtime.Config.Exists = true
-	if err := os.WriteFile(runtime.Config.Path, []byte(`{"version":2}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout bytes.Buffer
-	if warnings := printHarvesterConfigDoctor(&stdout, runtime); warnings != 3 {
-		t.Fatalf("warnings=%d, want 3 (layout + two retired variables)\n%s", warnings, stdout.String())
-	}
-	for _, want := range []string{"layout=pre-split", "retired_env=SEARXNG_URL", "search.searxngURL", "retired_env=HARVESTER_LOCAL_ROOTS", "never honored"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("doctor output lacks %q:\n%s", want, stdout.String())
-		}
-	}
-}
-
-// A configured external gateway always renders a line: its live state, or why
-// it cannot be running. Only "listening" is healthy.
-func TestDoctorExternalGatewayNeverRendersAsAbsence(t *testing.T) {
-	cases := []struct {
-		name, reported, want        string
-		enabled, external, warnings int
-	}{
-		{name: "off", enabled: 1, external: 0, warnings: 0, want: ""},
-		{name: "harvester disabled", enabled: 0, external: 1, reported: "disabled", warnings: 1, want: "harvester.enabled is false"},
-		{name: "old daemon", enabled: 1, external: 1, warnings: 1, want: "not reported"},
-		{name: "failed", enabled: 1, external: 1, reported: "failed: listen tcp 127.0.0.1:18378: bind", warnings: 1, want: "failed: listen"},
-		{name: "listening", enabled: 1, external: 1, reported: "listening on 127.0.0.1:18378", warnings: 0, want: "listening on"},
-	}
-	for _, tc := range cases {
-		harvester := config.DefaultHarvester()
-		harvester.Enabled = tc.enabled == 1
-		harvester.External.Enabled = tc.external == 1
-		var stdout bytes.Buffer
-		warnings := printHarvesterExternalDoctor(&stdout, harvester, tc.reported)
-		if warnings != tc.warnings {
-			t.Errorf("%s: warnings=%d, want %d (%q)", tc.name, warnings, tc.warnings, stdout.String())
-		}
-		if tc.want == "" && stdout.Len() != 0 || tc.want != "" && !strings.Contains(stdout.String(), tc.want) {
-			t.Errorf("%s: output %q, want %q", tc.name, stdout.String(), tc.want)
-		}
 	}
 }
 
@@ -264,7 +272,13 @@ func TestConfigInitRefusesBeforeWritingEitherFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runConfigInit(nil, &stdout, &stderr, runtime); code != 1 || !strings.Contains(stderr.String(), harvesterPath) {
+	if code := runConfigInit(
+		nil,
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), harvesterPath) {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
 	if _, err := os.Stat(runtime.Config.Path); !os.IsNotExist(err) {

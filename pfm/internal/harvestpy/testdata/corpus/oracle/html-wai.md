@@ -34,8 +34,8 @@ WCAG 2 info:
 - [WCAG 2 at a Glance](/WAI/standards-guidelines/wcag/glance/)
 - [How to Meet WCAG 2 (Quick Reference)](https://www.w3.org/WAI/WCAG22/quickref/)
 - [WCAG 2 Translations](/WAI/standards-guidelines/wcag/translations/)
-- [WCAG 2.2 Standard](https://www.w3.org/TR/WCAG22/),- [What’s New in WCAG 2.2](/WAI/standards-guidelines/wcag/new-in-22/)
-- [WCAG 2.1 Standard](https://www.w3.org/TR/WCAG21/),- [What’s New in WCAG 2.1](/WAI/standards-guidelines/wcag/new-in-21/)
+- [WCAG 2.2 Standard](https://www.w3.org/TR/WCAG22/),[What’s New in WCAG 2.2](/WAI/standards-guidelines/wcag/new-in-22/)
+- [WCAG 2.1 Standard](https://www.w3.org/TR/WCAG21/),[What’s New in WCAG 2.1](/WAI/standards-guidelines/wcag/new-in-21/)
 - [WCAG 2.0 Standard](https://www.w3.org/TR/WCAG20/)
 
 ### Authoring Tool Accessibility Guidelines (ATAG)
@@ -47,17 +47,26 @@ Authoring tools are software and services that “authors” (web developers, de
 
 ATAG info:
 
+- [ATAG Overview](/WAI/standards-guidelines/atag/)
+- [ATAG at a Glance](/WAI/standards-guidelines/atag/glance/)
+- [ATAG 2.0 Standard](https://www.w3.org/TR/ATAG/)
+
 ### User Agent Accessibility Guidelines (UAAG)
 
 User agents include browsers, browser extensions, media players, readers, and other applications that render web content.
 
 UAAG info:
 
+- [UAAG Overview](/WAI/standards-guidelines/uaag/)
+- [UAAG 2.0 Note](https://www.w3.org/TR/UAAG20/)
+
 ### W3C Accessibility Guidelines (WCAG) 3 Working Draft
 
 WCAG 3 is an early draft that is intended to become a W3C Standard. WCAG 3 applies to web content, apps, tools, publishing, and emerging technologies on the web.
 
 WCAG 3 info:
+
+- [WCAG 3 Introduction](/WAI/standards-guidelines/wcag/wcag3-intro/)
 
 ## Technical Specifications
 
@@ -69,25 +78,21 @@ The ARIA suite includes API mapping specifications that provide user agent imple
 
 ARIA info:
 
-- [WAI-ARIA Overview](/WAI/standards-guidelines/aria/)– includes a- [list and description of modules and API mappings](/WAI/standards-guidelines/aria/#versions)
+- [WAI-ARIA Overview](/WAI/standards-guidelines/aria/)– includes a[list and description of modules and API mappings](/WAI/standards-guidelines/aria/#versions)
 - [WAI-ARIA Authoring Practices](https://www.w3.org/TR/wai-aria-practices/)
 - [WAI-ARIA 1.2 Standard](https://www.w3.org/TR/wai-aria-1.2/)
 
 ### Audio and Video
 
--
-    [WebVTT: The Web Video Text Tracks Format](https://www.w3.org/TR/webvtt/)is a format for captions, text video descriptions, and other metadata that is time-aligned with audio or video content.
--
-    [Timed Text Markup Language (TTML)](https://www.w3.org/TR/ttml/)is intended to be used for transcoding or exchanging timed text information among legacy distribution content formats for subtitling and captioning.
+- [WebVTT: The Web Video Text Tracks Format](https://www.w3.org/TR/webvtt/) is a format for captions, text video descriptions, and other metadata that is time-aligned with audio or video content.
+- [Timed Text Markup Language (TTML)](https://www.w3.org/TR/ttml/) is intended to be used for transcoding or exchanging timed text information among legacy distribution content formats for subtitling and captioning.
 
 ### Evaluation
 
 The following resources support development of accessibility evaluation methods and tools:
 
--
-    [Accessibility Conformance Testing (ACT) Overview](/WAI/standards-guidelines/act/)— ACT establishes and documents rules for testing the conformance of web content to accessibility standards. The[WCAG 2 Test Rules](/WAI/standards-guidelines/act/rules/about/)use the ACT rules format.
--
-    [Evaluation and Report Language (EARL) Overview](/WAI/standards-guidelines/earl/)— EARL is a machine-readable format for expressing test results.
+- [Accessibility Conformance Testing (ACT) Overview](/WAI/standards-guidelines/act/) — ACT establishes and documents rules for testing the conformance of web content to accessibility standards. The [WCAG 2 Test Rules](/WAI/standards-guidelines/act/rules/about/) use the ACT rules format.
+- [Evaluation and Report Language (EARL) Overview](/WAI/standards-guidelines/earl/) — EARL is a machine-readable format for expressing test results.
 
 Additional resources related to evaluation are listed in the [Evaluating Web Accessibility Overview](/WAI/test-evaluate/), including:
 
@@ -103,17 +108,19 @@ Additional resources related to evaluation are listed in the [Evaluating Web Acc
 
 ## Other Areas of W3C WAI work
 
+- [Mobile Accessibility at W3C](/WAI/standards-guidelines/mobile/)
+- [Cognitive Accessibility at W3C](/WAI/cognitive/)
+
 ## Additional Information
 
--
-    [List of all W3C accessibility-related Standards (“W3C Recommendations”) and Working Group Notes](https://www.w3.org/TR/?tag=accessibility)
--
-    [Web Accessibility Laws & Policies](/WAI/policies/)lists governmental laws and policies relating to web accessibility in countries and regions around the world. Many of these reference W3C accessibility standards.
--
-    [Why Standards Harmonization is Essential to Web Accessibility](/WAI/standards-guidelines/harmonization/)
--
-    [Referencing and Linking to WAI Guidelines and Technical Documents](/WAI/standards-guidelines/linking/)
+- [List of all W3C accessibility-related Standards (“W3C Recommendations”) and Working Group Notes](https://www.w3.org/TR/?tag=accessibility)
+- [Web Accessibility Laws & Policies](/WAI/policies/) lists governmental laws and policies relating to web accessibility in countries and regions around the world. Many of these reference W3C accessibility standards.
+- [Why Standards Harmonization is Essential to Web Accessibility](/WAI/standards-guidelines/harmonization/)
+- [Referencing and Linking to WAI Guidelines and Technical Documents](/WAI/standards-guidelines/linking/)
+- [How WAI Develops Accessibility Guidelines through the W3C Process: Milestones and **Opportunities to Contribute**](/WAI/standards-guidelines/w3c-process/)
 
 ![Illustration showing the guidelines for the different components](/WAI/content-images/components/specs.png)
+
+[Long description of image](/WAI/fundamentals/components/examples/#guide)
 
 [Back to Top](#top)

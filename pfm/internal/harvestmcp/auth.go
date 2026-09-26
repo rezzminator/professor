@@ -6,6 +6,7 @@ package harvestmcp
 // credentials out of the state file.
 
 import (
+	"context"
 	cryptoRand "crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -21,15 +22,43 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
-	HarvesterScope     = "harvest"
-	authCodeTTL        = 5 * time.Minute
-	accessTokenTTL     = time.Hour
-	consentTTL         = 10 * time.Minute
-	maxConsentAttempts = 5
-	defaultTokenExpiry = 3600
+	HarvesterScope             = "harvest"
+	authorizationCodeGrant     = "authorization_code"
+	pkceMethodS256             = "S256"
+	tokenAuthClientSecretBasic = "client_secret_basic"
+	tokenAuthClientSecretPost  = "client_secret_post"
+	tokenAuthNone              = "none"
+	refreshTokenGrant          = "refresh_token"
+	oauthErrorInvalidGrant     = "invalid_grant"
+	oauthErrorInvalidTarget    = "invalid_target"
+	oauthErrorServer           = "server_error"
+	authCodeTTL                = 5 * time.Minute
+	accessTokenTTL             = time.Hour
+	consentTTL                 = 10 * time.Minute
+	maxConsentAttempts         = 5
+	defaultTokenExpiry         = 3600
+)
+
+// maxPendingConsents bounds how many /authorize transactions may wait for the
+// operator's passphrase at once. Every /authorize request mints one, and an
+// abandoned one lingers until consentTTL, so without a bound the map grows with
+// the request rate. Same policy as maxRegisteredClients: expired transactions
+// are swept first, then a request at the ceiling is refused — never a live
+// transaction silently evicted. Four open authorizations per client at the
+// client ceiling is far above what the handful of real clients ever holds.
+const maxPendingConsents = 4 * maxRegisteredClients
+
+// errTooManyPendingConsents is begin's refusal at maxPendingConsents; the
+// /authorize handler renders it as oauthErrorTooManyClients, the same
+// temporarily_unavailable refusal /register gives at its ceiling.
+var errTooManyPendingConsents = errors.New(
+	"the harvester gateway has reached its pending-authorization limit; retry once an open authorization completes or expires",
 )
 
 var pkceChallenge = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
@@ -59,9 +88,17 @@ func tokenURLSafe(size int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
+// persistedClient's ClientSecret field is a READ-compatibility door only: a
+// state.json written before L2-F20's fix, or a /register request body
+// (register() below always clears whatever a caller supplies before
+// persisting). saveLocked never writes a non-empty ClientSecret — load
+// migrates one to ClientSecretHash the moment it is seen, atomically
+// rewriting the file — so the cleartext never survives past the first open
+// past this fix.
 type persistedClient struct {
 	ClientID                string   `json:"client_id"`
 	ClientSecret            string   `json:"client_secret,omitempty"`
+	ClientSecretHash        string   `json:"client_secret_hash,omitempty"`
 	ClientIDIssuedAt        int64    `json:"client_id_issued_at,omitempty"`
 	ClientSecretExpiresAt   int64    `json:"client_secret_expires_at"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
@@ -130,19 +167,32 @@ type authStore struct {
 	passphrase string
 	staticHash string
 	statePath  string
+	clock      clock.Clock
 	clients    map[string]oauthClient
 	pending    map[string]pendingConsent
 	codes      map[string]authorizationCode
 	access     map[string]accessToken
 	refresh    map[string]refreshToken
+	// limiter is the real bound on passphrase guessing (L2-F21):
+	// maxConsentAttempts above caps ONE transaction, but /authorize mints a
+	// fresh one on every request.
+	limiter *passphraseLimiter
+	// mint issues consent's authorization codes: tokenURLSafe, replaced only
+	// by a test that must drive the entropy-failure branch.
+	mint func(size int) (string, error)
 }
 
-func newAuthStore(issuer, resource, passphrase, staticToken, statePath string) *authStore {
+func newAuthStore(issuer, resource, passphrase, staticToken, statePath string, clocks ...clock.Clock) *authStore {
+	watch := clock.Real
+	if len(clocks) > 0 && clocks[0] != nil {
+		watch = clocks[0]
+	}
 	s := &authStore{
 		issuer: issuer, resource: resource, passphrase: passphrase,
-		statePath: statePath, clients: map[string]oauthClient{},
+		statePath: statePath, clock: watch, clients: map[string]oauthClient{},
 		pending: map[string]pendingConsent{}, codes: map[string]authorizationCode{},
 		access: map[string]accessToken{}, refresh: map[string]refreshToken{},
+		limiter: newPassphraseLimiter(), mint: tokenURLSafe,
 	}
 	if staticToken != "" {
 		s.staticHash = digest(staticToken)
@@ -167,19 +217,39 @@ func (s *authStore) load() {
 		fmt.Fprintf(os.Stderr, "harvester auth: invalid state %s: %v\n", s.statePath, err)
 		return
 	}
-	for _, c := range state.Clients {
-		if c.ClientID != "" {
-			s.clients[c.ClientID] = oauthClient{persistedClient: c}
+	migrated := false
+	for i := range state.Clients {
+		c := &state.Clients[i]
+		if c.ClientID == "" {
+			continue
 		}
+		// L2-F20: a client secret written before this fix is cleartext.
+		// Migrate it to a digest and drop the plaintext the moment it is
+		// seen — the write below rewrites the file atomically, so the
+		// cleartext never lands on disk again past this load.
+		if c.ClientSecret != "" {
+			c.ClientSecretHash = digest(c.ClientSecret)
+			c.ClientSecret = ""
+			migrated = true
+		}
+		s.clients[c.ClientID] = oauthClient{persistedClient: *c}
 	}
 	for _, r := range state.Refresh {
 		if r.Hash == "" || r.ClientID == "" {
 			// A malformed refresh record invalidates the set, matching the old
-			// provider's fail-safe load behavior.
+			// provider's fail-safe load behavior — break, not return, so a
+			// client-secret migration below still persists.
 			s.refresh = map[string]refreshToken{}
-			return
+			break
 		}
 		s.refresh[r.Hash] = refreshToken{Hash: r.Hash, ClientID: r.ClientID, Scope: append([]string(nil), r.Scopes...)}
+	}
+	if migrated {
+		// s.refresh is fully populated above; saveLocked persists both maps
+		// together, so a migration never drops a live refresh token.
+		s.mu.Lock()
+		s.saveLocked()
+		s.mu.Unlock()
 	}
 }
 
@@ -188,7 +258,8 @@ func (s *authStore) saveLocked() {
 		return
 	}
 	state := authState{}
-	for _, c := range s.clients {
+	for id := range s.clients {
+		c := s.clients[id]
 		state.Clients = append(state.Clients, c.persistedClient)
 	}
 	for _, r := range s.refresh {
@@ -226,11 +297,12 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	// attempt to smuggle either into the registration document.
 	c.ClientID = ""
 	c.ClientSecret = ""
+	c.ClientSecretHash = ""
 	if c.TokenEndpointAuthMethod == "" {
-		c.TokenEndpointAuthMethod = "client_secret_basic"
+		c.TokenEndpointAuthMethod = tokenAuthClientSecretBasic
 	}
 	switch c.TokenEndpointAuthMethod {
-	case "none", "client_secret_post", "client_secret_basic":
+	case tokenAuthNone, tokenAuthClientSecretPost, tokenAuthClientSecretBasic:
 	default:
 		return persistedClient{}, "", "invalid_client_metadata"
 	}
@@ -241,21 +313,24 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	}
 	id, err := tokenURLSafe(18)
 	if err != nil {
-		return persistedClient{}, "", "server_error"
+		return persistedClient{}, "", oauthErrorServer
 	}
 	c.ClientID = id
-	c.ClientIDIssuedAt = time.Now().Unix()
+	c.ClientIDIssuedAt = s.clock.Now().Unix()
 	var secret string
-	if c.TokenEndpointAuthMethod != "none" {
+	if c.TokenEndpointAuthMethod != tokenAuthNone {
 		secret, err = tokenURLSafe(24)
 		if err != nil {
-			return persistedClient{}, "", "server_error"
+			return persistedClient{}, "", oauthErrorServer
 		}
-		c.ClientSecret = secret
+		// The plaintext is returned once, below, for the registration
+		// response (RFC 7591) — never stored. Only its digest is persisted
+		// (L2-F20); authenticateClient (remote.go) verifies against it.
+		c.ClientSecretHash = digest(secret)
 	}
 	c.ClientSecretExpiresAt = 0
 	if len(c.GrantTypes) == 0 {
-		c.GrantTypes = []string{"authorization_code", "refresh_token"}
+		c.GrantTypes = []string{authorizationCodeGrant, refreshTokenGrant}
 	}
 	if len(c.ResponseTypes) == 0 {
 		c.ResponseTypes = []string{"code"}
@@ -263,10 +338,18 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	if c.Scope == "" {
 		c.Scope = HarvesterScope
 	}
+	// L2-F21: /register was unthrottled and persisted every client forever.
+	// Refuse at the ceiling rather than silently evicting an
+	// oldest-but-still-used client — see maxRegisteredClients' doc comment.
+	// The check and the insert share one critical section, so concurrent
+	// registrations cannot all pass the check before any of them lands.
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.clients) >= maxRegisteredClients {
+		return persistedClient{}, "", oauthErrorTooManyClients
+	}
 	s.clients[id] = oauthClient{persistedClient: c}
 	s.saveLocked()
-	s.mu.Unlock()
 	return c, secret, ""
 }
 
@@ -294,7 +377,9 @@ func validRedirectURI(raw string) bool {
 func ResourceMatches(candidate, expected string) bool {
 	a, errA := url.Parse(candidate)
 	b, errB := url.Parse(expected)
-	if errA != nil || errB != nil || a.Scheme == "" || a.Hostname() == "" || b.Scheme == "" || b.Hostname() == "" || a.Fragment != "" || b.Fragment != "" {
+	if errA != nil || errB != nil || a.Scheme == "" || a.Hostname() == "" || b.Scheme == "" || b.Hostname() == "" ||
+		a.Fragment != "" ||
+		b.Fragment != "" {
 		return false
 	}
 	userA, userB := "", ""
@@ -310,7 +395,11 @@ func ResourceMatches(candidate, expected string) bool {
 		a.EscapedPath() == b.EscapedPath() && a.RawQuery == b.RawQuery
 }
 
-func (s *authStore) begin(c oauthClient, redirect, state, challenge, method, resource string, scope []string) (string, error) {
+func (s *authStore) begin(
+	c oauthClient,
+	redirect, state, challenge, method, resource string,
+	scope []string,
+) (string, error) {
 	if resource == "" {
 		resource = s.resource
 	}
@@ -318,9 +407,9 @@ func (s *authStore) begin(c oauthClient, redirect, state, challenge, method, res
 		return "", errors.New("resource does not identify this MCP server")
 	}
 	if method == "" {
-		method = "S256"
+		method = pkceMethodS256
 	}
-	if method != "S256" || !pkceChallenge.MatchString(challenge) {
+	if method != pkceMethodS256 || !pkceChallenge.MatchString(challenge) {
 		return "", errors.New("code_challenge is not valid PKCE")
 	}
 	txn, err := tokenURLSafe(18)
@@ -328,16 +417,44 @@ func (s *authStore) begin(c oauthClient, redirect, state, challenge, method, res
 		return "", err
 	}
 	s.mu.Lock()
-	s.pending[txn] = pendingConsent{ClientID: c.ClientID, RedirectURI: redirect, State: state, Scope: scope, Challenge: challenge, Method: method, Resource: resource, Created: time.Now()}
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	// Sweep, check and insert under one lock: see maxPendingConsents.
+	now := s.clock.Now()
+	for id := range s.pending {
+		if now.Sub(s.pending[id].Created) > consentTTL {
+			delete(s.pending, id)
+		}
+	}
+	if len(s.pending) >= maxPendingConsents {
+		return "", errTooManyPendingConsents
+	}
+	s.pending[txn] = pendingConsent{
+		ClientID:    c.ClientID,
+		RedirectURI: redirect,
+		State:       state,
+		Scope:       scope,
+		Challenge:   challenge,
+		Method:      method,
+		Resource:    resource,
+		Created:     now,
+	}
 	return txn, nil
 }
 
-func (s *authStore) consent(txn, supplied string) (string, bool, bool) {
+// consent spends one passphrase guess against txn from source address addr.
+// addr is metered by passphraseLimiter independently of maxConsentAttempts:
+// that bound caps ONE transaction, this one caps every transaction addr (or
+// the whole gateway) can mint. A locked-out guess is refused the SAME way a
+// wrong passphrase is (alive=true, ok=false) — the caller never learns
+// whether it hit the lockout or just guessed wrong. The right passphrase whose
+// authorization code cannot be minted returns ok=true, alive=false: a server
+// failure, logged here, that the caller must render as one — never as the
+// expired transaction ("", false, false) it would otherwise look like.
+func (s *authStore) consent(txn, supplied, addr string) (string, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.pending[txn]
-	if !ok || time.Since(p.Created) > consentTTL || s.passphrase == "" {
+	if !ok || s.clock.Now().Sub(p.Created) > consentTTL || s.passphrase == "" {
 		delete(s.pending, txn)
 		return "", false, false
 	}
@@ -347,15 +464,32 @@ func (s *authStore) consent(txn, supplied string) (string, bool, bool) {
 		return "", false, false
 	}
 	s.pending[txn] = p
-	if !equalSecret(supplied, s.passphrase) {
+	now := s.clock.Now()
+	if !s.limiter.allowed(addr, now) {
 		return "", false, true
 	}
-	delete(s.pending, txn)
-	code, err := tokenURLSafe(24)
-	if err != nil {
-		return "", false, false
+	if !equalSecret(supplied, s.passphrase) {
+		s.limiter.recordFailure(addr, now)
+		return "", false, true
 	}
-	s.codes[code] = authorizationCode{Code: code, ClientID: p.ClientID, RedirectURI: p.RedirectURI, State: p.State, Scope: p.Scope, Challenge: p.Challenge, Resource: p.Resource, Expires: time.Now().Add(authCodeTTL)}
+	s.limiter.recordSuccess(addr)
+	delete(s.pending, txn)
+	code, err := s.mint(24)
+	if err != nil {
+		obs.Logger(obs.Component(context.Background(), "mcp")).Error("harvester.auth.consent.mint",
+			obs.FieldErr, err.Error(), "client_id", p.ClientID)
+		return "", true, false
+	}
+	s.codes[code] = authorizationCode{
+		Code:        code,
+		ClientID:    p.ClientID,
+		RedirectURI: p.RedirectURI,
+		State:       p.State,
+		Scope:       p.Scope,
+		Challenge:   p.Challenge,
+		Resource:    p.Resource,
+		Expires:     s.clock.Now().Add(authCodeTTL),
+	}
 	return code, true, true
 }
 
@@ -363,19 +497,19 @@ func (s *authStore) exchange(code, clientID, redirect, verifier, resource string
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.codes[code]
-	if !ok || time.Now().After(c.Expires) || c.ClientID != clientID || c.RedirectURI != redirect {
-		return tokenResponse{}, "invalid_grant"
+	if !ok || s.clock.Now().After(c.Expires) || c.ClientID != clientID || c.RedirectURI != redirect {
+		return tokenResponse{}, oauthErrorInvalidGrant
 	}
 	if resource != "" && !ResourceMatches(resource, s.resource) {
-		return tokenResponse{}, "invalid_target"
+		return tokenResponse{}, oauthErrorInvalidTarget
 	}
 	if !verifyPKCE(c.Challenge, verifier) {
-		return tokenResponse{}, "invalid_grant"
+		return tokenResponse{}, oauthErrorInvalidGrant
 	}
 	delete(s.codes, code)
 	issued, err := s.issueLocked(c.ClientID, c.Scope)
 	if err != nil {
-		return tokenResponse{}, "server_error"
+		return tokenResponse{}, oauthErrorServer
 	}
 	return issued, ""
 }
@@ -408,28 +542,40 @@ func (s *authStore) issueLocked(clientID string, scope []string) (tokenResponse,
 	if len(scope) == 0 {
 		scope = []string{HarvesterScope}
 	}
-	s.access[digest(access)] = accessToken{Raw: access, ClientID: clientID, Scope: append([]string(nil), scope...), Resource: s.resource, Expires: time.Now().Add(accessTokenTTL)}
+	s.access[digest(access)] = accessToken{
+		Raw:      access,
+		ClientID: clientID,
+		Scope:    append([]string(nil), scope...),
+		Resource: s.resource,
+		Expires:  s.clock.Now().Add(accessTokenTTL),
+	}
 	hash := digest(refresh)
 	s.refresh[hash] = refreshToken{Hash: hash, ClientID: clientID, Scope: append([]string(nil), scope...)}
 	s.saveLocked()
-	return tokenResponse{AccessToken: access, TokenType: "Bearer", ExpiresIn: defaultTokenExpiry, Scope: strings.Join(scope, " "), RefreshToken: refresh}, nil
+	return tokenResponse{
+		AccessToken:  access,
+		TokenType:    "Bearer",
+		ExpiresIn:    defaultTokenExpiry,
+		Scope:        strings.Join(scope, " "),
+		RefreshToken: refresh,
+	}, nil
 }
 
 func (s *authStore) refreshExchange(raw, clientID, resource string) (tokenResponse, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if resource != "" && !ResourceMatches(resource, s.resource) {
-		return tokenResponse{}, "invalid_target"
+		return tokenResponse{}, oauthErrorInvalidTarget
 	}
 	hash := digest(raw)
 	r, ok := s.refresh[hash]
 	if !ok || r.ClientID != clientID {
-		return tokenResponse{}, "invalid_grant"
+		return tokenResponse{}, oauthErrorInvalidGrant
 	}
 	delete(s.refresh, hash)
 	issued, err := s.issueLocked(clientID, r.Scope)
 	if err != nil {
-		return tokenResponse{}, "server_error"
+		return tokenResponse{}, oauthErrorServer
 	}
 	return issued, ""
 }
@@ -441,7 +587,7 @@ func (s *authStore) verify(raw string) bool {
 		return true
 	}
 	h, ok := s.access[digest(raw)]
-	if !ok || time.Now().After(h.Expires) || !ResourceMatches(h.Resource, s.resource) {
+	if !ok || s.clock.Now().After(h.Expires) || !ResourceMatches(h.Resource, s.resource) {
 		return false
 	}
 	return true

@@ -155,7 +155,8 @@ func TestLastExchangeIsEngineAgnosticAndKeepsTools(t *testing.T) {
 			if !ok || len(prompt) != 1 || Condensed(prompt[0]) != "U latest question" {
 				t.Fatalf("prompt=%#v ok=%t", prompt, ok)
 			}
-			if len(response) != 2 || !strings.HasPrefix(Condensed(response[0]), "T ") || Condensed(response[1]) != "A latest answer" {
+			if len(response) != 2 || !strings.HasPrefix(Condensed(response[0]), "T ") ||
+				Condensed(response[1]) != "A latest answer" {
 				t.Fatalf("response=%#v", response)
 			}
 		})
@@ -171,7 +172,10 @@ func TestLastExchangeNamesPartialAndMissingShapesWithoutGuessing(t *testing.T) {
 	if !ok || len(prompt) != 1 || len(response) != 1 || response[0].Role != RoleTool {
 		t.Fatalf("partial prompt=%#v response=%#v ok=%t", prompt, response, ok)
 	}
-	if prompt, response, ok := LastExchange([]Entry{{Role: RoleAssistant, Text: "orphan"}}); ok || prompt != nil || response != nil {
+	if prompt, response, ok := LastExchange(
+		[]Entry{{Role: RoleAssistant, Text: "orphan"}},
+	); ok || prompt != nil ||
+		response != nil {
 		t.Fatalf("missing prompt=%#v response=%#v ok=%t", prompt, response, ok)
 	}
 }
@@ -189,10 +193,13 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 		t.Fatalf("context percent = %f, want ~8.64", percent)
 	}
 
-	claude := writeTranscript(t, "claude.jsonl",
-		`{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98,"output_tokens":500}}}
+	claude := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98}}}
 {"type":"assistant","message":{"model":"<synthetic>","usage":{}}}
-`)
+`,
+	)
 	meta, err = ReadMeta(claude, "cc")
 	if err != nil {
 		t.Fatalf("ReadMeta() error = %v", err)
@@ -200,8 +207,8 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 	if meta.Model != "claude-opus-5" {
 		t.Fatalf("model = %q — <synthetic> is the harness, not a choice", meta.Model)
 	}
-	if meta.ContextTokens != 1000 {
-		t.Fatalf("context tokens = %d, want 1000 (cache reads ARE context)", meta.ContextTokens)
+	if meta.ContextTokens != 500 {
+		t.Fatalf("context tokens = %d, want 500 (cache reads ARE context)", meta.ContextTokens)
 	}
 	// No window is stated anywhere in a Claude transcript, so the percentage
 	// must stay unknown rather than be guessed from a model name.
@@ -210,8 +217,126 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 	}
 }
 
+func TestReadMetaClaudeContextExcludesOutputTokens(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98,"output_tokens":500}}}`+"\n",
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 500 {
+		t.Fatalf("context tokens = %d, want input occupancy 500 without output tokens", meta.ContextTokens)
+	}
+}
+
+func TestReadMetaClaudeIgnoresNewerSidechainUsage(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}
+{"type":"assistant","isSidechain":true,"message":{"usage":{"input_tokens":1000,"cache_read_input_tokens":2000,"cache_creation_input_tokens":3000}}}
+`,
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 600 {
+		t.Fatalf("context tokens = %d, want last main-chain input occupancy 600", meta.ContextTokens)
+	}
+}
+
+func TestReadMetaClaudeCompactBoundaryOrdering(t *testing.T) {
+	tests := []struct {
+		name          string
+		lines         string
+		wantTokens    int64
+		wantCompacted bool
+		wantPost      int64
+	}{
+		{
+			name: "boundary after usage marks stale occupancy",
+			lines: `{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200}}}
+{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}`,
+			wantTokens:    300,
+			wantCompacted: true,
+			wantPost:      41,
+		},
+		{
+			name: "boundary before usage is not newer",
+			lines: `{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}
+{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200}}}`,
+			wantTokens: 300,
+		},
+		{
+			name: "new top-level usage clears compact state",
+			lines: `{"type":"assistant","message":{"usage":{"input_tokens":100}}}
+{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}
+{"type":"assistant","usage":{"input_tokens":7,"cache_read_input_tokens":8,"output_tokens":900}}`,
+			wantTokens: 15,
+		},
+		{
+			name: "output-only record does not clear compact state",
+			lines: `{"type":"assistant","message":{"usage":{"input_tokens":100}}}
+{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}
+{"type":"assistant","usage":{"output_tokens":900}}`,
+			wantTokens:    100,
+			wantCompacted: true,
+			wantPost:      41,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeTranscript(t, "claude.jsonl", test.lines+"\n")
+			meta, err := ReadMeta(path, "cc")
+			if err != nil {
+				t.Fatalf("ReadMeta() error = %v", err)
+			}
+			if meta.ContextTokens != test.wantTokens ||
+				meta.CompactedAfterUsage != test.wantCompacted ||
+				meta.PostCompactTokens != test.wantPost {
+				t.Fatalf(
+					"meta = %#v, want tokens=%d compacted=%t post=%d",
+					meta,
+					test.wantTokens,
+					test.wantCompacted,
+					test.wantPost,
+				)
+			}
+		})
+	}
+}
+
+func TestReadMetaClaudeCountsOnlyRealHumanPromptsAcrossWholeFile(t *testing.T) {
+	content := `{"type":"user","message":{"content":"first real prompt"}}
+` + strings.Repeat(`{"type":"assistant","message":{"content":"padding"}}
+`, 12000) + `{"type":"user","isMeta":true,"message":{"content":"metadata prompt"}}
+{"type":"user","isSidechain":true,"message":{"content":"sidechain prompt"}}
+{"type":"user","isCompactSummary":true,"message":{"content":"compact summary"}}
+{"type":"user","message":{"content":"<system-reminder>injected</system-reminder>"}}
+{"type":"user","message":{"content":""}}
+{"type":"assistant","message":{"content":"not a prompt"}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"ignored"},{"type":"text","text":"second\nreal prompt"}]}}
+`
+	if len(content) <= 512<<10 {
+		t.Fatalf("fixture size = %d, must exceed the retired tail window", len(content))
+	}
+	meta, err := ReadMeta(writeTranscript(t, "claude.jsonl", content), "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.HumanPrompts != 2 {
+		t.Fatalf("human prompts = %d, want 2", meta.HumanPrompts)
+	}
+}
+
 func TestCodexContextPercentUsesLastWindowNotLifetimeTotal(t *testing.T) {
-	path := writeTranscript(t, "rollout.jsonl",
+	path := writeTranscript(
+		t,
+		"rollout.jsonl",
 		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":155000},"total_token_usage":{"total_tokens":155000000},"model_context_window":272000}}}`+"\n",
 	)
 	meta, err := ReadMeta(path, "cx")
@@ -226,5 +351,33 @@ func TestCodexContextPercentUsesLastWindowNotLifetimeTotal(t *testing.T) {
 	}
 	if percent := (Meta{ContextTokens: 155000000, ContextWindow: 272000}).ContextPercent(); percent != 100 {
 		t.Fatalf("defensive context-percent cap = %f, want 100", percent)
+	}
+}
+
+// TestParseCodexSkipsAgentMessageEventPairedWithResponseItem pins the shape
+// internal/mockengine/codex.go's recordAssistant writes (and real Codex
+// rollouts carry too): a response_item message AND an event_msg agent_message
+// for the same turn. internal/index/codex.go treats the response_item as the
+// one canonical record for a turn already paired with an event — a reader
+// that also counts the event_msg reports the same reply twice.
+func TestParseCodexSkipsAgentMessageEventPairedWithResponseItem(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"rollout.jsonl",
+		`{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"read the report"}]}}`+"\n"+
+			`{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the report is clean"}]}}`+"\n"+
+			`{"timestamp":"t3","type":"event_msg","payload":{"type":"agent_message","message":"the report is clean"}}`+"\n",
+	)
+	entries, _, err := Tail(context.Background(), path, "cx", 100, 0)
+	if err != nil {
+		t.Fatalf("Tail() error = %v", err)
+	}
+	got := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		got = append(got, Condensed(entry))
+	}
+	want := []string{"U read the report", "A the report is clean"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("entries\n got: %v\nwant: %v (agent_message event double-counted the reply)", got, want)
 	}
 }

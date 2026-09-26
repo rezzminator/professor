@@ -1,8 +1,8 @@
 package compose
 
 import (
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Kind identifies the action and visual treatment for a row.
@@ -24,17 +24,32 @@ const (
 	// live operation it supports (attach), matching the socket-only identity
 	// it carries.
 	Booting
-	// ResumeOpencode is one indexed OpenCode session. Appended last ON PURPOSE:
+	// ResumeOpenCode is one indexed OpenCode session. Appended last ON PURPOSE:
 	// Kind values are compared numerically in golden fixtures, so renumbering
 	// an existing kind would silently rewrite every fixture row.
-	ResumeOpencode
-	// NewOpencode is appended for the same compatibility reason. It launches a
+	ResumeOpenCode
+	// NewOpenCode is appended for the same compatibility reason. It launches a
 	// fresh OpenCode TUI in a fleet-owned ox socket.
-	NewOpencode
+	NewOpenCode
 	// ProfessorUpdate is a cached, interactive-only release notice inserted by
 	// cmd/pfm ahead of the merged new-chat row. It is deliberately not emitted
 	// by Compose, so plain and TSV output retain their stable row contracts.
 	ProfessorUpdate
+	// ProfessorUpdateFailed is ProfessorUpdate's failure twin: the detached
+	// update checker has been failing on every attempt instead of finding (or
+	// ruling out) a release. It gets its own row for the same reason
+	// ProfessorUpdate does — a stderr line printed before the interactive
+	// picker takes the terminal is gone the instant the alt screen opens, and
+	// a swallowed failure must never render identically to "no update
+	// available". Never emitted by Compose either, for the same reason.
+	ProfessorUpdateFailed
+	// LiveOpenCode is a RUNNING OpenCode TUI on an ox- socket, detected from
+	// the pane's own process tree (gather.DetectOpenCode) rather than read out
+	// of the session store. Appended last for the same compatibility reason
+	// ResumeOpenCode was. Before it existed, a running OpenCode chat could
+	// only ever be listed as its own resume row — "resume-opencode", dead to
+	// every chat verb, while its TUI sat there answering keystrokes.
+	LiveOpenCode
 )
 
 func (kind Kind) String() string {
@@ -57,15 +72,52 @@ func (kind Kind) String() string {
 		return "new-codex"
 	case Booting:
 		return "booting"
-	case ResumeOpencode:
+	case ResumeOpenCode:
 		return "resume-opencode"
-	case NewOpencode:
+	case NewOpenCode:
 		return "new-opencode"
 	case ProfessorUpdate:
 		return "professor-update"
+	case ProfessorUpdateFailed:
+		return "professor-update-failed"
+	case LiveOpenCode:
+		return "live-opencode"
 	default:
 		return "unknown"
 	}
+}
+
+// IsLiveSeat reports whether kind is a running primary chat seat.
+func (kind Kind) IsLiveSeat() bool {
+	return kind == LiveClaude || kind == LiveCodex || kind == LiveSplit ||
+		kind == LiveOpenCode
+}
+
+// ResumeKindFor is the ONE demotion a live seat takes when it stops being
+// live — its tmux server died under it (action.Executor.Open,
+// action.OpenDetached) or the picker deliberately killed it to reboot it
+// (picker.rebootRow). The answer is the resumable kind of the seat's OWN
+// engine: the if/else these three call sites each used to spell mapped
+// everything that was not Codex onto ResumeClaude, so an OpenCode seat came
+// back as somebody else's chat entirely. A non-live kind is returned
+// unchanged — there is nothing to demote.
+func ResumeKindFor(kind Kind) Kind {
+	switch kind {
+	case LiveCodex:
+		return ResumeCodex
+	case LiveOpenCode:
+		return ResumeOpenCode
+	case LiveClaude, LiveSplit:
+		return ResumeClaude
+	default:
+		return kind
+	}
+}
+
+// IsAddressable reports whether kind has a live process or pane that chat
+// verbs can address.
+func (kind Kind) IsAddressable() bool {
+	return kind.IsLiveSeat() || kind == Agent || kind == Booting
 }
 
 // View selects the default, all, or killed-only row set.
@@ -81,6 +133,10 @@ const (
 type AccountRoot struct {
 	Account int
 	Path    string
+	// ConfigDir is the seat's config dir (CLAUDE_CONFIG_DIR / CODEX_HOME). A
+	// live process names its seat by this, and it stays distinct when every
+	// seat's Path resolves to one shared transcript store.
+	ConfigDir string
 }
 
 // Options controls pure presentation choices.
@@ -91,22 +147,22 @@ type Options struct {
 	PrimaryAccount      int
 	CodexAccountIDs     []int
 	PrimaryCodexAccount int
-	OpencodeAccountIDs  []int
-	PrimaryOpencode     int
+	OpenCodeAccountIDs  []int
+	PrimaryOpenCode     int
 	NowNS               int64
 }
 
 // Input is the complete immutable input to one composition pass.
 type Input struct {
-	Snapshot     gather.Snapshot
-	Transcripts  []store.Transcript
-	Rollouts     []store.Rollout
-	OcSessions   []store.OcSession
-	CxNames      map[string]string
-	Killed       []store.Killed
-	AccountRoots []AccountRoot
-	CodexRoots   []AccountRoot
-	Options      Options
+	Snapshot         gather.Snapshot
+	Transcripts      []store.Transcript
+	Rollouts         []store.Rollout
+	OpenCodeSessions []store.OpenCodeSession
+	CxNames          map[string]string
+	Killed           []store.Killed
+	AccountRoots     []AccountRoot
+	CodexHomes       []AccountRoot
+	Options          Options
 }
 
 // Row is one live, resumable, agent, or new-chat choice.
@@ -128,7 +184,7 @@ type Row struct {
 	CWD         string
 	Size        int64
 	PromptCount int64
-	// AssistantCount is set only for a ResumeOpencode row: an OpenCode
+	// AssistantCount is set only for a ResumeOpenCode row: an OpenCode
 	// session has no file size, so its reality signal is prompts answered,
 	// not bytes on disk. A session with prompts but no assistant reply is
 	// exactly as empty as a Claude transcript with no visible turns.
@@ -181,4 +237,5 @@ type Output struct {
 	primaryCodex       int
 	primaryOpenCode    int
 	fallbackDir        string
+	projects           projectNames
 }

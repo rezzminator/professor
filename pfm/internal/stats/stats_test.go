@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func uintString(value uint64) string { return strconv.FormatUint(value, 10) }
@@ -134,14 +135,8 @@ func TestSamplerCountsClaudeAndCodexLifetimeTokensIncrementally(t *testing.T) {
 
 	claudePath := filepath.Join(root, "claude.jsonl")
 	codexPath := filepath.Join(root, "codex.jsonl")
-	claude := strings.Join([]string{
-		`{"timestamp":"2026-08-16T10:00:00Z","type":"user","message":{"role":"user"}}`,
-		`{"timestamp":"2026-08-16T11:00:00Z","type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200,"cache_creation_input_tokens":300,"output_tokens":400}}}`,
-	}, "\n") + "\n"
-	codex := strings.Join([]string{
-		`{"timestamp":"2026-08-16T10:30:00Z","type":"session_meta","payload":{}}`,
-		`{"timestamp":"2026-08-16T11:30:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9000}}}}`,
-	}, "\n") + "\n"
+	claude := `{"timestamp":"2026-08-16T10:00:00Z","type":"user","message":{"role":"user"}}` + "\n" + `{"timestamp":"2026-08-16T11:00:00Z","type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200,"cache_creation_input_tokens":300,"output_tokens":400}}}` + "\n"
+	codex := `{"timestamp":"2026-08-16T10:30:00Z","type":"session_meta","payload":{}}` + "\n" + `{"timestamp":"2026-08-16T11:30:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9000}}}}` + "\n"
 	if err := os.WriteFile(claudePath, []byte(claude), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -172,10 +167,16 @@ func TestSamplerCountsClaudeAndCodexLifetimeTokensIncrementally(t *testing.T) {
 		t.Fatalf("Codex token accounting = %#v, want 9000 total and unknown first rate", got)
 	}
 
-	appendFile(t, claudePath,
-		`{"timestamp":"2026-08-16T12:00:00Z","type":"assistant","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"output_tokens":40}}}`+"\n")
-	appendFile(t, codexPath,
-		`{"timestamp":"2026-08-16T12:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":12000}}}}`+"\n")
+	appendFile(
+		t,
+		claudePath,
+		`{"timestamp":"2026-08-16T12:00:00Z","type":"assistant","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"output_tokens":40}}}`+"\n",
+	)
+	appendFile(
+		t,
+		codexPath,
+		`{"timestamp":"2026-08-16T12:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":12000}}}}`+"\n",
+	)
 	now = time.Date(2026, 8, 16, 12, 0, 30, 0, time.UTC).UnixNano()
 	second, err := sampler.Sample(rows)
 	if err != nil {
@@ -242,7 +243,9 @@ func TestSamplerUsageSparkTracksBurnDeltasResetsAndCap(t *testing.T) {
 	}
 	for index := 0; index < 20; index++ {
 		appendFile(t, transcript, fmt.Sprintf(
-			`{"timestamp":"2026-08-16T12:%02d:00Z","type":"assistant","message":{"usage":{"input_tokens":10}}}`+"\n", index%60))
+			`{"timestamp":"2026-08-16T12:%02d:00Z","type":"assistant","message":{"usage":{"input_tokens":10}}}`+"\n",
+			index%60,
+		))
 		now += int64(30 * time.Second)
 		got := sample()
 		if len(got.Spark) > 12 {
@@ -251,7 +254,11 @@ func TestSamplerUsageSparkTracksBurnDeltasResetsAndCap(t *testing.T) {
 	}
 	last := sample()
 	if len(last.Spark) != 12 || last.Spark[10] != 10 || last.Spark[11] != 0 {
-		t.Fatalf("capped sample spark = %v (len=%d), want 12 points with a burn then an idle step", last.Spark, len(last.Spark))
+		t.Fatalf(
+			"capped sample spark = %v (len=%d), want 12 points with a burn then an idle step",
+			last.Spark,
+			len(last.Spark),
+		)
 	}
 
 	if err := os.WriteFile(transcript, []byte(
@@ -540,8 +547,9 @@ func TestDockerIdentityIsResolvedOncePerCgroupID(t *testing.T) {
 
 func chatsBySocket(chats []Chat) map[string]Chat {
 	result := make(map[string]Chat, len(chats))
-	for _, chat := range chats {
-		result[chat.Socket] = chat
+	for index := range chats {
+		chat := &chats[index]
+		result[chat.Socket] = *chat
 	}
 	return result
 }
@@ -600,8 +608,34 @@ func writeStatsFixture(t *testing.T, proc string, systemTicks, processTicks uint
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	fields := []string{"S", "1", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", uintString(processTicks), "0", "0", "0", "0", "0", "0", "0", "1"}
-	if err := os.WriteFile(filepath.Join(directory, "stat"), []byte("100 (pane) "+strings.Join(fields, " ")+"\n"), 0o600); err != nil {
+	fields := []string{
+		"S",
+		"1",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		uintString(processTicks),
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"0",
+		"1",
+	}
+	if err := os.WriteFile(
+		filepath.Join(directory, "stat"),
+		[]byte("100 (pane) "+strings.Join(fields, " ")+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(directory, "statm"), []byte("10 5\n"), 0o600); err != nil {
@@ -652,7 +686,9 @@ func TestSamplerCountsAMultiRecordAssistantMessageOnce(t *testing.T) {
 		ProcRoot: proc, CgroupRoot: cgroup, CPUCount: 1,
 		Clock: func() int64 { return now },
 	}
-	rows := []compose.Row{{Kind: compose.LiveClaude, Socket: "split-socket", Name: "split", Path: path, PanePIDs: []int{100}}}
+	rows := []compose.Row{
+		{Kind: compose.LiveClaude, Socket: "split-socket", Name: "split", Path: path, PanePIDs: []int{100}},
+	}
 	snapshot, err := sampler.Sample(rows)
 	if err != nil {
 		t.Fatal(err)
@@ -660,5 +696,19 @@ func TestSamplerCountsAMultiRecordAssistantMessageOnce(t *testing.T) {
 	// msg_A once (1000) + msg_B (100) + req_C once (5) + two id-less records (1 + 1).
 	if got := chatsBySocket(snapshot.Chats)["split-socket"]; !got.TokensKnown || got.TokenCount != 1107 {
 		t.Fatalf("split-message token accounting = %#v, want 1107 (each message counted once)", got)
+	}
+}
+
+// A live OpenCode seat is a live chat for counting, and its usage belongs to
+// OpenCode. The engine-name fallback returns CLAUDE for anything it does not
+// recognise, so a missing arm here does not read as "unknown" — it reads as
+// somebody else's chat.
+func TestLiveOpenCodeCountsAsItsOwnEngine(t *testing.T) {
+	if !liveKind(compose.LiveOpenCode) {
+		t.Fatal("liveKind(LiveOpenCode)=false, want true")
+	}
+	want := pfmengine.MustLookup(pfmengine.OpenCode).LongName
+	if got := statsEngineName(compose.LiveOpenCode); got != want {
+		t.Fatalf("statsEngineName(LiveOpenCode)=%q, want %q", got, want)
 	}
 }

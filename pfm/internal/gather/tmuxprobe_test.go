@@ -2,6 +2,7 @@ package gather
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,8 +10,117 @@ import (
 	"testing"
 	"time"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
+
+func TestShowGlobalOptionAndIdentityNudgeClassifyGoneServer(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\necho 'no server running on fake socket' >&2\nexit 1\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const socket = "cc-stale-1-2-3"
+	client := TmuxProbe{Binary: binary, TmuxTmpDir: t.TempDir()}
+
+	_, err := client.ShowGlobalOption(context.Background(), socket, "set-titles-string")
+	if !errors.Is(err, ErrServerGone) {
+		t.Fatalf("ShowGlobalOption error = %v, want ErrServerGone", err)
+	}
+	if !strings.Contains(err.Error(), socket) {
+		t.Fatalf("ShowGlobalOption error = %q, want socket context", err)
+	}
+	err = client.NudgeTitlesIdentity(context.Background(), socket)
+	if !errors.Is(err, ErrServerGone) {
+		t.Fatalf("NudgeTitlesIdentity error = %v, want ErrServerGone", err)
+	}
+	if !strings.Contains(err.Error(), socket) {
+		t.Fatalf("NudgeTitlesIdentity error = %q, want socket context", err)
+	}
+}
+
+func TestNudgeTitlesStringRoundTripsExplicitIdentity(t *testing.T) {
+	client, state, commands := newTitlesProbeFixture(t)
+	const socket = "cc-explicit-identity"
+
+	if err := client.NudgeTitlesString(context.Background(), socket, "#P"); err != nil {
+		t.Fatal(err)
+	}
+
+	gotState, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotState) != "#P\n" {
+		t.Fatalf("identity after nudge = %q, want #P", strings.TrimSuffix(string(gotState), "\n"))
+	}
+	gotCommands, err := os.ReadFile(commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommands := "-L " + socket + " set-option -g set-titles-string #P \n" +
+		"-L " + socket + " set-option -g set-titles-string #P\n"
+	if string(gotCommands) != wantCommands {
+		t.Fatalf("tmux commands = %q, want %q", gotCommands, wantCommands)
+	}
+}
+
+func TestNudgeTitlesIdentityReadsAndRestoresSocketValue(t *testing.T) {
+	client, state, commands := newTitlesProbeFixture(t)
+	const socket = "cc-socket-identity"
+
+	if err := client.NudgeTitlesIdentity(context.Background(), socket); err != nil {
+		t.Fatal(err)
+	}
+
+	gotState, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotState) != "#T\n" {
+		t.Fatalf("identity after nudge = %q, want #T", strings.TrimSuffix(string(gotState), "\n"))
+	}
+	gotCommands, err := os.ReadFile(commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommands := "-L " + socket + " show -gv set-titles-string\n" +
+		"-L " + socket + " set-option -g set-titles-string #T \n" +
+		"-L " + socket + " set-option -g set-titles-string #T\n"
+	if string(gotCommands) != wantCommands {
+		t.Fatalf("tmux commands = %q, want %q", gotCommands, wantCommands)
+	}
+}
+
+func newTitlesProbeFixture(t *testing.T) (TmuxProbe, string, string) {
+	t.Helper()
+	root := t.TempDir()
+	binary := filepath.Join(root, "tmux")
+	state := filepath.Join(root, "state")
+	commands := filepath.Join(root, "commands")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$PFM_TEST_TMUX_COMMANDS"
+case "$3" in
+show)
+	cat "$PFM_TEST_TMUX_STATE"
+	;;
+set-option)
+	printf '%s\n' "$6" > "$PFM_TEST_TMUX_STATE"
+	;;
+*)
+	exit 2
+	;;
+esac
+`
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(state, []byte("#T\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_TMUX_COMMANDS", commands)
+	t.Setenv("PFM_TEST_TMUX_STATE", state)
+	return TmuxProbe{Binary: binary, TmuxTmpDir: root}, state, commands
+}
 
 // TestProbeTmuxFailsWholeWhenTmuxCannotRun is the regression for the shared
 // MCP daemon going deaf: launchd started it with /usr/bin:/bin:/usr/sbin:/sbin,
@@ -26,7 +136,7 @@ func TestProbeTmuxFailsWholeWhenTmuxCannotRun(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	for _, probe := range []struct {
 		name string
-		run  func(context.Context, string, TmuxClient, time.Time) (TmuxProbe, error)
+		run  func(context.Context, string, TmuxClient, time.Time) (TmuxSnapshot, error)
 	}{
 		{name: "sweeping", run: ProbeTmux},
 		{name: "read-only", run: ProbeTmuxReadOnly},
@@ -35,12 +145,15 @@ func TestProbeTmuxFailsWholeWhenTmuxCannotRun(t *testing.T) {
 			tmuxDir := t.TempDir()
 			now := time.Now()
 			createCorpseSocket(t, filepath.Join(tmuxDir, "cc-7-8-9"), now.Add(-2*time.Hour))
-			client := CommandTmux{Binary: "pfm-test-missing-tmux", TmuxTmpDir: tmuxDir}
+			client := TmuxProbe{Binary: "pfm-test-missing-tmux", TmuxTmpDir: tmuxDir}
 
 			result, err := probe.run(context.Background(), tmuxDir, client, now)
 			if err == nil {
-				t.Fatalf("probe with an unstartable tmux returned no error: panes=%d warnings=%q — an empty fleet that means \"could not look\"",
-					len(result.Panes), result.ProbeWarnings)
+				t.Fatalf(
+					"probe with an unstartable tmux returned no error: panes=%d warnings=%q — an empty fleet that means \"could not look\"",
+					len(result.Panes),
+					result.ProbeWarnings,
+				)
 			}
 			if !pfmtmux.CouldNotRun(err) {
 				t.Fatalf("probe error %v does not carry the could-not-run cause", err)
@@ -97,7 +210,7 @@ func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
 		kill.Env = environment
 		_ = kill.Run()
 	})
-	client := CommandTmux{Binary: "tmux", TmuxTmpDir: root}
+	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
 	options := [][]string{
 		{"set-option", "-g", "set-titles", "off"},
 		{"set-window-option", "-g", "automatic-rename", "off"},
@@ -109,7 +222,12 @@ func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
 	if strings.Join(transitions, "; ") != `automatic-rename "on" -> "off"` {
 		t.Fatalf("first pass transitions = %q, want only automatic-rename changed", transitions)
 	}
-	if again, err := client.ConvergeGlobalOptions(context.Background(), socket, options); err != nil || len(again) != 0 {
+	if again, err := client.ConvergeGlobalOptions(
+		context.Background(),
+		socket,
+		options,
+	); err != nil ||
+		len(again) != 0 {
 		t.Fatalf("second pass = %q (%v), want a converged server left alone", again, err)
 	}
 	_, err = client.ConvergeGlobalOptions(context.Background(), "cc-missing", options)

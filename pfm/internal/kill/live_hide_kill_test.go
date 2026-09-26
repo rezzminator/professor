@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // assertRecordedKill checks only that a kill for id landed and carries no
@@ -69,7 +69,11 @@ func TestKillSpawnsTheExitFinisherWheneverTheTargetIsLive(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
-			defer database.Close()
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 			spawner := &captureSpawner{}
 			manager, err := New(database, Dependencies{
 				Spawner: spawner,

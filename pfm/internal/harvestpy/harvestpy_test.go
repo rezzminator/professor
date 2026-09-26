@@ -15,10 +15,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestTargetsPinEveryRequestedPlatformAndVerifyableInputs(t *testing.T) {
@@ -48,7 +50,7 @@ func TestTargetsPinEveryRequestedPlatformAndVerifyableInputs(t *testing.T) {
 }
 
 func TestPlanExposesPinnedDownloadsAndMeasuredLinuxClosure(t *testing.T) {
-	plan, err := Plan(Platform{GOOS: "linux", GOARCH: "amd64"})
+	plan, err := PlanConversionEnvironment(Platform{GOOS: "linux", GOARCH: "amd64"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +72,19 @@ func TestPlanExposesPinnedDownloadsAndMeasuredLinuxClosure(t *testing.T) {
 		{Platform{GOOS: "darwin", GOARCH: "amd64"}, -1, "blocked-exact-lock"},
 		{Platform{GOOS: "darwin", GOARCH: "arm64"}, 389353114, "pinned-lock-artifact-sum"},
 	} {
-		other, err := Plan(tc.platform)
+		other, err := PlanConversionEnvironment(tc.platform)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if other.PackageDownloadBytes != tc.bytes || other.PackageDownloadStatus != tc.status {
-			t.Errorf("%s package plan = %d/%s, want %d/%s", tc.platform, other.PackageDownloadBytes, other.PackageDownloadStatus, tc.bytes, tc.status)
+			t.Errorf(
+				"%s package plan = %d/%s, want %d/%s",
+				tc.platform,
+				other.PackageDownloadBytes,
+				other.PackageDownloadStatus,
+				tc.bytes,
+				tc.status,
+			)
 		}
 		if tc.platform == (Platform{GOOS: "darwin", GOARCH: "amd64"}) && len(other.PackageBlockers) != 3 {
 			t.Fatalf("darwin-amd64 blockers = %#v, want all exact-lock gaps", other.PackageBlockers)
@@ -102,9 +111,14 @@ func TestEmbeddedAssetsAreConversionOnlyAndProtocolIsPinned(t *testing.T) {
 			t.Errorf("embedded lock is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"import zipfile", "import tarfile", "import py7zr", "import rarfile"} {
-		if strings.Contains(strings.ToLower(string(ConverterSource())), forbidden) {
-			t.Errorf("Python worker unexpectedly owns archive parsing: %q", forbidden)
+	bans := strings.Fields("zipfile infolist( .extract( tarfile py7zr rarfile unpack_archive extractall( namelist(")
+	for _, chunk := range strings.Split(strings.ToLower(string(ConverterSource())), "\ndef ") {
+		name, _, _ := strings.Cut(chunk, "(")
+		reader := map[string]bool{"_refuse_encrypted_odf": true, "_clamp_ods": true, "_ooxml_variant": true}[name]
+		for i, bad := range bans { // only these ODF/OOXML member readers open a zip, and none extracts it
+			if strings.Contains(chunk, bad) && (i > 2 || (i < 2) != reader) {
+				t.Errorf("Python worker owns archive parsing in %q: %q (archives stay files-only)", name, bad)
+			}
 		}
 	}
 }
@@ -121,7 +135,10 @@ func TestEmbeddedLockKeepsEveryResolvedConversionPackageAtOracleVersions(t *test
 	oracleVersions := lockVersions(string(oracle))
 	embeddedVersions := lockVersions(string(LockMetadata()))
 	if len(embeddedVersions) < 100 {
-		t.Fatalf("embedded conversion lock has only %d package records; full Docling/Torch behavior was not retained", len(embeddedVersions))
+		t.Fatalf(
+			"embedded conversion lock has only %d package records; full Docling/Torch behavior was not retained",
+			len(embeddedVersions),
+		)
 	}
 	for name, versions := range embeddedVersions {
 		if name == "professor-harvestpy" {
@@ -136,7 +153,12 @@ func TestEmbeddedLockKeepsEveryResolvedConversionPackageAtOracleVersions(t *test
 				}
 			}
 			if !found {
-				t.Errorf("embedded package %s=%s is not an oracle lock version (%v)", name, version, oracleVersions[name])
+				t.Errorf(
+					"embedded package %s=%s is not an oracle lock version (%v)",
+					name,
+					version,
+					oracleVersions[name],
+				)
 			}
 		}
 	}
@@ -191,7 +213,13 @@ func TestPinnedDownloadRejectsShortAndOversizedResponsesBeforePublish(t *testing
 			}))
 			defer server.Close()
 			path := filepath.Join(t.TempDir(), "input")
-			err := ensureInput(context.Background(), path, Artifact{URL: server.URL, Size: int64(len("pinned")), SHA256: digest([]byte("pinned"))}, false, nil)
+			err := ensureInput(
+				context.Background(),
+				path,
+				Artifact{URL: server.URL, Size: int64(len("pinned")), SHA256: digest([]byte("pinned"))},
+				false,
+				nil,
+			)
 			if err == nil {
 				t.Fatal("wrong-sized response was accepted")
 			}
@@ -249,7 +277,7 @@ func TestProvisionConvergesAtomicallyAndIsIdempotent(t *testing.T) {
 	commands := 0
 	result, err := provisionWith(t, ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
-		Download: func(_ context.Context, _ string, path string) error {
+		Download: func(_ context.Context, _, path string) error {
 			mu.Lock()
 			defer mu.Unlock()
 			downloads++
@@ -286,7 +314,7 @@ func TestProvisionKeepsAbsoluteVenvLinksAtTheirFinalPath(t *testing.T) {
 	targets, cache := fakeProvisionInputs(t, root, platform)
 	var smokePaths []string
 
-	result, err := provision(context.Background(), ProvisionOptions{
+	result, err := provisionWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Run: fakeProvisionRun(t, false),
 		Smoke: func(_ context.Context, runtime Runtime) (map[string]any, error) {
@@ -336,7 +364,7 @@ func TestProvisionFailureRemovesIncompleteFinalPath(t *testing.T) {
 	targets, cache := fakeProvisionInputs(t, root, platform)
 	desired := desiredTestDigest(platform, targets[platform])
 
-	_, err := provision(context.Background(), ProvisionOptions{
+	_, err := provisionWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Run: fakeProvisionRun(t, true),
 	}, targets)
@@ -371,7 +399,7 @@ func TestProvisionFailureRestoresQuarantinedEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := provision(context.Background(), ProvisionOptions{
+	_, err := provisionWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Run: fakeProvisionRun(t, true),
 	}, targets)
@@ -400,19 +428,25 @@ func TestInspectAndCheckReportIncompleteProvisioning(t *testing.T) {
 	if err := os.MkdirAll(version, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(version, "INCOMPLETE"), []byte("provisioning did not finish\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(version, "INCOMPLETE"),
+		[]byte("provisioning did not finish\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Base(version), RuntimeRoot(root, platform)); err != nil {
 		t.Fatal(err)
 	}
 
-	digest, inspectErr := Inspect(root, platform)
-	if digest.State != "incomplete" || inspectErr == nil || !strings.Contains(inspectErr.Error(), "provisioning did not finish") {
+	digest, inspectErr := InspectConversionEnvironment(root, platform)
+	if digest.State != "incomplete" || inspectErr == nil ||
+		!strings.Contains(inspectErr.Error(), "provisioning did not finish") {
 		t.Fatalf("Inspect incomplete = %#v, %v", digest, inspectErr)
 	}
-	report, checkErr := Check(context.Background(), root, platform)
-	if report.Digest.State != "incomplete" || checkErr == nil || !strings.Contains(report.Checks["marker"].Error, "provisioning did not finish") {
+	report, checkErr := CheckConversionEnvironment(context.Background(), root, platform)
+	if report.Digest.State != "incomplete" || checkErr == nil ||
+		!strings.Contains(report.Checks["marker"].Error, "provisioning did not finish") {
 		t.Fatalf("Check incomplete = %#v, %v", report, checkErr)
 	}
 }
@@ -428,7 +462,10 @@ for line in sys.stdin:
         print(json.dumps({"ok":True,"markdown":"# converted"}), flush=True)
 `)
 	converter := testConverter(t, python)
-	result, err := converter.Convert(context.Background(), Request{Path: filepath.Join(t.TempDir(), "input.html"), Kind: "html"})
+	result, err := converter.Convert(
+		context.Background(),
+		Request{Path: filepath.Join(t.TempDir(), "input.html"), Kind: "html"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,6 +500,71 @@ for line in sys.stdin:
 	if _, err := missing.Convert(context.Background(), Request{Path: "one", Kind: "html"}); err == nil {
 		t.Fatal("missing managed script was silently materialized")
 	}
+}
+
+func TestConverterCancellationReleasesBlockedWrite(t *testing.T) {
+	input := &blockedConverterInput{started: make(chan struct{}), released: make(chan struct{})}
+	output := io.NopCloser(strings.NewReader(""))
+	fake := &deps.FakeRunner{}
+	fake.ScriptInteractive([]string{"fake-python"}, deps.InteractiveScript{
+		Pid:    8101,
+		Stdin:  input,
+		Stdout: output,
+	})
+	workerScript := filepath.Join(t.TempDir(), "converter.py")
+	if err := os.WriteFile(workerScript, []byte("worker"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	converter := NewConverter(Runtime{Python: "fake-python", Script: workerScript, Runner: fake})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := converter.Convert(ctx, Request{Path: "input", Kind: "html"})
+		result <- err
+	}()
+	select {
+	case <-input.started:
+	case <-time.After(time.Second):
+		t.Fatal("converter did not reach the blocked stdin write")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "request cancelled") {
+			t.Fatalf("Convert() error = %v, want cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Convert() remained blocked after cancellation")
+	}
+	calls := fake.LifecycleCalls()
+	if len(calls) < 2 || calls[0].Action != "kill-group" || calls[1].Action != "wait" {
+		t.Fatalf("lifecycle calls = %+v, want kill-group then wait", calls)
+	}
+}
+
+type blockedConverterInput struct {
+	started  chan struct{}
+	released chan struct{}
+}
+
+func (input *blockedConverterInput) Write([]byte) (int, error) {
+	select {
+	case <-input.started:
+	default:
+		close(input.started)
+	}
+	<-input.released
+	return 0, errors.New("converter stdin closed")
+}
+
+func (input *blockedConverterInput) Close() error {
+	select {
+	case <-input.released:
+	default:
+		close(input.released)
+	}
+	return nil
 }
 
 func TestArchiveKindsAreRejectedBeforePython(t *testing.T) {
@@ -523,65 +625,9 @@ func TestInstalledInventoryDigestIsStableAndRejectsTampering(t *testing.T) {
 func TestCheckRejectsAChangedInstalledInventory(t *testing.T) {
 	root := t.TempDir()
 	platform := Platform{GOOS: "linux", GOARCH: "amd64"}
-	envRoot := filepath.Join(root, "env", platform.String())
-	final := filepath.Join(envRoot, "versioned")
-	project := filepath.Join(final, "project")
-	venv := filepath.Join(project, ".venv")
-	if err := os.MkdirAll(filepath.Join(venv, "lib", "python3.11", "site-packages"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	write := func(path, body string, mode os.FileMode) {
-		t.Helper()
-		if err := os.WriteFile(path, []byte(body), mode); err != nil {
-			t.Fatal(err)
-		}
-	}
-	uv := filepath.Join(final, "uv")
-	write(uv, "#!/bin/sh\nif [ \"$2\" = \"check\" ]; then exit 0; fi\nif [ -f \"$PWD/.venv/lib/python3.11/site-packages/removed.dist-info\" ]; then printf 'docling==2.107.0\\ntrafilatura==2.1.0\\n'; else printf 'docling==2.107.0\\n'; fi\n", 0o700)
-	if err := os.MkdirAll(filepath.Join(final, "python"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(final, "python", "BUILD"), "20260610\n", 0o600)
-	python := filepath.Join(venv, "bin", "python")
-	if err := os.MkdirAll(filepath.Dir(python), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	write(python, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Python 3.11.15'; else while IFS= read -r _line; do printf '{\"ok\":true,\"imports\":{},\"conversion\":{\"ok\":true}}\\n'; done; fi\n", 0o700)
-	write(filepath.Join(project, "converter.py"), string(ConverterSource()), 0o600)
-	write(filepath.Join(project, "pyproject.toml"), string(ProjectMetadata()), 0o600)
-	write(filepath.Join(project, "uv.lock"), string(LockMetadata()), 0o600)
-	markerInventory, markerCount, err := inventoryDigest([]byte("docling==2.107.0\ntrafilatura==2.1.0\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := Targets()[platform]
-	canonical := EnvironmentDigest{Schema: 1, Target: platform.String(), Python: "3.11.15+20260610", UV: "0.11.32", PythonSHA256: target.Python.SHA256, UVSHA256: target.UV.SHA256, LockSHA256: lockSHA256(), SourceSHA256: sourceSHA256(), Features: FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"}}
-	digest := digestID(canonical)
-	oldFinal := final
-	final = filepath.Join(envRoot, digest)
-	if err := os.Rename(oldFinal, final); err != nil {
-		t.Fatal(err)
-	}
-	project = filepath.Join(final, "project")
-	venv = filepath.Join(project, ".venv")
-	uv = filepath.Join(final, "uv")
-	python = filepath.Join(venv, "bin", "python")
-	marker := canonical
-	marker.Digest, marker.State, marker.Environment = digest, "ready", final
-	marker.InventorySHA256, marker.InventoryCount = markerInventory, markerCount
-	body, err := json.Marshal(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(final, "environment.json"), string(body), 0o600)
-	if err := os.MkdirAll(envRoot, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(digest, filepath.Join(envRoot, "current")); err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(venv, "lib", "python3.11", "site-packages", "removed.dist-info"), "present", 0o600)
-	report, err := Check(context.Background(), root, platform)
+	final := readyFixtureEnvironment(t, root, platform, ConverterSource())
+	venv := filepath.Join(final, "project", ".venv")
+	report, err := CheckConversionEnvironment(context.Background(), root, platform)
 	if err != nil || !report.Healthy {
 		t.Fatalf("healthy fixture rejected: %#v %v", report, err)
 	}
@@ -591,7 +637,7 @@ func TestCheckRejectsAChangedInstalledInventory(t *testing.T) {
 	if err := os.Remove(filepath.Join(venv, "lib", "python3.11", "site-packages", "removed.dist-info")); err != nil {
 		t.Fatal(err)
 	}
-	report, err = Check(context.Background(), root, platform)
+	report, err = CheckConversionEnvironment(context.Background(), root, platform)
 	if err == nil || report.Checks["lock_completeness"].OK {
 		t.Fatalf("missing installed package was accepted: %#v %v", report, err)
 	}
@@ -635,7 +681,11 @@ func TestCheckInventoryIgnoresUVsStderrBanner(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(python), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	write(python, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Python 3.11.15'; else while IFS= read -r _line; do printf '{\"ok\":true,\"imports\":{},\"conversion\":{\"ok\":true}}\\n'; done; fi\n", 0o700)
+	write(
+		python,
+		"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Python 3.11.15'; else while IFS= read -r _line; do printf '{\"ok\":true,\"imports\":{},\"conversion\":{\"ok\":true}}\\n'; done; fi\n",
+		0o700,
+	)
 	write(filepath.Join(project, "converter.py"), string(ConverterSource()), 0o600)
 	write(filepath.Join(project, "pyproject.toml"), string(ProjectMetadata()), 0o600)
 	write(filepath.Join(project, "uv.lock"), string(LockMetadata()), 0o600)
@@ -644,7 +694,17 @@ func TestCheckInventoryIgnoresUVsStderrBanner(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := Targets()[platform]
-	canonical := EnvironmentDigest{Schema: 1, Target: platform.String(), Python: "3.11.15+20260610", UV: "0.11.32", PythonSHA256: target.Python.SHA256, UVSHA256: target.UV.SHA256, LockSHA256: lockSHA256(), SourceSHA256: sourceSHA256(), Features: FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"}}
+	canonical := EnvironmentDigest{
+		Schema:       1,
+		Target:       platform.String(),
+		Python:       "3.11.15+20260610",
+		UV:           "0.11.32",
+		PythonSHA256: target.Python.SHA256,
+		UVSHA256:     target.UV.SHA256,
+		LockSHA256:   lockSHA256(),
+		SourceSHA256: sourceSHA256(),
+		Features:     FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"},
+	}
 	digest := digestID(canonical)
 	oldFinal := final
 	final = filepath.Join(envRoot, digest)
@@ -666,15 +726,22 @@ func TestCheckInventoryIgnoresUVsStderrBanner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := Check(context.Background(), root, platform)
+	report, err := CheckConversionEnvironment(context.Background(), root, platform)
 	if err != nil || !report.Healthy {
 		t.Fatalf("uv's stderr banner was decoded as a freeze record: report=%#v err=%v", report, err)
 	}
 	if status := report.Checks["lock_completeness"]; !status.OK {
-		t.Fatalf("lock_completeness = %#v, want OK — a decode failure must never register on a fully provisioned environment", status)
+		t.Fatalf(
+			"lock_completeness = %#v, want OK — a decode failure must never register on a fully provisioned environment",
+			status,
+		)
 	}
 	if report.Digest.State != "ready" {
-		t.Fatalf("Digest.State = %q, want %q — a live check failure is never the same condition as an interrupted provision ('incomplete')", report.Digest.State, "ready")
+		t.Fatalf(
+			"Digest.State = %q, want %q — a live check failure is never the same condition as an interrupted provision ('incomplete')",
+			report.Digest.State,
+			"ready",
+		)
 	}
 }
 
@@ -700,20 +767,21 @@ func TestCorpusManifestIsPermanentAndHasThirtyOraclePairs(t *testing.T) {
 	}
 	ok := 0
 	for _, item := range value.Items {
-		if item.Status == "ok" && item.Oracle != "" && item.Raw != "" {
-			ok++
-			if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Oracle)); err != nil {
-				t.Errorf("missing oracle %s: %v", item.Oracle, err)
-			}
-			if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Raw)); err != nil {
-				t.Errorf("missing raw %s: %v", item.Raw, err)
-			}
-			if got := fileSHA256(filepath.Join("testdata", "corpus", item.Raw)); got != item.RawSHA {
-				t.Errorf("raw hash %s = %s, want %s", item.Raw, got, item.RawSHA)
-			}
-			if got := fileSHA256(filepath.Join("testdata", "corpus", item.Oracle)); got != item.OracleSHA {
-				t.Errorf("oracle hash %s = %s, want %s", item.Oracle, got, item.OracleSHA)
-			}
+		if item.Status != "ok" || item.Oracle == "" || item.Raw == "" {
+			continue
+		}
+		ok++
+		if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Oracle)); err != nil {
+			t.Errorf("missing oracle %s: %v", item.Oracle, err)
+		}
+		if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Raw)); err != nil {
+			t.Errorf("missing raw %s: %v", item.Raw, err)
+		}
+		if got := fileSHA256(filepath.Join("testdata", "corpus", item.Raw)); got != item.RawSHA {
+			t.Errorf("raw hash %s = %s, want %s", item.Raw, got, item.RawSHA)
+		}
+		if got := fileSHA256(filepath.Join("testdata", "corpus", item.Oracle)); got != item.OracleSHA {
+			t.Errorf("oracle hash %s = %s, want %s", item.Oracle, got, item.OracleSHA)
 		}
 	}
 	if ok != 30 {
@@ -781,7 +849,10 @@ func TestCorpusPythonConversionOwnedPairsAreByteExact(t *testing.T) {
 		if item.Status != "ok" || !accepted[item.Method] || item.Raw == "" || item.Oracle == "" {
 			continue
 		}
-		result, err := converter.Convert(context.Background(), Request{Path: filepath.Join("testdata", "corpus", item.Raw), Kind: item.Kind})
+		result, err := converter.Convert(
+			context.Background(),
+			Request{Path: filepath.Join("testdata", "corpus", item.Raw), Kind: item.Kind},
+		)
 		if err != nil {
 			t.Errorf("%s conversion failed: %v", item.ID, err)
 			continue
@@ -798,7 +869,10 @@ func TestCorpusPythonConversionOwnedPairsAreByteExact(t *testing.T) {
 		passed++
 	}
 	if passed != 21 {
-		t.Fatalf("byte-exact Python conversion pairs = %d, want 21; archive/non-Python ladder pairs and the Go-added EuropePMC figures trailer are deliberately outside this gate", passed)
+		t.Fatalf(
+			"byte-exact Python conversion pairs = %d, want 21; archive/non-Python ladder pairs and the Go-added EuropePMC figures trailer are deliberately outside this gate",
+			passed,
+		)
 	}
 }
 
@@ -841,132 +915,14 @@ func TestCSVAndJSONConversionPathsAreByteExact(t *testing.T) {
 	}
 }
 
-func TestTarFixtureHelperCompilesForArchiveSecurityTests(t *testing.T) {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(zw)
-	if err := tw.WriteHeader(&tar.Header{Name: "safe.txt", Mode: 0o600, Size: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write([]byte("x")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if len(buf.Bytes()) == 0 || runtime.GOOS == "" || io.EOF == nil {
-		t.Fatal("fixture helper did not produce bytes")
-	}
-}
-
-func TestPythonArchiveExtractionRetainsInterpreterLibrariesAndRejectsTraversal(t *testing.T) {
-	archivePath := filepath.Join(t.TempDir(), "python.tar.gz")
-	archiveFile, err := os.Create(archivePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gzipWriter := gzip.NewWriter(archiveFile)
-	tarWriter := tar.NewWriter(gzipWriter)
-	entries := []struct {
-		name string
-		body string
-		mode int64
-	}{
-		{"python/", "", 0o755},
-		{"python/bin/", "", 0o755},
-		{"python/bin/python3", "interpreter", 0o755},
-		{"python/lib/python3.11/", "", 0o755},
-		{"python/lib/python3.11/os.py", "stdlib", 0o644},
-		{"python/share/terminfo/1/", "", 0o755},
-		{"python/share/terminfo/a/", "", 0o755},
-		{"python/share/terminfo/a/target", "linked", 0o644},
-	}
-	for _, entry := range entries {
-		header := &tar.Header{Name: entry.name, Mode: entry.mode, Size: int64(len(entry.body))}
-		if strings.HasSuffix(entry.name, "/") {
-			header.Typeflag = tar.TypeDir
-			header.Size = 0
-		}
-		if err := tarWriter.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if entry.body != "" {
-			if _, err := tarWriter.Write([]byte(entry.body)); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := tarWriter.WriteHeader(&tar.Header{Name: "python/share/terminfo/1/entry", Linkname: "../a/target", Typeflag: tar.TypeSymlink, Mode: 0o777}); err != nil {
-		t.Fatal(err)
-	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := archiveFile.Close(); err != nil {
-		t.Fatal(err)
-	}
-	destination := filepath.Join(t.TempDir(), "python")
-	python, err := extractPython(archivePath, destination)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(python); err != nil {
-		t.Fatalf("interpreter missing: %v", err)
-	}
-	stdlib, err := os.ReadFile(filepath.Join(destination, "python", "lib", "python3.11", "os.py"))
-	if err != nil || string(stdlib) != "stdlib" {
-		t.Fatalf("stdlib was not retained: %q %v", string(stdlib), err)
-	}
-	if target, err := os.Readlink(filepath.Join(destination, "python", "share", "terminfo", "1", "entry")); err != nil || target != "../a/target" {
-		t.Fatalf("safe internal symlink was not retained: %q %v", target, err)
-	}
-	unsafePath := filepath.Join(t.TempDir(), "unsafe.tar.gz")
-	unsafeFile, err := os.Create(unsafePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unsafeGzip := gzip.NewWriter(unsafeFile)
-	unsafeTar := tar.NewWriter(unsafeGzip)
-	if err := unsafeTar.WriteHeader(&tar.Header{Name: "../escape", Mode: 0o600, Size: 1}); err != nil {
-		t.Fatal(err)
-	}
-	_, _ = unsafeTar.Write([]byte("x"))
-	_ = unsafeTar.Close()
-	_ = unsafeGzip.Close()
-	_ = unsafeFile.Close()
-	if _, err := extractPython(unsafePath, filepath.Join(t.TempDir(), "python")); err == nil {
-		t.Fatal("path traversal archive was accepted")
-	}
-}
-
-func TestPinnedPythonArchiveRetainsFullRuntimeAndStdlib(t *testing.T) {
-	archive := os.Getenv("HARVESTPY_PYTHON_ARCHIVE")
-	if archive == "" {
-		t.Skip("HARVESTPY_PYTHON_ARCHIVE is not set; release-archive structural acceptance is an explicit provisioning gate")
-	}
-	destination := filepath.Join(t.TempDir(), "python")
-	python, err := extractPython(archive, destination)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(destination, "python", "lib", "python3.11", "os.py")); err != nil {
-		t.Fatalf("stdlib missing from full archive extraction: %v", err)
-	}
-	if _, err := os.Stat(python); err != nil {
-		t.Fatalf("standalone interpreter missing after extraction: %v", err)
-	}
-}
-
 func fakePython(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-python")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec python3 -c '"+strings.ReplaceAll(body, "'", "'\\''")+"'\n"), 0o700); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte("#!/bin/sh\nexec python3 -c '"+strings.ReplaceAll(body, "'", "'\\''")+"'\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -1006,7 +962,11 @@ func fakeProvisionInputs(t *testing.T, root string, platform Platform) (map[Plat
 	if err := os.WriteFile(filepath.Join(cache, "uv-"+platform.String()+".tar.gz"), uvArchive, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cache, "python-"+platform.String()+".tar.gz"), pythonArchive, 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(cache, "python-"+platform.String()+".tar.gz"),
+		pythonArchive,
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	return targets, cache
@@ -1103,5 +1063,5 @@ var targetsForTest = Targets()
 
 func provisionWith(t *testing.T, options ProvisionOptions) (ProvisionResult, error) {
 	t.Helper()
-	return provision(context.Background(), options, targetsForTest)
+	return provisionWithTargets(context.Background(), options, targetsForTest)
 }

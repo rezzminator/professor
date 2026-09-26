@@ -1,0 +1,58 @@
+# The skips `dev.sh test pfm` accepts: package<TAB>test<TAB>class<TAB>reason.
+# scripts/skip-check.sh reds any skipped test this file does not name, so a new
+# t.Skip is a decision recorded here, never a quiet hole in a green gate.
+github.com/rezzminator/professor/pfm/cmd/pfm	TestInternalLaunchPrintHelper	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/cmd/pfm	TestPFMAttachHelper	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/e2e	TestClaudeHarnessCaptureFixture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+github.com/rezzminator/professor/pfm/e2e	TestCodexHookAPIFixture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+github.com/rezzminator/professor/pfm/internal/agentrole	TestUnreadableDirectoryIsAnError	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/codexappendix	TestNativeHookDelivery	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+github.com/rezzminator/professor/pfm/internal/codexgen	TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/compose	TestCodexLineageStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+github.com/rezzminator/professor/pfm/internal/compose	TestComposeStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+github.com/rezzminator/professor/pfm/internal/deps	TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence	platform	darwin-only gate
+github.com/rezzminator/professor/pfm/internal/doctor	TestHarnessPromptNativeRepeatedCapture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+github.com/rezzminator/professor/pfm/internal/gather	TestGatherStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveFetchRequestedDOI	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderAnna	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderDOIMirror	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderDOIViewer	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderMD5Catalog	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderPMC	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderScholar	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderUnpaywall	opt-in-live	live network provider probe; opt-in
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestCSVAndJSONConversionPathsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonAcceptanceExactHTMLFixture	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonConversionOwnedPairsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestFormatParsersMatchTheBakeOffRecall	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestFormatParsersRefuseByName	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLConversionKeepsBlockStructure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLFullDOMConversionDropsHiddenElements	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestInflateXZAndArabicOCRAvailable	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestLiveBrowserCallerHeadersStayOnTheOrigin	opt-in-live	real-browser rung; runs only with HARVESTER_BROWSER=1
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRMissingModelIsANamedFailure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRReadsAScannedLatinPage	opt-in-corpus	needs the pinned interpreter and the staged OCR models named by HARVESTPY_CORPUS_PYTHON and HARVESTPY_OCR_MODEL_ROOT
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRRulesNameTheirChoices	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestOfficeFormatsMatchTheBakeOff	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestOfficeFormatsNameWhatTheyCannotRead	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestPinnedPythonArchiveRetainsFullRuntimeAndStdlib	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestInflateXZAndArabicOCRAvailable	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestLiveBrowserCallerHeadersStayOnTheOrigin	opt-in-live	real-browser rung; runs in the sim fence with HARVESTER_BROWSER=1
+github.com/rezzminator/professor/pfm/internal/hostfixture	TestReadOnlyHomeRefusesAWriteInsideIt	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/index	TestIndexStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+github.com/rezzminator/professor/pfm/internal/index	TestIndexStressHelper	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/internal/inject	TestRealClaudeStashSemantics	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+github.com/rezzminator/professor/pfm/internal/installer	TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/installer	TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateAnnouncesWhenItCannotProbe	platform	darwin-only gate
+github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateRefusesOnlyMidExecution	platform	darwin-only gate
+github.com/rezzminator/professor/pfm/internal/installer	TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/installer	TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/kill	TestKillStressProcessHelper	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/internal/naming	TestNamingStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+github.com/rezzminator/professor/pfm/internal/statusline	TestCodexAppServerFixture	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/internal/store	TestKilledWriteHelperProcess	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/internal/store	TestSharedKillsNeedNoBridgeInEitherDirection	tool-absent	needs the sqlite3 CLI, absent from the fence image
+github.com/rezzminator/professor/pfm/internal/store	TestStoreStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+github.com/rezzminator/professor/pfm/internal/store	TestStoreStressKilledHelper	helper	re-exec fixture: runs only as the child of its parent test
+github.com/rezzminator/professor/pfm/internal/update	TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError	root-noop	the fence runs as root, where permission bits deny nothing

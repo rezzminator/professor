@@ -17,7 +17,7 @@ import (
 // box: the spawn failed and nothing said why.
 func TestNewSessionRefusesAnUnreachableBinaryBeforeCreatingAServer(t *testing.T) {
 	dir := t.TempDir()
-	tmux := CommandTmux{TmuxDir: dir}
+	tmux := TmuxSpawner{TmuxDir: dir}
 	err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket:  "preflight-missing",
 		Session: "preflight-missing",
@@ -51,7 +51,7 @@ func TestNewSessionRefusesAnUnreachableBinaryBeforeCreatingAServer(t *testing.T)
 func TestNewSessionRefusesAMissingAbsoluteBinary(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "engines", "claude")
-	tmux := CommandTmux{TmuxDir: dir}
+	tmux := TmuxSpawner{TmuxDir: dir}
 	err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket:  "preflight-absolute",
 		Session: "preflight-absolute",
@@ -82,7 +82,7 @@ func TestNewSessionAcceptsAResolvableBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	tmux := CommandTmux{TmuxDir: root}
+	tmux := TmuxSpawner{TmuxDir: root}
 	spec := SessionSpec{
 		Socket:  "preflight-ok",
 		Session: "preflight-ok",

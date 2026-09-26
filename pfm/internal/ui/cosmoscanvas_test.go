@@ -26,8 +26,10 @@ const (
 // railColumns is what int(bezierAt(...)) must return for the 22 samples of
 // that rail, on every CPU. Columns 77 at samples 5 and 9 are not typos: with
 // each product rounded separately, those two land on 77.999999999999986 and
-// int() truncates them one cell to the left. That pair of dots IS the ⢈
-// (U+2888) glyph ui_cosmos_focus_80.ansi holds at canvas row 2, column 38.
+// int() truncates them one cell to the left. That pair of dots — with the
+// halo copies cosmosEdgeLight adds one braille row above and below a hot
+// rail — IS the ⢸ (U+28B8) glyph ui_cosmos_focus_80.ansi holds at canvas
+// row 2, column 38.
 var railColumns = []int{
 	78, 78, 78, 78, 78, 77, 78, 78, 78, 77, 78,
 	78, 78, 78, 78, 78, 78, 78, 78, 78, 78, 78,
@@ -38,7 +40,11 @@ var railColumns = []int{
 // frame and the code that draws it can never disagree about a dot again.
 func TestBezierAtPinsTheStraightRailPixelColumns(t *testing.T) {
 	if len(railColumns) != railSteps+1 {
-		t.Fatalf("railColumns has %d entries, want %d — the fixture no longer covers the rail", len(railColumns), railSteps+1)
+		t.Fatalf(
+			"railColumns has %d entries, want %d — the fixture no longer covers the rail",
+			len(railColumns),
+			railSteps+1,
+		)
 	}
 	for sample, want := range railColumns {
 		at := float64(sample) / float64(railSteps)
@@ -55,8 +61,8 @@ func TestBezierAtPinsTheStraightRailPixelColumns(t *testing.T) {
 // exactly that for the Bezier's three products, amd64 never does. bezierAt
 // forbids it with explicit float64() conversions, so this test compares the
 // shipped value against the contraction arm64 would otherwise emit — the
-// value that turned the golden's ⢈ (U+2888) into ⠈ (U+2808), byte 1325,
-// 0xa2 → 0xa0. On an FMA host with the conversions removed the two agree and
+// value that turns the golden's ⢸ (U+28B8) into ⠘ (U+2818), byte 1348,
+// 0xb8 → 0x98: sample 9 and its two halo dots leave the cell together. On an FMA host with the conversions removed the two agree and
 // this fails; here it proves the trap is real and unentered.
 func TestBezierAtRefusesTheFusedMultiplyAdd(t *testing.T) {
 	at := float64(railFusedSample) / float64(railSteps)
@@ -106,7 +112,9 @@ func TestBezierAtRoundsEveryProductExplicitly(t *testing.T) {
 		}
 	}
 	if body == nil {
-		t.Fatalf("cosmoscanvas.go has no bezierAt returning one expression — the quadratic Bezier must stay in ONE canonical form")
+		t.Fatalf(
+			"cosmoscanvas.go has no bezierAt returning one expression — the quadratic Bezier must stay in ONE canonical form",
+		)
 	}
 	var terms []ast.Expr
 	var flatten func(ast.Expr)
@@ -131,7 +139,10 @@ func TestBezierAtRoundsEveryProductExplicitly(t *testing.T) {
 		}
 		name, ok := call.Fun.(*ast.Ident)
 		if !ok || name.Name != "float64" {
-			t.Errorf("bezierAt term %d is not wrapped in float64(); without it an FMA architecture may fuse the product into the sum and move a dot one cell", index)
+			t.Errorf(
+				"bezierAt term %d is not wrapped in float64(); without it an FMA architecture may fuse the product into the sum and move a dot one cell",
+				index,
+			)
 		}
 	}
 }

@@ -13,12 +13,13 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/sky"
-	pfmstats "hostops/pfm/internal/stats"
-	"hostops/pfm/internal/theme"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/sky"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 var (
@@ -40,7 +41,7 @@ var (
 			Foreground(lipgloss.Color("#94a3b8"))
 	codexStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#e879f9"))
-	opencodeStyle = lipgloss.NewStyle().
+	openCodeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#60a5fa"))
 	agentStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#fb923c"))
@@ -79,14 +80,20 @@ var (
 
 func configureStyles(palette theme.Palette) {
 	configuredCosmosPalette = palette
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Header)).Background(lipgloss.Color(palette.HeaderBg))
+	headerStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(palette.Header)).
+		Background(lipgloss.Color(palette.HeaderBg))
 	groupStyleA = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupA))
 	groupStyleB = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupB))
 	borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Border))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Header)).Background(lipgloss.Color(palette.Selected))
+	selectedStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(palette.Header)).
+		Background(lipgloss.Color(palette.Selected))
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
-	opencodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Opencode]))
+	openCodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.OpenCode]))
 	agentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.AgentRow))
 	statsHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.StatsHeader))
 	statsClaudeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.StatsEngine[pfmengine.Claude]))
@@ -194,8 +201,8 @@ func (model Model) renderHeader(width int) string {
 		if len(model.codexAccountIDs) != 0 {
 			headerAccount = model.codexPrimary
 			headerMedal = codexAccountMedal(headerAccount)
-		} else if len(model.opencodeAccountIDs) != 0 {
-			headerAccount = model.opencodePrimary
+		} else if len(model.openCodeAccountIDs) != 0 {
+			headerAccount = model.openCodePrimary
 			headerMedal = accountMedal(headerAccount)
 		}
 	}
@@ -260,9 +267,13 @@ func (model Model) renderQuery(width int) string {
 		// the ledger's own state.
 		switch {
 		case model.cosmosStatus != "":
-			return warnStyle.Render(fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosStatus, maxInt(0, width-9)), width))
+			return warnStyle.Render(
+				fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosStatus, maxInt(0, width-9)), width),
+			)
 		case model.cosmosSelected != "":
-			return dimStyle.Render(fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosSelectionHUD(), maxInt(0, width-9)), width))
+			return dimStyle.Render(
+				fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosSelectionHUD(), maxInt(0, width-9)), width),
+			)
 		}
 		status := "live comms ledger"
 		if model.cosmosLoading {
@@ -369,13 +380,14 @@ func (model Model) renderStatsPanel(width, height int) string {
 	innerHeight := maxInt(1, height-2)
 	lines := make([]string, 0, innerHeight)
 	if model.statsSubtab == StatsChats {
-		nameWidth := minInt(32, maxInt(8, innerWidth-72))
+		nameWidth := min(32, maxInt(8, innerWidth-72))
 		header := fmt.Sprintf(
 			"  %-*s %-7s %7s %8s %6s %9s %8s %5s %12s",
 			nameWidth, "NAME", "ENGINE", "CPU%", "RSS", "RAM%", "TOKENS", "TOK/MIN", "GEAR", "USAGE",
 		)
 		lines = append(lines, statsHeaderStyle.Render(fillLine(header, innerWidth)))
-		for index, chat := range model.stats.Chats {
+		for index := range model.stats.Chats {
+			chat := &model.stats.Chats[index]
 			if len(lines) >= innerHeight {
 				break
 			}
@@ -389,7 +401,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 			}
 			tokens := "…"
 			if chat.TokensKnown {
-				tokens = formatTokens(chat.TokenCount)
+				tokens = formatUsageTokens(chat.TokenCount)
 			}
 			tokensPerMinute := "…"
 			if chat.TokenRateValid {
@@ -397,7 +409,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 			}
 			plain := fmt.Sprintf(
 				"  %-*s %-7s %7s %8s %5.1f%% %9s %8s %5s %12s",
-				nameWidth, clipRunes(cleanField(chat.Name), nameWidth), chat.Engine, cpu,
+				nameWidth, clipRunesEllipsis(cleanField(chat.Name), nameWidth), chat.Engine, cpu,
 				formatSize(int64(chat.RSSBytes)), chat.RAMPercent,
 				tokens, tokensPerMinute, gear, usageSpark(chat.Spark),
 			)
@@ -413,7 +425,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 				}
 			}
 			line := "  " + statsNameStyle.Render(fmt.Sprintf(
-				"%-*s", nameWidth, clipRunes(cleanField(chat.Name), nameWidth),
+				"%-*s", nameWidth, clipRunesEllipsis(cleanField(chat.Name), nameWidth),
 			)) + " " + engineStyle.Render(fmt.Sprintf("%-7s", chat.Engine)) +
 				" " + statsCPUStyle.Render(fmt.Sprintf("%7s", cpu)) +
 				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", formatSize(int64(chat.RSSBytes)))) +
@@ -426,7 +438,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 		}
 	} else {
 		available := maxInt(16, innerWidth-36)
-		nameWidth := minInt(24, maxInt(8, available/3))
+		nameWidth := min(24, maxInt(8, available/3))
 		imageWidth := maxInt(8, available-nameWidth)
 		header := fmt.Sprintf(
 			"  %-*s %-*s %7s %8s %8s %6s",
@@ -447,8 +459,8 @@ func (model Model) renderStatsPanel(width, height int) string {
 			}
 			plain := fillLine(fmt.Sprintf(
 				"  %-*s %-*s %7s %8s %8s %5.1f%%",
-				nameWidth, clipRunes(cleanField(container.Name), nameWidth),
-				imageWidth, clipRunes(cleanField(container.Image), imageWidth), cpu,
+				nameWidth, clipRunesEllipsis(cleanField(container.Name), nameWidth),
+				imageWidth, clipRunesEllipsis(cleanField(container.Image), imageWidth), cpu,
 				formatSize(int64(container.MemoryBytes)), limit,
 				container.MemoryPercent,
 			), innerWidth)
@@ -457,9 +469,9 @@ func (model Model) renderStatsPanel(width, height int) string {
 				continue
 			}
 			line := "  " + statsNameStyle.Render(fmt.Sprintf(
-				"%-*s", nameWidth, clipRunes(cleanField(container.Name), nameWidth),
+				"%-*s", nameWidth, clipRunesEllipsis(cleanField(container.Name), nameWidth),
 			)) + " " + statsImageStyle.Render(fmt.Sprintf(
-				"%-*s", imageWidth, clipRunes(cleanField(container.Image), imageWidth),
+				"%-*s", imageWidth, clipRunesEllipsis(cleanField(container.Image), imageWidth),
 			)) + " " + statsCPUStyle.Render(fmt.Sprintf("%7s", cpu)) +
 				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", formatSize(int64(container.MemoryBytes)))) +
 				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", limit)) +
@@ -485,8 +497,8 @@ func (model Model) renderLimitsPanel(width, height int) string {
 	innerHeight := maxInt(1, height-2)
 	allLines := model.renderLimitCards(innerWidth)
 	maximum := maxInt(0, len(allLines)-innerHeight)
-	offset := minInt(maxInt(0, model.limitsOffset), maximum)
-	end := minInt(len(allLines), offset+innerHeight)
+	offset := min(maxInt(0, model.limitsOffset), maximum)
+	end := min(len(allLines), offset+innerHeight)
 	lines := append([]string(nil), allLines[offset:end]...)
 	title := " limits "
 	if maximum > 0 {
@@ -512,7 +524,8 @@ func (model Model) renderLimitCards(innerWidth int) []string {
 	appendLine := func(line string) {
 		lines = append(lines, line)
 	}
-	for _, account := range model.stats.Limits {
+	for index := range model.stats.Limits {
+		account := &model.stats.Limits[index]
 		if account.Unsupported {
 			// The engine has no limits concept at all — a card would be pure
 			// noise, not an error the operator can act on.
@@ -531,7 +544,7 @@ func (model Model) renderLimitCards(innerWidth int) []string {
 			continue
 		}
 		appendLine(borderStyle.Render(fillLine("  "+strings.Repeat("─", maxInt(0, innerWidth-2)), innerWidth)))
-		appendLine(statsHeaderStyle.Render(fillLine("  "+limitAccountHeader(account, now), innerWidth)))
+		appendLine(statsHeaderStyle.Render(fillLine("  "+limitAccountHeader(*account, now), innerWidth)))
 		if account.Status != "" {
 			appendLine(dimStyle.Render(fillLine("  ⚠ "+cleanField(account.Status), innerWidth)))
 			if len(account.Windows) == 0 {
@@ -602,8 +615,8 @@ func renderLimitWindow(now time.Time, window pfmstats.Window, innerWidth int) st
 	if showReset {
 		reserved += 18
 	}
-	barWidth := minInt(40, maxInt(1, innerWidth-reserved))
-	name := fmt.Sprintf("%-*s", nameWidth, clipRunes(cleanField(window.Name), nameWidth))
+	barWidth := min(40, maxInt(1, innerWidth-reserved))
+	name := fmt.Sprintf("%-*s", nameWidth, clipRunesEllipsis(cleanField(window.Name), nameWidth))
 	bar := limitBar(window.UsedPct, barWidth)
 	percent := fmt.Sprintf("%.0f%% used", window.UsedPct)
 	if window.UsedPct < 0 {
@@ -743,7 +756,7 @@ func (model Model) renderListPanel(width, height int) string {
 					if model.projectOrdinal(project)%2 == 1 {
 						style = groupStyleB
 					}
-					group := "╭─ " + clipRunes(project, maxInt(1, innerWidth-5))
+					group := "╭─ " + clipRunesEllipsis(project, maxInt(1, innerWidth-5))
 					lines = append(
 						lines,
 						style.Render(fillLine(group, innerWidth)),
@@ -815,7 +828,7 @@ func (model Model) renderGroupedRow(
 	if name == "" {
 		name = "(unnamed)"
 	}
-	if model.mergeNewChat && (isNewChatKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
+	if model.mergeNewChat && (isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
 		ids := model.newChatEngines()
 		labels := make([]string, 0, len(ids))
 		for _, id := range ids {
@@ -838,7 +851,8 @@ func (model Model) renderGroupedRow(
 			name = strings.Join(labels, " ")
 		}
 	}
-	if row.Kind == compose.ProfessorUpdate {
+	switch row.Kind {
+	case compose.ProfessorUpdate:
 		sparkle := "✦"
 		if (model.nowNS/int64(500*time.Millisecond))%2 != 0 {
 			sparkle = "✧"
@@ -849,6 +863,8 @@ func (model Model) renderGroupedRow(
 			return professorUpdateSelectedStyle.Render(line)
 		}
 		return professorUpdateStyle.Render(line)
+	case compose.ProfessorUpdateFailed:
+		return renderProfessorUpdateFailedRow(pointer, name, selected, width)
 	}
 	name = fixedDisplayColumn(name, 30)
 	marker := rowMarker(row.Kind)
@@ -859,7 +875,7 @@ func (model Model) renderGroupedRow(
 	left := pointer + marker + " " + name + " " + badges + " " +
 		fmt.Sprintf("%4s %6s", prompts, size)
 	age := formatAge(row, model.nowNS)
-	if selected && !(model.mergeNewChat && (isNewChatKind(row.Kind) || row.Kind == compose.ProfessorUpdate)) {
+	if selected && (!model.mergeNewChat || (!isNewChatActionKind(row.Kind) && row.Kind != compose.ProfessorUpdate)) {
 		age += "  " + carouselBoxes(model.actionIndex)
 	}
 	leftWidth := maxInt(1, width-lipgloss.Width(age)-1)
@@ -880,8 +896,8 @@ func (model Model) renderGroupedRow(
 		return professorUpdateStyle.Render(line)
 	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
 		return codexStyle.Render(line)
-	case compose.ResumeOpencode, compose.NewOpencode:
-		return opencodeStyle.Render(line)
+	case compose.LiveOpenCode, compose.ResumeOpenCode, compose.NewOpenCode:
+		return openCodeStyle.Render(line)
 	case compose.LiveClaude, compose.ResumeClaude, compose.NewClaude:
 		return statsClaudeStyle.Render(line)
 	case compose.Agent:
@@ -942,15 +958,15 @@ func framePanel(title string, lines []string, width int) string {
 
 func rowMarker(kind compose.Kind) string {
 	switch kind {
-	case compose.LiveClaude, compose.LiveCodex, compose.LiveSplit:
+	case compose.LiveClaude, compose.LiveCodex, compose.LiveOpenCode, compose.LiveSplit:
 		return "●"
 	case compose.Booting:
 		return "◐"
 	case compose.Agent:
 		return "⚙"
-	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpencode:
+	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
 		return "↻"
-	case compose.NewClaude, compose.NewCodex, compose.NewOpencode:
+	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode:
 		return "✦"
 	case compose.ProfessorUpdate:
 		return "⬆"
@@ -964,7 +980,7 @@ func (model Model) rowBadges(row compose.Row) string {
 	switch row.Kind {
 	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
 		badges = append(badges, "⬢")
-	case compose.ResumeOpencode, compose.NewOpencode:
+	case compose.LiveOpenCode, compose.ResumeOpenCode, compose.NewOpenCode:
 		badges = append(badges, "◇")
 	case compose.Agent:
 		badges = append(badges, "⚙ agent")
@@ -1043,7 +1059,7 @@ func formatSize(size int64) string {
 	return "0B"
 }
 
-func formatTokens(tokens int64) string {
+func formatUsageTokens(tokens int64) string {
 	if tokens < 0 {
 		return "…"
 	}
@@ -1077,7 +1093,7 @@ func usageSpark(deltas []int64) string {
 			continue
 		}
 		height := int(float64(delta)/float64(busiest)*float64(len(blocks)-1) + 0.5)
-		runes = append(runes, blocks[minInt(height, len(blocks)-1)])
+		runes = append(runes, blocks[min(height, len(blocks)-1)])
 	}
 	return string(runes)
 }
@@ -1154,18 +1170,17 @@ func fixedDisplayColumn(value string, width int) string {
 	return value
 }
 
-func clipRunes(value string, limit int) string {
+func clipRunesEllipsis(value string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
-	runes := []rune(value)
-	if len(runes) <= limit {
+	if len([]rune(value)) <= limit {
 		return value
 	}
 	if limit == 1 {
 		return "…"
 	}
-	return string(runes[:limit-1]) + "…"
+	return naming.ClipRunes(value, limit-1) + "…"
 }
 
 func cleanField(value string) string {

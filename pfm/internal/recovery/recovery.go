@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 var threadIDPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
@@ -39,15 +39,15 @@ type turn struct {
 }
 
 // Run locates target as either a readable rollout path or a thread id beneath
-// codexRoot/sessions, then rebuilds all three recovered files from scratch.
-func Run(ctx context.Context, codexRoot, target string) (Result, error) {
+// codexHome/sessions, then rebuilds all three recovered files from scratch.
+func Run(ctx context.Context, codexHome, target string) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
 	if strings.TrimSpace(target) == "" {
 		return Result{}, errors.New("a thread id or rollout path is required")
 	}
-	rollout, err := locate(codexRoot, target)
+	rollout, err := locate(codexHome, target)
 	if err != nil {
 		return Result{}, err
 	}
@@ -62,7 +62,7 @@ func Run(ctx context.Context, codexRoot, target string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	out := filepath.Join(codexRoot, "recovered-"+threadID)
+	out := filepath.Join(codexHome, "recovered-"+threadID)
 	if err := os.MkdirAll(out, 0o700); err != nil {
 		return Result{}, fmt.Errorf("create recovery directory %q: %w", out, err)
 	}
@@ -78,7 +78,7 @@ func Run(ctx context.Context, codexRoot, target string) (Result, error) {
 	}, nil
 }
 
-func locate(codexRoot, target string) (string, error) {
+func locate(codexHome, target string) (string, error) {
 	if info, err := os.Stat(target); err == nil {
 		if !info.Mode().IsRegular() {
 			return "", fmt.Errorf("rollout is not a regular file: %s", target)
@@ -87,7 +87,7 @@ func locate(codexRoot, target string) (string, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("stat rollout %q: %w", target, err)
 	}
-	sessions := filepath.Join(codexRoot, "sessions")
+	sessions := filepath.Join(codexHome, "sessions")
 	var candidates []candidate
 	err := filepath.WalkDir(sessions, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -130,14 +130,17 @@ type candidate struct {
 	mod  int64
 }
 
-func parse(ctx context.Context, path string) ([]turn, []turn, int, error) {
+func parse(ctx context.Context, path string) (turns, carried []turn, malformed int, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("open rollout %q: %w", path, err)
 	}
-	defer file.Close()
-	var turns, carried []turn
-	malformed := 0
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %q: %w", path, err))
+		}
+	}()
+	malformed = 0
 	scanner := bufio.NewScanner(file)
 	// A message can contain a large tool result. Scanner's default 64 KiB cap
 	// would silently turn a valid rollout into a malformed one.
@@ -216,13 +219,25 @@ func textOf(payload map[string]any) string {
 }
 
 func writeBundle(out, threadID, rollout string, turns, carried []turn) error {
-	if err := atomicfile.Write(filepath.Join(out, "transcript.md"), []byte(transcript(threadID, rollout, turns)), 0o600); err != nil {
+	if err := atomicfile.Write(
+		filepath.Join(out, "transcript.md"),
+		[]byte(transcript(threadID, rollout, turns)),
+		0o600,
+	); err != nil {
 		return err
 	}
-	if err := atomicfile.Write(filepath.Join(out, "compaction-memory.md"), []byte(memory(threadID, carried)), 0o600); err != nil {
+	if err := atomicfile.Write(
+		filepath.Join(out, "compaction-memory.md"),
+		[]byte(memory(threadID, carried)),
+		0o600,
+	); err != nil {
 		return err
 	}
-	if err := atomicfile.Write(filepath.Join(out, "brief.md"), []byte(brief(out, threadID, rollout, turns, carried)), 0o600); err != nil {
+	if err := atomicfile.Write(
+		filepath.Join(out, "brief.md"),
+		[]byte(brief(out, threadID, rollout, turns, carried)),
+		0o600,
+	); err != nil {
 		return err
 	}
 	return nil
@@ -230,7 +245,13 @@ func writeBundle(out, threadID, rollout string, turns, carried []turn) error {
 
 func transcript(threadID, rollout string, turns []turn) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Recovered conversation — thread %s\n\n%d user/assistant messages, parsed from %s\n\n", threadID, len(turns), rollout)
+	fmt.Fprintf(
+		&b,
+		"# Recovered conversation — thread %s\n\n%d user/assistant messages, parsed from %s\n\n",
+		threadID,
+		len(turns),
+		rollout,
+	)
 	for _, item := range turns {
 		fmt.Fprintf(&b, "## %s · %s\n\n%s\n\n", item.role, item.stamp, item.body)
 	}
@@ -239,7 +260,12 @@ func transcript(threadID, rollout string, turns []turn) string {
 
 func memory(threadID string, carried []turn) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# What survived compaction — thread %s\n\n%d messages carried through this thread's compactions.\n\n", threadID, len(carried))
+	fmt.Fprintf(
+		&b,
+		"# What survived compaction — thread %s\n\n%d messages carried through this thread's compactions.\n\n",
+		threadID,
+		len(carried),
+	)
 	for _, item := range carried {
 		fmt.Fprintf(&b, "## %s · %s\n\n%s\n\n", item.role, item.stamp, item.body)
 	}
@@ -253,10 +279,26 @@ func brief(out, threadID, rollout string, turns, carried []turn) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Recovery brief — thread %s\n\n", threadID)
-	fmt.Fprintf(&b, "You are the seat for thread `%s`. Codex brought you up with no memory: this thread's\nhistory store could not supply it, so `codex resume` opened an empty session. Nothing was lost —\nyour rollout is complete and your conversation is reconstructed below.\n\n", threadID)
-	fmt.Fprintf(&b, "| File | Holds |\n|------|-------|\n| `%s/compaction-memory.md` | %d messages carried through your compactions — your condensed long-term state |\n| `%s/transcript.md` | all %d user/assistant messages, in order |\n| `%s` | the raw rollout this was parsed from |\n\n", out, len(carried), out, len(turns), rollout)
-	b.WriteString("Read `compaction-memory.md` first, then the tail of `transcript.md` for the immediate position.\n\nA pane's emptiness is not evidence: the status line's context/token counts are what decide\nwhether a seat is warm.\n\n---\n\n")
-	b.WriteString("Came up empty? Run `pfm chat recover " + threadID + "` again to rebuild this bundle from the rollout.\n\n")
+	fmt.Fprintf(
+		&b,
+		"You are the seat for thread `%s`. Codex brought you up with no memory: this thread's\nhistory store could not supply it, so `codex resume` opened an empty session. Nothing was lost —\nyour rollout is complete and your conversation is reconstructed below.\n\n",
+		threadID,
+	)
+	fmt.Fprintf(
+		&b,
+		"| File | Holds |\n|------|-------|\n| `%s/compaction-memory.md` | %d messages carried through your compactions — your condensed long-term state |\n| `%s/transcript.md` | all %d user/assistant messages, in order |\n| `%s` | the raw rollout this was parsed from |\n\n",
+		out,
+		len(carried),
+		out,
+		len(turns),
+		rollout,
+	)
+	b.WriteString(
+		"Read `compaction-memory.md` first, then the tail of `transcript.md` for the immediate position.\n\nA pane's emptiness is not evidence: the status line's context/token counts are what decide\nwhether a seat is warm.\n\n---\n\n",
+	)
+	b.WriteString(
+		"Came up empty? Run `pfm chat recover " + threadID + "` again to rebuild this bundle from the rollout.\n\n",
+	)
 	fmt.Fprintf(&b, "## The last %d exchanges before the thread went dark\n\n", len(tail))
 	for _, item := range tail {
 		fmt.Fprintf(&b, "### %s · %s\n\n%s\n\n", item.role, item.stamp, item.body)

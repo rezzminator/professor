@@ -8,17 +8,18 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"hostops/pfm/internal/chat"
-	"hostops/pfm/internal/chatkeys"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/transcript"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const (
@@ -26,6 +27,13 @@ const (
 	// caller; maxCaptureBytes is the ceiling an explicit max_bytes may ask for.
 	defaultCaptureBytes = 256 << 10
 	maxCaptureBytes     = 4 << 20
+	statusNotFound      = "not_found"
+	statusAmbiguous     = "ambiguous"
+	// statusDead is the answer for a target that RESOLVED and then could not
+	// be driven or read — inject.CodeDead. It is deliberately not
+	// statusNotFound: a chat that exists and whose pane vanished mid-call is
+	// not a chat nobody has ever heard of.
+	statusDead = "dead"
 )
 
 // selfCompactDescription is a named const so the registered text and the test
@@ -39,8 +47,11 @@ var chatToolNames = []string{
 	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
 	"chat_new", "chat_open", "chat_read", "chat_resolve",
 	"chat_save", "chat_self_compact", "chat_status", "chat_unkill",
-	"chat_whoami", "issue_servicedesk",
+	"chat_whoami", "servicedesk",
 }
+
+// chatInstructions is the chat part of every professor server's routing text.
+const chatInstructions = "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; compact myself at a milestone → chat_self_compact; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -58,14 +69,16 @@ type Service struct {
 // Runtime is the already-loaded machine policy the stdio server shares with
 // the command that started it. The server never re-reads machine config.
 type Runtime struct {
+	Clock        clock.Clock
 	Paths        paths.Values
 	Accounts     []pfmconfig.Account
 	ConfigPath   string
 	ClaudeBinary string
 	CodexBinary  string
-	// OpencodeBinary is the configured OpenCode launch command; empty means
+	// OpenCodeBinary is the configured OpenCode launch command; empty means
 	// the registered OpenCode descriptor's default binary.
-	OpencodeBinary string
+	OpenCodeBinary string
+	DaemonAddress  string
 	// Chat is the typed verb layer (production: chat.Verbs over the command's
 	// runtime). Verbs not yet on it still reach package main through Dispatch.
 	Chat ChatVerbs
@@ -108,13 +121,11 @@ func NewConfigured(version string, warnings io.Writer, runtime Runtime) (*Servic
 
 func newService(version string, backend *backend) *Service {
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "pfm",
+		Name:    pfmconfig.MCPServerProfessor,
 		Version: version,
-	}, &mcp.ServerOptions{
-		Instructions: "The local pfm chat fleet — cross-chat communication between independent running chats, never parent/child agent communication (a sub-agent returns its result and its parent reads it; neither holds a reason to call any chat_* verb). Routing — \"send / tell / message / reply to / inject into chat X\" is chat_inject; \"compact yourself / self-compact at this milestone\" is chat_self_compact; \"who am I / my address\" is chat_whoami; \"what chats are running\" is chat_ls; \"spawn / start a new chat\" is chat_new; \"is chat X idle, what is it doing\" is chat_status; \"what did X answer last\" is chat_last; \"find / read an old transcript\" is chat_find then chat_read; \"dump my transcript to a file\" is chat_save. Every target names a chat except chat_save's, which is a file path. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands.",
-	})
+	}, &mcp.ServerOptions{Instructions: chatInstructions})
 	service := &Service{server: server, backend: backend}
-	service.register()
+	service.registerTools(server)
 	return service
 }
 
@@ -133,83 +144,101 @@ func (service *Service) Close() error {
 	return service.backend.close()
 }
 
-func (service *Service) register() {
+// registerTools adds the chat family to server, bound to this service: its
+// own server and every professor server carrying the chat family.
+func (service *Service) registerTools(server *mcp.Server) {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mutating := &mcp.ToolAnnotations{ReadOnlyHint: false}
-	mcp.AddTool(service.server, &mcp.Tool{
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_ls",
-		Description: "Lists live and resumable chats as rows — \"what chats are running\", \"is there a chat named X\". Call chat_ls{} or chat_ls{project:\"substring\", all:true}. Returns rows plus matched, truncated, and the filter echoed back; rows empty with matched 0 = nothing matched; a tool error = the fleet could not be read. Address a row with chat_inject by its session or name.",
+		Description: "Lists live and resumable chats as rows — \"what chats are running\", \"is there a chat named X\". Call chat_ls{} or chat_ls{project:\"substring\", all:true}. Scoped to the caller's repository when the caller resolves, else to every one, named in scope; all drops the scope and adds killed and background rows (pfm chat ls --all stays on live chats). Returns rows plus matched, truncated, scope, elsewhere, and the filter echoed back; rows empty with matched 0 = nothing matched; a tool error = the fleet could not be read. Address a row with chat_inject by its session or name.",
 		Annotations: readOnly,
-	}, service.chatLS)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_ls", service.chatLS))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_resolve",
 		Description: "Resolves one exact name to its tmux socket and pane — \"where does chat X live\", checking a target before chat_inject or chat_keys. Call chat_resolve{kind:\"label\", name:\"my-chat\"}. Returns status ok (code 0) with socket_path and pane; not_found (1) = no such chat; ambiguous (2) = several match, listed in candidates; a tool error = the resolver itself failed.",
 		Annotations: readOnly,
-	}, service.chatResolve)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_resolve", service.chatResolve))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_inject",
 		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / inject into chat X\" ask. Call chat_inject{target:\"my-chat\", message:\"…\"}; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke.",
 		Annotations: mutating,
-	}, service.chatInject)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_inject", service.chatInject))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_self_compact",
 		Description: selfCompactDescription,
 		Annotations: mutating,
-	}, service.chatSelfCompact)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_self_compact", service.chatSelfCompact))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_keys",
 		Description: "Presses tmux keys in a live chat — \"press Escape / Enter in chat X\", accept a modal, interrupt a turn. Call chat_keys{target:\"my-chat\", keys:[\"Escape\"]}; raw text is keys:[\"y\"] with literal:true. For a whole message use chat_inject; a sub-agent never drives its parent's pane. Returns status ok with count sent; not_found = no such chat; dead = the pane vanished mid-sequence, count says how many landed; a tool error = an unknown key name, the valid ones listed.",
 		Annotations: mutating,
-	}, service.chatKeys)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_keys", service.chatKeys))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_capture",
-		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call chat_capture{target:\"my-chat\"} or chat_capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; a tool error = the capture itself failed. For the last answer only, chat_last; for a killed or old chat, chat_read.",
+		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call chat_capture{target:\"my-chat\"} or chat_capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; dead = the chat resolved but its pane could not be read; error = the capture failed some other way, message says how. For the last answer only, chat_last; for a killed or old chat, chat_read.",
 		Annotations: readOnly,
-	}, service.chatCapture)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_capture", service.chatCapture))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_whoami",
 		Description: "Reports THIS chat's own identity — \"who am I\", \"what is my address\" — the session name another chat targets with chat_inject. Call chat_whoami{}. Returns status ok with session, socket_path, pane, engine, id; not_found = this transport carries no caller identity, message names the pfm chat command to run from the chat's own shell instead. A sub-agent has no chat identity — it reports to its parent by returning.",
 		Annotations: readOnly,
-	}, service.chatWhoami)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_whoami", service.chatWhoami))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_find",
-		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_read. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
+		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_read. Only Claude transcripts are searched. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
 		Annotations: readOnly,
-	}, service.chatFind)
-	mcp.AddTool(service.server, &mcp.Tool{
+	}, obs.Tool("chat_find", service.chatFind))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_read",
 		Description: "Reads the recent visible turns of an indexed transcript — \"what happened in that chat\", after chat_find or with a known id. Call chat_read{source:\"<id from chat_find>\", last_n:20}. Returns turns (role, text, timestamp) with count and truncated; turns empty with count 0 = the transcript has no visible turns yet; a tool error = no transcript by that id or path. For a LIVE chat's current answer, chat_last.",
 		Annotations: readOnly,
-	}, service.chatRead)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_last", Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure). For screen text, chat_capture; for older turns, chat_read.", Annotations: readOnly,
-	}, service.chatLast)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_status", Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds, context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.", Annotations: readOnly,
-	}, service.chatStatus)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_new", Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.", Annotations: mutating,
-	}, service.chatNew)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_open", Description: "Reopens a resumable (not live) chat in a pane — \"resume / reopen chat X\". Call chat_open{target:\"my-chat\"}. Returns status ok with the open message; a tool error = no such resumable chat or the open failed, message carries its stderr. A live chat needs no opening — address it with chat_inject.", Annotations: mutating,
-	}, service.chatOpen)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_name", Description: "Names or renames a live chat — \"call this chat X\", \"rename chat A to B\". Call chat_name{target:\"self\", name:\"my-chat\"}. Returns status ok; a tool error = the name was empty or multi-line, the target did not resolve, or the rename failed, message says which.", Annotations: mutating,
-	}, service.chatName)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_kill", Description: "Hides a chat from the fleet — \"kill / hide / close chat X\". A live target is also ended (its pane and socket close); a resumable-only target is only hidden. Call chat_kill{target:\"my-chat\"}. Returns status ok; a tool error = the target did not resolve or the kill failed, message says which. Reverse with chat_unkill.", Annotations: mutating,
-	}, service.chatKill)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_unkill", Description: "Restores a killed chat to the fleet listing — \"unkill / unhide chat X\", the reverse of chat_kill. Call chat_unkill{target:\"my-chat\"}. Returns status ok; a tool error = no killed chat by that name or the restore failed. It does not relaunch a pane — chat_open does that.", Annotations: mutating,
-	}, service.chatUnkill)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_save", Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call chat_save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.", Annotations: mutating,
-	}, service.chatSave)
-	mcp.AddTool(service.server, &mcp.Tool{
-		Name:        "issue_servicedesk",
-		Description: "Files a durable complaint about Professor itself for a human to triage — a command, agent, hook, or tool that misbehaved. Call issue_servicedesk{title:\"one line\", detail:\"what went wrong, what was expected, where\", area:\"/pfm\"}. Reporter identity is captured, never supplied. Returns status ok with the issue id; a tool error = title or detail missing, unknown severity, or the write failed — nothing was filed. Not for a bug in the user's own project.",
+	}, obs.Tool("chat_read", service.chatRead))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_last",
+		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure). For screen text, chat_capture; for older turns, chat_read.",
+		Annotations: readOnly,
+	}, obs.Tool("chat_last", service.chatLast))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_status",
+		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle), context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
+		Annotations: readOnly,
+	}, obs.Tool("chat_status", service.chatStatus))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_new",
+		Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.",
 		Annotations: mutating,
-	}, service.issueServicedesk)
+	}, obs.Tool("chat_new", service.chatNew))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_open",
+		Description: "Reopens a resumable (not live) chat in a pane — \"resume / reopen chat X\". Call chat_open{target:\"my-chat\"}. Returns status ok with the open message; a tool error = no such resumable chat or the open failed, message carries its stderr. A live chat needs no opening — address it with chat_inject.",
+		Annotations: mutating,
+	}, obs.Tool("chat_open", service.chatOpen))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_name",
+		Description: "Names or renames a live chat — \"call this chat X\", \"rename chat A to B\". Call chat_name{target:\"self\", name:\"my-chat\"}. Returns status ok; a tool error = the name was empty or multi-line, the target did not resolve, or the rename failed, message says which.",
+		Annotations: mutating,
+	}, obs.Tool("chat_name", service.chatName))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_kill",
+		Description: "Hides a chat from the fleet — \"kill / hide / close chat X\". A live target is also ended (its pane and socket close); a resumable-only target is only hidden. Call chat_kill{target:\"my-chat\"}. Returns status ok; a tool error = the target did not resolve or the kill failed, message says which. Reverse with chat_unkill.",
+		Annotations: mutating,
+	}, obs.Tool("chat_kill", service.chatKill))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_unkill",
+		Description: "Restores a killed chat to the fleet listing — \"unkill / unhide chat X\", the reverse of chat_kill. Call chat_unkill{target:\"my-chat\"}. Returns status ok; a tool error = no killed chat by that name or the restore failed. It does not relaunch a pane — chat_open does that.",
+		Annotations: mutating,
+	}, obs.Tool("chat_unkill", service.chatUnkill))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "chat_save",
+		Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call chat_save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.",
+		Annotations: mutating,
+	}, obs.Tool("chat_save", service.chatSave))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "servicedesk",
+		Description: "Files a durable complaint about Professor itself for a human to triage — a command, agent, hook, or tool that misbehaved. Call servicedesk{title:\"one line\", detail:\"what went wrong, what was expected, where\", area:\"/pfm\"}. Reporter identity is captured, never supplied. Returns status ok with the issue id; a tool error = title or detail missing, unknown severity, or the write failed — nothing was filed. Not for a bug in the user's own project.",
+		Annotations: mutating,
+	}, obs.Tool("servicedesk", service.issueServicedesk))
 }
 
 type requestScopedInjector interface {
@@ -227,6 +256,16 @@ func selfTarget(target string) bool {
 	return target == "self" || target == "me"
 }
 
+func relativeResolveTarget(target string) bool {
+	if selfTarget(target) {
+		return true
+	}
+	if len(target) < 2 || target[0] != '%' {
+		return false
+	}
+	return strings.Trim(target[1:], "0123456789") == ""
+}
+
 // noAmbientCallerRemedy explains a missing-identity refusal in terms an MCP
 // caller can act on, instead of the config fact chat.sh's CLI-oriented
 // wording states. The shared HTTP daemon (one process serving every chat on
@@ -238,7 +277,7 @@ func selfTarget(target string) bool {
 // something available to THIS call: run the equivalent `pfm chat ...`
 // command from the chat's own shell, since that process IS the chat and can
 // derive its own identity; or ask the operator to move this chat's MCP
-// transport onto per-chat stdio (`pfm mcp chat serve`), which inherits
+// transport onto per-chat stdio (`pfm mcp serve --stdio`), which inherits
 // ambient identity deliberately.
 const noAmbientCallerRemedy = "MCP request has no _meta.threadId, and this " +
 	"server is pfm's shared HTTP daemon (one process serving every chat on " +
@@ -309,11 +348,11 @@ func (service *Service) chatKeys(
 	}
 	if !input.Literal {
 		for _, key := range input.Keys {
-			if !chatkeys.Valid(key) {
+			if !chat.KeyValid(key) {
 				return nil, KeysOutput{}, fmt.Errorf(
 					"%q is not a tmux key; set literal=true to type it as text, or use one of: %s",
 					key,
-					chatkeys.Names(),
+					chat.KeyNames(),
 				)
 			}
 		}
@@ -330,24 +369,33 @@ func (service *Service) chatKeys(
 		return nil, KeysOutput{}, err
 	}
 	if refused, _ := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
-		return nil, KeysOutput{Status: "not_found", Code: inject.CodeUnknown, Keys: append([]string(nil), input.Keys...)}, nil
+		return nil, KeysOutput{
+			Status: statusNotFound,
+			Code:   inject.CodeUnknown,
+			Keys:   append([]string(nil), input.Keys...),
+		}, nil
 	}
 	target, code, detail, err := injector.Resolve(ctx, input.Target)
 	if err != nil {
 		return nil, KeysOutput{}, err
 	}
 	if code != 0 {
-		return nil, KeysOutput{Status: "not_found", Code: code, Keys: append([]string(nil), input.Keys...)}, fmt.Errorf("resolve %q: %s", input.Target, detail)
+		output := KeysOutput{
+			Status: statusNotFound,
+			Code:   code,
+			Keys:   append([]string(nil), input.Keys...),
+		}
+		return nil, output, fmt.Errorf("resolve %q: %s", input.Target, detail)
 	}
-	tmux := inject.CommandTmux{}
+	tmux := inject.TmuxInjector{}
 	for index, key := range input.Keys {
 		if index > 0 && delay > 0 {
-			timer := time.NewTimer(delay)
+			timer := service.backend.clock.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return nil, KeysOutput{}, ctx.Err()
-			case <-timer.C:
+			case <-timer.C():
 			}
 		}
 		var sendErr error
@@ -358,7 +406,7 @@ func (service *Service) chatKeys(
 		}
 		if sendErr != nil {
 			return nil, KeysOutput{
-				Status: "dead", Code: inject.CodeDead, SocketPath: target.SocketPath,
+				Status: statusDead, Code: inject.CodeDead, SocketPath: target.SocketPath,
 				Pane: target.Pane, Count: index, Keys: append([]string(nil), input.Keys...),
 			}, fmt.Errorf("send %q: %w", key, sendErr)
 		}
@@ -382,16 +430,21 @@ func (service *Service) chatKeys(
 
 func (service *Service) chatLS(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input LSInput,
 ) (*mcp.CallToolResult, LSOutput, error) {
-	output, err := service.backend.list(ctx, input)
+	repo, scope, err := service.backend.lsScope(ctx, requestMeta(request), input)
+	if err != nil {
+		return nil, LSOutput{}, err
+	}
+	output, err := service.backend.listProjected(ctx, input, true, repo)
+	output.Scope = scope
 	return nil, output, err
 }
 
 func (service *Service) chatResolve(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input ResolveInput,
 ) (*mcp.CallToolResult, ResolveOutput, error) {
 	kind := resolve.Kind(input.Kind)
@@ -400,47 +453,53 @@ func (service *Service) chatResolve(
 			"kind must be label, session, or cxwin",
 		)
 	}
-	if kind == resolve.CxWindow {
-		target, code, detail, err := service.backend.injector.ResolveEngine(
-			ctx, input.Name, string(pfmengine.Codex),
-		)
-		if err != nil {
-			return nil, ResolveOutput{}, err
-		}
-		status := "ok"
-		switch code {
-		case 0:
-		case inject.CodeUnknown:
-			status, code = "not_found", 1
-		case inject.CodeAmbiguous:
-			status, code = "ambiguous", 2
-		default:
-			return nil, ResolveOutput{}, fmt.Errorf(
-				"resolve target %q failed with code %d: %s", input.Name, code, detail,
-			)
-		}
-		return nil, ResolveOutput{
-			Status: status, Code: code, SocketPath: target.SocketPath,
-			Pane: target.Pane, Candidates: detail,
-		}, nil
+	name := strings.TrimSpace(input.Name)
+	if len(name) >= 2 && strings.HasPrefix(name, `"`) && strings.HasSuffix(name, `"`) {
+		name = strings.TrimSpace(name[1 : len(name)-1])
 	}
-	namespace, err := service.backend.resolver.Resolve(ctx, kind, input.Name)
+	relative := relativeResolveTarget(name)
+	requiredEngine := ""
+	if kind == resolve.CxWindow && !relative {
+		requiredEngine = string(pfmengine.Codex)
+	}
+	injector, caller, err := service.injectorForRequest(ctx, request)
+	if err != nil {
+		return nil, ResolveOutput{}, err
+	}
+	if refused, detail := service.selfCallerRefusal(caller); relative && refused {
+		return nil, ResolveOutput{Status: statusNotFound, Code: 1, Candidates: detail}, nil
+	}
+	type kindResolver interface {
+		ResolveKind(context.Context, string, resolve.Kind, string) (inject.Target, int, string, error)
+	}
+	var target inject.Target
+	var code int
+	var detail string
+	if resolver, ok := injector.(kindResolver); ok {
+		target, code, detail, err = resolver.ResolveKind(ctx, name, kind, requiredEngine)
+	} else if requiredEngine != "" {
+		target, code, detail, err = injector.ResolveEngine(ctx, name, requiredEngine)
+	} else {
+		target, code, detail, err = injector.Resolve(ctx, name)
+	}
 	if err != nil {
 		return nil, ResolveOutput{}, err
 	}
 	status := "ok"
-	if namespace.Code == 1 {
-		status = "not_found"
-	} else if namespace.Code == 2 {
-		status = "ambiguous"
+	switch code {
+	case 0:
+	case inject.CodeUnknown:
+		status, code = statusNotFound, 1
+	case inject.CodeAmbiguous:
+		status, code = statusAmbiguous, 2
+	default:
+		return nil, ResolveOutput{}, fmt.Errorf(
+			"resolve target %q failed with code %d: %s", input.Name, code, detail,
+		)
 	}
-	socket, pane := parseResolved(namespace.Stdout)
 	return nil, ResolveOutput{
-		Status:     status,
-		Code:       namespace.Code,
-		SocketPath: socket,
-		Pane:       pane,
-		Candidates: namespace.Stderr,
+		Status: status, Code: code, SocketPath: target.SocketPath,
+		Pane: target.Pane, Candidates: detail,
 	}, nil
 }
 
@@ -455,7 +514,7 @@ func (service *Service) chatInject(
 	}
 	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
 		return nil, InjectOutput{
-			Status: "not_found", Code: inject.CodeUnknown, Message: detail,
+			Status: statusNotFound, Code: inject.CodeUnknown, Message: detail,
 		}, nil
 	}
 	result, err := injector.Inject(ctx, inject.Request{
@@ -485,7 +544,7 @@ func (service *Service) chatSelfCompact(
 			detail = selfCompactNoAmbientRemedy
 		}
 		return nil, InjectOutput{
-			Status: "not_found", Code: inject.CodeUnknown, Message: detail,
+			Status: statusNotFound, Code: inject.CodeUnknown, Message: detail,
 		}, nil
 	}
 	// One steer, by the operator's rule. The engine's own guards still run on
@@ -561,7 +620,7 @@ func (service *Service) chatWhoami(
 	}
 	if caller.present {
 		if !caller.valid {
-			return nil, WhoamiOutput{Status: "not_found", Message: caller.detail}, nil
+			return nil, WhoamiOutput{Status: statusNotFound, Message: caller.detail}, nil
 		}
 		identity := caller.identity
 		return nil, WhoamiOutput{
@@ -578,7 +637,7 @@ func (service *Service) chatWhoami(
 	}
 	if !service.backend.allowAmbientIdentity {
 		return nil, WhoamiOutput{
-			Status:  "not_found",
+			Status:  statusNotFound,
 			Message: noAmbientCallerRemedy,
 		}, nil
 	}
@@ -589,7 +648,7 @@ func (service *Service) chatWhoami(
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
 		return nil, WhoamiOutput{
-			Status:  "not_found",
+			Status:  statusNotFound,
 			Engine:  identity.Engine,
 			ID:      identity.ID,
 			Source:  identity.Source,
@@ -638,18 +697,39 @@ func (service *Service) chatCapture(
 		return nil, CaptureOutput{}, err
 	}
 	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
-		return nil, CaptureOutput{Status: "not_found", Code: inject.CodeUnknown, Message: detail}, nil
+		return nil, CaptureOutput{Status: statusNotFound, Code: inject.CodeUnknown, Message: detail}, nil
 	}
 	target, text, code, detail, err := injector.Capture(
 		ctx,
 		input.Target,
 		lines,
 	)
+	// One status per engine code, never a catch-all: inject.Engine.Capture
+	// answers CodeDead for a pane it resolved and could not read, and folding
+	// that into not_found reported a live chat as one that does not exist.
+	// An unregistered code is a capture that FAILED for a reason this surface
+	// has not been taught yet (statusError) — still never an absence.
 	status := "ok"
-	if code == inject.CodeAmbiguous {
-		status = "ambiguous"
-	} else if code != 0 {
-		status = "not_found"
+	switch code {
+	case 0:
+	case inject.CodeAmbiguous:
+		status = statusAmbiguous
+	case inject.CodeUnknown:
+		status = statusNotFound
+	case inject.CodeDead:
+		status = statusDead
+	case inject.CodeCaptureFailed:
+		// Every other case above describes the TARGET pane and stays a
+		// legitimate soft answer (err untouched, nil). CodeCaptureFailed
+		// means Engine.Capture's tmux call never ran at all
+		// (pfmtmux.CouldNotRun) — this tool's OWN execution failed, so it
+		// surfaces as a real Go error the way chatOpenDetached and
+		// cliAction (actions.go) already return one for their statusError
+		// outcomes, instead of asking the caller to notice a JSON field.
+		status = statusError
+		err = fmt.Errorf("chat_capture: %s", detail)
+	default:
+		status = statusError
 	}
 	// The engine captures the WHOLE scrollback; the byte bound is applied here,
 	// after the capture, keeping the most recent screen when it has to cut.
@@ -684,26 +764,36 @@ func tailBytes(text string, budget int) string {
 
 func (service *Service) chatFind(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input FindInput,
 ) (*mcp.CallToolResult, FindOutput, error) {
-	output, err := service.backend.find(ctx, input)
+	self := ""
+	if !input.IncludeSelf {
+		caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
+		if err != nil {
+			return nil, FindOutput{}, err
+		}
+		switch {
+		case caller.valid && caller.row.Engine == pfmengine.Claude && caller.identity.ID != "":
+			self = caller.identity.ID
+		case !caller.present && service.backend.allowAmbientIdentity:
+			self = chat.AskingSession()
+		}
+	}
+	output, err := service.backend.find(ctx, input, self)
 	return nil, output, err
 }
 
 func (service *Service) chatRead(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input ReadInput,
 ) (*mcp.CallToolResult, ReadOutput, error) {
+	var err error
+	ctx, input.Source, err = service.cliTargetForRequest(ctx, request, input.Source)
+	if err != nil {
+		return nil, ReadOutput{}, err
+	}
 	output, err := service.backend.read(ctx, input)
 	return nil, output, err
-}
-
-func parseResolved(value string) (string, string) {
-	fields := strings.Split(strings.TrimSpace(value), "\t")
-	if len(fields) != 2 {
-		return "", ""
-	}
-	return fields[0], fields[1]
 }

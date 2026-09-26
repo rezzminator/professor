@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // CodexThread is one conversation as the Codex CLI's own SQLite state store
@@ -87,19 +89,19 @@ func (thread CodexThread) MachineSpawned() bool {
 	return thread.Source == codexExecSource && !thread.Renamed
 }
 
-// CodexStateFiles lists the Codex state stores under codexRoot, newest
+// CodexStateFiles lists the Codex state stores under codexHome, newest
 // generation first. Codex leaves older generations behind when it migrates,
 // and the highest N is the live store.
-func CodexStateFiles(codexRoot string) ([]string, error) {
-	if codexRoot == "" {
+func CodexStateFiles(codexHome string) ([]string, error) {
+	if codexHome == "" {
 		return nil, nil
 	}
-	entries, err := os.ReadDir(codexRoot)
+	entries, err := os.ReadDir(codexHome)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read Codex root %q: %w", codexRoot, err)
+		return nil, fmt.Errorf("read Codex root %q: %w", codexHome, err)
 	}
 	type generation struct {
 		number int
@@ -116,7 +118,7 @@ func CodexStateFiles(codexRoot string) ([]string, error) {
 		}
 		generations = append(generations, generation{
 			number: number,
-			path:   filepath.Join(codexRoot, entry.Name()),
+			path:   filepath.Join(codexHome, entry.Name()),
 		})
 	}
 	sort.Slice(generations, func(left, right int) bool {
@@ -152,26 +154,45 @@ func codexStateGeneration(name string) (int, bool) {
 // CodexStateFiles orders newest generation first: a thread id recorded by
 // several generations keeps the newest generation's row. A store that cannot
 // be opened or whose threads table is too old to classify is skipped, because
-// one unreadable generation must never blank the Codex half of the fleet.
+// one unreadable generation must never blank the Codex half of the fleet —
+// but skipping every generation is not the same as there being nothing to
+// read, so each skip is logged and an all-skipped run is an error, never a
+// silent empty list.
 func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error) {
 	threadByID := make(map[string]CodexThread)
+	skipped := 0
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		threads, err := readCodexState(ctx, file)
 		if err != nil {
+			skipped++
+			fmt.Fprintf(
+				os.Stderr,
+				"store: skip unusable Codex state generation %s: %v\n",
+				file,
+				err,
+			)
 			continue
 		}
-		for _, thread := range threads {
+		for index := range threads {
+			thread := &threads[index]
 			if _, newer := threadByID[thread.ID]; newer {
 				continue
 			}
-			threadByID[thread.ID] = thread
+			threadByID[thread.ID] = *thread
 		}
 	}
+	if len(files) > 0 && skipped == len(files) {
+		return nil, fmt.Errorf(
+			"read Codex state: all %d generation(s) were unreadable",
+			skipped,
+		)
+	}
 	threads := make([]CodexThread, 0, len(threadByID))
-	for _, thread := range threadByID {
+	for threadID := range threadByID {
+		thread := threadByID[threadID]
 		threads = append(threads, thread)
 	}
 	sort.Slice(threads, func(left, right int) bool {
@@ -195,23 +216,23 @@ type CodexPaneBound func(socket, paneID string) (id string, found bool)
 // gather.DetectCodexThreads expect.
 func NewCodexThreadResolver(
 	ctx context.Context,
-	codexRoot string,
+	codexHome string,
 	bound CodexPaneBound,
-) func(exported, cwd string, birth int64, socket, paneID string) (id string, rolloutPath string) {
-	return NewCodexThreadResolverRoots(ctx, []string{codexRoot}, bound)
+) func(exported, cwd string, birth int64, socket, paneID string) (id, rolloutPath string) {
+	return NewCodexThreadResolverRoots(ctx, []string{codexHome}, bound)
 }
 
 // NewCodexThreadResolverRoots resolves rollout-less live processes across the
 // complete config-owned Codex roster.
 func NewCodexThreadResolverRoots(
 	ctx context.Context,
-	codexRoots []string,
+	codexHomes []string,
 	bound CodexPaneBound,
-) func(exported, cwd string, birth int64, socket, paneID string) (id string, rolloutPath string) {
+) func(exported, cwd string, birth int64, socket, paneID string) (id, rolloutPath string) {
 	candidates := sync.OnceValue(func() []resolve.CodexThread {
 		files := make([]string, 0)
-		for _, codexRoot := range codexRoots {
-			rootFiles, err := CodexStateFiles(codexRoot)
+		for _, codexHome := range codexHomes {
+			rootFiles, err := CodexStateFiles(codexHome)
 			if err != nil {
 				continue
 			}
@@ -222,7 +243,8 @@ func NewCodexThreadResolverRoots(
 			return nil
 		}
 		rows := make([]resolve.CodexThread, 0, len(threads))
-		for _, thread := range threads {
+		for index := range threads {
+			thread := &threads[index]
 			if !thread.Listed() {
 				continue
 			}
@@ -251,12 +273,16 @@ func NewCodexThreadResolverRoots(
 }
 
 // readCodexState reads one state store, read-only while Codex writes it.
-func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
+func readCodexState(ctx context.Context, file string) (threads []CodexThread, returnErr error) {
 	db, err := sqlitedb.OpenReadOnly(file, 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("open Codex state store %q: %w", file, err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex state store %q: %w", file, err))
+		}
+	}()
 
 	columns, err := codexStateColumns(ctx, db)
 	if err != nil {
@@ -265,7 +291,7 @@ func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
 	for _, required := range []string{"id", "cwd", "created_at", "thread_source"} {
 		if _, found := columns[required]; !found {
 			return nil, fmt.Errorf(
-				"Codex state store %q has no threads.%s column",
+				"state store for Codex %q has no threads.%s column",
 				file,
 				required,
 			)
@@ -285,13 +311,19 @@ func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
 		codexStateColumn(columns, "recency_at", "0") + ", " +
 		codexStateColumn(columns, "tokens_used", "0") +
 		" FROM threads ORDER BY id"
+	read := obs.SQL(ctx, engine.MustLookup(engine.Codex).LongName, query)
 	rows, err := db.QueryContext(ctx, query)
+	read.End(-1, err)
 	if err != nil {
 		return nil, fmt.Errorf("query Codex state store %q: %w", file, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex state rows %q: %w", file, err))
+		}
+	}()
 
-	threads := make([]CodexThread, 0)
+	threads = make([]CodexThread, 0)
 	for rows.Next() {
 		var thread CodexThread
 		var threadSource, title, firstUserMessage, preview string
@@ -339,14 +371,21 @@ func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
 // codexStateColumns reports the threads columns this generation actually has.
 // Codex grows the table over releases, so an older store is read through the
 // columns it carries instead of failing the whole pass.
-func codexStateColumns(ctx context.Context, db *sql.DB) (map[string]struct{}, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(threads)")
+func codexStateColumns(ctx context.Context, db *sql.DB) (columns map[string]struct{}, returnErr error) {
+	const columnsQuery = "PRAGMA table_info(threads)"
+	read := obs.SQL(ctx, engine.MustLookup(engine.Codex).LongName, columnsQuery)
+	rows, err := db.QueryContext(ctx, columnsQuery)
+	read.End(-1, err)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex schema rows: %w", err))
+		}
+	}()
 
-	columns := make(map[string]struct{})
+	columns = make(map[string]struct{})
 	for rows.Next() {
 		var identifier int
 		var name, columnType string

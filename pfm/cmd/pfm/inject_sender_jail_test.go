@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // statedTestSender gives a jailed CLI test the identity a real caller has.

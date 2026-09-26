@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestRunIssuesDefaultsToOpenOnlyAndJSONAllReturnsEverything pins the read
@@ -23,18 +23,18 @@ func TestRunIssuesDefaultsToOpenOnlyAndJSONAllReturnsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	state := shared.Open(ctx, resolved)
-	if _, err := state.RecordIssue(ctx, shared.Issue{
+	state := fleetdb.OpenSharedState(ctx, resolved)
+	if _, err := state.RecordIssue(ctx, fleetdb.Issue{
 		AtNS: 1, Title: "open issue", Detail: "still needs a human",
-		Severity: shared.IssueSeverityLow, Area: "areaA",
+		Severity: fleetdb.IssueSeverityLow, Area: "areaA",
 		ReporterLabel: "Gate Runner",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := state.RecordIssue(ctx, shared.Issue{
+	if _, err := state.RecordIssue(ctx, fleetdb.Issue{
 		AtNS: 2, Title: "closed issue", Detail: "already handled",
-		Severity: shared.IssueSeverityHigh, Area: "areaB",
-		ReporterSession: shared.UnidentifiedSender, Status: "closed",
+		Severity: fleetdb.IssueSeverityHigh, Area: "areaB",
+		ReporterSession: fleetdb.UnidentifiedSender, Status: "closed",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestRunIssuesDefaultsToOpenOnlyAndJSONAllReturnsEverything(t *testing.T) {
 	if code := run([]string{"issues", "--all", "--json"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("pfm issues --all --json code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	var decoded []shared.Issue
+	var decoded []fleetdb.Issue
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("decode --all --json output %q: %v", stdout.String(), err)
 	}

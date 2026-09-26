@@ -4,13 +4,13 @@ package action
 
 import (
 	"context"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // nativeProcesses enumerates the process table on a kernel with no /proc.
@@ -48,12 +48,19 @@ func nativeProcesses(ctx context.Context) ([]Process, error) {
 // Linux reader gets this from /proc/<pid>/fd/0 and strips the /dev/ prefix; ps
 // already prints the short form, and "??" for a process with no terminal.
 func terminalByPID() map[int]string {
-	output, err := exec.Command(deps.Executable("ps"), "-A", "-o", "pid=,tty=").Output()
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		context.Background(),
+		[]string{deps.Executable("ps"), "-A", "-o", "pid=,tty="},
+		deps.RunOptions{},
+	)
 	if err != nil {
 		return nil
 	}
+	if result.ExitCode != 0 {
+		return nil
+	}
 	terminals := make(map[int]string)
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(string(result.Stdout), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 || fields[1] == "??" || fields[1] == "?" {
 			continue

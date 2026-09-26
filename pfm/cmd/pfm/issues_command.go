@@ -7,11 +7,12 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/shared"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 // runIssues lists the servicedesk complaint box agents file through the
-// issue_servicedesk MCP tool. It is the only read surface for that ledger: a
+// servicedesk MCP tool. It is the only read surface for that ledger: a
 // write-only complaint box nobody can open is a black hole.
 //
 // The three states an operator can hit are kept visibly distinct:
@@ -22,11 +23,11 @@ import (
 //     one.
 //   - --json always emits a JSON array, even when it is empty, since a script
 //     reading structured output needs `[]` rather than a prose sentence.
-func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("issues", "usage: pfm issues [--all] [--json]", stderr)
+func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
+	flags := cli.NewFlagSet("issues", "usage: pfm issues [--all] [--json]", stderr)
 	all := flags.Bool("all", false, "include closed issues, not only open ones")
-	asJSON := flags.Bool("json", false, "print issues as a JSON array")
-	if code, ok := parseFlags(flags, args); !ok {
+	asJSON := flags.Bool(jsonFormat, false, "print issues as a JSON array")
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -34,8 +35,8 @@ func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		return 2
 	}
 	ctx := context.Background()
-	state := shared.Open(ctx, runtime.Paths)
-	defer state.Close()
+	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
+	defer func() { cli.CloseResource(state, "pfm issues: close state", stderr, &exitCode) }()
 
 	issues, err := state.Issues(ctx, *all)
 	if err != nil {
@@ -62,7 +63,8 @@ func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		return 0
 	}
 
-	for _, issue := range issues {
+	for index := range issues {
+		issue := &issues[index]
 		reporter := issue.ReporterLabel
 		if reporter == "" {
 			reporter = issue.ReporterSession

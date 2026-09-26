@@ -1,13 +1,14 @@
 package paths
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestResolveOverrides(t *testing.T) {
@@ -20,20 +21,20 @@ func TestResolveOverrides(t *testing.T) {
 		filepath.Join(testRoot, "claude-1"),
 		filepath.Join(testRoot, "claude-2"),
 	}
-	codexRoot := filepath.Join(testRoot, "codex")
+	codexHome := filepath.Join(testRoot, "codex")
 	tmuxDir := filepath.Join(testRoot, "tmux")
 	procRoot := filepath.Join(testRoot, "proc")
 	cgroupRoot := filepath.Join(testRoot, "cgroup")
-	sharedDB := filepath.Join(testRoot, "shared", "fleet.db")
+	fleetDB := filepath.Join(testRoot, "shared", "fleet.db")
 
 	t.Setenv(EnvHome, home)
 	t.Setenv(EnvDB, db)
-	t.Setenv(EnvSharedDB, sharedDB)
+	t.Setenv(EnvFleetDB, fleetDB)
 	t.Setenv(EnvSIDDir, sidDir)
 	t.Setenv(EnvClaudeRoots, strings.Join(claudeRoots, string(os.PathListSeparator)))
-	t.Setenv(EnvCodexRoot, codexRoot)
+	t.Setenv(EnvCodexHome, codexHome)
 	opencodeRoot := filepath.Join(testRoot, "opencode")
-	t.Setenv(EnvOpencodeRoot, opencodeRoot)
+	t.Setenv(EnvOpenCodeRoot, opencodeRoot)
 	t.Setenv(EnvTmuxDir, tmuxDir)
 	t.Setenv(EnvProcRoot, procRoot)
 	t.Setenv(EnvCgroupRoot, cgroupRoot)
@@ -43,13 +44,13 @@ func TestResolveOverrides(t *testing.T) {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	want := Values{
-		DB:       db,
-		SharedDB: sharedDB,
-		SIDDir:   sidDir,
+		DB:      db,
+		FleetDB: fleetDB,
+		SIDDir:  sidDir,
 		Roots: map[pfmengine.ID][]string{
 			pfmengine.Claude:   claudeRoots,
-			pfmengine.Codex:    {codexRoot},
-			pfmengine.Opencode: {opencodeRoot},
+			pfmengine.Codex:    {codexHome},
+			pfmengine.OpenCode: {opencodeRoot},
 		},
 		TmuxDir: tmuxDir,
 		Home:    home,
@@ -58,31 +59,77 @@ func TestResolveOverrides(t *testing.T) {
 		ArchiveDir: filepath.Join(home, ".claude-archive"),
 		ProcRoot:   procRoot,
 		CgroupRoot: cgroupRoot,
+		LogFile:    filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)
 	}
 }
 
-// The shared state store defaults to ~/.cc/fleet.db, never the private cache's
+func TestDevRepoGitDirMatchesSymlinkedWorktreeRoot(t *testing.T) {
+	physical := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "blueprint")
+	if err := os.Symlink(physical, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvDevRepoWorkTree, "  "+physical+"  ")
+	t.Setenv(EnvDevRepoGitDir, "  /fence/git-dir  ")
+
+	gitDir, ok := DevRepoGitDir(alias)
+	if !ok || gitDir != "/fence/git-dir" {
+		t.Fatalf("DevRepoGitDir(%q) = %q, %t; want physical match", alias, gitDir, ok)
+	}
+}
+
+func TestDevRepoGitDirLogsPhysicalResolutionFailureBeforeCleanFallback(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-worktree")
+	t.Setenv(EnvDevRepoWorkTree, missing)
+	t.Setenv(EnvDevRepoGitDir, "/fence/git-dir")
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStderr := os.Stderr
+	os.Stderr = writer
+	gitDir, ok := DevRepoGitDir(missing)
+	os.Stderr = previousStderr
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	logged, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !ok || gitDir != "/fence/git-dir" {
+		t.Fatalf("DevRepoGitDir(%q) = %q, %t; want cleaned fallback match", missing, gitDir, ok)
+	}
+	if !strings.Contains(string(logged), missing) || !strings.Contains(string(logged), "falling back") {
+		t.Fatalf("stderr = %q, want path and fallback diagnostic", logged)
+	}
+}
+
+// The fleet state store defaults to ~/.cc/fleet.db, never the private cache's
 // directory, and the two overrides must not collide.
-func TestResolveSharedStoreDefaultsOutsideThePrivateCache(t *testing.T) {
+func TestResolveFleetStoreDefaultsOutsideThePrivateCache(t *testing.T) {
 	testRoot := t.TempDir()
 	home := filepath.Join(testRoot, "home")
 	t.Setenv(EnvHome, home)
 	t.Setenv(EnvDB, filepath.Join(testRoot, "cache", "fleet.db"))
-	t.Setenv(EnvSharedDB, "")
+	t.Setenv(EnvFleetDB, "")
 
 	got, err := Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	want := filepath.Join(home, ".cc", "fleet.db")
-	if got.SharedDB != want {
-		t.Fatalf("Resolve().SharedDB = %q, want %q", got.SharedDB, want)
+	if got.FleetDB != want {
+		t.Fatalf("Resolve().FleetDB = %q, want %q", got.FleetDB, want)
 	}
-	if got.SharedDB == got.DB {
-		t.Fatalf("shared store and private cache resolved to the same file %q", got.DB)
+	if got.FleetDB == got.DB {
+		t.Fatalf("fleet store and private cache resolved to the same file %q", got.DB)
 	}
 }
 
@@ -104,18 +151,18 @@ func TestResolveDoesNotFabricateClaudeAccountRoots(t *testing.T) {
 
 // The OpenCode root defaults under Home and jails with it; the explicit
 // override wins over the default.
-func TestResolveOpencodeRootDefaultsUnderHome(t *testing.T) {
+func TestResolveOpenCodeRootDefaultsUnderHome(t *testing.T) {
 	testRoot := t.TempDir()
 	home := filepath.Join(testRoot, "home")
 	t.Setenv(EnvHome, home)
-	t.Setenv(EnvOpencodeRoot, "")
+	t.Setenv(EnvOpenCodeRoot, "")
 
 	got, err := Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	want := filepath.Join(home, ".local", "share", "opencode")
-	if roots := got.Roots[pfmengine.Opencode]; len(roots) != 1 || roots[0] != want {
+	if roots := got.Roots[pfmengine.OpenCode]; len(roots) != 1 || roots[0] != want {
 		t.Fatalf("Resolve().Roots[ox] = %#v, want %q", roots, want)
 	}
 }
@@ -126,7 +173,7 @@ func TestResolveUsesScratchTmuxBase(t *testing.T) {
 	t.Setenv(EnvDB, filepath.Join(testRoot, "fleet.db"))
 	t.Setenv(EnvSIDDir, filepath.Join(testRoot, "sid"))
 	t.Setenv(EnvClaudeRoots, filepath.Join(testRoot, "claude"))
-	t.Setenv(EnvCodexRoot, filepath.Join(testRoot, "codex"))
+	t.Setenv(EnvCodexHome, filepath.Join(testRoot, "codex"))
 	t.Setenv(EnvTmuxDir, "")
 	t.Setenv(EnvProcRoot, filepath.Join(testRoot, "proc"))
 	t.Setenv("TMUX_TMPDIR", testRoot)
@@ -153,11 +200,11 @@ func TestFirstRootIsTheEnginesFirstConfiguredRoot(t *testing.T) {
 	}
 }
 
-// TestSocketUnderKeepsTheSocketInsideTheTmuxDirectory pins the one socket
+// TestSocketUnderKeepsTheSocketInsideTheTmuxDir pins the one socket
 // guard: a bare name joins the tmux directory; anything that could dial a
 // server elsewhere — absolute, nested, dot names — or an unset directory is
 // refused.
-func TestSocketUnderKeepsTheSocketInsideTheTmuxDirectory(t *testing.T) {
+func TestSocketUnderKeepsTheSocketInsideTheTmuxDir(t *testing.T) {
 	values := Values{TmuxDir: "/jail/tmux"}
 	if got, err := values.SocketUnder("cc-1-2-3"); err != nil || got != "/jail/tmux/cc-1-2-3" {
 		t.Fatalf("SocketUnder(cc-1-2-3) = %q, %v", got, err)
@@ -169,5 +216,29 @@ func TestSocketUnderKeepsTheSocketInsideTheTmuxDirectory(t *testing.T) {
 	}
 	if _, err := (Values{}).SocketUnder("cc-1-2-3"); err == nil {
 		t.Fatal("SocketUnder with no tmux directory answered a path")
+	}
+}
+
+// The activity log hangs off the same pfm state directory as the fleet cache,
+// so a jail, a fence and the live host each keep their own and never mix.
+func TestResolveLogFileHangsOffTheHomesStateDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+	resolved, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl")
+	if resolved.LogFile != want {
+		t.Fatalf("LogFile = %q, want %q", resolved.LogFile, want)
+	}
+	other := t.TempDir()
+	t.Setenv(EnvHome, other)
+	second, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.LogFile == resolved.LogFile {
+		t.Fatalf("two homes resolved to one activity log: %s", second.LogFile)
 	}
 }

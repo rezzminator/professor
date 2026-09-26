@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestComposeStress(t *testing.T) {
@@ -52,7 +52,7 @@ func TestComposeStress(t *testing.T) {
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
-	minHeap := uint64(^uint64(0))
+	minHeap := ^uint64(0)
 	maxHeap := uint64(0)
 	iterationsStarted := time.Now()
 	rowChecksum := 0
@@ -194,9 +194,11 @@ func logComposePhases(t *testing.T, input Input) {
 	liveRows = append(liveRows, splits...)
 	agents := current.agentRows()
 	liveDone := time.Now()
-	rows := append(liveRows, agents...)
+	liveRows = append(liveRows, agents...)
+	rows := liveRows
 	top := make([]Row, 0, claudeResumeCap)
-	for _, transcript := range input.Transcripts {
+	for index := range input.Transcripts {
+		transcript := input.Transcripts[index]
 		if _, live := current.liveTranscripts[transcript.UUID]; live {
 			continue
 		}
@@ -247,13 +249,13 @@ func composeStressInput() Input {
 		})
 	}
 
-	panes := make([]gather.Pane, 0, paneCount)
+	panes := make([]gather.ProbePane, 0, paneCount)
 	crumbs := make([]gather.Crumb, 0, paneCount)
 	for index := 0; index < paneCount; index++ {
 		socketIndex := index % socketCount
 		socket := fmt.Sprintf("cc-%d-100-%d", 1000+socketIndex, socketIndex)
 		paneID := fmt.Sprintf("%%%d", index)
-		panes = append(panes, gather.Pane{
+		panes = append(panes, gather.ProbePane{
 			Socket:      socket,
 			SessionName: socket,
 			PaneTitle:   "stress",

@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -79,11 +78,11 @@ func (h *Harvester) fetchUnshared(ctx context.Context, source string, options Fe
 		// handled above.
 		if strings.HasPrefix(strings.ToLower(source), "title:") {
 			value := strings.Trim(strings.TrimSpace(source[len("title:"):]), "\"'")
-			result = Result{Source: source, Error: fmt.Sprintf("%q is a title — use the `findWorks` tool to list candidate works (it returns a fetch handle for each), then fetch the one you pick. `fetch` retrieves locations and UNAMBIGUOUS identifiers (URL, file path, DOI, ISBN), never a title.", value)}
+			result = titleGuessResult(source, value)
 		} else if parsed, parseErr := url.Parse(source); parseErr == nil && parsed.Scheme != "" && parsed.Host != "" {
 			result = h.fetchURL(ctx, source, options)
 		} else {
-			result = Result{Source: source, Error: fmt.Sprintf("%q is a title — use the `findWorks` tool to list candidate works (it returns a fetch handle for each), then fetch the one you pick. `fetch` retrieves locations and UNAMBIGUOUS identifiers (URL, file path, DOI, ISBN), never a title.", source)}
+			result = titleGuessResult(source, source)
 		}
 	}
 	if options.SizeOnly && result.Error == "" {
@@ -133,49 +132,56 @@ func isLocalSource(source string) bool {
 	// Recognized file extensions remain local-path syntax even when the file is
 	// missing; callers then receive a useful missing-path diagnostic instead of
 	// an ambiguous scholarly-title hint.
-	if DetectKind(source) != "html" {
+	if DetectKind(source) != kindHTML {
 		return true
 	}
 	return filepath.IsAbs(source) || strings.HasPrefix(source, ".") || strings.ContainsAny(source, `/\\`)
 }
 
-func (h *Harvester) fetchTitle(ctx context.Context, title string, options FetchOptions) Result {
-	candidates, err := h.resolver().ResolveTitle(ctx, title)
-	if err != nil {
-		return Result{Source: title, Error: err.Error()}
-	}
-	for _, candidate := range candidates {
-		var result Result
-		if doi := DOIFrom(candidate.URL); doi != "" && !strings.HasPrefix(strings.ToLower(candidate.URL), "http://") && !strings.HasPrefix(strings.ToLower(candidate.URL), "https://") {
-			result = h.fetchOA(ctx, doi, nil, options)
-		} else {
-			result = h.fetchURL(ctx, candidate.URL, options)
-		}
-		if result.Error == "" {
-			result.Source = title
-			result.Rungs = append([]string{"title:" + candidate.Source}, result.Rungs...)
-			return result
-		}
-	}
-	return Result{Source: title, Error: fmt.Sprintf("no confident work match for %q; use findWorks", title)}
-}
-
 func (h *Harvester) fetchURL(ctx context.Context, source string, options FetchOptions) Result {
-	return h.fetchURLWithPolicy(ctx, source, options, true)
+	got, err := h.retrieveWith(
+		ctx,
+		retrieveRequest{target: source, want: WantPage, policy: PolicyPage, options: options},
+	)
+	if err != nil {
+		return Result{Source: source, Error: err.Error(), ErrorKind: errorKindInvalid}
+	}
+	return got.Result
 }
 
-func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, options FetchOptions, allowOAPivot bool) Result {
-	if err := assertFetchable(source, false); err != nil {
+func (h *Harvester) fetchURLWithPolicy(
+	ctx context.Context,
+	source string,
+	options FetchOptions,
+	allowOAPivot bool,
+) Result {
+	if err := validateFetchURL(source, false); err != nil {
 		if strings.Contains(err.Error(), "unsupported URL scheme") {
-			return Result{Source: source, Error: fmt.Sprintf("unsupported URL scheme in %q — fetch handles http(s):// and file:// URLs, local paths, DOIs, and ISBNs.", source)}
+			return Result{
+				Source: source,
+				Error: fmt.Sprintf(
+					"unsupported URL scheme in %q — harvester_read takes http(s):// pages in urls, local paths in files, DOIs and ISBNs in publications.",
+					source,
+				),
+			}
 		}
 		return Result{Source: source, Error: err.Error()}
 	}
 	if isPubMedSearchURL(source) {
-		return Result{Source: source, Error: fmt.Sprintf("%s is a PubMed search/results URL, not an article — use the `findWorks` tool%s to get candidate works, each with a fetch handle.", source, SearchHint(h.settings.searchAvailable,
-			" (or `search`)",
-			"",
-		))}
+		return Result{
+			Source: source,
+			Error: fmt.Sprintf(
+				"%s is a PubMed search/results URL, not an article — use the `harvester_search_literature` tool%s to get candidate works, each with a handle to read with `harvester_read` (publications).",
+				source,
+				SearchHint(h.settings.searchAvailable,
+					" (or `harvester_search_web`)",
+					"",
+				),
+			),
+		}
+	}
+	if refused, ok := shareLinkRefusal(source); ok { // a sign-in-only share service, named before any fetch
+		return refused
 	}
 	if providerResult, handled := h.fetchProviderRecord(ctx, source, options); handled {
 		return providerResult
@@ -184,17 +190,17 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	// extension gives us an early key; response sniffing may move it to another
 	// partition after the fetch.
 	guess := kindFromName(source)
-	fetchTarget, googleDriveFile := googleDriveDownloadURL(source)
-	if !googleDriveFile {
-		fetchTarget = source
-	}
+	share, shared := shareDirectLink(source) // a cloud share link fetches its direct form (share_links.go)
 	if !options.Refresh {
-		if googleDriveFile {
-			// Before complete-file dispatch existed, Drive share URLs were cached as
-			// Jina/direct HTML previews (usually only four pages). Only a cache entry
-			// produced by the download rung can satisfy a Drive file request now.
-			if body, kind, meta, path, ok := h.cache.loadAny(source, []string{"pdf", "docx", "xlsx", "pptx", "csv", "json", "txt", "epub", "html"}); ok &&
-				strings.HasPrefix(meta["method"], "google-drive-download") {
+		if shared {
+			// Share URLs were once cached as Jina/direct HTML previews (a Drive
+			// preview shows four pages). Only a cache entry produced by the share
+			// link's download rung can satisfy it now.
+			if body, kind, meta, path, ok := h.cache.loadAny(
+				source,
+				[]string{kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindJSON, kindTXT, kindEPUB, kindHTML},
+			); ok &&
+				strings.HasPrefix(meta["method"], share.service+"-download") {
 				return h.resultFromCache(source, kind, body, meta, path)
 			}
 		} else {
@@ -204,7 +210,10 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 			// Extensionless scholarly/PDF URLs are classified from response headers
 			// on the first request. Search every type partition on subsequent calls
 			// so the sniffed kind remains cacheable without a sidecar index.
-			if body, kind, meta, path, ok := h.cache.loadAny(source, []string{"pdf", "docx", "xlsx", "pptx", "csv", "json", "txt", "epub", "html"}); ok {
+			if body, kind, meta, path, ok := h.cache.loadAny(
+				source,
+				[]string{kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindJSON, kindTXT, kindEPUB, kindHTML},
+			); ok {
 				return h.resultFromCache(source, kind, body, meta, path)
 			}
 		}
@@ -217,6 +226,9 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	lastChallenge := false
 	lastContentChars := 0
 	var providerFailure *Result
+	// loaders is this fetch's loader following (loaders.go), shared by every
+	// conversion of the page so its cap holds across rungs.
+	loaders := newLoaderBudget(ctx)
 	emptyPDFConvert := false
 	var emptyPDFBody []byte
 	wrongPDF := false
@@ -232,21 +244,31 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	appShellText, _ := ctx.Value(appShellKey{}).(string)
 	appShellInherited := appShellText != ""
 	browserShellRender := false
+	staticConverterOutage := false
+	// partialPage stores an HTML page an HTTP rung converted but KNOWS is
+	// incomplete (its partial marker) where a render can close a gap. Only a real
+	// browser loads more of the same page, so the ladder goes straight to the
+	// browser rung and stores this page when the browser cannot do better. Nil
+	// unless the browser rung is on.
+	var partialPage func() Result
+	keptExtractor := ""  // the extractor that claimed partialPage's page
+	var gaps carriedGaps // a site-API gap and the next page; every rung that stores names them (withGaps)
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
-	case "pdf", "docx", "xlsx", "pptx", "csv", "zip", "tar", "7z", "rar":
+	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, kind7Z, kindRAR:
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
 	}
-	directRung, chromeRung := "direct", "chrome-impersonation"
-	if googleDriveFile {
+	directMediaFetch := guess == kindPDF || guess == kindDOCX || guess == kindXLSX || guess == kindPPTX ||
+		guess == kindCSV || guess == kindZIP || guess == kindTAR || guess == kind7Z || guess == kindRAR || guess == kindImage
+	directRung, chromeRung := rungDirect, rungChromeImpersonation
+	fetchTarget := source
+	if shared {
+		fetchTarget = share.target
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
-		directRung, chromeRung = "google-drive-download", "google-drive-download-chrome"
+		directRung, chromeRung = share.service+"-download", share.service+"-download-chrome"
 	}
-	// Ladder note: the Python reference also carried this defuddle.md reader
-	// rung and an opt-in real-browser rung (Patchright + system Chrome); both
-	// are wired below. Chrome impersonation here remains tls-client at the
-	// wire level — no JS, no real browser surface — which is why the opt-in
-	// browser rung exists as the ladder's last wall-bypass step.
+	// Chrome impersonation is tls-client at the wire level — no JS, no real browser
+	// surface — which is why the opt-in browser rung below is the last wall-bypass step.
 	for _, rung := range []struct {
 		name   string
 		client *http.Client
@@ -257,7 +279,19 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		{chromeRung, chromeClient, fetchTarget, chromeUA},
 	} {
 		rungs = append(rungs, rung.name)
-		body, status, contentType, err := getBody(ctx, rung.client, rung.target, rung.ua, h.options.MaxBytes)
+		headers := map[string]string{headerReferer: ProvenanceReferer}
+		if directMediaFetch || shared { // Drive interposes its virus-scan page on a Google referer
+			headers = nil
+		}
+		body, status, contentType, err := h.fetchShareRung(
+			ctx,
+			shared,
+			rung.client,
+			rung.target,
+			rung.ua,
+			headers,
+			&gaps,
+		)
 		if err != nil {
 			lastErr = err
 			lastErrorKind = errorKind(err)
@@ -265,58 +299,77 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		}
 		lastStatus = status
 		if status >= 400 && lastErrorKind == "" {
-			lastErrorKind = "http"
+			lastErrorKind = schemeHTTP
 		}
 		if isChallenge(body, status) {
 			lastChallenge = true
 		}
 		kind := classifyFetchedKind(source, contentType, body)
-		if guess == "pdf" {
+		if guess == kindPDF {
 			if strings.HasPrefix(string(body), "%PDF-") {
-				kind = "pdf"
+				kind = kindPDF
 			} else {
 				wrongPDF = true
-				if (kind == "html" || kind == "txt") && len(body) > 0 {
+				if (kind == kindHTML || kind == kindTXT) && len(body) > 0 {
 					lastPage = append(lastPage[:0], body...)
 				}
 				continue
 			}
 		}
-		if (kind == "html" || kind == "txt") && len(body) > 0 {
+		if (kind == kindHTML || kind == kindTXT) && len(body) > 0 {
 			lastPage = append(lastPage[:0], body...)
 		}
-		if kind == "image" || isImageKind(kind) {
-			return Result{Source: source, Kind: "image", Error: fmt.Sprintf("%s is an image — use the `fetchImage` tool, not `fetch`.", source), HTTPStatus: status, ErrorKind: "wrong_kind"}
+		if shared && kind == kindHTML { // a sign-in or interstitial page, never the file
+			lastErrorKind = shareInterstitialKind(status, lastErrorKind)
+			continue
 		}
-		if kind == "zip" || kind == "tar" || kind == "7z" || kind == "rar" {
+		if refused, ok := pageBodyGuard(source, kind, body, status, h.inflater(ctx)); ok {
+			return refused
+		}
+		if kind == kindZIP || kind == kindTAR || kind == kind7Z || kind == kindRAR {
 			// An EPUB is zip-SHAPED but is a book; OA book sources (OAPEN/DOAB/
 			// Gutenberg/Zenodo) serve EPUB constantly. Detect it by its uncompressed
 			// `mimetype` member and convert it instead of throwing the found book away.
-			if kind == "zip" && LooksLikeEpub(body) {
-				kind = "epub"
+			if kind == kindZIP && LooksLikeEpub(body) {
+				kind = kindEPUB
 			} else {
-				return Result{Source: source, Kind: "archive", Error: fmt.Sprintf("%s is a %s archive — use the `archive` tool, not `fetch`.", source, kind), HTTPStatus: status, ErrorKind: "wrong_kind"}
+				return Result{
+					Source: source,
+					Kind:   kindArchive,
+					Error: fmt.Sprintf(
+						"%s is a %s archive, not a page — use `harvester_download_file`.",
+						source,
+						kind,
+					),
+					HTTPStatus: status,
+					ErrorKind:  errorKindWrongKind,
+				}
 			}
 		}
-		converted, err := h.convert(ctx, kind, source, body)
+		converted, page, err := h.convertFetchedDocument(ctx, kind, source, body, loaders)
+		gaps = page.carry(gaps)
 		if err != nil {
+			staticConverterOutage = true // named a tool outage by convertOutageNote below (F12)
 			continue
 		}
-		if kind == "pdf" && strings.TrimSpace(converted) == "" {
+		if kind == kindPDF && strings.TrimSpace(converted) == "" {
 			emptyPDFConvert = true
 			if len(emptyPDFBody) == 0 {
 				emptyPDFBody = append([]byte(nil), body...)
 			}
 		}
-		lastContentChars = contentChars(converted)
-		binary4xxOK := status >= 400 && kind == "pdf" && strings.HasPrefix(string(body), "%PDF-")
-		if len(body) == 0 || isChallenge(body, status) || (status >= 400 && kind != "html" && kind != "txt" && !binary4xxOK) {
+		lastContentChars = contentChars(partialBody(converted))
+		binary4xxOK := status >= 400 && kind == kindPDF && strings.HasPrefix(string(body), "%PDF-")
+		// A wall or the origin's error page is no content — unless an extractor that readsSiteAPI
+		// rendered the page from an API record it proved (page.siteAPI), the wall unread.
+		if (len(body) == 0 && !page.siteAPI) || (isChallenge(body, status) && !page.siteAPI) ||
+			(status >= 400 && !binary4xxOK && !page.siteAPI) || gaps.refused != "" {
 			continue
 		}
 		if !usableContent(converted, kind) {
 			continue
 		}
-		if kind == "html" && isBibliographicLanding(converted) {
+		if kind == kindHTML && isBibliographicLanding(converted) {
 			if !landingFollowed && landingHops < 1 {
 				landingFollowed = true
 				if linked := bibliographicDocumentURL(body, source); linked != "" && linked != source {
@@ -331,11 +384,15 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		// The HTML ladder escalates thin extraction results. A short page is
 		// commonly a JS shell or bot wall even when the HTTP status is 200;
 		// plain text and converted binary documents are not subject to this
-		// threshold because their bytes are already the requested artifact.
-		if kind == "html" && contentChars(converted) < 500 {
+		// threshold because their bytes are already the requested artifact,
+		// nor is a page a per-site extractor recognised (a short thread is
+		// still that site's content, never a shell).
+		if kind == kindHTML && page.extractor == "" && contentChars(partialBody(converted)) < 500 {
 			continue
 		}
-		if kind == "html" && !googleDriveFile {
+		// A page a per-site extractor recognised is that site's content by
+		// construction — never an app shell, so it never pays for the probe.
+		if kind == kindHTML && !shared && page.extractor == "" {
 			if appShellText != "" {
 				if sameAsShell(appShellText, converted) {
 					continue
@@ -345,59 +402,70 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 				continue
 			}
 		}
-		if kind == "html" {
-			if localized, localizeErr := h.LocalizeImages(ctx, converted, source); localizeErr == nil {
-				converted = localized
-			}
-		}
+		status = page.deliveredStatus(status) // the site API delivered the page, not the wall
 		method := rung.name
-		if kind == "txt" {
+		if kind == kindTXT {
 			method = "plain-text"
 		}
+		if kind == kindHTML && partialReason(converted) != "" && h.settings.browser && !isPrivateURL(source) &&
+			!shared && guess != kindPDF && page.renderMayComplete {
+			partialPage = func() Result {
+				stored := page.withGaps(h.localizedImages(ctx, kind, converted, source), gaps, loaders)
+				return h.storeResult(source, kind, method, stored, int64(len(body)), status, rungs, options)
+			}
+			keptExtractor = page.extractor
+			break
+		}
+		converted = page.withGaps(h.localizedImages(ctx, kind, converted, source), gaps, loaders)
 		return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
 	}
-	if googleDriveFile {
-		message := fmt.Sprintf("Could not download the complete Google Drive file from %s — make the file available to anyone with the link, or download it locally and pass its path. Harvester will not substitute Drive's truncated preview page for the file.", source)
-		if lastStatus >= 400 {
-			message = fmt.Sprintf("Could not download the complete Google Drive file from %s (HTTP %d) — make the file available to anyone with the link, or download it locally and pass its path. Harvester will not substitute Drive's truncated preview page for the file.", source, lastStatus)
-		}
-		return Result{Source: source, HTTPStatus: lastStatus, Error: message, ErrorKind: lastErrorKind, Challenge: lastChallenge, Rungs: rungs}
+	if shared {
+		return shareFetchFailure(source, share, lastStatus, lastErrorKind, lastChallenge, rungs)
 	}
-	if !isPrivateURL(source) && guess != "pdf" {
+	// No reader or archive copy stands in for a missing origin, nor for a hash route's view (hashRouteShell).
+	originGone := originMissing(lastStatus, lastChallenge, source) || hashRouteShell(ctx, source, lastPage) ||
+		gaps.refused != "" // an address redirecting to a login or the home page: no copy stands in for it
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "jina")
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
-		body, status, _, err := getBody(ctx, h.jina, target, h.userAgent, h.options.MaxBytes)
-		if err != nil {
-			lastErr = err
-			lastErrorKind = errorKind(err)
-			// getBody returns status=0 on every transport-error path; letting
-			// that clobber a genuine earlier HTTP status would make the
-			// receipt report HTTPStatus 0 for a walled 403.
-		} else {
-			lastStatus = status
-		}
-		if err == nil && status < 400 && !isChallenge(body, status) {
+		// A reader rung speaks to the reader, not the target: its status and
+		// Retry-After are never the site's (noteRungOutcome, retry_after.go).
+		body, status, _, err := getBody(withoutRetryAfterNote(ctx), h.jina, target, h.userAgent, h.options.MaxBytes)
+		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
+		if err == nil && status < 400 && !isChallenge(body, status) && jinaTargetError(body) == 0 {
 			// Jina Reader already returns clean Markdown. Feeding it back into an
 			// HTML converter loses headings and code blocks, so preserve it as the
 			// original HTML-source kind for cache/type semantics.
-			kind := "html"
-			converted, convErr := stripJinaEnvelope(string(body)), error(nil)
-			if convErr == nil && usableContent(converted, kind) && !isBibliographicLanding(converted) && !sameAsShell(appShellText, converted) {
-				return h.storeResult(source, kind, "jina", converted, int64(len(body)), status, rungs, options)
+			converted, convErr := quoraReaderPage(source, pageText(stripJinaEnvelope(string(body)))), error(nil)
+			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
+				!sameAsShell(appShellText, converted) {
+				stored := h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders)
+				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
 			}
 		}
 	}
 	// defuddle.md — a second keyless reader beside Jina (different infra,
 	// different blocks), tried before the legal mirror pivot.
-	if !isPrivateURL(source) && guess != "pdf" {
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "defuddle")
 		target := "https://defuddle.md/" + source
-		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
+		body, status, _, err := getBody(withoutRetryAfterNote(ctx), h.client, target, h.userAgent, h.options.MaxBytes)
+		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
 		if err == nil && status < 400 && !isChallenge(body, status) {
-			converted := stripDefuddleEnvelope(string(body))
+			converted := pageText(stripDefuddleEnvelope(string(body)))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
-			if usableContent(converted, "html") && longer && !isBibliographicLanding(converted) && !sameAsShell(appShellText, converted) {
-				return h.storeResult(source, "html", "defuddle-reader", converted, int64(len(body)), status, rungs, options)
+			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
+				!sameAsShell(appShellText, converted) {
+				return h.storeResult(
+					source,
+					kindHTML,
+					"defuddle-reader",
+					h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders),
+					int64(len(body)),
+					status,
+					rungs,
+					options,
+				)
 			}
 		}
 	}
@@ -412,25 +480,24 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	browserUnavailable := ""
 	browserPolicyRefused := false
 	converterOutage := false
-	if h.settings.browser && !isPrivateURL(source) && guess != "pdf" {
+	if h.settings.browser && !isPrivateURL(source) && guess != kindPDF {
 		rungs = append(rungs, "browser")
 		if browserFetcher, ok := h.options.Converter.(BrowserFetcher); !ok {
 			browserUnavailable = "no BrowserFetcher adapter is wired into this Harvester"
 		} else {
-			// Headless first, headed only on a wall — the policy lives in
-			// renderHeadlessFirst (gateway.go) so this ladder and the gateway
-			// can never drift apart on when a visible window opens.
-			outcome := renderHeadlessFirst(ctx, browserFetcher, source)
+			// Headless only — the render lives in renderHeadless (gateway.go)
+			// so this ladder and the gateway never drift apart on it.
+			outcome := renderHeadless(ctx, browserFetcher, source)
 			html, status, err := outcome.html, outcome.status, outcome.err
 			switch {
 			case errors.Is(err, ErrBrowserPolicyDenied):
 				// The SSRF guard refused — a PERMANENT policy answer about
 				// this address, never an outage and never IP reputation.
 				browserPolicyRefused = true
-				log.Printf("harvest: browser rung refused %s by policy: %v", source, err)
+				log.Printf("harvest: browser rung refused %s by policy: %v", logSource(source), err)
 			case err != nil:
 				browserUnavailable = err.Error()
-				log.Printf("harvest: browser rung could not run for %s: %v", source, err)
+				log.Printf("harvest: browser rung could not run for %s: %v", logSource(source), err)
 			case html == "" || blankRenderPage(html):
 				// The render COMPLETED and found nothing — a real attempt with
 				// an empty result, never an outage. Chrome serialises at least
@@ -446,30 +513,51 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 					// The flag travels even when rung one saw no challenge: the
 					// browser surface is what identified the wall.
 					lastChallenge = true
-					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", source, status)
+					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", logSource(source), status)
 				} else {
-					converted, convErr := h.convert(ctx, "html", source, []byte(html))
-					if convErr != nil {
+					converted, page, convErr := h.convertFetchedDocument(ctx, kindHTML, source, []byte(html), loaders)
+					switch {
+					case convErr != nil:
 						// The render SUCCEEDED; the conversion step failing is
 						// a tool outage on this server — it must never read as
 						// "the wall won".
 						converterOutage = true
-						log.Printf("harvest: browser rung conversion failed for %s: %v", source, convErr)
-					} else if sameAsShell(appShellText, converted) {
+						log.Printf("harvest: browser rung conversion failed for %s: %v", logSource(source), convErr)
+					case sameAsShell(appShellText, converted):
 						// The bundle did not produce route content in a real
 						// browser either — the render is still the shell.
 						browserShellRender = true
-						log.Printf("harvest: browser rung rendered only the app shell for %s", source)
-					} else if usableContent(converted, "html") && !isBibliographicLanding(converted) &&
-						(contentChars(converted) > lastContentChars || appShellText != "") && contentChars(converted) >= 500 {
-						// Same thin-page floor as the HTML ladder above: a JS
-						// paywall overlay converting to a few hundred chars is
-						// a shell, not the article.
-						return h.storeResult(source, "html", "browser-chrome", converted, int64(len(html)), status, rungs, options)
+						log.Printf("harvest: browser rung rendered only the app shell for %s", logSource(source))
+					case usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
+						!originMissing(status, false, source) && browserRenderWins(ctx, browserCandidate{
+						source:        source,
+						finalURL:      outcome.finalURL,
+						converted:     converted,
+						extractor:     page.extractor,
+						earlierChars:  lastContentChars,
+						appShell:      appShellText != "",
+						kept:          partialPage != nil,
+						keptExtractor: keptExtractor,
+					}):
+						return h.storeResult(
+							source,
+							kindHTML,
+							"browser-chrome",
+							page.withGaps(converted, gaps.landed(ctx, source, outcome.finalURL, nil), loaders),
+							int64(len(html)),
+							status,
+							rungs,
+							options,
+						)
 					}
 				}
 			}
 		}
+	}
+	if partialPage != nil {
+		// The browser rung loaded no more than the HTTP rung did (walled,
+		// failed, or no longer): the partial page, still flagged, is the answer.
+		return partialPage()
 	}
 	// A publisher wall often leaves citation_pdf_url/citation_doi metadata in
 	// the HTML error body. Reuse that body before giving up; this is the same
@@ -483,22 +571,22 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 			}
 		}
 		if allowOAPivot && metaDOI != "" && !strings.EqualFold(metaDOI, DOIFrom(source)) {
-			if result := h.fetchOA(ctx, metaDOI, rungs, options); result.Error == "" {
+			result := h.fetchOA(ctx, metaDOI, rungs, options)
+			if result.Error == "" {
 				if isMirrorProviderMethod(result.Method) {
 					return h.storeResultAlias(source, source, result, result.Rungs, options)
 				}
 				return result
-			} else {
-				if len(result.Rungs) > len(rungs) {
-					rungs = result.Rungs
-				}
-				if hasProviderDiagnostic(result.Error) {
-					copy := result
-					providerFailure = &copy
-					lastStatus = result.HTTPStatus
-					lastErrorKind = result.ErrorKind
-					lastChallenge = result.Challenge
-				}
+			}
+			if len(result.Rungs) > len(rungs) {
+				rungs = result.Rungs
+			}
+			if hasProviderDiagnostic(result.Error) {
+				resultCopy := result
+				providerFailure = &resultCopy
+				lastStatus = result.HTTPStatus
+				lastErrorKind = result.ErrorKind
+				lastChallenge = result.Challenge
 			}
 		}
 	}
@@ -506,30 +594,30 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	// intentionally opt-in by recognizable DOI; arbitrary URLs must not trigger
 	// broad discovery traffic.
 	if doi := DOIFrom(source); allowOAPivot && doi != "" {
-		if result := h.fetchOA(ctx, doi, rungs, options); result.Error == "" {
+		result := h.fetchOA(ctx, doi, rungs, options)
+		if result.Error == "" {
 			if isMirrorProviderMethod(result.Method) {
 				return h.storeResultAlias(source, source, result, result.Rungs, options)
 			}
 			return result
-		} else {
-			if len(result.Rungs) > len(rungs) {
-				rungs = result.Rungs
-			}
-			if hasProviderDiagnostic(result.Error) {
-				copy := result
-				providerFailure = &copy
-				lastStatus = result.HTTPStatus
-				lastErrorKind = result.ErrorKind
-				lastChallenge = result.Challenge
-			}
+		}
+		if len(result.Rungs) > len(rungs) {
+			rungs = result.Rungs
+		}
+		if hasProviderDiagnostic(result.Error) {
+			resultCopy := result
+			providerFailure = &resultCopy
+			lastStatus = result.HTTPStatus
+			lastErrorKind = result.ErrorKind
+			lastChallenge = result.Challenge
 		}
 	}
 	// Any public source may have a legal Wayback snapshot, not only a DOI
 	// landing page. Avoid recursing when the snapshot itself fails.
-	if !strings.Contains(strings.ToLower(source), "web.archive.org") && !isPrivateURL(source) {
+	if !strings.Contains(strings.ToLower(source), "web.archive.org") && !isPrivateURL(source) && !originGone {
 		rungs = append(rungs, "wayback")
-		if snapshot, wbErr := WaybackRawURL(ctx, h.oa, source); wbErr == nil && snapshot != "" {
-			snapshotCtx := ctx
+		if snapshot, wbErr := WaybackRawURL(withoutRetryAfterNote(ctx), h.oa, source); wbErr == nil && snapshot != "" {
+			snapshotCtx := withoutRetryAfterNote(ctx) // an archive's wait is not the site's
 			if appShellText != "" {
 				// A snapshot of a client-rendered route is the same shell; the
 				// recursion rejects it before it is stored.
@@ -551,22 +639,36 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		if ocrConverter, ok := h.options.Converter.(OCRConverter); ok {
 			rungs = append(rungs, "ocr")
 			ocrRan = true
-			ocrConverted, ocrErr := ocrConverter.ConvertOCR(ctx, "pdf", source, emptyPDFBody)
+			ocrConverted, ocrErr := ocrConverter.ConvertOCR(ctx, kindPDF, source, emptyPDFBody)
+			ocrConverted = convertedDocument(ocrConverted)
 			switch {
 			case ocrErr != nil:
 				ocrBackendFailed = true
-				log.Printf("harvest: OCR escalation backend failed for %s: %v", source, ocrErr)
-			case usableContent(ocrConverted, "pdf"):
-				return h.storeResult(source, "pdf", "pdf:ocr", ocrConverted, int64(len(emptyPDFBody)), lastStatus, rungs, options)
+				log.Printf("harvest: OCR escalation backend failed for %s: %v", logSource(source), ocrErr)
+			case usableContent(ocrConverted, kindPDF):
+				return h.storeResult(
+					source,
+					kindPDF,
+					"pdf:ocr",
+					ocrConverted,
+					int64(len(emptyPDFBody)),
+					lastStatus,
+					rungs,
+					options,
+				)
 			}
 		}
 	}
-	message := failureMessage(source, lastStatus, lastErrorKind, lastChallenge, h.settings.searchAvailable)
+	message := FailureMessage(source, lastStatus, lastErrorKind, lastChallenge, h.settings.searchAvailable)
 	if wrongPDF {
-		message = fmt.Sprintf("%s has a .pdf address but did not return a PDF (non-PDF content — likely an HTML paywall/login wall or a bot-block). %s", source, SearchHint(h.settings.searchAvailable,
-			"Use `search` to find an open-access copy.",
-			"Find an open-access copy with findWorks or another URL.",
-		))
+		message = fmt.Sprintf(
+			"%s has a .pdf address but did not return a PDF (non-PDF content — likely an HTML paywall/login wall or a bot-block). %s",
+			source,
+			SearchHint(h.settings.searchAvailable,
+				"Use `harvester_search_web` to find an open-access copy.",
+				"Find an open-access copy with harvester_search_literature or another URL.",
+			),
+		)
 	}
 	if emptyPDFConvert {
 		// A BROKEN OCR backend and an OCR pass that legitimately found no text
@@ -574,20 +676,32 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		// "this PDF has nothing in it".
 		switch {
 		case ocrBackendFailed:
-			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text, and the OCR escalation could not RUN (converter backend error — see the server log). That is a tool outage, not proof the PDF is textless: %s", source, SearchHint(h.settings.searchAvailable,
-				"retry, or use `search` to find an alternative copy.",
-				"retry, or find an alternative copy with findWorks or another URL.",
-			))
+			message = fmt.Sprintf(
+				"Downloaded the PDF from %s but it converted to EMPTY text, and the OCR escalation could not RUN (converter backend error — see the server log). That is a tool outage, not proof the PDF is textless: %s",
+				source,
+				SearchHint(h.settings.searchAvailable,
+					"retry, or use `harvester_search_web` to find an alternative copy.",
+					"retry, or find an alternative copy with harvester_search_literature or another URL.",
+				),
+			)
 		case ocrRan:
-			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — an OCR pass was already attempted on this copy and produced nothing. %s", source, SearchHint(h.settings.searchAvailable,
-				"Use `search` to find an alternative copy.",
-				"Find an alternative copy with findWorks or another URL.",
-			))
+			message = fmt.Sprintf(
+				"Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — an OCR pass was already attempted on this copy and produced nothing. %s",
+				source,
+				SearchHint(h.settings.searchAvailable,
+					"Use `harvester_search_web` to find an alternative copy.",
+					"Find an alternative copy with harvester_search_literature or another URL.",
+				),
+			)
 		default:
-			message = fmt.Sprintf("Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set convert.pdfOcr=true in harvester.config.json to OCR it. %s", source, SearchHint(h.settings.searchAvailable,
-				"Use `search` to find an alternative copy.",
-				"Find an alternative copy with findWorks or another URL.",
-			))
+			message = fmt.Sprintf(
+				"Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set convert.pdfOcr=true in harvester.config.json to OCR it. %s",
+				source,
+				SearchHint(h.settings.searchAvailable,
+					"Use `harvester_search_web` to find an alternative copy.",
+					"Find an alternative copy with harvester_search_literature or another URL.",
+				),
+			)
 		}
 	}
 	// A dead-ended challenge must say what the real-browser rung did — the
@@ -606,27 +720,34 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 		// The static page was READ and proved route-independent: an app
 		// shell is a named failure, never a generic wall and never content.
 		lastErrorKind = "app_shell"
-		message = fmt.Sprintf("%s is a JavaScript app shell: a sibling path that cannot exist returned the same page, so its static HTML is identical for every route and this route's content only exists after the app's JavaScript runs. No rendering rung returned the route's content.", source)
+		message = fmt.Sprintf(
+			"%s is a JavaScript app shell: a sibling path that cannot exist returned the same page, so its static HTML is identical for every route and this route's content only exists after the app's JavaScript runs. No rendering rung returned the route's content.",
+			source,
+		)
 	}
-	if appShellFailure || (guess != "pdf" && (lastChallenge || browserRan || browserPolicyRefused)) {
+	if appShellFailure || (guess != kindPDF && (lastChallenge || browserRan || browserPolicyRefused)) {
 		switch {
 		case !h.settings.browser:
 			message += " No real-browser bypass was attempted: this server's Patchright + system-Chrome rung is DISABLED (opt-in) — set fetch.browser=true in harvester.config.json to enable it."
 		case browserPolicyRefused:
-			message += " The real-browser rung did not run because this server's SSRF guard refused the address (private or internal network). That is policy working as designed, not an outage."
+			message += browserRefusedNote(lastErrorKind)
 		case converterOutage:
-			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: " + SearchHint(h.settings.searchAvailable,
-				"retry, or use `search` to find an alternative copy.",
-				"retry, or find an alternative copy with findWorks or another URL.",
+			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: " + SearchHint(
+				h.settings.searchAvailable,
+				"retry, or use `harvester_search_web` to find an alternative copy.",
+				"retry, or find an alternative copy with harvester_search_literature or another URL.",
 			)
 		case browserUnavailable != "":
-			message += fmt.Sprintf(" The real-browser rung (fetch.browser) could NOT RUN (%s) — that is a tool outage on this server, not proof of IP reputation.", browserUnavailable)
+			message += fmt.Sprintf(
+				" The real-browser rung (fetch.browser) could NOT RUN (%s) — that is a tool outage on this server, not proof of IP reputation.",
+				browserUnavailable,
+			)
 		case browserEmptyRender:
 			message += " The real-browser rung DID run and returned an EMPTY page — a completed attempt with nothing usable, not an outage."
 		case browserShellRender:
 			message += " The real-browser rung DID run and rendered only the shell — the app's JavaScript produced no route content in a real browser either."
 		case browserRan:
-			message += " The real-browser rung (Patchright + system Chrome) DID run against this wall and still could not pass it."
+			message += browserRanNote(lastChallenge, lastStatus)
 		}
 	}
 	if lastContentChars == 0 && len(lastPage) > 0 {
@@ -638,37 +759,25 @@ func (h *Harvester) fetchURLWithPolicy(ctx context.Context, source string, optio
 	if providerFailure != nil {
 		message += " " + providerFailure.Error
 	}
-	message = withRungs(message, rungs)
-	return Result{Source: source, HTTPStatus: lastStatus, Error: message, ErrorKind: lastErrorKind, Challenge: lastChallenge, Chars: lastContentChars, ContentChars: lastContentChars, Rungs: rungs}
-}
-
-var googleDriveFileIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{10,256}$`)
-
-// googleDriveDownloadURL turns an uploaded Drive file's share/view link into
-// the public complete-file endpoint. The share page is not the artifact: its
-// reader-facing HTML commonly exposes only the first four PDF pages.
-func googleDriveDownloadURL(raw string) (string, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || !strings.EqualFold(strings.TrimSuffix(u.Hostname(), "."), "drive.google.com") {
-		return "", false
+	message, lastErrorKind = convertOutageNote(
+		message,
+		lastErrorKind,
+		staticConverterOutage,
+		emptyPDFConvert,
+		wrongPDF,
+		appShellFailure,
+	)
+	message = withRungs(loaders.loginWallNote(source, gaps.fail(message)), rungs) // a refused redirect (landing.go)
+	return Result{
+		Source:       source,
+		HTTPStatus:   lastStatus,
+		Error:        message,
+		ErrorKind:    lastErrorKind,
+		Challenge:    lastChallenge,
+		Chars:        lastContentChars,
+		ContentChars: lastContentChars,
+		Rungs:        rungs,
 	}
-	var id string
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) >= 3 && parts[0] == "file" && parts[1] == "d" {
-		id = parts[2]
-	} else if len(parts) == 1 && (parts[0] == "open" || parts[0] == "uc") {
-		id = u.Query().Get("id")
-	}
-	if !googleDriveFileIDPattern.MatchString(id) {
-		return "", false
-	}
-	target := &url.URL{Scheme: "https", Host: "drive.usercontent.google.com", Path: "/download"}
-	query := target.Query()
-	query.Set("id", id)
-	query.Set("export", "download")
-	query.Set("confirm", "t")
-	target.RawQuery = query.Encode()
-	return target.String(), true
 }
 
 func isPubMedSearchURL(raw string) bool {
@@ -676,42 +785,8 @@ func isPubMedSearchURL(raw string) bool {
 	if err != nil || !strings.EqualFold(u.Hostname(), "pubmed.ncbi.nlm.nih.gov") {
 		return false
 	}
-	return strings.Contains(strings.ToLower(u.Path), "/search") || strings.Contains(strings.ToLower(u.RawQuery), "term=")
-}
-
-func (h *Harvester) fetchLocal(ctx context.Context, source string, options FetchOptions) Result {
-	path := source
-	if strings.HasPrefix(strings.ToLower(path), "file://") {
-		decoded, err := fileURLPath(path)
-		if err != nil {
-			return Result{Source: source, Error: err.Error()}
-		}
-		path = decoded
-	}
-	if reason := DenyLocalPath(path, h.options.LocalRoots); reason != "" {
-		return Result{Source: source, Error: reason}
-	}
-	body, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return Result{Source: source, Error: fmt.Sprintf("read local file %s: %v", path, err)}
-	}
-	kind := classifyFetchedKind(path, "", body)
-	if kindFromName(path) == "pdf" && !strings.HasPrefix(string(body), "%PDF-") {
-		return Result{Source: source, Kind: "pdf", Error: fmt.Sprintf("%s has a .pdf extension but is not a PDF file — check its actual contents before fetching it again.", source)}
-	}
-	if !options.Refresh {
-		if cached, meta, cachePath, ok := h.cache.load(source, kind); ok {
-			return h.resultFromCache(source, kind, cached, meta, cachePath)
-		}
-	}
-	converted, err := h.convert(ctx, kind, source, body)
-	if err != nil {
-		return Result{Source: source, Kind: kind, Error: err.Error()}
-	}
-	if !usableContent(converted, kind) {
-		return Result{Source: source, Kind: kind, Error: "conversion produced no usable content"}
-	}
-	return h.storeResult(source, kind, "local", converted, int64(len(body)), 0, []string{"local"}, options)
+	return strings.Contains(strings.ToLower(u.Path), "/search") ||
+		strings.Contains(strings.ToLower(u.RawQuery), "term=")
 }
 
 func isPrivateURL(source string) bool {

@@ -5,13 +5,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func TestBandStartsAtTheConfiguredPercentAndStepsFromThere(t *testing.T) {
 	for _, test := range []struct{ percent, start, step, band int }{
-		{0, 35, 10, 0}, {34, 35, 10, 0}, {35, 35, 10, 35}, {44, 35, 10, 35}, {45, 35, 10, 45},
-		{94, 35, 10, 85}, {95, 35, 10, 95}, {100, 35, 10, 95}, {140, 35, 10, 95},
-		{49, 50, 20, 0}, {50, 50, 20, 50}, {69, 50, 20, 50}, {70, 50, 20, 70}, {90, 50, 20, 90}, {100, 50, 20, 90},
+		{0, 35, 10, 0},
+		{34, 35, 10, 0},
+		{35, 35, 10, 35},
+		{44, 35, 10, 35},
+		{45, 35, 10, 45},
+		{94, 35, 10, 85},
+		{95, 35, 10, 95},
+		{100, 35, 10, 95},
+		{140, 35, 10, 95},
+		{49, 50, 20, 0},
+		{50, 50, 20, 50},
+		{69, 50, 20, 50},
+		{70, 50, 20, 70},
+		{90, 50, 20, 90},
+		{100, 50, 20, 90},
 	} {
 		if got := Band(test.percent, test.start, test.step); got != test.band {
 			t.Fatalf("Band(%d, start %d, step %d)=%d, want %d", test.percent, test.start, test.step, got, test.band)
@@ -44,7 +58,15 @@ func TestDecideRemindsOncePerBandAndRearmsAfterACompact(t *testing.T) {
 			t.Fatalf("step %d: %v", index, err)
 		}
 		if band != step.band || nudge != step.nudge {
-			t.Fatalf("step %d (%d%%): band=%d nudge=%t, want band=%d nudge=%t", index, step.percent, band, nudge, step.band, step.nudge)
+			t.Fatalf(
+				"step %d (%d%%): band=%d nudge=%t, want band=%d nudge=%t",
+				index,
+				step.percent,
+				band,
+				nudge,
+				step.band,
+				step.nudge,
+			)
 		}
 	}
 }
@@ -56,6 +78,31 @@ func TestDecideKeepsSessionsApart(t *testing.T) {
 	}
 	if _, nudge, err := Decide(dir, "session-b", 50, 35, 10); err != nil || !nudge {
 		t.Fatalf("session-b must not inherit session-a's band: nudge=%t err=%v", nudge, err)
+	}
+}
+
+// TestDecideRecordsATransition: Decide walks the state door (spec §
+// Middleware, `state`) — comp=state, kind=nudge, watching to held or nudged —
+// never the percentage-derived reminder text itself.
+func TestDecideRecordsATransition(t *testing.T) {
+	_, recorder := obs.Test(t)
+	dir := t.TempDir()
+	if _, nudge, err := Decide(dir, "session-a", 50, 35, 10); err != nil || !nudge {
+		t.Fatalf("Decide() nudge=%t err=%v", nudge, err)
+	}
+	var next string
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "nudge" {
+			continue
+		}
+		value, _ := record.Field("next")
+		next, _ = value.(string)
+	}
+	if next != "nudged" {
+		t.Fatalf("Decide() next state = %q, want nudged: %s", next, recorder.Raw())
 	}
 }
 

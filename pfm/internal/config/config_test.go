@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestResolvePathUsesAbsoluteXDGOrHomeConfig(t *testing.T) {
@@ -56,13 +56,31 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		t.Fatalf("Version = %d, want %d", got.Version, Version)
 	}
 	wantAccounts := []Account{
-		{ID: 1, ConfigDir: filepath.Join(home, ".cc", "one"), ProjectDir: filepath.Join(home, ".cc", "one", "projects"), Implicit: true, Emoji: "🥇"},
-		{ID: 2, ConfigDir: filepath.Join(home, ".cc", "two"), ProjectDir: filepath.Join(home, ".cc", "two", "projects"), Emoji: "🥈"},
+		{
+			ID:         1,
+			ConfigDir:  filepath.Join(home, ".cc", "one"),
+			ProjectDir: filepath.Join(home, ".cc", "one", "projects"),
+			Implicit:   true,
+			Emoji:      "🥇",
+		},
+		{
+			ID:         2,
+			ConfigDir:  filepath.Join(home, ".cc", "two"),
+			ProjectDir: filepath.Join(home, ".cc", "two", "projects"),
+			Emoji:      "🥈",
+		},
 	}
 	if !reflect.DeepEqual(got.Accounts, wantAccounts) {
 		t.Fatalf("Accounts = %#v, want %#v", got.Accounts, wantAccounts)
 	}
-	if got.Claude != (Claude{PermissionMode: PermissionBypass, Binary: "claude", Cache1H: true, CompactNudge: DefaultCompactNudge()}) {
+	if got.Claude != (Claude{
+		PermissionMode: PermissionBypass,
+		Binary:         "claude",
+		Cache1H:        true,
+		CompactNudge:   DefaultCompactNudge(),
+
+		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
+	}) {
 		t.Fatalf("Claude = %#v, want bypass/claude defaults", got.Claude)
 	}
 	if got.Codex != (Codex{Yolo: true, Binary: "codex"}) {
@@ -130,9 +148,25 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 	}
 	got := Defaults(home, nil)
 	want := []Account{
-		{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"), ProjectDir: filepath.Join(home, ".cc", "1", "projects"), Implicit: true, Emoji: "🥇"},
-		{ID: 2, ConfigDir: filepath.Join(home, ".cc", "2"), ProjectDir: filepath.Join(home, ".cc", "2", "projects"), Emoji: "🥈"},
-		{ID: 3, ConfigDir: filepath.Join(home, ".cc", "3"), ProjectDir: filepath.Join(home, ".cc", "3", "projects"), Emoji: "🥉"},
+		{
+			ID:         1,
+			ConfigDir:  filepath.Join(home, ".cc", "1"),
+			ProjectDir: filepath.Join(home, ".cc", "1", "projects"),
+			Implicit:   true,
+			Emoji:      "🥇",
+		},
+		{
+			ID:         2,
+			ConfigDir:  filepath.Join(home, ".cc", "2"),
+			ProjectDir: filepath.Join(home, ".cc", "2", "projects"),
+			Emoji:      "🥈",
+		},
+		{
+			ID:         3,
+			ConfigDir:  filepath.Join(home, ".cc", "3"),
+			ProjectDir: filepath.Join(home, ".cc", "3", "projects"),
+			Emoji:      "🥉",
+		},
 	}
 	if !reflect.DeepEqual(got.Accounts, want) {
 		t.Fatalf("Accounts = %#v, want %#v", got.Accounts, want)
@@ -188,9 +222,24 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		t.Fatalf("Load(configured) error = %v", err)
 	}
 	want := []Account{
-		{ID: 9, ConfigDir: filepath.Join(home, "account-nine"), ProjectDir: filepath.Join(home, "account-nine", "projects"), Emoji: "·"},
-		{ID: 2, ConfigDir: filepath.Join(home, "account-two"), ProjectDir: filepath.Join(home, "account-two", "projects"), Emoji: "🥈"},
-		{ID: 17, ConfigDir: "/srv/claude/account-seventeen", ProjectDir: "/srv/claude/account-seventeen/projects", Emoji: "·"},
+		{
+			ID:         9,
+			ConfigDir:  filepath.Join(home, "account-nine"),
+			ProjectDir: filepath.Join(home, "account-nine", "projects"),
+			Emoji:      "·",
+		},
+		{
+			ID:         2,
+			ConfigDir:  filepath.Join(home, "account-two"),
+			ProjectDir: filepath.Join(home, "account-two", "projects"),
+			Emoji:      "🥈",
+		},
+		{
+			ID:         17,
+			ConfigDir:  "/srv/claude/account-seventeen",
+			ProjectDir: "/srv/claude/account-seventeen/projects",
+			Emoji:      "·",
+		},
 	}
 	if !reflect.DeepEqual(got.Accounts, want) {
 		t.Fatalf("Accounts = %#v, want %#v", got.Accounts, want)
@@ -198,14 +247,26 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 	if got.AccountIDs() == nil || !reflect.DeepEqual(got.AccountIDs(), []int{9, 2, 17}) {
 		t.Fatalf("AccountIDs = %#v, want [9 2 17]", got.AccountIDs())
 	}
-	if got.Claude != (Claude{PermissionMode: PermissionPrompt, Binary: "claude-custom", Cache1H: true, CompactNudge: DefaultCompactNudge()}) {
+	if got.Claude != (Claude{
+		PermissionMode: PermissionPrompt,
+		Binary:         "claude-custom",
+		Cache1H:        true,
+		CompactNudge:   DefaultCompactNudge(),
+
+		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
+	}) {
 		t.Fatalf("Claude = %#v, want configured values", got.Claude)
 	}
 	if got.Codex != (Codex{Yolo: false, Binary: "codex-custom"}) {
 		t.Fatalf("Codex = %#v, want configured values", got.Codex)
 	}
 	if !got.Exists || got.Source("accounts") != SourceFile || got.Source("mcp.servers.chat.enabled") != SourceFile {
-		t.Fatalf("configured sources/exists = exists:%v accounts:%q chat:%q", got.Exists, got.Source("accounts"), got.Source("mcp.servers.chat.enabled"))
+		t.Fatalf(
+			"configured sources/exists = exists:%v accounts:%q chat:%q",
+			got.Exists,
+			got.Source("accounts"),
+			got.Source("mcp.servers.chat.enabled"),
+		)
 	}
 	for _, key := range []string{"claude.permissionMode", "claude.binary", "codex.yolo", "codex.binary", "version"} {
 		if got.Source(key) != SourceFile {
@@ -223,7 +284,11 @@ func TestLoadConfiguredAccountsDropUnregisteredDiscoverySkips(t *testing.T) {
 		}
 		if account == 1 {
 			credentials := `{"claudeAiOauth":{"accessToken":"fixture"}}`
-			if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(credentials), 0o600); err != nil {
+			if err := os.WriteFile(
+				filepath.Join(configDir, ".credentials.json"),
+				[]byte(credentials),
+				0o600,
+			); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -244,16 +309,16 @@ func TestLoadConfiguredAccountsDropUnregisteredDiscoverySkips(t *testing.T) {
 	}
 }
 
-func TestSkipsOutsideDirectoryPreservesUnrelatedDiscoveryFailures(t *testing.T) {
+func TestSkipsOutsideDirPreservesUnrelatedDiscoveryFailures(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	claudeRoot := filepath.Join(home, ".cc")
 	codexFailure := AccountSkip{ConfigDir: filepath.Join(home, ".codex"), Reason: "codex discovery failed: fixture"}
-	got := skipsOutsideDirectory([]AccountSkip{
+	got := skipsOutsideDir([]AccountSkip{
 		{ID: 4, ConfigDir: filepath.Join(claudeRoot, "4"), Reason: "no valid credentials"},
 		codexFailure,
 	}, claudeRoot)
 	if !reflect.DeepEqual(got, []AccountSkip{codexFailure}) {
-		t.Fatalf("skipsOutsideDirectory()=%#v, want only unrelated discovery failure", got)
+		t.Fatalf("skipsOutsideDir()=%#v, want only unrelated discovery failure", got)
 	}
 }
 
@@ -289,11 +354,27 @@ func TestLoadRejectsUnknownKeysAtEveryConfigLevel(t *testing.T) {
 		{name: "top level", json: `{"version":1,"mystery":true}`, want: "mystery"},
 		{name: "claude", json: `{"version":1,"claude":{"mystery":true}}`, want: "mystery"},
 		{name: "codex", json: `{"version":1,"codex":{"mystery":true}}`, want: "mystery"},
-		{name: "account", json: `{"version":1,"accounts":[{"id":1,"configDir":"/opt/fixture/cc","projectDir":"/opt/fixture/projects"}]}`, want: "projectDir"},
+		{
+			name: "account",
+			json: `{"version":1,"accounts":[{"id":1,"configDir":"/opt/fixture/cc","projectDir":"/opt/fixture/projects"}]}`,
+			want: "projectDir",
+		},
 		{name: "mcp object", json: `{"version":1,"mcp":{"mystery":true}}`, want: "mystery"},
-		{name: "server object", json: `{"version":1,"mcp":{"servers":{"chat":{"enabled":false,"mystery":true}}}}`, want: "mystery"},
-		{name: "unregistered server", json: `{"version":1,"mcp":{"servers":{"not-registered":{"enabled":true}}}}`, want: "mcp.servers.not-registered"},
-		{name: "ask engine key", json: `{"version":1,"ask":{"bogus":{"model":"m"}}}`, want: `unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`},
+		{
+			name: "server object",
+			json: `{"version":1,"mcp":{"servers":{"chat":{"enabled":false,"mystery":true}}}}`,
+			want: "mystery",
+		},
+		{
+			name: "unregistered server",
+			json: `{"version":1,"mcp":{"servers":{"not-registered":{"enabled":true}}}}`,
+			want: "mcp.servers.not-registered",
+		},
+		{
+			name: "ask engine key",
+			json: `{"version":1,"ask":{"bogus":{"model":"m"}}}`,
+			want: `unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`,
+		},
 		{name: "ask engine prefs", json: `{"version":1,"ask":{"claude":{"mystery":true}}}`, want: "mystery"},
 	}
 	for _, tc := range cases {
@@ -351,9 +432,21 @@ func TestLoadRejectsInvalidAccountRoster(t *testing.T) {
 		want string
 	}{
 		{name: "non-positive id", json: `{"version":1,"accounts":[{"id":0,"configDir":"/tmp/cc"}]}`, want: "positive"},
-		{name: "duplicate id", json: `{"version":1,"accounts":[{"id":2,"configDir":"/tmp/a"},{"id":2,"configDir":"/tmp/b"}]}`, want: "duplicate"},
-		{name: "relative path", json: `{"version":1,"accounts":[{"id":1,"configDir":"relative"}]}`, want: "must be absolute"},
-		{name: "nul path", json: "{\"version\":1,\"accounts\":[{\"id\":1,\"configDir\":\"/tmp/a\\u0000b\"}]}", want: "must not contain NUL"},
+		{
+			name: "duplicate id",
+			json: `{"version":1,"accounts":[{"id":2,"configDir":"/tmp/a"},{"id":2,"configDir":"/tmp/b"}]}`,
+			want: "duplicate",
+		},
+		{
+			name: "relative path",
+			json: `{"version":1,"accounts":[{"id":1,"configDir":"relative"}]}`,
+			want: "must be absolute",
+		},
+		{
+			name: "nul path",
+			json: "{\"version\":1,\"accounts\":[{\"id\":1,\"configDir\":\"/tmp/a\\u0000b\"}]}",
+			want: "must not contain NUL",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -376,7 +469,11 @@ func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
 	}
 	home := filepath.Join(t.TempDir(), "home")
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"mcp":{"servers":{"harvester":{"enabled":true}}}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"version":1,"mcp":{"servers":{"harvester":{"enabled":true}}}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -590,15 +687,26 @@ func TestV2ConfigDefaultsAndPerAccountOverrides(t *testing.T) {
 func TestV1ConfigStillLoadsWithV2Defaults(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"accounts":[{"id":4,"configDir":"~/four"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"version":1,"accounts":[{"id":4,"configDir":"~/four"}]}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Load(path, home, nil)
 	if err != nil {
 		t.Fatalf("Load(v1) error = %v", err)
 	}
-	if got.Version != Version || got.Theme != "default" || got.MCP.HTTP.Port != DefaultMCPPort || got.Ask.Engine != pfmengine.Codex {
-		t.Fatalf("v1 defaults = version:%d theme:%q port:%d engine:%q", got.Version, got.Theme, got.MCP.HTTP.Port, got.Ask.Engine)
+	if got.Version != Version || got.Theme != "default" || got.MCP.HTTP.Port != DefaultMCPPort ||
+		got.Ask.Engine != pfmengine.Codex {
+		t.Fatalf(
+			"v1 defaults = version:%d theme:%q port:%d engine:%q",
+			got.Version,
+			got.Theme,
+			got.MCP.HTTP.Port,
+			got.Ask.Engine,
+		)
 	}
 	if got.EmojiFor(4) != "🍀" {
 		t.Fatalf("v1 account 4 emoji = %q, want 🍀", got.EmojiFor(4))
@@ -624,7 +732,10 @@ func TestLoadCache1HDefaultsTrueWhenAbsentFromFile(t *testing.T) {
 		t.Fatalf("Source(claude.cache1h) = %q, want %q", got.Source("claude.cache1h"), SourceDefault)
 	}
 	if !got.EffectiveClaude(1).Cache1H {
-		t.Fatalf("EffectiveClaude(1).Cache1H = %v, want true (account has no claude block at all)", got.EffectiveClaude(1).Cache1H)
+		t.Fatalf(
+			"EffectiveClaude(1).Cache1H = %v, want true (account has no claude block at all)",
+			got.EffectiveClaude(1).Cache1H,
+		)
 	}
 }
 
@@ -671,7 +782,11 @@ func TestLoadCache1HPerAccountOverridesTopLevel(t *testing.T) {
 		t.Fatal("EffectiveClaude(3).Cache1H = true, want false: account-level cache1h:false was not applied")
 	}
 	if got.Source("accounts[0].claude.cache1h") != SourceFile {
-		t.Fatalf("Source(accounts[0].claude.cache1h) = %q, want %q", got.Source("accounts[0].claude.cache1h"), SourceFile)
+		t.Fatalf(
+			"Source(accounts[0].claude.cache1h) = %q, want %q",
+			got.Source("accounts[0].claude.cache1h"),
+			SourceFile,
+		)
 	}
 }
 
@@ -696,10 +811,16 @@ func TestLoadCache1HPerAccountInheritsResolvedTopLevelWhenUnset(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if !got.EffectiveClaude(5).Cache1H {
-		t.Fatal("EffectiveClaude(5).Cache1H = false, want true: an account claude block touching only binary must inherit the resolved top-level cache1h, not the bool zero value")
+		t.Fatal(
+			"EffectiveClaude(5).Cache1H = false, want true: an account claude block touching only binary must inherit the resolved top-level cache1h, not the bool zero value",
+		)
 	}
 	if got.Source("accounts[0].claude.cache1h") != SourceDefault {
-		t.Fatalf("Source(accounts[0].claude.cache1h) = %q, want %q (no account-level key was set)", got.Source("accounts[0].claude.cache1h"), SourceDefault)
+		t.Fatalf(
+			"Source(accounts[0].claude.cache1h) = %q, want %q (no account-level key was set)",
+			got.Source("accounts[0].claude.cache1h"),
+			SourceDefault,
+		)
 	}
 }
 
@@ -712,6 +833,9 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	}
 	if strings.Contains(string(content), "//") {
 		t.Fatalf("default config contains comments: %s", content)
+	}
+	if !strings.Contains(string(content), "\"level\": \"info\"") {
+		t.Fatalf("default config carries no log.level default: %s", content)
 	}
 	if _, err := Load(path, home, nil); err != nil {
 		// The strict loader check below needs the bytes on disk; this assertion

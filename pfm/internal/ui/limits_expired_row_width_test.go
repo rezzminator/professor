@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
-	pfmengine "hostops/pfm/internal/engine"
-	pfmstats "hostops/pfm/internal/stats"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 )
 
 // TestExpiredLimitsRowStaysBoundedAtEveryWidth keeps the 2026-09-11 expiry

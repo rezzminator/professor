@@ -3,14 +3,15 @@ package resolve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 const (
@@ -111,7 +112,7 @@ func NewWhoami(dependencies WhoamiDependencies) (*Whoami, error) {
 	if procRoot == "" {
 		procRoot = resolved.ProcRoot
 	}
-	environment := WhoamiEnvironment{}
+	var environment WhoamiEnvironment
 	if dependencies.Environment != nil {
 		environment = *dependencies.Environment
 	} else {
@@ -142,11 +143,16 @@ func NewWhoami(dependencies WhoamiDependencies) (*Whoami, error) {
 
 // CallerEnvironment snapshots the identity variables of this process.
 func CallerEnvironment() WhoamiEnvironment {
+	return CallerEnvironmentFrom(paths.OSEnv{})
+}
+
+// CallerEnvironmentFrom snapshots identity variables over an injected environment.
+func CallerEnvironmentFrom(env paths.Env) WhoamiEnvironment {
 	return WhoamiEnvironment{
-		TMUX:            os.Getenv("TMUX"),
-		TMUXPane:        os.Getenv("TMUX_PANE"),
-		ClaudeSessionID: os.Getenv(ClaudeSessionEnv),
-		CodexThreadID:   os.Getenv(CodexThreadEnv),
+		TMUX:            env.Get("TMUX"),
+		TMUXPane:        env.Get("TMUX_PANE"),
+		ClaudeSessionID: env.Get(ClaudeSessionEnv),
+		CodexThreadID:   env.Get(CodexThreadEnv),
 	}
 }
 
@@ -159,7 +165,7 @@ func CallerEnvironment() WhoamiEnvironment {
 // $TMUX is sometimes deliberate, and re-exporting it would point every probe
 // at the sender's own session.
 func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
-	identity := Identity{Source: "tmux"}
+	identity := Identity{Source: tmuxName}
 	if identifier.environment.ClaudeSessionID != "" {
 		identity.Engine = string(pfmengine.Claude)
 		identity.ID = identifier.environment.ClaudeSessionID
@@ -179,7 +185,8 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		identity.Source = "env-codex"
 	}
 
-	socketPath, pane := socketFromTMUX(identifier.environment.TMUX)
+	socketPath := socketFromTMUX(identifier.environment.TMUX)
+	pane := ""
 	if pane == "" {
 		pane = identifier.environment.TMUXPane
 	}
@@ -191,7 +198,7 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		socketPath = recoveredSocket
 		pane = recoveredPane
 		identity.Recovered = true
-		if identity.Source == "tmux" {
+		if identity.Source == tmuxName {
 			identity.Source = "ancestry"
 		}
 	}
@@ -202,7 +209,14 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		identity.Engine = engineForSocket(identity.SocketName)
 	}
 	session, err := identifier.namer.SessionName(ctx, socketPath, pane)
-	if err != nil || session == "" {
+	if err != nil {
+		// The socket already resolved — this is a tmux exec that could not
+		// run, not "no tmux here". Reporting it as ErrNoTmux would make
+		// self/me target resolution read a transient tmux failure as the
+		// caller never being inside tmux at all.
+		return identity, fmt.Errorf("read the tmux session name on %s: %w", socketPath, err)
+	}
+	if session == "" {
 		return identity, ErrNoTmux
 	}
 	identity.Session = session
@@ -222,7 +236,8 @@ func (identifier *Whoami) recoverFromAncestry(
 		if err != nil {
 			continue
 		}
-		socketPath, pane := socketFromTMUX(environment["TMUX"])
+		socketPath := socketFromTMUX(environment["TMUX"])
+		pane := ""
 		if socketPath == "" {
 			continue
 		}
@@ -280,16 +295,16 @@ func (identifier *Whoami) paneOwners(ctx context.Context) []PaneOwner {
 // socketFromTMUX splits a $TMUX value into its socket path. Only the socket
 // component is ever read back; the session and pane fields of that string name
 // a server-local index, not a stable identity.
-func socketFromTMUX(value string) (string, string) {
+func socketFromTMUX(value string) string {
 	if value == "" {
-		return "", ""
+		return ""
 	}
 	fields := strings.Split(value, ",")
 	socketPath := fields[0]
 	if socketPath == "" {
-		return "", ""
+		return ""
 	}
-	return socketPath, ""
+	return socketPath
 }
 
 func engineForSocket(socketName string) string {
@@ -316,7 +331,10 @@ func (namer CommandTmuxNamer) SessionName(
 		arguments = append(arguments, "-t", target)
 	}
 	arguments = append(arguments, "#{session_name}")
-	output, err := pfmtmux.Command(ctx, namer.Binary, socketPath, arguments...).Output()
+	// Dir stays empty: socketPath is already the full pathname, and
+	// filepath.Join("", full) returns full unchanged (Socket's own doc
+	// comment, "kill's shape").
+	output, err := pfmtmux.Socket{Binary: namer.Binary}.Command(ctx, socketPath, arguments...).Output()
 	if err != nil && target != "" {
 		// A stale pane id must not kill a live session: retry untargeted, the
 		// way chat.sh's bare `tmux display-message -p` does.
@@ -344,7 +362,12 @@ func (lister CommandPaneOwners) PaneOwners(
 	ctx context.Context,
 	socketPath string,
 ) ([]PaneOwner, error) {
-	output, err := pfmtmux.Command(ctx, lister.Binary, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").Output()
+	// Dir stays empty: socketPath is already the full pathname (lister.TmuxDir
+	// addresses a directory to SCAN for sockets, in paneOwners above — never a
+	// join prefix here), and filepath.Join("", full) returns full unchanged.
+	output, err := pfmtmux.Socket{Binary: lister.Binary}.
+		Command(ctx, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
+		Output()
 	if err != nil {
 		return nil, err
 	}

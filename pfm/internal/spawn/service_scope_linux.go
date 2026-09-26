@@ -5,11 +5,12 @@ package spawn
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // serviceScopeCommand escapes a chat server from the user service that
@@ -21,13 +22,14 @@ func serviceScopeCommand(
 	ctx context.Context,
 	binary string,
 	arguments, environment []string,
+	env paths.Env,
 ) (*exec.Cmd, error) {
-	if strings.TrimSpace(os.Getenv("INVOCATION_ID")) == "" {
+	if strings.TrimSpace(env.Get("INVOCATION_ID")) == "" {
 		command := exec.CommandContext(ctx, binary, arguments...)
 		command.Env = environment
 		return command, nil
 	}
-	systemdRun, err := deps.Resolve("systemd-run")
+	systemdRun, err := obs.Runner(deps.RealRunner{}).LookPath("systemd-run")
 	if err != nil {
 		return nil, fmt.Errorf(
 			"running inside a systemd user service requires systemd-run to create a durable chat scope: %w",

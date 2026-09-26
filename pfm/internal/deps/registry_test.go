@@ -182,7 +182,11 @@ func TestRumdlRegistryEntryIsOptionalPinnedAndPlatformGated(t *testing.T) {
 		t.Error("rumdl must not apply to an ungated platform")
 	}
 	if entry.MinVersion != "0.2.73" {
-		t.Errorf("rumdl MinVersion = %q, want %q (the version the shipped .rumdl.toml policy was validated against)", entry.MinVersion, "0.2.73")
+		t.Errorf(
+			"rumdl MinVersion = %q, want %q (the version the shipped .rumdl.toml policy was validated against)",
+			entry.MinVersion,
+			"0.2.73",
+		)
 	}
 	if strings.TrimSpace(entry.InstallHint) == "" {
 		t.Error("rumdl must carry a non-empty InstallHint")

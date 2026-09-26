@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestCodexLaunchesUseTheSelectedRosterHome(t *testing.T) {
@@ -49,7 +49,7 @@ func TestCodexLaunchesUseTheSelectedRosterHome(t *testing.T) {
 		Engine: pfmengine.Codex, Name: "worker", CWD: "/work/project",
 		PrimaryAccount: 8, Config: machine,
 	})
-	if err == nil || !strings.Contains(err.Error(), "Codex account 8") {
+	if err == nil || !strings.Contains(err.Error(), "requested Codex account 8") {
 		t.Fatalf("off-roster error = %v", err)
 	}
 }

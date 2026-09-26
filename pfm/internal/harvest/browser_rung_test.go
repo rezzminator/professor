@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -32,10 +33,14 @@ type browserSpyConverter struct {
 	html         string
 	status       int
 	err          error
-	// modes records the headless flag of every call, in order; render, when
-	// set, answers per mode instead of html/status/err.
-	modes  []bool
-	render func(headless bool) (string, int, error)
+	// sources records the address of every render request, fragment
+	// included, in order.
+	sources []string
+	// render, when set, answers instead of html/status/err.
+	render func() (string, int, error)
+	// landed, when set, is the address every render lands on; unset, the
+	// render lands on the page requested.
+	landed *string
 }
 
 func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string, body []byte) (string, error) {
@@ -45,13 +50,20 @@ func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string
 	return "", errors.New("spy converter refuses every conversion")
 }
 
-func (spy *browserSpyConverter) FetchBrowser(ctx context.Context, source string, headless bool) (string, int, error) {
+func (spy *browserSpyConverter) FetchBrowser(
+	_ context.Context,
+	source string,
+) (string, int, string, error) {
 	spy.browserCalls++
-	spy.modes = append(spy.modes, headless)
-	if spy.render != nil {
-		return spy.render(headless)
+	spy.sources = append(spy.sources, source)
+	if spy.landed != nil {
+		source = *spy.landed
 	}
-	return spy.html, spy.status, spy.err
+	if spy.render != nil {
+		html, status, err := spy.render()
+		return html, status, source, err
+	}
+	return spy.html, spy.status, source, spy.err
 }
 
 func wallHarvester(t *testing.T, converter Converter, browserRung *bool) *Harvester {
@@ -129,7 +141,8 @@ func TestDisabledBrowserRungNamesEnablePath(t *testing.T) {
 	spy := &browserSpyConverter{err: errors.New("must never run")}
 	h := wallHarvester(t, spy, nil)
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if !strings.Contains(result.Error, "DISABLED") || !strings.Contains(result.Error, "fetch.browser=true in harvester.config.json") {
+	if !strings.Contains(result.Error, "DISABLED") ||
+		!strings.Contains(result.Error, "fetch.browser=true in harvester.config.json") {
 		t.Fatalf("disabled state not named with enable path: %q", result.Error)
 	}
 }
@@ -140,12 +153,15 @@ func TestDisabledBrowserRungNamesEnablePath(t *testing.T) {
 func TestBrowserChallengePageIsNeverLaunderedIntoContent(t *testing.T) {
 	blockPage := cloudflareBlockPageFixture()
 	if len(blockPage) <= 4000 {
-		t.Fatalf("fixture must reproduce the live page's bulk (its h1 is a STRONG marker matched at any length; the length is what proves a longer-than-earlier-rungs challenge cannot slip through as content), got %d bytes", len(blockPage))
+		t.Fatalf(
+			"fixture must reproduce the live page's bulk (its h1 is a STRONG marker matched at any length; the length is what proves a longer-than-earlier-rungs challenge cannot slip through as content), got %d bytes",
+			len(blockPage),
+		)
 	}
 	spy := &browserSpyConverter{
 		html:   blockPage,
 		status: http.StatusForbidden,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Sorry, you have been blocked") {
 				return strings.Repeat("laundered text ", 2000), nil
 			}
@@ -173,11 +189,14 @@ func TestBrowserChallengePageIsNeverLaunderedIntoContent(t *testing.T) {
 // rendered HTML that converts longer than everything before it wins at the
 // browser rung and is cached under method browser-chrome.
 func TestBrowserSuccessStoresAcceptedContent(t *testing.T) {
-	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat("real rendered evidence ", 100) + "</body></html>"
+	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat(
+		"real rendered evidence ",
+		100,
+	) + "</body></html>"
 	spy := &browserSpyConverter{
 		html:   rendered,
 		status: http.StatusOK,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Recovered article") {
 				return "# Recovered article\n\n" + strings.Repeat("real rendered evidence ", 100), nil
 			}
@@ -231,7 +250,7 @@ func TestBrowserDetectedChallengeIsReported(t *testing.T) {
 	spy := &browserSpyConverter{
 		html:   cloudflareBlockPageFixture(),
 		status: http.StatusForbidden,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Sorry, you have been blocked") {
 				return strings.Repeat("laundered text ", 2000), nil
 			}
@@ -288,11 +307,14 @@ func TestBrowserPolicyDenialIsNotAnOutage(t *testing.T) {
 // wall and rendered the article, then the conversion step failed. The user
 // must hear "tool outage", never the definitive verdict that the wall won.
 func TestBrowserConverterOutageIsNamed(t *testing.T) {
-	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat("real rendered evidence ", 100) + "</body></html>"
+	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat(
+		"real rendered evidence ",
+		100,
+	) + "</body></html>"
 	spy := &browserSpyConverter{
 		html:   rendered,
 		status: http.StatusOK,
-		convertFn: func(_ context.Context, _ string, _ string, _ []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, _ []byte) (string, error) {
 			return "", errors.New("conversion worker not provisioned")
 		},
 	}
@@ -315,7 +337,7 @@ func TestBrowserThinRenderIsNeverStored(t *testing.T) {
 	spy := &browserSpyConverter{
 		html:   rendered,
 		status: http.StatusOK,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "paywall") {
 				return strings.Repeat("subscribe ", 30), nil // ~300 chars: above zero, below the 500 floor
 			}
@@ -338,16 +360,18 @@ func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
 	wall := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", "<html>checking your browser</html>"), nil
 	})
-	dead := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	dead := roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("fixture connection reset")
 	})
 	h := mustNew(t, Options{
-		CacheDir:    t.TempDir(),
-		Client:      &http.Client{Transport: wall},
-		Chrome:      &http.Client{Transport: wall},
-		Jina:        &http.Client{Transport: dead},
-		OA:          nonChallengeTransport(),
-		Converter:   legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) { return "", nil }),
+		CacheDir: t.TempDir(),
+		Client:   &http.Client{Transport: wall},
+		Chrome:   &http.Client{Transport: wall},
+		Jina:     &http.Client{Transport: dead},
+		OA:       nonChallengeTransport(),
+		Converter: legacyConverterFunc(
+			func(context.Context, string, string, []byte) (string, error) { return "", nil },
+		),
 		BrowserRung: browserOff(),
 	})
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -358,10 +382,10 @@ func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
 
 // recoveredArticleSpy converts a rendered "Recovered article" page to long
 // real content and anything else (a wall) to thin text.
-func recoveredArticleSpy(render func(headless bool) (string, int, error)) *browserSpyConverter {
+func recoveredArticleSpy(render func() (string, int, error)) *browserSpyConverter {
 	return &browserSpyConverter{
 		render: render,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Recovered article") {
 				return "# Recovered article\n\n" + strings.Repeat("real rendered evidence ", 100), nil
 			}
@@ -372,58 +396,203 @@ func recoveredArticleSpy(render func(headless bool) (string, int, error)) *brows
 
 const recoveredArticleHTML = "<html><body><h1>Recovered article</h1>real rendered evidence</body></html>"
 
-// TestBrowserRungRendersHeadlessFirst pins headless-first: a render that
-// passes on the first try never opens a visible window.
-func TestBrowserRungRendersHeadlessFirst(t *testing.T) {
-	spy := recoveredArticleSpy(func(bool) (string, int, error) { return recoveredArticleHTML, http.StatusOK, nil })
+// TestBrowserRungRendersOnce: a render that passes is accepted from the one
+// headless request the rung sends.
+func TestBrowserRungRendersOnce(t *testing.T) {
+	spy := recoveredArticleSpy(func() (string, int, error) { return recoveredArticleHTML, http.StatusOK, nil })
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
 	if result.Error != "" || result.Method != "browser-chrome" {
 		t.Fatalf("headless render not accepted: method=%q err=%q", result.Method, result.Error)
 	}
-	if fmt.Sprint(spy.modes) != "[true]" {
-		t.Fatalf("browser modes=%v, want exactly one HEADLESS render [true]", spy.modes)
+	if want := "[https://blocked.example.test/article]"; fmt.Sprint(spy.sources) != want {
+		t.Fatalf("render requests %v, want exactly %s", spy.sources, want)
 	}
 }
 
-// TestBrowserHeadedRetryOnlyAfterAWall: a headless render that meets a bot
-// wall earns ONE headed retry, and the headed render's content wins.
-func TestBrowserHeadedRetryOnlyAfterAWall(t *testing.T) {
-	spy := recoveredArticleSpy(func(headless bool) (string, int, error) {
-		if headless {
+// TestBrowserRungsNeverRequestAHeadedBrowser: the render rung and the file
+// rung, each driven through a challenge the browser does not pass, send the
+// worker exactly one request apiece — the contract's only request is the
+// headless one (the worker's launch mode is pinned by browser_render_test.py)
+// — and return the headless wall verdict. Watched FAILING before the change:
+// both rungs sent a second, headed request ([true false]).
+func TestBrowserRungsNeverRequestAHeadedBrowser(t *testing.T) {
+	t.Run("render", func(t *testing.T) {
+		spy := recoveredArticleSpy(func() (string, int, error) {
 			return cloudflareBlockPageFixture(), http.StatusForbidden, nil
+		})
+		result := browserHarvester(t, spy).Fetch(context.Background(), "https://blocked.example.test/article")
+		if want := "[https://blocked.example.test/article]"; fmt.Sprint(spy.sources) != want {
+			t.Fatalf("render requests %v, want exactly the one headless request %s", spy.sources, want)
 		}
-		return recoveredArticleHTML, http.StatusOK, nil
+		if !result.Challenge || !strings.Contains(result.Error, "DID run against this wall") {
+			t.Fatalf("render: challenge=%v err=%q, want the headless wall verdict", result.Challenge, result.Error)
+		}
 	})
+	t.Run("file", func(t *testing.T) {
+		browser := &downloadingBrowser{
+			err: &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 403, Head: challengePage},
+		}
+		h, _ := walledHarvester(t, browser, 0)
+		got := h.Download(context.Background(), "https://203.0.113.10/paper.pdf")
+		if want := "[https://203.0.113.10/paper.pdf]"; fmt.Sprint(browser.calls) != want {
+			t.Fatalf("download requests %v, want exactly the one headless request %s", browser.calls, want)
+		}
+		if !strings.Contains(got.Error, "challenge the browser did not pass") {
+			t.Fatalf("file: err=%q, want the headless challenge verdict", got.Error)
+		}
+	})
+}
+
+// consentBannerPageHTML is a short article under a consent manager's dialog
+// whose vendor list names the providers a real bot wall names too.
+const consentBannerPageHTML = `<html><body><h1>Recovered article</h1><p>real rendered evidence</p>` +
+	`<div id="CybotCookiebotDialog" role="dialog"><p>We use cookies.</p><ul>` +
+	`<li>Cloudflare — __cf_bm, necessary</li><li>Google reCAPTCHA — _GRECAPTCHA, necessary</li>` +
+	`<li>Turnstile — bot protection</li></ul><button>Reject all</button><button>Accept all</button></div>` +
+	`<div class="qc-cmp2-container">Verify your consent choices: Cloudflare, hCaptcha</div></body></html>`
+
+// TestBrowserConsentBannerIsNotAWall: a consent dialog is not a bot wall, even
+// when its vendor list names Cloudflare or a captcha provider — the render
+// stands.
+func TestBrowserConsentBannerIsNotAWall(t *testing.T) {
+	spy := recoveredArticleSpy(func() (string, int, error) { return consentBannerPageHTML, http.StatusOK, nil })
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if result.Error != "" || result.Method != "browser-chrome" {
-		t.Fatalf("headed retry after a headless wall not accepted: method=%q err=%q", result.Method, result.Error)
-	}
-	if fmt.Sprint(spy.modes) != "[true false]" {
-		t.Fatalf("browser modes=%v, want headless then headed [true false]", spy.modes)
+	if result.Challenge {
+		t.Fatalf("a consent banner page was judged a bot wall: err=%q", result.Error)
 	}
 }
 
-// TestBrowserHeadedRetryFailureKeepsTheWallVerdict: when the headed retry
-// cannot launch (a display-less host), the completed headless attempt's
-// verdict — it RAN and met a wall — stands; it never becomes an outage.
-func TestBrowserHeadedRetryFailureKeepsTheWallVerdict(t *testing.T) {
-	spy := recoveredArticleSpy(func(headless bool) (string, int, error) {
-		if headless {
-			return cloudflareBlockPageFixture(), http.StatusForbidden, nil
+// catalogOrRender is a main-content converter that keeps only the lead of the
+// catalog card grid (flagged partial by the recall gate, a render may complete
+// it) and converts every other page — a render — by stripping its tags.
+func catalogOrRender(ctx context.Context, kind, source string, body []byte) (string, error) {
+	if strings.Contains(string(body), "<species-card") {
+		return leadOnlyConverter().Convert(ctx, kind, source, body)
+	}
+	return tagStripConverter().Convert(ctx, kind, source, body)
+}
+
+// TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage: a
+// flagged HTTP page is kept for the browser rung to beat. A render that landed
+// at another address (a load-time redirect to an age gate or a login), a render
+// whose address the browser did not report, and a render served at the
+// thread's own address that the thread's extractor does not claim (a consent
+// interstitial) are each an unflagged page of any length, never the page
+// asked for: the flagged page is stored. A render that IS the page still wins,
+// at the page's canonical address too.
+func TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage(t *testing.T) {
+	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
+	bodies := []string{long, long, long}
+	flaggedThread := redditThreadHTML(4, bodies, true)
+	completeThread := redditThreadHTML(4, append(append([]string(nil), bodies...), "Agreed."), false)
+	thread := "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/"
+	canonicalThread := "https://reddit.com/r/examplesub/comments/ccc333/loader_thread"
+	ageGate := "https://www.reddit.com/over18?dest=https%3A%2F%2Fwww.reddit.com%2Fr%2Fexamplesub%2F"
+	interstitial := "<html><body><main><h1>Before you continue</h1><p>" +
+		strings.Repeat("This community may hold mature content, so confirm your age to view it. ", 12) +
+		"</p></main></body></html>"
+	guide := "https://guide.example.test/birds"
+	login := "https://guide.example.test/login?next=%2Fbirds"
+	loginPage := "<html><body><main><h1>Sign in</h1><p>" +
+		strings.Repeat("Sign in to the estuary trust to keep reading the field guide and its species notes. ", 10) +
+		"</p></main></body></html>"
+	fullCatalog := "<html><body><main><h1>Field guide to coastal birds</h1><p>" +
+		strings.Repeat("Species notes on nesting in the dunes and feeding on the mudflats at low tide. ", 12) +
+		"</p></main></body></html>"
+	unreported := ""
+	for _, tc := range []struct {
+		name, page, source, render, method string
+		landed                             *string
+	}{
+		{"a thread render redirected to an age gate", flaggedThread, thread, interstitial, rungDirect, &ageGate},
+		{"an unclaimed interstitial at the thread's address", flaggedThread, thread, interstitial, rungDirect, nil},
+		{"a thread render at an unreported address", flaggedThread, thread, completeThread, rungDirect, &unreported},
+		{"a page render redirected to a login", catalogPage(), guide, loginPage, rungDirect, &login},
+		{
+			"the complete thread at its canonical address", flaggedThread, thread, completeThread, "browser-chrome",
+			&canonicalThread,
+		},
+		{"the complete page at its own address", catalogPage(), guide, fullCatalog, "browser-chrome", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spy := &browserSpyConverter{
+				html:      tc.render,
+				status:    http.StatusOK,
+				convertFn: catalogOrRender,
+				landed:    tc.landed,
+			}
+			h := pageHarvester(t, tc.page, spy, browserOn())
+			result := h.Fetch(context.Background(), tc.source)
+			if result.Error != "" || result.Method != tc.method || spy.browserCalls == 0 {
+				t.Fatalf("method=%q rungs=%v renders=%d error=%q, want %s",
+					result.Method, result.Rungs, spy.browserCalls, result.Error, tc.method)
+			}
+			if kept := tc.method == rungDirect; kept != (result.Partial != "") {
+				t.Fatalf("stored by %s with partial=%q: a kept page stays flagged, a winning render is complete",
+					result.Method, result.Partial)
+			}
+			for _, foreign := range []string{"Before you continue", "Sign in to the estuary trust"} {
+				if strings.Contains(result.Content, foreign) {
+					t.Fatalf("a render that is not the requested page was stored: %.300q", result.Content)
+				}
+			}
+		})
+	}
+}
+
+// TestImagesAreLocalizedOnlyForTheStoredPage: the HTTP rung's page is flagged
+// and kept for the browser rung to beat. Its images are fetched only when it
+// is the page stored — never for a page the browser render then supersedes.
+func TestImagesAreLocalizedOnlyForTheStoredPage(t *testing.T) {
+	withFigure := func(ctx context.Context, kind, source string, body []byte) (string, error) {
+		converted, err := catalogOrRender(ctx, kind, source, body)
+		if err == nil && strings.Contains(string(body), "<species-card") {
+			converted += "\n\n![Estuary map](/figure.png)"
 		}
-		return "", 0, errors.New("headed Chrome needs a display")
-	})
-	h := browserHarvester(t, spy)
-	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if !result.Challenge || !strings.Contains(result.Error, "DID run against this wall") {
-		t.Fatalf("headed-launch failure erased the headless wall verdict: challenge=%v err=%q", result.Challenge, result.Error)
+		return converted, err
 	}
-	if strings.Contains(result.Error, "could NOT RUN") {
-		t.Fatalf("a completed headless attempt was misreported as an outage: %q", result.Error)
-	}
-	if fmt.Sprint(spy.modes) != "[true false]" {
-		t.Fatalf("browser modes=%v, want [true false]", spy.modes)
+	rendered := "<html><body><main><p>" +
+		strings.Repeat("Species notes on nesting in the dunes and feeding on the mudflats at low tide. ", 12) +
+		"</p></main></body></html>"
+	for _, tc := range []struct {
+		name, render, method string
+		figureFetches        int32
+	}{
+		{"the browser render supersedes the flagged page", rendered, "browser-chrome", 0},
+		{"the flagged page is stored", "<html><body><h1>Prove your humanity</h1></body></html>", rungDirect, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var figureFetches atomic.Int32
+			site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Path == "/figure.png" {
+					figureFetches.Add(1)
+					return response(request, http.StatusOK, "image/png", "\x89PNG\r\n\x1a\nfigure"), nil
+				}
+				return response(request, http.StatusOK, "text/html", catalogPage()), nil
+			})
+			missing := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return response(request, http.StatusNotFound, "application/json", `{}`), nil
+			})
+			spy := &browserSpyConverter{html: tc.render, status: http.StatusOK, convertFn: withFigure}
+			h := mustNew(t, Options{
+				CacheDir:    t.TempDir(),
+				Client:      &http.Client{Transport: site},
+				Chrome:      &http.Client{Transport: site},
+				Jina:        &http.Client{Transport: missing},
+				OA:          &http.Client{Transport: missing},
+				Converter:   spy,
+				BrowserRung: browserOn(),
+			})
+			result := h.Fetch(context.Background(), "https://guide.example.test/birds")
+			if result.Error != "" || result.Method != tc.method {
+				t.Fatalf("method=%q rungs=%v error=%q, want %s", result.Method, result.Rungs, result.Error, tc.method)
+			}
+			if got := figureFetches.Load(); got != tc.figureFetches {
+				t.Fatalf("the figure was fetched %d time(s), want %d: images are localized for the stored page only",
+					got, tc.figureFetches)
+			}
+		})
 	}
 }

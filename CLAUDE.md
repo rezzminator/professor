@@ -1,39 +1,55 @@
 # Professor — the discipline layer for Claude Code
 
+## Spawned as a sub-agent? Your first move
+
+Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
+
+- A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
+- A brief carrying the user's ruling to skip the ceremony (no `flights-speccer`, no orchestrator): do it yourself, start to finish, whatever its size.
+- Otherwise take the lowest rung that fits; a higher rung needs its named reason. You finish within 45 calls; at the cap, return what landed, what is left and the next step.
+  1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish, when it fits your 45 calls; otherwise one or two sub-agents, in sequence or in parallel.
+  2. The solution is in hand but the volume is more than one or two agents finish (about 80 calls) — many clear tasks, each with nameable files: your first tool call spawns `general-orchestrator` (Agent tool, `subagent_type: general-orchestrator`), handing it the work, everything you already hold and the check that proves the batch done. It cuts the batch, runs one short executor per task and returns once.
+  3. The solution is not in hand — a design to choose, a failure of unknown cause, files you cannot name — and the work is large: your first tool call spawns `flights-speccer` (Agent tool, `subagent_type: flights-speccer`), handing it the work, everything you already hold and a directory under `$HOME/.local/state/pfm/flights/{project}/`. Its return is your orders: a directory of one task file you execute yourself; of several, you execute none and hand the directory to `flights-orchestrator` (Agent tool, `subagent_type: flights-orchestrator`), which runs one fresh executor per task file and returns once. Below opus you never write a spec yourself.
+- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no `flights-speccer`, no spawn.
+- ✓ "Add the timeout flag to each of the 12 subcommands" is a batch of clear tasks: `general-orchestrator`, no `flights-speccer`.
+- ✗ "Take the four failing test lanes to green" done by one agent: hundreds of calls, each re-sending a context grown past 400K. ✓ `flights-speccer` first, then `flights-orchestrator` runs one executor per task file.
+- Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
+
 **What this repo is:** the framework itself, not an app that uses it. Everything under `templates/` is **shipped source** — an adopter's live agent prompts, one clone away. Treat every prompt line as production code, because it is.
 
 ## Repo structure
 
-- `templates/`: the shipped framework — `templates/project/` (per-install templates, scaffolded into an adopter and then owned there) + `templates/global/` (machine-global agents/commands/skills — the originals, symlink-live) + `templates/prompts/` (the fleet prompt + harness baseline). Markdown + shell, no build; the gates are `scripts/leak-check.sh` and `scripts/refresh-scope.sh`.
-- `pfm/`: fleet engine — Go 1.24, `cmd/pfm` + `internal/*`. Owns its staged host assets under `pfm/internal/installer/assets/`; `pfm install` stages them. Also owns the memory organ under `internal/dream` and the only harvester under `internal/harvest` + `internal/harvestmcp`, over a pinned Python conversion sidecar in `internal/harvestpy/`.
-- `engines/wave-walker/engine/`: wave-walker engine — JS/TS compiled by `cross-workflow` for both the Claude Workflow runtime and the Codex SDK.
-- `docs/`: the specs — `BLUEPRINT.md` (philosophy), `SETUP.md` (generation), `PLACEHOLDERS.md` (substitution law) — plus `commands/` reference cards and `dev/` wave trains.
+- `templates/`: the shipped framework — `templates/project/` (per-install templates, scaffolded into an adopter and then owned there) + `templates/global/` (machine-global agents/commands/skills — the originals, symlink-live). Markdown + shell, no build; the gates are `scripts/leak-check.sh` and `scripts/refresh-scope.sh`.
+- `pfm/`: fleet engine — Go 1.24, `cmd/pfm` + `internal/*`. Owns its staged host assets under `pfm/internal/installer/assets/`; `pfm install` stages them. Owns the fleet prompt per engine in `pfm/harness-prompts/` (`share/head.md` + `{claude,codex,opencode}/professor.md` + `share/tail.md`; Claude's harness baselines under `claude/baselines/`), embedded at build and composed by `pfm install`; `pfm doctor` names an embed that differs from the clone's tree. Also owns the only harvester under `internal/harvest` + `internal/harvestmcp`, over a pinned Python conversion sidecar in `internal/harvestpy/`.
+- `workflows/`: in-tree engines — `deep-rr/` (the USER-ONLY research workflow), linked into `~/.claude/skills/` by `pfm install`.
+- `infra/`: `fence/` (`docker-compose.yml`, the `pfm-dev` image and its `pfm-sim` real-browser target, `release-rehearsal.sh`) — `dev.sh iso` and `/pfm:release` drive it; `demo/` is the live-demo fence for presentations; `check-self-hosted-manifest.sh` stays at the top level, a repo gate, not fence-only.
+- `docs/`: the specs — `BLUEPRINT.md` (philosophy), `SETUP.md` (generation), `PLACEHOLDERS.md` (substitution law) — plus `commands/` reference cards, `dev/` engineering notes and `design/` the design docs (the flights family under `design/flights/`, the general family under `design/general/`, the release family under `design/release/`, the rr family under `design/RR/`, collector, tracer and mapper under `design/tracing/`, every hook and the callmeter recorder under `design/hooks/`, the statusline under `design/context/`).
 - `scripts/`: repo-level gates (`leak-check.sh`, `refresh-scope.sh`); `.githooks/` runs the leak gate `pre-push`.
 - `releases/` + root `README.md` / `INSTALL.md` / `CHANGELOG.md` / `VERSION`: the public face — edited with template-grade care.
-- `.claude/`: this repo's own project-tier install — the commands, agents, skills, and scripts THIS repo uses, the source of truth for its mirrors. Global agents/commands are never copied here: they are the symlinked originals under `templates/global/`. `.codex/` and `.opencode/`: pointer layers compiled over it, never a restatement.
-- `.professor/`: ledgers — `release.md` (framework changes pending upstream; `/pfm:release` consumes and clears it), `drift.md` (this install's keep-local customizations; never consumed), `retro.md` (steering inbox; `/pfm retro` folds it).
-- `tmp/`: gitignored scratch — every generated artifact lands here, never in a tracked dir.
+- `.claude/`: this repo's own project-tier install — the commands, agents, skills, and scripts THIS repo uses, the source of truth for its mirrors. Machine-global originals reach it through `~/.claude/` symlinks; where one needs this repo's anchors (`quality/*`) a rewired local variant lives here. `.codex/` and `.opencode/`: pointer layers compiled over it, never a restatement; their generated files are untracked (only the hand-written keeper `.codex/config.toml` lives in git).
+- `.professor/`: ledgers — `retro.md` (steering inbox; `/pcm retro` folds it). Release notes are never written during development: `/pfm:release` derives them from `develop`'s diff against `main`.
+- Scratch lives OUTSIDE the tree, in `/tmp/{project}/{purpose}/` — `{project}` is this repo's directory name with any leading dot stripped (`.professor` → `professor`), derived, never hardcoded. One subdirectory per purpose, each owned by a named protocol: `timing/`, `lanes/`, `guard/`. A run never dirties the checkout, and a scratch path named to a human or a model is absolute. Flights are not scratch: a flight's directory is created, run and audited in `$HOME/.local/state/pfm/flights/{project}/{flight}/`, kept across reboots.
 
-Build/test through `.claude/scripts/dev.sh {status|install|build|typecheck|verify|test} {templates|pfm|walker}`.
+Build/test through `.claude/scripts/dev.sh {status|install|build|typecheck|verify|test} {templates|pfm}`.
 
 ## How the framework reaches an adopter — three tiers, one truth each
 
-- **Machine-global** (`templates/global/`): truth is the original in the blueprint clone. `pfm install` symlinks each original into the engine registries (`~/.claude/{agents,commands,skills}`); `pfm codex agents` compiles the Codex `.toml` twins beside their `.md` and links them into `~/.codex/agents/`. Saving a template IS the deploy — on this host `~/.professor` is this checkout.
+- **Machine-global** (`templates/global/`): truth is the original in the blueprint clone. `pfm install` symlinks each original into the engine registries (`~/.claude/{agents,commands,skills}`); `pfm install` (and `pfm codex agents`) compiles the Codex `.toml` twins and writes each as a marker-owned regular file into every Codex home's `agents/` (Codex refuses a symlinked role) — nothing generated is written into the clone. Saving a template IS the deploy for Claude; a Codex role changes at the next `pfm install` — on this host `~/.professor` is this checkout.
 - **Project** (`templates/project/` → an adopter's `CLAUDE.md`, `.claude/**`, `docs/`, `.codex/` keepers): truth is the adopter's local file, full stop. `pfm init` scaffolds once and pins every file in `.professor/baseline.json`; `pfm update adopt [--at REF]` pins an install that predates scaffolding. `pfm update check` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED`, each with the exact `git diff` to read; the adopter's session hand-applies what belongs, then `pfm update pin` (accept) / `ignore` (never adopt) / `drop` (forget). pfm never rewrites a project file after init.
-- **Engine mirrors** (`AGENTS.md`, `.codex/**`, `.opencode/**`): generated from the project's Claude sources by `pfm codex build|check` and `build-opencode.mjs`; never hand-edited.
+- **Engine mirrors** (`AGENTS.md`, `.codex/**`, `.opencode/**`): generated from the project's Claude sources by `pfm codex build|check` and `pfm opencode build|check|doctor`; never hand-edited, never tracked — a fresh clone generates before it checks.
 
-The reverse direction is the release: `/pfm:release` sweeps every `.professor/release.md` it is pointed at into `releases/vX.Y.Z.md` + `CHANGELOG.md`; with `--from {live-project}` its refresh pass re-derives `templates/project/**` from that project's live files per `templates/refresh-map.json` (`scripts/refresh-scope.sh` + `scripts/genericize.sh`); without it, hand-authored template edits ship as they are.
+The reverse direction is the release: `/pfm:release prepare` reviews `develop`'s diff against `main`, and `changelogger` writes `releases/vX.Y.Z.md` + the `CHANGELOG.md` line and every adopter instruction from that diff and its commit messages; with `--from {live-project}` its refresh pass re-derives `templates/project/**` from that project's live files per `templates/refresh-map.json` (`scripts/refresh-scope.sh` + `scripts/genericize.sh`); without it, hand-authored template edits ship as they are.
 
 ## Three-runtime team — Claude + Codex + OpenCode
 
-`CLAUDE.md` and `AGENTS.md` are one shared contract; runtime wrappers translate mechanics, never identity or protocol. `AGENTS.md` is **compiled** from this file — never hand-edited, never a symlink; edit `CLAUDE.md` and the `Stop` hook recompiles both mirrors. OpenCode reads the same compiled `AGENTS.md` (its loader prefers it over `CLAUDE.md`) plus its own `.opencode/` layer, compiled by `build-opencode.mjs`: agents (`.opencode/agent/*.md`), commands (`/flat-name`), skill symlinks, and `opencode.jsonc`, where guarded-file and non-gitter Git-write denies remain pinned. Every `.claude/agents/*.md` role compiles for Codex and OpenCode; only registered `gitter` retains Git-write authority. The active main Codex chat may use the user-authorized fallback under § Process when gitter is unavailable. After a Bash-driven write bypassed the hook:
+`CLAUDE.md` and `AGENTS.md` are one shared contract; runtime wrappers translate mechanics, never identity or protocol. `AGENTS.md` is **compiled** from this file — never hand-edited, never a symlink; edit `CLAUDE.md` and the `Stop` hook recompiles both mirrors. OpenCode reads the same compiled `AGENTS.md` (its loader prefers it over `CLAUDE.md`) plus its own `.opencode/` layer, compiled by `pfm opencode build`: agents (`.opencode/agent/*.md`), commands (`/flat-name`), skill symlinks, and `opencode.jsonc`, where guarded-file and non-gitter Git-write denies remain pinned. Every `.claude/agents/*.md` role compiles for Codex and OpenCode; only registered `gitter` retains Git-write authority. The active main Codex chat may use the user-authorized fallback under § Process when gitter is unavailable. After a Bash-driven write bypassed the hook:
 
 ```bash
 pfm codex build . && pfm codex check .
-node .claude/scripts/build-opencode.mjs generate && node .claude/scripts/build-opencode.mjs doctor
+pfm opencode build . && pfm opencode doctor .
 ```
 
-`pfm codex build` is the SINGLE writer of the Codex mirror; the legacy repo-local JS compiler is retired — `templates/project/scripts/build-codex.mjs` lives only in the adopter blueprint.
+`pfm codex build` and `pfm opencode build` are the SINGLE writers of their mirrors; `templates/project/scripts/build-codex.mjs` lives only in the adopter blueprint.
 
 ## Path vars
 
@@ -58,7 +74,7 @@ node .claude/scripts/build-opencode.mjs generate && node .claude/scripts/build-o
 - **The judge is never the thing being judged:** read the artifact from disk, never trust a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran.
 - Surgical changes: every changed line traces to the task; fix broken things you hit; dead code/references/deps — remove entirely, end to end (including `README.md`, `BLUEPRINT.md`, `SETUP.md`, `refresh-map.json`).
 - NO duplication: grep for the existing rule/section/script and reference it; never keep a near-copy that will drift.
-- **Twins move together:** a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass and logs to `release.md`; a customization only this repo wants logs to `drift.md`. Unsure → ask.
+- **Twins move together:** a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass, its commit message carrying the adopter-facing change; a customization only this repo wants stays local. Unsure → ask.
 - Right-size and finish: simplest thing that works, no speculative abstractions, no stubs or deferred TODOs.
 
 ### Engine code (Go / TS / JS / Python)
@@ -72,9 +88,9 @@ node .claude/scripts/build-opencode.mjs generate && node .claude/scripts/build-o
 
 - **Git writes use registered gitter.** Every other subagent is read-only. When gitter is unavailable, only the active main Codex chat may perform scoped Git writes, and only after explicit user authorization in the current turn. Publication still requires the separate explicit in-turn request above.
 - **Never commit broken code** — tests pass before the commit.
-- **Code waves build inside the fence** — a git worktree under `.worktrees/{train}/`, every build/test through `dev.sh iso` (the `infra/` container: fresh machine, own HOME, worktree mounted; design: `docs/dev/isolated-dev-foundation.md`). The live checkout, the host's `~/.local/bin`, and the real `$HOME` are never dev targets. Markdown-only waves (templates/docs/prompts) land on `develop` directly. A fenced wave closes in order: QA pass → orchestrator review with issues fixed → authorized Git writer merges to `develop` → the host mirror build (`make host-install` from `pfm/` + `pfm install --yes`). The installed wave commands (`/wave:refine`, `/wave:live`, `/wave:walker`, `/wave:walker-invariants`, `/wave:ccc`) are rewired to this cast — `dev` builds, `qa` tests, `$git` commits and merges; a task touching `.claude/**`, any `CLAUDE.md`, or `templates/**` routes to `/pfm`. Their `templates/project/commands/wave/` twins keep the adopter pipeline.
-- **Guarded files:** a PreToolUse hook gates `.claude/**` and every `CLAUDE.md` behind `/pfm` plus a session that has read `.claude/commands/quality/prompt.md`; the deny message carries the unlock steps. Never route around it by disabling the hook.
-- **Milestone = compact point:** at every milestone, checkpoint the plan to a `tmp/` file, then give yourself a compact before the next phase (a held turn arms an idle-fired self-inject instead).
+- **Code flights build inside the fence** — a git worktree under `.worktrees/{flight}/`, every build/test through `dev.sh iso` — an executor runs only its affected tests, the full suite is the gate's (the `infra/` container: fresh machine, own HOME, worktree mounted; design: `docs/dev/isolated-dev-foundation.md`). The live checkout, the host's `~/.local/bin`, and the real `$HOME` are never dev targets. Markdown-only flights (templates/docs/prompts) land on `develop` directly. A fenced flight closes in order: one `flights-lander` per project (checks, one review of the whole diff, adversarial tests, its own fixes) → the landing's checks → authorized Git writer commits to `develop` → the host mirror build (`make host-install` from `pfm/` + `pfm install --yes`). The flights commands (`/flights:spec`, `/flights:orchestrate-nested`, `/flights:orchestrate-live`, `/flights:orchestrate-cross-harness`, `/flights:audit`) run here with this cast — the flight executors build and test per `/pfm-testing-manual` (`.claude/commands/pfm-testing-manual.md`), `flights-lander` gates, `gitter` commits; a task touching `.claude/**`, any `CLAUDE.md`, or `templates/**` routes to `/pcm`.
+- **Guarded files:** a PreToolUse hook gates `.claude/**` and every `CLAUDE.md` behind `/pcm` plus a session that has read `.claude/commands/quality/prompt.md`; the deny message carries the unlock steps. Never route around it by disabling the hook.
+- **Milestone = compact point:** at every milestone, checkpoint the plan to a file, then give yourself a compact before the next phase (a held turn arms an idle-fired self-inject instead).
 - **AskUserQuestion is the user's whole screen** — context travels inside the question text; each round simpler and more concrete, never a rephrase.
 - When in doubt, do the right thing — correct over convenient, even at re-architecting cost.
 
@@ -98,7 +114,7 @@ Tiers, effort, and delegation posture live in the fleet prompt's § Model Select
 
 **The laws:**
 
-- Sync-dispatch: all sibling agents of a wave go in ONE message; a missing report is a loud, named coverage hole.
+- Sync-dispatch: all sibling agents of a round go in ONE message; a missing report is a loud, named coverage hole.
 - Map before dispatch: an invariant enforced across layers (Go + shell + prompt) is tracer-mapped closed-world BEFORE the build dispatch; the spec carries every enumerated door, never "find the rest" — an invariant enforced at N−1 of its N doors is a violation at the missing door.
 - An empty enumeration is never a verdict: "looked and found nothing" ≠ "failed to look" — the parent reports which.
 - Reconcile telemetry: agents dispatched vs reports received must match, and the count appears in the report.

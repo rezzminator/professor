@@ -138,7 +138,7 @@ Same eight base surfaces, the same optional VS Code surface, and the same rc-97 
 
 ## 3. Full Professor adoption — the discipline layer
 
-Everything above, plus `CLAUDE.md`, per-project agents, commands, docs scaffolding, and the whole pipeline. `pfm init` scaffolds the project layer once, with template tokens intact and per-file baseline pins; the Claude-guided interview then adapts those local files in place. Nothing here duplicates what paths 1/2 already do.
+Everything above, plus `CLAUDE.md`, per-project agents, commands, docs scaffolding, and the whole pipeline. `pfm init` scaffolds the project layer once, with template tokens intact and per-file baseline pins; the Claude-guided interview then records your answers in `.professor/manifest.json` `tokens`, runs `pfm init --render` to fill the install-time tokens once, and adapts the roster and structure of those local files in place. Updates never re-render. Nothing here duplicates what paths 1/2 already do.
 
 **Prerequisites:** Claude Code CLI, logged in. A git repository — if the project isn't one, Claude asks before `git init`. `jq` — required by the host installer and several hooks (`brew install jq` / `apt install jq`). `rumdl` — the markdown lint/format engine behind `/quality:md-forlint` and the format hook; `pfm install` provisions it, and `pfm doctor` carries its row. Optional, per opt-in: `tmux` (host fleet), `gh`/`glab` (git-host skill). Ten to fifteen minutes of your attention.
 
@@ -150,7 +150,7 @@ pfm init .
 claude
 ```
 
-Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install interview** section. Claude interviews you — structure, stack, optional roles, persona, and host extras — fills the scaffolded local files, deploys and pins per-project agents, shows the full write plan, waits for you to type **"go"**, then applies it. Ten to fifteen minutes, commits nothing.
+Tell Claude to read the printed `docs/SETUP.md` path and execute its **Install interview** section. Claude interviews you — structure, stack, optional roles, persona, and host extras — shows the full write plan, waits for you to type **"go"**, then applies it: records your answers in `.professor/manifest.json`, fills the install-time tokens once through `pfm init --render`, adapts the scaffolded local files to your roster and structure, and deploys and pins per-project agents. Ten to fifteen minutes, commits nothing.
 
 **Guarantees, stated by the installer up front:**
 
@@ -199,7 +199,7 @@ Each tier has one source of truth and one update mechanism:
 | Tier | Truth | Staying current |
 | ----------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. It rolls back only on a `pfm doctor` failure (a required dependency, launcher, hooks, host overlay, global agents, config, or database state); pre-existing warnings never block it, and it reports each warning the update newly introduced. |
-| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local files | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm update check` reports template deltas; you review and hand-apply each wanted change, then pin it. |
+| Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local files | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm doctor --project-updates` reports template deltas with the upstream diff under each `UPDATED` row; you carry what applies into the local file, keep your own edits, then pin it. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit them by hand. Rebuild or verify them with their compiler, including `pfm codex build` and `pfm codex check`. |
 
 A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.md`, `.codex/**`, `.opencode/**` are generated, never tracked (see [`.gitignore`](.gitignore)). Opening it in Claude Code first generates them via the `Stop` hook; opening it in Codex or OpenCode before that first Claude turn needs `pfm codex build .` and `pfm opencode build .` run once by hand. `pfm install` compiles the machine-global `.toml` twins the same way, into pfm's own generated directory — never into the clone.
@@ -208,8 +208,8 @@ A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.
 
 The project flow is deliberately non-destructive:
 
-1. Run `pfm update check` for a report only. Bare `pfm update` performs the machine update first and appends the same report when run inside a managed project.
-2. For each `UPDATED` item, inspect the printed blueprint `git diff`, decide what belongs in the local file, and apply it by hand. `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` each print their own adoption or cleanup action.
+1. Run `pfm doctor --project-updates` for a report only (exit 0 clean, 1 review, 3 failure). Bare `pfm update` performs the machine update first and appends the same report when run inside a managed project.
+2. For each `UPDATED` item, read the diff printed under the row — the intent of the upstream change — carry what applies into the local file, and keep the project's own edits. `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` each print their own adoption or cleanup action.
 3. Accept a reviewed file with `pfm update pin <local>`. Adopt a new template mapping with `pfm update pin --template <template> <local>`; forget an obsolete mapping with `pfm update drop <local>`; silence a template you will never take with `pfm update ignore <template>...`.
 4. Rebuild opted-in engine mirrors from the resulting local source files.
 

@@ -73,7 +73,7 @@ install)
 EOF
   # 2. pfm install exactly as a user runs it from the clone, Claude Code themes included: the
   #    seats wear the professor palettes the presenter's machines wear.
-  #    ~/.professor is where pfm expects the blueprint clone (pfm update check,
+  #    ~/.professor is where pfm expects the blueprint clone (pfm doctor --project-updates,
   #    the global fan-out); on a real host it IS the checkout, here it links to the mount.
   [ -e "$HOME/.professor" ] || ln -s "$SRC" "$HOME/.professor"
   #    The harvester's Python sidecar can refuse a platform (a pinned CUDA wheel on

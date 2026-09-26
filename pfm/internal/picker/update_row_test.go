@@ -33,7 +33,7 @@ func TestProfessorUpdatePromptExplainsThenAsksBeforeUpdating(t *testing.T) {
 		"pfm version", "EVERY release-notes file after the installed version through v0.61.2",
 		"git show v0.61.2:releases/vX.Y.Z.md", "#### → For:", "one checklist",
 		"#### → Stop:", "before update", "after update", "per project",
-		"pfm update check", "#### For:", "pfm update pin", "#### → For adopters",
+		"pfm doctor --project-updates", "keeping the project's own edits", "#### For:", "pfm update pin", "#### → For adopters",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("update prompt %q lacks %q", prompt, want)

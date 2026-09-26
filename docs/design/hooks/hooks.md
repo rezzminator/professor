@@ -127,7 +127,7 @@ Each name matches from the `pfm` or `cc-fleet` binary, at any path (`retiredHook
 - **pfm owns** exactly the hooks in `claudeHookTemplates` and the retired shapes above. It may add, rewrite, deduplicate and remove them. Its record is the ownership ledger.
 - **The operator owns** every other hook in a settings file: a notification script, a memory sync, anything hand-wired. pfm never rewrites, reorders or removes one, and doctor never reports one. The Codex writer's contract says the same (`pfm/internal/installer/codex_hooks.go:16`).
 - **An operator's hook that calls pfm stays the operator's.** A hook naming a subcommand this binary implements, such as `pfm doctor`, is never treated as residue (`pfm/internal/installer/settings.go:423-436`). Only an unknown subcommand in pfm's own shape is.
-- **Project-tier hooks are the adopter's.** pfm scaffolds them once; later changes flow through `pfm update check` and a hand-applied diff, never a rewrite.
+- **Project-tier hooks are the adopter's.** pfm scaffolds them once; later changes flow through `pfm doctor --project-updates` and an upstream diff the project ports by judgment, never a rewrite.
 
 ## The pfm doctor check
 

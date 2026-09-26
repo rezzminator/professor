@@ -124,9 +124,9 @@ check_express() { # five independently counted install-fidelity beats on the ado
   fi
 
   out=/tmp/verify-express-update.json
-  (cd "$root" && pfm update check --json) >"$out" 2>&1; rc=$?
+  (cd "$root" && pfm doctor --project-updates --json) >"$out" 2>&1; rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail express-update "pfm update check --json exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+    fail express-update "pfm doctor --project-updates --json exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
   else
     jq -e '.counts.UPDATED == 0 and .counts.NEW == 0 and .counts["GONE-UPSTREAM"] == 0 and .counts["LOCAL-DELETED"] == 0 and .reviewRequired == 0 and .terminal == "clean"' \
       "$out" >/dev/null 2>"$json_error"; json_rc=$?

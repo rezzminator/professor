@@ -1,6 +1,6 @@
 ---
 name: pfm
-description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm update check|adopt|pin|ignore|drop`), `pfm codex build|check`, `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → /pcm.
+description: Operates the fleet CLI — `pfm` verb map, the adopter update flow (`pfm doctor --project-updates`, `pfm update adopt|pin|ignore|drop`), `pfm codex build|check`, `pfm install --yes`, `pfm doctor`, chat/harvest MCP-vs-shell routing, config location; load for any `pfm` verb or question. Not for editing framework files → /pcm.
 argument-hint: [verb|question]
 ---
 
@@ -26,8 +26,8 @@ Operator verbs:
 - heal: report or repair wedged Codex history projections
 - install: wire the self-contained host integration (`--yes` non-interactive)
 - uninstall: remove it
-- update: bare form updates the binary from its source clone; `check|adopt|pin|ignore|drop` manage this project's template baseline
-- init: scaffold project templates once and pin their baselines (`pfm init [dir] [--force]`)
+- update: bare form updates the binary from its source clone; `adopt|pin|ignore|drop` manage this project's template baseline (`pfm doctor --project-updates` reports it)
+- init: scaffold project templates once and pin their baselines (`pfm init [dir] [--force]`); `pfm init --render [dir]` fills install-time tokens once from `.professor/manifest.json`
 - config: `init | show | validate` machine configuration
 - doctor: fleet database and jail health — exit 0 clean, 1 warnings, 3 failures
 - version: print the pfm version
@@ -38,12 +38,12 @@ Wiring verbs (hooks and services call these; you rarely type them): name-sync, s
 
 The blueprint never rewrites a project file after `pfm init`; every upstream change is hand-applied.
 
-1. `pfm update check` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, or `LOCAL-DELETED`, with the exact `git diff` command to read per item; it writes nothing. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-check.
-2. Read each printed diff. Decide per file what belongs locally.
-3. Hand-apply what belongs through `/pcm` (the guarded framework-edit flow).
+1. `pfm doctor --project-updates` — reports each pinned file as `current`, `ignored`, `UPDATED`, `NEW`, `GONE-UPSTREAM`, or `LOCAL-DELETED`, and prints under each `UPDATED` row the upstream diff since its pin; it writes nothing and exits 0 clean, 1 review, 3 failure. `FAILED — .professor/baseline.json not found` means the install predates scaffolding: run `pfm update adopt [--at REF]` once, then re-run the report.
+2. Read what upstream changed in each printed diff — the intent of the change — and decide per file what applies locally; install-time values are never read on update.
+3. Port what applies through `/pcm`, keeping the project's own edits (the guarded framework-edit flow).
 4. Advance the pin: `pfm update pin <local>...` (or `--all`); a `NEW` template you adopt: `pfm update pin --template <template> <local>`; one you will never take: `pfm update ignore <template>...` (`--undo` reverses); a `GONE-UPSTREAM` or `LOCAL-DELETED` file you keep or forget: `pfm update drop <local>...`.
 
-`pfm update` (bare) advances the source clone to the latest release tag (or `--to vX.Y.Z`), rebuilds and installs the binary, runs `pfm doctor` (rolling back on failure), then prints this project's `update check` report — start step 1 from there.
+`pfm update` (bare) advances the source clone to the latest release tag (or `--to vX.Y.Z`), rebuilds and installs the binary, runs `pfm doctor` (rolling back on failure), then prints the same report `pfm doctor --project-updates` prints for this project — start step 2 from there.
 
 ## Codex mirror
 

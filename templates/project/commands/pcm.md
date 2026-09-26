@@ -102,7 +102,7 @@ Classify FIRST — before any edit. The classification decides the source of tru
 - **Framework change** (an improvement any Professor adopter could use) → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates; its commit message names the adopter-facing change — the blueprint's release writes its notes from the diff and those messages. Never put project-specific behavior into the blueprint.
 - **Project customization** → edit this project's local file directly. That local file is the source of truth; it is not regenerated from the template.
 - **Engine mirror** → never edit the generated output by hand. Change its local Claude source, then run `pfm codex build` and `pfm codex check` (or the owning compiler for another engine).
-- **Upstream project-template delta** → `/pfm` § Adopter update flow: `pfm update check` prints per file the exact `git diff` to read; hand-apply the parts that belong locally through this command's change flow, then `pfm update pin <local>` (accept), `pfm update ignore <template>` (never adopt), or `pfm update drop <local>` (forget). No baseline yet (the install predates `pfm init`): `pfm update adopt [--at <ref>]` once.
+- **Upstream project-template delta** → `/pfm` § Adopter update flow: `pfm doctor --project-updates` prints under each changed file the upstream diff since its pin; port what applies through this command's change flow, keeping the project's own edits, then `pfm update pin <local>` (accept), `pfm update ignore <template>` (never adopt), or `pfm update drop <local>` (forget). No baseline yet (the install predates `pfm init`): `pfm update adopt [--at <ref>]` once.
 
 There is no local-stopgap-to-regeneration ceremony. A framework fix and a project customization are separate changes in their respective sources of truth.
 
@@ -275,7 +275,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 - **Stale names:** grep all CLAUDE.md files and agents for old/renamed project names or typos
 - **Package managers:** each roster project's lock file (`{PROJECT_PKG_MGR}` per project) present
 - **Codex mirror:** `pfm codex check` exits 0 — report its output verbatim; a non-zero exit names each generated Codex artifact (AGENTS.md, `.codex/`, `$HOME/.codex/`) that is MISSING, STALE, ORPHANed, or CONFLICTing with an unmarked file
-- **Baseline:** `pfm update check` runs (a `.professor/baseline.json` exists) — report its counts verbatim; FAILED output is a finding, never "current"
+- **Baseline:** `pfm doctor --project-updates` runs (a `.professor/baseline.json` exists) — report its counts verbatim; FAILED output (exit 3) is a finding, never "current"
 
 ### `cross-refs` — The glue between domains
 

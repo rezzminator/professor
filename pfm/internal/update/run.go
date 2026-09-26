@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	checkAction    = "check"
 	doctorCommand  = "doctor"
 	updateCommand  = "update"
 	installCommand = "install"
@@ -43,7 +42,7 @@ var (
 func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) int {
 	if len(args) > 0 {
 		switch args[0] {
-		case checkAction, "adopt", "pin", "ignore", "drop":
+		case "adopt", "pin", "ignore", "drop":
 			runtime, err := config.OptionalRuntime(runtimes)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
@@ -54,7 +53,7 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	}
 	flags := cli.NewFlagSet(
 		updateCommand,
-		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop} [options]",
+		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {adopt|pin|ignore|drop} [options]",
 		stderr,
 	)
 	target := flags.String("to", "", "target semantic-version tag")

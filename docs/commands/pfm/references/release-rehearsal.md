@@ -67,7 +67,7 @@ The driver calls Codex directly because `pfm headless exec --engine codex` route
 
 Judge the result, never the model's verdict alone: re-run each claimed-clean step's check yourself through `infra/fence/release-rehearsal.sh exec`, and replay each FRICTION command before routing it. A missing `result.json`, a schema-invalid one, or a non-zero driver exit is BLOCKED — the rehearsal failed to run, which is never CLEAN.
 
-Stage B is CLEAN only when `git -C ~/.professor status --porcelain` is empty and every `UPDATED` or `NEW` file pinned during Stage B passes the SETUP line-based token and KEEP/INSTALL marker checks against its rendered `theirs`: a local line carrying a brace token must match an identical line in `theirs`, and no install decision marker may remain. Any unmatched token-bearing local line or leftover marker is FRICTION, even when `pfm doctor` and `pfm update check` report clean.
+Stage B is CLEAN only when `git -C ~/.professor status --porcelain` is empty, `pfm doctor --project-updates` in `/root/project` ends `clean` with exit 0, no file ported during Stage B lost a line the project had carried, and no ported line carries an install-time token registered in `docs/PLACEHOLDERS.md`. A lost project line or a registered install-time token in a ported file is FRICTION, even when `pfm doctor` reports clean.
 
 ## Shared brief preamble
 
@@ -83,7 +83,7 @@ Prepended to both briefs, `{CONTAINER}` / `{STABLE}` / `v{NEW}` substituted:
 >
 > 1. Install `pfm` per INSTALL.md § Build from source, into `~/.professor`, then its preview and apply.
 > 2. Adopt Professor on a project: create `/root/project` as a git repository holding a minimal program and one commit, run `pfm init` there, then execute `docs/SETUP.md`'s Install interview yourself — you are both the assistant running it and the user answering it — and commit the result.
-> 3. Run `pfm doctor`, and `pfm update check` inside `/root/project`; record both.
+> 3. Run `pfm doctor`, and `pfm doctor --project-updates` inside `/root/project`; record both.
 
 ## Brief B — update to the candidate
 
@@ -91,6 +91,6 @@ Prepended to both briefs, `{CONTAINER}` / `{STABLE}` / `v{NEW}` substituted:
 
 > A new Professor release, v{NEW}, is published. The user opened the update chat from `pfm ls`'s **PROFESSOR UPDATE** banner in the source clone `~/.professor`, and it opens with the update prompt quoted at the end — work it as written, running its commands from `~/.professor` (`docker exec {CONTAINER} bash -lc 'cd ~/.professor && …'`), the directory that chat starts in. The user approves the overview you present: record the overview and its checklist as your first step's `note`, then continue past the approval gate. Where a step needs docs, read them at v{NEW} (`git -C ~/.professor show v{NEW}:INSTALL.md`, `docs/SETUP.md` at v{NEW}) — the installed copy is the old release.
 >
-> Then bring the adopted project `/root/project` current per `docs/SETUP.md` § Staying current at v{NEW}: run `pfm update check` there and resolve every item it reports. Finish with `pfm doctor`, and `pfm update check` in `/root/project` holding no item you have not resolved. List in `release_notes_read` every release-notes file you read.
+> Then bring the adopted project `/root/project` current per `docs/SETUP.md` § Staying current at v{NEW}: run `pfm doctor --project-updates` there and resolve every item it reports: for each `UPDATED` row, carry what applies from the diff under it into the local file, keep the project's own edits, then `pfm update pin <local>`. Finish with `pfm doctor`, and `pfm doctor --project-updates` in `/root/project` ending `clean` with exit 0. List in `release_notes_read` every release-notes file you read.
 >
 > The update prompt: {UPDATE_PROMPT}

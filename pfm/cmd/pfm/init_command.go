@@ -13,13 +13,14 @@ import (
 )
 
 func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := cli.NewFlagSet(initCommand, "usage: pfm init [dir] [--force]", stderr)
+	flags := cli.NewFlagSet(initCommand, "usage: pfm init [dir] [--force] | pfm init [dir] --render", stderr)
 	force := flags.Bool("force", false, "overwrite colliding scaffold files")
+	render := flags.Bool("render", false, "render install-time tokens from .professor/manifest.json tokens")
 	positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
-	if len(positional) > 1 {
+	if len(positional) > 1 || (*render && *force) {
 		flags.Usage()
 		return 2
 	}
@@ -42,6 +43,9 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		fmt.Fprintf(stderr, "pfm init: %v\n", err)
 		return 1
 	}
+	if *render {
+		return runInitRender(source, target, stdout, stderr)
+	}
 	if code, refused := refuseRescaffold(*force, target, stderr); refused {
 		return code
 	}
@@ -54,9 +58,32 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	fmt.Fprintf(stdout, "deployed %d project files; baseline: %s\n", deployed, professor.BaselinePath(target))
 	fmt.Fprintf(
 		stdout,
-		"open Claude here and follow %s § Install interview — it fills tokens and deploys the per-project files\n",
+		"open Claude here and follow %s § Install interview — it records your answers in .professor/manifest.json, "+
+			"runs pfm init --render and deploys the per-project files\n",
 		filepath.Join(source, "docs", "SETUP.md"),
 	)
+	return 0
+}
+
+// runInitRender dispatches --render: it never touches refuseRescaffold or
+// Scaffold, and it prints the terminal summary line RenderScaffold itself
+// does not.
+func runInitRender(source, target string, stdout, stderr io.Writer) int {
+	rendered, left, err := professor.RenderScaffold(source, target, stdout)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm init --render: %v\n", err)
+		return 1
+	}
+	if left > 0 {
+		fmt.Fprintf(
+			stdout,
+			"rendered %d files; %d files still carry install-time tokens (LEFT above)\n",
+			rendered,
+			left,
+		)
+	} else {
+		fmt.Fprintf(stdout, "rendered %d files; no install-time token left\n", rendered)
+	}
 	return 0
 }
 
@@ -75,7 +102,7 @@ func refuseRescaffold(force bool, target string, stderr io.Writer) (int, bool) {
 		pinned = baseline.PinSummary()
 	}
 	fmt.Fprintf(stderr, "pfm init: %s is already scaffolded (%s exists, %s) — "+
-		"a second init would rewrite the baseline; run `pfm update check` to see upstream changes, "+
+		"a second init would rewrite the baseline; run `pfm doctor --project-updates` to see upstream changes, "+
 		"or `pfm init --force` to re-scaffold and re-pin\n", target, professor.BaselinePath(target), pinned)
 	return 2, true
 }

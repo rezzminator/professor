@@ -5,7 +5,7 @@ exists $WORK/project/.professor/baseline.json
 
 # A fresh project is converged and the report still names all four state classes.
 cd $WORK/project
-exec jail-pfm-rc 3 update check
+exec jail-pfm-rc 1 doctor --project-updates
 stdout 'UPDATED[ ]+[0-9]+'
 stdout 'NEW[ ]+[0-9]+'
 stdout 'GONE-UPSTREAM[ ]+[0-9]+'

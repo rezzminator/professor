@@ -45,10 +45,12 @@ var (
 )
 
 type projectReportItem struct {
-	Status   projectStatus `json:"status"`
-	Local    string        `json:"local,omitempty"`
-	Template string        `json:"template"`
-	Pin      FilePin       `json:"pin,omitempty"`
+	Status    projectStatus `json:"status"`
+	Local     string        `json:"local,omitempty"`
+	Template  string        `json:"template"`
+	Pin       FilePin       `json:"pin,omitempty"`
+	Diff      string        `json:"diff,omitempty"`
+	DiffError string        `json:"diffError,omitempty"`
 }
 type projectReport struct {
 	Root     string
@@ -64,26 +66,6 @@ type projectTerminalEnvelope struct {
 
 func (r projectReport) reviewRequired() int {
 	return r.Counts[projectUpdated] + r.Counts[projectNew] + r.Counts[projectGoneUpstream] + r.Counts[projectLocalDeleted]
-}
-
-func renderProjectCheck(root, home string, jsonOutput bool, stdout io.Writer) int {
-	report, err := buildProjectReport(root, home)
-	if err != nil {
-		writeProjectFailure(stdout, jsonOutput, err)
-		return 1
-	}
-	if jsonOutput {
-		if err := writeProjectJSON(stdout, report); err != nil {
-			writeProjectFailure(stdout, false, err)
-			return 1
-		}
-	} else {
-		writeProjectHuman(stdout, report)
-	}
-	if report.reviewRequired() != 0 {
-		return 3
-	}
-	return 0
 }
 
 func buildProjectReport(root, home string) (projectReport, error) {
@@ -234,16 +216,35 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 						filepath.Join(r.Store.Templates, filepath.FromSlash(item.Template)),
 					)
 				} else {
-					fmt.Fprintf(
-						stdout,
-						"      review: git -C %s diff %s..%s -- templates/%s\n",
-						r.Store.Root,
-						item.Pin.PinnedSHA,
-						r.Store.SHA,
-						item.Template,
-					)
+					switch {
+					case item.DiffError != "":
+						fmt.Fprintf(stdout, "      upstream change UNREADABLE — %s\n", item.DiffError)
+					case strings.TrimSpace(item.Diff) == "":
+						fmt.Fprintf(
+							stdout,
+							"      upstream change EMPTY — git shows no difference from the pin; compare by hand: diff %s %s\n",
+							filepath.Join(r.Root, filepath.FromSlash(item.Local)),
+							filepath.Join(r.Store.Templates, filepath.FromSlash(item.Template)),
+						)
+					default:
+						fmt.Fprintf(
+							stdout,
+							"      upstream change: git -C %s diff %s -- templates/%s\n",
+							r.Store.Root,
+							item.Pin.PinnedSHA,
+							item.Template,
+						)
+						for _, line := range strings.Split(strings.TrimRight(item.Diff, "\n"), "\n") {
+							fmt.Fprintf(stdout, "      %s\n", line)
+						}
+					}
 				}
-				fmt.Fprintf(stdout, "      then apply by hand and: pfm update pin %s\n", item.Local)
+				fmt.Fprintf(
+					stdout,
+					"      port what applies into %s, keep the project's own edits, then: pfm update pin %s\n",
+					item.Local,
+					item.Local,
+				)
 			case projectNew:
 				fmt.Fprintf(
 					stdout,
@@ -270,11 +271,11 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 			}
 		}
 	}
-	if n := r.reviewRequired(); n != 0 {
-		fmt.Fprintf(stdout, "REVIEW REQUIRED — %d items; nothing was written.\n", n)
-	} else {
-		fmt.Fprintln(stdout, "clean")
+	terminal := projectTerminal(r)
+	if terminal != "clean" {
+		terminal += "; nothing was written."
 	}
+	fmt.Fprintln(stdout, terminal)
 }
 
 func writeProjectJSON(stdout io.Writer, r projectReport) error {
@@ -291,11 +292,7 @@ func writeProjectJSON(stdout io.Writer, r projectReport) error {
 		ReviewRequired int                   `json:"reviewRequired"`
 		Terminal       string                `json:"terminal"`
 	}{r.Root, blueprintJSON{r.Baseline.Blueprint.SHA, r.Store.SHA}, r.Counts, r.Items, r.Baseline.Ignored, r.reviewRequired(), ""}
-	if payload.ReviewRequired == 0 {
-		payload.Terminal = "clean"
-	} else {
-		payload.Terminal = fmt.Sprintf("REVIEW REQUIRED — %d items", payload.ReviewRequired)
-	}
+	payload.Terminal = projectTerminal(r)
 	encoder := json.NewEncoder(stdout)
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(payload); err != nil {
@@ -332,7 +329,7 @@ func runPostUpdate(rootFlag string, jsonOutput bool, stdout io.Writer, runtime c
 
 // writeProjectUnmanaged prints the successful post-update terminal for a source clone outside a managed project.
 func writeProjectUnmanaged(stdout io.Writer, jsonOutput bool) {
-	terminal := "NOT-MANAGED — no .professor/baseline.json at or above this directory (expected in the Professor source clone); run `pfm update check` inside each adopted project"
+	terminal := "NOT-MANAGED — no .professor/baseline.json at or above this directory (expected in the Professor source clone); run `pfm doctor --project-updates` inside each adopted project"
 	if jsonOutput {
 		if err := json.NewEncoder(stdout).Encode(projectTerminalEnvelope{Terminal: terminal}); err != nil {
 			fmt.Fprintf(stdout, "NOT-MANAGED — encode project report: %v\n", err)
@@ -652,7 +649,7 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 			ref,
 		)
 	}
-	fmt.Fprintln(stdout, "next: pfm update check")
+	fmt.Fprintln(stdout, "next: pfm doctor --project-updates")
 	return 0
 }
 

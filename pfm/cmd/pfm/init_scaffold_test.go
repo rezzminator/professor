@@ -94,7 +94,8 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		source,
 		"docs",
 		"SETUP.md",
-	) + " § Install interview — it fills tokens and deploys the per-project files"
+	) + " § Install interview — it records your answers in .professor/manifest.json, " +
+		"runs pfm init --render and deploys the per-project files"
 	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) {
 		t.Fatalf("init output=%q", stdout.String())
 	}
@@ -178,6 +179,7 @@ func TestInitRefusesASecondScaffoldWithoutForce(t *testing.T) {
 		t.Fatalf("second runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "is already scaffolded") ||
+		!strings.Contains(stderr.String(), "pfm doctor --project-updates") ||
 		!strings.Contains(stderr.String(), "pfm init --force") {
 		t.Fatalf("refusal stderr=%q", stderr.String())
 	}
@@ -200,6 +202,89 @@ func TestInitRefusesASecondScaffoldWithoutForce(t *testing.T) {
 	}
 	if got := len(baseline.Files); got == 0 {
 		t.Fatalf("forced re-init did not re-pin: %#v", baseline.Files)
+	}
+}
+
+// TestInitRenderFillsTokensFromManifestAnswers pins the command-level render
+// happy path (0-contracts § D): --render substitutes every supplied token
+// into every scaffolded file that still carries it, reports no leftovers
+// when every registered install-time token was supplied, and never touches
+// refuseRescaffold or Scaffold (the second plain-init refusal below would
+// otherwise fire).
+func TestInitRenderFillsTokensFromManifestAnswers(t *testing.T) {
+	source := newScaffoldStoreFixture(t)
+	home := t.TempDir()
+	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	var stdout, stderr bytes.Buffer
+	if code := runInit([]string{target}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+
+	manifestPath := filepath.Join(target, ".professor", "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, []byte(`{"tokens":{"TOKEN":"Acme"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runInit([]string{"--render", target}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runInit(--render) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "rendered 3 files; no install-time token left") {
+		t.Fatalf("render output=%q", stdout.String())
+	}
+	commandRaw, err := os.ReadFile(filepath.Join(target, ".claude", "commands", "dev.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(commandRaw), "Acme") || strings.Contains(string(commandRaw), "{TOKEN}") {
+		t.Fatalf("rendered command file=%q, want {TOKEN} replaced by Acme", commandRaw)
+	}
+
+	// The usage's `pfm init [dir] --render` order: the flag after the
+	// directory is still the flag (ParseFlagsAnywhere), never a second
+	// positional — the second run renders nothing, the files already changed.
+	stdout.Reset()
+	stderr.Reset()
+	if code := runInit([]string{target, "--render"}, &stdout, &stderr, runtime); code != 0 ||
+		!strings.Contains(stdout.String(), "rendered 0 files; no install-time token left") {
+		t.Fatalf("runInit(dir, --render) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+// TestInitRenderRejectsForceAndTwoPositionals pins the "usage" Done-when
+// row: --render --force and more than one positional are both usage errors.
+func TestInitRenderRejectsForceAndTwoPositionals(t *testing.T) {
+	source := newScaffoldStoreFixture(t)
+	home := t.TempDir()
+	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+		t.Fatal(err)
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+
+	var stdout, stderr bytes.Buffer
+	if code := runInit([]string{"--render", "--force", t.TempDir()}, &stdout, &stderr, runtime); code != 2 {
+		t.Fatalf("runInit(--render --force) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runInit(
+		[]string{"--render", t.TempDir(), t.TempDir()}, &stdout, &stderr, runtime,
+	); code != 2 {
+		t.Fatalf(
+			"runInit(--render, two positionals) code=%d stdout=%q stderr=%q",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 
@@ -247,6 +332,10 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			mode:    0o600,
 		},
 		"templates/project/docs-agents/_index.md": {content: "# Agents\n", mode: 0o600},
+		"docs/PLACEHOLDERS.md": {
+			content: "# Placeholders\n\nInstall-time: {TOKEN}.\n\n## Runtime metavariables\n\nRuntime: {SHA}.\n",
+			mode:    0o600,
+		},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))

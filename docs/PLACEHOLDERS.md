@@ -4,6 +4,8 @@
 
 Every regeneration agent reads this file and applies it uniformly. One canonical token per concept — never invent a synonym.
 
+`pfm init --render` substitutes every token registered above § Runtime metavariables from `.professor/manifest.json` `tokens`, once at install, only in scaffolded files still as scaffolded; it finds the runtime list by that heading, so the heading text starts `## Runtime metavariables`; a multi-project install's per-roster-entry tokens and pattern blocks stay the interview's; no update ever re-renders.
+
 ## Identity
 
 | Source value | Placeholder |

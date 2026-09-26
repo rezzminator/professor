@@ -4,7 +4,7 @@ Executed inside `/pfm:release prepare` (step 3). Re-derives the blueprint from t
 
 **Scope (incremental):** `templates/refresh-map.json` maps every template to its live source(s) + the SHA-256 of each as of the last sync. `scripts/refresh-scope.sh scan` proves unchanged sources untouched — their templates are skipped; re-derive only CHANGED templates; UNMAPPED-LIVE files get a mapping ruling. `curated` templates have no live source and are never auto-derived. `refresh-scope.sh regen` re-baselines the hashes at release end.
 
-**Update mechanism context:** Adopters install from a tagged blueprint. `pfm init` scaffolds project templates once and records per-file template pins in `.professor/baseline.json`; the local project files then own truth. `pfm update check` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` mappings without writing. The session reviews each printed template diff, hand-applies wanted changes, and advances accepted pins. Machine-global symlinks update through the blueprint clone, and engine mirrors rebuild from local sources.
+**Update mechanism context:** Adopters install from a tagged blueprint. `pfm init` scaffolds project templates once and records per-file template pins in `.professor/baseline.json`; the local project files then own truth. `pfm doctor --project-updates` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` mappings without writing, the upstream diff printed under each `UPDATED` row. The session reads each diff for its intent, carries what applies into the local file while keeping the project's own edits, and advances accepted pins with `pfm update pin <local>`. Machine-global symlinks update through the blueprint clone, and engine mirrors rebuild from local sources.
 
 Cross-conversation context persists via **Epics** — initiative-level manifest files (`docs/epics/{name}/manifest.md`) with lifecycle tracking (PLANNING → IN_PROGRESS → SHIPPED).
 
@@ -163,7 +163,7 @@ One-paragraph pitch: portable .claude/ that turns Claude Code into a self-discip
 - Worktree isolation + port allocation
 - Single git owner (gitter)
 - Self-improvement at source (/pfm)
-- Scaffold-and-own updates (`pfm update check` — reported template diffs, reviewed hand application, per-file pins)
+- Scaffold-and-own updates (`pfm doctor --project-updates` — reported template diffs, ported by judgment, per-file pins)
 - Epics — cross-conversation context persistence via manifest files (PLANNING → IN_PROGRESS → SHIPPED)
 - Path conventions ($DOCS, $WORKTREE, $CDOCS)
 - Documentation discipline (one agent writes permanent docs)

@@ -31,7 +31,7 @@ The family splits the work by who is allowed to judge what: an agent that only w
 
 ## The reader
 
-The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_row.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview, and only on approval runs `pfm update --to {target}`, the checklist, and `pfm doctor`. Inside each adopted project it then runs `pfm update check`, hand-applies each `UPDATED` template diff and pins it.
+The notes have one primary reader: the adopter's update chat, opened from `pfm ls`'s PROFESSOR UPDATE banner with the prompt `professorUpdatePrompt` (`pfm/internal/picker/update_row.go`; `pfm/cmd/pfm/update_notice_command.go` through v0.77.x). That chat runs `pfm version`, reads every `releases/vX.Y.Z.md` after the installed version through the target oldest first with `git show {target}:releases/…`, merges their `#### → For:` lines into one checklist, shows the user an overview, and only on approval runs `pfm update --to {target}`, the checklist, and `pfm doctor`. Inside each adopted project it then runs `pfm doctor --project-updates`, reads each `UPDATED` diff, ports what applies and pins it.
 
 Three facts about that reader shape every rule of the family:
 

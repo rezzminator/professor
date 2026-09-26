@@ -12,14 +12,14 @@ Read first, in one message: `docs/RELEASE.md` § Release notes (the grammar you 
 
 ## The reader
 
-The adopter's update chat, a model following your text literally. It reads every note after its installed version oldest first, merges every `#### → For:` line into one checklist, runs the `before update` actions, `pfm update --to` the target, the `after update` actions and `pfm doctor`, then in each adopted project `pfm update check` and the `per project` actions. For each change it needs: what changed as the adopter sees it — a command, a file in their project, a behavior, a cost, never the implementation; which route delivers it; what to do, when, on which surface; how to see it done. An action is re-runnable and names the command whose output shows it done, when one exists.
+The adopter's update chat, a model following your text literally. It reads every note after its installed version oldest first, merges every `#### → For:` line into one checklist, runs the `before update` actions, `pfm update --to` the target, the `after update` actions and `pfm doctor`, then in each adopted project `pfm doctor --project-updates` and the `per project` actions. For each change it needs: what changed as the adopter sees it — a command, a file in their project, a behavior, a cost, never the implementation; which route delivers it; what to do, when, on which surface; how to see it done. An action is re-runnable and names the command whose output shows it done, when one exists.
 
 ## Routes
 
 The bullet's label is the route, and the route decides whether there is an action:
 
 - Global: `templates/global/**`, `workflows/**` — live the moment the clone moves; Codex roles recompile at the update's `pfm install`. An action only when something outside the clone must change: a setting, a file the installer leaves behind, a command the adopter types by habit.
-- Project: `templates/project/**` — reaches a project only through `pfm update check` (`UPDATED`, `NEW`, `GONE-UPSTREAM`); the adopter hand-applies and pins. Always a `per project` action; the bullet names the template path and says what the change is for, so a customized copy can take the intent.
+- Project: `templates/project/**` — reaches a project only through `pfm doctor --project-updates` (`UPDATED`, `NEW`, `GONE-UPSTREAM`); the adopter ports what applies and pins. Always a `per project` action; the bullet names the template path and says what the change is for, so a customized copy can take the intent.
 - pfm: `pfm/**`, the embedded fleet prompt and installer assets included — arrives with the update's rebuild. An action when a config key, hook, environment variable, installed file, command or flag is added, renamed or removed.
 - Repo: everything else — CI, docs, infra, scripts, tests. Never an action; one short line.
 

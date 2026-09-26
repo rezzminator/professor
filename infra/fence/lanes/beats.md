@@ -105,10 +105,10 @@ The root image build. Its beats test no command — they build the shared `pfm-l
 
 ## Lane A — adopter
 
-- `A.01-scaffold` · the scaffold roster lands from `pfm init` (CLAUDE.md, settings, commands, agents, scripts, skills, epics, codex + docs mirrors) · spends none
+- `A.01-scaffold` · the scaffold roster lands from `pfm init` (CLAUDE.md, settings, commands, agents, scripts, skills, epics, codex + docs mirrors); `pfm init --render` fills a second scratch project's install-time tokens from its manifest · spends none
 - `A.02-phase2-never-deployed` · Phase-2-only scaffold is confirmed never auto-deployed by `pfm` · spends none
 - `A.03-baseline-pin` · `.professor/baseline.json` pins the install · spends none
-- `A.04-update-check` · `pfm update check` is clean; every status class is exercised · spends none
+- `A.04-project-updates` · `pfm doctor --project-updates` is clean; every status class is exercised · spends none
 - `A.05-update-verbs` · `pfm update` verbs: pin / pin --all / pin --template / drop / ignore / ignore --undo · spends none
 - `A.06-update-adopt` · `pfm update adopt` pins a pre-init install, incl. `--at REF` · spends none
 - `A.07-self-update` · bare `pfm update` self-updates: rebuild, doctor before/after, rollback on failure · spends none

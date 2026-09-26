@@ -52,7 +52,7 @@ The label is the route that delivers the change, from a closed set:
 | Label | Paths | Reaches the adopter |
 | --- | --- | --- |
 | `Global` | `templates/global/**`, `workflows/**` | when the source clone moves; machine-global files are linked live, Codex roles recompile at `pfm install` |
-| `Project` | `templates/project/**` | only by hand, through `pfm update check` in each project; the bullet names the template path |
+| `Project` | `templates/project/**` | only by hand, through `pfm doctor --project-updates` in each project; the bullet names the template path |
 | `pfm` | `pfm/**` | with the binary `pfm update` rebuilds and installs |
 | `Repo` | everything else | never at runtime; informational |
 
@@ -67,7 +67,7 @@ What a change asks of an adopter is one action line directly under its bullet, o
 ```
 
 - `{audience}`: who acts — `every adopter`, `Codex users`, `adopters who customized {template}`.
-- `{timing}`: exactly one of `before update` (in the source clone, before `pfm update --to`), `after update` (on the machine, after `pfm update` and `pfm doctor`), `per project` (in each adopted project, alongside `pfm update check`).
+- `{timing}`: exactly one of `before update` (in the source clone, before `pfm update --to`), `after update` (on the machine, after `pfm update` and `pfm doctor`), `per project` (in each adopted project, alongside `pfm doctor --project-updates`).
 - `{surface}`: the one thing the action touches — a path, a config key, a command, a template. A later release's action on the same surface supersedes an earlier one.
 - `{action}`: imperative and safe to re-run, ending with the command whose output shows it done when one exists.
 
@@ -106,4 +106,4 @@ The workflow is `.github/workflows/release.yml`. A `v*` tag push (or a manual `w
 
 State lives in `.professor/` inside the adopter's project: `VERSION` (installed version), `manifest.json` (the interview record), and `baseline.json` (pfm's local-to-template pins).
 
-The update chat `pfm ls` opens reads every note between the installed version and the target, stops at each required stop, and merges the actions into one checklist by timing. Then `pfm update --to v{X.Y.Z}` advances the tagged clone, rebuilds the binary, refreshes machine-global links, and runs `pfm doctor`, rolling back when the doctor fails anew. The `after update` actions follow; then, in each project, `pfm update check` reports every template change — hand-apply each `UPDATED` diff and run `pfm update pin <local>` — and the `per project` actions finish the update. See `INSTALL.md` § Updating and `docs/SETUP.md` § Staying current.
+The update chat `pfm ls` opens reads every note between the installed version and the target, stops at each required stop, and merges the actions into one checklist by timing. Then `pfm update --to v{X.Y.Z}` advances the tagged clone, rebuilds the binary, refreshes machine-global links, and runs `pfm doctor`, rolling back when the doctor fails anew. The `after update` actions follow; then, in each project, `pfm doctor --project-updates` reports every template change — read the diff under each `UPDATED` row, carry what applies into the local file, keep the project's own edits, and run `pfm update pin <local>` — and the `per project` actions finish the update. See `INSTALL.md` § Updating and `docs/SETUP.md` § Staying current.

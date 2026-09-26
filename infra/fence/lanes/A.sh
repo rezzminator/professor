@@ -13,7 +13,7 @@
 #                                ~10-15 min — before the first beat)
 #   run.sh                       in the sequence, after M
 #
-# Every beat asserts from pfm's OWN report (`pfm update check`'s lines and exit
+# Every beat asserts from pfm's OWN report (`pfm doctor --project-updates`'s lines and exit
 # code, a verb's stdout/stderr, a file pfm wrote, `pfm ls --tsv`) or from the
 # pane and the transcript the harness itself wrote — never from a model's prose.
 # The two model turns (A.11) are stimuli: the evidence is the file on disk, the
@@ -22,9 +22,10 @@
 # The second blueprint — $HOME/blueprint-b — is a real git clone of the mounted
 # repository's common git dir, checked out at the mounted worktree's HEAD with
 # its uncommitted template state applied, so its templates are byte-identical to
-# the store express was scaffolded from: `pfm update check` reads `clean` against
-# it BEFORE any drift is provoked, and every `review: git -C … diff A..B` line
-# pfm prints is runnable there. Express is pointed at it through the one door
+# the store express was scaffolded from: `pfm doctor --project-updates` reads
+# `clean` against it BEFORE any drift is provoked, and every `upstream change:
+# git -C … diff <pinned>` line pfm prints is runnable there. Express is pointed
+# at it through the one door
 # pfm resolves a store by (`.professor/manifest.json` → interview.blueprint_clone_path,
 # internal/professor/store.go ResolveStore) and pointed back after each beat.
 #
@@ -233,6 +234,7 @@ in_express() { (cd "$EXPRESS" && "$@" 2>&1); }
 
 beat A.01-scaffold
 spends none
+expect-log 'invalid tokens'
 INIT_DIR="$HOME/lane-a-init"
 rm -rf "$INIT_DIR"
 mkdir -p "$INIT_DIR"
@@ -283,8 +285,36 @@ printf '%s\n' "$forced" | grep -q '^CONFLICT' && bad="$bad --force still printed
 printf '%s\n' "$forced" | grep -q "^deployed $expected project files" || bad="$bad --force did not redeploy all $expected files;"
 pfm init "$INIT_DIR" extra >/dev/null 2>&1
 [ $? -eq 2 ] || bad="$bad pfm init with two positionals did not exit 2 (usage);"
+# pfm init --render: a second scratch project, scaffolded fresh, gets a
+# manifest supplying the token the store's CLAUDE.md carries ({PROJECT_NAME}).
+RENDER_DIR="$HOME/lane-a-render"
+rm -rf "$RENDER_DIR"
+mkdir -p "$RENDER_DIR"
+rout="$(cd "$RENDER_DIR" && pfm init . 2>&1)"
+rrc=$?
+[ "$rrc" -eq 0 ] || bad="$bad the render fixture's own pfm init exited $rrc ($(one_line "$rout"));"
+mkdir -p "$RENDER_DIR/.professor"
+printf '{"tokens":{"PROJECT_NAME":"lane-a-renderword"}}\n' >"$RENDER_DIR/.professor/manifest.json"
+render1="$(cd "$RENDER_DIR" && pfm init --render 2>&1)"
+render1_rc=$?
+[ "$render1_rc" -eq 0 ] || bad="$bad pfm init --render exited $render1_rc ($(one_line "$render1"));"
+printf '%s\n' "$render1" | grep -q '^RENDERED CLAUDE.md' || bad="$bad pfm init --render printed no 'RENDERED CLAUDE.md' line: $(one_line "$render1");"
+grep -qF 'lane-a-renderword' "$RENDER_DIR/CLAUDE.md" 2>/dev/null || bad="$bad $RENDER_DIR/CLAUDE.md does not carry the rendered value lane-a-renderword;"
+render2="$(cd "$RENDER_DIR" && pfm init --render 2>&1)"
+render2_rc=$?
+[ "$render2_rc" -eq 0 ] || bad="$bad a second pfm init --render exited $render2_rc ($(one_line "$render2"));"
+printf '%s\n' "$render2" | grep -q '^RENDERED' && bad="$bad a second pfm init --render still printed a RENDERED line: $(one_line "$render2");"
+before_sha="$(sha256sum "$RENDER_DIR/CLAUDE.md" | cut -d' ' -f1)"
+printf '{"tokens":{"SHA":"lane-a-badtoken"}}\n' >"$RENDER_DIR/.professor/manifest.json"
+render3="$(cd "$RENDER_DIR" && pfm init --render 2>&1)"
+render3_rc=$?
+[ "$render3_rc" -eq 1 ] || bad="$bad pfm init --render with manifest key SHA exited $render3_rc, want 1;"
+printf '%s\n' "$render3" | grep -qF 'INVALID SHA' || bad="$bad pfm init --render with manifest key SHA did not print 'INVALID SHA': $(one_line "$render3");"
+after_sha="$(sha256sum "$RENDER_DIR/CLAUDE.md" | cut -d' ' -f1)"
+[ "$before_sha" = "$after_sha" ] || bad="$bad the INVALID SHA render changed $RENDER_DIR/CLAUDE.md;"
+rm -rf "$RENDER_DIR"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "pfm init deployed $expected files into the eleven roster targets (per-project skipped, hooks and exec modes shipped); re-init named $conflicts CONFLICTs and left ${repinned:-?} pin(s) in baseline.json (observed: a re-init without --force rewrites the baseline to the files it deployed, i.e. none); --force redeployed all"
+  pass "pfm init deployed $expected files into the eleven roster targets (per-project skipped, hooks and exec modes shipped); re-init named $conflicts CONFLICTs and left ${repinned:-?} pin(s) in baseline.json (observed: a re-init without --force rewrites the baseline to the files it deployed, i.e. none); --force redeployed all; pfm init --render rendered CLAUDE.md's {PROJECT_NAME} once, was a no-op on a second run, and refused the runtime metavariable SHA without touching the file"
 fi
 
 # ─── A.02 — Phase-2 territory is never deployed by pfm ──────────────────────
@@ -305,10 +335,10 @@ if requires A.01-scaffold; then
   [ -z "$(find "$STORE_T/project/skills" -path '*host-gh*' -o -path '*host-glab*' 2>/dev/null | head -1)" ] ||
     bad="$bad the store carries a host-gh/host-glab skill template — P15 says it is Phase-2 generated, never shipped;"
   # The proof pfm itself gives: on a bare init those templates are exactly the
-  # unpinned, un-ignored ones — `pfm update check` lists each as NEW.
-  chk="$(cd "$INIT_DIR" && pfm update check 2>&1)"
+  # unpinned, un-ignored ones — `pfm doctor --project-updates` lists each as NEW.
+  chk="$(cd "$INIT_DIR" && pfm doctor --project-updates 2>&1)"
   chk_rc=$?
-  [ "$chk_rc" -eq 3 ] || bad="$bad pfm update check in the bare init exited $chk_rc, want 3 (the never-deployed templates are NEW);"
+  [ "$chk_rc" -eq 1 ] || bad="$bad pfm doctor --project-updates in the bare init exited $chk_rc, want 1 (the never-deployed templates are NEW);"
   for tmpl in project/per-project/CLAUDE.md project/commands/per-project/testing-manual.md project/settings-global.json; do
     printf '%s\n' "$chk" | grep -qF "    $tmpl — adopt: copy/adapt it locally, then pfm update pin --template $tmpl <local> — or ignore" ||
       bad="$bad check does not list $tmpl as NEW with its adopt line;"
@@ -356,33 +386,33 @@ else
   fi
 fi
 
-# ─── A.04 — pfm update check: clean, then every status class ────────────────
+# ─── A.04 — pfm doctor --project-updates: clean, then every status class ────
 
-beat A.04-update-check
+beat A.04-project-updates
 spends none
 expect-log 'baseline.json not found'
 bad=""
-clean0="$(in_express pfm update check)"
+clean0="$(in_express pfm doctor --project-updates)"
 clean0_rc=$?
 if [ "$clean0_rc" -ne 0 ] || [ "$(printf '%s\n' "$clean0" | tail -1)" != clean ]; then
-  fail "express is not clean before any drift: pfm update check exited $clean0_rc — $(one_line "$(printf '%s\n' "$clean0" | grep -vE '^  (current|ignored) ' | head -6)")"
+  fail "express is not clean before any drift: pfm doctor --project-updates exited $clean0_rc — $(one_line "$(printf '%s\n' "$clean0" | grep -vE '^  (current|ignored) ' | head -6)")"
 else
   n_pins="$(jq '.files | length' "$BASELINE")"
   n_ign="$(jq '(.ignored // []) | length' "$BASELINE")"
   point_express_at "$B"
-  cleanB="$(in_express pfm update check)"
+  cleanB="$(in_express pfm doctor --project-updates)"
   cleanB_rc=$?
   [ "$cleanB_rc" -eq 0 ] && [ "$(printf '%s\n' "$cleanB" | tail -1)" = clean ] ||
-    bad="$bad pointed at the identical second blueprint $B, check exited $cleanB_rc: $(one_line "$(printf '%s\n' "$cleanB" | grep -vE '^  (current|ignored) ' | head -4)");"
+    bad="$bad pointed at the identical second blueprint $B, doctor exited $cleanB_rc: $(one_line "$(printf '%s\n' "$cleanB" | grep -vE '^  (current|ignored) ' | head -4)");"
   printf '%s\n' "$cleanB" | grep -qF "blueprint $(jq -r .blueprint.sha "$BASELINE") → $B_BASE_SHORT" ||
     bad="$bad the header does not read 'blueprint <pinned> → $B_BASE_SHORT' through the manifest door: $(printf '%s\n' "$cleanB" | head -1);"
   unpoint_express
   if ! provoke_drift; then
     bad="$bad the drift could not be provoked: $D_WHY;"
   else
-    rep="$(in_express pfm update check)"
+    rep="$(in_express pfm doctor --project-updates)"
     rep_rc=$?
-    [ "$rep_rc" -eq 3 ] || bad="$bad with 5 review items check exited $rep_rc, want 3;"
+    [ "$rep_rc" -eq 1 ] || bad="$bad with 5 review items doctor exited $rep_rc, want 1;"
     [ "$(count_of "$rep" current)" = "$((n_pins - 4))" ] || bad="$bad current $(count_of "$rep" current), want $((n_pins - 4)) (P17);"
     [ "$(count_of "$rep" ignored)" = "$n_ign" ] || bad="$bad ignored $(count_of "$rep" ignored), want $n_ign from the baseline (P18);"
     [ "$(count_of "$rep" UPDATED)" = 2 ] || bad="$bad UPDATED $(count_of "$rep" UPDATED), want 2 (P19);"
@@ -391,13 +421,15 @@ else
     [ "$(count_of "$rep" LOCAL-DELETED)" = 1 ] || bad="$bad LOCAL-DELETED $(count_of "$rep" LOCAL-DELETED), want 1 (P22);"
     printf '%s\n' "$rep" | grep -qxF "    $D_L1   $D_T1  pinned @$D_S1" || bad="$bad no UPDATED row '$D_L1   $D_T1  pinned @$D_S1';"
     printf '%s\n' "$rep" | grep -qxF "    $D_L2   $D_T2  pinned @$D_S2" || bad="$bad no UPDATED row '$D_L2   $D_T2  pinned @$D_S2';"
-    review="git -C $B diff $D_S1..$D_SHA -- templates/$D_T1"
-    printf '%s\n' "$rep" | grep -qxF "      review: $review" || bad="$bad no 'review: $review' line;"
-    printf '%s\n' "$rep" | grep -qxF "      then apply by hand and: pfm update pin $D_L1" || bad="$bad no 'then apply by hand and: pfm update pin $D_L1' line;"
-    review_out="$($review 2>&1)"
-    review_rc=$?
-    [ "$review_rc" -eq 0 ] && printf '%s' "$review_out" | grep -qF 'Lane A probe: UPDATED' ||
-      bad="$bad the printed review command is not runnable or shows no delta (exit $review_rc): $(one_line "$review_out" | cut -c1-160);"
+    upstream="git -C $B diff $D_S1 -- templates/$D_T1"
+    printf '%s\n' "$rep" | grep -qxF "      upstream change: $upstream" || bad="$bad no 'upstream change: $upstream' line;"
+    printf '%s\n' "$rep" | grep -qxF "      +Lane A probe: UPDATED $LANE_STAMP" || bad="$bad no diff line '+Lane A probe: UPDATED $LANE_STAMP' (the change provoke_drift itself made to $D_T1);"
+    printf '%s\n' "$rep" | grep -qxF "      port what applies into $D_L1, keep the project's own edits, then: pfm update pin $D_L1" ||
+      bad="$bad no 'port what applies into $D_L1, keep the project's own edits, then: pfm update pin $D_L1' line;"
+    upstream_out="$($upstream 2>&1)"
+    upstream_rc=$?
+    [ "$upstream_rc" -eq 0 ] && printf '%s' "$upstream_out" | grep -qF 'Lane A probe: UPDATED' ||
+      bad="$bad the printed upstream-change command is not runnable or shows no delta (exit $upstream_rc): $(one_line "$upstream_out" | cut -c1-160);"
     printf '%s\n' "$rep" | grep -qxF "    $NEW_T — adopt: copy/adapt it locally, then pfm update pin --template $NEW_T <local> — or ignore" ||
       bad="$bad no NEW row with the adopt instruction for $NEW_T;"
     printf '%s\n' "$rep" | grep -qxF "    $D_L3   $D_T3 — local file is YOURS now — keep it and pfm update drop $D_L3, or delete both" ||
@@ -405,30 +437,30 @@ else
     printf '%s\n' "$rep" | grep -qxF "    $D_L4   $D_T4 — pfm update drop $D_L4 to forget, or restore the file" ||
       bad="$bad no LOCAL-DELETED row for $D_L4;"
     printf '%s\n' "$rep" | grep -qxF "REVIEW REQUIRED — 5 items; nothing was written." || bad="$bad no 'REVIEW REQUIRED — 5 items; nothing was written.' terminal;"
-    js="$(in_express pfm update check --json)"
+    js="$(in_express pfm doctor --project-updates --json)"
     js_rc=$?
-    [ "$js_rc" -eq 3 ] || bad="$bad --json exited $js_rc, want 3;"
+    [ "$js_rc" -eq 1 ] || bad="$bad --json exited $js_rc, want 1;"
     printf '%s' "$js" | jq -e --argjson c "$((n_pins - 4))" --argjson i "$n_ign" \
-      '.counts.current == $c and .counts.ignored == $i and .counts.UPDATED == 2 and .counts.NEW == 1 and .counts["GONE-UPSTREAM"] == 1 and .counts["LOCAL-DELETED"] == 1 and .reviewRequired == 5 and .terminal == "REVIEW REQUIRED — 5 items" and (.items | length) == 5' >/dev/null 2>&1 ||
-      bad="$bad --json counts/terminal disagree with the human report: $(one_line "$js" | cut -c1-200);"
-    # P23: 0 clean · 3 review · 1 failed (no baseline) · 2 usage
+      '.counts.current == $c and .counts.ignored == $i and .counts.UPDATED == 2 and .counts.NEW == 1 and .counts["GONE-UPSTREAM"] == 1 and .counts["LOCAL-DELETED"] == 1 and .reviewRequired == 5 and .terminal == "REVIEW REQUIRED — 5 items" and (.items | length) == 5 and ([.items[] | select(.status == "UPDATED") | .diff] | all(length > 0))' >/dev/null 2>&1 ||
+      bad="$bad --json counts/terminal/diff disagree with the human report: $(one_line "$js" | cut -c1-200);"
+    # exit translation from the retired verb: 0 clean · 1 review · 3 failed (no baseline) · 2 usage
     nob="$(mktemp -d /tmp/lane-a-nobaseline.XXXXXX)"
-    nob_out="$(pfm update check --root "$nob" 2>&1)"
+    nob_out="$(pfm doctor --project-updates --root "$nob" 2>&1)"
     nob_rc=$?
-    [ "$nob_rc" -eq 1 ] || bad="$bad check with no baseline exited $nob_rc, want 1;"
+    [ "$nob_rc" -eq 3 ] || bad="$bad doctor --project-updates with no baseline exited $nob_rc, want 3;"
     printf '%s\n' "$nob_out" | grep -qxF 'FAILED — .professor/baseline.json not found — pfm update adopt pins an existing install; pfm init scaffolds a new one' ||
       bad="$bad the no-baseline terminal is not the named FAILED line: $(one_line "$nob_out");"
     rmdir "$nob"
-    in_express pfm update check extra-positional >/dev/null 2>&1
-    [ $? -eq 2 ] || bad="$bad check with a positional did not exit 2 (usage);"
+    in_express pfm doctor --project-updates extra-positional >/dev/null 2>&1
+    [ $? -eq 2 ] || bad="$bad doctor --project-updates with a positional did not exit 2 (usage);"
   fi
   left="$(restore_drift)" || bad="$bad restore did not converge: $left;"
   if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after restore: $(one_line "$after");"; fi
-  final="$(in_express pfm update check)"
+  final="$(in_express pfm doctor --project-updates)"
   final_rc=$?
-  [ "$final_rc" -eq 0 ] && [ "$(printf '%s\n' "$final" | tail -1)" = clean ] || bad="$bad after restore check exited $final_rc, not clean;"
+  [ "$final_rc" -eq 0 ] && [ "$(printf '%s\n' "$final" | tail -1)" = clean ] || bad="$bad after restore doctor exited $final_rc, not clean;"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "clean (0) through ~/.professor and through the manifest door to $B; UPDATED×2/NEW/GONE-UPSTREAM/LOCAL-DELETED each reported with its instruction, the review diff command runnable and showing the delta; --json agrees; exit 3 on review, 1 with the named FAILED line on no baseline, 2 on usage; restored to clean"
+    pass "clean (0) through ~/.professor and through the manifest door to $B; UPDATED×2 (each with an upstream-change diff and the port line)/NEW/GONE-UPSTREAM/LOCAL-DELETED each reported with its instruction, the upstream-change diff command runnable and showing the delta; --json agrees with a diff on each UPDATED item; exit 1 on review, 3 with the named FAILED line on no baseline, 2 on usage; restored to clean"
   fi
 fi
 
@@ -474,14 +506,14 @@ else
   jq -e --arg l "$NEW_L" --arg t "$NEW_T" '.files[$l].template == $t' "$BASELINE" >/dev/null 2>&1 || bad="$bad baseline.json does not pin $NEW_L to $NEW_T after pin --template;"
   jq -e --arg l "$D_L3" '.files[$l] == null' "$BASELINE" >/dev/null 2>&1 || bad="$bad baseline.json still pins $D_L3 after drop;"
   [ "$(jq -r .blueprint.sha "$BASELINE")" = "$D_SHA" ] || bad="$bad baseline.json blueprint.sha is $(jq -r .blueprint.sha "$BASELINE") after pinning at $D_SHA;"
-  fin="$(in_express pfm update check)"
+  fin="$(in_express pfm doctor --project-updates)"
   fin_rc=$?
   [ "$fin_rc" -eq 0 ] && [ "$(printf '%s\n' "$fin" | tail -1)" = clean ] ||
-    bad="$bad after pin/pin --all/pin --template/drop/ignore the check is not clean (exit $fin_rc): $(one_line "$(printf '%s\n' "$fin" | grep -vE '^  (current|ignored) ' | head -4)");"
+    bad="$bad after pin/pin --all/pin --template/drop/ignore doctor --project-updates is not clean (exit $fin_rc): $(one_line "$(printf '%s\n' "$fin" | grep -vE '^  (current|ignored) ' | head -4)");"
   left="$(restore_drift)" || bad="$bad restore did not converge: $left;"
   if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after restore: $(one_line "$after");"; fi
-  final="$(in_express pfm update check)"
-  [ $? -eq 0 ] && [ "$(printf '%s\n' "$final" | tail -1)" = clean ] || bad="$bad after restore check is not clean;"
+  final="$(in_express pfm doctor --project-updates)"
+  [ $? -eq 0 ] && [ "$(printf '%s\n' "$final" | tail -1)" = clean ] || bad="$bad after restore doctor --project-updates is not clean;"
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "pin <local>, pin --all, pin --template (NEW adopted; a second adoption refused), drop (a pin forgotten; no pin and no argument refused by name), ignore (gone-upstream and pinned templates refused by name; already-ignored counted), ignore --undo (a non-ignored refused) — the drift ended clean and express was restored"
   fi
@@ -508,10 +540,10 @@ else
     mkdir -p "$ADOPT_DIR/.professor"
     printf '{"interview":{"blueprint_clone_path":"%s"}}\n' "$B" >"$ADOPT_DIR/.professor/manifest.json"
   fi
-  pre="$(cd "$ADOPT_DIR" && pfm update check 2>&1)"
+  pre="$(cd "$ADOPT_DIR" && pfm doctor --project-updates 2>&1)"
   pre_rc=$?
-  [ "$pre_rc" -eq 1 ] && printf '%s\n' "$pre" | grep -q 'baseline.json not found' ||
-    bad="$bad before adopt, check exited $pre_rc without the named 'baseline.json not found' terminal: $(one_line "$pre");"
+  [ "$pre_rc" -eq 3 ] && printf '%s\n' "$pre" | grep -q 'baseline.json not found' ||
+    bad="$bad before adopt, doctor --project-updates exited $pre_rc without the named 'baseline.json not found' terminal: $(one_line "$pre");"
   ad="$(pfm update adopt --root "$ADOPT_DIR" 2>&1)"
   ad_rc=$?
   [ "$ad_rc" -eq 0 ] || bad="$bad pfm update adopt --root exited $ad_rc ($(one_line "$ad"));"
@@ -524,15 +556,15 @@ else
   absent="$(printf '%s\n' "$ad" | awk '$1 == "absent" { print $2; exit }')"
   printf '%s\n' "$ad" | grep -qE '^  kept +0 +\(already pinned, untouched\)$' || bad="$bad no 'kept 0 (already pinned, untouched)' row;"
   printf '%s\n' "$ad" | grep -qE '^  absent +[0-9]+ +\(mapped template, no local file — check reports NEW\)$' || bad="$bad no 'absent N (mapped template, no local file — check reports NEW)' row;"
-  printf '%s\n' "$ad" | grep -qxF 'next: pfm update check' || bad="$bad no 'next: pfm update check' line;"
+  printf '%s\n' "$ad" | grep -qxF 'next: pfm doctor --project-updates' || bad="$bad no 'next: pfm doctor --project-updates' line;"
   [ "$(jq '.files | length' "$ADOPT_DIR/.professor/baseline.json" 2>/dev/null)" = "$n_adopted" ] ||
     bad="$bad baseline.json pins $(jq '.files | length' "$ADOPT_DIR/.professor/baseline.json" 2>/dev/null) file(s), want the adopted $n_adopted;"
   [ "$(jq -r '.blueprint.sha' "$ADOPT_DIR/.professor/baseline.json" 2>/dev/null)" = "$B_BASE_SHORT" ] || bad="$bad baseline.json blueprint.sha is not $B_BASE_SHORT;"
-  post="$(cd "$ADOPT_DIR" && pfm update check 2>&1)"
+  post="$(cd "$ADOPT_DIR" && pfm doctor --project-updates 2>&1)"
   post_rc=$?
   want_rc=0
-  [ "${absent:-0}" -gt 0 ] && want_rc=3
-  [ "$post_rc" -eq "$want_rc" ] || bad="$bad after adopt check exited $post_rc, want $want_rc ($absent absent → NEW);"
+  [ "${absent:-0}" -gt 0 ] && want_rc=1
+  [ "$post_rc" -eq "$want_rc" ] || bad="$bad after adopt doctor --project-updates exited $post_rc, want $want_rc ($absent absent → NEW);"
   [ "$(count_of "$post" current)" = "$n_adopted" ] || bad="$bad after adopt current $(count_of "$post" current), want $n_adopted;"
   [ "$(count_of "$post" NEW)" = "${absent:-0}" ] || bad="$bad after adopt NEW $(count_of "$post" NEW), want the $absent absent template(s);"
   for s in UPDATED GONE-UPSTREAM LOCAL-DELETED; do
@@ -734,7 +766,7 @@ beat A.10-symlinked-blueprint
 spends none
 bad=""
 [ -L "$BLUEPRINT" ] || bad="$bad $BLUEPRINT is not a symlink — the default store is not the linked shape this beat asserts;"
-via_home="$(in_express pfm update check)"
+via_home="$(in_express pfm doctor --project-updates)"
 via_home_rc=$?
 [ "$via_home_rc" -eq 0 ] || bad="$bad check through the linked $BLUEPRINT exited $via_home_rc ($(one_line "$via_home"));"
 printf '%s\n' "$via_home" | grep -qF "→ $WT_SHA" ||
@@ -744,10 +776,10 @@ LINK="$HOME/lane-a-blueprint-link"
 rm -f "$LINK"
 ln -s "$B" "$LINK"
 point_express_at "$B"
-direct="$(in_express pfm update check)"
+direct="$(in_express pfm doctor --project-updates)"
 direct_rc=$?
 point_express_at "$LINK"
-linked="$(in_express pfm update check)"
+linked="$(in_express pfm doctor --project-updates)"
 linked_rc=$?
 unpoint_express
 rm -f "$LINK"
@@ -1012,9 +1044,9 @@ if requires; then
   live_before="$(pfm ls --tsv 2>/dev/null | awk -F'\t' 'NR > 1 && $1 ~ /^live-/ { print $5 }' | sort | tr '\n' ' ')"
   rows_before="$(fleet_rows)"
   hooks_before="$(hooks_of_live_chats)"
-  upd="$(pfm update check --root "$EXPRESS" 2>&1)"
+  upd="$(pfm doctor --project-updates --root "$EXPRESS" 2>&1)"
   upd_rc=$?
-  [ "$upd_rc" -eq 0 ] && [ "$(printf '%s\n' "$upd" | tail -1)" = clean ] || bad="$bad the adopter update (pfm update check --root $EXPRESS) exited $upd_rc, not clean: $(one_line "$(printf '%s\n' "$upd" | tail -2)");"
+  [ "$upd_rc" -eq 0 ] && [ "$(printf '%s\n' "$upd" | tail -1)" = clean ] || bad="$bad the adopter update (pfm doctor --project-updates --root $EXPRESS) exited $upd_rc, not clean: $(one_line "$(printf '%s\n' "$upd" | tail -2)");"
   rw="$( (cd "$SOURCE_REPO" && pfm install --yes 2>&1) )"
   rw_rc=$?
   [ "$rw_rc" -eq 0 ] || bad="$bad the hook rewrite (pfm install --yes from $SOURCE_REPO) exited $rw_rc ($(one_line "$(printf '%s\n' "$rw" | tail -3)"));"

@@ -128,17 +128,21 @@ func Run(
 	dependencies = normalizeDependencies(dependencies)
 	flags := cli.NewFlagSet(
 		doctorCommand,
-		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
+		doctorUsage,
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
 	skipHarvest := flags.Bool("skip-harvest", false, "exclude the optional harvestpy runtime from health")
+	projectUpdates := bindProjectUpdatesFlags(flags)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
 		flags.Usage()
 		return 2
+	}
+	if code, handled := projectUpdates.dispatch(flags, *verbose || *skipHarvest, runtime.Paths.Home, stdout); handled {
+		return code
 	}
 	resolved := runtime.Paths
 	tally := &doctorTally{}

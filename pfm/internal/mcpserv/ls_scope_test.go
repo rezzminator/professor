@@ -27,7 +27,7 @@ func (verbs *selectingChatVerbs) List(_ context.Context, request chat.ListReques
 // chat_ls scopes to the caller's repository when _meta.threadId resolves the
 // caller, and says it listed every repository when it does not.
 func TestChatLSScopesToTheResolvedCallersRepository(t *testing.T) {
-	fixture := testjail.GitRepoWithWorktrees(t, "intuita")
+	fixture := testjail.GitRepoWithWorktrees(t, "acme")
 	rows := []compose.Row{
 		{
 			Kind:        compose.LiveCodex,

@@ -7,7 +7,7 @@ import (
 )
 
 func TestGitRepoWithWorktreesBuildsLinkedWorktrees(t *testing.T) {
-	repo := GitRepoWithWorktrees(t, "intuita")
+	repo := GitRepoWithWorktrees(t, "acme")
 	for _, dir := range []string{repo.Repo, repo.Other} {
 		if info, err := os.Stat(filepath.Join(dir, ".git")); err != nil || !info.IsDir() {
 			t.Fatalf("%s/.git = %v, %v; want a directory", dir, info, err)

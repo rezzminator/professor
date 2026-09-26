@@ -9,7 +9,7 @@ import (
 )
 
 func TestRepoRootMapsEveryPlaceInARepositoryToItsMainCheckout(t *testing.T) {
-	fixture := testjail.GitRepoWithWorktrees(t, "intuita")
+	fixture := testjail.GitRepoWithWorktrees(t, "acme")
 	base, repo, subdir, inner, outer := fixture.Base, fixture.Repo, fixture.Subdir, fixture.Inner, fixture.Outer
 	plain := filepath.Join(base, "plain")
 	if err := os.MkdirAll(plain, 0o755); err != nil {
@@ -27,7 +27,7 @@ func TestRepoRootMapsEveryPlaceInARepositoryToItsMainCheckout(t *testing.T) {
 		{"deleted worktree", filepath.Join(repo, ".worktrees", "gone", "pfm"), repo},
 		{"deleted worktree root", filepath.Join(repo, ".worktrees", "gone"), repo},
 		{"deleted plain dir", filepath.Join(base, "vanished"), filepath.Join(base, "vanished")},
-		{"relative dir", "intuita/src", "intuita/src"},
+		{"relative dir", "acme/src", "acme/src"},
 	} {
 		if got := RepoRoot(testCase.dir); got != testCase.want {
 			t.Errorf("%s: RepoRoot(%q) = %q, want %q", testCase.name, testCase.dir, got, testCase.want)

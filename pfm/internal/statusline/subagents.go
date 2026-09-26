@@ -358,7 +358,8 @@ func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) 
 	if !live && activity != nil && !activity.last.IsZero() {
 		end = activity.last
 	}
-	elapsed := cElapsed + formatDuration(max(end.UnixMilli()-task.StartTime, 0)) + reset
+	ran := time.Duration(max(end.UnixMilli()-task.StartTime, 0)) * time.Millisecond
+	elapsed := cElapsed + formatCacheTime(ran, false) + reset
 	if segment == "" {
 		return elapsed
 	}

@@ -50,8 +50,8 @@ func nestedSession(t *testing.T, transcripts map[string][]string, parents map[st
 
 func TestRenderSubagentsNestedAgents(t *testing.T) {
 	const (
-		working  = "delegating 2m0s" // the clock runs on
-		finished = "completed 1m30s" // frozen at p's last entry
+		working  = "delegating 2m:0s" // the clock runs on
+		finished = "completed 1m:30s" // frozen at p's last entry
 	)
 	cases := []struct {
 		name        string
@@ -114,9 +114,10 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 			warn:        "row p: nested agents: open sub-agent transcript",
 		},
 		{
-			name:        "an agent that spawned none shows no nested segment",
+			name:        "an agent that spawned none reads solo",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "other": {turnToolCall}},
 			parents:     map[string]string{"p": "", "other": ""},
+			nested:      "solo",
 			status:      finished,
 		},
 	}
@@ -150,7 +151,7 @@ func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "▱") {
+	if !strings.HasPrefix(got, "solo │ ▱") {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := renderOneSubagent(t, session,
@@ -168,7 +169,7 @@ func TestRenderSubagentsNestedLongTail(t *testing.T) {
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
 	got, warned := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "0/1 │ ") || !strings.Contains(got, "│ completed 1m30s │") || warned != "" {
+	if !strings.HasPrefix(got, "0/1 │ ") || !strings.Contains(got, "│ completed 1m:30s │") || warned != "" {
 		t.Fatalf("content = %q warn = %q, want 0/1 and completed", got, warned)
 	}
 }
@@ -221,8 +222,8 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 	}
 	const (
 		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K │ scout·general-purpose │ opus │ "
-		fullTail   = " 1m30s │ 2 tools │ 1 error │ 💾5m✓3m:8s 94% │ ⟲1 │ map it"
-		parentTail = " 3m30s │ 2 tools │ 1 error │ 💾5m✓1m:38s 94% │ ⟲1 │ map it"
+		fullTail   = " 1m:30s │ 2 tools │ 1 error │ 💾5m✓3m:8s 94% │ ⟲1 │ map it"
+		parentTail = " 3m:30s │ 2 tools │ 1 error │ 💾5m✓1m:38s 94% │ ⟲1 │ map it"
 	)
 	mutedWhole := func(raw string) bool {
 		return strings.HasPrefix(raw, cMuted) && strings.Count(raw, "\x1b[") == 2 && strings.HasSuffix(raw, reset)
@@ -241,7 +242,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "completed, first minute: the whole line muted, Claude Code's faint left on",
 			task:      row("a1", "completed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: fullRow + "completed" + fullTail,
+			wantPlain: "solo │ " + fullRow + "completed" + fullTail,
 			check:     mutedWhole,
 		},
 		{
@@ -255,7 +256,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "failed, first minute: full colour, it is an alert",
 			task:      row("a1", "failed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: fullRow + "failed" + fullTail,
+			wantPlain: "solo │ " + fullRow + "failed" + fullTail,
 			check:     bright,
 		},
 		{

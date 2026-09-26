@@ -17,20 +17,19 @@ import (
 // the last call's prompt read from it: 💾1h✓59m:28s 94%. The window's length is the one the
 // newest cache write actually used (usage.cache_creation), not an assumption;
 // the environment decides it only for a transcript that records none.
-// hit < 0 means the harness reported no usage yet, and drops the tail.
+// hit < 0 means the harness reported no usage yet, and drops the tail; a
+// lapsed window renders the hit as history, was 99%.
 // Claude Code's own prompt_cache (its request clock and TTL) wins whenever it
 // carries an expiry; the transcript is read only when it does not.
 func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string, hit int, harness *promptCache) string {
-	window := ""
-	if text, ok := harness.windowText(now); ok {
-		window = sep + text
-	} else {
-		window = sep + cacheWindowText(runtime, now, transcriptPath)
+	text, lapsed, ok := harness.windowText(now)
+	if !ok {
+		text, lapsed = cacheWindowText(runtime, now, transcriptPath)
 	}
 	if hit < 0 {
-		return window
+		return sep + text
 	}
-	return window + " " + cacheHitText(hit)
+	return sep + text + " " + cacheHitText(hit, lapsed)
 }
 
 // promptCache is the statusline payload's prompt_cache object: Claude Code
@@ -40,20 +39,24 @@ type promptCache struct {
 	ExpiresAt *int64 `json:"expires_at"`
 }
 
-// windowText renders the harness's cache window; ok is false when the payload
-// carries no expiry (no cached request yet, or a build without the field).
-func (cache *promptCache) windowText(now time.Time) (string, bool) {
+// windowText renders the harness's cache window and whether it has lapsed; ok
+// is false when the payload carries no expiry (no cached request yet, or a
+// build without the field).
+func (cache *promptCache) windowText(now time.Time) (text string, lapsed, ok bool) {
 	if cache == nil || cache.ExpiresAt == nil {
-		return "", false
+		return "", false, false
 	}
 	label := strings.TrimSpace(cache.TTL)
 	if label == "" {
 		label = "?"
 	}
-	return countdownText(label, time.Unix(*cache.ExpiresAt, 0), now), true
+	text, lapsed = countdownText(label, time.Unix(*cache.ExpiresAt, 0), now)
+	return text, lapsed, true
 }
 
-func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) string {
+// cacheWindowText renders the transcript's cache window and whether it has
+// lapsed; an unmeasurable window never counts as lapsed.
+func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) (string, bool) {
 	ttl := time.Hour
 	label := "1h"
 	if runtime.getenv("FORCE_PROMPT_CACHING_5M") == "1" {
@@ -71,11 +74,11 @@ func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) stri
 	// carries no user turn to anchor on, which is a fact about the chat. "!" is
 	// a fact about us — we could not look.
 	if transcriptPath == "" {
-		return cBad + "💾" + label + "!" + reset
+		return cBad + "💾" + label + "!" + reset, false
 	}
 	info, err := os.Stat(transcriptPath)
 	if err != nil || info.IsDir() {
-		return cBad + "💾" + label + "!" + reset
+		return cBad + "💾" + label + "!" + reset, false
 	}
 	cachePath := filepath.Join(
 		runtime.CacheDir,
@@ -96,20 +99,21 @@ func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) stri
 	}
 	if window.anchor.IsZero() {
 		if label == "1h" {
-			return cWarn + "💾1h∞" + reset
+			return cWarn + "💾1h∞" + reset, false
 		}
-		return cWarn + "💾" + label + "?" + reset
+		return cWarn + "💾" + label + "?" + reset, false
 	}
 	return countdownText(label, window.anchor.Add(ttl), now)
 }
 
-// countdownText renders a live or lapsed cache window: 💾1h✓59m:28s, 💾5m✗2m:0s.
-func countdownText(label string, expires, now time.Time) string {
+// countdownText renders a live or lapsed cache window, 💾1h✓59m:28s or
+// 💾5m✗2m:0s, and reports whether it has lapsed.
+func countdownText(label string, expires, now time.Time) (string, bool) {
 	remaining := expires.Sub(now)
 	if remaining > 0 {
-		return cGood + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset
+		return cGood + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset, false
 	}
-	return cBad + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset
+	return cBad + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset, true
 }
 
 // agentCacheText is a sub-agent row's cache segment in the main line's shape —
@@ -129,16 +133,22 @@ func agentCacheText(transcript string, hit int, now time.Time) string {
 	case 5 * time.Minute:
 		label = "5m"
 	}
-	text := cWarn + "💾" + label + "?" + reset
+	text, lapsed := cWarn+"💾"+label+"?"+reset, false
 	if !window.anchor.IsZero() {
-		text = countdownText(label, window.anchor.Add(ttl), now)
+		text, lapsed = countdownText(label, window.anchor.Add(ttl), now)
 	}
-	return text + " " + cacheHitText(hit)
+	return text + " " + cacheHitText(hit, lapsed)
 }
 
 // cacheHitText renders the share of one call's prompt read from the cache:
 // 94%. Green from 80, yellow from 50, red below — the context re-written.
-func cacheHitText(percent int) string {
+// The figure only changes when a call completes, so once the window has
+// lapsed it describes a warm cache that is gone: it renders muted as
+// was 94%, never as live health beside the expiry.
+func cacheHitText(percent int, lapsed bool) string {
+	if lapsed {
+		return cMuted + fmt.Sprintf("was %d%%", percent) + reset
+	}
 	color := cBad
 	switch {
 	case percent >= 80:

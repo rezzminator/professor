@@ -32,15 +32,15 @@ Read in the Claude Code 2.1.281 source and confirmed live:
 
 | Field | Shows | Rule |
 | --- | --- | --- |
-| nested | `2/5` | agents below this one working right now (their own turn is open), in green, over every agent below it at any depth, in the tools colour; absent when it spawned none. It leads the row because a parent row is read for it |
+| nested | `2/5` | agents below this one working right now (their own turn is open), in green, over every agent below it at any depth, in the tools colour; `solo`, muted, when it spawned none. It leads the row because a parent row is read for it |
 | gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize` |
 | identity | `scout·tracer` | the task name, then its role (`agentType`) |
 | model | `opus·🏎️ high` | the model family, then the effort (see [Effort](#effort)) |
-| status | `running 2m0s` | status plus time since `startTime`; a finished task's clock stops at its transcript's last entry. `delegating` replaces a stopped status while any agent below still works, and its clock runs on |
+| status | `running 2m:0s` | status plus time since `startTime`, in the cache window's h:m:s shape; a finished task's clock stops at its transcript's last entry. `delegating` replaces a stopped status while any agent below still works, and its clock runs on |
 | idle | `idle 1m20s` | only while running and silent for 60 s or more; yellow, red from 5 min |
 | tools | `12 tools` | distinct `tool_use` ids in the sub-agent's transcript |
 | errors | `1 error` | tool results marked `is_error`; absent at zero |
-| cache | `💾5m✓3m:8s 94%` | the main line's cache segment, per agent: the time left on the agent's own prompt cache (the length its newest cache write used, from its `usage.cache_creation` split, counted from its newest request — the row payload carries no `prompt_cache` per agent), then cache reads over the whole prompt on its newest call, green from 80, yellow from 50, red below; `💾–` before its first reply |
+| cache | `💾5m✓3m:8s 94%` | the main line's cache segment, per agent: the time left on the agent's own prompt cache (the length its newest cache write used, from its `usage.cache_creation` split, counted from its newest request — the row payload carries no `prompt_cache` per agent), then cache reads over the whole prompt on its newest call, green from 80, yellow from 50, red below — muted as `was 94%` once the window has lapsed; `💾–` before its first reply |
 | compactions | `⟲2` | `compact_boundary` entries; absent at zero |
 | cwd | `repo` | only when it differs from the session's cwd |
 | label | the task's label, else its description | |
@@ -85,7 +85,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 - The model block reads `◆ Opus 5.5·🚀 xhigh`: model symbol and name, a muted `·`, then the effort (`pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.
-- The cache window reads `💾1h✓59m:28s 94%`: the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). The window comes from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). Only when the payload carries no expiry — no cached request yet, or an older build — does the transcript decide (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else `FORCE_PROMPT_CACHING_5M`; the countdown from the newest request record, a user record that is not a local command's echo; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
+- The cache window reads `💾1h✓59m:28s 94%`: the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry. The window comes from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). Only when the payload carries no expiry — no cached request yet, or an older build — does the transcript decide (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else `FORCE_PROMPT_CACHING_5M`; the countdown from the newest request record, a user record that is not a local command's echo; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
 - The line uses the same palette as the rows (`pfm/internal/statusline/palette.go`).
 
 ## Palette and glyphs

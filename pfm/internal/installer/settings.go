@@ -136,7 +136,7 @@ func updateSettings(
 	}
 	pruneEmptyHooks(document, hookEventUserPromptSubmit)
 	if !uninstall {
-		for _, entry := range hookEntries(document, "PreToolUse", true) {
+		for _, entry := range hookEntries(document, hookEventPreToolUse, true) {
 			hooks, _ := entry["hooks"].([]any)
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)

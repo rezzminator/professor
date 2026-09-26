@@ -234,7 +234,7 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 // to repository's shipped .githooks directory — a relative spelling
 // (git's own default reading) and its absolute equivalent are the same
 // armed state. Both the install-time arm step (armSourceRepoPrePushGate,
-// above) and `pfm doctor`'s inspectPrePushGate compare through this one
+// above) and `pfm doctor`'s inspectPrePushGateWithRunner compare through this one
 // function, so a clone armed with either spelling is recognised the same
 // way by both and install never rewrites an already-armed clone.
 func PrePushGateArmed(repository, actual string) bool {

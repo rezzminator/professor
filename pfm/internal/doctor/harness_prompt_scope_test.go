@@ -48,9 +48,7 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 				context.Background(),
 				&output,
 				home,
-				config.Config{},
 				harnessPromptModels[0],
-				"",
 			)
 			if (code != 0) != tc.warning || !strings.Contains(output.String(), tc.want) {
 				t.Fatalf("code=%d output=%s", code, &output)

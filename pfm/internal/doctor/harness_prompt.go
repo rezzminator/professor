@@ -59,22 +59,6 @@ var errClaudeAbsent = errors.New("no Claude Code binary installed")
 // FAILED, because a real request answered and may have been billed.
 var errHarnessBypassedSink = errors.New("the CLI answered from the real endpoint and ignored ANTHROPIC_BASE_URL")
 
-func configuredHarnessCapture(
-	ctx context.Context,
-	home string,
-	machine config.Config,
-	model, verboseDir string,
-) (HarnessCapture, error) {
-	return configuredHarnessCaptureWithDeps(
-		ctx,
-		home,
-		machine,
-		model,
-		verboseDir,
-		normalizeDependencies(Dependencies{}),
-	)
-}
-
 func configuredHarnessCaptureWithDeps(
 	ctx context.Context,
 	home string,

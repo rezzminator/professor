@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestPaneCommandEngineRecognizesOpenCode(t *testing.T) {
@@ -31,19 +30,19 @@ func TestPaneCommandEngineRecognizesOpenCode(t *testing.T) {
 func TestTargetFromPartsRecognizesOpenCodeSockets(t *testing.T) {
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "")
 	for _, socket := range []string{"/tmp/tmux-0/ox-1-2-3,99,0"} {
-		target := targetFromParts(socket, "%5", paths.OSEnv{})
+		target := targetFromParts(socket, "%5")
 		if target.Engine != string(pfmengine.OpenCode) {
 			t.Errorf("targetFromParts(%q).Engine = %q, want ox", socket, target.Engine)
 		}
 	}
-	if got := targetFromParts("/tmp/tmux-0/cc-9,1,0", "%1", paths.OSEnv{}).Engine; got != "cc" {
+	if got := targetFromParts("/tmp/tmux-0/cc-9,1,0", "%1").Engine; got != "cc" {
 		t.Errorf("cc socket misread as %q", got)
 	}
 }
 
 func TestTargetFromPartsProbeOpenCodeSocket(t *testing.T) {
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
-	target := targetFromParts("/tmp/jail/probe-ox-7,3,0", "%2", paths.OSEnv{})
+	target := targetFromParts("/tmp/jail/probe-ox-7,3,0", "%2")
 	if target.Engine != string(pfmengine.OpenCode) {
 		t.Errorf("probe socket engine = %q, want ox", target.Engine)
 	}
@@ -51,7 +50,7 @@ func TestTargetFromPartsProbeOpenCodeSocket(t *testing.T) {
 
 func TestTargetFromPartsNamesUnknownSocketEngine(t *testing.T) {
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "")
-	target := targetFromParts("/tmp/tmux-0/unmanaged,1,0", "%2", paths.OSEnv{})
+	target := targetFromParts("/tmp/tmux-0/unmanaged,1,0", "%2")
 	if target.Engine != "unknown" {
 		t.Fatalf("unknown socket engine=%q, want an explicit unknown label", target.Engine)
 	}

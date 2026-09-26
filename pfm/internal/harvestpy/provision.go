@@ -609,10 +609,6 @@ func writePrivate(path string, body []byte) (returnErr error) {
 	return nil
 }
 
-func atomicCurrent(root, desired string) (returnErr error) {
-	return atomicCurrentWithClock(root, desired, clock.Real)
-}
-
 func atomicCurrentWithClock(root, desired string, now clock.Clock) (returnErr error) {
 	temporary := filepath.Join(root, ".current-") + fmt.Sprintf("%d", now.Now().UnixNano())
 	if err := os.Symlink(desired, temporary); err != nil {

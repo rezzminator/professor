@@ -1739,8 +1739,8 @@ func (engine *Engine) senderLabel(
 	return strings.TrimSpace(window)
 }
 
-func targetFromParts(socketPath, pane string, env paths.Env) Target {
-	return targetFromSeat(resolve.SeatFromParts(socketPath, pane, env))
+func targetFromParts(socketPath, pane string) Target {
+	return targetFromSeat(resolve.SeatFromParts(socketPath, pane, paths.OSEnv{}))
 }
 
 func refused(code int, message string) Result {

@@ -1294,7 +1294,6 @@ func appendHarvestBrowserDoctorRow(
 	stdout io.Writer,
 	root string,
 	platform harvestpy.Platform,
-	warnings int,
 	gateOn bool,
 ) int {
 	return appendHarvestBrowserDoctorRowWithRunner(
@@ -1302,7 +1301,7 @@ func appendHarvestBrowserDoctorRow(
 		stdout,
 		root,
 		platform,
-		warnings,
+		0,
 		gateOn,
 		obs.Runner(deps.RealRunner{}),
 		doctorChromeResolver,

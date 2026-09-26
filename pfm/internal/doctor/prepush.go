@@ -12,7 +12,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -30,12 +29,8 @@ type PrePushGate struct {
 
 // PrePushGateProbeOverride keeps command-package tests independent of the
 // checkout that runs them. Production leaves it nil; the dedicated pre-push
-// tests clear the test default and exercise inspectPrePushGate end to end.
+// tests clear the test default and exercise inspectPrePushGateWithRunner end to end.
 var PrePushGateProbeOverride func(context.Context) PrePushGate
-
-func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
-	return printPrePushDoctorWithRunner(ctx, stdout, obs.Runner(deps.RealRunner{}))
-}
 
 func printPrePushDoctorWithRunner(ctx context.Context, stdout io.Writer, runner deps.Runner) int {
 	var gate PrePushGate
@@ -77,10 +72,6 @@ func printPrePushDoctorWithRunner(ctx context.Context, stdout io.Writer, runner 
 		fmt.Fprintf(stdout, "doctor: pre-push gate=UNREADABLE error=%v\n", gate.Error)
 		return 1
 	}
-}
-
-func inspectPrePushGate(ctx context.Context) PrePushGate {
-	return inspectPrePushGateWithRunner(ctx, obs.Runner(deps.RealRunner{}))
 }
 
 func inspectPrePushGateWithRunner(ctx context.Context, runner deps.Runner) PrePushGate {

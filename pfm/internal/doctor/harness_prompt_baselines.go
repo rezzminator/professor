@@ -64,17 +64,15 @@ func printModelHarnessPromptDoctor(
 	ctx context.Context,
 	stdout io.Writer,
 	home string,
-	machine config.Config,
 	model HarnessPromptModel,
-	verboseDir string,
 ) int {
 	return printModelHarnessPromptDoctorWithDeps(
 		ctx,
 		stdout,
 		home,
-		machine,
+		config.Config{},
 		model,
-		verboseDir,
+		"",
 		normalizeDependencies(Dependencies{}),
 	)
 }

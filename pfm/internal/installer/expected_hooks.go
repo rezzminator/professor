@@ -11,6 +11,7 @@ import (
 
 const (
 	hookEventUserPromptSubmit = "UserPromptSubmit"
+	hookEventPreToolUse       = "PreToolUse"
 	hookExploreMatcher        = "Agent|Task"
 	// hookRRDirMatcher names the agents whose prompt reads the RR-DIR line:
 	// templates/global/agents/rr.md and the variants declared from it.
@@ -80,7 +81,7 @@ func claudeHookTemplates(home string) []ExpectedHook {
 		{Event: "SessionEnd", Command: binary + " internal clear-kill", Name: "clear-kill"},
 		{Event: "SessionEnd", Command: binary + " internal exit-close", Name: "exit-close"},
 		{
-			Event:   "PreToolUse",
+			Event:   hookEventPreToolUse,
 			Matcher: hookExploreMatcher,
 			Command: binary + " internal explore-deny",
 			Name:    "explore-deny",
@@ -88,7 +89,7 @@ func claudeHookTemplates(home string) []ExpectedHook {
 		{
 			// Every Bash call in every repository: only gitter writes shared
 			// git state (docs/design/hooks/git-guard.md).
-			Event:   "PreToolUse",
+			Event:   hookEventPreToolUse,
 			Matcher: "Bash",
 			Command: binary + " internal git-guard",
 			Name:    "git-guard",
@@ -112,7 +113,7 @@ func claudeHookTemplates(home string) []ExpectedHook {
 	// of a call.
 	callmeter := binary + " internal callmeter"
 	for _, placement := range []struct{ event, matcher string }{
-		{"PreToolUse", "Bash"},
+		{hookEventPreToolUse, "Bash"},
 		{"PostToolUse", hookMatchAll},
 		{"PostToolUseFailure", hookMatchAll},
 		{"PostToolBatch", ""},

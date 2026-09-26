@@ -138,7 +138,7 @@ func TestJoinSystemBlocksMatchesBaselineRendering(t *testing.T) {
 }
 
 // TestPrintHarnessPromptDoctorHonorsCaptureOverride pins the seam
-// configuredHarnessCapture adds: printHarnessPromptDoctor's baseline read and
+// configuredHarnessCaptureWithDeps adds: printHarnessPromptDoctor's baseline read and
 // verdict comparison stay real end to end, only the capture step is swapped —
 // exactly what makes the six formerly jail-broken doctor tests (main_test.go,
 // doctor_jail_test.go, launch_command_test.go, doctor_external_test.go) able
@@ -249,9 +249,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 				context.Background(),
 				&stdout,
 				home,
-				config.Config{},
 				harnessPromptModels[0],
-				"",
 			)
 			if warned := code != 0; warned != testCase.wantWarn {
 				t.Fatalf(
@@ -541,9 +539,7 @@ func TestPrintModelHarnessPromptDoctorPrintsDriftDetail(t *testing.T) {
 		context.Background(),
 		&stdout,
 		home,
-		config.Config{},
 		opus,
-		"",
 	); code != 1 {
 		t.Fatalf("code=%d, want 1\n%s", code, &stdout)
 	}
@@ -597,7 +593,7 @@ func TestHarnessDoctorSonnetBaselineCatalogOnlyChangeIsSilent(t *testing.T) {
 		return HarnessCapture{Prompt: captured, ResolvedModel: "claude-sonnet-5", CLIVersion: "2.1.280"}, nil
 	}
 	var stdout bytes.Buffer
-	code := printModelHarnessPromptDoctor(context.Background(), &stdout, home, config.Config{}, sonnet, "")
+	code := printModelHarnessPromptDoctor(context.Background(), &stdout, home, sonnet)
 	if code != 0 || !strings.Contains(stdout.String(), "doctor: harness-prompt: matches baseline "+fields[1]) ||
 		strings.Contains(stdout.String(), "DRIFT") {
 		t.Fatalf("catalog-only change warned: code=%d\n%s", code, &stdout)

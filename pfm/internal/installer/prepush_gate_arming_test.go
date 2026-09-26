@@ -183,7 +183,7 @@ func TestInstallRefusesABrokenHook(t *testing.T) {
 
 // TestInstallReportsAnAbsoluteHooksPathAsArmed is a REGRESSION test for the
 // 2026-09-14 retro finding: a clone armed with the absolute equivalent of
-// .githooks (e.g. "<clone>/.githooks", which `pfm doctor`'s inspectPrePushGate
+// .githooks (e.g. "<clone>/.githooks", which `pfm doctor`'s inspectPrePushGateWithRunner
 // already accepts as armed by resolving against the repo toplevel) must be
 // reported ok and left untouched — not rewritten to the relative spelling.
 // FAILS on unfixed code because armSourceRepoPrePushGate compares the raw

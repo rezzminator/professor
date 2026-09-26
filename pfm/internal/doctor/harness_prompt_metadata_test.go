@@ -168,7 +168,7 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			code := printModelHarnessPromptDoctor(context.Background(), &out, home, config.Config{}, model, "")
+			code := printModelHarnessPromptDoctor(context.Background(), &out, home, model)
 			line := out.String()
 			for _, want := range []string{
 				"BASELINE UNAVAILABLE",

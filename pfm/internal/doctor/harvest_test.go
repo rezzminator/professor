@@ -350,7 +350,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 	root := newRoot()
 	t.Run("gate off is informational and warns about nothing", func(t *testing.T) {
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, false)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, false)
 		if warnings != 0 || !strings.Contains(output.String(), "NOT_PROVISIONED") ||
 			!strings.Contains(output.String(), "disabled") {
 			t.Fatalf("gate-off row=%q warnings=%d", output.String(), warnings)
@@ -367,7 +367,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, false)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, false)
 		if warnings != 0 || !strings.Contains(output.String(), "CORRUPT_RECORD") {
 			t.Fatalf(
 				"corrupt gate-off row=%q warnings=%d — a broken state rendered as plain disabled",
@@ -380,7 +380,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 	root = newRoot()
 	t.Run("gate on without an environment reports NOT provisioned", func(t *testing.T) {
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if warnings != 1 || !strings.Contains(output.String(), "NOT_PROVISIONED") {
 			t.Fatalf("unprovisioned row=%q warnings=%d", output.String(), warnings)
 		}
@@ -396,7 +396,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if warnings != 1 || !strings.Contains(output.String(), "PROBE_FAILED") {
 			t.Fatalf("corrupt-record row=%q warnings=%d", output.String(), warnings)
 		}
@@ -422,7 +422,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if warnings != 1 || !strings.Contains(output.String(), "SOURCE_UNPINNED") {
 			t.Fatalf("unpinned-source row=%q warnings=%d", output.String(), warnings)
 		}
@@ -439,7 +439,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if warnings != 1 || !strings.Contains(output.String(), "SOURCE_MISMATCH") {
 			t.Fatalf("tampered-worker row=%q warnings=%d", output.String(), warnings)
 		}
@@ -478,7 +478,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			t.Fatal(err)
 		}
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if !strings.Contains(output.String(), "SOURCE_STALE") || strings.Contains(output.String(), "source_hash=ok") {
 			t.Fatalf("an older pfm's worker read as current: %q", output.String())
 		}
@@ -498,7 +498,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 			return nil, errors.New("smoke subprocess died")
 		})
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if warnings != 1 || !strings.Contains(output.String(), "BROKEN_SMOKE") {
 			t.Fatalf("broken-smoke row=%q warnings=%d", output.String(), warnings)
 		}
@@ -518,7 +518,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 		digest.Imports = map[string]any{"patchright": true, "chrome_path": goneChrome}
 		writeProvisionedBrowserEnv(t, root, platform, digest)
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if warnings != 1 || !strings.Contains(output.String(), "chrome=MISSING") {
 			t.Fatalf("missing-chrome row=%q warnings=%d", output.String(), warnings)
 		}
@@ -538,7 +538,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 		digest.Imports = map[string]any{"patchright": false, "chrome_path": ""} // stale record must not decide
 		writeProvisionedBrowserEnv(t, root, platform, digest)
 		var output strings.Builder
-		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, 0, true)
+		warnings := appendHarvestBrowserDoctorRow(ctx, &output, root, platform, true)
 		if warnings != 0 || !strings.Contains(output.String(), "healthy") ||
 			!strings.Contains(output.String(), "live smoke") {
 			t.Fatalf("healthy row=%q warnings=%d — a stale record decided the verdict", output.String(), warnings)

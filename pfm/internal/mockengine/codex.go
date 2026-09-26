@@ -349,7 +349,7 @@ func (session *codexSession) tool(step Step) (string, error) {
 
 // compact writes the `compacted` record a reader of the rollout sees: the
 // replacement history is the summary the fixture supplies.
-func (session *codexSession) compact(step Step) error {
+func (session *codexSession) compact(_ Step) error {
 	history := []codexMessage{{
 		Type: payloadMessage, Role: roleUser,
 		Content: []codexContent{{Type: blockInputText, Text: "Summary of the thread so far (fixture)."}},

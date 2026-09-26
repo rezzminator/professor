@@ -38,6 +38,19 @@ PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
 GUARD_DIR="/tmp/$PROJECT/guard"
 ACTIVE="$GUARD_DIR/pfm_active${SID:+.$SID}"
 QUALITY="$GUARD_DIR/quality_loaded${SID:+.$SID}"
+# The law read is session knowledge, not the edited repo's: guard-stamp.sh
+# stamps the law file's repo and the session's own project, never a repo the
+# session edits later (a sibling checkout, a plugin repo). Without this the
+# gate for another repo can never open: the agent reads the law, is denied
+# anyway, and follows a message that cannot help it.
+if [[ ! -f "$QUALITY" ]]; then
+  HOOK_CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty')
+  CWD_ROOT=$([[ -n "$HOOK_CWD" ]] && git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null) || CWD_ROOT=""
+  if [[ -n "$CWD_ROOT" && "$CWD_ROOT" != "$REPO_ROOT" ]]; then
+    CWD_PROJECT="$(basename "$CWD_ROOT")"
+    QUALITY="/tmp/${CWD_PROJECT#.}/guard/quality_loaded${SID:+.$SID}"
+  fi
+fi
 TTL=1500
 NOW=$(date +%s)
 

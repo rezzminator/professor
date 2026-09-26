@@ -489,6 +489,13 @@ act_templates() { # the shipped product: mechanical gates, no build
         fi
       done
 
+      head_ "templates — pfm-guard across repositories"
+      if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh"; then
+        ok "pfm-guard finds the session's law stamp for another repo's edit and denies an unread law"
+      else
+        fail_step "pfm-guard regression FAILED — a cross-repo edit must open on the session's law stamp and stay shut without one"
+      fi
+
       head_ "templates — go test report under pipefail"
       if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
         ok "go_test_report reaches its log line on filtered and over-cap failure output"

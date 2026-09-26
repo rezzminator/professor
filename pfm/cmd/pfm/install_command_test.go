@@ -12,6 +12,7 @@ import (
 	goRuntime "runtime"
 	"strings"
 	"testing"
+	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -616,6 +617,57 @@ func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
 	}
 	if !installerRan {
 		t.Fatal("pfm install --yes did not run the installer for the absent default config")
+	}
+}
+
+// TestOlderUpdaterInstallArgvOnTheRealBinaryDoesNotRefuse pins a4d89776
+// across the process boundary (pfm-update-1#NEW-F3): an older `pfm update`
+// ran its candidate as `pfm --config <default path> install --yes` whether or
+// not that file existed, and a candidate that refused the missing default
+// exited non-zero, which that updater reads as a failed install and rolls
+// back. The older updater is a released binary, not this tree's code, so the
+// closest real test runs its exact argv against this tree's real built
+// binary (TestMain's testPFMBinary): a real process, real config load, real
+// installer, in a jailed HOME with no config file. The updater half — a
+// non-zero candidate exit is what triggers rollback — is update.Run's own
+// rollback tests.
+func TestOlderUpdaterInstallArgvOnTheRealBinaryDoesNotRefuse(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env := replaceAttachEnv(os.Environ(), map[string]string{
+		"HOME":             home,
+		paths.EnvHome:      home,
+		"XDG_CONFIG_HOME":  filepath.Join(home, ".config"),
+		"XDG_DATA_HOME":    filepath.Join(home, ".local", "share"),
+		"XDG_STATE_HOME":   filepath.Join(home, ".local", "state"),
+		"XDG_CACHE_HOME":   filepath.Join(home, ".cache"),
+		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_CLAUDE_ROOTS": filepath.Join(home, ".claude", "projects"),
+		"PFM_CODEX_ROOT":   filepath.Join(home, ".codex"),
+		"TMUX":             "",
+	})
+	defaultPath := filepath.Join(home, ".config", "pfm", filepath.Base(pfmconfig.ResolvePath(home)))
+	if _, err := os.Stat(defaultPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default config %q must be absent, stat error = %v", defaultPath, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(
+		ctx, testPFMBinary, "--config", defaultPath, "install", "--yes", "--skip-harvest",
+	)
+	command.Env = env
+	command.Dir = home
+	command.Stdin = nil
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("older updater argv `pfm --config %s install --yes --skip-harvest` on the real binary: %v\n%s",
+			defaultPath, err, output)
+	}
+	if strings.Contains(string(output), "refusing to converge host wiring on defaults") {
+		t.Fatalf("the real install refused the absent default config:\n%s", output)
 	}
 }
 

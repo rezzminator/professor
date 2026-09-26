@@ -145,6 +145,20 @@ func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
 		t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the default location", namedDefault)
 	}
 
+	// A relative spelling of the default, resolved against the working directory.
+	t.Chdir(home)
+	relativeDefault, err := filepath.Rel(home, defaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := LoadRuntime(relativeDefault)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", relativeDefault, err)
+	}
+	if relative.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the default location", relativeDefault)
+	}
+
 	explicitPath := filepath.Join(t.TempDir(), "explicit.json")
 	explicit, err := LoadRuntime(explicitPath)
 	if err != nil {
@@ -152,6 +166,37 @@ func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
 	}
 	if !explicit.ConfigExplicit {
 		t.Fatalf("LoadRuntime(%q).ConfigExplicit = false, want true for a named path", explicitPath)
+	}
+}
+
+// TestLoadRuntimeDefaultUnderAnXDGOverrideIsNotExplicit pins pfm-update-2#F29's
+// XDG half: with XDG_CONFIG_HOME moved off home/.config, the default is the
+// path under XDG_CONFIG_HOME — naming it is not explicit, and naming the
+// home/.config spelling (no longer the default) is.
+func TestLoadRuntimeDefaultUnderAnXDGOverrideIsNotExplicit(t *testing.T) {
+	home := t.TempDir()
+	jail := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv(paths.EnvTestJailHome, jail)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(jail, ".config"))
+	xdgDefault := filepath.Join(jail, ".config", "pfm", filepath.Base(ResolvePath(home)))
+	if got := ResolvePath(home); got != xdgDefault {
+		t.Fatalf("ResolvePath under XDG_CONFIG_HOME = %q, want %q", got, xdgDefault)
+	}
+	named, err := LoadRuntime(xdgDefault)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", xdgDefault, err)
+	}
+	if named.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the XDG default", xdgDefault)
+	}
+	homeSpelling := filepath.Join(home, ".config", "pfm", filepath.Base(xdgDefault))
+	other, err := LoadRuntime(homeSpelling)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", homeSpelling, err)
+	}
+	if !other.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = false, want true: it is not the XDG default", homeSpelling)
 	}
 }
 

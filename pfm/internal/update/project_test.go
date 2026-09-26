@@ -27,11 +27,8 @@ func TestUpdateCheckReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
 		t.Fatalf("Run(check) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
-		"current       1",
-		"ignored       0",
-		"UPDATED       2",
-		"NEW           1",
-		"GONE-UPSTREAM 1",
+		"current       1", "ignored       0", "UPDATED       2", "NEW           1", "GONE-UPSTREAM 1",
+		"retired upstream — delete it and pfm update drop .claude/gone.md; keep it and drop only its pin",
 		"LOCAL-DELETED 1",
 		"review: git -C " + fixture.store,
 		"REVIEW REQUIRED — 5 items",

@@ -3,6 +3,7 @@ name: flights-orchestrator
 description: 'Runs task files to landing — delegate for a flight directory to execute (flight work without one: it spawns flights-speccer first). Pass the directory, standing rules, each project''s testing manual path, and any worktree, cap, landing checks or commit. flights-speccer → here → flights-*-executor, flights-lander. Returns a row per task, the gate per project, checks, commit, BLOCKED questions.'
 model: sonnet
 effort: high
+experimental: { cacheTtl: 1h }
 tools: Read, Bash, Glob, Grep, Agent, SendMessage
 hooks:
   PreToolUse:

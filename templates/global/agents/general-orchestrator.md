@@ -3,6 +3,7 @@ name: general-orchestrator
 description: 'Runs clear batches to done — delegate for work past one or two agents (about 80 calls): many tasks in one domain with nameable files, no design to choose, no unknown-cause failure. Pass the work, everything you hold, the acceptance check, standing rules, testing manual path, any worktree. here → general-*-executor. Returns DONE, PARTIAL or BLOCKED, a row per task, the acceptance line, RETRO.'
 model: opus
 effort: high
+experimental: { cacheTtl: 1h }
 tools: Read, Bash, Glob, Grep, Agent, SendMessage
 hooks:
   PreToolUse:

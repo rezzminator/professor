@@ -17,7 +17,7 @@ Use `/dev build pfm` · `/dev verify pfm` · `/dev test pfm` for anything the pi
 
 ## Stack
 
-- **Runtime:** Go 1.24.13 — **pinned, not latest** (`go.mod`; mise: `mise use -g go@1.24`)
+- **Runtime:** Go 1.27.1 — **pinned** (`go.mod`; mise: `mise use -g go@1.27`)
 - **TUI:** `charm.land/bubbletea/v2` + `bubbles/v2` + `lipgloss/v2` — verify the v2 API against the upstream repo before writing UI code; v1 examples do not compile
 - **Fuzzy match:** `sahilm/fuzzy` · **MCP:** `modelcontextprotocol/go-sdk`
 - **Storage:** `modernc.org/sqlite` — pure Go, `CGO_ENABLED=0`, static binary. On-demand incremental indexing; **no daemon.**

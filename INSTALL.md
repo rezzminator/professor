@@ -122,7 +122,7 @@ mkdir -p "$HOME/.local/bin"
 GOPROXY=https://proxy.golang.org go -C "$HOME/.professor/pfm" build -trimpath -ldflags "-X main.version=$TAG" -o "$HOME/.local/bin/pfm" ./cmd/pfm
 ```
 
-Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.24.13 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
+Set `GOPROXY` to a Go module proxy reachable from your network. The source path needs Go **1.27.1 or newer**, the floor declared by `pfm/go.mod`, and access to the module host or proxy. The tag lookup and explicit checkout keep the source and the binary on the same latest release; if the source directory already exists, fetch and check out that tag there instead of cloning over it.
 
 The source build has the same harvest cost and opt-outs as the [preview/apply block above](#preview-optional-components-and-harvest-footprint). Then run the same two commands as the binary path, from inside the clone — that is how `pfm install` records it as your source repository, which `pfm init` and `pfm update` both read:
 

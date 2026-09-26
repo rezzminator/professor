@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/rezzminator/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/rezzminator/professor"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/rezzminator/professor"></a>
-  <img alt="go" src="https://img.shields.io/badge/go-1.24-00ADD8">
+  <img alt="go" src="https://img.shields.io/badge/go-1.27-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey">
   <img alt="works with" src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-8A2BE2">
 </p>
@@ -179,9 +179,9 @@ One Go binary with embedded installer assets. Beyond the six moments above:
 - **Editor.** `pfm install --vscode` installs the Professor VS Code extension — visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown — and makes the `PFM` settings profile (its own icon and colour) the default, so each new integrated terminal opens at the fleet picker. To open a Professor terminal, press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`.
 
 <details>
-<summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.24.13+ for source builds</summary>
+<summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.27.1+ for source builds</summary>
 
-From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.24.13 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [harvest README](pfm/internal/harvest/README.md).
+From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.27.1 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [harvest README](pfm/internal/harvest/README.md).
 
 </details>
 

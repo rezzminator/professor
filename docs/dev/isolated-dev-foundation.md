@@ -16,7 +16,7 @@ All train/code work happens in a `git worktree` under `.worktrees/{train-or-wave
 
 ### 2. Container — a brand-new machine per run
 
-A dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.24, and pinned Node 22) mounts the worktree and behaves as a fresh box:
+A dev container (`ubuntu:24.04` + zsh/tmux/git, pinned Go 1.27, and pinned Node 22) mounts the worktree and behaves as a fresh box:
 
 - Own `$HOME` inside the container — `pfm install --yes` runs against it, doctor runs in it, the shim sources into its zshrc. Ephemeral by default (fresh machine per run); a named volume when a task needs iterative state.
 - Own tmux server, own socket dir — fleet experiments (spawn/inject/capture) run against container-local chats, never the live `cc-*`/`cx-*` sockets. The live-box law gains teeth: it is now physically satisfied, not just promised.

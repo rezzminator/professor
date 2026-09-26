@@ -20,7 +20,8 @@ import (
 
 // TestRemoteDownloadIsAResourceLinkServedOnlyThroughMCP: a downloaded zip is a
 // resource_link on the remote server, resources/read returns its bytes, an
-// unknown id is ResourceNotFound, and a blob over the cap is a named error.
+// unknown id is ResourceNotFound (-32602 invalid params, SEP-2164), and a blob
+// over the cap is a named error.
 func TestRemoteDownloadIsAResourceLinkServedOnlyThroughMCP(t *testing.T) {
 	service := newTestService(t, Runtime{Remote: true, MaxResourceBytes: 1 << 20})
 	zipPath := filepath.Join(t.TempDir(), "bundle.zip")
@@ -51,8 +52,8 @@ func TestRemoteDownloadIsAResourceLinkServedOnlyThroughMCP(t *testing.T) {
 		&mcp.ReadResourceParams{URI: downloadURIPrefix + strings.Repeat("0", 64)},
 	)
 	var wire *jsonrpc.Error
-	if !errors.As(err, &wire) || wire.Code != mcp.CodeResourceNotFound {
-		t.Fatalf("unknown id error = %v, want ResourceNotFound", err)
+	if !errors.As(err, &wire) || wire.Code != jsonrpc.CodeInvalidParams {
+		t.Fatalf("unknown id error = %v, want ResourceNotFound (-32602)", err)
 	}
 	service.runtime.MaxResourceBytes = 8
 	if _, err := session.ReadResource(

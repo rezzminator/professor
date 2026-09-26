@@ -1,6 +1,6 @@
 # super-rr
 
-`super-rr` is the `rr` lead with wider caps and more reasoning: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
+`super-rr` is the `rr` lead with wider caps, more reasoning and the repository lane: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`, and a `tracer-rr` for each repository whose code holds an answer. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
 
 ## Contents
 
@@ -18,7 +18,7 @@
 | Kind | variant of `rr`, declared in `templates/global/agents/variants.json` |
 | Model, effort | `opus`, `medium` |
 | Tools | `WebSearch, WebFetch, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` (inherited from `rr.md`) |
-| Spawns | `sub-rr` only |
+| Spawns | `sub-rr`, and `tracer-rr` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
 | Start hook | `rr-dir`, matcher `rr\|super-rr\|heavy-rr` |
 
@@ -34,6 +34,7 @@ Description, verbatim: `Deeper rr for higher stakes — delegate for "super rr",
 | `so 4 diggers carry the entire frontier` | `so 6 diggers carry the entire frontier` |
 | `or at the end of round 3 — a safety ceiling` | `or at the end of round 5 — a safety ceiling` |
 | `on at most 8 source pages` | `on at most 12 source pages` |
+| `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `tracer-rr` for a sub-area whose answer lives in a repository's code — the full text is in `tracer-rr.md`, § Who spawns it |
 
 - Each swapped text must occur exactly once in `rr.md`'s body. `renderGlobalAgentVariant` (`pfm/internal/codexgen/globalvariants.go`) refuses anything else with `"replace" text {text} occurs {n} times in the body, want exactly 1`, so an edit to `rr.md` that rewords a swapped sentence fails the render instead of shipping a variant with `rr`'s caps.
 - `TestShippedGlobalAgentVariantsRender` renders the shipped `variants.json` against the shipped `rr.md` and compiles each variant to its Codex TOML; it is the gate that catches the rewording before an install does.
@@ -50,7 +51,7 @@ A run costs `r(d + 1) + 5` lead calls (the family's lead-call budget: one spawn 
 | --- | --- |
 | Known sources, their exact words | `collector-rr` |
 | A map of a question, cheaply | `rr` |
-| A map where a wrong or missing fact costs something | `super-rr` |
+| A map where a wrong or missing fact costs something, or whose answer is partly in a repository's code | `super-rr` |
 | A map that must settle every sub-area whatever the cost | `heavy-rr` |
 
 ## What the runs measured
@@ -68,6 +69,7 @@ Three runs on one query (how faithfully fetch-and-answer tools quote a page) set
 | --- | --- |
 | The declaration | `templates/global/agents/variants.json`, entry `super-rr` |
 | The body it swaps into | `templates/global/agents/rr.md` |
+| The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `heavy-rr` entry |
 | The renderer and its tests | `pfm/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/installer/expected_hooks.go` (`hookRRDirMatcher`) |
 | The family doc | `docs/design/RR/rr.md` |

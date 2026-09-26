@@ -7,6 +7,7 @@
 //                        [--family SUBSTR] [--session SID] [--top N] [--out FILE]
 //   node token-audit.mjs --codex [--since 24h|3d] [--project SUBSTR] [--codex-root DIR] [--top N]
 //   node token-audit.mjs --flight DIR [--metrics-out FILE] [--out FILE]
+//   node token-audit.mjs --timeline FILE [--timeline FILE]...
 //
 // Unit of analysis: a RUN = one transcript file = one main chat loop, one sub-agent,
 // or one Codex rollout thread. A FAMILY = a main chat plus every sub-agent it spawned.
@@ -28,6 +29,10 @@ const NOW = Date.now();
 let SINCE = NOW - HOURS * 3600e3;
 const TOP = +opt("--top", 12), PROJECT = opt("--project", ""), FAMILY = opt("--family", ""), SESSION = opt("--session", ""), OUT = opt("--out", ""), VIEW = opt("--view", ""), BRIEFS = opt("--briefs", ""), FAMRX = new RegExp(opt("--family-rx", "."), "i");
 const FLIGHT = opt("--flight", ""), METRICS_OUT = opt("--metrics-out", ""), CODEX = argv.includes("--codex"), CODEX_ROOT = opt("--codex-root", "");
+// --timeline FILE: one transcript, whole file, one row per model call. No window applies.
+const TIMELINE = optAll("--timeline"), TL = TIMELINE.length > 0, TL_BIG = 20 * 1024;
+if (argv.includes("--timeline") && !TL) die("--timeline wants a transcript path");
+if (TL) { if (FLIGHT || CODEX || PROJECT || argv.includes("--since")) die("--timeline reads whole files: it takes no --flight, --codex, --project or --since"); SINCE = 0; }
 
 // ─── EDITABLE PRICING (USD per 1M tokens) ─────────────────────────────────────
 // Matched by substring on the lowercased model id; FIRST match wins, so keep more
@@ -131,6 +136,9 @@ function* linesOf(file) {
   } finally { fs.closeSync(fd); }
 }
 const contentChars = (c) => typeof c === "string" ? c.length : Array.isArray(c) ? c.reduce((a, b) => a + (b.type === "text" ? (b.text || "").length : b.type === "image" ? 6000 : JSON.stringify(b).length), 0) : c ? JSON.stringify(c).length : 0;
+// --timeline: what a tool call aimed at, one line, whatever the tool
+const tlTarget = (inp) => { const t = String(inp.file_path ?? inp.command ?? inp.pattern ?? inp.path ?? inp.subagent_type ?? inp.skill ?? inp.url ?? inp.query ?? Object.values(inp).find((v) => typeof v === "string") ?? "").replace(/\s+/g, " ").trim();
+  return t.length > 100 ? t.slice(0, 99) + "…" : t; };
 const foldCwd = (cwd) => (cwd || "").replace(/\/\.worktrees\/.*$/, "").replace(/\/+$/, "");
 const isHome = (p) => /^(\/home\/[^/]+|\/Users\/[^/]+|\/root|\/)$/.test(p);
 
@@ -150,9 +158,12 @@ function auditFile(file) {
   const seq = [], usage = new Map(), toolUses = new Map(), seenReads = new Map(), allCmd = new Map();
   let title = "", aiTitle = "", cwd0 = "", harnessUsd = null, compactPending = false, brief = null;
   const B = { tests: 0, testFails: 0, testCmd: {}, readsBeforeEdit: 0, firstEditCall: 0, edits: 0, editFiles: {} };
-  for (const ln of linesOf(file)) {
-    let o; try { o = JSON.parse(ln); } catch { SCAN.badLines++; continue; }
+  // --timeline only: each call's issued tools (callId → slots), each slot by tool_use id, the record span
+  const tlIssued = new Map(), tlSlot = new Map(); let nLines = 0, nBad = 0, recT0 = Infinity, recT1 = 0, tlBig = 0;
+  for (const ln of linesOf(file)) { nLines++;
+    let o; try { o = JSON.parse(ln); } catch { SCAN.badLines++; nBad++; continue; }
     const ts = o.timestamp ? Date.parse(o.timestamp) : NaN;
+    if (TL && !Number.isNaN(ts)) { recT0 = Math.min(recT0, ts); recT1 = Math.max(recT1, ts); }
     if (!cwd0 && o.cwd) cwd0 = o.cwd;
     if (o.type === "custom-title") { title = o.customTitle || title; continue; }
     if (o.type === "agent-name") { title ||= o.agentName || ""; continue; }
@@ -166,7 +177,9 @@ function auditFile(file) {
       const id = o.message.id + "|" + (o.requestId || "");
       if (!usage.has(id)) seq.push({ call: id });
       usage.set(id, { u, m: mdl, ts, effort: o.effort ?? o.perTurnEffort ?? "-" });
-      for (const b of o.message.content || []) if (b.type === "tool_use") toolUses.set(b.id, { name: b.name, input: b.input || {}, ts });
+      for (const b of o.message.content || []) if (b.type === "tool_use") { toolUses.set(b.id, { name: b.name, input: b.input || {}, ts });
+        if (TL) { const slot = { name: b.name, target: tlTarget(b.input || {}), chars: null, err: false, dur: 0 }; tlSlot.set(b.id, slot);
+          if (!tlIssued.has(id)) tlIssued.set(id, []); tlIssued.get(id).push(slot); } }
     } else if (o.type === "user") {
       const c = o.message?.content, notif = o.origin?.kind === "task-notification";
       const textCat = notif ? C_NOTIF : o.isCompactSummary ? C_SUMMARY : o.isMeta ? C_HARNESS : C_PROMPT;
@@ -186,6 +199,7 @@ function auditFile(file) {
           else if (name === "Skill") { cat = C_SKILL; target = tu.input.skill || ""; }
           else if (name.startsWith("mcp__") || name.startsWith("Web")) cat = C_MCP;
           seq.push({ cat, chars, ts, trig: "tool result", tool: name, target, bc, err: !!b.is_error, dur: tu && !Number.isNaN(ts) ? Math.max(0, ts - tu.ts) : 0 });
+          if (TL) { const slot = tlSlot.get(b.tool_use_id); if (chars > TL_BIG) tlBig++; if (slot) Object.assign(slot, { chars, err: !!b.is_error, dur: seq[seq.length - 1].dur }); }
         } else if (b.type === "text") seq.push({ cat: textCat, chars: (b.text || "").length, ts, trig: notif ? "agent report" : "user prompt" });
         else if (b.type === "image") seq.push({ cat: textCat, chars: 6000, ts, trig: "user prompt" });
       }
@@ -193,6 +207,8 @@ function auditFile(file) {
       const chars = JSON.stringify(o.attachment).length; seq.push({ cat: C_HARNESS, chars, ts, att: o.attachment?.type || "?" });
     }
   }
+  // a timeline over a file with no parseable line is a failure to read it, never an empty run
+  if (TL && nLines && nBad === nLines) throw new Error(`no line parsed as JSON (${nBad} malformed)`);
   const project = foldCwd(cwd0);
   if (PROJECT && !project.includes(PROJECT)) return null;
 
@@ -206,10 +222,10 @@ function auditFile(file) {
   const push = (c, t) => { if (t <= 0) return; const l = segs[segs.length - 1]; if (l && l.c === c) l.t += t; else segs.push({ c, t }); catTok[c] += t; have += t; R.land[c] += t; };
   const trim = (x) => { for (const ownOnly of [true, false]) for (let i = segs.length - 1; i >= 0 && x > 0; i--) { const s = segs[i]; if (ownOnly && s.c !== C_OWN) continue;
       const d = Math.min(s.t, x); s.t -= d; catTok[s.c] -= d; have -= d; x -= d; } segs = segs.filter((s) => s.t > 0); };
-  const landed = [], cmdCount = new Map();
+  const landed = [], cmdCount = new Map(), tlRows = []; let lastToolTs = NaN;
   for (const e of seq) {
     if (e.compact) { compactPending = true; continue; }
-    if (!e.call) { pending.push(e);
+    if (!e.call) { pending.push(e); if (e.tool && !Number.isNaN(e.ts)) lastToolTs = e.ts;
       if (e.ts >= SINCE && e.tool) { const t = (R.tools[e.tool] ??= { n: 0, chars: 0, err: 0 }); t.n++; t.chars += e.chars; if (e.err) { t.err++; R.errs++; }
         if (e.bc !== null && e.bc !== undefined) { const b = (R.bash[CATS[e.bc]] ??= { n: 0, chars: 0, err: 0, waitMs: 0 }); b.n++; b.chars += e.chars; b.waitMs += e.dur; if (e.err) b.err++; cmdCount.set(e.target, (cmdCount.get(e.target) || 0) + 1); }
         if (e.cat === C_READN) { R.rereadN++; R.rereadChars += e.chars; bump2(G.rereads, project + " · " + e.target.replace(project + "/", ""), "n", 1); bump2(G.rereads, project + " · " + e.target.replace(project + "/", ""), "chars", e.chars); }
@@ -220,6 +236,7 @@ function auditFile(file) {
       if (e.ts >= SINCE && e.att) { bump2(G.attach, e.att, "n", 1); bump2(G.attach, e.att, "chars", e.chars); bump2(R.attach, e.att, "n", 1); bump2(R.attach, e.att, "chars", e.chars); }
       continue; }
     const { u, m, ts, effort } = usage.get(e.call), r = RATE(m);
+    const tlPush = (usd) => { if (TL) tlRows.push({ n: R.calls, ts, gap: Number.isNaN(lastToolTs) ? null : ts - lastToolTs, ctx, out, usd, tools: tlIssued.get(e.call) || [] }); };
     if (R.firstTs === undefined) R.firstTs = ts;
     const cc = u.cache_creation, cwAll = u.cache_creation_input_tokens || 0, cw1 = cc?.ephemeral_1h_input_tokens || 0, cw5 = Math.max(0, cwAll - cw1);
     const cr = u.cache_read_input_tokens || 0, inp = u.input_tokens || 0, out = u.output_tokens || 0, ctx = inp + cr + cwAll;
@@ -242,7 +259,7 @@ function auditFile(file) {
     // An unpriced model is IGNORANCE, not a $0 spend: the call's tokens stay in every token
     // total and its run renders "n/a" in the $ column, exactly as the Codex side does.
     if (!r) { SCAN.unpricedCalls++; bump(SCAN.unpricedModels, m || "(none)", 1); R.unpriced = true;
-      R.calls++; G.calls++; bump(R.models, m, 0); bump(R.efforts, effort, 0);
+      R.calls++; G.calls++; bump(R.models, m, 0); bump(R.efforts, effort, 0); tlPush(null);
       R.tok.in += inp; R.tok.out += out; R.tok.cw5 += cw5; R.tok.cw1 += cw1; R.tok.cr += cr;
       G.tok.in += inp; G.tok.out += out; G.tok.cw5 += cw5; G.tok.cw1 += cw1; G.tok.cr += cr;
       if (!R.t0) { R.t0 = ts; R.ctxFirst = ctx; } R.t1 = ts; R.ctxPeak = Math.max(R.ctxPeak, ctx); R.ctxSum += ctx;
@@ -260,7 +277,7 @@ function auditFile(file) {
     for (const k in parts) { R.usdBy[k] += parts[k]; G.usd[k] += parts[k]; }
     G.tok.in += inp; G.tok.out += out; G.tok.cw5 += cw5; G.tok.cw1 += cw1; G.tok.cr += cr; G.tok.think += u.output_tokens_details?.thinking_tokens || 0; G.calls++;
     R.tok.in += inp; R.tok.out += out; R.tok.cw5 += cw5; R.tok.cw1 += cw1; R.tok.cr += cr;
-    R.calls++; R.usd += usd; R.usdLC += ctx > LONG_CTX_TOKENS ? (usd - parts.out) * r.lcIn + parts.out * r.lcOut : usd;
+    R.calls++; R.usd += usd; tlPush(usd); R.usdLC += ctx > LONG_CTX_TOKENS ? (usd - parts.out) * r.lcIn + parts.out * r.lcOut : usd;
     const ib = R.calls <= 50 ? "1 · calls 1–50" : R.calls <= 150 ? "2 · calls 51–150" : R.calls <= 300 ? "3 · calls 151–300" : "4 · calls 301+";
     bump2(G.callIdx, `${R.kind} ${ib}`, "usd", usd); bump2(G.callIdx, `${R.kind} ${ib}`, "calls", 1); bump2(G.callIdx, `${R.kind} ${ib}`, "ctx", ctx);
     bump2(G.tier, R.kind, "cw5", parts.cw5); bump2(G.tier, R.kind, "cw1", parts.cw1);
@@ -289,6 +306,7 @@ function auditFile(file) {
     prev = { ctx, ts, m };
   }
   if (!R.calls) return null;
+  if (TL) R.timeline = { rows: tlRows, t0: recT0, t1: recT1, big: tlBig };
   R.distinctRead = seenReads.size;
   for (const l of landed) { const after = R.calls - l.at, rr = RATE(l.m); if (after > 0 && rr) G.landings.push({ usd: l.tok * after * rr.rd / 1e6, tokK: Math.round(l.tok / 1000), after, tool: l.tool, target: String(l.target).slice(0, 90), run: RUNS.length }); }
   G.landings.sort((a, b) => b.usd - a.usd); G.landings.length = Math.min(G.landings.length, 200);
@@ -509,6 +527,28 @@ if (CODEX) {
   if (resumed) console.log(`${resumed} thread(s) resumed or compacted mid-run; each segment's peak is summed — the final counter alone would undercount them.`);
   if (unpriced) console.log(`${unpriced} thread(s) ran an unpriced model and show "n/a" — their TOKENS are in the total, their DOLLARS are not.`);
   process.exit(0);
+}
+
+// ---------- --timeline FILE: one run, every model call a row, priced by the same replay
+if (TL) {
+  const K = (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1000 ? (v / 1000).toFixed(1) + "K" : String(Math.round(v)));
+  const cash = (v) => (v === null ? "n/a" : "$" + v.toFixed(4)), secs = (ms) => (ms / 1000).toFixed(1) + "s", clock = (t) => new Date(t).toISOString().slice(11, 19);
+  let failed = 0;
+  TIMELINE.forEach((given, i) => {
+    // the gaps line speaks for THIS file only
+    Object.assign(SCAN, { badLines: 0, noTimestamp: 0, unpricedCalls: 0, unpricedModels: {}, tierUnknownCalls: 0, syntheticCalls: 0, readErrors: [], notes: [] });
+    if (i) console.log("");
+    let R; try { R = auditFile(path.resolve(given)); } catch (e) { failed++; console.log(`UNREADABLE — ${given}: ${e.message}`); return; }
+    if (!R) { console.log(`NO CALLS — ${given}`); console.log(gapsLine()); if (SCAN.readErrors.length) failed++; return; }
+    const T = R.timeline, who = R.kind === "main" ? "main" : R.agentType || "agent (type unknown: no .meta.json)";
+    console.log(`TIMELINE ${who} · ${Object.keys(R.models).map(shortModel).join("+")} · effort ${Object.keys(R.efforts).join("/")} · ${R.calls} calls · wall ${Math.round((T.t1 - T.t0) / 1000)}s · peak ctx ${K(R.ctxPeak)} · out ${R.tok.out} tok · tool errors ${R.errs} · results >20KB ${T.big} · ${R.unpriced ? "n/a" : cash(R.usd)} · ${given}`);
+    for (const c of T.rows) {
+      const tools = c.tools.map((t) => `${t.name}: ${t.target} ${t.chars === null ? "(no result)" : `${t.chars}ch${t.err ? " ERR" : ""} ${secs(t.dur)}`}`);
+      console.log(`  #${c.n} ${clock(c.ts)} after ${c.gap === null ? "-" : secs(c.gap)} · ctx ${K(c.ctx)} · out ${c.out} · ${cash(c.usd)} · ${tools.join(" | ") || "(no tools)"}`); }
+    console.log(gapsLine());
+    if (SCAN.readErrors.length) failed++;
+  });
+  process.exit(failed ? 1 : 0);
 }
 
 // ---------- run

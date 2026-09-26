@@ -22,6 +22,7 @@ node ~/.claude/commands/tokens/token-audit.mjs [flags]
 - One chat and its agents: `--family <title|agent-type|session-id-prefix>`, or `--session <sid-prefix>` when a sub-agent orchestrated the work and no chat title exists.
 - Codex threads: `--codex` — one row per rollout thread, sub-agents attributed from `session_meta.source`.
 - One flight's agents: `--flight <dir>` — see below.
+- One agent run call by call: `--timeline <transcript.jsonl>` (repeatable) — whole file, no window; a header (agent type, models, effort, calls, wall, peak context, output, tool errors, results over 20 KB, USD) then one row per model call with its clock, wait since the last tool result, context, output, price and each tool it issued (`name: target`, result chars, `ERR`, wait).
 - The full dataset for a page or a diff: `--out FILE` (JSON).
 
 ## One flight — `--flight <dir>`

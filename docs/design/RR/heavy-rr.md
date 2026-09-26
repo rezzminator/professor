@@ -1,6 +1,6 @@
 # heavy-rr
 
-`heavy-rr` is the `rr` lead with no round ceiling: 8 diggers a round, 16 verification pages, `opus` at effort `medium`, and digging that ends only when the map converges. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, the missing ceiling and what brakes a run without one, the cost, how it is run, and what its runs measured.
+`heavy-rr` is the `rr` lead with no round ceiling: 8 diggers a round, 16 verification pages, `opus` at effort `medium`, the repository lane `super-rr` also carries, and digging that ends only when the map converges. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, the missing ceiling and what brakes a run without one, the cost, how it is run, and what its runs measured.
 
 ## Contents
 
@@ -19,7 +19,7 @@
 | Kind | variant of `rr`, declared in `templates/global/agents/variants.json` |
 | Model, effort | `opus`, `medium` |
 | Tools | `WebSearch, WebFetch, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` (inherited from `rr.md`) |
-| Spawns | `sub-rr` only |
+| Spawns | `sub-rr`, and `tracer-rr` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
 | Start hook | `rr-dir`, matcher `rr\|super-rr\|heavy-rr` |
 
@@ -35,6 +35,7 @@ Description, verbatim: `Exhaustive rr — delegate for "heavy rr", "heavy-rr X" 
 | `so 4 diggers carry the entire frontier` | `so 8 diggers carry the entire frontier` |
 | `Digging ends when every sub-area is settled, when a round settled nothing and added no sub-area, or at the end of round 3 — a safety ceiling, never a target.` | `Digging ends when every sub-area is settled, or when a round settled nothing and added no sub-area; no round ceiling applies.` |
 | `on at most 8 source pages` | `on at most 16 source pages` |
+| `` `sub-rr` is the only agent type you spawn. `` | the repository lane: `sub-rr` for the web, `tracer-rr` for a sub-area whose answer lives in a repository's code — the full text is in `tracer-rr.md`, § Who spawns it |
 
 The third swap replaces the whole stop sentence, so any edit to that sentence in `rr.md` must be mirrored in this entry; `TestShippedGlobalAgentVariantsRender` fails until it is.
 
@@ -72,6 +73,7 @@ Two completed runs and one orphaned run on one query (what benchmarks evaluate d
 | --- | --- |
 | The declaration | `templates/global/agents/variants.json`, entry `heavy-rr` |
 | The body it swaps into | `templates/global/agents/rr.md` — the stop sentence is swapped whole |
+| The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `super-rr` entry |
 | The renderer and its tests | `pfm/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/installer/expected_hooks.go` (`hookRRDirMatcher`), `settings_wiring_test.go`, `settings_dedupe_test.go` |
 | The hook's docs | `docs/design/hooks/hooks.md`, `docs/dev/pfm-surface.md` |

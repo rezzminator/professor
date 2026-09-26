@@ -27,27 +27,28 @@ A change lands in this file first, then in the templates, then in every surface 
 | Member | Kind | Does | Runs at | Design |
 | --- | --- | --- | --- | --- |
 | `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only member holding `Write`, and it holds no `Read` | smart (`opus`), effort `low` | this file |
-| `super-rr` | variant of `rr` | The same body at higher effort with wider caps swapped in by `variants.json` `replace`, rendered by `pfm codex agents` | `opus`, effort `medium` | [super-rr.md](super-rr.md) |
+| `super-rr` | variant of `rr` | The same body at higher effort with wider caps and the repository lane swapped in by `variants.json` `replace`, rendered by `pfm codex agents` | `opus`, effort `medium` | [super-rr.md](super-rr.md) |
 | `heavy-rr` | variant of `rr` | As `super-rr`, 8 diggers a round and no round ceiling | `opus`, effort `medium` | [heavy-rr.md](heavy-rr.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | mechanical (`sonnet`), effort `low` | [sub-rr.md](sub-rr.md) |
+| `tracer-rr` | agent | The repository digger of `super-rr` and `heavy-rr`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [tracer-rr.md](tracer-rr.md) |
 | `collector-rr` | agent | Fetches named web sources and returns them verbatim; no diggers, no document | mechanical (`sonnet`), effort `low` | [collector-rr.md](collector-rr.md) |
 | `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|super-rr\|heavy-rr` | `pfm internal rr-dir` | this file |
 
-The leads differ only in their caps; every other line of the body is `rr.md`'s:
+The leads differ in their caps and in the repository lane, which sends a sub-area whose answer lives in a repository's code to `tracer-rr` ([tracer-rr.md](tracer-rr.md), § Who spawns it); every other line of the body is `rr.md`'s:
 
-| Lead | Diggers a round | Round ceiling | Verification pages |
-| --- | --- | --- | --- |
-| `rr` | 4 | 3 | 8 |
-| `super-rr` | 6 | 5 | 12 |
-| `heavy-rr` | 8 | none: the convergence stops alone end the run | 16 |
+| Lead | Diggers a round | Round ceiling | Verification pages | Repository lane |
+| --- | --- | --- | --- | --- |
+| `rr` | 4 | 3 | 8 | no |
+| `super-rr` | 6 | 5 | 12 | yes |
+| `heavy-rr` | 8 | none: the convergence stops alone end the run | 16 | yes |
 
 Vocabulary, one term per concept: a rabbit hole is a link, gap or missing piece a source raises and leaves unexplained; a sub-area is one part of the knowledge area, named in the plan; a finding is a digger's answer to one sub-query; a fact is a load-bearing statement in the map; a quote is the verbatim sentence that states a fact.
 
 ## The run
 
-1. OPEN. One message carries the WebSearch and, for a scholarly question, the harvester lookups; the next message fetches the 1-3 best starting pages. A failed or empty search ends the run with a one-line report.
-2. PLAN. The lead splits the knowledge area into 3-7 sub-areas, each with a `settled when` line.
-3. AGGREGATE. Findings and rabbit holes are pooled, each sub-area is judged against its `settled when` line, and the frontier is rebuilt from the rabbit holes that serve an unsettled sub-area.
+1. OPEN. One message carries the WebSearch and, for a scholarly question, the harvester lookups; the next message fetches the 1-3 best starting pages. An opening read that shows the lead no page text is marked `UNREAD` and its question goes to a round-1 digger, never into the map as an absence. A failed or empty search ends the run with a one-line report.
+2. PLAN. The lead splits the knowledge area into 3-7 sub-areas, each with a plan line, `{sub-area} — settled when {evidence}`, which opens every brief that owns it.
+3. AGGREGATE. Findings and rabbit holes are pooled, each sub-area is judged against its plan line (`settled` names the evidence that meets it; a digger's unsettled question or unverified inference on a part the line names makes it `partial`), and the frontier is rebuilt from the rabbit holes that serve an unsettled sub-area.
 4. DIG. At most the lead's diggers a round (§ The family), the frontier grouped by sub-area so no two diggers own the same ground, every digger of the round in one message. The lead waits by ending its message.
 5. LOOP. Steps 3-4 repeat until the stop rule fires. Each round closes with a status block — one `{sub-area}: settled | partial | open — {why}` line each, then `Next: round {n}` or `Digging ended: {condition}` — so the stop decision is on the record.
 6. VERIFY. One message of WebFetch checks over the facts the answer rests on.
@@ -58,7 +59,7 @@ Vocabulary, one term per concept: a rabbit hole is a link, gap or missing piece 
 
 One run produces one markdown document, `{RR dir}/{slug}-{YYYY-MM-DD}.md`, and nothing beside it: no part files, no sidecar directory, no log.
 
-- One writer. The lead is the only agent that writes it. `sub-rr` holds no `Write`, `Edit` or `Bash`; its `tools:` line carries that invariant, so the harness enforces it and no prose has to.
+- One writer. The lead is the only agent that writes it. `sub-rr` holds no `Write`, `Edit` or `Bash`; its `tools:` line carries that invariant, so the harness enforces it and no prose has to. `tracer-rr` holds `Bash` to clone and writes only its own result file under `{RR dir}/tracer-rr/`, which the document lists and never absorbs.
 - One write. The finished document is written once, at SAVE. Nothing is written before it and nothing is appended, so the lead needs no `Edit` tool and no sentinel lines.
 - No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing. It is what turns a second run on a taken name into a refusal instead of the silent loss of the first run's document. Adding `Read` to the lead's `tools:` line removes the guard. It would also let a lead open the ledger and inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path.
 - A failed save is loud. With no `RR-DIR:` line, an `RR-DIR-ERROR:` line, or a Write that fails for any reason but a taken name, the return opens `NOT SAVED — {reason}` and carries the synthesis inline.
@@ -69,7 +70,7 @@ Layout of the finished document:
 # RR — {question in one line}
 Question: {the query, verbatim}
 
-{answer, one to two sentences}
+{answer, one to two sentences of prose, each clause carrying the inline link of the map fact it states; lists belong in the map}
 {the map, by sub-area}
 Coverage       the plan, each sub-area settled | partial | open
 Verification   facts checked; every NOT ON PAGE and UNCHECKED by name
@@ -114,7 +115,8 @@ What enters the lead's context is held flat: a finding keeps its 2-4 sentence si
 
 The frontier of a run that starts from its opening pages holds only what those pages happen to mention. The plan closes that: before the first dig, the lead names every part the query needs, including the ones no opening page mentioned, from what it knows and what the opening pages showed.
 
-- 3-7 sub-areas, each with a `settled when` line: the evidence that must exist for the sub-area to count as answered.
+- 3-7 sub-areas, each with a plan line, `{sub-area} — settled when {evidence}`: the evidence that must exist for the sub-area to count as answered.
+- The plan lines open every brief that owns them, rather than standing as free text: a lead that reasons its plan without writing it down skipped a text line in trial runs, while a brief is written in every run, so the plan reaches the transcript with no step left to skip, and each status block has the lines on record to judge against. The digger also learns what evidence settles its sub-area.
 - Round 1's frontier is every sub-area of the plan plus the opening pages' rabbit holes, so the first round is the wide one.
 - The plan can grow: a rabbit hole that reveals a sub-area the plan missed adds it, and `Coverage` marks it as added.
 - The rabbit-hole footer on every content fetch carries the goal in one line, so the model that reads the page proposes rabbit holes for this run and not for the page in general.
@@ -156,15 +158,18 @@ One vocabulary across the digger's return, the lead's messages and the document,
 | `SEARCH FAILED — {error}` | lead | The opening search errored |
 | `NOTHING FOUND — {queries tried}` | lead, digger, collector | The searches ran and answered nothing |
 | `DIG FAILED — {error}` | digger | The sub-query's search errored or every fetch failed |
+| `CLONE FAILED — {error}` | repository digger | The repository could not be cloned; the return is this line alone |
+| `clone-only` | repository digger, lead | A code fact on a host with no commit-pinned link form, cited by its absolute path in the result file |
 | `FETCH FAILED — {error}` | collector | An order's source could not be read |
 | `PARTIAL READ — {part read}` | collector | The source was cut short before the item could be ruled out |
 | `unquoted` | digger, lead | A fact with no verbatim quote behind it, and nothing else: a quoted fact the verification did not sample carries no mark |
 | `DISPUTED` | digger, lead | Sources disagree; both sides are given with their quotes, unresolved |
 | `unverified` | lead | A claim with no fetched source behind it |
+| `UNREAD — {url}: {why}` | lead | An opening read showed no page text (a result saved to a file the lead cannot open, an error, a fetch model reporting no match on a long page); its question goes to a round-1 digger |
 | `confirmed`, `NOT ON PAGE`, `UNCHECKED — {error}` | lead | The verification verdicts; `NOT ON PAGE` is also the collector's mark for a source read that does not carry the item |
 | `NOT SAVED — {reason}` | lead | The document was not written; the synthesis travels inline |
 
-An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOUND`, `DIG FAILED` and `FETCH FAILED` against `NOTHING FOUND`, `UNCHECKED` and `PARTIAL READ` against `NOT ON PAGE`.
+An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOUND`, `DIG FAILED`, `CLONE FAILED` and `FETCH FAILED` against `NOTHING FOUND`, `UNCHECKED`, `UNREAD` and `PARTIAL READ` against `NOT ON PAGE`.
 
 ## Not part of the design
 
@@ -176,7 +181,7 @@ An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOU
 | A log of findings written round by round | Every finding would be emitted twice, once by the digger and once by the lead |
 | A `RUNNING` stub written at the start and replaced at the end | Replacing it is a Write over an existing file: refused without `Read`, even for the lead's own stub, and allowed for every file with it, which removes the name guard. A dead run leaves no document; its plan and findings are in the transcript |
 | A human gate on the plan | The lead is a sub-agent and holds no way to ask; the plan is reported in `Coverage` |
-| Source-routing modules per domain | The harvester covers the scholarly lane; nothing measured supports more |
+| Source-routing modules per domain | The harvester covers the scholarly lane and `tracer-rr` the code lane of the deeper leads; nothing measured supports more |
 
 ## What the evidence says
 
@@ -198,7 +203,7 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `collector-rr.md`, `variants.json` | The three protocols; the `super-rr` and `heavy-rr` overrides, whose `replace` text must occur exactly once in `rr.md` |
+| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `tracer-rr.md`, `collector-rr.md`, `variants.json` | The four protocols; the `super-rr` and `heavy-rr` overrides, whose `replace` text must occur exactly once in `rr.md`, and their repository lane, identical in both entries |
 | The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `super-rr` and `heavy-rr`, re-rendered by `pfm codex agents` after every edit of `rr.md` |
 | The hook | `pfm internal rr-dir`, wired by `pfm/internal/installer/expected_hooks.go` | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
 | The roster line | `docs/BLUEPRINT.md` | The family's members and the variant mechanism |

@@ -262,4 +262,104 @@ test("an unreadable root is a failure to look, not an empty result", () => {
   assert.match(r.err, /is not readable/);
 });
 
+// --timeline runs with an empty HOME and no CLAUDE_CONFIG_DIR: it reads the named file and
+// nothing else, so a build that ignored the flag and fell back to root discovery fails fast.
+const TL_ROOT = path.join(FIX, "timeline"), TL_SUB = path.join(TL_ROOT, "-tmp-tl-proj", "sess-tl", "subagents");
+const TL_PRICED = path.join(TL_SUB, "agent-t1.jsonl"), TL_UNPRICED = path.join(TL_SUB, "agent-t2.jsonl");
+function runTl(args) {
+  const home = fs.mkdtempSync(path.join(TMP, "tl-home-"));
+  const r = spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8", cwd: HERE, maxBuffer: 64 << 20, env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "" } });
+  if (r.error) assert.fail(`could not run ${BIN}: ${r.error.message}`);
+  return { code: r.status, out: r.stdout || "", err: r.stderr || "" };
+}
+const tlRows = (out) => out.split("\n").filter((l) => /^ {2}#\d+ /.test(l));
+const tlHeader = (out) => out.split("\n").find((l) => l.startsWith("TIMELINE ")) || "";
+
+test("--timeline: one row per distinct model call, however many assistant lines a call spans", () => {
+  const lines = fs.readFileSync(TL_PRICED, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((o) => o.type === "assistant");
+  const calls = new Set(lines.map((o) => o.message.id + "|" + o.requestId)).size;
+  assert.ok(lines.length > calls, "the fixture must split at least one call across several assistant lines");
+  const r = runTl(["--timeline", TL_PRICED]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(tlRows(r.out).length, calls, `want ${calls} rows, one per call:\n${r.out}`);
+  assert.match(tlHeader(r.out), new RegExp(`· ${calls} calls ·`));
+  assert.match(r.out, /^data gaps: none$/m);
+});
+
+test("--timeline: the header's USD equals the default report's USD for the same file, and the rows sum to it", () => {
+  const js = path.join(TMP, "tl-default.json");
+  const d = run(["--since", "99999d", "--root", TL_ROOT, "--out", js]);
+  assert.equal(d.code, 0, d.err);
+  const want = JSON.parse(fs.readFileSync(js, "utf8")).runs.find((x) => x.file.includes("agent-t1"));
+  assert.ok(want && want.usd > 0, "the default report must price the fixture run");
+  const r = runTl(["--timeline", TL_PRICED]);
+  const m = / · \$(\d+\.\d{4}) · /.exec(tlHeader(r.out));
+  assert.ok(m, `no USD in the timeline header:\n${r.out}`);
+  assert.equal(m[1], want.usd.toFixed(4), "one replay, one price table: the timeline must not re-price the run");
+  const rows = tlRows(r.out).map((l) => +/ · \$(\d+\.\d{4}) · /.exec(l)[1]);
+  assert.ok(Math.abs(rows.reduce((a, b) => a + b, 0) - want.usd) <= rows.length * 0.00005 + 1e-9, `rows sum ${rows} vs ${want.usd}`);
+});
+
+test("--timeline: an is_error tool result renders ERR on its call and counts in the header", () => {
+  const r = runTl(["--timeline", TL_PRICED]);
+  assert.equal(r.code, 0, r.err);
+  const bad = tlRows(r.out).filter((l) => / ERR /.test(l));
+  assert.equal(bad.length, 1, `exactly one row carries the failed Bash:\n${r.out}`);
+  assert.match(bad[0], /Bash: go test \S+ -run TestAlpha \d+ch ERR/);
+  assert.match(tlHeader(r.out), /· tool errors 1 ·/);
+  assert.match(tlHeader(r.out), /· results >20KB 1 ·/, "the 25,000-char Read result is over 20 KB");
+});
+
+test("--timeline: an unpriced model renders n/a in the header and every row, never $0", () => {
+  const r = runTl(["--timeline", TL_UNPRICED]);
+  assert.equal(r.code, 0, r.err);
+  assert.match(tlHeader(r.out), / · n\/a · /);
+  assert.ok(tlRows(r.out).length > 0 && tlRows(r.out).every((l) => / · n\/a · /.test(l)), r.out);
+  assert.doesNotMatch(r.out, /\$0\.0000/);
+  assert.match(r.out, /^data gaps:.*UNPRICED calls.*unobtanium/m);
+});
+
+test("--timeline: a missing path prints UNREADABLE and exits non-zero, never an empty run", () => {
+  const missing = path.join(TMP, "no-such-transcript.jsonl");
+  const r = runTl(["--timeline", missing]);
+  assert.notEqual(r.code, 0, "a file we failed to read must not exit clean");
+  assert.match(r.out + r.err, new RegExp(`UNREADABLE — ${missing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: ENOENT`));
+  assert.doesNotMatch(r.out, /NO CALLS/);
+});
+
+test("--timeline: a bare flag with no path exits 2 naming the missing path", () => {
+  const r = runTl(["--timeline"]);
+  assert.equal(r.code, 2, r.out + r.err);
+  assert.match(r.err, /token-audit: --timeline wants a transcript path/);
+});
+
+test("--timeline: combined with --flight, --codex, --project or --since is refused", () => {
+  for (const extra of [["--flight", "x"], ["--codex"], ["--project", "x"], ["--since", "1d"]]) {
+    const r = runTl(["--timeline", TL_PRICED, ...extra]);
+    assert.equal(r.code, 2, `${extra.join(" ")}: ${r.out + r.err}`);
+    assert.match(r.err, /--timeline reads whole files: it takes no --flight, --codex, --project or --since/, `${extra.join(" ")}: ${r.err}`);
+  }
+});
+
+const TL_BAD = path.join(TL_SUB, "agent-t3.jsonl"), TL_EMPTY = path.join(TL_SUB, "agent-t4.jsonl"), TL_NOMETA = path.join(TL_SUB, "agent-t5.jsonl");
+
+test("--timeline: a transcript where every line is malformed JSON prints UNREADABLE and exits 1", () => {
+  const r = runTl(["--timeline", TL_BAD]);
+  assert.equal(r.code, 1, r.out + r.err);
+  assert.match(r.out, new RegExp(`^UNREADABLE — ${TL_BAD.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: `, "m"));
+  assert.doesNotMatch(r.out, /NO CALLS/);
+});
+
+test("--timeline: an empty transcript file prints NO CALLS and exits 0", () => {
+  const r = runTl(["--timeline", TL_EMPTY]);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.match(r.out, new RegExp(`^NO CALLS — ${TL_EMPTY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+});
+
+test("--timeline: a transcript with no .meta.json beside it names the agent type unknown", () => {
+  const r = runTl(["--timeline", TL_NOMETA]);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.match(tlHeader(r.out), /^TIMELINE agent \(type unknown: no \.meta\.json\) /);
+});
+
 test.after(() => fs.rmSync(TMP, { recursive: true, force: true }));

@@ -48,6 +48,9 @@ templates/global/agents/*.toml
 .opencode/goals/
 # R&D scratch (walker consumer trees and the like): never a tracked artifact.
 .professor/RND/
+# tracer-rr result files: machine-local dig evidence (verbatim third-party code,
+# paths into /tmp clones); the RR document carries the commit-pinned links.
+.professor/RR/tracer-rr/
 # Harvester conversion cache and OpenCode's own runtime files (plugin install
 # tree, nested config): host state, never repo content.
 .cache/

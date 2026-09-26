@@ -25,11 +25,6 @@
 
 <h2 align="center">Professor is a complete, integrated toolbox for everything you want to do — that Anthropic, OpenAI <em>or anyone else</em> will <em>never</em> give you.</h2>
 
-<p align="center">
-  <img src="docs/img/torvalds-aalto-2012.jpg" alt="Linus Torvalds giving Nvidia the finger, Aalto University, 2012" width="900"><br>
-  <sub>Linus Torvalds · Aalto University, June 2012</sub>
-</p>
-
 A fleet controller and a discipline layer for **Claude Code, Codex, and OpenCode** — chats that talk to each other, agents that follow the rules, and a harvester that reads what the web won't show a bot.
 
 ## Why Professor?

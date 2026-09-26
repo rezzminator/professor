@@ -19,7 +19,7 @@ import (
 
 const (
 	// SchemaVersion is the newest database schema understood by this binary.
-	SchemaVersion = 8
+	SchemaVersion = 9
 )
 
 //go:embed schema.sql
@@ -46,6 +46,9 @@ var schemaV7 string
 //go:embed migration_v8.sql
 var schemaV8 string
 
+//go:embed migration_v9.sql
+var schemaV9 string
+
 var migrations = [...]string{
 	schemaV1,
 	schemaV2,
@@ -55,6 +58,7 @@ var migrations = [...]string{
 	schemaV6,
 	schemaV7,
 	schemaV8,
+	schemaV9,
 }
 
 // Store is a single-connection handle to the pfm SQLite database.
@@ -62,7 +66,7 @@ var migrations = [...]string{
 // It holds TWO databases, and the split is the whole point. `db` is this
 // binary's private cache — transcripts, rollouts, Codex names — every row of it
 // derived from files on disk and rebuildable by a rescan. `state` is the
-// fleet's shared store at ~/.cc/fleet.db. It holds
+// fleet's shared store at ~/.local/state/pfm/pfm.db. It holds
 // operator decisions such as kills, teammates, and the primary account.
 type Store struct {
 	db    *sql.DB
@@ -119,7 +123,12 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 		option(&settings)
 	}
 
-	db, err := sqlitedb.OpenStore(ctx, resolved.DB)
+	info, statErr := os.Stat(resolved.CacheDB)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect cache database %s: %w", resolved.CacheDB, statErr)
+	}
+	existed := statErr == nil && info.Size() > 0
+	db, err := sqlitedb.OpenStore(ctx, resolved.CacheDB)
 	if err != nil {
 		return nil, err
 	}
@@ -127,11 +136,11 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 	store := &Store{
 		db:    db,
 		state: fleetdb.OpenSharedState(ctx, resolved),
-		path:  resolved.DB,
+		path:  resolved.CacheDB,
 		warn:  settings.warn,
 		clock: settings.clock,
 	}
-	if err := store.migrate(ctx); err != nil {
+	if err := store.migrate(ctx, existed); err != nil {
 		return nil, errors.Join(err, store.Close())
 	}
 	if degraded := store.state.Degraded(); degraded != nil {
@@ -141,9 +150,6 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 			store.state.Path(),
 			degraded,
 		)
-	}
-	if err := store.adoptLocalKills(ctx); err != nil {
-		return nil, errors.Join(err, store.Close())
 	}
 	return store, nil
 }
@@ -172,32 +178,48 @@ func (s *Store) SharedDegraded() error { return s.state.Degraded() }
 // directly, including the teammate reaper.
 func (s *Store) Shared() *fleetdb.Store { return s.state }
 
-func (s *Store) migrate(ctx context.Context) error {
-	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
-		version, err := userVersion(ctx, tx)
+func (s *Store) migrate(ctx context.Context, existed bool) (returnErr error) {
+	version, err := userVersion(ctx, s.logged())
+	if err != nil {
+		return err
+	}
+	if version < SchemaVersion {
+		// Concurrent openers upgrade one at a time; the version read under
+		// the lock is the one the steps below may trust.
+		unlock, err := fleetdb.LockMigration(ctx, s.path)
 		if err != nil {
 			return err
 		}
-		if version > SchemaVersion {
-			// Migrations are ONE-WAY. A newer binary migrated this database;
-			// every older binary on the machine is now locked out until it is
-			// upgraded — there is no automatic downgrade, and hand-editing
-			// user_version is only safe when the skipped migrations happen to
-			// be purely additive, which nothing here guarantees. Say so where
-			// the failure lands, with the recovery that always works.
-			return fmt.Errorf(
-				"database schema version %d is newer than supported version %d: "+
-					"this pfm binary is OLDER than the one that migrated it — "+
-					"upgrade every pfm on this machine, or restore a backup "+
-					"(sqlite3 <db> \".backup <backup-before-upgrade>\") taken before the newer binary first ran; "+
-					"migrations are one-way and no downgrade path exists",
-				version,
-				SchemaVersion,
-			)
+		defer func() { returnErr = errors.Join(returnErr, unlock()) }()
+		if version, err = userVersion(ctx, s.logged()); err != nil {
+			return err
 		}
+	}
+	if version > SchemaVersion {
+		// Migrations are ONE-WAY. A newer binary migrated this database;
+		// every older binary on the machine is now locked out until it is
+		// upgraded — there is no automatic downgrade, and hand-editing
+		// user_version is only safe when the skipped migrations happen to
+		// be purely additive, which nothing here guarantees. Say so where
+		// the failure lands, with the recovery that always works.
+		return fmt.Errorf(
+			"database schema version %d is newer than supported version %d: "+
+				"this pfm binary is OLDER than the one that migrated it — "+
+				"upgrade every pfm on this machine, or restore a backup "+
+				"(sqlite3 <db> \".backup <backup-before-upgrade>\") taken before the newer binary first ran; "+
+				"migrations are one-way and no downgrade path exists",
+			version,
+			SchemaVersion,
+		)
+	}
+	if version < SchemaVersion {
+		if err := fleetdb.BackupBeforeMigration(ctx, s.db, s.path, version+1, existed); err != nil {
+			return err
+		}
+	}
 
-		startingVersion := version
-		for next := version + 1; next <= SchemaVersion; next++ {
+	if err := s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
+		for next := version + 1; next <= 8; next++ {
 			if _, err := tx.ExecContext(ctx, migrations[next-1]); err != nil {
 				return fmt.Errorf("apply database migration %d: %w", next, err)
 			}
@@ -208,17 +230,14 @@ func (s *Store) migrate(ctx context.Context) error {
 				return fmt.Errorf("set database schema version %d: %w", next, err)
 			}
 		}
-		if startingVersion < 2 {
+		if version < 2 {
 			if err := migrateCodexLineageKills(ctx, tx); err != nil {
 				return fmt.Errorf("migrate Codex lineage kills: %w", err)
 			}
 		}
-		// assistant_count is ensured here, never versioned: it is a single
-		// additive column an older binary's explicit column list already
-		// ignores, so ADD COLUMN is idempotent and ignorable both ways.
-		// Bumping user_version for it would instead lock every older pfm on
-		// this machine out of the whole store the moment one binary ran it —
-		// including the very binary pfm update's rollback restores.
+		// assistant_count is ensured here rather than given its own migration:
+		// an older binary's explicit column list ignores the additive column.
+		// The later v9 bump retires the cache's hidden table, not this column.
 		if err := ensureColumn(
 			ctx, tx, "oc_sessions", "assistant_count", "INTEGER NOT NULL DEFAULT 0",
 		); err != nil {
@@ -229,6 +248,23 @@ func (s *Store) migrate(ctx context.Context) error {
 		// its upsert leaves it alone. The claude parser version bump that ships
 		// with it is what fills the rows indexed before it existed.
 		return ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''")
+	}); err != nil {
+		return err
+	}
+	if version >= 9 {
+		return nil
+	}
+	if err := s.adoptLocalKills(ctx); err != nil {
+		return fmt.Errorf("adopt cache kills before migration 9: %w", err)
+	}
+	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
+		if _, err := tx.ExecContext(ctx, migrations[8]); err != nil {
+			return fmt.Errorf("apply database migration 9: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=9"); err != nil {
+			return fmt.Errorf("set database schema version 9: %w", err)
+		}
+		return nil
 	})
 }
 
@@ -277,13 +313,7 @@ const adoptedKillsMeta = "shared_hidden_adopted"
 // adoptLocalKills merges, once, the kills this binary used to keep to itself
 // into the shared store, then stops consulting the local table for good.
 //
-// Local rows become shared rows. Nothing is deleted: a kill is
-// permanent and an unkill is the only removal, so a startup that could drop a
-// row is a startup that could lose a decision.
-//
-// The v1 `hidden` table is left in place, populated, and unread. It costs a few
-// kilobytes and it is the rollback: an older binary still finds its kills
-// there. `pfm doctor` reports it; nothing else looks at it.
+// Local rows become shared rows before v9 drops the retired cache table.
 func (s *Store) adoptLocalKills(ctx context.Context) error {
 	done, found, err := s.Meta(ctx, adoptedKillsMeta)
 	if err != nil {
@@ -291,6 +321,16 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 	}
 	if found && done == "1" {
 		return nil
+	}
+	var hidden string
+	err = s.logged().QueryRowContext(ctx,
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'hidden'",
+	).Scan(&hidden)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check kills awaiting adoption: %w", err)
 	}
 
 	rows, err := s.logged().QueryContext(ctx, "SELECT id, hidden_at FROM hidden")

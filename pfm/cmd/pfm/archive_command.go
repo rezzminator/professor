@@ -8,7 +8,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/archive"
 	"github.com/rezzminator/professor/pfm/internal/cli"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -106,10 +105,9 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	}
 	defer func() { cli.CloseResource(database, "pfm archive: close database", stderr, &exitCode) }()
 	runner, err := archive.New(archive.Dependencies{
-		Paths:            resolved,
-		Kills:            killStoreAdapter{manager: manager},
-		CodexBinary:      runtime.Config.Codex.Binary,
-		ExactClaudeRoots: runtime.Config.Source("accounts") == pfmconfig.SourceFile,
+		Paths:       resolved,
+		Kills:       killStoreAdapter{manager: manager},
+		CodexBinary: runtime.Config.Codex.Binary,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm archive: %v\n", err)

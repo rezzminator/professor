@@ -67,7 +67,7 @@ Above threshold = split into a referenced file (one level deep, with a Table of 
 
 ### Voice location
 
-Voice lives in the fleet prompt (`pfm/harness-prompts/`: `share/head.md` + the engine's `professor.md` + `share/tail.md`, composed by `pfm install`; Claude injects it under `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
+Voice lives in the fleet prompt (`pfm/harness-prompts/`: `share/head.md` + the engine's `professor.md` + `share/tail.md`, composed at build into `pfm/harness-prompts/composed/`; Claude injects it under `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
 
 ### Hooks vs prompts
 

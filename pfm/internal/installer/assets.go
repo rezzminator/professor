@@ -7,10 +7,8 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
-	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
@@ -23,11 +21,8 @@ type assetFile struct {
 }
 
 func assetFiles() ([]assetFile, error) {
-	files, err := harnessPromptAssetFiles()
-	if err != nil {
-		return nil, err
-	}
-	err = fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
+	var files []assetFile
+	err := fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -35,6 +30,9 @@ func assetFiles() ([]assetFile, error) {
 			return nil
 		}
 		relative := strings.TrimPrefix(name, "assets/")
+		if relative == "shim/pfm.zsh" {
+			return nil
+		}
 		if !schedulerAsset(relative) {
 			// The other platform's scheduler files are embedded (one binary
 			// serves both) but never staged: an operator on macOS should not
@@ -79,23 +77,6 @@ func schedulerAsset(relative string) bool {
 
 func mcpSchedulerAsset(relative string) bool {
 	return relative == "systemd/pfm-mcp.service" || relative == "launchd/com.professor.pfm.mcp.plist"
-}
-
-func renderShimAsset(content []byte, options Options) ([]byte, error) {
-	codex := []string{"typeset -gA PFM_CODEX_YOLO=("}
-	for _, account := range sortedBoolKeys(options.CodexYolo) {
-		value := 0
-		if options.CodexYolo[account] {
-			value = 1
-		}
-		codex = append(codex, "  ["+strconv.Itoa(account)+"]="+strconv.Itoa(value))
-	}
-	codex = append(codex, ")")
-	text, err := replaceSingleAssetMarker(string(content), "typeset -gA PFM_CODEX_YOLO=()", strings.Join(codex, "\n"))
-	if err != nil {
-		return nil, err
-	}
-	return []byte(text), nil
 }
 
 // renderReloadCommandAsset replaces the {{RELOAD_USAGE}} token in the
@@ -168,23 +149,7 @@ func replaceSingleAssetMarker(content, marker, replacement string) (string, erro
 	return strings.Replace(content, marker, replacement, 1), nil
 }
 
-func sortedBoolKeys(values map[int]bool) []int {
-	keys := make([]int, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Ints(keys)
-	return keys
-}
-
-// readAsset reads one embedded asset by the managed-root-relative path it
-// stages to. The harness-prompt parts are embedded by their own package —
-// pfm/harness-prompts, the ONE copy of that tree — and reached through the
-// same name, so staging, composition and the command preview all keep one
-// door.
+// readAsset reads one embedded asset by its managed-root-relative path.
 func readAsset(name string) ([]byte, error) {
-	if relative, isHarnessPrompt := harnessPromptAssetName(name); isHarnessPrompt {
-		return harnessprompts.ReadPart(relative)
-	}
 	return embeddedAssets.ReadFile(path.Join("assets", name))
 }

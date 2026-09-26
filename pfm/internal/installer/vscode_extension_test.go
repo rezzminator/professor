@@ -330,7 +330,8 @@ func TestVSCodeExtensionOrdinaryInstallUpgradesPreExtensionLedgerAndLinksExtensi
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 		vscodeExtensionRoots: []string{root},
 	}); err != nil {
@@ -367,7 +368,8 @@ func TestVSCodeExtensionUninstallRestoresPreviousDefaultForBothCurrentAndLegacyV
 			settings := filepath.Join(home, "settings.json")
 			writeFixture(t, settings, `{"terminal.integrated.defaultProfile.linux": "bash"}`)
 			options := Options{
-				Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 				vscodePlatform: "linux", vscodeSettingsPaths: []string{settings}, VSCode: true,
 			}
 			if _, err := Run(context.Background(), options); err != nil {
@@ -459,7 +461,8 @@ func TestVSCodeExtensionPortableLinksAtPortableRootAndSettingsPathUsesUserData(t
 
 	installer := &engine{
 		options: Options{
-			Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 			VSCode: true, vscodePlatform: "linux", vscodeSettingsPaths: []string{},
 		},
 		apply: true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"), stamp: "fixture",
@@ -649,7 +652,8 @@ func TestVSCodeExtensionPreviewCreatesNoLinkAndNoLedger(t *testing.T) {
 
 	var preview bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}, Stdout: &preview, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Runner: &fakeRunner{}, Stdout: &preview, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{},
 		vscodeExtensionRoots: []string{root},
 	}); err != nil {

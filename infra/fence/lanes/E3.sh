@@ -85,7 +85,7 @@ lane_preamble
 
 WANT_NAME="${E3_CHAT:-E3_MAIN}" # the label E3.03 attempts (and asserts refused) — see fact 3
 CWD="${E3_CWD:-/work/lumen}"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 # The OpenCode session store: pfm's own root-resolution rule
 # (pfm/internal/engine/builtin.go DefaultRoots, overridable by PFM_OPENCODE_ROOT
 # per pfm/internal/paths/paths.go), never guessed.

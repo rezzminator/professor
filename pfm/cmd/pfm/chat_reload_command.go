@@ -18,7 +18,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
-	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -28,7 +27,6 @@ import (
 )
 
 const (
-	toggleOffFlag     = "off"
 	reloadNewFlag     = "--new"
 	reloadHideFlag    = "--hide"
 	reloadThenFlag    = "--then"
@@ -36,7 +34,7 @@ const (
 	reloadModelFlag   = "--model"
 	reloadEffortFlag  = "--effort"
 	reloadPaneFlag    = "--pane"
-	reloadOneHourFlag = "--1h"
+	reloadCacheFlag   = "--cache"
 	reloadAccountFlag = "--account"
 )
 
@@ -79,7 +77,7 @@ func runChatReloadWithRuntime(
 	// Refused HERE, where the caller is still reading: the detached worker has
 	// no way to identify an OpenCode seat (no session env, no crumb), so
 	// scheduling one printed success and then failed where nobody looked.
-	if reloadEngine(socketPath) == pfmengine.OpenCode {
+	if reload.EngineOf(socketPath) == pfmengine.OpenCode {
 		fmt.Fprintf(stderr, "pfm chat reload: OpenCode chats cannot be reloaded yet (%s)\n", filepath.Base(socketPath))
 		return 2
 	}
@@ -182,10 +180,9 @@ func runChatReloadWorkerWithRuntime(
 			}
 			index++
 			requestedPane = args[index]
-		case reloadOneHourFlag:
-			if index+1 >= len(args) ||
-				(args[index+1] != "on" && args[index+1] != toggleOffFlag && args[index+1] != "1" && args[index+1] != "0") {
-				fmt.Fprintln(stderr, "pfm chat reload: --1h needs on|off")
+		case reloadCacheFlag:
+			if index+1 >= len(args) || (args[index+1] != "1h" && args[index+1] != "5m") {
+				fmt.Fprintln(stderr, "pfm chat reload: --cache must be 1h|5m")
 				return 2
 			}
 			index++
@@ -232,7 +229,7 @@ func runChatReloadWorkerWithRuntime(
 	if code != 0 {
 		return code
 	}
-	engine := reloadEngine(socketPath)
+	engine := reload.EngineOf(socketPath)
 	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "", env)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
@@ -286,24 +283,26 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	birthAccount, birthCache, err := reloadBirth(resolved, runtime.Config, socketPath, paneState, stderr, env)
+	birthAccount, birthCache, err := reload.BirthAccount(
+		resolved, runtime.Config, socketPath, leftBehind, paneState, stderr, defaultEnv(env),
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
-		return 2
+		return 1
 	}
 	if account == "" {
 		account = strconv.Itoa(birthAccount)
 		fmt.Fprintf(stdout, "pfm chat reload: no account given — keeping the chat's current account %s\n", account)
 	}
 	acct, _ := strconv.Atoi(account)
-	selected, err := validateReloadAccount(runtime.Config, engine, acct)
+	selected, err := reload.ValidateAccount(runtime.Config, engine, acct)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
 	}
 	cache := birthCache
 	if cacheOverride != "" {
-		cache = cacheOverride == "on" || cacheOverride == "1"
+		cache = cacheOverride == "1h"
 	}
 	fmt.Fprintf(
 		stdout,
@@ -352,7 +351,7 @@ func runChatReloadWorkerWithRuntime(
 		},
 		options,
 		tmux,
-		reloadProc{procfs: gather.NewProcFS(resolved.ProcRoot)},
+		reload.NewProcessTable(resolved.ProcRoot),
 		stderr,
 	)
 	if err != nil {
@@ -464,10 +463,9 @@ func validateReloadArgs(args []string) error {
 			}
 			account = true
 			index++
-		case reloadOneHourFlag:
-			if index+1 >= len(args) ||
-				(args[index+1] != "on" && args[index+1] != toggleOffFlag && args[index+1] != "1" && args[index+1] != "0") {
-				return errors.New("--1h needs on|off")
+		case reloadCacheFlag:
+			if index+1 >= len(args) || (args[index+1] != "1h" && args[index+1] != "5m") {
+				return errors.New("--cache must be 1h|5m")
 			}
 			index++
 		default:
@@ -501,13 +499,13 @@ func flattenThenLine(text string) string {
 //
 // The usage string alone was not enough: a caller told "reload the cache off"
 // sent `reload cache off`, got the bare usage back, and had to work out on its
-// own that "cache" meant --1h. An error that only restates the grammar makes
+// own that "cache" meant --cache. An error that only restates the grammar makes
 // the reader do the mapping the command already knows how to do.
 func reloadArgumentHint(argument string) string {
 	suggestion := ""
 	switch strings.ToLower(strings.TrimPrefix(argument, "--")) {
 	case "cache", "1h", "ttl", "prompt-cache":
-		suggestion = "did you mean --1h on|off?"
+		suggestion = "did you mean --cache 1h|5m?"
 	case "account", "acct", "seat", "profile":
 		suggestion = "did you mean --account N?"
 	case "fresh", newAction, "restart", "reset":
@@ -539,7 +537,7 @@ func reloadRequestedAccount(args []string) int {
 		switch args[index] {
 		case reloadNewFlag, reloadHideFlag:
 			continue
-		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadOneHourFlag, reloadModelFlag, reloadEffortFlag:
+		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadCacheFlag, reloadModelFlag, reloadEffortFlag:
 			index++
 			continue
 		case reloadAccountFlag:
@@ -677,195 +675,6 @@ func reloadTargetFromIdentity(
 	return "", "", reload.Pane{}, 1
 }
 
-// reloadProc adapts the gathered process table to the tree walker. It holds ONE
-// reader rather than building a fresh one per call: on macOS the reader carries
-// a snapshot cache, and a per-call instance would resample the world each hop.
-type reloadProc struct{ procfs gather.ProcFS }
-
-func (proc reloadProc) PIDs() ([]int, error) { return proc.procfs.PIDs() }
-func (proc reloadProc) Cmdline(pid int) ([]string, error) {
-	return proc.procfs.Cmdline(pid)
-}
-
-func (proc reloadProc) Environ(pid int) (map[string]string, error) {
-	return proc.procfs.Environ(pid)
-}
-
-func (proc reloadProc) Stat(pid int) (gather.ProcStat, error) {
-	return proc.procfs.Stat(pid)
-}
-
-func reloadBirth(
-	resolved paths.Values,
-	machine pfmconfig.Config,
-	socketPath string,
-	pane reload.Pane,
-	stderr io.Writer,
-	env paths.Env,
-) (int, bool, error) {
-	env = defaultEnv(env)
-	engine := reloadEngine(socketPath)
-	if engine == pfmengine.OpenCode {
-		return 0, false, errors.New("OpenCode does not support in-place reload")
-	}
-	ids := machine.AccountIDs()
-	if engine == pfmengine.Codex {
-		ids = machine.CodexAccountIDs()
-	}
-	if len(ids) == 0 {
-		return 0, false, fmt.Errorf("no %s accounts configured", reloadEngineLabel(engine))
-	}
-	account, cache := ids[0], true
-	proc := gather.NewProcFS(resolved.ProcRoot)
-	procTree := reloadProc{procfs: proc}
-	matcher, err := gather.MatcherFor(engine)
-	if err != nil {
-		return 0, false, err
-	}
-	binary := machine.Claude.Binary
-	if engine == pfmengine.Codex {
-		binary = machine.Codex.Binary
-	}
-	pids, err := proc.PIDs()
-	if err != nil {
-		fmt.Fprintf(
-			stderr,
-			"pfm chat reload: inspect birth processes for %s: %v; using safe defaults\n",
-			filepath.Base(socketPath),
-			err,
-		)
-		return account, cache, nil
-	}
-	for _, pid := range pids {
-		argv, err := proc.Cmdline(pid)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: inspect process %d command: %v\n", pid, err)
-			continue
-		}
-		if !matcher.IsCommand(argv, binary) {
-			continue
-		}
-		inPane, err := reloadProcessInPane(procTree, pid, pane.PID)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: inspect process %d ancestry: %v\n", pid, err)
-			continue
-		}
-		if !inPane {
-			continue
-		}
-		env, err := proc.Environ(pid)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: inspect process %d environment: %v\n", pid, err)
-			continue
-		}
-		if engine == pfmengine.Codex {
-			account = accountForCodexHome(machine, env["CODEX_HOME"])
-		} else {
-			account = machine.AccountForConfigDir(env["CLAUDE_CONFIG_DIR"])
-			cache = env["FORCE_PROMPT_CACHING_5M"] != "1"
-		}
-		return account, cache, nil
-	}
-	// A tool shell can be detached from the seat's process tree. In that case
-	// its own birth config is the only safe account rung for a cache-only reload.
-	if engine == pfmengine.Codex {
-		account = accountForCodexHome(machine, env.Get("CODEX_HOME"))
-	} else {
-		account = machine.AccountForConfigDir(env.Get("CLAUDE_CONFIG_DIR"))
-	}
-	return account, cache, nil
-}
-
-func reloadEngine(socketPath string) pfmengine.ID {
-	id, _ := pfmengine.FromSocket(filepath.Base(socketPath))
-	return id
-}
-
-func reloadEngineLabel(id pfmengine.ID) string {
-	if id == "" {
-		return "unknown-engine"
-	}
-	return pfmengine.MustLookup(id).Short
-}
-
-func accountForCodexHome(machine pfmconfig.Config, home string) int {
-	if len(machine.CodexAccounts) == 0 {
-		return 0
-	}
-	cleaned := filepath.Clean(home)
-	for _, account := range machine.CodexAccounts {
-		if cleaned == filepath.Clean(account.Home) {
-			return account.ID
-		}
-	}
-	return machine.CodexAccounts[0].ID
-}
-
-// reloadAccountSelection is the roster verdict a reload needs BEYOND the
-// machine config it already carries: the Claude half is now the door's job, so
-// only the roster and the Codex seat's own fields survive here.
-type reloadAccountSelection struct {
-	IDs         []int
-	CodexHome   string
-	CodexBinary string
-	CodexYolo   bool
-}
-
-func validateReloadAccount(machine pfmconfig.Config, engine pfmengine.ID, account int) (reloadAccountSelection, error) {
-	switch engine {
-	case pfmengine.OpenCode:
-		return reloadAccountSelection{}, errors.New("OpenCode does not support in-place reload")
-	case pfmengine.Codex:
-		if len(machine.CodexAccounts) == 0 {
-			return reloadAccountSelection{}, errors.New("no Codex accounts configured")
-		}
-		selected, found := machine.CodexAccountByID(account)
-		if !found {
-			return reloadAccountSelection{}, fmt.Errorf(
-				"requested Codex account %d is not in the configured roster",
-				account,
-			)
-		}
-		policy := machine.EffectiveCodex(account)
-		return reloadAccountSelection{
-			IDs: machine.CodexAccountIDs(), CodexHome: selected.Home,
-			CodexBinary: policy.Binary, CodexYolo: policy.Yolo,
-		}, nil
-	case pfmengine.Claude:
-		// Continue below: Claude has the legacy account/config-dir policy.
-	default:
-		return reloadAccountSelection{}, fmt.Errorf("unknown reload engine %q", engine)
-	}
-	if len(machine.Accounts) == 0 {
-		return reloadAccountSelection{}, errors.New("no Claude accounts configured")
-	}
-	if _, found := machine.Account(account); !found {
-		return reloadAccountSelection{}, fmt.Errorf(
-			"requested Claude account %d is not in the configured roster",
-			account,
-		)
-	}
-	return reloadAccountSelection{IDs: machine.AccountIDs()}, nil
-}
-
-func reloadProcessInPane(proc reloadProc, pid, panePID int) (bool, error) {
-	current := pid
-	for depth := 0; depth <= 4; depth++ {
-		if current == panePID {
-			return true, nil
-		}
-		stat, err := proc.Stat(current)
-		if err != nil {
-			return false, err
-		}
-		if stat.ParentPID <= 1 || stat.ParentPID == current {
-			break
-		}
-		current = stat.ParentPID
-	}
-	return false, nil
-}
-
 func resolveReloadSession(
 	resolved paths.Values,
 	machine pfmconfig.Config,
@@ -897,14 +706,14 @@ func resolveReloadSession(
 			return "", "", fmt.Errorf("stat chat breadcrumb transcript %q: %w", crumbPath, err)
 		}
 	}
-	engine := reloadEngine(socketPath)
+	engine := reload.EngineOf(socketPath)
 	if id == "" && allowAmbient {
 		ambient := env.Get("CLAUDE_CODE_SESSION_ID")
 		if engine == pfmengine.Codex {
 			ambient = env.Get("CODEX_THREAD_ID")
 		}
 		if fleet.ChatIDPattern.MatchString(ambient) {
-			path, err := findEngineTranscript(resolved, machine, engine, ambient)
+			path, err := reload.SessionTranscript(resolved, machine, engine, ambient)
 			if err != nil {
 				return "", "", err
 			}
@@ -923,7 +732,7 @@ func resolveReloadSession(
 		return "", "", errors.New("couldn't identify this chat — run the statusline before reloading")
 	}
 	if transcript == "" {
-		path, err := findEngineTranscript(resolved, machine, engine, id)
+		path, err := reload.SessionTranscript(resolved, machine, engine, id)
 		if err != nil {
 			return "", "", err
 		}
@@ -1021,69 +830,4 @@ func hideReloadedConversation(
 		return "", fmt.Errorf("hide %s: %w", id, err)
 	}
 	return target.ID, nil
-}
-
-func findEngineTranscript(
-	resolved paths.Values,
-	machine pfmconfig.Config,
-	engine pfmengine.ID,
-	id string,
-) (string, error) {
-	switch engine {
-	case pfmengine.OpenCode:
-		return "", errors.New("OpenCode does not support in-place reload")
-	case pfmengine.Claude:
-		return findClaudeTranscript(resolved.Roots[pfmengine.Claude], id)
-	case pfmengine.Codex:
-		// Continue below: Codex searches every configured rollout home.
-	default:
-		return "", fmt.Errorf("unknown reload engine %q", engine)
-	}
-	for _, account := range machine.CodexAccounts {
-		found := ""
-		err := filepath.WalkDir(
-			filepath.Join(account.Home, "sessions"),
-			func(path string, entry os.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return walkErr
-				}
-				if entry != nil && !entry.IsDir() && strings.Contains(filepath.Base(path), id) &&
-					filepath.Ext(path) == ".jsonl" {
-					found = path
-					return filepath.SkipAll
-				}
-				return nil
-			},
-		)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("search Codex rollouts under %q: %w", account.Home, err)
-		}
-		if found != "" {
-			return found, nil
-		}
-	}
-	return "", nil
-}
-
-func findClaudeTranscript(roots []string, id string) (string, error) {
-	for _, root := range roots {
-		found := ""
-		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry != nil && !entry.IsDir() && filepath.Base(path) == id+".jsonl" {
-				found = path
-				return filepath.SkipAll
-			}
-			return nil
-		})
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("search Claude transcripts under %q: %w", root, err)
-		}
-		if found != "" {
-			return found, nil
-		}
-	}
-	return "", nil
 }

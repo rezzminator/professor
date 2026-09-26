@@ -266,6 +266,9 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 				"__TRANSCRIPT__",
 				writeGoldenTranscript(t, root, now.Add(-12*time.Minute), sample.engine),
 			))
+			if sample.engine == "claude" {
+				cacheLaunch(t, root, "11111111-1111-4111-8111-111111111111", true)
+			}
 			engineID, parseErr := pfmengine.Parse(sample.engine)
 			if parseErr != nil {
 				t.Fatal(parseErr)
@@ -511,6 +514,7 @@ func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T)
 
 func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 	root := t.TempDir()
+	cacheLaunch(t, root, "S", true)
 	transcriptPath := filepath.Join(root, "session.jsonl")
 	if err := os.WriteFile(
 		transcriptPath,
@@ -519,15 +523,14 @@ func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	// Env is pinned empty on purpose: a chat spawned by the fleet carries
-	// FORCE_PROMPT_CACHING_5M=1, and reading the ambient environment made this
-	// assertion depend on where the suite was run rather than on the default.
+	// The record makes a new 1h chat's empty anchor explicit.
 	segment := cacheWindowSegment(
 		Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}},
 		time.Now(),
 		transcriptPath,
 		-1,
 		nil,
+		"S",
 	)
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(segment, "")
 	if !strings.Contains(plain, "💾1h∞") || strings.Contains(plain, "1h?") {
@@ -638,6 +641,7 @@ func TestFleetSnapshotCountsOnlySocketsPresentInProcOnLinux(t *testing.T) {
 // always on says nothing either.
 func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 	root := t.TempDir()
+	cacheLaunch(t, root, "S", false)
 	now := time.Unix(1_786_838_400, 0)
 	live := filepath.Join(root, "live.jsonl")
 	turn := `{"type":"user","timestamp":"` +
@@ -670,7 +674,7 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			input := []byte(`{"model":{"display_name":"Opus 4"},` +
+			input := []byte(`{"session_id":"S","model":{"display_name":"Opus 4"},` +
 				`"workspace":{"current_dir":"/work/sample"},` +
 				`"context_window":{"used_percentage":10},` +
 				`"transcript_path":` + string(encoded) + `}`)
@@ -682,7 +686,7 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 				ProcRoot: filepath.Join(root, "proc"),
 				Columns:  columns,
 				UID:      1000,
-				Env:      map[string]string{"FORCE_PROMPT_CACHING_5M": "1"},
+				Env:      map[string]string{},
 				Command:  quietRunner{},
 			})
 			if err != nil {

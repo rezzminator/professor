@@ -1,14 +1,62 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestRegisteredDaemonSessionQueriesRosterConfigDirs(t *testing.T) {
+	home := t.TempDir()
+	dirs := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2"), filepath.Join(home, ".cc", "3")}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logPath := filepath.Join(home, "queries.log")
+	binary := filepath.Join(home, "claude")
+	const id = "c3000000-3333-4333-8333-333333333333"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$CLAUDE_CONFIG_DIR\" >> \"$PFM_TEST_QUERY_LOG\"\n" +
+		"if [ \"$CLAUDE_CONFIG_DIR\" = \"$PFM_TEST_TARGET_DIR\" ]; then\n" +
+		"  printf '[{\"sessionId\":\"" + id + "\"}]'\n" +
+		"else printf '[]'; fi\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_QUERY_LOG", logPath)
+	t.Setenv("PFM_TEST_TARGET_DIR", dirs[2])
+	machine := pfmconfig.Config{
+		Claude: pfmconfig.Claude{Binary: binary},
+		Accounts: []pfmconfig.Account{
+			{ID: 1, ConfigDir: filepath.Join(home, "wrong-implicit"), Implicit: true},
+			{ID: 2, ConfigDir: dirs[1]},
+			{ID: 3, ConfigDir: dirs[2]},
+			{ID: 4, ConfigDir: dirs[2]},
+		},
+	}
+	resolved := paths.Values{Home: home, Roots: map[pfmengine.ID][]string{
+		pfmengine.Claude: {filepath.Join(home, "unrelated", "projects")},
+	}}
+	configDir, found, err := registeredDaemonSession(context.Background(), resolved, machine, id)
+	if err != nil || !found || configDir != dirs[2] {
+		t.Fatalf("configDir=%q found=%t err=%v", configDir, found, err)
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(strings.TrimSpace(string(raw)), "\n"); len(got) != 3 ||
+		got[0] != dirs[0] || got[1] != dirs[1] || got[2] != dirs[2] {
+		t.Fatalf("queried config dirs=%q", raw)
+	}
+}
 
 func TestResolveResumeTargetDeduplicatesSameSessionIDBeforeAmbiguity(t *testing.T) {
 	const (

@@ -1,4 +1,6 @@
 .DS_Store
+/pfm.config.json
+/harvester.config.json
 *.swp
 *.bak
 node_modules/

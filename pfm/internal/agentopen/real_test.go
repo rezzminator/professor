@@ -2,13 +2,117 @@ package agentopen
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
+	commands, argvPath, values := testExecCommands(t)
+	ctx := context.Background()
+	if output, err := commands.QueryAgents(ctx, "/account/2"); err != nil || string(output) != "[]\n" {
+		t.Fatalf("query output=%q error=%v", output, err)
+	}
+	query := assertAgentLaunch(t, argvPath, "agents", "--json")
+	if len(query.Hooks) != 0 || query.MCPConfig != "" || query.Autonomy {
+		t.Fatalf("query carried session-only settings: %+v", query)
+	}
+	if err := commands.View(ctx, "/account/2", "/project"); err != nil {
+		t.Fatal(err)
+	}
+	view := assertAgentLaunch(t, argvPath, "agents", "--cwd", "/project")
+	if len(view.Hooks) != 0 || view.MCPConfig != "" || view.Autonomy {
+		t.Fatalf("view carried session-only settings: %+v", view)
+	}
+	if _, err := os.Stat(values.StateDB); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("query/view created a launch database: %v", err)
+	}
+}
+
+func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
+	commands, argvPath, values := testExecCommands(t)
+	ctx := context.Background()
+	const id = "33333333-3333-4333-8333-333333333333"
+	if err := commands.Resume(ctx, "/account/2", t.TempDir(), id, true); err != nil {
+		t.Fatal(err)
+	}
+	assertAgentLaunch(t, argvPath, "--resume", id)
+	launches, err := fleetdb.OpenLaunches(ctx, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := launches.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	record, err := launches.LaunchFor(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.SessionID != id || record.Engine != pfmengine.Claude || record.Account != 2 || !record.Cache1H {
+		t.Fatalf("resume record=%+v", record)
+	}
+}
+
+func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values) {
+	t.Helper()
+	root := t.TempDir()
+	argvPath := filepath.Join(root, "argv")
+	binary := filepath.Join(root, "claude")
+	if err := os.WriteFile(
+		binary,
+		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGENTOPEN_ARGV\"\nprintf '[]\\n'\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTOPEN_ARGV", argvPath)
+	t.Setenv(paths.EnvHome, root)
+	t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine := config.Config{
+		Claude:   config.ClaudePrefs{Binary: binary},
+		Accounts: []config.Account{{ID: 2, ConfigDir: "/account/2"}},
+	}
+	return ExecCommands{Home: root, Machine: machine}, argvPath, values
+}
+
+func assertAgentLaunch(t *testing.T, argvPath string, leading ...string) claudelaunch.Parsed {
+	t.Helper()
+	content, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+	parsed, err := claudelaunch.Parse(append([]string{"claude"}, argv...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range leading {
+		if !strings.Contains(string(content), value+"\n") {
+			t.Fatalf("argv=%q lacks %q", argv, value)
+		}
+	}
+	if parsed.Settings["outputStyle"] != "default" ||
+		parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" && parsed.Resume != "" {
+		t.Fatalf("rendered argv=%q parsed=%+v", argv, parsed)
+	}
+	return parsed
+}
 
 // fakeAgentopenTmuxBinary plays tmux: list-panes answers a fixed pid.
 func fakeAgentopenTmuxBinary(t *testing.T, pid int) string {

@@ -42,7 +42,7 @@ This law exists because its absence was measured, not imagined. Three writers on
 Corollaries:
 
 - A tool that wants to influence an installed file changes the **source in the repo**; the change reaches the install through build + `pfm install`, never by writing the destination.
-- An installed file that is not a symlink into the managed asset tree is a finding. `pfm install --apply` reports and repairs it (backing up, never destroying).
+- An installed file that is not a symlink into the managed asset tree is a finding. `pfm install --yes` reports and repairs it (backing up, never destroying).
 
 ## Stable addresses
 
@@ -82,7 +82,7 @@ go -C ~/.professor/pfm build -o ~/.local/bin/pfm ./cmd/pfm
 pfm install --yes             # idempotent; applies the exact binary assets
 ```
 
-`pfm install` is idempotent and honest: dry-run by default, `--apply` to act, `--uninstall` to reverse. A real file at a destination is backed up beside the link (`.pre-professor-<timestamp>`), never destroyed. The `~/.zshrc` source line is rewritten in place when the clone moves — never appended beside an old one, so the shell never sources two copies. It targets `$HOME/.claude` regardless of `$CLAUDE_CONFIG_DIR`, because the bundle is host-level and an install launched from inside a running chat must not land in that chat's account dir (`--config-dir` is the deliberate override).
+`pfm install` previews by default; `--yes` applies and `--rollback ID` reverses a named journaled HostLayout migration. It sources the shim from `{clone}/pfm/internal/installer/assets/shim/pfm.zsh` through one `~/.zshrc` line. The clone owns `pfm.config.json` and the composed prompts. Operator state is `~/.local/state/pfm/pfm.db`; the rebuildable cache is `pfm-cache.db` beside it. Claude hooks, status line and MCP ride each launch, while HostLayout strips pfm-owned legacy account-file entries. The shared Claude session store resolves through `~/.claude` for every configured account.
 
 ## Origin flow — the maintainer's repo is an adopter
 

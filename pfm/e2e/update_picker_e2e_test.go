@@ -51,7 +51,6 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	tmuxDir := filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))
 	for _, dir := range []string{
 		home, professor, binDir, configDir, codexHome, opencodeHome, managed, state, tmuxDir,
-		filepath.Join(home, ".config", "pfm"),
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -77,7 +76,7 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(managed, "source-repo"), []byte(professor+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(home, ".config", "pfm", "config.json")
+	configPath := filepath.Join(home, "pfm.config.json")
 	configuration := map[string]any{
 		"version": pfmconfig.Version,
 		"accounts": []map[string]any{{
@@ -156,8 +155,9 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 		"TMUX":                    "",
 		"TMUX_TMPDIR":             tmuxBase,
 		"PFM_HOME":                home,
-		"PFM_DB":                  filepath.Join(state, "fleet.db"),
-		"PFM_FLEET_DB":            filepath.Join(state, "shared.db"),
+		"PFM_CONFIG":              configPath,
+		"PFM_CACHE_DB":            filepath.Join(state, "pfm-cache.db"),
+		"PFM_STATE_DB":            filepath.Join(state, "shared.db"),
 		"PFM_SID_DIR":             filepath.Join(root, "sid"),
 		"PFM_CLAUDE_ROOTS":        filepath.Join(root, "claude"),
 		"PFM_CODEX_ROOT":          codexHome,

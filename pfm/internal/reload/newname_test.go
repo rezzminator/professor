@@ -158,7 +158,7 @@ func runNewOnClock(
 func indexedCustomTitle(t *testing.T, home, claudeRoot string) string {
 	t.Helper()
 	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvDB, filepath.Join(home, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(home, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(home, "sid"))
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(home, "tmux"))
 	t.Setenv("TMUX_TMPDIR", filepath.Join(home, "t"))

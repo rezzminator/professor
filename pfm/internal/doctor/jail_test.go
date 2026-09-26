@@ -12,10 +12,33 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+func TestDoctorJailRecordsCheckoutForPromptReaders(t *testing.T) {
+	runtime := testjail.CleanHome(t)
+	clone, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := paths.ComposedHarnessPrompt(runtime.Paths.Home, engine.Claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(prompt); err != nil {
+		t.Fatalf("clone %s prompt %s: %v", clone, prompt, err)
+	}
+	dir, err := paths.HarnessBaselineDir(runtime.Paths.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(filepath.Join(dir, "harness-original.sha256")); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // buildCleanDoctorHome stages the fixture a healthy target HOME carries —
 // the canonical binary, the Claude launcher, both host overlays, and every
@@ -26,7 +49,6 @@ func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Helper()
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	runtime := testjail.CleanHome(t)
-	stageHarnessPromptBaseline(t, runtime.Paths.Home)
 	return runtime
 }
 
@@ -330,7 +352,7 @@ func TestDoctorEarlyExitPrintsItsFailureCount(t *testing.T) {
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvDB, filepath.Join(blocked, "fleet.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(blocked, "pfm.db"))
 
 	var stdout, stderr bytes.Buffer
 	code := runDoctor(nil, &stdout, &stderr, runtime)

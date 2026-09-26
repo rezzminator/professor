@@ -32,7 +32,7 @@ lane_preamble
 
 CHAT="${E2_CHAT:-E2_MAIN}"
 CWD="${E2_CWD:-/work/orbit}"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 SID_DIR="${PFM_SID_DIR:-${TMPDIR:-/tmp}/cc-sid}"
 PORT="$(jq -r '.mcp.http.port // 18377' "$CONFIG" 2>/dev/null || echo 18377)"
 
@@ -45,7 +45,7 @@ CODEX_HOME="$(jq -r '.codex.homes[0].home // empty' "$CONFIG")"
 case "$CODEX_HOME" in "~"*) CODEX_HOME="$HOME${CODEX_HOME#\~}" ;; esac
 CODEX_HOMES="$(jq -r '.codex.homes | length' "$CONFIG")"
 [ -d "$CODEX_HOME" ] || lane_abort "the configured Codex home $CODEX_HOME does not exist"
-[ -s "$CODEX_HOME/auth.json" ] || lane_abort "NO CREDENTIAL — $CODEX_HOME/auth.json is missing or empty (lanes/creds.sh stages it)"
+[ -s "$CODEX_HOME/auth.json" ] || lane_abort "BLOCKED — no fence login was staged at $CODEX_HOME/auth.json (lanes/creds.sh stages the dedicated fence home)"
 command -v codex >/dev/null 2>&1 || lane_abort "no codex binary on PATH — the root image was built without the Codex CLI"
 
 need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
@@ -296,7 +296,7 @@ if requires E2.01-open-seat; then
   else
     note="$note --account not exercised by this beat ($CODEX_HOMES Codex homes configured);"
   fi
-  note="$note --1h not supported on cx by design (the cache window is Claude's prompt-cache env; the Codex launch line carries none — internal/reload/reload.go codexRun);"
+  note="$note --cache not supported on cx by design (the cache window is Claude's prompt-cache setting; the Codex launch line carries none);"
   if [ -n "$bad" ]; then fail "$bad exercised:${exercised:-none}; $note"; else
     pass "through the model:${exercised} worker log grew $log_before → $log_after bytes;$note"
   fi
@@ -355,7 +355,7 @@ target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
   config="$CODEX_HOME/config.toml"
-  staged="$HOME/.local/share/pfm/install/harness-prompts/codex.md"
+  staged="$HOME/.professor/pfm/harness-prompts/composed/codex.md"
   # pfm writes the composed Codex prompt into developer_instructions
   # (internal/installer/codex_developer_instructions.go); the retired
   # SessionStart appendix hook must be gone from hooks.json.
@@ -367,7 +367,7 @@ if requires E2.01-open-seat; then
   if [ -f "$CODEX_HOME/hooks.json" ] && grep -q 'internal codex-appendix' "$CODEX_HOME/hooks.json"; then
     bad="$bad $CODEX_HOME/hooks.json still carries the retired SessionStart appendix hook;"
   fi
-  [ -f "$staged" ] || bad="$bad no staged Codex prompt at $staged to compare the config against;"
+  [ -f "$staged" ] || bad="$bad no composed Codex prompt at $staged to compare the config against;"
   marker="$(head -1 "$staged" 2>/dev/null)"
   id="$(live_field "$CHAT" 2)"
   rollout="$(rollout_of "$id")"
@@ -613,27 +613,20 @@ if requires E2.01-open-seat; then
     *codex*|node) ;;
     *) bad="$bad the live pane on $sock runs '$(one_line "$cmd")', not the Codex binary;" ;;
   esac
-  # `pfm internal codex-launch BINARY [args…]` (internal/hookentry/codex_launch.go):
-  # resolves BINARY and execs it in place; usage on no args, a named refusal
-  # for an unresolvable binary, and the real exec proven with --version.
-  usage="$(pfm internal codex-launch 2>&1)"
-  usage_rc=$?
-  [ "$usage_rc" -eq 2 ] || bad="$bad codex-launch with no BINARY exited $usage_rc (want 2, usage): $(one_line "$usage");"
-  printf '%s' "$usage" | grep -qF 'usage: pfm internal codex-launch BINARY' || bad="$bad codex-launch with no BINARY printed no usage line: $(one_line "$usage");"
-  expect-log 'resolve Codex launcher'
-  missing="$(pfm internal codex-launch lane-no-such-binary 2>&1)"
-  missing_rc=$?
-  [ "$missing_rc" -eq 1 ] || bad="$bad codex-launch of an unresolvable binary exited $missing_rc (want 1): $(one_line "$missing");"
-  printf '%s' "$missing" | grep -qF 'resolve Codex launcher' || bad="$bad the unresolvable-binary refusal did not say 'resolve Codex launcher': $(one_line "$missing");"
-  version="$(timeout 30 pfm internal codex-launch codex --version 2>&1)"
+  # No arguments launches Codex directly; stdin is closed so the probe cannot
+  # consume a live terminal. --version proves argument forwarding.
+  noargs="$(timeout 10 pfm internal codex-launch </dev/null 2>&1)"
+  noargs_rc=$?
+  [ "$noargs_rc" -ne 2 ] || bad="$bad codex-launch with no args printed usage instead of launching Codex: $(one_line "$noargs");"
+  version="$(timeout 30 pfm internal codex-launch --version 2>&1)"
   version_rc=$?
   if [ "$version_rc" -ne 0 ]; then
-    bad="$bad codex-launch codex --version exited $version_rc: $(one_line "$version");"
+    bad="$bad codex-launch --version exited $version_rc: $(one_line "$version");"
   elif ! printf '%s' "$version" | grep -qE '[0-9]+\.[0-9]+'; then
     bad="$bad codex-launch codex --version exited 0 but printed no version: $(one_line "$version");"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "live pane runs '$cmd'; codex-launch: usage on no BINARY (2), 'resolve Codex launcher' on an unknown one (1), exec'd codex --version → $(one_line "$version")"
+    pass "live pane runs '$cmd'; codex-launch with no args launched Codex (exit $noargs_rc), --version → $(one_line "$version")"
   fi
 fi
 

@@ -60,7 +60,7 @@ func newKillTmuxJail(t *testing.T) *killTmuxJail {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", jail.root)
 	t.Setenv("PFM_HOME", jail.home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
 	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)

@@ -370,7 +370,7 @@ SELECT id, ? FROM oc_sessions WHERE id IN (` + marks + `)`
 		}
 		engineID, err := pfmengine.Parse(engine)
 		if err != nil {
-			return fmt.Errorf("fleet.db row %s: %w", id, err)
+			return fmt.Errorf("pfm.db row %s: %w", id, err)
 		}
 		// A transcript wins a collision, whatever order the union arms come
 		// back in: SQL does not promise that order, and an id that resolved
@@ -408,7 +408,7 @@ func scanKilled(row rowScanner) (Killed, error) {
 	}
 	id, err := pfmengine.Parse(engine)
 	if err != nil {
-		return Killed{}, fmt.Errorf("fleet.db row %s: %w", killed.ID, err)
+		return Killed{}, fmt.Errorf("pfm.db row %s: %w", killed.ID, err)
 	}
 	killed.Engine = id
 	return killed, nil

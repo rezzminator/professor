@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,43 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+func TestComposeFleetLaunchReadFailureKeepsRow(t *testing.T) {
+	stateDB := filepath.Join(t.TempDir(), "pfm.db")
+	db, err := sqlitedb.OpenStore(context.Background(), stateDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE launch(session_id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output := ComposeFleet(
+		Env{Paths: paths.Values{StateDB: stateDB}},
+		compose.AllView,
+		Data{
+			Transcripts: []store.Transcript{
+				{UUID: "S", Path: "/home/.claude/projects/S.jsonl", PromptCount: 1, Size: 1},
+			},
+		},
+		gather.Snapshot{},
+	)
+	for _, row := range output.Rows {
+		if row.ID == "S" {
+			if !row.LaunchUnread || row.C1H {
+				t.Fatalf("row = %#v, want launch warning without badge", row)
+			}
+			return
+		}
+	}
+	t.Fatal("launch read failure dropped the row")
+}
 
 // TestScanRecordsATransition: Scan walks the state door (spec § Middleware,
 // `state`) — stale to scanned, comp=state, kind=fleet — never the composed
@@ -61,7 +96,7 @@ func jailRuntime(t *testing.T) *pfmconfig.Runtime {
 	home := t.TempDir()
 	return &pfmconfig.Runtime{
 		Config: pfmconfig.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")}),
-		Paths:  paths.Values{Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db")},
+		Paths:  paths.Values{Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db")},
 	}
 }
 

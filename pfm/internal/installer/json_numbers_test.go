@@ -1,10 +1,8 @@
 package installer
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,53 +41,28 @@ func TestUnmarshalKeepingNumbersIsAsStrictAsUnmarshal(t *testing.T) {
 	}
 }
 
-func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
-	t.Parallel()
+func TestAccountMCPStripKeepsIntegersBeyondFloat64(t *testing.T) {
 	home := t.TempDir()
-	primary := filepath.Join(home, ".claude")
-	registry := filepath.Join(home, ".claude.json")
-	writeFixture(
-		t,
-		registry,
-		`{"counter":`+beyondFloat64+`,"mcpServers":{"foreign":{"type":"stdio","command":"foreign"}}}`,
-	)
-	options := Options{
-		Home:       home,
-		ConfigDir:  primary,
-		ConfigDirs: []string{primary},
-		CodexHomes: []string{},
-		Mode:       ModeApply,
-		Runner:     &fakeRunner{},
-		Stdout:     io.Discard,
-		MCPEnabled: map[string]bool{"chat": true},
-		MCPPort:    8377,
+	raw := []byte(`{"counter":` + beyondFloat64 + `,"mcpServers":{"chat":{"command":"` +
+		filepath.Join(home, ".local", "bin", "pfm") + `"},"foreign":{"type":"stdio","command":"foreign"}}}`)
+	updated, removed, err := stripAccountMCP(raw, []string{"chat"})
+	if err != nil || len(removed) != 1 || removed[0] != "mcpServers.chat" {
+		t.Fatalf("stripAccountMCP removed=%v err=%v", removed, err)
 	}
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
+	requireKeepsBeyondFloat64(t, "stripAccountMCP", updated)
+	if strings.Contains(string(updated), `"chat"`) || !strings.Contains(string(updated), `"foreign"`) {
+		t.Fatalf("stripAccountMCP changed foreign servers or kept chat: %s", updated)
 	}
-	installed := readFixture(t, registry)
-	if !strings.Contains(installed, `"professor"`) {
-		t.Fatalf("install did not register professor: %s", installed)
-	}
-	requireKeepsBeyondFloat64(t, "MCP install", []byte(installed))
-	options.Mode = ModeUninstall
-	if _, err := Run(context.Background(), options); err != nil {
-		t.Fatal(err)
-	}
-	uninstalled := readFixture(t, registry)
-	if strings.Contains(uninstalled, `"professor"`) {
-		t.Fatalf("uninstall left the professor registration: %s", uninstalled)
-	}
-	requireKeepsBeyondFloat64(t, "MCP uninstall", []byte(uninstalled))
 }
 
-func TestClaudeSettingsRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
-	t.Parallel()
-	updated, changed, _, err := updateSettings([]byte(`{"counter":`+beyondFloat64+`}`), t.TempDir(), false, nil)
-	if err != nil || !changed {
-		t.Fatalf("updateSettings changed=%v err=%v; want a rewrite", changed, err)
+func TestAccountSettingsStripKeepsIntegersBeyondFloat64(t *testing.T) {
+	home := t.TempDir()
+	raw := []byte(`{"counter":` + beyondFloat64 + `,"statusLine":{"command":"` + home + `/.local/bin/pfm statusline"}}`)
+	updated, removed, err := stripAccountSettings(raw, home, nil)
+	if err != nil || len(removed) != 1 {
+		t.Fatalf("stripAccountSettings removed=%v err=%v", removed, err)
 	}
-	requireKeepsBeyondFloat64(t, "updateSettings", updated)
+	requireKeepsBeyondFloat64(t, "stripAccountSettings", updated)
 }
 
 func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {

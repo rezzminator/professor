@@ -12,10 +12,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-type registryWriteHook func([]byte) (int, error)
-
-func (f registryWriteHook) Write(p []byte) (int, error) { return f(p) }
-
 func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -207,8 +203,9 @@ func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
 
 // TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere pins both ways
 // pfm takes its registrations back — every family disabled, and uninstall:
-// the owned professor and every legacy shape leave Claude, Codex and
-// OpenCode, the fence and orphan markers included, and nothing else moves.
+// the owned professor and every legacy shape leave Codex and OpenCode, the
+// fence and orphan markers included, and nothing else moves. Claude has no
+// install-time registration to take back (docs/design/engines/host-migration.md).
 func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 	for name, mode := range map[string]Mode{"both disabled": ModeApply, "uninstall": ModeUninstall} {
 		t.Run(name, func(t *testing.T) {
@@ -220,22 +217,11 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 			options := Options{
 				Mode: ModeApply, Home: home, ConfigDir: canonical, ConfigDirs: []string{canonical},
 				OpenCodeConfigPath: openCodePath, MCPEnabled: map[string]bool{"chat": true}, MCPPort: 18377,
-				Runner: &fakeRunner{}, Stdout: io.Discard,
+				Runner: &fakeRunner{}, Stdout: io.Discard, MCPConfigPath: testConfigPath(t),
 			}
 			if _, err := Run(context.Background(), options); err != nil {
 				t.Fatal(err)
 			}
-			claudePath := filepath.Join(home, ".claude.json")
-			var claude map[string]any
-			if err := json.Unmarshal([]byte(readFixture(t, claudePath)), &claude); err != nil {
-				t.Fatal(err)
-			}
-			servers := claude["mcpServers"].(map[string]any)
-			servers["chat"] = map[string]any{"type": "http", "url": "http://127.0.0.1:18377/mcp/chat"}
-			servers["harvester"] = map[string]any{"type": "http", "url": "http://127.0.0.1:18377/mcp/harvester"}
-			servers["manual"] = map[string]any{"command": "custom"}
-			encoded, _ := json.Marshal(claude)
-			writeFixture(t, claudePath, string(encoded))
 			codexPath := filepath.Join(home, ".codex", "config.toml")
 			remote := "[mcp_servers.harvester-remote]\nurl = \"https://gateway.example.invalid/mcp\"\n"
 			writeFixture(t, codexPath, readFixture(t, codexPath)+"\n[mcp_servers.chat]\n"+
@@ -248,15 +234,6 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 			options.MCPEnabled = map[string]bool{"chat": false, "harvester": false}
 			if _, err := Run(context.Background(), options); err != nil {
 				t.Fatal(err)
-			}
-			if err := json.Unmarshal([]byte(readFixture(t, claudePath)), &claude); err != nil {
-				t.Fatal(err)
-			}
-			if got := claude["mcpServers"]; !sameJSONValue(
-				got,
-				map[string]any{"manual": map[string]any{"command": "custom"}},
-			) {
-				t.Fatalf("Claude servers=%#v, want the manual entry alone", got)
 			}
 			codex := readFixture(t, codexPath)
 			if !strings.Contains(codex, remote) || strings.Contains(codex, "pfm mcp_servers") ||
@@ -271,54 +248,6 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 				t.Fatalf("OpenCode servers=%#v, want none", got)
 			}
 		})
-	}
-}
-
-func TestMCPFailedRemovalKeepsOwnershipForRetry(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	path := filepath.Join(home, ".claude.json")
-	managed := filepath.Join(home, "managed")
-	e := engine{
-		options:     Options{Home: home, ConfigDir: filepath.Join(home, ".claude"), Stdout: io.Discard},
-		managedRoot: managed,
-		apply:       true,
-		stamp:       "fixture",
-	}
-	if _, err := e.writeMCPClientJSON([]string{professorName}); err != nil {
-		t.Fatal(err)
-	}
-	original := readFixture(t, path)
-	injected := false
-	e.options.Stdout = registryWriteHook(func(p []byte) (int, error) {
-		if !injected && strings.Contains(string(p), "change  rewrite "+physicalSettingsPath(path)+" ") {
-			injected = true
-			if err := os.Remove(path); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Mkdir(path, 0o700); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return len(p), nil
-	})
-	if _, err := e.writeMCPClientJSON(nil); err == nil {
-		t.Fatal("failure injection not exercised")
-	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, path, original)
-	e.options.Stdout = io.Discard
-	if _, err := e.writeMCPClientJSON(nil); err != nil {
-		t.Fatal(err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal([]byte(readFixture(t, path)), &doc); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists := doc["mcpServers"].(map[string]any)[professorName]; exists {
-		t.Fatal("retry could not remove owned registration: receipt was deleted before failing registry mutation")
 	}
 }
 
@@ -378,43 +307,5 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 	}
 	if strings.Contains(readFixture(t, target), "mcp_servers.professor") {
 		t.Fatal("owned registration survived removal")
-	}
-}
-
-func TestMCPRefusesConcurrentNativeRegistryUpdate(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	path := filepath.Join(home, ".claude.json")
-	writeFixture(t, path, `{"oauthAccount":{"accountUuid":"original"}}`)
-	latest := `{"oauthAccount":{"accountUuid":"latest-native-login"}}`
-	e := engine{
-		options:     Options{Home: home, ConfigDir: filepath.Join(home, ".claude"), Stdout: io.Discard},
-		managedRoot: filepath.Join(home, "managed"),
-		apply:       true,
-		stamp:       "fixture",
-	}
-	injected := false
-	e.options.Stdout = registryWriteHook(func(p []byte) (int, error) {
-		if !injected && strings.Contains(string(p), "change  rewrite "+physicalSettingsPath(path)+" ") {
-			injected = true
-			writeFixture(t, path, latest)
-		}
-		return len(p), nil
-	})
-	if _, err := e.writeMCPClientJSON(
-		[]string{professorName},
-	); err == nil ||
-		!strings.Contains(err.Error(), "changed while planning") {
-		t.Fatalf("concurrent update error=%v", err)
-	}
-	if got := readFixture(t, path); got != latest {
-		t.Fatalf("native state overwritten: %s", got)
-	}
-	e.options.Stdout = io.Discard
-	if _, err := e.writeMCPClientJSON([]string{professorName}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(readFixture(t, path), "latest-native-login") {
-		t.Fatal("retry lost native login")
 	}
 }

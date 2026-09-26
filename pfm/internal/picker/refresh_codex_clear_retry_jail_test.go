@@ -227,7 +227,7 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 		t.Fatalf("hold current rollout in fake Codex process: %v", err)
 	}
 
-	faultDB, err := sql.Open("sqlite", database.SharedPath())
+	faultDB, err := sql.Open("sqlite", "file:"+database.SharedPath()+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

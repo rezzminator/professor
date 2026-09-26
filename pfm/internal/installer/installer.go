@@ -3,7 +3,6 @@ package installer
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,13 +22,14 @@ import (
 )
 
 type engine struct {
-	options     Options
-	report      Report
-	apply       bool
-	stamp       string
-	managedRoot string
-	outputErr   error
-	planErrors  []error
+	options       Options
+	layoutJournal *layoutJournal
+	report        Report
+	apply         bool
+	stamp         string
+	managedRoot   string
+	outputErr     error
+	planErrors    []error
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).
@@ -188,9 +188,6 @@ func (installer *engine) install(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := installer.stageHarnessPrompts(); err != nil {
-		return err
-	}
 	if err := installer.wireClaudeLauncher(); err != nil {
 		return err
 	}
@@ -289,12 +286,6 @@ func (installer *engine) install(ctx context.Context) error {
 		if systemdAssetChanged || unitChanged {
 			installer.reloadUnits(ctx)
 		}
-	}
-	if err := installer.migrateMemoryHelpers(); err != nil {
-		return err
-	}
-	if err := installer.wireSettings(); err != nil {
-		return err
 	}
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
@@ -885,9 +876,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if managerAvailable && installer.apply {
 		installer.runSystemctl(ctx, "daemon-reload")
 	}
-	if err := installer.wireSettings(); err != nil {
-		return err
-	}
 	if err := installer.wireCodexHooks(); err != nil {
 		return err
 	}
@@ -895,9 +883,6 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.wireOpenCodeInstructions(); err != nil {
-		return err
-	}
-	if err := installer.removeStagedHarnessPrompts(); err != nil {
 		return err
 	}
 	if err := installer.removeCodexDeveloperInstructions(); err != nil {
@@ -1112,8 +1097,6 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 			return false, fmt.Errorf("read embedded asset %s: %w", asset.path, err)
 		}
 		switch {
-		case asset.path == "shim/pfm.zsh":
-			content, err = renderShimAsset(content, installer.options)
 		case asset.path == "reload.command.md":
 			content, err = renderReloadCommandAsset(content)
 		case asset.path == "systemd/"+nameSyncTimerUnit:
@@ -1285,8 +1268,7 @@ func (installer *engine) retireGlob(pattern, reason string) error {
 // end as HOST overlays — materialized like every other embedded asset by
 // stageAssets, then symlinked at their contracted ~/.local/bin/NAME so a
 // human or a cron unit can invoke them by that one name:
-//   - pfm-statusline: the context-gauge overlay over `pfm statusline`
-//     wireSettings/updateSettings point statusLine.command at.
+//   - pfm-statusline: the context-gauge overlay over `pfm statusline`.
 //   - tmux-title-renudge: the OSC-title re-emitter the pfm-name-sync
 //     systemd/launchd trio fires on a timer.
 //
@@ -1302,48 +1284,6 @@ func managedHostOverlay(home, name string) string {
 
 func canonicalHostOverlay(home, name string) string {
 	return filepath.Join(home, ".local", "bin", name)
-}
-
-// StatusLineOverlayCommand is the statusLine.command value pfm install owns:
-// the canonical ~/.local/bin/pfm-statusline overlay symlink. updateSettings
-// writes it and doctor compares a live settings.json against this exact
-// string — the one exported name both sides key their agreement on.
-func StatusLineOverlayCommand(home string) string {
-	return canonicalHostOverlay(home, "pfm-statusline")
-}
-
-// RawStatusLineCommand reports whether a statusLine.command value is
-// exactly the un-overlaid `pfm statusline` — bare (relying on PATH) or the
-// absolute pfm binary path followed by " statusline" — the one shape that
-// renders identically to a healthy overlay while silently missing the
-// context-gauge fix (issue #14 F1). updateSettings rewrites this shape to
-// the overlay on apply; doctor names it by the same test on read.
-func RawStatusLineCommand(home, command string) bool {
-	return command == "pfm statusline" || command == home+"/.local/bin/pfm statusline"
-}
-
-// ReadStatusLineCommand reads a Claude settings.json's statusLine.command, so
-// doctor can check a live host's actual wiring without duplicating
-// updateSettings' JSON shape. A settings file that does not exist is a
-// genuine "not configured" — empty command, nil error. A settings file that
-// exists but cannot be read or parsed is a DIFFERENT state: the command is
-// unknown, not absent, and is reported as an error rather than folded into
-// the same empty string a clean "not configured" returns.
-func ReadStatusLineCommand(path string) (string, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", path, err)
-	}
-	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return "", fmt.Errorf("decode %s: %w", path, err)
-	}
-	status, _ := document["statusLine"].(map[string]any)
-	command, _ := status["command"].(string)
-	return command, nil
 }
 
 // HostOverlayState mirrors LauncherState for the two host-overlay scripts.
@@ -1698,13 +1638,13 @@ func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
 		}
 	}
 	add(installer.options.SourceRepo)
-	marker := SourceRepoPath(installer.options.Home)
+	marker := paths.SourceRepoPath(installer.options.Home)
 	if _, err := os.Lstat(marker); errors.Is(err, fs.ErrNotExist) {
 		return repos, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("inspect source repository marker for /bb retirement: %w", err)
 	}
-	repo, err := ReadSourceRepoMarker(installer.options.Home)
+	repo, err := paths.ReadSourceRepoMarker(installer.options.Home)
 	if err != nil {
 		return nil, fmt.Errorf("read source repository marker for /bb retirement: %w", err)
 	}
@@ -1910,92 +1850,6 @@ func (installer *engine) runSystemctl(ctx context.Context, arguments ...string) 
 	}
 }
 
-func (installer *engine) wireSettings() error {
-	ownershipPath := settingsHookOwnershipPath(installer.managedRoot)
-	ownership, ownershipRaw, err := readSettingsHookOwnership(ownershipPath)
-	if err != nil {
-		return fmt.Errorf("read settings hook ownership %s: %w", ownershipPath, err)
-	}
-	candidates := make([]string, 0, len(installer.options.ConfigDirs)+1)
-	if installer.options.ConfigDirs == nil {
-		candidates = append(candidates, filepath.Join(installer.options.ConfigDir, "settings.json"))
-	} else {
-		for _, configDir := range installer.options.ConfigDirs {
-			if strings.TrimSpace(configDir) == "" {
-				continue
-			}
-			candidates = append(candidates, filepath.Join(configDir, "settings.json"))
-		}
-	}
-	if len(candidates) == 0 {
-		installer.skip("no Claude account config dirs configured — settings hook wiring has nothing to wire")
-	}
-	seen := map[string]bool{}
-	seenOwnershipPaths := map[string]bool{}
-	// Codex hooks share this ledger but are converged by wireCodexHooks after
-	// Claude settings. They are therefore visited, just not by this loop.
-	for _, codexHome := range installer.codexHomes() {
-		seenOwnershipPaths[physicalSettingsPath(filepath.Join(codexHome, "hooks.json"))] = true
-	}
-	for _, candidate := range candidates {
-		physical := physicalSettingsPath(candidate)
-		if seen[physical] {
-			continue
-		}
-		seen[physical] = true
-		seenOwnershipPaths[physical] = true
-		raw, err := os.ReadFile(candidate)
-		if errors.Is(err, fs.ErrNotExist) {
-			if installer.options.Mode == ModeUninstall {
-				delete(ownership, physical)
-			}
-			installer.skip("no settings file at " + candidate)
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("read %s: %w", candidate, err)
-		}
-		updated, changed, nextOwned, err := updateSettings(
-			raw,
-			installer.options.Home,
-			installer.options.Mode == ModeUninstall,
-			ownership[physical],
-		)
-		if err != nil {
-			if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {
-				return fmt.Errorf("refuse to strand owned hooks in invalid settings JSON at %s: %w", candidate, err)
-			}
-			installer.skip("invalid settings JSON at " + candidate + ": " + err.Error())
-			continue
-		}
-		if installer.options.Mode != ModeUninstall {
-			installer.reportPreservedMixedTemplateHooks(updated, candidate)
-		}
-		if len(nextOwned) == 0 {
-			delete(ownership, physical)
-		} else {
-			ownership[physical] = nextOwned
-		}
-		if !changed {
-			installer.ok(candidate + " wiring")
-			continue
-		}
-		if err := installer.change("rewrite "+candidate+" (backup preserved)", func() error {
-			backup := availableBackup(candidate, installer.stamp)
-			if err := copyBackup(candidate, backup); err != nil {
-				return fmt.Errorf("backup %s: %w", candidate, err)
-			}
-			return atomicfile.Write(physical, updated, 0o600)
-		}); err != nil {
-			return err
-		}
-	}
-	if err := installer.reconcileUnvisitedSettingsOwnership(ownership, seenOwnershipPaths); err != nil {
-		return err
-	}
-	return installer.writeSettingsHookOwnership(ownershipPath, ownershipRaw, ownership)
-}
-
 func (installer *engine) writeSettingsHookOwnership(
 	path string,
 	existing []byte,
@@ -2065,8 +1919,7 @@ func (installer *engine) wireCodexHooks() error {
 			if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {
 				return fmt.Errorf("refuse to strand owned hooks in invalid Codex hooks JSON at %s: %w", path, updateErr)
 			}
-			// Same contract as the Claude sibling wireSettings (above): a
-			// hooks file the operator broke by hand is skipped loudly and the
+			// A hooks file the operator broke by hand is skipped loudly and the
 			// run continues. Only owned hooks that would be stranded justify
 			// stopping — one unparseable seat file must not cost the machine
 			// its MCP clients, log default, shell line and update metadata.
@@ -2140,7 +1993,20 @@ func (installer *engine) codexHomes() []string {
 
 func (installer *engine) wireShell(uninstall bool) error {
 	zshrc := filepath.Join(installer.options.Home, ".zshrc")
-	shim := filepath.Join(installer.managedRoot, "shim", "pfm.zsh")
+	// The clone being installed wins: a first install records the marker
+	// only later in this same run.
+	repo := strings.TrimSpace(installer.options.SourceRepo)
+	if !uninstall && repo == "" {
+		var err error
+		repo, err = paths.ReadSourceRepoMarker(installer.options.Home)
+		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
+			installer.skip("zshrc: no source repo recorded")
+			return nil
+		} else if err != nil {
+			return err
+		}
+	}
+	shim := filepath.Join(repo, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
 	wanted := sourceLine(shim)
 	raw, err := os.ReadFile(zshrc)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -2247,7 +2113,7 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr er
 		func() (returnErr error) {
 			values := paths.Values{
 				Home:    installer.options.Home,
-				FleetDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
+				StateDB: installer.options.StateDB,
 			}
 			state := fleetdb.OpenSharedState(ctx, values)
 			defer func() {

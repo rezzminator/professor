@@ -15,9 +15,8 @@ func configuredMachinePolicy(home string) pfmconfig.Config {
 	return pfmconfig.Config{
 		Version: pfmconfig.Version,
 		Accounts: []pfmconfig.Account{{
-			ID:         42,
-			ConfigDir:  configDir,
-			ProjectDir: filepath.Join(configDir, "projects"),
+			ID:        42,
+			ConfigDir: configDir,
 		}},
 		CodexAccounts: []pfmconfig.CodexAccount{{
 			ID:   42,
@@ -61,13 +60,15 @@ func TestSynthesizeUsesConfiguredClaudeAccountAndPromptPolicy(t *testing.T) {
 	}
 	for _, want := range []string{
 		"CLAUDE_CONFIG_DIR=" + Quote(machine.Accounts[0].ConfigDir),
-		"ENABLE_PROMPT_CACHING_1H=1",
 		Quote(machine.Claude.Binary),
 		Quote("--resume") + " " + Quote("11111111-1111-4111-8111-111111111111"),
 	} {
 		if !strings.Contains(plan.Run, want) {
 			t.Fatalf("resume run %q lacks configured policy %q", plan.Run, want)
 		}
+	}
+	if got := parsedShell(t, plan.Run).SettingsEnv["ENABLE_PROMPT_CACHING_1H"]; got != "1" {
+		t.Fatalf("resume cache setting = %q", got)
 	}
 	if strings.Contains(plan.Run, "skip-permissions") {
 		t.Fatalf("prompt permission policy still armed bypass flags: %q", plan.Run)

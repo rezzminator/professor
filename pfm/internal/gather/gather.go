@@ -146,11 +146,8 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 
-	// Fetched once and shared: DetectCodexThreadsInRoots, DetectAgents,
-	// DetectClaudeProcesses and DetectCache1H each used to enumerate every
-	// /proc pid and read its cmdline independently — four full walks of a
-	// ~1950-process box on every gather pass, live fleet or not. One walk,
-	// four detectors reading from it, is the whole fix (see processCmdlines).
+	// Fetched once and shared: the Codex, agent and Claude detectors used to
+	// enumerate every /proc pid separately. One walk feeds all three.
 	cmdlines, err := processCmdlines(gatherer.proc)
 	if err != nil {
 		return Snapshot{}, err
@@ -162,7 +159,6 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	var claudeProcesses []ClaudeProcess
 	var agents []Agent
 	var agentWarnings []string
-	var cacheSockets []string
 	var paneLabels []PaneLabel
 	group, _ := errgroup.WithContext(ctx)
 	group.Go(func() error {
@@ -226,11 +222,6 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		)
 		return err
 	})
-	group.Go(func() error {
-		var err error
-		cacheSockets, err = detectCache1HFrom(cmdlines, gatherer.proc, tmuxProbe.Panes, gatherer.claudeBinary)
-		return err
-	})
 	if err := group.Wait(); err != nil {
 		return Snapshot{}, err
 	}
@@ -249,7 +240,6 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		OpenCode:        append([]LiveOpenCode(nil), openCode...),
 		ClaudeProcesses: append([]ClaudeProcess(nil), claudeProcesses...),
 		Agents:          append([]Agent(nil), agents...),
-		Cache1HSockets:  append([]string(nil), cacheSockets...),
 		Renames: computeWindowRenames(
 			tmuxProbe.Panes,
 			codex,

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/index"
@@ -81,10 +80,7 @@ func NewFinisher(
 	if refresher == nil {
 		claudeRoots := dependencies.ClaudeRoots
 		if len(claudeRoots) == 0 {
-			claudeRoots = pfmconfig.Defaults(
-				resolved.Home,
-				resolved.Roots[pfmengine.Claude],
-			).ProjectRoots()
+			claudeRoots = resolved.Roots[pfmengine.Claude]
 		}
 		refresher = indexRefresher{
 			database:    database,

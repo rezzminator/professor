@@ -349,6 +349,23 @@ func TestClaudeResumeAppendsToTheSameTranscript(t *testing.T) {
 	}
 }
 
+func TestClaudeSessionIDFlagNamesTheTranscript(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0)})
+	const selected = "c2222222-2222-4222-8222-222222222222"
+	session := fix.startTUI("claude", claudeArgs("--session-id", selected), nil)
+	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	session.typeLine("chosen id")
+	session.waitFrame("the reply", func(frame string) bool { return strings.Contains(frame, DefaultReply) })
+	if meta := readMeta(t, fix.claudeTranscript(selected)); meta.HumanPrompts != 1 {
+		t.Fatalf("selected transcript meta=%+v", meta)
+	}
+	if rows := fix.indexedTranscripts(); len(rows) != 1 || rows[0].UUID != selected {
+		t.Fatalf("indexed transcripts=%+v, want selected id", rows)
+	}
+}
+
 func TestClaudeHeadlessEnvelopeIsReadByPfmsOwnRunner(t *testing.T) {
 	fix := newFixture(t)
 	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{

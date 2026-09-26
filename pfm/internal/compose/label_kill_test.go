@@ -31,9 +31,9 @@ func TestLabelKilledChatLeavesTheDefaultListing(t *testing.T) {
 		800,
 	)
 	input := Input{
-		Transcripts:  []store.Transcript{worker, plain},
-		AccountRoots: fixtureAccountRoots(),
-		Options:      Options{View: DefaultView, PrimaryAccount: 1},
+		Transcripts: []store.Transcript{worker, plain},
+		ClaudeSeats: fixtureClaudeSeats(),
+		Options:     Options{View: DefaultView, PrimaryAccount: 1},
 	}
 
 	output := Compose(input)
@@ -100,8 +100,8 @@ func TestLabelKillCoversLiveAndCodexRowsAndFoldsCase(t *testing.T) {
 				TranscriptPath: live.Path,
 			}},
 		},
-		AccountRoots: fixtureAccountRoots(),
-		Options:      Options{View: DefaultView, PrimaryAccount: 1},
+		ClaudeSeats: fixtureClaudeSeats(),
+		Options:     Options{View: DefaultView, PrimaryAccount: 1},
 	}
 
 	output := Compose(input)
@@ -136,10 +136,10 @@ func TestLegacyKillLabelAndKilledTableRowRemainKilled(t *testing.T) {
 		800,
 	)
 	input := Input{
-		Transcripts:  []store.Transcript{labelled, stored},
-		Killed:       []store.Killed{{ID: stored.UUID, Engine: pfmengine.Claude}},
-		AccountRoots: fixtureAccountRoots(),
-		Options:      Options{View: DefaultView, PrimaryAccount: 1},
+		Transcripts: []store.Transcript{labelled, stored},
+		Killed:      []store.Killed{{ID: stored.UUID, Engine: pfmengine.Claude}},
+		ClaudeSeats: fixtureClaudeSeats(),
+		Options:     Options{View: DefaultView, PrimaryAccount: 1},
 	}
 	if output := Compose(input); output.KilledCount != 2 {
 		t.Fatalf("legacy kill count = %d, want 2", output.KilledCount)
@@ -204,8 +204,8 @@ func TestSplitRowKeepsItsJoinedName(t *testing.T) {
 				},
 			},
 		},
-		AccountRoots: fixtureAccountRoots(),
-		Options:      Options{View: DefaultView, PrimaryAccount: 1},
+		ClaudeSeats: fixtureClaudeSeats(),
+		Options:     Options{View: DefaultView, PrimaryAccount: 1},
 	}
 
 	output := Compose(input)

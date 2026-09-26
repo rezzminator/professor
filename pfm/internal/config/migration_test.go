@@ -9,8 +9,7 @@ import (
 
 func TestMigrationSplitsRenamesAndMovesPort(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	dir := filepath.Join(home, ".config", "pfm")
+	dir := filepath.Join(home, "clone")
 	legacy := filepath.Join(dir, LegacyFileName)
 	writeFile(
 		t,
@@ -18,7 +17,7 @@ func TestMigrationSplitsRenamesAndMovesPort(t *testing.T) {
 		`{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`,
 		0o600,
 	)
-	before, err := Load("", home, nil)
+	before, err := Load(filepath.Join(dir, LegacyFileName), home, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +40,7 @@ func TestMigrationSplitsRenamesAndMovesPort(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, LegacyBackupName)); err != nil {
 		t.Fatalf("pre-split backup missing: %v", err)
 	}
-	after, err := Load("", home, nil)
+	after, err := Load(filepath.Join(dir, FileName), home, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,13 +119,12 @@ func TestMigrationKeepsCustomPortAndExistingHarvesterFlag(t *testing.T) {
 // treat the machine as already migrated.
 func TestInterruptedMigrationLeftoverIsParkedNotIgnored(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	dir := filepath.Join(home, ".config", "pfm")
+	dir := filepath.Join(home, "clone")
 	migrated := `{"version":2,"mcp":{"http":{"port":18377}}}` + "\n"
 	writeFile(t, filepath.Join(dir, FileName), migrated, 0o600)
 	stray := filepath.Join(dir, LegacyFileName)
 	writeFile(t, stray, `{"version":2,"mcp":{"http":{"port":8377},"servers":{"harvester":{"enabled":true}}}}`, 0o600)
-	loaded, err := Load("", home, nil)
+	loaded, err := Load(filepath.Join(dir, FileName), home, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,13 +155,12 @@ func TestInterruptedMigrationLeftoverIsParkedNotIgnored(t *testing.T) {
 // The park must succeed rather than abort the whole install.
 func TestApplyMigrationParksOverAnIdenticalPreSplitBackup(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	dir := filepath.Join(home, ".config", "pfm")
+	dir := filepath.Join(home, "clone")
 	legacy := filepath.Join(dir, LegacyFileName)
 	content := `{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377}}}`
 	writeFile(t, legacy, content, 0o600)
 	writeFile(t, filepath.Join(dir, LegacyBackupName), content, 0o600)
-	before, err := Load("", home, nil)
+	before, err := Load(filepath.Join(dir, LegacyFileName), home, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,14 +190,13 @@ func TestApplyMigrationParksOverAnIdenticalPreSplitBackup(t *testing.T) {
 // refused, but the message must say why.
 func TestApplyMigrationStillRefusesADifferentPreSplitBackup(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	dir := filepath.Join(home, ".config", "pfm")
+	dir := filepath.Join(home, "clone")
 	legacy := filepath.Join(dir, LegacyFileName)
 	legacyContent := `{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377}}}`
 	backupContent := `{"version":2,"theme":"dracula","mcp":{"http":{"port":8377}}}`
 	writeFile(t, legacy, legacyContent, 0o600)
 	writeFile(t, filepath.Join(dir, LegacyBackupName), backupContent, 0o600)
-	before, err := Load("", home, nil)
+	before, err := Load(filepath.Join(dir, LegacyFileName), home, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,15 +224,14 @@ func TestApplyMigrationStillRefusesADifferentPreSplitBackup(t *testing.T) {
 // identical to the existing pre-split backup, parks cleanly too.
 func TestApplyMigrationParksAnIdenticalStrayLegacyCopy(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	dir := filepath.Join(home, ".config", "pfm")
+	dir := filepath.Join(home, "clone")
 	migrated := `{"version":2,"mcp":{"http":{"port":18377}}}` + "\n"
 	writeFile(t, filepath.Join(dir, FileName), migrated, 0o600)
 	strayContent := `{"version":2,"mcp":{"http":{"port":8377}}}`
 	stray := filepath.Join(dir, LegacyFileName)
 	writeFile(t, stray, strayContent, 0o600)
 	writeFile(t, filepath.Join(dir, LegacyBackupName), strayContent, 0o600)
-	loaded, err := Load("", home, nil)
+	loaded, err := Load(filepath.Join(dir, FileName), home, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,8 +257,7 @@ func TestApplyMigrationParksAnIdenticalStrayLegacyCopy(t *testing.T) {
 // would leave a config that refuses to load; the plan keeps the old port.
 func TestMigrationKeepsPortWhenExternalGatewayHoldsTheTarget(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	dir := filepath.Join(home, ".config", "pfm")
+	dir := filepath.Join(home, "clone")
 	writeFile(t, filepath.Join(dir, LegacyFileName), `{"version":2,"mcp":{"http":{"port":8377}}}`, 0o600)
 	writeFile(
 		t,
@@ -271,7 +265,7 @@ func TestMigrationKeepsPortWhenExternalGatewayHoldsTheTarget(t *testing.T) {
 		`{"enabled":true,"external":{"enabled":true,"port":18377,"publicURL":"https://h.example.test","auth":{"staticToken":"t"}}}`,
 		0o600,
 	)
-	before, err := Load("", home, nil)
+	before, err := Load(filepath.Join(dir, LegacyFileName), home, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +279,7 @@ func TestMigrationKeepsPortWhenExternalGatewayHoldsTheTarget(t *testing.T) {
 	if err := ApplyMigration(migration); err != nil {
 		t.Fatal(err)
 	}
-	after, err := Load("", home, nil)
+	after, err := Load(filepath.Join(dir, FileName), home, nil)
 	if err != nil {
 		t.Fatalf("migrated config no longer loads: %v", err)
 	}

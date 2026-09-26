@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
@@ -204,10 +205,16 @@ func (service *Service) registerTools(server *mcp.Server) {
 		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle), context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_status", service.chatStatus))
+	newInputSchema, err := jsonschema.For[NewInput](nil)
+	if err != nil {
+		panic(fmt.Sprintf("chat_new input schema: %v", err))
+	}
+	newInputSchema.Properties["cache"].Enum = []any{"1h", "5m"}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_new",
 		Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.",
 		Annotations: mutating,
+		InputSchema: newInputSchema,
 	}, obs.Tool("chat_new", service.chatNew))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_open",
@@ -760,40 +767,4 @@ func tailBytes(text string, budget int) string {
 		cut++
 	}
 	return text[cut:]
-}
-
-func (service *Service) chatFind(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input FindInput,
-) (*mcp.CallToolResult, FindOutput, error) {
-	self := ""
-	if !input.IncludeSelf {
-		caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
-		if err != nil {
-			return nil, FindOutput{}, err
-		}
-		switch {
-		case caller.valid && caller.row.Engine == pfmengine.Claude && caller.identity.ID != "":
-			self = caller.identity.ID
-		case !caller.present && service.backend.allowAmbientIdentity:
-			self = chat.AskingSession()
-		}
-	}
-	output, err := service.backend.find(ctx, input, self)
-	return nil, output, err
-}
-
-func (service *Service) chatRead(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input ReadInput,
-) (*mcp.CallToolResult, ReadOutput, error) {
-	var err error
-	ctx, input.Source, err = service.cliTargetForRequest(ctx, request, input.Source)
-	if err != nil {
-		return nil, ReadOutput{}, err
-	}
-	output, err := service.backend.read(ctx, input)
-	return nil, output, err
 }

@@ -58,6 +58,23 @@ func TestHarnessPromptEmbedReportsOKWhenTreesMatch(t *testing.T) {
 	}
 }
 
+func TestHarnessPromptEmbedIgnoresBuildOutputs(t *testing.T) {
+	tree := materializeHarnessPromptTree(t)
+	for _, relative := range []string{"composed/claude.md", "compose/main.go"} {
+		path := filepath.Join(tree, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("build-owned"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	line, warnings := reportHarnessPromptEmbed(t, tree)
+	if warnings != 0 || !strings.Contains(line, "embed=ok") {
+		t.Fatalf("build outputs changed embed verdict: %s", line)
+	}
+}
+
 // Differ: every file the two trees disagree about is named, and the row
 // prescribes no direction — a difference says which files, never which side
 // is the newer one.

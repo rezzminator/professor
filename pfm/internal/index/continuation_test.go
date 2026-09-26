@@ -29,7 +29,7 @@ func continuationJail(t *testing.T) (string, *store.Store, *Indexer) {
 		t.Fatal(err)
 	}
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, claudeRoot)
 	t.Setenv(paths.EnvCodexHome, filepath.Join(root, "codex"))

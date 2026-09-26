@@ -14,7 +14,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/ui"
@@ -29,7 +28,7 @@ var startProfessorUpdateCheck = func(ctx context.Context, argv []string, options
 }
 
 func professorUpdateCachePath(runtime pfmconfig.Runtime) string {
-	return filepath.Join(filepath.Dir(runtime.Paths.DB), "update-check.json")
+	return filepath.Join(filepath.Dir(runtime.Paths.CacheDB), "update-check.json")
 }
 
 func cachedProfessorUpdateRow(runtime pfmconfig.Runtime) (compose.Row, bool) {
@@ -40,7 +39,7 @@ func cachedProfessorUpdateRow(runtime pfmconfig.Runtime) (compose.Row, bool) {
 	if err != nil || !found {
 		return compose.Row{}, false
 	}
-	repo, err := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	repo, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if err != nil {
 		return compose.Row{}, false
 	}
@@ -70,7 +69,7 @@ func cachedProfessorUpdateFailureRow(runtime pfmconfig.Runtime, hasUpdate bool) 
 	if err != nil || !failing {
 		return compose.Row{}, false
 	}
-	repo, err := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	repo, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if err != nil {
 		return compose.Row{}, false
 	}
@@ -115,7 +114,7 @@ func professorUpdateCheckNotice(runtime pfmconfig.Runtime) string {
 	if err != nil {
 		return fmt.Sprintf("pfm ls: could not read the Professor update cache: %v", err)
 	}
-	_, markerErr := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	_, markerErr := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if found {
 		// An update IS available — cachedProfessorUpdateRow renders it as its
 		// own picker row only when the source-repo marker reads; a second

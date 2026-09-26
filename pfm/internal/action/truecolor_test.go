@@ -1,7 +1,6 @@
 package action
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -14,18 +13,19 @@ const truecolorName = "CLAUDE_CODE_TMUX_TRUECOLOR"
 func TestClaudeSpawnCarriesTmuxTruecolor(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
-	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeProbe, PurposeQuery} {
+	machine.Claude.TmuxTruecolor = true
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()
 		if err != nil {
-			t.Fatalf("%s shell spawn: %v", purpose, err)
+			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
-		if want := " " + truecolorName + "=" + Quote("1") + " "; !strings.Contains(shell, want) {
-			t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, want)
+		if got := parsedShell(t, shell).SettingsEnv[truecolorName]; got != "1" {
+			t.Fatalf("%v settings truecolor = %q", purpose, got)
 		}
 		environment := spawn.Environment([]string{"PATH=/usr/bin"})
-		if got := lastEnvironmentValue(environment, truecolorName); got != "1" {
-			t.Fatalf("%s environment resolves %s=%q, want 1", purpose, truecolorName, got)
+		if got := lastEnvironmentValue(environment, truecolorName); got != "" {
+			t.Fatalf("%v process environment truecolor = %q", purpose, got)
 		}
 	}
 }

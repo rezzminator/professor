@@ -8,7 +8,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -38,7 +38,7 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		fmt.Fprintf(stderr, "pfm init: config: %v\n", err)
 		return 1
 	}
-	source, err := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	source, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm init: %v\n", err)
 		return 1

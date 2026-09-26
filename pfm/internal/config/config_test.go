@@ -1,46 +1,113 @@
 package config
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestResolvePathUsesAbsoluteXDGOrHomeConfig(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
+func TestConfigLoadsWithoutCodexLogin(t *testing.T) {
+	home := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "pfm.config.json")
+	if err := os.WriteFile(
+		configPath,
+		[]byte(`{"version":2,"codex":{"homes":[{"id":2,"home":"`+filepath.Join(home, "codex")+`"}]}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(configPath, home, nil)
+	if err != nil {
+		t.Fatalf("Load() refused a configured Codex home without login: %v", err)
+	}
+	if len(loaded.CodexAccounts) != 1 || loaded.CodexAccounts[0].ID != 2 {
+		t.Fatalf("Codex accounts = %#v, want id 2", loaded.CodexAccounts)
+	}
+}
 
-	t.Run("absolute XDG", func(t *testing.T) {
-		xdg := filepath.Join(t.TempDir(), "xdg")
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		want := filepath.Join(xdg, "pfm", FileName)
-		if got := ResolvePath(home); got != want {
-			t.Fatalf("ResolvePath(%q) = %q, want %q", home, got, want)
-		}
-	})
+func TestResolvePathUsesOverrideAndCloneMarker(t *testing.T) {
+	home := t.TempDir()
+	override := filepath.Join(t.TempDir(), "custom.json")
+	t.Setenv("PFM_CONFIG", override)
+	if got, err := ResolvePath(home); err != nil || got != override {
+		t.Fatalf("override path = %q, %v; want %q", got, err, override)
+	}
+	t.Setenv("PFM_CONFIG", "relative.json")
+	if _, err := ResolvePath(home); err == nil || !strings.Contains(err.Error(), "PFM_CONFIG") {
+		t.Fatalf("relative override error = %v, want PFM_CONFIG", err)
+	}
+	t.Setenv("PFM_CONFIG", "")
+	repo := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ResolvePath(home); err != nil || got != filepath.Join(repo, FileName) {
+		t.Fatalf("clone path = %q, %v", got, err)
+	}
+}
 
-	for _, tc := range []struct {
-		name string
-		xdg  string
-	}{
-		{name: "relative XDG", xdg: "relative-config"},
-		{name: "empty XDG", xdg: ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", tc.xdg)
-			want := filepath.Join(home, ".config", "pfm", FileName)
-			if got := ResolvePath(home); got != want {
-				t.Fatalf("ResolvePath(%q) = %q, want %q", home, got, want)
-			}
-		})
+func TestLoadWithoutMarkerIgnoresLegacyConfigAndHasNoWriterPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvConfig, "")
+	legacy := filepath.Join(home, ".config", "pfm", FileName)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`{"version":2,"theme":"tokyo-night"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load("", home, nil)
+	if err != nil || loaded.Path != "" || loaded.Exists || loaded.Theme == "tokyo-night" {
+		t.Fatalf(
+			"legacy-only Load = path %q exists %t theme %q error %v",
+			loaded.Path,
+			loaded.Exists,
+			loaded.Theme,
+			err,
+		)
+	}
+	if err := WriteDefault(
+		"",
+		home,
+		nil,
+		false,
+	); err == nil ||
+		!strings.Contains(err.Error(), "no source repo recorded") {
+		t.Fatalf("WriteDefault without marker = %v", err)
+	}
+}
+
+func TestUnusableMarkerDoesNotBecomeAConfigPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvConfig, "")
+	marker := paths.SourceRepoPath(home)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(home, "missing-clone")
+	if err := os.WriteFile(marker, []byte(missing+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load("", home, nil)
+	if err != nil || loaded.Path != "" || loaded.Exists {
+		t.Fatalf("unusable marker Load = path %q exists %t error %v", loaded.Path, loaded.Exists, err)
+	}
+	if err := WriteDefault(
+		"",
+		home,
+		nil,
+		false,
+	); err == nil || !strings.Contains(err.Error(), missing) ||
+		!strings.Contains(err.Error(), paths.EnvConfig) {
+		t.Fatalf("unusable marker writer error = %v", err)
 	}
 }
 
@@ -57,27 +124,29 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 	}
 	wantAccounts := []Account{
 		{
-			ID:         1,
-			ConfigDir:  filepath.Join(home, ".cc", "one"),
-			ProjectDir: filepath.Join(home, ".cc", "one", "projects"),
-			Implicit:   true,
-			Emoji:      "🥇",
+			ID:        1,
+			ConfigDir: filepath.Join(home, ".cc", "one"),
+			Implicit:  true,
+			Emoji:     "🥇",
 		},
 		{
-			ID:         2,
-			ConfigDir:  filepath.Join(home, ".cc", "two"),
-			ProjectDir: filepath.Join(home, ".cc", "two", "projects"),
-			Emoji:      "🥈",
+			ID:        2,
+			ConfigDir: filepath.Join(home, ".cc", "two"),
+			Emoji:     "🥈",
 		},
 	}
 	if !reflect.DeepEqual(got.Accounts, wantAccounts) {
 		t.Fatalf("Accounts = %#v, want %#v", got.Accounts, wantAccounts)
 	}
 	if got.Claude != (Claude{
-		PermissionMode: PermissionBypass,
-		Binary:         "claude",
-		Cache1H:        true,
-		CompactNudge:   DefaultCompactNudge(),
+		PermissionMode:        PermissionBypass,
+		Binary:                "claude",
+		WebSearchesPerSession: 9007199254740991,
+		TmuxTruecolor:         true,
+		CleanupPeriodDays:     36500,
+		RequireManagedCleanup: true,
+		Cache1H:               true,
+		CompactNudge:          DefaultCompactNudge(),
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -149,23 +218,20 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 	got := Defaults(home, nil)
 	want := []Account{
 		{
-			ID:         1,
-			ConfigDir:  filepath.Join(home, ".cc", "1"),
-			ProjectDir: filepath.Join(home, ".cc", "1", "projects"),
-			Implicit:   true,
-			Emoji:      "🥇",
+			ID:        1,
+			ConfigDir: filepath.Join(home, ".cc", "1"),
+			Implicit:  true,
+			Emoji:     "🥇",
 		},
 		{
-			ID:         2,
-			ConfigDir:  filepath.Join(home, ".cc", "2"),
-			ProjectDir: filepath.Join(home, ".cc", "2", "projects"),
-			Emoji:      "🥈",
+			ID:        2,
+			ConfigDir: filepath.Join(home, ".cc", "2"),
+			Emoji:     "🥈",
 		},
 		{
-			ID:         3,
-			ConfigDir:  filepath.Join(home, ".cc", "3"),
-			ProjectDir: filepath.Join(home, ".cc", "3", "projects"),
-			Emoji:      "🥉",
+			ID:        3,
+			ConfigDir: filepath.Join(home, ".cc", "3"),
+			Emoji:     "🥉",
 		},
 	}
 	if !reflect.DeepEqual(got.Accounts, want) {
@@ -223,22 +289,19 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 	}
 	want := []Account{
 		{
-			ID:         9,
-			ConfigDir:  filepath.Join(home, "account-nine"),
-			ProjectDir: filepath.Join(home, "account-nine", "projects"),
-			Emoji:      "·",
+			ID:        9,
+			ConfigDir: filepath.Join(home, "account-nine"),
+			Emoji:     "·",
 		},
 		{
-			ID:         2,
-			ConfigDir:  filepath.Join(home, "account-two"),
-			ProjectDir: filepath.Join(home, "account-two", "projects"),
-			Emoji:      "🥈",
+			ID:        2,
+			ConfigDir: filepath.Join(home, "account-two"),
+			Emoji:     "🥈",
 		},
 		{
-			ID:         17,
-			ConfigDir:  "/srv/claude/account-seventeen",
-			ProjectDir: "/srv/claude/account-seventeen/projects",
-			Emoji:      "·",
+			ID:        17,
+			ConfigDir: "/srv/claude/account-seventeen",
+			Emoji:     "·",
 		},
 	}
 	if !reflect.DeepEqual(got.Accounts, want) {
@@ -248,10 +311,14 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		t.Fatalf("AccountIDs = %#v, want [9 2 17]", got.AccountIDs())
 	}
 	if got.Claude != (Claude{
-		PermissionMode: PermissionPrompt,
-		Binary:         "claude-custom",
-		Cache1H:        true,
-		CompactNudge:   DefaultCompactNudge(),
+		PermissionMode:        PermissionPrompt,
+		Binary:                "claude-custom",
+		WebSearchesPerSession: 9007199254740991,
+		TmuxTruecolor:         true,
+		CleanupPeriodDays:     36500,
+		RequireManagedCleanup: true,
+		Cache1H:               true,
+		CompactNudge:          DefaultCompactNudge(),
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -325,13 +392,19 @@ func TestSkipsOutsideDirPreservesUnrelatedDiscoveryFailures(t *testing.T) {
 func TestLoadUsesResolvePathWhenPathIsEmpty(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	xdg := filepath.Join(root, "xdg")
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	path := filepath.Join(xdg, "pfm", "config.json")
+	repo := filepath.Join(root, "clone")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, "")
+	path := filepath.Join(repo, FileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"version":1}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -497,110 +570,6 @@ func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
 	}
 }
 
-func TestSetMCPServerIsIndependentAtomicAndIdempotent(t *testing.T) {
-	registered := map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
-	}
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "deep", "machine.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{
-  "version": 1,
-  "claude": {"binary": "claude-custom"},
-  "mcp": {"servers": {"chat": {"enabled": false}, "harvester": {"enabled": false}}}
-}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("initial Load error = %v", err)
-	}
-
-	changed, err := SetMCPServer(loaded, "chat", true)
-	if err != nil || !changed {
-		t.Fatalf("enable chat = changed:%v err:%v, want changed true", changed, err)
-	}
-	afterChat, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("Load(after chat) error = %v", err)
-	}
-	if !afterChat.MCPServers["chat"].Enabled || afterChat.MCPServers["harvester"].Enabled {
-		t.Fatalf("after chat toggle MCPServers = %#v, want chat true and harvester false", afterChat.MCPServers)
-	}
-	if afterChat.Claude.Binary != "claude-custom" {
-		t.Fatal("SetMCPServer discarded unrelated configuration")
-	}
-	beforeNoop, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed, err = SetMCPServer(afterChat, "chat", true)
-	if err != nil || changed {
-		t.Fatalf("repeat enable chat = changed:%v err:%v, want no-op", changed, err)
-	}
-	afterNoop, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(afterNoop, beforeNoop) {
-		t.Fatal("idempotent SetMCPServer rewrote the config")
-	}
-
-	changed, err = SetMCPServer(afterChat, "harvester", true)
-	if err != nil || !changed {
-		t.Fatalf("enable harvester = changed:%v err:%v, want changed true", changed, err)
-	}
-	afterHarvester, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("Load(after harvester) error = %v", err)
-	}
-	if !afterHarvester.MCPServers["chat"].Enabled || !afterHarvester.MCPServers["harvester"].Enabled {
-		t.Fatalf("after harvester toggle MCPServers = %#v, want both enabled", afterHarvester.MCPServers)
-	}
-
-	entries, err := os.ReadDir(filepath.Dir(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".config.json.tmp-") {
-			t.Errorf("atomic scratch file remains: %s", entry.Name())
-		}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("config mode = %o, want 600", info.Mode().Perm())
-	}
-}
-
-func TestSetMCPServerRejectsUnknownServerWithoutWriting(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "config.json")
-	loaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed, err := SetMCPServer(loaded, "not-registered", true); err == nil || changed {
-		t.Fatalf("unknown server = changed:%v err:%v, want error and no change", changed, err)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("unknown server created config: stat error = %v", err)
-	}
-}
-
-func TestRegisteredMCPServersIsSorted(t *testing.T) {
-	got := RegisteredMCPServers()
-	if !sort.StringsAreSorted(got) || !reflect.DeepEqual(got, []string{"chat", "harvester"}) {
-		t.Fatalf("RegisteredMCPServers() = %#v, want sorted production registry", got)
-	}
-}
-
 func TestLoadRejectsMissingVersionAndWrongVersion(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	for _, tc := range []struct {
@@ -621,30 +590,6 @@ func TestLoadRejectsMissingVersionAndWrongVersion(t *testing.T) {
 				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
 		})
-	}
-}
-
-func TestSetMCPServerWritesValidJSON(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "new", "config.json")
-	loaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed, err := SetMCPServer(loaded, "chat", true)
-	if err != nil || !changed {
-		t.Fatalf("SetMCPServer = changed:%v err:%v", changed, err)
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(content, &decoded); err != nil {
-		t.Fatalf("written config is not JSON: %v", err)
-	}
-	if got, ok := decoded["version"].(float64); !ok || got != Version {
-		t.Fatalf("written version = %#v, want %d", decoded["version"], Version)
 	}
 }
 
@@ -681,6 +626,45 @@ func TestV2ConfigDefaultsAndPerAccountOverrides(t *testing.T) {
 	}
 	if got.EmojiFor(1) != "A" || got.EmojiFor(2) != "B" || got.EmojiFor(999) != "·" {
 		t.Fatalf("emoji lookup = %q %q %q", got.EmojiFor(1), got.EmojiFor(2), got.EmojiFor(999))
+	}
+}
+
+func TestClaudeLaunchPreferencesMergeAndValidateByScope(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), FileName)
+	content := `{"version":2,"claude":{"webSearchesPerSession":7,"tmuxTruecolor":false,"cleanupPeriodDays":30,"requireManagedCleanup":false},"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":9,"tmuxTruecolor":true,"cleanupPeriodDays":14,"requireManagedCleanup":true}},{"id":2,"configDir":"~/two"}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		id        int
+		web       int64
+		truecolor bool
+		cleanup   int
+		managed   bool
+	}{{1, 9, true, 14, true}, {2, 7, false, 30, false}} {
+		prefs := loaded.EffectiveClaude(tc.id)
+		if prefs.WebSearchesPerSession != tc.web || prefs.TmuxTruecolor != tc.truecolor ||
+			prefs.CleanupPeriodDays != tc.cleanup || prefs.RequireManagedCleanup != tc.managed {
+			t.Fatalf("account %d launch preferences = %+v", tc.id, prefs)
+		}
+	}
+	for _, tc := range []struct{ content, want string }{
+		{`{"version":2,"claude":{"webSearchesPerSession":0}}`, "claude.webSearchesPerSession"},
+		{`{"version":2,"claude":{"cleanupPeriodDays":0}}`, "claude.cleanupPeriodDays"},
+		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":0}}]}`, "accounts[0].webSearchesPerSession"},
+		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"cleanupPeriodDays":0}}]}`, "accounts[0].cleanupPeriodDays"},
+	} {
+		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path, home, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("invalid %s error = %v", tc.want, err)
+		}
 	}
 }
 
@@ -859,34 +843,19 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	}
 }
 
-func TestRemoveLegacyMCPAuthTokenPreservesUnrelatedConfig(t *testing.T) {
+func TestLoadRejectsInvalidStateDB(t *testing.T) {
 	home := t.TempDir()
-	path := filepath.Join(home, ".config", "pfm", "config.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	legacy := `{"version":2,"theme":"midnight","mcp":{"authToken":"retired-secret","http":{"port":8456},"servers":{"harvester":{"enabled":true}}}}`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	config, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatalf("legacy config must remain loadable for cleanup: %v", err)
-	}
-	changed, err := RemoveMCPAuthToken(config)
-	if err != nil || !changed {
-		t.Fatalf("RemoveMCPAuthToken changed=%t err=%v", changed, err)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(body), "authToken") || strings.Contains(string(body), "retired-secret") {
-		t.Fatalf("legacy auth survived cleanup: %s", body)
-	}
-	for _, retained := range []string{`"theme": "midnight"`, `"port": 8456`, `"harvester"`} {
-		if !strings.Contains(string(body), retained) {
-			t.Fatalf("cleanup dropped unrelated config %q: %s", retained, body)
-		}
+	for _, raw := range []string{`12`, `""`, `"relative.db"`} {
+		t.Run(raw, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pfm.config.json")
+			content := `{"version":2,"state":{"db":` + raw + `}}`
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path, home, nil)
+			if err == nil || !strings.Contains(err.Error(), "state.db") || !strings.Contains(err.Error(), path) {
+				t.Fatalf("Load error = %v", err)
+			}
+		})
 	}
 }

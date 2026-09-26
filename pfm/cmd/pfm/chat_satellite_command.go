@@ -3,14 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -329,7 +327,8 @@ func runChatBranch(
 	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		"chat branch",
-		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] [--account N] [--name NAME] [name]",
+		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] "+
+			"[--account N] [--name NAME] [name]",
 		stderr,
 	)
 	requestedEngine := flags.String("engine", "", "engine of the session to fork")
@@ -380,9 +379,29 @@ func runChatBranch(
 		fmt.Fprintf(stderr, "pfm chat branch: resolve parent session: %v\n", err)
 		return 1
 	}
+	var parentLaunch fleetdb.Launch
+	parentRecorded := false
+	if engine == pfmengine.Claude {
+		launches, openErr := fleetdb.OpenLaunches(context.Background(), runtime.Paths)
+		if openErr != nil {
+			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v\n", *id, openErr)
+			return 1
+		}
+		parentLaunch, err = launches.LaunchFor(context.Background(), *id)
+		closeErr := launches.Close()
+		if err != nil && !errors.Is(err, fleetdb.ErrNoLaunch) || closeErr != nil {
+			fmt.Fprintf(stderr, "pfm chat branch: read launch record for %s: %v\n", *id, errors.Join(err, closeErr))
+			return 1
+		}
+		parentRecorded = err == nil
+	}
 	requestedAccount := *account
-	if requestedAccount == 0 && parentFound && parent.Account != 0 {
-		requestedAccount = parent.Account
+	if requestedAccount == 0 {
+		if engine == pfmengine.Claude && parentRecorded {
+			requestedAccount = parentLaunch.Account
+		} else if engine == pfmengine.Codex && parentFound {
+			requestedAccount = parent.Account
+		}
 	}
 	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
 	if primaryErr != nil {
@@ -394,7 +413,8 @@ func runChatBranch(
 		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
 		return 1
 	}
-	if *account == 0 && (!parentFound || parent.Account == 0) {
+	if *account == 0 && ((engine == pfmengine.Claude && !parentRecorded) ||
+		(engine == pfmengine.Codex && (!parentFound || parent.Account == 0))) {
 		fmt.Fprintf(
 			stderr,
 			"pfm chat branch: parent account for session %s could not be resolved; forking on primary account %d\n",
@@ -434,10 +454,17 @@ func runChatBranch(
 	if engine == pfmengine.Claude {
 		model = currentClaudeModel(*id, env, runtime)
 	}
+	forkCache1H := false
+	if engine == pfmengine.Claude {
+		forkCache1H = runtime.Config.EffectiveClaude(selectedAccount).Cache1H
+		if parentRecorded {
+			forkCache1H = parentLaunch.Cache1H
+		}
+	}
 	plan, err := action.HeadlessFork(action.HeadlessForkRequest{
 		Engine: engine, SessionID: *id, Name: name, CWD: cwd,
 		Home: runtime.Paths.Home, PrimaryAccount: selectedAccount,
-		Cache1H: engine == pfmengine.Claude && forkCache1H(parent, parentFound, runtime.Config, selectedAccount),
+		Cache1H: forkCache1H,
 		Model:   model, Config: runtime.Config,
 	})
 	if err != nil {
@@ -505,6 +532,19 @@ func runChatBranch(
 		fmt.Fprintf(stderr, "pfm chat branch: record detached seat: %v\n", failure)
 		return 1
 	}
+	if engine == pfmengine.Claude {
+		forkID, resolveErr := waitForBranchSessionID(
+			context.Background(), clk, resolved.SIDDir, socket, *id, branchForkSessionIDTimeout,
+		)
+		if resolveErr != nil {
+			fmt.Fprintf(stderr, "pfm chat branch: fork session id for %s %v\n", *id, resolveErr)
+		} else if err := fleetdb.RecordLaunch(context.Background(), resolved, fleetdb.Launch{
+			SessionID: forkID, Engine: pfmengine.Claude,
+			Account: selectedAccount, Cache1H: forkCache1H,
+		}, clk.Now().Unix()); err != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", forkID, err)
+		}
+	}
 	fmt.Fprintf(stdout, "Branched %s…", transcript.Truncate(*id, 8))
 	if len(branchWarnings) == 0 {
 		fmt.Fprintf(stdout, " as %q", name)
@@ -543,13 +583,48 @@ func parentBranchRow(ctx context.Context, id string, runtimes ...commandRuntime)
 	return compose.Row{}, false, nil
 }
 
-// forkCache1H inherits a live parent's observed TTL; otherwise it uses the
-// parent's account default because a dead row's false C1H is only "unobserved".
-func forkCache1H(parent compose.Row, parentFound bool, config pfmconfig.Config, account int) bool {
-	if parentFound && parent.Kind.IsAddressable() {
-		return parent.C1H
+// branchForkSessionIDTimeout outlasts a cold Claude start before the fork goes unrecorded.
+const branchForkSessionIDTimeout = 30 * time.Second
+
+func waitForBranchSessionID(
+	ctx context.Context,
+	clk clock.Clock,
+	sidDir, socket, parent string,
+	timeout time.Duration,
+) (string, error) {
+	deadline := clk.Now().Add(timeout)
+	for {
+		entries, err := os.ReadDir(sidDir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("read session crumbs: %w", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || (entry.Name() != socket && !strings.HasPrefix(entry.Name(), socket+".")) {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(sidDir, entry.Name()))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return "", fmt.Errorf("read session crumb %s: %w", entry.Name(), err)
+			}
+			id := composeTranscriptIDFromPath(strings.TrimSpace(string(raw)))
+			if id != "" && id != parent && uuidSessionID(id) {
+				return id, nil
+			}
+		}
+		if !clk.Now().Before(deadline) {
+			return "", fmt.Errorf(
+				"did not resolve within %s on tmux socket %s; no launch record written for the fork",
+				timeout,
+				socket,
+			)
+		}
+		if err := clk.Sleep(ctx, 25*time.Millisecond); err != nil {
+			return "", err
+		}
 	}
-	return config.EffectiveClaude(account).Cache1H
 }
 
 func sanitizeBranchName(value string) string {
@@ -637,12 +712,6 @@ func currentClaudeTranscriptPath(id, cwd string, env paths.Env, runtimes ...comm
 	return filepath.Join(resolved.Home, ".claude", "projects", slug, id+".jsonl")
 }
 
-// historyMessage is one surviving user/assistant turn from a transcript tail,
-// ready to print — the native port of history.sh's jq pipeline.
-type historyMessage struct {
-	timestamp, role, text string
-}
-
 // runChatHistory is the native port of the retired history.sh compatibility
 // script: read a chat's on-disk transcript as deep as its tail carries, not
 // bounded to a live pane's visible scrollback.
@@ -680,43 +749,27 @@ func runChatHistory(args []string, stdout, stderr io.Writer, runtimes ...command
 	}
 	path := sid
 	if info, statErr := os.Stat(sid); statErr != nil || !info.Mode().IsRegular() {
-		resolvedPath, err := resolveHistoryTranscript(sid, slug, runtimes...)
+		pools, err := historyPools(runtimes...)
+		resolvedPath := ""
+		if err == nil {
+			resolvedPath, err = transcript.FindHistory(pools, slug, sid)
+		}
 		if err != nil {
 			fmt.Fprintln(stderr, err.Error())
 			return 1
 		}
 		path = resolvedPath
 	}
-	messages, err := readHistoryMessages(path, count)
+	messages, err := transcript.ReadHistory(path, count)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat history: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "== %s · last %d messages ==\n", path, count)
 	for _, message := range messages {
-		fmt.Fprintf(stdout, "\n───── %s · %s ─────\n%s\n", message.timestamp, message.role, message.text)
+		fmt.Fprintf(stdout, "\n───── %s · %s ─────\n%s\n", message.Timestamp, message.Role, message.Text)
 	}
 	return 0
-}
-
-// resolveHistoryTranscript reproduces history.sh's pool search: each pool is
-// tried in order, the newest-mtime `{pool}/{slug}/{sid}*.jsonl` match wins,
-// and the first pool with any match short-circuits the rest.
-func resolveHistoryTranscript(sid, slug string, runtimes ...commandRuntime) (string, error) {
-	pools, err := historyPools(runtimes...)
-	if err != nil {
-		return "", err
-	}
-	for _, pool := range pools {
-		match, err := newestHistoryMatch(pool, slug, sid)
-		if err != nil {
-			return "", err
-		}
-		if match != "" {
-			return match, nil
-		}
-	}
-	return "", fmt.Errorf("no transcript matching sid '%s' under %s in any account pool", sid, slug)
 }
 
 // historyPools mirrors runChatScript's former PFM_HISTORY_ROOTS_JSON
@@ -731,144 +784,7 @@ func historyPools(runtimes ...commandRuntime) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	pools := []string{filepath.Join(resolved.Home, ".claude", "projects")}
-	matches, err := filepath.Glob(filepath.Join(resolved.Home, ".cc", "*", "projects"))
-	if err != nil {
-		return nil, fmt.Errorf("glob %s: %w", filepath.Join(resolved.Home, ".cc", "*", "projects"), err)
-	}
-	sort.Strings(matches)
-	return append(pools, matches...), nil
-}
-
-// newestHistoryMatch returns the newest-mtime file under pool/slug matching
-// sid*.jsonl, or "" when the pool has none. A glob candidate that fails to
-// stat for a reason other than having vanished between glob and stat is a
-// real error, never silently read as absence.
-func newestHistoryMatch(pool, slug, sid string) (string, error) {
-	matches, err := filepath.Glob(filepath.Join(pool, slug, sid+"*.jsonl"))
-	if err != nil {
-		return "", fmt.Errorf("scan %s: %w", pool, err)
-	}
-	newest := ""
-	var newestModTime time.Time
-	for _, match := range matches {
-		info, statErr := os.Stat(match)
-		if errors.Is(statErr, fs.ErrNotExist) {
-			continue
-		}
-		if statErr != nil {
-			return "", fmt.Errorf("stat %s: %w", match, statErr)
-		}
-		if newest == "" || info.ModTime().After(newestModTime) {
-			newest = match
-			newestModTime = info.ModTime()
-		}
-	}
-	return newest, nil
-}
-
-// readHistoryMessages is the native port of history.sh's jq pipeline: tail
-// generously, drop the (possibly partial) first line, keep only user/
-// assistant records with non-empty rendered text, drop synthetic reminder and
-// caveat preambles, then take the last count survivors.
-func readHistoryMessages(path string, count int) (messages []historyMessage, returnErr error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close %s: %w", path, err))
-		}
-	}()
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	lines := tailLines(string(content), 800)
-	if len(lines) > 0 {
-		lines = lines[1:]
-	}
-	for _, line := range lines {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		var record struct {
-			Type      string `json:"type"`
-			Timestamp string `json:"timestamp"`
-			Message   struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			// Match history.sh: a malformed transcript row is skipped, not fatal.
-			continue
-		}
-		if record.Type != transcriptRoleUser && record.Type != "assistant" {
-			continue
-		}
-		text := historyMessageText(record.Message.Content)
-		if text == "" || strings.HasPrefix(text, "<system-reminder") ||
-			strings.HasPrefix(text, "Caveat: The messages below") {
-			continue
-		}
-		timestamp := record.Timestamp
-		if timestamp == "" {
-			timestamp = "?"
-		}
-		messages = append(messages, historyMessage{timestamp: timestamp, role: record.Type, text: text})
-	}
-	if len(messages) > count {
-		messages = messages[len(messages)-count:]
-	}
-	return messages, nil
-}
-
-// historyMessageText extracts message.content the way history.sh's jq does:
-// a string is itself; an array joins the .text of every type=="text" element
-// with "\n"; anything else renders as "".
-func historyMessageText(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var asString string
-	if err := json.Unmarshal(raw, &asString); err == nil {
-		return asString
-	}
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &parts); err == nil {
-		texts := make([]string, 0, len(parts))
-		for _, part := range parts {
-			if part.Type == textFormat {
-				texts = append(texts, part.Text)
-			}
-		}
-		return strings.Join(texts, "\n")
-	}
-	return ""
-}
-
-// tailLines reproduces `tail -n count`: the last count newline-delimited
-// lines, tolerant of a missing trailing newline and of fewer lines than
-// count.
-func tailLines(content string, count int) []string {
-	if content == "" {
-		return nil
-	}
-	lines := strings.Split(content, "\n")
-	if lines[len(lines)-1] == "" {
-		// A file ending in a newline splits into one trailing empty element
-		// that is the terminator, not a line.
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) > count {
-		lines = lines[len(lines)-count:]
-	}
-	return lines
+	return []string{filepath.Join(resolved.Home, ".claude", "projects")}, nil
 }
 
 func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int {

@@ -28,9 +28,10 @@ func TestReachableIdleUserManagerAllowsMutatingModes(t *testing.T) {
 			home := t.TempDir()
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{
-				Mode:   mode,
-				Home:   home,
-				Stdout: &output,
+				MCPConfigPath: testConfigPath(t),
+				Mode:          mode,
+				Home:          home,
+				Stdout:        &output,
 				Runner: &outputRunner{
 					fakeRunner:  fakeRunner{manager: true, nameSyncIdle: true},
 					printOutput: "state = not running\n",
@@ -65,7 +66,8 @@ func TestUnprobedNameSyncGateProceedsButSaysSo(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err != nil {
 		t.Fatalf("an unprobed gate refused the install: %v\n%s", err, output.String())
@@ -87,7 +89,8 @@ func TestRunningNameSyncRefusesMutatingModesBeforeWriting(t *testing.T) {
 				expected = ErrLaunchAgentRunning
 			}
 			_, err := Run(context.Background(), Options{
-				Mode: mode, Home: home, Runner: runner,
+				MCPConfigPath: testConfigPath(t),
+				Mode:          mode, Home: home, Runner: runner,
 			})
 			if !errors.Is(err, expected) {
 				t.Fatalf("Run() error = %v, want %v", err, expected)

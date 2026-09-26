@@ -48,6 +48,7 @@ func TestConfiguredBinaryBasenamesReachLiveDetectors(t *testing.T) {
 	}
 	wantClaude := []ClaudeProcess{{
 		PID: 200, PanePID: 100, Socket: "cc-configured", PaneID: "%1", TTY: "/dev/ttys001",
+		ConfigDir: "/jail/home/account-42",
 	}}
 	if !reflect.DeepEqual(claudeProcesses, wantClaude) {
 		t.Fatalf("DetectClaudeProcesses() = %#v, want %#v", claudeProcesses, wantClaude)
@@ -61,14 +62,6 @@ func TestConfiguredBinaryBasenamesReachLiveDetectors(t *testing.T) {
 		t.Fatalf("DetectAgents() = %#v", agents)
 	}
 
-	cacheSockets, err := DetectCache1H(proc, panes, customClaude)
-	if err != nil {
-		t.Fatalf("DetectCache1H() error = %v", err)
-	}
-	if !reflect.DeepEqual(cacheSockets, []string{"cc-configured"}) {
-		t.Fatalf("DetectCache1H() = %#v, want configured Claude socket", cacheSockets)
-	}
-
 	codex, err := DetectCodexThreads(proc, codexHome, panes, nil, customCodex)
 	if err != nil {
 		t.Fatalf("DetectCodexThreads() error = %v", err)
@@ -79,5 +72,23 @@ func TestConfiguredBinaryBasenamesReachLiveDetectors(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(codex, wantCodex) {
 		t.Fatalf("DetectCodexThreads() = %#v, want %#v", codex, wantCodex)
+	}
+}
+
+func TestClaudeProcessUnreadableEnvironmentStaysUnknown(t *testing.T) {
+	proc := &fakeProcFS{processes: map[int]fakeProcess{
+		100: {stat: ProcStat{ParentPID: 1}},
+		200: {
+			cmdline: []string{"/opt/claude"}, environErr: true,
+			stat: ProcStat{ParentPID: 100},
+		},
+	}}
+	panes := []ProbePane{{Socket: "cc-unreadable", PaneID: "%1", PID: 100}}
+	processes, err := DetectClaudeProcesses(proc, panes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(processes) != 1 || !processes[0].ConfigUnreadable {
+		t.Fatalf("processes = %#v, want unreadable environment", processes)
 	}
 }

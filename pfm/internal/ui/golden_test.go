@@ -531,6 +531,13 @@ func TestAccountMedalUsesConfigOwnedDefaultsAndFailsClosedOnMissingRosterEntry(t
 	}
 }
 
+func TestLaunchUnreadMedalRendersWarning(t *testing.T) {
+	badges := (Model{}).rowBadges(compose.Row{Kind: compose.ResumeClaude, Account: 3, C1H: true, LaunchUnread: true})
+	if !strings.Contains(badges, "⚠") || strings.Contains(badges, "⚡") || strings.Contains(badges, accountMedal(3)) {
+		t.Fatalf("unread launch badges = %q, want warning without account or cache medal", badges)
+	}
+}
+
 func TestFancyRenderNeverWrapsAtFixedWidths(t *testing.T) {
 	for _, width := range []int{80, 120} {
 		snapshot := fixtureSnapshot(width)

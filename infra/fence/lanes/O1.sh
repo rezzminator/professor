@@ -22,7 +22,7 @@ LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$LANES_DIR/lib.sh"
 lane_preamble
 
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 MANAGED="$HOME/.local/share/pfm/install"
 BLUEPRINT="$HOME/.professor"
 SEAT="$(printf '%s\n' $LANE_SEATS | awk -F: '/^cc:/ { print $2; exit }')"
@@ -73,21 +73,21 @@ check_path I10 "reload command card" "$SEAT_DIR/commands/reload.md"
 check_path I21 "source-repo marker" "$MANAGED/source-repo"
 check_path I22 "mcp-auth-token" "$MANAGED/mcp-auth-token"
 check_path I23 "settings-hook-ownership ledger" "$MANAGED/settings-hook-ownership.json"
-check_path I11 "pfm.zsh shim" "$MANAGED/shim/pfm.zsh"
-grep -q 'pfm.zsh' "$HOME/.zshrc" 2>/dev/null || missing="$missing I11 (no pfm.zsh line in ~/.zshrc);"
+clone="$(cat "$MANAGED/source-repo" 2>/dev/null)"
+check_path I11 "clone-sourced pfm.zsh shim" "$clone/pfm/internal/installer/assets/shim/pfm.zsh"
+grep -Fq "$clone/pfm/internal/installer/assets/shim/pfm.zsh" "$HOME/.zshrc" 2>/dev/null || missing="$missing I11 (~/.zshrc does not source the clone shim);"
+check_path I7 "composed Codex prompt" "$clone/pfm/harness-prompts/composed/codex.md"
+check_path I9 "composed Claude prompt" "$clone/pfm/harness-prompts/composed/claude.md"
+check_path I8 "harness-prompt baseline" "$clone/pfm/harness-prompts/claude/baselines/harness-original.sha256"
 # The assets whose destination the installer computes are SEARCHED, and the
 # roots searched are named on failure — "nothing there" is never "failed to look".
 ROOTS="$HOME/.local/share/pfm $HOME/.local/bin $SEAT_DIR $CODEX_HOME $HOME/.claude"
-# The glob is a PATH suffix, not a bare name: the composed harness prompts are
-# told apart from any other claude.md/codex.md by the directory above them.
+# The glob is a PATH suffix, not a bare name.
 find_asset() { # find_asset <id> <what> <path-suffix-glob>
   local hit
   hit="$(find $ROOTS -maxdepth 6 -path "*/$3" 2>/dev/null | head -1)"
   [ -n "$hit" ] || missing="$missing $1 ($2: no '*/$3' under $ROOTS);"
 }
-find_asset I7 "codex appendix hook file" 'harness-prompts/codex.md'
-find_asset I9 "professor system-prompt file" 'harness-prompts/claude.md'
-find_asset I8 "harness-prompt baseline" 'harness-prompts/claude/baselines/harness-original.sha256'
 find_asset I15 "Claude Code professor theme" 'professor-*.json'
 find_asset I16 "harvestpy runtime marker" 'harvestpy*'
 find_asset I14 "VS Code extension asset" 'pfm*.vsix'
@@ -97,6 +97,41 @@ done
 [ -d "$CODEX_HOME/agents" ] || missing="$missing I20 (no Codex agents mirror at $CODEX_HOME/agents);"
 if [ -n "$missing" ]; then fail "$missing"; else
   pass "every contracted overlay, per-seat card, marker and registry is staged (searched: $ROOTS)"
+fi
+
+# ─── O1.02a — install owns every session-store link ────────────────────────
+
+beat O1.02a-session-store
+spends none
+if [ "$(jq '.accounts | length' "$CONFIG")" -lt 2 ]; then
+  blocked "seats $LANE_SEATS" "needs --seats cc:1,cc:2 to prove non-primary session-store links"
+else
+bad=""
+primary="$HOME/.claude"
+while IFS=$'\t' read -r id dir; do
+  [ -n "$id" ] || continue
+  case "$dir" in "~"*) dir="$HOME${dir#\~}" ;; esac
+  [ "$(readlink -f "$dir" 2>/dev/null)" = "$(readlink -f "$primary" 2>/dev/null)" ] && continue
+  for entry in projects file-history tasks session-env; do
+    link="$dir/$entry"
+    want="$primary/$entry"
+    if [ ! -L "$link" ]; then
+      if [ -d "$link" ]; then state="real dir"; elif [ -e "$link" ]; then state="non-link file"; else state="missing"; fi
+      bad="$bad seat $id $entry: $link is $state, want a symlink to $want;"
+    elif [ ! -d "$want" ]; then
+      bad="$bad seat $id $entry: $link is a symlink but target $want is missing;"
+    elif [ "$(readlink -f "$link" 2>/dev/null)" != "$(readlink -f "$want" 2>/dev/null)" ]; then
+      bad="$bad seat $id $entry: $link points at $(readlink "$link"), want $want;"
+    fi
+  done
+done < <(jq -r '.accounts[] | "\(.id)\t\(.configDir)"' "$CONFIG")
+doctor_store="$(pfm doctor 2>&1)"
+doctor_rc=$?
+[ "$doctor_rc" -le 1 ] || bad="$bad pfm doctor exited $doctor_rc, so its session-store enumeration cannot be trusted;"
+printf '%s\n' "$doctor_store" | grep -q '^session-store:' && bad="$bad pfm doctor still reports session-store: $(one_line "$(printf '%s\n' "$doctor_store" | grep '^session-store:' | head -1)");"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "pfm install linked projects, file-history, tasks and session-env for every non-primary seat; doctor has no session-store finding"
+fi
 fi
 
 # ─── O1.03 — the installer's hooks, per engine ──────────────────────────────
@@ -377,17 +412,13 @@ jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tm
   mv "$SEAT_DIR/settings.json.tmp" "$SEAT_DIR/settings.json"
 [ -n "$(find "$SEAT_DIR" -maxdepth 2 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
   bad="$bad no professor-*.json theme under $SEAT_DIR;"
-claude_json="$SEAT_DIR/.claude.json"
-if [ -f "$claude_json" ]; then
-  jq -e '.mcpServers | objects' "$claude_json" >/dev/null 2>&1 ||
-    bad="$bad $claude_json carries no mcpServers object (the professor server registration);"
-else
-  bad="$bad no $claude_json for seat $SEAT;"
-fi
+mcp_list="$(pfm mcp ls 2>&1)"
+printf '%s\n' "$mcp_list" | grep -q $'^chat\ttrue\t' || bad="$bad pfm mcp ls does not report chat enabled;"
+printf '%s\n' "$mcp_list" | grep -q $'^harvester\ttrue\t' || bad="$bad pfm mcp ls does not report harvester enabled;"
 [ -n "$(find "$SEAT_DIR/skills" -maxdepth 2 -type l -o -maxdepth 2 -type d -name '*git*' 2>/dev/null | head -1)" ] ||
   _lane_log_only "   O1.12: no git-bridge skill directory under $SEAT_DIR/skills (I94 reads the global fan-out instead)"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "settings merge keeps a foreign key, themes staged, MCP registered in .claude.json, project hooks rooted in the seat"
+  pass "settings merge keeps a foreign key, themes staged, MCP enabled in machine config, project hooks rooted in the seat"
 fi
 
 # ─── O1.13 — the misc ops CLI ───────────────────────────────────────────────

@@ -1,0 +1,73 @@
+package claudelaunch
+
+import (
+	"os"
+	"reflect"
+	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+)
+
+func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
+
+func TestKnobsExampleParity(t *testing.T) {
+	keys := map[string]bool{}
+	for _, key := range pfmconfig.Keys() {
+		keys[key.Key] = true
+	}
+	for _, knob := range Knobs {
+		if knob.Source == SourceConfig || knob.Source == SourceLaunchThenConfig {
+			key := "claude." + knob.Name
+			if !keys[key] {
+				t.Errorf("knob %s has no config key %s", knob.Name, key)
+			}
+		}
+	}
+}
+
+func TestKnobsInventory(t *testing.T) {
+	wantHygiene := []string{
+		"CLAUDE_CODE_SESSION_ID",
+		"CLAUDECODE",
+		"CLAUDE_CODE_CHILD_SESSION",
+		"CLAUDE_CONFIG_DIR",
+		"CLAUDE_PROJECT_DIR",
+		"ENABLE_PROMPT_CACHING_1H",
+		"FORCE_PROMPT_CACHING_5M",
+		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
+		"ANTHROPIC_BASE_URL",
+		"ANTHROPIC_AUTH_TOKEN",
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_MODEL",
+		"ANTHROPIC_SMALL_FAST_MODEL",
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+		"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
+		"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+		"CODEX_THREAD_ID",
+	}
+	if !reflect.DeepEqual(Hygiene(), wantHygiene) {
+		t.Errorf("hygiene=%q, want %q", Hygiene(), wantHygiene)
+	}
+	seen := map[string]bool{}
+	for _, knob := range Knobs {
+		if knob.Name == "" || knob.Target == "" || knob.Reason == "" {
+			t.Errorf("incomplete knob: %#v", knob)
+		}
+		if seen[knob.Name] {
+			t.Errorf("duplicate knob %s", knob.Name)
+		}
+		seen[knob.Name] = true
+	}
+	for _, name := range Hygiene() {
+		if !seen[name] {
+			t.Errorf("hygiene row %s missing", name)
+		}
+	}
+	for _, name := range []string{"configDir", "binary", "cache1h", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "tmuxTruecolor", "agentTeams", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
+		if !seen[name] {
+			t.Errorf("knob %s missing", name)
+		}
+	}
+}

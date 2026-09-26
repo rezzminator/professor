@@ -15,6 +15,9 @@ import (
 )
 
 func TestActionStress(t *testing.T) {
+	previous := newSessionID
+	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+	t.Cleanup(func() { newSessionID = previous })
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 	requests := stressRequests()
 	expected := make([]Plan, len(requests))

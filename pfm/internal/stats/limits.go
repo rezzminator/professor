@@ -640,8 +640,8 @@ func defaultAck(ctx context.Context, account LimitAccount) error {
 	result, err := headlessrun.Run(ctx, headlessrun.Request{
 		Engine: pfmengine.Claude, Account: account.ID,
 		Model: "claude-haiku-4-5", Prompt: "ACK", Native: true,
-		Args: []string{"--max-turns", "1"},
-		Env:  append(os.Environ(), "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1"),
+		Args:     []string{"--max-turns", "1"},
+		Settings: map[string]any{"systemPrompt": "lean"},
 		Config: pfmconfig.Config{
 			Claude:   pfmconfig.ClaudePrefs{Binary: account.ClaudeBinary},
 			Accounts: []pfmconfig.Account{{ID: account.ID, ConfigDir: account.ConfigDir}},

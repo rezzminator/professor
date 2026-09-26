@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -182,7 +183,7 @@ skip=0
 for argument in "$@"; do
   if [ "$skip" = 1 ]; then skip=0; continue; fi
   case "$argument" in
-    --name|--model|--effort) skip=1 ;;
+    --name|--model|--effort|--session-id|--settings|--mcp-config|--system-prompt-file) skip=1 ;;
     -*) ;;
     *) prompt="$argument"; break ;;
   esac
@@ -223,13 +224,13 @@ type runJail struct {
 	transcript string
 }
 
-func TestRunJailPinsXDGConfigHome(t *testing.T) {
-	foreign := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", foreign)
+func TestRunJailPinsPFMConfig(t *testing.T) {
+	foreign := filepath.Join(t.TempDir(), "pfm.config.json")
+	t.Setenv(paths.EnvConfig, foreign)
 	jail := newRunJail(t)
-	want := filepath.Join(jail.root, "home", ".config")
-	if got := os.Getenv("XDG_CONFIG_HOME"); got != want {
-		t.Fatalf("XDG_CONFIG_HOME=%q, want jailed config root %q", got, want)
+	want := filepath.Join(jail.root, "home", pfmconfig.FileName)
+	if got := os.Getenv(paths.EnvConfig); got != want {
+		t.Fatalf("PFM_CONFIG=%q, want jailed config %q", got, want)
 	}
 }
 
@@ -301,15 +302,18 @@ func newRunJail(t *testing.T) *runJail {
 	); err != nil {
 		t.Fatal(err)
 	}
-	configDir := filepath.Join(root, "home", ".config", "pfm")
+	configDir := filepath.Join(root, "home")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(configDir, "config.json"),
+		filepath.Join(configDir, pfmconfig.FileName),
 		[]byte(`{"version":2,"ask":{"engine":"claude"}}`),
 		0o600,
 	); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(configDir, filepath.Join(root, "work")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -318,6 +322,7 @@ func newRunJail(t *testing.T) *runJail {
 	// chat must not inherit its tmux server, pane, or chat identity.
 	t.Setenv("PATH", jail.binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv(paths.EnvConfig, filepath.Join(configDir, pfmconfig.FileName))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "home", ".config"))
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
@@ -325,7 +330,7 @@ func newRunJail(t *testing.T) *runJail {
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("PFM_HOME", filepath.Join(root, "home"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -452,7 +457,7 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 		t.Fatalf("codex window=%q, want inline launch name", got)
 	}
 	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		FleetDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
+		StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
 	})
 	t.Cleanup(func() { _ = state.Close() })
 	events, err := state.CommsSince(context.Background(), 0, 10)
@@ -558,6 +563,101 @@ func TestChatNewSpawnsAClaudeChatWithItsNameOnTheCommandLine(t *testing.T) {
 	}
 	if got := jail.onlyWindowName(t); got != "worker 7" {
 		t.Fatalf("claude window=%q, want inline launch name", got)
+	}
+}
+
+func TestChatNewRecordsAssignedSessionAndAccountCache(t *testing.T) {
+	for _, testCase := range []struct {
+		name, configCache, cache, ambient string
+		want                              bool
+	}{
+		{name: "configured default", configCache: "true", want: true},
+		{name: "1h choice", configCache: "false", cache: "1h", want: true},
+		{name: "5m choice", configCache: "true", cache: "5m", want: false},
+		{name: "ambient cache ignored", configCache: "false", ambient: "1", want: false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := exec.LookPath("tmux"); err != nil {
+				t.Skip("tmux is not installed")
+			}
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			if testCase.ambient != "" {
+				t.Setenv("CC_ARM_1H", testCase.ambient)
+			}
+			config := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q},`+
+				`{"id":2,"configDir":%q,"claude":{"cache1h":%s}}]}`,
+				filepath.Join(jail.root, "account1"), filepath.Join(jail.root, "account2"), testCase.configCache)
+			if err := os.WriteFile(os.Getenv(paths.EnvConfig), []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{
+				"chat", "new", "--engine", "claude", "--name", "recorded-worker",
+				"--account", "2", "--cwd", filepath.Join(jail.root, "work"),
+			}
+			if testCase.cache != "" {
+				args = append(args, "--cache", testCase.cache)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != 0 {
+				t.Fatalf("chat new rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			argv := jail.await(t, "cc-argv", "--session-id")
+			fields := strings.Fields(argv)
+			id := ""
+			for index, word := range fields {
+				if word == "--session-id" && index+1 < len(fields) {
+					id = fields[index+1]
+				}
+			}
+			if id == "" || !strings.Contains(argv, "--name recorded-worker") {
+				t.Fatalf("launch argv=%q", argv)
+			}
+			resolved, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			launches, err := fleetdb.OpenLaunches(context.Background(), resolved)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = launches.Close() }()
+			record, err := launches.LaunchFor(context.Background(), id)
+			if err != nil || record.Account != 2 || record.Cache1H != testCase.want || record.Engine != "cc" {
+				t.Fatalf("launch record=%#v err=%v", record, err)
+			}
+		})
+	}
+}
+
+func TestChatNewRejectsInvalidCacheChoice(t *testing.T) {
+	jailTest(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"chat", "new", "--name", "invalid", "--cache", "x"}, &stdout, &stderr)
+	if code != 2 || stderr.String() != "pfm chat new: --cache must be 1h or 5m\n" {
+		t.Fatalf("invalid cache code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestChatNewRecordFailureReportsAndStillStartsPane(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	blocker := filepath.Join(jail.root, "state-blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvStateDB, filepath.Join(blocker, "pfm.db"))
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new", "--engine", "claude", "--name", "record-failure-worker",
+		"--cwd", filepath.Join(jail.root, "work"),
+	}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stderr.String(), "pfm: record launch ") ||
+		!strings.Contains(jail.await(t, "cc-argv", "--session-id"), "--name record-failure-worker") {
+		t.Fatalf("chat new rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 
@@ -724,7 +824,7 @@ func assertJailedSpawnLineage(t *testing.T, jail *runJail, parent, forbiddenPare
 	}
 	socket := entries[0].Name()
 	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		FleetDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
+		StateDB: filepath.Join(jail.root, "home", ".local", "state", "pfm", "pfm.db"),
 	})
 	t.Cleanup(func() { _ = state.Close() })
 	children, found, err := state.Children(context.Background(), fleetdb.KindNew, parent)

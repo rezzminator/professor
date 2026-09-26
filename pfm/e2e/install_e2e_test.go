@@ -48,7 +48,6 @@ var commandLinks = []string{
 
 var managedAssets = []string{
 	"reload.command.md",
-	"shim/pfm.zsh",
 	"bin/claude",
 }
 
@@ -803,8 +802,9 @@ func (h *e2eHarness) environment(home string) []string {
 		"GOMODCACHE":            h.goModCache,
 		"HOME":                  home,
 		"PFM_HOME":              home,
-		"PFM_DB":                filepath.Join(home, ".local", "state", "pfm", "fleet.db"),
-		"PFM_FLEET_DB":          filepath.Join(home, ".cc", "fleet.db"),
+		"PFM_CONFIG":            filepath.Join(home, "pfm.config.json"),
+		"PFM_CACHE_DB":          filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db"),
+		"PFM_STATE_DB":          filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 		"PFM_SID_DIR":           filepath.Join(home, "sid"),
 		"PFM_CLAUDE_ROOTS":      strings.Join(roots, string(os.PathListSeparator)),
 		"PFM_CODEX_ROOT":        filepath.Join(home, ".codex"),
@@ -920,7 +920,7 @@ func (h *e2eHarness) assertInstalled(home string) {
 			)
 		}
 	}
-	for _, relative := range []string{"source-repo", "binary-ownership.json", "settings-hook-ownership.json"} {
+	for _, relative := range []string{"source-repo", "binary-ownership.json"} {
 		if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
 			h.t.Fatalf(
 				"install surface failed; differing paths: %s; status: %v",
@@ -943,7 +943,6 @@ func (h *e2eHarness) assertInstalled(home string) {
 		h.t.Fatalf("install surface failed; differing paths: launcher.state; status: %v", err)
 	}
 	h.readJSON(filepath.Join(managed, "binary-ownership.json"))
-	h.readJSON(filepath.Join(managed, "settings-hook-ownership.json"))
 	if runtime.GOOS == "linux" {
 		for _, relative := range []string{
 			"systemd/pfm-name-sync.path", "systemd/pfm-name-sync.service", "systemd/pfm-name-sync.timer",
@@ -957,24 +956,21 @@ func (h *e2eHarness) assertInstalled(home string) {
 			}
 		}
 	}
-	for _, relative := range managedSettings {
-		document := h.readJSON(filepath.Join(home, relative))
-		if got, ok := document["cleanupPeriodDays"].(float64); !ok || got != 36500 {
-			h.t.Fatalf("install surface failed; differing paths: %s cleanupPeriodDays", relative)
-		}
-		for _, suffix := range expectedHooks {
-			if !containsHookCommand(document, filepath.Join(home, ".local", "bin", "pfm")+" "+suffix) {
-				h.t.Fatalf("install surface failed; differing paths: %s hook %s", relative, suffix)
-			}
-		}
-	}
 	h.assertCommandLinksInstalled(home)
-	shim := filepath.Join(managed, "shim", "pfm.zsh")
+	// The shim is static and sourced straight from the clone the marker names;
+	// nothing is staged under the managed root.
+	clone, err := pfmpaths.ReadSourceRepoMarker(home)
+	if err != nil {
+		h.t.Fatalf("install surface failed; differing paths: source-repo marker; status: %v", err)
+	}
+	shim := filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
 	if result := runTool(home, "zsh", "-n", shim); result.err != nil {
 		h.t.Fatalf("install surface failed; differing paths: shim/pfm.zsh syntax; status: %v", result.err)
 	}
 	if !hasSourceLine(filepath.Join(home, e2eZshrc), shim) {
-		h.t.Fatalf("install surface failed; differing paths: .zshrc source line")
+		zshrc, readErr := os.ReadFile(filepath.Join(home, e2eZshrc))
+		h.t.Fatalf("install surface failed; differing paths: .zshrc source line for %s; zshrc=%q status=%v",
+			shim, zshrc, readErr)
 	}
 	h.assertTmuxConfig(home)
 	codexHooksPath := filepath.Join(home, e2eCodexHooks)
@@ -1313,8 +1309,13 @@ func (h *e2eHarness) assertUninstalled(home string) {
 	} else if _, err := os.Lstat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist")); !os.IsNotExist(err) {
 		h.t.Fatalf("uninstall failed; differing paths: launchd name-sync; status: %v", err)
 	}
-	if hasSourceLine(filepath.Join(home, e2eZshrc), filepath.Join(home, e2eManagedRoot, "shim", "pfm.zsh")) {
-		h.t.Fatalf("uninstall failed; differing paths: .zshrc installer source line")
+	for _, shim := range []string{
+		filepath.Join(home, e2eManagedRoot, "shim", "pfm.zsh"),
+		filepath.Join(h.repo, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh"),
+	} {
+		if hasSourceLine(filepath.Join(home, e2eZshrc), shim) {
+			h.t.Fatalf("uninstall failed; differing paths: .zshrc installer source line %s", shim)
+		}
 	}
 	document := h.readJSON(filepath.Join(home, e2eSettings))
 	if !containsJSONString(document, "manual-fixture-hook") {

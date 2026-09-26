@@ -46,7 +46,8 @@ func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
 	writeFixture(t, accountData, "keep\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: configDirs, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, ConfigDirs: configDirs, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,8 @@ func TestApplyQuarantinesExactNamedOperatorFilesBeforeRetirement(t *testing.T) {
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: []string{config}, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, ConfigDirs: []string{config}, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}

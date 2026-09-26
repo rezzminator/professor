@@ -50,7 +50,7 @@ type Knob struct {
 }
 ```
 
-`Knobs` lists every row. `Render(Request, pfmconfig.Claude) Launch` resolves each row for one launch and returns `Launch{Unset, Env, Argv}`. `ClaudeSpawn.ShellCommand` (`pfm/internal/action/claude_spawn.go`) prints it as `env -u … NAME=value … claude <argv>` for a tmux pane; `ClaudeSpawn.Command` execs it directly. Neither adds a word of its own.
+`Knobs` lists every row. `Render(Request, pfmconfig.Config) (Launch, error)` resolves each row for one launch and returns `Launch{Unset, Env, Argv}`. `ClaudeSpawn.ShellCommand` (`pfm/internal/action/claude_spawn.go`) prints it as `env -u … NAME=value … claude <argv>` for a tmux pane; `ClaudeSpawn.Command` execs it directly. Neither adds a word of its own.
 
 ## Wires
 
@@ -80,7 +80,7 @@ type Knob struct {
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
 | status lines | settings `statusLine`, `subagentStatusLine` — `docs/design/context/statusline.md` | constant | — |
-| MCP | flag `--mcp-config '{"mcpServers":{…}}'` — `chat` (stdio, `pfm mcp chat serve`) and `harvester` (http, `127.0.0.1:{mcp.port}`), each when enabled in `mcp` | config | — |
+| MCP | flag `--mcp-config '{"mcpServers":{"professor":{…}}}'` — one `professor` entry, `{type: stdio, command: ~/.local/bin/pfm, args: [mcp, serve, --stdio]}` (the shape `pfm install` registers for Codex and OpenCode), present when `chat` or `harvester` is enabled in `mcp`, absent when both are off | config | — |
 | `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass` | config | `bypass` |
 | model | flag `--model` | launch | unset |
 | effort | flag `--effort` (`low\|medium\|high\|xhigh\|max`) | launch | unset |
@@ -92,6 +92,7 @@ type Knob struct {
 ## Sources
 
 - **config** — `pfm.config.json`'s `claude` block, overridden by the launching account's own `claude` block.
+- **machine config** — the `mcp` block's enabled servers; they live outside `claude` and decide whether the `--mcp-config` row carries the `professor` entry. The HTTP port plays no part: the entry is stdio.
 - **launch → config** — a choice made for this one launch (the picker's cache toggle, `pfm chat new --cache 1h|5m`, `pfm chat reload --cache`); absent a choice, the config value.
 - **launch** — only a per-launch choice; unset means the flag is omitted.
 - **constant** — fixed in the registry; changing it is a code change.
@@ -107,7 +108,7 @@ pfm remembers what it launched in `pfm.db`, table `launch` — one row per sessi
 - **One reader.** `fleetdb.LaunchFor(ctx, sessionID)` returns the row, `ErrNoLaunch` for a session pfm never launched, or the read error.
 - **Readers:** the picker's ⚡1h badge; `pfm chat reload`, which carries the chat's account and cache into the respawn unless overridden; the statusline's cache window, keyed by the `session_id` in the statusline payload; account attribution of rows that are not live (compose), which is how a transcript in the shared store is tied to the account it ran on.
 - **No record** — a chat pfm did not launch — shows no badge and no medal. **A failed read** renders as an error marker (`⚠`), never as a 5-minute cache or a missing account.
-- Spawn-audit does not read the record: it audits what actually runs, through `claudelaunch.Parse` over the live argv.
+- Spawn-audit does not read the record: it audits what actually runs, through `claudelaunch.Parse` over the live argv with the binary first.
 
 ## Config keys
 
@@ -134,7 +135,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 ```text
 env -u {hygiene…} [CLAUDE_CONFIG_DIR={config dir}] {binary} {door verbs} \
   --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
-  --mcp-config '{"mcpServers":{…}}' \
+  [--mcp-config '{"mcpServers":{"professor":{"type":"stdio","command":"{home}/.local/bin/pfm","args":["mcp","serve","--stdio"]}}}'] \
   [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions]
 ```
 

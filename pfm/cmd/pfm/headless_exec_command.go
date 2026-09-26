@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
@@ -35,9 +36,10 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		"  --allow-unsupported (continue with diagnostics when common controls are unsupported)\n"+
 		"  --no-session-persistence --cwd DIR --timeout SECONDS (default 600; 0 unlimited)\n"+
 		"  --output-format text|json|native --out FILE --receipt FILE\n"+
+		"  --pfm-settings PATH (Claude launch settings JSON)\n"+
 		"  --env KEY=VALUE --engine-arg ARG (repeatable; native forwards engine output unchanged)", stderr)
 	engine := flags.String("engine", "", "engine (default from PFM config)")
-	model := flags.String("model", "", "model (default from PFM config)")
+	model := flags.String("model", "", "model (Claude default comes from Claude Code)")
 	effort := flags.String("effort", "", "reasoning effort")
 	account := flags.Int("account", 0, "configured account ID (default first account)")
 	configDir := flags.String("config-dir", "", "select a configured account by its directory")
@@ -57,6 +59,7 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	inlineSchema := flags.String("json-schema", "", "inline JSON Schema")
 	tools := flags.String("tools", "", "available tools (empty disables tools)")
 	settings := flags.String("setting-sources", "", "inherited settings sources (empty disables them)")
+	pfmSettings := flags.String("pfm-settings", "", "Claude launch settings JSON file")
 	strictMCP := flags.Bool("strict-mcp-config", false, "ignore inherited MCP servers")
 	noPersistence := flags.Bool("no-session-persistence", false, "discard session persistence")
 	sealed := flags.Bool(
@@ -142,6 +145,25 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			return "", fmt.Errorf("read %s: %w", path, err)
 		}
 		return string(body), nil
+	}
+	if present["pfm-settings"] {
+		if request.Engine != pfmengine.Claude {
+			fmt.Fprintln(stderr, "pfm headless: --pfm-settings requires Claude")
+			return 2
+		}
+		body, err := read(*pfmSettings)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm headless: %v\n", err)
+			return 2
+		}
+		request.Settings, err = claudelaunch.ParseSettings([]byte(body))
+		if err == nil {
+			_, err = claudelaunch.RenderHeadless(request.Settings)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm headless: --pfm-settings %s: %v\n", *pfmSettings, err)
+			return 2
+		}
 	}
 	var err error
 	framed := hasFiles || present["task"] || present["task-file"]

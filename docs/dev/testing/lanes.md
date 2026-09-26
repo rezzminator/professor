@@ -12,7 +12,7 @@ pfm-lane-root:<hash>          built once per template change (root.sh), never pu
        O1 → E1 → E2 → E3 → F → M → A → O2
 ```
 
-- **One container, lanes in sequence.** Every lane inherits the pfm state the lanes before it built: E1's named chat is still alive when F storms, when M restarts the daemon, when A rewrites the adopter's hooks. pfm is ONE state (one daemon, one `fleet.db`, one tmux server, one hook set) and the effect of each area on that shared state is where the bugs live.
+- **One container, lanes in sequence.** Every lane inherits the pfm state the lanes before it built: E1's named chat is still alive when F storms, when M restarts the daemon, when A rewrites the adopter's hooks. pfm is ONE state (one daemon, one `pfm.db` and one `pfm-cache.db`, one tmux server, one hook set) and the effect of each area on that shared state is where the bugs live.
 - **Any lane runs alone.** `run.sh --lanes M` starts a fresh container from the same root and runs M only; its `need` prelude makes the preconditions the sequence would have made (a live chat, the daemon, a working directory) and is a no-op when they already exist. A solo lane is the dev/qa loop; the sequence is the wave-close and release gate.
 - **No `--parallel`, ever.** Concurrency is a scripted beat (`storm`, two writers, inject-during-busy), never a scheduling strategy: two lanes racing on one fleet would make every red row order-dependent.
 - **Order is a design decision:** state builders first, readers over the richest state, destroyers last. Lane O is one area with two entry points — **O1** before any chat exists, **O2** the destructive tail that ends with `uninstall`.

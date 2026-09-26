@@ -140,25 +140,19 @@ func TestMain(m *testing.M) {
 		}
 		return results
 	}
-	installer.HookProbeOverride = func(home string, machine pfmconfig.Config) []installer.HookProbeResult {
-		expected := installer.ExpectedHooks(home, machine)
-		results := make([]installer.HookProbeResult, 0, len(expected))
-		for _, hook := range expected {
-			results = append(results, installer.HookProbeResult{Hook: hook, State: "ok"})
-		}
-		return results
-	}
+	installer.HookProbeOverride = func(string, pfmconfig.Config) []installer.HookProbeResult { return nil }
 	// No jail has a real `claude` to spawn — captureHarnessPrompt's own doc
 	// comment marks that REAL-SESSION. This stub stands in for every test;
 	// whether a doctor fixture reads as matches/DRIFT/CHECK-FAILED still
 	// depends only on what baseline (if any) the fixture stages, via
 	// stageHarnessPromptBaseline in main_test.go.
 	doctor.HarnessCaptureOverride = func(_ context.Context, _ string, _ pfmconfig.Config, alias, _ string) (doctor.HarnessCapture, error) {
+		prompt, err := testjail.ShippedHarnessPrompt(alias)
 		return doctor.HarnessCapture{
-			Prompt:        harnessPromptFixtureCaptured,
+			Prompt:        prompt,
 			ResolvedModel: "claude-" + alias + "-5",
 			CLIVersion:    "fixture",
-		}, nil
+		}, err
 	}
 	testjail.KeepAmbientIdentity = os.Getenv(attachHelperEnv) == "1"
 	code := testjail.Run(m)

@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -261,6 +262,10 @@ func ResolveEnv(request Request) (Env, error) {
 // and the live snapshot. It never writes.
 func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) compose.Output {
 	data, live = followContinuations(data, live)
+	launches, launchErr := fleetdb.OpenLaunches(context.Background(), env.Paths)
+	if launches != nil {
+		defer func() { _ = launches.Close() }()
+	}
 	output := compose.Compose(compose.Input{
 		Snapshot:         live,
 		Transcripts:      data.Transcripts,
@@ -268,8 +273,10 @@ func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) c
 		OpenCodeSessions: data.OpenCodeSessions,
 		CxNames:          data.CxNames,
 		Killed:           data.Killed,
-		AccountRoots:     accountRoots(env.Config.Accounts),
+		ClaudeSeats:      claudeSeats(env.Config.Accounts, env.Paths.Home),
 		CodexHomes:       codexAccountRoots(env.Config.CodexAccounts),
+		Launches:         launches,
+		LaunchError:      launchErr,
 		Options: compose.Options{
 			View:                view,
 			CurrentDir:          env.CurrentDir,

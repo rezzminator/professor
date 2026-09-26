@@ -27,7 +27,7 @@ func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.
 	writeFixture(t, settings, original)
 
 	options := Options{
-		Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t), Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	var preview bytes.Buffer
@@ -126,7 +126,8 @@ func TestVSCodeTerminalProfileRefusesAnOperatorProfileWithTheSameName(t *testing
 	writeFixture(t, settings, original)
 
 	_, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	if err == nil || !strings.Contains(err.Error(), `profile "PFM" already exists and is not PFM-owned`) {
@@ -145,7 +146,8 @@ func TestVSCodeProfileConflictRefusesApplyBeforeInstallerWrites(t *testing.T) {
 	writeFixture(t, settings, original)
 
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	if err == nil || !strings.Contains(err.Error(), `profile "PFM" already exists and is not PFM-owned`) {
@@ -170,7 +172,8 @@ func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -207,7 +210,8 @@ func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -241,7 +245,8 @@ func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -279,7 +284,8 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 		t.Fatalf("darwin settings paths=%q, want %q", paths, settings)
 	}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "darwin", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -326,7 +332,8 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 	writeFixture(t, newPath, `{}`)
 	installer := engine{
 		options: Options{
-			Mode: ModeApply, Home: home, VSCode: true, Stdout: &bytes.Buffer{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, VSCode: true, Stdout: &bytes.Buffer{},
 			vscodePlatform: "linux", vscodeSettingsPaths: []string{newPath},
 		},
 		apply: true, managedRoot: managed, stamp: "fixture",
@@ -346,7 +353,8 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -384,11 +392,13 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 func TestMalformedVSCodeSettingsSkipsVisiblyWithoutBlockingInstall(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
+	recordFixtureSourceRepo(t, home, t.TempDir())
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, "{broken\n")
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	})
 	if err != nil {
@@ -518,7 +528,8 @@ func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatalf("merge refused the real malformed file: %v\n%s", err, output.String())
@@ -581,7 +592,8 @@ func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T)
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true, Stdout: &output,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatalf("merge refused the malformed file: %v\n%s", err, output.String())
@@ -616,7 +628,8 @@ func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, VSCode: true,
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)

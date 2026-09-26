@@ -6,55 +6,6 @@ import (
 	"testing"
 )
 
-// A standalone harvester entry in the Claude user registry (~/.claude.json)
-// is the legacy state the cutover exists to find; reading only the Codex side
-// or a project .mcp.json would report this machine migrated when it is not.
-func TestInspectHarvesterClientCutoverFlagsAStandaloneEntryInTheClaudeUserRegistry(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	writeFixture(
-		t,
-		filepath.Join(home, ".claude.json"),
-		`{"mcpServers":{"harvester":{"type":"stdio","command":"uv","args":["run","harvester"]}}}`,
-	)
-	registries := []string{filepath.Join(home, ".claude.json")}
-	for _, report := range InspectHarvesterClientCutover(home, 8377, registries, nil) {
-		if report.State == MCPClientLegacyStandalone {
-			return
-		}
-	}
-	t.Fatal("the Claude user registry's standalone harvester was reported migrated")
-}
-
-// TestInspectHarvesterClientCutoverRefusesANilRegistryList pins issue #24
-// finding 5's part D: a nil registries argument is a programming error, not
-// "use the historical $HOME/.claude.json default" — the caller must resolve
-// the actual roster (installer.ClaudeUserRegistries). Silently falling back
-// to one hardcoded path is exactly how doctor and the writer disagreed with
-// no indication why; refusing loudly with one MCPClientUnreadable report
-// naming the missing list is the fix.
-func TestInspectHarvesterClientCutoverRefusesANilRegistryList(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	reports := InspectHarvesterClientCutover(home, 8377, nil, nil)
-	if len(reports) != 1 {
-		t.Fatalf("reports=%#v, want exactly one unreadable report naming the missing list", reports)
-	}
-	if reports[0].State != MCPClientUnreadable {
-		t.Fatalf("reports[0].State=%q, want %q", reports[0].State, MCPClientUnreadable)
-	}
-	if reports[0].Error == nil || reports[0].Error.Error() != "no Claude registries supplied" {
-		t.Fatalf("reports[0].Error=%v, want an error naming the missing registry list", reports[0].Error)
-	}
-}
-
-// TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace pins the
-// distinction doctor's remediation rests on: install records every OpenCode
-// registration it writes in its ownership ledger and preserves any entry that
-// ledger does not match (writeMCPOpenCodeJSON's "preserve conflicting manual
-// OpenCode MCP client"), so a user-written `harvester` entry is named while a
-// pfm-written one with a stale port is not — it is the one `pfm install --yes`
-// still rewrites.
 func TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -154,17 +105,16 @@ func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing
 	}
 }
 
-// TestInspectClaudeServersClassifiesProfessorAndPFMLegacyEntries pins the one
+// TestInspectProjectServersClassifiesProfessorAndPFMLegacyEntries pins the one
 // Claude/Codex classifier: `professor` is pfm only in the exact stdio shape
 // install writes (`{"type":"stdio","command":"<bin>","args":["mcp","serve",
 // "--stdio"]}`, nothing more, nothing less), never over HTTP; pfm's legacy
 // `chat` / `harvester` shapes (the loopback URL, the retired 64-hex bearer,
 // the stdio chat) are legacy-pfm; a `uv`/`harvest…` harvester stays
 // legacy-standalone.
-func TestInspectClaudeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
-	t.Parallel()
+func TestInspectProjectServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
 	home := t.TempDir()
-	path := filepath.Join(home, ".claude.json")
+	path := filepath.Join(home, ".mcp.json")
 	bin := filepath.Join(home, ".local", "bin", "pfm")
 	bearer := "Bearer " + strings.Repeat("ab", 32)
 	for _, testCase := range []struct {
@@ -190,7 +140,7 @@ func TestInspectClaudeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			writeFixture(t, path, `{"mcpServers":{"`+testCase.key+`":`+testCase.registration+`}}`)
-			reports := InspectClaudeServers(path, home, 8456, testCase.key)
+			reports := inspectProjectMCPServers(path, home, 8456, testCase.key)
 			if len(reports) != 1 || reports[0].State != testCase.want {
 				t.Fatalf("reports=%#v, want state %q", reports, testCase.want)
 			}
@@ -208,13 +158,13 @@ func TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex(t *testin
 	codex := filepath.Join(home, ".codex")
 	config := filepath.Join(codex, "config.toml")
 	writeFixture(t, config, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8456/mcp/harvester\"\n")
-	reports := InspectHarvesterClientCutover(home, 8456, []string{}, []string{codex})
+	reports := InspectHarvesterClientCutover(home, 8456, []string{codex})
 	if len(reports) != 2 || reports[0].State != MCPClientLegacyPFM {
 		t.Fatalf("reports=%#v, want the Codex url table legacy-pfm", reports)
 	}
 	writeFixture(t, config, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8456/mcp/harvester\"\n"+
 		"[mcp_servers.harvester.headers]\nAuthorization = \"Bearer "+strings.Repeat("ab", 32)+"\"\n")
-	reports = InspectHarvesterClientCutover(home, 8456, []string{}, []string{codex})
+	reports = InspectHarvesterClientCutover(home, 8456, []string{codex})
 	if reports[0].State != MCPClientForeignRegistration {
 		t.Fatalf("reports=%#v, want the headed Codex table foreign-registration", reports)
 	}

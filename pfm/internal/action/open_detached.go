@@ -95,6 +95,7 @@ func (executor *Executor) OpenDetached(
 		trail.Reach("opened", "already live")
 		return OpenResult{Name: request.Row.Name, Socket: request.Row.Socket, State: "live"}, nil
 	}
+	executor.recordLaunch(ctx, plan.Record)
 	if err := executor.tmux.CreateChatServer(ctx, *plan.ChatServer); err != nil {
 		return OpenResult{}, fmt.Errorf("open detached: %w", err)
 	}

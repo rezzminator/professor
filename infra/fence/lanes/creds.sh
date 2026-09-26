@@ -21,7 +21,7 @@
 #   darwin  each seat's OAuth blob comes from the Keychain — infra/demo/creds.sh
 #           is the reader, called once per seat so a failure names the seat id.
 #   linux   each seat's `<configDir>/.credentials.json` is copied in, plus the
-#           Codex home's auth.json and OpenCode's auth.json when present. (The
+#           dedicated fence Codex auth.json and OpenCode's auth.json when present. (The
 #           demo's reader is darwin-only; this is the devbox path Wave 4 adds.)
 #
 # Nothing is ever printed but paths, byte counts and verdicts: a credential body
@@ -32,17 +32,18 @@
 # a reusable root image — the alternative is a login per seat per rebuild.
 #
 # BROKEN STATE: every configured seat is reported by name — `seat 2 (🥈): NO
-# CREDENTIAL — <why>` — and the closing line counts both sides
-# (`creds: 3 staged · 2 NO CREDENTIAL · Claude seats staged: 1`). Exit 1 when no
+# CREDENTIAL — <why>` — and the closing line counts staged, absent and blocked
+# credentials separately. Exit 1 when no
 # requested seat holds a credential at all (the roster would be empty) and,
 # separately, when a roster seat could not be STAGED — a logged-out host and a
-# container that would not take the copy are different findings; a missing Codex or
-# OpenCode auth is named and non-fatal, since only E2/E3 need them. An
+# container that would not take the copy are different findings; a missing Codex
+# fence login is BLOCKED, while missing OpenCode auth is named and non-fatal. An
 # unreadable config, or docker not answering, exits 2 before anything is copied.
 set -uo pipefail
 
 NAME="" MODE=stage ACCOUNTS=""
-CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/pfm/pfm.config.json"
+clone="$(cat "$HOME/.local/share/pfm/install/source-repo" 2>/dev/null || true)"
+CONFIG="${PFM_CONFIG:-${clone:+$clone/pfm.config.json}}"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 
@@ -59,12 +60,15 @@ done
 
 fatal() { echo "creds: $1" >&2; exit 2; }
 command -v jq >/dev/null || fatal "TOOLCHAIN-MISSING — jq"
+[ -n "$CONFIG" ] || fatal "host pfm config path unavailable — PFM_CONFIG is unset and $HOME/.local/share/pfm/install/source-repo is absent"
 [ -f "$CONFIG" ] || fatal "host pfm config $CONFIG not found (the seats to mirror come from it)"
 
 expand() { case "$1" in "~"*) printf '%s' "$HOME${1#\~}" ;; *) printf '%s' "$1" ;; esac; }
 
-staged=0 seats_staged=0 absent=0
+staged=0 seats_staged=0 absent=0 blocked=0
 report_absent() { echo "creds: $1" >&2; absent=$((absent + 1)); }
+report_blocked() { echo "creds: $1" >&2; blocked=$((blocked + 1)); }
+codex_blocked='codex home: BLOCKED — no fence login at ~/.local/state/pfm/codex-fence/auth.json; create it once: CODEX_HOME=~/.local/state/pfm/codex-fence codex login --device-auth'
 
 is_darwin() { [ "$(uname -s)" = Darwin ]; }
 
@@ -187,24 +191,22 @@ while IFS=$'\t' read -r id cont_dir emoji; do
 done < <(jq -r '.accounts[] | "\(.id)\t\(.configDir)\t\(.emoji)"' <<<"$CC")
 
 # ── Codex home ──────────────────────────────────────────────────────────────
-codex_host="$(expand "$(jq -r '.codex.homes[0].home // "~/.codex"' "$CONFIG")")"
+codex_host="$HOME/.local/state/pfm/codex-fence"
 codex_cont="$(jq -r '.codex.homes[0].home' <<<"$CC")"
-if is_darwin; then
+if [ ! -s "$codex_host/auth.json" ] || ! jq -e '.tokens | objects' "$codex_host/auth.json" >/dev/null 2>&1; then
+  report_blocked "$codex_blocked; lane E2 cannot run"
+elif is_darwin; then
   if out="$(bash "$ROOT/infra/demo/creds.sh" --container "$NAME" --codex "$codex_host=$codex_cont" 2>&1)"; then
     echo "creds: codex home staged from the Keychain path → $codex_cont/auth.json"
     staged=$((staged + 1))
   else
-    report_absent "codex home: NO CREDENTIAL — $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
+    report_blocked "codex home: BLOCKED — staging the fence login failed: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
   fi
-elif [ ! -s "$codex_host/auth.json" ]; then
-  report_absent "codex home: NO CREDENTIAL — $codex_host/auth.json is missing or empty (sign in with codex on the host); lane E2 cannot run"
-elif ! jq -e '.tokens | objects' "$codex_host/auth.json" >/dev/null 2>&1; then
-  report_absent "codex home: NO CREDENTIAL — $codex_host/auth.json carries no tokens object"
 elif size="$(put "$codex_cont/auth.json" "$codex_host/auth.json")"; then
   echo "creds: codex $codex_cont/auth.json staged ($size bytes)"
   staged=$((staged + 1))
 else
-  report_absent "codex home: NO CREDENTIAL — the copy into $NAME failed"
+  report_blocked "codex home: BLOCKED — the fence login copy into $NAME failed"
 fi
 
 # ── OpenCode home ───────────────────────────────────────────────────────────
@@ -229,9 +231,10 @@ else
   report_absent "opencode: NO CREDENTIAL — the copy into $NAME failed"
 fi
 
-echo "creds: $staged staged · $absent NO CREDENTIAL · Claude seats staged: $seats_staged"
+echo "creds: $staged staged · $absent NO CREDENTIAL · $blocked BLOCKED · Claude seats staged: $seats_staged"
 if [ "$seats_staged" -eq 0 ]; then
   echo "creds: the roster held seat(s) $KEPT but not one could be STAGED into $NAME — the container can run no lane" >&2
   exit 1
 fi
+[ "$blocked" -eq 0 ] || exit 1
 exit 0

@@ -6,9 +6,8 @@ import (
 )
 
 // processCmdlines reads proc.PIDs() and every pid's cmdline exactly once.
-// DetectClaudeProcesses, DetectCodexThreadsInRoots, DetectAgents and
-// DetectCache1H each independently enumerated the WHOLE process table and
-// read every cmdline before this existed — four full /proc walks per gather
+// DetectClaudeProcesses, DetectCodexThreadsInRoots and DetectAgents each
+// read every cmdline before this existed — three full /proc walks per gather
 // pass, on a box with ~1950 processes, whether or not anyone was watching
 // the picker (2026-09-03 real-box measurement: 1741 ticks/30s, ~58% of a
 // core, idle). Snapshot's caller fetches this once and hands the same map to

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"os"
@@ -20,6 +21,8 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
@@ -42,9 +45,6 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 		) {
 		t.Fatalf("installer rosters ConfigDirs=%q CodexHomes=%q", options.ConfigDirs, options.CodexHomes)
 	}
-	if _, found := options.CodexYolo[4]; found {
-		t.Fatalf("Codex policies inherited Claude account IDs: %#v", options.CodexYolo)
-	}
 	if options.OpenCodeConfigPath != installer.OpenCodeConfigPath(home) {
 		t.Fatalf("OpenCodeConfigPath=%q, want %q", options.OpenCodeConfigPath, installer.OpenCodeConfigPath(home))
 	}
@@ -65,7 +65,7 @@ func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
 	t.Chdir(t.TempDir()) // no repo markers here — discoverSourceRepo() finds nothing
 	home := t.TempDir()
 	clone := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: home}}
@@ -101,7 +101,7 @@ func TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack(t *testing.T
 	if err := os.MkdirAll(vanished, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := installer.WriteSourceRepoMarker(home, vanished); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, vanished); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(vanished); err != nil {
@@ -125,33 +125,6 @@ func TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack(t *testing.T
 		installer.ModeDryRun, "", true, io.Discard, &quiet, fresh,
 	); options.SourceRepo != "" || quiet.Len() != 0 {
 		t.Fatalf("a home with no marker reported %q on stderr (SourceRepo=%q)", quiet.String(), options.SourceRepo)
-	}
-}
-
-func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
-	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{
-		Accounts: []pfmconfig.Account{
-			{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"), Implicit: true},
-			{ID: 2, ConfigDir: filepath.Join(home, ".cc", "2")},
-		},
-		CodexAccounts: []pfmconfig.CodexAccount{},
-	}}
-	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
-	want := []string{filepath.Join(home, ".claude.json"), filepath.Join(home, ".cc", "2", ".claude.json")}
-	if !reflect.DeepEqual(options.ClaudeRegistries, want) {
-		t.Fatalf("registries=%q want=%q", options.ClaudeRegistries, want)
-	}
-	if err := os.WriteFile(want[0], []byte(`{"mcpServers":{"professor":{"command":"manual"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var output bytes.Buffer
-	if warnings := doctor.PrintMCPClientCutover(
-		&output,
-		runtime,
-	); warnings != 1 ||
-		!strings.Contains(output.String(), want[0]) {
-		t.Fatalf("warnings=%d output=%s", warnings, &output)
 	}
 }
 
@@ -291,11 +264,52 @@ func TestInstallUsesOnlyTheNewSurface(t *testing.T) {
 			}
 			if !strings.Contains(
 				stderr.String(),
-				"usage: pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+				"usage: pfm install [--yes] [--rollback ID] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 			) {
 				t.Fatalf("runInstall(%q) stderr=%q, want new usage", retired, stderr.String())
 			}
 		})
+	}
+}
+
+func TestInstallRollbackUsesJournalAndRejectsMixedFlags(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
+		t.Fatal("rollback entered ordinary installer")
+		return installer.Report{}, nil
+	}
+	home := t.TempDir()
+	runtime := commandRuntime{
+		Paths:  paths.Values{Home: home},
+		Config: pfmconfig.Config{Path: filepath.Join(home, "pfm.config.json")},
+	}
+	id := "20260102T030405Z"
+	dir := filepath.Join(home, ".local", "state", "pfm", "migrations", id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "journal.json"), []byte("[]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"--rollback", id, "--yes"}, {"--rollback", ""}} {
+		var stdout, stderr bytes.Buffer
+		if code := runInstall(args, &stdout, &stderr, runtime); code != 2 {
+			t.Errorf("args=%v code=%d stderr=%s, want usage 2", args, code, stderr.String())
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runInstall([]string{"--rollback", id}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("rollback code=%d stderr=%s", code, stderr.String())
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("journal directory survived rollback: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runInstall([]string{"--rollback", id}, &stdout, &stderr, runtime); code != 2 ||
+		!strings.Contains(stderr.String(), filepath.Join(home, ".local", "state", "pfm", "migrations")) {
+		t.Fatalf("unknown rollback code=%d stderr=%s", code, stderr.String())
 	}
 }
 
@@ -595,8 +609,18 @@ func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
-	t.Setenv("XDG_CONFIG_HOME", "")
-	defaultPath := pfmconfig.ResolvePath(home)
+	t.Setenv(paths.EnvConfig, "")
+	clone := filepath.Join(home, "clone")
+	if err := os.MkdirAll(clone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	defaultPath, err := pfmconfig.ResolvePath(home)
+	if err != nil {
+		t.Fatalf("ResolvePath(%q) = %v", home, err)
+	}
 	if _, err := os.Stat(defaultPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("default config %q must be absent, stat error = %v", defaultPath, err)
 	}
@@ -644,12 +668,14 @@ func TestOlderUpdaterInstallArgvOnTheRealBinaryDoesNotRefuse(t *testing.T) {
 		"XDG_DATA_HOME":    filepath.Join(home, ".local", "share"),
 		"XDG_STATE_HOME":   filepath.Join(home, ".local", "state"),
 		"XDG_CACHE_HOME":   filepath.Join(home, ".cache"),
-		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		paths.EnvConfig:    "",
+		paths.EnvStateDB:   filepath.Join(root, "pfm.db"),
+		paths.EnvCacheDB:   filepath.Join(root, "pfm-cache.db"),
 		"PFM_CLAUDE_ROOTS": filepath.Join(home, ".claude", "projects"),
 		"PFM_CODEX_ROOT":   filepath.Join(home, ".codex"),
 		"TMUX":             "",
 	})
-	defaultPath := filepath.Join(home, ".config", "pfm", filepath.Base(pfmconfig.ResolvePath(home)))
+	defaultPath := filepath.Join(home, ".config", "pfm", pfmconfig.FileName)
 	if _, err := os.Stat(defaultPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("default config %q must be absent, stat error = %v", defaultPath, err)
 	}
@@ -668,6 +694,93 @@ func TestOlderUpdaterInstallArgvOnTheRealBinaryDoesNotRefuse(t *testing.T) {
 	}
 	if strings.Contains(string(output), "refusing to converge host wiring on defaults") {
 		t.Fatalf("the real install refused the absent default config:\n%s", output)
+	}
+}
+
+func TestInstallMigratesMovedDatabaseSchemas(t *testing.T) {
+	home := t.TempDir()
+	statePath := filepath.Join(home, ".local", "state", "pfm", "pfm.db")
+	cachePath := filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
+	t.Setenv("HOME", home)
+	t.Setenv("PFM_HOME", home)
+	t.Setenv("PFM_STATE_DB", statePath)
+	t.Setenv("PFM_CACHE_DB", cachePath)
+	fresh, err := store.OpenContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal(err)
+	}
+	state, err := sqlitedb.OpenStore(context.Background(), statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.Exec(
+		`PRAGMA user_version=1; CREATE TABLE swap_event(id INTEGER PRIMARY KEY); INSERT INTO swap_event VALUES(1)`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := sqlitedb.OpenStore(context.Background(), cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Exec(
+		`CREATE TABLE hidden(id TEXT PRIMARY KEY, engine TEXT NOT NULL, hidden_at INTEGER NOT NULL, baseline_prompts INTEGER); INSERT INTO hidden(id,engine,hidden_at) VALUES('cached','cc',88); UPDATE meta SET value='0' WHERE key='shared_hidden_adopted'; PRAGMA user_version=8`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateInstalledLayoutDatabases(context.Background(), statePath, cachePath); err != nil {
+		t.Fatal(err)
+	}
+	state, err = sqlitedb.OpenReadOnly(statePath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close shared database: %v", err)
+		}
+	}()
+	cache, err = sqlitedb.OpenReadOnly(cachePath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cache.Close(); err != nil {
+			t.Errorf("close cache database: %v", err)
+		}
+	}()
+	for _, check := range []struct {
+		db    interface{ QueryRow(string, ...any) *sql.Row }
+		query string
+		want  int
+	}{
+		{state, "PRAGMA user_version", 2},
+		{cache, "PRAGMA user_version", 9},
+		{state, "SELECT count(*) FROM sqlite_master WHERE name='swap_event'", 0},
+		{cache, "SELECT count(*) FROM sqlite_master WHERE name='hidden'", 0},
+		{state, "SELECT count(*) FROM hidden WHERE uuid='cached'", 1},
+	} {
+		var got int
+		if err := check.db.QueryRow(check.query).Scan(&got); err != nil || got != check.want {
+			t.Fatalf("%s = %d, %v; want %d", check.query, got, err, check.want)
+		}
+	}
+	wrongCache := filepath.Join(home, "wrong-cache.db")
+	t.Setenv("PFM_CACHE_DB", wrongCache)
+	if err := migrateInstalledLayoutDatabases(context.Background(), statePath, cachePath); err == nil ||
+		!strings.Contains(err.Error(), "moved database paths differ") {
+		t.Fatalf("mismatched paths error=%v", err)
+	}
+	if _, err := os.Lstat(wrongCache); !os.IsNotExist(err) {
+		t.Fatalf("mismatched cache was touched: %v", err)
 	}
 }
 

@@ -488,7 +488,7 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 // checker existed to catch and did not. A legacy-only live-codex row means the
 func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 	jailTest(t)
-	dbPath := os.Getenv(paths.EnvDB)
+	dbPath := os.Getenv(paths.EnvCacheDB)
 	if err := os.WriteFile(dbPath, []byte("not a sqlite database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -603,40 +603,9 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
-// harnessPromptFixtureCaptured is the fixed "live" prompt every jailed
-// doctor test observes through doctor.HarnessCaptureOverride (set in TestMain).
-// Its content is arbitrary — the check only ever hashes it and compares
-// against whatever baseline stageHarnessPromptBaseline pins alongside it.
-const harnessPromptFixtureCaptured = "pfm jail fixture harness prompt\n"
-
-// stageHarnessPromptBaseline writes the managed baseline pin a wired machine
-// carries after `pfm install` —
-// harness-prompts/claude/baselines/harness-original.sha256, embedded by the
-// pfm/harness-prompts package and staged verbatim by stageAssets — so a
-// hand-built "wired" doctor fixture can
-// reach the same matches-baseline verdict a real install produces, without
-// re-deriving or re-pinning the real embedded asset.
-func stageHarnessPromptBaseline(t *testing.T, home string) {
-	t.Helper()
-	for _, model := range doctor.HarnessPromptModels {
-		stageModelHarnessPromptBaseline(t, home, model, harnessPromptFixtureCaptured, "harness-prompt-fixture.md")
-	}
-}
-
-func stageModelHarnessPromptBaseline(
-	t *testing.T,
-	home string,
-	model doctor.HarnessPromptModel,
-	captured, name string,
-) {
-	t.Helper()
-	testjail.StageHarnessPromptBaseline(t, home, model.Alias, model.Stem, captured, name)
-}
-
 func jailTest(t *testing.T) string {
 	t.Helper()
 	root := testjail.InstalledHome(t)
-	stageHarnessPromptBaseline(t, filepath.Join(root, "home"))
 	return root
 }
 

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	config "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -431,7 +431,7 @@ func captureHarnessPromptWithDeps(
 	}
 	versionCtx, versionCancel := context.WithTimeout(ctx, 5*time.Second)
 	versionResult, versionErr := dependencies.Runner.Run(versionCtx, []string{binary, "--version"}, deps.RunOptions{
-		Env:       harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
+		Env:       claudelaunch.ProbeEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
 		WaitDelay: 500 * time.Millisecond,
 	})
 	versionCancel()
@@ -477,7 +477,7 @@ func captureHarnessPromptWithDeps(
 			"x", "--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections",
 		},
-		Env:    harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
+		Env:    claudelaunch.ProbeEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
 		Stdin:  devNull,
 		Runner: dependencies.Runner,
 	})
@@ -605,36 +605,6 @@ func harnessSinkHandler(bodies chan<- []byte) http.HandlerFunc {
 			[]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"captured by pfm doctor"}}`),
 		)
 	}
-}
-
-// harnessCaptureEnv is the fleet hygiene strip applied in-process: every name
-// in action's one list (session identity, endpoint, cache and traffic
-// overrides) plus ANTHROPIC_API_KEY is dropped, then the sink
-// endpoint, dummy credentials, the throwaway config dir, and the full-prompt
-// arm are pinned. configDir is created fresh per capture by the caller
-// (change B) — CLAUDE_CONFIG_DIR is stripped first so the inherited value
-// never leaks through even if this pin were ever omitted.
-func harnessCaptureEnv(environ []string, sinkURL, configDir string) []string {
-	stripped := map[string]bool{"ANTHROPIC_API_KEY": true}
-	for _, name := range action.HygieneNames() {
-		stripped[name] = true
-	}
-	result := make([]string, 0, len(environ)+6)
-	for _, entry := range environ {
-		name, _, _ := strings.Cut(entry, "=")
-		if stripped[name] {
-			continue
-		}
-		result = append(result, entry)
-	}
-	return append(result,
-		"ANTHROPIC_BASE_URL="+sinkURL,
-		"ANTHROPIC_API_KEY=pfm-doctor-sink",
-		"ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink",
-		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0",
-		"FORCE_PROMPT_CACHING_5M=1",
-		"CLAUDE_CONFIG_DIR="+configDir,
-	)
 }
 
 // joinSystemBlocks renders a captured request's system prompt exactly the way

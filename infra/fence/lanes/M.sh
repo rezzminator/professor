@@ -42,8 +42,8 @@ NEW_CHAT="${CHAT}_NEW"
 E1_CHAT="${E1_CHAT:-E1_MAIN}"
 E2_CHAT="${E2_CHAT:-E2_MAIN}"
 CWD="${M_CWD:-/work/orbit}"
-CFG_DIR="$HOME/.config/pfm"
-CONFIG="$CFG_DIR/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
+CFG_DIR="$(dirname "$CONFIG")"
 HARVESTER_CFG="$CFG_DIR/harvester.config.json"
 MANAGED="$HOME/.local/share/pfm/install"
 BLUEPRINT="$HOME/.professor"
@@ -324,25 +324,18 @@ tmp_config() {
 install_again() { (cd "$BLUEPRINT" && pfm install --yes 2>&1); }
 INSTALL_OUT=""
 
-# ─── M.01 — Claude registration: professor over stdio, per account ─────────
+# ─── M.01 — Claude launch payload: professor over stdio ─────────────────────
 
 beat M.01-register-claude
 spends none
 bad=""
-# The registry pfm itself names for this seat (doctor's row), never a guessed path.
-doctor_out="$(pfm doctor 2>&1)"
-REGISTRY="$(printf '%s\n' "$doctor_out" | awk -v want="account $SEAT " \
-  '/^doctor: mcp client=claude registry=/ && index($0, want) { sub(/^doctor: mcp client=claude registry=/, ""); sub(/ \(.*$/, ""); print; exit }')"
-if [ -z "$REGISTRY" ]; then
-  bad="$bad pfm doctor prints no 'mcp client=claude registry=… (account $SEAT …)' row — the seat's registry cannot be located from pfm's own report; rows seen: $(one_line "$(printf '%s\n' "$doctor_out" | grep -F 'client=claude' || echo none)");"
-  REGISTRY="$SEAT_DIR/.claude.json"
-fi
-if [ ! -f "$REGISTRY" ]; then
-  bad="$bad the registry $REGISTRY does not exist;"
-else
-  jq -e --arg bin "$PFM_BIN" '.mcpServers.professor == {type: "stdio", command: $bin, args: ["mcp", "serve", "--stdio"]}' "$REGISTRY" >/dev/null 2>&1 ||
-    bad="$bad M31/M32: $REGISTRY mcpServers.professor is not the stdio shape {type stdio, command $PFM_BIN, args [mcp serve --stdio]}: $(one_line "$(jq -c '.mcpServers.professor' "$REGISTRY" 2>&1)");"
-fi
+sock="$(live_field "$CHAT" 11)"
+start="$(tmux -S "$sock" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
+[ -n "$start" ] || bad="$bad the live pane has no start command at $sock;"
+printf '%s' "$start" | grep -Fq -- '--mcp-config' || bad="$bad M31: the Claude launch has no --mcp-config payload;"
+printf '%s' "$start" | grep -Fq 'mcpServers' || bad="$bad M31: --mcp-config has no mcpServers object;"
+printf '%s' "$start" | grep -Fq 'professor' || bad="$bad M31: --mcp-config names no professor server;"
+printf '%s' "$start" | grep -Eq 'mcp[^[:alnum:]]+serve[^[:alnum:]]+--stdio' || bad="$bad M31: --mcp-config has no professor stdio server (pfm mcp serve --stdio);"
 # M30: with no mcp.servers key and no harvester file, BOTH servers read
 # disabled from the default layer — a probe over a config copy, never the real one.
 if defaults_cfg="$(tmp_config defaults 'del(.mcp.servers)' ABSENT)"; then
@@ -354,21 +347,18 @@ if defaults_cfg="$(tmp_config defaults 'del(.mcp.servers)' ABSENT)"; then
 else
   bad="$bad M30: could not write the config copy for the default-layer probe;"
 fi
-# M33: a re-install keeps the registration byte-for-byte (the installer
-# recognises its own professor shape) and the ownership ledger names it.
-before="$(jq -S '.mcpServers' "$REGISTRY" 2>/dev/null)"
+# M33: a re-install succeeds with launch-scoped MCP configuration and leaves no
+# pfm server key in the seat's .claude.json (pfm writes none; it strips what
+# older installs left).
 INSTALL_OUT="$(install_again)"
 install_rc=$?
-after="$(jq -S '.mcpServers' "$REGISTRY" 2>/dev/null)"
 [ "$install_rc" -eq 0 ] || bad="$bad M33: pfm install --yes exited $install_rc: $(one_line "$(printf '%s\n' "$INSTALL_OUT" | tail -3)");"
-[ "$before" = "$after" ] || bad="$bad M33: the re-install changed $REGISTRY mcpServers (before: $(one_line "$before") after: $(one_line "$after"));"
-if [ -f "$MANAGED/mcp-ownership.json" ]; then
-  grep -qF "$(basename "$REGISTRY")" "$MANAGED/mcp-ownership.json" || bad="$bad M33: $MANAGED/mcp-ownership.json records no registration for $REGISTRY;"
-else
-  bad="$bad M33: no ownership ledger at $MANAGED/mcp-ownership.json;"
+if [ -f "$SEAT_DIR/.claude.json" ]; then
+  left="$(jq -c '.mcpServers // {} | with_entries(select(.key == "professor" or .key == "chat" or .key == "harvester"))' "$SEAT_DIR/.claude.json" 2>&1)"
+  [ "$left" = "{}" ] || bad="$bad M33: after the re-install $SEAT_DIR/.claude.json still carries a pfm server key: $(one_line "$left");"
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "$REGISTRY: professor stdio ($PFM_BIN mcp serve --stdio); default layer reads both disabled; re-install (exit 0) kept the shape, ownership ledger names the registry"
+  pass "live Claude launch carries the professor stdio server ($PFM_BIN mcp serve --stdio) in --mcp-config; default layer reads both families disabled; re-install succeeded and $SEAT_DIR/.claude.json carries no pfm server key"
 fi
 
 # ─── M.02 — Codex registration: professor over stdio, fenced, foreign kept ──
@@ -418,7 +408,7 @@ beat M.03-register-opencode
 spends none
 assert_opencode_mcp_registered "$PFM_BIN"
 
-# ─── M.04 — doctor: registration classes, Codex + project cutover, daemon ───
+# ─── M.04 — doctor: Codex + project cutover, daemon ─────────────────────────
 
 beat M.04-doctor-mcp
 spends none
@@ -426,34 +416,6 @@ bad=""
 doctor_out="$(pfm doctor 2>&1)"
 doctor_rc=$?
 [ "$doctor_rc" -le 1 ] || bad="$bad pfm doctor exited $doctor_rc, so its mcp rows cannot be trusted: $(one_line "$(printf '%s\n' "$doctor_out" | tail -3)");"
-printf '%s\n' "$doctor_out" | grep -qE "^doctor: mcp client=claude registry=.*account $SEAT .* professor=pfm$" ||
-  bad="$bad M37: no bare 'professor=pfm' row for account $SEAT: $(one_line "$(printf '%s\n' "$doctor_out" | grep -F 'client=claude' || echo none)");"
-# M37: every classification, provoked on an AMBIENT registry (CLAUDE_CONFIG_DIR
-# adds one row for a directory this lane owns) — never on a live seat's file.
-AMB="$SCRATCH/ambient-registry"
-mkdir -p "$AMB"
-amb_row() { CLAUDE_CONFIG_DIR="$AMB" pfm doctor 2>&1 | grep -F "registry=$AMB/.claude.json" | head -1; }
-row="$(amb_row)"
-printf '%s' "$row" | grep -q ' professor=absent' || bad="$bad M37 absent: $(one_line "${row:-no ambient registry row at all}");"
-printf '%s' "$row" | grep -q 'remediation=' || bad="$bad M37 absent: the absent registry beside a pfm-wired one carries no remediation: $(one_line "$row");"
-# A standalone uvx harvester and a foreign chat are not pfm's legacy: no legacy= suffix.
-printf '{"mcpServers":{"chat":{"type":"stdio","command":"other-tool","args":["x"]},"harvester":{"command":"uvx","args":["harvester-mcp"]}}}\n' >"$AMB/.claude.json"
-row="$(amb_row)"
-printf '%s' "$row" | grep -q ' professor=absent' || bad="$bad M37 standalone/foreign keys: $(one_line "${row:-no row}");"
-printf '%s' "$row" | grep -q ' legacy=' && bad="$bad M37 standalone/foreign keys: a uvx harvester and a foreign chat were reported as pfm legacy: $(one_line "$row");"
-printf '{not json\n' >"$AMB/.claude.json"
-row="$(amb_row)"
-printf '%s' "$row" | grep -q ' professor=unreadable error=' || bad="$bad M37 unreadable: $(one_line "${row:-no row}");"
-# pfm's own legacy chat stdio + harvester http beside pfm's professor: named, sorted, with a remedy.
-jq -n --arg bin "$PFM_BIN" --arg url "http://127.0.0.1:$PORT/mcp/harvester" \
-  '{mcpServers: {professor: {type: "stdio", command: $bin, args: ["mcp", "serve", "--stdio"]}, chat: {type: "stdio", command: $bin, args: ["mcp", "chat", "serve"]}, harvester: {type: "http", url: $url}}}' >"$AMB/.claude.json"
-row="$(amb_row)"
-printf '%s' "$row" | grep -q ' professor=pfm legacy=chat,harvester remediation=' || bad="$bad M37 legacy: $(one_line "${row:-no row}");"
-jq -n --arg bin "$PFM_BIN" '{mcpServers: {professor: {type: "stdio", command: $bin, args: ["mcp", "serve", "--stdio"]}}}' >"$AMB/.claude.json"
-row="$(amb_row)"
-printf '%s' "$row" | grep -q ' professor=pfm$' || bad="$bad M37 pfm: $(one_line "${row:-no row}");"
-printf '%s' "$row" | grep -q 'remediation=' && bad="$bad M37 pfm: a fully pfm-wired registry still carries a remediation: $(one_line "$row");"
-rm -rf "$AMB"
 # M38: the cutover rows — a Codex harvester entry pfm did not write, pfm's own
 # legacy Codex harvester table, and a project-scope ~/.mcp.json standalone
 # harvester — each named by client.
@@ -491,7 +453,7 @@ if skew_cfg="$(tmp_config skewport '.mcp.http.port = 1')"; then
     bad="$bad M39: with the port pointed at :1 doctor printed '$(one_line "${unreachable:-no daemon row}")' (want daemon=unreachable naming the URL);"
 fi
 if [ -n "$bad" ]; then fail "$bad (doctor exit $doctor_rc)"; else
-  pass "doctor exit $doctor_rc · ambient registry rows professor=absent (remedied, no legacy= for standalone/foreign keys) / unreadable / pfm legacy=chat,harvester / bare pfm · cutover rows codex foreign-registration + legacy-pfm, project-scope legacy-standalone · daemon=running on :$PORT, =unreachable when pointed at :1"
+  pass "doctor exit $doctor_rc · cutover rows codex foreign-registration + legacy-pfm, project-scope legacy-standalone · daemon=running on :$PORT, =unreachable when pointed at :1"
 fi
 
 # ─── M.05 — the daemon: one loopback port, health, exit-75 restart ──────────

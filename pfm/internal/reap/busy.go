@@ -35,12 +35,8 @@ type ClaudeAgents struct {
 }
 
 // NewClaudeAgents wires the probe to the accounts on this machine.
-func NewClaudeAgents(resolved paths.Values) ClaudeAgents {
-	directories := make([]string, 0, len(resolved.Roots[pfmengine.Claude]))
-	for _, root := range resolved.Roots[pfmengine.Claude] {
-		directories = append(directories, filepath.Dir(root))
-	}
-	return NewClaudeAgentsConfigured(resolved, pfmengine.MustLookup(pfmengine.Claude).Binary, directories)
+func NewClaudeAgents(resolved paths.Values, machine pfmconfig.Config) ClaudeAgents {
+	return NewClaudeAgentsConfigured(resolved, machine.Claude.Binary, machine.ClaudeConfigDirs(resolved.Home))
 }
 
 // NewClaudeAgentsConfigured probes exactly the configured roster with the
@@ -62,8 +58,10 @@ func NewClaudeAgentsConfigured(
 		}
 	}
 	available := make([]string, 0, len(directories))
+	seen := make(map[string]bool, len(directories))
 	for _, directory := range directories {
-		if info, err := os.Stat(directory); err == nil && info.IsDir() {
+		if info, err := os.Stat(directory); err == nil && info.IsDir() && !seen[directory] {
+			seen[directory] = true
 			available = append(available, directory)
 		}
 	}

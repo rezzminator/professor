@@ -61,7 +61,7 @@ Per account, owned by Claude Code and never written by pfm outside the one-time 
 ## What pfm does not write
 
 - No key in any account `settings.json`. Hooks, `statusLine`, `subagentStatusLine` and `cleanupPeriodDays` ride `--settings` at launch.
-- No entry in any `.claude.json`. `chat` and `harvester` ride `--mcp-config` at launch, beside the account's own servers.
+- No entry in any `.claude.json`. The one `professor` stdio server (`pfm mcp serve --stdio`, serving every enabled family) rides `--mcp-config` at launch, beside the account's own servers.
 - No `output-styles/`, `plugins/`, `keybindings.json` or `CLAUDE.md`.
 
 ## Registries

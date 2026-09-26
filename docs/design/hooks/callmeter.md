@@ -57,7 +57,7 @@ A `PostToolUse` hook can replace a Bash result before the model sees it, with `h
 
 ## The hooks
 
-One command, `pfm internal callmeter`, registered on every interactive Claude launch — `claudelaunch.Render` renders it from `claudeHookTemplates` into the `hooks` key of the launch `--settings` payload — on seven events: `PreToolUse` takes matcher `Bash`; `PostToolUse`, `PostToolUseFailure`, `SubagentStart` and `SubagentStop` take matcher `*`; `PostToolBatch` and `Stop` take no matcher (empty), since neither event carries a tool name to match. Every entry is `async: true`, rendered from the template and checked by `pfm doctor` spawn-audit as part of the registration itself, never as a separate flag. It is one command registered seven times: a duplicate registration is the same command appearing twice under one event, and a wrong registration is the command appearing under an event outside those seven.
+One command, `pfm internal callmeter`, registered on every interactive Claude launch — `claudelaunch.Render` renders it from `claudelaunch.HookTemplates` into the `hooks` key of the launch `--settings` payload — on seven events: `PreToolUse` takes matcher `Bash`; `PostToolUse`, `PostToolUseFailure`, `SubagentStart` and `SubagentStop` take matcher `*`; `PostToolBatch` and `Stop` take no matcher (empty), since neither event carries a tool name to match. Every entry is `async: true`, rendered from the template and checked by `pfm doctor` spawn-audit as part of the registration itself, never as a separate flag. It is one command registered seven times: a duplicate registration is the same command appearing twice under one event, and a wrong registration is the command appearing under an event outside those seven.
 
 - Async, because the hook fires on every call of every chat: a synchronous hook puts a process start and a database write in front of each call. Async also gives the transcript its time to reach the disk.
 - `PreToolUse` for Bash only, and only for its `cwd`: the parser replays a command's own `cd` from the stored directory, so it must be the one the command started in, and only `PreToolUse` carries that. Everything a pre-call stat would give is in the result: `Write` and `Edit` return `originalFile` and a `structuredPatch`, so the size before and after comes from the result; `Read` returns `startLine`, `numLines` and `totalLines`, and the file is stat'ed when the record is written.
@@ -230,7 +230,7 @@ A capture hook, loaded only through `--settings` into headless sessions in a scr
 | Surface | File | Holds |
 | --- | --- | --- |
 | The hook entry | `pfm/internal/hookentry/` | `pfm internal callmeter` |
-| The registration | `claudeHookTemplates` (`pfm/internal/installer/expected_hooks.go`), rendered by `claudelaunch.Render`, per [hooks.md](hooks.md) | events, matcher, `async` |
+| The registration | `claudelaunch.HookTemplates` (`pfm/internal/claudelaunch/hooks.go`), rendered by `claudelaunch.Render`, per [hooks.md](hooks.md) | events, matcher, `async` |
 | The doctor check | spawn-audit, per [hooks.md](hooks.md) | the seven registrations in every live chat's launch payload |
 | The account source | `fleetdb.LaunchFor` over `pfm.db` table `launch` | `account` per `session_id` |
 | The store and reports | `pfm/internal/callmeter/` and its `cmdparse/`, `report/`, `command/` packages; `pfm/cmd/pfm/main.go` | schema, parser, the CLI `report` |

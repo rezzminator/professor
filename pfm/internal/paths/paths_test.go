@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ func TestResolveOverrides(t *testing.T) {
 	testRoot := t.TempDir()
 	t.Setenv("TMUX_TMPDIR", filepath.Join(testRoot, "t"))
 	home := filepath.Join(testRoot, "home")
-	db := filepath.Join(testRoot, "fleet.db")
+	db := filepath.Join(testRoot, "pfm-cache.db")
 	sidDir := filepath.Join(testRoot, "sid")
 	claudeRoots := []string{
 		filepath.Join(testRoot, "claude-1"),
@@ -25,11 +26,12 @@ func TestResolveOverrides(t *testing.T) {
 	tmuxDir := filepath.Join(testRoot, "tmux")
 	procRoot := filepath.Join(testRoot, "proc")
 	cgroupRoot := filepath.Join(testRoot, "cgroup")
-	fleetDB := filepath.Join(testRoot, "shared", "fleet.db")
+	managedSettingsDir := filepath.Join(testRoot, "managed-settings.d")
+	stateDB := filepath.Join(testRoot, "shared", "pfm.db")
 
 	t.Setenv(EnvHome, home)
-	t.Setenv(EnvDB, db)
-	t.Setenv(EnvFleetDB, fleetDB)
+	t.Setenv(EnvCacheDB, db)
+	t.Setenv(EnvStateDB, stateDB)
 	t.Setenv(EnvSIDDir, sidDir)
 	t.Setenv(EnvClaudeRoots, strings.Join(claudeRoots, string(os.PathListSeparator)))
 	t.Setenv(EnvCodexHome, codexHome)
@@ -38,14 +40,15 @@ func TestResolveOverrides(t *testing.T) {
 	t.Setenv(EnvTmuxDir, tmuxDir)
 	t.Setenv(EnvProcRoot, procRoot)
 	t.Setenv(EnvCgroupRoot, cgroupRoot)
+	t.Setenv(EnvManagedSettingsDir, managedSettingsDir)
 
 	got, err := Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	want := Values{
-		DB:      db,
-		FleetDB: fleetDB,
+		CacheDB: db,
+		StateDB: stateDB,
 		SIDDir:  sidDir,
 		Roots: map[pfmengine.ID][]string{
 			pfmengine.Claude:   claudeRoots,
@@ -56,10 +59,11 @@ func TestResolveOverrides(t *testing.T) {
 		Home:    home,
 		// The carrier and the archive have no override of their own: both are
 		// defined relative to Home, and jailing Home jails them.
-		ArchiveDir: filepath.Join(home, ".claude-archive"),
-		ProcRoot:   procRoot,
-		CgroupRoot: cgroupRoot,
-		LogFile:    filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
+		ArchiveDir:         filepath.Join(home, ".claude-archive"),
+		ProcRoot:           procRoot,
+		CgroupRoot:         cgroupRoot,
+		ManagedSettingsDir: managedSettingsDir,
+		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)
@@ -111,25 +115,24 @@ func TestDevRepoGitDirLogsPhysicalResolutionFailureBeforeCleanFallback(t *testin
 	}
 }
 
-// The fleet state store defaults to ~/.cc/fleet.db, never the private cache's
-// directory, and the two overrides must not collide.
-func TestResolveFleetStoreDefaultsOutsideThePrivateCache(t *testing.T) {
+// The state and cache databases have distinct names in the pfm state directory.
+func TestResolveStateAndCacheDefaults(t *testing.T) {
 	testRoot := t.TempDir()
 	home := filepath.Join(testRoot, "home")
 	t.Setenv(EnvHome, home)
-	t.Setenv(EnvDB, filepath.Join(testRoot, "cache", "fleet.db"))
-	t.Setenv(EnvFleetDB, "")
+	t.Setenv(EnvCacheDB, filepath.Join(testRoot, "cache", "pfm-cache.db"))
+	t.Setenv(EnvStateDB, "")
 
 	got, err := Resolve()
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	want := filepath.Join(home, ".cc", "fleet.db")
-	if got.FleetDB != want {
-		t.Fatalf("Resolve().FleetDB = %q, want %q", got.FleetDB, want)
+	want := DefaultStateDB(home)
+	if got.StateDB != want {
+		t.Fatalf("Resolve().StateDB = %q, want %q", got.StateDB, want)
 	}
-	if got.FleetDB == got.DB {
-		t.Fatalf("fleet store and private cache resolved to the same file %q", got.DB)
+	if got.StateDB == got.CacheDB {
+		t.Fatalf("fleet store and private cache resolved to the same file %q", got.CacheDB)
 	}
 }
 
@@ -170,7 +173,7 @@ func TestResolveOpenCodeRootDefaultsUnderHome(t *testing.T) {
 func TestResolveUsesScratchTmuxBase(t *testing.T) {
 	testRoot := t.TempDir()
 	t.Setenv(EnvHome, filepath.Join(testRoot, "home"))
-	t.Setenv(EnvDB, filepath.Join(testRoot, "fleet.db"))
+	t.Setenv(EnvCacheDB, filepath.Join(testRoot, "pfm-cache.db"))
 	t.Setenv(EnvSIDDir, filepath.Join(testRoot, "sid"))
 	t.Setenv(EnvClaudeRoots, filepath.Join(testRoot, "claude"))
 	t.Setenv(EnvCodexHome, filepath.Join(testRoot, "codex"))
@@ -240,5 +243,62 @@ func TestResolveLogFileHangsOffTheHomesStateDirectory(t *testing.T) {
 	}
 	if second.LogFile == resolved.LogFile {
 		t.Fatalf("two homes resolved to one activity log: %s", second.LogFile)
+	}
+}
+
+func TestResolveIgnoresRetiredDatabaseEnvironment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+	t.Setenv(EnvStateDB, "")
+	t.Setenv(EnvCacheDB, "")
+	t.Setenv("PFM_"+"DB", filepath.Join(home, "retired-cache.db"))
+	t.Setenv("PFM_FLEET_"+"DB", filepath.Join(home, "retired-state.db"))
+	got, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.StateDB != DefaultStateDB(home) || got.CacheDB != DefaultCacheDB(home) {
+		t.Fatalf("paths = %q, %q", got.StateDB, got.CacheDB)
+	}
+}
+
+func TestHarnessBaselineDirUsesRecordedClone(t *testing.T) {
+	home := t.TempDir()
+	repo := t.TempDir()
+	if _, err := HarnessBaselineDir(home); !errors.Is(err, ErrNoSourceRepoMarker) {
+		t.Fatalf("missing marker error = %v", err)
+	}
+	if err := WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	got, err := HarnessBaselineDir(home)
+	want := filepath.Join(repo, "pfm", "harness-prompts", "claude", "baselines")
+	if err != nil || got != want {
+		t.Fatalf("baseline dir = %q, %v; want %q", got, err, want)
+	}
+	legacy := filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
+	if got := LegacyHarnessPromptsDir(home); got != legacy {
+		t.Fatalf("legacy dir = %q; want %q", got, legacy)
+	}
+}
+
+func TestResolveManagedSettingsDirUsesJailOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+	t.Setenv(EnvManagedSettingsDir, filepath.Join(home, "managed-settings.d"))
+	got, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ManagedSettingsDir != filepath.Join(home, "managed-settings.d") {
+		t.Fatalf("managed settings dir=%q", got.ManagedSettingsDir)
+	}
+	t.Setenv(EnvManagedSettingsDir, "")
+	got, err = Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ManagedSettingsDir != "/etc/claude-code/managed-settings.d" {
+		t.Fatalf("default managed settings dir=%q", got.ManagedSettingsDir)
 	}
 }

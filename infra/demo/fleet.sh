@@ -14,6 +14,7 @@
 # `pfm ls --plain` must show a ● live row per chat — a ✦-only listing means the
 # harness never reached pfm's statusline.
 set -euo pipefail
+: "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp
@@ -24,10 +25,10 @@ READY='Reply with exactly one line confirming you are ready, then wait for instr
 # assumed: a seat the host could not hand in is not in this config.
 # Seats come from up.sh's probe (the ones that answered, in config order); with
 # no record, the config order is trusted.
-read -r -a LIVE <<<"$(cat "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r '[.accounts[].id] | join(" ")' "$HOME/.config/pfm/pfm.config.json")"
+read -r -a LIVE <<<"$(cat "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r '[.accounts[].id] | join(" ")' "${PFM_CONFIG:?PFM_CONFIG is required in the container}")"
 SEAT_A="${LIVE[0]:-}"
 SEAT_B="${LIVE[1]:-$SEAT_A}"
-[ -n "$SEAT_A" ] && [ "$SEAT_A" != null ] || { echo "fleet: no Claude seat in ~/.config/pfm/pfm.config.json" >&2; exit 1; }
+[ -n "$SEAT_A" ] && [ "$SEAT_A" != null ] || { echo "fleet: no Claude seat in $PFM_CONFIG" >&2; exit 1; }
 live() { pfm ls --plain 2>/dev/null | grep -q "^● $1 "; }
 spawn() { # spawn <name> <engine cc|cx> <project> <account> <prompt> — idempotent: a live row is kept
   if live "$1"; then echo "kept $1 (live)"; return; fi

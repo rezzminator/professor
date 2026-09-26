@@ -31,17 +31,16 @@ const EmptyLine = "callmeter: no calls recorded in window"
 // Filter narrows every topic. A zero Since covers the whole retention window
 // (PruneExpired has pruned everything older); an empty field does not filter.
 type Filter struct {
-	Since      time.Time
-	Project    string   // calls whose cwd is Project or under it
-	AgentType  string   // calls made by that agent type
-	Session    string   // calls in that session
-	ConfigDirs []string // empty = every config dir
-	Account    *int     // calls and requests that configured account ran; nil = every row
-	Limit      int      // rows per table; <= 0 is DefaultLimit
+	Since     time.Time
+	Project   string // calls whose cwd is Project or under it
+	AgentType string // calls made by that agent type
+	Session   string // calls in that session
+	Account   *int   // calls and requests that configured account ran; nil = every row
+	Limit     int    // rows per table; <= 0 is DefaultLimit
 }
 
 // NameOf resolves a session id to its chat name; the CLI reads pfm's transcript
-// index read-only (store.OpenTranscriptNames), never fleet.db.
+// index read-only (store.OpenTranscriptNames), never pfm-cache.db.
 type NameOf func(sessionID string) (string, error)
 
 var durationSince = regexp.MustCompile(`^(\d+)([dh])$`)
@@ -147,9 +146,6 @@ func (f Filter) title(topic string, names *names) string {
 	if f.Session != "" {
 		parts = append(parts, fmt.Sprintf("session=%s (%s)", f.Session, names.of(f.Session)))
 	}
-	if len(f.ConfigDirs) > 0 {
-		parts = append(parts, "config-dir="+strings.Join(f.ConfigDirs, ","))
-	}
 	if f.Account != nil {
 		parts = append(parts, fmt.Sprintf("account=%d", *f.Account))
 	}
@@ -179,14 +175,6 @@ func (f Filter) where() (string, []any) {
 	if f.Session != "" {
 		conds = append(conds, col("session_id")+" = ?")
 		args = append(args, f.Session)
-	}
-	if len(f.ConfigDirs) > 0 {
-		marks := make([]string, len(f.ConfigDirs))
-		for i, dir := range f.ConfigDirs {
-			marks[i] = "?"
-			args = append(args, dir)
-		}
-		conds = append(conds, col("config_dir")+" IN ("+strings.Join(marks, ", ")+")")
 	}
 	if f.Account != nil {
 		conds = append(conds, col("account")+" = ?")
@@ -380,17 +368,9 @@ func faultFilter(f Filter, table string) (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
-// requestFilter narrows requests by window, session, config dir and account.
+// requestFilter narrows requests by window, session and account.
 func requestFilter(f Filter) (string, []any) {
 	where, args := faultFilter(f, "r")
-	if len(f.ConfigDirs) > 0 {
-		marks := make([]string, len(f.ConfigDirs))
-		for i, dir := range f.ConfigDirs {
-			marks[i] = "?"
-			args = append(args, dir)
-		}
-		where += " AND r.config_dir IN (" + strings.Join(marks, ", ") + ")"
-	}
 	if f.Account != nil {
 		where += " AND r.account = ?"
 		args = append(args, *f.Account)

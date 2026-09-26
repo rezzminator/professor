@@ -154,7 +154,7 @@ x "$BUILD" bash /worktree/infra/demo/setup.sh tools || step_failed "setup.sh too
 say "step 2/6 · container config + seat credentials (lanes/creds.sh)"
 CC="$(bash "$HERE/creds.sh" --print-config ${ACCOUNTS:+--accounts "$ACCOUNTS"})" ||
   step_failed "creds.sh --print-config" $?
-docker exec -i "$BUILD" sh -c 'mkdir -p /root/.config/pfm && cat > /root/.config/pfm/pfm.config.json' <<<"$CC" ||
+docker exec -i "$BUILD" sh -c 'mkdir -p "$(dirname "$PFM_CONFIG")" && cat > "$PFM_CONFIG"' <<<"$CC" ||
   step_failed "writing the container pfm config" $?
 say "config written with $(jq '.accounts | length' <<<"$CC") Claude seat(s) + 1 Codex home"
 bash "$HERE/creds.sh" --container "$BUILD" ${ACCOUNTS:+--accounts "$ACCOUNTS"} || step_failed "creds.sh" $?

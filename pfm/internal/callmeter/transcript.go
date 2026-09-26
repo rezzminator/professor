@@ -28,42 +28,6 @@ func SubagentTranscriptPath(transcriptPath, agentID string) string {
 	return filepath.Join(strings.TrimSuffix(transcriptPath, ".jsonl"), "subagents", "agent-"+agentID+".jsonl")
 }
 
-// ConfigDirOf is the Claude config dir a transcript belongs to: the nearest
-// ancestor directory holding projects/, symlinks resolved; "" when no ancestor
-// is named projects. A config dir that cannot be resolved (no longer on disk)
-// is returned cleaned but unresolved.
-func ConfigDirOf(transcriptPath string) string {
-	dir := filepath.Dir(filepath.Clean(transcriptPath))
-	for {
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		if filepath.Base(dir) == "projects" {
-			return ProjectsHome(parent)
-		}
-		dir = parent
-	}
-}
-
-// ProjectsHome is the config dir whose projects/ physically holds dir's
-// transcripts: dir/projects resolved through symlinks, then its parent.
-// Accounts that share one projects/ (a symlink, one file per chat) are one
-// config dir, so a chat keeps one history and one set of metrics whichever
-// account runs it — the hook and a report's --config-dir both name
-// the same dir. With no resolvable projects/ it is dir resolved, or dir
-// cleaned when dir is not on disk.
-func ProjectsHome(dir string) string {
-	dir = filepath.Clean(dir)
-	if projects, err := filepath.EvalSymlinks(filepath.Join(dir, "projects")); err == nil {
-		return filepath.Dir(projects)
-	}
-	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		return resolved
-	}
-	return dir
-}
-
 type transcriptEntry struct {
 	Type      string          `json:"type"`
 	Timestamp string          `json:"timestamp"`

@@ -12,12 +12,30 @@ import (
 	"time"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
+
+func TestHistoryPoolsUsesOnlySharedClaudeRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	account := filepath.Join(home, ".cc", "2", "projects")
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := historyPools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".claude", "projects")
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("history roots = %q, want [%q]", got, want)
+	}
+}
 
 func TestChatSaveUsesConfiguredImplicitAccountRoot(t *testing.T) {
 	root := t.TempDir()
@@ -164,7 +182,7 @@ func TestCurrentClaudeModelUsesConfiguredAccountRoot(t *testing.T) {
 func TestChatLSUsesConfiguredAccountRoots(t *testing.T) {
 	root := jailTest(t)
 	accountRoot := filepath.Join(root, "configured-account")
-	projects := filepath.Join(accountRoot, "projects")
+	projects := jailPaths(t).Roots[pfmengine.Claude][0]
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -546,4 +564,61 @@ func TestChatLSPrintsNameBeforeSessionAtAndOverTruncationBoundary(t *testing.T) 
 	}
 	check(exactSocket, exactName, exactName)
 	check(overSocket, overName, overName[:28])
+}
+
+// steppingClock advances its fake time on every Sleep, so a poll loop runs to
+// its deadline without real sleeping; onSleep sees the time after each step.
+type steppingClock struct {
+	*clock.Fake
+	onSleep func(now time.Time)
+}
+
+func (c *steppingClock) Sleep(_ context.Context, d time.Duration) error {
+	c.Advance(d)
+	if c.onSleep != nil {
+		c.onSleep(c.Now())
+	}
+	return nil
+}
+
+func TestWaitForBranchSessionIDGivesUpAtThirtySecondsNamingNoLaunchRecord(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	clk := &steppingClock{Fake: clock.NewFake(start)}
+	id, err := waitForBranchSessionID(
+		context.Background(), clk, t.TempDir(), "pfm-fork", "parent", branchForkSessionIDTimeout,
+	)
+	if id != "" {
+		t.Fatalf("id = %q, want empty on timeout", id)
+	}
+	if elapsed := clk.Now().Sub(start); elapsed < 30*time.Second || elapsed > 31*time.Second {
+		t.Fatalf("gave up after %s of fake time, want 30s", elapsed)
+	}
+	if err == nil || !strings.Contains(err.Error(), "no launch record written") ||
+		!strings.Contains(err.Error(), "pfm-fork") || !strings.Contains(err.Error(), "30s") {
+		t.Fatalf("err = %v, want a named 30s timeout carrying the socket and the missing launch record", err)
+	}
+}
+
+func TestWaitForBranchSessionIDReturnsAnIDThatAppearsAtTenSeconds(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	sidDir := t.TempDir()
+	const forkID = "11111111-2222-3333-4444-555555555555"
+	clk := &steppingClock{Fake: clock.NewFake(start)}
+	clk.onSleep = func(now time.Time) {
+		if now.Sub(start) >= 10*time.Second {
+			crumb := filepath.Join(sidDir, "pfm-fork")
+			if err := os.WriteFile(crumb, []byte("/transcripts/"+forkID+".jsonl\n"), 0o600); err != nil {
+				t.Errorf("write crumb: %v", err)
+			}
+		}
+	}
+	id, err := waitForBranchSessionID(
+		context.Background(), clk, sidDir, "pfm-fork", "parent", branchForkSessionIDTimeout,
+	)
+	if err != nil || id != forkID {
+		t.Fatalf("id, err = %q, %v; want %q, nil", id, err, forkID)
+	}
+	if elapsed := clk.Now().Sub(start); elapsed < 10*time.Second || elapsed > 11*time.Second {
+		t.Fatalf("resolved after %s of fake time, want about 10s", elapsed)
+	}
 }

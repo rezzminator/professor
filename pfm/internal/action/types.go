@@ -6,6 +6,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 // Route is the legacy picker action letter.
@@ -64,6 +65,7 @@ type Plan struct {
 	Run        string
 	Line       string
 	ChatServer *ChatServer
+	Record     *fleetdb.Launch
 }
 
 // Pane is the tmux state needed by solo and self-switch.

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -134,7 +136,7 @@ func warnSetup(format string, args ...any) {
 
 // jailHome points PFM_HOME at a private directory for the WHOLE package, so a
 // test that never builds a jail of its own still cannot reach the operator's
-// real home — the fleet.db their live chats are indexed in, the
+// real home — the pfm-cache.db their live chats are indexed in, the
 // ~/.claude/projects their transcripts live in.
 //
 // It deliberately does not touch HOME. Packages here shell out to `go build`,
@@ -159,19 +161,28 @@ func jailHome(base string) func() {
 		}
 		return func() {}
 	}
-	// XDG_CONFIG_HOME pinned alongside PFM_HOME (L3-F9): unpinned, an ambient
-	// XDG_CONFIG_HOME the operator's shell exported reaches
-	// config.LoadRuntime through internal/config/ambient.go regardless of how
-	// jailed PFM_HOME is, and a package that never builds a jail of its own
-	// would read the operator's real pfm/config.* the same way jailHome
-	// exists to stop it reading their real fleet.db.
+	configPath := filepath.Join(home, "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+		warnSetup("seed config %s: %v", configPath, err)
+	}
+	if err := os.Setenv(paths.EnvConfig, configPath); err != nil {
+		warnSetup("set %s: %v", paths.EnvConfig, err)
+	}
+	managedDir := filepath.Join(home, "managed-settings.d")
+	if err := os.MkdirAll(managedDir, 0o700); err != nil {
+		warnSetup("create managed settings directory: %v", err)
+	} else if err := os.WriteFile(filepath.Join(managedDir, "pfm.json"), []byte("{\"cleanupPeriodDays\":36500}\n"), 0o600); err != nil {
+		warnSetup("seed managed settings: %v", err)
+	}
+	if err := os.Setenv(paths.EnvManagedSettingsDir, managedDir); err != nil {
+		warnSetup("set %s: %v", paths.EnvManagedSettingsDir, err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, checkoutRoot()); err != nil {
+		warnSetup("write source repository marker: %v", err)
+	}
+	// Keep child tools' XDG files inside the package jail.
 	if err := os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")); err != nil {
 		warnSetup("set XDG_CONFIG_HOME under %s: %v", home, err)
-	}
-	// Named so config.RefuseAmbientConfigHome can tell this jail's own pin
-	// from an operator's ambient export after a test moves PFM_HOME.
-	if err := os.Setenv(paths.EnvTestJailHome, home); err != nil {
-		warnSetup("set %s to %s: %v", paths.EnvTestJailHome, home, err)
 	}
 	return func() {
 		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -215,7 +226,7 @@ func CreateShortRoot() (string, error) {
 }
 
 // Fleet builds a scratch fleet under a ShortRoot and points every pfm path at
-// it — TMUX_TMPDIR, PFM_DB, PFM_SID_DIR, both engine roots, the tmux dir, the
+// it — TMUX_TMPDIR, PFM_CACHE_DB, PFM_SID_DIR, both engine roots, the tmux dir, the
 // process table — and returns the root; a caller layers install artifacts on
 // top. A chat server's tmux config is /dev/null: in real life it loads the
 // user's ~/.tmux.conf, and a fixture must not let the machine it runs on
@@ -256,20 +267,35 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	}
 	setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	// The index DB, under the name it is migrating to (design § Glossary).
-	setenv(paths.EnvDB, filepath.Join(root, "index.db"))
+	setenv(paths.EnvCacheDB, filepath.Join(root, "index.db"))
 	setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	setenv(paths.EnvClaudeRoots, filepath.Join(root, claudeRoot))
 	setenv(paths.EnvCodexHome, filepath.Join(root, codexHome))
 	setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	setenv(paths.EnvHome, filepath.Join(root, "home"))
+	configPath := filepath.Join(root, "home", "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setenv(paths.EnvConfig, configPath)
+	managedDir := filepath.Join(root, "home", "managed-settings.d")
+	if err := os.MkdirAll(managedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(managedDir, "pfm.json"),
+		[]byte("{\"cleanupPeriodDays\":36500}\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	setenv(paths.EnvManagedSettingsDir, managedDir)
+	if err := paths.WriteSourceRepoMarker(filepath.Join(root, "home"), checkoutRoot()); err != nil {
+		t.Fatal(err)
+	}
 	setenv("HOME", filepath.Join(root, "home"))
-	// Pinned alongside PFM_HOME/HOME (L3-F9): an ambient XDG_CONFIG_HOME the
-	// operator's shell exported would otherwise reach config.LoadRuntime
-	// through internal/config/ambient.go no matter how jailed PFM_HOME is.
+	// Keep child tools' XDG files inside this fleet.
 	setenv("XDG_CONFIG_HOME", filepath.Join(root, "home", ".config"))
-	// Every jail that pins XDG_CONFIG_HOME names its home too, so the pin
-	// stays recognisable after a test moves PFM_HOME (config.RefuseAmbientConfigHome).
-	setenv(paths.EnvTestJailHome, filepath.Join(root, "home"))
 	setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
 	setenv(paths.EnvTmuxConf, "/dev/null")
 	return root
@@ -323,15 +349,83 @@ func InstalledHome(t *testing.T) string {
 		}
 	}
 	t.Setenv("PATH", strings.Join(testPath, string(os.PathListSeparator)))
+	StageGlobalAgents(t, jailedHome, root)
+	stageCloneZshrc(t, jailedHome)
 	return root
 }
 
-// StageHarnessPromptBaseline writes one managed harness-prompt baseline pin.
+func stageCloneZshrc(t *testing.T, home string) {
+	t.Helper()
+	shim := filepath.Join(checkoutRoot(), "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
+	line := "[[ -r \"" + shim + "\" ]] && source \"" + shim + "\"\n"
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkoutRoot() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
+}
+
+// StageSourceRepoMarker points a jail at this checkout's tracked prompts.
+func StageSourceRepoMarker(t *testing.T, home string) {
+	t.Helper()
+	if err := paths.WriteSourceRepoMarker(home, checkoutRoot()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// StageGlobalAgents wires the checkout's current role roster into a doctor jail.
+func StageGlobalAgents(t *testing.T, home string, extraClaudeConfigDirs ...string) {
+	t.Helper()
+	claudeConfigDirs := []string{filepath.Join(home, ".cc", "1"), filepath.Join(home, ".cc", "2")}
+	claudeConfigDirs = append(claudeConfigDirs, extraClaudeConfigDirs...)
+	_, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
+		Home: home, SourceRepo: checkoutRoot(),
+		ClaudeConfigDirs: claudeConfigDirs,
+		CodexHomes:       []string{filepath.Join(home, ".codex")}, Mode: codexgen.ModeBuild,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ShippedHarnessPrompt returns the reviewed baseline carried by this build.
+func ShippedHarnessPrompt(alias string) (string, error) {
+	stem := "harness-original"
+	if alias == "opus" {
+		stem = "harness-opus"
+	}
+	base := filepath.ToSlash(filepath.Join(pfmengine.MustLookup(pfmengine.Claude).LongName, "baselines"))
+	pin, err := harnessprompts.ReadPart(base + "/" + stem + ".sha256")
+	if err != nil {
+		return "", err
+	}
+	fields := strings.Fields(string(pin))
+	if len(fields) != 2 {
+		return "", fmt.Errorf("malformed %s baseline pin", stem)
+	}
+	content, err := harnessprompts.ReadPart(base + "/" + fields[1])
+	return string(content), err
+}
+
+// StageHarnessPromptBaseline writes one baseline into a private fixture clone.
 func StageHarnessPromptBaseline(t *testing.T, home, alias, stem, captured, name string) {
 	t.Helper()
 	sum := sha256.Sum256([]byte(captured))
 	pin := hex.EncodeToString(sum[:]) + "  " + name + "\n"
-	dir := paths.HarnessBaselineDir(home)
+	clone := filepath.Join(home, ".test-source")
+	if err := os.MkdirAll(clone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := paths.HarnessBaselineDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -357,8 +451,9 @@ func CleanHome(t *testing.T) config.Runtime {
 	for _, directory := range []string{
 		canonicalDir,
 		hostShimDir,
-		filepath.Join(home, ".cc", "1", "projects"),
-		filepath.Join(home, ".cc", "2", "projects"),
+		filepath.Join(home, ".cc", "1"),
+		filepath.Join(home, ".cc", "2"),
+		filepath.Join(home, ".claude"),
 		filepath.Join(home, ".codex"),
 		filepath.Join(home, ".local", "state", "pfm"),
 		filepath.Join(home, "proc"),
@@ -366,6 +461,17 @@ func CleanHome(t *testing.T) config.Runtime {
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
+		}
+	}
+	for _, entry := range []string{"projects", "file-history", "tasks", "session-env"} {
+		store := filepath.Join(home, ".claude", entry)
+		if err := os.MkdirAll(store, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, account := range []string{"1", "2"} {
+			if err := os.Symlink(store, filepath.Join(home, ".cc", account, entry)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	canonical := filepath.Join(canonicalDir, "pfm")
@@ -401,25 +507,35 @@ func CleanHome(t *testing.T) config.Runtime {
 			t.Fatal(err)
 		}
 	}
-	const (
-		captured = "pfm jail fixture harness prompt\n"
-		name     = "harness-prompt-fixture.md"
-	)
-	for _, model := range []struct{ alias, stem string }{{"sonnet", "harness-original"}, {"opus", "harness-opus"}} {
-		StageHarnessPromptBaseline(t, home, model.alias, model.stem, captured, name)
-	}
-
 	t.Setenv("HOME", home)
 	t.Setenv(paths.EnvHome, home)
+	configPath := filepath.Join(home, "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, configPath)
+	StageSourceRepoMarker(t, home)
+	StageGlobalAgents(t, home, filepath.Join(home, ".claude"))
+	stageCloneZshrc(t, home)
 	// Pinned alongside HOME/PFM_HOME (L3-F9) — see the same comment in
 	// fleetSetenv.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv(paths.EnvTestJailHome, home)
-	t.Setenv(paths.EnvDB, filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
-	t.Setenv(paths.EnvFleetDB, filepath.Join(home, ".cc", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(home, ".local", "state", "pfm", "pfm.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(home, "sid"))
-	t.Setenv(paths.EnvClaudeRoots, filepath.Join(home, ".cc", "1", "projects")+
-		string(os.PathListSeparator)+filepath.Join(home, ".cc", "2", "projects"))
+	t.Setenv(paths.EnvClaudeRoots, filepath.Join(home, ".claude", "projects"))
+	managedDir := filepath.Join(home, "managed-settings.d")
+	if err := os.MkdirAll(managedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(managedDir, "pfm.json"),
+		[]byte("{\"cleanupPeriodDays\":36500}\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvManagedSettingsDir, managedDir)
 	t.Setenv(paths.EnvCodexHome, filepath.Join(home, ".codex"))
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(home, "tmux"))
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")

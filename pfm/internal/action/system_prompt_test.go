@@ -1,16 +1,37 @@
 package action
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestProfessorPromptPathUsesRecordedClone(t *testing.T) {
+	home := t.TempDir()
+	if _, err := ProfessorPromptPath(
+		home,
+	); err == nil ||
+		!strings.Contains(err.Error(), "no source repository recorded") {
+		t.Fatalf("missing marker error = %v", err)
+	}
+	repo := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ProfessorPromptPath(home)
+	want := filepath.Join(repo, "pfm", "harness-prompts", "composed", "claude.md")
+	if err != nil || got != want {
+		t.Fatalf("prompt path = %q, %v; want %q", got, err, want)
+	}
+}
 
 func TestLauncherRunSystemPromptModes(t *testing.T) {
 	home := t.TempDir()
 	stageProfessorPrompt(t, home)
-	professorFile := Quote(ProfessorPromptPath(home))
+	professorFile := mustProfessorPromptPath(t, home)
 	cases := []struct {
 		mode     string
 		wantLean bool
@@ -32,11 +53,12 @@ func TestLauncherRunSystemPromptModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LauncherRun(mode=%q) error = %v", testCase.mode, err)
 		}
-		if got := strings.Contains(run, " CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1"); got != testCase.wantLean {
-			t.Fatalf("mode %q: lean env present=%v, want %v in %q", testCase.mode, got, testCase.wantLean, run)
+		parsed := parsedShell(t, run)
+		if got := parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] == "1"; got != testCase.wantLean {
+			t.Fatalf("mode %q: lean settings present=%v, want %v", testCase.mode, got, testCase.wantLean)
 		}
-		if got := strings.Contains(run, " --system-prompt-file "+professorFile); got != testCase.wantFile {
-			t.Fatalf("mode %q: professor flag present=%v, want %v in %q", testCase.mode, got, testCase.wantFile, run)
+		if got := parsed.PromptFile == professorFile; got != testCase.wantFile {
+			t.Fatalf("mode %q: professor flag present=%v, want %v", testCase.mode, got, testCase.wantFile)
 		}
 	}
 }
@@ -69,14 +91,12 @@ func TestClaudeCommandSystemPromptModes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("mode %q: claudeCommandWith error = %v", testCase.mode, err)
 		}
-		if got := strings.Contains(run, " CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1"); got != testCase.wantLean {
-			t.Fatalf("mode %q: lean env present=%v, want %v in %q", testCase.mode, got, testCase.wantLean, run)
+		parsed := parsedShell(t, run)
+		if got := parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] == "1"; got != testCase.wantLean {
+			t.Fatalf("mode %q: lean settings present=%v, want %v", testCase.mode, got, testCase.wantLean)
 		}
-		if got := strings.Contains(
-			run,
-			" --system-prompt-file "+Quote(ProfessorPromptPath(home)),
-		); got != testCase.wantFile {
-			t.Fatalf("mode %q: professor flag present=%v, want %v in %q", testCase.mode, got, testCase.wantFile, run)
+		if got := parsed.PromptFile == mustProfessorPromptPath(t, home); got != testCase.wantFile {
+			t.Fatalf("mode %q: professor flag present=%v, want %v", testCase.mode, got, testCase.wantFile)
 		}
 	}
 }

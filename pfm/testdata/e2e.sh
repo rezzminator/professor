@@ -20,7 +20,7 @@ SID_DIR="$JAIL/sid"
 PROC_ROOT="$JAIL/proc"
 TMUX_BASE="$JAIL/t"
 TMUX_DIR="$TMUX_BASE/tmux-$(id -u)"
-DB="$JAIL/state/fleet.db"
+DB="$JAIL/state/pfm-cache.db"
 
 mkdir -p \
   "$HOME_DIR/.claude" \
@@ -44,7 +44,7 @@ export HOME="$HOME_DIR"
 export TMUX=
 export TMUX_PANE=
 export TMUX_TMPDIR="$TMUX_BASE"
-export PFM_DB="$DB"
+export PFM_CACHE_DB="$DB"
 export PFM_SID_DIR="$SID_DIR"
 export PFM_CLAUDE_ROOTS="$CLAUDE_ROOT"
 export PFM_CODEX_ROOT="$CODEX_ROOT"
@@ -166,7 +166,7 @@ if [[ "${PFM_STRESS:-0}" == 1 ]]; then
 
   cp -- "$DB" "$JAIL/damaged.db"
   truncate -s 16 "$JAIL/damaged.db"
-  if PFM_DB="$JAIL/damaged.db" "$BIN" doctor \
+  if PFM_CACHE_DB="$JAIL/damaged.db" "$BIN" doctor \
     > "$JAIL/damaged.doctor" 2> "$JAIL/damaged.err"; then
     printf 'e2e: damaged doctor unexpectedly exited zero\n' >&2
     exit 1

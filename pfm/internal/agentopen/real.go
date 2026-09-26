@@ -11,9 +11,13 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -59,10 +63,14 @@ func (commands ExecCommands) command(
 	if err != nil {
 		return nil, err
 	}
+	var cache *bool
+	if purpose != action.PurposeQuery {
+		cache = &cache1H
+	}
 	command, err := action.ClaudeSpawn{
 		Purpose: purpose,
 		Account: account,
-		Cache1H: cache1H,
+		Cache1H: cache,
 		Args:    args,
 		Home:    commands.Home,
 		Machine: commands.Machine,
@@ -90,11 +98,34 @@ func (commands ExecCommands) QueryAgents(ctx context.Context, configName string)
 }
 
 func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id string, cache1H bool) error {
-	command, err := commands.command(ctx, action.PurposeResume, configName, cache1H, "--resume", id)
+	account, err := commands.accountFor(configName)
 	if err != nil {
 		return fmt.Errorf("resume agent session: %w", err)
 	}
+	command, err := action.ClaudeSpawn{
+		Purpose: claudelaunch.PurposeResume,
+		Account: account, Cache1H: &cache1H, Resume: id,
+		Home: commands.Home, Machine: commands.Machine,
+	}.Command(ctx)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
+	}
+	command.Stdout, command.Stderr = commands.Stdout, commands.Stderr
 	command.Dir = cwd
+	values, resolveErr := paths.Resolve()
+	if resolveErr == nil {
+		resolveErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
+			SessionID: id,
+			Engine:    pfmengine.Claude, Account: account, Cache1H: cache1H,
+		}, clock.Real.Now().Unix())
+	}
+	if resolveErr != nil {
+		stderr := commands.Stderr
+		if stderr == nil {
+			stderr = os.Stderr
+		}
+		fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", id, resolveErr)
+	}
 	return command.Run()
 }
 

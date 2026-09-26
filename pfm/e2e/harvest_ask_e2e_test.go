@@ -70,7 +70,7 @@ func TestHarvestAskE2E(t *testing.T) {
 		captures[name] = capture
 	}
 
-	configPath := filepath.Join(home, ".config", "pfm", "config.json")
+	configPath := filepath.Join(home, "pfm.config.json")
 	config := map[string]any{
 		"version": 2,
 		"accounts": []map[string]any{{

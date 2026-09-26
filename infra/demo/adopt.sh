@@ -26,6 +26,7 @@
 # 1); a missing hook script or a failing codex build/check prints the stage's
 # own output (exit 1). No marker commit is written on any of those.
 set -euo pipefail
+: "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 URL="${1:-https://github.com/expressjs/express}"
@@ -44,7 +45,7 @@ if [ ! -f "$DIR/.professor/baseline.json" ]; then
 fi
 cd "$DIR"
 CHAT="$(echo "$NAME" | tr a-z A-Z)_INSTALL"
-SEAT="$(cut -d" " -f1 "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r ".accounts[0].id" "$HOME/.config/pfm/pfm.config.json")"
+SEAT="$(cut -d" " -f1 "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r ".accounts[0].id" "${PFM_CONFIG:?PFM_CONFIG is required in the container}")"
 
 # Settled = pfm's own verdict: `--await --settle 60` returns once the chat has
 # been quiet for a full minute after its last word (exit 0, or 7 when another

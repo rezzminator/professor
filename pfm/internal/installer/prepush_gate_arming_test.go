@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // buildSourceCloneWithPrePushHook builds a bare git working tree with a
@@ -109,7 +111,7 @@ func TestInstallReportsAnArmedGateAsOK(t *testing.T) {
 	}
 	// Pre-settle the other two writeUpdateMetadata steps (marker + binary
 	// ownership) so only the arm step's own change/ok accounting is in play.
-	if err := WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
 	if err := RecordCanonicalBinary(home); err != nil {
@@ -202,7 +204,7 @@ func TestInstallReportsAnAbsoluteHooksPathAsArmed(t *testing.T) {
 	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", absolute).CombinedOutput(); err != nil {
 		t.Fatalf("pre-arm clone with absolute hooksPath: %v: %s", err, out)
 	}
-	if err := WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
 	if err := RecordCanonicalBinary(home); err != nil {

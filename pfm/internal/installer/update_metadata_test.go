@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type missingGitOutputRunner struct{}
@@ -32,7 +34,7 @@ var (
 func TestReportSourceRepoMarkerPresentReportsOK(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	if err := WriteSourceRepoMarker(home, t.TempDir()); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
@@ -85,7 +87,7 @@ func TestReportSourceRepoMarkerAbsentReportsNamedSkip(t *testing.T) {
 func TestReportSourceRepoMarkerOtherErrorIsReturnedNeverSkipped(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	markerPath := SourceRepoPath(home)
+	markerPath := paths.SourceRepoPath(home)
 	// A directory in the marker's place fails os.ReadFile with something
 	// other than fs.ErrNotExist (EISDIR), the shape reportSourceRepoMarker
 	// must return rather than skip.
@@ -169,11 +171,11 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.T) {
 	t.Parallel()
 	t.Run("no marker recorded", func(t *testing.T) {
-		_, err := ReadSourceRepoMarker(t.TempDir())
-		if !errors.Is(err, ErrNoSourceRepoMarker) {
-			t.Fatalf("err = %v, want ErrNoSourceRepoMarker", err)
+		_, err := paths.ReadSourceRepoMarker(t.TempDir())
+		if !errors.Is(err, paths.ErrNoSourceRepoMarker) {
+			t.Fatalf("err = %v, want paths.ErrNoSourceRepoMarker", err)
 		}
-		if errors.Is(err, ErrSourceRepoUnusable) {
+		if errors.Is(err, paths.ErrSourceRepoUnusable) {
 			t.Fatalf("an absent marker also claimed an unusable clone: %v", err)
 		}
 		if !errors.Is(err, os.ErrNotExist) {
@@ -187,17 +189,17 @@ func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.
 		if err := os.MkdirAll(clone, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteSourceRepoMarker(home, clone); err != nil {
+		if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Remove(clone); err != nil {
 			t.Fatal(err)
 		}
-		_, err := ReadSourceRepoMarker(home)
-		if !errors.Is(err, ErrSourceRepoUnusable) {
-			t.Fatalf("err = %v, want ErrSourceRepoUnusable", err)
+		_, err := paths.ReadSourceRepoMarker(home)
+		if !errors.Is(err, paths.ErrSourceRepoUnusable) {
+			t.Fatalf("err = %v, want paths.ErrSourceRepoUnusable", err)
 		}
-		if errors.Is(err, ErrNoSourceRepoMarker) {
+		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
 			t.Fatalf("a recorded-but-vanished clone reported as no marker at all: %v", err)
 		}
 		if !strings.Contains(err.Error(), clone) {
@@ -207,23 +209,23 @@ func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.
 
 	t.Run("marker holds more than one path", func(t *testing.T) {
 		home := t.TempDir()
-		writeFixture(t, SourceRepoPath(home), "/one\n/two\n")
-		_, err := ReadSourceRepoMarker(home)
-		if !errors.Is(err, ErrSourceRepoUnusable) {
-			t.Fatalf("err = %v, want ErrSourceRepoUnusable", err)
+		writeFixture(t, paths.SourceRepoPath(home), "/one\n/two\n")
+		_, err := paths.ReadSourceRepoMarker(home)
+		if !errors.Is(err, paths.ErrSourceRepoUnusable) {
+			t.Fatalf("err = %v, want paths.ErrSourceRepoUnusable", err)
 		}
 	})
 
 	t.Run("marker cannot be read at all", func(t *testing.T) {
 		home := t.TempDir()
-		if err := os.MkdirAll(SourceRepoPath(home), 0o700); err != nil {
+		if err := os.MkdirAll(paths.SourceRepoPath(home), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		_, err := ReadSourceRepoMarker(home)
+		_, err := paths.ReadSourceRepoMarker(home)
 		if err == nil {
 			t.Fatal("a marker path that is a directory read clean")
 		}
-		if errors.Is(err, ErrNoSourceRepoMarker) || errors.Is(err, ErrSourceRepoUnusable) {
+		if errors.Is(err, paths.ErrNoSourceRepoMarker) || errors.Is(err, paths.ErrSourceRepoUnusable) {
 			t.Fatalf("a failed look claimed one of the two answered states: %v", err)
 		}
 	})
@@ -241,7 +243,7 @@ func TestReportSourceRepoMarkerNamesAnUnusableCloneApartFromAbsence(t *testing.T
 	if err := os.MkdirAll(clone, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSourceRepoMarker(home, clone); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(clone); err != nil {

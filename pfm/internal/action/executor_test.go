@@ -13,7 +13,9 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type fakeActionTmux struct {
@@ -25,6 +27,7 @@ type fakeActionTmux struct {
 	sized        []string
 	selected     []string
 	created      []ChatServer
+	onCreate     func()
 }
 
 func (tmux *fakeActionTmux) ListPanes(
@@ -109,11 +112,101 @@ func (tmux *fakeActionTmux) CreateChatServer(
 	_ context.Context,
 	server ChatServer,
 ) error {
+	if tmux.onCreate != nil {
+		tmux.onCreate()
+	}
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	tmux.created = append(tmux.created, server)
 	tmux.alive[server.Socket] = true
 	return nil
+}
+
+func TestOpenRecordsClaudeBeforePaneStarts(t *testing.T) {
+	for _, kind := range []compose.Kind{compose.NewClaude, compose.ResumeClaude} {
+		t.Run(kind.String(), func(t *testing.T) {
+			jailAction(t)
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tmux := &fakeActionTmux{alive: map[string]bool{}}
+			var record fleetdb.Launch
+			tmux.onCreate = func() {
+				launches, openErr := fleetdb.OpenLaunches(context.Background(), values)
+				if openErr != nil {
+					t.Fatal(openErr)
+				}
+				defer func() {
+					if err := launches.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+				id := "44444444-4444-4444-8444-444444444444"
+				if kind == compose.NewClaude {
+					id = "00000000-0000-4000-8000-000000000004"
+				}
+				record, openErr = launches.LaunchFor(context.Background(), id)
+				if openErr != nil {
+					t.Fatalf("record before pane: %v", openErr)
+				}
+			}
+			previous := newSessionID
+			newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+			t.Cleanup(func() { newSessionID = previous })
+			executor, err := New(Dependencies{
+				Tmux: tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
+				Runner: &captureRunner{}, Stderr: io.Discard,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := compose.Row{Kind: kind, ID: "44444444-4444-4444-8444-444444444444", CWD: "/work"}
+			if _, err := executor.Open(context.Background(), Request{
+				Row: row, PrimaryAccount: 1,
+				Home: values.Home, FreshSocket: "cc-record", Config: testMachineConfig(values.Home),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if record.Account != 1 || record.Cache1H || string(record.Engine) != "cc" {
+				t.Fatalf("record = %#v", record)
+			}
+		})
+	}
+}
+
+func TestOpenStartsPaneWhenLaunchRecordFails(t *testing.T) {
+	root := jailAction(t)
+	t.Setenv("PFM_STATE_DB", root)
+	tmux := &fakeActionTmux{alive: map[string]bool{}}
+	var stderr bytes.Buffer
+	executor, err := New(
+		Dependencies{
+			Tmux:      tmux,
+			Processes: &fakeProcesses{},
+			Gate:      fixedGate(false),
+			Runner:    &captureRunner{},
+			Stderr:    &stderr,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := newSessionID
+	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+	t.Cleanup(func() { newSessionID = previous })
+	_, err = executor.Open(context.Background(), Request{
+		Row:            compose.Row{Kind: compose.NewClaude, CWD: "/work"},
+		PrimaryAccount: 1, Home: filepath.Join(root, "home"), FreshSocket: "cc-record-error",
+		Config: testMachineConfig(filepath.Join(root, "home")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tmux.created) != 1 ||
+		!strings.Contains(stderr.String(), "pfm: record launch 00000000-0000-4000-8000-000000000004:") {
+		t.Fatalf("pane=%d stderr=%q", len(tmux.created), stderr.String())
+	}
 }
 
 type fakeProcesses struct {
@@ -510,7 +603,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 		t.Fatalf("live line = %q", line)
 	}
 	if runner.name != "pfm" || !reflect.DeepEqual(runner.args, []string{
-		"chat", "reload", "--sock", "cc-100-1-1", "1", "--1h", "1",
+		"chat", "reload", "--sock", "cc-100-1-1", "1", "--cache", "1h",
 	}) {
 		t.Fatalf("reload command = %q %q", runner.name, runner.args)
 	}
@@ -776,7 +869,7 @@ func jailAction(t *testing.T) string {
 		}
 	}
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "tmp"))
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))

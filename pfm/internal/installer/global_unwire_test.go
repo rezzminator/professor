@@ -39,7 +39,8 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 	accounts := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2")}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: []string{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,8 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: []string{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +105,8 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 	codexHomes := []string{filepath.Join(home, ".codex")}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +119,8 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +162,8 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 
 	var transcript bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: []string{config},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, ConfigDirs: []string{config},
 		Runner: &fakeRunner{}, CodexHomes: []string{}, Stdout: &transcript,
 	}); err != nil {
 		t.Fatal(err)
@@ -191,7 +196,8 @@ func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *te
 	generated := paths.GeneratedClaudeAgentsDir(home)
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +206,8 @@ func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *te
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
 	}); err != nil {
 		t.Fatal(err)
 	}

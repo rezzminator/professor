@@ -33,17 +33,16 @@ type composer struct {
 	panesBySocket    map[string][]gather.ProbePane
 	paneByTarget     map[string]gather.ProbePane
 	claudeSockets    map[string]struct{}
-	cacheSockets     map[string]struct{}
 	liveTranscripts  map[string]struct{}
 	liveRollouts     map[string]struct{}
 	liveOpenCode     map[string]struct{}
-	claudeAccounts   accountMatcher
+	claudeAccounts   []ClaudeSeat
 	codexAccounts    accountMatcher
 	projectDirs      map[string]string
 	projects         projectNames
 }
 
-// Compose performs the complete side-effect-free row composition pass.
+// Compose performs the row composition pass, reading the supplied launch handle.
 func Compose(input Input) Output {
 	current := &composer{input: input, projects: projectNames{}}
 	current.buildIndexes()
@@ -64,7 +63,7 @@ func Compose(input Input) Output {
 
 	output := Output{
 		ProjectDirs:        cloneStringMap(current.projectDirs),
-		includeNewClaude:   input.Options.View != KilledView && len(input.AccountRoots) != 0,
+		includeNewClaude:   input.Options.View != KilledView && len(input.ClaudeSeats) != 0,
 		includeNewCodex:    input.Options.View != KilledView && len(input.Options.CodexAccountIDs) != 0,
 		includeNewOpenCode: input.Options.View != KilledView && len(input.Options.OpenCodeAccountIDs) != 0,
 		primaryAccount:     input.Options.PrimaryAccount,
@@ -73,9 +72,9 @@ func Compose(input Input) Output {
 		fallbackDir:        input.Options.CurrentDir,
 		projects:           current.projects,
 	}
-	if !configuredAccount(input.AccountRoots, output.primaryAccount) {
-		if len(input.AccountRoots) != 0 {
-			output.primaryAccount = input.AccountRoots[0].Account
+	if !configuredClaudeSeat(input.ClaudeSeats, output.primaryAccount) {
+		if len(input.ClaudeSeats) != 0 {
+			output.primaryAccount = input.ClaudeSeats[0].Account
 		}
 	}
 	if !configuredID(input.Options.CodexAccountIDs, output.primaryCodex) {
@@ -330,22 +329,10 @@ func (current *composer) buildIndexes() {
 			current.claudeSockets[agent.Socket] = struct{}{}
 		}
 	}
-	current.cacheSockets = make(map[string]struct{}, len(current.input.Snapshot.Cache1HSockets))
-	for _, socket := range current.input.Snapshot.Cache1HSockets {
-		current.cacheSockets[socket] = struct{}{}
-	}
 	current.liveTranscripts = make(map[string]struct{})
 	current.liveRollouts = make(map[string]struct{})
 	current.liveOpenCode = make(map[string]struct{})
-	// Account roots are the stable side of the prefix match. Resolve each one
-	// once, then match the ordinary row path lexically against both its
-	// configured and canonical spellings. The previous implementation called
-	// EvalSymlinks for every transcript on every picker refresh: a 50k-row
-	// corpus repeated 1,000 times spent more than ten minutes in filesystem
-	// probes. A path with a third alias still takes the canonical fallback, so
-	// the symlink-safe attribution contract is preserved without putting the
-	// common path on the filesystem.
-	current.claudeAccounts = newAccountMatcher(current.input.AccountRoots)
+	current.claudeAccounts = current.input.ClaudeSeats
 	current.codexAccounts = newAccountMatcher(current.input.CodexHomes)
 }
 
@@ -384,10 +371,6 @@ type accountPathRoot struct {
 	account    int
 	configured string
 	canonical  string
-	// configDir / configDirCanonical: the seat's own config dir, when the
-	// root carries one; empty roots never match a process by config dir.
-	configDir          string
-	configDirCanonical string
 }
 
 type accountMatcher struct {
@@ -406,32 +389,32 @@ func newAccountMatcher(roots []AccountRoot) accountMatcher {
 			configured: configured,
 			canonical:  canonicalPath(configured),
 		}
-		if root.ConfigDir != "" {
-			entry.configDir = absoluteCleanPath(root.ConfigDir)
-			entry.configDirCanonical = canonicalPath(entry.configDir)
-		}
 		matcher.roots = append(matcher.roots, entry)
 	}
 	return matcher
 }
 
-// accountForConfigDir names the seat whose config dir a live process runs
-// under — an exact match, configured spelling or canonical. Zero when the
-// process names no config dir or none of the roots carries one, so the
-// caller falls back to the transcript path.
-func (matcher accountMatcher) accountForConfigDir(dir string) int {
+// accountForConfigDir keeps live process attribution tied to its own seat.
+func (current *composer) accountForConfigDir(dir string) int {
 	if dir == "" {
+		for _, seat := range current.claudeAccounts {
+			if seat.Implicit {
+				return seat.Account
+			}
+		}
 		return 0
 	}
 	normalized := absoluteCleanPath(dir)
 	canonical := canonicalPath(normalized)
-	for _, root := range matcher.roots {
-		if root.configDir == "" {
+	for _, seat := range current.claudeAccounts {
+		if seat.ConfigDir == "" {
 			continue
 		}
-		if normalized == root.configDir || normalized == root.configDirCanonical ||
-			canonical == root.configDir || canonical == root.configDirCanonical {
-			return root.account
+		configured := absoluteCleanPath(seat.ConfigDir)
+		resolved := canonicalPath(configured)
+		if normalized == configured || normalized == resolved ||
+			canonical == configured || canonical == resolved {
+			return seat.Account
 		}
 	}
 	return 0
@@ -473,10 +456,6 @@ func (matcher accountMatcher) match(path string, includeConfigured bool) int {
 
 func pathWithinRoot(path, root string) bool {
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
-}
-
-func (current *composer) accountFor(path string) int {
-	return current.claudeAccounts.accountFor(path)
 }
 
 type crumbsForSocket struct {
@@ -577,6 +556,38 @@ func (current *composer) liveClaudeRow(
 		}
 	}
 	row := current.transcriptRow(transcript, LiveClaude)
+	// The process environment names the account when it can be read from one
+	// unambiguous process; otherwise the launch record's account stands.
+	recorded := row.Account
+	matchedProcess := false
+	for _, process := range current.input.Snapshot.ClaudeProcesses {
+		if process.Socket != socket || process.PaneID != pane.PaneID {
+			continue
+		}
+		if matchedProcess {
+			row.Account = recorded
+			row.ConfigDir = ""
+			break
+		}
+		matchedProcess = true
+		row.ConfigDir = process.ConfigDir
+		row.Account = recorded
+		if !process.ConfigUnreadable {
+			row.Account = current.accountForConfigDir(process.ConfigDir)
+		}
+	}
+	matchedAgent := false
+	for _, agent := range current.input.Snapshot.Agents {
+		if agent.SessionID == transcript.UUID {
+			row.ConfigDir = agent.ConfigDir
+			row.Account = current.accountForConfigDir(agent.ConfigDir)
+			matchedAgent = true
+			break
+		}
+	}
+	if !matchedAgent && !matchedProcess && row.Account == 0 {
+		row.Account = current.accountForConfigDir("")
+	}
 	row.Socket = socket
 	row.PaneID = pane.PaneID
 	row.PanePIDs = []int{pane.PID}
@@ -584,7 +595,6 @@ func (current *composer) liveClaudeRow(
 	row.ServerCount = 1
 	row.Attached = pane.Attached
 	row.Here = socket == current.input.Options.CurrentSocket
-	_, row.C1H = current.cacheSockets[socket]
 	if row.CWD == "" && pane.CurrentPath != "" {
 		row.CWD = pane.CurrentPath
 		row.Project = current.projects.of(pane.CurrentPath)
@@ -619,7 +629,6 @@ func (current *composer) splitRow(
 		SplitCount:  len(paneIDs),
 		Here:        socket == current.input.Options.CurrentSocket,
 	}
-	_, row.C1H = current.cacheSockets[socket]
 	names := make([]string, 0, len(paneIDs))
 	accounts := make(map[int]struct{})
 	for _, paneID := range paneIDs {
@@ -670,8 +679,11 @@ func (current *composer) splitRow(
 			row.Path = transcript.Path
 			row.LastPrompt = transcript.LastPrompt
 		}
-		if account := current.accountFor(transcript.Path); account != 0 {
-			accounts[account] = struct{}{}
+		launch, found, unread := current.launchFor(transcript.UUID)
+		row.LaunchUnread = row.LaunchUnread || unread
+		if found {
+			accounts[launch.Account] = struct{}{}
+			row.C1H = row.C1H || launch.Cache1H
 		}
 	}
 	row.Name = strings.Join(names, "+")
@@ -778,7 +790,6 @@ func (current *composer) bootingRows() []Row {
 			Here:        entry.Socket == current.input.Options.CurrentSocket,
 			ActivityNS:  paneStartActivityNS(entry.PaneStartUnix),
 		}
-		_, row.C1H = current.cacheSockets[entry.Socket]
 		if row.ActivityNS == 0 {
 			row.ActivityNS = socketEpochNS(entry.Socket)
 		}
@@ -839,12 +850,9 @@ func (current *composer) agentRows() []Row {
 		}
 		// The process's config dir is the seat, whatever store the transcript
 		// sits in: with seats sharing one store, the path names every seat.
-		if account := current.claudeAccounts.accountForConfigDir(agent.ConfigDir); account != 0 {
+		if account := current.accountForConfigDir(agent.ConfigDir); account != 0 {
 			row.Account = account
-		} else if row.Account == 0 {
-			row.Account = current.accountFor(agent.ConfigDir)
 		}
-		_, row.C1H = current.cacheSockets[agent.Socket]
 		rows = append(rows, row)
 	}
 	return rows
@@ -854,7 +862,7 @@ func (current *composer) transcriptRow(
 	transcript store.Transcript,
 	kind Kind,
 ) Row {
-	return Row{
+	row := Row{
 		Kind: kind,
 		ID:   transcript.UUID,
 		Path: transcript.Path,
@@ -869,9 +877,10 @@ func (current *composer) transcriptRow(
 		Size:        transcript.Size,
 		PromptCount: transcript.PromptCount,
 		ActivityNS:  transcript.EffectiveActivityNS(),
-		Account:     current.accountFor(transcript.Path),
 		BG:          transcript.IsBG,
 	}
+	current.applyLaunch(&row, transcript.UUID)
+	return row
 }
 
 func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
@@ -1205,9 +1214,9 @@ func transcriptIDFromPath(path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-func configuredAccount(roots []AccountRoot, account int) bool {
-	for _, root := range roots {
-		if root.Account == account {
+func configuredClaudeSeat(seats []ClaudeSeat, account int) bool {
+	for _, seat := range seats {
+		if seat.Account == account {
 			return true
 		}
 	}

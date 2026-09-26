@@ -32,8 +32,12 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 			home := t.TempDir()
 			stageHarnessPromptBaseline(t, home)
 			if tc.missing != "" {
+				dir, err := paths.HarnessBaselineDir(home)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if err := os.Remove(
-					filepath.Join(paths.HarnessBaselineDir(home), tc.missing),
+					filepath.Join(dir, tc.missing),
 				); err != nil {
 					t.Fatal(err)
 				}

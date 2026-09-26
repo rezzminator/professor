@@ -24,10 +24,15 @@ func AgentOpen(args []string, stderr io.Writer, runtime config.Runtime) int {
 	id := flags.String("id", "", "session id")
 	cwd := flags.String("cwd", "", "project directory")
 	configDir := flags.String("config", "", "owning Claude config directory")
+	cache := flags.String("cache", "", "cache duration: 1h or 5m")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *id == "" || *cwd == "" {
+		flags.Usage()
+		return 2
+	}
+	if *cache != "" && *cache != "1h" && *cache != "5m" {
 		flags.Usage()
 		return 2
 	}
@@ -57,9 +62,13 @@ func AgentOpen(args []string, stderr io.Writer, runtime config.Runtime) int {
 		Tmux:      agentopen.RealTmux{Dir: resolved.TmuxDir, Stderr: stderr},
 		Stderr:    stderr,
 	})
+	cache1H := runtime.Config.EffectiveClaude(primary).Cache1H
+	if *cache != "" {
+		cache1H = *cache == "1h"
+	}
 	if err := opener.Open(context.Background(), agentopen.Request{
 		ID: *id, CWD: *cwd, OwningConfig: *configDir, PrimaryAccount: primary,
-		Cache1H: runtime.Config.InitialCache1H(primary),
+		Cache1H: cache1H,
 	}); err != nil {
 		var outside *agentopen.OutsidePFMError
 		if errors.As(err, &outside) {

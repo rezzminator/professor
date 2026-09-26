@@ -39,12 +39,15 @@ func detectClaudeProcessesFrom(
 		if !found {
 			continue
 		}
+		environment, environmentErr := proc.Environ(pid)
 		processes = append(processes, ClaudeProcess{
-			PID:     pid,
-			PanePID: pane.PID,
-			Socket:  pane.Socket,
-			PaneID:  pane.PaneID,
-			TTY:     pane.TTY,
+			PID:              pid,
+			PanePID:          pane.PID,
+			Socket:           pane.Socket,
+			PaneID:           pane.PaneID,
+			TTY:              pane.TTY,
+			ConfigDir:        environment["CLAUDE_CONFIG_DIR"],
+			ConfigUnreadable: environmentErr != nil,
 		})
 	}
 	sort.Slice(processes, func(left, right int) bool {

@@ -41,7 +41,7 @@ CX="${F_CX_CHAT:-F_CX}"
 GRP="F_GRP:lane" # the {name}:{group} label grammar, exercised as a chat name
 E1_CHAT="${E1_CHAT:-E1_MAIN}"
 CWD="${F_CWD:-/work/orbit}"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 SID_DIR="${PFM_SID_DIR:-${TMPDIR:-/tmp}/cc-sid}"
 DEMO=/worktree/infra/demo
 GOLDEN=/worktree/pfm/testdata/golden
@@ -58,15 +58,10 @@ ACCOUNT_IDS="$(jq -r '.accounts[].id' "$CONFIG" 2>/dev/null | tr '\n' ' ')"
 # The seat's medal, from pfm's own resolved config (`config accounts=1:<dir>:🥇 (default),…`).
 MEDAL="$(pfm config show 2>/dev/null | sed -n 's/^config accounts=//p' | tr ',' '\n' |
   awk -F: -v s="$SEAT" '$1 == s { print $3 }' | awk '{ print $1 }')"
-# The Codex home pfm's config resolves (internal/config: `.codex.homes[0].home`,
-# else the default ~/.codex when its auth.json carries a live token pair).
+# The Codex home pfm's container config resolves.
 CX_HOME="$(jq -r '.codex.homes[0].home // empty' "$CONFIG" 2>/dev/null)"
 case "$CX_HOME" in "~"*) CX_HOME="$HOME${CX_HOME#\~}" ;; esac
-if [ -z "$CX_HOME" ] &&
-  jq -e '(.tokens.access_token // "") != "" and (.tokens.account_id // "") != ""' "$HOME/.codex/auth.json" >/dev/null 2>&1; then
-  CX_HOME="$HOME/.codex"
-fi
-CX_WHY="no .codex.homes in $CONFIG and $HOME/.codex/auth.json carries no token pair (internal/config hasValidCodexCredentials)"
+CX_WHY="no .codex.homes in $CONFIG — lanes/creds.sh could not stage a fence login"
 
 for project in orbit atlas lumen; do
   need "the working directory /work/$project" "[ -d '/work/$project/.git' ]" \
@@ -152,7 +147,7 @@ hex_to_sgr() { # hex_to_sgr "#rrggbb" — the r;g;b triple a truecolor SGR carri
 # library's single re-open spends the same command after it dies.
 open_cc() {
   local rc
-  pfm chat new --name "$CC" --engine cc --account "$SEAT" --cwd "$CWD" --1h --model sonnet --effort low \
+  pfm chat new --name "$CC" --engine cc --account "$SEAT" --cwd "$CWD" --cache 1h --model sonnet --effort low \
     --await --timeout 300 --settle 5 --progress \
     "You are $CC, the chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." \
     >/tmp/f-cc.launch.out 2>/tmp/f-cc.launch.err
@@ -345,7 +340,7 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "$grp_note: label '$GRP' in row + window, role prompt $role_prompt names f-role while the first user record contains only the prompt-file text, store kill/unkill, _KILL_F and _hide_f hide by name and the rename back unhides"
 fi
 
-# ─── F.03 — --account / --1h / --model --effort, read off the launch pfm made ─
+# ─── F.03 — --account / --cache / --model --effort, read off the launch pfm made ─
 
 beat F.03-new-account-1h-model
 spends "cc:$SEAT"
@@ -359,9 +354,10 @@ if requires; then
   # ShellCommand): the flags and the cache assignment are read back from tmux.
   start="$(tmux -S "$sock" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
   [ -n "$start" ] || bad="$bad the pane start command could not be read from $sock;"
+  printf '%s' "$start" | grep -q -- '--settings' || bad="$bad C14/K25 the launch carries no --settings payload;"
   printf '%s' "$start" | grep -q -- '--model sonnet' || bad="$bad C15/K28 the launch carries no '--model sonnet': $(one_line "$start" | cut -c1-200);"
   printf '%s' "$start" | grep -q -- '--effort low' || bad="$bad C16/K28 the launch carries no '--effort low';"
-  printf '%s' "$start" | grep -q 'ENABLE_PROMPT_CACHING_1H=1' || bad="$bad C14/K25 the launch carries no ENABLE_PROMPT_CACHING_1H=1 (--1h);"
+  printf '%s' "$start" | grep -q '"ENABLE_PROMPT_CACHING_1H":"1"' || bad="$bad C14/K25 the --settings payload carries no ENABLE_PROMPT_CACHING_1H=1 (--cache 1h);"
   # C13: the row reports the seat asked for; K24: the seat's medal on the row; K25: the ⚡ badge.
   [ "$(live_field "$CC" 9)" = "$SEAT" ] || bad="$bad C13 row account is '$(live_field "$CC" 9)', want $SEAT;"
   plain_row="$(pfm ls --plain 2>/dev/null | grep -F "● $CC " | head -1)"
@@ -600,12 +596,12 @@ if requires; then
   # K40: the ProfessorUpdate row is inserted only by a RELEASE build's cached
   # update notice; a tree build inserts none. Whichever this binary is, the
   # picker frame must agree with it. On a release build the notice's cache is
-  # professorUpdateCachePath(runtime) = dirname(PFM_DB)/update-check.json
+  # professorUpdateCachePath(runtime) = dirname(PFM_CACHE_DB)/update-check.json
   # (pfm/internal/picker/update_row.go) — its presence is the beat's own
   # ground truth for whether the frame SHOULD carry a ⬆ row, so a release
   # build is read for it too, never credited unconditionally.
   version="$(pfm version 2>&1)"
-  update_cache="$(dirname "${PFM_DB:-$HOME/.local/state/pfm/fleet.db}")/update-check.json"
+  update_cache="$(dirname "${PFM_CACHE_DB:-$HOME/.local/state/pfm/pfm-cache.db}")/update-check.json"
   if tui_open 120 40 ls -a; then
     frame="$(tui_pane)"
     printf '%s' "$frame" | grep -q '● ' || bad="$bad TUI frame shows no ● live row;"
@@ -975,7 +971,7 @@ done
 socks="$(for i in 1 2 3; do live_field "F_PAR_$i" 11; done | grep -c .)"
 uniq_socks="$(for i in 1 2 3; do live_field "F_PAR_$i" 11; done | sort -u | grep -c .)"
 [ "$socks" -eq 3 ] && [ "$uniq_socks" -eq 3 ] || bad="$bad $socks live sockets, $uniq_socks distinct (want 3 and 3);"
-pfm ls --tsv >/dev/null 2>&1 || bad="$bad pfm ls --tsv exits non-zero after the parallel writes (fleet.db unreadable?);"
+pfm ls --tsv >/dev/null 2>&1 || bad="$bad pfm ls --tsv exits non-zero after the parallel writes (pfm.db unreadable?);"
 # The three have served: end them and hide the resume rows they leave.
 for i in 1 2 3; do
   live_chat "F_PAR_$i" || continue
@@ -985,7 +981,7 @@ for i in 1 2 3; do
   [ -n "$id" ] && pfm chat kill "$id" >/dev/null 2>&1
 done
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "three parallel chat new landed three live rows on three distinct sockets, fleet.db read back clean; the three ended and their resume rows hidden"
+  pass "three parallel chat new landed three live rows on three distinct sockets, pfm.db read back clean; the three ended and their resume rows hidden"
 fi
 
 # ─── F.11 — the idle-detection state machine ────────────────────────────────

@@ -13,7 +13,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
@@ -45,7 +44,7 @@ func releaseRuntime(t *testing.T) pfmconfig.Runtime {
 	t.Helper()
 	return pfmconfig.Runtime{
 		Version: "v1.0.0",
-		Paths:   paths.Values{DB: filepath.Join(t.TempDir(), "fleet.db")},
+		Paths:   paths.Values{CacheDB: filepath.Join(t.TempDir(), "pfm-cache.db")},
 	}
 }
 
@@ -58,7 +57,7 @@ func releaseRuntimeWithSourceRepo(t *testing.T) pfmconfig.Runtime {
 	runtime := releaseRuntime(t)
 	home := t.TempDir()
 	repo := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, repo); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
 		t.Fatal(err)
 	}
 	runtime.Paths.Home = home
@@ -241,7 +240,7 @@ func TestProfessorUpdateCheckNoticeNamesAFoundUpdateWithAnUnusableSourceRepo(t *
 	if row, ok := cachedProfessorUpdateRow(runtime); ok {
 		t.Fatalf("cachedProfessorUpdateRow() = %+v, want no row without a usable source repo", row)
 	}
-	_, markerErr := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	_, markerErr := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if markerErr == nil {
 		t.Fatal("fixture home unexpectedly holds a readable source-repo marker")
 	}
@@ -258,7 +257,7 @@ func TestProfessorUpdateCheckNoticeNamesAFailingCheckWithAnUnusableSourceRepo(t 
 	if row, ok := cachedProfessorUpdateFailureRow(runtime, false); ok {
 		t.Fatalf("cachedProfessorUpdateFailureRow() = %+v, want no row without a usable source repo", row)
 	}
-	_, markerErr := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	_, markerErr := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if markerErr == nil {
 		t.Fatal("fixture home unexpectedly holds a readable source-repo marker")
 	}

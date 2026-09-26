@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -150,7 +149,9 @@ func Run(
 		fmt.Fprintf(stdout, "doctor: config error=%v\n", runtime.ConfigError)
 		tally.fail()
 	}
-	PrintConfig(stdout, runtime)
+	configWarnings, configFailures := PrintConfig(stdout, runtime)
+	tally.warnings += configWarnings
+	tally.failures += configFailures
 	tally.warnings += printHarvesterConfigDoctorWithEnv(stdout, runtime, dependencies.Env)
 	tally.warnings += printDuplicateSeatLogins(stdout, runtime, dependencies.Env)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
@@ -274,6 +275,9 @@ func Run(
 	hookWarnings, hookFailures := installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
+	layoutWarnings, layoutFailures := printLayoutChecks(stdout, runtime, dependencies.Env)
+	tally.warnings += layoutWarnings
+	tally.failures += layoutFailures
 
 	version, err := database.UserVersion(ctx)
 	if err != nil {
@@ -377,7 +381,12 @@ func Run(
 		fmt.Fprintf(stdout, "doctor: process_table readable pids=%d\n", len(pids))
 	}
 
-	tally.warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
+	tally.warnings += config.ReportRoots(
+		stdout,
+		resolved.Roots[pfmengine.Claude],
+		runtime.Config.CodexAccounts,
+		claudeAbsent,
+	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
 
 	tally.warnings += PrintCodexPaneBinding(ctx, stdout, database, runtime)
@@ -916,12 +925,9 @@ func PrintDependencies(
 // overlay renders identically to a healthy plain statusline (issue #14 F1)
 // — the failure is invisible from the prompt itself, so doctor has to be
 // the thing that notices it.
-// printHostOverlayDoctor treats every non-clean row — a missing/displaced/
-// unknown overlay symlink and a settings.json statusLine.command still
-// naming the raw `pfm statusline` — as a FAILURE, never a soft warning: a
-// misdirected or absent overlay is invisible from the prompt itself (issue
-// #14 F1), and only a state `pfm install --yes` is responsible for producing
-// is reported here at all.
+// printHostOverlayDoctor treats every missing, displaced, or unknown overlay
+// symlink as a failure: a misdirected or absent overlay is invisible from the
+// prompt itself (issue #14 F1).
 func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config) (warnings, failures int) {
 	for _, overlay := range installer.InspectHostOverlays(home) {
 		switch overlay.State {
@@ -948,7 +954,6 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 			)
 		}
 	}
-	failures += printStatusLineOverlayDoctor(stdout, home, machine)
 	return warnings, failures
 }
 
@@ -1492,94 +1497,6 @@ func harvestDoctorCheck(report harvestpy.CheckReport, name string, checkErr erro
 		return false, checkErr.Error()
 	}
 	return false, "check did not report healthy"
-}
-
-// pfmPathWarnings checks both precedence and byte identity. A copied binary
-// later on PATH can become the next active binary after a shell/toolchain
-// change, so checking command resolution alone is insufficient.
-func pfmPathWarnings(home, pathEnvironment string) []string {
-	return pfmPathWarningsWithEnv(home, pathEnvironment, paths.OSEnv{})
-}
-
-func pfmPathWarningsWithEnv(home, pathEnvironment string, env paths.Env) []string {
-	canonical := filepath.Join(home, ".local", "bin", "pfm")
-	canonical, _ = filepath.Abs(canonical)
-	targetHome, _ := filepath.Abs(home)
-	jailed := env.Get(paths.EnvHome) != "" || env.Get("PFM_DEV_FENCE") != ""
-	canonicalHash, err := executableHash(canonical)
-	if err != nil {
-		return []string{fmt.Sprintf("pfm_canonical=%s error=%v", canonical, err)}
-	}
-
-	seen := make(map[string]bool)
-	candidates := make([]string, 0)
-	var warnings []string
-	for _, directory := range filepath.SplitList(pathEnvironment) {
-		if directory == "" {
-			directory = "."
-		}
-		candidate, err := filepath.Abs(filepath.Join(directory, "pfm"))
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("pfm_path_entry=%s error=%v", directory, err))
-			continue
-		}
-		candidate = filepath.Clean(candidate)
-		if seen[candidate] {
-			continue
-		}
-		seen[candidate] = true
-		if jailed {
-			relative, err := filepath.Rel(targetHome, candidate)
-			if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
-				continue
-			}
-		}
-		info, err := os.Stat(candidate)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				warnings = append(warnings, fmt.Sprintf("pfm_path_entry=%s error=%v", candidate, err))
-			}
-			continue
-		}
-		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	if len(candidates) == 0 {
-		warnings = append(warnings, "pfm_path_resolves=not-found canonical="+canonical)
-		return warnings
-	}
-	if candidates[0] != canonical {
-		warnings = append(warnings, fmt.Sprintf(
-			"pfm_path_resolves=%s canonical=%s",
-			candidates[0],
-			canonical,
-		))
-	}
-	for _, candidate := range candidates {
-		hash, err := executableHash(candidate)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("pfm_hash_read=%s error=%v", candidate, err))
-			continue
-		}
-		if hash != canonicalHash {
-			warnings = append(warnings, fmt.Sprintf(
-				"pfm_hash_mismatch=%s canonical=%s",
-				candidate,
-				canonical,
-			))
-		}
-	}
-	return warnings
-}
-
-func executableHash(path string) ([sha256.Size]byte, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return [sha256.Size]byte{}, err
-	}
-	return sha256.Sum256(content), nil
 }
 
 func liveCodexSnapshot(ctx context.Context, runtime config.Runtime, manager *kill.Manager) (gather.Snapshot, error) {

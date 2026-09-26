@@ -97,7 +97,7 @@ func TestNameResolverReportsAScanFailureNotAMiss(t *testing.T) {
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvDB, filepath.Join(blocker, "index.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 	resolver := NameResolver{}
 	if _, code, _, err := resolver.ResolveName(
 		context.Background(),

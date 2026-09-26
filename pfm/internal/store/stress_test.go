@@ -355,8 +355,8 @@ func TestStoreStressKilledHelper(t *testing.T) {
 	if os.Getenv(storeStressHelperEnv) != "1" {
 		t.Skip("store stress helper process only")
 	}
-	if os.Getenv(paths.EnvDB) == "" {
-		t.Fatal("store stress helper has no PFM_DB jail")
+	if os.Getenv(paths.EnvCacheDB) == "" {
+		t.Fatal("store stress helper has no PFM_CACHE_DB jail")
 	}
 
 	count, err := strconv.Atoi(os.Getenv(storeStressCountEnv))

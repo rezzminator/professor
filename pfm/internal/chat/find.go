@@ -144,15 +144,11 @@ func ExcerptNeedles(value string) []string {
 }
 
 // ClaudeTranscripts lists every Claude transcript under the runtime's Claude
-// roots, sorted, each distinct file once under the first root that reaches it.
-// Without a config-file account list — or with no runtime at
-// all — the legacy primary root (~/.claude/projects) is searched first too.
+// roots, sorted, each given path once.
 func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 	var resolved paths.Values
-	includeLegacyPrimary := true
 	if runtime != nil {
 		resolved = runtime.Paths
-		includeLegacyPrimary = runtime.Config.Source("accounts") != pfmconfig.SourceFile
 	} else {
 		var err error
 		resolved, err = paths.Resolve()
@@ -161,9 +157,6 @@ func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 		}
 	}
 	roots := append([]string(nil), resolved.Roots[pfmengine.Claude]...)
-	if includeLegacyPrimary {
-		roots = append([]string{filepath.Join(resolved.Home, ".claude", "projects")}, roots...)
-	}
 	seen := make(map[string]struct{})
 	var files []string
 	for _, root := range roots {
@@ -188,21 +181,10 @@ func ClaudeTranscripts(runtime *pfmconfig.Runtime) ([]string, error) {
 					continue
 				}
 				path := filepath.Join(directory, entry.Name())
-				// Seat roots commonly share ONE projects directory by
-				// symlink, so the same transcript is reachable under every
-				// root: key by the resolved file, not by its spelling, or one
-				// session is listed once per root. A path that will not
-				// resolve (a dangling link) keys by its literal self — it is
-				// still listed once, never dropped and never an error for the
-				// whole search.
-				key := path
-				if physical, err := filepath.EvalSymlinks(path); err == nil {
-					key = physical
-				}
-				if _, exists := seen[key]; exists {
+				if _, exists := seen[path]; exists {
 					continue
 				}
-				seen[key] = struct{}{}
+				seen[path] = struct{}{}
 				files = append(files, path)
 			}
 		}

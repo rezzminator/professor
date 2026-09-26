@@ -404,8 +404,8 @@ func TestReadOpenCodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
 func openMirrorStore(t *testing.T) *store.Store {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv(paths.EnvDB, filepath.Join(root, "fleet.db"))
-	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "shared.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(root, "shared.db"))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)

@@ -28,6 +28,48 @@ func TestChatNewRejectsRetiredRoleFlagAndNamesAgentRole(t *testing.T) {
 	}
 }
 
+func TestChatNewRoleWithoutSourceRepoMarkerNamesCause(t *testing.T) {
+	jail := newRunJail(t)
+	rolePath := filepath.Join(jail.root, "work", ".claude", "agents", "reader.md")
+	if err := os.MkdirAll(filepath.Dir(rolePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rolePath, []byte("---\nname: reader\n---\nROLE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(jail.root, "home", "pfm.config.json")
+	if err := os.WriteFile(
+		configPath,
+		[]byte(`{"version":2,"claude":{"systemPrompt":"professor"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(paths.SourceRepoPath(filepath.Join(jail.root, "home"))); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{
+			"chat",
+			"new",
+			"--name",
+			"reader",
+			"--engine",
+			"cc",
+			"--cwd",
+			filepath.Join(jail.root, "work"),
+			"--agent-role",
+			"reader",
+		},
+		&stdout,
+		&stderr,
+	)
+	if code != 2 || !strings.Contains(stderr.String(), "no source repository recorded") {
+		t.Fatalf("chat new exit=%d stderr=%q", code, stderr.String())
+	}
+}
+
 func TestChatNewAgentRoleKeysDuplicateNamesByFreshSocket(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -46,14 +88,17 @@ func TestChatNewAgentRoleKeysDuplicateNamesByFreshSocket(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	fleetPrompt := action.ProfessorPromptPath(filepath.Join(jail.root, "home"))
+	fleetPrompt, err := action.ProfessorPromptPath(filepath.Join(jail.root, "home"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(fleetPrompt), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(fleetPrompt, []byte("FLEET"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(jail.root, "home", ".config", "pfm", "config.json")
+	configPath := filepath.Join(jail.root, "home", "pfm.config.json")
 	if err := os.WriteFile(
 		configPath,
 		[]byte(`{"version":2,"ask":{"engine":"claude"},"claude":{"systemPrompt":"professor"}}`),

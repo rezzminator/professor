@@ -161,7 +161,7 @@ func TestNameOfErrorRendersQuestionMarkAndNote(t *testing.T) {
 		t.Errorf("fault row = %v, want chat column ?", faultRow)
 	}
 	out := render(t, table)
-	if !strings.Contains(out, "note: chat names could not be read: session s1: fleet.db unreadable") {
+	if !strings.Contains(out, "note: chat names could not be read: session s1: pfm.db unreadable") {
 		t.Errorf("report lacks the chat-name note:\n%s", out)
 	}
 	if !strings.Contains(out, "note: 1 calls not recorded") {
@@ -173,7 +173,7 @@ type fleetError string
 
 func (e fleetError) Error() string { return string(e) }
 
-const errFleet = fleetError("fleet.db unreadable")
+const errFleet = fleetError("pfm.db unreadable")
 
 // TestAccountFilterKeepsThatAccountOnly: Filter.Account keeps the calls and
 // requests that account ran, drops another account's and the NULL account's,

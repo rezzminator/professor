@@ -2,6 +2,7 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,37 +10,22 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/callmeter"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// accountEnv is a hook environment homed at lab.root: its pfm config holds
-// config when config is not "", and CLAUDE_CONFIG_DIR is seat when seat is not "".
-func (lab *callmeterLab) accountEnv(config, seat string) paths.Env {
+// accountEnv is a hook environment homed at lab.root with seat as its
+// CLAUDE_CONFIG_DIR when set.
+func (lab *callmeterLab) accountEnv(seat string) paths.Env {
 	lab.t.Helper()
 	values := map[string]string{paths.EnvHome: lab.root}
 	if seat != "" {
 		values["CLAUDE_CONFIG_DIR"] = seat
 	}
 	env := &paths.MapEnv{HomeDir: lab.t.TempDir(), Values: values}
-	if config != "" {
-		path := pfmconfig.ResolvePathFrom(env, lab.root)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			lab.t.Fatalf("create config dir: %v", err)
-		}
-		lab.write(path, []byte(config))
-	}
 	lab.storePath = callmeter.DefaultPath(lab.root)
 	return env
-}
-
-// accountConfig is a pfm config registering each id at its dir.
-func accountConfig(dirs map[int]string) string {
-	var entries []string
-	for id, dir := range dirs {
-		entries = append(entries, fmt.Sprintf(`{"id":%d,"configDir":%q}`, id, dir))
-	}
-	return `{"version":2,"accounts":[` + strings.Join(entries, ",") + `]}`
 }
 
 // feedEntry runs each payload through the hook's own entry under env.
@@ -102,71 +88,67 @@ func (lab *callmeterLab) accountFaults() int {
 	return lab.count("SELECT COUNT(*) FROM faults WHERE stage = ?", callmeter.StageAccount)
 }
 
-func TestCallmeterRecordsTheSeatAccount(t *testing.T) {
-	lab := newCallmeterLab(t)
-	seat := filepath.Join(lab.root, "seat-3")
-	if err := os.MkdirAll(seat, 0o755); err != nil {
+func recordCallmeterLaunch(t *testing.T, home, session string, account int) {
+	t.Helper()
+	values := paths.Values{StateDB: paths.DefaultStateDB(home)}
+	if err := fleetdb.RecordLaunch(context.Background(), values, fleetdb.Launch{
+		SessionID: session, Engine: pfmengine.Claude, Account: account,
+	}, 1); err != nil {
 		t.Fatal(err)
 	}
-	lab.feedChat(lab.accountEnv(accountConfig(map[int]string{1: filepath.Join(lab.root, "seat-1"), 3: seat}), seat+"/"))
-	lab.expectSeat(3, seat)
+}
+
+func TestCallmeterLaunchAccountAcrossRows(t *testing.T) {
+	lab := newCallmeterLab(t)
+	seat := filepath.Join(lab.root, "seat-2")
+	recordCallmeterLaunch(t, lab.root, cmSessionA, 2)
+	lab.feedChat(lab.accountEnv(seat))
+	lab.expectSeat(2, seat)
+	for _, table := range []string{"calls", "requests", "agents"} {
+		if n := lab.count(
+			"SELECT COUNT(*) FROM "+table+" WHERE config_dir IS NOT ?",
+			filepath.Join(lab.root, ".claude"),
+		); n != 0 {
+			t.Errorf("%s rows with wrong shared config_dir = %d", table, n)
+		}
+	}
 	if n := lab.accountFaults(); n != 0 {
-		t.Errorf("account faults = %d, want 0", n)
+		t.Errorf("account faults = %d", n)
 	}
 }
 
-func TestCallmeterUnsetSeatIsHomeClaude(t *testing.T) {
+func TestCallmeterNoLaunchLeavesAccountNull(t *testing.T) {
 	lab := newCallmeterLab(t)
-	seat := filepath.Join(lab.root, ".claude")
-	lab.feedChat(lab.accountEnv(accountConfig(map[int]string{1: seat}), ""))
-	lab.expectSeat(1, seat)
-}
-
-// TestCallmeterSymlinkedSeatMatchesItsAccount: ~/.cc/3 links to ~/.claude3;
-// the seat is recorded as named, and matches the account by its target.
-func TestCallmeterSymlinkedSeatMatchesItsAccount(t *testing.T) {
-	lab := newCallmeterLab(t)
-	target := filepath.Join(lab.root, "claude3")
-	link := filepath.Join(lab.root, "cc-3")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
+	seat := filepath.Join(lab.root, "seat")
+	lab.feedEntry(lab.accountEnv(seat), lab.payloads("scripted.jsonl")[0])
+	if n := lab.count(
+		"SELECT COUNT(*) FROM calls WHERE account IS NULL AND seat_dir = ? AND config_dir = ?",
+		seat,
+		filepath.Join(lab.root, ".claude"),
+	); n != 1 {
+		t.Errorf("NULL-account call with seat and shared store = %d, want 1", n)
 	}
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
-	lab.feedChat(lab.accountEnv(accountConfig(map[int]string{3: target}), link))
-	lab.expectSeat(3, link)
-}
-
-func TestCallmeterUnregisteredSeatRecordsNoAccountAndNoFault(t *testing.T) {
-	lab := newCallmeterLab(t)
-	seat := filepath.Join(lab.root, "stray")
-	if err := os.MkdirAll(seat, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	lab.feedChat(lab.accountEnv(accountConfig(map[int]string{1: filepath.Join(lab.root, "other")}), seat))
-	lab.expectSeat(nil, seat)
 	if n := lab.accountFaults(); n != 0 {
-		t.Errorf("account faults = %d, want 0 for a seat no account names", n)
+		t.Errorf("account faults = %d", n)
 	}
 }
 
-// TestCallmeterUnloadableConfigIsOneAccountFault: a config pfm cannot load, or
-// none at all, still records the seat, leaves the account NULL and says so in
-// exactly one account fault for the hook run.
-func TestCallmeterUnloadableConfigIsOneAccountFault(t *testing.T) {
-	for name, config := range map[string]string{"missing": "", "unreadable": "{not json"} {
-		t.Run(name, func(t *testing.T) {
-			lab := newCallmeterLab(t)
-			seat := filepath.Join(lab.root, "seat")
-			lab.feedEntry(lab.accountEnv(config, seat), lab.payloads("scripted.jsonl")[0])
-			if n := lab.count("SELECT COUNT(*) FROM calls WHERE account IS NULL AND seat_dir = ?", seat); n != 1 {
-				t.Errorf("calls with NULL account and seat %s = %d, want 1", seat, n)
-			}
-			if n := lab.accountFaults(); n != 1 {
-				t.Errorf("account faults = %d, want exactly 1", n)
-			}
-			assertLogged(t, lab.rec, callmeter.StageAccount)
-		})
+func TestCallmeterLaunchReadErrorIsOneAccountFault(t *testing.T) {
+	lab := newCallmeterLab(t)
+	seat := filepath.Join(lab.root, "seat")
+	state := paths.DefaultStateDB(lab.root)
+	if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(state, []byte("not sqlite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lab.feedEntry(lab.accountEnv(seat), lab.payloads("scripted.jsonl")[0])
+	if n := lab.count("SELECT COUNT(*) FROM calls WHERE account IS NULL AND seat_dir = ?", seat); n != 1 {
+		t.Errorf("NULL-account call = %d, want 1", n)
+	}
+	if n := lab.accountFaults(); n != 1 {
+		t.Errorf("account faults = %d, want 1", n)
+	}
+	assertLogged(t, lab.rec, callmeter.StageAccount)
 }

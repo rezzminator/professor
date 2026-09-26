@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
@@ -16,7 +15,7 @@ import (
 func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	source := newScaffoldStoreFixture(t)
 	home := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, source); err != nil {
 		t.Fatal(err)
 	}
 	target := t.TempDir()
@@ -104,7 +103,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 func TestInitCollisionSkipsWithoutPinAndForceOverwrites(t *testing.T) {
 	source := newScaffoldStoreFixture(t)
 	home := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, source); err != nil {
 		t.Fatal(err)
 	}
 	target := t.TempDir()
@@ -154,7 +153,7 @@ func TestInitCollisionSkipsWithoutPinAndForceOverwrites(t *testing.T) {
 func TestInitRefusesASecondScaffoldWithoutForce(t *testing.T) {
 	source := newScaffoldStoreFixture(t)
 	home := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, source); err != nil {
 		t.Fatal(err)
 	}
 	target := t.TempDir()
@@ -214,7 +213,7 @@ func TestInitRefusesASecondScaffoldWithoutForce(t *testing.T) {
 func TestInitRenderFillsTokensFromManifestAnswers(t *testing.T) {
 	source := newScaffoldStoreFixture(t)
 	home := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, source); err != nil {
 		t.Fatal(err)
 	}
 	target := t.TempDir()
@@ -264,7 +263,7 @@ func TestInitRenderFillsTokensFromManifestAnswers(t *testing.T) {
 func TestInitRenderRejectsForceAndTwoPositionals(t *testing.T) {
 	source := newScaffoldStoreFixture(t)
 	home := t.TempDir()
-	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, source); err != nil {
 		t.Fatal(err)
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: home}}

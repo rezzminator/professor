@@ -33,7 +33,8 @@ func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
 	apply := func() {
 		t.Helper()
 		if _, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -105,10 +106,15 @@ func TestClaudeLauncherAssetIsExactExecShim(t *testing.T) {
 	t.Fatal("bin/claude missing from staged assets")
 }
 
-func TestAssetRenderersRefuseMissingTemplateMarkers(t *testing.T) {
-	t.Parallel()
-	if _, err := renderShimAsset([]byte("marker drift\n"), Options{}); err == nil {
-		t.Fatal("shim renderer silently accepted missing markers")
+func TestStaticShimIsNotStaged(t *testing.T) {
+	assets, err := assetFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range assets {
+		if asset.path == "shim/pfm.zsh" {
+			t.Fatal("static clone shim staged under managed root")
+		}
 	}
 }
 

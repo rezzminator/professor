@@ -28,6 +28,18 @@ func installedCodexConfig(t *testing.T, rest string) string {
 	return "developer_instructions = '''\n" + prompt + "'''\n" + rest
 }
 
+func writeDoctorCodexAuth(t *testing.T, home string) {
+	t.Helper()
+	path := filepath.Join(home, ".codex", "auth.json")
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"tokens":{"access_token":"fixture-access-token","account_id":"fixture-account-id"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	root := jailTest(t)
 	home := filepath.Join(root, "home")
@@ -43,6 +55,7 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeDoctorCodexAuth(t, home)
 	if err := os.WriteFile(
 		filepath.Join(home, ".codex", "config.toml"),
 		[]byte(installedCodexConfig(
@@ -81,6 +94,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeDoctorCodexAuth(t, home)
 	write := func(path, content string) {
 		t.Helper()
 		if path == codexPath {
@@ -242,7 +256,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	})
 }
 
-func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
+func TestDoctorEnumeratesExternalDependencies(t *testing.T) {
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	jailTest(t)
 	runtime, err := pfmconfig.LoadRuntime("")
@@ -258,10 +272,7 @@ func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
 			stderr.String(),
 		)
 	}
-	for _, wanted := range []string{
-		"doctor: dep tmux ",
-		"doctor: hook claude[1] ",
-	} {
+	for _, wanted := range []string{"doctor: dep tmux "} {
 		if !strings.Contains(stdout.String(), wanted) {
 			t.Fatalf("doctor output missing %q:\n%s", wanted, stdout.String())
 		}

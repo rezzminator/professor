@@ -1,6 +1,10 @@
 package installer
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+)
 
 const (
 	vscodePathKey        = "path"
@@ -30,14 +34,15 @@ var vscodeLegacyProfiles = []map[string]any{
 		vscodeProfileArgsKey: []any{"-l"},
 		vscodeProfileEnvKey:  map[string]any{vscodeAutoOpenEnv: MCPClientPFM},
 	},
-	{vscodePathKey: vscodeShellPath, vscodeProfileArgsKey: []any{"-l"}, vscodeProfileEnvKey: map[string]any{
-		vscodeAutoOpenEnv:           MCPClientPFM,
-		"CLAUDECODE":                nil,
-		"CLAUDE_CODE_SESSION_ID":    nil,
-		"CLAUDE_CODE_CHILD_SESSION": nil,
-		"TMUX":                      nil,
-		"TMUX_PANE":                 nil,
-	}},
+	{vscodePathKey: vscodeShellPath, vscodeProfileArgsKey: []any{"-l"}, vscodeProfileEnvKey: vscodeLegacyIdentityEnv()},
+}
+
+func vscodeLegacyIdentityEnv() map[string]any {
+	env := map[string]any{vscodeAutoOpenEnv: MCPClientPFM, "TMUX": nil, "TMUX_PANE": nil}
+	for _, name := range claudelaunch.IdentityHygiene()[:3] {
+		env[name] = nil
+	}
+	return env
 }
 
 func isLegacyVSCodeProfile(profile any) bool {
@@ -57,19 +62,9 @@ func vscodeProfile() map[string]any {
 		// typed into, never a nested chat — but it inherits VS Code's own
 		// process env, which (when VS Code was itself launched from inside a
 		// chat) carries that chat's identity markers. `null` is how VS Code
-		// deletes an inherited env var (terminal.integrated.env.<platform> and
-		// a profile's own "env" both honour it), matching the Professor
-		// extension's terminal (extension.js nextTerminal) — see
-		// CC_SESSION_UNSET in pfm.zsh (~line 56) for why each one lies in a
-		// different way, plus the TMUX pair that names its tmux server.
-		vscodeProfileEnvKey: map[string]any{
-			vscodeAutoOpenEnv:           MCPClientPFM,
-			"CLAUDECODE":                nil,
-			"CLAUDE_CODE_SESSION_ID":    nil,
-			"CLAUDE_CODE_CHILD_SESSION": nil,
-			"TMUX":                      nil,
-			"TMUX_PANE":                 nil,
-		},
+		// deletes an inherited env var. The registry supplies the identity
+		// markers, alongside the TMUX pair naming its tmux server.
+		vscodeProfileEnvKey: vscodeIdentityEnv(),
 		// icon/color give the canonical PFM profile the same visual identity
 		// the Professor extension's own contributed profile carries (15
 		// cycling icons, 6 colours) — mortar-board/magenta is the single,
@@ -79,4 +74,12 @@ func vscodeProfile() map[string]any {
 		"icon":  "mortar-board",
 		"color": "terminal.ansiMagenta",
 	}
+}
+
+func vscodeIdentityEnv() map[string]any {
+	env := map[string]any{vscodeAutoOpenEnv: MCPClientPFM, "TMUX": nil, "TMUX_PANE": nil}
+	for _, name := range claudelaunch.IdentityHygiene() {
+		env[name] = nil
+	}
+	return env
 }

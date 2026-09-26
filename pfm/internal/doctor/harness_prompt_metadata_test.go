@@ -163,7 +163,10 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			home := t.TempDir()
 			stageHarnessPromptBaseline(t, home)
-			dir := paths.HarnessBaselineDir(home)
+			dir, err := paths.HarnessBaselineDir(home)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := scenario.breakBaseline(dir); err != nil {
 				t.Fatal(err)
 			}

@@ -104,9 +104,7 @@ func Run(
 	}()
 
 	request := scanRequest{
-		View: view,
-		// Fleet-wide picker: no chat chosen yet, so no per-account override applies.
-		Cache1H: runtime.Config.InitialCache1H(0),
+		View:    view,
 		NoSky:   *noSky,
 		Safe:    *safe,
 		Runtime: &runtime,

@@ -389,7 +389,7 @@ func (session *claudeSession) background(step Step) (string, error) {
 
 func (session *claudeSession) mcp(Step) error {
 	return fmt.Errorf("claude MCP client calls are not scripted here: pfm registers its servers for Claude " +
-		"through mcpServers (internal/installer/mcp_accounts.go:230) and no pfm reader consumes the handshake")
+		"through the launch registry (internal/claudelaunch/render.go) and no pfm reader consumes the handshake")
 }
 
 func (session *claudeSession) clear() error {

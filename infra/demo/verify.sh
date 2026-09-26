@@ -25,7 +25,7 @@ export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp || exit 1
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 read -r -a LIVE <<<"$(cat "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r '[.accounts[].id] | join(" ")' "$CONFIG")"
 SEAT_A="${LIVE[0]:-}"; SEAT_B="${LIVE[1]:-$SEAT_A}"
 checks=0 failed=0

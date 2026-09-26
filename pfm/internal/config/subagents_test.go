@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -41,10 +40,6 @@ func TestLoadSubagentCapsDefault(t *testing.T) {
 		if source := got.Source(key); source != SourceDefault {
 			t.Fatalf("Source(%s) = %q, want %q", key, source, SourceDefault)
 		}
-	}
-	want := []string{"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=8"}
-	if env := got.EffectiveClaude(0).SubagentEnv(); !slices.Equal(env, want) {
-		t.Fatalf("SubagentEnv() = %v, want %v", env, want)
 	}
 }
 
@@ -89,13 +84,6 @@ func TestLoadSubagentCapsTopLevelAndPerAccount(t *testing.T) {
 			prefs.MaxSubagentSpawnDepth,
 			prefs.MaxConcurrentSubagents,
 		)
-	}
-	want := []string{
-		"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=5",
-		"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=32",
-	}
-	if env := got.EffectiveClaude(3).SubagentEnv(); !slices.Equal(env, want) {
-		t.Fatalf("SubagentEnv() = %v, want %v", env, want)
 	}
 }
 

@@ -179,30 +179,6 @@ func TestLimitsSamplerMapsCanonicalAndScopedWindowsAndCaches(t *testing.T) {
 	}
 }
 
-func TestLimitsSamplerACKFallbackIsAtMostOncePerAccount(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	var fetches, acks int
-	sampler := NewLimitsSampler([]LimitAccount{{ID: 7, Engine: pfmengine.Claude, ConfigDir: "config"}})
-	sampler.Now = func() time.Time { return now }
-	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
-		fetches++
-		return usagehook.Usage{}, fmt.Errorf("401 unauthorized")
-	}
-	sampler.Ack = func(context.Context, LimitAccount) error {
-		acks++
-		return fmt.Errorf("ACK refresh failed")
-	}
-	_, warnings := sampler.Sample(context.Background())
-	if acks != 1 || fetches != 1 || len(warnings) != 0 {
-		t.Fatalf("first sample fetches=%d acks=%d warnings=%v", fetches, acks, warnings)
-	}
-	now = now.Add(defaultLimitsTTL + time.Minute)
-	_, warnings = sampler.Sample(context.Background())
-	if acks != 1 || fetches != 2 || len(warnings) != 0 {
-		t.Fatalf("expired sample fetches=%d acks=%d warnings=%v", fetches, acks, warnings)
-	}
-}
-
 func TestDefaultLimitsTTLMatchesSharedUsageCacheCadence(t *testing.T) {
 	if got := NewLimitsSampler(nil).ttl(); got != 3*time.Minute {
 		t.Fatalf("default Limits TTL=%s, want the shared usage cache's 3m cadence", got)

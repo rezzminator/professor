@@ -51,7 +51,7 @@ fi
 # 3. ~/.zshrc — the devbox shell, minus what a fence has no use for (mise, direnv,
 #    the version pin). pfm's own shim line is preserved verbatim: pfm install owns it.
 shim="$(grep -F 'pfm.zsh' "$HOME/.zshrc" 2>/dev/null | head -1)"
-[ -n "$shim" ] || shim='[[ -r "$HOME/.local/share/pfm/install/shim/pfm.zsh" ]] && source "$HOME/.local/share/pfm/install/shim/pfm.zsh"'
+[ -n "$shim" ] || shim='[[ -r "$HOME/.professor/pfm/internal/installer/assets/shim/pfm.zsh" ]] && source "$HOME/.professor/pfm/internal/installer/assets/shim/pfm.zsh"'
 cat > "$HOME/.zshrc" <<ZRC
 # ~/.zshrc — the demo fence's shell (infra/demo/look.sh writes this file; edit there).
 export PATH="\$HOME/.local/bin:\$PATH"

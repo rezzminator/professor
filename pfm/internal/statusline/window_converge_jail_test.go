@@ -72,10 +72,9 @@ func TestRenderConvergesTheWindowNameOnAProbeSocket(t *testing.T) {
 		Engine:       pfmengine.Claude,
 		Command:      runner,
 		Env: map[string]string{
-			"TMUX":                    socketPath + ",1,0",
-			"TMUX_PANE":               pane,
-			"PFM_TEST_PROBE_SOCKETS":  "1",
-			"FORCE_PROMPT_CACHING_5M": "",
+			"TMUX":                   socketPath + ",1,0",
+			"TMUX_PANE":              pane,
+			"PFM_TEST_PROBE_SOCKETS": "1",
 		},
 	}
 	payload := `{"session_id":"probe-session","session_name":"RENAMED-BY-STATUSLINE"}`

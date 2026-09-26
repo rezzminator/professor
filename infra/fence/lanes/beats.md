@@ -19,9 +19,9 @@ The root image build. Its beats test no command — they build the shared `pfm-l
 
 - `E1.01-open-seat1` · opens one cc chat on seat 1 (spawn ceremony, label converges) · spends cc:$SEAT
 - `E1.02-statusline-theme` · statusline (seat glyph/model/effort/context%) and theme `custom:professor-*` render · spends cc:$SEAT
-- `E1.03-reload-account` · `/reload --account 2` reboots in place on the new seat · spends cc:${ALT:-none}
+- `E1.03-reload-account` · `/reload --account 2` keeps the same session id and recalls a pre-reload token on the new seat · spends cc:${ALT:-none}
 - `E1.04-reload-model-effort` · `/reload --model`/`--effort` reboot in place · spends cc:${ALT:-$SEAT}
-- `E1.05-reload-1h` · `/reload --1h on|off` toggles the cache window · spends cc:${ALT:-$SEAT}
+- `E1.05-reload-1h` · `/reload --cache 1h|5m` toggles the cache window · spends cc:${ALT:-$SEAT}
 - `E1.06-reload-new` · `/reload --new`/`--new --hide` spawns a fresh session variant · spends cc:${ALT:-$SEAT}
 - `E1.07-reload-then` · `/reload --then "<steer>"` queues a follow-up after the reboot · spends cc:${ALT:-$SEAT}
 - `E1.08-reload-sock` · `/reload --sock <own>` reboots against the caller's own socket · spends cc:${ALT:-$SEAT}
@@ -55,7 +55,7 @@ The root image build. Its beats test no command — they build the shared `pfm-l
 - `E2.07-inject-ask-watch` · inject/ask/watch on the Codex home · spends cx
 - `E2.08-kill-self` · `chat kill self/me` alias incl. the tmux-less Codex tool-shell (`CODEX_THREAD_ID`) · spends cx
 - `E2.09-self-compact` · self-compact composes the Codex bare `/compact` form (held, not disproved) · spends cx
-- `E2.10-codex-launch` · the Codex-specific launcher entry starts the pane · spends cx
+- `E2.10-codex-launch` · the Codex launcher accepts no args and forwards Codex args · spends cx
 - `E2.11-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows stay clean while the chat lives · spends cx
 
 ## Lane E3 — OpenCode
@@ -68,7 +68,7 @@ The root image build. Its beats test no command — they build the shared `pfm-l
 
 - `F.01-new-engine` · `chat new` across every engine: cc/cx/oc, resolved by flag/fallback/socket-prefix · spends cc:$SEAT+cx
 - `F.02-new-label-role` · `chat new` dimension: `{name}:{group}` label / hidden `_KILL`/`_HIDE` / role / prompt-file · spends cc:$SEAT
-- `F.03-new-account-1h-model` · `chat new` dimension: account / 1h / model-effort · spends cc:$SEAT
+- `F.03-new-account-1h-model` · `chat new` dimension: account / cache / model-effort · spends cc:$SEAT
 - `F.04-new-await-attach` · `chat new --await`/`--attach` mechanics · spends cc:$SEAT
 - `F.05-storm` · a storm (`storm.sh`) spans cc + cx + oc · spends cc:$SEAT+cx
 - `F.06-ls-rows` · `pfm ls` rows and kinds render for every chat · spends cc:$SEAT
@@ -87,10 +87,10 @@ The root image build. Its beats test no command — they build the shared `pfm-l
 
 ## Lane M — MCP
 
-- `M.01-register-claude` · registration per engine: Claude professor stdio (`pfm mcp serve --stdio`) wired from the files the installer wrote · spends none
+- `M.01-register-claude` · Claude `--mcp-config` payload carries the professor stdio server (`pfm mcp serve --stdio`); a re-install leaves no pfm server key in the seat's `.claude.json` · spends none
 - `M.02-register-codex` · registration per engine: Codex stdio, fenced block preserves a foreign entry · spends none
 - `M.03-register-opencode` · registration per engine: OpenCode — professor local stdio, `pfm doctor`'s healthy row · spends none
-- `M.04-doctor-mcp` · `pfm doctor` MCP registration classification (professor rows, `legacy=`, cutover rows) + daemon reachability + version-skew · spends none
+- `M.04-doctor-mcp` · `pfm doctor` Codex + project-scope cutover rows (`foreign-registration`, `legacy-pfm`, `legacy-standalone`) + daemon reachability + version-skew · spends none
 - `M.05-daemon-core` · daemon: single loopback port, `/mcp/professor` and its family views, health, restart on replaced binary (rebuild in-container, exit-75) · spends none
 - `M.06-daemon-units` · daemon service units: systemd live in the container, launchd = named advisory · spends none
 - `M.07-stdio-transports` · `pfm mcp serve --stdio`: forwards to the daemon, serves in process without one, the caller's ambient identity; malformed-frame parse error · spends none
@@ -127,6 +127,7 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 
 - `O1.01-install-idempotent` · a second `pfm install --yes` is idempotent (changed=0) · spends none
 - `O1.02-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, themes, harness baseline) · spends none
+- `O1.02a-session-store` · every non-primary seat has four installer-created session-store links and doctor has no `session-store:` finding · spends none
 - `O1.03-hooks-installed` · hooks are installed correctly per engine · spends none
 - `O1.04-seats` · seats configuration: implicit + explicit accounts, fanout, Codex homes, OpenCode home absence · spends none
 - `O1.05-credential` · a seat with an expired/absent credential refuses by name at every surface (doctor, `chat new`) · spends none

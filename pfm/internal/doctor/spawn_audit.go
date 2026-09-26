@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -56,9 +56,11 @@ type rolePromptRead struct {
 // spawnObservation is everything the classifier is allowed to see: one live
 // pane's Claude process as /proc reports it.
 type spawnObservation struct {
-	Socket string
-	PID    int
-	Argv   []string
+	Socket   string
+	PID      int
+	Argv     []string
+	Parsed   claudelaunch.Parsed
+	ParseErr error
 	// Environ is the process's own environment. A nil map means it could not
 	// be read, which is NOT the same as an empty one — the classifier says so.
 	Environ map[string]string
@@ -68,81 +70,71 @@ type spawnObservation struct {
 	StartedUnix int64
 }
 
-// classifySpawn is the pure verdict. layerStampUnix is the moment this host's
-// current spawn door went live (spawnDoorStamp); 0 means the stamp is
-// unavailable and the age signal is unusable.
-//
-// The reason string names WHICH signal decided, because the two flagless
-// outcomes are indistinguishable without it: "old chat" and "broken spawn
-// site" look identical in argv.
-func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVerdict, string) {
-	promptReason := ""
-	for _, argument := range observation.Argv {
-		if argument == "--system-prompt-file" ||
-			strings.HasPrefix(argument, "--system-prompt-file=") {
-			promptReason = "argv carries --system-prompt-file"
-			break
+// classifySpawn grades the decoded launch against the account's prompt policy and registry hooks.
+func classifySpawn(
+	parsed claudelaunch.Parsed,
+	observation spawnObservation,
+	prefs config.ClaudePrefs,
+	home string,
+	layerStampUnix int64,
+) (spawnVerdict, string) {
+	missing := ""
+	switch promptPolicyName(prefs.SystemPrompt) {
+	case config.SystemPromptProfessor:
+		if parsed.PromptFile == "" {
+			missing = "no --system-prompt-file prompt material"
+		}
+	case config.SystemPromptLean:
+		if parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "1" {
+			missing = "lean prompt missing from the --settings payload"
 		}
 	}
-	if promptReason == "" && observation.Environ["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] == "1" {
-		promptReason = "lean prompt armed in the process environment"
+	if missing == "" && (parsed.Settings == nil || parsed.Settings["outputStyle"] != "default") {
+		missing = "missing --settings outputStyle default"
 	}
-	if promptReason != "" {
-		// The staged prompt is meant to be the ONLY persona layer. A launch
-		// carrying it without also disabling Claude Code's own output style
-		// still double-applies a persona — the exact defect this flag exists
-		// to close — so it is reported as its own outcome, distinct from a
-		// spawn site that injected nothing at all.
-		if carried, malformed := argvCarriesOutputStyleDefault(observation.Argv); !carried {
-			settingsReason := fmt.Sprintf("argv is missing --settings %s", pfmengine.OutputStyleDefaultSettings)
-			if malformed != nil {
-				// The flag IS there and its value is broken: a different
-				// spawn-site bug than never passing it, so it is named apart.
-				settingsReason = fmt.Sprintf("argv carries a malformed --settings payload (%v)", malformed)
-			}
-			// ...but only a seat born AFTER the current spawn door went live
-			// can be blamed on a spawn site. An older chat carries the argv of the
-			// pfm that launched it, and predates this flag exactly as a
-			// flagless chat predates the prompt itself — a reload is the fix,
-			// not a bug hunt. Skipping this check would accuse every live
-			// seat on the host the moment the flag ships.
-			if age, older := predatesLayer(observation, layerStampUnix); older {
-				return spawnPredatesLayer, fmt.Sprintf(
-					"%s but %s, and the process started %s before this host's current spawn door was installed — reload to carry it",
-					promptReason,
-					settingsReason,
-					age,
-				)
-			}
-			return spawnViolation, fmt.Sprintf(
-				"%s but %s — Claude Code's own output style can still double-apply on top of it",
-				promptReason,
-				settingsReason,
-			)
-		}
-		return spawnInjected, promptReason
+	if missing == "" && !sameSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
+		missing = "hook set differs from the registry — reload to carry it"
 	}
-	if age, older := predatesLayer(observation, layerStampUnix); older {
-		return spawnPredatesLayer, fmt.Sprintf(
-			"process started %s before this host's current spawn door was installed", age,
-		)
-	}
-	for _, argument := range observation.Argv {
-		if argument == "--resume" || strings.HasPrefix(argument, "--resume=") {
-			return spawnPredatesLayer, "resumed argv with no prompt material — reborn before the door"
+	if missing == "" {
+		switch promptPolicyName(prefs.SystemPrompt) {
+		case config.SystemPromptProfessor:
+			return spawnInjected, "argv carries --system-prompt-file and registry payload"
+		case config.SystemPromptLean:
+			return spawnInjected, "lean prompt armed in the --settings payload and registry hooks"
+		default:
+			return spawnInjected, "production payload and registry hooks"
 		}
 	}
-	if observation.Environ == nil {
-		// A process whose environment could not be read cannot be cleared: the
-		// lean arm lives ONLY there. Calling it a violation would be a guess,
-		// and calling it clean would be a lie, so it is reported as the
-		// unaudited seat it is.
-		return spawnViolation, fmt.Sprintf(
-			"fresh flagless argv AND the environment could not be read (%v) — verdict unproven",
-			observation.EnvironErr,
-		)
+	if _, older := predatesLayer(observation, layerStampUnix); older {
+		return spawnPredatesLayer, missing
 	}
-	return spawnViolation, "fresh launch with no prompt material — some spawn site bypassed the door"
+	if parsed.Resume != "" && parsed.Settings == nil {
+		return spawnPredatesLayer, "resumed argv with no registry payload — reborn before the door"
+	}
+	return spawnViolation, missing + " — some spawn site bypassed the door"
+}
+
+func sameSpawnHooks(actual, expected []claudelaunch.Hook) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	type key struct {
+		event, matcher, command string
+		async                   bool
+	}
+	counts := map[key]int{}
+	for _, hook := range expected {
+		counts[key{hook.Event, hook.Matcher, hook.Command, hook.Async}]++
+	}
+	for _, hook := range actual {
+		counts[key{hook.Event, hook.Matcher, hook.Command, hook.Async}]--
+	}
+	for _, count := range counts {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // classifyRolePrompt separates a readable-but-invalid role channel from a
@@ -169,28 +161,6 @@ func classifyRolePrompt(path string, read rolePromptRead) (rolePromptOutcome, st
 	return rolePromptOK, fmt.Sprintf("%s carries role=%s and a non-empty prompt channel", path, read.role)
 }
 
-// roleSeatPromptPath finds the prompt file named by this process's own argv.
-// It recognizes the filename through agentrole's canonical path constructor,
-// so doctor does not invent a second role-file shape.
-func roleSeatPromptPath(argv []string) (string, bool) {
-	for index, argument := range argv {
-		var candidate string
-		switch {
-		case argument == "--system-prompt-file" && index+1 < len(argv):
-			candidate = argv[index+1]
-		case strings.HasPrefix(argument, "--system-prompt-file="):
-			candidate = strings.TrimPrefix(argument, "--system-prompt-file=")
-		default:
-			continue
-		}
-		if !agentrole.IsSeatPromptPath(candidate) {
-			continue
-		}
-		return candidate, true
-	}
-	return "", false
-}
-
 // printSpawnRoleAudit emits the additional role-channel audit. Ordinary
 // staged-prompt seats are deliberately silent here; without a role seat there
 // is no role-fleet claim to make and therefore no summary line.
@@ -198,10 +168,14 @@ func printSpawnRoleAudit(stdout io.Writer, observations []spawnObservation) int 
 	counts := map[rolePromptOutcome]int{}
 	roleSeats := 0
 	for _, observation := range observations {
-		path, ok := roleSeatPromptPath(observation.Argv)
-		if !ok {
+		parsed, err := observation.Parsed, observation.ParseErr
+		if parsed.Settings == nil && parsed.PromptFile == "" && err == nil {
+			parsed, err = claudelaunch.Parse(observation.Argv)
+		}
+		if err != nil || !agentrole.IsSeatPromptPath(parsed.PromptFile) {
 			continue
 		}
+		path := parsed.PromptFile
 		roleSeats++
 		role, prompt, found, err := agentrole.ReadSeatPromptFile(path)
 		outcome, reason := classifyRolePrompt(path, rolePromptRead{
@@ -248,46 +222,6 @@ func predatesLayer(observation spawnObservation, layerStampUnix int64) (time.Dur
 	return time.Duration(layerStampUnix-observation.StartedUnix) * time.Second, true
 }
 
-// argvCarriesOutputStyleDefault reports whether argv disables Claude Code's
-// own output style the way every fleet spawn door does: a `--settings` word
-// pair or a `--settings=<json>` word whose value parses as a JSON object
-// with `"outputStyle":"default"` — a themed payload (an extra `"theme"` key)
-// still counts; malformed JSON, another outputStyle, or a missing one does
-// not. When no word carries it, the error names the last `--settings` whose
-// payload did not parse (or that had no payload at all), so the caller can
-// tell a malformed flag from an absent one; nil means none was malformed.
-func argvCarriesOutputStyleDefault(argv []string) (bool, error) {
-	var malformed error
-	for index, argument := range argv {
-		var raw string
-		switch argument {
-		case "--settings":
-			if index+1 >= len(argv) {
-				malformed = errors.New("no payload follows --settings")
-				continue
-			}
-			raw = argv[index+1]
-		default:
-			value, found := strings.CutPrefix(argument, "--settings=")
-			if !found {
-				continue
-			}
-			raw = value
-		}
-		var settings struct {
-			OutputStyle string `json:"outputStyle"`
-		}
-		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
-			malformed = fmt.Errorf("parse %q: %w", raw, err)
-			continue
-		}
-		if settings.OutputStyle == "default" {
-			return true, nil
-		}
-	}
-	return false, malformed
-}
-
 // printSpawnAuditDoctor audits every live Claude chat against the configured
 // system-prompt policy and reports one line per seat plus a verdict summary.
 //
@@ -313,17 +247,12 @@ func printSpawnAuditDoctorWithClock(
 	clk clock.Clock,
 ) int {
 	prefs := machine.EffectiveClaude(primary)
-	if prefs.SystemPrompt == "" || prefs.SystemPrompt == config.SystemPromptProduction {
-		// Production expects no prompt material anywhere, so every seat would
-		// classify as a violation. Saying "clean" here would be a coincidence
-		// detector: it would print the same word whether the door worked or
-		// not.
-		fmt.Fprintf(
-			stdout,
-			"doctor: spawn-audit: policy=%s — no prompt material is expected, nothing to audit\n",
-			promptPolicyName(prefs.SystemPrompt),
-		)
-		return 0
+	policy := promptPolicyName(prefs.SystemPrompt)
+	for _, account := range machine.Accounts {
+		if promptPolicyName(machine.EffectiveClaude(account.ID).SystemPrompt) != policy {
+			policy = "per-account"
+			break
+		}
 	}
 
 	observations, unread, err := liveClaudeSpawns(ctx, resolved, machine, clk)
@@ -337,7 +266,7 @@ func printSpawnAuditDoctorWithClock(
 		fmt.Fprintf(
 			stdout,
 			"doctor: spawn-audit: policy=%s — no live Claude chats found\n",
-			promptPolicyName(prefs.SystemPrompt),
+			policy,
 		)
 		return spawnAuditUnreadWarnings(stdout, unread)
 	}
@@ -349,8 +278,23 @@ func printSpawnAuditDoctorWithClock(
 		return observations[left].PID < observations[right].PID
 	})
 	counts := map[spawnVerdict]int{}
-	for _, observation := range observations {
-		verdict, reason := classifySpawn(observation, stamp)
+	for index := range observations {
+		observation := &observations[index]
+		if warning := decodeSpawn(observation); warning != "" {
+			unread = append(unread, warning)
+			continue
+		}
+		accountID, accountReason := spawnAccount(machine, primary, *observation)
+		verdict, reason := classifySpawn(
+			observation.Parsed,
+			*observation,
+			machine.EffectiveClaude(accountID),
+			resolved.Home,
+			stamp,
+		)
+		if accountReason != "" {
+			reason += " (" + accountReason + ")"
+		}
 		counts[verdict]++
 		fmt.Fprintf(
 			stdout,
@@ -365,7 +309,7 @@ func printSpawnAuditDoctorWithClock(
 	fmt.Fprintf(
 		stdout,
 		"doctor: spawn-audit: policy=%s chats=%d injected=%d predates-layer=%d violations=%d (age signal: %s)\n",
-		promptPolicyName(prefs.SystemPrompt),
+		policy,
 		len(observations),
 		counts[spawnInjected],
 		counts[spawnPredatesLayer],
@@ -378,6 +322,27 @@ func printSpawnAuditDoctorWithClock(
 	}
 	warnings += roleWarnings
 	return warnings
+}
+
+func decodeSpawn(observation *spawnObservation) string {
+	observation.Parsed, observation.ParseErr = claudelaunch.Parse(observation.Argv)
+	if observation.ParseErr != nil {
+		return fmt.Sprintf("%s pid=%d: argv undecodable: %v", observation.Socket, observation.PID, observation.ParseErr)
+	}
+	return ""
+}
+
+func spawnAccount(machine config.Config, primary int, observation spawnObservation) (int, string) {
+	if observation.Environ == nil {
+		return primary, "account environment unreadable; graded against primary"
+	}
+	dir := observation.Environ["CLAUDE_CONFIG_DIR"]
+	for _, account := range machine.Accounts {
+		if account.ConfigDir == dir || (dir == "" && account.Implicit) {
+			return account.ID, ""
+		}
+	}
+	return primary, "account unmatched; graded against primary"
 }
 
 // spawnAuditUnreadWarnings reports the sockets and panes the audit could not
@@ -409,7 +374,7 @@ func promptPolicyName(value string) string {
 var spawnDoorExecutable = os.Executable
 
 // spawnDoorStamp is the moment this host's CURRENT spawn door went live: the
-// later of the staged professor prompt's mtime (the prompt layer) and the
+// later of the clone's composed professor prompt mtime (the prompt layer) and the
 // running pfm binary's mtime (the argv every door builds). One stamp cannot
 // be the prompt alone: the --settings output-style flag shipped releases
 // after the prompt, and an install that leaves the prompt's bytes unchanged
@@ -432,7 +397,8 @@ func spawnDoorStamp(home string) (int64, string) {
 		}
 		failures = append(failures, fmt.Sprintf("%s: %v", label, err))
 	}
-	consider("prompt layer", action.ProfessorPromptPath(home), nil)
+	promptPath, promptErr := action.ProfessorPromptPath(home)
+	consider("prompt layer", promptPath, promptErr)
 	executable, err := spawnDoorExecutable()
 	consider("pfm binary", executable, err)
 	if stamp == 0 {

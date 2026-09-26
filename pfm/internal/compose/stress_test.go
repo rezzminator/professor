@@ -286,9 +286,9 @@ func composeStressInput() Input {
 		},
 		Transcripts: transcripts,
 		Killed:      killed,
-		AccountRoots: []AccountRoot{{
-			Account: 1,
-			Path:    "/accounts/1",
+		ClaudeSeats: []ClaudeSeat{{
+			Account:   1,
+			ConfigDir: "/accounts/1",
 		}},
 		Options: Options{
 			View:           DefaultView,

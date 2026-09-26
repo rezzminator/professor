@@ -203,8 +203,7 @@ func TestMCPDaemonStatusReportsHarvesterExternalState(t *testing.T) {
 func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	jailTest(t)
 	home := os.Getenv("PFM_HOME")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	dir := filepath.Join(home, ".config", "pfm")
+	dir := filepath.Join(home, "clone")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +217,7 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := config.LoadRuntime("")
+	runtime, err := config.LoadRuntime(legacy)
 	if err != nil {
 		t.Fatal(err)
 	}

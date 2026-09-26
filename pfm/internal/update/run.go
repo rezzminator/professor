@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/semver"
 )
@@ -76,7 +77,7 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	}
 	repo := strings.TrimSpace(*repoFlag)
 	if repo == "" {
-		repo, err = installer.ReadSourceRepoMarker(runtime.Paths.Home)
+		repo, err = paths.ReadSourceRepoMarker(runtime.Paths.Home)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm update: %v\n", err)
 			return 1
@@ -179,7 +180,7 @@ func updateRepository(
 		}
 	}
 
-	managedRoot := filepath.Dir(installer.SourceRepoPath(runtime.Paths.Home))
+	managedRoot := filepath.Dir(paths.SourceRepoPath(runtime.Paths.Home))
 	stage, err := os.MkdirTemp(filepath.Dir(managedRoot), "update-")
 	if err != nil {
 		return fmt.Errorf("stage update beside managed root: %w", err)
@@ -596,7 +597,7 @@ func rollbackUpdateState(
 }
 
 func preferredUpdateSourceRepo(home, repo string) string {
-	recorded, err := installer.ReadSourceRepoMarker(home)
+	recorded, err := paths.ReadSourceRepoMarker(home)
 	if err != nil {
 		return repo
 	}

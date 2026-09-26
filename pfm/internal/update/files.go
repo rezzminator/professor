@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // updateFileKind names what an installer-owned file is to the operator: its
@@ -40,29 +41,26 @@ type updateFileSnapshot struct {
 	afterErr      error
 }
 
-// snapshotUpdateOwnedFiles captures every file whose hooks the installer owns
-// (installer.ExpectedHooks: each account's Claude settings) plus the
-// ownership ledger they reconcile against, PLUS the machine config files
-// under the config directory (issue #24 finding 3): the candidate's own
-// `install --yes` renames config.json -> pfm.config.json (the v0.74.0
-// migration). A rollback across that boundary runs the OLD binary, which
-// reads only the legacy name — without these files restored first, it
-// converges on defaults and tears down every MCP service the real config
-// enabled, including the launch agent. It also captures every MCP
-// registration install rewrites — each Claude user registry, $HOME/.claude.json, ~/.mcp.json,
-// each Codex home's config.toml, the OpenCode config and the MCP ownership
-// ledger — so a rollback never leaves the candidate's registrations behind.
+// snapshotUpdateOwnedFiles captures the hook ownership ledger and the machine
+// config files under the config directory (issue #24 finding 3): the
+// candidate's own `install --yes` renames config.json -> pfm.config.json
+// (the v0.74.0 migration). A rollback across that boundary runs the OLD
+// binary, which reads only the legacy name — without these files restored
+// first, it converges on defaults and tears down every MCP service the real
+// config enabled, including the launch agent. It also captures every MCP
+// registration install rewrites — each Codex home's config.toml, the OpenCode
+// config and the MCP ownership ledger — so a rollback never leaves the
+// candidate's registrations behind. Account files (settings.json,
+// .claude.json) are not captured: install writes no key there, and the
+// HostLayout journal owns the legacy entries it strips.
 func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, error) {
 	home := runtime.Paths.Home
 	type candidate struct {
 		path string
 		kind updateFileKind
 	}
-	managedRoot := filepath.Dir(installer.SourceRepoPath(home))
+	managedRoot := filepath.Dir(paths.SourceRepoPath(home))
 	candidates := []candidate{{filepath.Join(managedRoot, "settings-hook-ownership.json"), updateHookFile}}
-	for _, hook := range installer.ExpectedHooks(home, runtime.Config) {
-		candidates = append(candidates, candidate{hook.File, updateHookFile})
-	}
 	if runtime.Config.Path != "" {
 		configDir := filepath.Dir(runtime.Config.Path)
 		for _, name := range []string{
@@ -74,20 +72,6 @@ func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, err
 			candidates = append(candidates, candidate{filepath.Join(configDir, name), updateConfigFile})
 		}
 	}
-	for _, registry := range installer.ClaudeUserRegistries(
-		home,
-		runtime.Config.Accounts,
-		config.AmbientClaudeConfigDir(),
-	) {
-		candidates = append(candidates, candidate{registry.Path, updateMCPRegistration})
-	}
-	// $HOME/.claude.json is rewritten even when no account wires it (install
-	// sweeps pfm's legacy entries there), so it is captured either way.
-	candidates = append(
-		candidates,
-		candidate{filepath.Join(home, ".claude.json"), updateMCPRegistration},
-		candidate{filepath.Join(home, ".mcp.json"), updateMCPRegistration},
-	)
 	for _, codexHome := range runtime.Config.CodexHomes() {
 		candidates = append(candidates, candidate{filepath.Join(codexHome, "config.toml"), updateMCPRegistration})
 	}

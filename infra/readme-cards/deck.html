@@ -1175,7 +1175,7 @@
       <div class="why"><span class="k">Why</span><p>The order of authority decides who wins at 2 a.m. — your discipline sits on top.</p></div>
       <div class="how"><span class="k">How</span><p><code>pfm</code> launches every Claude chat with <code>--system-prompt-file professor.md</code>; Codex and OpenCode get compiled mirrors.</p></div>
     </div>
-    <div class="cue"><code>cat ~/.local/share/pfm/install/harness-prompts/claude.md</code> — pfm hands it to every Claude chat as <code>--system-prompt-file</code>, above the harness's own prose</div>
+    <div class="cue"><code>cat ~/.professor/pfm/harness-prompts/composed/claude.md</code> — pfm hands it to every Claude chat as <code>--system-prompt-file</code>, above the harness's own prose</div>
     <div class="towers">
       <div class="axis"><span class="lbl">high</span><div class="axisbar"><i class="axisdot"></i></div><span class="lbl">low</span></div>
 
@@ -2195,7 +2195,7 @@
         if (step === 20) row('you come back after 6 minutes: an idle chat is normal work');
         if (!dead5 && t5 <= 0) { dead5 = true; row('✗ default cache went cold at 5m — the next turn re-reads the whole context at full price', 'x'); }
         if (step === 34) { row('❯ next prompt at 34m idle', 'u'); row('⚡ 1h window still warm — served from cache, pennies', 'ok'); t5 = 300; t1 = 3600; dead5 = false; }
-        if (step === 50) { row('⚡ pfm chat reload --1h on · /reload --1h on — the mode is per chat, and the timer is how you see it', 'ok'); }
+        if (step === 50) { row('⚡ pfm chat reload --cache 1h|5m · /reload --cache 1h|5m — the choice is per chat, and the timer is how you see it', 'ok'); }
         if (!(await sc.wait(600, my))) return;
         idle += 60; t5 -= 60; t1 -= 60; paint();
       }

@@ -46,10 +46,11 @@ func TestCommandPreviewSurvivesDanglingGlobalCommandLink(t *testing.T) {
 			}
 
 			if _, err := Run(context.Background(), Options{
-				Mode:      mode.mode,
-				Home:      home,
-				ConfigDir: filepath.Join(home, ".claude"),
-				Runner:    &fakeRunner{},
+				MCPConfigPath: testConfigPath(t),
+				Mode:          mode.mode,
+				Home:          home,
+				ConfigDir:     filepath.Join(home, ".claude"),
+				Runner:        &fakeRunner{},
 			}); err != nil {
 				t.Fatalf("install aborted on a dangling global-command link it was about to retire: %v", err)
 			}

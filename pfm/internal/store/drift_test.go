@@ -2,10 +2,14 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"os/exec"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // TestSharedKillsNeedNoBridgeInEitherDirection pins the shared-state boundary:
@@ -86,64 +90,98 @@ ON CONFLICT(uuid) DO UPDATE SET
 	}
 }
 
-// The one-time adoption unions the retired local table into shared SQLite and
-// runs once. It never deletes the rollback rows.
+// The one-time adoption unions the retired local table into shared SQLite.
+// The v9 backup preserves the retired rows for rollback.
 func TestAdoptingLocalKillsUnionsOnceAndDeletesNothing(t *testing.T) {
-	setStoreTestJail(t)
-
-	first := openTestStore(t)
+	cachePath := setStoreTestJail(t)
 	ctx := context.Background()
-	// A kill in the shape the retired local table held: engine column and all,
-	// written straight to the private cache as an older binary would have.
-	if _, err := first.db.ExecContext(ctx, `
+	cache, err := sqlitedb.OpenStore(ctx, cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for version := 1; version <= 8; version++ {
+		if _, err := cache.ExecContext(ctx, migrations[version-1]); err != nil {
+			t.Fatalf("v%d: %v", version, err)
+		}
+		if _, err := cache.ExecContext(ctx, "PRAGMA user_version="+string(rune('0'+version))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// This row has the retired cache shape and has not yet been adopted.
+	if _, err := cache.ExecContext(ctx, `
 INSERT INTO hidden(id, engine, hidden_at, baseline_prompts)
 VALUES ('cache-kill', 'cc', 4242, 9)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := first.SetMeta(ctx, adoptedKillsMeta, ""); err != nil {
+	if err := cache.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := fleetdb.OpenSharedState(ctx, values)
+	if err := shared.Kill(ctx, "shared-kill", 3000); err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	first := openTestStore(t)
+	killed, err := first.KilledChats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(killed) != 2 ||
+		killed[0].ID != "cache-kill" || killed[0].KilledAt != 4242 ||
+		killed[1].ID != "shared-kill" || killed[1].KilledAt != 3000 {
+		t.Fatalf("adopted kills = %#v", killed)
+	}
+	var tableCount int
+	if err := first.db.QueryRowContext(ctx,
+		"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='hidden'",
+	).Scan(&tableCount); err != nil {
+		t.Fatal(err)
+	}
+	if tableCount != 0 {
+		t.Fatalf("retired cache hidden tables = %d, want 0", tableCount)
+	}
+	backup, err := sql.Open("sqlite", cachePath+".bak-before-v9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := backup.Close(); err != nil {
+			t.Errorf("close cache backup: %v", err)
+		}
+	})
+	var backupCount int
+	if err := backup.QueryRowContext(ctx,
+		"SELECT count(*) FROM hidden WHERE id='cache-kill'",
+	).Scan(&backupCount); err != nil {
+		t.Fatal(err)
+	}
+	if backupCount != 1 {
+		t.Fatalf("backup cache-kill rows = %d, want 1", backupCount)
+	}
+
+	// An unkill followed by a reopen must not re-adopt the backup row.
+	if err := first.Unkill(ctx, "cache-kill"); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-
 	second := openTestStore(t)
-	killed, err := second.KilledChats(ctx)
+	t.Cleanup(func() { _ = second.Close() })
+	killed, err = second.KilledChats(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(killed) != 1 ||
-		killed[0].ID != "cache-kill" || killed[0].KilledAt != 4242 {
-		t.Fatalf("adopted kills = %#v", killed)
-	}
-	// The retired table is left populated: it is the rollback, not a leak.
-	var remaining int
-	if err := second.db.QueryRowContext(
-		ctx,
-		"SELECT count(*) FROM hidden",
-	).Scan(&remaining); err != nil {
-		t.Fatal(err)
-	}
-	if remaining != 1 {
-		t.Fatalf("retired local killed rows = %d, want the original left in place", remaining)
-	}
-
-	// An unkill now, and a reopen must NOT resurrect it: adoption ran once.
-	if err := second.Unkill(ctx, "cache-kill"); err != nil {
-		t.Fatal(err)
-	}
-	if err := second.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	third := openTestStore(t)
-	t.Cleanup(func() { _ = third.Close() })
-	killed, err = third.KilledChats(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(killed) != 0 {
-		t.Fatalf("kills after reopen = %#v, want the unkill to have stuck", killed)
+	if len(killed) != 1 || killed[0].ID != "shared-kill" || killed[0].KilledAt != 3000 {
+		t.Fatalf("kills after reopen = %#v, want the original shared kill only", killed)
 	}
 }
 

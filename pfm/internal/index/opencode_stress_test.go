@@ -230,8 +230,8 @@ func TestStressOpenCodeMirrorConcurrentPasses(t *testing.T) {
 	seedOpenCodeStress(t, root, count)
 
 	jail := t.TempDir()
-	t.Setenv(paths.EnvDB, filepath.Join(jail, "fleet.db"))
-	t.Setenv(paths.EnvFleetDB, filepath.Join(jail, "shared.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(jail, "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(jail, "shared.db"))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)

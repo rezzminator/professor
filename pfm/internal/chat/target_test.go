@@ -271,7 +271,7 @@ func TestTargetReportsAScanThatCouldNotLook(t *testing.T) {
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvDB, filepath.Join(blocker, "index.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 	_, err := Target(ctx, "ghost", nil)
 	var failure *TargetError
 	if !errors.As(err, &failure) || errors.Is(err, ErrUnknownChat) || failure.Name != "ghost" {

@@ -21,8 +21,7 @@ import (
 func (installer *engine) wireLogDefault() error {
 	path := installer.options.MCPConfigPath
 	if path == "" {
-		installer.skip("log default: no pfm.config.json path known — nothing to write")
-		return nil
+		return pfmconfig.NoConfigPathError(nil)
 	}
 	content, changed, err := pfmconfig.LogDefaultInsertion(path)
 	if errors.Is(err, fs.ErrNotExist) {

@@ -30,6 +30,31 @@ type fakeCommsReader struct {
 	limit   int
 }
 
+func TestBuildSnapshotInitialCacheMatchesPrimaryAccount(t *testing.T) {
+	machine := config.Config{
+		Claude: config.ClaudePrefs{Cache1H: true},
+		Accounts: []config.Account{
+			{ID: 1},
+			{ID: 2, Claude: &config.ClaudePrefs{Cache1H: false}},
+		},
+	}
+	for _, testCase := range []struct {
+		account int
+		want    bool
+	}{{1, true}, {2, false}} {
+		snapshot := buildSnapshot(
+			context.Background(),
+			fleet.Env{Config: machine, Primary: testCase.account},
+			scanRequest{},
+			compose.Output{},
+		)
+		if snapshot.Cache1H != testCase.want || snapshot.Cache1HByAccount[testCase.account] != testCase.want {
+			t.Fatalf("account %d snapshot cache = %t map = %t, want %t", testCase.account,
+				snapshot.Cache1H, snapshot.Cache1HByAccount[testCase.account], testCase.want)
+		}
+	}
+}
+
 func (reader *fakeCommsReader) CommsSince(_ context.Context, sinceNS int64, limit int) ([]fleetdb.CommsEvent, error) {
 	reader.sinceNS = sinceNS
 	reader.limit = limit
@@ -304,7 +329,7 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 	if strict {
 		limit = 100 * time.Millisecond
 	}
-	request := scanRequest{Cache1H: true}
+	request := scanRequest{}
 	started := time.Now()
 	cached, err := scanFleetCached(context.Background(), database, request)
 	if err != nil {
@@ -538,7 +563,7 @@ func TestPrimaryAccountSetGetDirectly(t *testing.T) {
 	home := t.TempDir()
 	values := paths.Values{
 		Home:    home,
-		FleetDB: filepath.Join(home, ".cc", "fleet.db"),
+		StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 	}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
@@ -607,7 +632,7 @@ func TestPrimaryWritebackIgnoresTheUnsetSentinel(t *testing.T) {
 // primaryWriteback's whole point is keeping that call from ever happening.
 func TestPrimaryWritebackSentinelNeverHitsTheRosterCheck(t *testing.T) {
 	home := t.TempDir()
-	values := paths.Values{Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db")}
+	values := paths.Values{Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db")}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
 		filepath.Join(home, ".cc", "2", "projects"),

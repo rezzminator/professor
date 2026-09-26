@@ -285,29 +285,6 @@ func TestHarvesterFileEnabledWinsOverLegacyKey(t *testing.T) {
 	}
 }
 
-func TestLoadFallsBackToPreSplitFileUntilMigrated(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	legacy := filepath.Join(home, ".config", "pfm", LegacyFileName)
-	writeFile(t, legacy, `{"version":2,"theme":"tokyo-night"}`, 0o600)
-	got, err := Load("", home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Path != legacy || !got.Exists || got.Theme != "tokyo-night" {
-		t.Fatalf("pre-split fallback: path=%q exists=%t theme=%q", got.Path, got.Exists, got.Theme)
-	}
-	current := filepath.Join(home, ".config", "pfm", FileName)
-	writeFile(t, current, `{"version":2,"theme":"default"}`, 0o600)
-	got, err = Load("", home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Path != current || got.Theme != "default" {
-		t.Fatalf("current file must win once present: path=%q theme=%q", got.Path, got.Theme)
-	}
-}
-
 func TestSetMCPServerHarvesterWritesHarvesterFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)

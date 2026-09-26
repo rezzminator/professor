@@ -72,7 +72,6 @@ func stageHarnessPromptBaseline(t *testing.T, home string) {
 func jailTest(t *testing.T) string {
 	t.Helper()
 	root := testjail.InstalledHome(t)
-	stageHarnessPromptBaseline(t, filepath.Join(root, "home"))
 	return root
 }
 
@@ -139,20 +138,14 @@ func TestMain(m *testing.M) {
 		}
 		return results
 	}
-	installer.HookProbeOverride = func(home string, machine config.Config) []installer.HookProbeResult {
-		expected := installer.ExpectedHooks(home, machine)
-		results := make([]installer.HookProbeResult, 0, len(expected))
-		for _, hook := range expected {
-			results = append(results, installer.HookProbeResult{Hook: hook, State: "ok"})
-		}
-		return results
-	}
+	installer.HookProbeOverride = func(string, config.Config) []installer.HookProbeResult { return nil }
 	HarnessCaptureOverride = func(_ context.Context, _ string, _ config.Config, alias, _ string) (HarnessCapture, error) {
+		prompt, err := testjail.ShippedHarnessPrompt(alias)
 		return HarnessCapture{
-			Prompt:        harnessPromptFixtureCaptured,
+			Prompt:        prompt,
 			ResolvedModel: "claude-" + alias + "-5",
 			CLIVersion:    "fixture",
-		}, nil
+		}, err
 	}
 	os.Exit(testjail.Run(m))
 }

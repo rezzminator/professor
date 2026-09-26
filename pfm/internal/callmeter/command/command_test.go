@@ -29,7 +29,9 @@ func newLab(t *testing.T) lab {
 		t.Fatal(err)
 	}
 	home := filepath.Join(root, "home")
-	fixture := lab{runtime: pfmconfig.Runtime{Paths: paths.Values{Home: home, DB: filepath.Join(home, "pfm.db")}}}
+	fixture := lab{
+		runtime: pfmconfig.Runtime{Paths: paths.Values{Home: home, CacheDB: filepath.Join(home, "pfm-cache.db")}},
+	}
 	for index := range fixture.accounts {
 		dir := filepath.Join(root, fmt.Sprintf("account-%d", index+1))
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -47,12 +49,6 @@ func (fixture lab) run(args ...string) (code int, stdout, stderr string) {
 	var out, errs bytes.Buffer
 	code = CLI(args, &out, &errs, fixture.runtime)
 	return code, out.String(), errs.String()
-}
-
-// seedRead records one Read of file in configDir through the store's own API.
-func (fixture lab) seedRead(t *testing.T, id, file, configDir string) {
-	t.Helper()
-	fixture.seedReadOn(t, id, file, configDir, nil)
 }
 
 // seedReadOn is seedRead run on account, NULL when nil.
@@ -128,49 +124,6 @@ func TestCallmeterCLIUnknownTopicOrActionPrintsUsage(t *testing.T) {
 	}
 }
 
-func TestCallmeterCLIConfigDirNarrowsAndRejectsUnknown(t *testing.T) {
-	fixture := newLab(t)
-	fixture.seedRead(t, "toolu_1", "/work/one.md", fixture.accounts[0])
-	fixture.seedRead(t, "toolu_2", "/work/two.md", fixture.accounts[1])
-	code, stdout, stderr := fixture.run("report", "files", "--config-dir", fixture.accounts[1])
-	if code != 0 || !strings.Contains(stdout, "/work/two.md") || strings.Contains(stdout, "/work/one.md") {
-		t.Fatalf("narrowed report = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
-	}
-	nowhere := filepath.Join(fixture.runtime.Paths.Home, "nowhere")
-	code, _, stderr = fixture.run("report", "files", "--config-dir", nowhere)
-	if code != 2 || !strings.Contains(stderr, "is not a configured Claude config dir") ||
-		!strings.Contains(stderr, fixture.accounts[0]) || !strings.Contains(stderr, fixture.accounts[1]) {
-		t.Fatalf("unknown --config-dir = %d, want 2 naming the configured dirs\nstderr:\n%s", code, stderr)
-	}
-}
-
-// TestCallmeterCLIAccountsSharingProjectsAreOneHistory: accounts whose
-// projects/ is one directory (a symlink, as on this machine) hold one copy of
-// every chat. The hook names that chat's config dir once
-// (callmeter.ProjectsHome), and a report narrowed to either account shows the
-// same chat: a chat's history stays consistent across accounts.
-func TestCallmeterCLIAccountsSharingProjectsAreOneHistory(t *testing.T) {
-	fixture := newLab(t)
-	shared := filepath.Join(fixture.accounts[1], "projects")
-	if err := os.RemoveAll(shared); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(fixture.accounts[0], "projects"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(fixture.accounts[0], "projects"), shared); err != nil {
-		t.Fatal(err)
-	}
-	fixture.seedRead(t, "toolu_S", "/work/proj/shared.md", callmeter.ProjectsHome(fixture.accounts[0]))
-	for _, account := range fixture.accounts {
-		code, stdout, stderr := fixture.run("report", "files", "--config-dir", account)
-		if code != 0 || !strings.Contains(stdout, "/work/proj/shared.md") {
-			t.Fatalf("report narrowed to %s = %d, want the shared chat\nstdout:\n%s\nstderr:\n%s",
-				account, code, stdout, stderr)
-		}
-	}
-}
-
 // TestCallmeterCLIAccountNarrowsAndRejectsUnknown: --account keeps only the
 // calls that account ran, leaves out calls with no account recorded, names
 // itself in the header, and an id the config does not name is refused with
@@ -201,5 +154,16 @@ func TestCallmeterCLIAccountNarrowsAndRejectsUnknown(t *testing.T) {
 	if code != 2 || !strings.Contains(stderr, "--account 9 is not a configured account") ||
 		!strings.Contains(stderr, "1, 2, 3") {
 		t.Fatalf("unknown --account = %d, want 2 naming the configured ids\nstderr:\n%s", code, stderr)
+	}
+}
+
+func TestCallmeterCLIAccountFiltersSharedHistory(t *testing.T) {
+	fixture := newLab(t)
+	shared := filepath.Join(fixture.runtime.Paths.Home, ".claude")
+	fixture.seedReadOn(t, "toolu_1", "/work/one.md", shared, callmeter.Ptr(int64(1)))
+	fixture.seedReadOn(t, "toolu_2", "/work/two.md", shared, callmeter.Ptr(int64(2)))
+	code, stdout, stderr := fixture.run("report", "files", "--account", "2")
+	if code != 0 || !strings.Contains(stdout, "/work/two.md") || strings.Contains(stdout, "/work/one.md") {
+		t.Fatalf("shared-history account report = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
 }

@@ -1,40 +1,8 @@
 package engine
 
 import (
-	"encoding/json"
-	"fmt"
 	"path/filepath"
 )
-
-// OutputStyleDefaultSettings is the --settings payload every Claude launch
-// carries to disable Claude Code's own output style. Claude Code has no
-// "none" style; the built-in "default" style appends nothing, so naming it
-// is the off switch — see Claude's LaunchArgs below for why.
-const OutputStyleDefaultSettings = `{"outputStyle":"default"}`
-
-// claudeSettings is the --settings payload shape: outputStyle always
-// present, theme only when claude.theme resolved non-empty.
-type claudeSettings struct {
-	OutputStyle string `json:"outputStyle"`
-	Theme       string `json:"theme,omitempty"`
-}
-
-// ClaudeSettingsPayload is the --settings payload for a Claude launch: byte-
-// identical to OutputStyleDefaultSettings when theme is empty (so an
-// untouched account moves no goldens), else the same object with theme
-// merged in.
-func ClaudeSettingsPayload(theme string) string {
-	if theme == "" {
-		return OutputStyleDefaultSettings
-	}
-	payload, err := json.Marshal(claudeSettings{OutputStyle: "default", Theme: theme})
-	if err != nil {
-		// claudeSettings holds only plain strings — json.Marshal fails on
-		// channels, funcs, and cycles, none of which this type can hold.
-		panic(fmt.Sprintf("engine: marshal claude settings: %v", err))
-	}
-	return string(payload)
-}
 
 func init() {
 	Register(Descriptor{
@@ -43,29 +11,6 @@ func init() {
 		SocketPrefix: "cc-",
 		SessionEnv:   "CLAUDE_CODE_SESSION_ID",
 		HomeEnv:      "CLAUDE_CONFIG_DIR",
-		// Claude Code caps WebSearch at 200 calls per session; past it every
-		// search returns a refusal and a research chat stops mid-task. The
-		// CLI accepts any digits-only integer >= 1 with no ceiling, and a
-		// malformed value silently reverts to 200 — so this is the largest
-		// integer JavaScript holds exactly, spelled as plain digits.
-		//
-		// Claude Code drops to 256 colours whenever TMUX is set unless
-		// CLAUDE_CODE_TMUX_TRUECOLOR is present; every pfm chat lives in a
-		// tmux pane, so without it every theme colour is quantised. A
-		// headless run carries it too and ignores it: no TMUX, no downgrade.
-		LaunchEnv: []string{
-			"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991",
-			"CLAUDE_CODE_TMUX_TRUECOLOR=1",
-		},
-		// pfm stages its own system prompt (--system-prompt-file); Claude
-		// Code's own output style (a project or user "outputStyle" setting,
-		// e.g. a checked-in .claude/settings.json) would otherwise apply a
-		// second persona on top of it. Claude Code has no "none" style —
-		// the built-in "default" style appends nothing, so naming it via
-		// --settings is the off switch. --settings on the command line
-		// outranks project and user settings files, so this wins regardless
-		// of what a project or account has configured.
-		LaunchArgs:   []string{"--settings", OutputStyleDefaultSettings},
 		RootEnv:      "PFM_CLAUDE_ROOTS",
 		DefaultRoots: claudeDefaultRoots,
 	})

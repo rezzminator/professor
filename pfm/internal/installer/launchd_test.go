@@ -246,7 +246,7 @@ func TestWireLaunchAgentPlansLogDirInDryRun(t *testing.T) {
 func TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	configPath := filepath.Join(home, ".config", "pfm", "pfm.config.json")
+	configPath := filepath.Join(home, "pfm.config.json")
 	installer := &engine{
 		options: Options{
 			Home:          home,

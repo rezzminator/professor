@@ -30,8 +30,8 @@ func TestTranscriptNamesReadsDisplayNameReadOnly(t *testing.T) {
 		UUID: "sess-1", Path: "/fixture/sess-1.jsonl", AITitle: "ai title", FirstPrompt: "first prompt",
 	})
 	// The reader must never reach the shared store the indexing Store opened.
-	sharedPath := filepath.Join(t.TempDir(), "cc", "fleet.db")
-	t.Setenv(paths.EnvFleetDB, sharedPath)
+	sharedPath := filepath.Join(t.TempDir(), "cc", "pfm-cache.db")
+	t.Setenv(paths.EnvStateDB, sharedPath)
 
 	ctx := context.Background()
 	names, found, err := OpenTranscriptNames(ctx, dbPath)
@@ -56,7 +56,7 @@ func TestTranscriptNamesReadsDisplayNameReadOnly(t *testing.T) {
 }
 
 func TestTranscriptNamesMissingIndexIsAbsence(t *testing.T) {
-	names, found, err := OpenTranscriptNames(context.Background(), filepath.Join(t.TempDir(), "pfm.db"))
+	names, found, err := OpenTranscriptNames(context.Background(), filepath.Join(t.TempDir(), "pfm-cache.db"))
 	if names != nil || found || err != nil {
 		t.Fatalf("OpenTranscriptNames(missing) = %v, %v, %v; want nil, false, nil", names, found, err)
 	}
@@ -73,7 +73,7 @@ func TestTranscriptNamesUnreadableIndexErrs(t *testing.T) {
 		}
 	}
 	for name, path := range map[string]string{
-		"path under a file":   filepath.Join(notDir, "pfm.db"),
+		"path under a file":   filepath.Join(notDir, "pfm-cache.db"),
 		"not a database":      garbage,
 		"unrecognized schema": empty,
 	} {

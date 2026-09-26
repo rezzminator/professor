@@ -10,6 +10,7 @@ import (
 // field it wrote — including the five reporter-identity columns — comes
 // back unchanged through Issues().
 func TestRecordIssueRoundTripsThroughIssues(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	ctx := context.Background()
 
@@ -54,6 +55,7 @@ func TestRecordIssueRoundTripsThroughIssues(t *testing.T) {
 // default view (includeClosed=false) hides a closed issue entirely, and
 // includeClosed=true is the only way to see both.
 func TestIssuesFiltersToOpenUnlessIncludeClosed(t *testing.T) {
+	t.Parallel()
 	state, _ := openTestStore(t)
 	ctx := context.Background()
 

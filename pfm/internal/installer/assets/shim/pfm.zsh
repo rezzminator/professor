@@ -32,28 +32,6 @@ for _pfm_retired in cc cc1 cc2 cc3 cc4 cc-clean cc-ls cc-open cc-revive cc-swap 
 done
 unset _pfm_retired _cc_auto_what PFM_CLAUDE_PROMPTED
 
-typeset -gA PFM_CODEX_YOLO=()
-# CC_ENDPOINT_UNSET — every launch strips any inherited API endpoint. A chat
-# born inside another chat's Bash tool inherits that chat's environment, so a shell pointed at a
-# local translating proxy would hand the next launch a foreign endpoint and it would answer from a
-# foreign model under an Anthropic medal. The launcher's verdict is the account; the environment
-# gets no vote.
-typeset -ga CC_ENDPOINT_UNSET=(
-  -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL
-  -u CLAUDE_CODE_AUTO_COMPACT_WINDOW -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK
-  -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY
-)
-# CC_SESSION_UNSET — the inherited SESSION IDENTITY, stripped by every path that starts a chat.
-# A chat born inside another chat's Bash tool inherits that chat's markers, and each one lies in a
-# different way: CLAUDE_CODE_SESSION_ID makes the newborn answer to its parent's id, CLAUDECODE
-# makes it believe it is already inside a harness, and CLAUDE_CODE_CHILD_SESSION marks it a
-# SUBORDINATE — which silently turns transcript saving OFF. That last one is the quiet one: the
-# chat runs perfectly, and only the footer whispers "Transcript saving is off", so the loss is
-# discovered when someone goes looking for a conversation that was never written. Stripping the
-# marker restores the default; forcing persistence back on with
-# CLAUDE_CODE_FORCE_SESSION_PERSISTENCE would paper over an identity the chat should never have
-# had. One array, three launch paths — a list written three times is a list that gets fixed twice.
-typeset -ga CC_SESSION_UNSET=(-u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION)
 _pfm_primary() { local n; n="$("$HOME/.local/bin/pfm" internal primary-get 2>/dev/null)"; case "$n" in 1|2) ;; *) n=1 ;; esac; echo "$n"; }
 # cx — a CODEX chat on the same per-chat-server pattern, socket prefix cx-* instead of cc-*.
 # The prefix IS the engine marker: codex writes no statusline breadcrumbs and no ~/.claude
@@ -61,16 +39,10 @@ _pfm_primary() { local n; n="$("$HOME/.local/bin/pfm" internal primary-get 2>/de
 # accounts / ⚡1h don't apply — codex has its own single auth (~/.codex).
 cx() {
   local sock="cx-$(date +%s)-$$-$RANDOM"
-  local acct; acct="$(_pfm_primary)"
-  local -a codex_flags=()
-  if [[ "${PFM_CODEX_YOLO[$acct]:-1}" == 1 ]]; then
-    codex_flags=(--dangerously-bypass-approvals-and-sandbox)
-  fi
-  # same launch hygiene as claude: a codex born inside a Claude chat must not inherit its identity.
   # PER-ELEMENT quoting, then join: "${(q)@}" joins the
   # array into ONE word FIRST and quotes that, so `cx --resume abc123` arrives as a single
   # escaped argv element ("--resume\ abc123") and codex rejects it as one unknown flag.
-  local run="env ${CC_SESSION_UNSET} -u CLAUDE_CONFIG_DIR -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M ${CC_ENDPOINT_UNSET} codex ${(j: :)${(@q)codex_flags}} ${(j: :)${(@q)@}}"
+  local run="\"$HOME/.local/bin/pfm\" internal codex-launch ${(j: :)${(@q)@}}"
   _cx_server "$sock" "$PWD" "$run" || return
   if _pfm_selfswitch "$sock"; then :                          # already inside it → switch, never nest
   elif _pfm_in_bunker; then TMUX= exec tmux -L "$sock" attach # viewport dies with the tab

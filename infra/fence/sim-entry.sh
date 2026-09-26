@@ -33,11 +33,12 @@ mkdir -p "$HOME/.local/bin"
 go -C /worktree/pfm build -o "$HOME/.local/bin/pfm" ./cmd/pfm >/tmp/sim-build.log 2>&1 ||
   fail "go build ./cmd/pfm from /worktree" /tmp/sim-build.log
 
+export PFM_CONFIG="${PFM_CONFIG:-$HOME/.local/state/pfm/pfm.config.json}"
+mkdir -p "$(dirname "$PFM_CONFIG")"
 pfm install --yes --skip-engine codex --skip-themes >/tmp/sim-install.log 2>&1 ||
   fail "pfm install (converter sidecar into the harvest volume)" /tmp/sim-install.log
 
-mkdir -p "$HOME/.config/pfm"
-printf '{\n  "fetch": {\n    "browser": true\n  }\n}\n' >"$HOME/.config/pfm/harvester.config.json"
+printf '{\n  "fetch": {\n    "browser": true\n  }\n}\n' >"$(dirname "$PFM_CONFIG")/harvester.config.json"
 
 echo "sim: chrome=\"$chrome\" harvest=$HOME/.local/state/pfm/harvest-python browser-rung=on pfm=$(command -v pfm)"
 exec "$@"

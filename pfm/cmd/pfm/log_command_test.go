@@ -85,7 +85,7 @@ func TestLogVerbReadsWhatTheProcessWrote(t *testing.T) {
 // writeJailConfig writes the jail's pfm.config.json body.
 func writeJailConfig(t *testing.T, root, body string) {
 	t.Helper()
-	path := filepath.Join(root, "home", ".config", "pfm", config.FileName)
+	path := filepath.Join(root, "home", config.FileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}

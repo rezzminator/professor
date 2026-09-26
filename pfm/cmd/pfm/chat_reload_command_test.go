@@ -56,7 +56,14 @@ func TestRefreshReloadRolePromptReResolvesAndRewritesBothEngineChannels(t *testi
 				t.Fatal(err)
 			}
 			if testCase.engine == pfmengine.Claude {
-				fleetPrompt := action.ProfessorPromptPath(home)
+				clone := t.TempDir()
+				if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+					t.Fatal(err)
+				}
+				fleetPrompt, err := action.ProfessorPromptPath(home)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if err := os.MkdirAll(filepath.Dir(fleetPrompt), 0o700); err != nil {
 					t.Fatal(err)
 				}

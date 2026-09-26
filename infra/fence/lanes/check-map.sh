@@ -122,13 +122,13 @@ JSON
     printf '%s\n' '{"search": {"searxngURL": "http://127.0.0.1:9"}}' >"$JAIL/harvester.config.json"
     # Jailed: the derive must never touch the host's fleet, socket dir or tmux.
     pfm_jailed() {
-      env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" PFM_FLEET_DB="$JAIL/fleet.db" \
+      env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" PFM_CONFIG="$JAIL/pfm.config.json" \
         PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
         "$PFM" --config "$JAIL/pfm.config.json" "$@"
     }
     with_timeout() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
     pfm_jailed_timed() {
-      with_timeout 10 env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" PFM_FLEET_DB="$JAIL/fleet.db" \
+      with_timeout 10 env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" PFM_CONFIG="$JAIL/pfm.config.json" \
         PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
         "$PFM" --config "$JAIL/pfm.config.json" "$@"
     }
@@ -171,8 +171,8 @@ JSON
         '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
         '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
       sleep 5
-    } | with_timeout 60 env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" \
-      PFM_FLEET_DB="$JAIL/fleet.db" PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
+    } | with_timeout 60 env PFM_HOME="$JAIL/home" PFM_STATE_DB="$JAIL/pfm.db" PFM_CACHE_DB="$JAIL/pfm-cache.db" \
+      PFM_CONFIG="$JAIL/pfm.config.json" PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
       "$PFM" --config "$JAIL/pfm.config.json" mcp serve --stdio 2>"$JAIL/stdio.err")"
     printf '%s\n' "$tools_out" >"$JAIL/stdio.frames"
     tools="$(printf '%s\n' "$tools_out" | jq -r 'select(.id == 2) | .result.tools[]?.name' 2>/dev/null)"

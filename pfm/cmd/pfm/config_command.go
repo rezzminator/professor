@@ -7,8 +7,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -16,7 +19,7 @@ import (
 
 func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate")
+		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate | claude [--account N]")
 		return 2
 	}
 	switch args[0] {
@@ -32,6 +35,8 @@ func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		}
 		printResolvedConfig(stdout, runtime)
 		return 0
+	case pfmengine.MustLookup(pfmengine.Claude).LongName:
+		return runConfigClaude(args[1:], stdout, stderr, runtime)
 	case "validate":
 		if len(args) != 1 {
 			fmt.Fprintln(stderr, "usage: pfm config validate")
@@ -45,9 +50,53 @@ func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		fmt.Fprintf(stdout, "config valid: %s\n", loaded.Path)
 		return 0
 	default:
-		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate")
+		fmt.Fprintln(stderr, "usage: pfm config init [--force] | show | validate | claude [--account N]")
 		return 2
 	}
+}
+
+func runConfigClaude(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+	flags := cli.NewFlagSet("config claude", "usage: pfm config claude [--account N]", stderr)
+	account := flags.Int("account", 0, "Claude account roster ID")
+	if code, ok := cli.ParseFlags(flags, args); !ok {
+		return code
+	}
+	if flags.NArg() != 0 || *account < 0 {
+		flags.Usage()
+		return 2
+	}
+	if *account != 0 {
+		if _, found := runtime.Config.AccountByID(*account); !found {
+			ids := make([]int, 0, len(runtime.Config.Accounts))
+			for _, entry := range runtime.Config.Accounts {
+				ids = append(ids, entry.ID)
+			}
+			sort.Ints(ids)
+			configured := make([]string, 0, len(ids))
+			for _, id := range ids {
+				configured = append(configured, strconv.Itoa(id))
+			}
+			fmt.Fprintf(
+				stderr,
+				"pfm config claude: account %d is not configured (configured: %s)\n",
+				*account,
+				strings.Join(configured, ","),
+			)
+			return 2
+		}
+	}
+	for _, row := range claudelaunch.Resolve(runtime.Config, *account) {
+		fmt.Fprintf(
+			stdout,
+			"%s wire=%s target=%s value=%s source=%s\n",
+			row.Knob.Name,
+			row.Knob.Wire,
+			row.Knob.Target,
+			row.Value,
+			row.Won,
+		)
+	}
+	return 0
 }
 
 func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
@@ -59,6 +108,11 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	if flags.NArg() != 0 {
 		flags.Usage()
 		return 2
+	}
+	if runtime.Config.Path == "" {
+		_, markerErr := pfmconfig.ResolvePath(runtime.Paths.Home)
+		fmt.Fprintf(stderr, "pfm config init: %v\n", pfmconfig.NoConfigPathError(markerErr))
+		return 1
 	}
 	harvesterPath := pfmconfig.HarvesterPath(runtime.Config.Path)
 	if !*force {
@@ -146,6 +200,8 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
+	fmt.Fprintf(stdout, "config state.db=%s (%s)\n", runtime.Paths.StateDB, config.Source("state.db"))
+	fmt.Fprintf(stdout, "config state.cacheDb=%s (%s)\n", runtime.Paths.CacheDB, config.Source("state.cacheDb"))
 	accounts := make([]string, 0, len(config.Accounts))
 	for index, account := range config.Accounts {
 		accounts = append(accounts, fmt.Sprintf("%d:%s:%s", account.ID, account.ConfigDir, config.EmojiFor(account.ID)))
@@ -164,6 +220,30 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	)
 	fmt.Fprintf(stdout, "config claude.binary=%s (%s)\n", config.Claude.Binary, config.Source("claude.binary"))
 	fmt.Fprintf(stdout, "config claude.theme=%s (%s)\n", config.Claude.Theme, config.Source("claude.theme"))
+	fmt.Fprintf(
+		stdout,
+		"config claude.webSearchesPerSession=%d (%s)\n",
+		config.Claude.WebSearchesPerSession,
+		config.Source("claude.webSearchesPerSession"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"config claude.tmuxTruecolor=%t (%s)\n",
+		config.Claude.TmuxTruecolor,
+		config.Source("claude.tmuxTruecolor"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"config claude.cleanupPeriodDays=%d (%s)\n",
+		config.Claude.CleanupPeriodDays,
+		config.Source("claude.cleanupPeriodDays"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"config claude.requireManagedCleanup=%t (%s)\n",
+		config.Claude.RequireManagedCleanup,
+		config.Source("claude.requireManagedCleanup"),
+	)
 	fmt.Fprintf(
 		stdout,
 		"config claude.compactNudge.enabled=%t (%s)\n",

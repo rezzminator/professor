@@ -1,6 +1,7 @@
 package action
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -8,6 +9,42 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+func TestHeadlessClaudeAssignsSessionAndLaunchRecord(t *testing.T) {
+	request := HeadlessRequest{
+		Engine: pfmengine.Claude, Name: "worker", CWD: "/work/alpha",
+		Home: "/home/tester", PrimaryAccount: 2,
+	}
+	plan, err := headlessWithTestConfig(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed := parsedShell(t, plan.Run)
+	if parsed.SessionID == "" || parsed.Name != request.Name || plan.Record == nil ||
+		plan.Record.SessionID != parsed.SessionID || plan.Record.Account != 2 ||
+		plan.Record.Engine != pfmengine.Claude {
+		t.Fatalf("launch id=%q name=%q record=%#v", parsed.SessionID, parsed.Name, plan.Record)
+	}
+}
+
+func TestHeadlessClaudeDefaultsCacheFromAccount(t *testing.T) {
+	request := HeadlessRequest{
+		Engine: pfmengine.Claude, Name: "worker", CWD: "/work/alpha",
+		Home: "/home/tester", PrimaryAccount: 2,
+	}
+	machine := testMachineConfig(request.Home)
+	machine.Accounts[1].Claude = &machine.Claude
+	machine.Accounts[1].Claude.Cache1H = true
+	request.Config = machine
+	plan, err := HeadlessRun(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsedShell(t, plan.Run).SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" ||
+		plan.Record == nil || !plan.Record.Cache1H {
+		t.Fatalf("configured 1h cache missing: record=%#v run=%s", plan.Record, plan.Run)
+	}
+}
 
 func TestCodexDeveloperInstructionsArgKeepsOneCompleteTripleQuotedValue(t *testing.T) {
 	prompt := strings.Repeat("0123456789abcdef", 820) + ` a triple quote """ and slash \\ survive`
@@ -22,7 +59,7 @@ func TestCodexDeveloperInstructionsArgKeepsOneCompleteTripleQuotedValue(t *testi
 // TestHeadlessClaudeCarriesTheFullLaunchCeremony pins the command a headless
 // Claude chat runs. Every clause is load-bearing: the environment strip (a
 // chat born from another chat's Bash tool would otherwise inherit its identity
-// and account), the account's config dir, an explicit cache decision, the
+// and account), the account's config dir, its configured cache policy, the
 // name, and both autonomy flags — a headless chat has nobody awake to answer a
 // permission prompt.
 func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
@@ -40,30 +77,26 @@ func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
 	if !plan.PromptOnCommandLine {
 		t.Fatal("Claude takes its prompt on the command line")
 	}
-	want := "env -u CLAUDE_CODE_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CONFIG_DIR" +
-		" -u CLAUDE_PROJECT_DIR" +
-		" -u ENABLE_PROMPT_CACHING_1H -u FORCE_PROMPT_CACHING_5M -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT" +
-		" -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_MODEL" +
-		" -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_AUTO_COMPACT_WINDOW" +
-		" -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" +
-		" -u CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK" +
-		" -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" +
-		" -u CODEX_THREAD_ID" +
-		" CLAUDE_CONFIG_DIR='/home/tester/.cc/2' FORCE_PROMPT_CACHING_5M=1" +
-		" " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) +
-		" " + truecolorName + "=" + Quote("1") +
-		" " + spawnDepthName + "=" + Quote("8") +
-		" claude '--name' '_KILL worker 3' 'audit the firewall rules'" +
-		" '--settings' " + Quote(pfmengine.OutputStyleDefaultSettings) +
-		" --allow-dangerously-skip-permissions --dangerously-skip-permissions"
-	if plan.Run != want {
-		t.Fatalf("run command\n got: %s\nwant: %s", plan.Run, want)
+	parsed := parsedShell(t, plan.Run)
+	if parsed.Name != "_KILL worker 3" || !parsed.Autonomy ||
+		parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" ||
+		parsed.SettingsEnv[spawnDepthName] != "8" ||
+		parsed.Settings["outputStyle"] != "default" {
+		t.Fatalf("headless launch shape: name=%q autonomy=%t settings=%#v",
+			parsed.Name, parsed.Autonomy, parsed.SettingsEnv)
 	}
 }
 
 func TestHeadlessClaudeUsesRolePromptFileAndKeepsCallerPromptAlone(t *testing.T) {
 	home := t.TempDir()
+	stageProfessorPrompt(t, home)
 	rolePrompt := filepath.Join(home, "sid", "role-prompt-cc-worker.md")
+	if err := os.MkdirAll(filepath.Dir(rolePrompt), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rolePrompt, []byte("role"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	machine := testMachineConfig(home)
 	machine.Claude.SystemPrompt = "professor"
 	plan, err := HeadlessRun(HeadlessRequest{
@@ -74,10 +107,10 @@ func TestHeadlessClaudeUsesRolePromptFileAndKeepsCallerPromptAlone(t *testing.T)
 	if err != nil {
 		t.Fatalf("HeadlessRun() error = %v", err)
 	}
-	if !strings.Contains(plan.Run, " --system-prompt-file "+Quote(rolePrompt)) {
+	if parsedShell(t, plan.Run).PromptFile != rolePrompt {
 		t.Fatalf("Claude command does not carry per-seat prompt file: %s", plan.Run)
 	}
-	if strings.Contains(plan.Run, Quote(ProfessorPromptPath(home))) {
+	if strings.Contains(plan.Run, Quote(mustProfessorPromptPath(t, home))) {
 		t.Fatalf("Claude command still carries staged fleet prompt: %s", plan.Run)
 	}
 	if strings.Count(plan.Run, "caller prompt") != 1 {
@@ -111,13 +144,20 @@ func TestHeadlessCodexCarriesWholeRoleAsDeveloperInstructions(t *testing.T) {
 }
 
 func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
-	plan, err := headlessWithTestConfig(HeadlessRequest{
+	machine := testMachineConfig("/home/tester")
+	cache1H := true
+	machine.Claude.Cache1H = false
+	if machine.Accounts[0].Claude != nil {
+		machine.Accounts[0].Claude.Cache1H = false
+	}
+	plan, err := HeadlessRun(HeadlessRequest{
 		Engine:         "cc",
 		Name:           "worker",
 		CWD:            "/work/alpha",
 		Home:           "/home/tester",
 		PrimaryAccount: 1,
-		Cache1H:        true,
+		Cache1H:        &cache1H,
+		Config:         machine,
 	})
 	if err != nil {
 		t.Fatalf("HeadlessRun() error = %v", err)
@@ -128,10 +168,10 @@ func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
 	// Match the assignments themselves, never "…=1 claude": launch-env words
 	// sit between the cache assignment and the binary, so an adjacency check
 	// would pass vacuously with both cache modes set.
-	if !strings.Contains(plan.Run, " ENABLE_PROMPT_CACHING_1H=1 ") {
+	if parsedShell(t, plan.Run).SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" {
 		t.Fatalf("1h cache not armed: %s", plan.Run)
 	}
-	if strings.Contains(plan.Run, "FORCE_PROMPT_CACHING_5M=1") {
+	if parsedShell(t, plan.Run).SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "" {
 		t.Fatalf("both cache modes set: %s", plan.Run)
 	}
 }

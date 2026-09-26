@@ -135,7 +135,8 @@ func TestApplyStagesTheTimerWithTheConfiguredInterval(t *testing.T) {
 	}
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		NameSyncInterval: 4 * time.Minute,
 	}); err != nil {
 		t.Fatal(err)

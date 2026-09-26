@@ -15,7 +15,7 @@ import (
 )
 
 func TestChatIndexNamesAbsentIndexNamesNothing(t *testing.T) {
-	names := &chatIndexNames{ctx: context.Background(), path: filepath.Join(t.TempDir(), "pfm.db")}
+	names := &chatIndexNames{ctx: context.Background(), path: filepath.Join(t.TempDir(), "pfm-cache.db")}
 	if name, err := names.nameOf("sess-1"); name != "" || err != nil {
 		t.Fatalf("nameOf over an absent index = %q, %v; want blank and no error", name, err)
 	}
@@ -27,7 +27,7 @@ func TestChatIndexNamesUnreadableIndexErrsOnEveryCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer
-	names := &chatIndexNames{ctx: context.Background(), path: filepath.Join(file, "pfm.db")}
+	names := &chatIndexNames{ctx: context.Background(), path: filepath.Join(file, "pfm-cache.db")}
 	for call := range 2 {
 		if _, err := names.nameOf("sess-1"); err == nil || !strings.Contains(err.Error(), "read chat names from") {
 			t.Fatalf("call %d: nameOf over an unreadable index = %v, want the read error", call+1, err)
@@ -45,9 +45,9 @@ func TestChatIndexNamesUnreadableIndexErrsOnEveryCall(t *testing.T) {
 // the index file keeps its bytes and mtime.
 func TestCallmeterReportNamesChatsReadOnly(t *testing.T) {
 	root := t.TempDir()
-	index := filepath.Join(root, "pfm.db")
-	t.Setenv(paths.EnvDB, index)
-	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "seed", "fleet.db"))
+	index := filepath.Join(root, "pfm-cache.db")
+	t.Setenv(paths.EnvCacheDB, index)
+	t.Setenv(paths.EnvStateDB, filepath.Join(root, "seed", "pfm.db"))
 	ctx := context.Background()
 	seed, err := store.OpenContext(ctx)
 	if err != nil {
@@ -60,8 +60,8 @@ func TestCallmeterReportNamesChatsReadOnly(t *testing.T) {
 	if err := seed.Close(); err != nil {
 		t.Fatalf("close seed index: %v", err)
 	}
-	fleetDB := filepath.Join(root, "report", "fleet.db")
-	t.Setenv(paths.EnvFleetDB, fleetDB)
+	stateDB := filepath.Join(root, "report", "pfm.db")
+	t.Setenv(paths.EnvStateDB, stateDB)
 	beforeInfo, err := os.Stat(index)
 	if err != nil {
 		t.Fatal(err)
@@ -80,8 +80,8 @@ func TestCallmeterReportNamesChatsReadOnly(t *testing.T) {
 		t.Fatalf("nameOf = %q, %v (close exit %d); want %q and no error\nstderr:\n%s",
 			name, err, exitCode, "named chat", stderr.String())
 	}
-	if _, err := os.Stat(fleetDB); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("report opened the fleet store %s for a name lookup (stat err = %v)", fleetDB, err)
+	if _, err := os.Stat(stateDB); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("report opened the fleet store %s for a name lookup (stat err = %v)", stateDB, err)
 	}
 	afterInfo, err := os.Stat(index)
 	if err != nil {

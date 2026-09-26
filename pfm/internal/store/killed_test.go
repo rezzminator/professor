@@ -81,7 +81,7 @@ func TestDatabaseEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 	if err == nil ||
 		!strings.Contains(
 			err.Error(),
-			`fleet.db row row-7: unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`,
+			`pfm.db row row-7: unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`,
 		) {
 		t.Fatalf("scanKilled(bogus) error = %v", err)
 	}
@@ -469,8 +469,8 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 	if os.Getenv(helperProcessEnv) != "1" {
 		t.Skip("helper process only")
 	}
-	if os.Getenv(paths.EnvDB) == "" {
-		t.Fatal("helper process has no PFM_DB jail")
+	if os.Getenv(paths.EnvCacheDB) == "" {
+		t.Fatal("helper process has no PFM_CACHE_DB jail")
 	}
 
 	store := openTestStore(t)

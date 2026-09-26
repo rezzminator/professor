@@ -16,8 +16,11 @@ func TestReloadRejectsProseAndNamesTheRightFlag(t *testing.T) {
 		args []string
 		want string
 	}{
-		{args: []string{"cache", "off"}, want: "--1h on|off"},
-		{args: []string{"--cache", "off"}, want: "--1h on|off"},
+		{args: []string{"cache", "off"}, want: "--cache 1h|5m"},
+		{args: []string{"1h"}, want: "--cache 1h|5m"},
+		{args: []string{"ttl"}, want: "--cache 1h|5m"},
+		{args: []string{"--cache", "off"}, want: "1h|5m"},
+		{args: []string{"--cache", "on"}, want: "1h|5m"},
 		{args: []string{"account", "2"}, want: "--account N"},
 		{args: []string{"then", "keep going"}, want: "--then"},
 		{args: []string{"socket"}, want: "--sock"},
@@ -48,9 +51,9 @@ func TestReloadAccountFlag(t *testing.T) {
 		want    int
 	}{
 		{name: "flag form", args: []string{"--account", "2"}, want: 2},
-		{name: "flag form with other flags", args: []string{"--1h", "off", "--account", "3"}, want: 3},
+		{name: "flag form with other flags", args: []string{"--cache", "1h", "--account", "3"}, want: 3},
 		{name: "bare positional still accepted", args: []string{"2"}, want: 2},
-		{name: "no account", args: []string{"--1h", "off"}, want: 0},
+		{name: "no account", args: []string{"--cache", "5m"}, want: 0},
 		{name: "missing value", args: []string{"--account"}, wantErr: "--account needs an account number"},
 		{name: "non-numeric value", args: []string{"--account", "personal"}, wantErr: "account NUMBER"},
 		{name: "zero is not an account", args: []string{"--account", "0"}, wantErr: "account NUMBER"},
@@ -79,7 +82,7 @@ func TestReloadAccountFlag(t *testing.T) {
 // `--then "--account 4"` asks to send that text to the reborn chat; it does not
 // ask to switch seats.
 func TestReloadFlagValuesAreNotReparsedAsFlags(t *testing.T) {
-	args := []string{"--then", "--account 4", "--1h", "off"}
+	args := []string{"--then", "--account 4", "--cache", "5m"}
 	if err := validateReloadArgs(args); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,7 +167,7 @@ func TestReloadUsageTeachesTheFlagsAndTheSocketDefault(t *testing.T) {
 	haystack := reload.Usage
 	for _, needle := range []string{
 		"--account N",
-		"--1h on|off",
+		"--cache 1h|5m",
 		"--new",
 		"--hide",
 		"--then",

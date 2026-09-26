@@ -38,7 +38,7 @@ LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$LANES_DIR/lib.sh"
 lane_preamble
 
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 MANAGED="$HOME/.local/share/pfm/install"
 BLUEPRINT="$HOME/.professor"
 E1_MAIN="${E1_CHAT:-E1_MAIN}"

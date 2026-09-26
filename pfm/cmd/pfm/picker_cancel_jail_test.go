@@ -174,7 +174,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		"TMUX":             "",
 		"TMUX_TMPDIR":      root,
 		"PFM_HOME":         home,
-		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_CACHE_DB":     filepath.Join(root, "pfm-cache.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
 		"PFM_CODEX_ROOT":   codexHome,

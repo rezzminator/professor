@@ -74,28 +74,24 @@ func CurrentSocketFrom(env paths.Env) string {
 	return filepath.Base(value)
 }
 
-func accountRoots(accounts []pfmconfig.Account) []compose.AccountRoot {
-	roots := make([]compose.AccountRoot, 0, len(accounts))
+func claudeSeats(accounts []pfmconfig.Account, home string) []compose.ClaudeSeat {
+	seats := make([]compose.ClaudeSeat, 0, len(accounts))
 	for _, account := range accounts {
-		path := account.ProjectDir
-		if resolved, err := filepath.EvalSymlinks(account.ProjectDir); err == nil {
-			path = resolved
-		} else if absolute, err := filepath.Abs(account.ProjectDir); err == nil {
-			path = absolute
+		configDir := account.ConfigDir
+		if account.Implicit {
+			configDir = filepath.Join(home, ".claude")
 		}
-		roots = append(roots, compose.AccountRoot{
-			Account:   account.ID,
-			Path:      filepath.Clean(path),
-			ConfigDir: account.ConfigDir,
+		seats = append(seats, compose.ClaudeSeat{
+			Account: account.ID, ConfigDir: configDir, Implicit: account.Implicit,
 		})
 	}
-	return roots
+	return seats
 }
 
 func codexAccountRoots(accounts []pfmconfig.CodexAccount) []compose.AccountRoot {
 	result := make([]compose.AccountRoot, 0, len(accounts))
 	for _, account := range accounts {
-		result = append(result, compose.AccountRoot{Account: account.ID, Path: account.Home, ConfigDir: account.Home})
+		result = append(result, compose.AccountRoot{Account: account.ID, Path: account.Home})
 	}
 	return result
 }

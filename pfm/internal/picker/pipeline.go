@@ -130,7 +130,6 @@ type scanRequest struct {
 	View     compose.View
 	Query    string
 	ReadOnly bool
-	Cache1H  bool
 	NoSky    bool
 	// Safe is the --safe flag verbatim (auto|on|off); resolveCosmosSafe
 	// turns it into the snapshot's CosmosSafe bool at build time.
@@ -240,6 +239,10 @@ func buildSnapshot(
 		}
 	}
 	machine := environment.Config
+	cacheByAccount := make(map[int]bool)
+	for _, account := range machine.AccountIDs() {
+		cacheByAccount[account] = machine.EffectiveClaude(account).Cache1H
+	}
 	return ui.Snapshot{
 		Rows:                   output.Rows,
 		View:                   request.View,
@@ -254,7 +257,8 @@ func buildSnapshot(
 		OpenCodePrimaryAccount: machine.PrimaryOpenCodeAccount(),
 		OpenCodeAccountIDs:     machine.OpenCodeAccountIDs(),
 		Theme:                  machine.Theme,
-		Cache1H:                request.Cache1H,
+		Cache1H:                machine.EffectiveClaude(environment.Primary).Cache1H,
+		Cache1HByAccount:       cacheByAccount,
 		NowNS:                  environment.NowNS,
 		InitialQuery:           request.Query,
 		NoSky:                  request.NoSky,

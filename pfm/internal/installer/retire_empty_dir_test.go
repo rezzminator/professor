@@ -24,7 +24,8 @@ func TestPreflightReportsTheNonEmptyRetirementBeforeAnyMutation(t *testing.T) {
 	writeFixture(t, stray, "an operator note nobody asked pfm to remove\n")
 
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
 	})
 	if err == nil {
 		t.Fatal("apply succeeded with a stray file under the managed chat directory, want a preflight refusal")
@@ -53,7 +54,8 @@ func TestDryRunReportsTheNonEmptyRetirementAsAPlanConflict(t *testing.T) {
 
 	var transcript bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{}, Stdout: &transcript,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{}, Stdout: &transcript,
 	})
 	if err == nil {
 		t.Fatal("dry run reported no error for a directory it cannot retire, want the plan conflict")
@@ -80,7 +82,8 @@ func TestRetirementAccountsForTheFilesTheSamePassRemoves(t *testing.T) {
 	writeFixture(t, filepath.Join(managed, "chat", "self", "compact.command.md"), "# retired chat card\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
 	}); err != nil {
 		t.Fatalf("apply refused a managed directory holding only the cards it retires itself: %v", err)
 	}

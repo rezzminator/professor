@@ -12,6 +12,8 @@ import (
 // operation reaches SQLite through the store's logged statement helpers —
 // one comp=db record per statement with the verb, table and rows — and a
 // bound value (the chat id) never reaches the file.
+// It stays serial: obs.Test swaps the process logger, so it never overlaps
+// the package's parallel tests.
 func TestStoreOperationsRecordUnderTheDBComponent(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	state, _ := openTestStore(t)

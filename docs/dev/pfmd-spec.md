@@ -32,8 +32,8 @@ They coordinate only through a file: `usagehook.DefaultCacheDir()` = `os.TempDir
 ## Decisions
 
 1. **One daemon, `pfmd`, is the same binary.** `pfm daemon run` — the `dockerd`/`docker` shape. It owns: the limits poller (the **only** process that calls the Anthropic usage endpoint), the sqlite store (single writer), fleet/tmux operations, and the comms/cosmos event stream.
-2. **Transport is HTTP/1.1 over a unix socket** at `${XDG_STATE_HOME:-~/.local/state}/pfm/run/pfmd.sock`, mode `0600`. Go `net.Listen("unix", …)` + `net/http`; clients use `http.Transport` with a `DialContext` onto the socket. Versioned under `/v1`. **State, not share**: `paths.Resolve` already puts `fleet.db` at `~/.local/state/pfm` (`internal/paths/paths.go:163`), so the runtime socket lives beside it; `~/.local/share/pfm` is the *install* tree (`internal/installer/expected_hooks.go:124`). `PFM_RUN_DIR` overrides the directory, as every other path does through `paths.EnvOr` (`paths.go:96`).
-3. **Every existing surface becomes a client.** The TUI subscribes to SSE instead of ticking; the prompt hook does one `GET` with a 200 ms timeout; the statusline reads and *writes back*; `pfm mcp serve --stdio` — today a forwarder to the daemon's `/mcp/professor` — becomes a thin stdio↔socket JSON-RPC proxy, so every engine's `professor` registration (`~/.claude.json`, the Codex config, `opencode.jsonc`) is untouched (`internal/installer/mcp.go`).
+2. **Transport is HTTP/1.1 over a unix socket** at `${XDG_STATE_HOME:-~/.local/state}/pfm/run/pfmd.sock`, mode `0600`. Go `net.Listen("unix", …)` + `net/http`; clients use `http.Transport` with a `DialContext` onto the socket. Versioned under `/v1`. `paths.Resolve` puts `pfm.db` and `pfm-cache.db` under `~/.local/state/pfm`, so the runtime socket lives beside them; `~/.local/share/pfm` is the install tree. `PFM_RUN_DIR` overrides the directory in this proposed daemon.
+3. **Every existing surface becomes a client.** The TUI subscribes to SSE instead of ticking; the prompt hook does one `GET` with a 200 ms timeout; the statusline reads and *writes back*; `pfm mcp serve --stdio` — today a forwarder to the daemon's `/mcp/professor` — becomes a thin stdio↔socket JSON-RPC proxy, so every engine's `professor` registration (the Claude launch's `--mcp-config`, the Codex config, `opencode.jsonc`) is untouched (`internal/installer/mcp.go`).
 4. **No socket, no failure.** Clients degrade to today's behaviour — shared cache file, direct store. A hook or statusline must never block or fail a prompt. First client that finds no socket spawns `pfm daemon run` detached, the way `statusline.SpawnDetached` (`internal/statusline/process.go:23`) already spawns its refresher behind a lockfile. `pfm daemon install` optionally writes a launchd agent (macOS) or a systemd `--user` unit (devbox, Ubuntu 24.04) with `KeepAlive` / `Restart=always`.
 5. **The harvester stays its own service.** It is not absorbed into pfmd's core; pfmd health-checks it and reports it in `pfm doctor`. **Correction to the brief:** the harvester is no longer an external sibling at `127.0.0.1:8377`. `internal/harvestmcp` is compiled into pfm, served as the harvester family of the professor server at `/mcp/professor` and its view `/mcp/professor/harvester` by `cmd/pfm/mcp_serve_command.go`, and `8377` is `legacyDefaultMCPPort` (`internal/config/harvester.go:30`) — the live loopback port is `18377` (`harvester.go:27`). Its authenticated external gateway runs on its own listener inside the same process (`mcp_serve_command.go:223-260`). pfmd health-checks **that route**, and the Python worker environment behind it (`internal/harvestpy`), and never takes ownership of either.
 6. **Upgrade is a handoff, not a kill.** The new pfmd inherits the listening socket fd from the old one; the old drains in-flight requests and exits. `pfm update` and `make install` restart through this path instead of `pkill`. Clients reconnect with backoff; SSE clients resubscribe with a cursor.
@@ -59,8 +59,8 @@ They coordinate only through a file: `usagehook.DefaultCacheDir()` = `os.TempDir
     (loopback 18377,     │        │                                                                │
      chat + harvester)   │        │              ┌──────────────┐  ┌──────────────┐               │
                          │        └──────────────│ event bus    │◀─│ store svc    │ SINGLE WRITER │
-  pfm doctor ────────────▶  /v1/health           │ SSE + cursor │  │ fleet.db     │               │
-                         │                        └──────────────┘  │ ~/.cc/fleet.db│              │
+  pfm doctor ────────────▶  /v1/health           │ SSE + cursor │  │ pfm.db       │               │
+                         │                        └──────────────┘  │ pfm-cache.db │              │
                          │                                          └───────┬──────┘               │
                          │                        ┌──────────────┐          │                      │
                          │                        │ fleet/tmux   │◀─────────┘                      │
@@ -138,7 +138,7 @@ The invariant behind the whole table: **no pfm client ever hard-depends on pfmd.
 
 ## Migration
 
-Each phase is gated by `daemon.<phase>.enabled` in `~/.config/pfm/pfm.config.json` (the v2 strict config, `internal/config`), default `false` until the phase's tests are green on both hosts. Reverting a phase is flipping its gate — no client loses its fallback path.
+Each phase is gated by `daemon.<phase>.enabled` in `{clone}/pfm.config.json` (strict config, `internal/config`), default `false` until the phase's tests are green on both hosts. Reverting a phase is flipping its gate — no client loses its fallback path.
 
 ### Phase 1 — skeleton
 

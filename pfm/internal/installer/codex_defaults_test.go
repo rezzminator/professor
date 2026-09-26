@@ -19,7 +19,7 @@ func TestCodexDefaultsInstall(t *testing.T) {
 	config := filepath.Join(home, ".codex", "config.toml")
 	original := "# local preference\nmodel = 'custom'\ndeveloper_instructions = '''Keep my rules.\n[not.a.table]\n\n<!-- BEGIN Professor subagent coordination -->\nUse the agent mailbox.\n<!-- END Professor subagent coordination -->\n'''\n[features.multi_agent_v2]\ndefault_wait_timeout_ms = 900000\n# BEGIN pfm mcp\n[mcp_servers.chat]\nurl = 'http://localhost:1234'\n# END pfm mcp\n"
 	writeFixture(t, config, original)
-	options := Options{Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}}
+	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,13 @@ func TestCodexDefaultsFreshHomes(t *testing.T) {
 	homes := []string{filepath.Join(home, "account-one"), filepath.Join(home, "account-two")}
 	if _, err := Run(
 		context.Background(),
-		Options{Mode: ModeApply, Home: home, CodexHomes: homes, Runner: &fakeRunner{}},
+		Options{
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply,
+			Home:          home,
+			CodexHomes:    homes,
+			Runner:        &fakeRunner{},
+		},
 	); err != nil {
 		t.Fatal(err)
 	}

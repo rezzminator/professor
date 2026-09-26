@@ -78,7 +78,8 @@ func TestInstallReconcilesGlobalCodexCommands(t *testing.T) {
 	writeFixture(t, repositorySentinel, "repository sentinel\n")
 	t.Chdir(repository)
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
@@ -86,7 +87,8 @@ func TestInstallReconcilesGlobalCodexCommands(t *testing.T) {
 		t.Fatalf("dry run created Codex registry: %v", err)
 	}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -117,7 +119,8 @@ func TestInstallReconcilesGlobalCodexCommands(t *testing.T) {
 	foreign := filepath.Join(home, ".codex", "prompts", "operator.md")
 	writeFixture(t, foreign, "operator-owned prompt\n")
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}

@@ -42,7 +42,10 @@ func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	default:
 		t.Fatalf("unexpected capture model %q", alias)
 	}
-	dir := paths.HarnessBaselineDir(home)
+	dir, err := paths.HarnessBaselineDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	pin, err := os.ReadFile(filepath.Join(dir, stem+".sha256"))
 	if err != nil {
 		t.Fatal(err)

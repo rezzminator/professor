@@ -19,6 +19,7 @@
 # BROKEN STATE: a spawn that fails exits with pfm's message; `start` ends by
 # listing the STORM rows — fewer than N live rows means an engine never came up.
 set -euo pipefail
+: "${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp
@@ -29,7 +30,7 @@ PROJECTS=(atlas lumen orbit) # three systems: with N=6 the sky shows two storm c
 read -r -a ENGINES <<<"${STORM_ENGINES:-cc cx}"
 CC_MODEL="${STORM_CC_MODEL:-sonnet}" CC_EFFORT="${STORM_CC_EFFORT:-low}"
 # The Claude seat: the last one that answered up.sh's probe (config order), unless STORM_CC_ACCOUNT says otherwise.
-CC_ACCOUNT="${STORM_CC_ACCOUNT:-$(awk '{print $NF}' "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r ".accounts[-1].id" "$HOME/.config/pfm/pfm.config.json")}"
+CC_ACCOUNT="${STORM_CC_ACCOUNT:-$(awk '{print $NF}' "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r ".accounts[-1].id" "${PFM_CONFIG:?PFM_CONFIG is required in the container}")}"
 GPT_MODEL="${STORM_GPT_MODEL:-gpt-5.6-luna}" GPT_EFFORT="${STORM_GPT_EFFORT:-medium}"
 "$(dirname "$0")/daemon.sh" # the professor MCP daemon the chats' stdio servers forward to; harmless when already up
 case "${1:-}" in

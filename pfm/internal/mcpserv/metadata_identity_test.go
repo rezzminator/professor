@@ -118,7 +118,7 @@ func metadataIdentityService(t *testing.T) *Service {
 	t.Setenv(inject.SenderLabelEnv, "")
 	t.Setenv(inject.SenderIDEnv, "")
 	t.Setenv(paths.EnvHome, jail.home)
-	t.Setenv(paths.EnvDB, jail.database)
+	t.Setenv(paths.EnvCacheDB, jail.database)
 	t.Setenv(paths.EnvSIDDir, jail.sid)
 	t.Setenv(paths.EnvClaudeRoots, jail.claude)
 	t.Setenv(paths.EnvCodexHome, jail.codex)

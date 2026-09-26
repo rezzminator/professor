@@ -57,7 +57,7 @@ LINT_BASE ?= origin/main
 # The tagged e2e suite keeps its own -p 1 in dev.sh.
 TESTFLAGS ?= -p 4 -parallel 4
 
-.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover testflags iso timing sweep gate install host-install rollback \
+.PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
@@ -73,6 +73,9 @@ help: ## List every target
 
 build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
+
+prompts: ## Compose the tracked harness prompts from their parts
+	go run ./harness-prompts/compose
 
 tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
 	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh

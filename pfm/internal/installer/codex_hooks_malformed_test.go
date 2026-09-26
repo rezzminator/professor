@@ -9,15 +9,16 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestMalformedCodexHooksSkipsLoudlyAndFinishesTheRun is a REGRESSION test
 // for a hand-broken ~/.codex/hooks.json aborting the whole install: the Codex
 // hook path hard-returned on any parse failure, so wireMCP, wireLogDefault,
 // wireShell, wireVSCode and writeUpdateMetadata never ran and the machine was
-// left half-wired. The Claude sibling wireSettings has always skipped loudly
-// and continued unless uninstalling with owned hooks; this is the same
-// contract on the Codex side.
+// left half-wired. Install writes no Claude account settings, so this is the
+// one hooks writer that can meet a hand-broken file: it skips loudly and
+// continues unless uninstalling with owned hooks.
 func TestMalformedCodexHooksSkipsLoudlyAndFinishesTheRun(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -27,7 +28,8 @@ func TestMalformedCodexHooksSkipsLoudlyAndFinishesTheRun(t *testing.T) {
 
 	var transcript bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		CodexHomes: []string{codexHome}, Stdout: &transcript,
 	}); err != nil {
 		t.Fatalf("one malformed Codex hooks file aborted the install: %v\n%s", err, transcript.String())
@@ -39,16 +41,18 @@ func TestMalformedCodexHooksSkipsLoudlyAndFinishesTheRun(t *testing.T) {
 		t.Fatalf("the installer rewrote a Codex hooks file it could not parse: %q", got)
 	}
 	// The steps that used to be stranded behind the abort all ran.
-	if _, err := os.Stat(SourceRepoPath(home)); err == nil {
+	if _, err := os.Stat(paths.SourceRepoPath(home)); err == nil {
 		t.Fatal("unexpected source-repo marker: this fixture records no clone")
 	}
 	for _, path := range []string{
 		filepath.Join(home, ".local", "share", "pfm", "install", "binary-ownership.json"),
-		filepath.Join(home, ".zshrc"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("install stopped before writing %s: %v\n%s", path, err, transcript.String())
 		}
+	}
+	if !strings.Contains(transcript.String(), "skip    zshrc: no source repo recorded") {
+		t.Fatalf("missing marker was not reported as a shell skip:\n%s", transcript.String())
 	}
 }
 
@@ -82,7 +86,8 @@ func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing
 	writeFixture(t, hooks, "{ broken after the install that owns it\n")
 
 	_, err = Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{codexHome},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{codexHome},
 	})
 	if err == nil {
 		t.Fatal("uninstall silently stranded pfm-owned hooks in an unparseable Codex hooks file")

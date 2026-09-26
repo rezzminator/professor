@@ -8,14 +8,26 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// stageProfessorPrompt writes the staged professor prompt file a
-// SystemPromptProfessor spawn reads via ProfessorPromptPath, so a test can
-// exercise the "file present" side of promptFile's absence guard.
+func mustProfessorPromptPath(t *testing.T, home string) string {
+	t.Helper()
+	path, err := ProfessorPromptPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// stageProfessorPrompt writes a prompt into a private fixture clone.
 func stageProfessorPrompt(t *testing.T, home string) string {
 	t.Helper()
-	path := ProfessorPromptPath(home)
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	path := mustProfessorPromptPath(t, home)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("stage professor prompt dir: %v", err)
 	}
@@ -50,14 +62,18 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	}
 	for _, want := range []string{
 		"CLAUDE_CONFIG_DIR=" + Quote(machine.Accounts[0].ConfigDir),
-		"FORCE_PROMPT_CACHING_5M=1",
 		Quote(machine.Claude.Binary),
 		Quote(prompt),
-		"--system-prompt-file " + Quote(ProfessorPromptPath(home)),
 	} {
 		if !strings.Contains(plan.Run, want) {
 			t.Fatalf("native fresh run %q lacks %q", plan.Run, want)
 		}
+	}
+	parsed := parsedShell(t, plan.Run)
+	if parsed.SessionID == "" || parsed.PromptFile != mustProfessorPromptPath(t, home) ||
+		parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" || plan.Record == nil ||
+		plan.Record.SessionID != parsed.SessionID || plan.Record.Account != 42 {
+		t.Fatalf("fresh launch id=%q prompt=%q record=%#v", parsed.SessionID, parsed.PromptFile, plan.Record)
 	}
 	if strings.Contains(plan.Run, "skip-permissions") {
 		t.Fatalf("prompted account received autonomy bypass: %q", plan.Run)
@@ -68,7 +84,7 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	if plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
 		t.Fatalf("native fresh server = %#v, want the plan's run in the row's cwd", plan.ChatServer)
 	}
-	for _, retired := range []string{" cc42", "_cc_run", "CC_ARM_1H"} {
+	for _, retired := range []string{" cc42", "_cc_run"} {
 		if strings.Contains(plan.Line, retired) || strings.Contains(plan.Run, retired) {
 			t.Fatalf("native fresh action retained retired shell surface %q: %#v", retired, plan)
 		}
@@ -76,15 +92,15 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 }
 
 // TestNewClaudeNativeSpawnOmitsMissingSystemPromptFile is F3/F4's regression
-// test: a fresh account chose SystemPromptProfessor, but pfm install never
-// staged the prompt file (a brand-new machine, a wiped .local/share). The
+// test: a fresh account chose SystemPromptProfessor, but the home has no
+// source-repo marker (a brand-new machine). The
 // door must degrade to the lean fallback rather than pass claude a
 // --system-prompt-file flag pointing at nothing, which would brick the
 // launch instead of merely losing the extra prompt material — the fail-open
 // contract promptFile's doc comment states.
 func TestNewClaudeNativeSpawnOmitsMissingSystemPromptFile(t *testing.T) {
 	home := t.TempDir()
-	// Deliberately NOT staging the professor prompt file under home.
+	// Deliberately leave this home without a source-repo marker.
 	machine := configuredMachinePolicy(home)
 	machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
 	request := Request{
@@ -102,7 +118,7 @@ func TestNewClaudeNativeSpawnOmitsMissingSystemPromptFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(plan.Run, "--system-prompt-file") {
-		t.Fatalf("native fresh run carried --system-prompt-file for a missing staged prompt: %q", plan.Run)
+		t.Fatalf("native fresh run carried --system-prompt-file for a missing composed prompt: %q", plan.Run)
 	}
 }
 
@@ -123,14 +139,10 @@ func TestNewClaudeNativeSpawnPreservesBypassLeanAndCachePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{
-		"ENABLE_PROMPT_CACHING_1H=1",
-		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1",
-		autonomyFlags,
-	} {
-		if !strings.Contains(plan.Run, want) {
-			t.Fatalf("native fresh run %q lacks %q", plan.Run, want)
-		}
+	parsed := parsedShell(t, plan.Run)
+	if parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" ||
+		parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "1" || !parsed.Autonomy {
+		t.Fatalf("native fresh settings=%#v autonomy=%t", parsed.SettingsEnv, parsed.Autonomy)
 	}
 	if strings.Contains(plan.Run, "--system-prompt-file") {
 		t.Fatalf("lean prompt mode also received professor prompt file: %q", plan.Run)

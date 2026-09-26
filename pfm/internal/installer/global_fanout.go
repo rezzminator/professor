@@ -41,13 +41,13 @@ func (installer *engine) claudeRegistries(name string) string {
 // half of globalSourceRepoRoot, kept as one implementation so the checker
 // can never anchor on a different clone than the installer it checks.
 func GlobalSourceRepo(home string) (string, error) {
-	marker := SourceRepoPath(home)
+	marker := paths.SourceRepoPath(home)
 	if _, err := os.Lstat(marker); errors.Is(err, fs.ErrNotExist) {
 		return filepath.Clean(filepath.Join(home, ".professor")), nil
 	} else if err != nil {
 		return "", fmt.Errorf("inspect source repository marker %s: %w", marker, err)
 	}
-	repo, err := ReadSourceRepoMarker(home)
+	repo, err := paths.ReadSourceRepoMarker(home)
 	if err != nil {
 		return "", err
 	}
@@ -186,7 +186,7 @@ func InspectGlobalAgents(
 	if err != nil {
 		return []GlobalAgentsStatus{{Dir: home, State: GlobalAgentsUnresolved, Error: err.Error()}}
 	}
-	if _, markerErr := os.Lstat(SourceRepoPath(home)); errors.Is(markerErr, fs.ErrNotExist) {
+	if _, markerErr := os.Lstat(paths.SourceRepoPath(home)); errors.Is(markerErr, fs.ErrNotExist) {
 		if _, repoErr := os.Lstat(repo); errors.Is(repoErr, fs.ErrNotExist) {
 			return []GlobalAgentsStatus{{Dir: repo, State: GlobalAgentsNoClone}}
 		} else if repoErr != nil {

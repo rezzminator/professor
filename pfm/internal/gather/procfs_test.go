@@ -107,7 +107,7 @@ func TestDetectCodexRootMetadataAndAncestorMatching(t *testing.T) {
 	}
 }
 
-func TestDetectAgentsAndCache1H(t *testing.T) {
+func TestDetectAgentsAndClaudeProcesses(t *testing.T) {
 	home := "/jail/home"
 	sessionOne := "01234567-89ab-cdef-0123-456789abcdef"
 	sessionTwo := "fedcba98-7654-3210-fedc-ba9876543210"
@@ -160,14 +160,6 @@ func TestDetectAgentsAndCache1H(t *testing.T) {
 		t.Fatalf("DetectAgents() = %#v", agents)
 	}
 
-	cacheSockets, err := DetectCache1H(proc, panes)
-	if err != nil {
-		t.Fatalf("DetectCache1H() error = %v", err)
-	}
-	if !reflect.DeepEqual(cacheSockets, []string{"cc-1-2-3"}) {
-		t.Fatalf("DetectCache1H() = %q, want cc socket", cacheSockets)
-	}
-
 	claudeProcesses, err := DetectClaudeProcesses(proc, panes)
 	if err != nil {
 		t.Fatalf("DetectClaudeProcesses() error = %v", err)
@@ -183,111 +175,6 @@ func TestDetectAgentsAndCache1H(t *testing.T) {
 			process.PaneID != "%5" ||
 			process.PanePID != 500 {
 			t.Fatalf("DetectClaudeProcesses() process = %#v", process)
-		}
-	}
-}
-
-// TestCache1HBadgeFollowsTheOptOut fixtures the OUTCOME the picker draws — the
-// ⚡ badge on or off — for each way a live Claude can be born. Since Claude Code
-// 2.1.215 the 1h window is the harness DEFAULT, so FORCE_PROMPT_CACHING_5M=1 is
-// the only thing that turns the badge off.
-func TestCache1HBadgeFollowsTheOptOut(t *testing.T) {
-	tests := []struct {
-		name    string
-		environ map[string]string
-		noEnv   bool
-		badge   bool
-	}{
-		{
-			name:  "flagless elder born before the force-5m rewire",
-			badge: true,
-		},
-		{
-			name:    "explicitly armed 1h",
-			environ: map[string]string{"ENABLE_PROMPT_CACHING_1H": "1"},
-			badge:   true,
-		},
-		{
-			name:    "deliberately born 5m",
-			environ: map[string]string{"FORCE_PROMPT_CACHING_5M": "1"},
-			badge:   false,
-		},
-		{
-			name: "both flags — the 5m opt-out still wins",
-			environ: map[string]string{
-				"ENABLE_PROMPT_CACHING_1H": "1",
-				"FORCE_PROMPT_CACHING_5M":  "1",
-			},
-			badge: false,
-		},
-		{
-			name:    "force-5m set to something other than 1",
-			environ: map[string]string{"FORCE_PROMPT_CACHING_5M": "0"},
-			badge:   true,
-		},
-		{
-			name:  "environment unreadable — same answer as flagless",
-			noEnv: true,
-			badge: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			proc := &fakeProcFS{processes: map[int]fakeProcess{
-				500: {stat: ProcStat{ParentPID: 1}},
-				700: {
-					cmdline:    []string{"/opt/claude"},
-					environ:    test.environ,
-					environErr: test.noEnv,
-					stat:       ProcStat{ParentPID: 500},
-				},
-			}}
-			panes := []ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
-			sockets, err := DetectCache1H(proc, panes)
-			if err != nil {
-				t.Fatalf("DetectCache1H() error = %v", err)
-			}
-			want := []string{}
-			if test.badge {
-				want = []string{"cc-1-2-3"}
-			}
-			if !reflect.DeepEqual(sockets, want) {
-				t.Fatalf("DetectCache1H() = %q, want %q", sockets, want)
-			}
-		})
-	}
-}
-
-// A socket hosting several Claude processes is 5m as soon as ONE of them was
-// born that way, whichever order the scan reaches them in — the badge must
-// never promise a cheaper window than the chat actually has.
-func TestCache1HSharedSocketTakesTheColdestBirth(t *testing.T) {
-	for _, forced := range []int{700, 900} {
-		processes := map[int]fakeProcess{
-			500: {stat: ProcStat{ParentPID: 1}},
-			700: {
-				cmdline: []string{"/opt/claude"},
-				environ: map[string]string{"ENABLE_PROMPT_CACHING_1H": "1"},
-				stat:    ProcStat{ParentPID: 500},
-			},
-			900: {
-				cmdline: []string{"/opt/claude"},
-				environ: map[string]string{"ENABLE_PROMPT_CACHING_1H": "1"},
-				stat:    ProcStat{ParentPID: 500},
-			},
-		}
-		cold := processes[forced]
-		cold.environ = map[string]string{"FORCE_PROMPT_CACHING_5M": "1"}
-		processes[forced] = cold
-		sockets, err := DetectCache1H(
-			&fakeProcFS{processes: processes},
-			[]ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}},
-		)
-		if err != nil {
-			t.Fatalf("DetectCache1H() error = %v", err)
-		}
-		if len(sockets) != 0 {
-			t.Fatalf("pid %d forced 5m but sockets = %q", forced, sockets)
 		}
 	}
 }

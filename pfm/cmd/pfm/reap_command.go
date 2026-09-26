@@ -54,13 +54,11 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 	}
 
 	resolved := runtime.Paths
-	configDirs := make([]string, 0, len(runtime.Config.Accounts))
-	for _, account := range runtime.Config.Accounts {
-		configDirs = append(configDirs, account.ConfigDir)
-	}
+	configDirs := runtime.Config.ClaudeConfigDirs(resolved.Home)
 	ctx := context.Background()
 	runner, err := reap.New(reap.Dependencies{
 		Paths:          resolved,
+		Config:         runtime.Config,
 		Busy:           reap.NewClaudeAgentsConfigured(resolved, runtime.Config.Claude.Binary, configDirs),
 		ClaudeBinary:   runtime.Config.Claude.Binary,
 		CodexBinary:    runtime.Config.Codex.Binary,

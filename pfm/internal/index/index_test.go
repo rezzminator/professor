@@ -457,7 +457,7 @@ func TestCodexFilenameIdentityPreventsForkCollisionAndWarmReparse(t *testing.T) 
 		}
 	}
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
 	t.Setenv(paths.EnvCodexHome, codexHome)
@@ -539,7 +539,7 @@ func TestSDKSpawnedSessionsIndexAsBackgroundAndReparseOnVersionBump(t *testing.T
 	})
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, claudeRoot)
 	t.Setenv(paths.EnvCodexHome, filepath.Join(root, "codex"))
@@ -776,19 +776,10 @@ func setupIndexFixture(t *testing.T) indexFixture {
 		[]any{map[string]any{"type": "user", "message": map[string]any{"content": "ignored"}}},
 	)
 
-	linkOne := filepath.Join(root, "claude-link-1")
-	linkTwo := filepath.Join(root, "claude-link-2")
-	if err := os.Symlink(claudeRoot, linkOne); err != nil {
-		t.Fatalf("create first Claude root symlink: %v", err)
-	}
-	if err := os.Symlink(claudeRoot, linkTwo); err != nil {
-		t.Fatalf("create second Claude root symlink: %v", err)
-	}
-
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
-	t.Setenv(paths.EnvClaudeRoots, strings.Join([]string{linkOne, linkTwo, claudeRoot}, string(os.PathListSeparator)))
+	t.Setenv(paths.EnvClaudeRoots, claudeRoot)
 	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))

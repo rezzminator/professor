@@ -252,7 +252,7 @@ func newKillCLIJail(t *testing.T) *killCLIJail {
 	writeJailedCodexAuth(t, root)
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
 	t.Setenv("PFM_SID_DIR", sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", claudeRoot)
 	t.Setenv("PFM_CODEX_ROOT", codexHome)

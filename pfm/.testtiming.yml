@@ -12,6 +12,7 @@ suites:
       github.com/rezzminator/professor/pfm/cmd/pfm: 456
       github.com/rezzminator/professor/pfm/e2e: 2
       github.com/rezzminator/professor/pfm/harness-prompts: 2
+      github.com/rezzminator/professor/pfm/harness-prompts/compose: 2
       github.com/rezzminator/professor/pfm/internal/action: 60
       github.com/rezzminator/professor/pfm/internal/agentopen: 2
       github.com/rezzminator/professor/pfm/internal/agentrole: 2
@@ -25,6 +26,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/callmeter/report: 10
       github.com/rezzminator/professor/pfm/internal/chat: 18
       github.com/rezzminator/professor/pfm/internal/cli: 2
+      github.com/rezzminator/professor/pfm/internal/claudelaunch: 4
       github.com/rezzminator/professor/pfm/internal/clock: 2
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2
       github.com/rezzminator/professor/pfm/internal/codexgen: 6

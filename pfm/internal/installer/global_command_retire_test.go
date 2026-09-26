@@ -37,7 +37,8 @@ func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
 		}
 
 		if _, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +53,8 @@ func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
 		writeFixture(t, filepath.Join(source, "tokens.md"), "# tokens command\n")
 
 		if _, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +75,8 @@ func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
 		}
 
 		if _, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +99,8 @@ func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
 			writeFixture(t, regular, "an operator's own plain command file\n")
 
 			if _, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -138,8 +142,14 @@ func TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess(t *testing.T
 	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
 
 	installer := &engine{
-		options: Options{Mode: ModeApply, Home: home, ConfigDir: config, Stdout: io.Discard},
-		apply:   true,
+		options: Options{
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply,
+			Home:          home,
+			ConfigDir:     config,
+			Stdout:        io.Discard,
+		},
+		apply: true,
 	}
 	err := installer.retireOrphanGlobalCommands()
 	if err == nil {

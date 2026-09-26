@@ -1,8 +1,8 @@
 // Package fleetdb is the fleet's authoritative state store — operator decisions: kills, comms, issues.
 //
-// The SQLite database at ~/.cc/fleet.db holds every operator decision: killed
+// The SQLite database at ~/.local/state/pfm/pfm.db holds every operator decision: killed
 // chats, spawned teammates, and the primary account. The transcript database
-// (paths.Values.DB) remains a derived cache that a rescan can rebuild.
+// (paths.Values.CacheDB) remains a derived cache that a rescan can rebuild.
 package fleetdb
 
 import (
@@ -113,9 +113,9 @@ type Store struct {
 // return that failure instead of pretending an operator decision was stored.
 func OpenSharedState(ctx context.Context, values paths.Values) *Store {
 	store := &Store{
-		path: values.FleetDB,
+		path: values.StateDB,
 	}
-	db, err := openDatabase(ctx, values.FleetDB)
+	db, err := openDatabase(ctx, values.StateDB)
 	if err != nil {
 		store.degraded = err
 		return store
@@ -125,6 +125,11 @@ func OpenSharedState(ctx context.Context, values paths.Values) *Store {
 }
 
 func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
+	info, statErr := os.Stat(path)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect shared state database %s: %w", path, statErr)
+	}
+	existed := statErr == nil && info.Size() > 0
 	db, err := sqlitedb.OpenStore(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("open shared state database: %w", err)
@@ -135,6 +140,10 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize shared state schema: %w", err)
+	}
+	if err := migrate(ctx, db, path, existed); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate shared state database: %w", err)
 	}
 	return db, nil
 }
@@ -532,7 +541,7 @@ func (s *Store) ClearBranchSeat(ctx context.Context, socket string) error {
 // account", which then quietly answered every query with the roster's first
 // configured account instead of surfacing the outage.
 func ClaudePrimaryAccount(ctx context.Context, values paths.Values) (int, bool, error) {
-	account, found, err := primaryFromDatabase(ctx, values.FleetDB)
+	account, found, err := primaryFromDatabase(ctx, values.StateDB)
 	if err != nil {
 		return 0, false, err
 	}

@@ -52,7 +52,7 @@ func runRun(
 	flags := cli.NewFlagSet(
 		"chat new",
 		"usage: pfm chat new --name NAME [--engine cc|cx] [--cwd DIR] "+
-			"[--account N] [--1h] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
+			"[--account N] [--cache 1h|5m] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
 			"[--harness-prompt PATH] [--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
 		stderr,
 	)
@@ -64,7 +64,7 @@ func runRun(
 	)
 	cwd := flags.String("cwd", "", "project directory (default: the current one)")
 	account := flags.Int("account", 0, "Claude account (default: the primary one)")
-	cache1H := flags.Bool("1h", false, "arm 1h prompt caching")
+	cache := flags.String("cache", "", "prompt cache for this launch: 1h or 5m")
 	model := flags.String("model", "", "model the seat is born with")
 	effort := flags.String("effort", "", "reasoning effort the seat is born with")
 	promptFile := flags.String("prompt-file", "", "read the launch prompt from a file")
@@ -82,6 +82,15 @@ func runRun(
 	if *name == "" || *timeout < 0 || *settle < 0 || (*attach && *await) {
 		flags.Usage()
 		return 2
+	}
+	if *cache != "" && *cache != "1h" && *cache != "5m" {
+		fmt.Fprintln(stderr, "pfm chat new: --cache must be 1h or 5m")
+		return 2
+	}
+	var cache1H *bool
+	if *cache != "" {
+		choice := *cache == "1h"
+		cache1H = &choice
 	}
 	resolved := runtime.Paths
 	directory, err := runDir(*cwd)
@@ -137,18 +146,22 @@ func runRun(
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 			return 2
 		}
-		stagedFleetPrompt := harnessBody
+		fleetPrompt := harnessBody
 		if engineName == pfmengine.Claude && harnessPath == "" {
-			stagedPath := action.ProfessorPromptPath(resolved.Home)
-			raw, readErr := os.ReadFile(stagedPath)
-			if readErr != nil {
-				fmt.Fprintf(stderr, "pfm chat new: read staged Claude prompt %s: %v\n", stagedPath, readErr)
+			promptPath, pathErr := action.ProfessorPromptPath(resolved.Home)
+			if pathErr != nil {
+				fmt.Fprintf(stderr, "pfm chat new: %v\n", pathErr)
 				return 2
 			}
-			stagedFleetPrompt = string(raw)
+			raw, readErr := os.ReadFile(promptPath)
+			if readErr != nil {
+				fmt.Fprintf(stderr, "pfm chat new: read Claude prompt %s: %v\n", promptPath, readErr)
+				return 2
+			}
+			fleetPrompt = string(raw)
 		}
 		seatPrompt, composeErr := agentrole.ComposeSeatPrompt(
-			engineName, *role, constitution, stagedFleetPrompt,
+			engineName, *role, constitution, fleetPrompt,
 		)
 		if composeErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", composeErr)
@@ -185,12 +198,17 @@ func runRun(
 		Effort:         *effort,
 		Home:           resolved.Home,
 		PrimaryAccount: selectedAccount,
-		Cache1H:        *cache1H,
+		Cache1H:        cache1H,
 		Config:         runtime.Config,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
+	}
+	if plan.Record != nil {
+		if err := fleetdb.RecordLaunch(ctx, resolved, *plan.Record, clk.Now().Unix()); err != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", plan.Record.SessionID, err)
+		}
 	}
 
 	// PFM_SPAWN_TRACE turns on a step-by-step log of the TUI

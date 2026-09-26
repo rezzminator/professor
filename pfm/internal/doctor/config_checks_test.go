@@ -15,6 +15,108 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+func TestDoctorReportsMissingCodexLogin(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex")
+	runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
+	var output bytes.Buffer
+	PrintConfig(&output, runtime)
+	want := "doctor: codex-login codex[2] " + filepath.Join(home, "auth.json") + " missing — run codex login"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("PrintConfig() = %q, want %q", output.String(), want)
+	}
+}
+
+func TestDoctorReportsCodexLoginStates(t *testing.T) {
+	for _, tc := range []struct {
+		name, auth, want string
+		failures         int
+	}{
+		{name: "missing", want: "missing — run codex login", failures: 1},
+		{name: "invalid", auth: `{}`, want: "has no tokens.access_token and tokens.account_id — run codex login", failures: 1},
+		{name: "valid", auth: `{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`, want: "ok", failures: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tc.auth != "" {
+				if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(tc.auth), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
+			var output bytes.Buffer
+			_, failures := PrintConfig(&output, runtime)
+			want := "doctor: codex-login codex[2] "
+			if tc.name != "valid" {
+				want += filepath.Join(home, "auth.json") + " "
+			}
+			want += tc.want
+			if failures != tc.failures || !strings.Contains(output.String(), want) {
+				t.Fatalf("failures=%d output=%q, want failures=%d row=%q", failures, output.String(), tc.failures, want)
+			}
+		})
+	}
+	t.Run("unreadable", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.Mkdir(filepath.Join(home, "auth.json"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
+		var output bytes.Buffer
+		_, failures := PrintConfig(&output, runtime)
+		want := "doctor: codex-login codex[2] " + filepath.Join(home, "auth.json") + " UNREADABLE error="
+		if failures != 1 || !strings.Contains(output.String(), want) {
+			t.Fatalf("failures=%d output=%q, want failure and row %q", failures, output.String(), want)
+		}
+	})
+}
+
+func TestDoctorConfigFileRows(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "pfm.config.json")
+	var output bytes.Buffer
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(output.String(), "config: missing "+path+" — run pfm install") {
+		t.Fatalf("missing file row absent: %s", output.String())
+	}
+	output.Reset()
+	PrintConfig(&output, config.Runtime{})
+	if !strings.Contains(output.String(), "config: missing (no source repo recorded) — run pfm install") {
+		t.Fatalf("missing marker row absent: %s", output.String())
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(output.String(), "config: unreadable "+path) {
+		t.Fatalf("unreadable file row absent: %s", output.String())
+	}
+}
+
+func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(
+		output.String(),
+		"config: missing key claude.webSearchesPerSession (default 9007199254740991)",
+	) {
+		t.Fatalf("missing-key row absent: %s", output.String())
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	if !strings.Contains(output.String(), "config: unreadable "+path) ||
+		strings.Contains(output.String(), "config: missing key") {
+		t.Fatalf("malformed file produced missing keys: %s", output.String())
+	}
+}
+
 func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

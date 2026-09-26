@@ -9,7 +9,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
-func TestAccountAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {
+func TestCodexAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {
 	root := t.TempDir()
 	physical := filepath.Join(root, "physical")
 	projects := filepath.Join(physical, "projects")
@@ -25,32 +25,19 @@ func TestAccountAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	transcriptPath := filepath.Join(aliasThree, "projects", "nested", "claude.jsonl")
 	rolloutPath := filepath.Join(aliasThree, "projects", "nested", "rollout-codex.jsonl")
 	output := Compose(Input{
-		Transcripts: []store.Transcript{{
-			UUID: "claude-alias", Path: transcriptPath, CWD: "/work/claude",
-			FirstPrompt: "Claude alias", PromptCount: 1, Size: 10, MTimeNS: 1,
-		}},
 		Rollouts: []store.Rollout{{
 			ID: "codex-alias", Path: rolloutPath, CWD: "/work/codex",
 			FirstPrompt: "Codex alias", PromptCount: 1, Size: 10, MTimeNS: 2,
 			UserThread: true,
 		}},
-		AccountRoots: []AccountRoot{
-			{Account: 11, Path: filepath.Join(aliasOne, "projects")},
-			{Account: 12, Path: filepath.Join(aliasOne, "projects", "nested")},
-		},
 		CodexHomes: []AccountRoot{
 			{Account: 21, Path: filepath.Join(aliasOne, "projects")},
 			{Account: 22, Path: filepath.Join(aliasOne, "projects", "nested")},
 		},
 		Options: Options{View: AllView},
 	})
-	claude, found := rowByID(output.Rows, "claude-alias")
-	if !found || claude.Account != 12 {
-		t.Fatalf("third-alias Claude row = %#v, want nested account 12", claude)
-	}
 	codex, found := rowByID(output.Rows, "codex-alias")
 	if !found || codex.Account != 22 {
 		t.Fatalf("third-alias Codex row = %#v, want nested account 22", codex)
@@ -84,9 +71,9 @@ func TestLiveAgentAccountFollowsItsConfigDir(t *testing.T) {
 		Snapshot: gather.Snapshot{Agents: []gather.Agent{{
 			PID: 4242, Socket: "cc-shared", PaneID: "%0", SessionID: "shared", ConfigDir: third,
 		}}},
-		AccountRoots: []AccountRoot{
-			{Account: 1, Path: filepath.Join(primary, "projects"), ConfigDir: primary},
-			{Account: 3, Path: filepath.Join(third, "projects"), ConfigDir: third},
+		ClaudeSeats: []ClaudeSeat{
+			{Account: 1, ConfigDir: primary},
+			{Account: 3, ConfigDir: third},
 		},
 		Options: Options{View: AllView},
 	})

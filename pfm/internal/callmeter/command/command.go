@@ -1,5 +1,5 @@
 // Package command owns `pfm callmeter`: the report action over the call
-// store, its flags, the config-dir resolution and the chat-name
+// store, its flags and the chat-name
 // lookup; cmd/pfm only hands it argv and the runtime it resolved.
 package command
 
@@ -24,9 +24,8 @@ import (
 )
 
 const usage = `usage: pfm callmeter report {files|writes|commands|context|sequences|faults} [--since D] [--project P]
-                     [--agent-type T] [--session S] [--config-dir DIR] [--account N] [--limit N]
+                     [--agent-type T] [--session S] [--account N] [--limit N]
   --since D         a duration (7d, 24h) or a date (2026-09-01); default and floor: the 30-day retention window
-  --config-dir DIR  one configured Claude config dir; default: every one the machine config names
   --account N       calls one configured account ran (its id); default: every call, those with no account too`
 
 type topicFunc func(context.Context, *callmeter.Store, report.Filter, report.NameOf) (*report.Table, error)
@@ -37,7 +36,7 @@ var topics = map[string]topicFunc{
 }
 
 // CLI is `pfm callmeter {args}`: the reports over the call store the hook
-// fills, over the home, transcript index and Claude config dirs runtime names. It returns the process exit code.
+// fills, over the home and transcript index runtime names. It returns the process exit code.
 func CLI(args []string, stdout, stderr io.Writer, runtime pfmconfig.Runtime) int {
 	ctx := context.Background()
 	if len(args) > 0 {
@@ -55,15 +54,14 @@ func CLI(args []string, stdout, stderr io.Writer, runtime pfmconfig.Runtime) int
 }
 
 type flagValues struct {
-	since, configDir, account, project, agentType, session string
-	limit                                                  int
+	since, account, project, agentType, session string
+	limit                                       int
 }
 
 func newFlags(name string, stderr io.Writer) (*flag.FlagSet, *flagValues) {
 	flags := pfmcli.NewFlagSet(name, usage, stderr)
 	values := &flagValues{}
 	flags.StringVar(&values.since, "since", "", "a duration (7d, 24h) or a date (2026-09-01)")
-	flags.StringVar(&values.configDir, "config-dir", "", "one configured Claude config dir")
 	flags.StringVar(&values.account, "account", "", "calls this configured account id ran")
 	flags.StringVar(&values.project, "project", "", "calls whose cwd is this dir or under it")
 	flags.StringVar(&values.agentType, "agent-type", "", "calls made by this agent type")
@@ -108,7 +106,7 @@ func reportAction(
 		return 1
 	}
 	defer pfmcli.CloseResource(db, "callmeter: close store", stderr, &exitCode)
-	names := &chatIndexNames{ctx: ctx, path: runtime.Paths.DB}
+	names := &chatIndexNames{ctx: ctx, path: runtime.Paths.CacheDB}
 	defer names.close(stderr, &exitCode)
 	if _, err := report.PruneExpired(ctx, db, now); err != nil {
 		fmt.Fprintf(stderr, "callmeter: %v\n", err)
@@ -130,7 +128,7 @@ func reportAction(
 }
 
 // buildFilter turns the flags into a report.Filter: --since clamped to the
-// retention window (with one note), the config dirs resolved, --account checked, --project absolute.
+// retention window (with one note), --account checked, --project absolute.
 func buildFilter(
 	values *flagValues,
 	config pfmconfig.Config,
@@ -147,11 +145,6 @@ func buildFilter(
 			values.since, int(report.Retention.Hours()/24), floor.UTC().Format(time.RFC3339))
 		since = floor
 	}
-	dirs, err := configuredDirs(config, values.configDir)
-	if err != nil {
-		fmt.Fprintf(stderr, "callmeter: %v\n", err)
-		return report.Filter{}, 2, false
-	}
 	account, err := accountFilter(config, values.account)
 	if err != nil {
 		fmt.Fprintf(stderr, "callmeter: %v\n", err)
@@ -166,37 +159,8 @@ func buildFilter(
 	}
 	return report.Filter{
 		Since: since, Project: project, AgentType: values.agentType, Session: values.session,
-		ConfigDirs: dirs, Account: account, Limit: values.limit,
+		Account: account, Limit: values.limit,
 	}, 0, true
-}
-
-// configuredDirs lists every Claude account's config dir as a physical
-// path, de-duplicated; narrow keeps only that one, and must be one of them.
-func configuredDirs(config pfmconfig.Config, narrow string) ([]string, error) {
-	dirs := []string{}
-	seen := map[string]bool{}
-	for _, account := range config.Accounts {
-		dir, err := physicalDir(account.ConfigDir)
-		if err != nil {
-			return nil, err
-		}
-		if dir != "" && !seen[dir] {
-			seen[dir] = true
-			dirs = append(dirs, dir)
-		}
-	}
-	if narrow == "" {
-		return dirs, nil
-	}
-	dir, err := physicalDir(narrow)
-	if err != nil {
-		return nil, err
-	}
-	if !seen[dir] {
-		return nil, fmt.Errorf("--config-dir %s is not a configured Claude config dir (configured: %s)",
-			narrow, strings.Join(dirs, ", "))
-	}
-	return []string{dir}, nil
 }
 
 // accountFilter is --account as a report filter: nil when not given, and
@@ -218,19 +182,4 @@ func accountFilter(config pfmconfig.Config, value string) (*int, error) {
 		}
 	}
 	return nil, fmt.Errorf("--account %s is not a configured account (configured: %s)", value, strings.Join(ids, ", "))
-}
-
-// physicalDir is the config dir the store names for dir
-// (callmeter.ProjectsHome): accounts sharing one projects/ are one dir, so
-// --config-dir with either account shows the same history the hook recorded.
-// A dir not created yet keeps its absolute path.
-func physicalDir(dir string) (string, error) {
-	if dir == "" {
-		return "", nil
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", fmt.Errorf("resolve config dir %s: %w", dir, err)
-	}
-	return callmeter.ProjectsHome(abs), nil
 }

@@ -1,4 +1,5 @@
 # pfm — the Go fleet engine: one binary that indexes, lists, names, kills, attaches, injects and drives every live and resumable Claude Code and Codex chat on the box
+
 It reads and writes the user's real chat state: a destructive operation on a live socket is not recoverable by a rerun, so verify the target resolves before acting, and prefer refusing to guessing.
 
 # Vocabulary
@@ -13,8 +14,11 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - façades: the one door per cross-cutting primitive — `atomicfile.Write` (whole-file replace), `sqlitedb` (every SQLite open), `tmux.Exec` and `tmux.Socket` over it (every tmux call on a chat socket), `internal/chat/` (the chat verbs a surface calls typed) · `internal/atomicfile/`, `internal/sqlitedb/`, `internal/tmux/`
 - architecture ratchet: C1–C21 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
 - lint law: gofumpt + gci + golines at 120, plus dupl, goconst, gocritic, revive, staticcheck; coverage thresholds · `.golangci.yml`, `.testcoverage.yml`, tools pinned in `infra/fence/tools.env`
-- shim: the thin zsh wrapper that `eval`s the eval-protocol line · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
-- installer: stages every host asset; with the fleet prompt embedded from `harness-prompts/`, the binary is the single source — no external template dir · `internal/installer/`
+- shim: the thin zsh wrapper that `eval`s the eval-protocol line, sourced in place from the clone · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
+- installer: stages every host asset embedded from `internal/installer/assets/`; the fleet prompts and the shim are read from the clone instead · `internal/installer/`
+- composed prompts: the tracked fleet prompt per engine, drift-gated by a test · `harness-prompts/composed/` · generated from `harness-prompts/` by `make -C pfm prompts`
+- machine config: gitignored `{clone}/pfm.config.json`, seeded from `example.pfm.config.json`; `PFM_CONFIG` overrides · design `docs/design/engines/pfm-home.md`
+- launch registry: every flag, env value and `--settings` key a Claude chat starts with · `internal/claudelaunch/` · design `docs/design/engines/claude-launch.md`
 - `deps.Registry`: the single place a platform difference is declared; `deps.Resolve` refuses a gated name off-platform even when it is on PATH · `internal/deps/registry.go`
 - config: account identity, emoji, theme and permission posture · `internal/config/`
 - lineage: folds a Codex subagent thread into its parent seat · `internal/store/lineage.go`
@@ -27,11 +31,11 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since origin/develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone.
 - One package or probe: `.claude/scripts/dev.sh iso run 'go -C pfm test -count=1 ./internal/{pkg}/'`; the lint burn-down view: `iso run 'make -C pfm lint'`.
-- The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools.
+- The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools; `make -C pfm prompts` likewise runs on the host.
 
 ## Environment Variables
 
-- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_DB` · `PFM_FLEET_DB` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF`.
+- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF`.
 - `PFM_TMUX_CONF` unset: a chat's tmux server loads the user's own `~/.tmux.conf`, since a chat is a terminal the user lives in; a jail sets it to `/dev/null` so a real machine config never steers a fixture.
 - Test knobs outside `internal/paths/`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`), `PFM_TEST_FRESH_SOCKET` (`internal/spawn/socket.go`).
 
@@ -62,6 +66,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - Gate an entry on the binary's real availability, and give it `VersionArgs` only when every gated platform's build accepts them: BSD `nohup` rejects GNU's `--version`, reporting a working binary as broken.
 - Every filesystem location resolves through `internal/paths/`, and `/proc` sits behind the `ProcFS` interface — `$HOME`, `/tmp`, a socket dir and `/proc` are never literals; this is what lets the suite run in a jail.
 - Account identity, emoji, theme and permission posture come from `internal/config/` alone: a hardcoded account count, `.cc/{N}` literal, medal emoji or bypass flag elsewhere is a defect.
+- Every Claude launch flag, env value and `--settings` key comes from the launch registry alone; a launch literal elsewhere fails `TestNoLaunchLiteralOutsideRegistry`.
 - A seat is identified by lineage, not file recency: Codex writes subagent threads into `~/.codex/sessions` beside real seats, marked `thread_source: subagent` with a `parent_thread_id`; code reading the rollout tree directly checks those two fields first.
 - Identity is derived where the chat is, not where the message is delivered: a detached process (the `--then` waiter, any dispatcher a chat backgrounds) is reparented, and a Codex tool shell has neither `$TMUX` nor a session id — it derives nothing, and its message goes out unsigned.
 - A chat states its own identity through `CHAT_SENDER_SESSION` / `CHAT_SENDER_LABEL` / `CHAT_SENDER_SID`, which `inject` reads from its own environment only — a chat states who it is, never who somebody else is.

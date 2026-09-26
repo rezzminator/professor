@@ -148,11 +148,10 @@ func TestInstallLogDefaultLeavesAnAbsentFileAlone(t *testing.T) {
 	}
 
 	none := logDefaultEngine(t, "", true, io.Discard)
-	if err := none.wireLogDefault(); err != nil {
-		t.Fatal(err)
-	}
-	if none.report.Skipped != 1 {
-		t.Fatalf("an unknown config path was not a skip row (skipped=%d)", none.report.Skipped)
+	if err := none.wireLogDefault(); err == nil ||
+		!strings.Contains(err.Error(), "no config path: no source repo recorded") ||
+		!strings.Contains(err.Error(), "PFM_CONFIG") {
+		t.Fatalf("unknown config path writer error = %v", err)
 	}
 }
 
@@ -163,7 +162,7 @@ func TestInstallRunsTheLogDefaultStep(t *testing.T) {
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
-	path := filepath.Join(home, ".config", "pfm", "pfm.config.json")
+	path := filepath.Join(home, "pfm.config.json")
 	writeFixture(t, path, `{"version": 2}`)
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, ConfigDir: canonical, ConfigDirs: []string{canonical},

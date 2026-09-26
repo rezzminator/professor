@@ -172,20 +172,15 @@ func (function refreshFunc) Refresh(ctx context.Context) error {
 	return function(ctx)
 }
 
-func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
+func TestFinisherUsesResolvedClaudeRoots(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
 
-	configDir := filepath.Join(jail.home, ".cc", "7")
-	writeTestFile(
-		t,
-		filepath.Join(configDir, ".credentials.json"),
-		`{"claudeAiOauth":{"accessToken":"fixture"}}`,
-	)
+	claudeRoot := filepath.Join(jail.home, ".claude", "projects")
 	finisher, err := NewFinisher(database, Dependencies{Paths: paths.Values{
 		Home:    jail.home,
 		SIDDir:  jail.sidDir,
-		Roots:   map[pfmengine.ID][]string{pfmengine.Codex: {jail.codexHome}},
+		Roots:   map[pfmengine.ID][]string{pfmengine.Claude: {claudeRoot}, pfmengine.Codex: {jail.codexHome}},
 		TmuxDir: jail.tmuxDir,
 	}})
 	if err != nil {
@@ -195,9 +190,9 @@ func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
 	if !ok {
 		t.Fatalf("refresher = %T, want indexRefresher", finisher.refresher)
 	}
-	want := []string{filepath.Join(configDir, "projects")}
+	want := []string{claudeRoot}
 	if !reflect.DeepEqual(refresher.claudeRoots, want) {
-		t.Fatalf("Claude roots = %q, want config-owned discovery %q", refresher.claudeRoots, want)
+		t.Fatalf("Claude roots = %q, want resolved roots %q", refresher.claudeRoots, want)
 	}
 }
 
@@ -1122,7 +1117,7 @@ func newKillJail(t *testing.T) killJail {
 		tmuxDir:    filepath.Join(root, "tmux"),
 		claudeRoot: filepath.Join(root, "claude"),
 		codexHome:  filepath.Join(root, "codex"),
-		dbPath:     filepath.Join(root, "fleet.db"),
+		dbPath:     filepath.Join(root, "pfm-cache.db"),
 	}
 	for _, directory := range []string{
 		jail.home,
@@ -1136,7 +1131,7 @@ func newKillJail(t *testing.T) killJail {
 		}
 	}
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "tmp"))
-	t.Setenv("PFM_DB", jail.dbPath)
+	t.Setenv("PFM_CACHE_DB", jail.dbPath)
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
 	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)

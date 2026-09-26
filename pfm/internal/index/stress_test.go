@@ -145,7 +145,7 @@ func setupIndexStressCorpus(t *testing.T) (root, giantPath string, elapsed time.
 	writeGiantTranscript(t, giantPath, indexStressFileBytes)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, claudeRoot)
 	t.Setenv(paths.EnvCodexHome, codexHome)
@@ -189,7 +189,7 @@ func TestIndexStressHelper(t *testing.T) {
 	if os.Getenv(indexStressHelperEnv) != "1" {
 		t.Skip("index stress helper process only")
 	}
-	if os.Getenv(paths.EnvDB) == "" || os.Getenv(paths.EnvClaudeRoots) == "" {
+	if os.Getenv(paths.EnvCacheDB) == "" || os.Getenv(paths.EnvClaudeRoots) == "" {
 		t.Fatal("index stress helper is not jailed")
 	}
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"

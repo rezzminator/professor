@@ -200,7 +200,7 @@ func setupBackendFixture(t *testing.T) string {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
 	t.Setenv(paths.EnvSIDDir, sid)
 	t.Setenv(paths.EnvClaudeRoots, claude)
 	t.Setenv(paths.EnvCodexHome, codex)
@@ -512,7 +512,7 @@ func newStdioJail(t *testing.T) *stdioJail {
 		sid:             filepath.Join(root, "s"),
 		proc:            filepath.Join(root, "p"),
 		tmuxBase:        filepath.Join(root, "t"),
-		database:        filepath.Join(root, "d", "fleet.db"),
+		database:        filepath.Join(root, "d", "pfm-cache.db"),
 		socket:          "cc-1700000000-1-1",
 		session:         "fixture-session",
 		selectorSocket:  "cc-1700000001-1-2",
@@ -708,7 +708,7 @@ func (jail *stdioJail) environment() []string {
 		"TMUX=",
 		"TMUX_TMPDIR="+jail.tmuxBase,
 		paths.EnvHome+"="+jail.home,
-		paths.EnvDB+"="+jail.database,
+		paths.EnvCacheDB+"="+jail.database,
 		paths.EnvSIDDir+"="+jail.sid,
 		paths.EnvClaudeRoots+"="+jail.claude,
 		paths.EnvCodexHome+"="+jail.codex,
@@ -1011,49 +1011,6 @@ func writeEnabledMCPConfig(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestChatReadBudgetsAndJunkFilter(t *testing.T) {
-	root := setupBackendFixture(t)
-	path := filepath.Join(root, "claude", "project-alpha", "budget.jsonl")
-	writeJSONL(t, path, []any{
-		map[string]any{
-			"type": "user", "cwd": "/work/alpha",
-			"message": map[string]any{"content": "<system-reminder>killed"},
-		},
-		map[string]any{
-			"type": "user", "cwd": "/work/alpha",
-			"message": map[string]any{"content": "first visible"},
-		},
-		map[string]any{
-			"type":    "assistant",
-			"message": map[string]any{"content": strings.Repeat("z", 100)},
-		},
-		map[string]any{
-			"type": "user", "cwd": "/work/alpha",
-			"message": map[string]any{"content": "last visible"},
-		},
-	})
-	service := newFixtureService(t)
-	defer func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
-		}
-	}()
-	client := connectInMemory(t, service.Server())
-	output := callTool[ReadOutput](t, client.clientSession, "chat_read", ReadInput{
-		Source:   "budget",
-		LastN:    3,
-		MaxBytes: 30,
-	})
-	if output.Bytes > 30 || !output.Truncated {
-		t.Fatalf("budget output = %+v", output)
-	}
-	for _, turn := range output.Turns {
-		if strings.Contains(turn.Text, "system-reminder") {
-			t.Fatalf("junk prompt leaked: %+v", output)
-		}
-	}
 }
 
 func openFDs(t *testing.T) int {

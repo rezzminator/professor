@@ -26,7 +26,7 @@ func TestRunRecordsTheSweepsStateTransitions(t *testing.T) {
 	root := t.TempDir()
 	values := paths.Values{
 		TmuxDir: filepath.Join(root, "tmux"), SIDDir: filepath.Join(root, "sid"), ProcRoot: filepath.Join(root, "proc"),
-		FleetDB: filepath.Join(root, "fleet.db"), Home: filepath.Join(root, "home"),
+		StateDB: filepath.Join(root, "pfm.db"), Home: filepath.Join(root, "home"),
 	}
 	for _, dir := range []string{values.TmuxDir, values.SIDDir, values.ProcRoot} {
 		if err := mkdir(dir); err != nil {

@@ -113,6 +113,7 @@ func newAttachJail(t *testing.T) *attachJail {
 	codexHome := filepath.Join(root, "codex")
 	for _, directory := range []string{
 		filepath.Join(home, ".local", "bin"),
+		filepath.Join(home, ".claude"),
 		tmuxDir,
 		sidDir,
 		claudeRoot,
@@ -123,6 +124,12 @@ func newAttachJail(t *testing.T) *attachJail {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
+	}
+	configPath := filepath.Join(root, "pfm.config.json")
+	config := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q,"claude":{"cache1h":false}}]}`,
+		filepath.Join(home, ".claude"))
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	const id = "b1111111-1111-4111-8111-111111111111"
 	transcriptDir := filepath.Join(claudeRoot, "attach-project")
@@ -141,7 +148,7 @@ func newAttachJail(t *testing.T) *attachJail {
 		t.Fatal(err)
 	}
 	wrapper := "#!/bin/sh\nexec " + shellQuote(executable) +
-		" -test.run '^TestPFMAttachHelper$' -- \"$@\"\n"
+		" -test.run '^TestPFMAttachHelper$' -- --config " + shellQuote(configPath) + " \"$@\"\n"
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	if err := os.WriteFile(binary, []byte(wrapper), 0o700); err != nil {
 		t.Fatal(err)
@@ -158,14 +165,13 @@ func newAttachJail(t *testing.T) *attachJail {
 		// correctly has no 1h birth marker to observe. Match that explicit 5m
 		// posture now that the product default is 1h; otherwise the cache gate
 		// deliberately forks instead of proving the attach path.
-		"CC_ARM_1H":        "0",
 		"HOME":             home,
 		"PATH":             path,
 		"TERM":             "xterm-256color",
 		"TMUX":             "",
 		"TMUX_TMPDIR":      root,
 		"PFM_HOME":         home,
-		"PFM_DB":           filepath.Join(root, "fleet.db"),
+		"PFM_CACHE_DB":     filepath.Join(root, "pfm-cache.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
 		"PFM_CODEX_ROOT":   codexHome,

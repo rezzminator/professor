@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -37,7 +39,7 @@ import (
 // verbatim into the `/reload` slash command's own description — the picker
 // shows the human exactly the flags this package's Run understands, never a
 // hand-maintained restatement that can drift from them.
-const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--1h on|off] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
+const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
 	"       with no --sock, the calling chat's own pane is detected automatically;\n" +
 	"       --hide (with --new) hides the conversation left behind from the picker"
 
@@ -109,6 +111,7 @@ type Request struct {
 	// configured system prompt because this constructor never knew about one.
 	Home    string
 	Machine pfmconfig.Config
+	fresh   bool
 }
 
 type Options struct {
@@ -216,6 +219,15 @@ func Run(
 	}
 	if !rosterContains(request.AccountIDs, request.Account) {
 		return Result{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
+	}
+	wasNew := request.SessionID == ""
+	if wasNew && request.Engine == pfmengine.Claude {
+		id, idErr := claudelaunch.NewSessionID()
+		if idErr != nil {
+			return Result{}, fmt.Errorf("new reload session id: %w", idErr)
+		}
+		request.SessionID = id
+		request.fresh = true
 	}
 	run, err := engineRun(request)
 	if err != nil {
@@ -365,6 +377,18 @@ func Run(
 		return Result{}, exitIncomplete(ctx, request, options, tmux)
 	}
 	trail.Reach("dead", "pane exited")
+	if request.Engine == pfmengine.Claude && request.SessionID != "" {
+		values, recordErr := paths.Resolve()
+		if recordErr == nil {
+			recordErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
+				SessionID: request.SessionID, Engine: pfmengine.Claude,
+				Account: request.Account, Cache1H: request.Cache1H,
+			}, clock.Real.Now().Unix())
+		}
+		if recordErr != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", request.SessionID, recordErr)
+		}
+	}
 	if err := tmux.Respawn(ctx, request.SocketPath, request.Pane, request.CWD, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
@@ -386,10 +410,10 @@ func Run(
 		}
 		trail.Reach("then-delivered", "--then delivered")
 	}
-	if request.SessionID == "" {
+	if wasNew {
 		followName(ctx, request, options, tmux, proc, stderr)
 	}
-	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
+	return Result{Account: request.Account, Cache1H: request.Cache1H, New: wasNew}, nil
 }
 
 // waitCallerIdle holds the /exit until the pane's current turn has ended.
@@ -553,25 +577,26 @@ func (request Request) claudeBinary() string {
 // so a chat that reboots in place comes back with exactly what a fresh launch
 // would have carried.
 func claudeRun(request Request) (string, error) {
-	arguments := []string(nil)
-	if request.SessionID != "" {
-		arguments = []string{"--resume", request.SessionID}
-	}
 	effort, err := action.ClaudeEffort(request.Effort)
 	if err != nil {
 		return "", fmt.Errorf("resolve claude respawn effort: %w", err)
 	}
-	run, err := action.ClaudeSpawn{
+	spawn := action.ClaudeSpawn{
 		Purpose:    action.PurposeResume,
 		Account:    request.Account,
-		Cache1H:    request.Cache1H,
-		Args:       arguments,
+		Cache1H:    &request.Cache1H,
 		Home:       request.Home,
 		Machine:    request.Machine,
 		Model:      request.Model,
 		Effort:     effort,
 		PromptFile: request.PromptChannel,
-	}.ShellCommand()
+	}
+	if request.fresh {
+		spawn.Purpose, spawn.SessionID = action.PurposeInteractive, request.SessionID
+	} else {
+		spawn.Resume = request.SessionID
+	}
+	run, err := spawn.ShellCommand()
 	if err != nil {
 		return "", fmt.Errorf("render claude respawn command: %w", err)
 	}
@@ -594,9 +619,9 @@ func codexRun(request Request) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve codex respawn effort: %w", err)
 	}
-	parts := []string{
-		"env", "-u", "CODEX_THREAD_ID", "-u", "CLAUDE_CODE_SESSION_ID",
-		"-u", "CLAUDECODE", "-u", "CLAUDE_CONFIG_DIR",
+	parts := []string{"env"}
+	for _, name := range claudelaunch.Hygiene() {
+		parts = append(parts, "-u", name)
 	}
 	if request.CodexHome != "" {
 		parts = append(parts, "CODEX_HOME="+action.Quote(request.CodexHome))
@@ -829,6 +854,9 @@ func currentPanePID(ctx context.Context, socket, wanted string, tmux Tmux) (int,
 }
 
 func engineLabel(id pfmengine.ID) string {
+	if id == "" {
+		return "unknown-engine"
+	}
 	return pfmengine.MustLookup(id).Short
 }
 

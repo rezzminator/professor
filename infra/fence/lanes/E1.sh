@@ -28,7 +28,7 @@ lane_preamble
 CHAT="${E1_CHAT:-E1_MAIN}"
 ROLE_CHAT="${CHAT}_ROLE"
 CWD="${E1_CWD:-/work/orbit}"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 SID_DIR="${PFM_SID_DIR:-${TMPDIR:-/tmp}/cc-sid}"
 lane_seat_and_port "$CONFIG"
 
@@ -142,15 +142,24 @@ if requires E1.01-open-seat1; then
     # Not a failure: this run was given one seat, so there is no second seat to
     # reboot onto. The roster the container carries IS the run's --seats
     # (lanes/creds.sh), so an empty ALT is the run's own shape, not a defect.
-    blocked "seats $LANE_SEATS" "no second seat in this run — /reload --account needs two credentialed seats (run with --seats cc:1,cc:2)"
+    blocked "seats $LANE_SEATS" "needs --seats cc:1,cc:2 for cross-account session continuity"
   else
     before="$(live_field "$CHAT" 9)"
-    if ! reload_via_pane RELOADED-ACCT --account "$ALT"; then
-      fail "$REPLY_WHY"
+    before_id="$(live_field "$CHAT" 2)"
+    token="E1CONTINUITY$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
+    planted="$(pfm chat inject --allow-unsigned "$CHAT" "Remember the token $token. Reply TOKEN-PLANTED." 2>&1)"
+    if [ "$?" -ne 0 ] || ! wait_last "$CHAT" TOKEN-PLANTED 120; then
+      fail "could not plant the continuity token before reload: $(one_line "$planted") ${LANE_WAIT_WHY:-}"
+    elif ! pfm chat inject --allow-unsigned "$CHAT" "/reload --account $ALT --then \"What token did I ask you to remember before this reload? Reply with the token only.\"" >/dev/null 2>&1; then
+      fail "pfm chat inject refused the cross-account reload"
+    elif ! wait_last "$CHAT" "$token" 300; then
+      fail "the resumed chat did not answer the planted token $token: ${LANE_WAIT_WHY:-timeout}"
+    elif [ "$(live_field "$CHAT" 2)" != "$before_id" ]; then
+      fail "the row's session id changed from $before_id to $(live_field "$CHAT" 2)"
     elif [ "$(live_field "$CHAT" 9)" != "$ALT" ]; then
       fail "the steer ran but the row still reports account $(live_field "$CHAT" 9) (was $before, asked for $ALT)"
     else
-      pass "rebooted in place onto seat $ALT (row account $before → $ALT) and ran its --then steer"
+      pass "session $before_id continued on seat $ALT (account $before → $ALT); the resumed chat answered the planted token"
     fi
   fi
 fi
@@ -172,14 +181,14 @@ beat E1.05-reload-1h
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
-  if ! reload_via_pane RELOADED-1H-ON --1h on; then
-    fail "--1h on: $REPLY_WHY"
+  if ! reload_via_pane RELOADED-1H-ON --cache 1h; then
+    fail "--cache 1h: $REPLY_WHY"
   else
     on_pane="$(pane "$CHAT" | tail -3)"
-    if ! reload_via_pane RELOADED-1H-OFF --1h off; then
-      fail "--1h off: $REPLY_WHY (the on-reboot had already landed)"
+    if ! reload_via_pane RELOADED-1H-OFF --cache 5m; then
+      fail "--cache 5m: $REPLY_WHY (the 1h reboot had already landed)"
     else
-      pass "the cache window toggled on and off, each a reboot in place; pane after --1h on: $(one_line "$on_pane" | cut -c1-120)"
+      pass "the cache window toggled 1h → 5m, each a reboot in place; pane after --cache 1h: $(one_line "$on_pane" | cut -c1-120)"
     fi
   fi
 fi

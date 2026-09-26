@@ -62,7 +62,7 @@ Rows apply in this order, each only after the previous one verified:
 
 1. **Managed cleanup** — written and read back before any account file is touched, so no later step can leave a launch without the retention value.
 2. **Config** — `pfm.config.json` and `harvester.config.json` moved to the clone; every later row reads the new path.
-3. **State databases** — moved with their `-wal`/`-shm` siblings after a checkpoint; the move drops the retired `swap_event` table and the cache's unread `hidden` copy.
+3. **State databases** — moved with their `-wal`/`-shm` siblings after a checkpoint; row counts of every table are checked before and after the move. Install then opens the moved databases, migrates their schemas, and drops the retired `swap_event` table (`fleetdb/migration_v2.sql`) and the cache's `hidden` table (`store/migration_v9.sql`).
 4. **Session store** — merged, then linked.
 5. **Account files** — memory helpers renamed, then pfm entries stripped from `settings.json` and `.claude.json`.
 6. **Shell** — the `~/.zshrc` line repointed.
@@ -89,8 +89,8 @@ Transcripts are append-only JSONL named by session id, so a differing same-named
 
 Each applying run writes `~/.local/state/pfm/migrations/{UTC timestamp}/`:
 
-- `journal.json` — one record per action: row, verdict, source, destination, backup path, result.
-- `backup/` — the prior bytes of every rewritten file and every parked conflict.
+- `journal.json` — one record per affected path: row, verdict, source, destination, backup path, result. Each record is flushed before its path changes.
+- `backup/` — the prior bytes of every rewritten or removed path, each session tree before a merge, every parked conflict, and full copies of both moved databases and their WAL/SHM siblings before checkpointing. Rollback restores the database copies even if pfm opened the moved files after installation.
 
 `pfm install --rollback {timestamp}` replays the journal backwards: links removed, moves reversed, backups restored. A rollback of a run that moved state databases refuses while any pfm process holds them.
 
@@ -100,12 +100,12 @@ Chats born before the move were launched with `--system-prompt-file ~/.local/sha
 
 ## Rehearsal
 
-`TestHostLayoutMigratesLegacyHome` (`pfm/internal/e2e/`) is a Go end-to-end jail test, run in the fence through `dev.sh iso` like every e2e test, over the existing `testjail` homes; it needs no provider account. It sets `PFM_CONFIG` for its own home and builds the full legacy shape — `~/.cc/1 → ~/.claude`, accounts 2 and 3 with linked `projects/` and real `file-history/`, `tasks/`, `session-env/` including a same-id conflict, `~/.cc/fleet.db` with a `swap_event` table, `~/.local/state/pfm/fleet.db`, an empty `shared.db`, pfm hooks (ledger-owned, pre-ledger and retired) and `statusLine` in each account `settings.json`, a fingerprint-matched `cc-memory-wire.sh` with the operator hook naming it, pfm MCP entries in each `.claude.json`, the staged `~/.zshrc` line, and `~/.config/pfm/pfm.config.json`. It then asserts:
+`TestHostLayoutMigratesLegacyHome` (`pfm/e2e/`) is a Go end-to-end jail test, run in the fence through `dev.sh iso` like every e2e test, over the existing `testjail` homes; it needs no provider account. It sets `PFM_CONFIG` for its own home and builds the full legacy shape — `~/.cc/1 → ~/.claude`, accounts 2 and 3 with linked `projects/` and real `file-history/`, `tasks/`, `session-env/` including a same-id conflict, `~/.cc/fleet.db` with a `swap_event` table, `~/.local/state/pfm/fleet.db`, an empty `shared.db`, pfm hooks (ledger-owned, pre-ledger and retired) and `statusLine` in each account `settings.json`, a fingerprint-matched `cc-memory-wire.sh` with the operator hook naming it, pfm MCP entries in each `.claude.json`, the staged `~/.zshrc` line, and `~/.config/pfm/pfm.config.json`. It then asserts:
 
 1. `pfm install` (preview) changes no byte.
 2. `pfm install --yes` reaches every row `ok`, except the planted conflict, which is parked and listed.
 3. The SHA-256 of every transcript, checkpoint and task file before equals the set after (store plus parked).
-4. The row counts of every table in both databases are unchanged.
+4. The row counts stay unchanged except for retired `swap_event` and cache `hidden`; cache hides move into shared-state `hidden` before their old table drops.
 5. A second `pfm install --yes` records no action.
 6. `pfm doctor` reports no layout finding.
 7. `pfm install --rollback {id}` restores the legacy tree byte for byte.

@@ -63,16 +63,19 @@ func RefreshSeatPrompt(engine pfmengine.ID, sidDir, socket, pane, cwd, home stri
 	if err != nil {
 		return "", err
 	}
-	stagedFleetPrompt := harnessBody
+	fleetPrompt := harnessBody
 	if engine == pfmengine.Claude && !harnessFound {
-		path := action.ProfessorPromptPath(home)
+		path, err := action.ProfessorPromptPath(home)
+		if err != nil {
+			return "", fmt.Errorf("agent role: resolve Claude prompt: %w", err)
+		}
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return "", fmt.Errorf("agent role: read staged Claude prompt %s: %w", path, readErr)
+			return "", fmt.Errorf("agent role: read Claude prompt %s: %w", path, readErr)
 		}
-		stagedFleetPrompt = string(raw)
+		fleetPrompt = string(raw)
 	}
-	body, err := ComposeSeatPrompt(engine, role, constitution, stagedFleetPrompt)
+	body, err := ComposeSeatPrompt(engine, role, constitution, fleetPrompt)
 	if err != nil {
 		return "", err
 	}

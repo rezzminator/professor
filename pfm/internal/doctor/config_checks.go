@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -14,7 +15,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func PrintConfig(stdout io.Writer, runtime config.Runtime) {
+func PrintConfig(stdout io.Writer, runtime config.Runtime) (int, int) {
+	warnings, failures := printConfigFileRows(stdout, runtime)
 	fmt.Fprintf(stdout, "doctor: config path=%s exists=%t\n", runtime.Config.Path, runtime.Config.Exists)
 	fmt.Fprintf(
 		stdout,
@@ -79,6 +81,90 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) {
 		runtime.Config.Harvester.Path,
 		runtime.Config.Harvester.Exists,
 	)
+	for _, account := range runtime.Config.CodexAccounts {
+		path := filepath.Join(account.Home, "auth.json")
+		if err := config.CodexLoginError(account.Home); err != nil {
+			failures++
+			var pathErr *os.PathError
+			_, statErr := os.Stat(path)
+			switch {
+			case errors.Is(statErr, os.ErrNotExist):
+				fmt.Fprintf(stdout, "doctor: codex-login codex[%d] %s missing — run codex login\n", account.ID, path)
+			case errors.As(err, &pathErr):
+				fmt.Fprintf(
+					stdout,
+					"doctor: codex-login codex[%d] %s UNREADABLE error=%v\n",
+					account.ID,
+					path,
+					pathErr.Err,
+				)
+			default:
+				fmt.Fprintf(
+					stdout,
+					"doctor: codex-login codex[%d] %s has no tokens.access_token and tokens.account_id — run codex login\n",
+					account.ID,
+					path,
+				)
+			}
+			continue
+		}
+		fmt.Fprintf(stdout, "doctor: codex-login codex[%d] ok\n", account.ID)
+	}
+	return warnings, failures
+}
+
+func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, failures int) {
+	path := runtime.Config.Path
+	if path == "" {
+		_, markerErr := config.ResolvePath(runtime.Paths.Home)
+		if markerErr == nil || errors.Is(markerErr, paths.ErrNoSourceRepoMarker) {
+			fmt.Fprintln(stdout, "doctor: config: missing (no source repo recorded) — run pfm install")
+		} else {
+			fmt.Fprintf(stdout, "doctor: config: missing (%v) — run pfm install\n", markerErr)
+		}
+		return 1, 0
+	}
+	content, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(stdout, "doctor: config: missing %s — run pfm install\n", path)
+		if runtime.Paths.Home != "" {
+			legacy := filepath.Join(runtime.Paths.Home, ".config", "pfm", config.FileName)
+			if _, err := os.Stat(legacy); err == nil {
+				fmt.Fprintf(stdout, "doctor: config: legacy file %s is not read; run pfm install\n", legacy)
+			}
+		}
+		return 1, 0
+	}
+	if err != nil {
+		fmt.Fprintf(stdout, "doctor: config: unreadable %s error=%v\n", path, err)
+		return 0, 1
+	}
+	var object map[string]any
+	if err := json.Unmarshal(content, &object); err != nil || object == nil {
+		fmt.Fprintf(stdout, "doctor: config: unreadable %s error=%v\n", path, err)
+		return 0, 1
+	}
+	for _, entry := range config.Keys() {
+		parts := strings.Split(entry.Key, ".")
+		var current any = object
+		found := true
+		for _, part := range parts {
+			values, ok := current.(map[string]any)
+			if !ok {
+				found = false
+				break
+			}
+			current, ok = values[part]
+			if !ok {
+				found = false
+				break
+			}
+		}
+		if !found {
+			fmt.Fprintf(stdout, "doctor: config: missing key %s (default %v)\n", entry.Key, entry.Default)
+		}
+	}
+	return 0, 0
 }
 
 // RetiredHarvesterEnv maps every environment variable the harvester used to

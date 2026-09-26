@@ -46,6 +46,7 @@ lane_run() { # lane_run <name> <image> — a detached lane container, fence cont
     -v pfm-dev-npm-cache:/root/.npm \
     -w /worktree \
     -e PFM_DEV_FENCE=1 -e IS_SANDBOX=1 -e LANG=C.UTF-8 -e GOFLAGS=-buildvcs=false \
+    -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json \
     -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" \
     -e PFM_DEV_REPO_WORK_TREE=/worktree \
     "$image" sleep infinity >/dev/null

@@ -37,6 +37,23 @@ func hasValidCodexCredentials(home string) (bool, error) {
 	return valid, nil
 }
 
+// CodexLoginError checks runtime login state for a configured Codex home.
+// Configuration loading validates the home's shape, not its credentials.
+func CodexLoginError(home string) error {
+	valid, err := hasValidCodexCredentials(home)
+	path := filepath.Join(home, "auth.json")
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if !valid {
+		return fmt.Errorf(
+			"%s must contain a valid auth.json with tokens.access_token and account_id — run codex login",
+			path,
+		)
+	}
+	return nil
+}
+
 // openCodeStoreExists recognizes both a materialized session database and an
 // authenticate-only OpenCode data home. The latter is the state produced by a
 // subscription login before the first headless session has been written. An

@@ -206,7 +206,7 @@ your-project/
 │   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /context-meter, /quality:*, /tokens, /h:gh — `pfm install` installs them host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, format-md.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
-│   └── settings.json                  ← permissions, env vars, hooks (pfm-guard, guard-stamp, format-md, codex-sync)
+│   └── settings.json                  ← permissions, project hooks (pfm-guard, guard-stamp, format-md, codex-sync)
 ├── .codex/                            ← (OPTIONAL) pointer layer over .claude/ — never a restatement of it
 │   ├── config.toml                    ← sandbox reach + the {CODEX_MODEL}/{CODEX_REASONING_EFFORT} pins
 │   ├── rules/                         ← repo-law.rules — execpolicy door lock for non-gitter roles

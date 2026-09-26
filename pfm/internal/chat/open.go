@@ -96,7 +96,7 @@ func OpenID(
 				ctx,
 				*row,
 				effective.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
-				effective.Config.InitialCache1H(primary),
+				effective.Config.EffectiveClaude(primary).Cache1H,
 				"",
 				stdout,
 				stderr,
@@ -259,7 +259,9 @@ func openDetachedRow(
 			row.CWD = effective.Paths.Home
 		}
 	}
-	executor, request, err := prepareOpen(row, primary, effective.Config.InitialCache1H(primary), "", stderr, effective)
+	executor, request, err := prepareOpen(
+		row, primary, effective.Config.EffectiveClaude(primary).Cache1H, "", stderr, effective,
+	)
 	if err != nil {
 		return action.OpenResult{}, err
 	}

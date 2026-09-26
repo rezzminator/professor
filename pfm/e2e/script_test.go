@@ -223,7 +223,7 @@ func setupScriptJail(env *testscript.Env, source string) error {
 	binDir := filepath.Join(root, "bin")
 	for _, directory := range []string{
 		claudeRoot, filepath.Join(home, ".local", "bin"),
-		filepath.Join(home, ".config", "pfm"), filepath.Join(home, ".cc"),
+		filepath.Join(home, ".cc"),
 		codexRoot, filepath.Join(root, "sid"), filepath.Join(root, "proc"),
 		tmuxDir, filepath.Join(root, "state"), filepath.Join(root, "tmp"), binDir,
 	} {
@@ -290,12 +290,12 @@ func setupScriptJail(env *testscript.Env, source string) error {
 	path := binDir + string(os.PathListSeparator) + filepath.Join(home, ".local", "bin") +
 		string(os.PathListSeparator) + env.Getenv("PATH")
 	values := map[string]string{
-		"HOME": home, "PFM_HOME": home,
+		"HOME": home, "PFM_HOME": home, "PFM_CONFIG": filepath.Join(home, "pfm.config.json"),
 		"PFM_DEV_FENCE":    "1",
 		e2eScriptBinaryEnv: os.Getenv(e2eScriptBinaryEnv),
 		e2eTmuxBinaryEnv:   os.Getenv(e2eTmuxBinaryEnv),
-		"PFM_DB":           filepath.Join(root, "state", "fleet.db"),
-		"PFM_FLEET_DB":     filepath.Join(home, ".cc", "fleet.db"),
+		"PFM_CACHE_DB":     filepath.Join(root, "state", "pfm-cache.db"),
+		"PFM_STATE_DB":     filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 		"PFM_SID_DIR":      filepath.Join(root, "sid"),
 		"PFM_CLAUDE_ROOTS": claudeRoot,
 		"PFM_CODEX_ROOT":   codexRoot,

@@ -2,13 +2,16 @@
 package paths
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -39,8 +42,9 @@ const (
 func SIDScratchDirs() []string { return []string{SIDScratchDoctor, SIDScratchChatLoads} }
 
 const (
-	EnvDB          = "PFM_DB"
-	EnvFleetDB     = "PFM_FLEET_DB"
+	EnvConfig      = "PFM_CONFIG"
+	EnvCacheDB     = "PFM_CACHE_DB"
+	EnvStateDB     = "PFM_STATE_DB"
 	EnvSIDDir      = "PFM_SID_DIR"
 	EnvClaudeRoots = "PFM_CLAUDE_ROOTS"
 	EnvCodexHome   = "PFM_CODEX_ROOT"
@@ -53,15 +57,12 @@ const (
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
 	// test` is refused the real home rather than handed it silently.
-	EnvRealHome = "PFM_TEST_REAL_HOME"
-	// EnvTestJailHome names the package-wide jailed home internal/testjail
-	// built. A test that moves PFM_HOME to a directory of its own still
-	// inherits the jail's XDG_CONFIG_HOME, which is safe: it is this home's.
-	EnvTestJailHome    = "PFM_TEST_JAIL_HOME"
-	EnvProcRoot        = "PFM_PROC_ROOT"
-	EnvCgroupRoot      = "PFM_CGROUP_ROOT"
-	EnvDevRepoGitDir   = "PFM_DEV_REPO_GIT_DIR"
-	EnvDevRepoWorkTree = "PFM_DEV_REPO_WORK_TREE"
+	EnvRealHome           = "PFM_TEST_REAL_HOME"
+	EnvProcRoot           = "PFM_PROC_ROOT"
+	EnvManagedSettingsDir = "PFM_MANAGED_SETTINGS_DIR"
+	EnvCgroupRoot         = "PFM_CGROUP_ROOT"
+	EnvDevRepoGitDir      = "PFM_DEV_REPO_GIT_DIR"
+	EnvDevRepoWorkTree    = "PFM_DEV_REPO_WORK_TREE"
 	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
 	// the way a real chat runs — the server loads ~/.tmux.conf like every other
 	// terminal on the machine, because a chat IS a terminal the user lives in:
@@ -78,6 +79,92 @@ const (
 	EnvLogMirror     = "PFM_LOG"
 	defaultTmpDir    = "/tmp"
 )
+
+const sourceRepoMarkerName = "source-repo"
+
+// The two answered outcomes of reading the source-repo marker. They are
+// distinct because the remedies are opposite: ErrNoSourceRepoMarker means no
+// install ever recorded a clone (record one), ErrSourceRepoUnusable means one
+// was recorded and no longer names a usable directory (the clone moved, was
+// deleted, or the marker was hand-edited). A third outcome — the marker could
+// not be read at all — carries NEITHER sentinel: that is "we failed to look",
+// and a caller that folds it into either answer is reporting a guess.
+var (
+	ErrNoSourceRepoMarker = errors.New("no source repository recorded")
+	ErrSourceRepoUnusable = errors.New("recorded source repository is unusable")
+)
+
+// SourceRepoPath returns the install-owned clone marker location.
+func SourceRepoPath(home string) string {
+	return filepath.Join(filepath.Join(home, ".local", "share", "pfm", "install"), sourceRepoMarkerName)
+}
+
+// WriteSourceRepoMarker records exactly one normalized clone path.
+func WriteSourceRepoMarker(home, repo string) error {
+	content, err := SourceRepoMarkerContent(repo)
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(SourceRepoPath(home), content, 0o600)
+}
+
+func SourceRepoMarkerContent(repo string) ([]byte, error) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return nil, errors.New("source repository path is empty")
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source repository %q: %w", repo, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("inspect source repository %s: %w", abs, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("source repository %s is not a directory", abs)
+	}
+	return []byte(abs + "\n"), nil
+}
+
+// ReadSourceRepoMarker reads the one-line clone marker and verifies that it
+// still names a directory. Its three outcomes are told apart by the caller
+// with errors.Is: ErrNoSourceRepoMarker (nothing recorded),
+// ErrSourceRepoUnusable (recorded, but the path is gone, not a directory, or
+// not one path), and a plain wrapped error for a marker that could not be
+// read at all. fs.ErrNotExist is kept in the chain of the first so callers
+// written against the older single shape keep working.
+func ReadSourceRepoMarker(home string) (string, error) {
+	path := SourceRepoPath(home)
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("read source repository marker %s: %w: %w", path, ErrNoSourceRepoMarker, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read source repository marker %s: %w", path, err)
+	}
+	repo := strings.TrimSpace(string(raw))
+	if repo == "" || strings.ContainsAny(repo, "\r\n") {
+		return "", fmt.Errorf("source repository marker %s is not one path: %w", path, ErrSourceRepoUnusable)
+	}
+	info, err := os.Stat(repo)
+	if err != nil {
+		return "", fmt.Errorf("inspect recorded source repository %s: %w: %w", repo, ErrSourceRepoUnusable, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("recorded source repository %s is not a directory: %w", repo, ErrSourceRepoUnusable)
+	}
+	return repo, nil
+}
+
+// ComposedHarnessPrompt locates the installed engine prompt in the recorded clone.
+func ComposedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
+	repo, err := ReadSourceRepoMarker(home)
+	if err != nil {
+		return "", fmt.Errorf("resolve composed harness prompt: %w", err)
+	}
+	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md"), nil
+}
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,
 // or nothing at all so tmux loads the user's own config.
@@ -114,21 +201,22 @@ func EnsureTmuxDir(directory string) error {
 
 // Values contains the filesystem locations used by pfm.
 //
-// DB is this binary's own derived cache (transcripts, rollouts, names) and
-// nothing else reads it. FleetDB is the authoritative operator state: kills,
+// CacheDB is this binary's own derived cache (transcripts, rollouts, names) and
+// nothing else reads it. StateDB is the authoritative operator state: kills,
 // teammates, and the primary account.
 type Values struct {
-	DB      string
-	FleetDB string
+	CacheDB string
+	StateDB string
 	SIDDir  string
 	Roots   map[pfmengine.ID][]string
 	TmuxDir string
 	Home    string
 	// ArchiveDir is ~/.claude-archive: where archived transcripts and rollouts
 	// go, with the manifest that puts them back. It is defined relative to Home.
-	ArchiveDir string
-	ProcRoot   string
-	CgroupRoot string
+	ArchiveDir         string
+	ProcRoot           string
+	ManagedSettingsDir string
+	CgroupRoot         string
 	// LogFile is the home's activity log, the JSON-lines file internal/obs
 	// writes and `pfm log` reads. It hangs off the same pfm state directory
 	// as the fleet cache, so a jail, a fence and the live host each keep
@@ -191,11 +279,11 @@ func DevRepoGitDir(root string) (string, bool) {
 // set up its jail, which is refused.
 //
 // A test that never set up its jail would otherwise resolve to the
-// OPERATOR'S OWN home: the fleet.db their live chats are indexed in,
+// OPERATOR'S OWN home: the pfm-cache.db their live chats are indexed in,
 // the ~/.claude/projects their transcripts live in. That is not a
 // hypothetical — one `go test ./...` run outside the fence has written
 // fixture transcripts into a real account and held write transactions
-// on a real fleet.db until the TUI could no longer open it.
+// on a real pfm-cache.db until the TUI could no longer open it.
 //
 // Resolving is silent by design: it computes pathnames and touches
 // nothing, so a jailed run and an escaped one are byte-identical here
@@ -231,24 +319,16 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
-// ConfigHomeFrom resolves the XDG config-home root pfm's own on-disk state
-// hangs from: an absolute XDG_CONFIG_HOME wins, else home's own .config
-// subdirectory. internal/config's ResolvePath composes pfm's config.json
-// path under this same root — the single place it is computed, so a config
-// resolver and a jail's own pin (internal/testjail) can never drift about
-// which .config a caller meant (L3-F9).
-func ConfigHomeFrom(env Env, home string) string {
-	if root := env.Get("XDG_CONFIG_HOME"); filepath.IsAbs(root) {
-		return filepath.Clean(root)
-	}
-	return filepath.Join(home, ".config")
-}
-
-// ConfigHome is ConfigHomeFrom over the real process environment.
-func ConfigHome(home string) string { return ConfigHomeFrom(OSEnv{}, home) }
-
 // Resolve returns the standard host paths with all K4 test-jail overrides
 // applied. It only computes pathnames; it does not access the filesystem.
+func DefaultStateDB(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "pfm.db")
+}
+
+func DefaultCacheDB(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
+}
+
 func Resolve() (Values, error) {
 	home, err := Home()
 	if err != nil {
@@ -268,18 +348,17 @@ func Resolve() (Values, error) {
 	tmuxBase := EnvOr("TMUX_TMPDIR", defaultTmpDir)
 
 	return Values{
-		DB: EnvOr(EnvDB, filepath.Join(home, ".local", "state", "pfm", "fleet.db")),
-		// The fleet database defaults to $HOME/.cc/fleet.db. PFM_DB already
-		// overrides the private cache, so the fleet handle gets a distinct name.
-		FleetDB:    EnvOr(EnvFleetDB, filepath.Join(home, ".cc", "fleet.db")),
-		SIDDir:     EnvOr(EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid")),
-		Roots:      roots,
-		TmuxDir:    EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
-		Home:       home,
-		ArchiveDir: filepath.Join(home, ".claude-archive"),
-		LogFile:    filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
-		ProcRoot:   EnvOr(EnvProcRoot, "/proc"),
-		CgroupRoot: EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
+		CacheDB:            EnvOr(EnvCacheDB, DefaultCacheDB(home)),
+		StateDB:            EnvOr(EnvStateDB, DefaultStateDB(home)),
+		SIDDir:             EnvOr(EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid")),
+		Roots:              roots,
+		TmuxDir:            EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
+		Home:               home,
+		ArchiveDir:         filepath.Join(home, ".claude-archive"),
+		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
+		ProcRoot:           EnvOr(EnvProcRoot, "/proc"),
+		ManagedSettingsDir: EnvOr(EnvManagedSettingsDir, "/etc/claude-code/managed-settings.d"),
+		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil
 }
 
@@ -303,29 +382,21 @@ func GeneratedClaudeAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
 }
 
-// HarnessPromptsDir is where `pfm install` stages the fleet's system-prompt
-// layer: one composed prompt per engine, beside the parts it was composed
-// from and the Claude drift baselines.
-func HarnessPromptsDir(home string) string {
+// LegacyHarnessPromptsDir identifies the former managed prompt directory.
+func LegacyHarnessPromptsDir(home string) string {
 	return filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
 }
 
-// HarnessPromptPath is the staged prompt ONE engine reads — claude.md,
-// codex.md, opencode.md — composed at stage time from the shared head, that
-// engine's middle and the shared tail. Claude takes it as
-// --system-prompt-file, Codex as its SessionStart appendix, OpenCode through
-// its config's `instructions` array. Three readers in three packages; one
-// spelling of where the file is.
-func HarnessPromptPath(home string, id pfmengine.ID) string {
-	return filepath.Join(HarnessPromptsDir(home), pfmengine.MustLookup(id).LongName+".md")
-}
-
-// HarnessBaselineDir is the one staged location the harness-prompt drift
-// doctor reads its pins, bodies and model provenance from. The baselines are
-// captures of Claude Code's own built-in prompt, so they live under the
-// Claude engine's directory rather than beside the shared parts.
-func HarnessBaselineDir(home string) string {
-	return filepath.Join(HarnessPromptsDir(home), pfmengine.MustLookup(pfmengine.Claude).LongName, "baselines")
+// HarnessBaselineDir resolves Claude's captured baselines in the recorded clone.
+func HarnessBaselineDir(home string) (string, error) {
+	repo, err := ReadSourceRepoMarker(home)
+	if err != nil {
+		return "", fmt.Errorf("resolve harness baseline directory: %w", err)
+	}
+	return filepath.Join(
+		repo, "pfm", "harness-prompts",
+		pfmengine.MustLookup(pfmengine.Claude).LongName, "baselines",
+	), nil
 }
 
 // SocketPath resolves a chat's tmux socket to an absolute path: an absolute

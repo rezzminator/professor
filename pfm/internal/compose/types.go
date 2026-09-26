@@ -1,6 +1,9 @@
 package compose
 
 import (
+	"context"
+
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -129,14 +132,17 @@ const (
 	KilledView
 )
 
-// AccountRoot associates one transcript/config root with its fleet account.
+// AccountRoot associates one Codex rollout root with its fleet account.
 type AccountRoot struct {
 	Account int
 	Path    string
-	// ConfigDir is the seat's config dir (CLAUDE_CONFIG_DIR / CODEX_HOME). A
-	// live process names its seat by this, and it stays distinct when every
-	// seat's Path resolves to one shared transcript store.
+}
+
+// ClaudeSeat names a configured live process seat without using transcript paths.
+type ClaudeSeat struct {
+	Account   int
 	ConfigDir string
+	Implicit  bool
 }
 
 // Options controls pure presentation choices.
@@ -160,8 +166,11 @@ type Input struct {
 	OpenCodeSessions []store.OpenCodeSession
 	CxNames          map[string]string
 	Killed           []store.Killed
-	AccountRoots     []AccountRoot
+	ClaudeSeats      []ClaudeSeat
 	CodexHomes       []AccountRoot
+	Launches         *fleetdb.Launches
+	LaunchError      error
+	Context          context.Context
 	Options          Options
 }
 
@@ -192,6 +201,7 @@ type Row struct {
 	ActivityNS     int64
 	AgeNS          int64
 	Account        int
+	LaunchUnread   bool
 	Accounts       []int
 	Killed         bool
 	// NameKilled marks a row killed by its "_KILL…" label rather than by a

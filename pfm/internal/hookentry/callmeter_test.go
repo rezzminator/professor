@@ -100,6 +100,7 @@ func (lab *callmeterLab) payloads(name string) []string {
 
 func (lab *callmeterLab) feed(payloads ...string) {
 	lab.t.Helper()
+	shared := filepath.Join(lab.home, ".claude")
 	for _, payload := range payloads {
 		var stderr bytes.Buffer
 		if code := runCallmeter(
@@ -108,7 +109,7 @@ func (lab *callmeterLab) feed(payloads ...string) {
 			&stderr,
 			lab.storePath,
 			lab.clock,
-			callmeterSeat{},
+			callmeterSeat{configDir: &shared},
 		); code != 0 {
 			lab.t.Fatalf("exit code = %d, want 0 on every path; stderr = %q", code, stderr.String())
 		}

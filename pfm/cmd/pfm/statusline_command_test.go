@@ -296,3 +296,11 @@ func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
 		t.Fatalf("--subagents with --refresh-gpt: code=%d, want usage error 2", code)
 	}
 }
+
+func TestStatuslineRunsOnABrokenConfig(t *testing.T) {
+	for _, args := range [][]string{{"statusline"}, {"internal", "statusline"}} {
+		if !diagnosticCommand(args) {
+			t.Fatalf("pfm %v exits on a broken config; its cache segment must show the error instead", args)
+		}
+	}
+}

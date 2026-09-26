@@ -3,21 +3,24 @@ package installer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // openCodeInstructionsKey is the machine-scope config array OpenCode reads
 // extra system-prompt files from. OpenCode has no --system-prompt-file and no
 // appendix hook: `Instruction.systemPaths` resolves every entry of this array
 // (absolute paths globbed, `~/` expanded) and `Instruction.system` reads each
-// one into the session's system array, so naming the staged prompt here is
+// one into the session's system array, so naming the composed prompt here is
 // the ONE door pfm has into an OpenCode system prompt.
 const openCodeInstructionsKey = "instructions"
 
-// wireOpenCodeInstructions points OpenCode's config at the staged OpenCode
+// wireOpenCodeInstructions points OpenCode's config at the clone's composed
 // prompt, preserving every other key and every entry the operator wrote. Our
 // entry leads, so the Professor arrives ahead of an operator's additions.
 func (installer *engine) wireOpenCodeInstructions() error {
@@ -32,6 +35,14 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 	if path == "" {
 		installer.skip("no OpenCode config path configured — prompt wiring has nothing to write")
 		return nil
+	}
+	composed, err := paths.ComposedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
+	if errors.Is(err, paths.ErrNoSourceRepoMarker) {
+		installer.skip("skip opencode instructions: no source repo recorded")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("resolve OpenCode prompt: %w", err)
 	}
 	path = physicalSettingsPath(path)
 	original, existed, err := readMCPFile(path)
@@ -49,17 +60,17 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 	if err != nil {
 		return fmt.Errorf("parse OpenCode config %s: %w", path, err)
 	}
-	staged := installer.stagedHarnessPromptPath(pfmengine.MustLookup(pfmengine.OpenCode).LongName)
+	legacy := filepath.Join(paths.LegacyHarnessPromptsDir(installer.options.Home), "opencode.md")
 	current, err := openCodeInstructionEntries(document, path)
 	if err != nil {
 		return err
 	}
 	next := make([]string, 0, len(current)+1)
 	if wanted {
-		next = append(next, staged)
+		next = append(next, composed)
 	}
 	for _, entry := range current {
-		if entry == staged {
+		if entry == composed || entry == legacy {
 			continue
 		}
 		next = append(next, entry)

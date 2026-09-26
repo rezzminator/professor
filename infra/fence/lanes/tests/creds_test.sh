@@ -10,6 +10,7 @@ set -uo pipefail
 
 SUT_DIR="${LANE_SUT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 SUT="$SUT_DIR/creds.sh"
+DEMO_SUT="${LANE_DEMO_CRED_SUT:-$SUT_DIR/../../demo/creds.sh}"
 SHTEST_TAG=lane-creds-test
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
@@ -23,12 +24,13 @@ CONTAINER_SEAT_2='~/.cc/2'
 # shellcheck disable=SC2088 # same rule for seat 1: the ~ belongs to the container
 CONTAINER_SEAT_1='~/.cc/1'
 FAKE_HOME="$T/home"
-mkdir -p "$FAKE_HOME/.cc/1" "$FAKE_HOME/.cc/2" "$FAKE_HOME/.codex" "$FAKE_HOME/.local/share/opencode"
+mkdir -p "$FAKE_HOME/.cc/1" "$FAKE_HOME/.cc/2" "$FAKE_HOME/.codex" "$FAKE_HOME/.local/state/pfm/codex-fence" "$FAKE_HOME/.local/share/opencode"
 printf '{"claudeAiOauth":{"accessToken":"%s","refreshToken":"%s"}}\n' "$TOKEN" "$TOKEN" >"$FAKE_HOME/.cc/1/.credentials.json"
 # seat 2 deliberately has NO credential file; seat 3 has a logged-out one.
 mkdir -p "$FAKE_HOME/.cc/3"
 printf '{"claudeAiOauth":{"accessToken":""}}\n' >"$FAKE_HOME/.cc/3/.credentials.json"
-printf '{"tokens":{"access_token":"%s"}}\n' "$TOKEN" >"$FAKE_HOME/.codex/auth.json"
+printf '{"tokens":{"access_token":"HOST-ONLY-BAIT"}}\n' >"$FAKE_HOME/.codex/auth.json"
+printf '{"tokens":{"access_token":"%s"}}\n' "$TOKEN" >"$FAKE_HOME/.local/state/pfm/codex-fence/auth.json"
 printf '{"openai":{"type":"oauth","access":"%s"}}\n' "$TOKEN" >"$FAKE_HOME/.local/share/opencode/auth.json"
 
 CONFIG="$T/pfm.config.json"
@@ -70,7 +72,7 @@ chmod +x "$BIN/docker"
 export PATH="$BIN:$PATH" STUB_STAGE="$T/staged"
 
 run_sut() {
-  OUT="$(HOME="$FAKE_HOME" OPENCODE_AUTH="$FAKE_HOME/.local/share/opencode/auth.json" \
+  OUT="$(HOME="$FAKE_HOME" PFM_CONFIG= OPENCODE_AUTH="$FAKE_HOME/.local/share/opencode/auth.json" \
     bash "$SUT" "$@" 2>&1)"
   RC=$?
 }
@@ -93,6 +95,19 @@ if [ "$RC" -eq 0 ] &&
   ok "--print-config: only credentialed seats re-homed on ~/.cc/<id>; each dropped seat NAMED"
 else
   bad "print-config" "rc=$RC" "$OUT"
+fi
+
+# ---- 1a: absent PFM_CONFIG uses the source-repo marker's clone config ------
+
+mkdir -p "$FAKE_HOME/.local/share/pfm/install" "$T/clone"
+printf '%s\n' "$T/clone" >"$FAKE_HOME/.local/share/pfm/install/source-repo"
+cp "$CONFIG" "$T/clone/pfm.config.json"
+run_sut --print-config
+if [ "$RC" -eq 0 ] &&
+  [ "$(printf '%s' "$OUT" | grep '^{' | jq -r '.accounts | length')" = 1 ]; then
+  ok "host config defaults to the recorded clone's pfm.config.json"
+else
+  bad "recorded clone config" "rc=$RC" "$OUT"
 fi
 
 # ---- 1b: a seat WITH a credential keeps its container path ----------------
@@ -134,7 +149,7 @@ if [ "$RC" -eq 0 ] &&
   printf '%s' "$OUT" | grep -q 'seat 1 (🥇) staged' &&
   printf '%s' "$OUT" | grep -q 'seat 2 (🥈): NO CREDENTIAL' &&
   printf '%s' "$OUT" | grep -q 'seat 3 (🥉): NO CREDENTIAL' &&
-  printf '%s' "$OUT" | grep -q 'creds: 3 staged · 2 NO CREDENTIAL · Claude seats staged: 1'; then
+  printf '%s' "$OUT" | grep -q 'creds: 3 staged · 2 NO CREDENTIAL · 0 BLOCKED · Claude seats staged: 1'; then
   ok "staging: seat 1 staged, seat 2 (absent) and seat 3 (logged out) each NO CREDENTIAL by name"
 else
   bad "per-seat report" "rc=$RC" "$OUT"
@@ -143,6 +158,11 @@ if printf '%s' "$OUT" | grep -qF "$TOKEN"; then
   bad "TOKEN LEAK" "the fixture token appeared in creds.sh output:" "$OUT"
 else
   ok "no token on stdout or stderr (the fixture token appears nowhere in the output)"
+fi
+if grep -lF 'HOST-ONLY-BAIT' "$T/staged"/*.blob >/dev/null 2>&1; then
+  bad "host Codex credential" "host-only bytes reached the docker stub"
+else
+  ok "host Codex credential bytes never reached the container"
 fi
 if [ "$(grep -lF "$TOKEN" "$T/staged"/*.blob 2>/dev/null | wc -l | tr -d ' ')" -ge 2 ]; then
   ok "the credential bodies did travel (2+ blobs reached the container over stdin)"
@@ -180,21 +200,26 @@ else
 fi
 mv "$T/away.json" "$FAKE_HOME/.cc/1/.credentials.json"
 
-# ---- 5: a missing Codex / OpenCode auth is named, not fatal --------------
+# ---- 5: a missing fence Codex login blocks; OpenCode absence is named -----
 
-mv "$FAKE_HOME/.codex/auth.json" "$T/codex-away.json"
+mv "$FAKE_HOME/.local/state/pfm/codex-fence/auth.json" "$T/codex-away.json"
 mv "$FAKE_HOME/.local/share/opencode/auth.json" "$T/oc-away.json"
 run_sut --container fake --config "$CONFIG"
-if [ "$RC" -eq 0 ] &&
-  printf '%s' "$OUT" | grep -q 'codex home: NO CREDENTIAL' &&
+if [ "$RC" -eq 1 ] &&
+  printf '%s' "$OUT" | grep -q 'codex home: BLOCKED — no fence login at ~/.local/state/pfm/codex-fence/auth.json' &&
   printf '%s' "$OUT" | grep -q 'lane E2 cannot run' &&
   printf '%s' "$OUT" | grep -q 'opencode: NO CREDENTIAL' &&
   printf '%s' "$OUT" | grep -q 'lane E3 cannot run'; then
-  ok "a missing Codex/OpenCode auth names the lane it disables and does not fail the staging"
+  ok "a missing fence Codex login blocks staging and names lane E2; OpenCode absence is named"
 else
   bad "engine auth absence" "rc=$RC" "$OUT"
 fi
-mv "$T/codex-away.json" "$FAKE_HOME/.codex/auth.json"
+if grep -lF 'HOST-ONLY-BAIT' "$T/staged"/*.blob >/dev/null 2>&1; then
+  bad "host Codex fallback" "host-only bytes reached the docker stub after fence login removal"
+else
+  ok "missing fence login never falls back to the host Codex credential"
+fi
+mv "$T/codex-away.json" "$FAKE_HOME/.local/state/pfm/codex-fence/auth.json"
 mv "$T/oc-away.json" "$FAKE_HOME/.local/share/opencode/auth.json"
 
 # ---- 6: an unreadable config is exit 2 BEFORE anything is copied ---------
@@ -204,6 +229,31 @@ if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep -q 'not found'; then
   ok "a missing host config exits 2 by name before a single copy"
 else
   bad "missing config" "rc=$RC" "$OUT"
+fi
+
+# ---- 7: the macOS reader refuses a host login even when it is valid -------
+
+cat >"$BIN/uname" <<'STUB'
+#!/usr/bin/env bash
+echo Darwin
+STUB
+chmod +x "$BIN/uname"
+before_blobs="$(find "$T/staged" -name '*.blob' | wc -l | tr -d ' ')"
+OUT="$(HOME="$FAKE_HOME" bash "$DEMO_SUT" --container fake --codex "$FAKE_HOME/.codex=~/.codex" 2>&1)"
+RC=$?
+after_blobs="$(find "$T/staged" -name '*.blob' | wc -l | tr -d ' ')"
+if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'copied refresh token forks' &&
+  [ "$before_blobs" = "$after_blobs" ]; then
+  ok "macOS Codex reader refuses a host login before staging bytes"
+else
+  bad "macOS host login source" "rc=$RC" "$OUT" "blobs $before_blobs → $after_blobs"
+fi
+OUT="$(HOME="$FAKE_HOME" bash "$DEMO_SUT" --container fake --codex "$FAKE_HOME/.local/state/pfm/codex-fence=~/.codex" 2>&1)"
+RC=$?
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'codex .* staged\|creds: codex '; then
+  ok "macOS Codex reader stages the dedicated fence login"
+else
+  bad "macOS fence login source" "rc=$RC" "$OUT"
 fi
 
 shtest_end

@@ -12,24 +12,51 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+func TestUpdateRollbackPreservesAccountSettings(t *testing.T) {
+	home := t.TempDir()
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(`{"operator":"before"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := pfmconfig.Runtime{
+		Paths:  paths.Values{Home: home},
+		Config: pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Dir(settings)}}},
+	}
+	snapshots, err := snapshotUpdateOwnedFiles(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(`{"operator":"after"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordUpdateHookAfter(snapshots)
+	if err := restoreUpdateHookFiles(snapshots, home, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(settings); err != nil || string(got) != `{"operator":"after"}` {
+		t.Fatalf("rollback changed account settings: %s err=%v", got, err)
+	}
+}
+
 // updateConfigMigrationTestRuntime is updateRollbackTestRuntime, plus a
-// pre-split legacy config.json on disk and a runtime whose Config.Path names
-// it — the shape a host has right before the candidate's own `install --yes`
-// runs the v0.74.0 migration (config.json -> pfm.config.json) inside the
-// candidate process only.
+// pre-split legacy config.json outside the source clone and a runtime whose
+// Config.Path names it. PFM_CONFIG pins that external file while the
+// candidate's own `install --yes` migrates it to pfm.config.json.
 func updateConfigMigrationTestRuntime(
 	t *testing.T,
 ) (runtime pfmconfig.Runtime, repo, legacyPath, migratedPath string, originalContent []byte) {
 	t.Helper()
 	runtime, repo = updateRollbackTestRuntime(t)
-	configDir := filepath.Join(runtime.Paths.Home, ".config", "pfm")
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	configDir := t.TempDir()
 	legacyPath = filepath.Join(configDir, pfmconfig.LegacyFileName)
 	migratedPath = filepath.Join(configDir, pfmconfig.FileName)
+	t.Setenv(paths.EnvConfig, legacyPath)
 	originalContent = []byte(`{"version":2,"theme":"tokyo-night"}`)
 	if err := os.WriteFile(legacyPath, originalContent, 0o600); err != nil {
 		t.Fatal(err)
@@ -282,55 +309,54 @@ func writeUpdateFixtureFile(t *testing.T, path, content string) {
 }
 
 // The MCP registration files install rewrites — a Codex config.toml, the
-// OpenCode opencode.jsonc, a Claude registry, ~/.mcp.json and the MCP
-// ownership ledger — are snapshotted: rollback restores each one untouched
-// since install to its pre-update bytes (removing one absent before), and
-// names one changed since install as an MCP registration left as is.
+// OpenCode opencode.jsonc and the MCP ownership ledger — are snapshotted:
+// rollback restores each one untouched since install to its pre-update bytes
+// (removing one absent before), and names one changed since install as an MCP
+// registration left as is.
 func TestUpdateRollbackRestoresTheMCPRegistrationsTheInstallRewrote(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	runtime, repo := updateRollbackTestRuntime(t)
 	home := runtime.Paths.Home
 	codexHome := filepath.Join(home, ".codex")
+	editedCodexHome := filepath.Join(home, ".codex-edited")
 	runtime.Config = pfmconfig.Config{
-		Accounts:      []pfmconfig.Account{{ID: 1, Implicit: true}},
-		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
+		Accounts: []pfmconfig.Account{{ID: 1, Implicit: true}},
+		CodexAccounts: []pfmconfig.CodexAccount{
+			{ID: 1, Home: codexHome},
+			{ID: 2, Home: editedCodexHome},
+		},
 	}
 	codexConfig := filepath.Join(codexHome, "config.toml")
-	claudeRegistry := filepath.Join(home, ".claude.json")
-	mcpJSON := filepath.Join(home, ".mcp.json")
+	editedCodexConfig := filepath.Join(editedCodexHome, "config.toml")
 	openCode := installer.OpenCodeConfigPath(home)
-	ledger := filepath.Join(home, ".local", "share", "pfm", "install", "mcp-ownership.json")
+	ledger := filepath.Join(filepath.Dir(paths.SourceRepoPath(home)), "mcp-ownership.json")
 	before := map[string]string{
-		codexConfig:    "model = \"operator\"\n",
-		claudeRegistry: "{\"mcpServers\":{}}\n",
-		mcpJSON:        "{\"mcpServers\":{\"operator\":{}}}\n",
+		codexConfig:       "model = \"operator\"\n",
+		editedCodexConfig: "model = \"second\"\n",
 	}
 	for path, content := range before {
 		writeUpdateFixtureFile(t, path, content)
 	}
 	stderr := updateRollbackAfterInstall(t, runtime, repo, func() error {
-		for _, path := range []string{codexConfig, claudeRegistry, mcpJSON, openCode, ledger} {
+		for _, path := range []string{codexConfig, editedCodexConfig, openCode, ledger} {
 			writeUpdateFixtureFile(t, path, "written by the candidate install\n")
 		}
 		return nil
 	}, func() {
-		writeUpdateFixtureFile(t, claudeRegistry, "{\"operator\":\"saved while the update ran\"}\n")
+		writeUpdateFixtureFile(t, editedCodexConfig, "model = \"saved while the update ran\"\n")
 	})
-	for _, path := range []string{codexConfig, mcpJSON} {
-		if got, err := os.ReadFile(path); err != nil || string(got) != before[path] {
-			t.Fatalf("%s after rollback = %q, %v; want its pre-update bytes %q", path, got, err, before[path])
-		}
+	if got, err := os.ReadFile(codexConfig); err != nil || string(got) != before[codexConfig] {
+		t.Fatalf("%s after rollback = %q, %v; want its pre-update bytes %q", codexConfig, got, err, before[codexConfig])
 	}
 	for _, path := range []string{openCode, ledger} {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s after rollback: stat err=%v, want it removed (absent before the update)", path, err)
 		}
 	}
-	got, err := os.ReadFile(claudeRegistry)
+	got, err := os.ReadFile(editedCodexConfig)
 	if err != nil || !strings.Contains(string(got), "saved while the update ran") {
-		t.Fatalf("Claude registry after rollback = %q, %v; want the concurrent edit kept", got, err)
+		t.Fatalf("Codex config after rollback = %q, %v; want the concurrent edit kept", got, err)
 	}
-	physical, err := filepath.EvalSymlinks(claudeRegistry)
+	physical, err := filepath.EvalSymlinks(editedCodexConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,6 +364,68 @@ func TestUpdateRollbackRestoresTheMCPRegistrationsTheInstallRewrote(t *testing.T
 		" changed after the update's install wrote it; left as is — reconcile it by hand"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("stderr=%q, want %q", stderr, want)
+	}
+}
+
+// updateHookLedgerRollback runs an update whose candidate install writes the
+// settings hook ownership ledger — the hook file the rollback snapshots — and
+// whose concurrent edit (between) runs before the rollback; it returns the
+// ledger path and stderr.
+func updateHookLedgerRollback(t *testing.T, between func(ledger string)) (string, string) {
+	t.Helper()
+	runtime, repo := updateRollbackTestRuntime(t)
+	ledger := filepath.Join(filepath.Dir(paths.SourceRepoPath(runtime.Paths.Home)), "settings-hook-ownership.json")
+	writeUpdateFixtureFile(t, ledger, "{}\n")
+	stderr := updateRollbackAfterInstall(t, runtime, repo, func() error {
+		writeUpdateFixtureFile(t, ledger, "{\"written\":\"by the candidate install\"}\n")
+		return nil
+	}, func() { between(ledger) })
+	return ledger, stderr
+}
+
+// A hook file that changed after the update's install and no longer parses is
+// named as unchecked, carrying its parse error — never read as a clean file.
+func TestUpdateRollbackResidueNamesAnUnparsableHookFileAsUnchecked(t *testing.T) {
+	broken := []byte("{\"hooks\": ")
+	ledger, stderr := updateHookLedgerRollback(t, func(ledger string) {
+		if err := os.WriteFile(ledger, broken, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got, err := os.ReadFile(ledger); err != nil || !bytes.Equal(got, broken) {
+		t.Fatalf("ledger after rollback = %q, %v; want the concurrent edit kept %q", got, err, broken)
+	}
+	physical, err := filepath.EvalSymlinks(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "hook file " + physical + " changed after the update's install wrote it; left as is — it does not parse ("
+	if !strings.Contains(stderr, want) ||
+		!strings.Contains(stderr, "), so pfm could not check it for stranded pfm hooks; reconcile it by hand") {
+		t.Fatalf("rollback residue did not name the unparsable hook file as unchecked: %q", stderr)
+	}
+}
+
+// A hook file removed after the update's install is named as removed — an
+// absent file has nothing to parse, so it is never reported as unparsable.
+func TestUpdateRollbackResidueNamesARemovedHookFile(t *testing.T) {
+	var physical string
+	_, stderr := updateHookLedgerRollback(t, func(ledger string) {
+		resolved, err := filepath.EvalSymlinks(ledger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		physical = resolved
+		if err := os.Remove(physical); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := os.Lstat(physical); !os.IsNotExist(err) {
+		t.Fatalf("rollback recreated the removed hook file %s: %v", physical, err)
+	}
+	want := "hook file " + physical + " was removed after the update's install wrote it; reconcile it by hand"
+	if !strings.Contains(stderr, want) || strings.Contains(stderr, "does not parse") {
+		t.Fatalf("rollback residue did not name the removed hook file as removed: %q", stderr)
 	}
 }
 
@@ -358,27 +446,5 @@ func TestUpdateRollbackResidueNamesAChangedConfigFileAsAConfigFile(t *testing.T)
 		" changed after the update's install wrote it; left as is — reconcile it by hand"
 	if !strings.Contains(stderr, want) {
 		t.Fatalf("stderr=%q, want %q", stderr, want)
-	}
-}
-
-// $HOME/.claude.json is rewritten by install even when no account wires it
-// (every account has its own ConfigDir): pfm's legacy entries there go. The
-// snapshot therefore covers it too, and rollback restores its pre-update bytes.
-func TestUpdateRollbackRestoresTheHomeClaudeRegistryNoAccountWires(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	runtime, repo := updateRollbackTestRuntime(t)
-	home := runtime.Paths.Home
-	runtime.Config = pfmconfig.Config{
-		Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1")}},
-	}
-	homeRegistry := filepath.Join(home, ".claude.json")
-	before := "{\"mcpServers\":{\"chat\":{\"command\":\"pfm\"}}}\n"
-	writeUpdateFixtureFile(t, homeRegistry, before)
-	updateRollbackAfterInstall(t, runtime, repo, func() error {
-		writeUpdateFixtureFile(t, homeRegistry, "{\"mcpServers\":{}}\n")
-		return nil
-	}, func() {})
-	if got, err := os.ReadFile(homeRegistry); err != nil || string(got) != before {
-		t.Fatalf("%s after rollback = %q, %v; want its pre-update bytes %q", homeRegistry, got, err, before)
 	}
 }

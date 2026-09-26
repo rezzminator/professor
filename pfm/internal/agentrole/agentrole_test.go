@@ -8,7 +8,44 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestRefreshSeatPromptReadsComposedClaudePrompt(t *testing.T) {
+	repo, home, sidDir := t.TempDir(), t.TempDir(), t.TempDir()
+	mustWrite(t, filepath.Join(repo, ".claude", "agents", "reader.md"), "---\nname: reader\n---\nROLE\n")
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(clone, "pfm", "harness-prompts", "composed", "claude.md")
+	mustWrite(t, prompt, "FLEET\n")
+	if err := WriteSeatPrompt(sidDir, "cc-role", "", "<!-- pfm agent-role: reader -->\nSTALE"); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := RefreshSeatPrompt(pfmengine.Claude, sidDir, "cc-role", "", repo, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(channel)
+	if err != nil || !strings.Contains(string(raw), "FLEET") {
+		t.Fatalf("seat prompt = %q, %v", raw, err)
+	}
+	if err := os.Remove(prompt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RefreshSeatPrompt(
+		pfmengine.Claude,
+		sidDir,
+		"cc-role",
+		"",
+		repo,
+		home,
+	); err == nil ||
+		!strings.Contains(err.Error(), "agent role: read Claude prompt "+prompt) {
+		t.Fatalf("unreadable prompt error = %v", err)
+	}
+}
 
 // mustMkdir and mustWrite are the two filesystem primitives every test below
 // builds its jail out of. Every directory lives under t.TempDir(): never the

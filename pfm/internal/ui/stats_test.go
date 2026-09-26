@@ -647,7 +647,9 @@ func TestLimitsTabConsolidatesSkipsDropsUnknownsAndKeepsErrors(t *testing.T) {
 	label1 := pfmconfig.DisplayAccountDir(home, 1, pfmconfig.DefaultAccountDir(home, 1))
 	label3 := pfmconfig.DisplayAccountDir(home, 3, pfmconfig.DefaultAccountDir(home, 3))
 	label4 := pfmconfig.DisplayAccountDir(home, 4, pfmconfig.DefaultAccountDir(home, 4))
-	emoji1 := pfmconfig.Defaults(home, []string{pfmconfig.DefaultAccountProjectDir(home, 1)}).EmojiFor(1)
+	emoji1 := pfmconfig.Defaults(
+		home, []string{filepath.Join(pfmconfig.DefaultAccountDir(home, 1), "projects")},
+	).EmojiFor(1)
 	model := NewModel(fixtureSnapshot(140))
 	model.tab = TabLimits
 	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{

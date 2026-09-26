@@ -84,6 +84,7 @@ type Snapshot struct {
 	OpenCodeAccountIDs     []int
 	Theme                  string
 	Cache1H                bool
+	Cache1HByAccount       map[int]bool
 	NowNS                  int64
 	Width                  int
 	Height                 int

@@ -2,7 +2,6 @@ package installer
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,13 +30,6 @@ func TestInstallPhysicalPathStableAcrossCreation(t *testing.T) {
 	}
 }
 
-// TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript is a
-// REGRESSION test for the one installer diagnostic that wrote to raw
-// os.Stderr: it bypassed say/skip, the Report counts and the activity ledger,
-// and — because preflight plans the identical pass with its stdout discarded
-// while stderr is not — printed twice on every `--yes` run. It now goes
-// through the run's own transcript, exactly once per unresolvable directory
-// no matter how many times claudeConfigDirs() is called.
 func TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -116,38 +108,5 @@ func TestInstallHookOwnershipCanonicalizesLegacyAliases(t *testing.T) {
 				t.Fatalf("ownership=%v", got)
 			}
 		})
-	}
-}
-
-func TestInstallClaudeSettingsLeafSymlinkSurvivesLifecycle(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	config := filepath.Join(home, "account")
-	target := filepath.Join(home, "personal-settings.json")
-	link := filepath.Join(config, "settings.json")
-	writeFixture(t, target, `{"private":"keep"}`)
-	if err := os.MkdirAll(config, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
-	e := engine{
-		options:     Options{Home: home, ConfigDirs: []string{config}, CodexHomes: []string{}, Stdout: io.Discard},
-		managedRoot: filepath.Join(home, "managed"),
-		apply:       true,
-		stamp:       "fixture",
-	}
-	for _, mode := range []Mode{ModeApply, ModeUninstall} {
-		e.options.Mode = mode
-		if err := e.wireSettings(); err != nil {
-			t.Fatal(err)
-		}
-		if got, err := os.Readlink(link); err != nil || got != target {
-			t.Fatalf("mode=%v link=%q err=%v", mode, got, err)
-		}
-	}
-	if !strings.Contains(readFixture(t, target), `"private": "keep"`) {
-		t.Fatal("private setting lost")
 	}
 }

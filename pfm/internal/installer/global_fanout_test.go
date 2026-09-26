@@ -686,7 +686,8 @@ func TestUninstallRemovesOwnedCodexRolesAndTheLegacyGeneratedDirectory(t *testin
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -697,7 +698,8 @@ func TestUninstallRemovesOwnedCodexRolesAndTheLegacyGeneratedDirectory(t *testin
 	writeFixture(t, filepath.Join(legacy, "alpha.toml"), "name = \"alpha\"\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -725,7 +727,8 @@ func TestUninstallLeavesAForeignCodexAgentUntouched(t *testing.T) {
 	writeFixture(t, foreign, "name = \"mine\"\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -750,7 +753,7 @@ func TestUninstallRetiresAPreMigrationLegacyCodexAgentLink(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, "templates", "global", "agents"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSourceRepoMarker(home, repo); err != nil {
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
 		t.Fatal(err)
 	}
 	registry := filepath.Join(home, ".codex", "agents")
@@ -764,7 +767,8 @@ func TestUninstallRetiresAPreMigrationLegacyCodexAgentLink(t *testing.T) {
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -851,7 +855,8 @@ func TestInstallRetiresACodexRoleTheCloneNoLongerShips(t *testing.T) {
 	writeFixture(t, mine, "name = \"mine\"\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}

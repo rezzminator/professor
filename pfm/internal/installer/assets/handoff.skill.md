@@ -32,7 +32,7 @@ into the new chat (default) or spawn a separate detached one and leave this pane
    ```
    `--hide` is what hides the conversation being handed off — the command records it only after
    the reboot completes, so a failed reload leaves this chat listed and live. Keep any
-   `--account N` / `--1h` / `--model` / `--effort` the user asked for. Never pass `--sock`.
+   `--account N` / `--cache 1h|5m` / `--model` / `--effort` the user asked for. Never pass `--sock`.
 
    **With `--branch` — leave this pane and conversation completely untouched.** No reload, no
    hide. Instead start a SEPARATE, detached chat seeded with the handoff, once, via Bash:
@@ -43,7 +43,7 @@ into the new chat (default) or spawn a separate detached one and leave this pane
    the picker; that is the whole point of `--branch`. Never `--hide`, never `--sock`. The
    successor is born on THIS chat's engine — `chat new` defaults to the calling chat's engine;
    pass `--engine` only when the user asks for the other one. Keep any
-   `--account N` / `--1h` / `--model` / `--effort` the user asked for — `chat new` accepts all of
+   `--account N` / `--cache 1h|5m` / `--model` / `--effort` the user asked for — `chat new` accepts all of
    those.
 
 3. **Without `--branch`** — reply ONE short line, the handoff path, and END THE TURN. In-flight

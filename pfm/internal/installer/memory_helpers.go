@@ -130,14 +130,16 @@ func (installer *engine) migrateMemoryHelpers() error {
 		if err := installer.change(
 			"rewrite memory helper hook path in "+rewrite.path+" (backup preserved)",
 			func() error {
-				backup := availableBackup(rewrite.path, installer.stamp)
-				if err := copyBackup(rewrite.path, backup); err != nil {
-					return fmt.Errorf(
-						"backup settings before memory helper hook migration %s to %s: %w",
-						rewrite.path,
-						backup,
-						err,
-					)
+				if installer.layoutJournal == nil {
+					backup := availableBackup(rewrite.path, installer.stamp)
+					if err := copyBackup(rewrite.path, backup); err != nil {
+						return fmt.Errorf(
+							"backup settings before memory helper hook migration %s to %s: %w",
+							rewrite.path,
+							backup,
+							err,
+						)
+					}
 				}
 				if err := atomicfile.Write(rewrite.path, rewrite.content, rewrite.mode); err != nil {
 					return fmt.Errorf("rewrite memory helper hook path in %s: %w", rewrite.path, err)

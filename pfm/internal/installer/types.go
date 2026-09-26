@@ -69,20 +69,12 @@ type OutputRunner interface {
 type Options struct {
 	Mode      Mode
 	Home      string
+	StateDB   string
 	ConfigDir string
 	// ConfigDirs is the config-driven settings fanout. A nil value retains
 	// the historical discovery of existing .cc account settings for callers
 	// that construct Options directly.
 	ConfigDirs []string
-	// ClaudeRegistries carries actual user-scope paths, including implicit accounts.
-	// Nil derives legacy paths from ConfigDirs; empty means no Claude clients.
-	ClaudeRegistries []string
-	// ClaudeRegistryReasons explains, for a path also present in
-	// ClaudeRegistries, why that file is a registry a pfm-launched Claude
-	// reads (see ClaudeUserRegistries). A path with no entry writes with the
-	// historical unreasoned message; callers that populate ClaudeRegistries
-	// from ClaudeUserRegistries populate this too.
-	ClaudeRegistryReasons map[string]string
 	// CodexHomes is the config-driven hooks.json fanout. A nil value retains
 	// the historical single ~/.codex target for direct legacy callers; an
 	// explicitly empty roster installs no Codex hook.
@@ -114,7 +106,6 @@ type Options struct {
 	// callers may leave it empty to opt out of OpenCode wiring.
 	OpenCodeConfigPath string
 	ClaudeBinary       string
-	CodexYolo          map[int]bool
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches
@@ -252,6 +243,9 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 			return options, err
 		}
 	}
+	if options.StateDB == "" {
+		options.StateDB = paths.DefaultStateDB(options.Home)
+	}
 	if options.ConfigDir == "" {
 		options.ConfigDir = options.Home + "/.claude"
 	}
@@ -263,9 +257,6 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	}
 	if options.MCPPort == 0 {
 		options.MCPPort = pfmconfig.DefaultMCPPort
-	}
-	if options.CodexYolo == nil {
-		options.CodexYolo = map[int]bool{1: true, 2: true, 3: true}
 	}
 	if options.Now == nil {
 		options.Now = options.Clock.Now

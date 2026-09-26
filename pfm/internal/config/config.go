@@ -16,6 +16,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const Version = 2
@@ -28,6 +29,9 @@ const (
 	// defaultAskEffort is the reasoning effort every engine's ask defaults
 	// carry until an operator sets one.
 	defaultAskEffort = "low"
+	// defaultAskEngine is ask.engine's default, the value the tracked
+	// example.pfm.config.json carries.
+	defaultAskEngine = pfmengine.Codex
 )
 
 type Source string
@@ -50,18 +54,16 @@ const (
 	SystemPromptProfessor  = "professor"
 )
 
-// Account is one Claude account. ProjectDir is the transcript root used by
-// fleet discovery; ConfigDir is the directory handed to Claude at launch.
+// Account is one Claude account. ConfigDir is the directory handed to Claude at launch.
 // Implicit is true only for the default account whose current launch shape
 // deliberately leaves CLAUDE_CONFIG_DIR unset.
 type Account struct {
-	ID         int
-	ConfigDir  string
-	ProjectDir string
-	Implicit   bool
-	Emoji      string
-	Claude     *ClaudePrefs
-	Codex      *CodexPrefs
+	ID        int
+	ConfigDir string
+	Implicit  bool
+	Emoji     string
+	Claude    *ClaudePrefs
+	Codex     *CodexPrefs
 }
 
 // AccountSkip is a numeric ~/.cc directory discovery inspected and rejected
@@ -75,8 +77,12 @@ type AccountSkip struct {
 }
 
 type ClaudePrefs struct {
-	PermissionMode string
-	Binary, Theme  string
+	PermissionMode        string
+	Binary, Theme         string
+	WebSearchesPerSession int64
+	TmuxTruecolor         bool
+	CleanupPeriodDays     int
+	RequireManagedCleanup bool
 	// SystemPrompt is one of the SystemPrompt* values; empty means
 	// SystemPromptProduction.
 	SystemPrompt string
@@ -190,6 +196,7 @@ type Config struct {
 	Version          int
 	InputVersion     int
 	Theme            string
+	State            State
 	Accounts         []Account
 	AccountSkips     []AccountSkip
 	CodexAccounts    []CodexAccount
@@ -219,9 +226,20 @@ func productionMCPServers() map[string]MCPServer {
 	}
 }
 
+type State struct {
+	DB      string
+	CacheDB string
+}
+
+type rawState struct {
+	DB      *string `json:"db,omitempty"`
+	CacheDB *string `json:"cacheDb,omitempty"`
+}
+
 type rawConfig struct {
 	Version  *int          `json:"version"`
 	Theme    *string       `json:"theme,omitempty"`
+	State    *rawState     `json:"state,omitempty"`
 	Accounts *[]rawAccount `json:"accounts,omitempty"`
 	Claude   *rawClaude    `json:"claude,omitempty"`
 	Codex    *rawCodex     `json:"codex,omitempty"`
@@ -254,13 +272,17 @@ type rawAccount struct {
 }
 
 type rawClaude struct {
-	PermissionMode *string          `json:"permissionMode,omitempty"`
-	Binary         *string          `json:"binary,omitempty"`
-	Theme          *string          `json:"theme,omitempty"`
-	Cache1H        *bool            `json:"cache1h,omitempty"`
-	NativeCursor   *bool            `json:"nativeCursor,omitempty"`
-	SystemPrompt   *string          `json:"systemPrompt,omitempty"`
-	CompactNudge   *rawCompactNudge `json:"compactNudge,omitempty"`
+	PermissionMode        *string          `json:"permissionMode,omitempty"`
+	WebSearchesPerSession *int64           `json:"webSearchesPerSession,omitempty"`
+	TmuxTruecolor         *bool            `json:"tmuxTruecolor,omitempty"`
+	CleanupPeriodDays     *int             `json:"cleanupPeriodDays,omitempty"`
+	RequireManagedCleanup *bool            `json:"requireManagedCleanup,omitempty"`
+	Binary                *string          `json:"binary,omitempty"`
+	Theme                 *string          `json:"theme,omitempty"`
+	Cache1H               *bool            `json:"cache1h,omitempty"`
+	NativeCursor          *bool            `json:"nativeCursor,omitempty"`
+	SystemPrompt          *string          `json:"systemPrompt,omitempty"`
+	CompactNudge          *rawCompactNudge `json:"compactNudge,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
 	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
 	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
@@ -340,21 +362,6 @@ func (raw *rawAsk) UnmarshalJSON(content []byte) error {
 	return nil
 }
 
-// resolveExistingPath is ResolvePath, except that a machine which still has
-// only the pre-split config.json reads that file until `pfm install`
-// migrates it — every command keeps working across the binary upgrade.
-func resolveExistingPath(home string) string {
-	current := ResolvePath(home)
-	if _, err := os.Stat(current); err == nil {
-		return current
-	}
-	legacy := filepath.Join(filepath.Dir(current), LegacyFileName)
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
-	}
-	return current
-}
-
 // Defaults returns today's effective behavior over the supplied discovery
 // roots. The roots are preserved byte-for-byte as discovery inputs; only the
 // corresponding launch directory is derived.
@@ -377,11 +384,10 @@ func defaultsWithMCPServers(
 	for index, projectRoot := range projectRoots {
 		configDir := filepath.Dir(projectRoot)
 		accounts = append(accounts, Account{
-			ID:         index + 1,
-			ConfigDir:  filepath.Clean(configDir),
-			ProjectDir: filepath.Clean(projectRoot),
-			Implicit:   index == 0,
-			Emoji:      DefaultEmoji(index + 1),
+			ID:        index + 1,
+			ConfigDir: filepath.Clean(configDir),
+			Implicit:  index == 0,
+			Emoji:     DefaultEmoji(index + 1),
 		})
 	}
 	if len(accounts) == 0 {
@@ -411,14 +417,20 @@ func defaultsWithMCPServers(
 		openCodeAccounts = []OpenCodeAccount{{ID: 1, Home: openCodeHome}}
 	}
 	sources := map[string]Source{
-		"version":  SourceDefault,
-		"theme":    SourceDefault,
-		"accounts": SourceDefault,
+		keyVersion:      SourceDefault,
+		keyTheme:        SourceDefault,
+		keyStateDB:      SourceDefault,
+		keyStateCacheDB: SourceDefault,
+		"accounts":      SourceDefault,
 		engineConfigKey(pfmengine.Claude, "permissionMode"):  SourceDefault,
 		engineConfigKey(pfmengine.Claude, engineKeyBinary):   SourceDefault,
-		engineConfigKey(pfmengine.Claude, "theme"):           SourceDefault,
+		engineConfigKey(pfmengine.Claude, keyTheme):          SourceDefault,
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
+		"claude.webSearchesPerSession":                       SourceDefault,
+		"claude.tmuxTruecolor":                               SourceDefault,
+		"claude.cleanupPeriodDays":                           SourceDefault,
+		"claude.requireManagedCleanup":                       SourceDefault,
 		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
 		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
@@ -453,15 +465,20 @@ func defaultsWithMCPServers(
 		Version:          Version,
 		InputVersion:     Version,
 		Theme:            "default",
+		State:            State{DB: paths.DefaultStateDB(home), CacheDB: paths.DefaultCacheDB(home)},
 		Accounts:         accounts,
 		AccountSkips:     accountSkips,
 		CodexAccounts:    codexAccounts,
 		OpenCodeAccounts: openCodeAccounts,
 		Claude: Claude{
-			PermissionMode: PermissionBypass,
-			Binary:         pfmengine.MustLookup(pfmengine.Claude).Binary,
-			Cache1H:        true,
-			CompactNudge:   DefaultCompactNudge(),
+			PermissionMode:        PermissionBypass,
+			Binary:                pfmengine.MustLookup(pfmengine.Claude).Binary,
+			WebSearchesPerSession: 9007199254740991,
+			TmuxTruecolor:         true,
+			CleanupPeriodDays:     36500,
+			RequireManagedCleanup: true,
+			Cache1H:               true,
+			CompactNudge:          DefaultCompactNudge(),
 
 			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 		},
@@ -474,10 +491,10 @@ func defaultsWithMCPServers(
 		MCP:        MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: DefaultMCPPort}},
 		Harvester:  harvester,
 		Ask: AskConfig{
-			Engine: pfmengine.Codex,
+			Engine: defaultAskEngine,
 			Prefs: map[pfmengine.ID]EnginePrefs{
-				pfmengine.Codex:    {Model: "gpt-5.6-luna", Effort: defaultAskEffort},
-				pfmengine.OpenCode: {Model: "gpt-5.6-luna", Effort: defaultAskEffort},
+				pfmengine.Codex:    {Model: defaultAskLunaModel, Effort: defaultAskEffort},
+				pfmengine.OpenCode: {Model: defaultAskLunaModel, Effort: defaultAskEffort},
 				pfmengine.Claude:   {Model: "claude-haiku-4-5", Effort: defaultAskEffort},
 			},
 		},
@@ -515,11 +532,6 @@ func DefaultEmoji(id int) string {
 // account. Consumers must not reconstruct this filesystem policy.
 func DefaultAccountDir(home string, id int) string {
 	return filepath.Join(home, ".cc", strconv.Itoa(id))
-}
-
-// DefaultAccountProjectDir is the discovery root beneath DefaultAccountDir.
-func DefaultAccountProjectDir(home string, id int) string {
-	return filepath.Join(DefaultAccountDir(home, id), "projects")
 }
 
 // DisplayAccountDir names a conventional account without exposing a full home
@@ -569,8 +581,7 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 		}
 		accounts = append(accounts, Account{
 			ID: candidate.id, ConfigDir: candidate.path,
-			ProjectDir: filepath.Join(candidate.path, "projects"),
-			Implicit:   candidate.id == 1, Emoji: DefaultEmoji(candidate.id),
+			Implicit: candidate.id == 1, Emoji: DefaultEmoji(candidate.id),
 		})
 	}
 	return accounts, skips
@@ -620,7 +631,17 @@ func loadWithMCPServers(
 	}
 	result := defaultsWithMCPServers(home, projectRoots, registered, codexHomes...)
 	if path == "" {
-		path = resolveExistingPath(home)
+		var err error
+		path, err = ResolvePath(home)
+		if err != nil {
+			if strings.TrimSpace(paths.OSEnv{}.Get(paths.EnvConfig)) != "" {
+				return Config{}, err
+			}
+			if err := finishHarvester(&result, home, registered, nil); err != nil {
+				return Config{}, err
+			}
+			return result, nil
+		}
 	} else if !filepath.IsAbs(path) {
 		absolute, err := filepath.Abs(path)
 		if err != nil {
@@ -647,12 +668,12 @@ func loadWithMCPServers(
 		return Config{}, configJSONError(result.Path, err, int64(len(content)))
 	}
 	if raw.Version == nil {
-		return Config{}, fmt.Errorf("config %s: required key %q is missing", result.Path, "version")
+		return Config{}, fmt.Errorf("config %s: required key %q is missing", result.Path, keyVersion)
 	}
 	if *raw.Version != 1 && *raw.Version != Version {
 		return Config{}, fmt.Errorf("config %s: version must be 1 or %d, got %d", result.Path, Version, *raw.Version)
 	}
-	result.Sources["version"] = SourceFile
+	result.Sources[keyVersion] = SourceFile
 	result.InputVersion = *raw.Version
 	// Version 1 is accepted as a compatibility input, but callers always see
 	// the current materialized schema version.
@@ -662,7 +683,31 @@ func loadWithMCPServers(
 			return Config{}, fmt.Errorf("config %s: theme must be non-empty", result.Path)
 		}
 		result.Theme = *raw.Theme
-		result.Sources["theme"] = SourceFile
+		result.Sources[keyTheme] = SourceFile
+	}
+
+	if raw.State != nil {
+		for _, entry := range []struct {
+			key    string
+			raw    *string
+			target *string
+		}{
+			{keyStateDB, raw.State.DB, &result.State.DB},
+			{keyStateCacheDB, raw.State.CacheDB, &result.State.CacheDB},
+		} {
+			if entry.raw == nil {
+				continue
+			}
+			if strings.TrimSpace(*entry.raw) == "" {
+				return Config{}, fmt.Errorf("config %s: %s must be non-empty", result.Path, entry.key)
+			}
+			value, err := expandHomePath(*entry.raw, home)
+			if err != nil {
+				return Config{}, fmt.Errorf("config %s: %s: %w", result.Path, entry.key, err)
+			}
+			*entry.target = value
+			result.Sources[entry.key] = SourceFile
+		}
 	}
 
 	// The top-level claude posture resolves before accounts so an unset
@@ -688,6 +733,7 @@ func loadWithMCPServers(
 			result.Sources[engineConfigKey(pfmengine.Claude, "cache1h")] = SourceFile
 			result.Claude.Cache1H = prefs.Cache1H
 		}
+		applyClaudeLaunchPrefs(&result.Claude, *raw.Claude, result.Sources, name, -1)
 		if err := applyTheme(&result.Claude, raw.Claude.Theme, name, -1, result.Sources); err != nil {
 			return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 		}
@@ -729,6 +775,11 @@ func loadWithMCPServers(
 				if err != nil {
 					return Config{}, err
 				}
+				prefs.WebSearchesPerSession = result.Claude.WebSearchesPerSession
+				prefs.TmuxTruecolor = result.Claude.TmuxTruecolor
+				prefs.CleanupPeriodDays = result.Claude.CleanupPeriodDays
+				prefs.RequireManagedCleanup = result.Claude.RequireManagedCleanup
+				applyClaudeLaunchPrefs(&prefs, *value.Claude, result.Sources, "accounts", index)
 				if value.Claude.Cache1H == nil {
 					// No account-level override: inherit the already-resolved
 					// top-level value rather than the type's false zero value,
@@ -881,21 +932,17 @@ func loadWithMCPServers(
 			}
 		}
 	}
-	if raw.Ask != nil && raw.Ask.Engine != nil {
+	// A file holding ask.engine at its default (every seeded
+	// example.pfm.config.json does) loads like an absent key: DefaultEngine
+	// resolves the roster at use and names an empty one. Only a deliberate
+	// non-default engine is refused here when its roster is empty.
+	if raw.Ask != nil && raw.Ask.Engine != nil && result.Ask.Engine != defaultAskEngine {
 		counts := result.Engines()
 		switch result.Ask.Engine {
 		case pfmengine.Claude:
 			if counts[pfmengine.Claude] == 0 {
 				return Config{}, fmt.Errorf(
 					"config %s: ask.engine %q has zero Claude accounts; add an accounts entry or choose codex",
-					result.Path,
-					result.Ask.Engine,
-				)
-			}
-		case pfmengine.Codex:
-			if counts[pfmengine.Codex] == 0 {
-				return Config{}, fmt.Errorf(
-					"config %s: ask.engine %q has zero Codex accounts; authenticate the default Codex home, add codex.homes, or choose claude",
 					result.Path,
 					result.Ask.Engine,
 				)
@@ -922,8 +969,10 @@ func loadWithMCPServers(
 // finishHarvester loads harvester.config.json, mirrors its enabled flag into
 // the server-generic MCP maps, and checks the one cross-file invariant.
 func finishHarvester(result *Config, home string, registered map[string]MCPServer, legacyEnabled *bool) error {
-	if err := loadHarvester(result, home, legacyEnabled); err != nil {
-		return err
+	if result.Path != "" {
+		if err := loadHarvester(result, home, legacyEnabled); err != nil {
+			return err
+		}
 	}
 	if _, found := registered[MCPServerHarvester]; found {
 		result.MCP.Servers[MCPServerHarvester] = MCPServer{Enabled: result.Harvester.Enabled}
@@ -998,6 +1047,16 @@ func configJSONError(path string, err error, contentSize ...int64) error {
 
 func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePrefs, error) {
 	prefs := ClaudePrefs{}
+	if raw.WebSearchesPerSession != nil && *raw.WebSearchesPerSession < 1 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.webSearchesPerSession must be at least 1", path, configScope(scope, index),
+		)
+	}
+	if raw.CleanupPeriodDays != nil && *raw.CleanupPeriodDays < 1 {
+		return ClaudePrefs{}, fmt.Errorf(
+			"config %s: %s.cleanupPeriodDays must be at least 1", path, configScope(scope, index),
+		)
+	}
 	if raw.PermissionMode != nil {
 		mode := *raw.PermissionMode
 		// v1 used "prompt". Keep accepting it as an input alias while
@@ -1046,6 +1105,26 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 		prefs.SystemPrompt = value
 	}
 	return prefs, nil
+}
+
+func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[string]Source, scope string, index int) {
+	base := configScope(scope, index) + "."
+	if raw.WebSearchesPerSession != nil {
+		target.WebSearchesPerSession = *raw.WebSearchesPerSession
+		sources[base+"webSearchesPerSession"] = SourceFile
+	}
+	if raw.TmuxTruecolor != nil {
+		target.TmuxTruecolor = *raw.TmuxTruecolor
+		sources[base+"tmuxTruecolor"] = SourceFile
+	}
+	if raw.CleanupPeriodDays != nil {
+		target.CleanupPeriodDays = *raw.CleanupPeriodDays
+		sources[base+"cleanupPeriodDays"] = SourceFile
+	}
+	if raw.RequireManagedCleanup != nil {
+		target.RequireManagedCleanup = *raw.RequireManagedCleanup
+		sources[base+"requireManagedCleanup"] = SourceFile
+	}
 }
 
 func decodeCodexPrefs(raw rawCodex, path, scope string, index int) (CodexPrefs, error) {
@@ -1106,10 +1185,9 @@ func validateAccounts(values []rawAccount, home string) ([]Account, error) {
 			return nil, fmt.Errorf("entry %d configDir: %w", index+1, err)
 		}
 		accounts = append(accounts, Account{
-			ID:         value.ID,
-			ConfigDir:  configDir,
-			ProjectDir: filepath.Join(configDir, "projects"),
-			Emoji:      DefaultEmoji(value.ID),
+			ID:        value.ID,
+			ConfigDir: configDir,
+			Emoji:     DefaultEmoji(value.ID),
 		})
 	}
 	return accounts, nil
@@ -1145,17 +1223,6 @@ func validateCodexHomes(
 		codexHome, err := expandHomePath(value.Home, home)
 		if err != nil {
 			return nil, fmt.Errorf("config %s: %s.home: %w", path, scope, err)
-		}
-		valid, credErr := hasValidCodexCredentials(codexHome)
-		if credErr != nil {
-			return nil, fmt.Errorf("config %s: %s auth.json: %w", path, scope, credErr)
-		}
-		if !valid {
-			return nil, fmt.Errorf(
-				"config %s: %s must contain a valid auth.json with tokens.access_token and account_id",
-				path,
-				scope,
-			)
 		}
 		emoji := value.Emoji
 		if emoji == "" {
@@ -1255,6 +1322,10 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
 		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
+		result.WebSearchesPerSession = account.Claude.WebSearchesPerSession
+		result.TmuxTruecolor = account.Claude.TmuxTruecolor
+		result.CleanupPeriodDays = account.Claude.CleanupPeriodDays
+		result.RequireManagedCleanup = account.Claude.RequireManagedCleanup
 		result.CompactNudge = account.Claude.CompactNudge
 		// Zero is unset on both caps, so Load's inheritance already put the
 		// resolved top-level value here — same unconditional copy as Cache1H.
@@ -1357,7 +1428,7 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 	counts := config.Engines()
 	preferred := config.Ask.Engine
 	if preferred == "" {
-		preferred = pfmengine.Codex
+		preferred = defaultAskEngine
 	}
 	id := preferred
 	switch id {
@@ -1386,138 +1457,6 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 	return "", errors.New("no engines configured: Claude roster empty; Codex roster empty; OpenCode store absent")
 }
 
-func (config Config) ProjectRoots() []string {
-	roots := make([]string, 0, len(config.Accounts))
-	for _, account := range config.Accounts {
-		roots = append(roots, account.ProjectDir)
-	}
-	return roots
-}
-
-func RegisteredMCPServers() []string {
-	registered := productionMCPServers()
-	names := make([]string, 0, len(registered))
-	for name := range registered {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// SetMCPServer atomically changes one registered server in the machine file.
-// Repeating an already-effective setting is a no-op.
-func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
-	server, registered := config.MCPServers[name]
-	if !registered {
-		return false, fmt.Errorf("unknown MCP server %q", name)
-	}
-	if name == MCPServerHarvester {
-		return SetHarvesterEnabled(config, enabled)
-	}
-	if server.Enabled == enabled {
-		return false, nil
-	}
-
-	top := make(map[string]json.RawMessage)
-	if config.Exists {
-		content, err := os.ReadFile(config.Path)
-		if err != nil {
-			return false, fmt.Errorf("read config %s for update: %w", config.Path, err)
-		}
-		if err := json.Unmarshal(content, &top); err != nil {
-			return false, configJSONError(config.Path, err)
-		}
-	}
-	version, _ := json.Marshal(Version)
-	top["version"] = version
-
-	mcpObject := make(map[string]json.RawMessage)
-	if content := top["mcp"]; len(content) != 0 {
-		if err := json.Unmarshal(content, &mcpObject); err != nil {
-			return false, fmt.Errorf("decode config %s mcp for update: %w", config.Path, err)
-		}
-	}
-	servers := make(map[string]json.RawMessage)
-	if content := mcpObject["servers"]; len(content) != 0 {
-		if err := json.Unmarshal(content, &servers); err != nil {
-			return false, fmt.Errorf("decode config %s mcp.servers for update: %w", config.Path, err)
-		}
-	}
-	serverObject := map[string]bool{jsonKeyEnabled: enabled}
-	serverContent, _ := json.Marshal(serverObject)
-	servers[name] = serverContent
-	serversContent, _ := json.Marshal(servers)
-	mcpObject["servers"] = serversContent
-	mcpContent, _ := json.Marshal(mcpObject)
-	top["mcp"] = mcpContent
-
-	content, err := json.MarshalIndent(top, "", "  ")
-	if err != nil {
-		return false, fmt.Errorf("encode config %s: %w", config.Path, err)
-	}
-	content = append(content, '\n')
-	if err := atomicfile.Write(config.Path, content, 0o600); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// RemoveMCPAuthToken removes the retired installer-owned daemon credential
-// while preserving every unrelated field. The strict loader still accepts the
-// legacy key so an existing host can reach this cleanup path.
-func RemoveMCPAuthToken(config Config) (bool, error) {
-	content, changed, err := configWithoutMCPAuthToken(config)
-	if err != nil || !changed {
-		return changed, err
-	}
-	if err := atomicfile.Write(config.Path, content, 0o600); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// MCPAuthTokenPresent reports whether the retired installer credential is
-// present without modifying the config. Install preview uses the same parser
-// as apply so the cleanup appears in the plan before any host mutation.
-func MCPAuthTokenPresent(config Config) (bool, error) {
-	_, changed, err := configWithoutMCPAuthToken(config)
-	return changed, err
-}
-
-func configWithoutMCPAuthToken(config Config) ([]byte, bool, error) {
-	if config.Path == "" {
-		return nil, false, errors.New("MCP auth token cleanup has no config path")
-	}
-	top := make(map[string]json.RawMessage)
-	if !config.Exists {
-		return nil, false, nil
-	}
-	content, err := os.ReadFile(config.Path)
-	if err != nil {
-		return nil, false, fmt.Errorf("read config %s for MCP auth cleanup: %w", config.Path, err)
-	}
-	if err := json.Unmarshal(content, &top); err != nil {
-		return nil, false, configJSONError(config.Path, err)
-	}
-	mcpObject := make(map[string]json.RawMessage)
-	if content := top["mcp"]; len(content) != 0 {
-		if err := json.Unmarshal(content, &mcpObject); err != nil {
-			return nil, false, fmt.Errorf("decode config %s mcp for auth cleanup: %w", config.Path, err)
-		}
-	}
-	if _, present := mcpObject["authToken"]; !present {
-		return nil, false, nil
-	}
-	delete(mcpObject, "authToken")
-	mcpContent, _ := json.Marshal(mcpObject)
-	top["mcp"] = mcpContent
-	content, err = json.MarshalIndent(top, "", "  ")
-	if err != nil {
-		return nil, false, fmt.Errorf("encode config %s: %w", config.Path, err)
-	}
-	return append(content, '\n'), true, nil
-}
-
 // MarshalDefault returns the strict, comment-free JSON used by `pfm config
 // init`. It deliberately emits resolved defaults so the file is useful as a
 // documented starting point while the loader remains backward compatible.
@@ -1531,7 +1470,11 @@ func MarshalDefault(home string, projectRoots []string) ([]byte, error) {
 // are protected unless force is explicitly requested.
 func WriteDefault(path, home string, projectRoots []string, force bool) error {
 	if path == "" {
-		path = ResolvePath(home)
+		var err error
+		path, err = ResolvePath(home)
+		if err != nil {
+			return NoConfigPathError(err)
+		}
 	}
 	if _, err := os.Stat(path); err == nil && !force {
 		return fmt.Errorf("config %s already exists; use --force to overwrite", path)
@@ -1559,11 +1502,15 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		}
 		if account.Claude != nil {
 			value[claudeName] = map[string]any{
-				"permissionMode": account.Claude.PermissionMode,
-				engineKeyBinary:  account.Claude.Binary,
-				"theme":          themeMarshalValue(account.Claude.Theme),
-				"cache1h":        account.Claude.Cache1H,
-				"nativeCursor":   account.Claude.NativeCursor,
+				"webSearchesPerSession": account.Claude.WebSearchesPerSession,
+				"tmuxTruecolor":         account.Claude.TmuxTruecolor,
+				"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
+				"requireManagedCleanup": account.Claude.RequireManagedCleanup,
+				"permissionMode":        account.Claude.PermissionMode,
+				engineKeyBinary:         account.Claude.Binary,
+				keyTheme:                themeMarshalValue(account.Claude.Theme),
+				"cache1h":               account.Claude.Cache1H,
+				"nativeCursor":          account.Claude.NativeCursor,
 			}
 		}
 		if account.Codex != nil {
@@ -1612,15 +1559,20 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		askValue["engine"] = pfmengine.MustLookup(engine).LongName
 	}
 	value := map[string]any{
-		"version":  config.Version,
-		"theme":    config.Theme,
+		keyVersion: config.Version,
+		keyTheme:   config.Theme,
+		"state":    map[string]any{"db": config.State.DB, "cacheDb": config.State.CacheDB},
 		"accounts": accounts,
 		claudeName: map[string]any{
-			"permissionMode": config.Claude.PermissionMode,
-			engineKeyBinary:  config.Claude.Binary,
-			"theme":          themeMarshalValue(config.Claude.Theme),
-			"cache1h":        config.Claude.Cache1H,
-			"nativeCursor":   config.Claude.NativeCursor,
+			"webSearchesPerSession": config.Claude.WebSearchesPerSession,
+			"tmuxTruecolor":         config.Claude.TmuxTruecolor,
+			"cleanupPeriodDays":     config.Claude.CleanupPeriodDays,
+			"requireManagedCleanup": config.Claude.RequireManagedCleanup,
+			"permissionMode":        config.Claude.PermissionMode,
+			engineKeyBinary:         config.Claude.Binary,
+			keyTheme:                themeMarshalValue(config.Claude.Theme),
+			"cache1h":               config.Claude.Cache1H,
+			"nativeCursor":          config.Claude.NativeCursor,
 			"compactNudge": map[string]any{
 				jsonKeyEnabled: config.Claude.CompactNudge.Enabled,
 				"start":        config.Claude.CompactNudge.Start,

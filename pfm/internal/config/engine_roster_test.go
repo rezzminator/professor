@@ -75,7 +75,6 @@ func TestLoadRejectsExplicitAskEngineWithEmptyRoster(t *testing.T) {
 		fix    string
 	}{
 		{engine: "claude", codex: true, want: "zero Claude accounts", fix: "accounts"},
-		{engine: "codex", claude: true, want: "zero Codex accounts", fix: "codex.homes"},
 		{engine: "opencode", claude: true, want: "zero OpenCode accounts", fix: "opencode.db"},
 	} {
 		t.Run(testCase.engine, func(t *testing.T) {
@@ -252,23 +251,6 @@ func TestConfiguredCodexHomeRehomesAutoDiscoveredAccount(t *testing.T) {
 				t.Fatalf("Codex prefs=%#v, want %#v", got.Prefs, testCase.wantPrefs)
 			}
 		})
-	}
-}
-
-func TestConfiguredCodexHomeWithoutCredentialsIsAConfigError(t *testing.T) {
-	home := t.TempDir()
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(
-		path,
-		[]byte(`{"version":2,"accounts":[],"codex":{"homes":[{"id":2,"home":"~/missing"}]}}`),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(path, home, nil)
-	if err == nil || !strings.Contains(err.Error(), "codex.homes[0]") ||
-		!strings.Contains(err.Error(), "valid auth.json") {
-		t.Fatalf("Load() error=%v", err)
 	}
 }
 

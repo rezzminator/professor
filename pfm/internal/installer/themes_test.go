@@ -23,8 +23,15 @@ func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *
 	run := func(home, sourceRepo, manifestURL string) (Report, string, error) {
 		var output bytes.Buffer
 		report, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, SourceRepo: sourceRepo, ThemeManifestURL: manifestURL, Stdout: &output,
-			Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
+			MCPConfigPath:    testConfigPath(t),
+			Mode:             ModeApply,
+			Home:             home,
+			SourceRepo:       sourceRepo,
+			ThemeManifestURL: manifestURL,
+			Stdout:           &output,
+			Runner:           &fakeRunner{nameSyncIdle: true},
+			CodexHomes:       []string{},
+			InstallThemes:    true,
 		})
 		return report, output.String(), err
 	}
@@ -32,6 +39,7 @@ func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *
 	// 1. source clone carries the manifest and the file: installed, owned, idempotent.
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
+	recordFixtureSourceRepo(t, home, sourceRepo)
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"), string(themeBody))
 	target := filepath.Join(home, ".claude", "themes", "sonar-gold.json")
@@ -119,7 +127,8 @@ func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "x.json"), "not json\n")
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
 		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
 	})
 	if err != nil {
@@ -160,7 +169,8 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	run := func() (string, error) {
 		var output bytes.Buffer
 		_, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: t.TempDir(), SourceRepo: sourceRepo, Stdout: &output,
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply, Home: t.TempDir(), SourceRepo: sourceRepo, Stdout: &output,
 			Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
 		})
 		return output.String(), err
@@ -168,7 +178,8 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	home := t.TempDir()
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
 		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
 	}); err != nil {
 		t.Fatalf("overlay install: %v\n%s", err, output.String())
@@ -305,7 +316,8 @@ func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, SourceRepo: sourceRepo, Stdout: &output,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, SourceRepo: sourceRepo, Stdout: &output,
 		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
 	})
 	if err != nil {

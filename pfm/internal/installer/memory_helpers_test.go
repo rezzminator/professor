@@ -14,7 +14,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
@@ -90,14 +91,14 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 	writeFixture(t, settingsPath, settingsOriginal)
 	writeFixture(t, localSettingsPath, localOriginal)
 
-	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	if _, err := Run(context.Background(), Options{
-		Mode:       ModeApply,
-		Home:       home,
-		ConfigDirs: configDirs,
-		Runner:     &fakeRunner{},
-		Now:        func() time.Time { return now },
-	}); err != nil {
+	env := memoryHelperLayoutEnv(home, configDirs)
+	journal := &layoutJournal{env: env}
+	if err := applyLayoutRow(
+		context.Background(),
+		journal,
+		LayoutFinding{Row: layoutRowMemoryHelpers, Verdict: VerdictMove, Path: canonical},
+		io.Discard,
+	); err != nil {
 		t.Fatalf("apply migration: %v", err)
 	}
 
@@ -146,10 +147,39 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 		t.Errorf("settings.local.json hook was not migrated exactly:\n%s", localSettings)
 	}
 	for path, original := range map[string]string{settingsPath: settingsOriginal, localSettingsPath: localOriginal} {
-		backup := path + ".pre-professor-20260102-030405"
-		if got := readFixture(t, backup); got != original {
-			t.Errorf("backup for %s changed bytes", path)
+		found := false
+		for _, record := range journal.records {
+			if record.Destination == path && record.Backup != "" {
+				found = true
+				if got := readFixture(t, record.Backup); got != original {
+					t.Errorf("journal backup for %s changed bytes", path)
+				}
+			}
 		}
+		if !found {
+			t.Errorf("journal has no backup for %s", path)
+		}
+	}
+}
+
+func memoryHelperLayoutEnv(home string, configDirs []string) LayoutEnv {
+	accounts := make([]pfmconfig.Account, 0, len(configDirs))
+	for index, dir := range configDirs {
+		accounts = append(
+			accounts,
+			pfmconfig.Account{ID: index + 1, ConfigDir: dir, Implicit: dir == filepath.Join(home, ".claude")},
+		)
+	}
+	return LayoutEnv{
+		Home:       home,
+		Config:     pfmconfig.Config{Accounts: accounts},
+		ConfigPath: filepath.Join(home, "pfm.config.json"),
+		ManagedDir: filepath.Join(
+			home,
+			"managed",
+		),
+		ManagedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		ProcRoot:    filepath.Join(home, "proc"),
 	}
 }
 
@@ -157,7 +187,11 @@ func TestMemoryHelperMigrationAbsentDoesNotOptIn(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, ConfigDirs: []string{filepath.Join(home, ".claude")}, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply,
+		Home:          home,
+		ConfigDirs:    []string{filepath.Join(home, ".claude")},
+		Runner:        &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -178,13 +212,12 @@ func TestMemoryHelperMigrationDryRunIsReadOnly(t *testing.T) {
 	writeFixture(t, filepath.Join(config, "settings.json"), memorySettingsFixture(oldPath))
 	before := snapshotMemoryMigrationTree(t, home)
 
-	report, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, ConfigDirs: []string{config}, Runner: &fakeRunner{},
-	})
+	var output bytes.Buffer
+	_, err := ApplyLayout(context.Background(), memoryHelperLayoutEnv(home, []string{config}), false, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Changed == 0 {
+	if !strings.Contains(output.String(), "layout memory-helpers move ") {
 		t.Fatal("dry run did not report the planned migration")
 	}
 	if after := snapshotMemoryMigrationTree(t, home); !reflect.DeepEqual(after, before) {
@@ -377,12 +410,16 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 			test.prepare(t, home, oldConsolidate, newConsolidate)
 			before := snapshotMemoryMigrationTree(t, home)
 
-			_, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: home, ConfigDirs: []string{config}, Runner: &fakeRunner{},
-			})
-			if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
-				!strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("apply error = %v, want preflight refusal containing %q", err, test.wantErr)
+			env := memoryHelperLayoutEnv(home, []string{config})
+			journal := &layoutJournal{env: env}
+			err := applyLayoutRow(
+				context.Background(),
+				journal,
+				LayoutFinding{Row: layoutRowMemoryHelpers, Verdict: VerdictMove, Path: config},
+				io.Discard,
+			)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("apply error = %v, want refusal containing %q", err, test.wantErr)
 			}
 			if after := snapshotMemoryMigrationTree(t, home); !reflect.DeepEqual(after, before) {
 				t.Fatalf("preflight refusal mutated files:\nbefore=%#v\nafter=%#v", before, after)

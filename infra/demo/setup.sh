@@ -21,7 +21,7 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 SRC=/worktree
 HERE="$SRC/infra/demo"
-CONFIG="$HOME/.config/pfm/pfm.config.json"
+CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 PROJECTS=(atlas lumen orbit harvester)
 phase="${1:-}"
 
@@ -53,14 +53,6 @@ install)
     [ -s "$home/auth.json" ] || { echo "setup: codex home $home has no auth.json — run creds.sh first" >&2; exit 1; }
   done < <(jq -r '.codex.homes[].home' "$CONFIG")
   [ -s "$HOME/.local/share/opencode/auth.json" ] || { echo "setup: OpenCode has no auth.json under ~/.local/share/opencode — run creds.sh --opencode first" >&2; exit 1; }
-  #    Seats share one transcript store, as the host does (~/.cc/N/projects → ~/.claude/projects):
-  #    /reload --account N resumes the SAME transcript under the new seat, and a seat
-  #    with its own projects/ dir would resume nothing and die at birth.
-  primary="$(expand "$(jq -r '.accounts[0].configDir' "$CONFIG")")"; mkdir -p "$primary/projects"
-  while read -r dir; do
-    dir="$(expand "$dir")"; [ "$dir" = "$primary" ] && continue
-    [ -L "$dir/projects" ] || { rm -rf "$dir/projects"; ln -s "$primary/projects" "$dir/projects"; }
-  done < <(jq -r '.accounts[].configDir' "$CONFIG")
   # 1b. OpenCode's own config, model only: pfm install (step 2 below) merges the
   #     `professor` registration (`pfm mcp serve --stdio`) and the `instructions`
   #     array into this same file, so the demo writes nothing under "mcp" itself.
@@ -86,7 +78,7 @@ EOF
   "$HERE/daemon.sh" # no init system in the fence: the MCP HTTP daemon runs from here
   # 3. Claude Code's first-run state: onboarding done, every demo project trusted, so no
   #    dialog stands between a spawn and a live chat. Merged, never overwritten — pfm
-  #    install may already have written mcpServers.professor into the same file.
+  #    install may already have written other owned keys into the same file.
   trust="$(printf '%s\n' "${PROJECTS[@]}" express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s 'from_entries')"
   #    The bypass-permissions warning is a second first-run screen whose default is
   #    "No, exit" — a spawn's typed prompt dies in it. Accepting it once writes

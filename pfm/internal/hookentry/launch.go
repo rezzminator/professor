@@ -16,11 +16,14 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -115,8 +118,26 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			configDir = account.ConfigDir
 		}
 	}
+	accountID := primary
+	for _, account := range runtime.Config.Accounts {
+		if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
+			accountID = account.ID
+			break
+		}
+	}
+	identity, _, continuing := action.LauncherIdentity(arguments)
+	freshID := ""
+	if identity == "" && !continuing {
+		var idErr error
+		freshID, idErr = claudelaunch.NewSessionID()
+		if idErr != nil {
+			fmt.Fprintf(stderr, "pfm internal launch: new session id: %v\n", idErr)
+			return 1
+		}
+		identity = freshID
+	}
 	realRun, err := action.LauncherRun(
-		*realBinary, arguments, configDir, runtime.Paths.Home, runtime.Config.EffectiveClaude(primary),
+		*realBinary, arguments, configDir, runtime.Paths.Home, runtime.Config.EffectiveClaude(accountID), freshID,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
@@ -163,6 +184,14 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	titles := runtime.Config.Tmux.Titles
 	client := spawn.TmuxSpawner{Binary: tmuxBinary, TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}
 	ctx := context.Background()
+	if identity != "" {
+		cache := runtime.Config.EffectiveClaude(accountID).Cache1H
+		if recordErr := fleetdb.RecordLaunch(ctx, runtime.Paths, fleetdb.Launch{
+			SessionID: identity, Engine: pfmengine.Claude, Account: accountID, Cache1H: cache,
+		}, clock.Real.Now().Unix()); recordErr != nil {
+			fmt.Fprintf(stderr, "pfm: record launch %s: %v\n", identity, recordErr)
+		}
+	}
 	if err := client.NewSession(ctx, spawn.SessionSpec{
 		Socket: socket, Session: session, Window: spawn.WindowName(""), CWD: workingDir, Run: gateRun,
 		Width: action.HeadlessWidth, Height: action.HeadlessHeight,

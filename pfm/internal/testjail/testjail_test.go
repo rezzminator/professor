@@ -118,12 +118,7 @@ func assertGoTelemetryDirectory(t *testing.T, want, root string) {
 	}
 }
 
-// TestRunPinsXDGConfigHomeInsideTheJail pins L3-F9's package-wide door: Run
-// (via jailHome) sets PFM_HOME before any individual test runs, and must pin
-// XDG_CONFIG_HOME alongside it — a package that never builds a jail of its
-// own (never calls Fleet/CleanHome) must still be unable to resolve the
-// operator's ambient XDG_CONFIG_HOME the same way it cannot resolve their
-// real PFM_HOME.
+// Run keeps child tools' XDG files inside the package jail.
 func TestRunPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	home := os.Getenv(paths.EnvHome)
 	if home == "" {
@@ -131,8 +126,7 @@ func TestRunPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	}
 	xdg := os.Getenv("XDG_CONFIG_HOME")
 	if xdg == "" {
-		t.Fatal("XDG_CONFIG_HOME is unset after Run — an ambient value from the operator's shell would reach " +
-			"config.LoadRuntime unpinned")
+		t.Fatal("XDG_CONFIG_HOME is unset after Run")
 	}
 	if !filepath.IsAbs(xdg) {
 		t.Fatalf("XDG_CONFIG_HOME %q is not absolute", xdg)
@@ -140,6 +134,37 @@ func TestRunPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	if !strings.HasPrefix(xdg, home+string(filepath.Separator)) {
 		t.Fatalf("XDG_CONFIG_HOME %q does not sit under the jailed PFM_HOME %q", xdg, home)
 	}
+}
+
+func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
+	check := func(home, configPath string) {
+		t.Helper()
+		if configPath != filepath.Join(home, "pfm.config.json") {
+			t.Fatalf("PFM_CONFIG=%q, want a config under %q", configPath, home)
+		}
+		body, err := os.ReadFile(configPath)
+		if err != nil || strings.TrimSpace(string(body)) != `{"version":2}` {
+			t.Fatalf("seeded config = %q error %v", body, err)
+		}
+	}
+	check(os.Getenv(paths.EnvHome), os.Getenv(paths.EnvConfig))
+	for _, builder := range []func(*testing.T) string{Fleet, InstalledHome} {
+		root := builder(t)
+		check(filepath.Join(root, "home"), os.Getenv(paths.EnvConfig))
+	}
+	_, environment := FleetEnv(t)
+	var envHome, envConfig string
+	for _, entry := range environment {
+		if value, ok := strings.CutPrefix(entry, paths.EnvHome+"="); ok {
+			envHome = value
+		}
+		if value, ok := strings.CutPrefix(entry, paths.EnvConfig+"="); ok {
+			envConfig = value
+		}
+	}
+	check(envHome, envConfig)
+	runtime := CleanHome(t)
+	check(runtime.Paths.Home, os.Getenv(paths.EnvConfig))
 }
 
 // TestRunScrubsAmbientIdentity pins the jail's own scrub: an executor's shell
@@ -175,5 +200,44 @@ func TestCleanHomePinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	want := filepath.Join(runtime.Paths.Home, ".config")
 	if got := os.Getenv("XDG_CONFIG_HOME"); got != want {
 		t.Fatalf("XDG_CONFIG_HOME=%q, want %q under the CleanHome jail", got, want)
+	}
+}
+
+func TestCleanHomeStagesOneSessionStoreAndManagedCleanup(t *testing.T) {
+	runtime := CleanHome(t)
+	home := runtime.Paths.Home
+	if got := os.Getenv(paths.EnvClaudeRoots); got != filepath.Join(home, ".claude", "projects") {
+		t.Fatalf("Claude roots=%q", got)
+	}
+	for _, entry := range []string{"projects", "file-history", "tasks", "session-env"} {
+		store := filepath.Join(home, ".claude", entry)
+		if info, err := os.Stat(store); err != nil || !info.IsDir() {
+			t.Fatalf("store %s = %v, %v", store, info, err)
+		}
+		for _, account := range []string{"1", "2"} {
+			link := filepath.Join(home, ".cc", account, entry)
+			if target, err := os.Readlink(link); err != nil || target != store {
+				t.Fatalf("%s → %q, %v; want %s", link, target, err, store)
+			}
+		}
+	}
+	managed := filepath.Join(runtime.Paths.ManagedSettingsDir, "pfm.json")
+	if raw, err := os.ReadFile(managed); err != nil || strings.TrimSpace(string(raw)) != `{"cleanupPeriodDays":36500}` {
+		t.Fatalf("managed settings=%q error=%v", raw, err)
+	}
+	if raw, err := os.ReadFile(
+		filepath.Join(home, ".zshrc"),
+	); err != nil ||
+		!strings.Contains(string(raw), checkoutRoot()+"/pfm/internal/installer/assets/shim/pfm.zsh") {
+		t.Fatalf("clone source line=%q error=%v", raw, err)
+	}
+}
+
+func TestInstalledHomeStagesCloneSourceLine(t *testing.T) {
+	root := InstalledHome(t)
+	path := filepath.Join(root, "home", ".zshrc")
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), checkoutRoot()+"/pfm/internal/installer/assets/shim/pfm.zsh") {
+		t.Fatalf("installed source line=%q error=%v", raw, err)
 	}
 }

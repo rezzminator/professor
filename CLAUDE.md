@@ -14,7 +14,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - public face: the files a visitor or adopter reads first · `README.md`, `INSTALL.md`, `CHANGELOG.md`, `VERSION`, `releases/v{X.Y.Z}.md`
 - leak gate: the identifying-content scan, run `pre-push` · `scripts/leak-check.sh`, `.githooks/pre-push`
 - pfm: the fleet engine, Go · `pfm/cmd/pfm/`, `pfm/internal/` · child `pfm/CLAUDE.md`
-- fleet prompt: the main chat's system layer per engine, embedded at build and composed by `pfm install`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here; `pfm doctor` names an embed that differs from the clone · `pfm/harness-prompts/` · model tiers in § Model Selection `pfm/harness-prompts/share/head.md` · the main chat's rungs in § Orchestration `pfm/harness-prompts/share/tail.md`
+- fleet prompt: the main chat's system layer per engine, composed at build into the tracked `pfm/harness-prompts/composed/` by `make -C pfm prompts`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here · `pfm/harness-prompts/` · model tiers in § Model Selection `pfm/harness-prompts/share/head.md` · the main chat's rungs in § Orchestration `pfm/harness-prompts/share/tail.md`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the only web and document harvester, over a pinned Python conversion sidecar · `pfm/internal/harvest/`, `pfm/internal/harvestmcp/`, sidecar `pfm/internal/harvestpy/`
 - general family: `general-orchestrator` and its executors, for a clear batch · `templates/global/agents/` · design `docs/design/general/`

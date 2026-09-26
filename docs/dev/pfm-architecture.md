@@ -158,7 +158,7 @@ Each derived artifact names its source and the command that regenerates or verif
 | Platforms table in `pfm/CLAUDE.md` | `deps.Registry` (`internal/deps/registry.go`) | `pfm doctor` prints the live rows; the doc keeps only the two gating rules |
 | installer migration order | `internal/installer/migrations/` files | `steps_test.go`: slice == directory listing, `Since` versions ascend, none older than the sunset window (Open ruling 6) |
 | SQL schema migrations | `internal/store/migration_v*.sql` | existing `go:embed` + `migrate` (`store/store.go`) |
-| over-ceiling files, primitive sites, untested sources | `pfm/.arch/*.txt` baselines | `pfm/scripts/arch-check.sh`; a baseline only ever shrinks |
+| over-ceiling files, primitive sites, untested sources | `pfm/.arch/*.txt` baselines | `pfm/scripts/arch-check.sh`; a baseline only ever shrinks, and a ruled new exception carries its one-line reason in `pfm/.arch/exceptions.md` |
 
 ## 6. Checks
 

@@ -17,21 +17,15 @@ const (
 func TestClaudeSpawnCarriesWebSearchBudget(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
-	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeProbe, PurposeQuery} {
+	machine.Claude.WebSearchesPerSession = 9007199254740991
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()
 		if err != nil {
-			t.Fatalf("%s shell spawn: %v", purpose, err)
+			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
-		if want := " " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) + " "; !strings.Contains(shell, want) {
-			t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, want)
-		}
-		// An inherited lower cap must not win: exec keeps the LAST duplicate,
-		// so the door's assignment has to land after the inherited entry.
-		environment := spawn.Environment([]string{maxWebSearchesName + "=5", "PATH=/usr/bin"})
-		if got := lastEnvironmentValue(environment, maxWebSearchesName); got != maxWebSearchesValue {
-			t.Fatalf("%s spawn environment %q resolves %s=%q, want %q",
-				purpose, environment, maxWebSearchesName, got, maxWebSearchesValue)
+		if got := parsedShell(t, shell).SettingsEnv[maxWebSearchesName]; got != maxWebSearchesValue {
+			t.Fatalf("%v settings budget = %q", purpose, got)
 		}
 	}
 }

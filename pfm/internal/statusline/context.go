@@ -42,15 +42,21 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 			l2 += " " + dim + "✎" + strconv.Itoa(gauge.humanPrompts) + reset
 		}
 	}
-	// Never width-gated: an absent cache timer is indistinguishable from an
-	// expired one. The segment reports transcript readability itself.
-	// Codex reports no cache split: the tail is Claude's alone.
+	// Never width-gated: a recorded launch reports its cache window and
+	// transcript readability. Codex reports no cache split.
 	hit := -1
 	if runtime.Engine != pfmengine.Codex {
 		usage := data.ContextWindow.CurrentUsage
 		hit = cacheHitPercent(usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.InputTokens)
 	}
-	return gauge, l2 + cacheWindowSegment(runtime, now, data.TranscriptPath, hit, data.PromptCache), contextTokens
+	return gauge, l2 + cacheWindowSegment(
+		runtime,
+		now,
+		data.TranscriptPath,
+		hit,
+		data.PromptCache,
+		data.SessionID,
+	), contextTokens
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.

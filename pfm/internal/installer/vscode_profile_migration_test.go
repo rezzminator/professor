@@ -33,7 +33,8 @@ func TestVSCodeOwnedLegacyAutoOpenProfileUpgradesToPFM(t *testing.T) {
 	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName), string(ledger))
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -61,7 +62,8 @@ func TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved(t *testing.T) {
 	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName), string(ledger))
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -101,7 +103,8 @@ func TestVSCodeUninstallRemovesOwnedLegacyProfile(t *testing.T) {
 	})
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -123,7 +126,8 @@ func TestVSCodeUninstallPreservesEditedLegacyProfile(t *testing.T) {
 	})
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -189,7 +193,8 @@ func TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical(t *testin
 	})
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -217,7 +222,8 @@ func TestVSCodeHandEditedPreviousCanonicalProfileIsPreserved(t *testing.T) {
 	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{Path: settings, Platform: "linux", ProfileOwned: true})
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)

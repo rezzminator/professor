@@ -45,26 +45,36 @@ while [ $# -gt 0 ]; do
 done
 
 missing() { echo "demo: TOOLCHAIN-MISSING — $1" >&2; exit 1; }
+command -v jq >/dev/null || missing "jq"
+fence_codex="$HOME/.local/state/pfm/codex-fence"
+if [ ! -s "$fence_codex/auth.json" ] || ! jq -e '.tokens | objects' "$fence_codex/auth.json" >/dev/null 2>&1; then
+  echo 'codex home: BLOCKED — no fence login at ~/.local/state/pfm/codex-fence/auth.json; create it once: CODEX_HOME=~/.local/state/pfm/codex-fence codex login --device-auth' >&2
+  exit 1
+fi
 command -v docker >/dev/null || missing "docker"
 docker info >/dev/null 2>&1 || missing "the docker daemon is not reachable ('docker info' failed)"
-command -v jq >/dev/null || missing "jq"
 # The fleet plus a 6-chat storm fills a 7.7 GiB Docker VM (25
 # harnesses, ~1900% CPU): under 12 GiB the storm is capped at 4 in the note,
 # not silently. Docker Desktop → Settings → Resources → Memory.
 mem_gib="$(( $(docker info --format '{{.MemTotal}}') / 1073741824 ))"
 [ "$mem_gib" -ge 12 ] || echo "demo: NOTE — the Docker VM has ${mem_gib} GiB; the fleet plus a 6-chat storm needs ~12: raise Docker Desktop → Resources → Memory to 14 GB, or keep storm-up at 4"
-HOST_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/pfm/pfm.config.json"
-[ -f "$HOST_CONFIG" ] || missing "host pfm config $HOST_CONFIG (the seats to mirror come from it)"
+clone="$(cat "$HOME/.local/share/pfm/install/source-repo" 2>/dev/null || true)"
+HOST_CONFIG="${PFM_CONFIG:-${clone:+$clone/pfm.config.json}}"
+[ -f "$HOST_CONFIG" ] || { echo "demo: no config at ${HOST_CONFIG:-<unknown>} (set PFM_CONFIG or install from a recorded clone)" >&2; exit 1; }
 
 # 1. The fence, exactly as dev.sh iso mounts it.
 FENCE_CALLER=demo . "$ROOT/infra/fence/fence-env.sh"
 if [ "$FRESH" -eq 1 ] || ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  docker compose -f "$ROOT/infra/fence/docker-compose.yml" run -d --build --name "$NAME" pfm-dev sleep infinity >/dev/null
+  docker compose -f "$ROOT/infra/fence/docker-compose.yml" run -d --build --name "$NAME" -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json pfm-dev sleep infinity >/dev/null
   echo "demo: container $NAME started"
 else
   echo "demo: reusing running container $NAME"
 fi
+docker exec "$NAME" sh -c ': "${PFM_CONFIG:?PFM_CONFIG is required in the container}"' || {
+  echo "demo: container $NAME lacks PFM_CONFIG — start a fresh container" >&2
+  exit 1
+}
 
 # 2. Toolchain inside: pfm from the checkout, real Claude Code + Codex, Starship.
 docker exec -w /tmp "$NAME" bash /worktree/infra/demo/setup.sh tools
@@ -80,10 +90,10 @@ container_config="$(jq -c --arg ids "$ACCOUNTS" '
      mcp: {servers: {chat: {enabled: true}}}}' "$HOST_CONFIG")"
 n_acct="$(jq '.accounts | length' <<<"$container_config")"
 [ "$n_acct" -gt 0 ] || { echo "demo: none of the accounts $ACCOUNTS exist in $HOST_CONFIG" >&2; exit 1; }
-docker exec -i "$NAME" sh -c 'mkdir -p /root/.config/pfm && cat > /root/.config/pfm/pfm.config.json' <<<"$container_config"
+docker exec -i "$NAME" sh -c 'mkdir -p "$(dirname "$PFM_CONFIG")" && cat > "$PFM_CONFIG"' <<<"$container_config"
 echo "demo: config written with $n_acct Claude seat(s) + 1 Codex home"
 
-# 4. Credentials: Keychain → container, seat by seat; ~/.codex/auth.json and OpenCode's
+# 4. Credentials: Keychain → container, seat by seat; the dedicated fence Codex login and OpenCode's
 #    ChatGPT auth.json → container.
 seat_args=()
 if [ "$LOGIN" -eq 0 ]; then
@@ -91,7 +101,7 @@ if [ "$LOGIN" -eq 0 ]; then
     seat_args+=(--seat "$host_dir=$cont_dir")
   done < <(jq -r '.accounts[] | "\(.configDir)\t\(.configDir)"' <<<"$container_config" | sed "s#^~#$HOME#")
 fi
-bash "$HERE/creds.sh" --container "$NAME" ${seat_args[@]+"${seat_args[@]}"} --codex "$HOME/.codex=~/.codex" \
+bash "$HERE/creds.sh" --container "$NAME" ${seat_args[@]+"${seat_args[@]}"} --codex "$fence_codex=~/.codex" \
   --opencode "$HOME/.local/share/opencode/auth.json=~/.local/share/opencode/auth.json"
 
 # 4b. The presenter's terminal layer: ~/.config/code-theme (starship, tmux

@@ -1,92 +1,13 @@
 package installer
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
 	"sort"
-
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
-func (installer *engine) reconcileUnvisitedSettingsOwnership(
-	ownership map[string]settingsHookCounts,
-	seen map[string]bool,
-) error {
-	for path, owned := range ownership {
-		if seen[path] {
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			delete(ownership, path)
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("read unvisited owned settings path %s: %w", path, err)
-		}
-		if installer.options.Mode == ModeUninstall {
-			return fmt.Errorf("refuse to strand hooks in unvisited owned settings path %s", path)
-		}
-		var document map[string]any
-		if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-			return fmt.Errorf("refuse to drop ownership for invalid settings JSON at %s: %w", path, err)
-		}
-		if removeOwnedSettingsHooks(document, owned) {
-			updated, err := json.MarshalIndent(document, "", "  ")
-			if err != nil {
-				return fmt.Errorf("encode dropped settings seat %s: %w", path, err)
-			}
-			updated = append(updated, '\n')
-			if err := installer.change("rewrite "+path+" (dropped seat; backup preserved)", func() error {
-				backup := availableBackup(path, installer.stamp)
-				if err := copyBackup(path, backup); err != nil {
-					return fmt.Errorf("backup %s: %w", path, err)
-				}
-				return atomicfile.Write(path, updated, 0o600)
-			}); err != nil {
-				return err
-			}
-		}
-		delete(ownership, path)
-	}
-	return nil
-}
-
-// appendTemplateHook adds one template hook in its own entry, carrying
-// "async": true when the template runs in the background.
-func appendTemplateHook(document map[string]any, wanted ExpectedHook) {
-	hook := map[string]any{configTypeKey: commandType, configCommandKey: wanted.Command}
-	if wanted.Async {
-		hook[configAsyncKey] = true
-	}
-	hooks, _ := document["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-		document["hooks"] = hooks
-	}
-	values, _ := hooks[wanted.Event].([]any)
-	hooks[wanted.Event] = append(values, map[string]any{
-		"matcher": wanted.Matcher,
-		"hooks":   []any{hook},
-	})
-}
-
-// dropMisplacedTemplateHooks holds the one placement rule for every pfm-owned
-// hook: a template command lives exactly once under each (event, matcher)
-// pair its templates name — a set per command, since callmeter's one command
-// is registered under seven events. A second instance under an expected pair
-// is a duplicate and is removed wherever it sits; the first in event-name and
-// array order is the one kept. An instance under any other event or matcher
-// is a moved hook and is removed too, unless it shares its entry with an
-// operator hook: that entry was hand-edited and stays as the operator wrote
-// it, the same line the explore-deny matcher convergence holds. An entry
-// emptied by a removal goes, and so does an event it empties. A hook whose
-// command is no template's, or an entry whose shape is not the one the
-// harness reads, is never touched. The ownership ledger follows from the
-// before/after counts nextSettingsHookOwnership already takes.
+// dropMisplacedTemplateHooks removes misplaced or duplicate template hooks
+// before the account stripper removes their remaining canonical copies.
+// A mixed operator entry is left to removeOwnedSettingsHooks, which removes
+// only the exact command keys the stripper classified.
 func dropMisplacedTemplateHooks(document map[string]any, expected []ExpectedHook, pfmBinary string) bool {
 	placements := templatePlacements(expected)
 	events, _ := document["hooks"].(map[string]any)

@@ -10,6 +10,24 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+func TestExplicitConfigFlagWinsOverPFMConfig(t *testing.T) {
+	root := jailTest(t)
+	fromEnv := filepath.Join(root, "env.json")
+	fromFlag := filepath.Join(root, "flag.json")
+	if err := os.WriteFile(fromEnv, []byte(`{"version":2,"theme":"tokyo-night"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fromFlag, []byte(`{"version":2,"theme":"default"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, fromEnv)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--config", fromFlag, "config", "show"}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "config path="+fromFlag) {
+		t.Fatalf("flag precedence code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestConfigCLIRejectsGlobalConfigSyntaxAndLoadErrors(t *testing.T) {
 	root := jailTest(t)
 	for _, test := range []struct {
@@ -329,63 +347,26 @@ func TestConfigShowDistinguishesInputAndEffectiveSchema(t *testing.T) {
 	}
 }
 
-func TestConfiguredAccountRosterIsTheExactTranscriptSearchBoundary(t *testing.T) {
+func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	root := jailTest(t)
-	// The jail's home, not the plain HOME variable: this test writes a fixture
-	// transcript under it, and reading the raw variable once put that fixture
-	// in the operator's live ~/.claude/projects.
-	resolved, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
+	path := writeConfigFixture(
+		t,
+		root,
+		`{"version":2,"claude":{"webSearchesPerSession":17,"tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false}}`,
+	)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("config show code=%d stderr=%q", code, stderr.String())
 	}
-	home := resolved.Home
-	configuredRoot := filepath.Join(home, "configured-account")
-	configuredProject := filepath.Join(configuredRoot, "projects", "configured-project")
-	legacyProject := filepath.Join(home, ".claude", "projects", "legacy-project")
-	for _, directory := range []string{configuredProject, legacyProject} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
+	for _, want := range []string{
+		"config claude.webSearchesPerSession=17 (file)",
+		"config claude.tmuxTruecolor=false (file)",
+		"config claude.cleanupPeriodDays=31 (file)",
+		"config claude.requireManagedCleanup=false (file)",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("config show lacks %q: %s", want, stdout.String())
 		}
-	}
-	configuredNeedle := "configured transcript phrase that must be discoverable"
-	legacyNeedle := "legacy transcript phrase that configured accounts must exclude"
-	if err := os.WriteFile(
-		filepath.Join(configuredProject, "configured-session.jsonl"),
-		[]byte(`{"type":"user","message":{"content":"`+configuredNeedle+`"}}`+"\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(legacyProject, "legacy-session.jsonl"),
-		[]byte(`{"type":"user","message":{"content":"`+legacyNeedle+`"}}`+"\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	configPath := writeConfigFixture(t, root, `{
-  "version": 1,
-  "accounts": [{"id": 9, "configDir": "`+configuredRoot+`"}]
-}`)
-
-	find := func(name, needle string) (int, string, string) {
-		t.Helper()
-		excerptPath := filepath.Join(root, name+".txt")
-		if err := os.WriteFile(excerptPath, []byte(needle+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		var stdout, stderr bytes.Buffer
-		code := run([]string{"--config", configPath, "chat", "find", excerptPath}, &stdout, &stderr)
-		return code, stdout.String(), stderr.String()
-	}
-
-	if code, stdout, stderr := find("configured", configuredNeedle); code != 0 ||
-		!strings.Contains(stdout, "configured-session") || strings.Contains(stdout+stderr, "legacy-session") {
-		t.Fatalf("configured lookup code=%d stdout=%q stderr=%q", code, stdout, stderr)
-	}
-	if code, stdout, stderr := find("legacy", legacyNeedle); code != 2 || stdout != "" ||
-		!strings.Contains(stderr, "no session contains the excerpt") {
-		t.Fatalf("legacy lookup escaped configured boundary: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 

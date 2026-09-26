@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -69,6 +70,12 @@ type Runtime struct {
 
 	// A non-nil Env is a closed test environment. Nil reads the real process environment.
 	Env map[string]string
+
+	// StateDB is the fleet database the config loader resolved — --config,
+	// then PFM_CONFIG, then the clone marker's state.db, else the default.
+	// PFM_STATE_DB still overrides it. ConfigError is that load's failure.
+	StateDB     string
+	ConfigError error
 
 	Command CommandRunner
 	Spawn   func(RefreshKind) error
@@ -139,6 +146,13 @@ func CodexStatuslineCachePath(jailHome string, uid int) string {
 		cacheDir = filepath.Join(jailHome, "tmp")
 	}
 	return filepath.Join(cacheDir, "cc-gpt-usage-"+strconv.Itoa(uid)+".json")
+}
+
+// UseConfig takes the state database and any load error from the machine
+// runtime the config loader produced, so a render never re-resolves either.
+func (runtime *Runtime) UseConfig(machine pfmconfig.Runtime) {
+	runtime.StateDB = machine.Paths.StateDB
+	runtime.ConfigError = machine.ConfigError
 }
 
 func (runtime Runtime) getenv(name string) string {

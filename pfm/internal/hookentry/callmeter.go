@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/callmeter"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -117,6 +118,9 @@ func runCallmeter(
 	} else if err := json.Unmarshal(raw, &run.payload); err != nil {
 		payloadErr = fmt.Errorf("decode hook payload (%d bytes): %w", len(raw), err)
 	}
+	if payloadErr == nil {
+		run.seat.resolveAccount(ctx, run.payload.SessionID)
+	}
 	store, err := callmeter.OpenDB(ctx, storePath)
 	if err != nil {
 		run.fault(callmeter.StageStore, run.payload.calls(), errors.Join(payloadErr, err))
@@ -177,7 +181,7 @@ func (run *callmeterRun) base(toolUseID string) callmeter.Call {
 		call.AgentID = callmeter.Ptr(p.AgentID)
 		call.AgentType = presentString(p.AgentType)
 	}
-	call.ConfigDir = presentString(callmeter.ConfigDirOf(p.TranscriptPath))
+	call.ConfigDir = run.seat.configDir
 	call.Account, call.SeatDir = run.seat.account, run.seat.dir
 	return call
 }
@@ -338,7 +342,7 @@ func (run *callmeterRun) responseColumns(call *callmeter.Call) *callmeter.Agent 
 		ToolUses:        wholeNumber(response.TotalToolUseCount),
 		Model:           response.ResolvedModel,
 		Source:          callmeter.Ptr(callmeter.SourceHook),
-		ConfigDir:       presentString(callmeter.ConfigDirOf(p.TranscriptPath)),
+		ConfigDir:       run.seat.configDir,
 		Account:         run.seat.account,
 		SeatDir:         run.seat.dir,
 	}
@@ -463,7 +467,7 @@ func (run *callmeterRun) request(key string) *callmeter.Request {
 		RequestID: key,
 		SessionID: callmeter.Ptr(p.SessionID),
 		Source:    callmeter.Ptr(callmeter.SourceHook),
-		ConfigDir: presentString(callmeter.ConfigDirOf(p.TranscriptPath)),
+		ConfigDir: run.seat.configDir,
 		Account:   run.seat.account,
 		SeatDir:   run.seat.dir,
 	}
@@ -484,7 +488,7 @@ func (run *callmeterRun) recordAgent(stopped bool) {
 		SessionID: callmeter.Ptr(p.SessionID),
 		AgentType: presentString(p.AgentType),
 		Source:    callmeter.Ptr(callmeter.SourceHook),
-		ConfigDir: presentString(callmeter.ConfigDirOf(p.TranscriptPath)),
+		ConfigDir: run.seat.configDir,
 		Account:   run.seat.account,
 		SeatDir:   run.seat.dir,
 	}
@@ -657,80 +661,56 @@ func wholeNumber(value *float64) *int64 {
 	return callmeter.Ptr(int64(*value))
 }
 
-// callmeterSeat is who ran a hook run: the Claude config dir its chat was
-// launched with (seat_dir) and the configured account that dir is. It is
-// resolved once per run; config_dir, the shared history home, says neither.
+// callmeterSeat keeps the process seat and the shared transcript home distinct.
 type callmeterSeat struct {
-	dir     *string // CLAUDE_CONFIG_DIR, absolute and clean, symlinks unresolved; nil = not resolved
-	account *int64  // the configured account whose configDir is dir; nil = none matched or unknown
-	err     error   // why the account is unknown: the machine config could not be loaded
+	dir       *string // CLAUDE_CONFIG_DIR, absolute and clean, symlinks unresolved; nil = not resolved
+	configDir *string
+	stateDB   string
+	account   *int64
+	err       error
 }
 
-// resolveCallmeterSeat reads the hook's CLAUDE_CONFIG_DIR ({home}/.claude when
-// unset or blank) and matches it against the machine config's accounts. A
-// config that cannot be loaded, or is absent, leaves the account unknown and
-// is carried in err for the run's one account fault; a dir no account names
-// is simply no account.
+// resolveCallmeterSeat reads the process seat without resolving symlinks.
 func resolveCallmeterSeat(env paths.Env, home string) callmeterSeat {
 	dir := pfmconfig.AmbientClaudeConfigDirFrom(env)
 	if dir == "" {
 		dir = filepath.Join(home, ".claude")
 	}
+	shared := filepath.Join(home, ".claude")
+	stateDB := env.Get(paths.EnvStateDB)
+	if stateDB == "" {
+		stateDB = paths.DefaultStateDB(home)
+	}
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
-		return callmeterSeat{dir: &dir, err: fmt.Errorf("resolve seat dir %s: %w", dir, err)}
-	}
-	seat := callmeterSeat{dir: &absolute}
-	config, err := loadCallmeterConfig(env, home)
-	if err != nil {
-		seat.err = err
-		return seat
-	}
-	for _, account := range config.Accounts {
-		if sameDir(absolute, account.ConfigDir) {
-			seat.account = callmeter.Ptr(int64(account.ID))
-			return seat
+		return callmeterSeat{
+			dir:       &dir,
+			configDir: &shared,
+			stateDB:   stateDB,
+			err:       fmt.Errorf("resolve seat dir %s: %w", dir, err),
 		}
 	}
-	return seat
+	return callmeterSeat{dir: &absolute, configDir: &shared, stateDB: stateDB}
 }
 
-// loadCallmeterConfig loads the machine config the way `pfm callmeter`'s
-// runtime does — the current file, else the legacy one beside it — over the
-// hook's own environment, through the config package's loader. An absent file
-// is an error here: without it the accounts are only a guess.
-func loadCallmeterConfig(env paths.Env, home string) (pfmconfig.Config, error) {
-	current := pfmconfig.ResolvePathFrom(env, home)
-	path := ""
-	for _, candidate := range []string{current, filepath.Join(filepath.Dir(current), pfmconfig.LegacyFileName)} {
-		_, err := os.Stat(candidate)
-		if err == nil {
-			path = candidate
-			break
+func (seat *callmeterSeat) resolveAccount(ctx context.Context, sessionID string) {
+	if seat.stateDB == "" || sessionID == "" || seat.err != nil {
+		return
+	}
+	launches, err := fleetdb.OpenLaunches(ctx, paths.Values{StateDB: seat.stateDB})
+	if err == nil {
+		defer func() { _ = launches.Close() }()
+		launch, readErr := launches.LaunchFor(ctx, sessionID)
+		if errors.Is(readErr, fleetdb.ErrNoLaunch) {
+			return
 		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return pfmconfig.Config{}, fmt.Errorf("stat machine config %s: %w", candidate, err)
+		if readErr == nil {
+			seat.account = callmeter.Ptr(int64(launch.Account))
+			return
 		}
+		err = readErr
 	}
-	if path == "" {
-		return pfmconfig.Config{}, fmt.Errorf("no machine config at %s: the account is unknown", current)
-	}
-	config, err := pfmconfig.Load(path, home, nil)
-	if err != nil {
-		return pfmconfig.Config{}, fmt.Errorf("load machine config: %w", err)
-	}
-	return config, nil
-}
-
-// sameDir compares two dirs with their symlinks resolved, or cleaned when
-// either cannot be resolved.
-func sameDir(a, b string) bool {
-	resolvedA, errA := filepath.EvalSymlinks(a)
-	resolvedB, errB := filepath.EvalSymlinks(b)
-	if errA == nil && errB == nil {
-		return resolvedA == resolvedB
-	}
-	return filepath.Clean(a) == filepath.Clean(b)
+	seat.err = fmt.Errorf("read launch account for %s: %w", sessionID, err)
 }
 
 // accountFault says, once per run, why the run's account is unknown.

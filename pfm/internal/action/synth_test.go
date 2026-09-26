@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -64,23 +65,15 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		plan.ChatServer == nil || plan.ChatServer.CWD != request.Row.CWD {
 		t.Fatalf("resume plan = %#v server = %#v", plan, plan.ChatServer)
 	}
-	wantPrefix := hygiene +
-		" CLAUDE_CONFIG_DIR='/home/test/.cc/2'" +
-		" ENABLE_PROMPT_CACHING_1H=1" +
-		" " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) +
-		" " + truecolorName + "=" + Quote("1") +
-		" " + spawnDepthName + "=" + Quote("8") +
-		" claude"
-	if !strings.HasPrefix(plan.Run, wantPrefix) {
-		t.Fatalf("resume run = %q, want prefix %q", plan.Run, wantPrefix)
+	parsed := parsedShell(t, plan.Run)
+	if parsed.Resume != id || parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" ||
+		parsed.SettingsEnv[spawnDepthName] != "8" || plan.Record == nil || plan.Record.SessionID != id {
+		t.Fatalf("resume=%q settings=%#v record=%#v", parsed.Resume, parsed.SettingsEnv, plan.Record)
 	}
 	// A resumed chat keeps full autonomy, on every account, and always
 	// disables Claude Code's own output style so the staged prompt is the
 	// only persona layer.
-	if !strings.Contains(
-		plan.Run,
-		"claude '--resume' "+Quote(id)+" '--settings' "+Quote(pfmengine.OutputStyleDefaultSettings)+" "+autonomyFlags,
-	) {
+	if parsed.Settings["outputStyle"] != "default" || !parsed.Autonomy {
 		t.Fatalf("resume run missed the settings flag or autonomy flags: %q", plan.Run)
 	}
 	for _, name := range []string{
@@ -119,15 +112,25 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
 		t.Fatalf("new Claude line = %q, server = %#v, run = %q", plan.Line, plan.ChatServer, plan.Run)
 	}
-	for _, want := range []string{
-		"CLAUDE_CONFIG_DIR='/home/test/.cc/2'",
-		"FORCE_PROMPT_CACHING_5M=1",
-		"'--settings' " + Quote(pfmengine.OutputStyleDefaultSettings),
-		autonomyFlags,
-	} {
-		if !strings.Contains(plan.Run, want) {
-			t.Fatalf("new Claude run %q lacks %q", plan.Run, want)
-		}
+	parsed = parsedShell(t, plan.Run)
+	if parsed.SessionID == "" || parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" ||
+		parsed.Settings["outputStyle"] != "default" || !parsed.Autonomy || plan.Record == nil ||
+		plan.Record.SessionID != parsed.SessionID {
+		t.Fatalf("fresh id=%q settings=%#v record=%#v", parsed.SessionID, parsed.SettingsEnv, plan.Record)
+	}
+}
+
+func TestAgentRouteCarriesCacheFlag(t *testing.T) {
+	plan, err := synthesizeWithTestConfig(Request{
+		Row:            compose.Row{Kind: compose.Agent, ID: "22222222-2222-4222-8222-222222222222", CWD: "/work"},
+		PrimaryAccount: 2, Cache1H: true, Home: "/home/test", FreshSocket: "cc-agent-cache",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Run, "internal agent-open --id") || !strings.Contains(plan.Run, " --cache 1h") ||
+		strings.Contains(plan.Run, " ENABLE_PROMPT_CACHING_1H=") {
+		t.Fatalf("agent route = %q", plan.Run)
 	}
 }
 
@@ -283,8 +286,15 @@ if [ "$1" = internal ] && [ "$2" = agent-open ]; then exit 1; fi
 exit 2
 `, 0o700)
 	writeActionFile(t, claudeScript, `#!/bin/sh
+previous=
+settings=
+for word in "$@"; do
+  if [ "$previous" = --settings ]; then settings=$word; break; fi
+  previous=$word
+done
 {
   printf 'argv=%s\n' "$*"
+  printf 'settings=%s\n' "$settings"
   printf 'sid=%s\n' "${CLAUDE_CODE_SESSION_ID-unset}"
   printf 'code=%s\n' "${CLAUDECODE-unset}"
   printf 'cfg=%s\n' "${CLAUDE_CONFIG_DIR-unset}"
@@ -332,20 +342,22 @@ exit 2
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Join([]string{
-		"argv=--resume " + id + " --settings " + pfmengine.OutputStyleDefaultSettings + " " + autonomyFlags,
-		"sid=unset",
-		"code=unset",
-		"cfg=/home/test/.cc/2",
-		"enable=1",
-		"force=unset",
-		"base=unset",
-		"token=unset",
-		"gateway=unset",
-		"",
-	}, "\n")
-	if string(content) != want {
-		t.Fatalf("fallback result = %q, want %q", content, want)
+	line := string(content)
+	if !strings.HasPrefix(line, "argv=--resume "+id+" --settings ") ||
+		!strings.Contains(line, "\nsid=unset\n") || !strings.Contains(line, "\ncode=unset\n") ||
+		!strings.Contains(line, "\ncfg=/home/test/.cc/2\n") ||
+		!strings.Contains(line, "\nenable=unset\n") || !strings.Contains(line, "\nforce=unset\n") ||
+		!strings.Contains(line, "\nbase=unset\n") || !strings.Contains(line, "\ntoken=unset\n") ||
+		!strings.Contains(line, "\ngateway=unset\n") {
+		t.Fatalf("fallback result = %q", content)
+	}
+	settings := strings.TrimSuffix(strings.SplitN(strings.SplitN(line, "\nsettings=", 2)[1], "\n", 2)[0], "\r")
+	parsed, err := claudelaunch.Parse([]string{"claude", "--settings", settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" {
+		t.Fatalf("fallback cache = %#v", parsed.SettingsEnv)
 	}
 }
 
@@ -519,5 +531,56 @@ func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T)
 		if !seen[route] {
 			t.Fatalf("stress requests never reached route %c — the table proved nothing for it", route)
 		}
+	}
+}
+
+// TestLauncherIdentity is the shim's door: whatever a user types after
+// `claude`, pfm may pin a fresh --session-id only when Claude starts a brand-new
+// session, and may record a launch only under the id that session really has.
+func TestLauncherIdentity(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		args       []string
+		identity   string
+		continuing bool
+	}{
+		{name: "fresh", args: []string{"--model", "opus"}},
+		{name: "resume", args: []string{"--resume", "R"}, identity: "R"},
+		{name: "resume equals", args: []string{"--resume=R"}, identity: "R"},
+		{name: "short resume", args: []string{"-r", "R"}, identity: "R"},
+		{name: "resume picker", args: []string{"--resume"}, continuing: true},
+		{name: "short resume picker", args: []string{"-r"}, continuing: true},
+		{name: "resume picker then flag", args: []string{"--resume", "--model", "opus"}, continuing: true},
+		{name: "explicit", args: []string{"--session-id", "S"}, identity: "S"},
+		{name: "continue", args: []string{"--continue"}, continuing: true},
+		{name: "fork keeps parent unrecorded", args: []string{"--resume", "P", "--fork-session"}, continuing: true},
+		{
+			name:     "fork with its own id",
+			args:     []string{"--resume", "P", "--fork-session", "--session-id", "F"},
+			identity: "F",
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			identity, _, continuing := LauncherIdentity(scenario.args)
+			if identity != scenario.identity || continuing != scenario.continuing {
+				t.Fatalf("LauncherIdentity(%q) = %q, continuing %t; want %q, %t",
+					scenario.args, identity, continuing, scenario.identity, scenario.continuing)
+			}
+			run, err := LauncherRun("/bin/claude", scenario.args, "", t.TempDir(), pfmconfig.ClaudePrefs{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh := scenario.identity == "" && !scenario.continuing
+			added := strings.Count(
+				run,
+				"'--session-id'",
+			) - strings.Count(
+				strings.Join(scenario.args, " "),
+				"--session-id",
+			)
+			if (fresh && added != 1) || (!fresh && added != 0) {
+				t.Fatalf("pfm-added --session-id count %d (fresh=%t): %q", added, fresh, run)
+			}
+		})
 	}
 }

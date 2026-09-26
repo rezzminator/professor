@@ -90,8 +90,8 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv(EnvEngine, "")
 	// pfm's own readers resolve their jail through internal/paths.
 	t.Setenv(paths.EnvHome, fix.home)
-	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvFleetDB, filepath.Join(fix.home, ".cc", "fleet.db"))
+	t.Setenv(paths.EnvCacheDB, filepath.Join(root, "state", "pfm-cache.db"))
+	t.Setenv(paths.EnvStateDB, filepath.Join(fix.home, ".local", "state", "pfm", "pfm.db"))
 	t.Setenv(paths.EnvSIDDir, fix.sidDir)
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(fix.configDir, "projects"))
 	t.Setenv(paths.EnvCodexHome, fix.codexHome)

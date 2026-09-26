@@ -206,7 +206,7 @@ func TestClaudeGlobalAgentsLinkAndRetireWhateverTheCodexRoster(t *testing.T) {
 			roster := tc.roster(home)
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: home, Stdout: &output,
+				Mode: ModeApply, Home: home, Stdout: &output, MCPConfigPath: testConfigPath(t),
 				Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: roster,
 			})
 			if err != nil {

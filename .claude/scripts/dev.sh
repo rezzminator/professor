@@ -610,6 +610,7 @@ act_pfm() {
   case "$action" in
     install) run "pfm: go mod download" -- go -C "$d" mod download ;;
     build)
+      run "pfm: make prompts" -- make -C "$d" prompts
       run "pfm: go build" -- go -C "$d" build ./...
       # Reproducible build: ./cmd/pfm compiled twice for the environment's
       # GOOS/GOARCH with every input pinned (no cgo, no GOFLAGS, trimmed paths,

@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,7 +100,8 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 
 	var preview bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &preview,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &preview,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +126,8 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 
 	var apply bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &apply,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, ProcRoot: procRoot, Stdout: &apply,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +153,8 @@ func TestDryRunNeverGatesOnAReachableUserManager(t *testing.T) {
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true, nameSyncActive: true}
 	report, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: runner,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Runner: runner,
 	})
 	if err != nil || report.Changed == 0 {
 		t.Fatalf("dry run report=%#v err=%v, want an ungated preview", report, err)
@@ -175,13 +175,14 @@ func TestDryRunNamesUpdateMetadataWithoutWritingIt(t *testing.T) {
 	source := t.TempDir()
 	var output bytes.Buffer
 	report, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, SourceRepo: source,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, SourceRepo: source,
 		Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err != nil || report.Changed == 0 {
 		t.Fatalf("dry run report=%#v err=%v\n%s", report, err, output.String())
 	}
-	for _, path := range []string{SourceRepoPath(home), binaryOwnershipPath(home)} {
+	for _, path := range []string{paths.SourceRepoPath(home), binaryOwnershipPath(home)} {
 		if !strings.Contains(output.String(), "write "+path) {
 			t.Errorf("dry run omitted update-metadata path %s:\n%s", path, output.String())
 		}
@@ -214,12 +215,34 @@ func TestChangeDescriptionNamesCreateVsBackedUpRewrite(t *testing.T) {
 	}
 }
 
+// TestZshrcWiredOnFirstInstallBeforeAnyMarker is a fresh machine's first
+// `pfm install --yes` from the clone: the marker is recorded by this very run,
+// so the shell line must come from the clone being installed, not from a
+// marker a prior install would have left.
+func TestZshrcWiredOnFirstInstallBeforeAnyMarker(t *testing.T) {
+	home := t.TempDir()
+	clone := t.TempDir()
+	var applied bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), SourceRepo: clone,
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &applied,
+	}); err != nil {
+		t.Fatalf("first install: %v\n%s", err, applied.String())
+	}
+	want := sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh"))
+	if content := readFixture(t, filepath.Join(home, ".zshrc")); !strings.Contains(content, want) {
+		t.Fatalf("first install left .zshrc without %q:\n%s\n%s", want, content, applied.String())
+	}
+}
+
 func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
+	recordFixtureSourceRepo(t, home, t.TempDir())
 	var applied bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &applied,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &applied,
 	}); err != nil {
 		t.Fatalf("apply on a fresh home: %v\n%s", err, applied.String())
 	}
@@ -242,6 +265,8 @@ func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
 func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
+	clone := t.TempDir()
+	recordFixtureSourceRepo(t, home, clone)
 	config := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(home, ".codex", "hooks.json"), `{
   "hooks": {
@@ -284,7 +309,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	bbTarget := filepath.Join(config, "commands", "bb.md")
 	writeFixture(t, bbTarget, "operator copy\n")
 	seed := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db"),
+		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 	})
 	if err := seed.Kill(context.Background(), "killed-a", 99); err != nil {
 		t.Fatal(err)
@@ -297,13 +322,15 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	now := func() time.Time { return time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC) }
 	var preview bytes.Buffer
 	previewReport, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Now: now, Stdout: &preview, Runner: runner,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Now: now, Stdout: &preview, Runner: runner,
 		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	})
 	if err != nil || previewReport.Changed == 0 {
 		t.Fatalf("dry run report=%#v err=%v", previewReport, err)
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".local", "share", "pfm", "install")); !os.IsNotExist(err) {
+	stagedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", "claude")
+	if _, err := os.Lstat(stagedClaude); !os.IsNotExist(err) {
 		t.Fatalf("dry run staged assets: %v", err)
 	}
 	if content := readFixture(t, bbTarget); content != "operator copy\n" {
@@ -312,7 +339,8 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 
 	var applied bytes.Buffer
 	report, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Now: now, Stdout: &applied, Runner: runner,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Now: now, Stdout: &applied, Runner: runner,
 		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	})
 	if err != nil || report.Changed == 0 {
@@ -440,24 +468,8 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			t.Fatalf("managed %s=%q, want native exec shim %q", name, shim, want)
 		}
 	}
-	settings := readFixture(t, filepath.Join(config, "settings.json"))
-	for _, wanted := range []string{
-		home + "/.local/bin/pfm-statusline",
-		home + "/.local/bin/pfm usage-hook",
-		home + "/.local/bin/pfm internal clear-kill",
-		home + "/.local/bin/pfm internal launcher-repair",
-	} {
-		if !strings.Contains(settings, wanted) {
-			t.Fatalf("settings missing %q:\n%s", wanted, settings)
-		}
-	}
-	if strings.Contains(settings, home+"/.local/bin/pfm statusline\"") {
-		t.Fatalf("settings still point statusLine at the raw command, not the overlay:\n%s", settings)
-	}
-	for _, retired := range []string{"chat bb", "pfm bb", "bb-hook.sh"} {
-		if strings.Contains(settings, retired) {
-			t.Fatalf("settings retained retired /bb wiring %q:\n%s", retired, settings)
-		}
+	if settings := readFixture(t, filepath.Join(config, "settings.json")); !strings.Contains(settings, "bb-hook.sh") {
+		t.Fatalf("install changed account settings: %s", settings)
 	}
 	codexHooks := readFixture(t, filepath.Join(home, ".codex", "hooks.json"))
 	for _, wanted := range []string{"fixture-codex-keep"} {
@@ -479,25 +491,22 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if strings.Contains(codexHooks, "internal clear-kill") {
 		t.Fatalf("install wrote the retired Codex SessionStart clear-kill hook:\n%s", codexHooks)
 	}
-	secondary := readFixture(t, secondarySettings)
-	if strings.Contains(secondary, "chat bb") ||
-		!strings.Contains(secondary, home+"/.local/bin/pfm internal clear-kill") ||
-		!strings.Contains(secondary, "secondary-keep") {
-		t.Fatalf("secondary settings did not receive the complete hook wiring:\n%s", secondary)
+	if secondary := readFixture(t, secondarySettings); !strings.Contains(secondary, "secondary-keep") {
+		t.Fatalf("install changed secondary settings: %s", secondary)
 	}
 	if zshrc := readFixture(
 		t,
 		filepath.Join(home, ".zshrc"),
 	); !strings.Contains(
 		zshrc,
-		sourceLine(filepath.Join(managed, "shim", "pfm.zsh")),
+		sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")),
 	) ||
 		strings.Contains(zshrc, "cc-fleet.zsh") {
 		t.Fatalf("zshrc was not converged:\n%s", zshrc)
 	}
 
 	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
-		Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db"),
+		Home: home, StateDB: filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
 	})
 	killed, err := state.KilledAt(context.Background())
 	closeErr := state.Close()
@@ -507,7 +516,8 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 
 	var second bytes.Buffer
 	secondReport, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Now: now, Stdout: &second, Runner: runner,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Now: now, Stdout: &second, Runner: runner,
 		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	})
 	if err != nil || secondReport.Changed != 0 {
@@ -516,7 +526,8 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 
 	var removed bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Now: now, Stdout: &removed, Runner: runner,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeUninstall, Home: home, Now: now, Stdout: &removed, Runner: runner,
 		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	}); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, removed.String())
@@ -574,115 +585,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	}
 }
 
-func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	sourceRepo := t.TempDir()
-	themeBody := []byte(`{"name":"Tokyo Night","fixture":true}` + "\n")
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/tokyo-night.json" {
-			http.NotFound(response, request)
-			return
-		}
-		if _, err := response.Write(themeBody); err != nil {
-			t.Errorf("write theme fixture response: %v", err)
-		}
-	}))
-	t.Cleanup(server.Close)
-	manifest := fmt.Sprintf(`{
-  "_comment": "fixture",
-  "source_fetched": {
-    "tokyo-night": {
-      "repo": %q,
-      "raw": %q,
-      "target": "~/.claude/themes/tokyo-night.json",
-      "activate": "/theme",
-      "requires": "fixture"
-    }
-  }
-}`, server.URL, server.URL+"/tokyo-night.json")
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
-
-	run := func(mode Mode) (Report, string, error) {
-		var output bytes.Buffer
-		report, err := Run(context.Background(), Options{
-			Mode: mode, Home: home, SourceRepo: sourceRepo, Stdout: &output,
-			Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
-		})
-		return report, output.String(), err
-	}
-	target := filepath.Join(home, ".claude", "themes", "tokyo-night.json")
-	first, firstOutput, err := run(ModeApply)
-	if err != nil {
-		t.Fatalf("first theme install: %v\n%s", err, firstOutput)
-	}
-	if got := []byte(readFixture(t, target)); !bytes.Equal(got, themeBody) {
-		t.Fatalf("installed theme=%q, want %q", got, themeBody)
-	}
-	second, secondOutput, err := run(ModeApply)
-	if err != nil {
-		t.Fatalf("second theme install: %v\n%s", err, secondOutput)
-	}
-	if second.Changed != 0 || !strings.Contains(secondOutput, "theme tokyo-night") {
-		t.Fatalf("second report=%#v, want changed=0 with a named theme row\n%s", second, secondOutput)
-	}
-	if first.Changed == 0 {
-		t.Fatalf("first report=%#v, want a theme write\n%s", first, firstOutput)
-	}
-
-	writeFixture(t, target, "operator modification\n")
-	_, driftOutput, err := run(ModeApply)
-	if err != nil {
-		t.Fatalf("locally modified theme aborted install: %v\n%s", err, driftOutput)
-	}
-	if got := readFixture(t, target); got != "operator modification\n" {
-		t.Fatalf("locally modified theme was overwritten: %q", got)
-	}
-	if !strings.Contains(driftOutput, "theme tokyo-night locally modified; left in place") {
-		t.Fatalf("local drift was silent:\n%s", driftOutput)
-	}
-
-	writeFixture(t, target, string(themeBody))
-	_, uninstallOutput, err := run(ModeUninstall)
-	if err != nil {
-		t.Fatalf("theme uninstall: %v\n%s", err, uninstallOutput)
-	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("uninstall retained installer-owned theme: %v", err)
-	}
-}
-
-func TestThemeFetchFailureIsLoudAndNonFatal(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	sourceRepo := t.TempDir()
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		http.Error(response, "blocked by fixture", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(server.Close)
-	manifest := fmt.Sprintf(
-		`{"source_fetched":{"tokyo-night":{"repo":%q,"raw":%q,"target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`,
-		server.URL,
-		server.URL+"/tokyo-night.json",
-	)
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, Stdout: &output,
-		Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{}, InstallThemes: true,
-	})
-	if err != nil {
-		t.Fatalf("cosmetic theme fetch aborted host install: %v\n%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "theme tokyo-night fetch failed") ||
-		!strings.Contains(output.String(), "503") {
-		t.Fatalf("theme fetch failure was silent or vague:\n%s", output.String())
-	}
-	if _, statErr := os.Stat(filepath.Join(home, ".zshrc")); statErr != nil {
-		t.Fatalf("host install did not continue after theme failure: %v", statErr)
-	}
-}
-
 func TestEmptyCodexRosterSkipsCommandAndAgentMirrors(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -696,7 +598,8 @@ description: fixture agent
 `)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
 	})
 	if err != nil {
 		t.Fatalf("zero-Codex preview: %v\n%s", err, output.String())
@@ -720,59 +623,6 @@ description: fixture agent
 	}
 }
 
-func TestThemeManifestResolvesRegisteredOwnerPlaceholder(t *testing.T) {
-	t.Parallel()
-	sourceRepo := t.TempDir()
-	writeFixture(
-		t,
-		filepath.Join(sourceRepo, ".professor", "manifest.json"),
-		`{"installed_from":{"repo":"fixture-owner/professor"}}`,
-	)
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{
-  "source_fetched": {
-    "tokyo-night": {
-      "repo": "https://github.com/{GH_USER}/claude-code-tokyo-night",
-      "raw": "https://raw.githubusercontent.com/{GH_USER}/claude-code-tokyo-night/main/tokyo-night.json",
-      "target": "~/.claude/themes/tokyo-night.json",
-      "activate": "/theme",
-      "requires": "fixture"
-    }
-  }
-}`)
-	sources, err := loadThemeSources(context.Background(), Options{SourceRepo: sourceRepo})
-	if err != nil {
-		t.Fatalf("loadThemeSources: %v", err)
-	}
-	if got := sources["tokyo-night"].Raw; got != "https://raw.githubusercontent.com/fixture-owner/claude-code-tokyo-night/main/tokyo-night.json" {
-		t.Fatalf("resolved raw URL=%q", got)
-	}
-}
-
-func TestThemeManifestFallsBackToReleaseWhenDiscoveredSourceLacksManifest(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		response.Header().Set("Content-Type", "application/json")
-		if _, err := io.WriteString(
-			response,
-			`{"source_fetched":{"tokyo-night":{"repo":"https://example.test/theme","raw":"https://example.test/theme.json","target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`,
-		); err != nil {
-			t.Errorf("write release manifest fixture: %v", err)
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	sources, err := loadThemeSources(context.Background(), Options{
-		SourceRepo:       t.TempDir(),
-		ThemeManifestURL: server.URL,
-	})
-	if err != nil {
-		t.Fatalf("loadThemeSources() did not fall back to release manifest: %v", err)
-	}
-	if _, found := sources["tokyo-night"]; !found {
-		t.Fatalf("release manifest sources=%#v, want tokyo-night", sources)
-	}
-}
-
 func TestMCPEnablementSurvivesAnUnavailableSystemdUserManagerAndDisableRemovesIt(t *testing.T) {
 	t.Parallel()
 	if schedulerIsLaunchd {
@@ -781,7 +631,8 @@ func TestMCPEnablementSurvivesAnUnavailableSystemdUserManagerAndDisableRemovesIt
 	home := t.TempDir()
 	wants := filepath.Join(home, ".config", "systemd", "user", "default.target.wants", mcpUnitName)
 	options := Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 		MCPEnabled: map[string]bool{"chat": true},
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -805,8 +656,15 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 	staleLaunchd := filepath.Join(managed, "launchd", "com.professor.pfm.mcp.plist")
 	writeFixture(t, staleLaunchd, "stale staged plist\n")
 	installer := engine{
-		options: Options{Mode: ModeApply, Home: home, MCPEnabled: map[string]bool{"chat": false}, Stdout: io.Discard},
-		apply:   true, managedRoot: managed,
+		options: Options{
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply,
+			Home:          home,
+			MCPEnabled:    map[string]bool{"chat": false},
+			Stdout:        io.Discard,
+		},
+		apply:       true,
+		managedRoot: managed,
 	}
 	assets, err := assetFiles()
 	if err != nil {
@@ -823,7 +681,7 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	options := Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
+	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +718,8 @@ func TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads(t *testing.T) {
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +756,8 @@ func TestWireCodexAgentsReportsAndPreservesAForeignConflict(t *testing.T) {
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatalf("apply refused on a conflict it must only report: %v\n%s", err, output.String())
 	}
@@ -926,7 +786,8 @@ func TestWireGlobalCommandsLinksFilesAndDirectories(t *testing.T) {
 	writeFixture(t, filepath.Join(source, "tools", "refine.md"), "# tools refine\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -953,7 +814,8 @@ func TestWireGlobalCommandsSkipsAnAbsentOrEmptySource(t *testing.T) {
 			}
 			var output bytes.Buffer
 			if _, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 			}); err != nil {
 				t.Fatalf("apply: %v\n%s", err, output.String())
 			}
@@ -985,7 +847,8 @@ func TestWireGlobalSkillsLinksTemplateSkillDirectories(t *testing.T) {
 	writeFixture(t, filepath.Join(source, "architecture-design", "SKILL.md"), "# architecture-design skill\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1010,7 +873,8 @@ func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
 	}
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
@@ -1037,7 +901,8 @@ func TestRetireOrphanCodexAgentsDeletesExactlyTheKnownStrays(t *testing.T) {
 	writeFixture(t, keeper, "keeper\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1075,7 +940,7 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		}
 		if _, err := Run(
 			context.Background(),
-			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1090,7 +955,7 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		writeFixture(t, frr, "---\nname: frr\ndescription: pre-rename research agent\n---\nbody\n")
 		if _, err := Run(
 			context.Background(),
-			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1109,7 +974,7 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		)
 		if _, err := Run(
 			context.Background(),
-			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1124,7 +989,7 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		writeFixture(t, frr, "just prose, no frontmatter\n")
 		if _, err := Run(
 			context.Background(),
-			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1137,7 +1002,7 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		home := t.TempDir()
 		if _, err := Run(
 			context.Background(),
-			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+			Options{MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1160,7 +1025,8 @@ func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
 	)
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1180,7 +1046,8 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 	writeFixture(t, filepath.Join(elsewhere, "templates", "global", "skills", "pcm", "SKILL.md"), "# pcm skill\n")
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1189,141 +1056,14 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 	}
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	assertLink(t,
 		filepath.Join(home, ".claude", "skills", "pcm"),
 		filepath.Join(elsewhere, "templates", "global", "skills", "pcm"))
-}
-
-func TestApplyRetiresInstalledBBCardsAndHook(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	config := filepath.Join(home, ".claude")
-	managed := filepath.Join(home, ".local", "share", "pfm", "install")
-	commandTarget := filepath.Join(config, "commands", "bb.md")
-	skillTarget := filepath.Join(home, ".agents", "skills", "bb")
-	writeFixture(t, filepath.Join(managed, "bb.command.md"), "old managed command\n")
-	writeFixture(t, filepath.Join(managed, "codex-skills", "bb", "SKILL.md"), "old managed skill\n")
-	writeFixture(t, filepath.Join(managed, "codex-skills", "bb", "agents", "openai.yaml"), "old managed metadata\n")
-	if err := os.MkdirAll(filepath.Dir(commandTarget), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(managed, "bb.command.md"), commandTarget); err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, commandTarget+".pre-professor-20300102-030405", "operator command\n")
-	if err := os.MkdirAll(filepath.Dir(skillTarget), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(managed, "codex-skills", "bb"), skillTarget); err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, filepath.Join(config, "settings.json"), `{
-  "hooks": {
-    "UserPromptSubmit": [
-      {"matcher":"","hooks":[
-        {"type":"command","command":"`+home+`/.local/bin/pfm chat bb"},
-        {"type":"command","command":"fixture-keep"}
-      ]}
-    ]
-  }
-}`)
-
-	now := func() time.Time { return time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC) }
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Now: now, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if content := readFixture(t, commandTarget); content != "operator command\n" {
-		t.Fatalf("retirement did not restore operator card: %q", content)
-	}
-	for _, retired := range []string{
-		skillTarget,
-		filepath.Join(managed, "bb.command.md"),
-		filepath.Join(managed, "codex-skills"),
-	} {
-		if _, err := os.Lstat(retired); !os.IsNotExist(err) {
-			t.Fatalf("retired /bb surface remains at %s: %v", retired, err)
-		}
-	}
-	settings := readFixture(t, filepath.Join(config, "settings.json"))
-	if strings.Contains(settings, "chat bb") || !strings.Contains(settings, "fixture-keep") ||
-		!strings.Contains(settings, home+"/.local/bin/pfm internal clear-kill") {
-		t.Fatalf("settings did not retire /bb and wire clear-kill:\n%s", settings)
-	}
-
-	var second bytes.Buffer
-	report, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Now: now, Stdout: &second, Runner: &fakeRunner{},
-	})
-	if err != nil || report.Changed != 0 {
-		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())
-	}
-}
-
-func TestApplyLeavesUnrelatedBBSymlinkAlone(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	target := filepath.Join(home, ".claude", "commands", "bb.md")
-	operatorSource := filepath.Join(home, "operator", "bb.md")
-	writeFixture(t, operatorSource, "operator command\n")
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(operatorSource, target); err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, filepath.Join(home, ".claude", "settings.json"), `{}`)
-
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	assertLink(t, target, operatorSource)
-}
-
-func TestApplyRetiresDanglingBBLinksFromTheRecordedProfessorClone(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	repo := filepath.Join(home, "professor-clone")
-	if err := os.MkdirAll(repo, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteSourceRepoMarker(home, repo); err != nil {
-		t.Fatal(err)
-	}
-	commandTarget := filepath.Join(home, ".claude", "commands", "bb.md")
-	skillTarget := filepath.Join(home, ".agents", "skills", "bb")
-	for _, target := range []string{commandTarget, skillTarget} {
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	legacyRoot := filepath.Join(repo, "blueprint", "templates", "host-swap")
-	if err := os.Symlink(filepath.Join(legacyRoot, "bb.command.md"), commandTarget); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(legacyRoot, "codex-skills", "bb"), skillTarget); err != nil {
-		t.Fatal(err)
-	}
-
-	installer := &engine{
-		options: Options{Mode: ModeApply, Home: home, ConfigDir: filepath.Join(home, ".claude"), Stdout: io.Discard},
-		apply:   true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
-	}
-	if err := installer.retireBBInstall(); err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{commandTarget, skillTarget} {
-		if _, err := os.Lstat(target); !os.IsNotExist(err) {
-			t.Fatalf("recorded legacy /bb link remains at %s: %v", target, err)
-		}
-	}
 }
 
 func TestDryRunNamesFutureCodexWritesAndRefusesTheirConflicts(t *testing.T) {
@@ -1340,7 +1080,8 @@ Read only.
 
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "CONFLICT "+conflict) {
 		t.Fatalf("dry-run error=%v, want future Codex conflict; output:\n%s", err, output.String())
@@ -1373,7 +1114,8 @@ Read only.
 
 	output.Reset()
 	_, err = Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "preflight apply plan") ||
 		!strings.Contains(err.Error(), "CONFLICT "+conflict) {
@@ -1393,20 +1135,11 @@ Read only.
 	}
 }
 
-func TestUninstallAlsoRemovesRetiredDreamHooks(t *testing.T) {
-	t.Parallel()
+func TestRunRefusesMissingConfigPathAndSourceRepo(t *testing.T) {
 	home := t.TempDir()
-	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	oldCommand := home + "/.local/bin/cc-fleet dream hook agent-inject"
-	writeFixture(t, settingsPath, `{"hooks":{"PreToolUse":[{"hooks":[{"command":"`+oldCommand+`"}]}]}}`)
-
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if settings := readFixture(t, settingsPath); strings.Contains(settings, oldCommand) {
-		t.Fatalf("uninstall retained retired Dream hook:\n%s", settings)
+	_, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}})
+	if err == nil || !strings.Contains(err.Error(), "preflight apply plan: no config path: no source repo recorded") {
+		t.Fatalf("Run error=%v, want missing config path refusal", err)
 	}
 }
 
@@ -1415,7 +1148,8 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: runner,
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: runner,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1509,18 +1243,94 @@ func TestEarlyFleetCallsNamesWhatRunsBeforeTheLaunchersExist(t *testing.T) {
 	}
 }
 
+func TestShimSourceUsesRecordedCloneAndKeepsLegacyPosition(t *testing.T) {
+	home := t.TempDir()
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	legacy := sourceLine(filepath.Join(home, ".local", "share", "pfm", "install", "shim", "pfm.zsh"))
+	zshrc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(zshrc, []byte("before\n"+legacy+"\nafter\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installer := &engine{
+		options: Options{Home: home, Mode: ModeApply, Stdout: io.Discard},
+		apply:   true, stamp: "test", managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+	}
+	if err := installer.wireShell(false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(zshrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sourceLine(filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh"))
+	if !strings.Contains(string(raw), "before\n# The shell launchers delegate to the pfm engine.\n"+want+"\nafter") {
+		t.Fatalf("zshrc=%q", raw)
+	}
+}
+
+func TestShimSourceSkipsWithoutRecordedClone(t *testing.T) {
+	home := t.TempDir()
+	zshrc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(zshrc, []byte("untouched\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installer := &engine{
+		options: Options{Home: home, Mode: ModeApply, Stdout: io.Discard},
+		apply:   true, stamp: "test", managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+	}
+	if err := installer.wireShell(false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(zshrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "untouched\n" {
+		t.Fatalf("zshrc=%q", raw)
+	}
+	if installer.report.Skipped == 0 {
+		t.Fatal("missing skip report")
+	}
+}
+
+func TestShimUnwireRemovesLegacyAndCloneLinesWithoutMarker(t *testing.T) {
+	for _, source := range []string{
+		"/fixture/home/.local/share/pfm/install/shim/pfm.zsh",
+		"/fixture/clone/pfm/internal/installer/assets/shim/pfm.zsh",
+	} {
+		t.Run(source, func(t *testing.T) {
+			home := t.TempDir()
+			writeFixture(t, paths.SourceRepoPath(home), filepath.Join(home, "missing-clone")+"\n")
+			zshrc := filepath.Join(home, ".zshrc")
+			writeFixture(t, zshrc, "export EDITOR=vim\n"+sourceLine(source)+"\n")
+			installer := &engine{options: Options{Home: home, Stdout: io.Discard}, apply: true, stamp: "test"}
+			if err := installer.wireShell(true); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFixture(t, zshrc); got != "export EDITOR=vim\n" {
+				t.Fatalf("zshrc=%q", got)
+			}
+		})
+	}
+}
+
 // The rewriter and the early-call scan must never disagree about where the
 // source line is: one decides where the launchers start existing, the other
 // reports what runs before they do.
 func TestEarlyCallScanStopsWhereTheRewriterFindsTheSourceLine(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
+	recordFixtureSourceRepo(t, home, t.TempDir())
 	zshrc := filepath.Join(home, ".zshrc")
 	writeFixture(t, zshrc, "cc\nsource /old/cc-fleet.zsh\ncc-ls\n")
 
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatalf("apply: %v\n%s", err, output.String())
 	}
@@ -1584,7 +1394,8 @@ func TestLaunchAgentGateRefusesOnlyMidExecution(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			runner := &outputRunner{printOutput: testCase.output, printErr: testCase.outputErr}
 			_, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: t.TempDir(), Stdout: io.Discard, Runner: runner,
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeApply, Home: t.TempDir(), Stdout: io.Discard, Runner: runner,
 			})
 			if testCase.wantRefuse {
 				if !errors.Is(err, ErrLaunchAgentRunning) {
@@ -1608,12 +1419,20 @@ func TestLaunchAgentGateAnnouncesWhenItCannotProbe(t *testing.T) {
 	}
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: t.TempDir(), Stdout: &output, Runner: &fakeRunner{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: t.TempDir(), Stdout: &output, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "launch-agent gate NOT probed") {
 		t.Fatalf("an unprobed gate was silent:\n%s", output.String())
+	}
+}
+
+func recordFixtureSourceRepo(t *testing.T, home, repo string) {
+	t.Helper()
+	if err := paths.WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1641,5 +1460,30 @@ func assertLink(t *testing.T, target, wanted string) {
 	got, linked := resolvedLink(target)
 	if !linked || got != wanted {
 		t.Fatalf("link %s -> %q,%v, want %q,true", target, got, linked, wanted)
+	}
+}
+
+func TestMigrateLegacyCarrierUsesConfiguredStateDB(t *testing.T) {
+	home := t.TempDir()
+	writeFixture(t, filepath.Join(home, ".claude", ".cc-ls-hidden"), "retired-chat\n")
+	statePath := filepath.Join(home, "operator-state", "pfm.db")
+	installer := &engine{
+		options: Options{
+			MCPConfigPath: testConfigPath(t),
+			Mode:          ModeApply,
+			Home:          home,
+			StateDB:       statePath,
+			Stdout:        io.Discard,
+		},
+		apply: true,
+	}
+	if err := installer.migrateLegacyCarrier(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: statePath})
+	killed, err := state.KilledAt(context.Background())
+	closeErr := state.Close()
+	if err != nil || closeErr != nil || killed["retired-chat"] != 0 || len(killed) != 1 {
+		t.Fatalf("configured state killed=%v err=%v close=%v", killed, err, closeErr)
 	}
 }

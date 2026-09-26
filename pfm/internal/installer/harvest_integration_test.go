@@ -72,6 +72,7 @@ func TestInstallHarvestDryRunPlansOnlyAndWritesNothing(t *testing.T) {
 	fake := &harvestProvisionerFake{plan: linuxHarvestPlan()}
 	var output strings.Builder
 	_, err := Run(context.Background(), Options{
+		MCPConfigPath:      testConfigPath(t),
 		Mode:               ModeDryRun,
 		Home:               home,
 		Stdout:             &output,
@@ -126,6 +127,7 @@ func TestInstallHarvestSkipReportsExactStateForApplyAndPreview(t *testing.T) {
 			fake := &harvestProvisionerFake{plan: linuxHarvestPlan()}
 			var output strings.Builder
 			if _, err := Run(context.Background(), Options{
+				MCPConfigPath:      testConfigPath(t),
 				Mode:               test.mode,
 				Home:               home,
 				Stdout:             &output,
@@ -161,6 +163,7 @@ func TestInstallHarvestApplyUsesCentralRuntimeRootAndCheckFastPath(t *testing.T)
 	}
 	var output strings.Builder
 	if _, err := Run(context.Background(), Options{
+		MCPConfigPath:      testConfigPath(t),
 		Mode:               ModeApply,
 		Home:               home,
 		Stdout:             &output,
@@ -197,6 +200,7 @@ func TestInstallHarvestApplyUsesCentralRuntimeRootAndCheckFastPath(t *testing.T)
 		check: harvestpy.CheckReport{Healthy: true},
 	}
 	if _, err := Run(context.Background(), Options{
+		MCPConfigPath:      testConfigPath(t),
 		Mode:               ModeApply,
 		Home:               home,
 		Stdout:             &output,
@@ -235,6 +239,7 @@ func TestInstallHarvestApplyProvisionFailureIsActionableOffline(t *testing.T) {
 	}
 	var output strings.Builder
 	_, err := Run(context.Background(), Options{
+		MCPConfigPath:      testConfigPath(t),
 		Mode:               ModeApply,
 		Home:               home,
 		Stdout:             &output,
@@ -267,6 +272,7 @@ func TestInstallHarvestDarwinAMD64BlockedByExactLock(t *testing.T) {
 	fake := &harvestProvisionerFake{plan: plan}
 	var output strings.Builder
 	_, err := Run(context.Background(), Options{
+		MCPConfigPath:      testConfigPath(t),
 		Mode:               ModeDryRun,
 		Home:               home,
 		Stdout:             &output,
@@ -305,6 +311,7 @@ func TestUninstallHarvestRemovesOnlyManagedRuntimeAndCache(t *testing.T) {
 	fake := &harvestProvisionerFake{plan: linuxHarvestPlan()}
 	var output strings.Builder
 	if _, err := Run(context.Background(), Options{
+		MCPConfigPath:      testConfigPath(t),
 		Mode:               ModeUninstall,
 		Home:               home,
 		Stdout:             &output,

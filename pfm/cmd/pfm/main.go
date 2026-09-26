@@ -215,8 +215,9 @@ func diagnosticCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	if args[0] == doctorCommand {
-		return true
+	if args[0] == doctorCommand || args[0] == statuslineCommand ||
+		args[0] == internalCommand && len(args) > 1 && args[1] == statuslineCommand {
+		return true // the statusline renders a broken config on its cache segment
 	}
 	return args[0] == configCommand && len(args) > 1 && (args[1] == "show" || args[1] == "validate")
 }
@@ -384,7 +385,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		return hookentry.AgentOpen(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "codex-launch" {
-		return hookentry.CodexLaunch(args[1:], stderr)
+		return hookentry.CodexLaunch(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "claude-launch" {
 		return hookentry.ClaudeLaunch(args[1:], stdout, stderr, runtime, nil)
@@ -535,7 +536,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	defer func() { cli.CloseResource(database, "pfm internal kill-exit: close database", stderr, &exitCode) }()
 	finisher, err := kill.NewFinisher(database, kill.Dependencies{
 		Paths:       runtime.Paths,
-		ClaudeRoots: runtime.Config.ProjectRoots(),
+		ClaudeRoots: runtime.Paths.Roots[pfmengine.Claude],
 		CodexHomes:  runtime.Config.CodexHomes(),
 	})
 	if err == nil {

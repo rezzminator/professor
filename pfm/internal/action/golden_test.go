@@ -9,6 +9,9 @@ import (
 )
 
 func TestGoldenCommandLines(t *testing.T) {
+	previous := newSessionID
+	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+	t.Cleanup(func() { newSessionID = previous })
 	var actual bytes.Buffer
 	lastRoute := Route(0)
 	for _, request := range stressRequests() {

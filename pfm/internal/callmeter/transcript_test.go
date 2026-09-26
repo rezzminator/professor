@@ -64,47 +64,6 @@ func TestSubagentTranscriptPath(t *testing.T) {
 	}
 }
 
-func TestConfigDirOf(t *testing.T) {
-	root := t.TempDir()
-	realDir := filepath.Join(root, "realDir-config")
-	if err := os.MkdirAll(filepath.Join(realDir, "projects", "-tmp-demo-proj"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(root, "linked-config")
-	if err := os.Symlink(realDir, link); err != nil {
-		t.Fatal(err)
-	}
-	resolvedReal, err := filepath.EvalSymlinks(realDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A second account: its own real dir, its projects/ a symlink into the
-	// first's (this machine: ~/.claude3/projects -> ~/.claude/projects). One
-	// transcript, so one config dir whichever account wrote the call.
-	shared := filepath.Join(root, "shared-account")
-	if err := os.MkdirAll(shared, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(realDir, "projects"), filepath.Join(shared, "projects")); err != nil {
-		t.Fatal(err)
-	}
-	cases := map[string]string{
-		filepath.Join(link, "projects", "-tmp-demo-proj", "sess-1.jsonl"):                          resolvedReal,
-		filepath.Join(link, "projects", "-tmp-demo-proj", "sess-1", "subagents", "agent-a1.jsonl"): resolvedReal,
-		filepath.Join(root, "gone-config", "projects", "-tmp-demo-proj", "sess-1.jsonl"): filepath.Join(
-			root,
-			"gone-config",
-		),
-		filepath.Join(root, "elsewhere", "sess-1.jsonl"):                    "",
-		filepath.Join(shared, "projects", "-tmp-demo-proj", "sess-1.jsonl"): resolvedReal,
-	}
-	for path, want := range cases {
-		if got := ConfigDirOf(path); got != want {
-			t.Errorf("ConfigDirOf(%q) = %q, want %q", path, got, want)
-		}
-	}
-}
-
 // bigTranscript writes head, then filler user lines past FindRequests' first
 // tail window, then tail: the shape of a long chat whose newest request is at
 // the end.

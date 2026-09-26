@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
@@ -52,11 +51,6 @@ const (
 type projectGroup struct {
 	name    string
 	indices []int
-}
-
-type nameGroup struct {
-	name  string
-	count int
 }
 
 type orderedSearch struct {
@@ -113,6 +107,7 @@ type Model struct {
 	openCodePrimary      int
 	openCodeAccountIDs   []int
 	cache1H              bool
+	cache1HByAccount     map[int]bool
 	tab                  Tab
 	statsSubtab          StatsSubtab
 	statsFocus           StatsFocus
@@ -229,6 +224,7 @@ func NewModel(snapshot Snapshot) Model {
 		openCodePrimary:     validAccount(snapshot.OpenCodePrimaryAccount, snapshot.OpenCodeAccountIDs),
 		openCodeAccountIDs:  normalizedAccountIDs(snapshot.OpenCodeAccountIDs),
 		cache1H:             snapshot.Cache1H,
+		cache1HByAccount:    snapshot.Cache1HByAccount,
 		query:               input,
 		initialKilled:       make(map[string]bool),
 		killChanges:         make(map[string]KillChange),
@@ -820,6 +816,9 @@ func (model *Model) cycleSelectedAccount() {
 		return
 	}
 	model.primary = nextAccount(model.primary, model.accountIDs)
+	if choice, ok := model.cache1HByAccount[model.primary]; ok {
+		model.cache1H = choice
+	}
 }
 
 func nextAccount(current int, ids []int) int {
@@ -1398,39 +1397,6 @@ func (model *Model) rebuildOrder() {
 
 func isNewChatActionKind(kind compose.Kind) bool {
 	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
-}
-
-// nameGroupPrefix reads a GROUP:NAME declaration off a chat name.
-//
-// The shape is exact on purpose: a non-empty prefix with NO whitespace in it,
-// a colon, and a non-empty remainder that does not start with whitespace.
-// "P:BUILDER" declares a group; "fix: the bug" is a sentence with a colon in
-// it and declares nothing, and neither does "wave 3: rework".
-//
-// The strictness became load-bearing when a single member started opening a
-// panel. Under the old two-member threshold a prose colon was mostly harmless
-// — it took two of them to invent a group — so the rule could afford to be
-// loose. It cannot now: every stray colon would become a header.
-func nameGroupPrefix(name string) (string, bool) {
-	prefix, rest, found := strings.Cut(cleanField(name), ":")
-	if !found || prefix == "" || rest == "" {
-		return "", false
-	}
-	if strings.ContainsFunc(prefix, unicode.IsSpace) {
-		return "", false
-	}
-	if unicode.IsSpace(rune(rest[0])) {
-		return "", false
-	}
-	return prefix, true
-}
-
-// isNameGroupRow admits every kind a GROUP:NAME can fold into a panel: live,
-// Agent, Booting, and every resumable kind — a resumable SOLO:BUILD groups
-// with its live namesakes exactly like a live row would.
-func isNameGroupRow(kind compose.Kind) bool {
-	return kind.IsAddressable() ||
-		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpenCode
 }
 
 func (model *Model) refilter(follow string, fallback int) {

@@ -9,9 +9,10 @@ import (
 )
 
 // TestContinuedInColumnIsEnsuredOnAnOlderSchema8Database opens a database an
-// older pfm left at schema 8 — no continued_in column — and proves the column
-// is added without a version bump (an older pfm on the machine can still open
-// it) and round-trips, with Superseded derived from it.
+// older pfm left at schema 8 — no continued_in column or hidden table — and
+// proves the column is added before the derived cache migrates to v9. Older
+// binaries read fleet.db, not this cache. The column round-trips, with
+// Superseded derived from it.
 func TestContinuedInColumnIsEnsuredOnAnOlderSchema8Database(t *testing.T) {
 	dbPath := setStoreTestJail(t)
 	ctx := context.Background()

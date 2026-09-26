@@ -286,7 +286,7 @@ type NewInput struct {
 	Engine   string `json:"engine,omitempty"`
 	CWD      string `json:"cwd,omitempty"`
 	Account  int    `json:"account,omitempty"`
-	Cache1H  bool   `json:"1h,omitempty"`
+	Cache    string `json:"cache,omitempty" jsonschema:"prompt cache for this launch: 1h or 5m"`
 	Model    string `json:"model,omitempty"`
 	Effort   string `json:"effort,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`

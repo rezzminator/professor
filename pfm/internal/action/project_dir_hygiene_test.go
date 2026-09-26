@@ -3,6 +3,8 @@ package action
 import (
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
 
 // A chat spawned from inside another chat's hook inherits that session's
@@ -16,18 +18,18 @@ const projectDirName = "CLAUDE_PROJECT_DIR"
 func TestClaudeSpawnStripsInheritedProjectDir(t *testing.T) {
 	home := t.TempDir()
 	machine := configuredMachinePolicy(home)
-	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeProbe, PurposeQuery} {
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()
 		if err != nil {
-			t.Fatalf("%s shell spawn: %v", purpose, err)
+			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
 		if want := " -u " + projectDirName + " "; !strings.Contains(shell, want) {
-			t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, want)
+			t.Fatalf("%v shell spawn %q lacks %q", purpose, shell, want)
 		}
 		environment := spawn.Environment([]string{projectDirName + "=/srv/tester/.professor", "PATH=/usr/bin"})
 		if got := lastEnvironmentValue(environment, projectDirName); got != "" {
-			t.Fatalf("%s spawn environment %q kept %s=%q, want it stripped",
+			t.Fatalf("%v spawn environment %q kept %s=%q, want it stripped",
 				purpose, environment, projectDirName, got)
 		}
 	}
@@ -36,7 +38,7 @@ func TestClaudeSpawnStripsInheritedProjectDir(t *testing.T) {
 func TestDerivedStripsAlsoDropProjectDir(t *testing.T) {
 	for name, names := range map[string][]string{
 		"fleet":    hygieneNames,
-		"headless": headlessHygieneNames,
+		"headless": claudelaunch.Hygiene(),
 		"opencode": opencodeHygieneNames,
 	} {
 		found := false
@@ -46,7 +48,7 @@ func TestDerivedStripsAlsoDropProjectDir(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Fatalf("%s strip list %v lacks %s", name, names, projectDirName)
+			t.Fatalf("%v strip list %v lacks %s", name, names, projectDirName)
 		}
 	}
 }

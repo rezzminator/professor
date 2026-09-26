@@ -113,8 +113,8 @@ func TestChatInjectResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) 
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("TMPDIR", root)
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -367,10 +367,24 @@ func TestChatInjectResumeLadderPathSessionAndExcerpt(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			home := filepath.Join(root, "home")
 			project := filepath.Join(root, "claude", "project")
-			for _, directory := range []string{home, project, filepath.Join(root, "tmux"), filepath.Join(root, "codex"), filepath.Join(root, "proc")} {
+			for _, directory := range []string{
+				home, project, filepath.Join(root, "tmux"),
+				filepath.Join(root, "codex"), filepath.Join(root, "proc"),
+			} {
 				if err := os.MkdirAll(directory, 0o700); err != nil {
 					t.Fatal(err)
 				}
+			}
+			claudeBinary := filepath.Join(home, ".local", "bin", "claude")
+			if err := os.MkdirAll(filepath.Dir(claudeBinary), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const registryStub = "#!/bin/sh\n" +
+				"if [ \"$1\" = agents ] && [ \"$2\" = --json ]; then\n" +
+				"  printf '[]\\n'\n" +
+				"else\n  exit 2\nfi\n"
+			if err := os.WriteFile(claudeBinary, []byte(registryStub), 0o700); err != nil {
+				t.Fatal(err)
 			}
 			transcript := filepath.Join(project, id+".jsonl")
 			line := fmt.Sprintf(
@@ -383,8 +397,8 @@ func TestChatInjectResumeLadderPathSessionAndExcerpt(t *testing.T) {
 			t.Setenv("HOME", home)
 			t.Setenv("TMUX", "")
 			t.Setenv("PFM_HOME", home)
-			t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-			t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+			t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+			t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 			t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 			t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 			t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -447,8 +461,8 @@ func TestChatInjectResumeRefusesAProcessHeldSessionAsDead(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("TMUX", "")
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "claude"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -504,8 +518,8 @@ func TestChatInjectResumeRefusesDaemonRegistrySession(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", accountProjects)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
@@ -594,8 +608,8 @@ func TestChatInjectResumeRefusesLiveSocketCrumbSession(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_CACHE_DB", filepath.Join(root, "pfm-cache.db"))
+	t.Setenv("PFM_STATE_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", accountProjects)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))

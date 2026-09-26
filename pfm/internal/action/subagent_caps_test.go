@@ -1,7 +1,6 @@
 package action
 
 import (
-	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -17,7 +16,7 @@ const (
 )
 
 func subagentPurposes() []Purpose {
-	return []Purpose{PurposeInteractive, PurposeResume, PurposeProbe, PurposeQuery}
+	return []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery}
 }
 
 func TestClaudeSpawnCarriesDefaultSubagentSpawnDepth(t *testing.T) {
@@ -27,20 +26,14 @@ func TestClaudeSpawnCarriesDefaultSubagentSpawnDepth(t *testing.T) {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()
 		if err != nil {
-			t.Fatalf("%s shell spawn: %v", purpose, err)
+			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
-		if want := " " + spawnDepthName + "=" + Quote("8") + " "; !strings.Contains(shell, want) {
-			t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, want)
+		settings := parsedShell(t, shell).SettingsEnv
+		if settings[spawnDepthName] != "8" {
+			t.Fatalf("%v settings spawn depth = %q", purpose, settings[spawnDepthName])
 		}
-		if strings.Contains(shell, concurrencyName) {
-			t.Fatalf("%s shell spawn %q carries %s with no key in the config", purpose, shell, concurrencyName)
-		}
-		environment := spawn.Environment([]string{"PATH=/usr/bin"})
-		if got := lastEnvironmentValue(environment, spawnDepthName); got != "8" {
-			t.Fatalf("%s environment resolves %s=%q, want 8", purpose, spawnDepthName, got)
-		}
-		if got := lastEnvironmentValue(environment, concurrencyName); got != "" {
-			t.Fatalf("%s environment resolves %s=%q, want it absent", purpose, concurrencyName, got)
+		if settings[concurrencyName] != "" {
+			t.Fatalf("%v settings concurrency = %q", purpose, settings[concurrencyName])
 		}
 	}
 }
@@ -53,17 +46,11 @@ func TestClaudeSpawnCarriesConfiguredSubagentCaps(t *testing.T) {
 		spawn := ClaudeSpawn{Purpose: purpose, Account: 42, Home: home, Machine: machine}
 		shell, err := spawn.ShellCommand()
 		if err != nil {
-			t.Fatalf("%s shell spawn: %v", purpose, err)
+			t.Fatalf("%v shell spawn: %v", purpose, err)
 		}
 		for name, want := range map[string]string{spawnDepthName: "5", concurrencyName: "32"} {
-			if assignment := " " + name + "=" + Quote(want) + " "; !strings.Contains(shell, assignment) {
-				t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, assignment)
-			}
-			// exec keeps the LAST duplicate, so the door's assignment has to
-			// land after an inherited lower cap.
-			environment := spawn.Environment([]string{name + "=1", "PATH=/usr/bin"})
-			if got := lastEnvironmentValue(environment, name); got != want {
-				t.Fatalf("%s environment resolves %s=%q, want %q", purpose, name, got, want)
+			if got := parsedShell(t, shell).SettingsEnv[name]; got != want {
+				t.Fatalf("%v settings %s = %q, want %q", purpose, name, got, want)
 			}
 		}
 	}
@@ -83,8 +70,8 @@ func TestLauncherRunCarriesSubagentCaps(t *testing.T) {
 		t.Fatalf("LauncherRun: %v", err)
 	}
 	for name, want := range map[string]string{spawnDepthName: "12", concurrencyName: "40"} {
-		if assignment := " " + name + "=" + Quote(want) + " "; !strings.Contains(run, assignment) {
-			t.Fatalf("launcher run %q lacks %q", run, assignment)
+		if got := parsedShell(t, run).SettingsEnv[name]; got != want {
+			t.Fatalf("launcher settings %s = %q, want %q", name, got, want)
 		}
 	}
 }

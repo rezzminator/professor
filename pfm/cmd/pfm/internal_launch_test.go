@@ -2,18 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/doctor"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func clearRetiredHarvesterEnv(t *testing.T) {
@@ -176,13 +179,34 @@ exit 3
 	}
 	for _, want := range []string{
 		"tmux=" + socket,
-		"argv=--resume fixture-id --dangerously-skip-permissions --settings " + pfmengine.OutputStyleDefaultSettings,
+		"argv=--resume fixture-id --dangerously-skip-permissions --settings {",
+		`"ENABLE_PROMPT_CACHING_1H":"1"`,
 		"config=" + filepath.Join(root, "caller-config"),
-		"force=1", "sid=unset", "child=unset", "endpoint=unset",
+		"force=unset", "sid=unset", "child=unset", "endpoint=unset",
 	} {
-		if !strings.Contains(string(proof), want+"\n") {
+		if !strings.Contains(string(proof), want) {
 			t.Fatalf("launch evidence missing %q:\n%s", want, proof)
 		}
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	launches, err := fleetdb.OpenLaunches(context.Background(), values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := launches.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	record, err := launches.LaunchFor(context.Background(), "fixture-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.SessionID != "fixture-id" || record.Account != 1 || !record.Cache1H {
+		t.Fatalf("managed launcher record=%+v", record)
 	}
 }
 
@@ -222,6 +246,78 @@ func TestInternalLaunchPrintHelper(t *testing.T) {
 		os.Stderr,
 	)
 	os.Exit(code)
+}
+
+func TestInternalLaunchFreshAndExplicitRecordBeforeTmux(t *testing.T) {
+	for _, scenario := range []struct {
+		name, explicit string
+		arguments      []string
+	}{
+		{name: "fresh"},
+		{name: "explicit", explicit: "22222222-2222-4222-8222-222222222222", arguments: []string{"--session-id", "22222222-2222-4222-8222-222222222222"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			root := jailTest(t)
+			t.Setenv("TMUX", "")
+			t.Setenv("PFM_LAUNCH_PASSTHROUGH", "")
+			bin := filepath.Join(root, "bin")
+			argumentsPath := filepath.Join(root, "tmux-arguments")
+			writeExecutable(
+				t,
+				filepath.Join(bin, "tmux"),
+				"#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CC_TMUX_ARGUMENTS\"\nprintf 'fixture tmux refused' >&2\nexit 9\n",
+			)
+			realBinary := filepath.Join(bin, "claude")
+			writeExecutable(t, realBinary, "#!/bin/sh\nexit 0\n")
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("CC_TMUX_ARGUMENTS", argumentsPath)
+			var stdout, stderr bytes.Buffer
+			arguments := append(
+				[]string{"internal", "launch", "--real", realBinary, "--cwd", root, "--"},
+				scenario.arguments...)
+			if code := run(
+				arguments,
+				&stdout,
+				&stderr,
+			); code != 1 ||
+				!strings.Contains(stderr.String(), "fixture tmux refused") {
+				t.Fatalf("launcher code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			content, err := os.ReadFile(argumentsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			line := string(content)
+			matches := regexp.MustCompile(`'--session-id' '([^']+)'`).FindStringSubmatch(line)
+			if len(matches) != 2 || strings.Count(line, "--session-id") != 1 {
+				t.Fatalf("tmux command has no single session id: %q", line)
+			}
+			id := matches[1]
+			if scenario.explicit != "" && id != scenario.explicit {
+				t.Fatalf("session id=%q, want %q", id, scenario.explicit)
+			}
+			values, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			launches, err := fleetdb.OpenLaunches(context.Background(), values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := launches.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			record, err := launches.LaunchFor(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.Account != 1 || !record.Cache1H || string(record.Engine) != "cc" {
+				t.Fatalf("launcher record=%+v", record)
+			}
+		})
+	}
 }
 
 func TestInternalLaunchTmuxStartFailureIsLoudAndNeverFallsBack(t *testing.T) {

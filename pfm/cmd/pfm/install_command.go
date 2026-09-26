@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -15,7 +17,9 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
@@ -39,10 +43,11 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--rollback ID] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
+	rollback := flags.String("rollback", "", "replay a layout journal backwards")
 	vscode := flags.Bool(
 		"vscode",
 		false,
@@ -58,6 +63,42 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	if flags.NArg() != 0 {
 		flags.Usage()
 		return 2
+	}
+	rollbackSet := false
+	flags.Visit(func(flag *flag.Flag) {
+		if flag.Name == "rollback" {
+			rollbackSet = true
+		}
+	})
+	if rollbackSet {
+		other := false
+		flags.Visit(func(flag *flag.Flag) {
+			if flag.Name != "rollback" {
+				other = true
+			}
+		})
+		if other || *rollback == "" {
+			flags.Usage()
+			return 2
+		}
+		runtime, err := pfmconfig.OptionalRuntime(runtimes)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm install: resolve dependency config: %v\n", err)
+			return 1
+		}
+		env, err := installer.NewLayoutEnv(runtime, paths.OSEnv{})
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm install: layout environment: %v\n", err)
+			return 1
+		}
+		if err := installer.RollbackLayout(context.Background(), env, *rollback, stdout); err != nil {
+			fmt.Fprintf(stderr, "pfm install: rollback: %v\n", err)
+			if strings.Contains(err.Error(), "unknown layout journal") {
+				return 2
+			}
+			return 1
+		}
+		return 0
 	}
 	skipCodex := false
 	if value := strings.TrimSpace(*skipEngine); value != "" {
@@ -92,6 +133,45 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 		fmt.Fprintf(stdout, "  skip    %s\n", refusal)
 	}
+	layoutEnv, err := installer.NewInstallLayoutEnv(runtime, paths.OSEnv{}, professor.DiscoverSourceRepo())
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm install: layout environment: %v\n", err)
+		return 1
+	}
+	layoutFindings := installer.ClassifyLayout(layoutEnv)
+	journalDir, err := installer.ApplyLayout(context.Background(), layoutEnv, mode == installer.ModeApply, stdout)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm install: %v\n", err)
+		return 1
+	}
+	if mode == installer.ModeApply && journalDir != "" {
+		for _, finding := range layoutFindings {
+			if (finding.Row != "state-db" && finding.Row != "cache-db") || finding.Source == "" {
+				continue
+			}
+			if _, sourceErr := os.Lstat(finding.Source); !os.IsNotExist(sourceErr) {
+				continue
+			}
+			if _, targetErr := os.Stat(finding.Path); targetErr != nil {
+				continue
+			}
+			if migrateErr := migrateInstalledLayoutDatabases(
+				context.Background(),
+				layoutEnv.StateDB,
+				layoutEnv.CacheDB,
+			); migrateErr != nil {
+				fmt.Fprintf(stderr, "pfm install: migrate moved databases: %v\n", migrateErr)
+				return 1
+			}
+			break
+		}
+	}
+	installConfig, configErr := layoutEnv.InstallConfig(runtime, mode == installer.ModeApply)
+	if configErr != nil {
+		fmt.Fprintf(stderr, "pfm install: %v\n", configErr)
+		return 1
+	}
+	runtime.Config = installConfig
 	migrated, migrateCode := migrateMachineConfig(mode, stdout, stderr, runtime)
 	if migrateCode != 0 {
 		return migrateCode
@@ -123,7 +203,6 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	options.ThemeHTTPClient = installThemeHTTPClientOverride
 	if skipCodex {
 		options.CodexHomes = []string{}
-		options.CodexYolo = map[int]bool{}
 	}
 	code := runInstallerCommand(installCommand, options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
@@ -150,6 +229,26 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintln(stdout, confirmation)
 	}
 	return code
+}
+
+func migrateInstalledLayoutDatabases(ctx context.Context, statePath, cachePath string) (returnErr error) {
+	resolved, err := paths.Resolve()
+	if err != nil {
+		return fmt.Errorf("resolve moved database paths: %w", err)
+	}
+	if resolved.StateDB != statePath || resolved.CacheDB != cachePath {
+		return fmt.Errorf("moved database paths differ from resolved paths: state %s != %s; cache %s != %s",
+			statePath, resolved.StateDB, cachePath, resolved.CacheDB)
+	}
+	database, err := store.OpenContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, database.Close()) }()
+	if err := database.SharedDegraded(); err != nil {
+		return fmt.Errorf("shared state: %w", err)
+	}
+	return nil
 }
 
 // migrateMachineConfig moves a pre-split machine to the current layout
@@ -211,6 +310,7 @@ func newInstallerOptions(
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]
 		options.Home = runtime.Paths.Home
+		options.StateDB = runtime.Paths.StateDB
 		options.MCPEnabled = make(map[string]bool, len(runtime.Config.MCPServers))
 		for name, server := range runtime.Config.MCPServers {
 			options.MCPEnabled[name] = server.Enabled
@@ -224,28 +324,16 @@ func newInstallerOptions(
 			options.CodexBinary = pfmengine.MustLookup(pfmengine.Codex).Binary
 		}
 		options.NameSyncInterval = runtime.Config.NameSync.Interval
-		options.CodexYolo = make(map[int]bool, len(runtime.Config.CodexAccounts))
 		options.CodexHomes = make([]string, 0, len(runtime.Config.CodexAccounts))
 		for _, account := range runtime.Config.CodexAccounts {
 			options.CodexHomes = append(options.CodexHomes, account.Home)
-			options.CodexYolo[account.ID] = runtime.Config.EffectiveCodex(account.ID).Yolo
 		}
 		if configDir == "" {
 			options.ConfigDirs = make([]string, 0, len(runtime.Config.Accounts))
 			for _, account := range runtime.Config.Accounts {
 				options.ConfigDirs = append(options.ConfigDirs, account.ConfigDir)
 			}
-			registries := installer.ClaudeUserRegistries(
-				runtime.Paths.Home,
-				runtime.Config.Accounts,
-				pfmconfig.AmbientClaudeConfigDir(),
-			)
-			options.ClaudeRegistries = make([]string, 0, len(registries))
-			options.ClaudeRegistryReasons = make(map[string]string, len(registries))
-			for _, registry := range registries {
-				options.ClaudeRegistries = append(options.ClaudeRegistries, registry.Path)
-				options.ClaudeRegistryReasons[registry.Path] = registry.Reason
-			}
+
 		}
 	}
 	options.SourceRepo = resolveInstallSourceRepo(options.Home, stderr)
@@ -274,8 +362,8 @@ func resolveInstallSourceRepo(home string, stderr io.Writer) string {
 	}
 	// No marker at all is a first install and stays silent; every other miss
 	// (a recorded clone that moved, vanished or became unreadable) is named.
-	recorded, err := installer.ReadSourceRepoMarker(home)
-	if errors.Is(err, installer.ErrNoSourceRepoMarker) {
+	recorded, err := paths.ReadSourceRepoMarker(home)
+	if errors.Is(err, paths.ErrNoSourceRepoMarker) {
 		return ""
 	}
 	if err != nil {

@@ -11,30 +11,20 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
-// PrintMCPClientCutover reports three disjoint surfaces: every user-scope
-// Claude registry a pfm-launched Claude can actually read (installer.
-// ClaudeUserRegistries — one row per file, naming why pfm considers it a
-// registry, with its "professor" state and any pfm legacy "chat" / "harvester"
-// entry still present, so a registry pfm never reached reads as visibly absent
-// rather than silently skipped), each Codex account home's config.toml and the
-// OpenCode config the same way, and the historical harvester cutover check for
-// Codex and the project-scope .mcp.json
-// (unaffected by CLAUDE_CONFIG_DIR), which tells pfm's own legacy entry apart
-// from a foreign or standalone one.
+// PrintMCPClientCutover reports the historical harvester cutover check for
+// Codex and the project-scope .mcp.json, which tells pfm's own legacy entry
+// apart from a foreign or standalone one, then each Codex account home's
+// config.toml and the OpenCode config with their "professor" state and any pfm
+// legacy "chat" / "harvester" entry. Claude has no registry row: its MCP
+// servers ride --mcp-config at launch and pfm writes no account .claude.json.
 func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 	warnings := 0
-	registries := installer.ClaudeUserRegistries(
-		runtime.Paths.Home,
-		runtime.Config.Accounts,
-		config.AmbientClaudeConfigDir(),
-	)
-	warnings += printClaudeRegistryRows(stdout, registries, runtime.Paths.Home, runtime.Config.MCP.HTTP.Port)
 
 	codexHomes := make([]string, 0, len(runtime.Config.CodexAccounts))
 	for _, account := range runtime.Config.CodexAccounts {
 		codexHomes = append(codexHomes, account.Home)
 	}
-	for _, report := range installer.InspectHarvesterClientCutover(runtime.Paths.Home, runtime.Config.MCP.HTTP.Port, []string{}, codexHomes) {
+	for _, report := range installer.InspectHarvesterClientCutover(runtime.Paths.Home, runtime.Config.MCP.HTTP.Port, codexHomes) {
 		switch report.State {
 		case installer.MCPClientAbsent, installer.MCPClientPFM:
 			continue
@@ -189,58 +179,4 @@ func openCodeRemediation(home, path, state string) string {
 	default:
 		return reinstall
 	}
-}
-
-// printClaudeRegistryRows prints one row per registry ClaudeUserRegistries
-// resolved — every row, not only the unhealthy ones, so a registry pfm never
-// reaches is visible rather than silently absent from the report. A registry
-// whose `professor` is not pfm's — absent while a sibling registry holds pfm's,
-// or foreign — or that still holds a pfm legacy entry is a warning naming the
-// remediation; an unreadable file reports its parse error instead of guessing
-// a state.
-func printClaudeRegistryRows(stdout io.Writer, registries []installer.ClaudeRegistry, home string, port int) int {
-	type outcome struct {
-		registry      installer.ClaudeRegistry
-		state, legacy string
-		err           error
-	}
-	outcomes := make([]outcome, 0, len(registries))
-	anyPFM := false
-	for _, registry := range registries {
-		out := outcome{registry: registry}
-		out.state, out.legacy, out.err = professorState(installer.InspectClaudeServers(
-			registry.Path,
-			home,
-			port,
-			config.MCPServerProfessor,
-			config.MCPServerChat,
-			config.MCPServerHarvester,
-		))
-		if out.state == installer.MCPClientPFM {
-			anyPFM = true
-		}
-		outcomes = append(outcomes, out)
-	}
-	warnings := 0
-	for _, out := range outcomes {
-		base := fmt.Sprintf("doctor: mcp client=claude registry=%s (%s) professor=%s%s",
-			out.registry.Path, out.registry.Reason, out.state, out.legacy)
-		switch {
-		case out.state == installer.MCPClientUnreadable:
-			warnings++
-			fmt.Fprintf(stdout, "%s error=%v\n", base, out.err)
-		case out.legacy == "" && out.state == installer.MCPClientPFM:
-			fmt.Fprintln(stdout, base)
-		case out.legacy == "" && out.state == installer.MCPClientAbsent && !anyPFM:
-			fmt.Fprintln(stdout, base)
-		default:
-			warnings++
-			fmt.Fprintf(
-				stdout,
-				"%s remediation=run pfm install --yes (registers every registry a pfm-launched Claude reads)\n",
-				base,
-			)
-		}
-	}
-	return warnings
 }

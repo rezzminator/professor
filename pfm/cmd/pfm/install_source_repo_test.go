@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // outsideAnyClone moves the test out of this checkout, so DiscoverSourceRepo
@@ -33,7 +33,7 @@ func TestResolveInstallSourceRepoNamesARecordedCloneThatIsGone(t *testing.T) {
 	outsideAnyClone(t)
 	home := t.TempDir()
 	gone := filepath.Join(t.TempDir(), "moved-away")
-	marker := installer.SourceRepoPath(home)
+	marker := paths.SourceRepoPath(home)
 	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
 		t.Fatal(err)
 	}

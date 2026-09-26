@@ -3,8 +3,8 @@ package reload
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -12,10 +12,27 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func parsedReloadShell(t *testing.T, run string) claudelaunch.Parsed {
+	t.Helper()
+	output, err := exec.Command("sh", "-c", "set -- "+run+"; printf '%s\\000' \"$@\"").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	words := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+	parsed, err := claudelaunch.Parse(append([]string{"claude"}, words...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
 
 type fakeReloadTmux struct {
 	dead     bool
@@ -358,7 +375,7 @@ func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 			t.Fatalf("run %q does not mention %s", run, variable)
 		}
 	}
-	if !strings.Contains(run, "claude '--resume'") {
+	if parsedReloadShell(t, run).Resume != "11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("run %q has no resume", run)
 	}
 }
@@ -375,7 +392,13 @@ func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
 
 func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	home := t.TempDir()
-	promptPath := action.ProfessorPromptPath(home)
+	if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	promptPath, err := action.ProfessorPromptPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
 		t.Fatalf("stage professor prompt dir: %v", err)
 	}
@@ -391,20 +414,25 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFile := " --system-prompt-file " + action.Quote(action.ProfessorPromptPath(home))
-	if !strings.Contains(professor, wantFile) {
-		t.Fatalf("reloaded chat lost the professor prompt: %q lacks %q", professor, wantFile)
+	if got := parsedReloadShell(t, professor).PromptFile; got != promptPath {
+		t.Fatalf("reloaded chat prompt = %q", got)
 	}
 	if !strings.Contains(professor, "--dangerously-skip-permissions") {
 		t.Fatalf("reloaded chat lost the configured autonomy posture: %q", professor)
 	}
 	rolePrompt := filepath.Join(home, "sid", "role-prompt-cc-reviewer.md")
+	if err := os.MkdirAll(filepath.Dir(rolePrompt), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rolePrompt, []byte("role"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	roleRun, err := claudeRun(Request{
 		Account: 2, Home: home, Machine: reloadTestMachine(pfmconfig.SystemPromptProfessor, home),
 		SessionID: "11111111-1111-4111-8111-111111111111", PromptChannel: rolePrompt,
 	})
-	if err != nil || !strings.Contains(roleRun, " --system-prompt-file "+action.Quote(rolePrompt)) ||
-		strings.Contains(roleRun, action.Quote(action.ProfessorPromptPath(home))) {
+	if err != nil || parsedReloadShell(t, roleRun).PromptFile != rolePrompt ||
+		strings.Contains(roleRun, action.Quote(promptPath)) {
 		t.Fatalf("Claude role reload did not replace the ordinary prompt file: run=%q error=%v", roleRun, err)
 	}
 
@@ -417,7 +445,7 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(lean, " CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1 ") {
+	if parsedReloadShell(t, lean).SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "1" {
 		t.Fatalf("reloaded chat lost the lean prompt arm: %q", lean)
 	}
 
@@ -430,8 +458,8 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(production, "--system-prompt-file") ||
-		strings.Contains(production, "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1") {
+	if parsed := parsedReloadShell(t, production); parsed.PromptFile != "" ||
+		parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "" {
 		t.Fatalf("production mode invented prompt material: %q", production)
 	}
 	if !strings.Contains(production, " -u CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT ") {
@@ -471,6 +499,11 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	if strings.Contains(run, "CLAUDE_CONFIG_DIR=") {
 		t.Fatalf("Codex reload inherited a Claude config assignment: %q", run)
 	}
+	for _, name := range claudelaunch.Hygiene() {
+		if !strings.Contains(run, "-u "+name) {
+			t.Fatalf("Codex reload did not strip %s: %q", name, run)
+		}
+	}
 	roleless, err := codexRun(Request{SessionID: "019ff700-0000-7000-8000-000000000001"})
 	if err != nil || strings.Contains(roleless, "developer_instructions") {
 		t.Fatalf("roleless Codex reload changed: run=%q error=%v", roleless, err)
@@ -504,6 +537,8 @@ func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 }
 
 func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
+	t.Setenv(paths.EnvHome, t.TempDir())
+	t.Setenv(paths.EnvStateDB, filepath.Join(t.TempDir(), "pfm.db"))
 	tmux := &fakeReloadTmux{}
 	result, err := Run(
 		context.Background(),
@@ -532,13 +567,34 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 	}
 	for _, want := range []string{
 		"CLAUDE_CONFIG_DIR=",
-		"FORCE_PROMPT_CACHING_5M=1",
-		"claude '--resume'",
-		"11111111-1111-4111-8111-111111111111",
 	} {
 		if !strings.Contains(tmux.respawn, want) {
 			t.Fatalf("respawn %q lacks %q", tmux.respawn, want)
 		}
+	}
+	parsed := parsedReloadShell(t, tmux.respawn)
+	if parsed.Resume != "11111111-1111-4111-8111-111111111111" || parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" {
+		t.Fatalf("respawn resume=%q settings=%#v", parsed.Resume, parsed.SettingsEnv)
+	}
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	launches, err := fleetdb.OpenLaunches(context.Background(), values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := launches.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	record, err := launches.LaunchFor(context.Background(), "11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Account != 2 || record.Cache1H || record.Engine != pfmengine.Claude {
+		t.Fatalf("reload record=%+v", record)
 	}
 }
 
@@ -627,167 +683,6 @@ func TestRunWaitsForTheRebornPromptBeforeCheckingClaudeAndSubmittingThen(t *test
 	}
 	if len(tmux.displays) != 0 {
 		t.Fatalf("successful --then displayed a failure: %q", tmux.displays)
-	}
-}
-
-func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
-	tmux := &delayedThenTmux{marker: "›"}
-	tmux.respawn = "codex"
-	proc := fakeReloadProc{
-		pids: []int{801},
-		argv: map[int][]string{801: {"codex"}},
-		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
-	}
-	err := deliverThen(
-		context.Background(),
-		Request{
-			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-codex-then", Pane: "%7",
-			PanePID: 700, Then: "continue the task",
-		},
-		Options{ThenTries: 2},
-		tmux,
-		proc,
-		io.Discard,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !tmux.ready || !tmux.submitted {
-		t.Fatalf("ready=%t submitted=%t", tmux.ready, tmux.submitted)
-	}
-}
-
-func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
-	tmux := &respawnPIDTmux{oldPID: 700, newPID: 900}
-	_, err := Run(
-		context.Background(),
-		Request{
-			Engine:     pfmengine.Claude,
-			SocketPath: "/tmp/tmux-1000/probe-reload-then-pid",
-			Pane:       "%7",
-			PanePID:    tmux.oldPID,
-			SessionID:  "11111111-1111-4111-8111-111111111111",
-			CWD:        "/jail/project",
-			Account:    2,
-			AccountIDs: []int{2},
-			Then:       "continue the task",
-		},
-		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, ThenTries: 2},
-		tmux,
-		respawnPromptProc{tmux: tmux},
-		nil,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !tmux.submitted {
-		t.Fatal("--then was not submitted after the pane process changed")
-	}
-}
-
-func TestFailedThenWritesTheRecoverableSentinel(t *testing.T) {
-	dir := t.TempDir()
-	tmux := &fakeReloadTmux{}
-	request := Request{
-		SocketPath: "/tmp/tmux-1000/probe-reload",
-		Pane:       "%7",
-		Then:       "continue the task",
-	}
-	if err := failThen(context.Background(), request, dir, tmux, "input box missing"); err != nil {
-		t.Fatal(err)
-	}
-	content, err := os.ReadFile(filepath.Join(dir, "probe-reload.then-failed"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "continue the task\n" || len(tmux.displays) != 1 {
-		t.Fatalf("sentinel=%q displays=%q", content, tmux.displays)
-	}
-}
-
-// A wrapped prompt's tail must prove delivery even though the marker is only
-// on the first composer row.
-func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
-	const then = "Continue the flight: read the run ledger end to end, " +
-		"execute the remaining tasks, and write the zero-gap task file to the " +
-		"flight directory before presenting the user gate."
-	tmux := &delayedThenTmux{}
-	tmux.respawn = "claude"
-	proc := fakeReloadProc{
-		pids: []int{801},
-		argv: map[int][]string{801: {"claude"}},
-		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
-	}
-	err := deliverThen(
-		context.Background(),
-		Request{
-			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-wrapped-then", Pane: "%7",
-			PanePID: 700, Then: then,
-		},
-		Options{ThenTries: 2},
-		tmux,
-		proc,
-		io.Discard,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !tmux.submitted {
-		t.Fatal("a wrapped --then prompt was never submitted — Enter was withheld from a prompt that had fully landed")
-	}
-}
-
-// busyThenIdleTmux shows the caller's own turn still running for the first
-// busyCaptures captures — the state the worker actually wakes up in, since the
-// Bash call that scheduled it is part of that turn — and idle afterwards. It
-// records how many captures had happened when /exit was typed.
-type busyThenIdleTmux struct {
-	fakeReloadTmux
-	busyCaptures int
-	captures     int
-	typedAfter   int
-}
-
-func (tmux *busyThenIdleTmux) Capture(context.Context, string, string) (string, error) {
-	tmux.captures++
-	if tmux.captures <= tmux.busyCaptures {
-		return "Claude\n✻ Thinking… (12s · ↓ 1.2k tokens · esc to interrupt)\n❯ ", nil
-	}
-	return tmux.fakeReloadTmux.Capture(context.Background(), "", "")
-}
-
-func (tmux *busyThenIdleTmux) SendLiteral(ctx context.Context, socket, pane, value string) error {
-	if value == "/exit" {
-		tmux.typedAfter = tmux.captures
-	}
-	return tmux.fakeReloadTmux.SendLiteral(ctx, socket, pane, value)
-}
-
-// stuckExitTmux renders the typed /exit in the composer and never dies on
-// Enter — the incident shape: a chat that did not take the /exit and sat with
-// it in the input box. Backspaces erase the typed text one rune at a time.
-type stuckExitTmux struct {
-	fakeReloadTmux
-	keys []string
-}
-
-func (tmux *stuckExitTmux) Capture(context.Context, string, string) (string, error) {
-	return "Claude\n❯ " + tmux.literal, nil
-}
-
-func (tmux *stuckExitTmux) SendKey(_ context.Context, _, _, key string) error {
-	tmux.keys = append(tmux.keys, key)
-	if key == "BSpace" && tmux.literal != "" {
-		tmux.literal = tmux.literal[:len(tmux.literal)-1]
-	}
-	return nil
-}
-
-func reloadIdleWaitRequest(socket string) Request {
-	return Request{
-		Engine: pfmengine.Claude, SocketPath: socket, Pane: "%7", PanePID: 700,
-		SessionID: "11111111-1111-4111-8111-111111111111", CWD: "/jail/project",
-		Account: 2, AccountIDs: []int{2}, Machine: reloadTestMachine("", "/jail/home"),
 	}
 }
 

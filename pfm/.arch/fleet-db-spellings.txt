@@ -1,3 +1,4 @@
 internal/installer/installer.go 1
+internal/installer/layout.go 1
 internal/paths/paths.go 2
 internal/testjail/testjail.go 2

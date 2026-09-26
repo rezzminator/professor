@@ -126,14 +126,15 @@ func headlessCLIRuntimeFor(t *testing.T, binary string, engine pfmengine.ID) com
 	t.Helper()
 	configDir := filepath.Join(t.TempDir(), "engine-home")
 	config := pfmconfig.Config{}
-	if engine == pfmengine.Codex {
+	switch engine {
+	case pfmengine.Codex:
 		config.Codex = pfmconfig.CodexPrefs{Binary: binary}
 		config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: configDir}}
-	} else if engine == pfmengine.OpenCode {
+	case pfmengine.OpenCode:
 		configDir = filepath.Join(t.TempDir(), "opencode")
 		config.OpenCode = pfmconfig.OpenCodePrefs{Binary: binary}
 		config.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: configDir}}
-	} else {
+	default:
 		config.Claude = pfmconfig.ClaudePrefs{Binary: binary}
 		config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: configDir}}
 	}
@@ -178,6 +179,92 @@ func TestHeadlessExecNormalizedJSONAndReceiptPreserveNullCost(t *testing.T) {
 	}
 	if value, ok := receiptValue["cost_usd"]; !ok || value != nil {
 		t.Fatalf("receipt cost = %#v, want explicit null", value)
+	}
+}
+
+func TestHeadlessExecPFMSettingsFile(t *testing.T) {
+	headlessCLIJail(t)
+	capture := filepath.Join(t.TempDir(), "argv")
+	t.Setenv("PFM_CAPTURE_ARGV", capture)
+	binary := writeHeadlessCLIStub(t, `printf '%s\n' "$@" > "$PFM_CAPTURE_ARGV"
+printf '%s\n' '{"result":"ok"}'`)
+	machine := headlessCLIRuntime(t, binary)
+	path := filepath.Join(t.TempDir(), "s.json")
+	if err := os.WriteFile(path, []byte(`{"theme":"t","maxSubagentSpawnDepth":4}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runHeadlessExec(
+		[]string{"--engine", "claude", "--prompt", "x", "--pfm-settings", path},
+		strings.NewReader(""), &stdout, &stderr, machine,
+	)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	argv, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"env":{"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
+		`"outputStyle":"default","theme":"t"}`
+	if !strings.Contains(string(argv), want) {
+		t.Fatalf("argv = %s", argv)
+	}
+}
+
+func TestHeadlessExecClaudeIgnoresConfiguredLaunchValues(t *testing.T) {
+	headlessCLIJail(t)
+	capture := filepath.Join(t.TempDir(), "capture")
+	t.Setenv("PFM_CAPTURE", capture)
+	binary := writeHeadlessCLIStub(t, `printf '%s\n' "$@" > "$PFM_CAPTURE"
+printenv CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION >> "$PFM_CAPTURE" || true
+printf '%s\n' '{"result":"ok"}'`)
+	machine := headlessCLIRuntime(t, binary)
+	machine.Config.Claude.Theme = "from-config"
+	machine.Config.Claude.MaxSubagentSpawnDepth = 9
+	machine.Config.Claude.WebSearchesPerSession = 99
+	machine.Config.Claude.TmuxTruecolor = true
+	machine.Config.Claude.Cache1H = true
+	var stdout, stderr bytes.Buffer
+	code := runHeadlessExec([]string{"--engine", "claude", "-p", "x"}, strings.NewReader(""), &stdout, &stderr, machine)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	got, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(got), "--settings\n{\"outputStyle\":\"default\"}\n") {
+		t.Fatalf("configured launch values reached child: %q", got)
+	}
+}
+
+func TestHeadlessExecPFMSettingsErrorsNamePathOrKey(t *testing.T) {
+	headlessCLIJail(t)
+	machine := headlessCLIRuntime(t, writeHeadlessCLIStub(t, `exit 99`))
+	for _, test := range []struct{ name, body, want string }{
+		{"unreadable", "", "missing.json"},
+		{"unknown key", `{"mystery":true}`, "mystery"},
+		{"bad type", `{"theme":4}`, "theme"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.json")
+			if test.body != "" {
+				if err := os.WriteFile(path, []byte(test.body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				path = filepath.Join(t.TempDir(), "missing.json")
+			}
+			var stdout, stderr bytes.Buffer
+			code := runHeadlessExec(
+				[]string{"--engine", "claude", "--prompt", "x", "--pfm-settings", path},
+				strings.NewReader(""), &stdout, &stderr, machine,
+			)
+			if code != 2 || !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("exit=%d stderr=%q, want %q", code, stderr.String(), test.want)
+			}
+		})
 	}
 }
 

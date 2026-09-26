@@ -35,8 +35,8 @@ const (
 	StageStore      = "store"
 	StageTranscript = "transcript"
 	StageParse      = "parse"
-	// StageAccount: the machine config could not be loaded, so the run's
-	// account is unknown (its seat_dir is still recorded).
+	// StageAccount: the session's launch record could not be read, so the
+	// run's account is unknown (its seat_dir is still recorded).
 	StageAccount = "account"
 )
 

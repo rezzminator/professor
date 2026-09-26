@@ -27,7 +27,7 @@ func TestChatReloadAcceptsCacheOnlyRequest(t *testing.T) {
 	jailTest(t)
 	var stdout, stderr bytes.Buffer
 	code := runChat(
-		[]string{"reload", "--1h", "on"},
+		[]string{"reload", "--cache", "1h"},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
@@ -114,7 +114,7 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := runChatReloadWorker([]string{"--sock", socket, "--1h", "on"}, &stdout, &stderr)
+	code := runChatReloadWorker([]string{"--sock", socket, "--cache", "1h"}, &stdout, &stderr)
 	if code == 0 || !strings.Contains(stderr.String(), "open selector menu") {
 		t.Fatalf("reload selector gate rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -158,7 +158,7 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	if code := run(
-		[]string{"--config", configPath, "chat", "reload", "2", "--sock", socket, "--1h", "on"},
+		[]string{"--config", configPath, "chat", "reload", "2", "--sock", socket, "--cache", "1h"},
 		&stdout,
 		&stderr,
 	); code != 0 {
@@ -229,7 +229,10 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 		return nil
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", configPath, "chat", "reload", "2", "--1h", "on"}, &stdout, &stderr); code != 0 {
+	if code := run(
+		[]string{"--config", configPath, "chat", "reload", "2", "--cache", "1h"},
+		&stdout, &stderr,
+	); code != 0 {
 		t.Fatalf("schedule rc=%d stderr=%q", code, stderr.String())
 	}
 	joined := strings.Join(workerArgs, "\x00")
@@ -297,7 +300,7 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{
 		"--config", configPath, "chat", "reload", "2",
-		"--sock", socket, "--pane", target, "--1h", "on",
+		"--sock", socket, "--pane", target, "--cache", "1h",
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("explicit --sock/--pane on a multi-pane server was refused: rc=%d stderr=%q", code, stderr.String())

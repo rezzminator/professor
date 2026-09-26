@@ -104,12 +104,9 @@ func TestHostOverlayDoctorDisplacedSymlinkIsAFailure(t *testing.T) {
 	}
 }
 
-// TestHostOverlayDoctorStatusLineRawCommandIsAFailureButCustomIsNot pins the
-// second half of F1.d: with both overlay links healthy, a configured
-// account's statusLine.command still naming the raw `pfm statusline` is a
-// named failure, while a genuinely custom command is silently left alone —
-// the same distinction updateSettings itself preserves on install.
-func TestHostOverlayDoctorStatusLineRawCommandIsAFailureButCustomIsNot(t *testing.T) {
+// The overlay check judges the two managed links even when account settings
+// cannot be parsed; HostLayout reports account file problems separately.
+func TestHostOverlayDoctorChecksLinksWithUnreadableAccountSettings(t *testing.T) {
 	home := t.TempDir()
 	managed := stageHostOverlayManagedCopies(t, home)
 	wireHostOverlaySymlinks(t, home, managed)
@@ -117,54 +114,17 @@ func TestHostOverlayDoctorStatusLineRawCommandIsAFailureButCustomIsNot(t *testin
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeSettings := func(t *testing.T, command string) {
-		t.Helper()
-		body := `{"statusLine":{"type":"command","command":"` + command + `"}}`
-		if err := os.WriteFile(filepath.Join(configDir, "settings.json"), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(configDir, "settings.json"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: configDir}}}
-
-	t.Run("bare raw pfm statusline is a failure", func(t *testing.T) {
-		writeSettings(t, "pfm statusline")
-		var output bytes.Buffer
-		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 1 {
-			t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
+	var output bytes.Buffer
+	if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
+	}
+	for _, name := range []string{"pfm-statusline", "tmux-title-renudge"} {
+		if !strings.Contains(output.String(), "doctor: host_overlay "+name+" ok") {
+			t.Fatalf("missing healthy link row for %s: %s", name, output.String())
 		}
-		want := `doctor: host_overlay statusline claude[1] command="pfm statusline", want the overlay — run pfm install --yes`
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("output missing %q:\n%s", want, output.String())
-		}
-	})
-
-	t.Run("absolute raw pfm statusline is a failure", func(t *testing.T) {
-		writeSettings(t, home+"/.local/bin/pfm statusline")
-		var output bytes.Buffer
-		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 1 {
-			t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
-		}
-	})
-
-	t.Run("the overlay command itself is clean", func(t *testing.T) {
-		writeSettings(t, home+"/.local/bin/pfm-statusline")
-		var output bytes.Buffer
-		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 0 {
-			t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
-		}
-		if strings.Contains(output.String(), "host_overlay statusline") {
-			t.Fatalf("doctor flagged the overlay command itself:\n%s", output.String())
-		}
-	})
-
-	t.Run("a genuinely custom statusLine command is left alone", func(t *testing.T) {
-		writeSettings(t, "~/bin/my-own-statusline.sh")
-		var output bytes.Buffer
-		if warnings, failures := printHostOverlayDoctor(&output, home, machine); warnings != 0 || failures != 0 {
-			t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
-		}
-		if strings.Contains(output.String(), "host_overlay statusline") {
-			t.Fatalf("doctor flagged a custom statusLine command:\n%s", output.String())
-		}
-	})
+	}
 }

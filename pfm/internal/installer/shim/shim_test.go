@@ -64,6 +64,31 @@ func TestShimSyntaxAndResource(t *testing.T) {
 	}
 }
 
+func TestCxHandsArgumentsToCodexLaunch(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	home := t.TempDir()
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeShimFile(t, filepath.Join(binDir, "pfm"), "#!/bin/sh\nexit 0\n")
+	script := "source " + quoteZsh(embeddedShimPath(t)) + "\n" +
+		"_cx_server() { print -r -- \"$3\" }\n" +
+		"_pfm_selfswitch() { return 0 }\n" +
+		"cx --resume 'literal prompt'\n"
+	output, err := jailedZshCommand(zsh, script, home).CombinedOutput()
+	if err != nil {
+		t.Fatalf("cx: %v: %s", err, output)
+	}
+	want := `"` + filepath.Join(home, ".local", "bin", "pfm") + `" internal codex-launch --resume literal\ prompt`
+	if strings.TrimSpace(string(output)) != want {
+		t.Fatalf("run=%q, want %q", output, want)
+	}
+}
+
 func TestShimCanBeResourcedWithForeignReadOnlyPFMBinParameter(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {

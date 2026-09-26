@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // decodeCodexConfig parses one config.toml the way codex-cli does, so a test
@@ -141,6 +144,26 @@ func TestCodexDeveloperInstructionsSurviveHostileText(t *testing.T) {
 func TestInstallWritesTheComposedPromptIntoEveryCodexHome(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
+	clone := t.TempDir()
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := codexHarnessPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	composedPath, err := paths.ComposedHarnessPrompt(home, pfmengine.Codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(composedPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(composedPath, prompt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(home, "pfm.config.json")
+	writeFixture(t, configPath, "{\"version\":2}\n")
 	accounts := []string{filepath.Join(home, ".codex"), filepath.Join(home, ".codex-2")}
 	for _, account := range accounts {
 		if err := os.MkdirAll(account, 0o700); err != nil {
@@ -149,23 +172,23 @@ func TestInstallWritesTheComposedPromptIntoEveryCodexHome(t *testing.T) {
 		writeFixture(t, filepath.Join(account, "config.toml"), "model = 'personal'\n")
 	}
 	options := Options{
-		Mode: ModeApply, Home: home, CodexHomes: accounts, Runner: &fakeRunner{}, Stdout: io.Discard,
+		Mode:          ModeApply,
+		Home:          home,
+		SourceRepo:    clone,
+		MCPConfigPath: configPath,
+		CodexHomes:    accounts,
+		Runner:        &fakeRunner{},
+		Stdout:        io.Discard,
 	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := codexHarnessPrompt()
+	staged, err := os.ReadFile(composedPath)
 	if err != nil {
-		t.Fatal(err)
-	}
-	staged, err := os.ReadFile(filepath.Join(
-		home, ".local", "share", "pfm", "install", harnessPromptsDirName, "codex.md",
-	))
-	if err != nil {
-		t.Fatalf("staged Codex prompt: %v", err)
+		t.Fatalf("composed Codex prompt: %v", err)
 	}
 	if !bytes.Equal(staged, prompt) {
-		t.Fatal("the staged Codex prompt and the config value are not the same bytes")
+		t.Fatal("the composed Codex prompt and the config value are not the same bytes")
 	}
 	for _, account := range accounts {
 		path := filepath.Join(account, "config.toml")

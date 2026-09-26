@@ -28,11 +28,4 @@ func TestWithoutEmptyEnvDropsOnlyAnEmptyEnv(t *testing.T) {
 			t.Fatalf("%s: the caller's map lost its env; want a copy", name)
 		}
 	}
-	recorded := map[string]any{"type": "stdio", "command": "pfm"}
-	if !sameClaudeRegistration(base(map[string]any{}), recorded) {
-		t.Fatal("a registration Claude rewrote with an empty env must match pfm's receipt")
-	}
-	if sameClaudeRegistration(base(map[string]any{"A": "1"}), recorded) {
-		t.Fatal("a registration with a non-empty env must not match pfm's receipt")
-	}
 }

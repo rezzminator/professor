@@ -142,8 +142,11 @@ func (service *Service) chatNew(
 	if input.Account != 0 {
 		args = append(args, "--account", fmt.Sprint(input.Account))
 	}
-	if input.Cache1H {
-		args = append(args, "--1h")
+	if input.Cache != "" {
+		if input.Cache != "1h" && input.Cache != "5m" {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: cache must be 1h|5m")
+		}
+		args = append(args, "--cache", input.Cache)
 	}
 	if input.Model != "" {
 		args = append(args, "--model", input.Model)

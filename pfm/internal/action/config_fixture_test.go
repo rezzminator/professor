@@ -8,9 +8,9 @@ import (
 
 func testMachineConfig(home string) pfmconfig.Config {
 	machine := pfmconfig.Defaults(home, []string{
-		pfmconfig.DefaultAccountProjectDir(home, 1),
-		pfmconfig.DefaultAccountProjectDir(home, 2),
-		pfmconfig.DefaultAccountProjectDir(home, 3),
+		pfmconfig.DefaultAccountDir(home, 1) + "/projects",
+		pfmconfig.DefaultAccountDir(home, 2) + "/projects",
+		pfmconfig.DefaultAccountDir(home, 3) + "/projects",
 	})
 	machine.CodexAccounts = []pfmconfig.CodexAccount{
 		{ID: 1, Home: home + "/.codex"},

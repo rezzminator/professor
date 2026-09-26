@@ -32,7 +32,8 @@ func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t
 	})
 
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)
@@ -67,7 +68,8 @@ func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t
 		t.Fatal(err)
 	}
 	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: &bytes.Buffer{},
 		vscodePlatform: "linux", vscodeSettingsPaths: []string{settings},
 	}); err != nil {
 		t.Fatal(err)

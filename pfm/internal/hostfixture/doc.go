@@ -26,7 +26,7 @@
 //   - NoCreds — no ~/.credentials.json exists, and the FakeRunner answers
 //     the Keychain "security" probe with its not-found exit status.
 //   - StaleArtifacts — a dead tmux socket file, an exited process's pid
-//     file, a fleet.db-wal left by a crashed writer, and a leftover reload
+//     file, a pfm.db-wal left by a crashed writer, and a leftover reload
 //     lock.
 //   - TwoWriters — runs a caller-supplied function twice concurrently
 //     against the same jailed fleet.

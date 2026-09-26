@@ -95,30 +95,17 @@ func Read(path, current string) (Notice, bool, error) {
 	return notice, true, nil
 }
 
-// Check performs one bounded latest-release lookup and atomically replaces the
-// cache only after a complete, valid response. A failed lookup leaves the last
-// successful notice intact, so temporary network failures cannot make an
-// already-known update disappear.
-func CheckForUpdate(ctx context.Context, path, current, latestURL string, client *http.Client) error {
-	return CheckForUpdateWithClock(ctx, path, current, latestURL, client, clock.Real)
-}
-
-// CheckForUpdateWithClock is CheckForUpdate with the repository clock injected
-// for callers that must make lock expiry and cache freshness deterministic.
+// CheckForUpdate performs one bounded latest-release lookup and atomically
+// replaces the cache only after a complete, valid response. A failed lookup
+// leaves the last successful notice intact, so temporary network failures
+// cannot make an already-known update disappear.
 //
 // Every path that does not end in a confirmed-fresh cache writes a durable
 // FailureMarker beside path first; every path that does clears it. A checker
 // that has been failing for days must never look identical, through Read
 // alone, to a machine that genuinely has no update — see ReadFailure.
-func CheckForUpdateWithClock(
-	ctx context.Context,
-	path, current, latestURL string,
-	client *http.Client,
-	clk clock.Clock,
-) error {
-	if clk == nil {
-		clk = clock.Real
-	}
+func CheckForUpdate(ctx context.Context, path, current, latestURL string, client *http.Client) error {
+	clk := clock.Real
 	if _, ok := parseNoticeVersion(current); !ok {
 		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH[-prerelease]", current)
 	}
@@ -140,12 +127,15 @@ func CheckForUpdateWithClock(
 		return recordFailure(path, now, class, checkErr)
 	}
 	if err := clearFailure(path); err != nil {
-		return err
+		// The check itself succeeded and the cache is fresh: a stale marker
+		// that would not go is logged, never turned into a failed check.
+		obs.Logger(ctx).Warn("update check: the stale failure marker could not be cleared after a successful check",
+			"cache", path, "marker", failurePath(path), obs.FieldErr, err.Error())
 	}
 	return nil
 }
 
-// performCheck is CheckForUpdateWithClock's body once the lock is held: the
+// performCheck is CheckForUpdate's body once the lock is held: the
 // freshness short-circuit, the network lookup, and the cache write. Its
 // failureClass return is "" on success — recordFailure is never called with
 // a nil error, so the class is never read in that case.
@@ -170,7 +160,10 @@ func performCheck(
 		return failureNetwork, fmt.Errorf("build latest-release request: %w", err)
 	}
 	request.Header.Set("User-Agent", "pfm-update-check/"+normalizeVersion(current))
-	noFollow := *obs.WrapClient(client)
+	// Wrap a shallow copy: the caller's client keeps its own Transport and
+	// CheckRedirect.
+	noFollow := *client
+	obs.WrapClient(&noFollow)
 	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}

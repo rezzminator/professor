@@ -1,0 +1,23 @@
+{
+  "name": "professor",
+  "description": "Claude Code plugins built and maintained with Professor.",
+  "owner": {
+    "name": "rezzminator",
+    "url": "https://github.com/rezzminator/professor"
+  },
+  "plugins": [
+    {
+      "name": "sub-agent-compact",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/sub-agent-compact.git",
+        "path": "plugins/sub-agent-compact",
+        "ref": "main"
+      },
+      "description": "Smart auto-compact for Claude Code: a separate compaction point for every sub-agent, and self-compaction at a milestone the model chooses.",
+      "homepage": "https://github.com/rezzminator/sub-agent-compact",
+      "license": "MIT",
+      "keywords": ["claude-code", "sub-agent", "auto-compact", "compaction", "function-hooks", "professor"]
+    }
+  ]
+}

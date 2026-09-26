@@ -193,6 +193,17 @@ From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux
 
 ---
 
+## Plugins
+
+Claude Code plugins built with Professor, installable on their own. This repo is their marketplace:
+
+```bash
+claude plugin marketplace add rezzminator/professor
+claude plugin install sub-agent-compact@professor
+```
+
+- [sub-agent-compact](https://github.com/rezzminator/sub-agent-compact): a separate auto-compact point for the main chat and every sub-agent, and self-compaction at a milestone the model chooses.
+
 ## Origin
 
 Extracted from a live production monorepo, not designed in the abstract. Every rule here exists because something went wrong without it — the gate that reads disk instead of chat exists because an agent once claimed green; the scoped-commit rule exists because two concurrent commits once swallowed each other's files; the prevention step exists because the same bug class shipped twice. The characters exist because a generic agent wasn't good enough to argue with.

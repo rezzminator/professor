@@ -169,3 +169,39 @@ func TestCacheWindowPrefersTheHarnessExpiry(t *testing.T) {
 		t.Fatalf("a prompt_cache without expiry must fall back to the transcript, got %q", got)
 	}
 }
+
+// A lapsed window's hit rate is history: the last call read it while the
+// cache was warm, and the next call will not. It renders as "was N%" in the
+// muted colour, on the main line and on a sub-agent row alike.
+func TestLapsedCacheWindowMarksTheHitAsPast(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 10, 0, 0, time.UTC)
+	path := writeTranscript(
+		t,
+		`{"type":"user","timestamp":"2026-09-02T10:00:00.000Z","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","timestamp":"2026-09-02T10:00:30.000Z","message":{"role":"assistant","content":[],`+
+			`"usage":{"cache_creation":{"ephemeral_5m_input_tokens":4200,"ephemeral_1h_input_tokens":0}}}}`,
+	)
+	root := t.TempDir()
+	runtime := Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}}
+	expires := now.Add(-4 * time.Minute).Unix()
+	harness := &promptCache{TTL: "5m", ExpiresAt: &expires}
+
+	main := cacheWindowSegment(runtime, now, path, 99, harness)
+	if got := stripANSICodes(main); !strings.Contains(got, "💾5m✗4m:0s was 99%") {
+		t.Fatalf("harness segment = %q, want the lapsed hit as was 99%%", got)
+	}
+	if !strings.Contains(main, cMuted+"was 99%") {
+		t.Fatalf("a lapsed hit must render muted, not as live health: %q", main)
+	}
+	transcript := stripANSICodes(cacheWindowSegment(runtime, now, path, 99, nil))
+	if got := transcript; !strings.Contains(got, "💾5m✗5m:0s was 99%") {
+		t.Fatalf("transcript segment = %q, want the lapsed hit as was 99%%", got)
+	}
+	if got := stripANSICodes(agentCacheText(path, 94, now)); !strings.Contains(got, "💾5m✗5m:0s was 94%") {
+		t.Fatalf("agent row = %q, want the lapsed hit as was 94%%", got)
+	}
+	live := stripANSICodes(cacheWindowSegment(runtime, now.Add(-9*time.Minute), path, 99, nil))
+	if !strings.Contains(live, "✓") || !strings.HasSuffix(live, " 99%") || strings.Contains(live, "was") {
+		t.Fatalf("a live window keeps the bare hit: %q", live)
+	}
+}

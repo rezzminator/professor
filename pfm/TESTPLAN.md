@@ -644,6 +644,7 @@ Each row is one **session kind** crossed with the operations that touch it. This
 | exit contract: 0 delivered/queued, 2 usage, 3 dead, 4 unknown, 5 answer timeout, 6 undelivered | JAIL | `headless_command.go`, `headless_matrix_test.go`, `inject_cli_jail_test.go` | | `e2e/testdata/scripts/no-such-chat.txtar` (rc 4 only) |
 | hidden root compatibility alias emits a deprecation; `run`, `dump`, and the old stream verb are gone | JAIL | `main.go`, `headless_matrix_test.go` | |
 | cache-window status stays compact, labels every shown unit, and omits a zero-hour field (`💾5m✗21m10s`, but `💾5m✗1h55m0s`); no prose is added | UNIT | `internal/statusline/render.go`, `statusline_test.go` | live display regression |
+| a lapsed cache window renders the last call's hit as history, muted `was 99%`, on the main line (harness expiry and transcript anchor) and on a sub-agent row; a live window keeps the bare `99%` | UNIT | `internal/statusline/cache_window.go`, `cache_window_test.go:TestLapsedCacheWindowMarksTheHitAsPast` | live display regression |
 
 ### Measured composer edges — Claude Code 2.1.224 / Codex CLI 0.147.0
 

@@ -1117,14 +1117,31 @@ function ready(o) {
       failR("R3", "GATE", rel, `ran at ${sha.slice(0, 7)}, not HEAD; since then ${outside.length} path(s) outside the release files changed: ${outside.slice(0, 5).join(", ")}${outside.length > 5 ? ", …" : ""}`);
   }
 
-  // R4 — the rehearsal CLEAN on both machines, at HEAD or carried over
+  // R4 — the rehearsal CLEAN on both machines, or a recorded user ruling
+  // that ships in the note's ## Verification; at HEAD or carried over
   // commits that touch only the note's ## Verification section.
   const rehearsal = readVerdict(join(dir, "rehearsal.md"));
-  const r4 = /^REHEARSAL CLEAN ([0-9a-f]{7,40}) round (\d+)$/.exec(textLines(rehearsal ?? "")[0]?.trim() ?? "");
+  const lineOne = textLines(rehearsal ?? "")[0]?.trim() ?? "";
+  const ruledLine = /^REHEARSAL RULED ([0-9a-f]{7,40}) round (\d+)(?:\s+—(.*))?$/.exec(lineOne);
+  const r4 = ruledLine ?? /^REHEARSAL CLEAN ([0-9a-f]{7,40}) round (\d+)$/.exec(lineOne);
   if (!r4)
     failR("R4", "REHEARSE", "rehearsal.md", rehearsal === null ? "absent" : `line one is not \`REHEARSAL CLEAN {sha} round {n}\`: ${JSON.stringify(textLines(rehearsal)[0] ?? "")}`);
   else {
-    for (const machine of MACHINES) {
+    if (ruledLine) {
+      if (!(ruledLine[3] ?? "").trim())
+        failR("R4", "REHEARSE", "rehearsal.md", "`REHEARSAL RULED {sha} round {n} — {ruling}` carries no ruling text");
+      if (!treeHas(wt, head, notePath))
+        failR("R4", "REHEARSE", notePath, `absent at HEAD ${head.slice(0, 7)}; the ruling ships in its \`## Verification\``);
+      else {
+        const noteText = git(wt, ["show", `HEAD:${notePath}`]);
+        const range = verificationRange(noteText);
+        const body = range ? textLines(noteText).slice(range.start, range.end) : [];
+        const round = new RegExp(`\\bREHEARSAL RULED\\b.*\\bround ${ruledLine[2]}\\b`);
+        if (!body.some((l) => round.test(l)))
+          failR("R4", "REHEARSE", notePath, `\`## Verification\` holds no line with \`REHEARSAL RULED\` and round ${ruledLine[2]}; the ruling ships in the note`);
+      }
+    }
+    for (const machine of ruledLine ? [] : MACHINES) {
       const rel = `rehearsal/${machine}-${r4[2]}/result.json`;
       const raw = readVerdict(join(dir, rel));
       let verdict;

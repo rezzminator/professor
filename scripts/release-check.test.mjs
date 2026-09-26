@@ -879,6 +879,49 @@ describe("ready R1–R6", () => {
     assert.match(r.out, /^FAIL R4: rehearsal\.md — line one is not `REHEARSAL CLEAN \{sha\} round \{n\}`: "not the right format"$/m, r.out);
     assertRerun(r, "REHEARSE");
   });
+  const RULED_NOTE = NOTE.replace("The gate green on three lanes.\n", "The gate green on three lanes.\nREHEARSAL RULED round 7 — the owner ruled to ship without a CLEAN rehearsal.\n");
+  const ruled = (f, sha, ruling = " — the owner ruled to ship without a CLEAN rehearsal") =>
+    write(f.dir, {
+      "rehearsal.md": `REHEARSAL RULED ${sha} round 7${ruling}\n`,
+      "rehearsal/main-7/result.json": JSON.stringify({ verdict: "FRICTION" }),
+      "rehearsal/behind-7/result.json": JSON.stringify({ verdict: "FRICTION" }),
+    });
+  test("R4 RULED with the ruling in ## Verification passes without CLEAN verdicts", () => {
+    const f = fixture();
+    f.advance({ "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
+    ruled(f, f.head);
+    assertClean(f.ready("--stamp"), "ready");
+  });
+  test("R4 RULED without the ruling in ## Verification", () => {
+    const f = fixture();
+    ruled(f, f.head);
+    const r = f.ready("--stamp");
+    assertFail(r, "R4");
+    assert.match(r.out, /^FAIL R4: releases\/v0\.78\.0\.md — `## Verification` holds no line with `REHEARSAL RULED` and round 7; the ruling ships in the note$/m, r.out);
+    assertRerun(r, "REHEARSE");
+  });
+  test("R4 RULED with empty ruling text", () => {
+    const f = fixture();
+    f.advance({ "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
+    ruled(f, f.head, " — ");
+    const r = f.ready("--stamp");
+    assertFail(r, "R4");
+    assert.match(r.out, /^FAIL R4: rehearsal\.md — `REHEARSAL RULED \{sha\} round \{n\} — \{ruling\}` carries no ruling text$/m, r.out);
+  });
+  test("R4 RULED at a stale sha with a change outside ## Verification", () => {
+    const f = fixture();
+    const next = f.advance({ "docs/x.md": "x2\n", "releases/v0.78.0.md": RULED_NOTE }, ["notes"]);
+    write(f.dir, {
+      "gate/candidate-templates.log": `ok\nEXIT 0 @${next}\n`,
+      "gate/candidate-pfm.log": `ok\nEXIT 0 @${next}\n`,
+      "gate/candidate-e2e.log": `ok\nEXIT 0 @${next}\n`,
+    });
+    ruled(f, f.head);
+    const r = f.ready("--stamp");
+    assertFail(r, "R4");
+    assert.doesNotMatch(r.out, /^FAIL R4: rehearsal\.md/m, r.out);
+    assert.match(r.out, /^FAIL R4: docs\/x\.md — changed since the rehearsed [0-9a-f]{7}; only releases\/v0\.78\.0\.md § Verification carries the rehearsal over$/m, r.out);
+  });
   test("R5 notes check not PASS at HEAD", () => {
     const f = fixture();
     write(f.dir, { "notes/check.txt": `NOTES FAIL ${f.head}\n` });

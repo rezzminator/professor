@@ -72,6 +72,7 @@
     ],
     "commands": [
       "dev",
+      "github-marketing",
       "pcm",
       "pfm-testing-manual",
       "pfm:release"
@@ -95,6 +96,7 @@
     ".claude/agents/releaser.md": "d336ec16982f7c4b277e831f6cf376767dcc587f68d959e24b3376a696f1a85b",
     ".claude/codex-build.json": "d63f0933e4cfe1e5270101180e37aed48490ab8dc8c3f7204ada67ab01afe115",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
+    ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
     ".claude/commands/pcm.md": "1988aa43fb4e7209cd15c181f7c44ea4b5fefddcf1ccee28b8e162109b86d56d",
     ".claude/commands/pfm-testing-manual.md": "a42fea600e0181b4f3219f6369187b8981d121a81d2dc0578e3e7a4d07b3e855",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",

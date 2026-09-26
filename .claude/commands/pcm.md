@@ -12,7 +12,7 @@ $ARGUMENTS
 
 ## Mandatory skill load (before any prompt-file edit)
 
-Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/prompt.md` is READ this session (Read auto-stamps the quality marker). Its rules govern prose leanness for ANY prompt; `/quality:description` governs every `description:` field and loads before one is written; **§ Claude-harness prompt law** below carries the harness-specific file rules (size limits, voice location, hooks, routing); **§ Authoring conventions** below governs the file skeleton (frontmatter + shape).
+Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/prompt.md` (machine-global `/quality:prompt`) is READ this session (Read auto-stamps the quality marker). Its rules govern prose leanness for ANY prompt; `/quality:description` governs every `description:` field and loads before one is written; **§ Claude-harness prompt law** below carries the harness-specific file rules (size limits, voice location, hooks, routing); **§ Authoring conventions** below governs the file skeleton (frontmatter + shape).
 
 ---
 
@@ -21,7 +21,7 @@ Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/pro
 ### How the pieces connect
 
 - `CLAUDE.md` — the law + guards + routing; names mandatory-load obligations; carries no rosters of commands or skills (§ Authoring conventions, no-rosters law)
-- `.claude/commands/**/*.md` — slash commands (`/pcm`, `/pfm:release`, `/quality:*`, `/dev`; `/context-meter`, `/pfm` are global)
+- `.claude/commands/**/*.md` — slash commands (`/pcm`, `/pfm:release`, `/dev`; `/quality:*`, `/context-meter`, `/pfm` are global)
 - `.claude/agents/*.md` — registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set; source-fetched per `templates/project/skills/sources.json`, never vendored)
 - `.claude/scripts/*.{sh,mjs}` — dev.sh, pfm-guard.sh, guard-stamp.sh, format-md.sh, codex-sync.sh (mirror auto-compile; the Codex compiler itself is `pfm codex build`)

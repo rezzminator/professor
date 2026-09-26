@@ -107,6 +107,10 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 			result.Status = fmt.Sprintf("skipped %s: credentials rejected", label)
 			return result, nil
 		}
+		if status, ok := rateLimitedStatus(fetchErr); ok {
+			result.Status = fmt.Sprintf("account %d %s; limits unavailable", account.ID, status)
+			return result, fmt.Errorf("account %d limits unavailable: %w", account.ID, fetchErr)
+		}
 		result.Status = fmt.Sprintf("account %d limits unavailable: %v", account.ID, fetchErr)
 		return result, errors.New(result.Status)
 	}

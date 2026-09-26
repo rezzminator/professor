@@ -50,9 +50,12 @@ type LimitsSampler struct {
 	// override" — Codex falls back to TTL exactly like before, which is
 	// what the legacy Sample() callers (pfm doctor, the prompt hook) want.
 	// The interactive picker sets it to CodexLiveLimitsTTL.
-	CodexTTL      time.Duration
-	Client        *http.Client
-	Endpoint      string
+	CodexTTL time.Duration
+	Client   *http.Client
+	Endpoint string
+	// Version is the running pfm's version, named in every usage request's
+	// User-Agent (usagehook.Options.Version).
+	Version       string
 	CodexClient   *http.Client
 	CodexEndpoint string
 	Fetch         func(context.Context, LimitAccount) (usagehook.Usage, error)
@@ -82,23 +85,6 @@ type cachedLimits struct {
 	when     time.Time
 }
 
-type statuslineClaudeLimits struct {
-	Account          int    `json:"acct"`
-	ConfigDir        string `json:"config_dir"`
-	FiveHourUsed     int64  `json:"five_hour_used"`
-	SevenDayUsed     int64  `json:"seven_day_used"`
-	FiveHourResetsAt int64  `json:"five_hour_resets_at"`
-	SevenDayResetsAt int64  `json:"seven_day_resets_at"`
-	// The Fable window is model-SCOPED: the harness reports it inside its
-	// `limits` array, never as a flat top-level window, so it has to be
-	// carried across this snapshot explicitly or it cannot reach a host whose
-	// only limits source IS this snapshot. Absent in a snapshot written by an
-	// older build, which reads back as a zero reset and is skipped.
-	FableUsed     int64 `json:"fable_used"`
-	FableResetsAt int64 `json:"fable_resets_at"`
-	ConfirmedAt   int64 `json:"ts"`
-}
-
 // defaultLimitsTTL is the legacy freshness interval for the in-memory and
 // shared disk caches. The interactive picker selects LiveLimitsTTL instead.
 const defaultLimitsTTL = 3 * time.Minute
@@ -122,11 +108,6 @@ const LiveLimitsTTL = 60 * time.Second
 // spawned every ~10s). 90s keeps the tab honest without paying that cost on
 // every tick.
 const CodexLiveLimitsTTL = 90 * time.Second
-
-// A last-good payload remains useful through a short provider outage. This is
-// the same stale horizon the prompt hook already applies; after it expires the
-// sampler reports the fetch failure without presenting old quota as current.
-const maxStaleLimitsAge = time.Hour
 
 func NewLimitsSampler(accounts []LimitAccount) *LimitsSampler {
 	copyAccounts := append([]LimitAccount(nil), accounts...)
@@ -193,10 +174,9 @@ func (sampler *LimitsSampler) fetchClaude(
 }
 
 // fetchClaudeStatusline reads provider-confirmed windows that a running
-// Claude seat supplied to its statusline. It is the no-credential fallback:
-// account number alone is not identity, so snapshots written before
-// config_dir was recorded or belonging to a different config directory are
-// deliberately ignored.
+// Claude seat supplied to its statusline, up to the stale horizon old. It is
+// the no-credential fallback; the usage door reads the same snapshots first,
+// at the caller's TTL.
 func (sampler *LimitsSampler) fetchClaudeStatusline(
 	account LimitAccount,
 ) (usagehook.Usage, time.Time, bool, error) {
@@ -204,121 +184,10 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 	if env == nil {
 		env = paths.OSEnv{}
 	}
-	directory := statusline.ClaudeRateLimitDir(env.Get(paths.EnvHome), os.Getuid())
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return usagehook.Usage{}, time.Time{}, false, nil
-		}
-		return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("read statusline quota directory: %w", err)
-	}
-	prefix := fmt.Sprintf("acct-%d.", account.ID)
-	var latest statuslineClaudeLimits
-	var latestAt time.Time
-	found := false
-	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), prefix) || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("stat statusline quota %s: %w", entry.Name(), err)
-		}
-		if !info.Mode().IsRegular() {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
-				"statusline quota %s is not a regular file",
-				entry.Name(),
-			)
-		}
-		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
-		if err != nil {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("read statusline quota %s: %w", entry.Name(), err)
-		}
-		var snapshot statuslineClaudeLimits
-		if err := json.Unmarshal(body, &snapshot); err != nil {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
-				"decode statusline quota %s: %w",
-				entry.Name(),
-				err,
-			)
-		}
-		if snapshot.Account != account.ID {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
-				"statusline quota %s claims account %d, want %d", entry.Name(), snapshot.Account, account.ID,
-			)
-		}
-		if snapshot.ConfigDir == "" || !sameConfigDir(snapshot.ConfigDir, account.ConfigDir) {
-			continue
-		}
-		confirmedAt := time.Unix(snapshot.ConfirmedAt, 0)
-		if snapshot.ConfirmedAt <= 0 || confirmedAt.After(sampler.now()) {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
-				"statusline quota %s has invalid confirmation time",
-				entry.Name(),
-			)
-		}
-		if sampler.now().Sub(confirmedAt) > maxStaleLimitsAge {
-			continue
-		}
-		if !found || confirmedAt.After(latestAt) {
-			latest, latestAt, found = snapshot, confirmedAt, true
-		}
-	}
-	if !found {
-		return usagehook.Usage{}, time.Time{}, false, nil
-	}
-	usage := usagehook.Usage{}
-	setWindow := func(target *usagehook.Window, used, resetsAt int64) error {
-		if resetsAt <= sampler.now().Unix() {
-			return nil
-		}
-		if used < 0 || used > 100 {
-			return fmt.Errorf("statusline quota utilization %d is outside 0..100", used)
-		}
-		percent := float64(used)
-		target.Utilization = &percent
-		target.ResetsAt = time.Unix(resetsAt, 0).UTC().Format(time.RFC3339)
-		return nil
-	}
-	if err := setWindow(&usage.FiveHour, latest.FiveHourUsed, latest.FiveHourResetsAt); err != nil {
-		return usagehook.Usage{}, time.Time{}, false, err
-	}
-	if err := setWindow(&usage.SevenDay, latest.SevenDayUsed, latest.SevenDayResetsAt); err != nil {
-		return usagehook.Usage{}, time.Time{}, false, err
-	}
-	// Fable re-enters through the scoped `limits` array rather than a flat
-	// field, because that array is the one shape usagehook.fableWindow reads —
-	// rebuilding the selector here would be a second opinion on which scoped
-	// limit is the Fable one, and the two would drift.
-	if latest.FableResetsAt > sampler.now().Unix() {
-		if latest.FableUsed < 0 || latest.FableUsed > 100 {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
-				"statusline quota Fable utilization %d is outside 0..100", latest.FableUsed,
-			)
-		}
-		percent := float64(latest.FableUsed)
-		scoped := usagehook.ScopedLimit{
-			Kind:     "weekly_scoped",
-			Percent:  &percent,
-			ResetsAt: time.Unix(latest.FableResetsAt, 0).UTC().Format(time.RFC3339),
-			IsActive: true,
-		}
-		scoped.Scope.Model.DisplayName = "Fable"
-		usage.Limits = append(usage.Limits, scoped)
-	}
-	if len(usageWindows(usage, sampler.now())) == 0 {
-		return usagehook.Usage{}, time.Time{}, false, nil
-	}
-	return usage, latestAt, true, nil
-}
-
-func sameConfigDir(left, right string) bool {
-	leftResolved, leftErr := filepath.EvalSymlinks(left)
-	rightResolved, rightErr := filepath.EvalSymlinks(right)
-	if leftErr == nil && rightErr == nil {
-		return filepath.Clean(leftResolved) == filepath.Clean(rightResolved)
-	}
-	return filepath.Clean(left) == filepath.Clean(right)
+	return usagehook.ReadStatuslineSnapshot(
+		usagehook.ClaudeRateLimitDir(env.Get(paths.EnvHome)),
+		account.ID, account.ConfigDir, sampler.now(), usagehook.StaleHorizon,
+	)
 }
 
 // fetchClaudeAfterCredentialRefresh performs the one live retry authorized by
@@ -345,111 +214,28 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 	bypassCredentialBackoff bool,
 ) (usagehook.Usage, time.Time, error) {
 	now := sampler.now()
-	path := usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID)
-	record, readErr := usagehook.ReadCacheRecord(path)
-	matches := readErr == nil && record.MatchesConfigDir(account.ConfigDir)
-	confirmedAt, confirmed := cacheConfirmedAt(record.FetchedAt, path)
-	confirmed = confirmed && !confirmedAt.After(now)
-	staleUsable := matches && confirmed && reusableClaudeUsage(record.Usage, now) &&
-		now.Sub(confirmedAt) <= maxStaleLimitsAge
-	// This cache is SHARED by every pfm process on the host, so a backoff
-	// written by a peer — another picker, an MCP server, a build that predates
-	// this one — is a normal condition rather than an anomaly. The condition is
-	// re-checked from the FILESYSTEM (free, no request) rather than read out of
-	// the record's message, which is prose and varies by platform.
-	// "Absent" here means no credential we could spend in EITHER source — the
-	// file or the OS keychain — and also covers a signed-out one, because a
-	// peer's backoff must not blank a card whose only real repair is a fallback
-	// or an interactive login.
-	credentialsAbsent := usagehook.IsCredentialUnavailable(usagehook.CredentialAvailable(ctx, account.ConfigDir))
-	if matches && record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
-		err := errors.New(record.Backoff.Message)
-		if !bypassCredentialBackoff || !needsCredentialRefresh(err) {
-			// A backoff carrying usable windows still serves them, whatever
-			// wrote it — a 429's cached quota is exactly as good here as
-			// anywhere else.
-			if staleUsable && staleEligible(err) {
-				return record.Usage, confirmedAt, err
-			}
-			// An EMPTY replay is the one that blanks the card, and a revived
-			// record cannot carry the os.ErrNotExist sentinel FetchClaude gates
-			// its statusline fallback on (it comes back as a flat errors.New).
-			// With no credentials file the live path below costs a local stat
-			// and returns that sentinel properly wrapped, so fall through to it
-			// rather than returning nothing.
-			if !credentialsAbsent {
-				return usagehook.Usage{}, time.Time{}, err
-			}
-		}
+	options := usagehook.Options{
+		Now: sampler.now, Env: sampler.Env, ConfigDir: account.ConfigDir,
+		CacheDir: usagehook.DefaultCacheDir(), TTL: sampler.ttl(),
+		Client: sampler.client(), Endpoint: sampler.Endpoint, Version: sampler.Version,
 	}
-	if !bypassCredentialBackoff && matches && reusableClaudeUsage(record.Usage, now) &&
-		cacheFresh(record.FetchedAt, path, now, sampler.ttl()) {
-		return record.Usage, confirmedAt, nil
+	if bypassCredentialBackoff {
+		options.BypassBackoff = needsCredentialRefresh
 	}
-	previousUsage, previousFetchedAt := usagehook.Usage{}, (*time.Time)(nil)
-	if matches && confirmed {
-		previousUsage, previousFetchedAt = record.Usage, record.FetchedAt
-		if previousFetchedAt == nil && confirmed {
-			stamp := confirmedAt
-			previousFetchedAt = &stamp
-		}
+	usage, confirmedAt, err := usagehook.Fetch(ctx, options, account.ID)
+	if err == nil {
+		return usage, confirmedAt, nil
 	}
-	usage, err := usagehook.Fetch(ctx, usagehook.Options{
-		ConfigDir: account.ConfigDir,
-		Client:    sampler.client(),
-		Endpoint:  sampler.Endpoint,
-	})
-	if err != nil {
-		if ctx.Err() != nil {
-			return usagehook.Usage{}, time.Time{}, err
-		}
-		// Credential failures get one ACK refresh followed by an immediate live
-		// retry. Recording backoff here would block that retry with the failure
-		// it is specifically intended to repair.
-		if needsCredentialRefresh(err) {
-			return usagehook.Usage{}, time.Time{}, err
-		}
-		// An ABSENT credentials file is a local, network-free condition — the
-		// normal shape wherever Claude keeps its credentials in the OS keychain
-		// — and it is exactly the case fetchClaudeStatusline covers. A backoff
-		// buys nothing here (no request was made, so there is no endpoint to
-		// spare) and costs the fallback: the replay path above revives a record
-		// as errors.New(record.Backoff.Message), and a flat string error cannot
-		// satisfy the errors.Is(err, os.ErrNotExist) that FetchClaude gates the
-		// statusline fallback on. Recording one therefore blanks the Limits card
-		// for the whole backoff window while a fresh, identity-matched quota
-		// snapshot sits on disk.
-		if usagehook.IsCredentialUnavailable(err) {
-			return usagehook.Usage{}, time.Time{}, err
-		}
-		message, retryAfter := backoffFor(err, now)
-		cacheErr := usagehook.WriteCacheRecord(path, usagehook.CacheRecord{
-			Usage: previousUsage, ConfigDir: account.ConfigDir, FetchedAt: previousFetchedAt,
-			Backoff: &usagehook.CacheBackoff{Message: message, RetryAfter: retryAfter, RecordedAt: now},
-		})
-		var rateLimit *usagehook.RateLimitError
-		if errors.As(err, &rateLimit) {
-			err = errors.New(message)
-		}
-		if cacheErr != nil {
-			err = errors.Join(err, fmt.Errorf("write Claude limits cache: %w", cacheErr))
-		}
-		if staleUsable && staleEligible(err) {
-			return previousUsage, confirmedAt, err
-		}
+	// The door hands back the last-good payload beside its error, already
+	// bounded by usagehook.StaleHorizon. It is shown only while it still
+	// describes a live window, under a failure stale quota may honestly sit
+	// beside; an absent
+	// credential goes out bare so FetchClaude reaches its statusline fallback.
+	if confirmedAt.IsZero() || usagehook.IsCredentialUnavailable(err) || !usagehook.HasCurrentWindow(usage, now) ||
+		!staleEligible(err) {
 		return usagehook.Usage{}, time.Time{}, err
 	}
-	fetchedAt := sampler.now()
-	if ctx.Err() != nil {
-		return usagehook.Usage{}, time.Time{}, ctx.Err()
-	}
-	cacheErr := usagehook.WriteCacheRecord(path, usagehook.CacheRecord{
-		Usage: usage, ConfigDir: account.ConfigDir, FetchedAt: &fetchedAt,
-	})
-	if cacheErr != nil {
-		return usage, fetchedAt, fmt.Errorf("write Claude limits cache: %w", cacheErr)
-	}
-	return usage, fetchedAt, nil
+	return usage, confirmedAt, err
 }
 
 // cacheFresh reports whether a cached payload is still inside ttl. Older
@@ -468,31 +254,6 @@ func cacheConfirmedAt(fetchedAt *time.Time, path string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return info.ModTime(), true
-}
-
-// backoffFor turns a fetch error into the shared cache's backoff record: a
-// 429 backs off for at least ten minutes — honoring whatever Retry-After the
-// server sent — and reports the SAME "limits unavailable: 429 ... — retry at
-// HH:MM" message whether a caller hit the 429 directly or is replaying the
-// record. Every other failure backs off for sixty seconds, just long enough
-// that two pickers opened together don't both pay for the same dead
-// endpoint, and keeps its original message so isCredentialRejection /
-// needsCredentialRefresh still recognize a replayed failure exactly like a
-// live one.
-func backoffFor(err error, now time.Time) (message string, retryAfter time.Time) {
-	var rateLimit *usagehook.RateLimitError
-	if errors.As(err, &rateLimit) {
-		wait := rateLimit.RetryAfter
-		if wait < 10*time.Minute {
-			wait = 10 * time.Minute
-		}
-		retryAfter = now.Add(wait)
-		return fmt.Sprintf(
-			"limits unavailable: 429 Too Many Requests — retry at %s",
-			retryAfter.Format("15:04"),
-		), retryAfter
-	}
-	return err.Error(), now.Add(time.Minute)
 }
 
 func (sampler *LimitsSampler) Sample(ctx context.Context) ([]AccountLimits, []string) {
@@ -769,19 +530,39 @@ func staleEligible(err error) bool {
 	return true
 }
 
+// rateLimitedStatus names a 429 with its retry time first, "rate-limited —
+// retry 15:04", so a narrow pane keeps the time. The time comes from the
+// shared backoff's message (usagehook.BackoffFor); a record an older build
+// wrote still says "retry at 15:04" and reads the same. ok is false for any
+// failure that is no 429.
+func rateLimitedStatus(err error) (status string, ok bool) {
+	message := err.Error()
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "429") && !strings.Contains(lower, "too many requests") {
+		return "", false
+	}
+	if retry := strings.Index(message, "retry "); retry >= 0 {
+		fields := strings.Fields(message[retry+len("retry "):])
+		if len(fields) > 0 && fields[0] == "at" {
+			fields = fields[1:]
+		}
+		if len(fields) > 0 {
+			if _, parseErr := time.Parse("15:04", fields[0]); parseErr == nil {
+				return "rate-limited — retry " + fields[0], true
+			}
+		}
+	}
+	return "provider rate-limited", true
+}
+
 func staleStatus(err error) string {
 	message := strings.ToLower(err.Error())
 	if strings.HasPrefix(message, "write claude limits cache:") ||
 		strings.HasPrefix(message, "write codex limits cache:") {
 		return err.Error()
 	}
-	if strings.Contains(message, "429") || strings.Contains(message, "too many requests") {
-		if retry := strings.Index(message, "retry at "); retry >= 0 {
-			if fields := strings.Fields(err.Error()[retry+len("retry at "):]); len(fields) > 0 {
-				return "provider rate-limited; retry at " + fields[0] + "; showing cached limits"
-			}
-		}
-		return "provider rate-limited; showing cached limits"
+	if status, ok := rateLimitedStatus(err); ok {
+		return status + "; showing cached limits"
 	}
 	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(message, "deadline exceeded") ||
 		strings.Contains(message, "timeout") || strings.Contains(message, "timed out") {
@@ -795,19 +576,6 @@ func staleStatus(err error) string {
 		}
 	}
 	return "refresh failed; showing cached limits"
-}
-
-// reusableClaudeUsage reports whether a cached payload still describes windows
-// that exist now. A payload whose every window has passed its reset carries no
-// current quota at all, so the cache-fresh short-circuit must not serve it —
-// an active Backoff still wins, a 429 is never bypassed by this.
-func reusableClaudeUsage(usage usagehook.Usage, now time.Time) bool {
-	for _, window := range usageWindows(usage, now) {
-		if window.ResetNote != expiredResetNote {
-			return true
-		}
-	}
-	return false
 }
 
 func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) error {
@@ -1211,7 +979,7 @@ func (sampler *LimitsSampler) fetchCodexCached(
 	confirmedAt, confirmed := cacheConfirmedAt(record.FetchedAt, path)
 	confirmed = confirmed && !confirmedAt.After(now)
 	staleUsable := matches && confirmed && len(codexWindows(record.codexUsage)) > 0 &&
-		now.Sub(confirmedAt) <= maxStaleLimitsAge
+		now.Sub(confirmedAt) <= usagehook.StaleHorizon
 	if matches && record.Backoff != nil && now.Before(record.Backoff.RetryAfter) {
 		err := errors.New(record.Backoff.Message)
 		if staleUsable && staleEligible(err) {
@@ -1236,7 +1004,7 @@ func (sampler *LimitsSampler) fetchCodexCached(
 		if ctx.Err() != nil {
 			return codexUsage{}, time.Time{}, err
 		}
-		message, retryAfter := backoffFor(err, now)
+		message, retryAfter := usagehook.BackoffFor(err, now)
 		cacheErr := writeCodexCacheRecord(path, codexCacheRecord{
 			codexUsage: previousUsage, SourceVersion: codexUsageSourceVersion,
 			CodexAuthPath: account.CodexAuthPath, FetchedAt: previousFetchedAt,

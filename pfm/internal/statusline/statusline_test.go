@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 func TestEngineFromEnvironmentRefusesMissingEngine(t *testing.T) {
@@ -762,5 +763,87 @@ func TestStatuslineQuotaSnapshotCarriesTheScopedFableWindow(t *testing.T) {
 	}
 	if snapshot.FiveHourUsed != 31 || snapshot.FableUsed != 62 || snapshot.FableResetsAt != fableResets.Unix() {
 		t.Fatalf("snapshot=%#v, want five_hour 31 and Fable 62 resetting at %d", snapshot, fableResets.Unix())
+	}
+}
+
+// 0% is a real reading: a fresh five-hour window at 0% used to write no
+// snapshot at all, so the usage door fell through to the endpoint on exactly
+// the seats that had just started. The snapshot now carries every window the
+// stdin payload did under `windows` — scoped Fable and the gateway's
+// spend_limit included — beside the flat keys an older build's reader
+// expects, and a null window or a non-window key (model_scoped) neither fails
+// the render nor lands as a window.
+func TestStatuslineQuotaSnapshotRecordsAZeroFiveHourReadingAndEveryWindow(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".cc", "2")
+	rateDir := filepath.Join(root, "rates")
+	now := time.Now().Truncate(time.Second)
+	fiveReset := now.Add(4 * time.Hour).Unix()
+	sevenReset := now.Add(6 * 24 * time.Hour).Unix()
+	spendReset := now.Add(20 * 24 * time.Hour).Unix()
+	fableReset := now.Add(5 * 24 * time.Hour).UTC()
+	runtime := Runtime{
+		Now: func() time.Time { return now }, Home: root, ConfigDir: configDir,
+		CacheDir: filepath.Join(root, "cache"), RateLimitDir: rateDir,
+		SIDDir: filepath.Join(root, "sid"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000,
+		AccountDirs: map[string]int{configDir: 2}, Env: map[string]string{}, Command: quietRunner{},
+	}
+	input := []byte(fmt.Sprintf(`{
+  "model":{"display_name":"Opus 4"},
+  "session_id":"fresh-session",
+  "rate_limits":{
+    "five_hour":{"used_percentage":0,"resets_at":%d},
+    "seven_day":{"used_percentage":0,"resets_at":%d},
+    "spend_limit":{"used_percentage":12.5,"resets_at":%d},
+    "seven_day_sonnet":null,
+    "seven_day_opus":{"used_percentage":3,"resets_at":%d},
+    "model_scoped":[{"model":"opus","used_percentage":3}],
+    "limits":[{"kind":"weekly_scoped","scope":{"model":{"display_name":"Fable"}},"percent":0,"resets_at":%q,"is_active":true}]
+  }
+}`, fiveReset, sevenReset, spendReset, sevenReset, fableReset.Format(time.RFC3339)))
+	if _, err := Render(context.Background(), input, runtime); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(rateDir, "acct-2.fresh-session.json"))
+	if err != nil {
+		t.Fatalf("read account 2 quota snapshot: %v", err)
+	}
+	type window struct {
+		UsedPercentage float64 `json:"used_percentage"`
+		ResetsAt       int64   `json:"resets_at"`
+	}
+	var snapshot struct {
+		FiveHourUsed     *int64            `json:"five_hour_used"`
+		FiveHourResetsAt int64             `json:"five_hour_resets_at"`
+		Windows          map[string]window `json:"windows"`
+	}
+	if err := json.Unmarshal(body, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]window{
+		"five_hour":       {0, fiveReset},
+		"seven_day":       {0, sevenReset},
+		"spend_limit":     {12.5, spendReset},
+		"seven_day_opus":  {3, sevenReset},
+		"seven_day_fable": {0, fableReset.Unix()},
+	}
+	if len(snapshot.Windows) != len(want) {
+		t.Fatalf("snapshot windows=%v, want exactly %v", snapshot.Windows, want)
+	}
+	for key, expected := range want {
+		if got, ok := snapshot.Windows[key]; !ok || got != expected {
+			t.Fatalf("snapshot window %s=%v (present=%v), want %v", key, got, ok, expected)
+		}
+	}
+	if snapshot.FiveHourUsed == nil || *snapshot.FiveHourUsed != 0 || snapshot.FiveHourResetsAt != fiveReset {
+		t.Fatalf(
+			"legacy five-hour keys=%v/%d, want 0 resetting at %d",
+			snapshot.FiveHourUsed, snapshot.FiveHourResetsAt, fiveReset,
+		)
+	}
+	usage, _, found, err := usagehook.ReadStatuslineSnapshot(rateDir, 2, configDir, now, time.Minute)
+	if err != nil || !found || usage.FiveHour.Utilization == nil || *usage.FiveHour.Utilization != 0 {
+		t.Fatalf("read back found=%v err=%v five_hour=%v, want the 0%% reading", found, err, usage.FiveHour)
 	}
 }

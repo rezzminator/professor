@@ -49,7 +49,7 @@ Installed into `{claude config dir}/settings.json` for every account in the mach
 | Name | Event | Matcher | Command | Defined | Body | Does | On failure |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | launcher-repair | `SessionStart` | `""` | `pfm internal launcher-repair` | `expected_hooks.go:81` | `pfm/internal/hookentry/launcher_repair.go:12-25` | Repairs the Claude launcher each session start | Exits 1 with one stderr line; the session continues |
-| usage | `UserPromptSubmit` | `""` | `pfm usage-hook` | `expected_hooks.go:82` | `pfm/cmd/pfm/statusline_command.go:160-196` | Checks the account's usage and prints a warning into the prompt when one is due; a no-op under Codex (`statusline_command.go:176-179`) | Fail-open, exits 0 (`statusline_command.go:187-190`) |
+| usage | `UserPromptSubmit` | `""` | `pfm usage-hook` | `expected_hooks.go:82` | `pfm/cmd/pfm/statusline_command.go:134-174` | Checks the account's usage through `usagehook.Fetch`, the one door to the usage endpoint (order below), and prints a warning into the prompt when one is due; a no-op under Codex (`statusline_command.go:150-151`) | Fail-open, exits 0 (`statusline_command.go:164-166`); a failed refresh is written to stderr, the hook's log |
 | clear-kill | `SessionEnd` | `""` | `pfm internal clear-kill` | `expected_hooks.go:83` | `pfm/internal/hookentry/clear_kill.go:15` | Handles a `/clear` for the fleet session record | Fail-open, stderr line per cause (`clear_kill.go:27-66`) |
 | exit-close | `SessionEnd` | `""` | `pfm internal exit-close` | `expected_hooks.go:84` | `pfm/internal/hookentry/exit_close.go:23` | Closes the terminal a chat was watched through after a human `/exit` | Fail-open, the terminal is left open (`exit_close.go:30-73`) |
 | explore-deny | `PreToolUse` | `Agent\|Task` | `pfm internal explore-deny` | `expected_hooks.go:85-90` | `pfm/internal/hookentry/explore_deny.go:18` | Denies an `Explore` spawn and names `tracer` instead (`explore_deny.go:16`) | Fail-open on an unreadable payload (`explore_deny.go:22-30`) |
@@ -60,6 +60,16 @@ Installed into `{claude config dir}/settings.json` for every account in the mach
 | exit-intercept | `UserPromptSubmit` | `""` | `pfm internal exit-intercept` | `expected_hooks.go:107` | `pfm/internal/hookentry/exit_intercept.go:18` | Turns an exact `e` or `/e` prompt into a kill of this chat | Exits 2 when the kill fails (`exit_intercept.go:40`) |
 | compact-nudge | `UserPromptSubmit` | `""` | `pfm internal compact-nudge` | `expected_hooks.go:108` | `pfm/internal/hookentry/compact_nudge.go:22` | Reminds the main chat to compact as context fills; Claude only | Exits 0 on every skip, 1 on one write failure (`compact_nudge.go:36-87`) |
 | callmeter | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `SubagentStart`, `SubagentStop`, `Stop` (one command, seven registrations) | `Bash` on `PreToolUse`; `*` on the other tool events and the subagent events; none on `PostToolBatch` and `Stop` | `pfm internal callmeter`, async (`expected_hooks.go:109-130`) | `expected_hooks.go:109-130` | `pfm/internal/hookentry/callmeter.go` | Records calls, requests, agents and faults, per [callmeter.md](callmeter.md) | Always exits 0; logs and counts a fault |
+
+The usage hook and the `pfm ls` Limits tab reach `GET https://api.anthropic.com/api/oauth/usage` only through `usagehook.Fetch` (`pfm/internal/usagehook/fetch.go`), which answers in this order:
+
+1. A `cc-rate-limits` statusline snapshot of the seat (`ReadStatuslineSnapshot`): the same config dir, younger than the caller's TTL, its five-hour reset still ahead. No request.
+2. The shared cache record `acct-<id>.json` fresh within the caller's TTL: the hook's 180 seconds (`CC_USAGE_TTL`), the Limits tab's 60 (`LiveLimitsTTL`).
+3. An active shared backoff: the cached usage with the backoff's error. No request.
+4. The `O_EXCL` refresh lock `acct-<id>.lock` beside the cache (`RefreshLockPath`). A lock older than 30 seconds (`lockStaleAfter`) is stale and taken over; a caller that cannot take the lock sends no request and answers from the cache; the holder re-reads the cache and answers if a peer refreshed or backed off meanwhile, and releases the lock on every path.
+5. The request, sent with `User-Agent: pfm/{version}`. Success writes the record. A 429 writes the shared backoff (`BackoffFor`): `Retry-After` honored with a ten-minute floor, message `rate-limited — retry HH:MM (429 Too Many Requests)`. Any other failure backs off one minute.
+
+The hook writes a failed refresh to stderr; its prompt output does not change. The statusline writes the snapshots from its stdin `rate_limits` (`harvestRateLimits`, `pfm/internal/statusline/render.go`): every window the harness sent, 0% included, under `windows`, beside the flat keys an older build's reader expects.
 
 A blocked prompt returns `decision: block` with the original prompt suppressed (`pfm/internal/hookentry/prompt_block.go:23-28`).
 

@@ -1153,15 +1153,6 @@ func codexAccountMedal(account int) string {
 	return pfmconfig.DefaultEmoji(account)
 }
 
-func fillLine(value string, width int) string {
-	value = ansi.Truncate(value, maxInt(0, width), "")
-	padding := width - lipgloss.Width(value)
-	if padding > 0 {
-		value += strings.Repeat(" ", padding)
-	}
-	return value
-}
-
 func fixedDisplayColumn(value string, width int) string {
 	value = ansi.Truncate(value, maxInt(0, width), "…")
 	if padding := width - lipgloss.Width(value); padding > 0 {

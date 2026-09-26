@@ -1,8 +1,13 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +19,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/theme"
 )
@@ -533,6 +540,56 @@ func TestLimitsTabNarrowRowsDropResetAndNeverWrap(t *testing.T) {
 	for index, line := range strings.Split(panel, "\n") {
 		if got := lipgloss.Width(line); got != 50 {
 			t.Fatalf("narrow Limits line %d width=%d, want 50: %q", index, got, line)
+		}
+	}
+}
+
+// A 429 sampled end to end — the stats door records the shared backoff, the
+// sampler words the status, renderLimitCards draws the card — says "limits
+// unavailable" at most once and keeps the retry time on the card at a wide
+// pane and a narrow one. The status used to wrap the backoff message in a
+// second "limits unavailable:", which pushed the retry time past a narrow
+// pane's edge.
+func TestRateLimitedLimitCardSaysUnavailableOnceAndKeepsTheRetryTime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	configDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	credentials := `{"claudeAiOauth":{"accessToken":"fixture-oauth-token-not-a-real-secret"}}`
+	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(credentials), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// cmd/pfm wires each engine's usage source; the real Claude one is wired
+	// here so the card comes out of the same path a running picker takes.
+	if _, err := pfmstats.UsageSourceFor(pfmengine.Claude); err != nil {
+		pfmstats.RegisterUsageSource(pfmengine.Claude, claudeengine.UsageSource{})
+	}
+	now := time.Unix(1_800_000_000, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	sampler := pfmstats.NewLimitsSampler([]pfmstats.LimitAccount{
+		{ID: 6, Engine: pfmengine.Claude, Label: "account 6", ConfigDir: configDir},
+	})
+	sampler.Endpoint = server.URL
+	sampler.Now = func() time.Time { return now }
+	limits, _ := sampler.Sample(context.Background())
+	if len(limits) != 1 {
+		t.Fatalf("limits=%#v, want one card", limits)
+	}
+	retry := "retry " + now.Add(10*time.Minute).Format("15:04")
+	for _, width := range []int{118, 50} {
+		model := NewModel(fixtureSnapshot(120))
+		model.stats = pfmstats.Snapshot{Limits: limits}
+		card := ansi.Strip(strings.Join(model.renderLimitCards(width), "\n"))
+		if count := strings.Count(card, "limits unavailable"); count > 1 {
+			t.Fatalf("width %d: card says limits unavailable %d times, want at most once:\n%s", width, count, card)
+		}
+		if !strings.Contains(card, retry) {
+			t.Fatalf("width %d: card lost %q from status %#v:\n%s", width, retry, limits[0], card)
 		}
 	}
 }

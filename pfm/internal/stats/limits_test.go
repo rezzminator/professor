@@ -744,44 +744,11 @@ func TestLimitsSamplerRespectsShortTTLWithinAndAcrossWindow(t *testing.T) {
 	}
 }
 
-// TestLimitsSamplerBacksOff429AcrossProcessesForAtLeastTenMinutes pins the
-// 429-backoff half of the shared-cache contract: a rate-limited response must
-// be recorded where every sampler can see it, and a fresh sampler standing in
-// for a second process must not repeat the request that just got rate-limited.
-//
-// Fails at HEAD for the same reason as the fetch-sharing test above: sampler
-// B starts with an empty in-memory cache and has no shared record of A's 429,
-// so it fetches again — hits ends at 2, not 1.
-func TestLimitsSamplerBacksOff429AcrossProcessesForAtLeastTenMinutes(t *testing.T) {
-	configDir := t.TempDir()
-	writeFixtureCredentials(t, configDir)
-	var hits int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits++
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	defer server.Close()
-
-	account := LimitAccount{ID: 5, Engine: pfmengine.Claude, Label: "account 5", ConfigDir: configDir}
-
-	samplerA := NewLimitsSampler([]LimitAccount{account})
-	samplerA.Endpoint = server.URL
-	limitsA, _ := samplerA.Sample(context.Background())
-	if hits != 1 || len(limitsA) != 1 || !strings.Contains(limitsA[0].Status, "429") {
-		t.Fatalf("sampler A: hits=%d limits=%#v, want one recorded 429", hits, limitsA)
-	}
-
-	samplerB := NewLimitsSampler([]LimitAccount{account})
-	samplerB.Endpoint = server.URL
-	limitsB, _ := samplerB.Sample(context.Background())
-	if hits != 1 {
-		t.Fatalf("sampler B retried during the shared 429 backoff window: hits=%d, want 1 (no new request)", hits)
-	}
-	if len(limitsB) != 1 || !strings.Contains(limitsB[0].Status, "429") {
-		t.Fatalf("sampler B limits=%#v, want the shared 429 status surfaced without a fetch", limitsB)
-	}
-}
-
+// A 429 with nothing cached reaches the card as its status line. The backoff
+// message and the card's own wrapper each used to say "limits unavailable",
+// and the retry time sat past column 60 where a narrow pane cut it off; the
+// status now names the rate limit and its retry time first, and the phrase
+// once.
 // TestLimitsSamplerReadsCachePayloadTheHookWroteWithoutFetching pins the other
 // direction of the same shared cache: the UserPromptSubmit hook
 // (usagehook.Evaluate, hook.go:182-215) already writes a shared, on-disk
@@ -1324,47 +1291,6 @@ func TestLimitsSamplerLiveKeepsRefreshingAcrossHours(t *testing.T) {
 	}
 }
 
-func TestLimitsSamplerStaleRateLimitStatusPreservesRetryTime(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv(paths.EnvHome, home)
-	now := time.Unix(1_800_000_000, 0)
-	account := LimitAccount{
-		ID:        9,
-		Engine:    pfmengine.Claude,
-		Label:     "account 9",
-		ConfigDir: filepath.Join(home, "claude"),
-	}
-	confirmedAt := now.Add(-10 * time.Minute)
-	usage := liveClaudeUsage(confirmedAt, 49)
-	retryMessage := "limits unavailable: 429 Too Many Requests — retry at 15:04"
-	if err := usagehook.WriteCacheRecord(
-		usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID),
-		usagehook.CacheRecord{
-			Usage:     usage,
-			ConfigDir: account.ConfigDir,
-			FetchedAt: &confirmedAt,
-			Backoff: &usagehook.CacheBackoff{
-				Message:    retryMessage,
-				RetryAfter: now.Add(10 * time.Minute),
-				RecordedAt: now,
-			},
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	sampler := NewLimitsSampler([]LimitAccount{account})
-	sampler.Now = func() time.Time { return now }
-	limits, warnings := sampler.Sample(context.Background())
-	if len(limits) != 1 || len(limits[0].Windows) != 2 ||
-		limits[0].Status != "provider rate-limited; retry at 15:04; showing cached limits" {
-		t.Fatalf("rate-limited stale card=%#v, want retry time and cached windows", limits)
-	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "retry at 15:04") {
-		t.Fatalf("rate-limit warnings=%v, want retry time preserved", warnings)
-	}
-}
-
 func TestLimitsSamplerSuccessfulFetchReportsClaudeCacheWriteFailure(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
@@ -1894,7 +1820,7 @@ func TestUsageWindowsBlanksPassedResetsAndStopsCacheReuse(t *testing.T) {
 	if windows[1].Name != "7d" || windows[1].UsedPct != 40 || windows[1].ResetNote != "" {
 		t.Fatalf("live 7d window=%#v", windows[1])
 	}
-	if !reusableClaudeUsage(mixed, now) {
+	if !usagehook.HasCurrentWindow(mixed, now) {
 		t.Fatal("payload with one live window was treated as unusable")
 	}
 
@@ -1902,7 +1828,7 @@ func TestUsageWindowsBlanksPassedResetsAndStopsCacheReuse(t *testing.T) {
 		FiveHour: usagehook.Window{Utilization: &past, ResetsAt: now.Add(-time.Minute).Format(time.RFC3339)},
 		SevenDay: usagehook.Window{Utilization: &past, ResetsAt: now.Add(-time.Hour).Format(time.RFC3339)},
 	}
-	if reusableClaudeUsage(expired, now) {
+	if usagehook.HasCurrentWindow(expired, now) {
 		t.Fatal("payload whose every window had passed its reset was still reusable")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestFetchWritesAnHTTPOutRecord proves options.Client is wrapped with
@@ -43,9 +44,10 @@ func TestFetchWritesAnHTTPOutRecord(t *testing.T) {
 	}
 
 	_, recorder := obs.Test(t)
-	if _, err := Fetch(context.Background(), Options{
+	if _, _, err := Fetch(context.Background(), Options{
 		ConfigDir: configDir, Endpoint: server.URL + "?token=FETCHSECRET",
-	}); err != nil {
+		CacheDir: filepath.Join(root, "cache"), Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}},
+	}, 1); err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
 	var outbound *obs.Record

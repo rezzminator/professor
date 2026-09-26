@@ -15,6 +15,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // RefreshKind names one detached cache refresher the render path may arm.
@@ -91,7 +92,7 @@ func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
 		configDir = filepath.Join(resolved.Home, ".claude")
 	}
 	cacheDir := filepath.Dir(CodexStatuslineCachePath(env.Get(paths.EnvHome), os.Getuid()))
-	rateDir := ClaudeRateLimitDir(env.Get(paths.EnvHome), os.Getuid())
+	rateDir := usagehook.ClaudeRateLimitDir(env.Get(paths.EnvHome))
 	return Runtime{
 		Now:          clock.Real.Now,
 		Home:         resolved.Home,
@@ -138,13 +139,6 @@ func CodexStatuslineCachePath(jailHome string, uid int) string {
 		cacheDir = filepath.Join(jailHome, "tmp")
 	}
 	return filepath.Join(cacheDir, "cc-gpt-usage-"+strconv.Itoa(uid)+".json")
-}
-
-// ClaudeRateLimitDir is the one filesystem rule for provider-confirmed Claude
-// windows harvested from statusline input. Limits readers use the same path so
-// the statusline writer remains the single owner of this cache.
-func ClaudeRateLimitDir(jailHome string, uid int) string {
-	return filepath.Join(filepath.Dir(CodexStatuslineCachePath(jailHome, uid)), "cc-rate-limits")
 }
 
 func (runtime Runtime) getenv(name string) string {

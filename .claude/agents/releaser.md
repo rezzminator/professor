@@ -3,7 +3,6 @@ name: releaser
 description: 'RELEASE-ONLY — spawned by /pfm:release, one phase per spawn: REVIEW, NOTES, GATE, REHEARSE, READY, VERIFY; runs and judges it. Pass PHASE, MODE, DIR, CANDIDATE, STABLE, NEW, PREV, BUMP, SUMMARY. /pfm:release → here → reviewer, changelogger, gitter. Returns a DONE, FIX, FAILED or BLOCKED line, rows, the verdict file.'
 model: opus
 effort: high
-experimental: { cacheTtl: 1h }
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage
 hooks:
   PreToolUse:

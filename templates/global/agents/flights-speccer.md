@@ -3,7 +3,6 @@ name: flights-speccer
 description: 'Writes executor task files — delegate for large work whose solution is not in hand, or to revise one after SPEC-DRIFT or FAILED; the main chat starts a new flight only via /flights:spec. NEVER two running at once per caller. Pass the work, all you hold and a $HOME/.local/state/pfm/flights/{project}/ dir. /flights:spec → here → flights-orchestrator. Returns the directory, index, BLOCKED questions.'
 model: opus
 effort: high
-experimental: { cacheTtl: 1h }
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent
 ---
 

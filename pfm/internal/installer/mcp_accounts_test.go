@@ -179,3 +179,117 @@ func TestMCPInstallNamesAMalformedScanOnlyRegistryAndContinues(t *testing.T) {
 		}
 	})
 }
+
+// TestMCPInstallTreatsClaudesEmptyEnvAsShapeNeutral pins the live-host
+// defects: Claude Code adds `"env": {}` when it rewrites its config, so an
+// empty env must never make pfm's own entry foreign — the legacy chat still
+// goes, the owned professor is neither rewritten nor a conflict — while a
+// non-empty env stays foreign; and $HOME/.claude.json, the registry a plain
+// `claude` reads, is swept of pfm's legacy entries even when every account has
+// its own ConfigDir, gaining no professor.
+func TestMCPInstallTreatsClaudesEmptyEnvAsShapeNeutral(t *testing.T) {
+	stdioChat := `"chat":{"type":"stdio","command":"BIN","args":["mcp","chat","serve"],"env":ENV}`
+	professor := `"professor":{"type":"stdio","command":"BIN","args":["mcp","serve","--stdio"]}`
+	for _, testCase := range []struct {
+		name, configDir, servers, wantServers, wantLine, forbidLine string
+		ownProfessor, unchanged                                     bool
+		wantStates                                                  map[string]string
+	}{
+		{
+			name: "legacy stdio chat with an empty env is removed", configDir: ".claude",
+			servers:     strings.ReplaceAll(stdioChat, "ENV", "{}"),
+			wantServers: professor,
+			wantLine:    "remove pfm's legacy MCP clients chat",
+			wantStates:  map[string]string{chatName: MCPClientAbsent, professorName: MCPClientPFM},
+		},
+		{
+			name: "legacy chat with a non-empty env is preserved as a conflict", configDir: ".claude",
+			servers:     strings.ReplaceAll(stdioChat, "ENV", `{"DEBUG":"1"}`),
+			wantServers: strings.ReplaceAll(stdioChat, "ENV", `{"DEBUG":"1"}`) + "," + professor,
+			forbidLine:  "remove pfm's legacy MCP clients",
+			wantStates:  map[string]string{chatName: MCPClientForeignRegistration, professorName: MCPClientPFM},
+		},
+		{
+			name: "owned professor with an empty env stays pfm's", configDir: ".claude",
+			servers:      strings.TrimSuffix(professor, "}") + `,"env":{}}`,
+			ownProfessor: true, unchanged: true,
+			forbidLine: "preserve conflicting manual MCP client",
+			wantStates: map[string]string{professorName: MCPClientPFM},
+		},
+		{
+			name: "unwired home registry loses only pfm's legacy entries", configDir: "account-one",
+			servers: strings.ReplaceAll(stdioChat, "ENV", "{}") +
+				`,"harvester":{"type":"http","url":"http://127.0.0.1:8377/mcp/harvester"},"foreign":{"command":"custom"}`,
+			wantServers: `"foreign":{"command":"custom"}`,
+			wantLine:    "remove pfm's legacy MCP clients chat,harvester",
+			wantStates: map[string]string{
+				chatName: MCPClientAbsent, mcpServerHarvester: MCPClientAbsent, professorName: MCPClientAbsent,
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			home := t.TempDir()
+			bin := filepath.Join(home, ".local", "bin", "pfm")
+			registry := filepath.Join(home, ".claude.json")
+			original := `{"theme":"dark","mcpServers":{` + strings.ReplaceAll(testCase.servers, "BIN", bin) + `}}`
+			writeFixture(t, registry, original)
+			if testCase.ownProfessor {
+				ledger, _ := json.Marshal(mcpOwnership{Registrations: map[string]map[string]any{
+					registry: {professorName: claudeProfessorShape(home)},
+				}})
+				writeFixture(
+					t,
+					filepath.Join(home, ".local", "share", "pfm", "install", mcpOwnershipName),
+					string(ledger),
+				)
+			}
+			configDir := filepath.Join(home, testCase.configDir)
+			writeFixture(t, filepath.Join(configDir, "settings.json"), `{}`)
+			var applied strings.Builder
+			if _, err := Run(context.Background(), Options{
+				Mode: ModeApply, Home: home, ConfigDir: configDir,
+				ConfigDirs: []string{configDir}, MCPEnabled: map[string]bool{"chat": true},
+				MCPPort: 8377, Runner: &fakeRunner{}, Stdout: &applied,
+			}); err != nil {
+				t.Fatalf("apply: %v\n%s", err, applied.String())
+			}
+			output := applied.String()
+			if testCase.wantLine != "" && !strings.Contains(output, testCase.wantLine) {
+				t.Errorf("install output does not name %q:\n%s", testCase.wantLine, output)
+			}
+			if testCase.forbidLine != "" && strings.Contains(output, testCase.forbidLine) {
+				t.Errorf("install output names %q:\n%s", testCase.forbidLine, output)
+			}
+			got := readFixture(t, registry)
+			if testCase.unchanged {
+				if got != original {
+					t.Errorf("registry rewritten to %s, want byte-identical %s", got, original)
+				}
+			} else {
+				var want, document map[string]any
+				wantJSON := `{"theme":"dark","mcpServers":{` + strings.ReplaceAll(
+					testCase.wantServers,
+					"BIN",
+					bin,
+				) + `}}`
+				if err := json.Unmarshal([]byte(wantJSON), &want); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal([]byte(got), &document); err != nil {
+					t.Fatal(err)
+				}
+				if !sameJSONValue(document, want) {
+					t.Errorf("registry=%s, want %s", got, wantJSON)
+				}
+			}
+			for name, state := range testCase.wantStates {
+				for _, report := range InspectClaudeServers(registry, home, 8377, name) {
+					if report.State != state {
+						t.Errorf("doctor classifies %s as %s, want %s", name, report.State, state)
+					}
+				}
+			}
+		})
+	}
+}

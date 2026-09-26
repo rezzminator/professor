@@ -39,6 +39,7 @@ const (
 	configTypeKey     = "type"
 	configCommandKey  = "command"
 	configArgsKey     = "args"
+	configEnvKey      = "env"
 	commandType       = "command"
 	legacyFleetBinary = "cc-fleet"
 )

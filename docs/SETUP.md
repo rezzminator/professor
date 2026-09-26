@@ -242,6 +242,7 @@ Claude takes your answers and:
 | `/quality:prompt` | Command `templates/global/commands/quality/prompt.md` | Replace `{DOMAIN_ADJ}`, `{SENSITIVE_DATA}` |
 | `/quality:doc` | Command `templates/global/commands/quality/doc.md` | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples |
 | `/quality:description` | Command `templates/global/commands/quality/description.md` | None |
+| `/quality:claude-md` | Command `templates/global/commands/quality/claude-md.md` | None |
 | `/quality:md-forlint` | Command `templates/global/commands/quality/md-forlint.md`, config `templates/project/rumdl-policy.toml` → adopter `.rumdl.toml` | None |
 | `/quality:llm-codebase`, `/quality:integration-suite` | Commands `templates/global/commands/quality/{llm-codebase,integration-suite}.md` — host-global, linked by `pfm install` | None |
 | `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md` | Hydrated by RR (Phase 2.5) |

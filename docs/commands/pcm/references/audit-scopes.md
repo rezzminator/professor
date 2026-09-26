@@ -72,7 +72,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 Catches what no single-domain audit can see. Reads across ALL domains simultaneously.
 
 - **Routing ↔ commands:** every command/skill named in CLAUDE.md "Request Routing" (the non-obvious calls + guards only — most route by self-indexing) → file exists and handles claimed scope
-- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (rosters: `pcm.md § Authoring conventions`, no-rosters law)
+- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (rosters: `/quality:claude-md`)
 - **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry) — CLAUDE.md carries no command roster
 - **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter; CLAUDE.md Skills section is a pointer, not a list (nothing to drift)
 - **Frontmatter validity:** every agent has non-empty `name`/`description`/`tools`; root agent `name` matches its `subagent_type` registry entry

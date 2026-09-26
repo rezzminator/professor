@@ -52,6 +52,9 @@
     "global/commands/pfm.md": {
       "curated": true
     },
+    "global/commands/quality/claude-md.md": {
+      "curated": true
+    },
     "global/commands/quality/description.md": {
       "curated": true
     },

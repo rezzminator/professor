@@ -1,6 +1,6 @@
 ---
 name: quality:prompt
-description: MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills); leanness plus correctness law for any prompt. `cut <file>` rewrites the target leaner in place. Harness file rules → /pcm; a `description:` → /quality:description; doc shape → /quality:doc; markdown mechanics → /quality:md-forlint.
+description: MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills); leanness plus correctness law for any prompt. `cut <file>` rewrites the target leaner in place. Harness file rules → /pcm; CLAUDE.md shape → /quality:claude-md; a `description:` → /quality:description; doc shape → /quality:doc; markdown mechanics → /quality:md-forlint.
 ---
 
 # Prompt Quality

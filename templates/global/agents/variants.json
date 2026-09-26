@@ -13,6 +13,7 @@
     "from": "rr",
     "description": "Exhaustive rr — delegate for \"heavy rr\", \"heavy-rr X\" when the map must settle whatever the cost; lighter → super-rr. Returns the saved RR path, then the cited map.",
     "effort": "medium",
+    "tools": "WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web",
     "replace": {
       "Spawn at most 4 diggers a round": "Spawn at most 8 diggers a round",
       "so 4 diggers carry the entire frontier": "so 8 diggers carry the entire frontier",

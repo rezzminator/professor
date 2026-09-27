@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -33,47 +35,12 @@ var claudePlugins = []claudePlugin{
 	{Source: "rezzminator/sub-agent-compact", ID: "sub-agent-compact@sub-agent-compact"},
 }
 
-// claudeEnvDefaults is the settings.json env every Claude account gets, each
-// key written only when absent: a user's own value always wins.
-var claudeEnvDefaults = []struct {
-	Key   string
-	Value string
-}{
-	{Key: "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS", Value: "1"},
-	{Key: "CLAUDE_CODE_AUTO_COMPACT_WINDOW", Value: "100000"},
-}
-
-// addClaudeEnvDefaults adds each claudeEnvDefaults key missing from the
-// document's env object, creating env when it is absent. An env that is not
-// an object is operator content and is left untouched.
-func addClaudeEnvDefaults(document map[string]any) bool {
-	raw, present := document[configEnvKey]
-	env, isObject := raw.(map[string]any)
-	if present && !isObject {
-		return false
-	}
-	if env == nil {
-		env = map[string]any{}
-	}
-	changed := false
-	for _, entry := range claudeEnvDefaults {
-		if _, exists := env[entry.Key]; !exists {
-			env[entry.Key] = entry.Value
-			changed = true
-		}
-	}
-	if changed {
-		document[configEnvKey] = env
-	}
-	return changed
-}
-
 // ErrClaudeSettingsAbsent is ClaudePluginGaps' answer for an account with no
 // settings.json: an account never set up, not one missing its plugins.
 var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 
 // ClaudePluginGaps reads one account's settings.json and names every plugin
-// id not enabled and every claudeEnvDefaults key absent. A missing file
+// id not enabled. A missing file
 // returns ErrClaudeSettingsAbsent; a file that cannot be read or parsed
 // returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string) ([]string, error) {
@@ -88,12 +55,6 @@ func ClaudePluginGaps(path string) ([]string, error) {
 	for _, plugin := range claudePlugins {
 		if !pluginEnabled(document, plugin.ID) {
 			gaps = append(gaps, "plugin "+plugin.ID+" not enabled")
-		}
-	}
-	env, _ := document[configEnvKey].(map[string]any)
-	for _, entry := range claudeEnvDefaults {
-		if _, exists := env[entry.Key]; !exists {
-			gaps = append(gaps, "env "+entry.Key+" absent")
 		}
 	}
 	return gaps, nil
@@ -174,9 +135,16 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	}
 	pathEnv := env.Get("PATH")
 	binary, resolveErr := ResolveClaudeBinary(installer.options.Home, installer.options.ClaudeBinary, pathEnv)
+	dirs := installer.claudeConfigDirs()
+	sharers := map[string][]string{}
+	for _, dir := range dirs {
+		physical := physicalSettingsPath(filepath.Join(dir, "settings.json"))
+		sharers[physical] = append(sharers[physical], dir)
+	}
 	var failures []error
-	for _, dir := range installer.claudeConfigDirs() {
+	for _, dir := range dirs {
 		settingsPath := filepath.Join(dir, "settings.json")
+		physical := physicalSettingsPath(settingsPath)
 		document, err := readClaudeSettingsDocument(settingsPath)
 		if err != nil {
 			installer.skip("claude plugins in " + dir + ": settings unreadable, state unknown: " + err.Error())
@@ -187,6 +155,7 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 			installer.skip("claude plugins in " + dir + ": install record unreadable, state unknown: " + err.Error())
 			continue
 		}
+		guarded := false
 		for _, plugin := range claudePlugins {
 			if pluginEnabled(document, plugin.ID) && !slices.Contains(missing, plugin.ID) {
 				installer.ok("claude plugin " + plugin.ID + " installed and enabled in " + dir)
@@ -198,8 +167,45 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 				))
 				continue
 			}
+			if !guarded {
+				guarded = true
+				pids := map[int]bool{}
+				var guardErr error
+				for _, sharer := range sharers[physical] {
+					live, err := liveChatPIDs(installer.options.ProcRoot, sharer)
+					if err != nil {
+						guardErr = fmt.Errorf("read live chats in %s: %w", sharer, err)
+						break
+					}
+					for _, pid := range live {
+						id, _ := strconv.Atoi(pid)
+						pids[id] = true
+					}
+				}
+				if guardErr != nil {
+					failures = append(failures, installer.pluginFailure(dir, plugin.ID, guardErr))
+					break
+				}
+				if len(pids) > 0 {
+					ordered := make([]int, 0, len(pids))
+					for pid := range pids {
+						ordered = append(ordered, pid)
+					}
+					sort.Ints(ordered)
+					names := make([]string, 0, len(ordered))
+					for _, pid := range ordered {
+						names = append(names, strconv.Itoa(pid))
+					}
+					installer.skip(fmt.Sprintf(
+						"claude plugins in %s: live chats %s on %s — close them and rerun pfm install --yes",
+						dir, strings.Join(names, ","), physical,
+					))
+					break
+				}
+			}
 			if err := installer.installClaudePlugin(ctx, binary, dir, plugin); err != nil {
 				failures = append(failures, installer.pluginFailure(dir, plugin.ID, err))
+				break
 			}
 		}
 	}
@@ -212,7 +218,8 @@ func (installer *engine) installClaudePlugin(ctx context.Context, binary, dir st
 	message := fmt.Sprintf(
 		"run %s=%s %s && %s", claudeConfigDirEnv, dir, strings.Join(add, " "), strings.Join(install, " "),
 	)
-	return installer.change(message, func() error {
+	targets := []string{physicalSettingsPath(filepath.Join(dir, "settings.json")), filepath.Join(dir, "plugins")}
+	return installer.changePathsOrRestore(message, targets, func() error {
 		options := deps.RunOptions{Env: deps.EnvironmentWith(claudeConfigDirEnv, dir)}
 		// An already-added marketplace exits non-zero; the install that
 		// follows is the judge, so its failure carries this answer too.

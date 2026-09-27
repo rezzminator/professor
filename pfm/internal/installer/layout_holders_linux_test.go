@@ -24,3 +24,24 @@ func TestLinuxDBHolderPIDsFixture(t *testing.T) {
 		t.Fatalf("dbHolderPIDs = %v, %v", got, err)
 	}
 }
+
+func TestLinuxDBHolderThroughSymlinkedDirectory(t *testing.T) {
+	root := t.TempDir()
+	dir := t.TempDir()
+	db := filepath.Join(dir, "fleet.db")
+	linkdir := filepath.Join(t.TempDir(), "linkdir")
+	if err := os.Symlink(dir, linkdir); err != nil {
+		t.Fatal(err)
+	}
+	fd := filepath.Join(root, "123", "fd")
+	if err := os.MkdirAll(fd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(linkdir, "fleet.db"), filepath.Join(fd, "0")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := dbHolderPIDs(root, db)
+	if err != nil || !reflect.DeepEqual(got, []string{"123"}) {
+		t.Fatalf("dbHolderPIDs = %v, %v", got, err)
+	}
+}

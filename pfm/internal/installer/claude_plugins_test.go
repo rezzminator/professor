@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,7 @@ type pluginRunner struct {
 	deps.Runner
 	calls []pluginCall
 	fail  map[string]string
+	onRun func(configDir, argv string)
 }
 
 func (runner *pluginRunner) Run(_ context.Context, argv []string, options deps.RunOptions) (deps.RunResult, error) {
@@ -36,6 +38,9 @@ func (runner *pluginRunner) Run(_ context.Context, argv []string, options deps.R
 	}
 	joined := strings.Join(argv[1:], " ")
 	runner.calls = append(runner.calls, pluginCall{argv: joined, configDir: configDir})
+	if runner.onRun != nil {
+		runner.onRun(configDir, joined)
+	}
 	if stderr, failed := runner.fail[configDir+" "+joined]; failed {
 		return deps.RunResult{ExitCode: 1, Stderr: []byte(stderr)}, nil
 	}
@@ -107,7 +112,10 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
-	if err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(
+	installer := pluginEngine(home, binary, first, second, runner, &out, true)
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+	installer.options.Journal = journal
+	if err := installer.ensureClaudePlugins(
 		context.Background(),
 	); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
@@ -123,6 +131,12 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	}
 	if len(runner.calls) != 2*len(claudePlugins) {
 		t.Fatalf("second account calls=%v, want add+install per plugin", runner.calls)
+	}
+	for _, record := range journal.records {
+		if record.Destination == filepath.Join(first, "settings.json") ||
+			record.Destination == filepath.Join(first, "plugins") {
+			t.Fatalf("already enabled account journaled %+v", record)
+		}
 	}
 }
 
@@ -260,7 +274,11 @@ func TestEnsureClaudePluginsDryRunSaysWhatWouldRun(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
-	if err := pluginEngine(home, binary, first, second, runner, &out, false).ensureClaudePlugins(
+	installer := pluginEngine(home, binary, first, second, runner, &out, false)
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+	journal.dryRun = true
+	installer.options.Journal = journal
+	if err := installer.ensureClaudePlugins(
 		context.Background(),
 	); err != nil {
 		t.Fatalf("ensureClaudePlugins: %v", err)
@@ -274,6 +292,8 @@ func TestEnsureClaudePluginsDryRunSaysWhatWouldRun(t *testing.T) {
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("output missing %q:\n%s", want, out.String())
 	}
+	requireJournalPaths(t, journal.Planned(), filepath.Join(first, "settings.json"), filepath.Join(first, "plugins"),
+		filepath.Join(second, "settings.json"), filepath.Join(second, "plugins"))
 }
 
 func TestEnsureClaudePluginsUnresolvedBinaryIsAVisibleSkip(t *testing.T) {
@@ -308,6 +328,7 @@ func TestInstallRunsTheClaudePluginStep(t *testing.T) {
 		ClaudeBinary:  binary,
 		ProcessRunner: runner,
 		Runner:        &outputRunner{printOutput: "state = not running\n"},
+		MCPConfigPath: testConfigPath(t),
 		Stdout:        &out,
 	}); err != nil {
 		t.Fatalf("Run: %v\n%s", err, out.String())
@@ -323,58 +344,228 @@ func TestInstallRunsTheClaudePluginStep(t *testing.T) {
 	}
 }
 
-func TestUpdateSettingsAddsClaudeEnvDefaultsKeepingUserValues(t *testing.T) {
-	home := t.TempDir()
-	for _, test := range []struct {
-		name string
-		raw  string
-		want map[string]string
-	}{
-		{
-			name: "env absent",
-			raw:  `{}`,
-			want: map[string]string{
-				"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
-				"CLAUDE_CODE_AUTO_COMPACT_WINDOW":   "100000",
-			},
-		},
-		{
-			name: "user value and neighbor kept",
-			raw:  `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","OTHER":"x"}}`,
-			want: map[string]string{
-				"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
-				"CLAUDE_CODE_AUTO_COMPACT_WINDOW":   "250000",
-				"OTHER":                             "x",
-			},
-		},
+func TestClaudePluginDoorJournalsAndRollsBack(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	for _, dir := range []string{first, second} {
+		writeFixture(t, filepath.Join(dir, "settings.json"), "{}\n")
+	}
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+	runner := &pluginRunner{}
+	runner.onRun = func(dir, argv string) {
+		if len(journal.records) < 2 {
+			t.Fatalf("command %s in %s ran without snapshots", argv, dir)
+		}
+		settings := journal.records[len(journal.records)-2]
+		plugins := journal.records[len(journal.records)-1]
+		if settings.Destination != filepath.Join(dir, "settings.json") ||
+			plugins.Destination != filepath.Join(dir, "plugins") ||
+			settings.Result != layoutRecordPending || plugins.Result != layoutRecordPending {
+			t.Fatalf("command %s in %s saw records %+v %+v", argv, dir, settings, plugins)
+		}
+		if !strings.HasPrefix(argv, "plugin install ") {
+			return
+		}
+		settingsPath := filepath.Join(dir, "settings.json")
+		if err := os.WriteFile(settingsPath, []byte(`{"enabledPlugins":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeFixture(t, filepath.Join(dir, "plugins", "marker"), argv)
+	}
+	var out bytes.Buffer
+	installer := pluginEngine(home, binary, first, second, runner, &out, true)
+	installer.options.Journal = journal
+	if err := installer.ensureClaudePlugins(context.Background()); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	if len(journal.records) != 4*len(claudePlugins) {
+		t.Fatalf("records=%+v", journal.records)
+	}
+	for _, record := range journal.records {
+		if record.Row != layoutRowInstall || record.Result != layoutRecordApplied {
+			t.Fatalf("record not applied: %+v", record)
+		}
+	}
+	if err := RollbackLayout(
+		context.Background(), LayoutEnv{Home: home}, filepath.Base(journal.Dir()), false, io.Discard,
+	); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	for _, dir := range []string{first, second} {
+		got, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+		if err != nil || string(got) != "{}\n" {
+			t.Fatalf("settings in %s after rollback=%q err=%v", dir, got, err)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "plugins")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("plugins in %s after rollback: %v", dir, err)
+		}
+	}
+}
+
+func TestClaudePluginFailedCommandRestoresAndClosesJournal(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	before := []byte("{}\n")
+	writeFixture(t, filepath.Join(second, "settings.json"), string(before))
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+	runner := &pluginRunner{fail: map[string]string{
+		second + " plugin install " + claudePlugins[0].ID + " -y": "plugin failed",
+	}}
+	runner.onRun = func(dir, argv string) {
+		if dir != second || !strings.HasPrefix(argv, "plugin install ") {
+			return
+		}
+		writeFixture(t, filepath.Join(dir, "settings.json"), `{"enabledPlugins":{"bad":true}}`)
+		writeFixture(t, filepath.Join(dir, "plugins", "installed_plugins.json"), `{"plugins":{}}`)
+	}
+	var out bytes.Buffer
+	installer := pluginEngine(home, binary, first, second, runner, &out, true)
+	installer.options.Journal = journal
+	err := installer.ensureClaudePlugins(context.Background())
+	if err == nil || !strings.Contains(err.Error(), second) || !strings.Contains(err.Error(), claudePlugins[0].ID) ||
+		!strings.Contains(out.String(), "FAIL    claude plugin "+claudePlugins[0].ID+" in "+second) {
+		t.Fatalf("failure did not name account and plugin: err=%v\n%s", err, out.String())
+	}
+	got, readErr := os.ReadFile(filepath.Join(second, "settings.json"))
+	if readErr != nil || !bytes.Equal(got, before) {
+		t.Fatalf("settings after failure=%q err=%v", got, readErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(second, "plugins")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("plugins after failure: %v", statErr)
+	}
+	if len(journal.records) != 2*len(claudePlugins)+2 {
+		t.Fatalf("records=%+v", journal.records)
+	}
+	for _, record := range journal.records[len(journal.records)-2:] {
+		if record.Result != layoutRecordRestored {
+			t.Fatalf("failed plugin record=%+v", record)
+		}
+	}
+	for _, record := range journal.records[:len(journal.records)-2] {
+		if record.Result != layoutRecordApplied {
+			t.Fatalf("other account did not apply: %+v", record)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(journal.Dir(), "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted []layoutJournalRecord
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range persisted {
+		if record.Result == layoutRecordPending {
+			t.Fatalf("journal.json contains pending record: %+v", record)
+		}
+	}
+}
+
+func TestClaudePluginDoorLeavesSettingsEnvAlone(t *testing.T) {
+	for _, test := range []struct{ name, content string }{
+		{"env absent", "{}\n"},
+		{"operator env", "{\"env\":{\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"250000\"}}\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			updated, _, _, err := updateSettings([]byte(test.raw), home, false, nil)
-			if err != nil {
+			home, binary, first, second := pluginFixture(t)
+			path := filepath.Join(first, "settings.json")
+			writeFixture(t, path, test.content)
+			var out bytes.Buffer
+			installer := pluginEngine(home, binary, first, second, &pluginRunner{}, &out, true)
+			if err := installer.ensureClaudePlugins(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			var document struct {
-				Env map[string]string `json:"env"`
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != test.content {
+				t.Fatalf("settings=%q err=%v, want %q", got, err, test.content)
 			}
-			if err := json.Unmarshal(updated, &document); err != nil {
+		})
+	}
+}
+
+func TestClaudePluginDoorSkipsLiveChatsOnAccountAndSharer(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		name := "own account"
+		if shared {
+			name = "shared settings"
+		}
+		t.Run(name, func(t *testing.T) {
+			home, binary, first, second := pluginFixture(t)
+			procRoot := filepath.Join(home, "proc")
+			if err := os.MkdirAll(filepath.Join(procRoot, "4242"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if len(document.Env) != len(test.want) {
-				t.Fatalf("env=%v, want %v", document.Env, test.want)
+			liveDir := second
+			var extra string
+			if shared {
+				extra = filepath.Join(home, ".cc", "3")
+				if err := os.MkdirAll(extra, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, filepath.Join(first, "settings.json"), "{}")
+				for _, dir := range []string{second, extra} {
+					sharedSettings := filepath.Join(first, "settings.json")
+					if err := os.Symlink(sharedSettings, filepath.Join(dir, "settings.json")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				liveDir = extra
 			}
-			for key, value := range test.want {
-				if document.Env[key] != value {
-					t.Fatalf("env[%s]=%q, want %q (env=%v)", key, document.Env[key], value, document.Env)
+			writeFixture(t, filepath.Join(liveDir, "sessions", "4242.json"), "{}")
+			runner := &pluginRunner{}
+			var out bytes.Buffer
+			installer := pluginEngine(home, binary, first, second, runner, &out, true)
+			installer.options.ProcRoot = procRoot
+			if shared {
+				installer.options.ConfigDirs = append(installer.options.ConfigDirs, extra)
+			}
+			if err := installer.ensureClaudePlugins(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			for _, dir := range []string{second, extra} {
+				if dir == "" {
+					continue
+				}
+				physical := physicalSettingsPath(filepath.Join(dir, "settings.json"))
+				want := "skip    claude plugins in " + dir + ": live chats 4242 on " + physical +
+					" — close them and rerun pfm install --yes"
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("missing %q:\n%s", want, out.String())
+				}
+				for _, call := range runner.calls {
+					if call.configDir == dir {
+						t.Fatalf("live account ran %v", call)
+					}
+				}
+			}
+			if !shared {
+				if len(runner.calls) != 2*len(claudePlugins) || runner.calls[0].configDir != first {
+					t.Fatalf("other account did not install: %v", runner.calls)
 				}
 			}
 		})
 	}
-	userEnv := []byte(`{"env":{"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"}}`)
-	uninstalled, _, _, err := updateSettings(userEnv, home, true, nil)
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestClaudePluginDoorLiveChatReadErrorNamesAccount(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	writeFixture(t, filepath.Join(second, "sessions"), "not a directory")
+	runner := &pluginRunner{}
+	var out bytes.Buffer
+	installer := pluginEngine(home, binary, first, second, runner, &out, true)
+	installer.options.ProcRoot = filepath.Join(home, "proc")
+	err := installer.ensureClaudePlugins(context.Background())
+	if err == nil || !strings.Contains(err.Error(), second) || !strings.Contains(err.Error(), "live chats") ||
+		!strings.Contains(out.String(), "FAIL    claude plugin "+claudePlugins[0].ID+" in "+second) {
+		t.Fatalf("err=%v output=%s", err, out.String())
 	}
-	if !strings.Contains(string(uninstalled), "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS") {
-		t.Fatalf("uninstall removed a user env key: %s", uninstalled)
+	for _, call := range runner.calls {
+		if call.configDir == second {
+			t.Fatalf("account ran after guard failed: %v", call)
+		}
+	}
+	if len(runner.calls) != 2*len(claudePlugins) {
+		t.Fatalf("other account did not run: %v", runner.calls)
 	}
 }

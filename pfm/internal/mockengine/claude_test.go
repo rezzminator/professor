@@ -24,7 +24,13 @@ const fixtureSession = "b1111111-1111-4111-8111-111111111111"
 // claudeArgs is the argv pfm's spawn template hands a Claude chat
 // (internal/action/claude_spawn.go): the caller's words, then LaunchArgs.
 func claudeArgs(extra ...string) []string {
-	return append(extra, "--settings", `{"outputStyle":"default"}`, "--model", "claude-sonnet-4-5-fixture")
+	return append(
+		extra,
+		"--settings",
+		`{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`,
+		"--model",
+		"claude-sonnet-4-5-fixture",
+	)
 }
 
 func (fix *fixture) claudeTranscript(sessionID string) string {

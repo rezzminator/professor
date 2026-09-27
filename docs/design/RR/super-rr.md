@@ -71,5 +71,5 @@ Three runs on one query (how faithfully fetch-and-answer tools quote a page) set
 | The body it swaps into | `templates/global/agents/rr.md` |
 | The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `heavy-rr` entry |
 | The renderer and its tests | `pfm/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
-| The start hook's matcher | `pfm/internal/installer/expected_hooks.go` (`hookRRDirMatcher`) |
+| The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The family doc | `docs/design/RR/rr.md` |

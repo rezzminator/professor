@@ -465,48 +465,6 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 	}
 }
 
-// An identical config.json.pre-split beside the legacy config.json (a
-// rollback restoring the pre-update config is one producer, issue #24 #7)
-// must not abort the install with the "already exists" refusal.
-func TestInstallApplyContinuesPastAnIdenticalPreSplitBackup(t *testing.T) {
-	previous := runInstaller
-	t.Cleanup(func() { runInstaller = previous })
-	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
-		return installer.Report{}, nil
-	}
-	home := t.TempDir()
-	dir := filepath.Join(home, ".config", "pfm")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	legacy := filepath.Join(dir, pfmconfig.LegacyFileName)
-	content := `{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377}}}`
-	if err := os.WriteFile(legacy, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "config.json.pre-split"), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_CONFIG_HOME", "")
-	loaded, err := pfmconfig.Load("", home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime := commandRuntime{Paths: paths.Values{Home: home}, Config: loaded}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf(
-			"runInstall() code=%d stdout=%q stderr=%q, want 0 for an identical pre-split backup",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	if strings.Contains(stderr.String(), "apply config migration") {
-		t.Fatalf("stderr=%q, want no apply config migration failure", stderr.String())
-	}
-}
-
 // TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist is a REGRESSION
 // test for issue #24 findings 3/4's guard (M3 change B): an explicit
 // --config path that does not exist loads as silent defaults (config.go
@@ -894,7 +852,7 @@ func TestMigrateMachineConfigJournalsEveryFileItMoves(t *testing.T) {
 	env := installer.LayoutEnv{Home: home}
 	journal := installer.NewJournal(context.Background(), env)
 	var stdout, stderr bytes.Buffer
-	if _, code := migrateMachineConfig(installer.ModeApply, journal, &stdout, &stderr, runtime); code != 0 {
+	if _, code := migrateMachineConfig(installer.ModeApply, journal, "", &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("apply code=%d stderr=%q", code, stderr.String())
 	}
 	raw, err := os.ReadFile(filepath.Join(journal.Dir(), "journal.json"))

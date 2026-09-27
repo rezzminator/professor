@@ -13,6 +13,7 @@
     "nativeCursor": false,
     "systemPrompt": null,
     "webSearchesPerSession": 9007199254740991,
+    "autoCompactWindow": 100000,
     "tmuxTruecolor": true,
     "cleanupPeriodDays": 36500,
     "requireManagedCleanup": true,

@@ -80,6 +80,7 @@ type ClaudePrefs struct {
 	PermissionMode        string
 	Binary, Theme         string
 	WebSearchesPerSession int64
+	AutoCompactWindow     int64
 	TmuxTruecolor         bool
 	CleanupPeriodDays     int
 	RequireManagedCleanup bool
@@ -274,6 +275,7 @@ type rawAccount struct {
 type rawClaude struct {
 	PermissionMode        *string          `json:"permissionMode,omitempty"`
 	WebSearchesPerSession *int64           `json:"webSearchesPerSession,omitempty"`
+	AutoCompactWindow     *int64           `json:"autoCompactWindow,omitempty"`
 	TmuxTruecolor         *bool            `json:"tmuxTruecolor,omitempty"`
 	CleanupPeriodDays     *int             `json:"cleanupPeriodDays,omitempty"`
 	RequireManagedCleanup *bool            `json:"requireManagedCleanup,omitempty"`
@@ -428,6 +430,7 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
 		"claude.webSearchesPerSession":                       SourceDefault,
+		"claude.autoCompactWindow":                           SourceDefault,
 		"claude.tmuxTruecolor":                               SourceDefault,
 		"claude.cleanupPeriodDays":                           SourceDefault,
 		"claude.requireManagedCleanup":                       SourceDefault,
@@ -474,6 +477,7 @@ func defaultsWithMCPServers(
 			PermissionMode:        PermissionBypass,
 			Binary:                pfmengine.MustLookup(pfmengine.Claude).Binary,
 			WebSearchesPerSession: 9007199254740991,
+			AutoCompactWindow:     100000,
 			TmuxTruecolor:         true,
 			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
@@ -750,6 +754,7 @@ func loadWithMCPServers(
 					return Config{}, err
 				}
 				prefs.WebSearchesPerSession = result.Claude.WebSearchesPerSession
+				prefs.AutoCompactWindow = result.Claude.AutoCompactWindow
 				prefs.TmuxTruecolor = result.Claude.TmuxTruecolor
 				prefs.CleanupPeriodDays = result.Claude.CleanupPeriodDays
 				prefs.RequireManagedCleanup = result.Claude.RequireManagedCleanup
@@ -1019,88 +1024,6 @@ func configJSONError(path string, err error, contentSize ...int64) error {
 	return fmt.Errorf("parse config %s: %w", path, err)
 }
 
-func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePrefs, error) {
-	prefs := ClaudePrefs{}
-	if raw.WebSearchesPerSession != nil && *raw.WebSearchesPerSession < 1 {
-		return ClaudePrefs{}, fmt.Errorf(
-			"config %s: %s.webSearchesPerSession must be at least 1", path, configScope(scope, index),
-		)
-	}
-	if raw.CleanupPeriodDays != nil && *raw.CleanupPeriodDays < 1 {
-		return ClaudePrefs{}, fmt.Errorf(
-			"config %s: %s.cleanupPeriodDays must be at least 1", path, configScope(scope, index),
-		)
-	}
-	if raw.PermissionMode != nil {
-		mode := *raw.PermissionMode
-		// v1 used "prompt". Keep accepting it as an input alias while
-		// materializing the v2 canonical value.
-		if mode == "prompt" {
-			mode = PermissionPrompt
-		}
-		if mode != PermissionBypass && mode != PermissionPrompt {
-			return ClaudePrefs{}, fmt.Errorf(
-				"config %s: %s.permissionMode must be %q or %q, got %q",
-				path,
-				configScope(scope, index),
-				PermissionBypass,
-				PermissionPrompt,
-				*raw.PermissionMode,
-			)
-		}
-		prefs.PermissionMode = mode
-	}
-	if raw.Binary != nil {
-		if strings.TrimSpace(*raw.Binary) == "" || strings.ContainsRune(*raw.Binary, '\x00') {
-			return ClaudePrefs{}, fmt.Errorf(
-				"config %s: %s.binary must be a non-empty command",
-				path,
-				configScope(scope, index),
-			)
-		}
-		prefs.Binary = *raw.Binary
-	}
-	if raw.Cache1H != nil {
-		prefs.Cache1H = *raw.Cache1H
-	}
-	if raw.SystemPrompt != nil {
-		value := *raw.SystemPrompt
-		if value != SystemPromptProduction && value != SystemPromptLean && value != SystemPromptProfessor {
-			return ClaudePrefs{}, fmt.Errorf(
-				"config %s: %s.systemPrompt must be %q, %q or %q, got %q",
-				path,
-				configScope(scope, index),
-				SystemPromptProduction,
-				SystemPromptLean,
-				SystemPromptProfessor,
-				value,
-			)
-		}
-		prefs.SystemPrompt = value
-	}
-	return prefs, nil
-}
-
-func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[string]Source, scope string, index int) {
-	base := configScope(scope, index) + "."
-	if raw.WebSearchesPerSession != nil {
-		target.WebSearchesPerSession = *raw.WebSearchesPerSession
-		sources[base+"webSearchesPerSession"] = SourceFile
-	}
-	if raw.TmuxTruecolor != nil {
-		target.TmuxTruecolor = *raw.TmuxTruecolor
-		sources[base+"tmuxTruecolor"] = SourceFile
-	}
-	if raw.CleanupPeriodDays != nil {
-		target.CleanupPeriodDays = *raw.CleanupPeriodDays
-		sources[base+"cleanupPeriodDays"] = SourceFile
-	}
-	if raw.RequireManagedCleanup != nil {
-		target.RequireManagedCleanup = *raw.RequireManagedCleanup
-		sources[base+"requireManagedCleanup"] = SourceFile
-	}
-}
-
 func decodeCodexPrefs(raw rawCodex, path, scope string, index int) (CodexPrefs, error) {
 	return decodeCodexPrefValues(raw.Yolo, raw.Binary, path, scope, index)
 }
@@ -1297,6 +1220,7 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// there is no false-zero ambiguity left to guard against here.
 		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
 		result.WebSearchesPerSession = account.Claude.WebSearchesPerSession
+		result.AutoCompactWindow = account.Claude.AutoCompactWindow
 		result.TmuxTruecolor = account.Claude.TmuxTruecolor
 		result.CleanupPeriodDays = account.Claude.CleanupPeriodDays
 		result.RequireManagedCleanup = account.Claude.RequireManagedCleanup
@@ -1477,6 +1401,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		if account.Claude != nil {
 			value[claudeName] = map[string]any{
 				"webSearchesPerSession": account.Claude.WebSearchesPerSession,
+				"autoCompactWindow":     account.Claude.AutoCompactWindow,
 				"tmuxTruecolor":         account.Claude.TmuxTruecolor,
 				"cleanupPeriodDays":     account.Claude.CleanupPeriodDays,
 				"requireManagedCleanup": account.Claude.RequireManagedCleanup,
@@ -1539,6 +1464,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		"accounts": accounts,
 		claudeName: map[string]any{
 			"webSearchesPerSession": config.Claude.WebSearchesPerSession,
+			"autoCompactWindow":     config.Claude.AutoCompactWindow,
 			"tmuxTruecolor":         config.Claude.TmuxTruecolor,
 			"cleanupPeriodDays":     config.Claude.CleanupPeriodDays,
 			"requireManagedCleanup": config.Claude.RequireManagedCleanup,

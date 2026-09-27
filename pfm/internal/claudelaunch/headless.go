@@ -20,7 +20,8 @@ const (
 var headlessKeys = map[string]string{
 	knobCache1H: kindBool, knobSystemPrompt: kindString, knobNativeCursor: kindBool,
 	knobMaxSubagentSpawnDepth: kindInt, knobMaxConcurrentSubagents: kindInt,
-	knobWebSearchesPerSession: kindInt, knobTmuxTruecolor: kindBool, knobTheme: kindString,
+	knobWebSearchesPerSession: kindInt, knobAutoCompactWindow: kindInt,
+	knobTmuxTruecolor: kindBool, knobTheme: kindString,
 	knobCleanupPeriodDays: kindInt,
 }
 
@@ -65,6 +66,12 @@ func ParseSettings(raw []byte) (map[string]any, error) {
 }
 
 func checkValue(key, kind string, value any) error {
+	if key == knobAutoCompactWindow {
+		if number, ok := integer(value); ok && number > 0 {
+			return nil
+		}
+		return fmt.Errorf("%s: expected positive int", key)
+	}
 	switch kind {
 	case kindBool:
 		if _, ok := value.(bool); ok {
@@ -102,7 +109,13 @@ func integer(value any) (int64, bool) {
 // RenderHeadless turns supported per-run Claude preferences into --settings JSON.
 func RenderHeadless(settings map[string]any) (string, error) {
 	result := map[string]any{knobOutputStyle: defaultWord}
-	env := map[string]string{}
+	env := map[string]string{envFunctionHooks: "1"}
+	for _, knob := range Knobs {
+		if knob.Name == knobAutoCompactWindow {
+			env[envAutoCompactWindow] = strconv.FormatInt(knob.Default.(int64), 10)
+			break
+		}
+	}
 	for key, value := range settings {
 		kind, ok := headlessKeys[key]
 		if !ok {
@@ -138,6 +151,8 @@ func RenderHeadless(settings map[string]any) (string, error) {
 			}
 		case knobWebSearchesPerSession:
 			env[envWebSearches] = strconv.FormatInt(mustInteger(value), 10)
+		case knobAutoCompactWindow:
+			env[envAutoCompactWindow] = strconv.FormatInt(mustInteger(value), 10)
 		case knobTmuxTruecolor:
 			if value.(bool) {
 				env[envTmuxTruecolor] = "1"

@@ -209,7 +209,14 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		return 1
 	}
 	runtime.Config = installConfig
-	migrated, migrateCode := migrateMachineConfig(mode, journal, stdout, stderr, runtime)
+	planSource := ""
+	for _, finding := range layoutFindings {
+		if mode != installer.ModeApply && finding.Row == "config" && finding.Verdict == installer.VerdictMove &&
+			finding.Err == nil && finding.Source != "" && finding.Path == runtime.Config.Path {
+			planSource = finding.Source
+		}
+	}
+	migrated, migrateCode := migrateMachineConfig(mode, journal, planSource, stdout, stderr, runtime)
 	if migrateCode != 0 {
 		return migrateCode
 	}
@@ -325,10 +332,11 @@ func migrateInstalledLayoutDatabases(ctx context.Context, statePath, cachePath s
 func migrateMachineConfig(
 	mode installer.Mode,
 	journal *installer.Journal,
+	planSource string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (commandRuntime, int) {
-	migration, err := pfmconfig.PlanMigration(runtime.Config)
+	migration, err := pfmconfig.PlanMigrationFrom(runtime.Config, planSource)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm install: plan config migration: %v\n", err)
 		return runtime, 1

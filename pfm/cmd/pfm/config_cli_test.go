@@ -352,7 +352,7 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	path := writeConfigFixture(
 		t,
 		root,
-		`{"version":2,"claude":{"webSearchesPerSession":17,"tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false}}`,
+		`{"version":2,"claude":{"webSearchesPerSession":17,"autoCompactWindow":250000,"tmuxTruecolor":false,"cleanupPeriodDays":31,"requireManagedCleanup":false}}`,
 	)
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
@@ -360,6 +360,7 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 	}
 	for _, want := range []string{
 		"config claude.webSearchesPerSession=17 (file)",
+		"config claude.autoCompactWindow=250000 (file)",
 		"config claude.tmuxTruecolor=false (file)",
 		"config claude.cleanupPeriodDays=31 (file)",
 		"config claude.requireManagedCleanup=false (file)",
@@ -367,6 +368,17 @@ func TestConfigShowReportsClaudeLaunchPreferenceSources(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("config show lacks %q: %s", want, stdout.String())
 		}
+	}
+	if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("default config show code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "config claude.autoCompactWindow=100000 (default)") {
+		t.Fatalf("default config show lacks auto compact window: %s", stdout.String())
 	}
 }
 

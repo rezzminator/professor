@@ -340,6 +340,31 @@ func TestLayoutLegacyStatePath(t *testing.T) {
 	}
 }
 
+func TestLayoutDatabaseConfiguredToLegacyPathRefuses(t *testing.T) {
+	for _, row := range []string{layoutRowStateDB, layoutRowCacheDB} {
+		t.Run(row, func(t *testing.T) {
+			env := layoutFixture(t)
+			legacy := paths.LegacyStateDB(env.Home)
+			if row == layoutRowCacheDB {
+				legacy = paths.LegacyCacheDB(env.Home)
+			}
+			layoutWrite(t, legacy, "database")
+			target := legacy
+			if row == layoutRowCacheDB {
+				alias := filepath.Join(env.Home, "database-alias")
+				if err := os.Symlink(filepath.Dir(legacy), alias); err != nil {
+					t.Fatal(err)
+				}
+				target = filepath.Join(alias, filepath.Base(legacy))
+			}
+			finding := classifyDB(env, row, target, legacy)
+			if finding.Verdict != VerdictRefuse || finding.Detail != "configured path is the legacy path" {
+				t.Fatalf("classifyDB() = %+v", finding)
+			}
+		})
+	}
+}
+
 func TestLayoutClassifierPureAndStable(t *testing.T) {
 	env := layoutFixture(t)
 	before := layoutTreeSnapshot(t, env.Home)
@@ -627,6 +652,7 @@ func TestLayoutSharedAccountSettingsLinkIsJudgedOnce(t *testing.T) {
 	if finding.Detail != "live chats: 4242" {
 		t.Fatalf("a live chat in a sharing account: detail=%q", finding.Detail)
 	}
+	requireLayoutVerdict(t, ClassifyLayout(env), "account-settings", links[1], VerdictOK)
 }
 
 func TestLayoutForeignAccountSettingsLinksRefuse(t *testing.T) {

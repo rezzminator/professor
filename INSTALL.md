@@ -168,6 +168,10 @@ One writer per surface — the law that keeps the two installers from fighting o
 | Surface | Written by | Paths |
 | --------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Host fleet wiring | `pfm install` — the only writer | `{clone}/pfm.config.json`, `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, the systemd/launchd scheduler units, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, and the opt-in VS Code user/remote `settings.json`; Claude hooks, status line and MCP ride every launch |
+| Claude managed cleanup | `pfm install` | `/etc/claude-code/managed-settings.d/pfm.json`; uses `sudo -n` when direct write is unavailable. Without cached credentials, install warns and prints the command to run. |
+| State and cache database moves | `pfm install` | `~/.cc/fleet.db` → `~/.local/state/pfm/pfm.db`; `~/.local/state/pfm/fleet.db` → `~/.local/state/pfm/pfm-cache.db`, including WAL/SHM siblings. |
+| Install migration journal | `pfm install` | `~/.local/state/pfm/migrations/<id>/` records changed paths and their backups for rollback. |
+| Claude plugin door | `pfm install` through `claude plugin install` | Each account's `{config dir}/plugins/**` and `enabledPlugins` in its `settings.json` are journaled; a plugin write is skipped while a chat is live on that settings file, including a sharing account. |
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, source-fetched and bundled (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json`, `~/.claude/themes/professor-{gold,silver,bronze}.json`, and any other target declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
@@ -205,6 +209,24 @@ Each tier has one source of truth and one update mechanism:
 A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.md`, `.codex/**`, `.opencode/**` are generated, never tracked (see [`.gitignore`](.gitignore)). Opening it in Claude Code first generates them via the `Stop` hook; opening it in Codex or OpenCode before that first Claude turn needs `pfm codex build .` and `pfm opencode build .` run once by hand. `pfm install` compiles the machine-global `.toml` twins the same way, into pfm's own generated directory — never into the clone.
 
 **Read every release you skipped before you update.** `pfm version` names the installed release; each later `releases/vX.Y.Z.md` up to the target is one release's changes, and its `#### → For:` lines are what that release asks of you, each marked `before update`, `after update` or `per project` (the grammar is `docs/RELEASE.md` § Release notes). A release whose note carries `#### → Stop:` is a required stop: update to it first, finish its actions, then continue. Read all of them first — five versions behind is five files — and merge their actions into one list, a later release's action superseding an earlier one on the same surface. Then run `pfm update` and work through the list; `pfm update` prints the release-notes files it moved past once the source has advanced.
+
+### Crossing from v0.76–v0.78
+
+Before the first migration, run `infra/fence/host-backup.sh <backup> live` from the clone, then rehearse with `infra/fence/host-rehearsal.sh <backup> <scratch>`. Close every chat before crossing. If an older `pfm update` reaches the layout migration, its candidate install prints this refusal:
+
+```text
+  refuse  updater — this install migrates the host layout, and the pfm update running it predates the install journal
+cross by hand:
+  1. close every chat, the one running this command included
+  2. from a plain shell outside tmux, run:
+     git -C <clone> pull --ff-only
+     make -C <clone>/pfm host-install
+     pfm install --yes
+```
+
+The older `pfm update` rolls itself back first, so nothing changed. Run the crossing commands from a plain shell outside tmux after it exits.
+
+For a journal listed under `~/.local/state/pfm/migrations/`, run `pfm install --rollback <id>` to reverse that install; `pfm install --rollback <id> --force` overrides destination drift when you intend to overwrite newer changes. A pending journal from a crashed or failed install blocks the next install until it is rolled back. After an install seals its journal, pruning keeps the newest three sealed journals and any younger than 14 days.
 
 The project flow is deliberately non-destructive:
 

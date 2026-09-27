@@ -104,6 +104,16 @@ func (migration Migration) Preview(config Config) Config {
 
 // PlanMigration inspects the machine's pfm config without modifying it.
 func PlanMigration(config Config) (Migration, error) {
+	return PlanMigrationFrom(config, "")
+}
+
+// PlanMigrationFrom plans config.Path's migration from the bytes at source
+// (empty: config.Path): an install preview reads a config the layout will
+// move to config.Path but has not moved yet.
+func PlanMigrationFrom(config Config, source string) (Migration, error) {
+	if source == "" {
+		source = config.Path
+	}
 	migration := Migration{Path: config.Path}
 	if !config.Exists {
 		return migration, nil
@@ -122,7 +132,7 @@ func PlanMigration(config Config) (Migration, error) {
 		}
 	}
 	migration.harvesterPath = HarvesterPath(migration.Path)
-	top, err := readTopLevel(config.Path)
+	top, err := readTopLevel(source)
 	if err != nil {
 		return Migration{}, err
 	}

@@ -216,7 +216,13 @@ func TestPreferredUpdateSourceRepoPreservesRecordedAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	aliasRepo := filepath.Join(aliasRoot, filepath.Base(realRepo))
-	if err := paths.WriteSourceRepoMarker(home, aliasRepo); err != nil {
+	// A marker an earlier release recorded through the alias; this release
+	// records the resolved path (paths.SourceRepoMarkerContent).
+	marker := paths.SourceRepoPath(home)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte(aliasRepo+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

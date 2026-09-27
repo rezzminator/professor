@@ -80,6 +80,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if parsed.SettingsEnv["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] != "9007199254740991" {
 					t.Error("web cap missing")
 				}
+			case "autoCompactWindow":
+				if parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "100000" {
+					t.Error("auto compact window missing")
+				}
 			case "tmuxTruecolor":
 				if parsed.SettingsEnv["CLAUDE_CODE_TMUX_TRUECOLOR"] != "1" {
 					t.Error("truecolor missing")
@@ -87,6 +91,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 			case "agentTeams":
 				if parsed.SettingsEnv["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] != "0" {
 					t.Error("agent teams missing")
+				}
+			case "functionHooks":
+				if parsed.SettingsEnv["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"] != "1" {
+					t.Error("function hooks missing")
 				}
 			case "outputStyle":
 				if parsed.Settings["outputStyle"] != "default" {

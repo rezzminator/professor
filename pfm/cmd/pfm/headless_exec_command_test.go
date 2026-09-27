@@ -190,7 +190,11 @@ func TestHeadlessExecPFMSettingsFile(t *testing.T) {
 printf '%s\n' '{"result":"ok"}'`)
 	machine := headlessCLIRuntime(t, binary)
 	path := filepath.Join(t.TempDir(), "s.json")
-	if err := os.WriteFile(path, []byte(`{"theme":"t","maxSubagentSpawnDepth":4}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"theme":"t","maxSubagentSpawnDepth":4,"autoCompactWindow":250000}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -205,7 +209,7 @@ printf '%s\n' '{"result":"ok"}'`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"env":{"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
+	want := `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},` +
 		`"outputStyle":"default","theme":"t"}`
 	if !strings.Contains(string(argv), want) {
 		t.Fatalf("argv = %s", argv)
@@ -223,6 +227,7 @@ printf '%s\n' '{"result":"ok"}'`)
 	machine.Config.Claude.Theme = "from-config"
 	machine.Config.Claude.MaxSubagentSpawnDepth = 9
 	machine.Config.Claude.WebSearchesPerSession = 99
+	machine.Config.Claude.AutoCompactWindow = 5
 	machine.Config.Claude.TmuxTruecolor = true
 	machine.Config.Claude.Cache1H = true
 	var stdout, stderr bytes.Buffer
@@ -234,7 +239,10 @@ printf '%s\n' '{"result":"ok"}'`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(string(got), "--settings\n{\"outputStyle\":\"default\"}\n") {
+	if !strings.HasSuffix(
+		string(got),
+		"--settings\n{\"env\":{\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"100000\",\"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS\":\"1\"},\"outputStyle\":\"default\"}\n",
+	) {
 		t.Fatalf("configured launch values reached child: %q", got)
 	}
 }
@@ -246,6 +254,8 @@ func TestHeadlessExecPFMSettingsErrorsNamePathOrKey(t *testing.T) {
 		{"unreadable", "", "missing.json"},
 		{"unknown key", `{"mystery":true}`, "mystery"},
 		{"bad type", `{"theme":4}`, "theme"},
+		{"zero window", `{"autoCompactWindow":0}`, "autoCompactWindow"},
+		{"bad window type", `{"autoCompactWindow":"x"}`, "autoCompactWindow"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "s.json")

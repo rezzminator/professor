@@ -282,6 +282,26 @@ func TestHarnessBaselineDirUsesRecordedClone(t *testing.T) {
 	}
 }
 
+func TestSourceRepoMarkerContentResolvesAlias(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(repo, alias); err != nil {
+		t.Fatal(err)
+	}
+	content, err := SourceRepoMarkerContent(alias)
+	if err != nil || string(content) != repo+"\n" {
+		t.Fatalf("content=%q err=%v, want %q", content, err, repo+"\n")
+	}
+	missing := filepath.Join(root, "missing")
+	if _, err := SourceRepoMarkerContent(missing); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing error=%v", err)
+	}
+}
+
 func TestResolveManagedSettingsDirUsesJailOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(EnvHome, home)

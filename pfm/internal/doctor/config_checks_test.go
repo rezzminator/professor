@@ -106,6 +106,9 @@ func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
 	) {
 		t.Fatalf("missing-key row absent: %s", output.String())
 	}
+	if !strings.Contains(output.String(), "config: missing key claude.autoCompactWindow (default 100000)") {
+		t.Fatalf("auto compact window missing-key row absent: %s", output.String())
+	}
 	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}

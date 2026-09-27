@@ -268,17 +268,19 @@ func classifyAccountSettings(env LayoutEnv) []LayoutFinding {
 		} else if finding.Err == nil && exists {
 			judgeAccountSettings(env, &finding, info, ownership[physical])
 		}
-		live := []string{}
-		for _, sharer := range sharers[physical] {
-			pids, err := liveChatPIDs(env.ProcRoot, sharer)
-			if err != nil {
-				finding.Err = err
-				break
+		if finding.Verdict != VerdictOK {
+			live := []string{}
+			for _, sharer := range sharers[physical] {
+				pids, err := liveChatPIDs(env.ProcRoot, sharer)
+				if err != nil {
+					finding.Err = err
+					break
+				}
+				live = append(live, pids...)
 			}
-			live = append(live, pids...)
-		}
-		if finding.Err == nil && len(live) > 0 {
-			finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
+			if finding.Err == nil && len(live) > 0 {
+				finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
+			}
 		}
 		findings = append(findings, finding)
 	}

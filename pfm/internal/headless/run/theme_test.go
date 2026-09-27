@@ -14,8 +14,8 @@ func TestArgumentsThemeIsPassedPerRun(t *testing.T) {
 		settings map[string]any
 		want     string
 	}{
-		{"no theme passed", nil, `{"outputStyle":"default"}`},
-		{"theme passed", map[string]any{"theme": "t"}, `{"outputStyle":"default","theme":"t"}`},
+		{"no theme passed", nil, `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`},
+		{"theme passed", map[string]any{"theme": "t"}, `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default","theme":"t"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			args, err := arguments(Request{Engine: pfmengine.Claude, Config: machine, Settings: test.settings})
@@ -37,7 +37,11 @@ func TestArgumentsWithoutAccountStillGetsPassedSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsPair(args, "--settings", `{"outputStyle":"default","theme":"t"}`) {
+	if !containsPair(
+		args,
+		"--settings",
+		`{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default","theme":"t"}`,
+	) {
 		t.Fatalf("without-account args = %q", args)
 	}
 }

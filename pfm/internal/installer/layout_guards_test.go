@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -76,8 +77,21 @@ func TestLayoutLiveChatsRefuseAndUnreadableSessionsFail(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(env.ProcRoot, "123"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	layoutWrite(
+		t,
+		filepath.Join(account, "settings.json"),
+		`{"statusLine":{"type":"command","command":"`+filepath.Join(env.Home, ".local", "bin", "pfm")+` statusline"}}`,
+	)
+	registry := filepath.Join(account, ".claude.json")
+	layoutWrite(t, registry, `{"mcpServers":{"chat":{"command":"pfm"}}}`)
+	layoutWrite(t, filepath.Join(env.ManagedRoot, mcpOwnershipName), `{"registrations":{"`+registry+`":{"chat":{}}}}`)
+	store := filepath.Join(account, "file-history")
+	if err := os.Remove(store); err != nil {
+		t.Fatal(err)
+	}
+	layoutWrite(t, filepath.Join(store, "checkpoint"), "keep")
 	findings := ClassifyLayout(env)
-	for _, check := range []struct{ row, path string }{{"session-store", filepath.Join(account, "projects")}, {"account-settings", filepath.Join(account, "settings.json")}, {"account-mcp", filepath.Join(account, ".claude.json")}} {
+	for _, check := range []struct{ row, path string }{{"session-store", store}, {"account-settings", filepath.Join(account, "settings.json")}, {"account-mcp", registry}} {
 		finding := requireLayoutVerdict(t, findings, check.row, check.path, VerdictRefuse)
 		if finding.Detail != "live chats: 123" {
 			t.Errorf("%s detail=%q", check.row, finding.Detail)
@@ -90,9 +104,60 @@ func TestLayoutLiveChatsRefuseAndUnreadableSessionsFail(t *testing.T) {
 		t.Fatal(err)
 	}
 	layoutWrite(t, filepath.Join(account, "sessions"), "not a directory")
-	finding := layoutFinding(t, ClassifyLayout(env), "session-store", filepath.Join(account, "projects"))
+	finding := layoutFinding(t, ClassifyLayout(env), "session-store", store)
 	if finding.Err == nil {
 		t.Fatal("unreadable sessions directory looked clean")
+	}
+}
+
+func TestLayoutLiveChatLeavesCleanRowsOK(t *testing.T) {
+	env := layoutFixture(t)
+	account := env.Config.Accounts[1].ConfigDir
+	layoutWrite(t, filepath.Join(account, "settings.json"), `{}`)
+	layoutWrite(t, filepath.Join(account, ".claude.json"), `{}`)
+	layoutWrite(t, filepath.Join(account, "sessions", "123.json"), `{}`)
+	if err := os.Mkdir(filepath.Join(env.ProcRoot, "123"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	findings := ClassifyLayout(env)
+	for _, entry := range SessionPaths {
+		requireLayoutVerdict(t, findings, layoutRowSessionStore, filepath.Join(account, entry), VerdictOK)
+	}
+	for _, check := range []struct{ row, path string }{
+		{layoutRowAccountSettings, filepath.Join(account, "settings.json")},
+		{layoutRowAccountMCP, filepath.Join(account, ".claude.json")},
+	} {
+		requireLayoutVerdict(t, findings, check.row, check.path, VerdictOK)
+	}
+}
+
+func TestLayoutLiveChatRefusesSessionRepoint(t *testing.T) {
+	env := layoutFixture(t)
+	account := env.Config.Accounts[1].ConfigDir
+	third := filepath.Join(env.Home, ".cc", "3")
+	env.Config.Accounts = append(env.Config.Accounts, pfmconfig.Account{ID: 3, ConfigDir: third})
+	if err := os.MkdirAll(third, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(env.Home, ".claude", "projects")
+	if err := os.Symlink(store, filepath.Join(third, "projects")); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(account, "projects")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(third, "projects"), link); err != nil {
+		t.Fatal(err)
+	}
+	requireLayoutVerdict(t, ClassifyLayout(env), layoutRowSessionStore, link, VerdictRepoint)
+	layoutWrite(t, filepath.Join(account, "sessions", "123.json"), `{}`)
+	if err := os.Mkdir(filepath.Join(env.ProcRoot, "123"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	finding := requireLayoutVerdict(t, ClassifyLayout(env), layoutRowSessionStore, link, VerdictRefuse)
+	if finding.Detail != "live chats: 123" {
+		t.Fatalf("repoint detail=%q", finding.Detail)
 	}
 }
 

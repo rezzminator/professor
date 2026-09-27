@@ -52,11 +52,10 @@ func TestClaudePluginsDoctorNamesEachGapPerAccount(t *testing.T) {
 		}
 	}
 	writeSettings(complete, `{"enabledPlugins":{"cache-live-control@cache-live-control":true,`+
-		`"sub-agent-compact@sub-agent-compact":true},"env":{"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1",`+
-		`"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000"}}`)
+		`"sub-agent-compact@sub-agent-compact":true}}`)
 	writeDoctorInstalledPlugins(t, complete, doctorPluginIDs...)
 	writeSettings(partial, `{"enabledPlugins":{"cache-live-control@cache-live-control":true,`+
-		`"sub-agent-compact@sub-agent-compact":false},"env":{"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"0"}}`)
+		`"sub-agent-compact@sub-agent-compact":false}}`)
 	writeDoctorInstalledPlugins(t, partial, doctorPluginIDs...)
 	// A directory where the file belongs fails the read for any uid.
 	if err := os.MkdirAll(filepath.Join(broken, "settings.json"), 0o700); err != nil {
@@ -78,14 +77,13 @@ func TestClaudePluginsDoctorNamesEachGapPerAccount(t *testing.T) {
 	var output bytes.Buffer
 	tally := &doctorTally{}
 	printClaudePluginsDoctor(&output, machine, tally)
-	// The unreadable file is a failure; each missing plugin or env key a warning.
-	if tally.failures != 1 || tally.warnings != 3 {
-		t.Fatalf("failures=%d warnings=%d, want 1 and 3\n%s", tally.failures, tally.warnings, output.String())
+	// The unreadable file is a failure; each missing plugin is a warning.
+	if tally.failures != 1 || tally.warnings != 2 {
+		t.Fatalf("failures=%d warnings=%d, want 1 and 2\n%s", tally.failures, tally.warnings, output.String())
 	}
 	for _, want := range []string{
 		"doctor: claude_plugins claude[1] ok\n",
 		"doctor: claude_plugins claude[2] plugin sub-agent-compact@sub-agent-compact not enabled — run pfm",
-		"doctor: claude_plugins claude[2] env CLAUDE_CODE_AUTO_COMPACT_WINDOW absent — run pfm install --yes",
 		"doctor: claude_plugins claude[3] could not read " + filepath.Join(broken, "settings.json"),
 		"doctor: claude_plugins claude[4] skipped: no settings.json at " + filepath.Join(fresh, "settings.json"),
 		"doctor: claude_plugins claude[5] plugin sub-agent-compact@sub-agent-compact not installed in " + shared +
@@ -96,8 +94,25 @@ func TestClaudePluginsDoctorNamesEachGapPerAccount(t *testing.T) {
 		}
 	}
 	if strings.Contains(output.String(), "claude[2] plugin cache-live-control") ||
-		strings.Contains(output.String(), "claude[2] env CLAUDE_CODE_ENABLE_FUNCTION_HOOKS") ||
+		strings.Contains(output.String(), "env CLAUDE_CODE_AUTO_COMPACT_WINDOW absent") ||
 		strings.Contains(output.String(), "claude[5] plugin cache-live-control") {
-		t.Fatalf("a present plugin or env key was reported missing:\n%s", output.String())
+		t.Fatalf("a present plugin or removed env check was reported missing:\n%s", output.String())
+	}
+}
+
+func TestClaudePluginsDoctorDedupesMissingTailThroughSymlinkedParent(t *testing.T) {
+	root := t.TempDir()
+	physical := filepath.Join(root, "physical")
+	if err := os.Mkdir(physical, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(physical, alias); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	if !firstVisit(seen, filepath.Join(alias, "settings.json")) ||
+		firstVisit(seen, filepath.Join(physical, "settings.json")) || len(seen) != 1 {
+		t.Fatalf("missing settings target visited more than once: %v", seen)
 	}
 }

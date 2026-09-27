@@ -42,12 +42,13 @@ const (
 func SIDScratchDirs() []string { return []string{SIDScratchDoctor, SIDScratchChatLoads} }
 
 const (
-	EnvConfig      = "PFM_CONFIG"
-	EnvCacheDB     = "PFM_CACHE_DB"
-	EnvStateDB     = "PFM_STATE_DB"
-	EnvSIDDir      = "PFM_SID_DIR"
-	EnvClaudeRoots = "PFM_CLAUDE_ROOTS"
-	EnvCodexHome   = "PFM_CODEX_ROOT"
+	EnvConfig        = "PFM_CONFIG"
+	EnvUpdateInstall = "PFM_UPDATE_INSTALL"
+	EnvCacheDB       = "PFM_CACHE_DB"
+	EnvStateDB       = "PFM_STATE_DB"
+	EnvSIDDir        = "PFM_SID_DIR"
+	EnvClaudeRoots   = "PFM_CLAUDE_ROOTS"
+	EnvCodexHome     = "PFM_CODEX_ROOT"
 	// EnvOpenCodeRoot jails OpenCode's data home (~/.local/share/opencode),
 	// the directory holding its SQLite session store opencode.db.
 	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
@@ -116,6 +117,10 @@ func SourceRepoMarkerContent(repo string) ([]byte, error) {
 	abs, err := filepath.Abs(repo)
 	if err != nil {
 		return nil, fmt.Errorf("resolve source repository %q: %w", repo, err)
+	}
+	abs, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source repo %s: %w", abs, err)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {

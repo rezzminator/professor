@@ -58,6 +58,21 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 	h.requireSuccess("stage installed assets", run("install", "--yes", "--skip-harvest", "--skip-themes"))
 	plantLegacyHostLayout(t, home, repo)
 	plantHostInstallerDrift(t, home)
+	// The migration apply must run the plugin door again; its settings write
+	// makes rollback detect a missing plugin journal record.
+	for _, relative := range []string{".claude/settings.json", ".cc/2/settings.json", ".cc/3/settings.json"} {
+		raw, err := os.ReadFile(filepath.Join(home, relative))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings map[string]any
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			t.Fatal(err)
+		}
+		if _, present := settings["enabledPlugins"]; present {
+			t.Fatalf("plant left %s plugin enabled; apply would not exercise the plugin door", relative)
+		}
+	}
 	filesBefore := hostLayoutPayloads(t, home, "")
 	stateBefore := hostLayoutTableCounts(t, filepath.Join(home, ".cc", "fleet.db"))
 	cacheBefore := hostLayoutTableCounts(t, filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
@@ -71,6 +86,31 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 	apply := run("install", "--yes", "--skip-harvest", "--skip-themes")
 	h.requireSuccess("layout apply", apply)
 	journal := hostLayoutJournal(t, home, apply.stdout)
+	if !strings.Contains(apply.stdout, "change  run CLAUDE_CONFIG_DIR=") {
+		t.Fatalf("migration apply did not run the plugin door:\n%s", apply.stdout)
+	}
+	journalRaw, err := os.ReadFile(filepath.Join(journal, "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journalRecords []struct{ Row, Destination, Result string }
+	if err := json.Unmarshal(journalRaw, &journalRecords); err != nil {
+		t.Fatal(err)
+	}
+	pluginPaths := map[string]bool{}
+	for _, record := range journalRecords {
+		if record.Row == "install" && record.Result == "applied" {
+			pluginPaths[record.Destination] = true
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(home, ".claude", "settings.json"),
+		filepath.Join(home, ".claude", "plugins"),
+	} {
+		if !pluginPaths[path] {
+			t.Fatalf("plugin door did not journal %s", path)
+		}
+	}
 	for _, line := range strings.Split(apply.stdout, "\n") {
 		if strings.Contains(line, "refuse  layout") || strings.Contains(line, "UNREADABLE") {
 			t.Fatalf("unexpected layout refusal: %s\n%s", line, apply.stdout)

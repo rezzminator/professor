@@ -21,9 +21,15 @@ func TestRenderHeadlessPayload(t *testing.T) {
 	if payload["env"].(map[string]any)["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] != "3" {
 		t.Errorf("payload=%#v", payload)
 	}
-	empty, err := RenderHeadless(map[string]any{})
-	if err != nil || empty != `{"outputStyle":"default"}` {
+	empty, err := RenderHeadless(nil)
+	if err != nil ||
+		empty != `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}` {
 		t.Errorf("empty=%q err=%v", empty, err)
+	}
+	window, err := RenderHeadless(map[string]any{"autoCompactWindow": 250000})
+	if err != nil ||
+		window != `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}` {
+		t.Errorf("window=%q err=%v", window, err)
 	}
 	for key, value := range map[string]any{"unknown": true, "permissionMode": "bypass", "binary": "claude", "systemPrompt": "professor"} {
 		_, err := RenderHeadless(map[string]any{key: value})
@@ -41,9 +47,18 @@ func TestParseSettings(t *testing.T) {
 	if got["theme"] != "x" || got["cache1h"] != false || got["maxSubagentSpawnDepth"].(json.Number) != "3" {
 		t.Errorf("settings=%#v", got)
 	}
+	window, err := ParseSettings([]byte(`{"autoCompactWindow":250000}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window["autoCompactWindow"].(json.Number) != "250000" {
+		t.Errorf("window settings=%#v err=%v", window, err)
+	}
 	for _, entry := range []struct{ raw, want string }{
 		{`{"alien":1}`, "alien"},
 		{`{"cache1h":"yes"}`, "cache1h"},
+		{`{"autoCompactWindow":0}`, "autoCompactWindow"},
+		{`{"autoCompactWindow":"x"}`, "autoCompactWindow"},
 		{`{"theme":"x"} {"theme":"y"}`, "trailing"},
 	} {
 		_, err := ParseSettings([]byte(entry.raw))

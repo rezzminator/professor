@@ -158,6 +158,35 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 	})
 }
 
+func TestClassifyGlobalLinkAliasRoot(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(repo, alias); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, foundRoot, sourceRoot string }{
+		{"alias target", alias, repo}, {"alias root", repo, alias},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := filepath.Join(root, tc.name)
+			stale := filepath.Join(tc.foundRoot, "stale.md")
+			if err := os.Symlink(stale, target); err != nil {
+				t.Fatal(err)
+			}
+			state, _, err := ClassifyGlobalLink(
+				target, filepath.Join(tc.sourceRoot, "desired.md"), tc.sourceRoot, GlobalLinkFile,
+			)
+			if err != nil || state != GlobalLinkWrongTarget {
+				t.Fatalf("state=%s err=%v", state, err)
+			}
+		})
+	}
+}
+
 // TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing pins the rule this
 // package exists to enforce: a probe that could not run must never render as
 // "nothing there". A parent directory this process cannot traverse makes

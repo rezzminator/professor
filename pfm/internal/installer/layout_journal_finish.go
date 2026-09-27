@@ -2,16 +2,19 @@ package installer
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // Seal recomputes the fingerprint of every applied record once the install
 // has finished. A record for a directory the install created and then wrote
 // into keeps its empty-directory fingerprint otherwise, and rollback reads
 // the install's own later writes as newer work.
-func (journal *Journal) Seal() error {
+func (journal *Journal) Seal(stdout io.Writer) error {
 	if journal == nil || journal.dryRun || journal.dir == "" {
 		return nil
 	}
@@ -24,7 +27,15 @@ func (journal *Journal) Seal() error {
 	if len(indexes) == 0 {
 		return nil
 	}
-	return journal.markRecordsApplied(indexes)
+	if err := journal.markRecordsApplied(indexes); err != nil {
+		return err
+	}
+	currentClock := journal.clock
+	if currentClock == nil {
+		currentClock = clock.Real
+	}
+	pruneInstallJournals(journal.env.Home, filepath.Base(journal.dir), currentClock.Now(), stdout)
+	return nil
 }
 
 // MigrationBackups lists the pre-migration backups beside the journal's

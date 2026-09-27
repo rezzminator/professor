@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # host-rehearsal.sh — rehearse the host install on a COPY of a real host
-# backup (the flight's backup.sh layout), inside the pfm-dev image.
+# backup (infra/fence/host-backup.sh layout), inside the pfm-dev image.
 #
 # usage: infra/fence/host-rehearsal.sh BACKUP SCRATCH
 #        infra/fence/host-rehearsal.sh compare BACKUP HOME JOURNAL

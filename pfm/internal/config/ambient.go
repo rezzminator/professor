@@ -81,7 +81,7 @@ func RefuseAmbientConfigHomeFrom(env paths.Env, home string) error {
 		return nil
 	}
 	for directory := cwd; directory != filepath.Dir(directory); directory = filepath.Dir(directory) {
-		if filepath.Clean(repo) == filepath.Clean(directory) {
+		if paths.PhysicalPath(repo) == paths.PhysicalPath(directory) {
 			return fmt.Errorf(
 				"refusing ambient config in real clone %s inside a test: set %s to a jailed file",
 				repo,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for infra/fence/host-rehearsal.sh — a fixture-sized
-# backup (the backup.sh layout) under the scratch jail, and stubs for docker,
+# backup (the infra/fence/host-backup.sh layout) under the scratch jail, and stubs for docker,
 # make and pfm. The docker stub plays the pfm-dev image: `run` records its argv
 # and links each mount target it can create onto its source; `exec … bash -lc`
 # runs the command locally under the recorded -e environment, so the script's
@@ -18,7 +18,11 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 # host-rehearsal.sh needs sqlite3, rsync and sha256sum (the pfm-dev image
 # carries all three). A test that cannot run is never a pass: exit 2, named.
 missing=""
-for tool in sqlite3 rsync sha256sum; do command -v "$tool" >/dev/null 2>&1 || missing+=" $tool"; done
+for tool in sqlite3 rsync sha256sum find; do command -v "$tool" >/dev/null 2>&1 || missing+=" $tool"; done
+if command -v find >/dev/null 2>&1 && ! find . -maxdepth 0 -printf "" >/dev/null 2>&1; then
+  echo "host-rehearsal_test: CANNOT RUN — GNU find required" >&2
+  exit 2
+fi
 if [ -n "$missing" ]; then
   echo "host-rehearsal_test: CANNOT RUN — not on PATH:$missing" >&2
   exit 2
@@ -27,7 +31,7 @@ fi
 BIN="$T/bin"
 mkdir -p "$BIN"
 
-# ---- fixture: a home, then a backup of it in the backup.sh layout ----------
+# ---- fixture: a home, then a backup of it in the infra/fence/host-backup.sh layout ----------
 FH="$T/fakehome" # the home= path; freed after the backup so docker's stub can mount onto it
 mk_home() {
   rm -rf "$FH"
@@ -46,23 +50,13 @@ mk_home() {
     CREATE TABLE swap_event(id INTEGER); INSERT INTO swap_event VALUES(1),(2);
     CREATE TABLE hidden(id INTEGER); INSERT INTO hidden VALUES(1);"
 }
-mk_backup() { # mk_backup DEST — backup.sh's layout, manifest built its way
-  local d=$1
-  mkdir -p "$d/home" "$d/etc/claude-code/managed-settings.d" "$d/manifest"
-  rsync -aH "$FH/" "$d/home/"
-  echo '{}' >"$d/etc/claude-code/managed-settings.d/pfm.json"
-  (cd "$d/home" && find .claude/projects .cc/2/projects -type f -print0 | sort -z | xargs -0 -r sha256sum) >"$d/manifest/sessions.sha256"
-  (cd "$d/home" && find . -type f -printf '%s %P\n' | sort -k2) >"$d/manifest/files.txt"
-  (cd "$d/home" && find . -type l -printf '%P -> %l\n' | sort) >"$d/manifest/links.txt"
-  {
-    echo "== .cc/fleet.db"
-    sqlite3 "$d/home/.cc/fleet.db" "PRAGMA integrity_check;"
-    for t in chat hidden swap_event; do echo "$t $(sqlite3 "$d/home/.cc/fleet.db" "SELECT count(*) FROM $t;")"; done
-    echo "== .local/state/pfm/fleet.db ABSENT"
-    echo "== .local/state/pfm/callmeter.db ABSENT"
-  } >"$d/manifest/db.txt"
-  printf 'home=%s\nmode=live\ntaken=2026-01-01T00:00:00Z\nprevious=none\nexcluded=--exclude=.credentials.json\n' "$FH" >"$d/meta"
+mk_backup() { # mk_backup DEST — run the host backup against the fixture home
+  local d=$1 managed="$T/managed-settings.d"
+  mkdir -p "$managed"
+  echo '{}' >"$managed/pfm.json"
+  HOME="$FH" PFM_MANAGED_SETTINGS_DIR="$managed" bash "$(dirname "$SUT")/host-backup.sh" "$d" live >"$T/backup.log" || { cat "$T/backup.log" >&2; return 1; }
 }
+
 mk_home
 BK="$T/backup"
 mk_backup "$BK"

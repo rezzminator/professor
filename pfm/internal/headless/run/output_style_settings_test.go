@@ -17,8 +17,9 @@ func TestArgumentsUsesOnlyPassedClaudeSettings(t *testing.T) {
 		settings map[string]any
 		want     string
 	}{
-		{"nothing passed", nil, `{"outputStyle":"default"}`},
-		{"passed values", map[string]any{"theme": "t", "maxSubagentSpawnDepth": 4}, `{"env":{"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},"outputStyle":"default","theme":"t"}`},
+		{"nothing passed", nil, `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1"},"outputStyle":"default"}`},
+		{"passed values", map[string]any{"theme": "t", "maxSubagentSpawnDepth": 4}, `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":"4"},"outputStyle":"default","theme":"t"}`},
+		{"lean prompt", map[string]any{"systemPrompt": "lean"}, `{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"100000","CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":"1","CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT":"1"},"outputStyle":"default"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			args, err := arguments(Request{Engine: pfmengine.Claude, Config: machine, Settings: test.settings})

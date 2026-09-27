@@ -299,10 +299,11 @@ func Synthesize(request Request) (Plan, error) {
 			machine.Path,
 			owningConfig,
 		)
+		account := deadClaudeAccount(request, machine)
 		resume, err := claudeCommand(
 			PurposeResume,
 			request.Home,
-			request.PrimaryAccount,
+			account,
 			request.Cache1H,
 			machine,
 			claudeResumeFlag,
@@ -319,7 +320,7 @@ func Synthesize(request Request) (Plan, error) {
 		plan.Record = &fleetdb.Launch{
 			SessionID: request.Row.ID,
 			Engine:    pfmengine.Claude,
-			Account:   request.PrimaryAccount,
+			Account:   account,
 			Cache1H:   request.Cache1H,
 		}
 	case ResumeClaude:
@@ -329,10 +330,11 @@ func Synthesize(request Request) (Plan, error) {
 				"resuming Claude requires id, cwd, and fresh socket",
 			)
 		}
+		account := deadClaudeAccount(request, machine)
 		resume, err := claudeCommand(
 			PurposeResume,
 			request.Home,
-			request.PrimaryAccount,
+			account,
 			request.Cache1H,
 			machine,
 			claudeResumeFlag,
@@ -355,7 +357,7 @@ func Synthesize(request Request) (Plan, error) {
 		plan.Record = &fleetdb.Launch{
 			SessionID: request.Row.ID,
 			Engine:    pfmengine.Claude,
-			Account:   request.PrimaryAccount,
+			Account:   account,
 			Cache1H:   request.Cache1H,
 		}
 	case ResumeCodex:
@@ -370,6 +372,15 @@ func Synthesize(request Request) (Plan, error) {
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}
 	return plan, nil
+}
+
+func deadClaudeAccount(request Request, machine pfmconfig.Config) int {
+	if request.Row.Account != 0 {
+		if _, found := machine.Account(request.Row.Account); found {
+			return request.Row.Account
+		}
+	}
+	return request.PrimaryAccount
 }
 
 func routeForKind(kind compose.Kind) (Route, error) {

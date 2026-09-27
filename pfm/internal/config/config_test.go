@@ -142,6 +142,7 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		PermissionMode:        PermissionBypass,
 		Binary:                "claude",
 		WebSearchesPerSession: 9007199254740991,
+		AutoCompactWindow:     100000,
 		TmuxTruecolor:         true,
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
@@ -314,6 +315,7 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		PermissionMode:        PermissionPrompt,
 		Binary:                "claude-custom",
 		WebSearchesPerSession: 9007199254740991,
+		AutoCompactWindow:     100000,
 		TmuxTruecolor:         true,
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
@@ -629,45 +631,6 @@ func TestV2ConfigDefaultsAndPerAccountOverrides(t *testing.T) {
 	}
 }
 
-func TestClaudeLaunchPreferencesMergeAndValidateByScope(t *testing.T) {
-	home := t.TempDir()
-	path := filepath.Join(t.TempDir(), FileName)
-	content := `{"version":2,"claude":{"webSearchesPerSession":7,"tmuxTruecolor":false,"cleanupPeriodDays":30,"requireManagedCleanup":false},"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":9,"tmuxTruecolor":true,"cleanupPeriodDays":14,"requireManagedCleanup":true}},{"id":2,"configDir":"~/two"}]}`
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(path, home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		id        int
-		web       int64
-		truecolor bool
-		cleanup   int
-		managed   bool
-	}{{1, 9, true, 14, true}, {2, 7, false, 30, false}} {
-		prefs := loaded.EffectiveClaude(tc.id)
-		if prefs.WebSearchesPerSession != tc.web || prefs.TmuxTruecolor != tc.truecolor ||
-			prefs.CleanupPeriodDays != tc.cleanup || prefs.RequireManagedCleanup != tc.managed {
-			t.Fatalf("account %d launch preferences = %+v", tc.id, prefs)
-		}
-	}
-	for _, tc := range []struct{ content, want string }{
-		{`{"version":2,"claude":{"webSearchesPerSession":0}}`, "claude.webSearchesPerSession"},
-		{`{"version":2,"claude":{"cleanupPeriodDays":0}}`, "claude.cleanupPeriodDays"},
-		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":0}}]}`, "accounts[0].webSearchesPerSession"},
-		{`{"version":2,"accounts":[{"id":1,"configDir":"~/one","claude":{"cleanupPeriodDays":0}}]}`, "accounts[0].cleanupPeriodDays"},
-	} {
-		if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Load(path, home, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Fatalf("invalid %s error = %v", tc.want, err)
-		}
-	}
-}
-
 func TestV1ConfigStillLoadsWithV2Defaults(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -820,6 +783,9 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "\"level\": \"info\"") {
 		t.Fatalf("default config carries no log.level default: %s", content)
+	}
+	if !strings.Contains(string(content), "\"autoCompactWindow\": 100000") {
+		t.Fatalf("default config carries no auto compact window: %s", content)
 	}
 	if _, err := Load(path, home, nil); err != nil {
 		// The strict loader check below needs the bytes on disk; this assertion

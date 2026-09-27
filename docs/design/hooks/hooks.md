@@ -191,7 +191,7 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 | Surface | File | Holds |
 | --- | --- | --- |
 | The hook list | `pfm/internal/claudelaunch/hooks.go` | `HookTemplates` |
-| Installer adapter | `pfm/internal/installer/expected_hooks.go` | `claudeHookTemplates`, `ExpectedHooks` |
+| Installer adapter and probe | `pfm/internal/installer/expected_hooks.go`, `hook_probe.go` | `claudeHookTemplates`, `ExpectedHook`, `ProbeExpectedHooks` |
 | The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the `hooks` knob, `Render` |
 | Spawn-audit | `claudelaunch.Parse`, the doctor spawn-audit | the per-chat hook-set verdicts |
 | The account-file reconciler | `pfm/internal/installer/layout.go` | `HostLayout`'s account `settings.json` row, `strip`, the `legacy` doctor row |

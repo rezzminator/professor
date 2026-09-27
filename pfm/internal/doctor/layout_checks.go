@@ -180,6 +180,32 @@ func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment pat
 			}
 		}
 	}
+	root := filepath.Join(layout.Home, ".local", "state", "pfm", "migrations")
+	journals, inventoryErr := installer.InstallJournals(layout.Home)
+	if inventoryErr != nil {
+		fmt.Fprintf(stdout, "install journals: UNREADABLE %s error=%v\n", root, inventoryErr)
+		failures++
+		return warnings, failures
+	}
+	var total uint64
+	for _, journal := range journals {
+		total += journal.Bytes
+	}
+	fmt.Fprintf(stdout, "install journals: %d in %s, %d bytes\n", len(journals), root, total)
+	for _, journal := range journals {
+		if journal.Err != nil {
+			fmt.Fprintf(stdout, "install journal %s: UNREADABLE error=%v\n", journal.ID, journal.Err)
+			failures++
+		} else if journal.Pending && !journal.RolledBack {
+			fmt.Fprintf(
+				stdout,
+				"install journal %s: pending records from a crashed or failed install — run pfm install --rollback %s\n",
+				journal.ID,
+				journal.ID,
+			)
+			failures++
+		}
+	}
 	return warnings, failures
 }
 

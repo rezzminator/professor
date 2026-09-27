@@ -8,11 +8,12 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // printClaudePluginsDoctor checks every configured Claude account for the
-// plugins and env pfm install ensures: its settings.json for the enabled
-// plugins and env keys (installer.ClaudePluginGaps), once per physical file,
+// plugins pfm install ensures: its settings.json for the enabled
+// plugins (installer.ClaudePluginGaps), once per physical file,
 // since accounts may share one through a symlink; and its own config dir's
 // install record (installer.ClaudePluginsNotInstalled), once per physical
 // dir. Each gap is a warning — the plugins are optional extras pfm runs
@@ -80,11 +81,7 @@ func printClaudePluginsDoctor(stdout io.Writer, machine config.Config, tally *do
 // firstVisit reports whether path's physical location is new to seen, and
 // marks it seen.
 func firstVisit(seen map[string]bool, path string) bool {
-	physical, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		physical = path
-	}
-	physical = filepath.Clean(physical)
+	physical := paths.PhysicalPath(path)
 	if seen[physical] {
 		return false
 	}

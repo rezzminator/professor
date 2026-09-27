@@ -10,6 +10,7 @@ const (
 	knobMaxSubagentSpawnDepth      = "maxSubagentSpawnDepth"
 	knobMaxConcurrentSubagents     = "maxConcurrentSubagents"
 	knobWebSearchesPerSession      = "webSearchesPerSession"
+	knobAutoCompactWindow          = "autoCompactWindow"
 	knobTmuxTruecolor              = "tmuxTruecolor"
 	knobTheme                      = "theme"
 	knobCleanupPeriodDays          = "cleanupPeriodDays"
@@ -55,6 +56,7 @@ const (
 	envWebSearches                 = "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"
 	envTmuxTruecolor               = "CLAUDE_CODE_TMUX_TRUECOLOR"
 	envAgentTeams                  = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+	envFunctionHooks               = "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"
 	flagSettings                   = "--settings"
 	flagMCPConfig                  = "--mcp-config"
 	flagModel                      = "--model"
@@ -194,6 +196,14 @@ var Knobs = func() []Knob {
 			"Set the web search ceiling.",
 		},
 		Knob{
+			knobAutoCompactWindow,
+			WireSettings,
+			"env." + envAutoCompactWindow,
+			SourceConfig,
+			int64(100000),
+			"Set the auto-compact window the compaction plugin reads.",
+		},
+		Knob{
 			knobTmuxTruecolor,
 			WireSettings,
 			"env." + envTmuxTruecolor,
@@ -208,6 +218,14 @@ var Knobs = func() []Knob {
 			SourceConstant,
 			"0",
 			"Keep experimental agent teams off.",
+		},
+		Knob{
+			"functionHooks",
+			WireSettings,
+			"env." + envFunctionHooks,
+			SourceConstant,
+			"1",
+			"Enable function hooks for pfm's Claude plugins.",
 		},
 		Knob{
 			knobOutputStyle,

@@ -65,7 +65,7 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("hygiene row %s missing", name)
 		}
 	}
-	for _, name := range []string{"configDir", "binary", "cache1h", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "tmuxTruecolor", "agentTeams", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
+	for _, name := range []string{"configDir", "binary", "cache1h", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "tmuxTruecolor", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
 		if !seen[name] {
 			t.Errorf("knob %s missing", name)
 		}

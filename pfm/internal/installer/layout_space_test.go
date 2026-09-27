@@ -74,6 +74,28 @@ func TestCheckInstallSpaceCountsJournalCopiesAndCrossFilesystemMoves(t *testing.
 	}
 }
 
+func TestCheckInstallSpaceChargesGrownStoreForEachMerge(t *testing.T) {
+	for _, entries := range [][]string{{"aa"}, {"aa", "bbb"}} {
+		env, _ := spaceFixture(t, map[uint64]uint64{1: 0, 2: 0})
+		store := filepath.Join(env.Home, ".claude", "projects")
+		layoutWrite(t, filepath.Join(store, "existing"), "store")
+		findings := []LayoutFinding{}
+		want := uint64(0)
+		grown := uint64(5)
+		for i, entry := range entries {
+			account := filepath.Join(env.Home, ".cc", fmt.Sprint(i+2), "projects")
+			layoutWrite(t, filepath.Join(account, "entry"), entry)
+			findings = append(findings, LayoutFinding{Row: layoutRowSessionStore, Verdict: VerdictMerge, Path: account})
+			want += grown + uint64(len(entry))
+			grown += uint64(len(entry))
+		}
+		err := CheckInstallSpace(env, findings, nil)
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("need %d bytes", want)) {
+			t.Fatalf("CheckInstallSpace() err=%v, want %d journal bytes", err, want)
+		}
+	}
+}
+
 func TestCheckInstallSpaceRefusesBelowTheMarginAndPassesAtIt(t *testing.T) {
 	margin := uint64(1) << 30
 	for _, test := range []struct {

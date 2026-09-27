@@ -28,7 +28,7 @@
 | Budget | 30 tool calls |
 | Spawns | nothing — it holds no `Agent` |
 | Writes | its clone under `/tmp/rr-repos/`, and one result file under `{RR dir}/tracer-rr/` |
-| Start hook | none — `hookRRDirMatcher` lists exact names and omits it; the `RR-DIR:` line arrives in the brief |
+| Start hook | none — `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) lists exact names and omits it; the `RR-DIR:` line arrives in the brief |
 
 Description, verbatim: `RR-ONLY digs a repository's code — spawned by super-rr and heavy-rr with a repo URL and numbered sub-queries, never delegated to directly. Returns its result file path, then a code-quoted finding per sub-query, then rabbit holes.`
 

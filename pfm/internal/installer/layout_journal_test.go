@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestLayoutJournalRollbackRestoresPriorBytesAndLinks(t *testing.T) {
@@ -625,7 +627,7 @@ func TestLayoutRollbackAcceptsWritesIntoADirectoryTheInstallCreated(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := journal.Seal(); err != nil {
+	if err := journal.Seal(io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
@@ -634,6 +636,200 @@ func TestLayoutRollbackAcceptsWritesIntoADirectoryTheInstallCreated(t *testing.T
 	}
 	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
 		t.Fatalf("rollback left the directory the install created: %v", err)
+	}
+}
+
+func TestLayoutRollbackSkipsRestoredRecords(t *testing.T) {
+	env := layoutFixture(t)
+	file := filepath.Join(env.Home, ".zshrc")
+	journal := &Journal{env: env}
+	if err := journal.mutate(LayoutFinding{Row: layoutRowZshrc, Verdict: VerdictRepoint, Path: file},
+		[]string{file}, func() error { return os.WriteFile(file, []byte("changed"), 0o600) }); err != nil {
+		t.Fatal(err)
+	}
+	operator := filepath.Join(env.Home, "operator.txt")
+	layoutWrite(t, operator, "keep")
+	journal.records = append(journal.records, layoutJournalRecord{
+		Row: layoutRowSessionStore, Destination: operator, Result: layoutRecordRestored,
+	})
+	if err := journal.flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, operator); got != "keep" {
+		t.Fatalf("restored record replayed onto operator file: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(journal.dir, layoutRolledBackMarker)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLayoutRollbackClearsInterruptedDatabaseCopy(t *testing.T) {
+	env := layoutFixture(t)
+	legacy := paths.LegacyStateDB(env.Home)
+	if err := os.Remove(env.StateDB); err != nil {
+		t.Fatal(err)
+	}
+	layoutWrite(t, legacy, "legacy bytes")
+	journal := &Journal{env: env}
+	finding := LayoutFinding{Row: layoutRowStateDB, Verdict: VerdictMove, Source: legacy, Path: env.StateDB}
+	err := journal.mutate(finding, []string{legacy, env.StateDB}, func() error {
+		layoutWrite(t, env.StateDB, "half copied")
+		return errors.New("interrupted")
+	})
+	if err == nil {
+		t.Fatal("interrupted move succeeded")
+	}
+	if err := installGate(env, nil); err == nil || !strings.Contains(err.Error(), filepath.Base(journal.dir)) {
+		t.Fatalf("gate=%v", err)
+	}
+	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(env.StateDB); !os.IsNotExist(err) {
+		t.Fatalf("target after rollback: %v", err)
+	}
+	if got := readFile(t, legacy); got != "legacy bytes" {
+		t.Fatalf("legacy=%q", got)
+	}
+	if finding := layoutFindingByPath(
+		ClassifyLayout(env),
+		layoutRowStateDB,
+		env.StateDB,
+	); finding.Verdict != VerdictMove {
+		t.Fatalf("state-db after rollback=%+v", finding)
+	}
+	if _, err := os.Stat(filepath.Join(journal.dir, layoutRolledBackMarker)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLayoutRollbackStopsFleetBeforeHolderScanAndRestarts(t *testing.T) {
+	env := layoutFixture(t)
+	journal := &Journal{env: env}
+	if err := journal.mutate(LayoutFinding{Row: layoutRowStateDB, Verdict: VerdictMove, Path: env.StateDB},
+		[]string{env.StateDB}, func() error { return os.WriteFile(env.StateDB, []byte("moved"), 0o600) }); err != nil {
+		t.Fatal(err)
+	}
+	fd := filepath.Join(env.ProcRoot, "4242", "fd", "3")
+	if err := os.MkdirAll(filepath.Dir(fd), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(env.StateDB, fd); err != nil {
+		t.Fatal(err)
+	}
+	runner := &layoutTestRunner{}
+	runner.onRun = func(call string) {
+		if strings.Contains(call, " stop ") || strings.Contains(call, " bootout ") {
+			if err := os.Remove(fd); err != nil {
+				if !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
+			}
+		}
+		if (strings.Contains(call, " start ") || strings.Contains(call, " bootstrap ")) &&
+			readFile(t, env.StateDB) != "state" {
+			t.Error("fleet restarted before database replay")
+		}
+	}
+	env.runner = runner
+	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if schedulerIsLaunchd {
+		if !strings.Contains(strings.Join(runner.calls, "\n"), "launchctl bootout ") ||
+			!strings.Contains(strings.Join(runner.calls, "\n"), "launchctl bootstrap ") {
+			t.Fatalf("launchd calls=%v", runner.calls)
+		}
+	} else {
+		calls := strings.Join(runner.calls, "\n")
+		if strings.Index(calls, " is-active ") > strings.Index(calls, " stop ") ||
+			strings.Index(calls, " stop ") > strings.Index(calls, " start ") ||
+			strings.Count(calls, " stop ") != 1 || strings.Count(calls, " start ") != 1 {
+			t.Fatalf("systemd calls=%v", runner.calls)
+		}
+	}
+}
+
+func TestLayoutRollbackServiceFailuresJoinWithoutReplay(t *testing.T) {
+	for _, phase := range []string{"stop", "replay"} {
+		t.Run(phase, func(t *testing.T) {
+			env := layoutFixture(t)
+			journal := &Journal{env: env}
+			if err := journal.snapshot(layoutRowStateDB, VerdictMove, env.StateDB); err != nil {
+				t.Fatal(err)
+			}
+			if phase == "replay" {
+				journal.records = append(journal.records, layoutJournalRecord{
+					Row:         layoutRowInstall,
+					Destination: filepath.Join(t.TempDir(), "operator.txt"),
+					Result:      layoutRecordApplied,
+				})
+				if err := journal.flush(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			layoutWrite(t, env.StateDB, "changed")
+			verb := " stop "
+			if phase == "replay" {
+				verb = " start "
+			}
+			if schedulerIsLaunchd {
+				verb = " bootout "
+				if phase == "replay" {
+					verb = " bootstrap "
+				}
+			}
+			runner := &rollbackFailureRunner{failVerb: verb}
+			env.runner = runner
+			err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), true, io.Discard)
+			if err == nil {
+				t.Fatal("rollback succeeded")
+			}
+			if phase == "stop" && (!strings.Contains(err.Error(), "stop fleet units") ||
+				readFile(t, env.StateDB) != "changed") {
+				t.Fatalf("failed stop err=%v calls=%v", err, runner.calls)
+			}
+			restartVerb := "start"
+			if schedulerIsLaunchd {
+				restartVerb = "bootstrap"
+			}
+			if phase == "replay" &&
+				(!strings.Contains(err.Error(), "unsafe path") || !strings.Contains(err.Error(), restartVerb)) {
+				t.Fatalf("joined failure=%v", err)
+			}
+		})
+	}
+}
+
+type rollbackFailureRunner struct {
+	layoutTestRunner
+	failVerb string
+}
+
+func (runner *rollbackFailureRunner) Run(ctx context.Context, name string, args ...string) error {
+	err := runner.layoutTestRunner.Run(ctx, name, args...)
+	if strings.Contains(runner.calls[len(runner.calls)-1], runner.failVerb) {
+		return os.ErrPermission
+	}
+	return err
+}
+
+func TestLayoutRollbackInstallOnlyJournalDoesNotTouchServices(t *testing.T) {
+	env := layoutFixture(t)
+	runner := &layoutTestRunner{}
+	env.runner = runner
+	journal := &Journal{env: env}
+	if err := journal.before(filepath.Join(env.Home, ".zshrc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("install-only service calls=%v", runner.calls)
 	}
 }
 

@@ -65,17 +65,19 @@ func TestLayoutApplyConfigMoveSeedAndNoMarker(t *testing.T) {
 			}
 			var output bytes.Buffer
 			dir, err := ApplyLayout(context.Background(), env, nil, true, &output)
-			if err != nil {
-				t.Fatal(err)
-			}
 			if scenario == "no marker" {
-				if !strings.Contains(output.String(), "no source repo recorded") {
-					t.Fatalf("missing refusal: %s", output.String())
+				// Without a clone pfm runs on its defaults: the row is named, never a failed install.
+				refusal := "  refuse  layout config " + env.ConfigPath + " — no source repo recorded"
+				if err != nil || !strings.Contains(output.String(), refusal) {
+					t.Fatalf("no-marker seed: err=%v output=%q, want the refusal named", err, output.String())
 				}
 				if dir != "" {
 					t.Fatalf("refused seed created journal %q", dir)
 				}
 				return
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 			if dir == "" || strings.Contains(output.String(), "layout: nothing to do") {
 				t.Fatalf("journal=%q output=%s", dir, output.String())
@@ -100,7 +102,7 @@ func TestLayoutApplyConfigMoveSeedAndNoMarker(t *testing.T) {
 // clone) from example.pfm.config.json, and an existing file is never touched.
 // The preview classifies against the config the apply reloads.
 func TestInstallLayoutSeedsResolvedConfigOnFirstInstall(t *testing.T) {
-	for _, scenario := range []string{"absent", "existing"} {
+	for _, scenario := range []string{"absent", "existing", "legacy-move"} {
 		t.Run(scenario, func(t *testing.T) {
 			fixture := layoutFixture(t)
 			if err := os.Remove(fixture.ConfigPath); err != nil {
@@ -111,6 +113,13 @@ func TestInstallLayoutSeedsResolvedConfigOnFirstInstall(t *testing.T) {
 			resolved := filepath.Join(fixture.Home, "override", pfmconfig.FileName)
 			if scenario == "existing" {
 				layoutWrite(t, resolved, `{"version":2,"theme":"mine"}`)
+			}
+			if scenario == "legacy-move" {
+				layoutWrite(
+					t,
+					filepath.Join(fixture.LegacyConfigDir, pfmconfig.FileName),
+					`{"version":2,"mcp":{"servers":{"chat":{"enabled":true}}}}`,
+				)
 			}
 			config := fixture.Config
 			config.Path = resolved
@@ -133,6 +142,9 @@ func TestInstallLayoutSeedsResolvedConfigOnFirstInstall(t *testing.T) {
 			if err != nil {
 				t.Fatalf("preview config: %v", err)
 			}
+			if scenario == "legacy-move" && !preview.MCPServers["chat"].Enabled {
+				t.Fatalf("preview plans disabled chat MCP server: %+v", preview.MCPServers)
+			}
 			var output bytes.Buffer
 			if _, err := ApplyLayout(context.Background(), env, nil, true, &output); err != nil {
 				t.Fatalf("apply: %v\n%s", err, output.String())
@@ -145,8 +157,11 @@ func TestInstallLayoutSeedsResolvedConfigOnFirstInstall(t *testing.T) {
 				t.Fatalf("preview and --yes classify different configs:\npreview=%#v\napply=%#v", preview, applied)
 			}
 			want := example
-			if scenario == "existing" {
+			switch scenario {
+			case "existing":
 				want = `{"version":2,"theme":"mine"}`
+			case "legacy-move":
+				want = `{"version":2,"mcp":{"servers":{"chat":{"enabled":true}}}}`
 			}
 			if got, err := os.ReadFile(resolved); err != nil || string(got) != want {
 				t.Fatalf("config=%q err=%v want %q\n%s", got, err, want, output.String())
@@ -411,7 +426,8 @@ func TestLayoutDBHolderRefusesAndIndependentShellRowContinues(t *testing.T) {
 	layoutWrite(t, zshrc, sourceLine(filepath.Join(env.ManagedRoot, "shim", "pfm.zsh"))+"\n")
 	var output bytes.Buffer
 	dir, err := ApplyLayout(context.Background(), env, nil, true, &output)
-	if err != nil || dir == "" {
+	if err == nil || !strings.Contains(err.Error(), "layout state-db "+env.StateDB+" refused: held by pid 4242") ||
+		dir == "" {
 		t.Fatalf("refused DB should allow shell row: dir=%q err=%v output=%s", dir, err, output.String())
 	}
 	if !strings.Contains(output.String(), "refuse  layout state-db") ||
@@ -440,7 +456,13 @@ func TestLayoutLiveChatRefusesSessionMerge(t *testing.T) {
 	}
 	var output bytes.Buffer
 	dir, err := ApplyLayout(context.Background(), env, nil, true, &output)
-	if err != nil || dir != "" || !strings.Contains(output.String(), "live chats: 4242") {
+	if err == nil ||
+		!strings.Contains(
+			err.Error(),
+			"refused before any change:\n  refuse  layout session-store "+path+" — live chats: 4242",
+		) ||
+		dir != "" ||
+		output.Len() != 0 {
 		t.Fatalf("live guard journal=%q err=%v output=%s", dir, err, output.String())
 	}
 	if got, err := os.ReadFile(filepath.Join(path, "session", "checkpoint")); err != nil || string(got) != "keep" {
@@ -474,20 +496,21 @@ func TestLayoutCrossFilesystemMoveChecksSpaceBeforeCopy(t *testing.T) {
 			}
 			var output bytes.Buffer
 			_, err = ApplyLayout(context.Background(), env, nil, true, &output)
-			if err != nil {
-				t.Fatal(err)
-			}
 			if probes == 0 {
 				t.Fatal("device and free-space probe did not run")
 			}
 			if available == 2 {
-				if !strings.Contains(output.String(), "insufficient free space: need 13 bytes, have 2") {
-					t.Fatalf("missing sized refusal: %s", output.String())
+				if err == nil || !strings.Contains(err.Error(), "insufficient free space: need 13 bytes, have 2") ||
+					output.Len() != 0 {
+					t.Fatalf("missing gate refusal: err=%v output=%s", err, output.String())
 				}
 				if _, err := os.Stat(legacy); err != nil {
 					t.Fatalf("refused move removed source: %v", err)
 				}
 				return
+			}
+			if err != nil {
+				t.Fatal(err)
 			}
 			after, err := os.Stat(env.ConfigPath)
 			if err != nil {
@@ -503,7 +526,7 @@ func TestLayoutCrossFilesystemMoveChecksSpaceBeforeCopy(t *testing.T) {
 	}
 }
 
-func TestLayoutManagedSudoDeclinedRefusesRowAndContinues(t *testing.T) {
+func TestLayoutManagedSudoDeclinedWarnsAndContinues(t *testing.T) {
 	env := layoutFixture(t)
 	managed := filepath.Join(env.ManagedDir, "pfm.json")
 	if err := os.Remove(managed); err != nil {
@@ -520,19 +543,69 @@ func TestLayoutManagedSudoDeclinedRefusesRowAndContinues(t *testing.T) {
 	zshrc := filepath.Join(env.Home, ".zshrc")
 	layoutWrite(t, zshrc, sourceLine(filepath.Join(env.ManagedRoot, "shim", "pfm.zsh"))+"\n")
 	var output bytes.Buffer
-	_, err := ApplyLayout(context.Background(), env, nil, true, &output)
+	journal := NewJournal(context.Background(), env)
+	_, err := ApplyLayout(context.Background(), env, journal, true, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "sudo install -D -m 0644") ||
-		!strings.Contains(output.String(), "refuse  layout managed-cleanup") {
-		t.Fatalf("sudo refusal missing: %s", output.String())
+	want := "  warn    layout managed-cleanup " + managed +
+		" — sudo -n needs cached credentials; run: sudo mkdir -p " + filepath.Dir(managed) +
+		" && printf '%s\\n' '{\"cleanupPeriodDays\":36500}' | sudo tee " + managed + " >/dev/null"
+	if !strings.Contains(output.String(), "sudo -n install -D -m 0644") ||
+		!strings.Contains(
+			output.String(),
+			want,
+		) || strings.Contains(output.String(), "refuse  layout managed-cleanup") {
+		t.Fatalf("sudo warning missing: %s", output.String())
 	}
-	if len(runner.calls) == 0 || !strings.HasPrefix(runner.calls[0], "sudo install -D -m 0644 ") {
+	if len(runner.calls) == 0 || !strings.HasPrefix(runner.calls[0], "sudo -n install -D -m 0644 ") {
 		t.Fatalf("sudo command not injected: %v", runner.calls)
 	}
 	if finding := layoutFindingByPath(ClassifyLayout(env), "zshrc", zshrc); finding.Verdict != VerdictOK {
 		t.Fatalf("later shell row did not apply: %+v", finding)
+	}
+	for _, record := range journal.records {
+		if record.Row == layoutRowManagedCleanup {
+			t.Fatalf("advisory row retained a journal record: %+v", record)
+		}
+	}
+}
+
+func TestLayoutManagedSudoWithCachedCredentialsApplies(t *testing.T) {
+	env := layoutFixture(t)
+	managed := filepath.Join(env.ManagedDir, "pfm.json")
+	if err := os.Remove(managed); err != nil {
+		t.Fatal(err)
+	}
+	env.writeManaged = func(string, []byte) error { return os.ErrPermission }
+	runner := &layoutTestRunner{}
+	runner.onRun = func(call string) {
+		if !strings.HasPrefix(call, "sudo -n install -D -m 0644 ") {
+			return
+		}
+		parts := strings.Fields(call)
+		data, err := os.ReadFile(parts[len(parts)-2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(managed, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env.runner = runner
+	var output bytes.Buffer
+	if _, err := ApplyLayout(context.Background(), env, nil, true, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.calls) == 0 || !strings.HasPrefix(runner.calls[0], "sudo -n install -D -m 0644 ") {
+		t.Fatalf("runner calls=%v", runner.calls)
+	}
+	if finding := layoutFindingByPath(
+		ClassifyLayout(env),
+		layoutRowManagedCleanup,
+		managed,
+	); finding.Verdict != VerdictOK {
+		t.Fatalf("managed row=%+v", finding)
 	}
 }
 
@@ -651,7 +724,10 @@ func TestLayoutDatabaseServicesRestartAfterOutcome(t *testing.T) {
 			if outcome == "failure" && err == nil {
 				t.Fatal("invalid database did not fail")
 			}
-			if outcome != "failure" && err != nil {
+			if outcome == "holder" && (err == nil || !strings.Contains(err.Error(), "refused: held by pid 4242")) {
+				t.Fatalf("holder refusal error=%v", err)
+			}
+			if outcome == "moved" && err != nil {
 				t.Fatal(err)
 			}
 			var lifecycle []string
@@ -753,11 +829,12 @@ func TestLayoutApplyHomeMCPClientsOnlyAndMalformed(t *testing.T) {
 	layoutWrite(t, ledger, `{"clients":["chat"]}`)
 	layoutWrite(t, home, `{bad`)
 	output.Reset()
-	if _, err := ApplyLayout(context.Background(), env, nil, true, &output); err != nil {
-		t.Fatalf("malformed apply err=%v output=%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "refuse  layout home-mcp "+home) {
-		t.Errorf("malformed home .mcp.json not refused: %s", output.String())
+	if dir, err := ApplyLayout(context.Background(), env, nil, true, &output); err == nil ||
+		!strings.Contains(
+			err.Error(),
+			"  refuse  layout home-mcp "+home+" — UNREADABLE ",
+		) || dir != "" || output.Len() != 0 {
+		t.Fatalf("malformed home .mcp.json gate: dir=%q err=%v output=%s", dir, err, output.String())
 	}
 	for path, want := range map[string]string{home: `{bad`, ledger: `{"clients":["chat"]}`} {
 		if got, err := os.ReadFile(path); err != nil || string(got) != want {

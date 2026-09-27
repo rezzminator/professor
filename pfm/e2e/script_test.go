@@ -37,6 +37,7 @@ type jailedTestMain struct{ m *testing.M }
 func (m jailedTestMain) Run() int {
 	if os.Getenv("PFM_E2E_REQUIRE_FENCE_HELPER") == "1" ||
 		os.Getenv("PFM_E2E_CLAUDE_CAPTURE") == "1" ||
+		os.Getenv("PFM_E2E_CLAUDE_PLUGIN") == "1" ||
 		os.Getenv("PFM_E2E_CODEX_HOOK_FIXTURE") == "1" {
 		return testjail.Run(m.m)
 	}

@@ -59,7 +59,7 @@ A run costs `r(d + 1) + 5` lead calls; each round of 8 diggers costs 9, and `r` 
 
 ## Running it
 
-- The `rr-dir` hook's matcher is a pipe-separated list of exact names: the Claude Code hooks reference evaluates a matcher made only of letters, digits, `_`, `-`, spaces, `,` and `|` as "Exact string, or list of exact strings separated by `|` or `,`". A lead missing from `hookRRDirMatcher` gets no `RR-DIR:` line and returns `NOT SAVED — no RR-DIR line arrived`. A caller can always pass the line in the brief; the brief's line wins.
+- The `rr-dir` hook's matcher is a pipe-separated list of exact names: the Claude Code hooks reference evaluates a matcher made only of letters, digits, `_`, `-`, spaces, `,` and `|` as "Exact string, or list of exact strings separated by `|` or `,`". A lead missing from `claudelaunch.HookRRDirMatcher` gets no `RR-DIR:` line and returns `NOT SAVED — no RR-DIR line arrived`. A caller can always pass the line in the brief; the brief's line wins.
 - Run it from an interactive session or as a sub-agent. A headless `claude -p` wrapper ends its process when its own turn ends, and a heavy lead waiting on its diggers dies with it, its diggers' work lost.
 - A new agent type becomes spawnable once the harness reloads its registry; a session that started before `heavy-rr` was linked answers `Agent type 'heavy-rr' not found` until then.
 
@@ -80,6 +80,6 @@ Two completed runs and one orphaned run on one query (what benchmarks evaluate d
 | The body it swaps into | `templates/global/agents/rr.md` — the stop sentence is swapped whole |
 | The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `super-rr` entry |
 | The renderer and its tests | `pfm/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
-| The start hook's matcher | `pfm/internal/installer/expected_hooks.go` (`hookRRDirMatcher`), `settings_wiring_test.go`, `settings_dedupe_test.go` |
+| The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The hook's docs | `docs/design/hooks/hooks.md`, `docs/dev/pfm-surface.md` |
 | The family doc | `docs/design/RR/rr.md` |

@@ -33,6 +33,7 @@ func Keys() []KeyDefault {
 		{"claude.nativeCursor", false},
 		{"claude.systemPrompt", nil},
 		{"claude.webSearchesPerSession", int64(9007199254740991)},
+		{"claude.autoCompactWindow", int64(100000)},
 		{"claude.tmuxTruecolor", true},
 		{"claude.cleanupPeriodDays", 36500},
 		{"claude.requireManagedCleanup", true},

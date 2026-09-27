@@ -19,7 +19,13 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
-var errLayoutRefuse = errors.New("layout row refused")
+var (
+	errLayoutRefuse   = errors.New("layout row refused")
+	errLayoutAdvisory = errors.New("layout row advisory")
+	// errLayoutNoSource refuses a row that needs the clone; pfm runs on its
+	// defaults without it, so the row never fails the install.
+	errLayoutNoSource = fmt.Errorf("%w: no source repo recorded", errLayoutRefuse)
+)
 
 // ApplyLayout converges the layout rows, recording into journal (nil: a
 // private one); it returns the journal directory.
@@ -30,6 +36,11 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply boo
 	journal.dryRun = !apply
 	layoutStart := len(journal.records)
 	findings := ClassifyLayout(env)
+	if apply {
+		if err := installGate(env, findings); err != nil {
+			return "", err
+		}
+	}
 	actionable := false
 	configMigrated := false
 	var independentFailures []error
@@ -69,6 +80,10 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply boo
 				detail = current.Err.Error()
 			}
 			fmt.Fprintf(stdout, "  refuse  layout %s %s — %s\n", current.Row, current.Path, detail)
+			if apply && current.Row != layoutRowManagedCleanup {
+				independentFailures = append(independentFailures,
+					fmt.Errorf("layout %s %s refused: %s", current.Row, current.Path, detail))
+			}
 			continue
 		}
 		actionable = true
@@ -83,17 +98,27 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply boo
 		} else {
 			err = applyLayoutRow(ctx, journal, current, stdout)
 		}
-		if errors.Is(err, errLayoutRefuse) {
+		if errors.Is(err, errLayoutRefuse) || errors.Is(err, errLayoutAdvisory) {
 			if discardErr := journal.discardPending(priorRecords); discardErr != nil {
 				return journal.dir, fmt.Errorf("layout %s discard refused action: %w", current.Row, discardErr)
 			}
-			fmt.Fprintf(
-				stdout,
-				"  refuse  layout %s %s — %s\n",
-				current.Row,
-				current.Path,
-				strings.TrimPrefix(err.Error(), errLayoutRefuse.Error()+": "),
-			)
+			if errors.Is(err, errLayoutAdvisory) {
+				fmt.Fprintf(
+					stdout,
+					"  warn    layout managed-cleanup %s — sudo -n needs cached credentials; run: sudo mkdir -p %s && printf '%%s\\n' '{\"cleanupPeriodDays\":%d}' | sudo tee %s >/dev/null\n",
+					current.Path,
+					filepath.Dir(current.Path),
+					env.Config.Claude.CleanupPeriodDays,
+					current.Path,
+				)
+			} else {
+				detail := strings.TrimPrefix(err.Error(), errLayoutRefuse.Error()+": ")
+				fmt.Fprintf(stdout, "  refuse  layout %s %s — %s\n", current.Row, current.Path, detail)
+				if !errors.Is(err, errLayoutNoSource) {
+					independentFailures = append(independentFailures,
+						fmt.Errorf("layout %s %s refused: %s", current.Row, current.Path, detail))
+				}
+			}
 			continue
 		}
 		if err != nil {
@@ -213,10 +238,11 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 				return err
 			}
 			defer func() { _ = os.Remove(tmp) }()
-			fmt.Fprintf(stdout, "sudo install -D -m 0644 %s %s\n", tmp, finding.Path)
+			fmt.Fprintf(stdout, "sudo -n install -D -m 0644 %s %s\n", tmp, finding.Path)
 			if err := env.commandRunner().Run(
 				ctx,
 				"sudo",
+				"-n",
 				"install",
 				"-D",
 				"-m",
@@ -224,7 +250,7 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 				tmp,
 				finding.Path,
 			); err != nil {
-				return fmt.Errorf("%w: sudo install declined: %v", errLayoutRefuse, err)
+				return fmt.Errorf("%w: sudo -n install declined: %v", errLayoutAdvisory, err)
 			}
 			return nil
 		})
@@ -238,11 +264,11 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 			})
 		}
 		if env.Clone == "" {
-			return fmt.Errorf("%w: no source repo recorded", errLayoutRefuse)
+			return errLayoutNoSource
 		}
 		source := filepath.Join(env.Clone, "example.pfm.config.json")
 		if _, err := os.Stat(source); err != nil {
-			return fmt.Errorf("%w: no source repo recorded: %v", errLayoutRefuse, err)
+			return fmt.Errorf("%w: %v", errLayoutNoSource, err)
 		}
 		return journal.mutate(finding, paths, func() error { return copyLayoutTree(source, finding.Path) })
 	case layoutRowSessionStore:
@@ -285,7 +311,7 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 		return applyLayoutHomeMCP(journal, finding, paths)
 	case layoutRowZshrc:
 		if env.Clone == "" {
-			return fmt.Errorf("%w: no source repo recorded", errLayoutRefuse)
+			return errLayoutNoSource
 		}
 		return journal.mutate(finding, paths, func() error {
 			raw, err := os.ReadFile(finding.Path)

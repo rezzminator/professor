@@ -222,7 +222,7 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	preview, code := migrateMachineConfig(installer.ModeDryRun, nil, &stdout, &stderr, runtime)
+	preview, code := migrateMachineConfig(installer.ModeDryRun, nil, "", &stdout, &stderr, runtime)
 	if code != 0 || preview.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
 		!strings.Contains(stdout.String(), "change  rename") {
 		t.Fatalf(
@@ -236,7 +236,7 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	if _, err := os.Stat(legacy); err != nil {
 		t.Fatalf("preview touched the pre-split file: %v", err)
 	}
-	applied, code := migrateMachineConfig(installer.ModeApply, nil, &stdout, &stderr, runtime)
+	applied, code := migrateMachineConfig(installer.ModeApply, nil, "", &stdout, &stderr, runtime)
 	if code != 0 {
 		t.Fatalf("apply code=%d stderr=%q", code, stderr.String())
 	}

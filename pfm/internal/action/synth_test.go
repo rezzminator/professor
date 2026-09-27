@@ -134,6 +134,48 @@ func TestAgentRouteCarriesCacheFlag(t *testing.T) {
 	}
 }
 
+func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		kind       compose.Kind
+		rowAccount int
+		want       int
+	}{
+		{"recorded resume", compose.ResumeClaude, 3, 3},
+		{"missing record", compose.ResumeClaude, 0, 2},
+		{"retired account", compose.ResumeClaude, 9, 2},
+		{"agent fallback", compose.Agent, 3, 3},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			machine := testMachineConfig("/home/test")
+			machine.Accounts[2].Claude = &pfmconfig.ClaudePrefs{Binary: "/bin/claude-three"}
+			plan, err := synthesizeWithTestConfig(Request{
+				Row: compose.Row{
+					Kind:    scenario.kind,
+					ID:      "22222222-2222-4222-8222-222222222222",
+					CWD:     "/work",
+					Account: scenario.rowAccount,
+				},
+				PrimaryAccount: 2,
+				Home:           "/home/test",
+				FreshSocket:    "cc-account-test",
+				Config:         machine,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantDir := pfmconfig.DefaultAccountDir("/home/test", scenario.want)
+			if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+Quote(wantDir)) || plan.Record == nil ||
+				plan.Record.Account != scenario.want {
+				t.Fatalf("run = %q, record = %+v; want account %d", plan.Run, plan.Record, scenario.want)
+			}
+			if usesThird := strings.Contains(plan.Run, Quote("/bin/claude-three")); usesThird != (scenario.want == 3) {
+				t.Fatalf("account %d effective binary in run = %t", scenario.want, usesThird)
+			}
+		})
+	}
+}
+
 func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 	// An account outside the launcher's two-seat roster must never reach a
 	// command line.

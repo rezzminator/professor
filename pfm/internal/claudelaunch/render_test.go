@@ -62,6 +62,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 		"ENABLE_PROMPT_CACHING_1H": "1", "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "8",
 		"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "9007199254740991", "CLAUDE_CODE_TMUX_TRUECOLOR": "1",
 		"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
+		"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":    "1", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
 	} {
 		if got := parsed.SettingsEnv[name]; got != want {
 			t.Errorf("env %s=%q, want %q", name, got, want)
@@ -99,6 +100,28 @@ func TestRenderFreshInteractive(t *testing.T) {
 	again, err := Render(Request{Purpose: PurposeInteractive, Home: home, Account: 2, SessionID: "S"}, machine)
 	if err != nil || !reflect.DeepEqual(launch, again) {
 		t.Errorf("render is not byte-stable: second=%#v err=%v", again, err)
+	}
+}
+
+func TestRenderPluginEnvEveryPurposeAndAccount(t *testing.T) {
+	home, machine := renderMachine(t)
+	machine.Claude.AutoCompactWindow = 250000
+	account := machine.Claude
+	account.AutoCompactWindow = 50000
+	machine.Accounts[1].Claude = &account
+	for _, purpose := range []Purpose{PurposeResume, PurposeLauncher, PurposeQuery} {
+		for _, tc := range []struct {
+			account int
+			window  string
+		}{{1, "250000"}, {2, "50000"}} {
+			_, parsed := renderParsed(t, Request{Purpose: purpose, Home: home, Account: tc.account}, machine)
+			if got := parsed.SettingsEnv["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != tc.window {
+				t.Errorf("purpose %d account %d window=%q, want %q", purpose, tc.account, got, tc.window)
+			}
+			if got := parsed.SettingsEnv["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"]; got != "1" {
+				t.Errorf("purpose %d account %d function hooks=%q", purpose, tc.account, got)
+			}
+		}
 	}
 }
 

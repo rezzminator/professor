@@ -73,6 +73,8 @@ type layoutSpaceNeed struct {
 func CheckInstallSpace(env LayoutEnv, findings []LayoutFinding, planned []string) error {
 	migrations := filepath.Join(env.Home, ".local", "state", "pfm", "migrations")
 	copies := append([]string(nil), planned...)
+	mergeGrowth := map[string]uint64{}
+	mergeJournalBytes := uint64(0)
 	type move struct{ source, destination string }
 	moves := []move{}
 	for _, finding := range findings {
@@ -83,7 +85,22 @@ func CheckInstallSpace(env LayoutEnv, findings []LayoutFinding, planned []string
 		if err != nil {
 			return fmt.Errorf("plan layout %s %s: %w", finding.Row, finding.Path, err)
 		}
-		copies = append(copies, paths...)
+		if finding.Row == layoutRowSessionStore && finding.Verdict == VerdictMerge {
+			store := layoutSessionStore(env, finding)
+			storeBytes, err := layoutApparentBytes(store)
+			if err != nil {
+				return fmt.Errorf("size %s for the space preflight: %w", store, err)
+			}
+			entryBytes, err := layoutApparentBytes(finding.Path)
+			if err != nil {
+				return fmt.Errorf("size %s for the space preflight: %w", finding.Path, err)
+			}
+			mergeJournalBytes += storeBytes + mergeGrowth[store]
+			mergeGrowth[store] += entryBytes
+			copies = append(copies, finding.Path)
+		} else {
+			copies = append(copies, paths...)
+		}
 		if finding.Row == layoutRowStateDB && env.ConfigPath != "" {
 			copies = append(copies, layoutConfigMigrationPaths(env)...)
 		}
@@ -114,7 +131,7 @@ func CheckInstallSpace(env LayoutEnv, findings []LayoutFinding, planned []string
 		needs[device].bytes += bytes
 		return nil
 	}
-	journalBytes := uint64(0)
+	journalBytes := mergeJournalBytes
 	seen := map[string]bool{}
 	for _, path := range copies {
 		if path == "" || seen[filepath.Clean(path)] {

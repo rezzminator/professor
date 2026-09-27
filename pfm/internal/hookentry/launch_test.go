@@ -1,10 +1,16 @@
 package hookentry
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestLaunchPassThroughPredicate(t *testing.T) {
@@ -49,6 +55,93 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
+	accountDir := t.TempDir()
+	wantNames := claudelaunch.SessionEnv(config.ClaudePrefs{AutoCompactWindow: 50000})
+	for _, entry := range wantNames {
+		name, _, _ := strings.Cut(entry, "=")
+		t.Setenv(name, "inherited")
+	}
+	t.Setenv("PFM_KEEP", "kept")
+	previousExec := LaunchExec
+	t.Cleanup(func() { LaunchExec = previousExec })
+	machine := config.Runtime{Config: config.Config{
+		Claude: config.ClaudePrefs{AutoCompactWindow: 100000},
+		Accounts: []config.Account{
+			{ID: 2, ConfigDir: accountDir, Claude: &config.ClaudePrefs{AutoCompactWindow: 50000}},
+		},
+	}}
+	for _, test := range []struct {
+		name, ambient, tmux, forced string
+		args                        []string
+		wantWindow                  int64
+		session                     bool
+	}{
+		{"print account override", accountDir + "/.", "", "", []string{"-p", "hi"}, 50000, true},
+		{"forced resume", accountDir, "", "1", []string{"--resume", "X"}, 50000, true},
+		{"pfm socket", accountDir, "/tmp/tmux-1000/cc-1-2-3,123,0", "", []string{"--resume", "X"}, 50000, true},
+		{"unmatched ambient", "", "", "", []string{"-p", "hi"}, 100000, true},
+		{"plugin", accountDir, "", "", []string{"plugin", "install", "x"}, 0, false},
+		{"mcp", accountDir, "", "", []string{"mcp", "list"}, 0, false},
+		{"config", accountDir, "", "", []string{"config"}, 0, false},
+		{"agents query", accountDir, "", "", []string{"agents", "--json"}, 0, false},
+		{"version", accountDir, "", "", []string{"--version"}, 0, false},
+		{"short version", accountDir, "", "", []string{"-v"}, 0, false},
+		{"help", accountDir, "", "", []string{"-h"}, 0, false},
+		{"long help", accountDir, "", "", []string{"--help"}, 0, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", test.ambient)
+			t.Setenv("TMUX", test.tmux)
+			t.Setenv("PFM_LAUNCH_PASSTHROUGH", test.forced)
+			inherited := os.Environ()
+			var got []string
+			LaunchExec = func(_ string, _, environment []string) error {
+				got = append([]string(nil), environment...)
+				return nil
+			}
+			var stderr bytes.Buffer
+			if code := Launch(
+				append([]string{"--real", "/bin/echo", "--"}, test.args...),
+				&bytes.Buffer{},
+				&stderr,
+				machine,
+				paths.OSEnv{},
+			); code != 0 {
+				t.Fatalf("Launch code=%d stderr=%q", code, stderr.String())
+			}
+			if !test.session {
+				if !reflect.DeepEqual(got, inherited) {
+					t.Fatalf("non-session env changed: got=%q want=%q", got, inherited)
+				}
+				return
+			}
+			for _, want := range claudelaunch.SessionEnv(config.ClaudePrefs{AutoCompactWindow: test.wantWindow}) {
+				if count := countEnvironmentEntry(got, want); count != 1 {
+					t.Errorf("%q occurs %d times in exec env", want, count)
+				}
+				name, _, _ := strings.Cut(want, "=")
+				if count := countEnvironmentEntry(got, name+"=inherited"); count != 0 {
+					t.Errorf("inherited %q survived %d times in exec env", name, count)
+				}
+			}
+			if countEnvironmentEntry(got, "PFM_KEEP=kept") != 1 {
+				t.Errorf("unrelated env lost from exec: %q", got)
+			}
+		})
+	}
+}
+
+func countEnvironmentEntry(environment []string, want string) int {
+	count := 0
+	for _, entry := range environment {
+		if entry == want {
+			count++
+		}
+	}
+	return count
 }
 
 func TestReadLaunchStatusRejectsMissingAndInvalidFiles(t *testing.T) {

@@ -21,7 +21,7 @@ How `pfm install` moves a host from any older layout onto the one in [pfm-home.m
 - **One classifier, two callers.** `ClassifyLayout` is pure: it reads the disk and returns one verdict per row. Install applies the verdicts; doctor prints them. What install fixes, doctor reports, by construction.
 - **Preview first.** `pfm install` without `--yes` prints every action and changes nothing.
 - **Nothing is overwritten or deleted without a copy.** Every move, rewrite and removal is recorded in a journal with its backup; `pfm install --rollback {id}` reverses a run.
-- **Refuse over guess.** A path in a shape the table does not recognise — a foreign symlink, two differing files with one name — is refused and named; install carries on with every other row.
+- **Refuse over guess.** A path in a shape the table does not recognise — a foreign symlink, two differing files with one name — is refused and named. `pfm install --yes` refuses the whole run before any change when the initial classification has a blocking refusal.
 - **A shared settings file is one file.** An account `settings.json` that is a symlink to a regular file inside HOME (accounts sharing `~/.claude/settings.json` on purpose) is judged once, by its physical path: the first account resolving to it carries the verdict for that target, the others report `ok`, shared with the first; a strip writes through to the target, the link stays a link, the journal snapshots the target, and a live chat in any sharing account refuses it. A dangling link, a target outside HOME and a non-regular target are refused.
 
 ## The layout table
@@ -62,7 +62,7 @@ An account's `cleanupPeriodDays` key is never removed: it is a redundant copy of
 
 Rows apply in this order, each only after the previous one verified:
 
-1. **Managed cleanup** — written and read back before any account file is touched, so no later step can leave a launch without the retention value.
+1. **Managed cleanup** — attempted before any account file is touched. A declined `sudo -n` produces an advisory with a command to set the value by hand; later rows continue.
 2. **Config** — `pfm.config.json` and `harvester.config.json` moved to the clone; every later row reads the new path.
 3. **State databases** — moved with their `-wal`/`-shm` siblings after a checkpoint; row counts of every table are checked before and after the move. Install then opens the moved databases, migrates their schemas, and drops the retired `swap_event` table (`fleetdb/migration_v2.sql`) and the cache's `hidden` table (`store/migration_v9.sql`).
 4. **Session store** — merged, then linked.
@@ -82,9 +82,9 @@ Transcripts are append-only JSONL named by session id, so a differing same-named
 
 ## Guards
 
-- **Live chats.** A session row whose account has a live Claude process (`{config dir}/sessions/{pid}.json` with a running pid) is refused, naming the chats to close. A running pid is read from the process table (`/proc` on Linux, `sysctl` on macOS).
-- **Database holders.** The state-database rows stop whichever of `pfm-mcp` and `pfm-name-sync` are running first and restart exactly those after — a unit the host never loaded, or one the operator stopped, is neither stopped nor started; a remaining holder (a picker, a live chat's MCP proxy) makes the row refuse, naming each pid. Another user's process, whose `/proc/{pid}/fd` a normal user cannot read, is skipped. On macOS, `lsof -t` checks holders; a missing or failing `lsof` refuses the row and names the reason.
-- **Root.** The managed-settings row needs `sudo`; declined, it is refused and doctor keeps warning.
+- **Live chats.** Only a row that would write refuses for a live Claude process (`{config dir}/sessions/{pid}.json` with a running pid); an `ok` row stays `ok` while a chat is live. A refused row names the chats to close. A running pid is read from the process table (`/proc` on Linux, `sysctl` on macOS). `pfm install --yes` refuses the whole run before any change when any blocking row refuses, naming each refusal; preview still lists the rows without writing.
+- **Database holders.** The state-database rows stop whichever of `pfm-mcp` and `pfm-name-sync` are running first and restart exactly those after — a unit the host never loaded, or one the operator stopped, is neither stopped nor started; a remaining holder (a picker, a live chat's MCP proxy) makes the row refuse, naming each pid. Linux compares symlink-resolved database and fd paths. Another user's process, whose `/proc/{pid}/fd` a normal user cannot read, is skipped. On macOS, `lsof -t` checks holders; a missing or failing `lsof` refuses the row and names the reason. A configured state or cache database path equal to its legacy path, including through symlinks, refuses.
+- **Root.** The managed-settings row tries a direct write, then `sudo -n` if needed. Missing cached credentials produce an advisory warning with the command to run; they never refuse the whole install.
 - **Free space.** Before the first change of `pfm install --yes`, a preflight sums what the run will write per filesystem: the bytes of every path the journal will copy (the layout rows it acts on, the installer's own planned writes, and the whole harvester root when a re-provision is planned) charged to the migrations directory's filesystem, plus the source of every cross-filesystem move charged to its destination's. It refuses the whole apply unless each has `free >= need + max(1 GiB, need/10)`: `pfm install: not enough free space on {dir}: need {need} bytes + margin {margin}, have {free} — nothing changed`, exit 1. A free-space probe that fails refuses too (`could not measure free space on {dir}: {err}`), never read as enough. Each cross-filesystem move checks again before it copies; `rename` within one filesystem needs none.
 - **Live chats at rollback.** A rollback with a session-store record refuses while a chat is live on that account (`{home}/.claude/{entry}` checks every account), `--force` included.
 
@@ -96,16 +96,30 @@ Each applying run keeps one journal for the whole `pfm install --yes`, in `~/.lo
 - `scope.json` — the Claude accounts, Codex homes, and state and cache database paths used by that install. Rollback judges every record against this saved scope, even when the current config has moved or is absent.
 - `backup/` — the prior bytes of every rewritten or removed path, each session tree before a merge, every parked conflict, and full copies of both moved databases and their WAL/SHM siblings before checkpointing. Rollback restores the database copies even if pfm opened the moved files after installation.
 
-`pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. Every check reads before anything is written:
+A journal with pending records blocks the next `pfm install --yes` before any change; `pfm install --rollback {id}` replays those records, including a half-finished database move. An unreadable journal is also a refusal. A released updater's staged candidate that predates the install journal refuses a layout migration with this line and prints the manual crossing commands:
+
+```text
+  refuse  updater — this install migrates the host layout, and the pfm update running it predates the install journal
+```
+
+`pfm doctor` prints `install journals: {count} in {root}, {bytes} bytes` and names pending or unreadable journals.
+
+`pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. Scope, live-chat and drift checks run before replay; a database rollback stops the running fleet units before checking for remaining holders:
 
 - a journal already rolled back refuses: `rollback {id} refused: already rolled back at {time}`;
 - a journal without `scope.json` refuses: `rollback {id} refused: journal {dir} has no scope.json`;
 - an unreadable or invalid scope refuses: `rollback {id} refused: journal scope {path}: {reason}`;
-- a run that moved state databases refuses while any pfm process holds them;
+- a run that moved state databases stops the running fleet units before database replay and restarts those same units afterward; it refuses if any holder remains;
 - a session-store record refuses while a chat is live on its account (§ Guards);
 - a destination whose fingerprint no longer matches its last applied record — newer work since the install — refuses the whole rollback, naming every drifted path: `rollback {id} refused: drift at {path}[, {path}…] — rerun with --force to overwrite them`. A record without a fingerprint counts as drift. Pending records, the cache database and `-wal`/`-shm` siblings are not checked. `--force` overrides only this check.
 
 A successful rollback keeps the journal and writes `{dir}/rolled-back` (the UTC time); a rollback that fails part-way leaves it unmarked, so it can be retried. `pfm update` rolls a failed candidate back by replaying that candidate install's journal the same way.
+
+After a journal is sealed, pruning keeps the newest three sealed journals and every journal younger than 14 days; pending and unreadable journals are retained. Each pruned journal prints:
+
+```text
+  prune   install journal {id} ({bytes} bytes)
+```
 
 ## Legacy prompt files
 
@@ -125,8 +139,9 @@ Chats born before the move were launched with `--system-prompt-file ~/.local/sha
 
 ## Running it on a host
 
-1. Rehearse on a copy of the host first: `infra/fence/host-rehearsal.sh BACKUP SCRATCH` runs the preview, the apply, doctor, a second apply, the manifest check and the rollback against a `backup.sh` backup, and writes its verdict under `SCRATCH/rehearsal/`.
-2. Close the chats on the accounts being merged, or accept that their rows refuse and rerun later.
-3. `pfm install` — read the plan.
-4. `pfm install --yes`.
-5. `pfm doctor` — every layout row `ok`; the conflict list, if any, names what to reconcile by hand.
+1. Back up the live host with `infra/fence/host-backup.sh BACKUP live`, then run `infra/fence/host-rehearsal.sh BACKUP SCRATCH` against that backup. The rehearsal runs preview, apply, doctor, a second apply, the manifest check and rollback, and writes its verdict under `SCRATCH/rehearsal/`.
+2. On v0.76–v0.78, cross before the install steps below: close every chat, including the one running an older `pfm update`; from a plain shell outside tmux run `git -C <clone> pull --ff-only`, `make -C <clone>/pfm host-install`, then `pfm install --yes`. The older updater rolls itself back first when its candidate refuses the migration.
+3. Close chats on accounts whose rows need to write; any live-chat refusal blocks `pfm install --yes` before changes.
+4. `pfm install` — read the plan.
+5. `pfm install --yes`.
+6. `pfm doctor` — every layout row `ok`; the conflict list, if any, names what to reconcile by hand.

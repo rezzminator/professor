@@ -68,6 +68,8 @@ type LayoutEnv struct {
 	spaceProbe   func(dir string) (device, free uint64, err error)
 	runner       CommandRunner
 	writeManaged func(path string, content []byte) error
+	invocation   paths.Env
+	executable   func() (string, error)
 }
 
 func NewLayoutEnv(runtime pfmconfig.Runtime, env paths.Env) (LayoutEnv, error) {
@@ -118,6 +120,7 @@ func NewInstallLayoutEnv(runtime pfmconfig.Runtime, env paths.Env, installClone 
 		ManagedDir: runtime.Paths.ManagedSettingsDir, ProcRoot: runtime.Paths.ProcRoot,
 		ManagedRoot:     filepath.Join(home, ".local", "share", "pfm", "install"),
 		LegacyConfigDir: legacyDir,
+		invocation:      env,
 	}
 	if _, err := os.Lstat(configPath); errors.Is(err, fs.ErrNotExist) {
 		for _, name := range []string{pfmconfig.FileName, "config.json"} {
@@ -169,6 +172,18 @@ func (env LayoutEnv) InstallConfig(runtime pfmconfig.Runtime, apply bool) (pfmco
 		return pfmconfig.Config{}, fmt.Errorf("inspect layout config %s: %w", env.ConfigPath, statErr)
 	}
 	finding := classifyConfig(env)
+	if !apply && !runtime.ConfigExplicit && finding.Err == nil && finding.Verdict == VerdictMove &&
+		finding.Source != "" {
+		config, err := pfmconfig.Load(
+			finding.Source, values.Home, values.Roots[pfmengine.Claude], values.FirstRoot(pfmengine.Codex),
+		)
+		if err != nil {
+			return pfmconfig.Config{}, fmt.Errorf("preview moved config %s: %w", finding.Source, err)
+		}
+		config.Path = env.ConfigPath
+		config.Harvester.Path = pfmconfig.HarvesterPath(env.ConfigPath)
+		return config, nil
+	}
 	if apply || runtime.ConfigExplicit || env.Clone == "" || finding.Err != nil || finding.Verdict != VerdictCreate {
 		return runtime.Config, nil
 	}
@@ -417,6 +432,10 @@ func classifyDB(env LayoutEnv, row, target, legacy string) LayoutFinding {
 		finding.Verdict, finding.Detail = VerdictRefuse, "target is not a regular file"
 		return finding
 	}
+	if paths.PhysicalPath(target) == paths.PhysicalPath(legacy) {
+		finding.Verdict, finding.Detail = VerdictRefuse, "configured path is the legacy path"
+		return finding
+	}
 	found := false
 	for _, suffix := range []string{"", layoutDBWAL, layoutDBSHM} {
 		legacyFinding, info, exists := layoutLstat(row, legacy+suffix)
@@ -475,7 +494,9 @@ func classifySessionStore(env LayoutEnv) []LayoutFinding {
 		if physicalSettingsPath(dir) == physicalSettingsPath(store) {
 			continue
 		}
-		live, liveErr := liveChatPIDs(env.ProcRoot, dir)
+		var live []string
+		var liveErr error
+		scanned := false
 		for _, entry := range SessionPaths {
 			path := filepath.Join(dir, entry)
 			want := filepath.Join(store, entry)
@@ -517,10 +538,16 @@ func classifySessionStore(env LayoutEnv) []LayoutFinding {
 					finding.Verdict, finding.Detail = VerdictRefuse, "not a directory or link"
 				}
 			}
-			if liveErr != nil {
-				finding.Err = liveErr
-			} else if len(live) > 0 {
-				finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
+			if finding.Verdict != VerdictOK {
+				if !scanned {
+					live, liveErr = liveChatPIDs(env.ProcRoot, dir)
+					scanned = true
+				}
+				if liveErr != nil {
+					finding.Err = liveErr
+				} else if len(live) > 0 {
+					finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
+				}
 			}
 			findings = append(findings, finding)
 		}
@@ -602,7 +629,7 @@ func classifyAccountMCP(env LayoutEnv) []LayoutFinding {
 			sort.Strings(owned)
 			judgeMCPFile(&finding, info, owned, shaped)
 		}
-		if registry.Account != 0 {
+		if registry.Account != 0 && finding.Verdict != VerdictOK {
 			dir := filepath.Dir(path)
 			for _, account := range env.Config.Accounts {
 				if account.ID == registry.Account && account.Implicit {

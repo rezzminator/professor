@@ -129,6 +129,8 @@ func configValue(name string, prefs pfmconfig.ClaudePrefs, machine pfmconfig.Con
 		return strconv.Itoa(prefs.MaxConcurrentSubagents)
 	case knobWebSearchesPerSession:
 		return strconv.FormatInt(prefs.WebSearchesPerSession, 10)
+	case knobAutoCompactWindow:
+		return strconv.FormatInt(prefs.AutoCompactWindow, 10)
 	case knobTmuxTruecolor:
 		return strconv.FormatBool(prefs.TmuxTruecolor)
 	case knobTheme:

@@ -212,56 +212,20 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		}
 	}
 	fmt.Fprintf(stdout, "config accounts=%s (%s)\n", strings.Join(accounts, ","), config.Source("accounts"))
-	fmt.Fprintf(
-		stdout,
-		"config claude.permissionMode=%s (%s)\n",
-		config.Claude.PermissionMode,
-		config.Source("claude.permissionMode"),
-	)
-	fmt.Fprintf(stdout, "config claude.binary=%s (%s)\n", config.Claude.Binary, config.Source("claude.binary"))
-	fmt.Fprintf(stdout, "config claude.theme=%s (%s)\n", config.Claude.Theme, config.Source("claude.theme"))
-	fmt.Fprintf(
-		stdout,
-		"config claude.webSearchesPerSession=%d (%s)\n",
-		config.Claude.WebSearchesPerSession,
-		config.Source("claude.webSearchesPerSession"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.tmuxTruecolor=%t (%s)\n",
-		config.Claude.TmuxTruecolor,
-		config.Source("claude.tmuxTruecolor"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.cleanupPeriodDays=%d (%s)\n",
-		config.Claude.CleanupPeriodDays,
-		config.Source("claude.cleanupPeriodDays"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.requireManagedCleanup=%t (%s)\n",
-		config.Claude.RequireManagedCleanup,
-		config.Source("claude.requireManagedCleanup"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.compactNudge.enabled=%t (%s)\n",
-		config.Claude.CompactNudge.Enabled,
-		config.Source("claude.compactNudge.enabled"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.compactNudge.start=%d (%s)\n",
-		config.Claude.CompactNudge.Start,
-		config.Source("claude.compactNudge.start"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"config claude.compactNudge.step=%d (%s)\n",
-		config.Claude.CompactNudge.Step,
-		config.Source("claude.compactNudge.step"),
-	)
+	printClaude := func(key string, value any) {
+		fmt.Fprintf(stdout, "config claude.%s=%v (%s)\n", key, value, config.Source("claude."+key))
+	}
+	printClaude("permissionMode", config.Claude.PermissionMode)
+	printClaude("binary", config.Claude.Binary)
+	printClaude("theme", config.Claude.Theme)
+	printClaude("webSearchesPerSession", config.Claude.WebSearchesPerSession)
+	printClaude("autoCompactWindow", config.Claude.AutoCompactWindow)
+	printClaude("tmuxTruecolor", config.Claude.TmuxTruecolor)
+	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
+	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
+	printClaude("compactNudge.enabled", config.Claude.CompactNudge.Enabled)
+	printClaude("compactNudge.start", config.Claude.CompactNudge.Start)
+	printClaude("compactNudge.step", config.Claude.CompactNudge.Step)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

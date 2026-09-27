@@ -13,6 +13,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func liveChatPIDs(procRoot, configDir string) ([]string, error) {
@@ -71,6 +72,11 @@ func processIDs(procRoot string) ([]string, error) {
 }
 
 func procFDHolders(procRoot, db string) ([]string, error) {
+	probed := map[string]string{}
+	for _, suffix := range []string{"", layoutDBWAL, layoutDBSHM} {
+		physical := paths.PhysicalPath(db + suffix)
+		probed[physical] = filepath.Base(physical)
+	}
 	pids, err := processIDs(procRoot)
 	if err != nil {
 		return nil, err
@@ -94,7 +100,18 @@ func procFDHolders(procRoot, db string) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			if target == db || target == db+"-wal" || target == db+"-shm" {
+			match := false
+			if _, ok := probed[target]; ok {
+				match = true
+			} else {
+				for physical, base := range probed {
+					if filepath.Base(target) == base && paths.PhysicalPath(target) == physical {
+						match = true
+						break
+					}
+				}
+			}
+			if match {
 				holders = append(holders, pid)
 				break
 			}

@@ -12,6 +12,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -142,6 +144,49 @@ func TestOpenDetachedIDHealsACodexResume(t *testing.T) {
 	}
 	if result.State != "opened" {
 		t.Fatalf("result = %#v, want the resume reported as opened", result)
+	}
+}
+
+func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
+	root := testjail.Fleet(t)
+	const id = "33333333-3333-4333-8333-333333333333"
+	seedClaudeChat(t, root, id)
+	runtime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	runtime.Config = config.Defaults(home, []string{
+		filepath.Join(home, ".cc", "1", "projects"),
+		filepath.Join(home, ".cc", "2", "projects"),
+		filepath.Join(home, ".cc", "3", "projects"),
+	})
+	if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, 2); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := fleetdb.RecordLaunch(ctx, runtime.Paths, fleetdb.Launch{
+		SessionID: id, Engine: pfmengine.Claude, Account: 3,
+	}, 1); err != nil {
+		t.Fatal(err)
+	}
+	tmux := &fakeOpenTmux{alive: map[string]bool{}}
+	stubOpenExecutor(t, tmux)
+	if _, err := OpenDetachedID(ctx, id, io.Discard, &runtime); err != nil {
+		t.Fatal(err)
+	}
+	wantDir := filepath.Join(home, ".cc", "3")
+	if len(tmux.created) != 1 || !strings.Contains(tmux.created[0].Run, "CLAUDE_CONFIG_DIR="+action.Quote(wantDir)) {
+		t.Fatalf("created = %+v; want account 3 config %q", tmux.created, wantDir)
+	}
+	launches, err := fleetdb.OpenLaunches(ctx, runtime.Paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = launches.Close() })
+	launch, err := launches.LaunchFor(ctx, id)
+	if err != nil || launch.Account != 3 {
+		t.Fatalf("launch = %+v, %v; want account 3", launch, err)
 	}
 }
 

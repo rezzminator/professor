@@ -67,6 +67,22 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 	return false
 }
 
+func launchStartsSession(arguments []string) bool {
+	for _, argument := range arguments {
+		switch argument {
+		case "-h", "--help", "--version", "-v":
+			return false
+		}
+	}
+	for _, argument := range arguments {
+		if argument == "--" || strings.HasPrefix(argument, "-") {
+			continue
+		}
+		return !nonInteractiveClaudeSubcommands[argument]
+	}
+	return true
+}
+
 // Launch is the managed Claude launcher entry.
 func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
 	if env == nil {
@@ -88,7 +104,33 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		return 2
 	}
 	if launchPassThrough(arguments, env.Get("TMUX"), env.Get("PFM_LAUNCH_PASSTHROUGH") == "1") {
-		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), os.Environ()); err != nil {
+		environment := os.Environ()
+		if launchStartsSession(arguments) {
+			prefs := runtime.Config.Claude
+			configDir := config.AmbientClaudeConfigDir()
+			for _, account := range runtime.Config.Accounts {
+				if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
+					prefs = runtime.Config.EffectiveClaude(account.ID)
+					break
+				}
+			}
+			sessionEnv := claudelaunch.SessionEnv(prefs)
+			replaced := make(map[string]bool, len(sessionEnv))
+			for _, entry := range sessionEnv {
+				name, _, _ := strings.Cut(entry, "=")
+				replaced[name] = true
+			}
+			filtered := make([]string, 0, len(environment)+len(sessionEnv))
+			for _, entry := range environment {
+				name, _, _ := strings.Cut(entry, "=")
+				if !replaced[name] {
+					filtered = append(filtered, entry)
+				}
+			}
+			filtered = append(filtered, sessionEnv...)
+			environment = filtered
+		}
+		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), environment); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", err)
 			return 1
 		}

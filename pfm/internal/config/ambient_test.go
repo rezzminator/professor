@@ -70,3 +70,26 @@ func TestRefuseAmbientConfigHomeFromAllowsNoMarkerAndRealHomeOptOut(t *testing.T
 		t.Fatal(err)
 	}
 }
+
+func TestRefuseAmbientConfigHomeFromAlias(t *testing.T) {
+	home := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	physical, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(physical)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(parent, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, filepath.Join(alias, filepath.Base(physical))); err != nil {
+		t.Fatal(err)
+	}
+	if err := RefuseAmbientConfigHomeFrom(&paths.MapEnv{Values: map[string]string{}}, home); err == nil {
+		t.Fatal("alias marker allowed ambient config")
+	}
+}

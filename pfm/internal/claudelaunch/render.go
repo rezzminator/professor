@@ -124,8 +124,10 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h bool) map[string]any {
 	settings := map[string]any{knobOutputStyle: defaultWord, knobCleanupPeriodDays: prefs.CleanupPeriodDays}
 	env := map[string]string{
-		envWebSearches: strconv.FormatInt(prefs.WebSearchesPerSession, 10),
-		envAgentTeams:  "0",
+		envWebSearches:       strconv.FormatInt(prefs.WebSearchesPerSession, 10),
+		envAutoCompactWindow: strconv.FormatInt(prefs.AutoCompactWindow, 10),
+		envAgentTeams:        "0",
+		envFunctionHooks:     "1",
 	}
 	depth := prefs.MaxSubagentSpawnDepth
 	if depth < 1 {

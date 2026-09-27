@@ -409,7 +409,7 @@ func copyLayoutTree(source, target string) error {
 // a session-store account refuse whatever force says; a destination changed
 // since the install refuses unless force. A successful rollback keeps the
 // journal and marks it {dir}/rolled-back.
-func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, stdout io.Writer) error {
+func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, stdout io.Writer) (err error) {
 	root := filepath.Join(env.Home, ".local", "state", "pfm", "migrations")
 	if !layoutJournalID.MatchString(id) {
 		return fmt.Errorf("unknown layout journal %q in %s", id, root)
@@ -437,23 +437,6 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, s
 		return err
 	}
 	env = scope.apply(env)
-	for _, record := range records {
-		if record.Row != layoutRowStateDB && record.Row != layoutRowCacheDB {
-			continue
-		}
-		for _, path := range []string{record.Destination, env.StateDB, env.CacheDB} {
-			pids, err := dbHolderPIDs(
-				env.ProcRoot,
-				strings.TrimSuffix(strings.TrimSuffix(path, layoutDBWAL), layoutDBSHM),
-			)
-			if err != nil {
-				return err
-			}
-			if len(pids) > 0 {
-				return fmt.Errorf("rollback %s refused: database held by pid %s", id, strings.Join(pids, ","))
-			}
-		}
-	}
 	if err := layoutRollbackLiveChats(env, id, records); err != nil {
 		return err
 	}
@@ -467,10 +450,45 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, s
 				id, strings.Join(drifted, ", "))
 		}
 	}
+	hasDatabase := false
+	for _, record := range records {
+		if record.Result != layoutRecordRestored && (record.Row == layoutRowStateDB || record.Row == layoutRowCacheDB) {
+			hasDatabase = true
+			break
+		}
+	}
+	if hasDatabase {
+		stopped, stopErr := stopLayoutServices(ctx, env)
+		defer func() { err = errors.Join(err, restartLayoutServices(ctx, env, stopped)) }()
+		if stopErr != nil {
+			return fmt.Errorf("rollback %s: stop fleet units: %w", id, stopErr)
+		}
+		for _, record := range records {
+			if record.Result == layoutRecordRestored ||
+				(record.Row != layoutRowStateDB && record.Row != layoutRowCacheDB) {
+				continue
+			}
+			for _, path := range []string{record.Destination, env.StateDB, env.CacheDB} {
+				pids, scanErr := dbHolderPIDs(
+					env.ProcRoot,
+					strings.TrimSuffix(strings.TrimSuffix(path, layoutDBWAL), layoutDBSHM),
+				)
+				if scanErr != nil {
+					return scanErr
+				}
+				if len(pids) > 0 {
+					return fmt.Errorf("rollback %s refused: database held by pid %s", id, strings.Join(pids, ","))
+				}
+			}
+		}
+	}
 	var failures []error
 	unitsRestored := false
 	for index := len(records) - 1; index >= 0; index-- {
 		record := records[index]
+		if record.Result == layoutRecordRestored {
+			continue
+		}
 		if !layoutRecordSafe(env, dir, record) {
 			failures = append(failures, fmt.Errorf("record %d has unsafe path", index))
 			continue
@@ -512,7 +530,7 @@ func layoutRollbackLiveChats(env LayoutEnv, id string, records []layoutJournalRe
 	store := filepath.Join(env.Home, ".claude")
 	checked := map[string]bool{}
 	for _, record := range records {
-		if record.Row != layoutRowSessionStore {
+		if record.Result == layoutRecordRestored || record.Row != layoutRowSessionStore {
 			continue
 		}
 		dirs := []string{filepath.Dir(record.Destination)}

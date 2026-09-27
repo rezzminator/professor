@@ -97,21 +97,21 @@
     ".claude/codex-build.json": "a25e19df556db6fa67cfe410101c9de7816003ba1ef3271e2d70d3ce67adfea7",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
-    ".claude/commands/pcm.md": "888bf417ddde7d21b65547e1ad0927c8ceb0875ad5a72ebe3730ee8a6d5fabc0",
-    ".claude/commands/pfm-testing-manual.md": "ac6b00ed0fde4653d0bf2a3b3939dc37a1c140b7dc3242b2dd073ec4835d99bd",
+    ".claude/commands/pcm.md": "097af533e61159d83e5ac50514c02748ad5d457b75ec1fc894d394acec004ea0",
+    ".claude/commands/pfm-testing-manual.md": "38f7f1bf1d7a905b0632024c6b0893e120c070efd305434975ace682c0d9b004",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
     ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
-    ".claude/scripts/dev.sh": "a1239c26cadbefb630c6e0176925f620eabaf06f56b871d1b80ba85b3e09b9f0",
+    ".claude/scripts/dev.sh": "12e697a3bba839b7426b063ab71d42a43dcc4f3bc5f4b86a5f9f436d6a802812",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
     ".claude/scripts/pfm-guard.sh": "b4e1a5d6f3f827410b40d484aaa687ce0c34b882938ef86080d8828f560d48dc",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
-    ".gitignore": "b4b64ebc80d0550100d5afb29b8e1def0ae87ccf3626f16f060e78624377a524",
-    "CLAUDE.md": "c4e6e54c1a73c5f0389609975980401d6dd114272c05ef50c01ac3204fb463e4",
+    ".gitignore": "65cc2b9db5d7b61af166900deefb240aed6e9b71b99fbed06644cbf1cbaca9ce",
+    "CLAUDE.md": "0e1201e201d225c65857b9e1a08f0e1ef16179e8f836636892cb34d3f5973830",
     "docs/commands/pcm/references/audit-scopes.md": "0eb093cd384472d0cab03d30fe4b562b8424a6d0d6310fe1d51bad7efb04398b",
     "docs/commands/pcm/references/refresh.md": "39ad4e4e8aa023d9516ed3ec2d1ac5cdad78ebf1c058bcb3cb68cf8a01cd47ff",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
-    "pfm/CLAUDE.md": "baddc5138a6653c80af94181401ff29481e5b9379912c37e48d216353020cc48"
+    "pfm/CLAUDE.md": "f3706b4fa70ab4bd2d924c29e114222c59d0568fe4a7db34556dee238b82125e"
   }
 }

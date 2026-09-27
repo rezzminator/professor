@@ -12,15 +12,14 @@ import (
 )
 
 // stageGlobalSource writes one recorded clone's machine-global sources: two
-// commands (a file and a directory), one template skill, and the in-tree
-// deep-rr workflow skill — exactly the four shapes wireGlobalCommands and
-// wireGlobalSkills fan out across every configured account.
+// commands (a file and a directory) and one template skill — exactly the
+// three shapes wireGlobalCommands and wireGlobalSkills fan out across every
+// configured account.
 func stageGlobalSource(t *testing.T, repo string) {
 	t.Helper()
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tokens.md"), "# tokens command\n")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tools", "go.md"), "# go command\n")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "skills", "pcm", "SKILL.md"), "# pcm skill\n")
-	writeFixture(t, filepath.Join(repo, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
 }
 
 // TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink is the uninstall
@@ -30,7 +29,8 @@ func stageGlobalSource(t *testing.T, repo string) {
 // command and skill link behind, so a removed install still resolved
 // /flights:*, /quality:* and the global skills into the clone from every
 // account — against INSTALL.md's promise that uninstall removes the
-// installer-owned links.
+// installer-owned links. A retired skill's link an earlier install left
+// behind (retiredGlobalSkills) is installer-owned too and goes with them.
 func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
@@ -52,9 +52,12 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 		assertLink(t,
 			filepath.Join(config, "skills", "pcm"),
 			filepath.Join(repo, "templates", "global", "skills", "pcm"))
-		assertLink(t,
+		if err := os.Symlink(
+			filepath.Join(repo, "workflows", "deep-rr"),
 			filepath.Join(config, "skills", "deep-rr"),
-			filepath.Join(repo, "workflows", "deep-rr"))
+		); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if _, err := Run(context.Background(), Options{

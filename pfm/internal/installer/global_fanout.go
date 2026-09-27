@@ -376,10 +376,10 @@ func inspectAccountGlobalAgents(account pfmconfig.Account, repo string, sources 
 	return status
 }
 
-// wireGlobalSkills links every machine-global skill into the skills/
-// registry of every configured Claude account: the in-tree workflows/deep-rr
-// directory, and each
-// skill directory shipped under templates/global/skills/.
+// wireGlobalSkills first prunes every retired skill's leftover link
+// (retireRetiredGlobalSkills), then links every machine-global skill — each
+// skill directory shipped under templates/global/skills/ — into the skills/
+// registry of every configured Claude account.
 // ghostwriter/vision-factory clone management is explicitly out of scope
 // here — a different owner entirely.
 func (installer *engine) wireGlobalSkills() error {
@@ -387,11 +387,7 @@ func (installer *engine) wireGlobalSkills() error {
 	if err != nil {
 		return fmt.Errorf("resolve global skills source repository: %w", err)
 	}
-	if err := installer.wireGlobalSkill(
-		sourceRepo,
-		filepath.Join(sourceRepo, "workflows", "deep-rr"),
-		"deep-rr",
-	); err != nil {
+	if err := installer.retireRetiredGlobalSkills(); err != nil {
 		return err
 	}
 	return installer.wireTemplateSkills(sourceRepo)

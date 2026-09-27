@@ -143,11 +143,11 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 	})
 
 	t.Run("dir-kind copy is replaceable, unlike a dir-kind conflict", func(t *testing.T) {
-		target := filepath.Join(root, "dir-copy", "deep-rr")
+		target := filepath.Join(root, "dir-copy", "pcm")
 		if err := os.MkdirAll(filepath.Join(target, "nested"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		dirSource := filepath.Join(sourceRepo, "workflows", "deep-rr")
+		dirSource := filepath.Join(sourceRepo, "templates", "global", "skills", "pcm")
 		state, _, err := ClassifyGlobalLink(target, dirSource, sourceRepo, GlobalLinkDir)
 		if err != nil {
 			t.Fatal(err)

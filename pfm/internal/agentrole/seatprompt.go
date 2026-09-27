@@ -186,16 +186,19 @@ func seatPromptCandidates(sidDir, socket, pane string) ([]string, error) {
 }
 
 // RemoveSeatPrompt removes the pane-specific prompt and its bare-socket
-// fallback. Absence is already the desired end state.
+// fallback, with each one's harness prompt record. Absence is already the
+// desired end state.
 func RemoveSeatPrompt(sidDir, socket, pane string) error {
 	paths, err := seatPromptCandidates(sidDir, socket, pane)
 	if err != nil {
 		return err
 	}
 	var removeErrs []error
-	for _, path := range paths {
-		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			removeErrs = append(removeErrs, fmt.Errorf("agent role: remove seat prompt %s: %w", path, err))
+	for _, seatPath := range paths {
+		for _, path := range []string{seatPath, harnessRecordFor(seatPath)} {
+			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				removeErrs = append(removeErrs, fmt.Errorf("agent role: remove seat prompt %s: %w", path, err))
+			}
 		}
 	}
 	return errors.Join(removeErrs...)

@@ -424,3 +424,52 @@ func mustCodexFleetPrompt(t *testing.T) string {
 	}
 	return prompt
 }
+
+func TestRefreshReloadKeepsTheRecordedHarnessPrompt(t *testing.T) {
+	repo, home, sidDir := t.TempDir(), t.TempDir(), t.TempDir()
+	harness := filepath.Join(t.TempDir(), "alt.md")
+	if err := os.WriteFile(harness, []byte("ALT PROMPT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A roleless seat reborn on the file it was launched with, not the staged prompt.
+	if err := agentrole.WriteHarnessPromptRecord(sidDir, "cc-plain", "", harness); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := agentrole.RefreshSeatPrompt(pfmengine.Claude, sidDir, "cc-plain", "%1", repo, home)
+	if err != nil || channel != harness {
+		t.Fatalf("roleless harness seat = channel %q error %v, want %q", channel, err, harness)
+	}
+
+	// A role seat composes its role onto the recorded prompt; no staged prompt exists in home.
+	agentPath := filepath.Join(repo, ".claude", "agents", "reviewer.md")
+	if err := os.MkdirAll(filepath.Dir(agentPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentPath, []byte("---\nname: reviewer\n---\nROLE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := agentrole.WriteHarnessPromptRecord(sidDir, "cc-role", "", harness); err != nil {
+		t.Fatal(err)
+	}
+	if err := agentrole.WriteSeatPrompt(sidDir, "cc-role", "", "<!-- pfm agent-role: reviewer -->\nSTALE"); err != nil {
+		t.Fatal(err)
+	}
+	channel, err = agentrole.RefreshSeatPrompt(pfmengine.Claude, sidDir, "cc-role", "%1", repo, home)
+	if err != nil || channel != mustReloadSeatPromptPath(t, sidDir, "cc-role", "") {
+		t.Fatalf("role harness seat = channel %q error %v", channel, err)
+	}
+	if _, prompt, _, _, err := agentrole.ReadSeatPrompt(sidDir, "cc-role", ""); err != nil ||
+		prompt != "ALT PROMPT\n\n---\n\nROLE\n" {
+		t.Fatalf("role harness seat prompt = %q error %v", prompt, err)
+	}
+
+	// The recorded file gone is a refusal naming it, never a silent fall back to the staged prompt.
+	if err := os.Remove(harness); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentrole.RefreshSeatPrompt(pfmengine.Claude, sidDir, "cc-plain", "%1", repo, home); err == nil ||
+		!strings.Contains(err.Error(), harness) {
+		t.Fatalf("gone harness prompt error = %v, want the path", err)
+	}
+}

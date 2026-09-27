@@ -76,6 +76,7 @@ func crumbHealthWith(
 			nonFleetServerCrumb(name) ||
 			knownSIDMetadata(name) ||
 			agentrole.IsSeatPromptPath(name) ||
+			agentrole.IsHarnessPromptRecordPath(name) ||
 			sidScratchFile(name) {
 			continue
 		}

@@ -53,7 +53,7 @@ func runRun(
 		"chat new",
 		"usage: pfm chat new --name NAME [--engine cc|cx] [--cwd DIR] "+
 			"[--account N] [--1h] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
-			"[--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
+			"[--harness-prompt PATH] [--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
 		stderr,
 	)
 	name := flags.String("name", "", "chat name (a _KILL… name stays out of the list)")
@@ -69,6 +69,7 @@ func runRun(
 	effort := flags.String("effort", "", "reasoning effort the seat is born with")
 	promptFile := flags.String("prompt-file", "", "read the launch prompt from a file")
 	role := flags.String("agent-role", "", "registered agent role carried by the seat's prompt channel")
+	harnessPrompt := flags.String("harness-prompt", "", "claude only: system prompt file replacing the staged one")
 	await := flags.Bool("await", false, "wait for the first answer and print it (the launch summary moves to stderr)")
 	timeout := flags.Int("timeout", askTimeoutSeconds, "with --await: seconds to wait (0 waits forever)")
 	settle := flags.Int("settle", askSettleSeconds, "with --await: seconds of quiet before an answer is finished")
@@ -103,8 +104,13 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
+	harnessPath, harnessBody, err := agentrole.LoadHarnessPromptFor(engineName, *harnessPrompt)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return 2
+	}
 	socket := spawn.FreshSocket(engineName)
-	if *role != "" {
+	if *role != "" && harnessPath == "" {
 		policy := runtime.Config.EffectiveClaude(selectedAccount).SystemPrompt
 		if policyErr := agentrole.ValidateSeatPromptPolicy(engineName, policy); policyErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", policyErr)
@@ -116,12 +122,12 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
-	var promptChannel string
-	rolePromptWritten := false
+	promptChannel := harnessPath
+	seatStateWritten := false
 	defer func() {
-		if rolePromptWritten {
+		if seatStateWritten {
 			if removeErr := agentrole.RemoveSeatPrompt(resolved.SIDDir, socket, ""); removeErr != nil {
-				fmt.Fprintf(stderr, "pfm chat new: clean up unused role prompt: %v\n", removeErr)
+				fmt.Fprintf(stderr, "pfm chat new: clean up unused seat prompt state: %v\n", removeErr)
 			}
 		}
 	}()
@@ -131,8 +137,8 @@ func runRun(
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 			return 2
 		}
-		var stagedFleetPrompt string
-		if engineName == pfmengine.Claude {
+		stagedFleetPrompt := harnessBody
+		if engineName == pfmengine.Claude && harnessPath == "" {
 			stagedPath := action.ProfessorPromptPath(resolved.Home)
 			raw, readErr := os.ReadFile(stagedPath)
 			if readErr != nil {
@@ -157,12 +163,17 @@ func runRun(
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", writeErr)
 			return 2
 		}
-		rolePromptWritten = true
+		seatStateWritten = true
 		if engineName == pfmengine.Claude {
 			promptChannel = seatPromptPath
 		} else {
 			promptChannel = constitution
 		}
+	}
+	seatStateWritten = seatStateWritten || harnessPath != ""
+	if err := agentrole.WriteHarnessPromptRecord(resolved.SIDDir, socket, "", harnessPath); err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return 2
 	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:         engineName,
@@ -226,7 +237,7 @@ func runRun(
 		pfmchat.RecordVerb(context.Background(), "new", 1)
 		return 1
 	}
-	rolePromptWritten = false
+	seatStateWritten = false
 	pfmchat.RecordVerb(context.Background(), "new", 0)
 	spawnedAt := clk.Now()
 	parent := parentChatID(ctx, env)

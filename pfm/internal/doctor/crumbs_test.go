@@ -119,6 +119,21 @@ func TestDoctorCrumbsAcceptLiveRolePrompts(t *testing.T) {
 	}
 }
 
+func TestDoctorCrumbsAcceptHarnessPromptRecords(t *testing.T) {
+	root := jailTest(t)
+	sidDir := filepath.Join(root, "sid")
+	if err := agentrole.WriteHarnessPromptRecord(sidDir, "cc-1", "", filepath.Join(root, "alt.md")); err != nil {
+		t.Fatal(err)
+	}
+	entries, invalid, err := crumbHealth(sidDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries != 1 || invalid != 0 {
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want the harness prompt record accepted", entries, invalid)
+	}
+}
+
 // TestDoctorCrumbsAcceptHarnessCaptureConfigDirs pins the harness-prompt
 // capture's config directory, in flight or left by a crash, as pfm's own.
 func TestDoctorCrumbsAcceptHarnessCaptureConfigDirs(t *testing.T) {

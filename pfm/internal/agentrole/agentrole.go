@@ -32,16 +32,39 @@ import (
 // RefreshSeatPrompt re-resolves the marker role, atomically rewrites its
 // prompt file, and returns the engine-ready prompt channel.
 func RefreshSeatPrompt(engine pfmengine.ID, sidDir, socket, pane, cwd, home string) (string, error) {
-	role, _, path, found, err := ReadSeatPrompt(sidDir, socket, pane)
-	if err != nil || !found {
+	harnessPath, harnessFound, err := ReadHarnessPromptRecord(sidDir, socket, pane)
+	if err != nil {
 		return "", err
+	}
+	var harnessBody string
+	if harnessFound {
+		if engine != pfmengine.Claude {
+			return "", fmt.Errorf(
+				"agent role: seat %s records harness prompt %s, which only a claude seat carries",
+				socket,
+				harnessPath,
+			)
+		}
+		if _, harnessBody, err = LoadHarnessPrompt(harnessPath); err != nil {
+			return "", fmt.Errorf("agent role: seat %s was launched on a harness prompt: %w", socket, err)
+		}
+	}
+	role, _, path, found, err := ReadSeatPrompt(sidDir, socket, pane)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		if harnessFound {
+			return harnessPath, nil
+		}
+		return "", nil
 	}
 	constitution, _, err := Resolve(engine, role, cwd, home)
 	if err != nil {
 		return "", err
 	}
-	var stagedFleetPrompt string
-	if engine == pfmengine.Claude {
+	stagedFleetPrompt := harnessBody
+	if engine == pfmengine.Claude && !harnessFound {
 		path := action.ProfessorPromptPath(home)
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {

@@ -313,6 +313,18 @@ func TestFrontmatterAndRosterTransform(t *testing.T) {
 	}
 }
 
+// A line naming both files states their relation; swapping its CLAUDE.md
+// makes it claim AGENTS.md is hand-edited and compiled from itself.
+func TestTransformMarkdownKeepsLinesNamingBothFiles(t *testing.T) {
+	both := "- `CLAUDE.md` is the one hand-edited orientation file; `AGENTS.md` is compiled from it."
+	pointer := "- pfm: the fleet engine · child `pfm/CLAUDE.md`"
+	got := transformMarkdown(both+"\n"+pointer+"\n", TransformOptions{ReplaceClaudeFile: true})
+	want := both + "\n- pfm: the fleet engine · child `pfm/AGENTS.md`\n"
+	if got != want {
+		t.Fatalf("transformMarkdown = %q, want %q", got, want)
+	}
+}
+
 func TestFrontmatterUnquotesYAMLScalars(t *testing.T) {
 	raw := "---\n" +
 		"single: 'a: b, \"c\" and it''s fine'\n" +

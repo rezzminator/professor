@@ -34,6 +34,13 @@ func TestInstallRollbackUsesJournalAndRejectsMixedFlags(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "journal.json"), []byte("[]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "scope.json"),
+		[]byte(`{"accounts":[],"codexHomes":[],"stateDb":"","cacheDb":""}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{{"--rollback", id, "--yes"}, {"--rollback", ""}} {
 		var stdout, stderr bytes.Buffer
 		if code := runInstall(args, &stdout, &stderr, runtime); code != 2 {
@@ -57,6 +64,27 @@ func TestInstallRollbackUsesJournalAndRejectsMixedFlags(t *testing.T) {
 	if code := runInstall([]string{"--rollback", "20260102T030406Z"}, &stdout, &stderr, runtime); code != 2 ||
 		!strings.Contains(stderr.String(), filepath.Join(home, ".local", "state", "pfm", "migrations")) {
 		t.Fatalf("unknown rollback code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func TestInstallRollbackRefusesJournalWithoutScope(t *testing.T) {
+	home := t.TempDir()
+	id := "20260102T030405Z"
+	dir := filepath.Join(home, ".local", "state", "pfm", "migrations", id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "journal.json"), []byte("[]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := commandRuntime{
+		Paths:  paths.Values{Home: home},
+		Config: pfmconfig.Config{Path: filepath.Join(home, "pfm.config.json")},
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runInstall([]string{"--rollback", id}, &stdout, &stderr, runtime); code != 1 ||
+		!strings.Contains(stderr.String(), "rollback "+id+" refused: journal "+dir+" has no scope.json") {
+		t.Fatalf("rollback code=%d stderr=%q", code, stderr.String())
 	}
 }
 

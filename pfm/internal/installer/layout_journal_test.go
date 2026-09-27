@@ -318,6 +318,9 @@ func TestInstallJournalRollbackRefusesAnInstallRecordOutsideTheAllowlist(t *test
 			t.Fatal(err)
 		}
 		writeFile(t, filepath.Join(dir, "journal.json"), string(raw), 0o600)
+		if err := writeLayoutJournalScope(dir, env); err != nil {
+			t.Fatal(err)
+		}
 		err = RollbackLayout(context.Background(), env, filepath.Base(dir), false, io.Discard)
 		if err == nil || err.Error() != "record 0 has unsafe path" {
 			t.Fatalf("case %d rollback err=%v, want record 0 has unsafe path", index, err)

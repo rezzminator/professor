@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // journalRollbackRunner plays the candidate's `install --rollback {id}` and
@@ -334,36 +337,140 @@ func TestUpdateRefusesToInstallWhenTheJournalDirectoryIsUnreadable(t *testing.T)
 // rollback, before the previous release's installer reads --config — with the
 // same --config the install was given, and no copy of their own.
 func TestUpdateRollbackRestoresMovedConfigThroughTheJournal(t *testing.T) {
-	runtime, repo, legacyPath, migratedPath, originalContent := updateConfigMigrationTestRuntime(t)
-	home := runtime.Paths.Home
-	_, calls, stderr, code := journalRollbackUpdate{
-		runtime:     runtime,
-		repo:        repo,
-		doctorFails: true,
-		install: func() error {
-			if err := writeUpdateJournal(home, "20260927T120000Z"); err != nil {
-				return err
+	t.Run("single config", func(t *testing.T) {
+		runtime, repo, legacyPath, migratedPath, originalContent := updateConfigMigrationTestRuntime(t)
+		home := runtime.Paths.Home
+		_, calls, stderr, code := journalRollbackUpdate{
+			runtime:     runtime,
+			repo:        repo,
+			doctorFails: true,
+			install: func() error {
+				if err := writeUpdateJournal(home, "20260927T120000Z"); err != nil {
+					return err
+				}
+				return os.Rename(legacyPath, migratedPath)
+			},
+			onRollback: func([]string) {
+				if err := os.Rename(migratedPath, legacyPath); err != nil {
+					t.Errorf("journal rollback stub: %v", err)
+				}
+			},
+		}.run(t)
+		if code == 0 {
+			t.Fatalf("Run() code=0, want the candidate doctor failure; stderr=%q", stderr)
+		}
+		if len(calls) != 1 || !slices.Equal(calls[0][1:], []string{
+			"--config", legacyPath, "install", "--rollback", "20260927T120000Z",
+		}) {
+			t.Fatalf(
+				"journal rollback calls = %q, want --config %s install --rollback 20260927T120000Z",
+				calls,
+				legacyPath,
+			)
+		}
+		if got, err := os.ReadFile(legacyPath); err != nil || !bytes.Equal(got, originalContent) {
+			t.Fatalf("config.json after rollback = %q, %v; want %q", got, err, originalContent)
+		}
+		if _, err := os.Stat(migratedPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("pfm.config.json after rollback: stat err=%v, want it gone", err)
+		}
+	})
+	t.Run("three accounts", func(t *testing.T) {
+		runtime, repo, legacyPath, migratedPath, _ := updateConfigMigrationTestRuntime(t)
+		home := runtime.Paths.Home
+		registries := make(map[string][]byte)
+		configAccounts := make([]string, 0, 3)
+		for id := 1; id <= 3; id++ {
+			dir := filepath.Join(home, "accounts", fmt.Sprint(id))
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
 			}
-			return os.Rename(legacyPath, migratedPath)
-		},
-		onRollback: func([]string) {
-			if err := os.Rename(migratedPath, legacyPath); err != nil {
-				t.Errorf("journal rollback stub: %v", err)
+			registry := filepath.Join(dir, ".claude.json")
+			original := []byte(
+				fmt.Sprintf(
+					`{"mcpServers":{"professor":{"type":"stdio","command":%q,"args":["mcp","serve","--stdio"]}}}`,
+					filepath.Join(home, ".local", "bin", "pfm"),
+				),
+			)
+			if err := os.WriteFile(registry, original, 0o600); err != nil {
+				t.Fatal(err)
 			}
-		},
-	}.run(t)
-	if code == 0 {
-		t.Fatalf("Run() code=0, want the candidate doctor failure; stderr=%q", stderr)
-	}
-	if len(calls) != 1 || !slices.Equal(calls[0][1:], []string{
-		"--config", legacyPath, "install", "--rollback", "20260927T120000Z",
-	}) {
-		t.Fatalf("journal rollback calls = %q, want --config %s install --rollback 20260927T120000Z", calls, legacyPath)
-	}
-	if got, err := os.ReadFile(legacyPath); err != nil || !bytes.Equal(got, originalContent) {
-		t.Fatalf("config.json after rollback = %q, %v; want %q", got, err, originalContent)
-	}
-	if _, err := os.Stat(migratedPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("pfm.config.json after rollback: stat err=%v, want it gone", err)
-	}
+			registries[registry] = original
+			configAccounts = append(configAccounts, fmt.Sprintf(`{"id":%d,"configDir":%q}`, id, dir))
+		}
+		config := []byte(`{"version":2,"accounts":[` + strings.Join(configAccounts, ",") + `]}`)
+		if err := os.WriteFile(legacyPath, config, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var journalID string
+		_, calls, stderr, code := journalRollbackUpdate{
+			runtime: runtime, repo: repo, doctorFails: true,
+			install: func() error {
+				loaded, err := pfmconfig.LoadInstallRuntime(legacyPath)
+				if err != nil {
+					return err
+				}
+				env, err := installer.NewLayoutEnv(loaded, paths.OSEnv{})
+				if err != nil {
+					return err
+				}
+				// The candidate's config rename is stubbed below; layout acts on its target path.
+				env.ConfigPath = migratedPath
+				dir, err := installer.ApplyLayout(context.Background(), env, nil, true, io.Discard)
+				if err != nil {
+					return err
+				}
+				if dir == "" {
+					return errors.New("layout apply wrote no journal")
+				}
+				journalID = filepath.Base(dir)
+				for registry, before := range registries {
+					after, readErr := os.ReadFile(registry)
+					if readErr != nil || bytes.Equal(after, before) {
+						return fmt.Errorf("layout did not strip %s: %v", registry, readErr)
+					}
+				}
+				return os.Rename(legacyPath, migratedPath)
+			},
+			onRollback: func(argv []string) {
+				loaded, err := pfmconfig.LoadInstallRuntime(argv[2])
+				if err != nil {
+					t.Errorf("load rollback runtime: %v", err)
+					return
+				}
+				env, err := installer.NewLayoutEnv(loaded, paths.OSEnv{})
+				if err != nil {
+					t.Errorf("build rollback layout: %v", err)
+					return
+				}
+				if err := installer.RollbackLayout(context.Background(), env, argv[5], false, io.Discard); err != nil {
+					t.Errorf("journal rollback: %v", err)
+				}
+				if err := os.Rename(migratedPath, legacyPath); err != nil {
+					t.Errorf("config move stub rollback: %v", err)
+				}
+			},
+		}.run(t)
+		if code == 0 {
+			t.Fatalf("Run() code=0, want candidate doctor failure; stderr=%q", stderr)
+		}
+		if len(calls) != 1 ||
+			!slices.Equal(calls[0][1:], []string{"--config", legacyPath, "install", "--rollback", journalID}) {
+			t.Fatalf(
+				"journal rollback calls=%q stderr=%q, want --config %s install --rollback %s",
+				calls,
+				stderr,
+				legacyPath,
+				journalID,
+			)
+		}
+		for registry, want := range registries {
+			if got, err := os.ReadFile(registry); err != nil || !bytes.Equal(got, want) {
+				t.Errorf("account registry %s after rollback=%q err=%v, want %q", registry, got, err, want)
+			}
+		}
+		if got, err := os.ReadFile(legacyPath); err != nil || !bytes.Equal(got, config) {
+			t.Errorf("legacy config after rollback=%q err=%v, want %q", got, err, config)
+		}
+	})
 }

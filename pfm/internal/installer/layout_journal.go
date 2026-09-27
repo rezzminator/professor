@@ -39,13 +39,14 @@ type layoutJournalRecord struct {
 // write the installer itself makes record the prior state of their paths here
 // before the change, so `pfm install --rollback {id}` restores all of them.
 type Journal struct {
-	env     LayoutEnv
-	dir     string
-	records []layoutJournalRecord
-	planned []string
-	dryRun  bool
-	ctx     context.Context
-	clock   clock.Clock
+	env        LayoutEnv
+	dir        string
+	records    []layoutJournalRecord
+	planned    []string
+	dryRun     bool
+	ctx        context.Context
+	clock      clock.Clock
+	writeScope func(dir string, env LayoutEnv) error
 }
 
 const (
@@ -273,8 +274,18 @@ func (journal *Journal) ensure() error {
 		if err != nil {
 			return err
 		}
+		if err := os.Mkdir(filepath.Join(dir, "backup"), 0o700); err != nil {
+			return err
+		}
+		writeScope := journal.writeScope
+		if writeScope == nil {
+			writeScope = writeLayoutJournalScope
+		}
+		if err := writeScope(dir, journal.env); err != nil {
+			return err
+		}
 		journal.dir = dir
-		return os.Mkdir(filepath.Join(dir, "backup"), 0o700)
+		return nil
 	}
 }
 
@@ -419,6 +430,11 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, s
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("read rollback marker %s: %w", marker, err)
 	}
+	scope, err := readLayoutJournalScope(dir, id)
+	if err != nil {
+		return err
+	}
+	env = scope.apply(env)
 	for _, record := range records {
 		if record.Row != layoutRowStateDB && record.Row != layoutRowCacheDB {
 			continue

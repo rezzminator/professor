@@ -93,11 +93,14 @@ Transcripts are append-only JSONL named by session id, so a differing same-named
 Each applying run keeps one journal for the whole `pfm install --yes`, in `~/.local/state/pfm/migrations/{UTC timestamp}/`: the layout rows, the config migration, and every write the installer itself makes that changes bytes (an identical rewrite records nothing, so a no-op install makes no journal). Its last stdout line names it: `install journal: {dir}`.
 
 - `journal.json` — one record per affected path: row, verdict, source, destination, backup path, result, and `after`, the destination's fingerprint right after the change (sha256 over one line per entry at and under it, walked without following links: relative path, type, size, mtime, mode, link target). Each record is flushed before its path changes. The install refingerprints the state database after its own schema migration of the moved file.
+- `scope.json` — the Claude accounts, Codex homes, and state and cache database paths used by that install. Rollback judges every record against this saved scope, even when the current config has moved or is absent.
 - `backup/` — the prior bytes of every rewritten or removed path, each session tree before a merge, every parked conflict, and full copies of both moved databases and their WAL/SHM siblings before checkpointing. Rollback restores the database copies even if pfm opened the moved files after installation.
 
 `pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. Every check reads before anything is written:
 
 - a journal already rolled back refuses: `rollback {id} refused: already rolled back at {time}`;
+- a journal without `scope.json` refuses: `rollback {id} refused: journal {dir} has no scope.json`;
+- an unreadable or invalid scope refuses: `rollback {id} refused: journal scope {path}: {reason}`;
 - a run that moved state databases refuses while any pfm process holds them;
 - a session-store record refuses while a chat is live on its account (§ Guards);
 - a destination whose fingerprint no longer matches its last applied record — newer work since the install — refuses the whole rollback, naming every drifted path: `rollback {id} refused: drift at {path}[, {path}…] — rerun with --force to overwrite them`. A record without a fingerprint counts as drift. Pending records, the cache database and `-wal`/`-shm` siblings are not checked. `--force` overrides only this check.
@@ -123,7 +126,7 @@ Chats born before the move were launched with `--system-prompt-file ~/.local/sha
 ## Running it on a host
 
 1. Rehearse on a copy of the host first: `infra/fence/host-rehearsal.sh BACKUP SCRATCH` runs the preview, the apply, doctor, a second apply, the manifest check and the rollback against a `backup.sh` backup, and writes its verdict under `SCRATCH/rehearsal/`.
-1. Close the chats on the accounts being merged, or accept that their rows refuse and rerun later.
-2. `pfm install` — read the plan.
-3. `pfm install --yes`.
-4. `pfm doctor` — every layout row `ok`; the conflict list, if any, names what to reconcile by hand.
+2. Close the chats on the accounts being merged, or accept that their rows refuse and rerun later.
+3. `pfm install` — read the plan.
+4. `pfm install --yes`.
+5. `pfm doctor` — every layout row `ok`; the conflict list, if any, names what to reconcile by hand.

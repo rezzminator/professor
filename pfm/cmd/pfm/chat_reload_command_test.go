@@ -252,6 +252,10 @@ func (reloadTargetTmux) CancelMode(context.Context, string, string) error { retu
 func (reloadTargetTmux) Capture(context.Context, string, string) (string, error) {
 	return "", nil
 }
+
+func (reloadTargetTmux) CaptureStyled(context.Context, string, string) (string, error) {
+	return "", nil
+}
 func (reloadTargetTmux) SendKey(context.Context, string, string, string) error { return nil }
 func (reloadTargetTmux) SendLiteral(context.Context, string, string, string) error {
 	return nil

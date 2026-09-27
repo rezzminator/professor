@@ -84,6 +84,11 @@ func (tmux reloadCommandTmux) Capture(ctx context.Context, socket, pane string) 
 	return string(out), err
 }
 
+func (tmux reloadCommandTmux) CaptureStyled(ctx context.Context, socket, pane string) (string, error) {
+	out, err := tmux.command(ctx, socket, "capture-pane", "-t", pane, "-p", "-J", "-e").Output()
+	return string(out), err
+}
+
 func (tmux reloadCommandTmux) SendKey(ctx context.Context, socket, pane, key string) error {
 	return tmux.command(ctx, socket, "send-keys", "-t", pane, key).Run()
 }

@@ -923,3 +923,109 @@ func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
 		})
 	}
 }
+
+// recordBeforeWrite is a BeforeWrite hook that records each path together with
+// whether it existed at the moment of the call, and fails on failPath.
+func recordBeforeWrite(calls *[]string, existed map[string]bool, failPath string) func(string) error {
+	return func(path string) error {
+		*calls = append(*calls, path)
+		if _, err := os.Lstat(path); err == nil {
+			existed[path] = true
+		}
+		if path == failPath {
+			return os.ErrPermission
+		}
+		return nil
+	}
+}
+
+func TestGlobalAgentsBeforeWriteSeesEveryChangedPathBeforeItsWrite(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+	link := filepath.Join(home, ".claude", "agents", "alpha.md")
+	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
+
+	var calls []string
+	existed := map[string]bool{}
+	options := GlobalAgentsOptions{Home: home, BeforeWrite: recordBeforeWrite(&calls, existed, "")}
+	if _, err := RunGlobalAgents(options); err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+	if strings.Join(calls, "\n") != role+"\n"+link {
+		t.Fatalf("BeforeWrite calls = %q, want the role then the link once each", calls)
+	}
+	if existed[link] || existed[role] {
+		t.Fatalf("BeforeWrite ran after a write: existed = %v", existed)
+	}
+
+	calls = nil
+	if _, err := RunGlobalAgents(options); err != nil {
+		t.Fatalf("RunGlobalAgents (converged): %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("BeforeWrite on a converged home = %q, want no call", calls)
+	}
+}
+
+func TestGlobalAgentsBeforeWriteErrorAbortsBeforeTheWrite(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
+
+	var calls []string
+	failing := recordBeforeWrite(&calls, map[string]bool{}, role)
+	_, err := RunGlobalAgents(GlobalAgentsOptions{Home: home, BeforeWrite: failing})
+	if err == nil || !strings.Contains(err.Error(), role) {
+		t.Fatalf("RunGlobalAgents error = %v, want the hook failure naming %s", err, role)
+	}
+	if _, statErr := os.Lstat(role); !os.IsNotExist(statErr) {
+		t.Fatalf("role written despite the failing hook: %v", statErr)
+	}
+}
+
+func TestGlobalCommandsBeforeWriteSeesEveryChangedPathBeforeItsWrite(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".claude", "commands", "fixture.md")
+	writeTestFile(t, source, "---\ndescription: fixture\n---\nUse /fixture.\n")
+
+	var calls []string
+	existed := map[string]bool{}
+	options := GlobalCommandsOptions{Home: home, Mode: ModeBuild, BeforeWrite: recordBeforeWrite(&calls, existed, "")}
+	build, err := RunGlobalCommands(options)
+	if err != nil || !build.OK || build.Wrote != 2 {
+		t.Fatalf("global build: result=%#v err=%v", build, err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("BeforeWrite calls = %q, want one per written path", calls)
+	}
+	for _, path := range calls {
+		if existed[path] {
+			t.Fatalf("BeforeWrite ran after the write of %s", path)
+		}
+		if _, statErr := os.Lstat(path); statErr != nil {
+			t.Fatalf("hooked path %s was not written: %v", path, statErr)
+		}
+	}
+
+	calls = nil
+	if _, err := RunGlobalCommands(options); err != nil || len(calls) != 0 {
+		t.Fatalf("converged build: calls=%q err=%v, want no call", calls, err)
+	}
+
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	orphans := []string{}
+	failing := GlobalCommandsOptions{Home: home, Mode: ModeBuild, BeforeWrite: func(path string) error {
+		orphans = append(orphans, path)
+		return os.ErrPermission
+	}}
+	if _, err := RunGlobalCommands(failing); err == nil || len(orphans) != 1 {
+		t.Fatalf("orphan removal with a failing hook: calls=%q err=%v, want one call and an error", orphans, err)
+	}
+	if _, statErr := os.Lstat(orphans[0]); statErr != nil {
+		t.Fatalf("orphan %s removed despite the failing hook: %v", orphans[0], statErr)
+	}
+}

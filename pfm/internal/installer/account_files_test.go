@@ -106,18 +106,18 @@ func TestAccountSettingsUnreadableLedger(t *testing.T) {
 
 func TestAccountMCPLeftoversAndStrip(t *testing.T) {
 	raw := []byte(`{"counter":9007199254740993,"mcpServers":{"chat":{"command":"pfm"},"other":{"command":"operator"}}}`)
-	got, err := accountMCPLeftovers(raw, []string{"chat"})
+	got, err := accountMCPLeftovers(raw, []string{"chat"}, nil)
 	if err != nil || !reflect.DeepEqual(got, []string{"mcpServers.chat"}) {
 		t.Fatalf("leftovers=%v err=%v", got, err)
 	}
-	updated, removed, err := stripAccountMCP(raw, []string{"chat"})
+	updated, removed, err := stripAccountMCP(raw, []string{"chat"}, nil)
 	if err != nil || !reflect.DeepEqual(removed, got) || strings.Contains(string(updated), `"chat"`) ||
 		!strings.Contains(string(updated), `"other"`) ||
 		!strings.Contains(string(updated), `9007199254740993`) {
 		t.Fatalf("updated=%s removed=%v err=%v", updated, removed, err)
 	}
 	for _, malformed := range []string{`{`, `[]`, `{"mcpServers":[]}`} {
-		if _, err := accountMCPLeftovers([]byte(malformed), []string{"chat"}); err == nil {
+		if _, err := accountMCPLeftovers([]byte(malformed), []string{"chat"}, nil); err == nil {
 			t.Errorf("accepted wrong-shaped MCP registry %q", malformed)
 		}
 	}

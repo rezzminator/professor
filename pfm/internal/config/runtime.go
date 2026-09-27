@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 
@@ -81,10 +83,28 @@ func OptionalRuntime(runtimes []Runtime) (Runtime, error) {
 	return LoadRuntime("")
 }
 
+// ErrNotMigrated marks a default config load refused because a legacy
+// {LegacyConfigDir} config still waits for pfm install to move it into the clone.
+var ErrNotMigrated = errors.New("config not migrated: run pfm install")
+
 // LoadRuntime resolves paths, loads the config at configPath (the default
 // location when empty), and keeps Claude's resolved transcript roots.
-// A broken config is an error.
+// A broken config is an error, and so is a default load that would run on
+// defaults while a legacy config waits (ErrNotMigrated).
 func LoadRuntime(configPath string) (Runtime, error) {
+	runtime, err := LoadInstallRuntime(configPath)
+	if err != nil {
+		return Runtime{}, err
+	}
+	if err := checkLegacyConfig(configPath, runtime.Paths.Home, runtime.Config); err != nil {
+		return Runtime{}, err
+	}
+	return runtime, nil
+}
+
+// LoadInstallRuntime is LoadRuntime without the ErrNotMigrated refusal: the
+// installer is the command that migrates the legacy config.
+func LoadInstallRuntime(configPath string) (Runtime, error) {
 	resolved, err := paths.Resolve()
 	if err != nil {
 		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
@@ -140,6 +160,32 @@ func configPathIsExplicit(configPath, home string) (bool, error) {
 	return named != defaultAbsolute, nil
 }
 
+// checkLegacyConfig refuses a default load that found no clone config while
+// a legacy pfm.config.json or config.json waits in LegacyConfigDir. A named
+// --config path or PFM_CONFIG is never refused.
+func checkLegacyConfig(configPath, home string, loaded Config) error {
+	env := paths.OSEnv{}
+	if configPath != "" || env.Get(paths.EnvConfig) != "" || loaded.Exists {
+		return nil
+	}
+	target, resolveErr := ResolvePath(home)
+	if resolveErr != nil {
+		target = "no clone config"
+	}
+	dir := LegacyConfigDir(env, home)
+	for _, name := range []string{FileName, LegacyFileName} {
+		legacy := filepath.Join(dir, name)
+		_, err := os.Lstat(legacy)
+		if err == nil {
+			return fmt.Errorf("%w (%s present, %s absent)", ErrNotMigrated, legacy, target)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect legacy config %s: %w", legacy, err)
+		}
+	}
+	return nil
+}
+
 // LegacyConfigDir is the config directory pfm resolved before the config
 // moved into the clone: $XDG_CONFIG_HOME/pfm when that is absolute, else
 // {home}/.config/pfm.
@@ -179,6 +225,9 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	configExplicit, err := configPathIsExplicit(configPath, resolved.Home)
 	if err != nil {
 		return Runtime{}, err
+	}
+	if configErr == nil {
+		configErr = checkLegacyConfig(configPath, resolved.Home, effective)
 	}
 	if configErr == nil {
 		applyStatePaths(&resolved, effective)

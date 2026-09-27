@@ -302,3 +302,66 @@ func TestResolveManagedSettingsDirUsesJailOverride(t *testing.T) {
 		t.Fatalf("default managed settings dir=%q", got.ManagedSettingsDir)
 	}
 }
+
+func TestCheckLegacyPending(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	present := filepath.Join(root, "present.db")
+	if err := os.WriteFile(present, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	absent := filepath.Join(root, "absent.db")
+	unreadable := filepath.Join(blocker, "fleet.db") // ENOTDIR, even for root
+	tests := []struct {
+		name, target, legacy string
+		pending              bool
+		wantText             []string
+	}{
+		{name: "target exists", target: present, legacy: present},
+		{name: "fresh home", target: absent, legacy: filepath.Join(root, "absent-legacy.db")},
+		{
+			name: "legacy waits", target: absent, legacy: present, pending: true,
+			wantText: []string{absent, present, "run pfm install"},
+		},
+		{name: "legacy unreadable", target: absent, legacy: unreadable, wantText: []string{"inspect " + unreadable}},
+		{name: "target unreadable", target: unreadable, legacy: present, wantText: []string{"inspect " + unreadable}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			err := CheckLegacyPending(test.target, test.legacy)
+			if len(test.wantText) == 0 {
+				if err != nil {
+					t.Fatalf("CheckLegacyPending = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("CheckLegacyPending = nil, want an error")
+			}
+			if errors.Is(err, ErrLegacyPending) != test.pending {
+				t.Fatalf("errors.Is(%v, ErrLegacyPending) = %v, want %v", err, !test.pending, test.pending)
+			}
+			for _, want := range test.wantText {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q lacks %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLegacyDatabasePaths(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join(t.TempDir(), "home")
+	if got, want := LegacyStateDB(home), filepath.Join(home, ".cc", "fleet.db"); got != want {
+		t.Fatalf("LegacyStateDB = %q, want %q", got, want)
+	}
+	if got, want := LegacyCacheDB(home), filepath.Join(home, ".local", "state", "pfm", "fleet.db"); got != want {
+		t.Fatalf("LegacyCacheDB = %q, want %q", got, want)
+	}
+}

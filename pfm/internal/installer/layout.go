@@ -30,8 +30,6 @@ const (
 	VerdictRefuse  LayoutVerdict = "refuse"
 )
 
-const legacyDBName = "fleet.db"
-
 const (
 	layoutRowManagedCleanup  = "managed-cleanup"
 	layoutRowConfig          = "config"
@@ -42,6 +40,7 @@ const (
 	layoutRowMemoryHelpers   = "memory-helpers"
 	layoutRowAccountSettings = "account-settings"
 	layoutRowAccountMCP      = "account-mcp"
+	layoutRowHomeMCP         = "home-mcp"
 	layoutRowZshrc           = "zshrc"
 	layoutRowStagedPrompts   = "staged-prompts"
 	layoutRowSharedDB        = "shared-db"
@@ -49,6 +48,7 @@ const (
 	layoutDBWAL              = "-wal"
 	layoutDBSHM              = "-shm"
 	layoutNotRegular         = "not a regular file"
+	layoutOwnershipLedger    = "ownership ledger"
 )
 
 type LayoutEnv struct {
@@ -63,8 +63,11 @@ type LayoutEnv struct {
 	ManagedRoot     string
 	LegacyConfigDir string
 	moveProbe       func(source, destination string) (different bool, available uint64, err error)
-	runner          CommandRunner
-	writeManaged    func(path string, content []byte) error
+	// spaceProbe reports the device and free bytes of the filesystem holding
+	// dir; nil is the statfs default (layout_space.go).
+	spaceProbe   func(dir string) (device uint64, free uint64, err error)
+	runner       CommandRunner
+	writeManaged func(path string, content []byte) error
 }
 
 func NewLayoutEnv(runtime pfmconfig.Runtime, env paths.Env) (LayoutEnv, error) {
@@ -216,7 +219,8 @@ var HostLayout = []LayoutRow{
 	},
 	{layoutRowMemoryHelpers, "account helper without cc prefix", "fingerprint-matched cc-memory helper"},
 	{layoutRowAccountSettings, "account settings without pfm hooks or status lines", "pfm-owned settings entries"},
-	{layoutRowAccountMCP, "account registry without pfm MCP servers", "ledger-owned registry entries"},
+	{layoutRowAccountMCP, "account registry without pfm MCP servers", "ledger-owned or pfm-shaped registry entries"},
+	{layoutRowHomeMCP, "{home}/.mcp.json without pfm MCP servers, no ledger clients", "pfm entries or ledger clients"},
 	{layoutRowZshrc, "source {Clone}/pfm/internal/installer/assets/shim/pfm.zsh", "source managed staged shim"},
 	{layoutRowStagedPrompts, "no staged prompt directory", "{ManagedRoot}/harness-prompts"},
 	{layoutRowSharedDB, "no shared database", "empty shared.db"},
@@ -238,12 +242,12 @@ func ClassifyLayout(env LayoutEnv) []LayoutFinding {
 		case layoutRowStateDB:
 			findings = append(
 				findings,
-				classifyDB(env, row.Row, env.StateDB, filepath.Join(env.Home, ".cc", legacyDBName)),
+				classifyDB(env, row.Row, env.StateDB, paths.LegacyStateDB(env.Home)),
 			)
 		case layoutRowCacheDB:
 			findings = append(
 				findings,
-				classifyDB(env, row.Row, env.CacheDB, filepath.Join(env.Home, ".local", "state", "pfm", legacyDBName)),
+				classifyDB(env, row.Row, env.CacheDB, paths.LegacyCacheDB(env.Home)),
 			)
 		case layoutRowSessionStore:
 			findings = append(findings, classifySessionStore(env)...)
@@ -253,6 +257,8 @@ func ClassifyLayout(env LayoutEnv) []LayoutFinding {
 			findings = append(findings, classifyAccountSettings(env)...)
 		case layoutRowAccountMCP:
 			findings = append(findings, classifyAccountMCP(env)...)
+		case layoutRowHomeMCP:
+			findings = append(findings, classifyHomeMCP(env))
 		case layoutRowZshrc:
 			findings = append(findings, classifyZshrc(env))
 		case layoutRowStagedPrompts:
@@ -579,7 +585,7 @@ func classifyAccountSettings(env LayoutEnv) []LayoutFinding {
 		path := filepath.Join(dir, "settings.json")
 		finding, info, exists := layoutLstat(layoutRowAccountSettings, path)
 		if ledgerErr != nil {
-			finding.Err, finding.Source, finding.Detail = ledgerErr, ledgerPath, "ownership ledger"
+			finding.Err, finding.Source, finding.Detail = ledgerErr, ledgerPath, layoutOwnershipLedger
 		} else if finding.Err == nil && exists {
 			if !info.Mode().IsRegular() {
 				finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
@@ -604,6 +610,7 @@ func classifyAccountSettings(env LayoutEnv) []LayoutFinding {
 
 func classifyAccountMCP(env LayoutEnv) []LayoutFinding {
 	ownership, ledgerErr := readMCPOwnership(filepath.Join(env.ManagedRoot, mcpOwnershipName))
+	shaped := layoutMCPShaped(env)
 	findings := []LayoutFinding{}
 	seen := map[string]bool{}
 	for _, registry := range ClaudeUserRegistries(env.Home, env.Config.Accounts, "") {
@@ -618,24 +625,14 @@ func classifyAccountMCP(env LayoutEnv) []LayoutFinding {
 			finding.Err, finding.Source, finding.Detail = ledgerErr, filepath.Join(
 				env.ManagedRoot,
 				mcpOwnershipName,
-			), "ownership ledger"
+			), layoutOwnershipLedger
 		} else if finding.Err == nil && exists {
-			if !info.Mode().IsRegular() {
-				finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
-			} else if raw, err := os.ReadFile(path); err != nil {
-				finding.Err = err
-			} else {
-				owned := make([]string, 0, len(ownership.Registrations[physical]))
-				for name := range ownership.Registrations[physical] {
-					owned = append(owned, name)
-				}
-				sort.Strings(owned)
-				if leftovers, err := accountMCPLeftovers(raw, owned); err != nil {
-					finding.Err = err
-				} else if len(leftovers) > 0 {
-					finding.Verdict, finding.Detail = VerdictStrip, strings.Join(leftovers, ",")
-				}
+			owned := make([]string, 0, len(ownership.Registrations[physical]))
+			for name := range ownership.Registrations[physical] {
+				owned = append(owned, name)
 			}
+			sort.Strings(owned)
+			judgeMCPFile(&finding, info, owned, shaped)
 		}
 		if registry.Account != 0 {
 			dir := filepath.Dir(path)
@@ -655,6 +652,59 @@ func classifyAccountMCP(env LayoutEnv) []LayoutFinding {
 		findings = append(findings, finding)
 	}
 	return findings
+}
+
+// classifyHomeMCP judges {home}/.mcp.json by the ledger's old clients list and
+// by shape, and reports a non-empty clients list as its own leftover.
+func classifyHomeMCP(env LayoutEnv) LayoutFinding {
+	ledger := filepath.Join(env.ManagedRoot, mcpOwnershipName)
+	finding, info, exists := layoutLstat(layoutRowHomeMCP, filepath.Join(env.Home, ".mcp.json"))
+	ownership, err := readMCPOwnership(ledger)
+	if err != nil {
+		finding.Err, finding.Source, finding.Detail = err, ledger, layoutOwnershipLedger
+		return finding
+	}
+	if finding.Err != nil {
+		return finding
+	}
+	if exists {
+		judgeMCPFile(&finding, info, ownership.Clients, layoutMCPShaped(env))
+		if finding.Err != nil || finding.Verdict == VerdictRefuse {
+			return finding
+		}
+	}
+	if len(ownership.Clients) > 0 {
+		finding.Verdict, finding.Detail = VerdictStrip, strings.TrimPrefix(finding.Detail+",clients", ",")
+	}
+	return finding
+}
+
+// judgeMCPFile marks an existing Claude MCP file strip when it carries
+// ledger-owned or pfm-shaped mcpServers entries.
+func judgeMCPFile(finding *LayoutFinding, info fs.FileInfo, owned []string, shaped mcpShaped) {
+	if !info.Mode().IsRegular() {
+		finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
+		return
+	}
+	raw, err := os.ReadFile(finding.Path)
+	if err != nil {
+		finding.Err = err
+		return
+	}
+	leftovers, err := accountMCPLeftovers(raw, owned, shaped)
+	if err != nil {
+		finding.Err = err
+	} else if len(leftovers) > 0 {
+		finding.Verdict, finding.Detail = VerdictStrip, strings.Join(leftovers, ",")
+	}
+}
+
+// layoutMCPShaped is the by-shape judge both MCP rows share: the host's pfm
+// binary and the configured loopback port.
+func layoutMCPShaped(env LayoutEnv) mcpShaped {
+	return func(name string, registration map[string]any) bool {
+		return pfmClaudeMCPShape(name, registration, env.Home, env.Config.MCP.HTTP.Port)
+	}
 }
 
 func classifyZshrc(env LayoutEnv) LayoutFinding {

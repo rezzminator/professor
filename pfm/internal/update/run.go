@@ -260,10 +260,6 @@ func updateRepository(
 		}
 		replacements = append(replacements, updateReplacement{target: targetPath, backup: backup})
 	}
-	hookSnapshots, err := snapshotUpdateOwnedFiles(runtime)
-	if err != nil {
-		return fmt.Errorf("snapshot hook files before install: %w", err)
-	}
 	// Read current health before replacement so candidate deltas exclude old warnings.
 	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, skipHarvest, stdout, stderr)
 	switch {
@@ -297,6 +293,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
+				candidateA,
 				nil,
 				runtime,
 				skipHarvest,
@@ -311,8 +308,27 @@ func updateRepository(
 		replacements[index].replaced = true
 	}
 
+	journalsBefore, err := listUpdateInstallJournals(runtime.Paths.Home)
+	if err != nil {
+		return updateFailure(
+			fmt.Errorf("before install --yes: %w", err),
+			rollbackUpdateState(
+				ctx,
+				repo,
+				installSourceRepo,
+				previousRef,
+				sourceAdvanced,
+				replacements,
+				candidateA,
+				nil,
+				runtime,
+				skipHarvest,
+				stdout,
+				stderr,
+			),
+		)
+	}
 	installErr := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr)
-	recordUpdateHookAfter(hookSnapshots)
 	if installErr != nil {
 		return updateFailure(
 			fmt.Errorf("install --yes after staging: %w", installErr),
@@ -323,7 +339,8 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				candidateA,
+				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -342,7 +359,8 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				candidateA,
+				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -372,7 +390,8 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				candidateA,
+				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -391,7 +410,8 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				candidateA,
+				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -428,7 +448,8 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				hookSnapshots,
+				candidateA,
+				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -471,7 +492,7 @@ func updateRepository(
 func releaseNotesForUpdate(
 	ctx context.Context,
 	repo, previousRef, target string,
-) (previous string, paths []string, err error) {
+) (previous string, notePaths []string, err error) {
 	previousTag, err := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
 	if err != nil {
 		return "", nil, fmt.Errorf("describe previous release: %w", err)
@@ -481,8 +502,8 @@ func releaseNotesForUpdate(
 	if err != nil {
 		return previousTag, nil, fmt.Errorf("list release notes at %s: %w", target, err)
 	}
-	paths, err = ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
-	return previousTag, paths, err
+	notePaths, err = ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
+	return previousTag, notePaths, err
 }
 
 type updateReplacement struct {
@@ -518,31 +539,45 @@ func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writ
 	return rollbackErr
 }
 
-// rollbackUpdateState first restores every owned binary and the source, then
-// the hook files the candidate's install rewrote, and only then uses the prior
+// rollbackUpdateState first replays the candidate's install journal through
+// the candidate itself, while it is still staged — the journal is the one
+// owner of every write that install made, config files included. It then
+// restores every owned binary and the source, and only then uses the prior
 // binary's embedded installer to converge installer-owned host wiring back to
-// the previous release. The hook restore has to come first: that installer
-// recognises only hooks IT generates, so a hook only the newer release knows
-// would survive it. A clean doctor is part of rollback proof; without it,
+// the previous release. The journal replay has to come first: that installer
+// recognises only what IT generates, so a write only the newer release makes
+// would survive it. A refused replay is residue; the rest still runs.
+// journalsBefore is the journal id set listed before the install, nil when no
+// install ran. A clean doctor is part of rollback proof; without it,
 // updateFailure reports residue instead of claiming a safe rollback.
 func rollbackUpdateState(
 	ctx context.Context,
 	repo, installSourceRepo, previousRef string,
 	sourceAdvanced bool,
 	replacements []updateReplacement,
-	hookSnapshots []updateFileSnapshot,
+	candidate string,
+	journalsBefore map[string]bool,
 	runtime config.Runtime,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) error {
-	rollbackErr := rollbackUpdateReplacements(replacements, stderr)
+	rollbackErr := rollbackUpdateInstallJournal(
+		ctx,
+		candidate,
+		journalsBefore,
+		repo,
+		installSourceRepo,
+		runtime,
+		stdout,
+		stderr,
+	)
+	rollbackErr = errors.Join(rollbackErr, rollbackUpdateReplacements(replacements, stderr))
 	if sourceAdvanced {
 		if err := updateGitRun(ctx, repo, "reset", "--keep", previousRef); err != nil {
 			return errors.Join(rollbackErr, fmt.Errorf("restore source revision %s: %w", previousRef, err))
 		}
 		fmt.Fprintf(stderr, "pfm update: rolled back source to %s\n", previousRef)
 	}
-	rollbackErr = errors.Join(rollbackErr, restoreUpdateHookFiles(hookSnapshots, runtime.Paths.Home, stderr))
 	if len(replacements) == 0 {
 		return errors.Join(rollbackErr, errors.New("no previous binary is available to restore installer state"))
 	}
@@ -704,20 +739,25 @@ func applyUpdateInstall(
 	if skipHarvest {
 		args = append(args, "--skip-harvest")
 	}
-	configPath := ""
-	if runtime.Config.Exists {
-		configPath = runtime.Config.Path
-	}
 	return runUpdateCandidateCommand(
 		ctx,
 		candidate,
-		configPath,
+		updateInstallConfigPath(runtime),
 		repo,
 		sourceRepo,
 		stdout,
 		stderr,
 		installCommand,
 		args...)
+}
+
+// updateInstallConfigPath is the --config an install and its journal rollback
+// are given: runtime.Config.Path only when that file exists.
+func updateInstallConfigPath(runtime config.Runtime) string {
+	if runtime.Config.Exists {
+		return runtime.Config.Path
+	}
+	return ""
 }
 
 // runUpdateDoctor runs candidate's `doctor` and turns its exit code and

@@ -21,8 +21,14 @@ import (
 
 var errLayoutRefuse = errors.New("layout row refused")
 
-func ApplyLayout(ctx context.Context, env LayoutEnv, apply bool, stdout io.Writer) (string, error) {
-	journal := &layoutJournal{env: env, ctx: ctx, clock: clock.Real}
+// ApplyLayout converges the layout rows, recording into journal (nil: a
+// private one); it returns the journal directory.
+func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply bool, stdout io.Writer) (string, error) {
+	if journal == nil {
+		journal = NewJournal(ctx, env)
+	}
+	journal.dryRun = !apply
+	layoutStart := len(journal.records)
 	findings := ClassifyLayout(env)
 	actionable := false
 	configMigrated := false
@@ -110,10 +116,8 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, apply bool, stdout io.Write
 		fmt.Fprintf(stdout, "  ok      layout %s %s\n", current.Row, current.Path)
 	}
 	if apply {
-		if journal.dir == "" {
+		if len(journal.records) == layoutStart {
 			fmt.Fprintln(stdout, "layout: nothing to do")
-		} else {
-			fmt.Fprintln(stdout, "layout journal: "+journal.dir)
 		}
 	} else if !actionable {
 		fmt.Fprintln(stdout, "layout: nothing to do")
@@ -130,12 +134,71 @@ func layoutFindingByPath(findings []LayoutFinding, row, path string) LayoutFindi
 	return LayoutFinding{Row: row, Path: path, Err: errors.New("finding disappeared")}
 }
 
-func applyLayoutRow(ctx context.Context, journal *layoutJournal, finding LayoutFinding, stdout io.Writer) error {
+// layoutSnapshotPaths names every path apply journals before it acts on
+// finding — the one list apply and the space preflight (layout_space.go) both
+// read. The database family's migration backup is added by applyLayoutDB: it
+// does not exist before the move, so it has nothing to copy.
+func layoutSnapshotPaths(env LayoutEnv, finding LayoutFinding) ([]string, error) {
+	switch finding.Row {
+	case layoutRowConfig, layoutRowHarvesterConfig:
+		if finding.Verdict == VerdictMove {
+			return []string{finding.Source, finding.Path}, nil
+		}
+	case layoutRowSessionStore:
+		if finding.Verdict == VerdictMerge {
+			return []string{finding.Path, layoutSessionStore(env, finding)}, nil
+		}
+	case layoutRowMemoryHelpers:
+		planner := &engine{options: Options{Home: env.Home, ConfigDirs: accountDirs(env), Stdout: io.Discard}}
+		migrations, err := planner.planMemoryHelperMigrations()
+		if err != nil {
+			return nil, err
+		}
+		paths := []string{}
+		for _, migration := range migrations {
+			paths = append(paths, migration.oldPath, migration.newPath)
+		}
+		for _, dir := range accountDirs(env) {
+			for _, name := range []string{"settings.json", "settings.local.json"} {
+				paths = append(paths, filepath.Join(dir, name))
+			}
+		}
+		return paths, nil
+	case layoutRowAccountSettings:
+		return []string{finding.Path, settingsHookOwnershipPath(env.ManagedRoot)}, nil
+	case layoutRowAccountMCP, layoutRowHomeMCP:
+		return []string{finding.Path, filepath.Join(env.ManagedRoot, mcpOwnershipName)}, nil
+	case layoutRowStateDB, layoutRowCacheDB:
+		paths := []string{}
+		for _, suffix := range []string{"", layoutDBWAL, layoutDBSHM} {
+			paths = append(paths, finding.Source+suffix, finding.Path+suffix)
+		}
+		return paths, nil
+	}
+	return []string{finding.Path}, nil
+}
+
+// layoutSessionStore is the shared store entry a session-store finding links to.
+func layoutSessionStore(env LayoutEnv, finding LayoutFinding) string {
+	return filepath.Join(env.Home, ".claude", filepath.Base(finding.Path))
+}
+
+// layoutConfigMigrationPaths names what the config migration before the
+// state-db row journals.
+func layoutConfigMigrationPaths(env LayoutEnv) []string {
+	return []string{env.ConfigPath, filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")}
+}
+
+func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding, stdout io.Writer) error {
 	env := journal.env
+	paths, err := layoutSnapshotPaths(env, finding)
+	if err != nil {
+		return err
+	}
 	switch finding.Row {
 	case layoutRowManagedCleanup:
 		content := []byte(fmt.Sprintf("{\"cleanupPeriodDays\":%d}\n", env.Config.Claude.CleanupPeriodDays))
-		return journal.mutate(finding, []string{finding.Path}, func() error {
+		return journal.mutate(finding, paths, func() error {
 			writeManaged := env.writeManaged
 			if writeManaged == nil {
 				writeManaged = func(path string, content []byte) error { return atomicfile.Write(path, content, 0o644) }
@@ -165,7 +228,7 @@ func applyLayoutRow(ctx context.Context, journal *layoutJournal, finding LayoutF
 		})
 	case layoutRowConfig, layoutRowHarvesterConfig:
 		if finding.Verdict == VerdictMove {
-			return journal.mutate(finding, []string{finding.Source, finding.Path}, func() error {
+			return journal.mutate(finding, paths, func() error {
 				if finding.Detail == "identical legacy copy" {
 					return os.Remove(finding.Source)
 				}
@@ -179,22 +242,18 @@ func applyLayoutRow(ctx context.Context, journal *layoutJournal, finding LayoutF
 		if _, err := os.Stat(source); err != nil {
 			return fmt.Errorf("%w: no source repo recorded: %v", errLayoutRefuse, err)
 		}
-		return journal.mutate(
-			finding,
-			[]string{finding.Path},
-			func() error { return copyLayoutTree(source, finding.Path) },
-		)
+		return journal.mutate(finding, paths, func() error { return copyLayoutTree(source, finding.Path) })
 	case layoutRowSessionStore:
-		store := filepath.Join(env.Home, ".claude", filepath.Base(finding.Path))
+		store := layoutSessionStore(env, finding)
 		switch finding.Verdict {
 		case VerdictMerge:
-			conflicts, err := mergeLayoutSession(journal, finding, store)
+			conflicts, err := mergeLayoutSession(journal, finding, paths, store)
 			for _, conflict := range conflicts {
 				fmt.Fprintln(stdout, "  conflict layout session-store "+conflict)
 			}
 			return err
 		case VerdictCreate, VerdictRepoint:
-			return journal.mutate(finding, []string{finding.Path}, func() error {
+			return journal.mutate(finding, paths, func() error {
 				if err := os.MkdirAll(filepath.Dir(finding.Path), 0o700); err != nil {
 					return err
 				}
@@ -217,27 +276,16 @@ func applyLayoutRow(ctx context.Context, journal *layoutJournal, finding LayoutF
 		if err := preview.migrateMemoryHelpers(); err != nil {
 			return err
 		}
-		migrations, err := installer.planMemoryHelperMigrations()
-		if err != nil {
-			return err
-		}
-		paths := []string{}
-		for _, migration := range migrations {
-			paths = append(paths, migration.oldPath, migration.newPath)
-		}
-		for _, dir := range accountDirs(env) {
-			for _, name := range []string{"settings.json", "settings.local.json"} {
-				paths = append(paths, filepath.Join(dir, name))
-			}
-		}
 		return journal.mutate(finding, paths, installer.migrateMemoryHelpers)
 	case layoutRowAccountSettings, layoutRowAccountMCP:
-		return applyLayoutAccount(journal, finding)
+		return applyLayoutAccount(journal, finding, paths)
+	case layoutRowHomeMCP:
+		return applyLayoutHomeMCP(journal, finding, paths)
 	case layoutRowZshrc:
 		if env.Clone == "" {
 			return fmt.Errorf("%w: no source repo recorded", errLayoutRefuse)
 		}
-		return journal.mutate(finding, []string{finding.Path}, func() error {
+		return journal.mutate(finding, paths, func() error {
 			raw, err := os.ReadFile(finding.Path)
 			if errors.Is(err, fs.ErrNotExist) {
 				raw = nil
@@ -248,12 +296,12 @@ func applyLayoutRow(ctx context.Context, journal *layoutJournal, finding LayoutF
 			return atomicfile.Write(finding.Path, []byte(rewriteZshrc(string(raw), wanted, false)), 0o600)
 		})
 	case layoutRowStagedPrompts, layoutRowSharedDB, layoutRowStrayDir:
-		return journal.mutate(finding, []string{finding.Path}, func() error { return os.RemoveAll(finding.Path) })
+		return journal.mutate(finding, paths, func() error { return os.RemoveAll(finding.Path) })
 	}
 	return fmt.Errorf("unsupported verdict %s for row %s", finding.Verdict, finding.Row)
 }
 
-func applyLayoutConfigMigration(journal *layoutJournal) error {
+func applyLayoutConfigMigration(journal *Journal) error {
 	env := &journal.env
 	if _, err := os.Stat(env.ConfigPath); errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -272,15 +320,14 @@ func applyLayoutConfigMigration(journal *layoutJournal) error {
 		return fmt.Errorf("%w: pre-split config path is outside HostLayout", errLayoutRefuse)
 	}
 	change := LayoutFinding{Row: layoutRowConfig, Verdict: VerdictRepoint, Path: env.ConfigPath}
-	paths := []string{env.ConfigPath, filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")}
-	if err := journal.mutate(change, paths, func() error { return pfmconfig.ApplyMigration(migration) }); err != nil {
+	if err := journal.mutate(change, layoutConfigMigrationPaths(*env), func() error { return pfmconfig.ApplyMigration(migration) }); err != nil {
 		return err
 	}
 	env.Config = migration.Preview(loaded)
 	return nil
 }
 
-func applyLayoutAccount(journal *layoutJournal, finding LayoutFinding) error {
+func applyLayoutAccount(journal *Journal, finding LayoutFinding, paths []string) error {
 	env := journal.env
 	raw, err := os.ReadFile(finding.Path)
 	if err != nil {
@@ -302,7 +349,7 @@ func applyLayoutAccount(journal *layoutJournal, finding LayoutFinding) error {
 		if err != nil {
 			return err
 		}
-		return journal.mutate(finding, []string{finding.Path, ledger}, func() error {
+		return journal.mutate(finding, paths, func() error {
 			if err := atomicfile.Write(finding.Path, updated, 0o600); err != nil {
 				return err
 			}
@@ -323,7 +370,7 @@ func applyLayoutAccount(journal *layoutJournal, finding LayoutFinding) error {
 		owned = append(owned, name)
 	}
 	sort.Strings(owned)
-	updated, _, err := stripAccountMCP(raw, owned)
+	updated, _, err := stripAccountMCP(raw, owned, layoutMCPShaped(env))
 	if err != nil {
 		return err
 	}
@@ -332,7 +379,7 @@ func applyLayoutAccount(journal *layoutJournal, finding LayoutFinding) error {
 	if err != nil {
 		return err
 	}
-	return journal.mutate(finding, []string{finding.Path, ledger}, func() error {
+	return journal.mutate(finding, paths, func() error {
 		if err := atomicfile.Write(finding.Path, updated, 0o600); err != nil {
 			return err
 		}
@@ -343,7 +390,53 @@ func applyLayoutAccount(journal *layoutJournal, finding LayoutFinding) error {
 	})
 }
 
-func applyLayoutDB(ctx context.Context, journal *layoutJournal, finding LayoutFinding) (err error) {
+// applyLayoutHomeMCP strips pfm's entries from {home}/.mcp.json and retires the
+// ledger's clients list in one journaled change; an absent file stays absent.
+func applyLayoutHomeMCP(journal *Journal, finding LayoutFinding, paths []string) error {
+	env := journal.env
+	ledger := filepath.Join(env.ManagedRoot, mcpOwnershipName)
+	ownership, err := readMCPOwnership(ledger)
+	if err != nil {
+		return err
+	}
+	var updated []byte
+	var removed []string
+	mode := fs.FileMode(0o600)
+	info, err := os.Stat(finding.Path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return err
+	default:
+		mode = info.Mode().Perm()
+		raw, err := os.ReadFile(finding.Path)
+		if err != nil {
+			return err
+		}
+		if updated, removed, err = stripAccountMCP(raw, ownership.Clients, layoutMCPShaped(env)); err != nil {
+			return err
+		}
+	}
+	retire := len(ownership.Clients) > 0
+	ownership.Clients = nil
+	encoded, err := json.MarshalIndent(ownership, "", "  ")
+	if err != nil {
+		return err
+	}
+	return journal.mutate(finding, paths, func() error {
+		if len(removed) > 0 {
+			if err := atomicfile.Write(finding.Path, updated, mode); err != nil {
+				return err
+			}
+		}
+		if !retire {
+			return nil
+		}
+		return atomicfile.Write(ledger, append(encoded, '\n'), 0o600)
+	})
+}
+
+func applyLayoutDB(ctx context.Context, journal *Journal, finding LayoutFinding) (err error) {
 	env := journal.env
 	defer func() { err = errors.Join(err, restartLayoutServices(ctx, env)) }()
 	if stopErr := stopLayoutServices(ctx, env); stopErr != nil {
@@ -359,9 +452,9 @@ func applyLayoutDB(ctx context.Context, journal *layoutJournal, finding LayoutFi
 	if current.Verdict == VerdictOK {
 		return nil
 	}
-	paths := []string{}
-	for _, suffix := range []string{"", layoutDBWAL, layoutDBSHM} {
-		paths = append(paths, current.Source+suffix, current.Path+suffix)
+	paths, err := layoutSnapshotPaths(env, current)
+	if err != nil {
+		return err
 	}
 	backup, err := layoutMigrationBackupPath(ctx, current.Source, current.Path)
 	if err != nil {

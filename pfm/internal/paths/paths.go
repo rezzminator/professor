@@ -329,6 +329,52 @@ func DefaultCacheDB(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
 }
 
+// legacyDBName is the one name both pre-layout databases shared.
+const legacyDBName = "fleet.db"
+
+// ErrLegacyPending marks a database create refused because the legacy
+// database it replaces has not been migrated by pfm install yet.
+var ErrLegacyPending = errors.New("legacy database not migrated")
+
+// LegacyStateDB is where the authoritative state database lived before the
+// host layout moved it to DefaultStateDB.
+func LegacyStateDB(home string) string {
+	return filepath.Join(home, ".cc", legacyDBName)
+}
+
+// LegacyCacheDB is where the derived cache database lived before the host
+// layout moved it to DefaultCacheDB.
+func LegacyCacheDB(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", legacyDBName)
+}
+
+// CheckLegacyPending refuses to let a caller create target while legacy still
+// waits for pfm install to move it: a fresh target beside unmigrated legacy
+// data forks the state. An existing target, or no legacy file, is nil. A stat
+// that fails for any reason but not-exist is an error, never read as absence.
+func CheckLegacyPending(target, legacy string) error {
+	_, err := os.Lstat(target)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect %s: %w", target, err)
+	}
+	_, err = os.Lstat(legacy)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", legacy, err)
+	}
+	return fmt.Errorf(
+		"%w: %s not created while legacy %s still exists — run pfm install",
+		ErrLegacyPending,
+		target,
+		legacy,
+	)
+}
+
 func Resolve() (Values, error) {
 	home, err := Home()
 	if err != nil {

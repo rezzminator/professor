@@ -22,9 +22,9 @@ func TestLayoutSessionMergeAndRollback(t *testing.T) {
 	layoutWrite(t, filepath.Join(account, "same", "different"), "account-copy")
 	layoutWrite(t, filepath.Join(store, "same", "identical"), "equal")
 	layoutWrite(t, filepath.Join(store, "same", "different"), "store-copy")
-	journal := &layoutJournal{env: env}
+	journal := &Journal{env: env}
 	finding := LayoutFinding{Row: "session-store", Verdict: VerdictMerge, Path: account}
-	conflicts, err := mergeLayoutSession(journal, finding, store)
+	conflicts, err := mergeLayoutSession(journal, finding, []string{finding.Path, store}, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestLayoutSessionMergeAndRollback(t *testing.T) {
 	if got, err := os.ReadFile(parked); err != nil || string(got) != "account-copy" {
 		t.Fatalf("parked=%q err=%v", got, err)
 	}
-	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), &bytes.Buffer{}); err != nil {
+	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), false, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(

@@ -37,6 +37,10 @@ type GlobalAgentsOptions struct {
 	// empty means {Home}/.codex alone.
 	CodexHomes []string
 	Mode       Mode
+	// BeforeWrite, when set, is called in build mode with the absolute path
+	// immediately before each file write, role write, link create/replace and
+	// removal; an error aborts the build before that write. Nil: no call.
+	BeforeWrite func(path string) error
 }
 
 // GlobalAgentCompiled is one desired role file or rendered variant source.
@@ -282,6 +286,9 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		if same {
 			continue
 		}
+		if err := callBeforeWrite(options.BeforeWrite, agent.mdSource); err != nil {
+			return GlobalAgentsResult{}, err
+		}
 		if err := writeGlobalAgentFile(agent.mdSource, agent.mdContent); err != nil {
 			return GlobalAgentsResult{}, err
 		}
@@ -293,6 +300,11 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		state, _, err := ClassifyGlobalRole(role.target, role.content, ownedLinkDirs)
 		if err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("re-inspect global role %s: %w", role.target, err)
+		}
+		if state.writes() {
+			if err := callBeforeWrite(options.BeforeWrite, role.target); err != nil {
+				return GlobalAgentsResult{}, err
+			}
 		}
 		if err := ApplyGlobalRole(role.target, role.content, state); err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("install global role %s: %w", role.target, err)
@@ -309,6 +321,11 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		state, _, err := ClassifyGlobalLink(installed.Path, installed.Source, sourceRepo, GlobalLinkFile)
 		if err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("re-inspect global agent artifact %s: %w", installed.Path, err)
+		}
+		if state.writes() {
+			if err := callBeforeWrite(options.BeforeWrite, installed.Path); err != nil {
+				return GlobalAgentsResult{}, err
+			}
 		}
 		if err := ApplyGlobalLink(installed.Path, installed.Source, state); err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("install global agent artifact %s: %w", installed.Path, err)
@@ -429,6 +446,17 @@ func sameGlobalAgentFile(path string, content []byte) (bool, error) {
 		return false, fmt.Errorf("read global agent artifact %s: %w", path, err)
 	}
 	return bytes.Equal(raw, content), nil
+}
+
+// callBeforeWrite runs a build's optional before-write hook for one path.
+func callBeforeWrite(hook func(path string) error, path string) error {
+	if hook == nil {
+		return nil
+	}
+	if err := hook(path); err != nil {
+		return fmt.Errorf("before write %s: %w", path, err)
+	}
+	return nil
 }
 
 func writeGlobalAgentFile(path string, content []byte) error {

@@ -126,8 +126,8 @@ func TestLayoutLegacyHostClassifiesEveryKind(t *testing.T) {
 	}
 	layoutWrite(t, filepath.Join(env.LegacyConfigDir, pfmconfig.FileName), `{"version":2}`)
 	layoutWrite(t, filepath.Join(env.LegacyConfigDir, "harvester.config.json"), `{}`)
-	layoutWrite(t, filepath.Join(env.Home, ".cc", legacyDBName), "state")
-	layoutWrite(t, filepath.Join(env.Home, ".local", "state", "pfm", legacyDBName), "cache")
+	layoutWrite(t, paths.LegacyStateDB(env.Home), "state")
+	layoutWrite(t, paths.LegacyCacheDB(env.Home), "cache")
 	if err := os.Remove(filepath.Join(account, "file-history")); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestLayoutAccountFilesAndOwnershipErrors(t *testing.T) {
 
 func TestLayoutLegacyStatePath(t *testing.T) {
 	env := layoutFixture(t)
-	legacy := filepath.Join(env.Home, ".cc", legacyDBName)
+	legacy := paths.LegacyStateDB(env.Home)
 	layoutWrite(t, legacy, "state")
 	finding := requireLayoutVerdict(t, ClassifyLayout(env), "state-db", env.StateDB, VerdictRefuse)
 	if finding.Source != legacy {
@@ -449,5 +449,126 @@ func TestLayoutEnvTargetsCloneWhenRuntimeLoadedLegacyConfig(t *testing.T) {
 	want := filepath.Join(clone, pfmconfig.FileName)
 	if env.ConfigPath != want || env.Config.Path != legacy {
 		t.Fatalf("target=%q loaded=%q want %q / %q", env.ConfigPath, env.Config.Path, want, legacy)
+	}
+}
+
+const layoutTestMCPPort = 18765
+
+func layoutMCPReplacer(env LayoutEnv, registry string) *strings.Replacer {
+	return strings.NewReplacer(
+		"{bin}", filepath.Join(env.Home, ".local", "bin", "pfm"),
+		"{port}", strconv.Itoa(layoutTestMCPPort),
+		"{registry}", physicalSettingsPath(registry),
+	)
+}
+
+func TestLayoutMCPRowsJudgeLedgerAndShape(t *testing.T) {
+	const (
+		professor = `"professor":{"type":"stdio","command":"{bin}","args":["mcp","serve","--stdio"]}`
+		chat      = `"chat":{"type":"stdio","command":"{bin}","args":["mcp","chat","serve"]}`
+		harvester = `"harvester":{"type":"http","url":"http://127.0.0.1:{port}/mcp/harvester"}`
+		operator  = `"operator":{"type":"stdio","command":"{bin}","args":["mcp","serve","--stdio"]}`
+	)
+	type want struct {
+		verdict LayoutVerdict
+		detail  string
+		err     bool
+	}
+	ok := want{verdict: VerdictOK}
+	for _, testCase := range []struct {
+		name, registry, home, ledger string
+		account, homeMCP             want
+	}{
+		{
+			name:     "ledger-owned entry",
+			registry: `{"mcpServers":{"chat":{"command":"pfm"}}}`,
+			ledger:   `{"registrations":{"{registry}":{"chat":{}}}}`,
+			account:  want{verdict: VerdictStrip, detail: "mcpServers.chat"},
+			homeMCP:  ok,
+		},
+		{
+			name:     "shape-only professor",
+			registry: `{"counter":9007199254740993,"mcpServers":{` + professor + `}}`,
+			account:  want{verdict: VerdictStrip, detail: "mcpServers.professor"},
+			homeMCP:  ok,
+		},
+		{
+			name:     "shape-only legacy",
+			registry: `{"mcpServers":{` + chat + `,` + harvester + `}}`,
+			account:  want{verdict: VerdictStrip, detail: "mcpServers.chat,mcpServers.harvester"},
+			homeMCP:  ok,
+		},
+		{
+			name: "near miss",
+			registry: `{"mcpServers":{"professor":{"type":"stdio","command":"{bin}","args":["mcp","serve","--stdio"],` +
+				`"cwd":"/srv"},"chat":{"type":"stdio","command":"pfm","args":["mcp","chat","serve"]},` + operator + `}}`,
+			home:    `{"mcpServers":{` + operator + `,"harvester":{"type":"http","url":"http://127.0.0.1:1/mcp/harvester"}}}`,
+			account: ok,
+			homeMCP: ok,
+		},
+		{
+			name:    "home file stripped",
+			home:    `{"mcpServers":{` + harvester + `,"operator":{"command":"own"}}}`,
+			ledger:  `{"clients":["harvester"]}`,
+			account: ok,
+			homeMCP: want{verdict: VerdictStrip, detail: "mcpServers.harvester,clients"},
+		},
+		{
+			name:    "home shape without ledger",
+			home:    `{"mcpServers":{` + professor + `}}`,
+			account: ok,
+			homeMCP: want{verdict: VerdictStrip, detail: "mcpServers.professor"},
+		},
+		{
+			name:    "clients only",
+			ledger:  `{"clients":["chat"]}`,
+			account: ok,
+			homeMCP: want{verdict: VerdictStrip, detail: "clients"},
+		},
+		{
+			name:    "clean home",
+			home:    `{"mcpServers":{"operator":{"command":"own"}}}`,
+			ledger:  `{"registrations":{}}`,
+			account: ok,
+			homeMCP: ok,
+		},
+		{name: "home not JSON", home: `{bad`, account: ok, homeMCP: want{err: true}},
+		{name: "home mcpServers not object", home: `{"mcpServers":[]}`, account: ok, homeMCP: want{err: true}},
+		{
+			name:     "unreadable ledger",
+			registry: `{"mcpServers":{` + professor + `}}`,
+			home:     `{"mcpServers":{` + professor + `}}`,
+			ledger:   `{bad`,
+			account:  want{err: true, detail: "ownership ledger"},
+			homeMCP:  want{err: true, detail: "ownership ledger"},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			env := layoutFixture(t)
+			env.Config.MCP.HTTP.Port = layoutTestMCPPort
+			registry := filepath.Join(env.Config.Accounts[1].ConfigDir, ".claude.json")
+			home := filepath.Join(env.Home, ".mcp.json")
+			ledger := filepath.Join(env.ManagedRoot, mcpOwnershipName)
+			replace := layoutMCPReplacer(env, registry)
+			for path, raw := range map[string]string{registry: testCase.registry, home: testCase.home, ledger: testCase.ledger} {
+				if raw != "" {
+					layoutWrite(t, path, replace.Replace(raw))
+				}
+			}
+			findings := ClassifyLayout(env)
+			for _, check := range []struct {
+				row, path string
+				want      want
+			}{{"account-mcp", registry, testCase.account}, {"home-mcp", home, testCase.homeMCP}} {
+				finding := layoutFinding(t, findings, check.row, check.path)
+				if (finding.Err != nil) != check.want.err || !check.want.err && finding.Verdict != check.want.verdict ||
+					finding.Detail != check.want.detail {
+					t.Errorf("%s = %+v, want %+v", check.row, finding, check.want)
+				}
+				if check.want.detail == "ownership ledger" && finding.Source != ledger {
+					t.Errorf("%s ledger source = %q, want %q", check.row, finding.Source, ledger)
+				}
+			}
+		})
 	}
 }

@@ -45,7 +45,7 @@ func TestAccountMCPStripKeepsIntegersBeyondFloat64(t *testing.T) {
 	home := t.TempDir()
 	raw := []byte(`{"counter":` + beyondFloat64 + `,"mcpServers":{"chat":{"command":"` +
 		filepath.Join(home, ".local", "bin", "pfm") + `"},"foreign":{"type":"stdio","command":"foreign"}}}`)
-	updated, removed, err := stripAccountMCP(raw, []string{"chat"})
+	updated, removed, err := stripAccountMCP(raw, []string{"chat"}, nil)
 	if err != nil || len(removed) != 1 || removed[0] != "mcpServers.chat" {
 		t.Fatalf("stripAccountMCP removed=%v err=%v", removed, err)
 	}

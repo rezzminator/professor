@@ -1487,3 +1487,99 @@ func TestMigrateLegacyCarrierUsesConfiguredStateDB(t *testing.T) {
 		t.Fatalf("configured state killed=%v err=%v close=%v", killed, err, closeErr)
 	}
 }
+
+func TestInstallJournalRecordsStagedAssetAndNothingWhenIdentical(t *testing.T) {
+	home := t.TempDir()
+	installer, journal, env := journaledEngine(t, home, true)
+	target := filepath.Join(installer.managedRoot, "handoff.skill.md")
+	writeFile(t, target, "operator bytes\n", 0o600)
+	assets := []assetFile{{path: "handoff.skill.md", mode: 0o644}}
+	if _, err := installer.stageAssets(assets); err != nil {
+		t.Fatal(err)
+	}
+	if got := installRecordDestinations(t, journal); len(got) != 1 || got[0] != target {
+		t.Fatalf("records=%v, want the staged asset", got)
+	}
+	converged, second, _ := journaledEngine(t, home, true)
+	if _, err := converged.stageAssets(assets); err != nil {
+		t.Fatal(err)
+	}
+	if second.Dir() != "" || len(second.records) != 0 {
+		t.Fatalf("identical rewrite recorded %v in %q", second.records, second.Dir())
+	}
+	rollbackInstallJournal(t, env, journal)
+	info, err := os.Stat(target)
+	if err != nil || info.Mode().Perm() != 0o600 || readFile(t, target) != "operator bytes\n" {
+		t.Fatalf("rollback left %s info=%v err=%v", target, info, err)
+	}
+}
+
+func TestInstallJournalRecordsLinksSidecarsAncestorsAndRemovals(t *testing.T) {
+	home := t.TempDir()
+	installer, journal, env := journaledEngine(t, home, true)
+	units := filepath.Join(home, ".config", "systemd", "user")
+	repointed, old := filepath.Join(units, "timers.target.wants", "pfm.timer"), filepath.Join(home, "old.timer")
+	if err := os.MkdirAll(filepath.Dir(repointed), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(old, repointed); err != nil {
+		t.Fatal(err)
+	}
+	displaced := filepath.Join(home, ".claude", "commands", "x.md")
+	writeFile(t, displaced, "operator command\n", 0o600)
+	fresh := filepath.Join(home, ".claude", "skills", "deep", "skill")
+	retired := filepath.Join(home, ".claude", "bin", "cx-kill.sh")
+	writeFile(t, retired, "retired\n", 0o700)
+	for _, target := range []string{repointed, displaced, fresh} {
+		if _, err := installer.ensureLink(filepath.Join(home, "new"), target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := installer.retire(retired, "test"); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := displaced + ".pre-professor-test"
+	want := []string{repointed, displaced, sidecar, filepath.Join(home, ".claude", "skills"), retired}
+	if got := installRecordDestinations(t, journal); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("records=%v, want %v", got, want)
+	}
+	output := rollbackInstallJournal(t, env, journal)
+	if target, err := os.Readlink(repointed); err != nil || target != old {
+		t.Fatalf("repointed link=%q err=%v, want %q", target, err, old)
+	}
+	if readFile(t, displaced) != "operator command\n" || readFile(t, retired) != "retired\n" {
+		t.Fatal("rollback did not restore the displaced or retired file")
+	}
+	for _, gone := range []string{sidecar, filepath.Join(home, ".claude", "skills")} {
+		if _, err := os.Lstat(gone); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s survived rollback: %v", gone, err)
+		}
+	}
+	if !strings.HasSuffix(output, "  note    run: systemctl --user daemon-reload\n") {
+		t.Fatalf("rollback output=%q, want the daemon-reload note last", output)
+	}
+}
+
+func TestInstallJournalRecordsShellAndCodexHooksWithSidecars(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	installer, journal, _ := journaledEngine(t, home, true)
+	installer.options.SourceRepo = clone
+	installer.options.CodexHomes = []string{filepath.Join(home, ".codex")}
+	zshrc, hooks := filepath.Join(home, ".zshrc"), filepath.Join(home, ".codex", "hooks.json")
+	writeFile(t, zshrc, "export A=1\n", 0o600)
+	writeFile(t, hooks, `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"`+
+		filepath.Join(home, ".local", "bin", "cc-fleet")+` hook stop"}]}]}}`+"\n", 0o600)
+	if err := installer.wireShell(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.wireCodexHooks(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{zshrc, zshrc + ".pre-professor-test", hooks, hooks + ".pre-professor-test"}
+	if _, err := os.Lstat(settingsHookOwnershipPath(installer.managedRoot)); err == nil {
+		want = append(want, filepath.Dir(installer.managedRoot))
+	}
+	if got := installRecordDestinations(t, journal); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("records=%v, want %v", got, want)
+	}
+}

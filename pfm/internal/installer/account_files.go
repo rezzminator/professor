@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
@@ -155,7 +156,13 @@ func pruneAccountHooks(document map[string]any) {
 	}
 }
 
-func accountMCPLeftovers(raw []byte, owned []string) ([]string, error) {
+// mcpShaped reports whether a registration under name is in a pfm shape; nil
+// judges by the ledger alone.
+type mcpShaped func(name string, registration map[string]any) bool
+
+// accountMCPLeftovers names the mcpServers entries pfm owns in a Claude MCP
+// file: the ledger-owned names present plus the shape-matched ones.
+func accountMCPLeftovers(raw []byte, owned []string, shaped mcpShaped) ([]string, error) {
 	document, err := parseAccountDocument(raw)
 	if err != nil {
 		return nil, err
@@ -164,10 +171,10 @@ func accountMCPLeftovers(raw []byte, owned []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ownedMCPNames(servers, owned), nil
+	return ownedMCPNames(servers, owned, shaped), nil
 }
 
-func stripAccountMCP(raw []byte, owned []string) ([]byte, []string, error) {
+func stripAccountMCP(raw []byte, owned []string, shaped mcpShaped) ([]byte, []string, error) {
 	document, err := parseAccountDocument(raw)
 	if err != nil {
 		return nil, nil, err
@@ -176,12 +183,12 @@ func stripAccountMCP(raw []byte, owned []string) ([]byte, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	removed := ownedMCPNames(servers, owned)
+	removed := ownedMCPNames(servers, owned, shaped)
 	if len(removed) == 0 {
 		return raw, nil, nil
 	}
-	for _, name := range owned {
-		delete(servers, name)
+	for _, name := range removed {
+		delete(servers, strings.TrimPrefix(name, "mcpServers."))
 	}
 	if len(servers) == 0 {
 		delete(document, "mcpServers")
@@ -205,11 +212,18 @@ func accountMCPServers(document map[string]any) (map[string]any, error) {
 	return servers, nil
 }
 
-func ownedMCPNames(servers map[string]any, owned []string) []string {
+func ownedMCPNames(servers map[string]any, owned []string, shaped mcpShaped) []string {
 	seen := map[string]bool{}
 	for _, name := range owned {
 		if _, present := servers[name]; present {
 			seen[name] = true
+		}
+	}
+	if shaped != nil {
+		for _, name := range []string{chatName, mcpServerHarvester, professorName} {
+			if registration, ok := servers[name].(map[string]any); ok && shaped(name, registration) {
+				seen[name] = true
+			}
 		}
 	}
 	result := make([]string, 0, len(seen))

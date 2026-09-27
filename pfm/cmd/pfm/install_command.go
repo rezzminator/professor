@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -33,6 +34,9 @@ var (
 
 var runInstaller = installer.Run
 
+// checkInstallSpace is the applying run's space preflight; a test swaps it.
+var checkInstallSpace = installer.CheckInstallSpace
+
 func installHarvestProvisioner() installer.HarvestProvisioner {
 	if installHarvestProvisionerOverride != nil {
 		return installHarvestProvisionerOverride
@@ -43,11 +47,12 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--rollback ID] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
 	rollback := flags.String("rollback", "", "replay a layout journal backwards")
+	force := flags.Bool("force", false, "with --rollback: overwrite destinations changed since the install")
 	vscode := flags.Bool(
 		"vscode",
 		false,
@@ -70,10 +75,14 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			rollbackSet = true
 		}
 	})
+	if *force && !rollbackSet {
+		flags.Usage()
+		return 2
+	}
 	if rollbackSet {
 		other := false
 		flags.Visit(func(flag *flag.Flag) {
-			if flag.Name != "rollback" {
+			if flag.Name != "rollback" && flag.Name != "force" {
 				other = true
 			}
 		})
@@ -81,24 +90,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			flags.Usage()
 			return 2
 		}
-		runtime, err := pfmconfig.OptionalRuntime(runtimes)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm install: resolve dependency config: %v\n", err)
-			return 1
-		}
-		env, err := installer.NewLayoutEnv(runtime, paths.OSEnv{})
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm install: layout environment: %v\n", err)
-			return 1
-		}
-		if err := installer.RollbackLayout(context.Background(), env, *rollback, stdout); err != nil {
-			fmt.Fprintf(stderr, "pfm install: rollback: %v\n", err)
-			if strings.Contains(err.Error(), "unknown layout journal") {
-				return 2
-			}
-			return 1
-		}
-		return 0
+		return runInstallRollback(*rollback, *force, stdout, stderr, runtimes)
 	}
 	skipCodex := false
 	if value := strings.TrimSpace(*skipEngine); value != "" {
@@ -138,8 +130,40 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm install: layout environment: %v\n", err)
 		return 1
 	}
+	journal := installer.NewJournal(context.Background(), layoutEnv)
+	if mode == installer.ModeApply {
+		// The run's one journal line is its last stdout line, on every return
+		// once anything was recorded — a failure included.
+		defer func() {
+			if dir := journal.Dir(); dir != "" {
+				fmt.Fprintln(stdout, "install journal: "+dir)
+			}
+		}()
+	}
+	// withFlags carries the command's flags into an installer run: the apply
+	// and the space preflight's planning pass see the same install.
+	withFlags := func(options installer.Options) installer.Options {
+		options.VSCode = *vscode
+		options.InstallThemes = !*skipThemes
+		options.ThemeManifestURL = professorThemeManifestURL(version)
+		options.ThemeHTTPClient = installThemeHTTPClientOverride
+		if skipCodex {
+			options.CodexHomes = []string{}
+		}
+		return options
+	}
 	layoutFindings := installer.ClassifyLayout(layoutEnv)
-	journalDir, err := installer.ApplyLayout(context.Background(), layoutEnv, mode == installer.ModeApply, stdout)
+	if mode == installer.ModeApply {
+		planOptions := func(runtime commandRuntime) installer.Options {
+			return withFlags(newInstallerOptions(installer.ModeDryRun, *configDir, *skipHarvest, io.Discard, io.Discard, runtime))
+		}
+		if code := installSpacePreflight(layoutEnv, layoutFindings, runtime, planOptions, stderr); code != 0 {
+			return code
+		}
+	}
+	journalDir, err := installer.ApplyLayout(
+		context.Background(), layoutEnv, journal, mode == installer.ModeApply, stdout,
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm install: %v\n", err)
 		return 1
@@ -163,6 +187,18 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 				fmt.Fprintf(stderr, "pfm install: migrate moved databases: %v\n", migrateErr)
 				return 1
 			}
+			// The migration rewrote the moved state database and may have
+			// written its pre-migration backup: this install's own change,
+			// never drift for a rollback.
+			backups, globErr := filepath.Glob(layoutEnv.StateDB + ".bak-before-v*")
+			if globErr != nil {
+				fmt.Fprintf(stderr, "pfm install: list state database backups: %v\n", globErr)
+				return 1
+			}
+			if err := journal.Refingerprint(append([]string{layoutEnv.StateDB}, backups...)...); err != nil {
+				fmt.Fprintf(stderr, "pfm install: fingerprint migrated state database: %v\n", err)
+				return 1
+			}
 			break
 		}
 	}
@@ -172,7 +208,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		return 1
 	}
 	runtime.Config = installConfig
-	migrated, migrateCode := migrateMachineConfig(mode, stdout, stderr, runtime)
+	migrated, migrateCode := migrateMachineConfig(mode, journal, stdout, stderr, runtime)
 	if migrateCode != 0 {
 		return migrateCode
 	}
@@ -196,14 +232,8 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintln(stderr, "pfm install: required dependency preflight failed")
 		return 1
 	}
-	options := newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime)
-	options.VSCode = *vscode
-	options.InstallThemes = !*skipThemes
-	options.ThemeManifestURL = professorThemeManifestURL(version)
-	options.ThemeHTTPClient = installThemeHTTPClientOverride
-	if skipCodex {
-		options.CodexHomes = []string{}
-	}
+	options := withFlags(newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime))
+	options.Journal = journal
 	code := runInstallerCommand(installCommand, options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
 		if preflight != 0 {
@@ -231,6 +261,41 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	return code
 }
 
+// installSpacePreflight plans the run — the installer in dry-run with a fresh
+// journal, plus the harvester root a re-provision journals — and refuses the
+// apply when a filesystem cannot take the journal copies and cross-filesystem
+// moves (installer.CheckInstallSpace).
+func installSpacePreflight(
+	layoutEnv installer.LayoutEnv,
+	findings []installer.LayoutFinding,
+	runtime commandRuntime,
+	planOptions func(commandRuntime) installer.Options,
+	stderr io.Writer,
+) int {
+	ctx := context.Background()
+	planConfig, err := layoutEnv.InstallConfig(runtime, false)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm install: space preflight: plan install writes: %v\n", err)
+		return 1
+	}
+	runtime.Config = planConfig
+	options := planOptions(runtime)
+	plan := installer.NewJournal(ctx, layoutEnv)
+	options.Journal = plan
+	if _, err := runInstaller(ctx, options); err != nil {
+		fmt.Fprintf(stderr, "pfm install: space preflight: plan install writes: %v\n", err)
+		return 1
+	}
+	planned := append(plan.Planned(), installer.PlanHarvestJournal(ctx, options)...)
+	if err := checkInstallSpace(layoutEnv, findings, planned); err != nil {
+		for _, line := range strings.Split(err.Error(), "\n") {
+			fmt.Fprintf(stderr, "pfm install: %s\n", line)
+		}
+		return 1
+	}
+	return 0
+}
+
 func migrateInstalledLayoutDatabases(ctx context.Context, statePath, cachePath string) (returnErr error) {
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -256,7 +321,12 @@ func migrateInstalledLayoutDatabases(ctx context.Context, statePath, cachePath s
 // BEFORE the installer reads the port it wires every client to — so client
 // registrations and the restarted daemon always agree. A preview prints the
 // plan and wires what the apply would.
-func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime commandRuntime) (commandRuntime, int) {
+func migrateMachineConfig(
+	mode installer.Mode,
+	journal *installer.Journal,
+	stdout, stderr io.Writer,
+	runtime commandRuntime,
+) (commandRuntime, int) {
 	migration, err := pfmconfig.PlanMigration(runtime.Config)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm install: plan config migration: %v\n", err)
@@ -273,7 +343,8 @@ func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime
 		runtime.Config = migration.Preview(runtime.Config)
 		return runtime, 0
 	}
-	if err := pfmconfig.ApplyMigration(migration); err != nil {
+	apply := func() error { return pfmconfig.ApplyMigration(migration) }
+	if err := journal.Write(configMigrationPaths(migration), apply); err != nil {
 		fmt.Fprintf(stderr, "pfm install: apply config migration: %v\n", err)
 		return runtime, 1
 	}
@@ -283,6 +354,19 @@ func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime
 		return runtime, 1
 	}
 	return reloaded, 0
+}
+
+// configMigrationPaths names every file pfmconfig.ApplyMigration writes,
+// renames or removes: the config, its harvester sibling, the pre-split file
+// and the parked copy it becomes.
+func configMigrationPaths(migration pfmconfig.Migration) []string {
+	changed := []string{migration.Path, pfmconfig.HarvesterPath(migration.Path)}
+	for _, legacy := range []string{migration.LegacyPath, migration.StrayLegacyPath} {
+		if legacy != "" {
+			changed = append(changed, legacy, filepath.Join(filepath.Dir(legacy), pfmconfig.LegacyBackupName))
+		}
+	}
+	return changed
 }
 
 func professorThemeManifestURL(currentVersion string) string {

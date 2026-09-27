@@ -12,10 +12,10 @@ import (
 
 // mergeLayoutSession keeps the store's copy on conflict and retains the
 // account's copy in the journal. The snapshots also restore dropped duplicates.
-func mergeLayoutSession(journal *layoutJournal, finding LayoutFinding, store string) ([]string, error) {
+func mergeLayoutSession(journal *Journal, finding LayoutFinding, paths []string, store string) ([]string, error) {
 	account := finding.Path
 	conflicts := []string{}
-	err := journal.mutate(finding, []string{account, store}, func() error {
+	err := journal.mutate(finding, paths, func() error {
 		if err := os.MkdirAll(store, 0o700); err != nil {
 			return err
 		}
@@ -30,7 +30,7 @@ func mergeLayoutSession(journal *layoutJournal, finding LayoutFinding, store str
 	return conflicts, err
 }
 
-func mergeLayoutChildren(journal *layoutJournal, source, destination, prefix string, conflicts *[]string) error {
+func mergeLayoutChildren(journal *Journal, source, destination, prefix string, conflicts *[]string) error {
 	entries, err := os.ReadDir(source)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func moveLayoutPath(env LayoutEnv, source, destination string) error {
 	} else if !errors.Is(err, syscall.EXDEV) {
 		return err
 	}
-	if err := ensureLayoutMoveSpace(source, destination); err != nil {
+	if err := ensureLayoutMoveSpace(env, source, destination); err != nil {
 		return err
 	}
 	if err := copyLayoutTree(source, destination); err != nil {
@@ -121,12 +121,12 @@ func moveLayoutPath(env LayoutEnv, source, destination string) error {
 	return os.RemoveAll(source)
 }
 
-func ensureLayoutMoveSpace(source, destination string) error {
-	var space syscall.Statfs_t
-	if err := syscall.Statfs(filepath.Dir(destination), &space); err != nil {
+func ensureLayoutMoveSpace(env LayoutEnv, source, destination string) error {
+	_, available, err := env.probeSpace(filepath.Dir(destination))
+	if err != nil {
 		return err
 	}
-	return ensureLayoutMoveSpaceWithAvailable(source, space.Bavail*uint64(space.Bsize))
+	return ensureLayoutMoveSpaceWithAvailable(source, available)
 }
 
 func ensureLayoutMoveSpaceWithAvailable(source string, available uint64) error {

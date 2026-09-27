@@ -88,7 +88,11 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		printUsage(stderr)
 		return 2
 	}
-	runtime, err := config.LoadRuntime(configPath)
+	load := config.LoadRuntime
+	if len(args) > 0 && args[0] == installCommand {
+		load = config.LoadInstallRuntime // install is the command that migrates a legacy config
+	}
+	runtime, err := load(configPath)
 	if err != nil {
 		if !diagnosticCommand(args) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)

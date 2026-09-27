@@ -83,9 +83,7 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 		installer.ok(path + " OpenCode prompt wiring")
 		return nil
 	}
-	return installer.change(changeDescription(path, existed), func() error {
-		return installer.writeMCPFile(path, original, wantedRaw, existed)
-	})
+	return installer.changeMCPFile(changeDescription(path, existed), path, original, wantedRaw, existed)
 }
 
 // openCodeInstructionEntries reads the existing array. A present-but-wrong

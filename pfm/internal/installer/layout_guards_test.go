@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestLayoutLiveChatsRefuseAndUnreadableSessionsFail(t *testing.T) {
@@ -38,7 +40,7 @@ func TestLayoutDatabaseHolderRefusesAndUnreadableProcFails(t *testing.T) {
 	if err := os.Remove(env.StateDB); err != nil {
 		t.Fatal(err)
 	}
-	legacy := filepath.Join(env.Home, ".cc", legacyDBName)
+	legacy := paths.LegacyStateDB(env.Home)
 	layoutWrite(t, legacy, "state")
 	fd := filepath.Join(env.ProcRoot, "456", "fd")
 	if err := os.MkdirAll(fd, 0o700); err != nil {

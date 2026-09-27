@@ -79,7 +79,7 @@ func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 		} else if err != nil {
 			return err
 		}
-		return installer.change("remove "+path, func() error { return os.Remove(path) })
+		return installer.changePaths("remove "+path, []string{path}, func() error { return os.Remove(path) })
 	}
 	encoded, err := json.MarshalIndent(ownership, "", "  ")
 	if err != nil {
@@ -89,5 +89,7 @@ func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 	if sameFile(path, encoded, 0o600) {
 		return nil
 	}
-	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0o600) })
+	return installer.changePaths("write "+path, []string{path}, func() error {
+		return atomicfile.Write(path, encoded, 0o600)
+	})
 }

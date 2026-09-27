@@ -870,3 +870,73 @@ func TestInstallRetiresACodexRoleTheCloneNoLongerShips(t *testing.T) {
 	}
 	assertOwnedCodexRole(t, filepath.Join(registry, "alpha.toml"))
 }
+
+// TestInstallJournalRecordsCodexAgentsAndCommands covers the writes the
+// installer makes inside codexgen: every Claude agent link, Codex role and
+// Codex command artifact is journaled before its write, a preview plans the
+// same paths, rollback restores them, and a converged host records nothing.
+func TestInstallJournalRecordsCodexAgentsAndCommands(t *testing.T) {
+	home := t.TempDir()
+	assets, err := assetFiles()
+	if err != nil {
+		t.Fatalf("assetFiles: %v", err)
+	}
+	engineFor := func(apply bool) (*engine, *Journal) {
+		installer, _, _ := globalFanoutEngine(t, home, apply, io.Discard)
+		journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+		journal.dryRun = !apply
+		installer.options.Journal = journal
+		return installer, journal
+	}
+	plain, first, second := globalFanoutEngine(t, home, true, io.Discard)
+	if err := plain.wireGlobalCommands(); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{
+		filepath.Join(first, "agents"), filepath.Join(second, "agents"),
+		filepath.Join(home, ".codex", "agents"), filepath.Join(home, ".codex", "prompts"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changed := []string{
+		filepath.Join(first, "agents", "gamma.md"), filepath.Join(second, "agents", "gamma.md"),
+		filepath.Join(home, ".codex", "agents", "gamma.toml"),
+	}
+	steps := func(installer *engine) {
+		t.Helper()
+		if err := installer.wireCodexAgents(); err != nil {
+			t.Fatalf("wireCodexAgents: %v", err)
+		}
+		if err := installer.reconcileCodexCommands(assets); err != nil {
+			t.Fatalf("reconcileCodexCommands: %v", err)
+		}
+	}
+
+	preview, planned := engineFor(false)
+	steps(preview)
+	changed = append(changed, filepath.Join(home, ".codex", "prompts", "alpha.md"))
+	requireJournalPaths(t, planned.Planned(), changed...)
+
+	installer, journal := engineFor(true)
+	steps(installer)
+	recorded := installRecordDestinations(t, journal)
+	requireJournalPaths(t, recorded, changed...)
+
+	rollbackInstallJournal(t, LayoutEnv{Home: home}, journal)
+	for _, path := range recorded {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("rollback kept %s: %v", path, err)
+		}
+	}
+
+	settle, _ := engineFor(true)
+	settle.options.Journal = nil
+	steps(settle)
+	again, idle := engineFor(true)
+	steps(again)
+	if idle.Dir() != "" {
+		t.Fatalf("converged Codex wiring journaled %v", idle.records)
+	}
+}

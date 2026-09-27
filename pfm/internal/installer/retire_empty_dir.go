@@ -94,5 +94,5 @@ func (installer *engine) retireEmptyDir(path string) error {
 		return nil
 	}
 	installer.markRemoved(path)
-	return installer.change("remove empty "+path, func() error { return os.Remove(path) })
+	return installer.changePaths("remove empty "+path, []string{path}, func() error { return os.Remove(path) })
 }

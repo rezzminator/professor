@@ -25,6 +25,30 @@ func readMCPFile(path string) ([]byte, bool, error) {
 
 // Recheck the planned preimage before preserving a backup and atomically writing
 // the physical file. Native clients may update their registry during installation.
+// backedUpWritePaths names what a write through writeMCPFile or
+// writeCodexConfig changes: the physical file (a config symlink is written
+// through, never replaced) and, when it existed, the pre-professor sidecar the
+// write keeps. An unresolvable link journals path itself; the write resolves
+// it again and returns that error.
+func (installer *engine) backedUpWritePaths(path string, existed bool) []string {
+	if !existed {
+		return []string{path}
+	}
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return []string{path}
+	}
+	return []string{target, availableBackup(target, installer.stamp)}
+}
+
+// changeMCPFile is change for one writeMCPFile write, journaling the file and
+// its sidecar first.
+func (installer *engine) changeMCPFile(message, path string, original, wanted []byte, existed bool) error {
+	return installer.changePaths(message, installer.backedUpWritePaths(path, existed), func() error {
+		return installer.writeMCPFile(path, original, wanted, existed)
+	})
+}
+
 func (installer *engine) writeMCPFile(path string, original, wanted []byte, existed bool) error {
 	latest, present, err := readMCPFile(path)
 	if err != nil || present != existed || !bytes.Equal(latest, original) {

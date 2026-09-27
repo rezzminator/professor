@@ -23,7 +23,7 @@ import (
 
 type engine struct {
 	options       Options
-	layoutJournal *layoutJournal
+	layoutJournal *Journal
 	report        Report
 	apply         bool
 	stamp         string
@@ -101,6 +101,9 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		stamp:       options.Now().Format("20060102-150405"),
 		managedRoot: managedRootForHome(options.Home),
 	}
+	if options.Journal != nil {
+		options.Journal.dryRun = !installer.apply
+	}
 	installer.say("pfm install: home=%s config=%s", options.Home, options.ConfigDir)
 	switch options.Mode {
 	case ModeDryRun:
@@ -141,6 +144,7 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 	options := installer.options
 	options.Stdout = io.Discard
+	options.Journal = nil
 	preview := &engine{
 		options: options, apply: false, stamp: installer.stamp, managedRoot: installer.managedRoot,
 	}
@@ -353,6 +357,7 @@ func (installer *engine) wireCodexAgents() error {
 		if action.Target != "" {
 			message += " -> " + action.Target
 		}
+		installer.planJournal(action.Path)
 		if err := installer.change(message, nil); err != nil {
 			return err
 		}
@@ -377,9 +382,13 @@ func (installer *engine) wireCodexAgents() error {
 		ClaudeConfigDirs: installer.claudeConfigDirs(),
 		CodexHomes:       installer.codexHomes(),
 		Mode:             codexgen.ModeBuild,
+		BeforeWrite:      installer.journalBeforeWrite(),
 	})
 	if err != nil {
 		return fmt.Errorf("run pfm codex agents: %w", err)
+	}
+	if err := installer.options.Journal.markApplied(); err != nil {
+		return fmt.Errorf("journal Codex global agents: %w", err)
 	}
 	installer.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
 	return nil
@@ -571,7 +580,7 @@ func (installer *engine) wireGlobalLink(source, target, sourceRepoRoot string, i
 		installer.skip(message)
 		return nil
 	}
-	return installer.change(message, func() error {
+	return installer.changePaths(message, []string{target}, func() error {
 		return codexgen.ApplyGlobalLink(target, source, state)
 	})
 }
@@ -586,6 +595,7 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 		if action.Target != "" {
 			message += " -> " + action.Target
 		}
+		installer.planJournal(action.Path)
 		if err := installer.change(message, nil); err != nil {
 			return err
 		}
@@ -627,15 +637,19 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 		sourceHome = empty
 	}
 	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home:       installer.options.Home,
-		SourceHome: sourceHome,
-		Mode:       codexgen.ModeBuild,
+		Home:        installer.options.Home,
+		SourceHome:  sourceHome,
+		Mode:        codexgen.ModeBuild,
+		BeforeWrite: installer.journalBeforeWrite(),
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile Codex global commands: %w", err)
 	}
 	if !result.OK {
 		return fmt.Errorf("reconcile Codex global commands: %s", strings.Join(result.Problems, "; "))
+	}
+	if err := installer.options.Journal.markApplied(); err != nil {
+		return fmt.Errorf("journal Codex global commands: %w", err)
 	}
 	installer.ok(fmt.Sprintf(
 		"Codex global commands wrote=%d unchanged=%d deleted=%d",
@@ -644,6 +658,23 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 		result.Deleted,
 	))
 	return nil
+}
+
+// journalBeforeWrite is the codexgen BeforeWrite hook of this run: the
+// journal's pending snapshot of each path a build writes, nil without a journal.
+func (installer *engine) journalBeforeWrite() func(path string) error {
+	if installer.options.Journal == nil {
+		return nil
+	}
+	return installer.options.Journal.before
+}
+
+// planJournal adds a path a codexgen check plan reports as changing to a
+// preview's journal plan; an applying run records it through the build's hook.
+func (installer *engine) planJournal(path string) {
+	if journal := installer.options.Journal; journal != nil && !installer.apply {
+		journal.plan([]string{path})
+	}
 }
 
 func codexPlanBlockers(problems []string) []string {
@@ -972,6 +1003,9 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 	} else {
 		installer.say("harvestpy Check reported an unhealthy environment; provisioning")
 	}
+	if err := installer.options.Journal.before(root); err != nil {
+		return fmt.Errorf("journal harvestpy root %s: %w", root, err)
+	}
 	result, provisionErr := provider.Provision(ctx, harvestpy.ProvisionOptions{
 		Root:     root,
 		Cache:    filepath.Join(root, "cache"),
@@ -989,6 +1023,9 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 			)
 		}
 		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
+	}
+	if err := installer.options.Journal.markApplied(); err != nil {
+		return err
 	}
 	installer.ok("harvestpy environment provisioned digest=" + result.Digest)
 	return installer.stageHarvestModels(ctx, provider, root, platform)
@@ -1115,7 +1152,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		if strings.HasPrefix(asset.path, "systemd/") {
 			systemdChanged = true
 		}
-		if err := installer.change("write "+target, func() error {
+		if err := installer.changePaths("write "+target, []string{target}, func() error {
 			return atomicfile.Write(target, content, asset.mode)
 		}); err != nil {
 			return false, err
@@ -1130,7 +1167,9 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 					mcpAsset,
 					installer.options.MCPConfigPath,
 				)
-				if err := installer.change(message, func() error { return os.Remove(mcpAsset) }); err != nil {
+				if err := installer.changePaths(message, []string{mcpAsset}, func() error {
+					return os.Remove(mcpAsset)
+				}); err != nil {
 					return false, err
 				}
 				systemdChanged = systemdChanged || strings.HasPrefix(relative, "systemd/")
@@ -1198,17 +1237,22 @@ func (installer *engine) ensureLink(source, target string) (bool, error) {
 		return false, err
 	}
 	description := "link " + target + " -> " + source
-	return true, installer.change(description, func() error {
+	changed := []string{target}
+	backup := ""
+	if info != nil && info.Mode()&os.ModeSymlink == 0 {
+		backup = availableBackup(target, installer.stamp)
+		changed = append(changed, backup)
+	}
+	return true, installer.changePaths(description, changed, func() error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}
 		if info != nil {
-			if info.Mode()&os.ModeSymlink != 0 {
+			if backup == "" {
 				if err := os.Remove(target); err != nil {
 					return err
 				}
 			} else {
-				backup := availableBackup(target, installer.stamp)
 				if err := os.Rename(target, backup); err != nil {
 					return fmt.Errorf("backup %s to %s: %w", target, backup, err)
 				}
@@ -1226,9 +1270,10 @@ func (installer *engine) unlinkOne(target string) error {
 	}
 	backup := newestBackup(target)
 	if backup == "" {
-		return installer.change("remove "+target, func() error { return os.Remove(target) })
+		return installer.changePaths("remove "+target, []string{target}, func() error { return os.Remove(target) })
 	}
-	return installer.change("restore "+target+" from "+filepath.Base(backup), func() error {
+	message := "restore " + target + " from " + filepath.Base(backup)
+	return installer.changePaths(message, []string{target, backup}, func() error {
 		if err := os.Remove(target); err != nil {
 			return err
 		}
@@ -1248,7 +1293,9 @@ func (installer *engine) retire(path, reason string) error {
 		return fmt.Errorf("refuse to retire directory %s", path)
 	}
 	installer.markRemoved(path)
-	return installer.change("retire "+path+" ("+reason+")", func() error { return os.Remove(path) })
+	return installer.changePaths("retire "+path+" ("+reason+")", []string{path}, func() error {
+		return os.Remove(path)
+	})
 }
 
 func (installer *engine) retireGlob(pattern, reason string) error {
@@ -1662,12 +1709,20 @@ func (installer *engine) retireEmptyDirTolerant(path string) error {
 	if !installer.apply {
 		return nil
 	}
+	if entries, err := os.ReadDir(path); err == nil && len(entries) == 0 {
+		if err := installer.options.Journal.before(path); err != nil {
+			return err
+		}
+	}
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		installer.skip("leave non-empty directory " + path + ": " + err.Error())
 		return nil
+	}
+	if err := installer.options.Journal.markApplied(); err != nil {
+		return err
 	}
 	installer.ok("removed empty " + path)
 	return nil
@@ -1775,7 +1830,9 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 				installer.skip("unexpected non-symlink MCP enablement left untouched: " + target)
 				continue
 			}
-			if err := installer.change("remove "+target, func() error { return os.Remove(target) }); err != nil {
+			if err := installer.changePaths("remove "+target, []string{target}, func() error {
+				return os.Remove(target)
+			}); err != nil {
 				return false, err
 			}
 			changed = true
@@ -1860,7 +1917,7 @@ func (installer *engine) writeSettingsHookOwnership(
 			installer.ok(path)
 			return nil
 		}
-		return installer.change("remove "+path, func() error { return os.Remove(path) })
+		return installer.changePaths("remove "+path, []string{path}, func() error { return os.Remove(path) })
 	}
 	same, encoded, err := sameSettingsHookOwnership(existing, ownership)
 	if err != nil {
@@ -1870,7 +1927,7 @@ func (installer *engine) writeSettingsHookOwnership(
 		installer.ok(path)
 		return nil
 	}
-	return installer.change("write "+path, func() error {
+	return installer.changePaths("write "+path, []string{path}, func() error {
 		return atomicfile.Write(path, encoded, 0o600)
 	})
 }
@@ -1932,11 +1989,15 @@ func (installer *engine) wireCodexHooks() error {
 			ownership[physical] = nextOwned
 		}
 
+		hookPaths, backup := []string{physical}, ""
+		if existed {
+			backup = availableBackup(path, installer.stamp)
+			hookPaths = append(hookPaths, backup)
+		}
 		if !changed {
 			installer.ok(path + " wiring")
-		} else if err := installer.change(changeDescription(path, existed), func() error {
+		} else if err := installer.changePaths(changeDescription(path, existed), hookPaths, func() error {
 			if existed {
-				backup := availableBackup(path, installer.stamp)
 				if err := copyBackup(path, backup); err != nil {
 					return fmt.Errorf("backup %s: %w", path, err)
 				}
@@ -1974,8 +2035,13 @@ func (installer *engine) wireCodexHooks() error {
 		if !codexappendix.TrustRecorded(account) {
 			continue
 		}
-		if err := installer.change(
+		if err := installer.changePaths(
 			"remove retired appendix hook trust "+account,
+			// codexappendix.Unregister rewrites config.toml and removes its trust receipt.
+			[]string{
+				filepath.Join(account, "config.toml"),
+				filepath.Join(account, ".professor-appendix-trust.json"),
+			},
 			func() error { return codexappendix.Unregister(account) },
 		); err != nil {
 			return err
@@ -2026,9 +2092,13 @@ func (installer *engine) wireShell(uninstall bool) error {
 	if len(raw) == 0 {
 		description = "create " + zshrc
 	}
-	return installer.change(description, func() error {
+	shellPaths, backup := []string{zshrc}, ""
+	if len(raw) > 0 {
+		backup = availableBackup(zshrc, installer.stamp)
+		shellPaths = append(shellPaths, backup)
+	}
+	return installer.changePaths(description, shellPaths, func() error {
 		if len(raw) > 0 {
-			backup := availableBackup(zshrc, installer.stamp)
 			if err := copyBackup(zshrc, backup); err != nil {
 				return err
 			}
@@ -2067,7 +2137,7 @@ func (installer *engine) migrateOldState() error {
 	oldInfo, oldErr := os.Stat(oldState)
 	_, stateErr := os.Stat(state)
 	if oldErr == nil && oldInfo.IsDir() && errors.Is(stateErr, fs.ErrNotExist) {
-		return installer.change("migrate "+oldState+" -> "+state, func() error {
+		return installer.changePaths("migrate "+oldState+" -> "+state, []string{oldState, state}, func() error {
 			if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
 				return err
 			}
@@ -2108,8 +2178,13 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr er
 		return fmt.Errorf("scan retired kill carrier: %w", err)
 	}
 	sort.Strings(ids)
-	return installer.change(
+	return installer.changePaths(
 		fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)),
+		[]string{
+			installer.options.StateDB,
+			installer.options.StateDB + layoutDBWAL,
+			installer.options.StateDB + layoutDBSHM,
+		},
 		func() (returnErr error) {
 			values := paths.Values{
 				Home:    installer.options.Home,
@@ -2258,7 +2333,7 @@ func (installer *engine) retireLegacyCommand(path string) error {
 		filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-commands", filepath.Base(path)),
 		installer.stamp,
 	)
-	return installer.change("retire "+path+" (backup: "+backup+")", func() error {
+	return installer.changePaths("retire "+path+" (backup: "+backup+")", []string{path, backup}, func() error {
 		if err := copyBackup(path, backup); err != nil {
 			return fmt.Errorf("backup retired command %s: %w", path, err)
 		}

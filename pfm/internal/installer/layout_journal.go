@@ -2,6 +2,8 @@ package installer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,12 +12,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type layoutJournalRecord struct {
@@ -25,19 +30,217 @@ type layoutJournalRecord struct {
 	Destination string        `json:"destination"`
 	Backup      string        `json:"backup"`
 	Result      string        `json:"result"`
+	// After is the destination's fingerprint right after the change
+	// (layoutFingerprint); rollback refuses when it no longer matches.
+	After string `json:"after,omitempty"`
 }
 
-type layoutJournal struct {
+// Journal is the one journal of an install run: the layout rows and every
+// write the installer itself makes record the prior state of their paths here
+// before the change, so `pfm install --rollback {id}` restores all of them.
+type Journal struct {
 	env     LayoutEnv
 	dir     string
 	records []layoutJournalRecord
+	planned []string
+	dryRun  bool
 	ctx     context.Context
 	clock   clock.Clock
 }
 
+const (
+	// layoutRowInstall is the record row of a write outside the layout rows.
+	layoutRowInstall        = "install"
+	layoutRecordPending     = "pending"
+	layoutRecordApplied     = "applied"
+	layoutRolledBackMarker  = "rolled-back"
+	layoutFingerprintAbsent = "absent"
+	systemdDaemonReloadNote = "  note    run: systemctl --user daemon-reload"
+)
+
+// verdictInstallWrite is the verdict every install record carries.
+const verdictInstallWrite LayoutVerdict = "write"
+
+// NewJournal returns the run's journal; it writes nothing until the first
+// record, which creates {home}/.local/state/pfm/migrations/{id}/.
+func NewJournal(ctx context.Context, env LayoutEnv) *Journal {
+	return &Journal{env: env, ctx: ctx, clock: clock.Real}
+}
+
+// Dir is the journal directory, "" until the first record.
+func (journal *Journal) Dir() string {
+	if journal == nil {
+		return ""
+	}
+	return journal.dir
+}
+
+// Planned lists, sorted and de-duplicated, the paths a dry run would record.
+func (journal *Journal) Planned() []string {
+	if journal == nil {
+		return nil
+	}
+	planned := append([]string(nil), journal.planned...)
+	sort.Strings(planned)
+	return slices.Compact(planned)
+}
+
+// Write records the prior state of paths as install records, runs action and
+// marks the records applied; a failing action leaves them pending. A nil
+// journal only runs action; a dry-run journal plans the paths and runs nothing.
+func (journal *Journal) Write(paths []string, action func() error) error {
+	if journal == nil {
+		return action()
+	}
+	if journal.dryRun {
+		journal.plan(paths)
+		return nil
+	}
+	for _, path := range paths {
+		if err := journal.before(path); err != nil {
+			return err
+		}
+	}
+	if err := action(); err != nil {
+		return err
+	}
+	return journal.markApplied()
+}
+
+// before snapshots one path as a pending install record — the first half of
+// the two-phase form for a write made inside another package.
+func (journal *Journal) before(path string) error {
+	if journal == nil {
+		return nil
+	}
+	if journal.dryRun {
+		journal.plan([]string{path})
+		return nil
+	}
+	// The journal directory exists before a path resolves, so a missing
+	// ancestor is never the parent of the journal itself.
+	if err := journal.ensure(); err != nil {
+		return err
+	}
+	resolved := installRecordPath(path)
+	for _, record := range journal.records {
+		if record.Row == layoutRowInstall && record.Result == layoutRecordPending && record.Destination == resolved {
+			return nil
+		}
+	}
+	return journal.snapshot(layoutRowInstall, verdictInstallWrite, resolved)
+}
+
+// markApplied marks every pending install record applied and flushes.
+func (journal *Journal) markApplied() error {
+	if journal == nil || journal.dryRun || journal.dir == "" {
+		return nil
+	}
+	applied := []int{}
+	for index := range journal.records {
+		if journal.records[index].Row == layoutRowInstall && journal.records[index].Result == layoutRecordPending {
+			applied = append(applied, index)
+		}
+	}
+	return journal.markRecordsApplied(applied)
+}
+
+// markRecordsApplied marks the records applied with their post-change
+// fingerprint and flushes. A destination that cannot be fingerprinted stays
+// without one — rollback then counts it as drift — and the error is returned.
+func (journal *Journal) markRecordsApplied(indexes []int) error {
+	var failures []error
+	for _, index := range indexes {
+		record := &journal.records[index]
+		record.Result = layoutRecordApplied
+		after, err := layoutFingerprint(record.Destination)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("fingerprint %s: %w", record.Destination, err))
+		}
+		record.After = after
+	}
+	return errors.Join(append(failures, journal.flush())...)
+}
+
+// Refingerprint recomputes the fingerprint of the last applied record of each
+// path — for a change the install itself makes after the record, such as the
+// schema migration of a moved database. A path with no applied record is left
+// alone.
+func (journal *Journal) Refingerprint(paths ...string) error {
+	if journal == nil || journal.dryRun || journal.dir == "" {
+		return nil
+	}
+	indexes := []int{}
+	for _, path := range paths {
+		for index := len(journal.records) - 1; index >= 0; index-- {
+			record := journal.records[index]
+			if record.Result == layoutRecordApplied && filepath.Clean(record.Destination) == filepath.Clean(path) {
+				indexes = append(indexes, index)
+				break
+			}
+		}
+	}
+	if len(indexes) == 0 {
+		return nil
+	}
+	return journal.markRecordsApplied(indexes)
+}
+
+func (journal *Journal) plan(paths []string) {
+	for _, path := range paths {
+		journal.planned = append(journal.planned, installRecordPath(path))
+	}
+}
+
+// installRecordPath is the path an install record names: the highest missing
+// ancestor when the parent chain is absent, and the physical location of the
+// parent directory, so a write through a symlinked directory records the
+// path it replaces. The last component is never resolved: a link the write
+// replaces is itself the prior state.
+func installRecordPath(path string) string {
+	path = filepath.Clean(path)
+	existing, missing := path, ""
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return path
+		}
+		missing, existing = existing, parent
+	}
+	if missing == "" {
+		parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+		if err != nil {
+			return path
+		}
+		return filepath.Join(parent, filepath.Base(path))
+	}
+	physical, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return missing
+	}
+	return filepath.Join(physical, filepath.Base(missing))
+}
+
+// changePaths is the one door for an install write outside the layout rows:
+// change, with every path the action changes journaled before it runs.
+func (installer *engine) changePaths(message string, paths []string, action func() error) error {
+	journal := installer.options.Journal
+	if journal == nil || action == nil {
+		return installer.change(message, action)
+	}
+	if !installer.apply {
+		journal.plan(paths)
+		return installer.change(message, action)
+	}
+	return installer.change(message, func() error { return journal.Write(paths, action) })
+}
+
 var layoutJournalID = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 
-func (journal *layoutJournal) ensure() error {
+func (journal *Journal) ensure() error {
 	if journal.dir != "" {
 		return nil
 	}
@@ -75,7 +278,7 @@ func (journal *layoutJournal) ensure() error {
 	}
 }
 
-func (journal *layoutJournal) flush() error {
+func (journal *Journal) flush() error {
 	raw, err := json.MarshalIndent(journal.records, "", "  ")
 	if err != nil {
 		return err
@@ -84,7 +287,7 @@ func (journal *layoutJournal) flush() error {
 }
 
 // snapshot flushes the recovery instruction before the corresponding mutation.
-func (journal *layoutJournal) snapshot(row string, verdict LayoutVerdict, path string) error {
+func (journal *Journal) snapshot(row string, verdict LayoutVerdict, path string) error {
 	if err := journal.ensure(); err != nil {
 		return err
 	}
@@ -98,12 +301,12 @@ func (journal *layoutJournal) snapshot(row string, verdict LayoutVerdict, path s
 		return err
 	}
 	journal.records = append(journal.records, layoutJournalRecord{
-		Row: row, Verdict: verdict, Source: path, Destination: path, Backup: backup, Result: "pending",
+		Row: row, Verdict: verdict, Source: path, Destination: path, Backup: backup, Result: layoutRecordPending,
 	})
 	return journal.flush()
 }
 
-func (journal *layoutJournal) mutate(finding LayoutFinding, paths []string, action func() error) error {
+func (journal *Journal) mutate(finding LayoutFinding, paths []string, action func() error) error {
 	for _, path := range paths {
 		if err := journal.snapshot(finding.Row, finding.Verdict, path); err != nil {
 			return err
@@ -112,18 +315,19 @@ func (journal *layoutJournal) mutate(finding LayoutFinding, paths []string, acti
 	if err := action(); err != nil {
 		return err
 	}
+	applied := []int{}
 	for index := len(journal.records) - len(paths); index < len(journal.records); index++ {
-		journal.records[index].Result = "applied"
+		applied = append(applied, index)
 	}
-	return journal.flush()
+	return journal.markRecordsApplied(applied)
 }
 
-func (journal *layoutJournal) discardPending(start int) error {
+func (journal *Journal) discardPending(start int) error {
 	if start >= len(journal.records) {
 		return nil
 	}
 	for _, record := range journal.records[start:] {
-		if record.Result != "pending" {
+		if record.Result != layoutRecordPending {
 			return errors.New("cannot discard applied journal records")
 		}
 		if record.Backup != "" {
@@ -187,7 +391,12 @@ func copyLayoutTree(source, target string) error {
 	}
 }
 
-func RollbackLayout(ctx context.Context, env LayoutEnv, id string, stdout io.Writer) error {
+// RollbackLayout replays journal id backwards. Every check reads before any
+// write: an already rolled-back journal, a database holder and a live chat on
+// a session-store account refuse whatever force says; a destination changed
+// since the install refuses unless force. A successful rollback keeps the
+// journal and marks it {dir}/rolled-back.
+func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, stdout io.Writer) error {
 	root := filepath.Join(env.Home, ".local", "state", "pfm", "migrations")
 	if !layoutJournalID.MatchString(id) {
 		return fmt.Errorf("unknown layout journal %q in %s", id, root)
@@ -203,6 +412,12 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, stdout io.Wri
 	var records []layoutJournalRecord
 	if err := json.Unmarshal(raw, &records); err != nil {
 		return fmt.Errorf("decode layout journal %s: %w", dir, err)
+	}
+	marker := filepath.Join(dir, layoutRolledBackMarker)
+	if stamp, err := os.ReadFile(marker); err == nil {
+		return fmt.Errorf("rollback %s refused: already rolled back at %s", id, strings.TrimSpace(string(stamp)))
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read rollback marker %s: %w", marker, err)
 	}
 	for _, record := range records {
 		if record.Row != layoutRowStateDB && record.Row != layoutRowCacheDB {
@@ -221,11 +436,24 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, stdout io.Wri
 			}
 		}
 	}
+	if err := layoutRollbackLiveChats(env, id, records); err != nil {
+		return err
+	}
+	if !force {
+		drifted, err := layoutRollbackDrift(env, dir, records)
+		if err != nil {
+			return err
+		}
+		if len(drifted) > 0 {
+			return fmt.Errorf("rollback %s refused: drift at %s — rerun with --force to overwrite them",
+				id, strings.Join(drifted, ", "))
+		}
+	}
 	var failures []error
+	unitsRestored := false
 	for index := len(records) - 1; index >= 0; index-- {
 		record := records[index]
-		if !layoutRecordAllowed(env, record) ||
-			(record.Backup != "" && !strings.HasPrefix(record.Backup, filepath.Join(dir, "backup")+string(os.PathSeparator))) {
+		if !layoutRecordSafe(env, dir, record) {
 			failures = append(failures, fmt.Errorf("record %d has unsafe path", index))
 			continue
 		}
@@ -234,15 +462,139 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, stdout io.Wri
 			continue
 		}
 		fmt.Fprintf(stdout, "  rollback layout %s %s\n", record.Row, record.Destination)
+		for _, home := range layoutHomes(env) {
+			units := filepath.Join(home, ".config", "systemd", "user")
+			unitsRestored = unitsRestored || pathWithin(record.Destination, units)
+		}
+	}
+	if unitsRestored {
+		fmt.Fprintln(stdout, systemdDaemonReloadNote)
 	}
 	if len(failures) != 0 {
 		return errors.Join(failures...)
 	}
-	if err := os.RemoveAll(dir); err != nil {
-		return err
+	stamp := clock.Real.Now().UTC().Format(time.RFC3339) + "\n"
+	if err := atomicfile.Write(marker, []byte(stamp), 0o600); err != nil {
+		return fmt.Errorf("mark journal %s rolled back: %w", dir, err)
 	}
-	_ = os.Remove(root)
 	return nil
+}
+
+// layoutRecordSafe reports whether a record may be replayed: its destination
+// is on the allowlist and its backup lies inside the journal.
+func layoutRecordSafe(env LayoutEnv, dir string, record layoutJournalRecord) bool {
+	return layoutRecordAllowed(env, record) &&
+		(record.Backup == "" || strings.HasPrefix(record.Backup, filepath.Join(dir, "backup")+string(os.PathSeparator)))
+}
+
+// layoutRollbackLiveChats refuses a journal with a session-store record while
+// a chat is live on its account: {account}/{entry} checks that account, the
+// shared store {home}/.claude/{entry} checks every account.
+func layoutRollbackLiveChats(env LayoutEnv, id string, records []layoutJournalRecord) error {
+	store := filepath.Join(env.Home, ".claude")
+	checked := map[string]bool{}
+	for _, record := range records {
+		if record.Row != layoutRowSessionStore {
+			continue
+		}
+		dirs := []string{filepath.Dir(record.Destination)}
+		if filepath.Clean(dirs[0]) == filepath.Clean(store) {
+			dirs = accountDirs(env)
+		}
+		for _, dir := range dirs {
+			if checked[dir] {
+				continue
+			}
+			checked[dir] = true
+			pids, err := liveChatPIDs(env.ProcRoot, dir)
+			if err != nil {
+				return fmt.Errorf("rollback %s: read live chats on %s: %w", id, dir, err)
+			}
+			if len(pids) > 0 {
+				return fmt.Errorf("rollback %s refused: live chats on %s: %s", id, dir, strings.Join(pids, ","))
+			}
+		}
+	}
+	return nil
+}
+
+// layoutRollbackDrift names, in journal order, every destination whose last
+// applied record no longer matches the destination on disk. Pending records,
+// the derived cache database and SQLite sidecars are never checked; a record
+// the replay would refuse as unsafe is left to that refusal.
+func layoutRollbackDrift(env LayoutEnv, dir string, records []layoutJournalRecord) ([]string, error) {
+	last := map[string]int{}
+	for index, record := range records {
+		if record.Result == layoutRecordApplied {
+			last[filepath.Clean(record.Destination)] = index
+		}
+	}
+	drifted := []string{}
+	for index, record := range records {
+		destination := filepath.Clean(record.Destination)
+		if last[destination] != index || record.Result != layoutRecordApplied || record.Row == layoutRowCacheDB ||
+			strings.HasSuffix(destination, layoutDBWAL) || strings.HasSuffix(destination, layoutDBSHM) ||
+			!layoutRecordSafe(env, dir, record) {
+			continue
+		}
+		if record.After == "" {
+			drifted = append(drifted, record.Destination+" (no fingerprint)")
+			continue
+		}
+		now, err := layoutFingerprint(record.Destination)
+		if err != nil {
+			return nil, fmt.Errorf("fingerprint %s: %w", record.Destination, err)
+		}
+		if now != record.After {
+			drifted = append(drifted, record.Destination)
+		}
+	}
+	return drifted, nil
+}
+
+// layoutFingerprint is the identity of path and everything under it, walked
+// with Lstat (links never followed): hex sha256 over the sorted lines, one per
+// entry, of relative path, type, size, mtime in Unix nanoseconds, mode bits
+// and link target. An absent path is "absent".
+func layoutFingerprint(path string) (string, error) {
+	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+		return layoutFingerprintAbsent, nil
+	} else if err != nil {
+		return "", err
+	}
+	lines := []string{}
+	err := filepath.WalkDir(path, func(entryPath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(path, entryPath)
+		if err != nil {
+			return err
+		}
+		kind, target := "file", ""
+		switch {
+		case info.Mode()&fs.ModeSymlink != 0:
+			kind = "link"
+			if target, err = os.Readlink(entryPath); err != nil {
+				return err
+			}
+		case info.IsDir():
+			kind = "dir"
+		}
+		lines = append(lines, fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%o\x00%s",
+			relative, kind, info.Size(), info.ModTime().UnixNano(), uint32(info.Mode()), target))
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func restoreLayoutRecord(ctx context.Context, record layoutJournalRecord) error {
@@ -291,10 +643,10 @@ func layoutRecordAllowed(env LayoutEnv, record layoutJournalRecord) bool {
 		return allows(filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json"),
 			filepath.Join(env.LegacyConfigDir, "harvester.config.json"))
 	case layoutRowStateDB, layoutRowCacheDB:
-		legacy := filepath.Join(env.Home, ".cc", legacyDBName)
+		legacy := paths.LegacyStateDB(env.Home)
 		target := env.StateDB
 		if record.Row == layoutRowCacheDB {
-			legacy = filepath.Join(env.Home, ".local", "state", "pfm", legacyDBName)
+			legacy = paths.LegacyCacheDB(env.Home)
 			target = env.CacheDB
 		}
 		for _, suffix := range []string{"", layoutDBWAL, layoutDBSHM} {
@@ -359,12 +711,30 @@ func layoutRecordAllowed(env LayoutEnv, record layoutJournalRecord) bool {
 				return true
 			}
 		}
+	case layoutRowHomeMCP:
+		return allows(filepath.Join(env.Home, ".mcp.json"), filepath.Join(env.ManagedRoot, mcpOwnershipName))
 	case layoutRowZshrc:
 		return allows(filepath.Join(env.Home, ".zshrc"))
 	case layoutRowStagedPrompts:
 		return allows(filepath.Join(env.ManagedRoot, "harness-prompts"))
 	case layoutRowSharedDB:
 		return allows(filepath.Join(env.Home, ".local", "state", "pfm", "shared.db"))
+	case layoutRowInstall:
+		for _, home := range layoutHomes(env) {
+			migrations := filepath.Join(home, ".local", "state", "pfm", "migrations")
+			if path == migrations || pathWithin(path, migrations) {
+				return false
+			}
+		}
+		if allows(env.ConfigPath) ||
+			env.ConfigPath != "" && allows(filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json")) {
+			return true
+		}
+		for _, root := range append(layoutHomes(env), env.Config.CodexHomes()...) {
+			if pathWithin(path, root) {
+				return true
+			}
+		}
 	case layoutRowStrayDir:
 		return allows(
 			filepath.Join(env.Home, ".cc", ".git"),
@@ -373,4 +743,20 @@ func layoutRecordAllowed(env LayoutEnv, record layoutJournalRecord) bool {
 		)
 	}
 	return false
+}
+
+// layoutHomes is the home as configured and, when it differs, its physical
+// location: install records name physical parents.
+func layoutHomes(env LayoutEnv) []string {
+	homes := []string{filepath.Clean(env.Home)}
+	if physical, err := filepath.EvalSymlinks(env.Home); err == nil && physical != homes[0] {
+		homes = append(homes, physical)
+	}
+	return homes
+}
+
+// pathWithin reports whether path lies strictly below root.
+func pathWithin(path, root string) bool {
+	root = filepath.Clean(root)
+	return root != "" && root != "." && strings.HasPrefix(filepath.Clean(path), root+string(os.PathSeparator))
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	goRuntime "runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,7 +265,7 @@ func TestInstallUsesOnlyTheNewSurface(t *testing.T) {
 			}
 			if !strings.Contains(
 				stderr.String(),
-				"usage: pfm install [--yes] [--rollback ID] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+				"usage: pfm install [--yes] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 			) {
 				t.Fatalf("runInstall(%q) stderr=%q, want new usage", retired, stderr.String())
 			}
@@ -272,60 +273,16 @@ func TestInstallUsesOnlyTheNewSurface(t *testing.T) {
 	}
 }
 
-func TestInstallRollbackUsesJournalAndRejectsMixedFlags(t *testing.T) {
-	previous := runInstaller
-	t.Cleanup(func() { runInstaller = previous })
-	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
-		t.Fatal("rollback entered ordinary installer")
-		return installer.Report{}, nil
-	}
-	home := t.TempDir()
-	runtime := commandRuntime{
-		Paths:  paths.Values{Home: home},
-		Config: pfmconfig.Config{Path: filepath.Join(home, "pfm.config.json")},
-	}
-	id := "20260102T030405Z"
-	dir := filepath.Join(home, ".local", "state", "pfm", "migrations", id)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "journal.json"), []byte("[]\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"--rollback", id, "--yes"}, {"--rollback", ""}} {
+func TestInstallForceIsOnlyARollbackFlag(t *testing.T) {
+	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
+	for _, args := range [][]string{{"--force"}, {"--force", "--yes"}, {"--rollback", "20260102T030405Z", "--force", "--yes"}} {
 		var stdout, stderr bytes.Buffer
 		if code := runInstall(args, &stdout, &stderr, runtime); code != 2 {
-			t.Errorf("args=%v code=%d stderr=%s, want usage 2", args, code, stderr.String())
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q, want usage 2", args, code, stdout.String(), stderr.String())
 		}
-	}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--rollback", id}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf("rollback code=%d stderr=%s", code, stderr.String())
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("journal directory survived rollback: %v", err)
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := runInstall([]string{"--rollback", id}, &stdout, &stderr, runtime); code != 2 ||
-		!strings.Contains(stderr.String(), filepath.Join(home, ".local", "state", "pfm", "migrations")) {
-		t.Fatalf("unknown rollback code=%d stderr=%s", code, stderr.String())
-	}
-}
-
-func TestInstallRejectsRetiredForceFlag(t *testing.T) {
-	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--force", "--skip-harvest"}, &stdout, &stderr, runtime); code != 2 {
-		t.Fatalf(
-			"retired --force code=%d stdout=%q stderr=%q, want unknown-flag usage",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	if strings.Contains(stderr.String(), "[--force]") {
-		t.Fatalf("install usage still advertises retired --force: %q", stderr.String())
+		if !strings.Contains(stderr.String(), "[--rollback ID [--force]]") {
+			t.Fatalf("args=%v stderr=%q, want the usage line naming --force beside --rollback", args, stderr.String())
+		}
 	}
 }
 
@@ -368,16 +325,21 @@ func TestInstallPreviewAndYesUseTheSameInstallerClassification(t *testing.T) {
 	if code := runInstall([]string{"--yes", "--config-dir", configDir}, &applyOut, &applyErr, runtime); code != 0 {
 		t.Fatalf("yes code=%d stdout=%q stderr=%q", code, applyOut.String(), applyErr.String())
 	}
-	if len(calls) != 2 {
-		t.Fatalf("installer calls=%d, want preview and yes", len(calls))
+	// The yes run plans its writes in dry-run for the space preflight first.
+	if len(calls) != 3 || calls[1].Mode != installer.ModeDryRun {
+		t.Fatalf("installer calls=%d, want preview, the space preflight's plan and yes", len(calls))
 	}
+	calls = []installer.Options{calls[0], calls[2]}
 	if calls[0].Mode != installer.ModeDryRun || calls[1].Mode != installer.ModeApply {
 		t.Fatalf("installer modes=%v/%v, want dry-run/apply", calls[0].Mode, calls[1].Mode)
 	}
 	preview, apply := calls[0], calls[1]
+	if apply.Journal == nil {
+		t.Fatal("yes run carried no install journal")
+	}
 	preview.Mode = installer.ModeApply
-	preview.Stdout = nil
-	apply.Stdout = nil
+	preview.Stdout, preview.Journal = nil, nil
+	apply.Stdout, apply.Journal = nil, nil
 	if !reflect.DeepEqual(preview, apply) {
 		t.Fatalf("preview and yes options classify differently:\npreview=%#v\nyes=%#v", preview, apply)
 	}
@@ -810,5 +772,173 @@ func TestRootHelpListsUninstall(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "  uninstall") {
 		t.Fatalf("help=%q, want top-level uninstall", stdout.String())
+	}
+}
+
+// TestInstallKeepsOneJournalAndPrintsItLast drives a --yes run whose config
+// migration and installer write land in one journal, the failing installer
+// step included, and rolls the whole run back.
+func TestInstallKeepsOneJournalAndPrintsItLast(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	home := t.TempDir()
+	written := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(written, []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+		if options.Mode == installer.ModeDryRun {
+			return installer.Report{}, nil
+		}
+		if err := options.Journal.Write([]string{written}, func() error {
+			return os.WriteFile(written, []byte("after\n"), 0o600)
+		}); err != nil {
+			return installer.Report{}, err
+		}
+		return installer.Report{}, errors.New("installer step failed after writing")
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	var stdout, stderr bytes.Buffer
+	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("runInstall() code=0 for a failing installer step; stdout=%q", stdout.String())
+	}
+	migrations := filepath.Join(home, ".local", "state", "pfm", "migrations")
+	entries, err := os.ReadDir(migrations)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("journals=%v err=%v, want exactly one", entries, err)
+	}
+	journal := filepath.Join(migrations, entries[0].Name())
+	lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
+	if lines[len(lines)-1] != "install journal: "+journal || strings.Contains(stdout.String(), "layout journal:") {
+		t.Fatalf("stdout=%q, want the last line %q", stdout.String(), "install journal: "+journal)
+	}
+	raw, err := os.ReadFile(filepath.Join(journal, "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"row": "zshrc"`) ||
+		!strings.Contains(string(raw), `"row": "install"`) {
+		t.Fatalf("journal lacks the layout row or the installer write:\n%s", raw)
+	}
+	stdout.Reset()
+	if code := runInstall([]string{"--rollback", entries[0].Name()}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("rollback code=%d stderr=%q", code, stderr.String())
+	}
+	if got, err := os.ReadFile(written); err != nil || string(got) != "before\n" {
+		t.Fatalf("rolled-back %s=%q err=%v", written, got, err)
+	}
+}
+
+func TestMigrateMachineConfigJournalsEveryFileItMoves(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "clone")
+	legacy := filepath.Join(dir, pfmconfig.LegacyFileName)
+	content := `{"version":2,"mcp":{"http":{"port":8377},"servers":{"harvester":{"enabled":true}}}}`
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := pfmconfig.LoadRuntime(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := installer.LayoutEnv{Home: home}
+	journal := installer.NewJournal(context.Background(), env)
+	var stdout, stderr bytes.Buffer
+	if _, code := migrateMachineConfig(installer.ModeApply, journal, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("apply code=%d stderr=%q", code, stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(journal.Dir(), "journal.json"))
+	if err != nil {
+		t.Fatalf("migration recorded no journal: %v", err)
+	}
+	moved := filepath.Join(dir, pfmconfig.FileName)
+	parked := filepath.Join(dir, pfmconfig.LegacyBackupName)
+	for _, path := range []string{moved, pfmconfig.HarvesterPath(moved), legacy, parked} {
+		if !strings.Contains(string(raw), `"destination": "`+path+`"`) {
+			t.Fatalf("journal lacks %s:\n%s", path, raw)
+		}
+	}
+	id := filepath.Base(journal.Dir())
+	if err := installer.RollbackLayout(context.Background(), env, id, false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(legacy); err != nil || string(got) != content {
+		t.Fatalf("rolled-back legacy config=%q err=%v", got, err)
+	}
+	if _, err := os.Lstat(moved); !os.IsNotExist(err) {
+		t.Fatalf("migrated config survived rollback: %v", err)
+	}
+}
+
+func TestInstallSpacePreflightRefusesBeforeAnyChange(t *testing.T) {
+	previousInstaller, previousCheck := runInstaller, checkInstallSpace
+	t.Cleanup(func() { runInstaller, checkInstallSpace = previousInstaller, previousCheck })
+	home := t.TempDir()
+	zshrc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(zshrc, []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(home, ".local", "bin", "pfm-helper")
+	runInstaller = func(ctx context.Context, options installer.Options) (installer.Report, error) {
+		if options.Mode != installer.ModeDryRun {
+			t.Fatal("the applying installer ran past a refused space preflight")
+		}
+		// installer.Run marks its journal dry-run; a layout preview does the same here.
+		if _, err := installer.ApplyLayout(ctx, installer.LayoutEnv{Home: home}, options.Journal, false, io.Discard); err != nil {
+			return installer.Report{}, err
+		}
+		return installer.Report{}, options.Journal.Write([]string{helper}, func() error {
+			t.Fatal("the planning pass wrote")
+			return nil
+		})
+	}
+	var planned []string
+	checked := 0
+	checkInstallSpace = func(_ installer.LayoutEnv, findings []installer.LayoutFinding, paths []string) error {
+		checked, planned = len(findings), paths
+		return errors.New("not enough free space on migrations: need 5 bytes + margin 1073741824, have 1 — nothing changed")
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	var stdout, stderr bytes.Buffer
+	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 1 ||
+		!strings.Contains(stderr.String(), "pfm install: not enough free space on migrations: need 5 bytes") {
+		t.Fatalf("refused apply code=%d stderr=%q", code, stderr.String())
+	}
+	// A write under a missing directory is planned as its highest missing ancestor.
+	if checked == 0 || !slices.Contains(planned, filepath.Join(home, ".local")) {
+		t.Fatalf("preflight saw %d findings and planned=%v, want the layout findings and %s", checked, planned, helper)
+	}
+	if got, err := os.ReadFile(zshrc); err != nil || string(got) != "before\n" {
+		t.Fatalf("refused apply changed .zshrc: %q err=%v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".local", "state", "pfm", "migrations")); !os.IsNotExist(err) {
+		t.Fatalf("refused apply created a journal: %v", err)
+	}
+
+	runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
+		return installer.Report{}, errors.New("plan boom")
+	}
+	checkInstallSpace = func(installer.LayoutEnv, []installer.LayoutFinding, []string) error {
+		t.Fatal("space check ran after a failed planning pass")
+		return nil
+	}
+	stderr.Reset()
+	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 1 ||
+		!strings.Contains(stderr.String(), "pfm install: space preflight: plan install writes: plan boom") {
+		t.Fatalf("failed planning code=%d stderr=%q", code, stderr.String())
+	}
+
+	checkInstallSpace = func(installer.LayoutEnv, []installer.LayoutFinding, []string) error {
+		t.Fatal("a preview ran the space preflight")
+		return nil
+	}
+	runInstaller = func(context.Context, installer.Options) (installer.Report, error) { return installer.Report{}, nil }
+	stdout.Reset()
+	runInstall([]string{"--skip-harvest"}, &stdout, &stderr, runtime)
+	if !strings.Contains(stdout.String(), "  change  layout zshrc") {
+		t.Fatalf("preview output=%q, want its layout plan unchanged", stdout.String())
 	}
 }

@@ -26,6 +26,7 @@ Where pfm keeps its own configuration and state. Nothing here belongs to one eng
 - **`harvester.config.json`** lives beside it, `{clone}/harvester.config.json`, also gitignored.
 - **Created by `pfm install`** from `example.pfm.config.json` when absent; an existing file is never overwritten. Keys a newer pfm adds are reported by `pfm doctor` as `missing key … (default …)`, not written silently.
 - **Blocks:** `accounts` (the Claude account roster: `id`, `configDir`, per-account overrides), `claude` (every Claude launch setting — the full list is [claude-launch.md § Config keys](claude-launch.md#config-keys)), `codex`, `opencode`, `mcp`, `tmux`, `state`.
+- **Not migrated yet:** with no `--config` and no `PFM_CONFIG`, a load that finds no clone config while a legacy `{LegacyConfigDir}/pfm.config.json` or `config.json` (`$XDG_CONFIG_HOME/pfm`, else `~/.config/pfm`) is present never runs on defaults: every command but the installer fails with `config not migrated: run pfm install (… present, … absent)` (`config.ErrNotMigrated`). `pfm install` loads through `config.LoadInstallRuntime` and moves the file; `pfm doctor`, the statusline and `pfm config show|validate` run on defaults and print the error (`doctor: config error=config not migrated: …`).
 
 ## example.pfm.config.json
 
@@ -42,6 +43,7 @@ Tracked at the repo root. It holds every key pfm reads, each at its default, wit
 - `hidden` lives only in `pfm.db`.
 - Both databases migrate by numbered, additive `migration_vN.sql` files (`pfm.db` gains the mechanism with `launch`). A migration backs the file up beside itself (`{file}.bak-before-v{n}`) before it runs.
 - The move onto this layout drops the retired `swap_event` table, the cache's unread `hidden` copy, and the empty `shared.db`.
+- **No fork while legacy data waits:** nothing creates `pfm.db` while `~/.cc/fleet.db` exists, nor `pfm-cache.db` while `~/.local/state/pfm/fleet.db` exists. The two create doors (`fleetdb.OpenSharedState`, reached by `RecordLaunch`, `SetClaudePrimaryAccount` and `store.Open`; the cache in `store.OpenContext`, which checks both pairs before opening either) fail with `paths.ErrLegacyPending`, naming both paths and `run pfm install`; doctor aborts on it as `doctor: unhealthy database: …`. An existing target opens as before, and a legacy path that cannot be inspected is an error, never read as absent. There is no bypass: `pfm install` moves the legacy files in its layout pass before it opens anything.
 
 ## Other state
 

@@ -117,6 +117,16 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve store paths: %w", err)
 	}
+	// Neither database is created while its legacy file waits for pfm install:
+	// the cache pair first, then the state pair, before anything opens.
+	if resolved.Home != "" {
+		if err := paths.CheckLegacyPending(resolved.CacheDB, paths.LegacyCacheDB(resolved.Home)); err != nil {
+			return nil, err
+		}
+	}
+	if err := fleetdb.CheckLegacyState(resolved); err != nil {
+		return nil, err
+	}
 
 	settings := openOptions{warn: os.Stderr, clock: clock.Real}
 	for _, option := range options {

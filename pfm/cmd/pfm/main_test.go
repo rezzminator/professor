@@ -12,12 +12,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -793,5 +796,75 @@ func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
 				name,
 			)
 		}
+	}
+}
+
+// legacyConfigJail is a jailed installed home whose default config load finds
+// no clone config while a legacy ~/.config/pfm/pfm.config.json waits.
+func legacyConfigJail(t *testing.T) string {
+	t.Helper()
+	root := jailTest(t)
+	t.Setenv(paths.EnvConfig, "")
+	home := jailPaths(t).Home
+	clone := filepath.Join(root, "clone") // a jailed clone with no pfm.config.json
+	if err := os.MkdirAll(clone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(pfmconfig.LegacyConfigDir(paths.OSEnv{}, home), pfmconfig.FileName)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content, err := pfmconfig.MarshalDefault(home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return legacy
+}
+
+func TestInstallRunsWhileLegacyConfigWaits(t *testing.T) {
+	legacyConfigJail(t)
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	var modes []installer.Mode
+	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+		modes = append(modes, options.Mode)
+		return installer.Report{}, nil
+	}
+	for _, args := range [][]string{{"install", "--skip-harvest"}, {"install", "--yes", "--skip-harvest"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("run(%q) code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
+		}
+	}
+	if !slices.Equal(modes, []installer.Mode{installer.ModeDryRun, installer.ModeDryRun, installer.ModeApply}) {
+		t.Fatalf("installer modes=%v, want preview, then the space preflight's plan and apply", modes)
+	}
+}
+
+func TestDoctorReportsConfigNotMigrated(t *testing.T) {
+	legacy := legacyConfigJail(t)
+	var stdout, stderr bytes.Buffer
+	run([]string{"doctor"}, &stdout, &stderr)
+	want := "doctor: config error=config not migrated: run pfm install"
+	if !strings.Contains(stdout.String(), want) || !strings.Contains(stdout.String(), legacy) {
+		t.Fatalf("doctor stdout=%q stderr=%q, want %q naming %s", stdout.String(), stderr.String(), want, legacy)
+	}
+}
+
+func TestCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
+	legacy := legacyConfigJail(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"chat", "ls"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("chat ls code=%d stdout=%q stderr=%q, want 1", code, stdout.String(), stderr.String())
+	}
+	want := "pfm: config: config not migrated: run pfm install"
+	if !strings.HasPrefix(stderr.String(), want) || !strings.Contains(stderr.String(), legacy) {
+		t.Fatalf("chat ls stderr=%q, want %q naming %s", stderr.String(), want, legacy)
 	}
 }

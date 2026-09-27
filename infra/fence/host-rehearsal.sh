@@ -1,0 +1,323 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# host-rehearsal.sh — rehearse the host install on a COPY of a real host
+# backup (the flight's backup.sh layout), inside the pfm-dev image.
+#
+# usage: infra/fence/host-rehearsal.sh BACKUP SCRATCH
+#        infra/fence/host-rehearsal.sh compare BACKUP HOME JOURNAL
+#
+# BACKUP SCRATCH: copies BACKUP/home and BACKUP/etc into SCRATCH (hard links,
+# modes and link targets kept; credentials never), places this repository's
+# tracked files at the clone path the copied source-repo marker names, and
+# runs one container with SCRATCH/home mounted at the home= path of
+# BACKUP/meta and SCRATCH/etc/claude-code at /etc/claude-code. Steps, in order:
+#   copy build hash-before preview apply doctor apply-again manifest rollback hash-after
+# BACKUP is only read. Outputs in SCRATCH/rehearsal/:
+#   verdict.txt   first line REHEARSAL PASS or REHEARSAL FAIL {step}: {reason},
+#                 then one line per step run: step {name} ok | step {name} FAILED {reason}
+#   plan.txt      the preview's stdout, verbatim (the install window diffs its layout plan)
+#   {step}.log    each container step's output; doctor.log ends with doctor's exit code
+#   hash-before.txt / hash-preview.txt / hash-after.txt
+#                 the tree of SCRATCH/home (path, type, mode, link target or
+#                 sha256), .local/state/pfm/migrations/ excluded
+#   stubs/        systemctl (argv appended to systemctl.log; is-active exits 3), sudo
+#   proc/         the empty PFM_PROC_ROOT: no chat is live in the rehearsal
+# stdout ends with the verdict path.
+#
+# compare BACKUP HOME JOURNAL: the manifest check alone — every sessions.sha256
+# hash present in HOME/.claude/{projects,file-history,tasks,session-env} or in
+# JOURNAL/backup/conflicts; every db.txt table count equal in HOME's database
+# (.cc/fleet.db → .local/state/pfm/pfm.db, .local/state/pfm/fleet.db →
+# .local/state/pfm/pfm-cache.db, callmeter.db → itself) except swap_event and
+# hidden, each counted from a temp copy with its -wal/-shm.
+#
+# BROKEN STATE: wrong arguments print usage, exit 2. A backup lacking home= in
+# meta, manifest/sessions.sha256 or manifest/db.txt, a non-empty SCRATCH, or a
+# missing host tool / unreachable docker daemon (TOOLCHAIN-MISSING) refuse
+# before anything is copied or started, exit 1, naming what. After the copy,
+# the first failed step writes REHEARSAL FAIL {step}: {reason}, stops, exit 1;
+# REHEARSAL PASS is written only after every step's own check passed. compare
+# prints manifest: ok (0), manifest: FAILED — {reason} (1), or
+# manifest: UNREADABLE — {cause} (2) when it could not look.
+
+IMAGE=professor-pfm-dev
+NAME="${PFM_REHEARSAL_NAME:-pfm-host-rehearsal}"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+# Container-side paths: fixed, never under the rehearsed home.
+C_REHEARSAL=/rehearsal
+C_GIT=/pfm-git-common
+C_GOMOD=/pfm-gomod
+DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db" ".local/state/pfm/callmeter.db .local/state/pfm/callmeter.db")
+
+die() { echo "host-rehearsal: $*" >&2; exit 1; }
+usage() {
+  cat >&2 <<'EOF'
+usage: infra/fence/host-rehearsal.sh BACKUP SCRATCH
+       infra/fence/host-rehearsal.sh compare BACKUP HOME JOURNAL
+EOF
+  exit 2
+}
+
+# ---- compare ------------------------------------------------------------------
+
+unreadable() { echo "manifest: UNREADABLE — $*"; exit 2; }
+
+# count_tables DB OUT — "{table} {count}" per table of DB, read from a temp copy.
+count_tables() {
+  local db=$1 out=$2 c t n
+  c="$TMP/count-$(basename "$db")"
+  rm -f "$c" "$c-wal" "$c-shm"
+  cp "$db" "$c" || return 1
+  for s in -wal -shm; do [ -f "$db$s" ] && { cp "$db$s" "$c$s" || return 1; }; done
+  t=$(sqlite3 "$c" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" 2>&1) || { echo "$t" >"$out"; return 1; }
+  : >"$out"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    n=$(sqlite3 "$c" "SELECT count(*) FROM \"$name\";" 2>&1) || { echo "$n" >"$out"; return 1; }
+    printf '%s %s\n' "$name" "$n" >>"$out"
+  done <<<"$t"
+}
+
+cmd_compare() {
+  local backup=$1 home=$2 journal=$3 tool
+  for tool in sqlite3 sha256sum; do command -v "$tool" >/dev/null 2>&1 || unreadable "$tool not on PATH"; done
+  local sums="$backup/manifest/sessions.sha256" dbtxt="$backup/manifest/db.txt"
+  [ -r "$sums" ] || unreadable "$sums unreadable"
+  [ -r "$dbtxt" ] || unreadable "$dbtxt unreadable"
+  TMP=$(mktemp -d "${TMPDIR:-/tmp}/host-rehearsal-compare.XXXXXX") || unreadable "mktemp failed"
+  trap 'rm -rf -- "$TMP"' EXIT
+
+  local reasons=() dirs=() d
+  for d in "$home"/.claude/{projects,file-history,tasks,session-env} "$journal/backup/conflicts"; do
+    [ -d "$d" ] && dirs+=("$d")
+  done
+  : >"$TMP/have"
+  if [ ${#dirs[@]} -gt 0 ]; then
+    find -H "${dirs[@]}" -type f -print0 | xargs -0 -r sha256sum | sed 's/^\\//' | cut -c1-64 | sort -u >"$TMP/have" ||
+      unreadable "hashing the store under $home failed"
+  fi
+  awk 'NR == FNR { have[$1] = 1; next }
+    { h = $1; sub(/^\\/, "", h); if (!(h in have)) { p = substr($0, index($0, "  ") + 2); print p } }' \
+    "$TMP/have" "$sums" >"$TMP/missing"
+  local nmiss
+  nmiss=$(wc -l <"$TMP/missing")
+  if [ "$nmiss" -gt 0 ]; then
+    reasons+=("session $(head -1 "$TMP/missing") (backup path; $nmiss of $(wc -l <"$sums") session files) found neither in the store nor parked")
+  fi
+
+  local line src="" skip=1 target table count now entry
+  while IFS= read -r line; do
+    case $line in
+    "== "*" ABSENT") skip=1; continue ;;
+    "== "*)
+      src=${line#== }; skip=0; target=""
+      for entry in "${DB_MAP[@]}"; do [ "${entry%% *}" = "$src" ] && target=${entry#* }; done
+      [ -n "$target" ] || unreadable "db.txt names $src, which has no mapped database"
+      [ -r "$home/$target" ] || unreadable "$home/$target unreadable (backup lists $src)"
+      count_tables "$home/$target" "$TMP/now" || unreadable "$home/$target: $(head -1 "$TMP/now")"
+      continue ;;
+    ok | "") continue ;;
+    esac
+    [ "$skip" = 0 ] || continue
+    table=${line% *}; count=${line##* }
+    case $table in swap_event | hidden) continue ;; esac
+    now=$(awk -v t="$table" '$1 == t { print $2 }' "$TMP/now")
+    if [ -z "$now" ]; then reasons+=("$target table $table missing (backup $src had $count)")
+    elif [ "$now" != "$count" ]; then reasons+=("$target table $table: backup $count, now $now"); fi
+  done <"$dbtxt"
+
+  if [ ${#reasons[@]} -eq 0 ]; then echo "manifest: ok"; exit 0; fi
+  local joined
+  joined=$(printf '%s; ' "${reasons[@]}")
+  echo "manifest: FAILED — ${joined%; }"
+  exit 1
+}
+
+# ---- rehearsal ---------------------------------------------------------------
+
+# tree_hash DIR OUT — one sorted line per path: path, type, mode, target or sha256.
+tree_hash() {
+  local dir=$1 out=$2
+  (cd "$dir" && find . -path ./.local/state/pfm/migrations -prune -o -type f -print0 | xargs -0 -r sha256sum) \
+    >"$out.sha" || return 1
+  (cd "$dir" && find . -path ./.local/state/pfm/migrations -prune -o ! -path . -printf '%P\t%y\t%m\t%l\n') \
+    >"$out.meta" || return 1
+  awk -F'\t' 'NR == FNR { o = (substr($0, 1, 1) == "\\") ? 1 : 0; sha[substr($0, 69 + o)] = substr($0, 1 + o, 64); next }
+    { v = ($2 == "f") ? sha[$1] : ($2 == "l" ? $4 : "-"); print $1 "\t" $2 "\t" $3 "\t" v }' \
+    "$out.sha" "$out.meta" | LC_ALL=C sort >"$out"
+  local rc=$?
+  rm -f "$out.sha" "$out.meta"
+  return $rc
+}
+
+# tree_diff A B — the first differing paths, comma-separated.
+tree_diff() {
+  diff "$1" "$2" | sed -n 's/^[<>] \([^\t]*\)\t.*/\1/p' | awk '!seen[$0]++' | head -5 | paste -sd, - | sed 's/,/, /g'
+}
+
+STEP_LINES=()
+fail() { # fail STEP REASON — the verdict, then stop.
+  STEP_LINES+=("step $1 FAILED $2")
+  { echo "REHEARSAL FAIL $1: $2"; printf '%s\n' "${STEP_LINES[@]}"; } >"$R/verdict.txt"
+  cat "$R/verdict.txt"
+  echo "$R/verdict.txt"
+  exit 1
+}
+pass() { STEP_LINES+=("step $1 ok"); echo "step $1 ok"; }
+
+# inside CMD — one container step; the stub dir is forced first on PATH.
+inside() { docker exec "$NAME" bash -lc "export PATH=$C_REHEARSAL/stubs:\$PATH; cd /; $1"; }
+
+cmd_rehearse() {
+  local backup=$1 scratch=$2 home f tool
+  [ -r "$backup/meta" ] || die "meta missing in $backup"
+  home=$(sed -n 's/^home=//p' "$backup/meta" | head -1)
+  [ -n "$home" ] || die "home= line in meta missing in $backup"
+  for f in manifest/sessions.sha256 manifest/db.txt; do [ -f "$backup/$f" ] || die "$f missing in $backup"; done
+  [ -d "$backup/home" ] || die "home/ missing in $backup"
+  if [ -e "$scratch" ] && [ -n "$(ls -A "$scratch" 2>/dev/null)" ]; then
+    die "SCRATCH $scratch exists and is not empty — refusing to touch it"
+  fi
+  for tool in sqlite3 sha256sum rsync git; do
+    command -v "$tool" >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — $tool not on PATH"
+  done
+  command -v docker >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — docker not on PATH"
+  docker info >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed)"
+  docker container inspect "$NAME" >/dev/null 2>&1 && die "container $NAME already exists — remove it or set PFM_REHEARSAL_NAME"
+
+  mkdir -p "$scratch/home" "$scratch/etc" "$scratch/rehearsal/stubs" "$scratch/rehearsal/proc" || die "create $scratch failed"
+  scratch="$(cd "$scratch" && pwd -P)"
+  R="$scratch/rehearsal"
+  local H="$scratch/home" rc
+
+  # copy
+  rsync -aH --exclude=.credentials.json --exclude=.codex/auth.json "$backup/home/" "$H/" >"$R/copy.log" 2>&1 ||
+    fail copy "rsync of $backup/home exit $?"
+  if [ -d "$backup/etc" ]; then
+    rsync -aH "$backup/etc/" "$scratch/etc/" >>"$R/copy.log" 2>&1 || fail copy "rsync of $backup/etc exit $?"
+  fi
+  mkdir -p "$scratch/etc/claude-code" || fail copy "create $scratch/etc/claude-code failed"
+  local marker=.local/share/pfm/install/source-repo clone
+  [ -f "$H/$marker" ] || fail copy "clone marker $marker missing in the copied home"
+  clone=$(head -1 "$H/$marker")
+  case $clone in
+  "$home"/?*) ;;
+  *) fail copy "clone marker names '$clone', outside home $home" ;;
+  esac
+  case "/$clone/" in */../*) fail copy "clone marker names '$clone', which climbs out of the home" ;; esac
+  local cand="$H/${clone#"$home"/}"
+  { rm -rf -- "$cand" && mkdir -p "$cand"; } || fail copy "clear $cand failed"
+  git -C "$REPO_ROOT" ls-files -z | rsync -a --from0 --files-from=- --ignore-missing-args "$REPO_ROOT/" "$cand/" >>"$R/copy.log" 2>&1 ||
+    fail copy "placing the candidate tree from $REPO_ROOT failed (see copy.log)"
+  pass copy
+
+  # build: stubs, container, make host-install
+  cat >"$R/stubs/systemctl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>$(printf '%q' "$R/systemctl.log")
+case " \$* " in *" is-active "*) exit 3 ;; esac
+exit 0
+EOF
+  printf '#!/usr/bin/env bash\n# /etc/claude-code is the uid-owned scratch copy: run unprivileged.\nexec "$@"\n' >"$R/stubs/sudo"
+  chmod 755 "$R/stubs/systemctl" "$R/stubs/sudo"
+  local gitvals git_common git_rel
+  gitvals=$(ROOT="$REPO_ROOT" FENCE_CALLER=host-rehearsal bash -c \
+    'source "$1" && printf "%s\n%s\n" "$PFM_DEV_GIT_COMMON" "$PFM_DEV_GIT_DIR_REL"' _ "$REPO_ROOT/infra/fence/fence-env.sh" 2>&1) ||
+    fail build "resolve the git dir of $REPO_ROOT: $gitvals"
+  git_common=$(sed -n 1p <<<"$gitvals"); git_rel=$(sed -n 2p <<<"$gitvals")
+  docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >"$R/build.log" 2>&1 ||
+    fail build "docker build of $IMAGE failed (see build.log)"
+  trap 'docker rm -f "$NAME" >/dev/null 2>&1' EXIT
+  # The Go module cache is the fence's volume, read-only; build cache and
+  # telemetry config live in the container's /tmp, never in the home.
+  docker run -d --name "$NAME" --init --user "$(id -u):$(id -g)" \
+    -v "$H:$home" \
+    -v "$scratch/etc/claude-code:/etc/claude-code" \
+    -v "$R:$C_REHEARSAL" \
+    -v "$R/proc:$C_REHEARSAL/proc:ro" \
+    -v "$R/stubs:$C_REHEARSAL/stubs:ro" \
+    -v "$git_common:$C_GIT:ro" \
+    -v "pfm-dev-gomod:$C_GOMOD:ro" \
+    -e "HOME=$home" \
+    -e "PATH=$C_REHEARSAL/stubs:$home/.local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    -e PFM_LOG_LEVEL=off \
+    -e "PFM_PROC_ROOT=$C_REHEARSAL/proc" \
+    -e GOFLAGS=-buildvcs=false \
+    -e "GOMODCACHE=$C_GOMOD" \
+    -e GOCACHE=/tmp/go-build \
+    -e GOPATH=/tmp/go \
+    -e "PFM_DEV_REPO_GIT_DIR=$C_GIT/$git_rel" \
+    -e "PFM_DEV_REPO_WORK_TREE=$clone" \
+    "$IMAGE" sleep infinity >>"$R/build.log" 2>&1 || fail build "docker run of $IMAGE failed (see build.log)"
+  local qclone qpfm
+  qclone=$(printf '%q' "$clone")
+  qpfm=$(printf '%q' "$home/.local/bin/pfm")
+  inside "XDG_CONFIG_HOME=/tmp/go-config make -C $qclone/pfm host-install" >>"$R/build.log" 2>&1
+  rc=$?
+  [ $rc -eq 0 ] || fail build "make host-install exit $rc: $(tail -1 "$R/build.log")"
+  [ -x "$H/.local/bin/pfm" ] || fail build "make host-install left no .local/bin/pfm"
+  pass build
+
+  tree_hash "$H" "$R/hash-before.txt" || fail hash-before "hashing $H failed"
+  pass hash-before
+
+  inside "$qpfm install --skip-harvest" >"$R/plan.txt" 2>"$R/preview.log"
+  rc=$?
+  cat "$R/plan.txt" >>"$R/preview.log"
+  [ $rc -eq 0 ] || fail preview "pfm install --skip-harvest exit $rc: $(tail -1 "$R/preview.log")"
+  tree_hash "$H" "$R/hash-preview.txt" || fail preview "hashing $H failed"
+  cmp -s "$R/hash-before.txt" "$R/hash-preview.txt" ||
+    fail preview "tree changed at $(tree_diff "$R/hash-before.txt" "$R/hash-preview.txt")"
+  pass preview
+
+  inside "$qpfm install --yes --skip-harvest" >"$R/apply.log" 2>&1
+  rc=$?
+  local jdir jid
+  jdir=$(sed -n 's/^install journal: //p' "$R/apply.log" | tail -1)
+  [ $rc -eq 0 ] || fail apply "pfm install --yes exit $rc: $(tail -1 "$R/apply.log")"
+  [ -n "$jdir" ] || fail apply "pfm install --yes printed no 'install journal:' line"
+  case $jdir in "$home"/?*) ;; *) fail apply "journal $jdir is outside home $home" ;; esac
+  jid=${jdir##*/}
+  pass apply
+
+  inside "$qpfm doctor" >"$R/doctor.log" 2>&1
+  rc=$?
+  echo "(doctor exit $rc; only layout findings are judged)" >>"$R/doctor.log"
+  local finding
+  finding=$(grep -E '^(session-store|managed-cleanup|legacy|state|layout): ' "$R/doctor.log" |
+    grep -vx 'managed-cleanup: check off by config' | head -1)
+  [ -z "$finding" ] || fail doctor "$finding"
+  pass doctor
+
+  inside "$qpfm install --yes --skip-harvest" >"$R/apply-again.log" 2>&1
+  rc=$?
+  [ $rc -eq 0 ] || fail apply-again "pfm install --yes exit $rc: $(tail -1 "$R/apply-again.log")"
+  local again
+  again=$(grep '^install journal: ' "$R/apply-again.log" | tail -1)
+  [ -z "$again" ] || fail apply-again "the second apply recorded changes: $again"
+  pass apply-again
+
+  local verdict
+  verdict=$(bash "$0" compare "$backup" "$H" "$H/${jdir#"$home"/}" 2>&1 | tee "$R/manifest.log" | tail -1)
+  [ "$verdict" = "manifest: ok" ] || fail manifest "${verdict#manifest: }"
+  pass manifest
+
+  inside "$qpfm install --rollback $(printf '%q' "$jid")" >"$R/rollback.log" 2>&1
+  rc=$?
+  [ $rc -eq 0 ] || fail rollback "pfm install --rollback $jid exit $rc: $(tail -1 "$R/rollback.log")"
+  pass rollback
+
+  tree_hash "$H" "$R/hash-after.txt" || fail hash-after "hashing $H failed"
+  cmp -s "$R/hash-before.txt" "$R/hash-after.txt" || fail hash-after "$(tree_diff "$R/hash-before.txt" "$R/hash-after.txt")"
+  pass hash-after
+
+  { echo "REHEARSAL PASS"; printf '%s\n' "${STEP_LINES[@]}"; } >"$R/verdict.txt"
+  echo "REHEARSAL PASS"
+  echo "$R/verdict.txt"
+}
+
+case ${1:-} in
+compare) [ $# -eq 4 ] || usage; cmd_compare "$2" "$3" "$4" ;;
+*) [ $# -eq 2 ] || usage; cmd_rehearse "$1" "$2" ;;
+esac

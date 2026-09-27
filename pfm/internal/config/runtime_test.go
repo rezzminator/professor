@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -399,5 +400,95 @@ func TestStateDatabasePrecedence(t *testing.T) {
 				t.Fatalf("sources = %v", got.Config.Sources)
 			}
 		})
+	}
+}
+
+// legacyConfigHome builds a jailed home whose default load finds no clone
+// config, with XDG_CONFIG_HOME pointed into it; withMarker records a clone
+// that has no pfm.config.json.
+func legacyConfigHome(t *testing.T, withMarker bool) (home, legacyDir, target string) {
+	t.Helper()
+	home = t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv(paths.EnvConfig, "")
+	xdg := filepath.Join(home, "xdg")
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	legacyDir = filepath.Join(xdg, "pfm")
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target = "no clone config"
+	if withMarker {
+		clone := filepath.Join(home, "clone")
+		if err := os.MkdirAll(clone, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+			t.Fatal(err)
+		}
+		target = filepath.Join(clone, FileName)
+	}
+	return home, legacyDir, target
+}
+
+func TestLoadRuntimeRefusesDefaultsWhileLegacyConfigWaits(t *testing.T) {
+	for _, marker := range []bool{false, true} {
+		for _, name := range []string{FileName, LegacyFileName} {
+			t.Run(fmt.Sprintf("marker=%v/%s", marker, name), func(t *testing.T) {
+				_, legacyDir, target := legacyConfigHome(t, marker)
+				legacy := filepath.Join(legacyDir, name)
+				if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, err := LoadRuntime("")
+				if !errors.Is(err, ErrNotMigrated) {
+					t.Fatalf("LoadRuntime(\"\") = %v, want ErrNotMigrated", err)
+				}
+				if !strings.HasPrefix(err.Error(), "config not migrated: run pfm install") {
+					t.Fatalf("error %q does not begin with the remedy", err)
+				}
+				for _, want := range []string{legacy, target} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("error %q lacks %q", err, want)
+					}
+				}
+				runtime, err := LoadDiagnosticRuntime("")
+				if err != nil {
+					t.Fatalf("LoadDiagnosticRuntime(\"\") = %v", err)
+				}
+				if !errors.Is(runtime.ConfigError, ErrNotMigrated) || len(runtime.Config.Accounts) == 0 {
+					t.Fatalf("diagnostic runtime = %+v, want defaults carrying ErrNotMigrated", runtime)
+				}
+				if _, err := LoadInstallRuntime(""); err != nil {
+					t.Fatalf("LoadInstallRuntime(\"\") = %v, want the installer to load", err)
+				}
+			})
+		}
+	}
+}
+
+func TestLoadRuntimeNothingToMigrateRunsOnDefaults(t *testing.T) {
+	legacyConfigHome(t, false)
+	runtime, err := LoadRuntime("")
+	if err != nil {
+		t.Fatalf("LoadRuntime(\"\") = %v", err)
+	}
+	if runtime.Config.Exists || len(runtime.Config.Accounts) == 0 {
+		t.Fatalf("Config = %+v, want defaults", runtime.Config)
+	}
+}
+
+func TestLoadRuntimeExplicitConfigIgnoresLegacyFiles(t *testing.T) {
+	home, legacyDir, _ := legacyConfigHome(t, false)
+	if err := os.WriteFile(filepath.Join(legacyDir, FileName), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	named := filepath.Join(home, "named", FileName)
+	if _, err := LoadRuntime(named); err != nil {
+		t.Fatalf("LoadRuntime(--config) = %v", err)
+	}
+	t.Setenv(paths.EnvConfig, named)
+	if _, err := LoadRuntime(""); err != nil {
+		t.Fatalf("LoadRuntime under PFM_CONFIG = %v", err)
 	}
 }

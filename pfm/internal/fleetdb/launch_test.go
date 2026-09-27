@@ -243,3 +243,93 @@ func TestLaunchForBrokenFileReturnsError(t *testing.T) {
 		t.Fatalf("broken query=%v", err)
 	}
 }
+
+// legacyStateHome plants {home}/.cc/fleet.db and returns values whose StateDB
+// sits in a directory that does not exist yet.
+func legacyStateHome(t *testing.T) paths.Values {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "home")
+	legacy := paths.LegacyStateDB(home)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return paths.Values{Home: home, StateDB: paths.DefaultStateDB(home)}
+}
+
+func assertLegacyPending(t *testing.T, err error, values paths.Values) {
+	t.Helper()
+	if !errors.Is(err, paths.ErrLegacyPending) {
+		t.Fatalf("error = %v, want paths.ErrLegacyPending", err)
+	}
+	for _, want := range []string{values.StateDB, paths.LegacyStateDB(values.Home), "run pfm install"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q lacks %q", err, want)
+		}
+	}
+	if _, statErr := os.Lstat(filepath.Dir(values.StateDB)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("state directory %s was created (stat err %v)", filepath.Dir(values.StateDB), statErr)
+	}
+}
+
+func TestOpenSharedStateRefusesCreateWhileLegacyWaits(t *testing.T) {
+	t.Parallel()
+	values := legacyStateHome(t)
+	ctx := context.Background()
+	state := OpenSharedState(ctx, values)
+	assertLegacyPending(t, state.Degraded(), values)
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err := RecordLaunch(ctx, values, Launch{SessionID: "S", Engine: pfmengine.ID("cc"), Account: 1}, 1)
+	assertLegacyPending(t, err, values)
+	assertLegacyPending(t, SetClaudePrimaryAccount(ctx, values, 2, 1), values)
+}
+
+func TestOpenSharedStateOpensExistingTargetBesideLegacy(t *testing.T) {
+	t.Parallel()
+	values := legacyStateHome(t)
+	ctx := context.Background()
+	if err := RecordLaunch(ctx, paths.Values{StateDB: values.StateDB}, Launch{
+		SessionID: "S", Engine: pfmengine.ID("cc"), Account: 1,
+	}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordLaunch(ctx, values, Launch{SessionID: "T", Engine: pfmengine.ID("cc"), Account: 1}, 2); err != nil {
+		t.Fatalf("existing target beside legacy: %v", err)
+	}
+}
+
+func TestOpenSharedStateCreatesInFreshHome(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join(t.TempDir(), "home")
+	values := paths.Values{Home: home, StateDB: paths.DefaultStateDB(home)}
+	if err := SetClaudePrimaryAccount(context.Background(), values, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(values.StateDB); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenSharedStateLegacyUnreadableIsAnError(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// {home}/.cc as a regular file: the legacy stat fails with ENOTDIR.
+	if err := os.WriteFile(filepath.Join(home, ".cc"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	values := paths.Values{Home: home, StateDB: paths.DefaultStateDB(home)}
+	err := OpenSharedState(context.Background(), values).Degraded()
+	if err == nil || !strings.Contains(err.Error(), paths.LegacyStateDB(home)) {
+		t.Fatalf("Degraded() = %v, want an error naming %s", err, paths.LegacyStateDB(home))
+	}
+	if _, statErr := os.Lstat(values.StateDB); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("state database created despite an unreadable legacy path (stat err %v)", statErr)
+	}
+}

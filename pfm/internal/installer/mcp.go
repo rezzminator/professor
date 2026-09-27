@@ -109,7 +109,7 @@ func (installer *engine) removeLegacyMCPCredential() error {
 	} else if err != nil {
 		return fmt.Errorf("inspect retired MCP credential %s: %w", path, err)
 	}
-	return installer.change("remove retired "+path, func() error { return os.Remove(path) })
+	return installer.changePaths("remove retired "+path, []string{path}, func() error { return os.Remove(path) })
 }
 
 func isHex(value string) bool {
@@ -214,6 +214,18 @@ func isPFMHTTPShape(registration map[string]any, url string) bool {
 	return len(token) == 64 && isHex(token)
 }
 
+// pfmClaudeMCPShape is the one by-shape test of an entry pfm wrote into a
+// Claude file (an account .claude.json or ~/.mcp.json): the legacy chat and
+// harvester shapes, or the exact professor stdio shape. Only chat, harvester
+// and professor are ever matched.
+func pfmClaudeMCPShape(name string, registration map[string]any, home string, port int) bool {
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	if isPFMLegacyClaudeShape(name, registration, bin, port) {
+		return true
+	}
+	return name == professorName && isExactStdioShape(registration, bin, mcpStdioArgs)
+}
+
 func (installer *engine) writeMCPCodeConfig(names []string) error {
 	for _, home := range installer.codexHomes() {
 		if err := installer.writeMCPCodeConfigAt(filepath.Join(home, "config.toml"), names); err != nil {
@@ -263,9 +275,7 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 		installer.ok(path + " wiring")
 		return nil
 	}
-	return installer.change(changeDescription(path, existed), func() error {
-		return installer.writeMCPFile(path, raw, []byte(wanted), existed)
-	})
+	return installer.changeMCPFile(changeDescription(path, existed), path, raw, []byte(wanted), existed)
 }
 
 // codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
@@ -514,9 +524,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 		if len(removedLegacy) > 0 {
 			message += " — remove pfm's legacy MCP clients " + strings.Join(removedLegacy, ",")
 		}
-		if err := installer.change(message, func() error {
-			return installer.writeMCPFile(path, original, wantedRaw, existed)
-		}); err != nil {
+		if err := installer.changeMCPFile(message, path, original, wantedRaw, existed); err != nil {
 			return err
 		}
 	} else {
@@ -673,7 +681,8 @@ func (installer *engine) removeLegacyMCPConfigAuth() error {
 	if !changed {
 		return nil
 	}
-	return installer.change("remove retired MCP authToken from "+installer.options.MCPConfigPath, func() error {
+	message := "remove retired MCP authToken from " + installer.options.MCPConfigPath
+	return installer.changePaths(message, []string{effective.Path}, func() error {
 		_, err := pfmconfig.RemoveMCPAuthToken(effective)
 		return err
 	})
@@ -709,9 +718,7 @@ func (installer *engine) removeMCPCodeConfigAt(path string) error {
 	if wanted == string(raw) {
 		return nil
 	}
-	return installer.change("rewrite "+path+" (remove pfm MCP registration)", func() error {
-		return installer.writeMCPFile(path, raw, []byte(wanted), true)
-	})
+	return installer.changeMCPFile("rewrite "+path+" (remove pfm MCP registration)", path, raw, []byte(wanted), true)
 }
 
 func sameJSONValue(left, right any) bool {

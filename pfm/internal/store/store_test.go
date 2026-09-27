@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -340,5 +341,99 @@ func assertPragmas(t *testing.T, store *Store) {
 	}
 	if foreignKeys != 1 {
 		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
+}
+
+// plantLegacy writes a legacy database file at path.
+func plantLegacy(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertStoreLegacyPending(t *testing.T, err error, target, legacy string) {
+	t.Helper()
+	if !errors.Is(err, paths.ErrLegacyPending) {
+		t.Fatalf("OpenContext error = %v, want paths.ErrLegacyPending", err)
+	}
+	for _, want := range []string{target, legacy, "run pfm install"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q lacks %q", err, want)
+		}
+	}
+}
+
+func TestOpenRefusesCacheCreateWhileLegacyCacheWaits(t *testing.T) {
+	cacheDB := setStoreTestJail(t)
+	home := os.Getenv(paths.EnvHome)
+	legacy := paths.LegacyCacheDB(home)
+	plantLegacy(t, legacy)
+	for name, open := range map[string]func() (*Store, error){
+		"Open":        func() (*Store, error) { return Open() },
+		"OpenContext": func() (*Store, error) { return OpenContext(context.Background()) },
+	} {
+		store, err := open()
+		if store != nil {
+			_ = store.Close()
+			t.Fatalf("%s opened a store beside the legacy cache", name)
+		}
+		assertStoreLegacyPending(t, err, cacheDB, legacy)
+	}
+	if _, err := os.Lstat(cacheDB); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cache database created (stat err %v)", err)
+	}
+}
+
+func TestOpenRefusesStateCreateBeforeOpeningEither(t *testing.T) {
+	cacheDB := setStoreTestJail(t)
+	home := os.Getenv(paths.EnvHome)
+	stateDB := os.Getenv(paths.EnvStateDB)
+	plantLegacy(t, cacheDB) // the cache target exists
+	cacheBefore, err := os.ReadFile(cacheDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := paths.LegacyStateDB(home)
+	plantLegacy(t, legacy)
+	_, err = OpenContext(context.Background())
+	assertStoreLegacyPending(t, err, stateDB, legacy)
+	if _, statErr := os.Lstat(filepath.Dir(stateDB)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("state directory created (stat err %v)", statErr)
+	}
+	cacheAfter, err := os.ReadFile(cacheDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(cacheAfter, cacheBefore) {
+		t.Fatal("cache database was opened and rewritten before the state refusal")
+	}
+}
+
+func TestOpenCreatesBesideLegacyWhenTargetsExistOrHomeIsFresh(t *testing.T) {
+	cacheDB := setStoreTestJail(t)
+	home := os.Getenv(paths.EnvHome)
+	// Fresh home: both created.
+	openTestStore(t)
+	// Targets exist: legacy files planted afterwards change nothing.
+	plantLegacy(t, paths.LegacyCacheDB(home))
+	plantLegacy(t, paths.LegacyStateDB(home))
+	openTestStore(t)
+	if _, err := os.Stat(cacheDB); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenLegacyCacheUnreadableIsAnError(t *testing.T) {
+	setStoreTestJail(t)
+	home := os.Getenv(paths.EnvHome)
+	// {home}/.local/state/pfm as a regular file: the legacy stat fails with ENOTDIR.
+	plantLegacy(t, filepath.Join(home, ".local", "state", "pfm"))
+	_, err := OpenContext(context.Background())
+	if err == nil || !strings.Contains(err.Error(), paths.LegacyCacheDB(home)) {
+		t.Fatalf("OpenContext error = %v, want one naming %s", err, paths.LegacyCacheDB(home))
 	}
 }

@@ -492,7 +492,7 @@ func (installer *engine) unwireGeneratedCodexAgents() error {
 	} else if err != nil {
 		return fmt.Errorf("inspect generated Codex agents directory %s: %w", generated, err)
 	}
-	return installer.change("remove "+generated, func() error {
+	return installer.changePaths("remove "+generated, []string{generated}, func() error {
 		if err := os.RemoveAll(generated); err != nil {
 			return fmt.Errorf("remove generated Codex agents directory %s: %w", generated, err)
 		}
@@ -607,7 +607,7 @@ func (installer *engine) unwireGeneratedClaudeAgents() error {
 	} else if err != nil {
 		return fmt.Errorf("inspect generated Claude agents directory %s: %w", generated, err)
 	}
-	return installer.change("remove "+generated, func() error {
+	return installer.changePaths("remove "+generated, []string{generated}, func() error {
 		if err := os.RemoveAll(generated); err != nil {
 			return fmt.Errorf("remove generated Claude agents directory %s: %w", generated, err)
 		}

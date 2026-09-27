@@ -67,6 +67,10 @@ type GlobalCommandsOptions struct {
 	Home       string
 	SourceHome string
 	Mode       Mode
+	// BeforeWrite, when set, is called in build mode with the absolute path
+	// immediately before each link create/replace, file write, chmod and
+	// orphan removal; an error aborts the build before that write. Nil: no call.
+	BeforeWrite func(path string) error
 }
 
 const defaultAgentPreamble = "You are the ${name} role in this repository, running as a native Codex subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\n"
@@ -237,7 +241,7 @@ func RunGlobalCommands(options GlobalCommandsOptions) (Result, error) {
 	reconciled, err := reconcileManagedWithClaim(outputs, options.Mode, []string{
 		filepath.Join(home, ".codex", "skills"),
 		filepath.Join(home, ".codex", "prompts"),
-	}, markerClaimable(home))
+	}, markerClaimable(home), options.BeforeWrite)
 	if err != nil {
 		return Result{}, err
 	}

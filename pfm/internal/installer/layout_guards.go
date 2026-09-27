@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
@@ -159,39 +158,19 @@ func (env LayoutEnv) probeMove(source, target string) (bool, uint64, error) {
 	if env.moveProbe != nil {
 		return env.moveProbe(source, target)
 	}
-	sourceInfo, err := os.Stat(source)
+	if _, err := os.Stat(source); err != nil {
+		return false, 0, err
+	}
+	sourceDevice, _, err := env.probeSpace(source)
 	if err != nil {
 		return false, 0, err
 	}
-	sourceStat, ok := sourceInfo.Sys().(*syscall.Stat_t)
-	if !ok {
-		return false, 0, fmt.Errorf("source %s has no device identity", source)
+	destinationDevice, available, err := env.probeSpace(filepath.Dir(target))
+	if err != nil {
+		return false, 0, err
 	}
-	destination := filepath.Dir(target)
-	for {
-		info, err := os.Stat(destination)
-		if errors.Is(err, fs.ErrNotExist) {
-			parent := filepath.Dir(destination)
-			if parent == destination {
-				return false, 0, fmt.Errorf("no existing destination parent for %s", target)
-			}
-			destination = parent
-			continue
-		}
-		if err != nil {
-			return false, 0, err
-		}
-		destStat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok {
-			return false, 0, fmt.Errorf("destination %s has no device identity", destination)
-		}
-		if sourceStat.Dev == destStat.Dev {
-			return false, 0, nil
-		}
-		var space syscall.Statfs_t
-		if err := syscall.Statfs(destination, &space); err != nil {
-			return false, 0, err
-		}
-		return true, space.Bavail * uint64(space.Bsize), nil
+	if sourceDevice == destinationDevice {
+		return false, 0, nil
 	}
+	return true, available, nil
 }

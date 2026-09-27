@@ -122,10 +122,12 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		mcpJSON := filepath.Join(home, ".mcp.json")
 		write(mcpJSON, `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n")
-		output := run(t, 1)
+		// The layout's home-mcp row judges the same pfm-shaped entry a failure (ruling 28).
+		output := run(t, 3)
 		for _, want := range []string{
 			"doctor: mcp client=claude harvester=legacy-pfm remediation=run pfm install --yes path=" + mcpJSON + "\n",
 			"doctor: mcp client=codex harvester=legacy-pfm remediation=run pfm install --yes path=" + codexPath + "\n",
+			"legacy: " + mcpJSON + " still carries pfm mcpServers.harvester — run pfm install\n",
 		} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("legacy pfm route output missing %q:\n%s", want, output)
@@ -209,13 +211,18 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
-		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
+		// The layout's home-mcp row reports the same unparseable file as a failure.
+		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 3 {
 			t.Fatalf(
-				"doctor code=%d stdout=%q stderr=%q, want unreadable warning",
+				"doctor code=%d stdout=%q stderr=%q, want unreadable warning and home-mcp failure",
 				code,
 				stdout.String(),
 				stderr.String(),
 			)
+		}
+		unreadable := "layout: home-mcp UNREADABLE " + filepath.Join(home, ".mcp.json") + " error="
+		if !strings.Contains(stdout.String(), unreadable) {
+			t.Fatalf("home-mcp unreadable line missing:\n%s", stdout.String())
 		}
 		if !strings.Contains(stdout.String(), "doctor: mcp client=claude harvester=unreadable error=") {
 			t.Fatalf("malformed Claude JSON was not distinguished from absence:\n%s", stdout.String())

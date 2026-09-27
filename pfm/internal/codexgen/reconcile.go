@@ -39,6 +39,20 @@ type reconcileResult struct {
 	Wrote, Unchanged, Deleted int
 	Problems, Warnings        []string
 	Actions                   []Action
+	// beforeWrite is the build's optional before-write hook; err is the
+	// first hook failure, which stops every later write.
+	beforeWrite func(path string) error
+	err         error
+}
+
+// announce runs the before-write hook for path; false means the write must
+// not happen (an earlier or this hook call failed).
+func (r *reconcileResult) announce(path string) bool {
+	if r.err != nil {
+		return false
+	}
+	r.err = callBeforeWrite(r.beforeWrite, path)
+	return r.err == nil
 }
 
 func reconcile(root, home string, outputs []generatedFile, mode Mode, manageGlobal bool) (reconcileResult, error) {
@@ -55,7 +69,7 @@ func reconcile(root, home string, outputs []generatedFile, mode Mode, manageGlob
 }
 
 func reconcileManaged(outputs []generatedFile, mode Mode, managed []string) (reconcileResult, error) {
-	return reconcileManagedWithClaim(outputs, mode, managed, claimable)
+	return reconcileManagedWithClaim(outputs, mode, managed, claimable, nil)
 }
 
 func reconcileManagedWithClaim(
@@ -63,11 +77,15 @@ func reconcileManagedWithClaim(
 	mode Mode,
 	managed []string,
 	owns func(string) bool,
+	beforeWrite func(path string) error,
 ) (reconcileResult, error) {
-	result := reconcileResult{}
+	result := reconcileResult{beforeWrite: beforeWrite}
 	sort.Slice(outputs, func(i, j int) bool { return outputs[i].Path < outputs[j].Path })
 	wanted := map[string]bool{}
 	for _, output := range outputs {
+		if result.err != nil {
+			return result, result.err
+		}
 		wanted[managedEntry(output.Path, managed)] = true
 		if output.Link != "" {
 			result.reconcileLink(output, mode, owns)
@@ -78,7 +96,7 @@ func reconcileManagedWithClaim(
 	for _, dir := range managed {
 		result.reconcileOrphans(dir, wanted, mode, owns)
 	}
-	return result, nil
+	return result, result.err
 }
 
 func managedEntry(path string, managed []string) string {
@@ -124,6 +142,9 @@ func (r *reconcileResult) reconcileLink(output generatedFile, mode Mode, owns fu
 			r.Problems,
 			fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
 		)
+		return
+	}
+	if !r.announce(output.Path) {
 		return
 	}
 	r.Actions = append(r.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
@@ -201,6 +222,9 @@ func (r *reconcileResult) reconcileFile(output generatedFile, mode Mode, owns fu
 		)
 		return
 	}
+	if !r.announce(output.Path) {
+		return
+	}
 	if modeOnlyDrift {
 		r.Actions = append(
 			r.Actions,
@@ -246,6 +270,9 @@ func (r *reconcileResult) reconcileOrphans(dir string, wanted map[string]bool, m
 			r.Problems = append(r.Problems, "ORPHAN "+path)
 			r.Actions = append(r.Actions, Action{Kind: "delete", Path: path})
 			continue
+		}
+		if !r.announce(path) {
+			return
 		}
 		r.Actions = append(r.Actions, Action{Kind: "delete", Path: path})
 		if err := os.RemoveAll(path); err != nil {

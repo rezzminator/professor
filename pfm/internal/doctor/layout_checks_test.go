@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,5 +202,39 @@ func TestLayoutDoctorStateAndOtherRows(t *testing.T) {
 	if warnings < 2 || !strings.Contains(output, "state: legacy "+legacy+" still present — run pfm install") ||
 		!strings.Contains(output, "layout: staged-prompts remove "+staged) {
 		t.Fatalf("warnings=%d output=%q", warnings, output)
+	}
+}
+
+func TestLayoutDoctorHomeMCPLines(t *testing.T) {
+	runtime := testjail.CleanHome(t)
+	home := runtime.Paths.Home
+	mcp := filepath.Join(home, ".mcp.json")
+	ledger := filepath.Join(home, ".local", "share", "pfm", "install", "mcp-ownership.json")
+	doctorLayoutWrite(t, mcp, fmt.Sprintf(
+		`{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:%d/mcp/harvester"},"operator":{"command":"own"}}}`,
+		runtime.Config.MCP.HTTP.Port,
+	))
+	doctorLayoutWrite(t, ledger, `{"clients":["harvester"]}`)
+	output, _, failures := layoutDoctorOutput(t, runtime)
+	for _, want := range []string{
+		"legacy: " + mcp + " still carries pfm mcpServers.harvester — run pfm install\n",
+		"legacy: " + ledger + " still carries pfm clients — run pfm install\n",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("missing %q from %q", want, output)
+		}
+	}
+	if failures != 2 {
+		t.Fatalf("failures=%d output=%q", failures, output)
+	}
+	doctorLayoutWrite(t, mcp, "{bad")
+	output, _, failures = layoutDoctorOutput(t, runtime)
+	if !strings.Contains(output, "layout: home-mcp UNREADABLE "+mcp+" error=") || failures < 1 {
+		t.Fatalf("malformed home .mcp.json output=%q failures=%d", output, failures)
+	}
+	doctorLayoutWrite(t, ledger, "{bad")
+	output, _, _ = layoutDoctorOutput(t, runtime)
+	if got := strings.Count(output, "legacy: ownership ledger UNREADABLE error="); got != 1 {
+		t.Fatalf("unreadable ledger reported %d times: %q", got, output)
 	}
 }

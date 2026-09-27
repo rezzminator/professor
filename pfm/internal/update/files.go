@@ -2,6 +2,7 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,200 +12,107 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/installer"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// updateFileKind names what an installer-owned file is to the operator: its
-// residue says which, and only a hook file is checked for stranded pfm hooks.
-type updateFileKind string
-
-const (
-	updateHookFile        updateFileKind = "hook file"
-	updateConfigFile      updateFileKind = "config file"
-	updateMCPRegistration updateFileKind = "MCP registration"
-)
-
-// updateFileSnapshot is one installer-owned file captured around the
-// candidate's `install --yes`: its bytes before (the state rollback returns
-// to) and right after (the only state rollback may overwrite).
-type updateFileSnapshot struct {
-	path          string // physical path: a symlinked account settings file is written through, never replaced
-	kind          updateFileKind
-	before        []byte
-	beforeExisted bool
-	beforeMode    fs.FileMode
-	after         []byte
-	afterExisted  bool
-	afterErr      error
+// updateInstallJournalRoot is where an applying `pfm install` writes its one
+// journal per run: {home}/.local/state/pfm/migrations/{id}/. The candidate
+// binary owns the journal's format; update only tells the ids apart.
+func updateInstallJournalRoot(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "migrations")
 }
 
-// snapshotUpdateOwnedFiles captures the hook ownership ledger and the machine
-// config files under the config directory (issue #24 finding 3): the
-// candidate's own `install --yes` renames config.json -> pfm.config.json
-// (the v0.74.0 migration). A rollback across that boundary runs the OLD
-// binary, which reads only the legacy name — without these files restored
-// first, it converges on defaults and tears down every MCP service the real
-// config enabled, including the launch agent. It also captures every MCP
-// registration install rewrites — each Codex home's config.toml, the OpenCode
-// config and the MCP ownership ledger — so a rollback never leaves the
-// candidate's registrations behind. Account files (settings.json,
-// .claude.json) are not captured: install writes no key there, and the
-// HostLayout journal owns the legacy entries it strips.
-func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, error) {
-	home := runtime.Paths.Home
-	type candidate struct {
-		path string
-		kind updateFileKind
+// listUpdateInstallJournals returns the journal ids under the root. A missing
+// root holds no journal; any other listing failure is an error, never read
+// as "no journal".
+func listUpdateInstallJournals(home string) (map[string]bool, error) {
+	root := updateInstallJournalRoot(home)
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]bool{}, nil
 	}
-	managedRoot := filepath.Dir(paths.SourceRepoPath(home))
-	candidates := []candidate{{filepath.Join(managedRoot, "settings-hook-ownership.json"), updateHookFile}}
-	if runtime.Config.Path != "" {
-		configDir := filepath.Dir(runtime.Config.Path)
-		for _, name := range []string{
-			config.FileName,
-			config.LegacyFileName,
-			config.HarvesterFileName,
-			config.LegacyBackupName,
-		} {
-			candidates = append(candidates, candidate{filepath.Join(configDir, name), updateConfigFile})
+	if err != nil {
+		return nil, fmt.Errorf("list install journals in %s: %w", root, err)
+	}
+	ids := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			ids[entry.Name()] = true
 		}
 	}
-	for _, codexHome := range runtime.Config.CodexHomes() {
-		candidates = append(candidates, candidate{filepath.Join(codexHome, "config.toml"), updateMCPRegistration})
+	return ids, nil
+}
+
+// rollbackUpdateInstallJournal replays the journal the candidate's
+// `install --yes` wrote — every install write, config migration included —
+// through the candidate's own `install --rollback {id}`, with the --config
+// the install was given. journalsBefore is the id set listed right before
+// that install; nil means no install ran and there is nothing to replay. A
+// run that recorded nothing left no new id. More than one new id is never
+// guessed between: each is named with its command. A refused replay is
+// returned with the candidate's own stderr; the caller keeps rolling back.
+func rollbackUpdateInstallJournal(
+	ctx context.Context,
+	candidate string,
+	journalsBefore map[string]bool,
+	repo, sourceRepo string,
+	runtime config.Runtime,
+	stdout, stderr io.Writer,
+) error {
+	if journalsBefore == nil {
+		return nil
 	}
-	candidates = append(
-		candidates,
-		candidate{installer.OpenCodeConfigPath(home), updateMCPRegistration},
-		candidate{filepath.Join(managedRoot, "mcp-ownership.json"), updateMCPRegistration},
-	)
-	seen := make(map[string]bool, len(candidates))
-	snapshots := make([]updateFileSnapshot, 0, len(candidates))
-	for _, candidate := range candidates {
-		physical, err := filepath.EvalSymlinks(candidate.path)
-		if errors.Is(err, fs.ErrNotExist) {
-			physical = filepath.Clean(candidate.path)
-		} else if err != nil {
-			return nil, fmt.Errorf("resolve %s %s: %w", candidate.kind, candidate.path, err)
+	journalsAfter, err := listUpdateInstallJournals(runtime.Paths.Home)
+	if err != nil {
+		return fmt.Errorf("find the update's install journal: %w", err)
+	}
+	var created []string
+	for id := range journalsAfter {
+		if !journalsBefore[id] {
+			created = append(created, id)
 		}
-		if seen[physical] {
-			continue
+	}
+	sort.Strings(created)
+	switch len(created) {
+	case 0:
+		return nil
+	case 1:
+	default:
+		commands := make([]string, 0, len(created))
+		for _, id := range created {
+			commands = append(commands, "pfm install --rollback "+id)
 		}
-		seen[physical] = true
-		content, mode, existed, err := readUpdateHookFile(physical)
-		if err != nil {
-			return nil, err
-		}
-		snapshots = append(
-			snapshots,
-			updateFileSnapshot{
-				path: physical, kind: candidate.kind, before: content, beforeExisted: existed, beforeMode: mode,
-			},
+		return fmt.Errorf(
+			"the update's install left %d install journals (%s); none was replayed — roll each back by hand: %s",
+			len(created),
+			strings.Join(created, ", "),
+			strings.Join(commands, "; "),
 		)
 	}
-	sort.Slice(snapshots, func(left, right int) bool { return snapshots[left].path < snapshots[right].path })
-	return snapshots, nil
-}
-
-// recordUpdateHookAfter captures each file exactly as the candidate's install
-// left it. A file that cannot be read keeps its error, and restore then
-// refuses to touch it.
-func recordUpdateHookAfter(snapshots []updateFileSnapshot) {
-	for index := range snapshots {
-		snapshot := &snapshots[index]
-		snapshot.after, _, snapshot.afterExisted, snapshot.afterErr = readUpdateHookFile(snapshot.path)
-	}
-}
-
-// restoreUpdateHookFiles returns each snapshotted file to its pre-install bytes, but
-// only while it still holds exactly what the candidate's install left: a file
-// something else rewrote since — a live chat saving its settings — is never
-// clobbered. It is named as residue instead — and when that residue still
-// carries a hook of pfm's own shape naming a subcommand this binary does not
-// implement (issue #24 finding 2: exactly what a rollback across the update
-// this file's install just performed can leave stranded), the residue
-// message names those entries so the operator's repair instruction is
-// concrete rather than a bare "reconcile it by hand".
-func restoreUpdateHookFiles(snapshots []updateFileSnapshot, home string, stderr io.Writer) error {
-	var residue error
-	for _, snapshot := range snapshots {
-		current, _, existed, err := readUpdateHookFile(snapshot.path)
-		if err != nil {
-			residue = errors.Join(residue, err)
-			continue
-		}
-		if existed == snapshot.beforeExisted && bytes.Equal(current, snapshot.before) {
-			continue
-		}
-		if snapshot.afterErr != nil || existed != snapshot.afterExisted || !bytes.Equal(current, snapshot.after) {
-			residue = errors.Join(residue, errors.New(updateResidueMessage(snapshot, current, existed, home)))
-			continue
-		}
-		if snapshot.beforeExisted {
-			err = atomicfile.Write(snapshot.path, snapshot.before, snapshot.beforeMode)
-		} else {
-			err = os.Remove(snapshot.path)
-		}
-		if err != nil {
-			residue = errors.Join(residue, fmt.Errorf("restore %s %s: %w", snapshot.kind, snapshot.path, err))
-			continue
-		}
-		fmt.Fprintf(stderr, "pfm update: restored %s to its pre-update state\n", snapshot.path)
-	}
-	return residue
-}
-
-// updateResidueMessage names a file something rewrote after the update's
-// install wrote it. A hook file is also checked for stranded pfm hooks: one
-// that carries them names them, and one that does not parse is named as
-// unchecked with its parse error — never read as clean. A file removed since
-// has nothing to check and says so.
-func updateResidueMessage(snapshot updateFileSnapshot, current []byte, existed bool, home string) string {
-	prefix := fmt.Sprintf("%s %s changed after the update's install wrote it; left as is", snapshot.kind, snapshot.path)
-	if !existed {
-		return fmt.Sprintf("%s %s was removed after the update's install wrote it; reconcile it by hand",
-			snapshot.kind, snapshot.path)
-	}
-	if snapshot.kind != updateHookFile {
-		return prefix + " — reconcile it by hand"
-	}
-	stranded, err := installer.UnknownPFMHookCommands(current, home)
-	switch {
-	case err != nil:
-		return fmt.Sprintf(
-			"%s — it does not parse (%v), so pfm could not check it for stranded pfm hooks; reconcile it by hand",
-			prefix,
+	id := created[0]
+	var refusal bytes.Buffer
+	if err := runUpdateCandidateCommand(
+		ctx,
+		candidate,
+		updateInstallConfigPath(runtime),
+		repo,
+		sourceRepo,
+		stdout,
+		io.MultiWriter(stderr, &refusal),
+		installCommand,
+		"--rollback",
+		id,
+	); err != nil {
+		return fmt.Errorf(
+			"install journal %s was not rolled back: pfm install --rollback %s failed: %s: %w",
+			id,
+			id,
+			strings.TrimSpace(refusal.String()),
 			err,
 		)
-	case len(stranded) > 0:
-		return fmt.Sprintf(
-			"%s — it still carries %s; reconcile by hand or run pfm install --yes",
-			prefix,
-			strings.Join(stranded, ", "),
-		)
-	default:
-		return prefix + " — reconcile it by hand"
 	}
-}
-
-func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
-	info, err := os.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, 0, false, nil
-	}
-	if err != nil {
-		return nil, 0, false, fmt.Errorf("stat hook file %s: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, 0, false, fmt.Errorf("hook file %s is not a regular file", path)
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, 0, false, fmt.Errorf("read hook file %s: %w", path, err)
-	}
-	return content, info.Mode().Perm(), true, nil
+	fmt.Fprintf(stderr, "pfm update: rolled back install journal %s\n", id)
+	return nil
 }
 
 // updateConfigPathAfterInstall resolves the --config path the candidate's OWN
@@ -212,7 +120,7 @@ func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
 // resolved BEFORE the migration renamed it inside the candidate process only.
 // A non-ENOENT stat error on either candidate path (issue #24 F2 — EACCES,
 // ENOTDIR, or anything else) is returned as an error, exactly like sibling
-// readUpdateHookFile: it is never folded into the "gone/migrated" notes,
+// listUpdateInstallJournals: it is never folded into the "gone/migrated" notes,
 // which would misreport a stat failure as an absent file. The caller treats
 // a returned error as a failed update step.
 func updateConfigPathAfterInstall(runtime config.Runtime) (path, note string, err error) {

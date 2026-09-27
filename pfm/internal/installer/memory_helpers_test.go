@@ -92,7 +92,7 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 	writeFixture(t, localSettingsPath, localOriginal)
 
 	env := memoryHelperLayoutEnv(home, configDirs)
-	journal := &layoutJournal{env: env}
+	journal := &Journal{env: env}
 	if err := applyLayoutRow(
 		context.Background(),
 		journal,
@@ -213,7 +213,7 @@ func TestMemoryHelperMigrationDryRunIsReadOnly(t *testing.T) {
 	before := snapshotMemoryMigrationTree(t, home)
 
 	var output bytes.Buffer
-	_, err := ApplyLayout(context.Background(), memoryHelperLayoutEnv(home, []string{config}), false, &output)
+	_, err := ApplyLayout(context.Background(), memoryHelperLayoutEnv(home, []string{config}), nil, false, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 			before := snapshotMemoryMigrationTree(t, home)
 
 			env := memoryHelperLayoutEnv(home, []string{config})
-			journal := &layoutJournal{env: env}
+			journal := &Journal{env: env}
 			err := applyLayoutRow(
 				context.Background(),
 				journal,

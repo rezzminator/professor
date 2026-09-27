@@ -35,7 +35,8 @@ How `pfm install` moves a host from any older layout onto the one in [pfm-home.m
 | managed cleanup | `/etc/claude-code/managed-settings.d/pfm.json` with `claude.cleanupPeriodDays` | absent; another value |
 | memory helpers | `scripts/memory-wire.sh` / `scripts/memory-consolidate.sh`, named by the operator's own hooks | the fingerprint-matched `scripts/cc-memory-wire.sh` / `scripts/cc-memory-consolidate.sh` in any account dir: renamed once, and the operator hook paths that name them in `settings.json` / `settings.local.json` rewritten once (`migrateMemoryHelpers`) |
 | account `settings.json` | no pfm-owned `hooks`, `statusLine`, `subagentStatusLine` | entries recorded in `settings-hook-ownership.json`; any hook whose command is a `claudeHookTemplates` command or matches pfm's retired-hook table (`pfm/internal/installer/settings.go`) — pfm-owned by command shape, so installs older than the ledger are cleaned too; the overlay `statusLine`; the `--subagents` line |
-| account `.claude.json` | no pfm-owned `mcpServers` entries | entries recorded in `mcp-ownership.json` |
+| account `.claude.json` (row `account-mcp`) | no pfm-owned `mcpServers` entries | entries recorded in `mcp-ownership.json`; any `chat`, `harvester` or `professor` entry in an exact pfm shape — the legacy `chat` stdio (`{home}/.local/bin/pfm mcp chat serve` or `pfm mcp`) and loopback `http://127.0.0.1:{mcp.http.port}/mcp/{name}` entries, and `mcpServers.professor` as `{type: stdio, command: {home}/.local/bin/pfm, args: [mcp, serve, --stdio]}` — pfm-owned by shape, so installs older than the ledger are cleaned too; any other name only when the ledger records it |
+| `~/.mcp.json` (row `home-mcp`) | no pfm-owned `mcpServers` entries, and no `clients` list in `mcp-ownership.json` | the names in the ledger's old `clients` list; any `chat`, `harvester` or `professor` entry in the same exact pfm shapes; a non-empty `clients` list, which install drops from the ledger |
 | `~/.zshrc` source line | `{clone}/pfm/internal/installer/assets/shim/pfm.zsh` | the line naming `~/.local/share/pfm/install/shim/pfm.zsh` |
 | staged prompts | absent | `~/.local/share/pfm/install/harness-prompts/` ([Legacy prompt files](#legacy-prompt-files)) |
 | `shared.db` | absent | an empty `~/.local/state/pfm/shared.db` |
@@ -52,7 +53,7 @@ An account's `cleanupPeriodDays` key is never removed: it is a redundant copy of
 | `repoint` | a pfm-made symlink to the wrong target | replace the link |
 | `move` | a legacy file at an old path, target absent | move it, leave nothing at the old path (a memory helper's move also rewrites the operator hook paths naming it) |
 | `merge` | a real session dir where a link belongs | [merge](#merging-a-session-dir), then link |
-| `strip` | pfm-owned entries in an account file | remove the ledger-owned entries and the hooks pfm owns by command shape, keep every other key |
+| `strip` | pfm-owned entries in an account file or `~/.mcp.json` | remove the ledger-owned entries, the hooks pfm owns by command shape and the MCP entries pfm owns by shape, keep every other key; `home-mcp` also drops the ledger's `clients` list |
 | `remove` | a legacy pfm artefact with no remaining user | remove it |
 | `refuse` | a shape the row does not recognise, or a [guard](#guards) holds | print why and the path; touch nothing |
 
@@ -64,7 +65,7 @@ Rows apply in this order, each only after the previous one verified:
 2. **Config** — `pfm.config.json` and `harvester.config.json` moved to the clone; every later row reads the new path.
 3. **State databases** — moved with their `-wal`/`-shm` siblings after a checkpoint; row counts of every table are checked before and after the move. Install then opens the moved databases, migrates their schemas, and drops the retired `swap_event` table (`fleetdb/migration_v2.sql`) and the cache's `hidden` table (`store/migration_v9.sql`).
 4. **Session store** — merged, then linked.
-5. **Account files** — memory helpers renamed, then pfm entries stripped from `settings.json` and `.claude.json`.
+5. **Account files** — memory helpers renamed, then pfm entries stripped from `settings.json` and `.claude.json`, then from `~/.mcp.json` (`home-mcp`), whose change also retires the ledger's `clients` list.
 6. **Shell** — the `~/.zshrc` line repointed.
 7. **Leftovers** — staged prompts, `shared.db` and stray dirs removed once nothing uses them.
 
@@ -83,16 +84,24 @@ Transcripts are append-only JSONL named by session id, so a differing same-named
 - **Live chats.** A session row whose account has a live Claude process (`{config dir}/sessions/{pid}.json` with a running pid) is refused, naming the chats to close.
 - **Database holders.** The state-database rows stop `pfm-mcp` and `pfm-name-sync` first and restart them after; a remaining holder (a picker, a live chat's MCP proxy) makes the row refuse, naming each pid.
 - **Root.** The managed-settings row needs `sudo`; declined, it is refused and doctor keeps warning.
-- **Free space.** A cross-filesystem move checks free space first; `rename` within one filesystem needs none.
+- **Free space.** Before the first change of `pfm install --yes`, a preflight sums what the run will write per filesystem: the bytes of every path the journal will copy (the layout rows it acts on, the installer's own planned writes, and the whole harvester root when a re-provision is planned) charged to the migrations directory's filesystem, plus the source of every cross-filesystem move charged to its destination's. It refuses the whole apply unless each has `free >= need + max(1 GiB, need/10)`: `pfm install: not enough free space on {dir}: need {need} bytes + margin {margin}, have {free} — nothing changed`, exit 1. A free-space probe that fails refuses too (`could not measure free space on {dir}: {err}`), never read as enough. Each cross-filesystem move checks again before it copies; `rename` within one filesystem needs none.
+- **Live chats at rollback.** A rollback with a session-store record refuses while a chat is live on that account (`{home}/.claude/{entry}` checks every account), `--force` included.
 
 ## The journal
 
-Each applying run writes `~/.local/state/pfm/migrations/{UTC timestamp}/`:
+Each applying run keeps one journal for the whole `pfm install --yes`, in `~/.local/state/pfm/migrations/{UTC timestamp}/`: the layout rows, the config migration, and every write the installer itself makes that changes bytes (an identical rewrite records nothing, so a no-op install makes no journal). Its last stdout line names it: `install journal: {dir}`.
 
-- `journal.json` — one record per affected path: row, verdict, source, destination, backup path, result. Each record is flushed before its path changes.
+- `journal.json` — one record per affected path: row, verdict, source, destination, backup path, result, and `after`, the destination's fingerprint right after the change (sha256 over one line per entry at and under it, walked without following links: relative path, type, size, mtime, mode, link target). Each record is flushed before its path changes. The install refingerprints the state database after its own schema migration of the moved file.
 - `backup/` — the prior bytes of every rewritten or removed path, each session tree before a merge, every parked conflict, and full copies of both moved databases and their WAL/SHM siblings before checkpointing. Rollback restores the database copies even if pfm opened the moved files after installation.
 
-`pfm install --rollback {timestamp}` replays the journal backwards: links removed, moves reversed, backups restored. A rollback of a run that moved state databases refuses while any pfm process holds them.
+`pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. Every check reads before anything is written:
+
+- a journal already rolled back refuses: `rollback {id} refused: already rolled back at {time}`;
+- a run that moved state databases refuses while any pfm process holds them;
+- a session-store record refuses while a chat is live on its account (§ Guards);
+- a destination whose fingerprint no longer matches its last applied record — newer work since the install — refuses the whole rollback, naming every drifted path: `rollback {id} refused: drift at {path}[, {path}…] — rerun with --force to overwrite them`. A record without a fingerprint counts as drift. Pending records, the cache database and `-wal`/`-shm` siblings are not checked. `--force` overrides only this check.
+
+A successful rollback keeps the journal and writes `{dir}/rolled-back` (the UTC time); a rollback that fails part-way leaves it unmarked, so it can be retried. `pfm update` rolls a failed candidate back by replaying that candidate install's journal the same way.
 
 ## Legacy prompt files
 
@@ -100,7 +109,7 @@ Chats born before the move were launched with `--system-prompt-file ~/.local/sha
 
 ## Rehearsal
 
-`TestHostLayoutMigratesLegacyHome` (`pfm/e2e/`) is a Go end-to-end jail test, run in the fence through `dev.sh iso` like every e2e test, over the existing `testjail` homes; it needs no provider account. It sets `PFM_CONFIG` for its own home and builds the full legacy shape — `~/.cc/1 → ~/.claude`, accounts 2 and 3 with linked `projects/` and real `file-history/`, `tasks/`, `session-env/` including a same-id conflict, `~/.cc/fleet.db` with a `swap_event` table, `~/.local/state/pfm/fleet.db`, an empty `shared.db`, pfm hooks (ledger-owned, pre-ledger and retired) and `statusLine` in each account `settings.json`, a fingerprint-matched `cc-memory-wire.sh` with the operator hook naming it, pfm MCP entries in each `.claude.json`, the staged `~/.zshrc` line, and `~/.config/pfm/pfm.config.json`. It then asserts:
+`TestHostLayoutMigratesLegacyHome` (`pfm/e2e/`) is a Go end-to-end jail test, run in the fence through `dev.sh iso` like every e2e test, over the existing `testjail` homes; it needs no provider account. It sets `PFM_CONFIG` for its own home and builds the full legacy shape — `~/.cc/1 → ~/.claude`, accounts 2 and 3 with linked `projects/` and real `file-history/`, `tasks/`, `session-env/` including a same-id conflict, `~/.cc/fleet.db` with a `swap_event` table, `~/.local/state/pfm/fleet.db`, an empty `shared.db`, pfm hooks (ledger-owned, pre-ledger and retired) and `statusLine` in each account `settings.json`, a fingerprint-matched `cc-memory-wire.sh` with the operator hook naming it, pfm MCP entries in each `.claude.json` (ledger-owned, plus a shape-only `professor` and a loopback `harvester` with no ledger record in account 2), a `~/.mcp.json` with a pfm-shape `harvester` beside a foreign `operator` and the ledger's old `clients: ["harvester"]`, the staged `~/.zshrc` line, and `~/.config/pfm/pfm.config.json`. It then asserts:
 
 1. `pfm install` (preview) changes no byte.
 2. `pfm install --yes` reaches every row `ok`, except the planted conflict, which is parked and listed.
@@ -112,6 +121,7 @@ Chats born before the move were launched with `--system-prompt-file ~/.local/sha
 
 ## Running it on a host
 
+1. Rehearse on a copy of the host first: `infra/fence/host-rehearsal.sh BACKUP SCRATCH` runs the preview, the apply, doctor, a second apply, the manifest check and the rollback against a `backup.sh` backup, and writes its verdict under `SCRATCH/rehearsal/`.
 1. Close the chats on the accounts being merged, or accept that their rows refuse and rerun later.
 2. `pfm install` — read the plan.
 3. `pfm install --yes`.

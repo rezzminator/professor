@@ -67,7 +67,10 @@ type OutputRunner interface {
 }
 
 type Options struct {
-	Mode      Mode
+	Mode Mode
+	// Journal is the install run's journal (NewJournal); every write the
+	// installer makes records its prior state there first. nil: no journaling.
+	Journal   *Journal
 	Home      string
 	StateDB   string
 	ConfigDir string

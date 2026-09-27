@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
@@ -73,11 +75,12 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 			t.Fatalf("unexpected layout refusal: %s\n%s", line, apply.stdout)
 		}
 	}
-	for _, row := range []string{"config", "state-db", "cache-db", "session-store", "memory-helpers", "account-settings", "account-mcp", "zshrc", "staged-prompts", "shared-db", "stray-dir"} {
+	for _, row := range []string{"config", "state-db", "cache-db", "session-store", "memory-helpers", "account-settings", "account-mcp", "home-mcp", "zshrc", "staged-prompts", "shared-db", "stray-dir"} {
 		if !strings.Contains(apply.stdout, "ok      layout "+row+" ") {
 			t.Fatalf("apply did not verify layout row %s:\n%s", row, apply.stdout)
 		}
 	}
+	hostLayoutMCPStripped(t, home)
 	if !strings.Contains(apply.stdout, "conflict layout session-store") ||
 		!strings.Contains(apply.stdout, filepath.Join(journal, "backup", "conflicts")) {
 		t.Fatalf("session conflict was not listed and parked in %s:\n%s", journal, apply.stdout)
@@ -94,7 +97,8 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 
 	second := run("install", "--yes", "--skip-harvest", "--skip-themes")
 	h.requireSuccess("layout idempotence", second)
-	if !strings.Contains(second.stdout, "layout: nothing to do") || strings.Contains(second.stdout, "layout journal:") {
+	if !strings.Contains(second.stdout, "layout: nothing to do") ||
+		strings.Contains(second.stdout, "install journal:") {
 		t.Fatalf("second install changed layout:\n%s", second.stdout)
 	}
 	doctor := run("doctor")
@@ -276,6 +280,10 @@ func plantLegacyAccountFiles(t *testing.T, home, repo string, write func(string,
 	}
 	write(".local/share/pfm/install/settings-hook-ownership.json", settingsLedger)
 	registrations := map[string]any{}
+	harvesterShape := map[string]any{
+		"type": "http",
+		"url":  fmt.Sprintf("http://127.0.0.1:%d/mcp/harvester", hostLayoutMCPPort(t, home)),
+	}
 	for _, account := range []string{"1", "2", "3"} {
 		registry := filepath.Join(".cc", account, ".claude.json")
 		if account == "1" {
@@ -286,21 +294,95 @@ func plantLegacyAccountFiles(t *testing.T, home, repo string, write func(string,
 			"harvester": map[string]any{"command": "pfm", "args": []string{"mcp", "harvester", "serve"}},
 			"operator":  map[string]any{"command": "operator-mcp"},
 		}
+		owned := map[string]any{"chat": servers["chat"], "harvester": servers["harvester"]}
+		if account == "2" {
+			// Shape-only entries an install older than the ledger wrote: no ledger record names them.
+			servers["professor"] = map[string]any{
+				"type":    "stdio",
+				"command": pfm,
+				"args":    []string{"mcp", "serve", "--stdio"},
+			}
+			servers["harvester"] = harvesterShape
+			owned = map[string]any{"chat": servers["chat"]}
+		}
 		registryRaw, err := json.Marshal(map[string]any{"mcpServers": servers})
 		if err != nil {
 			t.Fatal(err)
 		}
 		write(registry, registryRaw)
-		registrations[filepath.Join(home, registry)] = map[string]any{
-			"chat":      servers["chat"],
-			"harvester": servers["harvester"],
-		}
+		registrations[filepath.Join(home, registry)] = owned
 	}
-	mcpLedger, err := json.Marshal(map[string]any{"registrations": registrations})
+	homeMCP, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"harvester": harvesterShape,
+		"operator":  map[string]any{"command": "operator-mcp"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(".mcp.json", homeMCP)
+	mcpLedger, err := json.Marshal(map[string]any{"registrations": registrations, "clients": []string{"harvester"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	write(".local/share/pfm/install/mcp-ownership.json", mcpLedger)
+}
+
+// hostLayoutMCPStripped proves the MCP plants left: the shape-only entries in
+// account 2, the pfm entry in ~/.mcp.json and the ledger's clients list, while
+// the foreign operator entries stay.
+func hostLayoutMCPStripped(t *testing.T, home string) {
+	t.Helper()
+	ledger := filepath.Join(home, ".local", "share", "pfm", "install", "mcp-ownership.json")
+	for path, want := range map[string]struct{ gone, kept []string }{
+		filepath.Join(home, ".cc", "2", ".claude.json"): {
+			gone: []string{`"professor"`, `"harvester"`, `"chat"`},
+			kept: []string{`"operator"`},
+		},
+		filepath.Join(home, ".mcp.json"): {gone: []string{`"harvester"`}, kept: []string{`"operator"`}},
+		ledger:                           {gone: []string{`"clients"`}},
+	} {
+		raw, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) && want.kept == nil {
+			continue // the install's own MCP pass may retire an emptied ledger
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, gone := range want.gone {
+			if bytes.Contains(raw, []byte(gone)) {
+				t.Errorf("%s still carries %s after apply: %s", path, gone, raw)
+			}
+		}
+		for _, kept := range want.kept {
+			if !bytes.Contains(raw, []byte(kept)) {
+				t.Errorf("%s lost %s after apply: %s", path, kept, raw)
+			}
+		}
+	}
+}
+
+// hostLayoutMCPPort is the loopback port the planted config gives pfm's MCP
+// server: the one the layout's shape test reads.
+func hostLayoutMCPPort(t *testing.T, home string) int {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(home, "pfm.config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		MCP struct {
+			HTTP struct {
+				Port int `json:"port"`
+			} `json:"http"`
+		} `json:"mcp"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.MCP.HTTP.Port == 0 {
+		return pfmconfig.DefaultMCPPort
+	}
+	return config.MCP.HTTP.Port
 }
 
 func hostLayoutLegacyDBs(t *testing.T, repo, state, cache string) {
@@ -365,6 +447,11 @@ func hostLayoutSnapshot(t *testing.T, home string) map[string]string {
 		rel, err := filepath.Rel(home, path)
 		if err != nil {
 			return err
+		}
+		if rel == filepath.Join(".local", "state", "pfm", "migrations") {
+			// The install journal itself: created by the apply, kept or
+			// removed by the rollback — never part of the host it restores.
+			return fs.SkipDir
 		}
 		if entry.IsDir() {
 			result[rel] = "dir"
@@ -545,7 +632,7 @@ func hostLayoutStateHiddenIDs(t *testing.T, path string, want []string) {
 func hostLayoutJournal(t *testing.T, home, output string) string {
 	t.Helper()
 	for _, line := range strings.Split(output, "\n") {
-		path, ok := strings.CutPrefix(line, "layout journal: ")
+		path, ok := strings.CutPrefix(line, "install journal: ")
 		if !ok {
 			continue
 		}
@@ -564,10 +651,10 @@ func hostLayoutJournal(t *testing.T, home, output string) string {
 			t.Fatal(err)
 		}
 		if len(records) == 0 {
-			t.Fatal("layout journal has no records")
+			t.Fatal("install journal has no records")
 		}
 		return path
 	}
-	t.Fatalf("apply omitted layout journal:\n%s", output)
+	t.Fatalf("apply omitted install journal:\n%s", output)
 	return ""
 }

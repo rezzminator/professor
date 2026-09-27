@@ -12,7 +12,11 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const layoutAccountMCPRow = "account-mcp"
+const (
+	layoutAccountMCPRow      = "account-mcp"
+	layoutAccountSettingsRow = "account-settings"
+	layoutHomeMCPRow         = "home-mcp"
+)
 
 // printLayoutChecks reports the same ordered findings the installer will apply.
 func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment paths.Env) (warnings, failures int) {
@@ -35,7 +39,7 @@ func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment pat
 					ledgerReported[finding.Source] = true
 					failures++
 				}
-			case finding.Row == "account-settings" || finding.Row == layoutAccountMCPRow:
+			case finding.Row == layoutAccountSettingsRow || finding.Row == layoutAccountMCPRow:
 				fmt.Fprintf(stdout, "legacy: %s UNREADABLE error=%v\n", finding.Path, finding.Err)
 				failures++
 			default:
@@ -104,16 +108,20 @@ func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment pat
 				fmt.Fprintf(stdout, "layout: session-store %s %s\n", finding.Verdict, finding.Path)
 			}
 			failures++
-		case "account-settings", layoutAccountMCPRow:
+		case layoutAccountSettingsRow, layoutAccountMCPRow, layoutHomeMCPRow:
 			if finding.Verdict == installer.VerdictOK {
 				continue
 			}
 			if finding.Verdict == installer.VerdictStrip {
 				for _, leftover := range strings.Split(finding.Detail, ",") {
-					if finding.Row == layoutAccountMCPRow && !strings.HasPrefix(leftover, "mcpServers.") {
+					path := finding.Path
+					switch {
+					case finding.Row == layoutHomeMCPRow && leftover == "clients":
+						path = filepath.Join(layout.ManagedRoot, "mcp-ownership.json")
+					case finding.Row != layoutAccountSettingsRow && !strings.HasPrefix(leftover, "mcpServers."):
 						leftover = "mcpServers." + leftover
 					}
-					fmt.Fprintf(stdout, "legacy: %s still carries pfm %s — run pfm install\n", finding.Path, leftover)
+					fmt.Fprintf(stdout, "legacy: %s still carries pfm %s — run pfm install\n", path, leftover)
 					failures++
 				}
 			} else {

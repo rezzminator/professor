@@ -3,6 +3,8 @@ name: flights-mechanical-executor
 description: 'FLIGHTS-ONLY — spawned by flights-orchestrator, one fresh executor per task file rated mechanical: its code and covering tests. Pass the brief file, the task file and its reads paths. flights-orchestrator → here → flights-lander. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the watched-failing test per Done when row, adaptations, RETRO.'
 model: sonnet
 effort: medium
+codex-model: gpt-6-sol
+codex-effort: low
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

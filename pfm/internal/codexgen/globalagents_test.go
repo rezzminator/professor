@@ -1,6 +1,7 @@
 package codexgen
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,121 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestGlobalAgentCodexFrontmatterOverridesModelAndEffort(t *testing.T) {
+	agentsDir := t.TempDir()
+	path := filepath.Join(agentsDir, "worker.md")
+	raw := "---\nname: worker\ndescription: Worker.\nmodel: sonnet\neffort: medium\ncodex-model: gpt-6-sol\ncodex-effort: high\n---\n\nWork.\n"
+	_, got, err := renderGlobalAgentTOML(path, raw, agentsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "model = \"gpt-6-sol\"\nmodel_reasoning_effort = \"high\"\n") {
+		t.Fatalf("Codex overrides missing from TOML:\n%s", got)
+	}
+	if strings.Contains(got, "codex-model") || strings.Contains(got, "codex-effort") {
+		t.Fatalf("Codex-only frontmatter leaked into TOML:\n%s", got)
+	}
+}
+
+func TestGlobalAgentBadCodexEffortNamesSource(t *testing.T) {
+	agentsDir := t.TempDir()
+	path := filepath.Join(agentsDir, "worker.md")
+	for _, effort := range []string{"", "max", "HIGH"} {
+		t.Run(effort, func(t *testing.T) {
+			raw := "---\nname: worker\ndescription: Worker.\ncodex-effort: " + effort + "\n---\n\nWork.\n"
+			_, _, err := renderGlobalAgentTOML(path, raw, agentsDir)
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "codex-effort") {
+				t.Fatalf("error = %v, want source path and codex-effort", err)
+			}
+		})
+	}
+}
+
+func TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate codexgen test source")
+	}
+	agentsDir := filepath.Join(filepath.Dir(testFile), "..", "..", "..", "templates", "global", "agents")
+	sources, err := filepath.Glob(filepath.Join(agentsDir, "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	variants, err := LoadGlobalAgentVariants(agentsDir, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type source struct{ path, raw string }
+	all := make([]source, 0, len(sources)+len(variants))
+	for _, path := range sources {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, source{path, string(raw)})
+	}
+	for _, variant := range variants {
+		all = append(all, source{variant.Path, string(variant.Content)})
+	}
+	checked := 0
+	for _, src := range all {
+		fields, _, err := parseFrontmatter(src.raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, present := fields["codex-model"]; present {
+			continue
+		}
+		if _, present := fields["codex-effort"]; present {
+			continue
+		}
+		t.Run(strings.TrimSuffix(filepath.Base(src.path), ".md"), func(t *testing.T) {
+			_, got, err := renderGlobalAgentTOML(src.path, src.raw, agentsDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := renderOriginalGlobalAgentTOML(t, src.path, src.raw, agentsDir)
+			if !bytes.Equal([]byte(got), []byte(want)) {
+				t.Fatalf("TOML bytes changed without Codex overrides: %s", src.path)
+			}
+		})
+		checked++
+	}
+	if checked != len(all)-2 {
+		t.Fatalf("checked %d of %d roles; want all except the two flights executors", checked, len(all))
+	}
+}
+
+// The pre-override renderer is a byte-for-byte reference for unmodified roles.
+func renderOriginalGlobalAgentTOML(t *testing.T, mdPath, raw, agentsDir string) string {
+	t.Helper()
+	fields, body, err := parseFrontmatter(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := strings.TrimSpace(fields["name"])
+	description := rewriteCodeReview(strings.TrimSpace(fields["description"]), nil)
+	body = rewriteCodeReview(strings.ReplaceAll(strings.TrimSpace(body), globalAgentBodyOld, globalAgentBodyNew), nil)
+	model := strings.TrimSpace(fields["model"])
+	if mapped, ok := defaultConfig().ModelMap[model]; ok {
+		model = mapped
+	}
+	effort := strings.TrimSpace(fields["effort"])
+	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
+		"name = \"" + globalAgentEscape(name) + "\"\n" +
+		"description = \"" + globalAgentEscape(description) + "\"\n"
+	if model != "" {
+		content += "model = \"" + globalAgentEscape(model) + "\"\n"
+	}
+	if effort != "" {
+		content += "model_reasoning_effort = \"" + globalAgentEscape(effort) + "\"\n"
+	}
+	if codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(mdPath), ".md")) {
+		content += "sandbox_mode = \"read-only\"\n"
+	}
+	return content + "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
+}
 
 // TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution covers the
 // two-file happy path: both .md sources compile to a sibling .toml, both get

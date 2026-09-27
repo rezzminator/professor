@@ -499,7 +499,18 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	if mapped, ok := defaultConfig().ModelMap[model]; ok {
 		model = mapped
 	}
+	if override, ok := fields["codex-model"]; ok {
+		model = strings.TrimSpace(override)
+	}
 	effort := strings.TrimSpace(fields["effort"])
+	if override, ok := fields["codex-effort"]; ok {
+		effort = strings.TrimSpace(override)
+		switch effort {
+		case "low", "medium", "high", "xhigh":
+		default:
+			return "", "", fmt.Errorf("%s: invalid codex-effort %q (want low, medium, high, or xhigh)", mdPath, effort)
+		}
+	}
 
 	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +

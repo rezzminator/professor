@@ -86,7 +86,7 @@ func LoadHarnessPromptFor(engineID pfmengine.ID, path string) (absolute, body st
 	}
 	if engineID != pfmengine.Claude {
 		return "", "", fmt.Errorf(
-			"--harness-prompt is supported for claude only (engine %s): it replaces Claude's --system-prompt-file, "+
+			"--harness-prompt is supported for claude only (engine %s): it replaces Claude's whole system prompt, "+
 				"and no other engine takes a whole system prompt from a file",
 			engineID,
 		)

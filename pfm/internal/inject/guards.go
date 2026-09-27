@@ -13,6 +13,18 @@ var (
 	codexMenuPattern  = regexp.MustCompile(`›[\s\v]*\d+\.[\s\v]`)
 	numberedOption    = regexp.MustCompile(`^[\s\v]*›?[\s\v]*\d+\.[\s\v]`)
 	busyPattern       = regexp.MustCompile(`(?i)esc to interrupt|\(\d+s ·|· \d+s|\d+ tokens`)
+	// claudeBusyPattern is a running Claude turn, read only from the shapes the
+	// engine itself draws: "esc to interrupt"; the spinner's parenthesised
+	// timer, minutes included ("(12s ·", "(1m 50s ·"); a column-0 spinner glyph
+	// with a verb still running ("✢ Tempering…"); and an ellipsis followed by
+	// elapsed time ("  Spawning … · 51s"). busyPattern's bare `\d+ tokens` and
+	// `· \d+s` arms are left out on purpose: transcript prose and the rows of
+	// background agents behind an idle input box say exactly that. The finished
+	// row ("✻ Worked for 12s") and the idle agent-wait row ("✻ Waiting for 1
+	// background agent to finish") match none of it.
+	claudeBusyPattern = regexp.MustCompile(
+		`(?im)esc to interrupt|\((?:\d+[hm] )*\d+s ·|^[✻✢✶✳✽·*] +\S[^\n]*…|…\s*·\s*(?:\d+[hm] )*\d+s`,
+	)
 	// The receipt Claude Code prints once a compaction has actually happened.
 	// It is the only positive evidence a pane carries that the turn a --then
 	// waiter was sent to ride out was a compaction AND that it finished.
@@ -75,7 +87,16 @@ const openCodeBusyHint = "esc interrupt"
 // and OpenCode's own running-turn footer says `esc interrupt`, which none of
 // busyPattern's arms match. One rule for three engines was wrong in both
 // directions at once here.
+//
+// Claude needs its own rule too. busyPattern's `\d+ tokens` and `· \d+s` arms
+// read transcript prose ("wrote 24,768 tokens") and background-agent rows
+// under an idle input box as a running turn, while a 2.1.283 spinner past one
+// minute ("(1m 50s · ↓ 9.3k tokens)") matches none of its arms. A Claude turn
+// is busy only on the shapes the engine itself draws (claudeBusyPattern).
 func IsBusyFor(engine pfmengine.ID, capture string) bool {
+	if engine == pfmengine.Claude {
+		return claudeBusyPattern.MatchString(capture)
+	}
 	if engine != pfmengine.OpenCode {
 		return IsBusy(capture)
 	}

@@ -59,5 +59,8 @@ services:
 
 volumes:
   pfm-dev-gocache:
+  # Named explicitly: host-rehearsal.sh, release-rehearsal.sh and
+  # lanes/container.sh mount this cache by its bare name.
   pfm-dev-gomod:
+    name: pfm-dev-gomod
   pfm-dev-npm-cache:

@@ -84,6 +84,8 @@ case "\$*" in
   exit 0 ;;
 "install --yes --skip-harvest")
   if [ -d "\$J" ] && [ "\$mode" != apply-again-records ]; then echo "layout: nothing to do"; exit 0; fi
+  # SQLite opens a WAL database with -wal/-shm beside it; the live host always has them.
+  [ "\$mode" = db-sidecars ] && mkdir -p "\$HOME/.cc" && : >"\$HOME/.cc/fleet.db-wal" && : >"\$HOME/.cc/fleet.db-shm"
   mkdir -p "\$J"
   if [ ! -d "\$HOME/.claude/projects/p1" ]; then
     mv "\$HOME/.cc/2/projects/p1" "\$HOME/.claude/projects/p1"
@@ -266,6 +268,9 @@ fail_case doctor-finding "REHEARSAL FAIL doctor: legacy: ~/.cc/fleet.db still pr
 fail_case apply-again-records "REHEARSAL FAIL apply-again: " manifest "second apply records: FAIL apply-again"
 fail_case drop-session "REHEARSAL FAIL manifest: " rollback "manifest: a lost session fails the manifest step"
 if grep -q '\.cc/2/projects/p1/s1\.jsonl' "$T/s-drop-session/rehearsal/verdict.txt" 2>/dev/null; then ok "manifest: the verdict names the session's backup path"; else bad "manifest names path" "$(cat "$T/s-drop-session/rehearsal/verdict.txt" 2>/dev/null)"; fi
+rehearse db-sidecars "$T/s-db-sidecars"
+if [ "$RC" -eq 0 ] && [ "$(verdict "$T/s-db-sidecars")" = "REHEARSAL PASS" ]; then ok "db sidecars: SQLite's -wal/-shm beside a database never fail the tree hash"
+else bad "db sidecars" "rc=$RC" "$(cat "$T/s-db-sidecars/rehearsal/verdict.txt" 2>/dev/null)"; fi
 rehearse go-telemetry "$T/s-go-telemetry"
 if [ "$RC" -eq 0 ] && [ "$(verdict "$T/s-go-telemetry")" = "REHEARSAL PASS" ]; then ok "go telemetry: the Go toolchain's own counters under .config/go never fail the tree hash"
 else bad "go telemetry" "rc=$RC" "$(cat "$T/s-go-telemetry/rehearsal/verdict.txt" 2>/dev/null)"; fi

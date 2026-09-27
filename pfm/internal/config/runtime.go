@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -271,12 +272,12 @@ func StatePathsFrom(env paths.Env, home string) (stateDB, cacheDB string, err er
 		}
 		configPath = ""
 	}
-	config, err := Load(configPath, home, nil)
+	state, err := loadState(configPath, home)
 	if err != nil {
 		return "", "", err
 	}
 	resolved := paths.Values{StateDB: stateDB, CacheDB: cacheDB}
-	applyStatePaths(&resolved, config, env)
+	applyStatePaths(&resolved, Config{State: state}, env)
 	return resolved.StateDB, resolved.CacheDB, nil
 }
 
@@ -291,4 +292,80 @@ func ResolvePaths() (paths.Values, error) {
 		return paths.Values{}, fmt.Errorf("resolve state paths: %w", err)
 	}
 	return resolved, nil
+}
+
+// decodeVersioned strictly decodes a config file and checks its version, the
+// validation every reader of the file shares.
+func decodeVersioned(path string, content []byte) (rawConfig, error) {
+	var raw rawConfig
+	if err := decodeStrict(content, &raw); err != nil {
+		return rawConfig{}, configJSONError(path, err, int64(len(content)))
+	}
+	if raw.Version == nil {
+		return rawConfig{}, fmt.Errorf("config %s: required key %q is missing", path, keyVersion)
+	}
+	if *raw.Version != 1 && *raw.Version != Version {
+		return rawConfig{}, fmt.Errorf("config %s: version must be 1 or %d, got %d", path, Version, *raw.Version)
+	}
+	return raw, nil
+}
+
+// applyStateKeys applies the file's state.db and state.cacheDb over the
+// defaults already in result.
+func applyStateKeys(result *Config, state *rawState, home string) error {
+	if state == nil {
+		return nil
+	}
+	for _, entry := range []struct {
+		key    string
+		raw    *string
+		target *string
+	}{
+		{keyStateDB, state.DB, &result.State.DB},
+		{keyStateCacheDB, state.CacheDB, &result.State.CacheDB},
+	} {
+		if entry.raw == nil {
+			continue
+		}
+		if strings.TrimSpace(*entry.raw) == "" {
+			return fmt.Errorf("config %s: %s must be non-empty", result.Path, entry.key)
+		}
+		value, err := expandHomePath(*entry.raw, home)
+		if err != nil {
+			return fmt.Errorf("config %s: %s: %w", result.Path, entry.key, err)
+		}
+		*entry.target = value
+		result.Sources[entry.key] = SourceFile
+	}
+	return nil
+}
+
+// loadState reads only what locating the databases needs: the file's syntax,
+// its version and its state keys. A setting elsewhere in the file that Load
+// would refuse (an ask engine with no account, say) does not hide where the
+// databases live; the command that uses that setting reports it.
+func loadState(path, home string) (State, error) {
+	result := Config{
+		Path:    path,
+		State:   State{DB: paths.DefaultStateDB(home), CacheDB: paths.DefaultCacheDB(home)},
+		Sources: map[string]Source{},
+	}
+	if path == "" {
+		return result.State, nil
+	}
+	content, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return result.State, nil
+	}
+	if err != nil {
+		return State{}, fmt.Errorf("read config %s: %w", path, err)
+	}
+	raw, err := decodeVersioned(path, content)
+	if err != nil {
+		return State{}, err
+	}
+	if err := applyStateKeys(&result, raw.State, home); err != nil {
+		return State{}, err
+	}
+	return result.State, nil
 }

@@ -663,15 +663,9 @@ func loadWithMCPServers(
 	}
 	result.Exists = true
 
-	var raw rawConfig
-	if err := decodeStrict(content, &raw); err != nil {
-		return Config{}, configJSONError(result.Path, err, int64(len(content)))
-	}
-	if raw.Version == nil {
-		return Config{}, fmt.Errorf("config %s: required key %q is missing", result.Path, keyVersion)
-	}
-	if *raw.Version != 1 && *raw.Version != Version {
-		return Config{}, fmt.Errorf("config %s: version must be 1 or %d, got %d", result.Path, Version, *raw.Version)
+	raw, err := decodeVersioned(result.Path, content)
+	if err != nil {
+		return Config{}, err
 	}
 	result.Sources[keyVersion] = SourceFile
 	result.InputVersion = *raw.Version
@@ -686,28 +680,8 @@ func loadWithMCPServers(
 		result.Sources[keyTheme] = SourceFile
 	}
 
-	if raw.State != nil {
-		for _, entry := range []struct {
-			key    string
-			raw    *string
-			target *string
-		}{
-			{keyStateDB, raw.State.DB, &result.State.DB},
-			{keyStateCacheDB, raw.State.CacheDB, &result.State.CacheDB},
-		} {
-			if entry.raw == nil {
-				continue
-			}
-			if strings.TrimSpace(*entry.raw) == "" {
-				return Config{}, fmt.Errorf("config %s: %s must be non-empty", result.Path, entry.key)
-			}
-			value, err := expandHomePath(*entry.raw, home)
-			if err != nil {
-				return Config{}, fmt.Errorf("config %s: %s: %w", result.Path, entry.key, err)
-			}
-			*entry.target = value
-			result.Sources[entry.key] = SourceFile
-		}
+	if err := applyStateKeys(&result, raw.State, home); err != nil {
+		return Config{}, err
 	}
 
 	// The top-level claude posture resolves before accounts so an unset

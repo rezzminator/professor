@@ -1,7 +1,7 @@
 cmd/pfm/chat_reload_command.go 833
 cmd/pfm/chat_satellite_command.go 828
 internal/compose/compose.go 1332
-internal/config/config.go 1602
+internal/config/config.go 1576
 internal/doctor/doctor.go 1517
 internal/harvest/mirror_providers.go 829
 internal/inject/engine.go 1807

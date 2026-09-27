@@ -415,6 +415,9 @@ func TestStatePathsFromPrecedence(t *testing.T) {
 		{name: "missing config file", missing: true},
 		{name: "explicit missing config file", missing: true},
 		{name: "broken config", config: "not json", wantError: true},
+		{name: "unrelated invalid key keeps state", config: `{"version":2,"accounts":[],"ask":{"engine":"cc"},"state":{"db":"~/key-state.db"}}`, stateKey: "key-state.db"},
+		{name: "unsupported version", config: `{"version":99,"state":{"db":"~/key-state.db"}}`, wantError: true},
+		{name: "empty state key", config: `{"version":2,"state":{"db":" "}}`, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()

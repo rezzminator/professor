@@ -104,6 +104,7 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
 		`"sub-agent-compact@sub-agent-compact":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
+	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	if err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(
@@ -116,11 +117,103 @@ func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 			t.Fatalf("already-enabled account ran %v\n%s", call, out.String())
 		}
 	}
-	if !strings.Contains(out.String(), "ok      claude plugin sub-agent-compact@sub-agent-compact enabled in "+first) {
+	wantOK := "ok      claude plugin sub-agent-compact@sub-agent-compact installed and enabled in " + first
+	if !strings.Contains(out.String(), wantOK) {
 		t.Fatalf("no ok line for the enabled account:\n%s", out.String())
 	}
 	if len(runner.calls) != 2*len(claudePlugins) {
 		t.Fatalf("second account calls=%v, want add+install per plugin", runner.calls)
+	}
+}
+
+// writeInstalledPlugins writes dir's plugins/installed_plugins.json the way
+// claude records an install: one entry per id whose installPath exists.
+func writeInstalledPlugins(t *testing.T, dir string, ids ...string) {
+	t.Helper()
+	plugins := map[string]any{}
+	for _, id := range ids {
+		installPath := filepath.Join(dir, "plugins", "cache", id)
+		if err := os.MkdirAll(installPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		plugins[id] = []any{map[string]any{"scope": "user", "installPath": installPath}}
+	}
+	raw, err := json.Marshal(map[string]any{"version": 2, "plugins": plugins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(dir, "plugins", "installed_plugins.json"), string(raw))
+}
+
+// Accounts share one settings.json through a symlink, so "enabled" there says
+// nothing about this account: a plugin enabled but never installed in this
+// account's config dir still gets installed.
+func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
+		`"sub-agent-compact@sub-agent-compact":true}}`
+	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
+	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
+	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID)
+	runner := &pluginRunner{}
+	var out bytes.Buffer
+	if err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(
+		context.Background(),
+	); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	installs := 0
+	for _, call := range runner.calls {
+		if call.configDir == first {
+			t.Fatalf("the installed account ran %v\n%s", call, out.String())
+		}
+		if strings.HasPrefix(call.argv, "plugin install ") {
+			installs++
+		}
+	}
+	if installs != len(claudePlugins) {
+		t.Fatalf(
+			"installs in the uninstalled account=%d, want %d; calls=%v",
+			installs,
+			len(claudePlugins),
+			runner.calls,
+		)
+	}
+}
+
+func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
+	all := []string{claudePlugins[0].ID, claudePlugins[1].ID}
+	for _, test := range []struct {
+		name    string
+		prepare func(t *testing.T, dir string)
+		want    []string
+		wantErr bool
+	}{
+		{name: "no record file", prepare: func(*testing.T, string) {}, want: all},
+		{name: "both installed", prepare: func(t *testing.T, dir string) {
+			writeInstalledPlugins(t, dir, all...)
+		}, want: nil},
+		{name: "install path gone", prepare: func(t *testing.T, dir string) {
+			writeInstalledPlugins(t, dir, all...)
+			if err := os.RemoveAll(filepath.Join(dir, "plugins", "cache", all[1])); err != nil {
+				t.Fatal(err)
+			}
+		}, want: all[1:]},
+		{name: "malformed record", prepare: func(t *testing.T, dir string) {
+			writeFixture(t, filepath.Join(dir, "plugins", "installed_plugins.json"), "{")
+		}, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			test.prepare(t, dir)
+			got, err := ClaudePluginsNotInstalled(dir)
+			if test.wantErr != (err != nil) {
+				t.Fatalf("err=%v, wantErr=%t", err, test.wantErr)
+			}
+			if strings.Join(got, ",") != strings.Join(test.want, ",") {
+				t.Fatalf("not installed=%v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

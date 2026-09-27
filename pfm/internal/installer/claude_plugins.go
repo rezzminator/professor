@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -98,6 +99,44 @@ func ClaudePluginGaps(path string) ([]string, error) {
 	return gaps, nil
 }
 
+// ClaudePluginsNotInstalled reads one account's plugins/installed_plugins.json
+// and names every claudePlugins id with no install record whose installPath
+// exists. Accounts may share one settings.json, so this record — one per
+// config dir — is what says a plugin is installed in THIS account. A missing
+// file means none is installed; a file that cannot be read or parsed returns
+// its error, never an answer.
+func ClaudePluginsNotInstalled(configDir string) ([]string, error) {
+	path := filepath.Join(configDir, "plugins", "installed_plugins.json")
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var record struct {
+		Plugins map[string][]struct {
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	if err == nil {
+		if err := json.Unmarshal(raw, &record); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+	}
+	var missing []string
+	for _, plugin := range claudePlugins {
+		installed := false
+		for _, entry := range record.Plugins[plugin.ID] {
+			if info, statErr := os.Stat(entry.InstallPath); entry.InstallPath != "" && statErr == nil && info.IsDir() {
+				installed = true
+				break
+			}
+		}
+		if !installed {
+			missing = append(missing, plugin.ID)
+		}
+	}
+	return missing, nil
+}
+
 func readClaudeSettingsDocument(path string) (map[string]any, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -122,7 +161,8 @@ func pluginEnabled(document map[string]any, id string) bool {
 }
 
 // ensureClaudePlugins installs every claudePlugins entry on every Claude
-// account whose settings.json does not already enable it, running the real
+// account where it is not both enabled in settings.json and recorded as
+// installed in that account's own config dir, running the real
 // claude binary with CLAUDE_CONFIG_DIR pointed at that account. A failed
 // account is reported and joined into the returned error; the other accounts
 // still run. A settings file it cannot read is skipped by name, the way
@@ -142,9 +182,14 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 			installer.skip("claude plugins in " + dir + ": settings unreadable, state unknown: " + err.Error())
 			continue
 		}
+		missing, err := ClaudePluginsNotInstalled(dir)
+		if err != nil {
+			installer.skip("claude plugins in " + dir + ": install record unreadable, state unknown: " + err.Error())
+			continue
+		}
 		for _, plugin := range claudePlugins {
-			if pluginEnabled(document, plugin.ID) {
-				installer.ok("claude plugin " + plugin.ID + " enabled in " + dir)
+			if pluginEnabled(document, plugin.ID) && !slices.Contains(missing, plugin.ID) {
+				installer.ok("claude plugin " + plugin.ID + " installed and enabled in " + dir)
 				continue
 			}
 			if resolveErr != nil {

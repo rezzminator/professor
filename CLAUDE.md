@@ -14,10 +14,9 @@ This repo is the framework, not an app that uses it: everything under `templates
 - public face: the files a visitor or adopter reads first · `README.md`, `INSTALL.md`, `CHANGELOG.md`, `VERSION`, `releases/v{X.Y.Z}.md`
 - leak gate: the identifying-content scan, run `pre-push` · `scripts/leak-check.sh`, `.githooks/pre-push`
 - pfm: the fleet engine, Go · `pfm/cmd/pfm/`, `pfm/internal/` · child `pfm/CLAUDE.md`
-- fleet prompt: the main chat's system layer per engine, embedded at build and composed by `pfm install`; sub-agents never receive it; `pfm doctor` names an embed that differs from the clone · `pfm/harness-prompts/` · model tiers in § Model Selection `pfm/harness-prompts/share/head.md` · the rungs, the briefing contract and a sub-agent's first move in § Orchestration `pfm/harness-prompts/share/tail.md`
+- fleet prompt: the main chat's system layer per engine, embedded at build and composed by `pfm install`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here; `pfm doctor` names an embed that differs from the clone · `pfm/harness-prompts/` · model tiers in § Model Selection `pfm/harness-prompts/share/head.md` · the main chat's rungs in § Orchestration `pfm/harness-prompts/share/tail.md`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the only web and document harvester, over a pinned Python conversion sidecar · `pfm/internal/harvest/`, `pfm/internal/harvestmcp/`, sidecar `pfm/internal/harvestpy/`
-- deep-rr: the research workflow engine, linked into `~/.claude/skills/` by `pfm install` · `workflows/deep-rr/` · child `workflows/deep-rr/CLAUDE.md`
 - general family: `general-orchestrator` and its executors, for a clear batch · `templates/global/agents/` · design `docs/design/general/`
 - flights: the spec → execute → land pipeline for large work, `/flights:*` with the `flights-*` agents · `templates/global/commands/flights/` · design `docs/design/flights/`
 - flight directory: a flight's task files and audit trail, outside the tree and kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
@@ -27,7 +26,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 - self-hosted manifest: the tracked ledger of this repo's own install, verified (restamped with `--write`) by a repo gate · `.professor/manifest.json`, `infra/check-self-hosted-manifest.sh`
 - retro inbox: the steering ledger `/pcm retro` folds · `.professor/retro.md`
 - this repo's install: the project tier this repo runs, source of truth for its engine mirrors; machine-global originals reach it only through `~/.claude/` symlinks, never a local copy · `.claude/`
-- guard: the PreToolUse hook gating `.claude/**` and every `CLAUDE.md` · `.claude/scripts/pfm-guard.sh` · design `docs/design/hooks/`
+- guard: the PreToolUse hook gating `.claude/**` and every `CLAUDE.md`, never a generated `AGENTS.md` · `.claude/scripts/pfm-guard.sh` · design `docs/design/hooks/`
 - engine mirrors: `AGENTS.md`, `.codex/**`, `.opencode/**`, untracked, so a fresh clone generates before it checks · generated from `CLAUDE.md` and `.claude/` by `pfm codex build .` and `pfm opencode build .`
 - Codex keeper: the one hand-written, tracked file under `.codex/` · `.codex/config.toml`
 - marketplace: the plugin listing · `.claude-plugin/marketplace.json`
@@ -63,7 +62,7 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Local
 
-- Build and test only through `.claude/scripts/dev.sh {status|install|build|typecheck|verify|test} {templates|pfm}`; deep-rr builds per its child file.
+- On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` only; `verify`, `test`, `cover` and `all` refuse outside the fence.
 - Scratch lives in `/tmp/{project}/{purpose}/`: `{project}` is this repo's directory name minus any leading dot (`.professor` → `professor`), derived, never hardcoded.
 - One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{timing|lanes|guard}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
 
@@ -91,6 +90,30 @@ This repo is the framework, not an app that uses it: everything under `templates
 - **Version discipline:** `VERSION`, `CHANGELOG.md`, `releases/v{X.Y.Z}.md` and the tag MUST agree; between releases `develop`'s `VERSION` is the next `{X.Y.Z}-alpha`; `/pfm:release` owns the sequence.
 - **Release notes are NEVER written during development:** `/pfm:release` derives them from `develop`'s diff against `main` and its commit messages.
 
+## Your first move as a sub-agent
+
+Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
+
+- A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
+- A brief carrying the user's ruling to skip the ceremony (no `flights-speccer`, no orchestrator): do it yourself, start to finish, whatever its size.
+- Otherwise take the lowest rung that fits; a higher rung needs its named reason. You finish within 45 calls; at the cap, return what landed, what is left and the next step.
+  1. The solution is in hand and fits about 80 calls, a small failure you can read to its cause included: do it yourself when it fits your 45 calls, otherwise one or two sub-agents, in sequence or in parallel.
+  2. The solution is in hand but the volume is past one or two agents — many clear tasks with nameable files: your first call spawns `general-orchestrator` with the work, all you hold and the check that proves the batch done.
+  3. The solution is not in hand — a design to choose, a failure of unknown cause, files you cannot name — and the work is large: your first call spawns `flights-speccer` with the work, all you hold and a directory under `$HOME/.local/state/pfm/flights/{project}/`. Its return is your orders: one task file, you execute it; several, you execute none and hand the directory to `flights-orchestrator`. Below the smart tier you write no spec yourself.
+- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
+- ✓ "Add the timeout flag to each of the 12 subcommands" is a batch of clear tasks: `general-orchestrator`, no `flights-speccer`.
+- ✗ "Take the four failing test lanes to green" done by one agent: hundreds of calls, each re-sending a context past 400K. ✓ `flights-speccer`, then `flights-orchestrator`.
+- Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
+
+## Dispatch
+
+Tiers and effort live in the fleet prompt's § Model Selection; the cast and each agent's pinned model in `.claude/agents/` frontmatter.
+
+- Every dispatch carries all five: the goal in one sentence and the artifact it returns, its shape named; the boundary, in scope and explicitly out; the anchors — exact files, symbols or commands, never "find the relevant code"; the tier and effort, plus a budget when the task can run away; what its own failure looks like — a dead end, an empty result, a tool that would not run.
+- All sibling agents of a round go in one message; agents dispatched and reports received are counted and must match, and a missing report is a named coverage hole.
+- An invariant enforced across layers (Go + shell + prompt) is `tracer`-mapped closed-world before the build dispatch; the spec carries every enumerated door — an invariant held at N−1 of its N doors is a violation at the missing door.
+- Agent reports are evidence, not truth: verify a claim against what you can read yourself before relaying it.
+
 ## Prompt & template code
 
 - A template is the live source file, verbatim — same structure, mechanics, character and logic; only project-specific values swap for placeholder tokens; the prose is never abstracted, skeletonized or genericized.
@@ -116,8 +139,8 @@ This repo is the framework, not an app that uses it: everything under `templates
 - Git writes go through registered `gitter`; every other sub-agent is read-only.
 - When `gitter` is unavailable, only the active main Codex chat performs scoped Git writes, and only after the user's explicit authorization in the current turn; publication still needs its own request under § Publication.
 - Commit only code whose tests pass.
-- Guarded files: a task touching `.claude/**`, any `CLAUDE.md` or `templates/**` routes to `/pcm`; the guard admits its files only in a session that has read `~/.claude/commands/quality/prompt.md`, and its deny message carries the unlock steps.
-- Edits to `.claude/**` and any `CLAUDE.md` are the main chat's, under `/pcm`; a sub-agent reports the change it needs.
+- Guarded files: a task touching `.claude/**`, any `CLAUDE.md` (the source of its `AGENTS.md`) or `templates/**` routes to `/pcm`; the guard admits its files only in a session that has read `~/.claude/commands/quality/prompt.md`, and its deny message carries the unlock steps.
+- Edits to `.claude/**` and any `CLAUDE.md` (never its generated `AGENTS.md`) are the main chat's, under `/pcm`; a sub-agent reports the change it needs.
 - Disabling the guard hook, or routing a sub-agent around it, is a violation.
 - Code flights build inside the fence: a git worktree under `.worktrees/{flight}/`, every build and test through `.claude/scripts/dev.sh iso`; an executor runs only its affected tests per `.claude/commands/pfm-testing-manual.md`; the full suite is the gate's.
 - Dev runs target fence worktrees; the live checkout, the host's `~/.local/bin` and the real `$HOME` stay untouched.
@@ -128,6 +151,6 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Testing
 
-- Run the project's own gate before claiming anything works: `.claude/scripts/dev.sh test {templates|pfm}`; never report a suite you did not watch run.
+- **Every test runs inside the fence, never on the host:** the gate is `.claude/scripts/dev.sh iso test {templates|pfm}`, run before claiming anything works; never report a suite you did not watch run.
 - A regression test counts only after it was watched failing against the unfixed code.
 - A skipped or filtered suite is a named gap in the report, never a pass.

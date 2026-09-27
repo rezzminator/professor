@@ -14,8 +14,8 @@ Every build, test and gate runs through one script:
 
 ```bash
 .claude/scripts/dev.sh status            # toolchains and projects
-.claude/scripts/dev.sh verify templates  # leak gate + placeholder registry
-.claude/scripts/dev.sh test pfm          # the Go fleet engine's suite
+.claude/scripts/dev.sh iso verify templates  # leak gate + placeholder registry
+.claude/scripts/dev.sh iso test pfm      # the Go fleet engine's suite
 ```
 
 - `pfm/` is the Go fleet engine (version in `pfm/go.mod`); how it is tested is written down in [`.claude/commands/pfm-testing-manual.md`](.claude/commands/pfm-testing-manual.md).

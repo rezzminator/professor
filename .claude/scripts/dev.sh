@@ -734,10 +734,10 @@ commands:
   build                  compile
   typecheck              vet / tsc --noEmit
   verify                 pre-test gates (pfm: go vet, fmt-check, lint-new, architecture ratchet;
-                         templates: clone ratchet, leak + token gates)
-  test                   run the test suite
-  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml)
-  all                    verify + build + test for the project
+                         templates: clone ratchet, leak + token gates) — fence only
+  test                   run the test suite — fence only
+  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml) — fence only
+  all                    verify + build + test for the project — fence only
   iso <cmd> [project]    run any command above — plus e2e | shell — inside the
                          pfm-dev container fence (infra/), worktree mounted
   iso sim <command…>     run a command in the real-simulation fence: Google Chrome,
@@ -754,6 +754,17 @@ EOF
 
 CMD="${1:-status}"
 TARGET="${2:-all}"
+
+# A suite never runs on the host: its tests spawn tmux sessions, git repos and
+# processes against whatever machine they run on. The fence sets
+# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh).
+case "$CMD" in
+  test|cover|all|verify)
+    if [[ -z "${PFM_DEV_FENCE:-}" ]]; then
+      echo "FENCE-ONLY: dev.sh $CMD runs test suites and never on the host — run: .claude/scripts/dev.sh iso $CMD ${2:-}" >&2
+      exit 2
+    fi ;;
+esac
 
 case "$CMD" in
   status) cmd_status "$TARGET" ;;

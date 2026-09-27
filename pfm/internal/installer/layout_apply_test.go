@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -540,6 +542,9 @@ type layoutTestRunner struct {
 	failStop  bool
 	failStart bool
 	onRun     func(string)
+	// unloaded units answer is-active non-zero, and a stop or start naming
+	// one fails as systemctl does for a unit that is not loaded (exit 5).
+	unloaded []string
 }
 
 func (runner *layoutTestRunner) Run(_ context.Context, name string, args ...string) error {
@@ -549,6 +554,11 @@ func (runner *layoutTestRunner) Run(_ context.Context, name string, args ...stri
 	}
 	if name == "sudo" && runner.failSudo {
 		return os.ErrPermission
+	}
+	for _, unit := range runner.unloaded {
+		if slices.Contains(args, unit) {
+			return errors.New("exit status 5: unit " + unit + " not loaded")
+		}
 	}
 	if strings.Contains(runner.calls[len(runner.calls)-1], " stop ") && runner.failStop {
 		return os.ErrPermission
@@ -585,7 +595,9 @@ func TestLayoutDatabaseServiceCommandFailureIsReported(t *testing.T) {
 					t.Fatalf("database moved without stopped services: %v", err)
 				}
 			}
-			if len(runner.calls) != 2 {
+			if lifecycle := slices.DeleteFunc(slices.Clone(runner.calls), func(call string) bool {
+				return strings.Contains(call, " is-active ")
+			}); len(lifecycle) != 2 {
 				t.Fatalf("services not restarted after %s failure: %v", phase, runner.calls)
 			}
 		})
@@ -642,9 +654,15 @@ func TestLayoutDatabaseServicesRestartAfterOutcome(t *testing.T) {
 			if outcome != "failure" && err != nil {
 				t.Fatal(err)
 			}
-			if len(runner.calls) != 2 ||
-				runner.calls[0] != "systemctl --user stop pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" ||
-				runner.calls[1] != "systemctl --user start pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" {
+			var lifecycle []string
+			for _, call := range runner.calls {
+				if !strings.Contains(call, " is-active ") {
+					lifecycle = append(lifecycle, call)
+				}
+			}
+			if len(lifecycle) != 2 ||
+				lifecycle[0] != "systemctl --user stop pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" ||
+				lifecycle[1] != "systemctl --user start pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" {
 				t.Fatalf("service lifecycle %s: %v", outcome, runner.calls)
 			}
 		})
@@ -745,5 +763,76 @@ func TestLayoutApplyHomeMCPClientsOnlyAndMalformed(t *testing.T) {
 		if got, err := os.ReadFile(path); err != nil || string(got) != want {
 			t.Errorf("malformed row changed %s=%s err=%v", path, got, err)
 		}
+	}
+}
+
+// Ruling 32: a strip of a shared settings.json writes through the links to the
+// target, journals the target, and rolls the target's bytes back.
+func TestLayoutApplyStripsSharedSettingsThroughTheLink(t *testing.T) {
+	env, shared, links, raw := sharedSettingsFixture(t, filepath.Join("dotfiles", "claude-settings.json"))
+	var output bytes.Buffer
+	dir, err := ApplyLayout(context.Background(), env, nil, true, &output)
+	if err != nil || dir == "" {
+		t.Fatalf("strip journal=%q err=%v output=%s", dir, err, output.String())
+	}
+	updated, err := os.ReadFile(shared)
+	if err != nil || strings.Contains(string(updated), "private-ledger-hook") ||
+		!strings.Contains(string(updated), "operator-hook") {
+		t.Fatalf("shared settings=%s err=%v", updated, err)
+	}
+	for _, link := range links {
+		if target, err := os.Readlink(link); err != nil || target != shared {
+			t.Fatalf("%s is no longer a link to %s: target=%q err=%v", link, shared, target, err)
+		}
+		requireLayoutVerdict(t, ClassifyLayout(env), "account-settings", link, VerdictOK)
+	}
+	if err := RollbackLayout(context.Background(), env, filepath.Base(dir), false, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(shared); err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("shared settings rollback=%s err=%v", got, err)
+	}
+	if target, err := os.Readlink(links[0]); err != nil || target != shared {
+		t.Fatalf("rollback replaced the link: target=%q err=%v", target, err)
+	}
+}
+
+// A host that never loaded one pfm unit (MCP off, or an install older than
+// the name-sync units) still moves its database: only the running units stop,
+// and exactly those start again.
+func TestLayoutDatabaseMoveStopsOnlyRunningServices(t *testing.T) {
+	env := layoutFixture(t)
+	if err := os.Remove(env.StateDB); err != nil {
+		t.Fatal(err)
+	}
+	legacy := paths.LegacyStateDB(env.Home)
+	db, err := sqlitedb.OpenStore(context.Background(), legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runner := &layoutTestRunner{unloaded: []string{"pfm-mcp.service"}}
+	env.runner = runner
+	var output bytes.Buffer
+	if _, err := ApplyLayout(context.Background(), env, nil, true, &output); err != nil {
+		t.Fatalf("apply with an unloaded unit: %v output=%s calls=%v", err, output.String(), runner.calls)
+	}
+	if _, err := os.Stat(env.StateDB); err != nil {
+		t.Fatalf("database not moved: %v output=%s", err, output.String())
+	}
+	var lifecycle []string
+	for _, call := range runner.calls {
+		if strings.Contains(call, " stop ") || strings.Contains(call, " start ") {
+			lifecycle = append(lifecycle, call)
+		}
+	}
+	want := []string{
+		"systemctl --user stop pfm-name-sync.path pfm-name-sync.timer",
+		"systemctl --user start pfm-name-sync.path pfm-name-sync.timer",
+	}
+	if !slices.Equal(lifecycle, want) {
+		t.Fatalf("service lifecycle = %q, want %q", lifecycle, want)
 	}
 }

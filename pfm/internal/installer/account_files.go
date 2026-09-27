@@ -2,7 +2,11 @@ package installer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -232,4 +236,108 @@ func ownedMCPNames(servers map[string]any, owned []string, shaped mcpShaped) []s
 	}
 	sort.Strings(result)
 	return result
+}
+
+// classifyAccountSettings judges each physical settings file once: accounts
+// whose settings.json resolves to one file share it, the first carries the
+// verdict for that file and the others report ok, shared. A settings.json link
+// is shared settings only when it resolves to a regular file inside HOME.
+func classifyAccountSettings(env LayoutEnv) []LayoutFinding {
+	dirs := accountDirs(env)
+	ledgerPath := settingsHookOwnershipPath(env.ManagedRoot)
+	ownership, _, ledgerErr := readSettingsHookOwnership(ledgerPath)
+	sharers := map[string][]string{}
+	for _, dir := range dirs {
+		physical := physicalSettingsPath(filepath.Join(dir, "settings.json"))
+		sharers[physical] = append(sharers[physical], dir)
+	}
+	findings := make([]LayoutFinding, 0, len(dirs))
+	for _, dir := range dirs {
+		path := filepath.Join(dir, "settings.json")
+		physical := physicalSettingsPath(path)
+		if first := sharers[physical][0]; first != dir {
+			findings = append(findings, LayoutFinding{
+				Row: layoutRowAccountSettings, Verdict: VerdictOK, Path: path, Source: physical,
+				Detail: "shared with " + filepath.Join(first, "settings.json"),
+			})
+			continue
+		}
+		finding, info, exists := layoutLstat(layoutRowAccountSettings, path)
+		if ledgerErr != nil {
+			finding.Err, finding.Source, finding.Detail = ledgerErr, ledgerPath, layoutOwnershipLedger
+		} else if finding.Err == nil && exists {
+			judgeAccountSettings(env, &finding, info, ownership[physical])
+		}
+		live := []string{}
+		for _, sharer := range sharers[physical] {
+			pids, err := liveChatPIDs(env.ProcRoot, sharer)
+			if err != nil {
+				finding.Err = err
+				break
+			}
+			live = append(live, pids...)
+		}
+		if finding.Err == nil && len(live) > 0 {
+			finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
+		}
+		findings = append(findings, finding)
+	}
+	return findings
+}
+
+// judgeAccountSettings marks an existing account settings.json strip when it
+// carries pfm-owned entries, reading through a link to its shared target.
+func judgeAccountSettings(env LayoutEnv, finding *LayoutFinding, info fs.FileInfo, owned settingsHookCounts) {
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, refusal, err := accountSettingsLink(env, finding.Path)
+		finding.Source = target
+		if err != nil || refusal != "" {
+			finding.Err = err
+			if refusal != "" {
+				finding.Verdict, finding.Detail = VerdictRefuse, refusal
+			}
+			return
+		}
+	} else if !info.Mode().IsRegular() {
+		finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
+		return
+	}
+	raw, err := os.ReadFile(finding.Path)
+	if err != nil {
+		finding.Err = err
+		return
+	}
+	leftovers, err := accountSettingsLeftovers(raw, env.Home, owned, true)
+	if err != nil {
+		finding.Err = err
+	} else if len(leftovers) > 0 {
+		finding.Verdict, finding.Detail = VerdictStrip, strings.Join(leftovers, ",")
+	}
+}
+
+// accountSettingsLink resolves an account settings.json link: its target when
+// that is a regular file inside HOME, otherwise the reason it is refused.
+func accountSettingsLink(env LayoutEnv, path string) (target, refusal string, err error) {
+	target, err = filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", "dangling link", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	inside := false
+	for _, home := range layoutHomes(env) {
+		inside = inside || pathWithin(target, home)
+	}
+	if !inside {
+		return target, "link outside HOME: " + target, nil
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return target, "", err
+	}
+	if !info.Mode().IsRegular() {
+		return target, layoutNotRegular, nil
+	}
+	return target, "", nil
 }

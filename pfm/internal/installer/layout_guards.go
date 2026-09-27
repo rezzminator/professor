@@ -68,8 +68,10 @@ func dbHolderPIDs(procRoot, db string) ([]string, error) {
 	}
 	holders := []string{}
 	for _, pid := range pids {
+		// Another user's process is unreadable (EACCES) to a normal user, and it
+		// cannot hold a database under this user's HOME.
 		fds, err := os.ReadDir(filepath.Join(procRoot, pid, "fd"))
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			continue
 		}
 		if err != nil {
@@ -77,7 +79,7 @@ func dbHolderPIDs(procRoot, db string) ([]string, error) {
 		}
 		for _, fd := range fds {
 			target, err := os.Readlink(filepath.Join(procRoot, pid, "fd", fd.Name()))
-			if errors.Is(err, fs.ErrNotExist) {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 				continue
 			}
 			if err != nil {

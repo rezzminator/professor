@@ -82,3 +82,48 @@ func TestReconcileFileDefaultModeIsUnchangedFromBeforeTheFix(t *testing.T) {
 		t.Fatalf("result=%#v, want Unchanged=1 and no problems for a matching default-mode file", result)
 	}
 }
+
+func TestGlobalCommandsBeforeWriteSeesEveryChangedPathBeforeItsWrite(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".claude", "commands", "fixture.md")
+	writeTestFile(t, source, "---\ndescription: fixture\n---\nUse /fixture.\n")
+
+	var calls []string
+	existed := map[string]bool{}
+	options := GlobalCommandsOptions{Home: home, Mode: ModeBuild, BeforeWrite: recordBeforeWrite(&calls, existed, "")}
+	build, err := RunGlobalCommands(options)
+	if err != nil || !build.OK || build.Wrote != 2 {
+		t.Fatalf("global build: result=%#v err=%v", build, err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("BeforeWrite calls = %q, want one per written path", calls)
+	}
+	for _, path := range calls {
+		if existed[path] {
+			t.Fatalf("BeforeWrite ran after the write of %s", path)
+		}
+		if _, statErr := os.Lstat(path); statErr != nil {
+			t.Fatalf("hooked path %s was not written: %v", path, statErr)
+		}
+	}
+
+	calls = nil
+	if _, err := RunGlobalCommands(options); err != nil || len(calls) != 0 {
+		t.Fatalf("converged build: calls=%q err=%v, want no call", calls, err)
+	}
+
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	orphans := []string{}
+	failing := GlobalCommandsOptions{Home: home, Mode: ModeBuild, BeforeWrite: func(path string) error {
+		orphans = append(orphans, path)
+		return os.ErrPermission
+	}}
+	if _, err := RunGlobalCommands(failing); err == nil || len(orphans) != 1 {
+		t.Fatalf("orphan removal with a failing hook: calls=%q err=%v, want one call and an error", orphans, err)
+	}
+	if _, statErr := os.Lstat(orphans[0]); statErr != nil {
+		t.Fatalf("orphan %s removed despite the failing hook: %v", orphans[0], statErr)
+	}
+}

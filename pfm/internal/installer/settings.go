@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -299,46 +298,6 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 		return "", false
 	}
 	return name, true
-}
-
-// UnknownPFMHookCommands parses a settings.json or Codex hooks.json document
-// and returns the names (unknownPFMHookCommand's shape) of every hook
-// command present that is of pfm's own shape but names a subcommand this
-// binary neither implements nor recognizes as retired — the residue a
-// stranded rollback leaves (issue #24 finding 2). A document this binary
-// cannot parse returns its decode error — an unchecked file, never a clean
-// one; a clean document returns nil, nil.
-func UnknownPFMHookCommands(raw []byte, home string) ([]string, error) {
-	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, fmt.Errorf("decode hook document: %w", err)
-	}
-	pfmBinary := filepath.Join(home, ".local", "bin", "pfm")
-	seen := map[string]bool{}
-	events, _ := document["hooks"].(map[string]any)
-	for _, eventValue := range events {
-		entries, _ := eventValue.([]any)
-		for _, entryValue := range entries {
-			entry, _ := entryValue.(map[string]any)
-			hooks, _ := entry["hooks"].([]any)
-			for _, hookValue := range hooks {
-				hook, _ := hookValue.(map[string]any)
-				command, _ := hook[configCommandKey].(string)
-				if name, ok := unknownPFMHookCommand(command, pfmBinary); ok {
-					seen[name] = true
-				}
-			}
-		}
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		return nil, nil
-	}
-	return names, nil
 }
 
 func isRetiredHookCommand(command, pfmBinary string) bool {

@@ -24,6 +24,9 @@ func (env LayoutEnv) probeSpace(dir string) (device, free uint64, err error) {
 	return statfsSpaceProbe(dir)
 }
 
+// layoutDevice widens a stat device number, whose type differs by kernel.
+func layoutDevice[T ~int32 | ~uint32 | ~uint64](device T) uint64 { return uint64(device) }
+
 // statfsSpaceProbe is the one statfs reader: the device of the nearest
 // existing ancestor of dir (Lstat) and the bytes available to an unprivileged
 // writer there.
@@ -40,7 +43,7 @@ func statfsSpaceProbe(dir string) (device, free uint64, err error) {
 			if err := syscall.Statfs(existing, &space); err != nil {
 				return 0, 0, err
 			}
-			return uint64(stat.Dev), space.Bavail * uint64(space.Bsize), nil
+			return layoutDevice(stat.Dev), space.Bavail * uint64(space.Bsize), nil
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			return 0, 0, err

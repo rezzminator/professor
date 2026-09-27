@@ -331,7 +331,14 @@ func TestInstallJournalRollbackRefusesAnInstallRecordOutsideTheAllowlist(t *test
 
 // driftFixture applies three journaled changes an install could make — a file
 // rewrite, a created link and a created tree — each left with a fixed mtime.
-func driftFixture(t *testing.T) (LayoutEnv, *Journal, string, string, string, []byte) {
+type driftSetup struct {
+	env              LayoutEnv
+	journal          *Journal
+	file, link, tree string
+	original         []byte
+}
+
+func driftFixture(t *testing.T) driftSetup {
 	t.Helper()
 	env := layoutFixture(t)
 	old := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -371,7 +378,7 @@ func driftFixture(t *testing.T) (LayoutEnv, *Journal, string, string, string, []
 			t.Fatal(err)
 		}
 	}
-	return env, journal, file, link, tree, original
+	return driftSetup{env: env, journal: journal, file: file, link: link, tree: tree, original: original}
 }
 
 func TestLayoutRollbackRefusesDriftUnlessForced(t *testing.T) {
@@ -431,7 +438,9 @@ func TestLayoutRollbackRefusesDriftUnlessForced(t *testing.T) {
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			env, journal, file, link, tree, original := driftFixture(t)
+			fixture := driftFixture(t)
+			env, journal, file, link, tree, original := fixture.env, fixture.journal, fixture.file, fixture.link,
+				fixture.tree, fixture.original
 			drifted := test.drift(t, file, link, tree)
 			id := filepath.Base(journal.dir)
 			current, err := os.ReadFile(file)

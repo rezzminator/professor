@@ -88,15 +88,15 @@ func (journal *Journal) Planned() []string {
 // Write records the prior state of paths as install records, runs action and
 // marks the records applied; a failing action leaves them pending. A nil
 // journal only runs action; a dry-run journal plans the paths and runs nothing.
-func (journal *Journal) Write(paths []string, action func() error) error {
+func (journal *Journal) Write(targets []string, action func() error) error {
 	if journal == nil {
 		return action()
 	}
 	if journal.dryRun {
-		journal.plan(paths)
+		journal.plan(targets)
 		return nil
 	}
-	for _, path := range paths {
+	for _, path := range targets {
 		if err := journal.before(path); err != nil {
 			return err
 		}
@@ -166,12 +166,12 @@ func (journal *Journal) markRecordsApplied(indexes []int) error {
 // path — for a change the install itself makes after the record, such as the
 // schema migration of a moved database. A path with no applied record is left
 // alone.
-func (journal *Journal) Refingerprint(paths ...string) error {
+func (journal *Journal) Refingerprint(targets ...string) error {
 	if journal == nil || journal.dryRun || journal.dir == "" {
 		return nil
 	}
 	indexes := []int{}
-	for _, path := range paths {
+	for _, path := range targets {
 		for index := len(journal.records) - 1; index >= 0; index-- {
 			record := journal.records[index]
 			if record.Result == layoutRecordApplied && filepath.Clean(record.Destination) == filepath.Clean(path) {
@@ -186,8 +186,8 @@ func (journal *Journal) Refingerprint(paths ...string) error {
 	return journal.markRecordsApplied(indexes)
 }
 
-func (journal *Journal) plan(paths []string) {
-	for _, path := range paths {
+func (journal *Journal) plan(targets []string) {
+	for _, path := range targets {
 		journal.planned = append(journal.planned, installRecordPath(path))
 	}
 }
@@ -226,16 +226,16 @@ func installRecordPath(path string) string {
 
 // changePaths is the one door for an install write outside the layout rows:
 // change, with every path the action changes journaled before it runs.
-func (installer *engine) changePaths(message string, paths []string, action func() error) error {
+func (installer *engine) changePaths(message string, targets []string, action func() error) error {
 	journal := installer.options.Journal
 	if journal == nil || action == nil {
 		return installer.change(message, action)
 	}
 	if !installer.apply {
-		journal.plan(paths)
+		journal.plan(targets)
 		return installer.change(message, action)
 	}
-	return installer.change(message, func() error { return journal.Write(paths, action) })
+	return installer.change(message, func() error { return journal.Write(targets, action) })
 }
 
 var layoutJournalID = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
@@ -306,8 +306,8 @@ func (journal *Journal) snapshot(row string, verdict LayoutVerdict, path string)
 	return journal.flush()
 }
 
-func (journal *Journal) mutate(finding LayoutFinding, paths []string, action func() error) error {
-	for _, path := range paths {
+func (journal *Journal) mutate(finding LayoutFinding, targets []string, action func() error) error {
+	for _, path := range targets {
 		if err := journal.snapshot(finding.Row, finding.Verdict, path); err != nil {
 			return err
 		}
@@ -316,7 +316,7 @@ func (journal *Journal) mutate(finding LayoutFinding, paths []string, action fun
 		return err
 	}
 	applied := []int{}
-	for index := len(journal.records) - len(paths); index < len(journal.records); index++ {
+	for index := len(journal.records) - len(targets); index < len(journal.records); index++ {
 		applied = append(applied, index)
 	}
 	return journal.markRecordsApplied(applied)
@@ -698,7 +698,8 @@ func layoutRecordAllowed(env LayoutEnv, record layoutJournalRecord) bool {
 			return true
 		}
 		for _, dir := range accountDirs(env) {
-			if allows(filepath.Join(dir, "settings.json")) {
+			settings := filepath.Join(dir, "settings.json")
+			if allows(settings, physicalSettingsPath(settings)) {
 				return true
 			}
 		}

@@ -13,6 +13,9 @@ import (
 // wireUnits links, so the two can never be spelled differently.
 const nameSyncTimerUnit = "pfm-name-sync.timer"
 
+// nameSyncPathUnit is the name-sync path unit, started beside the timer.
+const nameSyncPathUnit = "pfm-name-sync.path"
+
 // The two markers each scheduler asset carries in place of a hard-coded poll.
 // launchd counts whole seconds; systemd takes a duration it can parse itself.
 const (

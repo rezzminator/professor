@@ -8,7 +8,7 @@
 # (release-rehearsal.sh) still produces pfm-dev, never the Chrome image.
 FROM ubuntu:24.04 AS pfm-base
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils \
+    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 \
  && rm -rf /var/lib/apt/lists/*
 # Go pinned to pfm/go.mod — bump both together or the fence tests a different compiler.
 ARG GO_VERSION=1.27.1

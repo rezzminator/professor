@@ -628,13 +628,12 @@ func editOpenCodeServer(raw []byte, name string, value []byte, remove bool) ([]b
 		if remove {
 			return raw, nil
 		}
-		servers := map[string]any{}
-		var registration map[string]any
-		if err := json.Unmarshal(value, &registration); err != nil {
-			return nil, err
+		// The caller's bytes go in verbatim, as the existing-object branch
+		// writes them, so a second edit finds nothing to change.
+		if !json.Valid(value) {
+			return nil, errors.New("OpenCode mcp registration is not valid JSON")
 		}
-		servers[name] = registration
-		encoded, err := json.Marshal(map[string]any{"mcp": servers})
+		encoded, err := json.Marshal(map[string]json.RawMessage{name: value})
 		if err != nil {
 			return nil, err
 		}

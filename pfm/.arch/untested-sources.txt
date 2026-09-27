@@ -3,7 +3,6 @@ cmd/pfm/chat_ask_command.go
 cmd/pfm/chat_command.go
 cmd/pfm/chat_dispatch.go
 cmd/pfm/chat_keys_command.go
-cmd/pfm/chat_new_command.go
 cmd/pfm/engines.go
 cmd/pfm/heal_command.go
 cmd/pfm/index_command.go
@@ -46,7 +45,6 @@ internal/engine/opencode/index.go
 internal/engine/opencode/match.go
 internal/fleet/killmanager.go
 internal/gather/agents.go
-internal/gather/cache1h.go
 internal/gather/claudeproc.go
 internal/gather/codex_held_root.go
 internal/gather/gather.go
@@ -68,7 +66,6 @@ internal/headless/run/process_unix.go
 internal/headless/stream.go
 internal/headless/watch.go
 internal/heal/runner.go
-internal/hookentry/agent_open.go
 internal/hookentry/claude_version.go
 internal/hookentry/codex_launch.go
 internal/hookentry/doc.go

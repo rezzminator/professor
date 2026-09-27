@@ -46,6 +46,15 @@ set -uo pipefail
 IMAGE=professor-pfm-dev
 NAME="${PFM_REHEARSAL_NAME:-pfm-host-rehearsal}"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+# The tracked tree. Inside the fence a linked worktree's .git names a host
+# path; the fence hands the active gitdir in as PFM_DEV_REPO_GIT_DIR.
+repo_ls_files() {
+  if [ -n "${PFM_DEV_REPO_GIT_DIR:-}" ]; then
+    GIT_DIR="$PFM_DEV_REPO_GIT_DIR" GIT_WORK_TREE="$REPO_ROOT" git -c safe.directory='*' ls-files -z
+  else
+    git -C "$REPO_ROOT" ls-files -z
+  fi
+}
 # Container-side paths: fixed, never under the rehearsed home.
 C_REHEARSAL=/rehearsal
 C_GIT=/pfm-git-common
@@ -210,7 +219,7 @@ cmd_rehearse() {
   case "/$clone/" in */../*) fail copy "clone marker names '$clone', which climbs out of the home" ;; esac
   local cand="$H/${clone#"$home"/}"
   { rm -rf -- "$cand" && mkdir -p "$cand"; } || fail copy "clear $cand failed"
-  git -C "$REPO_ROOT" ls-files -z | rsync -a --from0 --files-from=- --ignore-missing-args "$REPO_ROOT/" "$cand/" >>"$R/copy.log" 2>&1 ||
+  repo_ls_files | rsync -a --from0 --files-from=- --ignore-missing-args "$REPO_ROOT/" "$cand/" >>"$R/copy.log" 2>&1 ||
     fail copy "placing the candidate tree from $REPO_ROOT failed (see copy.log)"
   pass copy
 

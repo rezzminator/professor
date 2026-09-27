@@ -572,3 +572,85 @@ func TestLayoutMCPRowsJudgeLedgerAndShape(t *testing.T) {
 		})
 	}
 }
+
+// sharedSettingsFixture links account 2's and a third account's settings.json
+// to one regular settings file carrying pfm entries (ruling 32): the store's
+// own settings.json, or a file elsewhere inside HOME when target is set.
+func sharedSettingsFixture(t *testing.T, target string) (env LayoutEnv, shared string, links []string, raw []byte) {
+	t.Helper()
+	env = layoutFixture(t)
+	third := filepath.Join(env.Home, ".cc", "3")
+	env.Config.Accounts = append(env.Config.Accounts, pfmconfig.Account{ID: 3, ConfigDir: third})
+	shared = filepath.Join(env.Home, ".claude", "settings.json")
+	if target != "" {
+		shared = filepath.Join(env.Home, target)
+	}
+	raw, owned := accountSettingsFixture(env.Home)
+	layoutWrite(t, shared, string(raw))
+	encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{physicalSettingsPath(shared): owned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	layoutWrite(t, settingsHookOwnershipPath(env.ManagedRoot), string(encoded))
+	for _, dir := range []string{env.Config.Accounts[1].ConfigDir, third} {
+		link := filepath.Join(dir, "settings.json")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(shared, link); err != nil {
+			t.Fatal(err)
+		}
+		links = append(links, link)
+	}
+	return env, shared, links, raw
+}
+
+func TestLayoutSharedAccountSettingsLinkIsJudgedOnce(t *testing.T) {
+	env, shared, links, _ := sharedSettingsFixture(t, "")
+	findings := ClassifyLayout(env)
+	requireLayoutVerdict(t, findings, "account-settings", shared, VerdictStrip)
+	for _, link := range links {
+		finding := requireLayoutVerdict(t, findings, "account-settings", link, VerdictOK)
+		if !strings.Contains(finding.Detail, "shared with "+shared) {
+			t.Fatalf("shared link detail=%q, want shared with %s", finding.Detail, shared)
+		}
+	}
+	env, _, links, _ = sharedSettingsFixture(t, filepath.Join("dotfiles", "claude-settings.json"))
+	findings = ClassifyLayout(env)
+	requireLayoutVerdict(t, findings, "account-settings", links[0], VerdictStrip)
+	requireLayoutVerdict(t, findings, "account-settings", links[1], VerdictOK)
+	layoutWrite(t, filepath.Join(filepath.Dir(links[1]), "sessions", "4242.json"), `{}`)
+	if err := os.Mkdir(filepath.Join(env.ProcRoot, "4242"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	finding := requireLayoutVerdict(t, ClassifyLayout(env), "account-settings", links[0], VerdictRefuse)
+	if finding.Detail != "live chats: 4242" {
+		t.Fatalf("a live chat in a sharing account: detail=%q", finding.Detail)
+	}
+}
+
+func TestLayoutForeignAccountSettingsLinksRefuse(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "settings.json")
+	layoutWrite(t, outside, `{}`)
+	for _, testCase := range []struct {
+		name   string
+		target func(env LayoutEnv) string
+		detail string
+	}{
+		{"dangling", func(env LayoutEnv) string { return filepath.Join(env.Home, "gone.json") }, "dangling link"},
+		{"outside-home", func(LayoutEnv) string { return outside }, "link outside HOME"},
+		{"not-regular", func(env LayoutEnv) string { return filepath.Join(env.Home, ".claude") }, layoutNotRegular},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			env := layoutFixture(t)
+			link := filepath.Join(env.Config.Accounts[1].ConfigDir, "settings.json")
+			if err := os.Symlink(testCase.target(env), link); err != nil {
+				t.Fatal(err)
+			}
+			finding := requireLayoutVerdict(t, ClassifyLayout(env), "account-settings", link, VerdictRefuse)
+			if !strings.Contains(finding.Detail, testCase.detail) {
+				t.Fatalf("detail=%q, want %q", finding.Detail, testCase.detail)
+			}
+		})
+	}
+}

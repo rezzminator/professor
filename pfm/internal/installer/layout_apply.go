@@ -165,7 +165,9 @@ func layoutSnapshotPaths(env LayoutEnv, finding LayoutFinding) ([]string, error)
 		}
 		return paths, nil
 	case layoutRowAccountSettings:
-		return []string{finding.Path, settingsHookOwnershipPath(env.ManagedRoot)}, nil
+		// A shared settings.json link is written through: the target is the
+		// prior state, and the link stays a link.
+		return []string{physicalSettingsPath(finding.Path), settingsHookOwnershipPath(env.ManagedRoot)}, nil
 	case layoutRowAccountMCP, layoutRowHomeMCP:
 		return []string{finding.Path, filepath.Join(env.ManagedRoot, mcpOwnershipName)}, nil
 	case layoutRowStateDB, layoutRowCacheDB:
@@ -354,7 +356,7 @@ func applyLayoutAccount(journal *Journal, finding LayoutFinding, paths []string)
 			return err
 		}
 		return journal.mutate(finding, paths, func() error {
-			if err := atomicfile.Write(finding.Path, updated, 0o600); err != nil {
+			if err := atomicfile.Write(physical, updated, 0o600); err != nil {
 				return err
 			}
 			if _, err := os.Stat(ledger); errors.Is(err, fs.ErrNotExist) {
@@ -442,8 +444,9 @@ func applyLayoutHomeMCP(journal *Journal, finding LayoutFinding, paths []string)
 
 func applyLayoutDB(ctx context.Context, journal *Journal, finding LayoutFinding) (err error) {
 	env := journal.env
-	defer func() { err = errors.Join(err, restartLayoutServices(ctx, env)) }()
-	if stopErr := stopLayoutServices(ctx, env); stopErr != nil {
+	stopped, stopErr := stopLayoutServices(ctx, env)
+	defer func() { err = errors.Join(err, restartLayoutServices(ctx, env, stopped)) }()
+	if stopErr != nil {
 		return stopErr
 	}
 	current := layoutFindingByPath(ClassifyLayout(env), finding.Row, finding.Path)
@@ -580,37 +583,59 @@ func (env LayoutEnv) commandRunner() CommandRunner {
 	return execCommandRunner{}
 }
 
-func stopLayoutServices(ctx context.Context, env LayoutEnv) error {
+// layoutServiceUnits are the systemd user units that hold a pfm database.
+var layoutServiceUnits = []string{mcpUnitName, nameSyncPathUnit, nameSyncTimerUnit}
+
+// stopLayoutServices stops the pfm services running now and returns them, so
+// the restart brings back exactly those: a unit the host never loaded, or one
+// the operator stopped, is neither stopped nor started. A probe misreading a
+// running service is caught after the stop by the database holder scan.
+func stopLayoutServices(ctx context.Context, env LayoutEnv) ([]string, error) {
 	runner := env.commandRunner()
+	var running []string
 	if schedulerIsLaunchd {
 		var failures []error
 		for _, label := range []string{mcpLaunchdLabel, launchdLabel} {
 			service := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+			if runner.Run(ctx, "launchctl", "print", service) != nil {
+				continue
+			}
 			if err := runner.Run(ctx, "launchctl", "bootout", service); err != nil {
 				failures = append(failures, fmt.Errorf("launchctl bootout %s: %w", service, err))
+				continue
 			}
+			running = append(running, label)
 		}
-		return errors.Join(failures...)
+		return running, errors.Join(failures...)
 	}
-	if err := runner.Run(
-		ctx,
-		"systemctl",
-		"--user",
-		"stop",
-		mcpUnitName,
-		"pfm-name-sync.path",
-		nameSyncTimerUnit,
-	); err != nil {
-		return fmt.Errorf("systemctl --user stop layout services: %w", err)
+	for _, unit := range layoutServiceUnits {
+		if layoutSystemctl(ctx, runner, "is-active", "--quiet", unit) == nil {
+			running = append(running, unit)
+		}
 	}
-	return nil
+	if len(running) == 0 {
+		return nil, nil
+	}
+	if err := layoutSystemctl(ctx, runner, append([]string{"stop"}, running...)...); err != nil {
+		return running, fmt.Errorf("systemctl --user stop layout services: %w", err)
+	}
+	return running, nil
 }
 
-func restartLayoutServices(ctx context.Context, env LayoutEnv) error {
+// layoutSystemctl runs one systemctl verb on the user manager.
+func layoutSystemctl(ctx context.Context, runner CommandRunner, args ...string) error {
+	return runner.Run(ctx, "systemctl", append([]string{"--user"}, args...)...)
+}
+
+// restartLayoutServices starts again the services stopLayoutServices stopped.
+func restartLayoutServices(ctx context.Context, env LayoutEnv, stopped []string) error {
+	if len(stopped) == 0 {
+		return nil
+	}
 	runner := env.commandRunner()
 	if schedulerIsLaunchd {
 		var failures []error
-		for _, label := range []string{mcpLaunchdLabel, launchdLabel} {
+		for _, label := range stopped {
 			service := filepath.Join(env.Home, "Library", "LaunchAgents", label+".plist")
 			if err := runner.Run(
 				ctx,
@@ -624,15 +649,7 @@ func restartLayoutServices(ctx context.Context, env LayoutEnv) error {
 		}
 		return errors.Join(failures...)
 	}
-	if err := runner.Run(
-		ctx,
-		"systemctl",
-		"--user",
-		"start",
-		mcpUnitName,
-		"pfm-name-sync.path",
-		nameSyncTimerUnit,
-	); err != nil {
+	if err := layoutSystemctl(ctx, runner, append([]string{"start"}, stopped...)...); err != nil {
 		return fmt.Errorf("systemctl --user start layout services: %w", err)
 	}
 	return nil

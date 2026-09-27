@@ -576,38 +576,6 @@ func classifyMemoryHelpers(env LayoutEnv) []LayoutFinding {
 	return findings
 }
 
-func classifyAccountSettings(env LayoutEnv) []LayoutFinding {
-	dirs := accountDirs(env)
-	ledgerPath := settingsHookOwnershipPath(env.ManagedRoot)
-	ownership, _, ledgerErr := readSettingsHookOwnership(ledgerPath)
-	findings := make([]LayoutFinding, 0, len(dirs))
-	for _, dir := range dirs {
-		path := filepath.Join(dir, "settings.json")
-		finding, info, exists := layoutLstat(layoutRowAccountSettings, path)
-		if ledgerErr != nil {
-			finding.Err, finding.Source, finding.Detail = ledgerErr, ledgerPath, layoutOwnershipLedger
-		} else if finding.Err == nil && exists {
-			if !info.Mode().IsRegular() {
-				finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
-			} else if raw, err := os.ReadFile(path); err != nil {
-				finding.Err = err
-			} else if leftovers, err := accountSettingsLeftovers(raw, env.Home, ownership[physicalSettingsPath(path)], true); err != nil {
-				finding.Err = err
-			} else if len(leftovers) > 0 {
-				finding.Verdict, finding.Detail = VerdictStrip, strings.Join(leftovers, ",")
-			}
-		}
-		live, err := liveChatPIDs(env.ProcRoot, dir)
-		if err != nil {
-			finding.Err = err
-		} else if len(live) > 0 {
-			finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
-		}
-		findings = append(findings, finding)
-	}
-	return findings
-}
-
 func classifyAccountMCP(env LayoutEnv) []LayoutFinding {
 	ownership, ledgerErr := readMCPOwnership(filepath.Join(env.ManagedRoot, mcpOwnershipName))
 	shaped := layoutMCPShaped(env)

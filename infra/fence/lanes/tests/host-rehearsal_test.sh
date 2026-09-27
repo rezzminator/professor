@@ -15,13 +15,13 @@ export SHTEST_TAG=host-rehearsal-test
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 [ -f "$SUT" ] || { echo "host-rehearsal_test: no host-rehearsal.sh at $SUT" >&2; exit 2; }
-# host-rehearsal.sh is a host-only script (docker, sqlite3, rsync on the host);
-# the pfm-dev image carries neither sqlite3 nor rsync, so there it cannot run.
+# host-rehearsal.sh needs sqlite3, rsync and sha256sum (the pfm-dev image
+# carries all three). A test that cannot run is never a pass: exit 2, named.
 missing=""
 for tool in sqlite3 rsync sha256sum; do command -v "$tool" >/dev/null 2>&1 || missing+=" $tool"; done
 if [ -n "$missing" ]; then
-  echo "host-rehearsal_test: SKIPPED — not on PATH:$missing (host-only script; run this test on the host)" >&2
-  exit 0
+  echo "host-rehearsal_test: CANNOT RUN — not on PATH:$missing" >&2
+  exit 2
 fi
 
 BIN="$T/bin"

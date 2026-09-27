@@ -73,3 +73,31 @@ func TestLayoutStagedPromptsInUseRefuse(t *testing.T) {
 		t.Fatalf("staged detail=%q", finding.Detail)
 	}
 }
+
+// A normal user cannot read another user's /proc/{pid}/fd (EACCES): the holder
+// scan skips that process instead of failing every database row.
+func TestDBHolderScanSkipsAnotherUsersProcess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("the fence runs as root, where permission bits deny nothing")
+	}
+	procRoot := t.TempDir()
+	db := filepath.Join(t.TempDir(), "fleet.db")
+	foreign := filepath.Join(procRoot, "1", "fd")
+	holder := filepath.Join(procRoot, "4242", "fd")
+	for _, dir := range []string{foreign, holder} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(db, filepath.Join(holder, "3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(foreign, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(foreign, 0o700) })
+	pids, err := dbHolderPIDs(procRoot, db)
+	if err != nil || len(pids) != 1 || pids[0] != "4242" {
+		t.Fatalf("dbHolderPIDs = %v, %v; want [4242] with the unreadable process skipped", pids, err)
+	}
+}

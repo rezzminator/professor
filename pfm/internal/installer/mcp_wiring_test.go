@@ -1,7 +1,9 @@
 package installer
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -473,9 +475,8 @@ func legacyMCPJournalFixture(t *testing.T, home string, installer *engine) map[s
 		filepath.Join(managedRootForHome(home), mcpCredentialName): legacyToken + "\n",
 		filepath.Join(home, ".codex", "config.toml"): mcpFenceBegin + "\n[mcp_servers.chat]\nurl = \"http://127.0.0.1:8377/mcp/chat\"\n" +
 			"[mcp_servers.chat.headers]\nAuthorization = \"Bearer " + legacyToken + "\"\n" + mcpFenceEnd + "\n",
-		// An existing "mcp" object: a config without one gets a double-nested
-		// "mcp" key from editOpenCodeServer and never converges.
-		OpenCodeConfigPath(home): "{\n  \"theme\": \"opencode\",\n  \"mcp\": {}\n}\n",
+		// No "mcp" object yet: install creates it.
+		OpenCodeConfigPath(home): "{\n  \"theme\": \"opencode\"\n}\n",
 	}
 	for path, content := range files {
 		writeFixture(t, path, content)
@@ -538,5 +539,27 @@ func TestMCPInstallJournalRecordsEveryChangedFileAndRollsBack(t *testing.T) {
 	}
 	if idle.Dir() != "" {
 		t.Fatalf("converged MCP wiring journaled %v", idle.records)
+	}
+}
+
+// An OpenCode config with no "mcp" key gains one "mcp" object holding the
+// server — never "mcp" nested in "mcp" — and a second edit settles.
+func TestEditOpenCodeServerCreatesOneMCPObjectAndSettles(t *testing.T) {
+	registration := []byte(`{"type":"local","command":["pfm","mcp","serve","--stdio"]}`)
+	first, err := editOpenCodeServer([]byte("{\n  \"theme\": \"opencode\"\n}\n"), "professor", registration, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(first, &document); err != nil {
+		t.Fatalf("edited config %s: %v", first, err)
+	}
+	servers, ok := document["mcp"].(map[string]any)
+	if !ok || servers["professor"] == nil || servers["mcp"] != nil || len(servers) != 1 {
+		t.Fatalf("mcp = %v, want exactly the professor server; config=%s", document["mcp"], first)
+	}
+	second, err := editOpenCodeServer(first, "professor", registration, false)
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatalf("second edit changed the config: %s -> %s err=%v", first, second, err)
 	}
 }

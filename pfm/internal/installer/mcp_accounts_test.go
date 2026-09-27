@@ -13,6 +13,7 @@ import (
 )
 
 func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
 	secondary := filepath.Join(home, "account-two")
@@ -74,6 +75,7 @@ func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
 // (internal_launch.go), so the registry resolver must list both files, each
 // naming why it is a registry pfm cares about.
 func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	ambient := filepath.Join(home, ".cc", "1")
 	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: ambient, Implicit: true}}
@@ -109,6 +111,7 @@ func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(
 // "nothing owned"; it now shares loadMCPOwnership with the rest of the
 // package.
 func TestWriteMCPClientJSONRefusesAnUnreadableOwnershipLedger(t *testing.T) {
+	t.Parallel()
 	for name, ledger := range map[string]string{"empty": "", "malformed": "{not json"} {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()

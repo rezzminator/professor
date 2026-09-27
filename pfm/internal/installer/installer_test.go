@@ -71,6 +71,7 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 // protected because a live pid is executing it despite being outside that
 // window, and the fourth is the only one either run may remove.
 func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -149,6 +150,7 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 }
 
 func TestDryRunNeverGatesOnAReachableUserManager(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true, nameSyncActive: true}
 	report, err := Run(context.Background(), Options{
@@ -168,6 +170,7 @@ func TestDryRunNeverGatesOnAReachableUserManager(t *testing.T) {
 }
 
 func TestDryRunNamesUpdateMetadataWithoutWritingIt(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := t.TempDir()
 	var output bytes.Buffer
@@ -194,6 +197,7 @@ func TestDryRunNamesUpdateMetadataWithoutWritingIt(t *testing.T) {
 // backup is actually written. Callers pass the SAME existed value that
 // gates the backup, so this contract is the whole guarantee.
 func TestChangeDescriptionNamesCreateVsBackedUpRewrite(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		existed bool
@@ -211,6 +215,7 @@ func TestChangeDescriptionNamesCreateVsBackedUpRewrite(t *testing.T) {
 }
 
 func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var applied bytes.Buffer
 	if _, err := Run(context.Background(), Options{
@@ -235,6 +240,7 @@ func TestZshrcCreateOnFreshHomeNamesItselfHonestly(t *testing.T) {
 }
 
 func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(home, ".codex", "hooks.json"), `{
@@ -569,6 +575,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 }
 
 func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	themeBody := []byte(`{"name":"Tokyo Night","fixture":true}` + "\n")
@@ -646,6 +653,7 @@ func TestThemeInstallIsIdempotentVisibleOnDriftAndReversible(t *testing.T) {
 }
 
 func TestThemeFetchFailureIsLoudAndNonFatal(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
@@ -676,6 +684,7 @@ func TestThemeFetchFailureIsLoudAndNonFatal(t *testing.T) {
 }
 
 func TestEmptyCodexRosterSkipsCommandAndAgentMirrors(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".claude", "commands", "fixture.md"), "# Fixture command\n")
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "fixture.md"), `---
@@ -712,6 +721,7 @@ description: fixture agent
 }
 
 func TestThemeManifestResolvesRegisteredOwnerPlaceholder(t *testing.T) {
+	t.Parallel()
 	sourceRepo := t.TempDir()
 	writeFixture(
 		t,
@@ -739,6 +749,7 @@ func TestThemeManifestResolvesRegisteredOwnerPlaceholder(t *testing.T) {
 }
 
 func TestThemeManifestFallsBackToReleaseWhenDiscoveredSourceLacksManifest(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		if _, err := io.WriteString(
@@ -763,6 +774,7 @@ func TestThemeManifestFallsBackToReleaseWhenDiscoveredSourceLacksManifest(t *tes
 }
 
 func TestMCPEnablementSurvivesAnUnavailableSystemdUserManagerAndDisableRemovesIt(t *testing.T) {
+	t.Parallel()
 	if schedulerIsLaunchd {
 		t.Skip("systemd enablement is not installed on launchd hosts")
 	}
@@ -787,6 +799,7 @@ func TestMCPEnablementSurvivesAnUnavailableSystemdUserManagerAndDisableRemovesIt
 }
 
 func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	staleLaunchd := filepath.Join(managed, "launchd", "com.professor.pfm.mcp.plist")
@@ -808,6 +821,7 @@ func TestMCPDisableRemovesEveryStagedSchedulerAsset(t *testing.T) {
 }
 
 func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	options := Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -835,80 +849,12 @@ func TestUninstallCodexConflictRefusesBeforeRemovingGlobalCommands(t *testing.T)
 	}
 }
 
-// TestInstallReconcilesGlobalCodexCommands is the issue-6 regression: install
-// wired the global Claude command sources but never rebuilt their Codex prompt
-// and skill mirrors, leaving pfm codex check to report stale/missing/orphans.
-func TestInstallReconcilesGlobalCodexCommands(t *testing.T) {
-	home := t.TempDir()
-	repository := t.TempDir()
-	repositorySentinel := filepath.Join(repository, "AGENTS.md")
-	writeFixture(t, repositorySentinel, "repository sentinel\n")
-	t.Chdir(repository)
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatalf("dry run: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
-		t.Fatalf("dry run created Codex registry: %v", err)
-	}
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-
-	for _, path := range []string{
-		filepath.Join(home, ".codex", "prompts", "reload.md"),
-		filepath.Join(home, ".codex", "skills", "reload", "SKILL.md"),
-	} {
-		content := readFixture(t, path)
-		if !strings.Contains(content, "Generated by pfm codex build") {
-			t.Fatalf("global Codex command mirror %s is not marker-owned:\n%s", path, content)
-		}
-	}
-	// The retired /chat: commands never reach ~/.claude/commands/chat/ at all,
-	// so their former Codex mirrors (chat-inject, chat-interrogate) must not
-	// exist either.
-	for _, path := range []string{
-		filepath.Join(home, ".codex", "prompts", "chat-inject.md"),
-		filepath.Join(home, ".codex", "prompts", "chat-interrogate.md"),
-		filepath.Join(home, ".codex", "skills", "chat-inject"),
-		filepath.Join(home, ".codex", "skills", "chat-interrogate"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("retired /chat: command left a Codex mirror at %s: %v", path, err)
-		}
-	}
-
-	foreign := filepath.Join(home, ".codex", "prompts", "operator.md")
-	writeFixture(t, foreign, "operator-owned prompt\n")
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatalf("uninstall: %v", err)
-	}
-	for _, path := range []string{
-		filepath.Join(home, ".codex", "prompts", "reload.md"),
-		filepath.Join(home, ".codex", "skills", "reload"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("uninstall left marker-owned command mirror %s: %v", path, err)
-		}
-	}
-	if got := readFixture(t, foreign); got != "operator-owned prompt\n" {
-		t.Fatalf("uninstall changed foreign prompt: %q", got)
-	}
-	if got := readFixture(t, repositorySentinel); got != "repository sentinel\n" {
-		t.Fatalf("global install path changed repository file: %q", got)
-	}
-}
-
 // TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads pins the install call
 // site's two promises apart: Claude's agent is a symlink to the clone, while
 // Codex — whose loader opens a role with O_NOFOLLOW — gets a REGULAR FILE
 // carrying the generated marker that proves pfm owns it.
 func TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
@@ -935,6 +881,7 @@ func TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads(t *testing.T) {
 // wording and is never overwritten or deleted — and, critically, a conflict
 // never aborts the rest of the install.
 func TestWireCodexAgentsReportsAndPreservesAForeignConflict(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
@@ -972,6 +919,7 @@ func TestWireCodexAgentsReportsAndPreservesAForeignConflict(t *testing.T) {
 // file symlink, a directory entry (tools/) links as ONE whole-directory
 // symlink — never a copy of its contents.
 func TestWireGlobalCommandsLinksFilesAndDirectories(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "commands")
 	writeFixture(t, filepath.Join(source, "git.md"), "# git command\n")
@@ -991,6 +939,7 @@ func TestWireGlobalCommandsLinksFilesAndDirectories(t *testing.T) {
 // carve-out: a parallel lane may not have populated templates/global/commands
 // yet, and that is a reported skip (0 entries), never an error.
 func TestWireGlobalCommandsSkipsAnAbsentOrEmptySource(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"absent", "empty"} {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
@@ -1028,6 +977,7 @@ func TestWireGlobalCommandsSkipsAnAbsentOrEmptySource(t *testing.T) {
 // symlink at {Home}/.claude/skills/deep-rr resolving to the in-tree
 // workflows/deep-rr skill.
 func TestWireGlobalSkillsLinksDeepRR(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
 
@@ -1045,6 +995,7 @@ func TestWireGlobalSkillsLinksDeepRR(t *testing.T) {
 // SKILL-SOURCE-MISSING wording bullet 3 requires when workflows/deep-rr/
 // SKILL.md is absent at link time — reported, no link ever created.
 func TestWireGlobalSkillsReportsMissingSkillSource(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var output bytes.Buffer
 	if _, err := Run(context.Background(), Options{
@@ -1065,6 +1016,7 @@ func TestWireGlobalSkillsReportsMissingSkillSource(t *testing.T) {
 // becomes ONE whole-directory link in {Home}/.claude/skills, while the
 // sources.json registry beside them — a file, not a skill — is never linked.
 func TestWireGlobalSkillsLinksTemplateSkillDirectories(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "skills")
 	writeFixture(t, filepath.Join(source, "sources.json"), "{}\n")
@@ -1088,6 +1040,7 @@ func TestWireGlobalSkillsLinksTemplateSkillDirectories(t *testing.T) {
 // SKILL-SOURCE-MISSING report covers template skills too: a directory with no
 // SKILL.md is named and left unlinked rather than linked as a loadable skill.
 func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "skills")
 	if err := os.MkdirAll(filepath.Join(source, "half-built"), 0o700); err != nil {
@@ -1112,6 +1065,7 @@ func TestWireGlobalSkillsReportsATemplateSkillWithoutSKILLMd(t *testing.T) {
 // any timestamped backup are deleted; a genuinely unrelated agent file next
 // to them is never touched.
 func TestRetireOrphanCodexAgentsDeletesExactlyTheKnownStrays(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	explorer := filepath.Join(home, ".codex", "agents", "explorer.toml")
 	writeFixture(t, explorer, "stale explorer agent\n")
@@ -1144,6 +1098,7 @@ func TestRetireOrphanCodexAgentsDeletesExactlyTheKnownStrays(t *testing.T) {
 // "frr", the same field RunGlobalAgents keys identity on, so a user's own
 // same-named agent (different frontmatter, or none at all) is never touched.
 func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *testing.T) {
+	t.Parallel()
 	t.Run("a symlink at the retired path retires unconditionally, even dangling", func(t *testing.T) {
 		home := t.TempDir()
 		link := filepath.Join(home, ".claude", "agents", "frr.md")
@@ -1232,6 +1187,7 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 // wins over the documented {Home}/.professor default, even when a same-named
 // fixture also exists at that default location.
 func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	elsewhere := t.TempDir()
 	writeFixture(t, filepath.Join(elsewhere, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
@@ -1252,6 +1208,7 @@ func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
 // through the marker the first install recorded, not silently reset to the
 // {Home}/.professor default.
 func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	elsewhere := t.TempDir()
 	writeFixture(t, filepath.Join(elsewhere, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
@@ -1276,6 +1233,7 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 }
 
 func TestApplyRetiresInstalledBBCardsAndHook(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := filepath.Join(home, ".claude")
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
@@ -1342,6 +1300,7 @@ func TestApplyRetiresInstalledBBCardsAndHook(t *testing.T) {
 }
 
 func TestApplyLeavesUnrelatedBBSymlinkAlone(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	target := filepath.Join(home, ".claude", "commands", "bb.md")
 	operatorSource := filepath.Join(home, "operator", "bb.md")
@@ -1363,6 +1322,7 @@ func TestApplyLeavesUnrelatedBBSymlinkAlone(t *testing.T) {
 }
 
 func TestApplyRetiresDanglingBBLinksFromTheRecordedProfessorClone(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, "professor-clone")
 	if err := os.MkdirAll(repo, 0o700); err != nil {
@@ -1401,6 +1361,7 @@ func TestApplyRetiresDanglingBBLinksFromTheRecordedProfessorClone(t *testing.T) 
 }
 
 func TestDryRunNamesFutureCodexWritesAndRefusesTheirConflicts(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.md"), `---
 name: tracer
@@ -1467,6 +1428,7 @@ Read only.
 }
 
 func TestUninstallAlsoRemovesRetiredDreamHooks(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	oldCommand := home + "/.local/bin/cc-fleet dream hook agent-inject"
@@ -1483,6 +1445,7 @@ func TestUninstallAlsoRemovesRetiredDreamHooks(t *testing.T) {
 }
 
 func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	runner := &fakeRunner{manager: true}
 	if _, err := Run(context.Background(), Options{
@@ -1524,6 +1487,7 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 // terminal profile calling `cc` from ~/.zshrc greeted every new terminal with
 // "clang: error: no input files" while the fleet loaded fine a few lines later.
 func TestEarlyFleetCallsNamesWhatRunsBeforeTheLaunchersExist(t *testing.T) {
+	t.Parallel()
 	const sourced = `[[ -r "/opt/fixture/pfm/install/shim/pfm.zsh" ]] && source "/opt/fixture/pfm/install/shim/pfm.zsh"`
 
 	cases := []struct {
@@ -1583,6 +1547,7 @@ func TestEarlyFleetCallsNamesWhatRunsBeforeTheLaunchersExist(t *testing.T) {
 // source line is: one decides where the launchers start existing, the other
 // reports what runs before they do.
 func TestEarlyCallScanStopsWhereTheRewriterFindsTheSourceLine(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	zshrc := filepath.Join(home, ".zshrc")
 	writeFixture(t, zshrc, "cc\nsource /old/cc-fleet.zsh\ncc-ls\n")
@@ -1633,6 +1598,7 @@ func (runner *outputRunner) Output(ctx context.Context, name string, args ...str
 // a logged-in user, so the only window worth refusing is an apply that would
 // rewrite the agent and its binary while that agent is running.
 func TestLaunchAgentGateRefusesOnlyMidExecution(t *testing.T) {
+	t.Parallel()
 	if !schedulerIsLaunchd {
 		t.Skip("launch-agent gate is macOS-only")
 	}
@@ -1670,6 +1636,7 @@ func TestLaunchAgentGateRefusesOnlyMidExecution(t *testing.T) {
 // A runner that cannot be probed must not be read as "safe": the installer says
 // the gate did not run rather than implying it passed.
 func TestLaunchAgentGateAnnouncesWhenItCannotProbe(t *testing.T) {
+	t.Parallel()
 	if !schedulerIsLaunchd {
 		t.Skip("launch-agent gate is macOS-only")
 	}

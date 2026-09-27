@@ -18,6 +18,7 @@ import (
 // blueprint entirely, and a plain regular file — survives untouched, the
 // same preservation rule retireRenamedGlobalAgents holds to for agents.
 func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
+	t.Parallel()
 	t.Run("orphan retired: a dangling link at its own recorded blueprint path is removed", func(t *testing.T) {
 		home := t.TempDir()
 		source := filepath.Join(home, ".professor", "templates", "global", "commands")
@@ -118,6 +119,7 @@ func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
 // account's commands/chat/* first, which would make this test pass for a
 // different function's error, not retireOrphanGlobalCommands' own.
 func TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip(
 			"running as root: chmod-denied directory reads are a no-op for root, so this failure cannot be forced genuinely here",

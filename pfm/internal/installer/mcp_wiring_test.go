@@ -14,6 +14,7 @@ import (
 )
 
 func TestJailPinsClaudeConfigDir(t *testing.T) {
+	t.Parallel()
 	const (
 		childEnv    = "PFM_TEST_INSTALLER_JAIL_CHILD"
 		sentinelEnv = "PFM_TEST_INSTALLER_JAIL_SENTINEL"
@@ -61,6 +62,7 @@ func TestJailPinsClaudeConfigDir(t *testing.T) {
 }
 
 func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
+	t.Parallel()
 	raw, err := readAsset("systemd/pfm-mcp.service")
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +90,7 @@ func TestMCPSystemdUnitStartsAtLogin(t *testing.T) {
 }
 
 func TestMCPWireFailureStillRefreshesRunningLinuxDaemon(t *testing.T) {
+	t.Parallel()
 	if schedulerIsLaunchd {
 		t.Skip("Linux systemd daemon refresh")
 	}
@@ -120,6 +123,7 @@ func TestMCPWireFailureStillRefreshesRunningLinuxDaemon(t *testing.T) {
 // would not catch the original bug — the bug was that the helper was never
 // consulted at this call site.
 func TestMCPInstallCreatesClientJSONWithoutClaimingABackup(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
@@ -149,6 +153,7 @@ func TestMCPInstallCreatesClientJSONWithoutClaimingABackup(t *testing.T) {
 // install's client wiring: with both families enabled, the Claude registry
 // gains the one professor stdio registration and the ledger owns it.
 func TestMCPInstallWiresConfigDrivenUnauthenticatedLoopbackClients(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	secondary := filepath.Join(home, "account-two")
@@ -264,6 +269,7 @@ func TestMCPInstallWiresConfigDrivenUnauthenticatedLoopbackClients(t *testing.T)
 }
 
 func TestMCPInstallRemovesLegacyCredentialAndAuthHeadersEverywhere(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
@@ -339,6 +345,7 @@ func TestMCPInstallRemovesLegacyCredentialAndAuthHeadersEverywhere(t *testing.T)
 }
 
 func TestMCPManualConflictIsNotClaimedOrRemoved(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
@@ -388,6 +395,7 @@ func TestMCPManualConflictIsNotClaimedOrRemoved(t *testing.T) {
 }
 
 func TestMCPOpenCodeWiringPreservesJSONCAndUnownedServers(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configPath := OpenCodeConfigPath(home)
 	original := `{
@@ -445,6 +453,7 @@ func TestMCPOpenCodeWiringPreservesJSONCAndUnownedServers(t *testing.T) {
 }
 
 func TestMCPOpenCodeUninstallRemovesOnlyExactOwnedRegistrations(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configPath := OpenCodeConfigPath(home)
 	writeFixture(
@@ -504,6 +513,7 @@ func openCodeProfessorShape(home string) map[string]any {
 // pfm's own pre-professor OpenCode entries go by exact shape alone — no
 // ledger entry names them — while every comment and foreign key survives.
 func TestMCPOpenCodeInstallRemovesPFMLegacyEntriesTheLedgerNeverListed(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configPath := OpenCodeConfigPath(home)
 	bin := filepath.Join(home, ".local", "bin", "pfm")
@@ -792,6 +802,7 @@ func TestMCPInstallRecognizesAnOwnedStdioProfessorClientWithoutRewriteOrConflict
 // transport law on Codex: one fence at the end of the file holding the stdio
 // command and args, and no url line.
 func TestMCPInstallRegistersTheStdioProfessorInAFreshCodexHome(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	applyChatMCP(t, home)
 	codexConfig := readFixture(t, filepath.Join(home, ".codex", "config.toml"))
@@ -868,6 +879,7 @@ func TestInstallRegistersMCPServersInEveryRegistryAPFMLaunchedClaudeReads(t *tes
 }
 
 func TestInspectHarvesterClientCutoverNamesPFMLegacyStandaloneAndUnreadableStates(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(
 		t,
@@ -925,6 +937,7 @@ func TestMCPInstallRemovesTheBarePFMMCPChatEntry(t *testing.T) {
 // TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine pins that the OpenCode
 // writer names the pfm legacy keys it removes, in the Claude writer's words.
 func TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configPath := OpenCodeConfigPath(home)
 	bin := filepath.Join(home, ".local", "bin", "pfm")

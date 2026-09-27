@@ -17,6 +17,7 @@ type registryWriteHook func([]byte) (int, error)
 func (f registryWriteHook) Write(p []byte) (int, error) { return f(p) }
 
 func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	account := filepath.Join(home, "secondary-codex")
 	path := filepath.Join(account, "config.toml")
@@ -93,6 +94,7 @@ func codexProfessorFence(home string) string {
 // byte-identical, and one professor fence lands at the end. A second pass
 // changes nothing and reports the wiring ok.
 func TestMCPRepairsABrokenCodexFence(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	account := filepath.Join(home, ".codex")
 	path := filepath.Join(account, "config.toml")
@@ -123,6 +125,7 @@ func TestMCPRepairsABrokenCodexFence(t *testing.T) {
 // shape, so install removes it and writes one fenced table (no manual-conflict
 // skip), and uninstall over the same orphan leaves no professor table.
 func TestMCPReclaimsAnOrphanedCodexProfessorBody(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	account := filepath.Join(home, ".codex")
 	path := filepath.Join(account, "config.toml")
@@ -154,6 +157,7 @@ func TestMCPReclaimsAnOrphanedCodexProfessorBody(t *testing.T) {
 // TestMCPKeepsALegacyCodexTableWithAnExtraKey pins that a [mcp_servers.harvester]
 // table differing from pfm's legacy shape by one key is not pfm's and stays.
 func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	account := filepath.Join(home, ".codex")
 	path := filepath.Join(account, "config.toml")
@@ -178,6 +182,7 @@ func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
 // single-line shape: install keeps it whole rather than stripping the parent
 // and orphaning the sub-table, as doctor classifies a headed table foreign.
 func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	account := filepath.Join(home, ".codex")
 	path := filepath.Join(account, "config.toml")
@@ -270,6 +275,7 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 }
 
 func TestMCPFailedRemovalKeepsOwnershipForRetry(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, ".claude.json")
 	managed := filepath.Join(home, "managed")
@@ -317,6 +323,7 @@ func TestMCPFailedRemovalKeepsOwnershipForRetry(t *testing.T) {
 }
 
 func TestRetirementPreservesSecondaryPersonalAgentLink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	second := filepath.Join(home, "secondary")
 	personal := filepath.Join(home, "personal-agent.md")
@@ -341,6 +348,7 @@ func TestRetirementPreservesSecondaryPersonalAgentLink(t *testing.T) {
 }
 
 func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := filepath.Join(home, "secondary", "config.toml")
 	target := filepath.Join(home, "personal.toml")
@@ -374,6 +382,7 @@ func TestMCPConfigSymlinkSurvivesInstallAndRemoval(t *testing.T) {
 }
 
 func TestMCPRefusesConcurrentNativeRegistryUpdate(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, ".claude.json")
 	writeFixture(t, path, `{"oauthAccount":{"accountUuid":"original"}}`)

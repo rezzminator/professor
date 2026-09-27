@@ -11,6 +11,7 @@ import (
 )
 
 func TestCodexAppendixRejectsInvalidShapeBeforeMutation(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{`null`, `{"hooks":"personal"}`, `{"hooks":{"SessionStart":"personal"}}`, `{"hooks":{"SessionStart":[null]}}`, `{"hooks":{"SessionStart":[{"hooks":[null]}]}}`} {
 		if _, _, _, err := updateCodexHooks([]byte(raw), t.TempDir(), false, nil); err == nil {
 			t.Fatalf("accepted %s", raw)
@@ -22,6 +23,7 @@ func TestCodexAppendixRejectsInvalidShapeBeforeMutation(t *testing.T) {
 // apply must take it away — not merely stop writing it — while an operator's
 // own handler in the same shared, symlinked file is untouched.
 func TestCodexApplyRetiresTheAppendixHookAndKeepsSharedSymlinks(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	shared := filepath.Join(home, "shared-hooks.json")
 	appendix, err := json.Marshal(map[string]any{
@@ -75,6 +77,7 @@ func TestCodexApplyRetiresTheAppendixHookAndKeepsSharedSymlinks(t *testing.T) {
 }
 
 func TestCodexAppendixRefusesDanglingHookSymlink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	account := filepath.Join(home, "account")
 	if err := os.MkdirAll(account, 0o700); err != nil {

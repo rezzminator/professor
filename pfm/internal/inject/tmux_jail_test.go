@@ -95,18 +95,20 @@ func (jail *injectTmuxJail) command(arguments ...string) *exec.Cmd {
 // keys on, then clears to an idle composer after a delay, and echoes a
 // submitted line as "USER:<text>". A line typed while it is still busy is
 // echoed as "BUSY-TYPED:", so a premature steer is visible in the capture.
+// The idle composer overwrites the spinner's row so scrollback cannot keep
+// the old busy footer inside SettledTurn's live-footer window.
 const busyThenIdleUI = `import os, select, sys, time, tty
 tty.setraw(0)
 delay = float(sys.argv[1])
 start = time.time()
-sys.stdout.write("Working (2s · 9 tokens)\r\n")
+sys.stdout.write("Working (2s · 9 tokens)")
 sys.stdout.flush()
 idle = False
 buf = bytearray()
 while True:
     if not idle and time.time() - start >= delay:
         idle = True
-        sys.stdout.write("\x1b[2J\x1b[H❯ ")
+        sys.stdout.write("\r\x1b[2K❯ ")
         sys.stdout.flush()
     ready, _, _ = select.select([0], [], [], 0.05)
     if not ready:
@@ -375,6 +377,9 @@ func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	}
 	if result.Code != 0 || result.Status != "delivered" || !result.Typed {
 		t.Fatalf("DeliverThen() = %+v", result)
+	}
+	if strings.Contains(result.Message, "WARNING: no turn boundary was observed") {
+		t.Fatalf("waiter delivered without observing the busy-to-idle turn: %q", result.Message)
 	}
 	capture, err := TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil {

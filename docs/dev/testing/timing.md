@@ -41,7 +41,7 @@ Event span excludes build work before the first event. The sweep records externa
 
 `pfm/.testtiming.yml` contains `tolerance` and `suites.<name>.wall_s` plus a package-to-seconds map at `suites.<name>.packages`. Unit and e2e package sets are independent. The initial tolerance is 1.25: a duration above budget times tolerance fails.
 
-New package budgets and deliberate increases require an explicit edit with its evidence in the commit. `--measure` only lowers existing budgets. Architecture baselines under `pfm/.arch/` are separate and are not changed by timing measurements.
+New package budgets and deliberate increases require an explicit edit with its evidence in the commit. A `TESTFLAGS` change re-baselines the unit block by hand from three passing captures at the new flags: take the maximum event span for each package and the suite, round up to whole seconds with a one-second floor, then double. The capture set and per-package derivation table are retained with the change. `--measure` only lowers existing budgets. Architecture baselines under `pfm/.arch/` are separate and are not changed by timing measurements.
 
 ## Checks and measurement
 
@@ -55,21 +55,23 @@ Malformed or incomplete input, unreadable budgets, missing dependencies, failed 
 
 The steady-state ratchet uses three independent successful captures with identical package sets and flags. Record host load and uptime before and after each capture. A failed run cannot establish or lower a budget. Median durations are rounded up to seconds. Preserve all raw captures beside the measurement log so each budget can be traced back to evidence.
 
-The initial shared-host ratchet is explicitly provisional: one successful serial capture is rounded up and doubled. This exception establishes a loose first ceiling without claiming a quiet-host median. W5 replaces it with the normal three-capture measurement and may only shrink the checked-in values.
+For the shared-host unit block at `-p 4 -parallel 4`, the current baseline uses the maximum of three passing fenced captures, rounded up and doubled per package and suite. The tagged e2e block retains its initial serial-capture rule: round up and double. Both blocks are checked at budget × `tolerance` (`1.25`). This shared-host rule does not claim a quiet-host median; a later measurement can establish one.
 
 ## Concurrency sweep
 
-`make sweep` runs a host preflight followed by the fenced sweep and report. Host test execution is excluded from this train. The sweep explores package concurrency and then per-package test concurrency, retaining three repetitions per point and a separate shuffle check. A failed or incomplete sweep cannot pin `TESTFLAGS`.
+`make sweep` runs a host preflight followed by the fenced sweep and report. Host test execution is excluded from this train. The sweep explores package concurrency and then per-package test concurrency, retaining three repetitions per point and a separate shuffle check. A pin needs the fastest point supported by at least three passing fenced captures and green timing checks.
 
 The target enables `--wait-quiet`, which prefers load below 4 before each capture. The wait is outside the timed command and capped at five minutes; sustained load emits a warning and proceeds with high-load evidence. The raw TSV records each result; its sibling `.load.log` records capture identity and dated uptime before and after, including failed captures. Unreadable load probes fail explicitly.
 
-Conservative `-p 1 -parallel 1` flags remain in effect until W5 supplies a successful sweep recommendation. The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `/tmp/{project}/timing/`.
+The unit gate is pinned at `-p 4 -parallel 4`; a later sweep may move it. The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `/tmp/{project}/timing/`.
 
 ## Accepted measurements
 
-The first accepted budgets are **provisional — re-measure at W5 close**. The serial unit capture ran from 08:51:51 to 09:01:45 UTC at load 20.54 → 8.89 and measured a 586.849 s event span. The tagged e2e capture ran from 09:03:42 to 09:05:36 UTC at load 10.25 → 14.63 and measured 111.784 s. Rounded values were doubled to unit 1174 s and e2e 224 s; every package budget was doubled by the same rule. Raw JSON, TSV, candidates and load evidence are retained under `tmp/timing/provisional-serial-utf8-20260918/`.
+The tagged e2e budget remains from the 2026-09-18 serial capture: 09:03:42 to 09:05:36 UTC, load 10.25 → 14.63, event span 111.784 s, rounded up and doubled to 224 s. Its raw JSON, TSV, candidates, and load evidence are under `tmp/timing/provisional-serial-utf8-20260918/`.
 
-The raw unit stream's sole package failure was the stale W6-A `TestResolveOverrides` expected value, which omitted the newly derived activity-log path. Its focused fenced rerun passed after the expectation was corrected. `unit-validated.json` preserves the original timestamps and changes only that test and package's two terminal fail actions; the untouched `unit.json` and `paths-fixed.json` remain beside it for audit.
+The unit block was re-baselined on 2026-09-27 at `-p 4 -parallel 4` from `speed-3a-1`, `speed-3a-1-repeat`, and `speed-3a-2`. Their start loads were 19.55, 26.08, and 18.25; SUITE event spans were 239.680, 227.630, and 260.828 s. Twice the rounded-up maximum gives a 522 s unit suite budget, down from the serial-calibrated 1174 s. All 76 package rows and the suite pass re-checks against the new file; the independent `speed-3a-3` validation passes at 234.939 s event span and 246.774 s host wall. Raw JSON, TSV, check logs, metadata, and the derivation table are under `$HOME/.local/state/pfm/flights/professor/test-speed/rebaseline/`; the capture table, with host walls and dates, is in [concurrency-sweep.md](concurrency-sweep.md).
+
+The 2026-09-18 serial unit stream had a stale `TestResolveOverrides` expected value, then a corrected fixture was used for its historical baseline. That serial unit capture does not contribute to the current unit budgets; its untouched and corrected artifacts remain beside the e2e evidence for audit.
 
 Two earlier attempts remain rejected evidence: default concurrency failed under sustained load, and a serial scratch driver incorrectly forced the C locale, breaking a Unicode window-name assertion. Neither contributed a budget.
 

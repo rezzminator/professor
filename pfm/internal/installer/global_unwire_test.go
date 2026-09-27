@@ -32,6 +32,7 @@ func stageGlobalSource(t *testing.T, repo string) {
 // account — against INSTALL.md's promise that uninstall removes the
 // installer-owned links.
 func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	stageGlobalSource(t, repo)
@@ -87,6 +88,7 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 // ~/.claude/agents/<name>.md symlink behind, against INSTALL.md § Uninstall's
 // promise that every installer-owned link is removed.
 func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	agentsSource := filepath.Join(repo, "templates", "global", "agents")
@@ -133,6 +135,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 // The foreign same-named link is also NAMED in the transcript, so a kept
 // entry is a reported decision rather than a silent omission.
 func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	stageGlobalSource(t, repo)
@@ -174,6 +177,7 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 // clone, so the ownership-by-target rule has to know that directory too —
 // otherwise uninstall leaves a working super-* agent in every account.
 func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	agentsSource := filepath.Join(home, ".professor", "templates", "global", "agents")
 	writeFixture(t, filepath.Join(agentsSource, "lead.md"),

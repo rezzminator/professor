@@ -57,6 +57,7 @@ func globalFanoutEngine(t *testing.T, home string, apply bool, stdout io.Writer)
 // silently had none of them. Every registry the installer would retire from
 // is a registry it must install into.
 func TestGlobalWiringReachesEveryConfiguredAccount(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer, first, second := globalFanoutEngine(t, home, true, &output)
@@ -93,6 +94,7 @@ func TestGlobalWiringReachesEveryConfiguredAccount(t *testing.T) {
 }
 
 func TestGlobalCommandsReachConfigDirAndConfigDirs(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalFanoutSource(t, home)
 	primary := filepath.Join(home, ".claude")
@@ -122,6 +124,7 @@ func TestGlobalCommandsReachConfigDirAndConfigDirs(t *testing.T) {
 // only the primary account would hide exactly the defect above from the
 // operator reading `pfm install` before running it.
 func TestGlobalWiringDryRunPlansEveryConfiguredAccount(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var output bytes.Buffer
 	installer, first, second := globalFanoutEngine(t, home, false, &output)
@@ -280,6 +283,7 @@ func twoReportAccounts(home string) []pfmconfig.Account {
 // it as a warning — a per-account registry that reports nothing is exactly
 // how this shipped unnoticed.
 func TestGlobalAgentsDoctorNamesTheAccountThatHasNoAgents(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
@@ -315,6 +319,7 @@ func TestGlobalAgentsDoctorNamesTheAccountThatHasNoAgents(t *testing.T) {
 // into the first's registry, the real host shape) is state=linked with no
 // warning at all.
 func TestGlobalAgentsDoctorReportsEveryLinkedAccountClean(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	first := filepath.Join(home, ".claude")
@@ -345,6 +350,7 @@ func TestGlobalAgentsDoctorReportsEveryLinkedAccountClean(t *testing.T) {
 // absence claim must never borrow: a registry entry that cannot be read is
 // UNREADABLE ("we failed to look"), never MISSING ("nothing there").
 func TestGlobalAgentsDoctorDistinguishesUnreadableFromMissing(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
@@ -378,6 +384,7 @@ func TestGlobalAgentsDoctorDistinguishesUnreadableFromMissing(t *testing.T) {
 // clone is never this installer's to replace, and doctor says CONFLICT
 // rather than quietly calling the account linked.
 func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	first := filepath.Join(home, ".claude")
@@ -412,6 +419,7 @@ func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
 // or none of them did. SYMLINK is its own outcome, never MISSING: the file is
 // there, and that is precisely why the operator cannot see what is wrong.
 func TestGlobalAgentsDoctorNamesASymlinkedCodexRole(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
@@ -456,6 +464,7 @@ func TestGlobalAgentsDoctorNamesASymlinkedCodexRole(t *testing.T) {
 // still named in the same line, and a role file that cannot be read at all is
 // UNREADABLE — "we failed to look" is not "nothing there".
 func TestGlobalAgentsDoctorNamesMismatchedMissingAndUnreadableCodexRoles(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
@@ -512,6 +521,7 @@ func TestGlobalAgentsDoctorNamesMismatchedMissingAndUnreadableCodexRoles(t *test
 // "have them all". Doctor must say it found no sources instead of certifying
 // a roster it never enumerated.
 func TestGlobalAgentsDoctorNoSourcesIsAWarningNotACleanBill(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".professor", "templates", "global", "agents"), 0o755); err != nil {
 		t.Fatal(err)
@@ -535,6 +545,7 @@ func TestGlobalAgentsDoctorNoSourcesIsAWarningNotACleanBill(t *testing.T) {
 // this must be named, never counted as a warning, and never rendered as if
 // every account were linked.
 func TestGlobalAgentsDoctorNoCloneIsNamedNotWarned(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var output bytes.Buffer
 	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
@@ -557,6 +568,7 @@ func TestGlobalAgentsDoctorNoCloneIsNamedNotWarned(t *testing.T) {
 // unreadable) is UNRESOLVED — "we failed to look" — never NO-CLONE, which
 // would misreport a failed look as an absent clone.
 func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip(
 			"running as root — chmod 000 never blocks root's own Lstat, so the unreadable-marker fixture cannot be produced",
@@ -591,6 +603,7 @@ func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) 
 // checked), and none of it counts a warning — the installer never wires an
 // account with no Claude Code binary to run.
 func TestGlobalAgentsDoctorClaudeAbsentIsNamedNotWarnedPerAccount(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
@@ -614,6 +627,7 @@ func TestGlobalAgentsDoctorClaudeAbsentIsNamedNotWarnedPerAccount(t *testing.T) 
 // broken clone, still a warning), and unreadable (e.g. the agents path is a
 // file, not a directory) is UNREADABLE — "we failed to look", never MISSING.
 func TestInspectGlobalAgentsSourceDirectoryStates(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name  string
 		stage func(t *testing.T, home string)
@@ -666,6 +680,7 @@ func TestInspectGlobalAgentsSourceDirectoryStates(t *testing.T) {
 // installer wrote go, and so does the retired generated directory an earlier
 // layout used as the role store — leaving neither behind.
 func TestUninstallRemovesOwnedCodexRolesAndTheLegacyGeneratedDirectory(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
@@ -700,6 +715,7 @@ func TestUninstallRemovesOwnedCodexRolesAndTheLegacyGeneratedDirectory(t *testin
 // ~/.codex/agents/<name>.toml is an operator's own — uninstall must never
 // delete it.
 func TestUninstallLeavesAForeignCodexAgentUntouched(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	registry := filepath.Join(home, ".codex", "agents")
 	if err := os.MkdirAll(registry, 0o755); err != nil {
@@ -728,6 +744,7 @@ func TestUninstallLeavesAForeignCodexAgentUntouched(t *testing.T) {
 // were an operator's own file, the way TestUninstallLeavesAForeignCodexAgentUntouched
 // pins for a GENUINELY foreign link.
 func TestUninstallRetiresAPreMigrationLegacyCodexAgentLink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, "blueprint")
 	if err := os.MkdirAll(filepath.Join(repo, "templates", "global", "agents"), 0o755); err != nil {
@@ -761,6 +778,7 @@ func TestUninstallRetiresAPreMigrationLegacyCodexAgentLink(t *testing.T) {
 // MISSING the variant by name, and a declaration that cannot render is
 // UNREADABLE with its error — never a roster quietly short of variants.
 func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	declaration := filepath.Join(repo, "templates", "global", "agents", "variants.json")
@@ -810,6 +828,7 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 // agent_type. The install that wrote a role owes its removal; a file the
 // operator wrote under a retired name is still never touched.
 func TestInstallRetiresACodexRoleTheCloneNoLongerShips(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")

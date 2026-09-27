@@ -20,6 +20,7 @@ import (
 // this run's plan, while a still-declared variant's link and file survive
 // untouched.
 func TestRetireOrphanGlobalAgentsPrunesUndeclaredVariants(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	generatedDir := paths.GeneratedClaudeAgentsDir(home)
 	keepFile := filepath.Join(generatedDir, "keep.md")
@@ -74,6 +75,7 @@ func TestRetireOrphanGlobalAgentsPrunesUndeclaredVariants(t *testing.T) {
 // dangling link pointing outside the blueprint entirely all survive — the
 // same preservation rule retireOrphanGlobalCommands holds to for commands.
 func TestRetireOrphanGlobalAgentsPrunesDanglingOriginals(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	liveSource := filepath.Join(repo, "templates", "global", "agents", "alpha.md")
@@ -136,6 +138,7 @@ func TestRetireOrphanGlobalAgentsPrunesDanglingOriginals(t *testing.T) {
 // naming its path, never render as the silent no-op success of a registry
 // that simply had no orphan.
 func TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip(
 			"running as root: chmod-denied directory reads are a no-op for root, so this failure cannot be forced genuinely here",
@@ -176,6 +179,7 @@ func TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess(t *testing.T) 
 // and never linked a newly shipped agent. Both rosters must serve Claude; only
 // the configured one may write a Codex role.
 func TestClaudeGlobalAgentsLinkAndRetireWhateverTheCodexRoster(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		roster func(home string) []string

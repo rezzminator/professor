@@ -18,6 +18,7 @@ import (
 )
 
 func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	account := filepath.Join(home, ".cc", "2")
@@ -153,6 +154,7 @@ func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
 }
 
 func TestMemoryHelperMigrationAbsentDoesNotOptIn(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, ConfigDirs: []string{filepath.Join(home, ".claude")}, Runner: &fakeRunner{},
@@ -168,6 +170,7 @@ func TestMemoryHelperMigrationAbsentDoesNotOptIn(t *testing.T) {
 }
 
 func TestMemoryHelperMigrationDryRunIsReadOnly(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := filepath.Join(home, ".claude")
 	oldPath := filepath.Join(config, "scripts", "cc-memory-wire.sh")
@@ -190,6 +193,7 @@ func TestMemoryHelperMigrationDryRunIsReadOnly(t *testing.T) {
 }
 
 func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		prepare func(*testing.T, string, string, string)
@@ -388,6 +392,7 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 }
 
 func TestRewriteMemoryHelperHookPathsAcceptsOnlyExactStandaloneForms(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join(t.TempDir(), "operator's-home")
 	oldPath := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
 	newPath := filepath.Join(home, ".claude", "scripts", "memory-wire.sh")
@@ -439,6 +444,7 @@ func TestRewriteMemoryHelperHookPathsAcceptsOnlyExactStandaloneForms(t *testing.
 }
 
 func TestRewriteMemoryHelperHookPathsRejectsMalformedSettingsShapes(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	oldPath := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
 	paths := map[string]string{oldPath: filepath.Join(home, ".claude", "scripts", "memory-wire.sh")}
@@ -470,6 +476,7 @@ func TestRewriteMemoryHelperHookPathsRejectsMalformedSettingsShapes(t *testing.T
 }
 
 func TestMemoryHelperConfigAliasMigratesOnceAndRewritesEveryLexicalPath(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	alias := filepath.Join(home, ".cc", "current")
@@ -514,6 +521,7 @@ func TestMemoryHelperConfigAliasMigratesOnceAndRewritesEveryLexicalPath(t *testi
 }
 
 func TestNormalizedMemoryHelperFingerprintPinsHistoricalTemplatesAndRejectsShellSyntax(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		newName  string

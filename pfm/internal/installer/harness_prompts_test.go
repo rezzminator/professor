@@ -29,6 +29,7 @@ func readHarnessPromptPart(t *testing.T, relative string) []byte {
 }
 
 func TestHarnessBaselineAssetPairIsCoherent(t *testing.T) {
+	t.Parallel()
 	for _, stem := range []string{"harness-original", "harness-opus"} {
 		t.Run(stem, func(t *testing.T) {
 			baselines := path.Join("claude", "baselines")
@@ -54,6 +55,7 @@ func TestHarnessBaselineAssetPairIsCoherent(t *testing.T) {
 // The tree's README is embedded so doctor can compare both trees whole, and
 // must never reach an operator's managed root as a staged asset.
 func TestHarnessPromptReadmeIsEmbeddedButNeverStaged(t *testing.T) {
+	t.Parallel()
 	if _, err := readAsset(path.Join(harnessPromptsDirName, harnessPromptReadme)); err != nil {
 		t.Fatalf("read embedded %s: %v", harnessPromptReadme, err)
 	}
@@ -82,6 +84,7 @@ func TestHarnessPromptReadmeIsEmbeddedButNeverStaged(t *testing.T) {
 // here from the embedded parts rather than taken from composeHarnessPrompt,
 // so a change to the joining rule has to be made twice to pass.
 func TestInstallStagesComposedHarnessPrompts(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, Stdout: io.Discard,

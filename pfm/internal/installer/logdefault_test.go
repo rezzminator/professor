@@ -45,6 +45,7 @@ func readLogBlock(t *testing.T, path string) (map[string]any, bool) {
 // default: a pfm.config.json without a `log` key gains {"level": "info",
 // "keepDays": 30} through the ledger (a `change` row), and nothing else moves.
 func TestInstallWritesTheLogDefaultWhereNoneExists(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "pfm.config.json")
 	if err := os.WriteFile(path, []byte(`{"version": 2, "theme": "dark"}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -91,6 +92,7 @@ func TestInstallWritesTheLogDefaultWhereNoneExists(t *testing.T) {
 // TestInstallNeverOverwritesAnExistingLogKey is the spec's own test: install
 // over a config carrying "level": "off" and read `off` back.
 func TestInstallNeverOverwritesAnExistingLogKey(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "pfm.config.json")
 	original := `{"version": 2, "log": {"level": "off"}}`
 	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
@@ -119,6 +121,7 @@ func TestInstallNeverOverwritesAnExistingLogKey(t *testing.T) {
 // TestInstallLogDefaultLeavesAnAbsentFileAlone: config init owns creation, and
 // a dry run plans the write without performing it.
 func TestInstallLogDefaultLeavesAnAbsentFileAlone(t *testing.T) {
+	t.Parallel()
 	absent := filepath.Join(t.TempDir(), "pfm.config.json")
 	var stdout strings.Builder
 	installer := logDefaultEngine(t, absent, true, &stdout)
@@ -156,6 +159,7 @@ func TestInstallLogDefaultLeavesAnAbsentFileAlone(t *testing.T) {
 // TestInstallRunsTheLogDefaultStep: the step is wired into install(), not a
 // helper nothing calls.
 func TestInstallRunsTheLogDefaultStep(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude")
 	writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)

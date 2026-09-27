@@ -88,6 +88,7 @@ func TestInstallMarkdownToolAlreadyPresentIsANoOp(t *testing.T) {
 }
 
 func TestInstallMarkdownToolUsesInjectedProcessRunner(t *testing.T) {
+	t.Parallel()
 	runner := &deps.FakeRunner{}
 	runner.ScriptLookPath("rumdl", "/fixture/rumdl", nil)
 	runner.Script([]string{"/fixture/rumdl", "--version"}, deps.RunResult{
@@ -290,6 +291,7 @@ exit 0
 // otherwise intact, and long output is bounded with a visible marker rather
 // than silently cut.
 func TestTruncateOutputBoundsLengthWithoutMangingShortOutput(t *testing.T) {
+	t.Parallel()
 	if got := truncateOutput([]byte("  boom  \n"), 4096); got != "boom" {
 		t.Fatalf("truncateOutput(short) = %q, want %q", got, "boom")
 	}

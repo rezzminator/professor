@@ -108,7 +108,8 @@ run_lane() {
     printf '. "%s"\n' "$LIB"
     printf '%s\n' "$@"
   } >"$T/$name.sh"
-  OUT="$(LANE_OUT_DIR="$LANE_DIR" LANE_GAPS="${LANE_GAPS_FIXTURE:-$T/gaps.yml}" LANE_PFM_LOG="${LANE_PFM_LOG_FIXTURE:-$T/absent.jsonl}" \
+  OUT="$(LANE_ALIVE_RETRY_SECS="${LANE_ALIVE_RETRY_SECS:-0.05}" LANE_WAIT_LAST_EVERY_SECS="${LANE_WAIT_LAST_EVERY_SECS:-0.05}" LANE_WAIT_FOR_EVERY_SECS="${LANE_WAIT_FOR_EVERY_SECS:-0.05}" \
+    LANE_OUT_DIR="$LANE_DIR" LANE_GAPS="${LANE_GAPS_FIXTURE:-$T/gaps.yml}" LANE_PFM_LOG="${LANE_PFM_LOG_FIXTURE:-$T/absent.jsonl}" \
     LANE_TODAY="${LANE_TODAY_FIXTURE:-2026-09-17}" bash "$T/$name.sh" 2>&1)"
   RC=$?
 }
@@ -423,6 +424,22 @@ else
   bad "log slice" "rc=$RC" "$OUT" "$(cat "$LANE_DIR/TL.log" 2>&1)"
 fi
 
+# ---- 13b: pfm's own slog record (level ERROR, upper case) fails the beat too --
+
+LOG="$T/pfm.jsonl"
+printf '{"level":"INFO","msg":"before the lane"}\n' >"$LOG"
+LANE_PFM_LOG_FIXTURE="$LOG" run_lane logslice \
+  'lane_begin TL' \
+  "beat TL.21-slog; printf '{\"level\":\"ERROR\",\"msg\":\"store unreadable\"}\n' >> '$LOG'; pass 'the assertion held'" \
+  'lane_end'
+if [ "$RC" -ne 0 ] &&
+  printf '%s' "$OUT" | grep -q 'unexpected error record' &&
+  grep -q 'store unreadable' "$LANE_DIR/TL.log" 2>/dev/null; then
+  ok "activity log: pfm's upper-case ERROR record turns a passing beat ✗ like a lower-case one"
+else
+  bad "log slice (slog ERROR)" "rc=$RC" "$OUT" "$(cat "$LANE_DIR/TL.log" 2>&1)"
+fi
+
 # ---- 14: expect-log declares the error the beat provokes on purpose -------
 
 printf '{"level":"info","msg":"before the lane"}\n' >"$LOG"
@@ -547,6 +564,33 @@ else
 fi
 dead_rows
 
+# ---- 19b: poll intervals keep production defaults; overrides reach each sleep
+
+run_lane poll_intervals \
+  'mkdir -p "$LANE_OUT_DIR"; sleep() { printf "%s\n" "$1" >>"$LANE_OUT_DIR/sleeps"; }' \
+  'LANE_ANCHOR=name:missing; _lane_alive_probe() { return 1; }; pfm() { return 1; }' \
+  'for mode in unset empty invalid short; do
+     case "$mode" in
+       unset) unset LANE_ALIVE_RETRY_SECS LANE_WAIT_LAST_EVERY_SECS LANE_WAIT_FOR_EVERY_SECS ;;
+       empty) LANE_ALIVE_RETRY_SECS= LANE_WAIT_LAST_EVERY_SECS= LANE_WAIT_FOR_EVERY_SECS= ;;
+       invalid) LANE_ALIVE_RETRY_SECS=abc LANE_WAIT_LAST_EVERY_SECS=abc LANE_WAIT_FOR_EVERY_SECS=abc ;;
+       short) LANE_ALIVE_RETRY_SECS=0.05 LANE_WAIT_LAST_EVERY_SECS=0.05 LANE_WAIT_FOR_EVERY_SECS=0.05 ;;
+     esac
+     lane_alive
+     _lane_wait_dead() { return 1; }
+     _lane_now() { local n; n=$(cat "$LANE_OUT_DIR/clock"); if [ "$n" -lt 2 ]; then printf "0\n"; else printf "2\n"; fi; printf "%s\n" "$((n + 1))" >"$LANE_OUT_DIR/clock"; }
+     printf "0\n" >"$LANE_OUT_DIR/clock"
+     wait_last missing NEVER 1
+     printf "0\n" >"$LANE_OUT_DIR/clock"
+     wait_for 1 false
+   done'
+polls="$(paste -sd, "$LANE_DIR/sleeps" 2>/dev/null)"
+if [ "$polls" = '1,1,5,3,1,1,5,3,1,1,5,3,0.05,0.05,0.05,0.05' ]; then
+  ok "poll intervals: defaults and invalid values keep production pacing; overrides reach each sleep"
+else
+  bad "poll intervals" "got=[$polls]"
+fi
+
 # ---- 20: blocked carries a reason beside the beat that blocked it ---------
 
 run_lane blockedwhy \
@@ -654,7 +698,9 @@ cat >"$T/wr-interrupt.sh" <<SCRIPT
 with_restored "$T/wr-target.txt" || exit 9
 printf 'mutated\n' >"$T/wr-target.txt"
 : >"$MARKER"
-sleep 30
+sleep 30 </dev/null >/dev/null 2>&1 &
+echo "\$!" >"$T/wr-sleeper.pid"
+wait "\$!"
 SCRIPT
 chmod +x "$T/wr-interrupt.sh"
 "$T/wr-interrupt.sh" &
@@ -666,6 +712,9 @@ while [ ! -e "$MARKER" ] && [ "$waited" -lt 100 ]; do
 done
 kill -TERM "$wr_pid" 2>/dev/null
 wait "$wr_pid" 2>/dev/null
+if [ -f "$T/wr-sleeper.pid" ]; then
+  kill "$(cat "$T/wr-sleeper.pid")" 2>/dev/null || true
+fi
 wr_content="$(cat "$T/wr-target.txt" 2>/dev/null)"
 if [ -e "$MARKER" ] && [ "$wr_content" = "original content" ]; then
   ok "with_restored: a SIGTERM mid-beat still restores the file via the composed exit trap"

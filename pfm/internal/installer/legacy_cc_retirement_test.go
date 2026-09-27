@@ -10,6 +10,7 @@ import (
 )
 
 func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configDirs := []string{
 		filepath.Join(home, ".claude"),
@@ -62,6 +63,7 @@ func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
 }
 
 func TestApplyQuarantinesExactNamedOperatorFilesBeforeRetirement(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := filepath.Join(home, ".claude")
 	public := filepath.Join(home, ".local", "bin", "cc-open")

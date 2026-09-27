@@ -9,6 +9,7 @@ import (
 )
 
 func TestMCPReconcilesOwnershipAfterRegistryMovesToSymlinkTarget(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	logical := filepath.Join(home, ".claude.json")
 	physical := filepath.Join(home, ".0-private", "claude.json")
@@ -43,6 +44,7 @@ func TestMCPReconcilesOwnershipAfterRegistryMovesToSymlinkTarget(t *testing.T) {
 }
 
 func TestMCPLegacyLedgerFollowsRegistrySymlink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	logical := filepath.Join(home, ".mcp.json")
 	physical := filepath.Join(home, ".claude.json")

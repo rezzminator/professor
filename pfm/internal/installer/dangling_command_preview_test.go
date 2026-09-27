@@ -22,6 +22,7 @@ import (
 // itself, but runs ModeApply, where future=!apply is false and the preview path
 // never executes — the gap this test closes.
 func TestCommandPreviewSurvivesDanglingGlobalCommandLink(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []struct {
 		name string
 		mode Mode

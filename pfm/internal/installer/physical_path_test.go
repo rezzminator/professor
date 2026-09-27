@@ -10,6 +10,7 @@ import (
 )
 
 func TestInstallPhysicalPathStableAcrossCreation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -38,6 +39,7 @@ func TestInstallPhysicalPathStableAcrossCreation(t *testing.T) {
 // through the run's own transcript, exactly once per unresolvable directory
 // no matter how many times claudeConfigDirs() is called.
 func TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	broken := filepath.Join(root, "broken-config")
 	if err := os.Symlink(filepath.Join(root, "missing-target"), broken); err != nil {
@@ -68,6 +70,7 @@ func TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript(t *te
 }
 
 func TestInstallHookOwnershipCanonicalizesLegacyAliases(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -117,6 +120,7 @@ func TestInstallHookOwnershipCanonicalizesLegacyAliases(t *testing.T) {
 }
 
 func TestInstallClaudeSettingsLeafSymlinkSurvivesLifecycle(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := filepath.Join(home, "account")
 	target := filepath.Join(home, "personal-settings.json")

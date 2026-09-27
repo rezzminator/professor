@@ -92,6 +92,42 @@ skip_gate() {
   esac
 }
 
+# timing_run_dir <base>: create <base> if absent and a fresh run.XXXXXX under
+# it, mode 0755 whatever the umask — the fence writes as root under the bind
+# mount and the host's non-root reader (`make -C pfm timing`, the CI artifact
+# upload) must still open it. Prints the run dir's absolute path. BROKEN STATE:
+# a base or run dir that cannot be made is non-zero with a stderr line naming
+# the base and prints no path, so a caller never runs a suite into nowhere.
+timing_run_dir() {
+  local base="$1" run abs
+  if [[ ! -d "$base" ]]; then
+    if ! mkdir -p "$base" 2>/dev/null || ! chmod 0755 "$base" 2>/dev/null; then
+      echo "timing_run_dir: the timing base $base could not be created" >&2; return 1
+    fi
+  fi
+  if ! run="$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)"; then
+    echo "timing_run_dir: no run directory could be created under $base" >&2; return 1
+  fi
+  if ! chmod 0755 "$run" || ! abs="$(cd "$run" && pwd)"; then
+    echo "timing_run_dir: the run directory under $base could not be opened to readers ($run)" >&2; return 1
+  fi
+  printf '%s\n' "$abs"
+}
+
+# pfm_e2e_rows <pfm-dir> <timing-run-dir>: the one definition of the tagged e2e
+# rows — `test` runs them after the unit rows, `e2e` runs them alone. Tagged
+# Tier A runs serially and has its own budget and artifact.
+pfm_e2e_rows() {
+  local d="$1" timing_run="$2"
+  run "pfm: e2e (tagged)" -- bash -c '
+    go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
+  ' _ "$d" "$timing_run/e2e.json"
+  go_test_report "$timing_run/e2e.json"
+  skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
+  run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
+    --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json"
+}
+
 # go_test_report <go-test.json>: the failure-biased read of a `go test -json`
 # stream — the whole stream is megabytes of frames a caller cannot hold, so this
 # prints one block per FAILING test (package, test name, that test's own output
@@ -240,7 +276,7 @@ node_test_suite() {
 act_templates() { # the shipped product: mechanical gates, no build
   local action="$1"
   case "$action" in
-    install|build|typecheck|cover) info "templates: no $action step (markdown + shell)" ;;
+    install|build|typecheck|cover|e2e) info "templates: no $action step (markdown + shell)" ;;
     verify|test|all)
       # Clone ratchet over the shell / JS / Python surface (scripts/clone-check.sh,
       # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
@@ -252,38 +288,42 @@ act_templates() { # the shipped product: mechanical gates, no build
       run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
       run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
       head_ "templates — leak gate"
-      # EVERY tracked file in this repo is published, so the changed set is the
-      # whole working tree — not a `templates scripts README INSTALL CHANGELOG
-      # releases` pathspec. Under that pathspec a change touching docs/,
-      # .claude/, .codex/, .professor/ or infra/ printed "leak-check clean (N
-      # changed file(s))" having scanned none of it, and the count made the
-      # claim look earned. Deleted paths are dropped and COUNTED here rather
-      # than handed to leak-check, whose --files mode correctly refuses to call
-      # a list of non-files clean.
-      local changed present gone
-      changed=$(repo_git status --porcelain | awk '{print $NF}' | grep -v '/$' || true)
-      present=()
-      gone=0
-      local candidate
-      while IFS= read -r candidate; do
-        [[ -z "$candidate" ]] && continue
-        if [[ -f "$candidate" ]]; then present+=("$candidate"); else gone=$((gone + 1)); fi
-      done <<<"$changed"
-      if (( ${#present[@]} > 0 )); then
-        if scripts/leak-check.sh --files "${present[@]}"; then
-          ok "leak-check clean (${#present[@]} changed file(s) scanned, ${gone} deleted path(s) skipped)"
-        else
-          fail_step "leak-check FAILED — brand / PII / machine-path string in a changed public file"
-        fi
-      elif (( gone > 0 )); then
-        ok "leak-check: every one of the ${gone} changed path(s) is a deletion — nothing to scan, nothing could leak"
+      # EVERY tracked file in this repo is published, so the gate scans the
+      # whole tracked tree — the same set CI scans — plus every changed or
+      # untracked non-ignored file, whatever the tree's state. A pathspec here
+      # once printed "clean" having scanned none of docs/, .claude/ or infra/,
+      # and the count made the claim look earned. Deleted paths are dropped and
+      # COUNTED rather than handed to leak-check, whose --files mode correctly
+      # refuses to call a list of non-files clean. BROKEN STATE: a git listing
+      # that could not be read is a red row, never a scan of nothing.
+      local tracked porcelain changed candidate leak_list
+      local present=0 changed_n=0 gone=0
+      if ! tracked="$(repo_git ls-files)" || ! porcelain="$(repo_git status --porcelain --untracked-files=all)"; then
+        fail_step "leak-check: the tracked or changed file list could not be read from git — nothing was scanned"
       else
-        info "working tree clean — scanning the whole tracked templates tree instead"
-        # shellcheck disable=SC2046
-        if repo_git ls-files templates README.md INSTALL.md | xargs scripts/leak-check.sh --files; then
-          ok "leak-check clean (full tracked scan of templates/ + README + INSTALL — NOT the whole repo)"
+        changed=$(awk '{print $NF}' <<<"$porcelain" | grep -v '/$' || true)
+        mkdir -p "$TMP_BASE/templates"
+        leak_list="$TMP_BASE/templates/leak-candidates.z"
+        : > "$leak_list"
+        while IFS= read -r candidate; do
+          [[ -z "$candidate" ]] && continue
+          if [[ -f "$candidate" ]]; then
+            printf '%s\0' "$candidate" >> "$leak_list"; present=$((present + 1))
+          else
+            gone=$((gone + 1))
+          fi
+        done < <(printf '%s\n%s\n' "$tracked" "$changed" | sort -u)
+        while IFS= read -r candidate; do
+          [[ -n "$candidate" && -f "$candidate" ]] && changed_n=$((changed_n + 1))
+        done <<<"$changed"
+        if (( present == 0 )); then
+          fail_step "leak-check: the candidate list holds no file present on disk — the LIST is broken, nothing was scanned"
+        # xargs batches the list so no argument list overflows; any red batch
+        # makes xargs non-zero, and a non-empty list never yields an empty batch.
+        elif xargs -0 scripts/leak-check.sh --files < "$leak_list"; then
+          ok "leak-check clean (${present} file(s): the whole tracked tree plus ${changed_n} changed, ${gone} deleted path(s) skipped)"
         else
-          fail_step "leak-check FAILED — brand / PII / machine-path string in a public file"
+          fail_step "leak-check FAILED — brand / PII / machine-path string in a public file, or a batch could not be scanned"
         fi
       fi
 
@@ -489,6 +529,9 @@ act_templates() { # the shipped product: mechanical gates, no build
         fi
       done
 
+      head_ "templates — refresh-scope fixtures"
+      run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
+
       head_ "templates — go test report under pipefail"
       if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
         ok "go_test_report reaches its log line on filtered and over-cap failure output"
@@ -559,14 +602,50 @@ act_pfm() {
   need_tool make pfm || return 0
   case "$action" in
     install) run "pfm: go mod download" -- go -C "$d" mod download ;;
-    build)   run "pfm: go build" -- go -C "$d" build ./... ;;
+    build)
+      run "pfm: go build" -- go -C "$d" build ./...
+      # Reproducible build: ./cmd/pfm compiled twice for the environment's
+      # GOOS/GOARCH with every input pinned (no cgo, no GOFLAGS, trimmed paths,
+      # no VCS stamp — the fence's linked-worktree .git names a host path) must
+      # hash identically. BROKEN STATE: no sha256 tool is TOOLCHAIN-MISSING and
+      # red, never a pass; a failed build or scratch dir is red naming the label.
+      local goos goarch label build_dir h1 h2 n
+      local sum_cmd=()
+      goos="$(go env GOOS)"; goarch="$(go env GOARCH)"
+      label="pfm: reproducible build ($goos/$goarch)"
+      if command -v sha256sum >/dev/null 2>&1; then sum_cmd=(sha256sum)
+      elif command -v shasum >/dev/null 2>&1; then sum_cmd=(shasum -a 256)
+      else fail_step "$label — TOOLCHAIN-MISSING: neither sha256sum nor shasum on PATH; the builds could not be compared"; return; fi
+      if ! mkdir -p "$TMP_BASE/build" || ! build_dir="$(mktemp -d "$TMP_BASE/build/repro.XXXXXX")"; then
+        fail_step "$label — no scratch directory could be created under $TMP_BASE/build"; return
+      fi
+      info "\$ CGO_ENABLED=0 go -C $d build -trimpath -buildvcs=false -ldflags \"-X main.version=verify\" -o $build_dir/pfm.{1,2} ./cmd/pfm"
+      for n in 1 2; do
+        env -u GOFLAGS CGO_ENABLED=0 go -C "$d" build -trimpath -buildvcs=false \
+          -ldflags "-X main.version=verify" -o "$build_dir/pfm.$n" ./cmd/pfm || break
+      done
+      if [[ ! -f "$build_dir/pfm.1" || ! -f "$build_dir/pfm.2" ]]; then
+        fail_step "$label — go build ./cmd/pfm failed (see output)"
+      else
+        h1="$("${sum_cmd[@]}" "$build_dir/pfm.1" | awk '{print $1}')"
+        h2="$("${sum_cmd[@]}" "$build_dir/pfm.2" | awk '{print $1}')"
+        if [[ -n "$h1" && "$h1" == "$h2" ]]; then
+          ok "$label — sha256 = $h1"
+        else
+          fail_step "$label — the two builds differ: sha256 ${h1:-<unreadable>} vs ${h2:-<unreadable>}"
+        fi
+      fi
+      rm -rf "$build_dir" ;;
     typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
     verify)
       run "pfm: go vet" -- go -C "$d" vet ./...
+      # The release binaries ship for macOS: vet the darwin build tags too, so a
+      # darwin-only file is judged here and not first by CI.
+      run "pfm: go vet (darwin/arm64)" -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./...
       # Formatting and lint through the pinned golangci-lint (infra/fence/tools.env):
       # the Makefile names TOOLCHAIN-MISSING when the tool is absent — `make
       # tools` on the host; the fence image bakes it in. lint-new judges only
-      # lines changed since origin/develop; `make lint` is the full backlog.
+      # lines changed since origin/main, the base CI uses; `make lint` is the full backlog.
       run "pfm: fmt-check (gofumpt + gci + golines)" -- make -C "$d" --no-print-directory fmt-check
       run "pfm: lint-new (golangci-lint, changed lines)" -- make -C "$d" --no-print-directory lint-new
       # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
@@ -577,9 +656,9 @@ act_pfm() {
       run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d" ;;
     # -count=1 is not optional: without it a package whose inputs are unchanged
     # reports `ok  (cached)`, and this gate would call a run it never watched a
-    # pass. -timeout is measured, not guessed — internal/index's OpenCode WAL
-    # stress test alone takes ~4.5 minutes (268s watched), so the 10m default
-    # turns an ordinary loaded host into a red suite that names the wrong cause.
+    # pass. -timeout 25m bounds a hang while letting a loaded host finish: the
+    # longest package (cmd/pfm) measured 133.5s in the fence, and the 10m
+    # default leaves too little headroom under host contention.
     test)
       local flags_text timing_base timing_run
       local testflags=()
@@ -588,8 +667,9 @@ act_pfm() {
       fi
       read -r -a testflags <<< "$flags_text"
       timing_base="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
-      mkdir -p "$timing_base"
-      timing_run="$(mktemp -d "$timing_base/run.XXXXXX")"
+      if ! timing_run="$(timing_run_dir "$timing_base")"; then
+        fail_step "pfm: timing run directory could not be created under $timing_base"; return
+      fi
       # Positional arguments keep flags and output paths out of shell code.
       # The JSON is retained even on failure; timing is a separate verdict.
       run "pfm: go test" -- bash -c '
@@ -599,14 +679,16 @@ act_pfm() {
       skip_gate "pfm: skipped tests are all listed (unit)" "$timing_run/unit.json"
       run "pfm: test timing (budget)" -- bash "$d/scripts/test-timing.sh" \
         --check --suite unit --out "$timing_run/unit.tsv" "$timing_run/unit.json"
-      # Tagged Tier A runs serially and has its own budget and artifact.
-      run "pfm: e2e (tagged)" -- bash -c '
-        go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
-      ' _ "$d" "$timing_run/e2e.json"
-      go_test_report "$timing_run/e2e.json"
-      skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
-      run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
-        --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json" ;;
+      pfm_e2e_rows "$d" "$timing_run" ;;
+    # The tagged e2e suite alone, in its own timing run dir — the same rows
+    # `test` runs after the unit suite (pfm_e2e_rows).
+    e2e)
+      local timing_base timing_run
+      timing_base="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
+      if ! timing_run="$(timing_run_dir "$timing_base")"; then
+        fail_step "pfm: timing run directory could not be created under $timing_base"; return
+      fi
+      pfm_e2e_rows "$d" "$timing_run" ;;
     # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
     # by pfm/.testcoverage.yml (a ratchet: measured, raised, never lowered).
     # COVER_DIR is where the profiles land — the fence sets it to container HOME
@@ -625,10 +707,10 @@ dispatch() { # dispatch <project> <action>
 
 # ─── iso — the container fence ───────────────────────────────────────────────
 # Runs a command inside the pfm-dev container (infra/fence/docker-compose.yml) with
-# THIS checkout — the worktree this script belongs to — mounted at /work: a
+# THIS checkout — the worktree this script belongs to — mounted at /worktree: a
 # fresh machine per run (own HOME, own tmux, no published ports). Files are
 # edited on the host; the container only builds and tests.
-# First output line is the fence proof (container hostname + HOME + /work).
+# First output line is the fence proof (container hostname + HOME + /worktree).
 # BROKEN STATE: docker missing, its DAEMON unreachable, or the compose file
 # missing = TOOLCHAIN-MISSING and a non-zero exit — never a host fallback; a run
 # that cannot print its fence proof did not run inside the fence. The daemon is
@@ -679,9 +761,7 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   case "$action" in
     shell)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
-    e2e)
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
-    install|build|typecheck|verify|test|cover|all|status)
+    install|build|typecheck|verify|test|e2e|cover|all|status)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
     run)
       # An arbitrary command inside the fence, from the worktree root — for the
@@ -728,10 +808,11 @@ commands:
   typecheck              vet / tsc --noEmit
   verify                 pre-test gates (pfm: go vet, fmt-check, lint-new, architecture ratchet;
                          templates: clone ratchet, leak + token gates)
-  test                   run the test suite
+  test                   run the test suite (pfm: unit rows, then the e2e rows)
+  e2e                    pfm: the tagged e2e suite alone, its report, skip gate and budget
   cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml)
   all                    verify + build + test for the project
-  iso <cmd> [project]    run any command above — plus e2e | shell — inside the
+  iso <cmd> [project]    run any command above — plus shell — inside the
                          pfm-dev container fence (infra/), worktree mounted
   iso sim <command…>     run a command in the real-simulation fence: Google Chrome,
                          an X display, pfm installed from the worktree, browser rung on
@@ -750,7 +831,7 @@ TARGET="${2:-all}"
 
 case "$CMD" in
   status) cmd_status "$TARGET" ;;
-  install|build|test|typecheck|verify|cover|all)
+  install|build|test|e2e|typecheck|verify|cover|all)
     if [[ "$TARGET" == "all" ]]; then
       for p in "${PROJECTS[@]}"; do head_ "$p :: $CMD"; dispatch "$p" "$CMD"; done
     else

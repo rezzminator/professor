@@ -13,6 +13,7 @@ import (
 // state — its actual wiring is unknown, not absent — and must come back as
 // an error, never silently folded into the same empty string.
 func TestReadStatusLineCommandDistinguishesAbsentFromUnreadable(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 
 	t.Run("a settings file that does not exist is not configured, not an error", func(t *testing.T) {

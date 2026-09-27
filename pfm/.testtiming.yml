@@ -1,88 +1,89 @@
-# pfm test timing budgets — PROVISIONAL first ratchet.
-# Values are one successful fenced capture rounded up, then doubled.
-# Re-measure from three captures at W5 close; budgets only shrink.
-# Evidence is retained under tmp/timing/provisional-serial-utf8-20260918/.
+# pfm test timing budgets. Both suites are checked at budget x tolerance.
+# Unit: -p 4 -parallel 4; max of three passing 2026-09-27 fenced captures,
+# rounded up to whole seconds (minimum 1), then doubled per row and suite.
+# Unit evidence: $HOME/.local/state/pfm/flights/professor/test-speed/rebaseline/.
+# E2e: 2026-09-18 serial capture, rounded up and doubled; unchanged here.
 tolerance: 1.25
 suites:
   unit:
-    wall_s: 1174
+    wall_s: 522
     packages:
       github.com/rezzminator/professor/pfm/cmd/mock-engine: 10
-      github.com/rezzminator/professor/pfm/cmd/pfm: 498
+      github.com/rezzminator/professor/pfm/cmd/pfm: 456
       github.com/rezzminator/professor/pfm/e2e: 2
       github.com/rezzminator/professor/pfm/harness-prompts: 2
-      github.com/rezzminator/professor/pfm/internal/action: 26
+      github.com/rezzminator/professor/pfm/internal/action: 60
       github.com/rezzminator/professor/pfm/internal/agentopen: 2
       github.com/rezzminator/professor/pfm/internal/agentrole: 2
       github.com/rezzminator/professor/pfm/internal/archive: 2
       github.com/rezzminator/professor/pfm/internal/ask: 2
       github.com/rezzminator/professor/pfm/internal/atomicfile: 2
-      github.com/rezzminator/professor/pfm/internal/binwatch: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter: 18
-      github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter/command: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter/report: 2
-      github.com/rezzminator/professor/pfm/internal/chat: 12
+      github.com/rezzminator/professor/pfm/internal/binwatch: 4
+      github.com/rezzminator/professor/pfm/internal/callmeter: 26
+      github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse: 4
+      github.com/rezzminator/professor/pfm/internal/callmeter/command: 6
+      github.com/rezzminator/professor/pfm/internal/callmeter/report: 10
+      github.com/rezzminator/professor/pfm/internal/chat: 18
       github.com/rezzminator/professor/pfm/internal/cli: 2
       github.com/rezzminator/professor/pfm/internal/clock: 2
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2
-      github.com/rezzminator/professor/pfm/internal/codexgen: 2
+      github.com/rezzminator/professor/pfm/internal/codexgen: 6
       github.com/rezzminator/professor/pfm/internal/codexmeta: 2
       github.com/rezzminator/professor/pfm/internal/compose: 2
-      github.com/rezzminator/professor/pfm/internal/config: 2
-      github.com/rezzminator/professor/pfm/internal/deps: 42
-      github.com/rezzminator/professor/pfm/internal/doctor: 6
+      github.com/rezzminator/professor/pfm/internal/config: 4
+      github.com/rezzminator/professor/pfm/internal/deps: 8
+      github.com/rezzminator/professor/pfm/internal/doctor: 20
       github.com/rezzminator/professor/pfm/internal/engine: 2
       github.com/rezzminator/professor/pfm/internal/engine/claude: 2
       github.com/rezzminator/professor/pfm/internal/engine/codex: 2
       github.com/rezzminator/professor/pfm/internal/engine/opencode: 2
-      github.com/rezzminator/professor/pfm/internal/fleet: 2
-      github.com/rezzminator/professor/pfm/internal/fleetdb: 2
-      github.com/rezzminator/professor/pfm/internal/gather: 22
+      github.com/rezzminator/professor/pfm/internal/fleet: 4
+      github.com/rezzminator/professor/pfm/internal/fleetdb: 4
+      github.com/rezzminator/professor/pfm/internal/gather: 26
       github.com/rezzminator/professor/pfm/internal/gitroot: 2
-      github.com/rezzminator/professor/pfm/internal/harvest: 132
-      github.com/rezzminator/professor/pfm/internal/harvestcli: 6
+      github.com/rezzminator/professor/pfm/internal/harvest: 154
+      github.com/rezzminator/professor/pfm/internal/harvestcli: 4
       github.com/rezzminator/professor/pfm/internal/harvestmcp: 6
-      github.com/rezzminator/professor/pfm/internal/harvestpy: 6
-      github.com/rezzminator/professor/pfm/internal/headless: 8
-      github.com/rezzminator/professor/pfm/internal/headless/run: 10
-      github.com/rezzminator/professor/pfm/internal/heal: 10
-      github.com/rezzminator/professor/pfm/internal/hookentry: 18
+      github.com/rezzminator/professor/pfm/internal/harvestpy: 14
+      github.com/rezzminator/professor/pfm/internal/headless: 12
+      github.com/rezzminator/professor/pfm/internal/headless/run: 24
+      github.com/rezzminator/professor/pfm/internal/heal: 26
+      github.com/rezzminator/professor/pfm/internal/hookentry: 28
       github.com/rezzminator/professor/pfm/internal/hostfixture: 2
-      github.com/rezzminator/professor/pfm/internal/index: 56
-      github.com/rezzminator/professor/pfm/internal/inject: 16
-      github.com/rezzminator/professor/pfm/internal/installer: 44
-      github.com/rezzminator/professor/pfm/internal/installer/shim: 2
-      github.com/rezzminator/professor/pfm/internal/kill: 14
-      github.com/rezzminator/professor/pfm/internal/mcpserv: 92
-      github.com/rezzminator/professor/pfm/internal/mockengine: 16
+      github.com/rezzminator/professor/pfm/internal/index: 138
+      github.com/rezzminator/professor/pfm/internal/inject: 24
+      github.com/rezzminator/professor/pfm/internal/installer: 122
+      github.com/rezzminator/professor/pfm/internal/installer/shim: 4
+      github.com/rezzminator/professor/pfm/internal/kill: 48
+      github.com/rezzminator/professor/pfm/internal/mcpserv: 198
+      github.com/rezzminator/professor/pfm/internal/mockengine: 22
       github.com/rezzminator/professor/pfm/internal/naming: 2
       github.com/rezzminator/professor/pfm/internal/nudge: 2
       github.com/rezzminator/professor/pfm/internal/obs: 2
-      github.com/rezzminator/professor/pfm/internal/opencodegen: 2
-      github.com/rezzminator/professor/pfm/internal/paths: 2
-      github.com/rezzminator/professor/pfm/internal/picker: 16
-      github.com/rezzminator/professor/pfm/internal/professor: 2
+      github.com/rezzminator/professor/pfm/internal/opencodegen: 4
+      github.com/rezzminator/professor/pfm/internal/paths: 6
+      github.com/rezzminator/professor/pfm/internal/picker: 36
+      github.com/rezzminator/professor/pfm/internal/professor: 4
       github.com/rezzminator/professor/pfm/internal/reap: 2
       github.com/rezzminator/professor/pfm/internal/recovery: 2
-      github.com/rezzminator/professor/pfm/internal/reload: 6
-      github.com/rezzminator/professor/pfm/internal/resolve: 40
+      github.com/rezzminator/professor/pfm/internal/reload: 8
+      github.com/rezzminator/professor/pfm/internal/resolve: 96
       github.com/rezzminator/professor/pfm/internal/semver: 2
       github.com/rezzminator/professor/pfm/internal/sky: 2
-      github.com/rezzminator/professor/pfm/internal/spawn: 10
+      github.com/rezzminator/professor/pfm/internal/spawn: 16
       github.com/rezzminator/professor/pfm/internal/sqlitedb: 2
       github.com/rezzminator/professor/pfm/internal/stale: 2
-      github.com/rezzminator/professor/pfm/internal/stats: 4
-      github.com/rezzminator/professor/pfm/internal/statusline: 4
-      github.com/rezzminator/professor/pfm/internal/store: 12
-      github.com/rezzminator/professor/pfm/internal/testjail: 2
+      github.com/rezzminator/professor/pfm/internal/stats: 10
+      github.com/rezzminator/professor/pfm/internal/statusline: 14
+      github.com/rezzminator/professor/pfm/internal/store: 42
+      github.com/rezzminator/professor/pfm/internal/testjail: 4
       github.com/rezzminator/professor/pfm/internal/theme: 2
       github.com/rezzminator/professor/pfm/internal/tmux: 2
       github.com/rezzminator/professor/pfm/internal/transcript: 2
-      github.com/rezzminator/professor/pfm/internal/ui: 10
-      github.com/rezzminator/professor/pfm/internal/update: 26
+      github.com/rezzminator/professor/pfm/internal/ui: 16
+      github.com/rezzminator/professor/pfm/internal/update: 86
       github.com/rezzminator/professor/pfm/internal/updatecheck: 2
-      github.com/rezzminator/professor/pfm/internal/usagehook: 2
+      github.com/rezzminator/professor/pfm/internal/usagehook: 4
   e2e:
     wall_s: 224
     packages:

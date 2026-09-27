@@ -28,6 +28,7 @@ var plistEnvironmentPath = regexp.MustCompile(
 //
 // It drives the real install path and reads the plist launchd will load.
 func TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	installer := &engine{
 		options: Options{
@@ -77,6 +78,7 @@ func TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux(t *testing.T) {
 // is how the systemd unit had one and its launchd twins had none — and the
 // rendered unit carries servicePath exactly.
 func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	units := 0
 	err := fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
@@ -126,6 +128,7 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 // planned "0 windows" each time, and exited 0, so no Codex rename ever reached
 // a window or a tab.
 func TestNameSyncLaunchAgentGivesTheJobAPathThatFindsTmux(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	installer := &engine{
 		options: Options{Home: home, Stdout: io.Discard, Runner: &loadedRunner{}, Sleep: func(time.Duration) {}},
@@ -156,6 +159,7 @@ func TestNameSyncLaunchAgentGivesTheJobAPathThatFindsTmux(t *testing.T) {
 // stdout/stderr unless StandardOutPath/StandardErrorPath are set, and neither
 // embedded plist carried them.
 func TestLaunchAgentPlistsCarryLogPaths(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		asset   string
 		logFile string
@@ -189,6 +193,7 @@ func TestLaunchAgentPlistsCarryLogPaths(t *testing.T) {
 // existed — launchd never creates one for a log path, so every line the
 // daemon wrote before this fix vanished silently.
 func TestWireLaunchAgentCreatesLogDirInApplyMode(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	installer := &engine{
 		options: Options{Home: home, Stdout: io.Discard, Runner: &loadedRunner{}, Sleep: func(time.Duration) {}},
@@ -210,6 +215,7 @@ func TestWireLaunchAgentCreatesLogDirInApplyMode(t *testing.T) {
 // TestWireLaunchAgentPlansLogDirInDryRun mirrors CreatesLogDirInApplyMode: a
 // dry run must report the same planned step without touching the filesystem.
 func TestWireLaunchAgentPlansLogDirInDryRun(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var stdout strings.Builder
 	installer := &engine{
@@ -238,6 +244,7 @@ func TestWireLaunchAgentPlansLogDirInDryRun(t *testing.T) {
 // differently from "the operator turned it off". Unfixed: the change line is
 // "remove <path>" with no config named.
 func TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configPath := filepath.Join(home, ".config", "pfm", "pfm.config.json")
 	installer := &engine{

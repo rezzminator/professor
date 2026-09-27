@@ -18,6 +18,7 @@ import (
 // an operator-edited profile still relinquishes exactly as any other legacy
 // upgrade would.
 func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{

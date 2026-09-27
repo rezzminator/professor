@@ -10,6 +10,7 @@ import (
 // where the first comma is followed by another comma, not directly by
 // whitespace-then-bracket.
 func TestSanitizeJSONCToleratesConsecutiveTrailingCommas(t *testing.T) {
+	t.Parallel()
 	for name, content := range map[string]string{
 		"double trailing comma in a nested object":  `{"a": {"x": 1,,},"b":2}`,
 		"triple trailing comma in a nested object":  `{"a": {"x": 1,,,},"b":2}`,

@@ -49,6 +49,7 @@ type attachJail struct {
 }
 
 func TestJailedEvalAttachFromPlainAndNestedTmux(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
@@ -59,30 +60,37 @@ func TestJailedEvalAttachFromPlainAndNestedTmux(t *testing.T) {
 		t.Skip("script(1) is not installed")
 	}
 
-	jail := newAttachJail(t)
-	index := exec.Command(filepath.Join(jail.home, ".local", "bin", "pfm"), "index", "--full")
-	index.Env = jail.env
-	if output, err := index.CombinedOutput(); err != nil {
-		t.Fatalf("index attach fixture: %v: %s", err, output)
-	}
-
 	for _, mode := range []string{"plain", "inside-tmux", "bunker"} {
 		for _, flow := range []string{"picker", "open"} {
 			t.Run("eval/"+mode+"/"+flow, func(t *testing.T) {
-				jail.proveAttach(t, "eval", mode, flow)
+				t.Parallel()
+				proveJailedAttach(t, "eval", mode, flow)
 			})
 		}
 	}
 	for _, mode := range []string{"plain", "inside-tmux"} {
 		for _, flow := range []string{"picker", "open"} {
 			t.Run("raw/"+mode+"/"+flow, func(t *testing.T) {
-				jail.proveAttach(t, "raw", mode, flow)
+				t.Parallel()
+				proveJailedAttach(t, "raw", mode, flow)
 			})
 		}
 	}
 	t.Run("raw/plain/bare", func(t *testing.T) {
-		jail.proveAttach(t, "raw", "plain", "bare")
+		t.Parallel()
+		proveJailedAttach(t, "raw", "plain", "bare")
 	})
+}
+
+func proveJailedAttach(t *testing.T, protocol, mode, flow string) {
+	t.Helper()
+	jail := newAttachJail(t)
+	index := exec.Command(filepath.Join(jail.home, ".local", "bin", "pfm"), "index", "--full")
+	index.Env = jail.env
+	if output, err := index.CombinedOutput(); err != nil {
+		t.Fatalf("index attach fixture: %v: %s", err, output)
+	}
+	jail.proveAttach(t, protocol, mode, flow)
 }
 
 func newAttachJail(t *testing.T) *attachJail {

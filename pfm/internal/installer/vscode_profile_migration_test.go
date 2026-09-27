@@ -11,6 +11,7 @@ import (
 )
 
 func TestVSCodeOwnedLegacyAutoOpenProfileUpgradesToPFM(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{
@@ -44,6 +45,7 @@ func TestVSCodeOwnedLegacyAutoOpenProfileUpgradesToPFM(t *testing.T) {
 }
 
 func TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"operator-choice"}}}}`
@@ -86,6 +88,7 @@ func TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved(t *testing.T) {
 }
 
 func TestVSCodeUninstallRemovesOwnedLegacyProfile(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(
@@ -110,6 +113,7 @@ func TestVSCodeUninstallRemovesOwnedLegacyProfile(t *testing.T) {
 }
 
 func TestVSCodeUninstallPreservesEditedLegacyProfile(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}}}`
@@ -135,6 +139,7 @@ func TestVSCodeUninstallPreservesEditedLegacyProfile(t *testing.T) {
 // (VS Code's documented "delete this inherited var" spelling), never absent
 // and never a non-null placeholder value.
 func TestVSCodeCanonicalProfileNullsEveryChatIdentityVariable(t *testing.T) {
+	t.Parallel()
 	profile := vscodeProfile()
 	env, ok := profile["env"].(map[string]any)
 	if !ok {
@@ -170,6 +175,7 @@ func TestVSCodeCanonicalProfileNullsEveryChatIdentityVariable(t *testing.T) {
 // owned profile in that exact shape is upgraded rather than refused as an
 // operator edit.
 func TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{
@@ -203,6 +209,7 @@ func TestVSCodeOwnedPreviousCanonicalProfileUpgradesToNullEnvCanonical(t *testin
 // alone, the same law TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved
 // already pins for the CC_AUTO_OPEN spelling.
 func TestVSCodeHandEditedPreviousCanonicalProfileIsPreserved(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"operator-choice"}}}}`

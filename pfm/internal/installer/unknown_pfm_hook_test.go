@@ -83,6 +83,7 @@ func TestInstallRetiresAPFMHookThisBinaryDoesNotImplement(t *testing.T) {
 // argument text contains "pfm". This assertion holds on unfixed code too —
 // it pins the guard, not the new behavior.
 func TestInstallLeavesAForeignHookThatMerelyMentionsPFM(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	foreign := "/usr/local/bin/notify --tag pfm"
 	raw := []byte(`{
@@ -221,6 +222,7 @@ func TestUnknownPFMHookCommandNeverReportsUnknownWithAnUnsetRegistry(t *testing.
 // one: UnknownPFMHookCommands returns the decode error, and a clean document
 // returns no names and no error.
 func TestUnknownPFMHookCommandsNamesAnUnparsableDocument(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	names, err := UnknownPFMHookCommands([]byte("{\"hooks\": "), home)
 	if err == nil {

@@ -17,6 +17,7 @@ import (
 // then staged assets, launchers and overlays before refusing, leaving the
 // machine half-converged with no named remedy.
 func TestPreflightReportsTheNonEmptyRetirementBeforeAnyMutation(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := managedRootForHome(home)
 	stray := filepath.Join(managed, "chat", "stray-note.md")
@@ -45,6 +46,7 @@ func TestPreflightReportsTheNonEmptyRetirementBeforeAnyMutation(t *testing.T) {
 // visible in it — named in the transcript and returned as a plan error, never
 // a clean-looking preview of a run that cannot finish.
 func TestDryRunReportsTheNonEmptyRetirementAsAPlanConflict(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	stray := filepath.Join(managedRootForHome(home), "codex-skills", "bb", "keepme.txt")
 	writeFixture(t, stray, "operator file\n")
@@ -71,6 +73,7 @@ func TestDryRunReportsTheNonEmptyRetirementAsAPlanConflict(t *testing.T) {
 // that accounting, every install with a legacy /chat: command card on disk
 // would refuse to run.
 func TestRetirementAccountsForTheFilesTheSamePassRemoves(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := managedRootForHome(home)
 	writeFixture(t, filepath.Join(managed, "chat", "ls.command.md"), "# retired chat card\n")

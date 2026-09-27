@@ -54,6 +54,7 @@ func gitConfigValue(t *testing.T, repo, key string) string {
 // must carry the change line naming that clone. FAILS on unfixed code
 // because core.hooksPath is never written.
 func TestInstallArmsThePrePushGateInTheSourceClone(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	var stdout bytes.Buffer
@@ -76,6 +77,7 @@ func TestInstallArmsThePrePushGateInTheSourceClone(t *testing.T) {
 // to the clone's git config. FAILS on unfixed code because no change line
 // names the clone at all.
 func TestInstallPreviewNamesTheUnarmedGateAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	var stdout bytes.Buffer
@@ -97,6 +99,7 @@ func TestInstallPreviewNamesTheUnarmedGateAndWritesNothing(t *testing.T) {
 // re-announced as a change. FAILS on unfixed code because no "armed" ok line
 // is ever produced for the clone.
 func TestInstallReportsAnArmedGateAsOK(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	// Pre-arm the clone's git config directly, bypassing the step under test.
@@ -133,6 +136,7 @@ func TestInstallReportsAnArmedGateAsOK(t *testing.T) {
 // is ever produced (the clone's config is untouched either way, so only the
 // stdout assertion distinguishes fixed from unfixed here).
 func TestInstallSkipsAGateThatIsNotShipped(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := t.TempDir()
 	if out, err := exec.Command("git", "-C", clone, "init", "-q").CombinedOutput(); err != nil {
@@ -159,6 +163,7 @@ func TestInstallSkipsAGateThatIsNotShipped(t *testing.T) {
 // because writeUpdateMetadata never inspects .githooks/pre-push and returns
 // nil.
 func TestInstallRefusesABrokenHook(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	hook := filepath.Join(clone, ".githooks", "pre-push")
@@ -190,6 +195,7 @@ func TestInstallRefusesABrokenHook(t *testing.T) {
 // core.hooksPath string to the literal ".githooks" and issues a change line
 // instead of ok.
 func TestInstallReportsAnAbsoluteHooksPathAsArmed(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	absolute := filepath.Join(clone, ".githooks")

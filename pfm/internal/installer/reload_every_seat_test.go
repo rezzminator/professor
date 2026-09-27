@@ -12,6 +12,7 @@ import (
 // commands/ is a real directory (not a symlink to the primary's) had no
 // /reload at all — the demo fence's seat 3 was exactly that.
 func TestReloadCommandLinksIntoEverySeat(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
 	second := filepath.Join(home, ".cc", "2")
@@ -53,6 +54,7 @@ func TestReloadCommandLinksIntoEverySeat(t *testing.T) {
 }
 
 func TestReloadCommandLinksIntoTheImplicitSeat(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
 	second := filepath.Join(home, ".cc", "2")

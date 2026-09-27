@@ -67,6 +67,7 @@ func linuxHarvestPlan() harvestpy.InstallPlan {
 }
 
 func TestInstallHarvestDryRunPlansOnlyAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	fake := &harvestProvisionerFake{plan: linuxHarvestPlan()}
 	var output strings.Builder
@@ -111,6 +112,7 @@ func TestInstallHarvestDryRunPlansOnlyAndWritesNothing(t *testing.T) {
 }
 
 func TestInstallHarvestSkipReportsExactStateForApplyAndPreview(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		mode Mode
@@ -150,6 +152,7 @@ func TestInstallHarvestSkipReportsExactStateForApplyAndPreview(t *testing.T) {
 }
 
 func TestInstallHarvestApplyUsesCentralRuntimeRootAndCheckFastPath(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	root := filepath.Join(home, ".local", "state", "pfm", "harvest-python")
 	fake := &harvestProvisionerFake{
@@ -223,6 +226,7 @@ func TestInstallHarvestApplyUsesCentralRuntimeRootAndCheckFastPath(t *testing.T)
 }
 
 func TestInstallHarvestApplyProvisionFailureIsActionableOffline(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	fake := &harvestProvisionerFake{
 		plan:         linuxHarvestPlan(),
@@ -249,6 +253,7 @@ func TestInstallHarvestApplyProvisionFailureIsActionableOffline(t *testing.T) {
 }
 
 func TestInstallHarvestDarwinAMD64BlockedByExactLock(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	plan := linuxHarvestPlan()
 	plan.Platform = "darwin-amd64"
@@ -284,6 +289,7 @@ func TestInstallHarvestDarwinAMD64BlockedByExactLock(t *testing.T) {
 }
 
 func TestUninstallHarvestRemovesOnlyManagedRuntimeAndCache(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	root := filepath.Join(home, ".local", "state", "pfm", "harvest-python")
 	if err := os.MkdirAll(filepath.Join(root, "env", "linux-amd64", "current"), 0o700); err != nil {

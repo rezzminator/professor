@@ -253,6 +253,7 @@ func TestVSCodeExtensionUninstallSkipsAForeignRelinkedTargetButStillDeletesTheLe
 // sorted regardless of write order, a relative extension path is refused,
 // and a duplicate is refused.
 func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	path := filepath.Join(managed, vscodeOwnershipName)
@@ -498,6 +499,7 @@ func TestVSCodeExtensionPortableLinksAtPortableRootAndSettingsPathUsesUserData(t
 // id it contributes, main names a file that is itself embedded, and
 // assetFiles() stages both under vscode/professor/.
 func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStagesBothFiles(t *testing.T) {
+	t.Parallel()
 	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/package.json")
 	if err != nil {
 		t.Fatal(err)
@@ -568,6 +570,7 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 // never through a bare createTerminal(options) call, which renders the
 // default profile's icon instead of the extension's own (finding 10).
 func TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions(t *testing.T) {
+	t.Parallel()
 	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/extension.js")
 	if err != nil {
 		t.Fatal(err)
@@ -600,6 +603,7 @@ func TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions(t *test
 // regression for issue #24 finding 11b: pfm wires a default keybinding for
 // professor.newChatTerminal so the command is reachable without the palette.
 func TestVSCodeExtensionContributesOneKeybindingForTheCommand(t *testing.T) {
+	t.Parallel()
 	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/package.json")
 	if err != nil {
 		t.Fatal(err)
@@ -881,6 +885,7 @@ process.stdout.write(JSON.stringify(provider.provideTerminalProfile()));
 // a JSON null for every chat-identity variable a launcher app could have
 // inherited (see the comment beside nextTerminal's env in extension.js).
 func TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv(t *testing.T) {
+	t.Parallel()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")

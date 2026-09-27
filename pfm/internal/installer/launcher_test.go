@@ -10,6 +10,7 @@ import (
 )
 
 func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".local", "bin", "claude")
 	nativeOne := filepath.Join(home, ".local", "share", "claude", "versions", "1.0.0")
@@ -80,6 +81,7 @@ func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
 }
 
 func TestClaudeLauncherAssetIsExactExecShim(t *testing.T) {
+	t.Parallel()
 	raw, err := readAsset("bin/claude")
 	if err != nil {
 		t.Fatal(err)
@@ -104,12 +106,14 @@ func TestClaudeLauncherAssetIsExactExecShim(t *testing.T) {
 }
 
 func TestAssetRenderersRefuseMissingTemplateMarkers(t *testing.T) {
+	t.Parallel()
 	if _, err := renderShimAsset([]byte("marker drift\n"), Options{}); err == nil {
 		t.Fatal("shim renderer silently accepted missing markers")
 	}
 }
 
 func TestResolveClaudeBinaryUsesConfiguredThenNewestThenPATH(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -147,6 +151,7 @@ func TestResolveClaudeBinaryUsesConfiguredThenNewestThenPATH(t *testing.T) {
 }
 
 func TestResolveClaudeBinaryUsesRelativeConfiguredCommandFromSuppliedPATH(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {
@@ -168,6 +173,7 @@ func TestResolveClaudeBinaryUsesRelativeConfiguredCommandFromSuppliedPATH(t *tes
 }
 
 func TestResolveClaudeBinaryMissingRelativeConfiguredCommandFails(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	newest := filepath.Join(home, ".local", "share", "claude", "versions", "9.9.9")
 	if err := os.MkdirAll(filepath.Dir(newest), 0o700); err != nil {
@@ -191,6 +197,7 @@ func TestResolveClaudeBinaryMissingRelativeConfiguredCommandFails(t *testing.T) 
 }
 
 func TestResolveClaudeBinaryDefaultNameStillUsesNativeFallback(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	newest := filepath.Join(home, ".local", "share", "claude", "versions", "9.9.9")
 	if err := os.MkdirAll(filepath.Dir(newest), 0o700); err != nil {
@@ -205,6 +212,7 @@ func TestResolveClaudeBinaryDefaultNameStillUsesNativeFallback(t *testing.T) {
 }
 
 func TestResolveClaudeBinarySkipsManagedAliasesAndHonorsPATHOrder(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := managedClaudeLauncher(home)
 	if err := os.MkdirAll(filepath.Dir(managed), 0o700); err != nil {
@@ -258,6 +266,7 @@ func TestResolveClaudeBinaryTreatsEmptyPATHComponentAsCurrentDirectory(t *testin
 }
 
 func TestResolveClaudeBinaryNamesAbsenceAndInspectionFailure(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	if resolved, err := ResolveClaudeBinary(
 		home,
@@ -283,6 +292,7 @@ func TestResolveClaudeBinaryNamesAbsenceAndInspectionFailure(t *testing.T) {
 }
 
 func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := canonicalClaudeLauncher(home)
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
@@ -300,6 +310,7 @@ func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
 }
 
 func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := canonicalClaudeLauncher(home)
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {

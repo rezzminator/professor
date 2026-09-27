@@ -6,6 +6,7 @@ import (
 )
 
 func TestReloadCommandTargetMigratesLegacySwap(t *testing.T) {
+	t.Parallel()
 	installer := &engine{options: Options{ConfigDir: filepath.Join(t.TempDir(), ".claude")}}
 	target, ok := installer.commandTarget("reload.command.md")
 	if !ok || filepath.Base(target) != "reload.md" {
@@ -17,6 +18,7 @@ func TestReloadCommandTargetMigratesLegacySwap(t *testing.T) {
 }
 
 func TestSkillTargetMapsHandoffUnderItsOwnDir(t *testing.T) {
+	t.Parallel()
 	installer := &engine{options: Options{ConfigDir: filepath.Join(t.TempDir(), ".claude")}}
 	target, ok := installer.skillTarget(installer.options.ConfigDir, "handoff.skill.md")
 	if !ok {

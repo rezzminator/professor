@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -74,13 +75,9 @@ func runRun(
 	settle := flags.Int("settle", askSettleSeconds, "with --await: seconds of quiet before an answer is finished")
 	progress := flags.Bool("progress", false, "with --await: print the chat's turns to stderr while waiting")
 	attach := flags.Bool("attach", false, "attach this terminal after launch")
-	if code, ok := cli.ParseFlags(flags, args); !ok {
-		return code
-	}
-	positional := flags.Args()
-	if *name == "" && len(positional) > 0 {
-		*name = positional[0]
-		positional = positional[1:]
+	positional, parseCode, ok := parseRunFlags(flags, name, args)
+	if !ok {
+		return parseCode
 	}
 	if *name == "" || *timeout < 0 || *settle < 0 || (*attach && *await) {
 		flags.Usage()
@@ -519,6 +516,30 @@ func rescueLaunchPrompt(
 		return false
 	}
 	return true
+}
+
+// parseRunFlags reads chat new's flags on both sides of a positional seat
+// name: `pfm chat new seat --engine cx` keeps --engine. The prompt starts at
+// the first word after the name that is not a flag, and `--` ends flag
+// parsing, so a prompt word that looks like a flag (`explain the -h output`)
+// stays prompt text instead of printing usage or arming a flag.
+func parseRunFlags(flags *flag.FlagSet, name *string, args []string) ([]string, int, bool) {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
+		return nil, code, false
+	}
+	positional := flags.Args()
+	terminated := len(positional) < len(args) && args[len(args)-len(positional)-1] == "--"
+	if *name != "" || len(positional) == 0 {
+		return positional, 0, true
+	}
+	*name = positional[0]
+	if terminated {
+		return positional[1:], 0, true
+	}
+	if code, ok := cli.ParseFlags(flags, positional[1:]); !ok {
+		return nil, code, false
+	}
+	return flags.Args(), 0, true
 }
 
 // runPrompt takes the launch prompt from a file or from the command line,

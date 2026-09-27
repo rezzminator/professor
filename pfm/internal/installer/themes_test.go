@@ -17,6 +17,7 @@ import (
 )
 
 func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *testing.T) {
+	t.Parallel()
 	themeBody := []byte(`{"name":"Sonar Gold","base":"dark","overrides":{"claude":"#ffd60a"}}` + "\n")
 	manifest := `{"bundled":{"sonar-gold":{"file":"sonar-gold.json","target":"~/.claude/themes/sonar-gold.json","activate":"/theme","requires":"fixture"}}}`
 	run := func(home, sourceRepo, manifestURL string) (Report, string, error) {
@@ -90,6 +91,7 @@ func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *
 }
 
 func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing.T) {
+	t.Parallel()
 	load := func(manifest string) error {
 		sourceRepo := t.TempDir()
 		writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
@@ -133,6 +135,7 @@ func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing
 }
 
 func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
+	t.Parallel()
 	baseBody := `{"name":"Tokyo Night","base":"dark","overrides":{"claude":"#c95cff","promptBorder":"#7c4dff","promptBorderShimmer":"#aa8bff"}}`
 	overlay := `{"name":"Professor Gold","overrides":{"promptBorder":"#ffd60a","promptBorderShimmer":"#fff7c2"}}`
 	var baseStatus int
@@ -234,6 +237,7 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 // is fetched unconditionally and the error is a bare "fetch failed"/network
 // error, not the named refusal.
 func TestThemeManifestUnpublishedAlphaReleaseReturnsNamedRefusal(t *testing.T) {
+	t.Parallel()
 	_, err := loadThemeSources(context.Background(), Options{
 		ThemeManifestURL: "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/sources.json",
 	})
@@ -252,6 +256,7 @@ func TestThemeManifestUnpublishedAlphaReleaseReturnsNamedRefusal(t *testing.T) {
 // must return the named refusal carrying the local-manifest error — never a
 // fetch of the URL pfm never publishes.
 func TestThemeManifestSourceRepoWithoutLocalManifestRefusesUnpublishedAlpha(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		t.Errorf("fetched the unpublished -alpha release manifest %s", request.URL)
 		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
@@ -288,6 +293,7 @@ func (fn themeRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, e
 // preview line must say "read bundled theme X -> target". FAILS on unfixed
 // code because the preview line always says "fetch theme X -> target".
 func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
 	writeFixture(

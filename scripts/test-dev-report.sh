@@ -42,9 +42,11 @@ fi
 J2="$T/test-fail-long.json"
 {
   echo '{"Action":"run","Package":"p/b","Test":"TestLoud"}'
-  for i in $(seq 1 4000); do
-    printf '{"Action":"output","Package":"p/b","Test":"TestLoud","Output":"line %d %s\\n"}\n' "$i" "$(printf 'x%.0s' $(seq 1 120))"
-  done
+  awk 'BEGIN {
+    for (j = 1; j <= 120; j++) pad = pad "x"
+    for (i = 1; i <= 4000; i++)
+      printf "{\"Action\":\"output\",\"Package\":\"p/b\",\"Test\":\"TestLoud\",\"Output\":\"line %d %s\\n\"}\n", i, pad
+  }'
   echo '{"Action":"fail","Package":"p/b","Test":"TestLoud","Elapsed":0.1}'
   echo '{"Action":"fail","Package":"p/b","Elapsed":0.1}'
 } > "$J2"
@@ -59,9 +61,11 @@ fi
 J3="$T/pkg-fail-long.json"
 {
   echo '{"Action":"run","Package":"p/ok","Test":"TestFine"}'
-  for i in $(seq 1 4000); do
-    printf '{"Action":"output","Package":"p/c","Output":"p/c/x.go:%d: undefined: thing %s\\n"}\n' "$i" "$(printf 'y%.0s' $(seq 1 120))"
-  done
+  awk 'BEGIN {
+    for (j = 1; j <= 120; j++) pad = pad "y"
+    for (i = 1; i <= 4000; i++)
+      printf "{\"Action\":\"output\",\"Package\":\"p/c\",\"Output\":\"p/c/x.go:%d: undefined: thing %s\\n\"}\n", i, pad
+  }'
   echo '{"Action":"fail","Package":"p/c","Elapsed":0.1}'
 } > "$J3"
 out=$(report "$J3"); rc=$?
@@ -79,6 +83,33 @@ if [[ $rc -eq 0 && "$out" == *"NO TEST EVENTS"* && "$out" == *"info: log: "* ]];
   ok "a stream with no test event and only blank output reaches the log line"
 else
   bad "a stream with no test event and only blank output aborted the report (rc $rc)" "${out:-<no output>}"
+fi
+
+# Case 5: timing_run_dir makes a run dir a non-root reader can open, even under
+# umask 077 (the fence runs as root; the host reads its timing TSVs), and an
+# uncreatable base fails naming the base with no path printed.
+TRD="$T/timing-run-dir.sh"
+awk '/^timing_run_dir\(\) \{/,/^\}/ { print }' "$DEV" > "$TRD"
+if ! grep -q '^timing_run_dir() {' "$TRD"; then
+  bad "timing_run_dir not found in $DEV — the timing run dir cannot be checked"
+else
+  base="$T/timing-base/nested"
+  out=$(bash -c 'umask 077; source "$1"; timing_run_dir "$2"' _ "$TRD" "$base" 2>"$T/trd.err"); rc=$?
+  mode=$( [[ -n "$out" && -d "$out" ]] && ls -ld "$out" | cut -c1-10 )
+  if [[ $rc -eq 0 && "$out" == "$base"/run.* && -d "$out" && "$mode" == "drwxr-xr-x" ]]; then
+    ok "timing_run_dir creates an absent base and a 0755 run dir under umask 077"
+  else
+    bad "timing_run_dir did not create a 0755 run dir under umask 077 (rc $rc, mode ${mode:-none})" "stdout: ${out:-<none>}" "stderr: $(cat "$T/trd.err")"
+  fi
+  : > "$T/plain-file"
+  base="$T/plain-file/timing"
+  out=$(bash -c 'source "$1"; timing_run_dir "$2"' _ "$TRD" "$base" 2>"$T/trd.err"); rc=$?
+  err=$(cat "$T/trd.err")
+  if [[ $rc -ne 0 && -z "$out" && "$err" == *"$base"* ]]; then
+    ok "timing_run_dir fails on an uncreatable base, names it on stderr and prints no path"
+  else
+    bad "timing_run_dir on an uncreatable base did not fail cleanly (rc $rc)" "stdout: ${out:-<none>}" "stderr: ${err:-<none>}"
+  fi
 fi
 
 shtest_end

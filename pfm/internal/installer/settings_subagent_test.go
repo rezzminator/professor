@@ -12,6 +12,7 @@ import (
 // absent, never replaces an operator's own command, and uninstall removes
 // exactly its own value.
 func TestSubagentStatusLineIsWiredOnceAndOnlyOursIsRemoved(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	ours := SubagentStatusLineCommand(home)
 	if ours != StatusLineOverlayCommand(home)+" --subagents" {

@@ -11,6 +11,7 @@ import (
 )
 
 func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	original := `{
@@ -118,6 +119,7 @@ func TestVSCodeTerminalProfileIsPreviewedMergedIdempotentAndReversed(t *testing.
 }
 
 func TestVSCodeTerminalProfileRefusesAnOperatorProfileWithTheSameName(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}}}`
@@ -136,6 +138,7 @@ func TestVSCodeTerminalProfileRefusesAnOperatorProfileWithTheSameName(t *testing
 }
 
 func TestVSCodeProfileConflictRefusesApplyBeforeInstallerWrites(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	original := `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}}}`
@@ -162,6 +165,7 @@ func TestVSCodeProfileConflictRefusesApplyBeforeInstallerWrites(t *testing.T) {
 }
 
 func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
@@ -198,6 +202,7 @@ func TestVSCodeUninstallPreservesAnOperatorOverrideAfterInstall(t *testing.T) {
 // uninstall must leave it exactly as the operator left it rather than
 // restoring pfm's own remembered prior state.
 func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
@@ -232,6 +237,7 @@ func TestVSCodeScalarKeyOperatorOverrideSurvivesUninstall(t *testing.T) {
 }
 
 func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
 	options := Options{
@@ -257,6 +263,7 @@ func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
 }
 
 func TestVSCodeProfileUsesTheShimPickerValueExplicitly(t *testing.T) {
+	t.Parallel()
 	shim := readFixture(t, filepath.Join("assets", "shim", "pfm.zsh"))
 	if !strings.Contains(shim, `cmd="$HOME/.local/bin/pfm"`) {
 		t.Fatal("the installed PFM_AUTO_OPEN=pfm value is not routed to the absolute PFM picker")
@@ -264,6 +271,7 @@ func TestVSCodeProfileUsesTheShimPickerValueExplicitly(t *testing.T) {
 }
 
 func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
 	paths := (&engine{options: Options{Home: home, vscodePlatform: "darwin"}}).vscodeSettingsPaths()
@@ -291,6 +299,7 @@ func TestVSCodeDarwinUsesTheOSXTerminalKeysAndUserSettingsPath(t *testing.T) {
 }
 
 func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	oldPath := filepath.Join(home, "a-old-settings.json")
@@ -332,6 +341,7 @@ func TestVSCodeNewPathUsesLivePlatformNotAnOlderRecordsPlatform(t *testing.T) {
 }
 
 func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)
@@ -372,6 +382,7 @@ func TestVSCodeEditedProfileSurvivesUninstallAndDoesNotBlockReinstall(t *testing
 }
 
 func TestMalformedVSCodeSettingsSkipsVisiblyWithoutBlockingInstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, "{broken\n")
@@ -500,6 +511,7 @@ const realMalformedVSCodeSettings = `{
 // already carried — the other profiles, the automation profile, the tab
 // title — read back correctly.
 func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, realMalformedVSCodeSettings)
@@ -549,6 +561,7 @@ func TestVSCodeMergeToleratesTheRealMalformedTrailingCommaFile(t *testing.T) {
 // object (setJSONCProperty's insert path), not just decide nothing had
 // changed. The result must still be valid strict JSON at that object.
 func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	withoutPFM := strings.Replace(realMalformedVSCodeSettings, `    "PFM": {
@@ -595,6 +608,7 @@ func TestVSCodeMergeWritesStrictJSONIntoTheMalformedProfilesObject(t *testing.T)
 }
 
 func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
 	writeFixture(t, settings, `{}`)

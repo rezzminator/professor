@@ -259,5 +259,6 @@ func newKillCLIJail(t *testing.T) *killCLIJail {
 	t.Setenv("PFM_TMUX_DIR", tmuxDir)
 	t.Setenv("PFM_PROC_ROOT", procRoot)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
+	t.Setenv("PFM_TEST_KILL_CONFIRM_EVERY_MS", "10")
 	return &killCLIJail{root: root, home: home, procRoot: procRoot}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +60,17 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	confirmEvery := dependencies.ConfirmEvery
 	if confirmEvery == 0 {
 		confirmEvery = defaultConfirmEvery
+		if value := (paths.OSEnv{}).Get(TestConfirmEveryMSEnv); value != "" {
+			ms, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || ms <= 0 || ms > int64((1<<63-1)/time.Millisecond) {
+				return nil, fmt.Errorf(
+					"%s=%q: want a positive whole number of milliseconds",
+					TestConfirmEveryMSEnv,
+					value,
+				)
+			}
+			confirmEvery = time.Duration(ms) * time.Millisecond
+		}
 	}
 	confirmAttempts := dependencies.ConfirmAttempts
 	if confirmAttempts == 0 {
@@ -89,6 +101,13 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 // prompt); only a pane that outlived the finisher is escalated, and each
 // escalation stage then waits defaultEscalateAttempts polls.
 const (
+	// TestConfirmEveryMSEnv shortens confirmation polling for in-process tests.
+	// defaultConfirmAttempts stays, so the whole confirm window shrinks with it
+	// (10 ms: ~0.5 s, under the finisher's defaultExitDelay): a pane that would
+	// close gracefully is force-closed instead. Only for jails whose panes never
+	// answer the finisher (a `sleep` pane), which escalate either way.
+	TestConfirmEveryMSEnv = "PFM_TEST_KILL_CONFIRM_EVERY_MS"
+
 	defaultConfirmEvery     = 500 * time.Millisecond
 	defaultConfirmAttempts  = int((defaultExitDelay+defaultPollAttempts*defaultPollEvery)/defaultConfirmEvery) + 6
 	defaultEscalateAttempts = 6

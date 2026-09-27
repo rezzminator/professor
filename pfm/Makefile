@@ -24,6 +24,9 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 REPO    := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..)
+# Scratch outside the tree, where dev.sh writes it: /tmp/<project>, <project>
+# the repo directory's basename with any leading dot stripped.
+TMP_BASE := /tmp/$(patsubst .%,%,$(notdir $(REPO)))
 DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
 LOCAL   := pfm.dev
@@ -47,12 +50,12 @@ COVER := $(firstword $(wildcard $(TOOLS_BIN)/go-test-coverage) $(shell command -
 # Coverage outputs: the fence mounts the tree read-only, so dev.sh iso points
 # COVER_DIR at container HOME; on the host it lands in gitignored tmp/.
 COVER_DIR ?= $(REPO)/tmp/cover
-# lint-new judges lines changed since this ref: a wave against develop; CI
-# passes origin/main so a release is judged on everything since the last one.
-LINT_BASE ?= origin/develop
-# The first provisional fenced capture uses conservative serial concurrency;
-# W5 re-measures the sweep and may ratchet this toward the observed knee.
-TESTFLAGS ?= -p 1 -parallel 1
+# lint-new judges lines changed since this ref — origin/main, the last release,
+# for every caller (dev.sh, the gate, CI), so a local green is a CI green.
+LINT_BASE ?= origin/main
+# The fenced unit captures in docs/dev/testing/concurrency-sweep.md pin these flags.
+# The tagged e2e suite keeps its own -p 1 in dev.sh.
+TESTFLAGS ?= -p 4 -parallel 4
 
 .PHONY: help build tools fmt fmt-check lint lint-new vet arch cover test testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
@@ -112,7 +115,7 @@ lint: ## Every finding in the module — the burn-down view
 # `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
 # fence-wide it hijacks every `git init` the test suite runs.
 FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
-lint-new: ## Findings on lines changed since LINT_BASE (origin/develop) — the gate view
+lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gate view
 	$(call need-tool,LINT)
 	$(FENCE_GIT) $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 
@@ -151,12 +154,12 @@ iso: ## Containerised test suite (delegates to dev.sh iso; same TESTFLAGS)
 	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh iso test pfm
 
 timing: ## Print the most recently written suite timing TSV
-	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(REPO)/tmp/timing"
+	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(TMP_BASE)/timing"
 
 sweep: ## Measure the fenced concurrency sweep and publish its report
 	bash scripts/test-sweep.sh --preflight
 	cd "$(REPO)" && bash .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-sweep.sh --run --wait-quiet --label fence --out /pfm-timing/sweep-fence.tsv --json /pfm-timing/sweep-json'
-	bash scripts/test-sweep.sh --report "$(REPO)/tmp/timing/sweep-fence.tsv"
+	bash scripts/test-sweep.sh --report "$(TMP_BASE)/timing/sweep-fence.tsv"
 
 gate: fmt-check lint-new vet arch test iso ## Everything a change must pass before it merges
 	@echo "gate: all passed"

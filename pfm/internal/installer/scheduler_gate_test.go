@@ -22,6 +22,7 @@ import (
 // That is the proceed-silently case: install must not refuse, and — unlike
 // the probe-could-not-run case — must never claim the gate was unprobed.
 func TestReachableIdleUserManagerAllowsMutatingModes(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []Mode{ModeApply, ModeUninstall} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			home := t.TempDir()
@@ -57,6 +58,7 @@ func TestReachableIdleUserManagerAllowsMutatingModes(t *testing.T) {
 // CONFIRMED running service), but it must say the gate was not probed rather
 // than silently reading that ambiguity as safe — the entire point of the fix.
 func TestUnprobedNameSyncGateProceedsButSaysSo(t *testing.T) {
+	t.Parallel()
 	if schedulerIsLaunchd {
 		t.Skip("the systemd name-sync gate is Linux-only")
 	}
@@ -74,6 +76,7 @@ func TestUnprobedNameSyncGateProceedsButSaysSo(t *testing.T) {
 }
 
 func TestRunningNameSyncRefusesMutatingModesBeforeWriting(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []Mode{ModeApply, ModeUninstall} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			home := t.TempDir()
@@ -123,6 +126,7 @@ func (runOnlyRunner) Run(context.Context, string, ...string) error { return nil 
 // cannot read (a coded exit, a plain error, an unknown state, a runner that
 // cannot read output) is unprobed, never idle.
 func TestNameSyncServiceRunningClassifiesProbeAnswers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name                    string
 		runner                  CommandRunner
@@ -195,6 +199,7 @@ func TestNameSyncServiceRunningProductionShape(t *testing.T) {
 // counts as probed=true (nothing installed, so nothing can be mid-execution),
 // while a plain Output error means the probe never got an answer.
 func TestLaunchAgentRunningClassifiesProbeAnswers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name                    string
 		output                  string

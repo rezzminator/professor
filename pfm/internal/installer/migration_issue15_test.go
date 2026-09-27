@@ -44,6 +44,7 @@ func (r *bootstrapFailureRunner) Run(_ context.Context, name string, args ...str
 // the one outcome where the installer made things worse, and the operator
 // needs the command that puts it back.
 func TestLaunchAgentBootstrapFailureAfterStopSaysTheServiceIsDown(t *testing.T) {
+	t.Parallel()
 	runner := &bootstrapFailureRunner{}
 	installer := engine{
 		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
@@ -71,6 +72,7 @@ func TestLaunchAgentBootstrapFailureAfterStopSaysTheServiceIsDown(t *testing.T) 
 }
 
 func TestRetirementReachesSecondaryClaudeAndCodex(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
 	secondary := filepath.Join(home, "account-two")

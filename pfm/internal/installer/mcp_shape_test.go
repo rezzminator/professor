@@ -6,6 +6,7 @@ import "testing"
 // adds it when it rewrites its config — while a non-empty env, or any other
 // value under the key, keeps the entry someone else's.
 func TestWithoutEmptyEnvDropsOnlyAnEmptyEnv(t *testing.T) {
+	t.Parallel()
 	base := func(env any) map[string]any {
 		return map[string]any{"type": "stdio", "command": "pfm", configEnvKey: env}
 	}

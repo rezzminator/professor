@@ -15,6 +15,7 @@ import (
 // instructions array — and every other key, including an operator's own
 // instruction entries, has to survive the write.
 func TestInstallWiresOpenCodeInstructions(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := OpenCodeConfigPath(home)
 	if err := os.MkdirAll(filepath.Dir(config), 0o700); err != nil {
@@ -83,6 +84,7 @@ func TestInstallWiresOpenCodeInstructions(t *testing.T) {
 // A malformed instructions value is an error, never a silent overwrite of
 // whatever the operator put there.
 func TestOpenCodeInstructionsRejectsForeignShape(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{`{"instructions": "house-rules.md"}`, `{"instructions": [1]}`} {
 		document, err := decodeJSONCObject([]byte(raw))
 		if err != nil {

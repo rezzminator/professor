@@ -18,6 +18,7 @@ import (
 )
 
 func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".claude", "settings.json")
 	secondary := filepath.Join(home, ".cc", "4", "settings.json")
@@ -92,6 +93,7 @@ func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {
 }
 
 func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	raw := []byte(
 		`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"manual-keep"}]}]},"cleanupPeriodDays":42}`,
@@ -157,6 +159,7 @@ func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) 
 // one that already carries it TWICE — the shape a hand-edited or
 // double-installed settings.json can reach — keeps exactly one copy.
 func TestInstallPausesAutomaticDreamHooksAcrossClaudeAndCodex(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	pfm := filepath.Join(home, ".local", "bin", "pfm")
 	claudeRaw := []byte(`{
@@ -218,6 +221,7 @@ func TestInstallPausesAutomaticDreamHooksAcrossClaudeAndCodex(t *testing.T) {
 }
 
 func TestInstallPausesDreamHooksAcrossUnknownEventsAndPreservesMalformedNeighbors(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	raw := []byte(`{
   "hooks": {
@@ -299,6 +303,7 @@ func TestInstallPausesDreamHooksAcrossUnknownEventsAndPreservesMalformedNeighbor
 }
 
 func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		command string
@@ -346,6 +351,7 @@ func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 // ledger stays empty for it and doctor reports permanent ownership drift
 // (`ownership=0 file=1`) for a hook that is, in fact, correctly wired.
 func TestInstallOwnershipLedgerClaimsHooksAlreadyPresentInSettings(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 
 	// Build the settings document a fully-wired install produces — this is
@@ -417,6 +423,7 @@ func TestInstallOwnershipLedgerClaimsHooksAlreadyPresentInSettings(t *testing.T)
 // drift (`ownership=0 file=1`) for hooks that are, in fact, correctly
 // wired — on every install, forever.
 func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 
 	// Build the settings document a fully-wired install produces, exactly
@@ -532,38 +539,6 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 	}
 }
 
-// TestSettingsInstallRemovesRetiredClearHideAndKeepsOneClearKill pins the
-// deep-doctor defect: the kill-rename retired `internal clear-hide` in favor
-// of `internal clear-kill` (cmd/pfm/main.go's `internal` dispatch has no
-// `clear-hide` case at all — it falls through to the usage error), but the
-// installer's SessionEnd wiring only recognizes and dedups the CURRENT
-// clear-kill command. A settings.json still carrying the pre-rename command
-// keeps it forever; the installer neither removes it nor even notices it.
-func TestSettingsInstallRemovesRetiredClearHideAndKeepsOneClearKill(t *testing.T) {
-	home := filepath.Join("neutral", "home")
-	binary := home + "/.local/bin/pfm"
-	retired := binary + " internal clear-hide"
-	raw := []byte(`{"hooks":{"SessionEnd":[{"matcher":"","hooks":[{"type":"command","command":"` + retired + `"}]}]}}`)
-
-	updated, changed, owned, err := updateSettings(raw, home, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Fatalf("retired clear-hide hook was not rewritten at all")
-	}
-	if strings.Contains(string(updated), "clear-hide") {
-		t.Fatalf("retired command %q survived installer wiring:\n%s", retired, updated)
-	}
-	clearKill := binary + " internal clear-kill"
-	if got := hookCommandCount(t, string(updated), "SessionEnd", clearKill); got != 1 {
-		t.Fatalf("clear-kill count=%d after wiring, want exactly 1:\n%s", got, updated)
-	}
-	if owned[settingsHookKey{Event: "SessionEnd", Command: clearKill}] != 1 {
-		t.Fatalf("owned ledger did not claim the replacement clear-kill hook: %#v", owned)
-	}
-}
-
 // TestSettingsInstallRemovesRetiredChatGroupHookOnApply pins the retired
 // chat-group feature's live-host contract: a settings.json written by an
 // installer that predates the purge still carries the installer-owned
@@ -573,6 +548,7 @@ func TestSettingsInstallRemovesRetiredClearHideAndKeepsOneClearKill(t *testing.T
 // installer neighbors (usage-hook, epic-inject) and an unrelated operator
 // hook sitting in its own entry survive untouched.
 func TestSettingsInstallRemovesRetiredChatGroupHookOnApply(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	pfm := home + "/.local/bin/pfm"
 	raw := []byte(`{
@@ -613,6 +589,7 @@ func TestSettingsInstallRemovesRetiredChatGroupHookOnApply(t *testing.T) {
 }
 
 func TestShimAssetEmitsConfiguredCodexPostureOnly(t *testing.T) {
+	t.Parallel()
 	raw, err := readAsset("shim/pfm.zsh")
 	if err != nil {
 		t.Fatal(err)
@@ -651,6 +628,7 @@ func TestShimAssetEmitsConfiguredCodexPostureOnly(t *testing.T) {
 // existed — converges on the pfm-statusline overlay, while a genuinely
 // custom command is left untouched.
 func TestStatusLineRewriteOwnsTheOverlayAndPreservesCustomCommands(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	overlay := StatusLineOverlayCommand(home)
 	absoluteRaw := home + "/.local/bin/pfm statusline"
@@ -766,6 +744,7 @@ func hookMatcherCount(t *testing.T, raw, event, command, matcher string) int {
 }
 
 func TestExploreDenyMatcherMigrationPreservesMixedOperatorEntry(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	config := filepath.Join(home, ".claude")
 	settings := filepath.Join(config, "settings.json")
@@ -797,6 +776,7 @@ func TestExploreDenyMatcherMigrationPreservesMixedOperatorEntry(t *testing.T) {
 }
 
 func TestDreamHookPauseRetiresEveryCopyAndPreservesNeighbors(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	secondaryPath := filepath.Join(home, ".cc", "3", "settings.json")
@@ -959,6 +939,7 @@ func hookCommandCount(t *testing.T, raw, event, wanted string) int {
 }
 
 func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	hooksPath := filepath.Join(home, ".codex", "hooks.json")
@@ -986,6 +967,7 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 // The retired Codex clear-kill hook is never written fresh: a host with no
 // existing hooks.json gets none created, across every configured home.
 func TestCodexHookWiringWritesNoClearKillHookAcrossConfiguredHomes(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	homes := []string{filepath.Join(home, ".codex"), filepath.Join(home, ".codex-2")}
 	installer := engine{
@@ -1011,6 +993,7 @@ func TestCodexHookWiringWritesNoClearKillHookAcrossConfiguredHomes(t *testing.T)
 // A Codex home carrying a leftover clear-kill hook from a prior install has
 // it stripped, not repaired.
 func TestCodexHookWiringStripsALeftoverAcrossConfiguredHomes(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	homes := []string{filepath.Join(home, ".codex"), filepath.Join(home, ".codex-2")}
 	canonical := filepath.Join(home, ".local", "bin", "pfm") + " internal clear-kill"

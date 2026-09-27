@@ -13,6 +13,7 @@ import (
 )
 
 func TestProbeExpectedHooksStatesAndOwnership(t *testing.T) {
+	t.Parallel()
 	t.Run("all present", func(t *testing.T) {
 		home, machine := stageExpectedHookFixtures(t)
 		results := ProbeExpectedHooks(home, machine)
@@ -59,6 +60,7 @@ func TestProbeExpectedHooksStatesAndOwnership(t *testing.T) {
 // (and never was) claimed by the ownership ledger is invisible end to end —
 // doctor prints nothing about a stale command sitting in a live host's hooks.
 func TestProbeExpectedHooksFlagsRetiredHookCommandsAsStale(t *testing.T) {
+	t.Parallel()
 	home, machine := stageExpectedHookFixtures(t)
 	hook := findExpectedHook(t, home, machine, "claude[2]", "clear-kill")
 	retired := strings.Replace(hook.Command, "internal clear-kill", "internal clear-hide", 1)
@@ -173,6 +175,7 @@ func TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale(t *testing.T) {
 // with an empty matcher (the epic-inject shape), pointing at the binary's
 // own `internal reload-intercept` subcommand.
 func TestClaudeHookTemplatesIncludesReloadIntercept(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	templates := claudeHookTemplates(home)
 	if got := commandByName(templates, "reload-intercept"); got != home+"/.local/bin/pfm internal reload-intercept" {
@@ -197,6 +200,7 @@ func TestClaudeHookTemplatesIncludesReloadIntercept(t *testing.T) {
 // config.toml's developer_instructions, so a Codex account contributes no
 // expected hook and doctor has no Codex hook row to converge.
 func TestExpectedHooksExpectNoCodexHook(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	machine := pfmconfig.Config{
 		CodexAccounts: []pfmconfig.CodexAccount{
@@ -213,6 +217,7 @@ func TestExpectedHooksExpectNoCodexHook(t *testing.T) {
 // type, or the old shell-parent shape — is stripped outright, never
 // repaired or migrated forward: there is nothing left to converge it toward.
 func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	canonical := filepath.Join(home, ".local", "bin", "pfm") + " internal clear-kill"
 	legacyParent := filepath.Join(home, ".local", "bin", "pfm") + ` internal clear-kill --parent "$PPID"`
@@ -345,6 +350,7 @@ func assertHookState(t *testing.T, results []HookProbeResult, hook ExpectedHook,
 // The milestone reminder rides the same event and shape as epic-inject: one
 // UserPromptSubmit hook, empty matcher, the binary's own subcommand.
 func TestClaudeHookTemplatesIncludesCompactNudge(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	templates := claudeHookTemplates(home)
 	if got := commandByName(templates, "compact-nudge"); got != home+"/.local/bin/pfm internal compact-nudge" {
@@ -361,6 +367,7 @@ func TestClaudeHookTemplatesIncludesCompactNudge(t *testing.T) {
 // repository: PreToolUse, matcher Bash, the binary's own subcommand, and never
 // async — an async hook cannot deny.
 func TestClaudeHookTemplatesIncludesGitGuard(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	found := 0
 	for _, template := range claudeHookTemplates(home) {
@@ -387,6 +394,7 @@ func TestClaudeHookTemplatesIncludesGitGuard(t *testing.T) {
 // Swapping either event would either fire the closer on every prompt or
 // never let the intercept catch "e"/"/e" before the model sees it.
 func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	templates := claudeHookTemplates(home)
 
@@ -426,6 +434,7 @@ func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 // mirroring the installer's own choice never to wire Claude hooks on a host
 // with no Claude Code binary.
 func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
+	t.Parallel()
 	home, machine := stageExpectedHookFixtures(t)
 	var output bytes.Buffer
 	warnings, failures := ReportHooks(&output, home, machine, true)
@@ -447,6 +456,7 @@ func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
 // with Claude present, a missing hook must still count as a failure exactly
 // as before — the absence skip never masks a genuine installer defect.
 func TestReportHooksClaudePresentStillFailsOnAMissingHook(t *testing.T) {
+	t.Parallel()
 	home, machine := stageExpectedHookFixtures(t)
 	hook := findExpectedHook(t, home, machine, "claude[2]", "usage")
 	removeHookFixture(t, hook)

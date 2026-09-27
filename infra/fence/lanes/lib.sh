@@ -39,7 +39,7 @@
 #
 # Activity log (Wave 6, docs/dev/trains/testing-foundation/waves/6-activity-log):
 # each beat snapshots the byte offset of <pfm home>/log/pfm.jsonl and, at its
-# verdict, fails on any `"level":"error"` record in its own slice that no
+# verdict, fails on any error-level record (`"level":"ERROR"`, any case) in its own slice that no
 # `expect-log <pattern>` declared — the slice is attached to the lane log. Wave 6
 # has not landed: when the file is absent the lane footer and the run summary
 # each say so BY NAME (`activity log: ABSENT (Wave 6 not landed) — log
@@ -486,10 +486,20 @@ _lane_alive_probe() {
 # seconds, never the minutes a full wait costs.
 lane_alive() {
   _lane_alive_probe && return 0
-  sleep 1
+  # Default 1 second; self-tests shorten the retry interval.
+  sleep "$(_lane_poll_secs "${LANE_ALIVE_RETRY_SECS-}" 1)"
   _lane_alive_probe && return 0
-  sleep 1
+  # Default 1 second; self-tests shorten the retry interval.
+  sleep "$(_lane_poll_secs "${LANE_ALIVE_RETRY_SECS-}" 1)"
   _lane_alive_probe
+}
+
+_lane_poll_secs() {
+  if [[ "$1" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]]; then
+    printf '%s' "$1"
+  else
+    printf '%s' "$2"
+  fi
 }
 
 _lane_anchor_label() {
@@ -587,7 +597,7 @@ _lane_raw_dump() { # the failed beat's pane, escapes included (zellij's rule)
 }
 
 # _lane_log_slice — the activity-log records written during this beat. Prints
-# the unexpected `"level":"error"` ones; returns 1 when any exist. A `tail`
+# the unexpected error-level ones (`"level":"ERROR"`, any case); returns 1 when any exist. A `tail`
 # that cannot read the file (a race between the offset check above and here,
 # a permission change mid-run) prints the sentinel LANE-LOG-READ-FAILED and
 # also returns 1 — a read failure is a FAIL distinct from an empty slice
@@ -602,7 +612,8 @@ _lane_log_slice() {
     return 1
   fi
   [ -n "$slice" ] || return 0
-  errors="$(printf '%s\n' "$slice" | grep '"level":"error"' || true)"
+  # pfm's slog JSON handler writes "ERROR"; a lower-case "error" counts too.
+  errors="$(printf '%s\n' "$slice" | grep -iE '"level": *"error"' || true)"
   [ -n "$errors" ] || return 0
   kept="$errors"
   # A here-doc, not a pipe: the loop must run in THIS shell or the filtered
@@ -895,7 +906,8 @@ wait_last() {
   while [ "$(_lane_now)" -lt "$deadline" ]; do
     _lane_wait_dead && return 2
     pfm chat last "$1" 2>/dev/null | grep -qF -- "$2" && return 0
-    sleep 5
+    # Default 5 seconds; self-tests shorten the wait_last poll interval.
+    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" 5)"
   done
   LANE_WAIT_WHY="timed out after $3s waiting for '$2' from $1"
   return 1
@@ -912,7 +924,8 @@ wait_for() {
     _lane_wait_dead && return 2
     # shellcheck disable=SC2294 # the condition arrives as a shell string, by design
     eval "$@" >/dev/null 2>&1 && return 0
-    sleep 3
+    # Default 3 seconds; self-tests shorten the wait_for poll interval.
+    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 3)"
   done
   # shellcheck disable=SC2034 # read by the lanes, which name the reason in their verdict
   LANE_WAIT_WHY="timed out after ${secs}s waiting for: $*"

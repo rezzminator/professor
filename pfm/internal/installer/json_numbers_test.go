@@ -25,6 +25,7 @@ func requireKeepsBeyondFloat64(t *testing.T, door string, rewritten []byte) {
 }
 
 func TestUnmarshalKeepingNumbersIsAsStrictAsUnmarshal(t *testing.T) {
+	t.Parallel()
 	var document map[string]any
 	if err := unmarshalKeepingNumbers([]byte(`{"counter":`+beyondFloat64+`}`), &document); err != nil {
 		t.Fatal(err)
@@ -43,6 +44,7 @@ func TestUnmarshalKeepingNumbersIsAsStrictAsUnmarshal(t *testing.T) {
 }
 
 func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
 	registry := filepath.Join(home, ".claude.json")
@@ -82,6 +84,7 @@ func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 }
 
 func TestClaudeSettingsRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
+	t.Parallel()
 	updated, changed, _, err := updateSettings([]byte(`{"counter":`+beyondFloat64+`}`), t.TempDir(), false, nil)
 	if err != nil || !changed {
 		t.Fatalf("updateSettings changed=%v err=%v; want a rewrite", changed, err)
@@ -90,6 +93,7 @@ func TestClaudeSettingsRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 }
 
 func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
+	t.Parallel()
 	// The Codex hook file is rewritten only to take something away now, so
 	// the fixture carries the retired appendix hook for the pass to remove.
 	home := t.TempDir()
@@ -104,6 +108,7 @@ func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 }
 
 func TestMemoryHelperHookRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	oldPath := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
 	newPath := filepath.Join(home, ".claude", "scripts", "memory-wire.sh")
@@ -123,6 +128,7 @@ func TestMemoryHelperHookRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 }
 
 func TestJSONNumberIsMatchesEitherDecodedForm(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value any
 		want  bool

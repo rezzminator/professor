@@ -12,6 +12,7 @@ import (
 )
 
 func TestCodexDefaultsInstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\ndefault_wait_timeout_ms = 750000\n")
@@ -59,6 +60,7 @@ func TestCodexDefaultsInstall(t *testing.T) {
 }
 
 func TestCodexDefaultsFreshHomes(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
@@ -86,6 +88,7 @@ func TestCodexDefaultsFreshHomes(t *testing.T) {
 }
 
 func TestCodexDefaultsMergeLayouts(t *testing.T) {
+	t.Parallel()
 	defaults := "[features.multi_agent_v2]\nwait_agent_enabled = true\n"
 	for _, input := range []string{
 		"", "# keep this comment", "developer_instructions = 'Use mailbox.'",
@@ -131,6 +134,7 @@ func TestCodexDefaultsMergeLayouts(t *testing.T) {
 }
 
 func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
@@ -155,6 +159,7 @@ func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
 }
 
 func TestCodexDefaultsRejectsInconsistentTimeouts(t *testing.T) {
+	t.Parallel()
 	defaults := "[features.multi_agent_v2]\nmin_wait_timeout_ms = 150000\ndefault_wait_timeout_ms = 750000\nmax_wait_timeout_ms = 1500000\n"
 	for _, value := range []string{"30000", "-1", "3600001", "'wrong type'"} {
 		if _, err := mergeCodexDefaults(
@@ -169,6 +174,7 @@ func TestCodexDefaultsRejectsInconsistentTimeouts(t *testing.T) {
 // Codex clamps every command wait at ~31s unless both long-yield keys are set,
 // which turns one wait into a poll loop; a user's own value still wins.
 func TestCodexDefaultsLongCommandWaits(t *testing.T) {
+	t.Parallel()
 	defaults := "[features.multi_agent_v2]\nwait_agent_enabled = true\n"
 	for _, testCase := range []struct {
 		name       string
@@ -222,6 +228,7 @@ func TestCodexDefaultsLongCommandWaits(t *testing.T) {
 }
 
 func TestCodexDefaultsRefusesDanglingConfigSymlink(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
@@ -244,6 +251,7 @@ func TestCodexDefaultsRefusesDanglingConfigSymlink(t *testing.T) {
 }
 
 func TestCodexDefaultsRemovesOnlyManagedInstructions(t *testing.T) {
+	t.Parallel()
 	input := "developer_instructions = '<!-- BEGIN Professor subagent coordination -->old<!-- END Professor subagent coordination -->' # keep note\nmodel = 'personal'\n"
 	got, err := mergeCodexDefaults(input, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
 	if err != nil {

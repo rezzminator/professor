@@ -26,6 +26,7 @@ func decodeCodexConfig(t *testing.T, raw string) map[string]any {
 // The composed prompt lands verbatim, whatever the config around it looks
 // like, and a second pass over the result changes nothing.
 func TestCodexDeveloperInstructionsLandVerbatimAndIdempotently(t *testing.T) {
+	t.Parallel()
 	prompt := "# Fleet\n\nLine with a \\ backslash, a \" quote and `ticks`.\n"
 	cases := []struct {
 		name string
@@ -69,6 +70,7 @@ func TestCodexDeveloperInstructionsLandVerbatimAndIdempotently(t *testing.T) {
 // A prompt the fence already holds is REPLACED, never stacked beside a second
 // declaration (which TOML rejects as a duplicate key).
 func TestCodexDeveloperInstructionsReplaceAnEarlierPrompt(t *testing.T) {
+	t.Parallel()
 	first, _, err := mergeCodexDeveloperInstructions("model = 'personal'\n", "old prompt\n")
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +97,7 @@ func TestCodexDeveloperInstructionsReplaceAnEarlierPrompt(t *testing.T) {
 // why nothing was installed — silence here would destroy an operator's own
 // instructions, or hide that the fleet prompt never landed.
 func TestCodexDeveloperInstructionsPreserveAForeignValue(t *testing.T) {
+	t.Parallel()
 	raw := "developer_instructions = 'Keep my rules.'\nmodel = 'personal'\n"
 	updated, foreign, err := mergeCodexDeveloperInstructions(raw, "fleet prompt\n")
 	if err != nil {
@@ -112,6 +115,7 @@ func TestCodexDeveloperInstructionsPreserveAForeignValue(t *testing.T) {
 // one containing a triple single quote, so the encoder's basic string does, and the value
 // still reads back byte for byte.
 func TestCodexDeveloperInstructionsSurviveHostileText(t *testing.T) {
+	t.Parallel()
 	for _, prompt := range []string{
 		"has ''' three quotes\n",
 		"ends without a newline",
@@ -135,6 +139,7 @@ func TestCodexDeveloperInstructionsSurviveHostileText(t *testing.T) {
 // and an uninstall takes pfm's block back out without touching what was
 // there before.
 func TestInstallWritesTheComposedPromptIntoEveryCodexHome(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	accounts := []string{filepath.Join(home, ".codex"), filepath.Join(home, ".codex-2")}
 	for _, account := range accounts {

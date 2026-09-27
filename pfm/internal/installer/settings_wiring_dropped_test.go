@@ -10,6 +10,7 @@ import (
 )
 
 func TestApplyRemovesOwnedHooksAndLedgerForDroppedSettingsSeat(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	seatA := filepath.Join(home, ".claude")
 	seatB := filepath.Join(home, ".cc", "2")

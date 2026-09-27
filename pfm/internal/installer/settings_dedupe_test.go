@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,7 @@ func settingsHookObjects(t *testing.T, raw []byte, event, command string) ([]map
 }
 
 func TestSettingsInstallDropsDuplicateCompactNudge(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	compactNudge := home + "/.local/bin/pfm internal compact-nudge"
 	raw := []byte(`{"hooks":{"UserPromptSubmit":[
@@ -67,6 +69,7 @@ func TestSettingsInstallDropsDuplicateCompactNudge(t *testing.T) {
 }
 
 func TestSettingsInstallRemovesRRDirMovedUnderPostToolUse(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	rrDir := home + "/.local/bin/pfm internal rr-dir"
 	raw := []byte(`{"hooks":{"PostToolUse":[
@@ -95,6 +98,7 @@ func TestSettingsInstallRemovesRRDirMovedUnderPostToolUse(t *testing.T) {
 }
 
 func TestSettingsInstallWritesSevenAsyncCallmeterHooks(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	callmeter := home + "/.local/bin/pfm internal callmeter"
 
@@ -132,6 +136,7 @@ func TestSettingsInstallWritesSevenAsyncCallmeterHooks(t *testing.T) {
 }
 
 func TestSettingsInstallConvergesCallmeterAsyncAndKeepsOperatorHooks(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	callmeter := home + "/.local/bin/pfm internal callmeter"
 	operatorEntry := `{"matcher":"*","hooks":[{"type":"command","command":"operator-notify","async":false,"timeout":7}]}`
@@ -182,6 +187,7 @@ func TestSettingsInstallConvergesCallmeterAsyncAndKeepsOperatorHooks(t *testing.
 }
 
 func TestSettingsInstallWiresReloadInterceptHookAndDedupes(t *testing.T) {
+	t.Parallel()
 	home := filepath.Join("neutral", "home")
 	prefix := home + "/.local/bin/pfm"
 	reloadIntercept := prefix + " internal reload-intercept"
@@ -216,5 +222,38 @@ func TestSettingsInstallWiresReloadInterceptHookAndDedupes(t *testing.T) {
 	}
 	if got := hookCommandCount(t, string(deduped), "UserPromptSubmit", reloadIntercept); got != 1 {
 		t.Fatalf("reload-intercept count=%d after dedupe, want exactly 1\n%s", got, deduped)
+	}
+}
+
+// TestSettingsInstallRemovesRetiredClearHideAndKeepsOneClearKill pins the
+// deep-doctor defect: the kill-rename retired `internal clear-hide` in favor
+// of `internal clear-kill` (cmd/pfm/main.go's `internal` dispatch has no
+// `clear-hide` case at all — it falls through to the usage error), but the
+// installer's SessionEnd wiring only recognizes and dedups the CURRENT
+// clear-kill command. A settings.json still carrying the pre-rename command
+// keeps it forever; the installer neither removes it nor even notices it.
+func TestSettingsInstallRemovesRetiredClearHideAndKeepsOneClearKill(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join("neutral", "home")
+	binary := home + "/.local/bin/pfm"
+	retired := binary + " internal clear-hide"
+	raw := []byte(`{"hooks":{"SessionEnd":[{"matcher":"","hooks":[{"type":"command","command":"` + retired + `"}]}]}}`)
+
+	updated, changed, owned, err := updateSettings(raw, home, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatalf("retired clear-hide hook was not rewritten at all")
+	}
+	if strings.Contains(string(updated), "clear-hide") {
+		t.Fatalf("retired command %q survived installer wiring:\n%s", retired, updated)
+	}
+	clearKill := binary + " internal clear-kill"
+	if got := hookCommandCount(t, string(updated), "SessionEnd", clearKill); got != 1 {
+		t.Fatalf("clear-kill count=%d after wiring, want exactly 1:\n%s", got, updated)
+	}
+	if owned[settingsHookKey{Event: "SessionEnd", Command: clearKill}] != 1 {
+		t.Fatalf("owned ledger did not claim the replacement clear-kill hook: %#v", owned)
 	}
 }

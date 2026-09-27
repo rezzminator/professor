@@ -18,6 +18,7 @@ func (failingInstallerClock) Sleep(context.Context, time.Duration) error {
 }
 
 func TestNormalizedInstallerSleepErrorIsReportedWithoutPanic(t *testing.T) {
+	t.Parallel()
 	var output bytes.Buffer
 	options, err := normalizeInstallerOptions(Options{
 		Home:   t.TempDir(),

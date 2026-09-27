@@ -30,6 +30,7 @@ var (
 // an existing source-repo marker is reported ok, naming the kept repo, and
 // never silently skipped.
 func TestReportSourceRepoMarkerPresentReportsOK(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	if err := WriteSourceRepoMarker(home, t.TempDir()); err != nil {
 		t.Fatal(err)
@@ -57,6 +58,7 @@ func TestReportSourceRepoMarkerPresentReportsOK(t *testing.T) {
 // at all when it was missing. reportSourceRepoMarker must instead render
 // that absence as a NAMED skip line, never as if nothing were expected there.
 func TestReportSourceRepoMarkerAbsentReportsNamedSkip(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var stdout bytes.Buffer
 	installer := &engine{options: Options{Home: home, Stdout: &stdout}}
@@ -81,6 +83,7 @@ func TestReportSourceRepoMarkerAbsentReportsNamedSkip(t *testing.T) {
 // must be RETURNED as a real error, never folded into the same skip line an
 // absent marker gets — an error is never "nothing there".
 func TestReportSourceRepoMarkerOtherErrorIsReturnedNeverSkipped(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	markerPath := SourceRepoPath(home)
 	// A directory in the marker's place fails os.ReadFile with something
@@ -112,6 +115,7 @@ func TestReportSourceRepoMarkerOtherErrorIsReturnedNeverSkipped(t *testing.T) {
 // installer.reportSourceRepoMarker()` branch; this pins that writeUpdateMetadata
 // itself (not just the helper in isolation) reports the named skip.
 func TestWriteUpdateMetadataWithNoSourceRepoReportsTheMarkerSkip(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	var stdout bytes.Buffer
 	installer := &engine{options: Options{Home: home, Stdout: &stdout}, apply: true}
@@ -129,6 +133,7 @@ func TestWriteUpdateMetadataWithNoSourceRepoReportsTheMarkerSkip(t *testing.T) {
 // preserving install's documented behavior, even though the runner wraps the
 // process lookup failure in exec.ErrNotFound.
 func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := t.TempDir()
 	hooks := filepath.Join(clone, ".githooks")
@@ -162,6 +167,7 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 // which one it held — and an error to LOOK read as the absence of anything to
 // look at. Each outcome now carries its own sentinel.
 func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.T) {
+	t.Parallel()
 	t.Run("no marker recorded", func(t *testing.T) {
 		_, err := ReadSourceRepoMarker(t.TempDir())
 		if !errors.Is(err, ErrNoSourceRepoMarker) {
@@ -229,6 +235,7 @@ func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.
 // absent marker prints — that would tell an operator to record a clone they
 // already recorded, and hide that the recorded one moved.
 func TestReportSourceRepoMarkerNamesAnUnusableCloneApartFromAbsence(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	clone := filepath.Join(t.TempDir(), "moved-away")
 	if err := os.MkdirAll(clone, 0o700); err != nil {

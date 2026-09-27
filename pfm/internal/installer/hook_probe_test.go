@@ -94,6 +94,7 @@ func eachHookObject(document map[string]any, event string, visit func(hook map[s
 // fixture file in a temp HOME, through the exact line ReportHooks prints and
 // the (warnings, failures) tally doctor exits on.
 func TestReportHooksStates(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		mutate   func(t *testing.T, fixture *hookStateFixture)

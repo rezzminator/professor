@@ -19,6 +19,7 @@ import (
 // and continued unless uninstalling with owned hooks; this is the same
 // contract on the Codex side.
 func TestMalformedCodexHooksSkipsLoudlyAndFinishesTheRun(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	codexHome := filepath.Join(home, ".codex")
 	hooks := filepath.Join(codexHome, "hooks.json")
@@ -57,6 +58,7 @@ func TestMalformedCodexHooksSkipsLoudlyAndFinishesTheRun(t *testing.T) {
 // it. Skipping there would leave the operator with pfm hook entries nothing
 // will ever remove, so the refusal stays an error naming the file.
 func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	codexHome := filepath.Join(home, ".codex")
 	hooks := filepath.Join(codexHome, "hooks.json")

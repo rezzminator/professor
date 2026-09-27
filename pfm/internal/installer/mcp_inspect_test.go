@@ -10,6 +10,7 @@ import (
 // is the legacy state the cutover exists to find; reading only the Codex side
 // or a project .mcp.json would report this machine migrated when it is not.
 func TestInspectHarvesterClientCutoverFlagsAStandaloneEntryInTheClaudeUserRegistry(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	writeFixture(
 		t,
@@ -33,6 +34,7 @@ func TestInspectHarvesterClientCutoverFlagsAStandaloneEntryInTheClaudeUserRegist
 // no indication why; refusing loudly with one MCPClientUnreadable report
 // naming the missing list is the fix.
 func TestInspectHarvesterClientCutoverRefusesANilRegistryList(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	reports := InspectHarvesterClientCutover(home, 8377, nil, nil)
 	if len(reports) != 1 {
@@ -54,6 +56,7 @@ func TestInspectHarvesterClientCutoverRefusesANilRegistryList(t *testing.T) {
 // pfm-written one with a stale port is not — it is the one `pfm install --yes`
 // still rewrites.
 func TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	path := OpenCodeConfigPath(home)
 	writeFixture(
@@ -102,6 +105,7 @@ func TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace(t *testing.T) {
 // install writes, pfm's own legacy `chat` / `harvester` shapes are legacy-pfm,
 // anything else is foreign, and a malformed config is unreadable, never absent.
 func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	path := OpenCodeConfigPath(home)
 	bin := filepath.Join(home, ".local", "bin", "pfm")
@@ -158,6 +162,7 @@ func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing
 // the stdio chat) are legacy-pfm; a `uv`/`harvest…` harvester stays
 // legacy-standalone.
 func TestInspectClaudeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, ".claude.json")
 	bin := filepath.Join(home, ".local", "bin", "pfm")
@@ -198,6 +203,7 @@ func TestInspectClaudeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T
 // one install removes), while the same url with a headers table is not a
 // shape install removes and so stays foreign.
 func TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	codex := filepath.Join(home, ".codex")
 	config := filepath.Join(codex, "config.toml")
@@ -220,6 +226,7 @@ func TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex(t *testin
 // so the entry is install's own — the one it adopts on the next run — and
 // doctor must not call it user-owned.
 func TestOpenCodeUnownedEntriesClaimsAnInterruptedInstallsPendingEntry(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	path := OpenCodeConfigPath(home)
 	professor := `{"type":"local","command":["` + filepath.Join(home, ".local", "bin", "pfm") +

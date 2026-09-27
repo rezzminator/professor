@@ -37,8 +37,8 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 ## Run commands
 
 - Affected, an executor's only run (flight or general): `.claude/scripts/dev.sh iso run "go -C pfm test ./internal/<package>/ -run <Test> -count=1"` in the fence, `go -C pfm test ./internal/<package>/ -run <Test>` on the host — timeout 600 s.
-- Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh test pfm` on the host, `.claude/scripts/dev.sh iso test pfm` in the fence — about 5 minutes, timeout 600 s, background past that.
-- Static: `.claude/scripts/dev.sh verify pfm` (vet, fmt-check, lint-new, the architecture ratchet, the gate scripts' self-tests). Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`.
+- Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh iso test pfm`, in the fence only — a suite never runs on the host — about 5 minutes, timeout 600 s, background past that.
+- Static: `.claude/scripts/dev.sh iso verify pfm` (vet, fmt-check, lint-new, the architecture ratchet, the gate scripts' self-tests). Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`.
 
 ## Concurrency
 

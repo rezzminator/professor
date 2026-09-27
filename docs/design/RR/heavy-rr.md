@@ -1,12 +1,13 @@
 # heavy-rr
 
-`heavy-rr` is the `rr` lead with no round ceiling: 8 diggers a round, 16 verification pages, `opus` at effort `medium`, the repository lane `super-rr` also carries, and digging that ends only when the map converges. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, the missing ceiling and what brakes a run without one, the cost, how it is run, and what its runs measured.
+`heavy-rr` is the `rr` lead with no round ceiling: 8 diggers a round, 16 verification pages, `opus` at effort `medium`, the repository lane `super-rr` also carries, digging that ends only when the map converges, and the `Read` tool the other leads lack. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, the missing ceiling and what brakes a run without one, the `Read` it holds and the name guard that costs, the cost, how it is run, and what its runs measured.
 
 ## Contents
 
 - [Identity](#identity)
 - [How the variant is built](#how-the-variant-is-built)
 - [No round ceiling](#no-round-ceiling)
+- [Read, and the name guard it gives up](#read-and-the-name-guard-it-gives-up)
 - [Cost](#cost)
 - [Running it](#running-it)
 - [What the runs measured](#what-the-runs-measured)
@@ -18,16 +19,16 @@
 | --- | --- |
 | Kind | variant of `rr`, declared in `templates/global/agents/variants.json` |
 | Model, effort | `opus`, `medium` |
-| Tools | `WebSearch, WebFetch, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` (inherited from `rr.md`) |
+| Tools | `WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` — `rr.md`'s list plus `Read`, set by the `tools` override in `variants.json` |
 | Spawns | `sub-rr`, and `tracer-rr` for a repository sub-area |
-| Writes | the one RR document, into the directory on its `RR-DIR:` line |
+| Writes | the one RR document, into the directory on its `RR-DIR:` line; an existing file of the same name is overwritten (§ Read, and the name guard it gives up) |
 | Start hook | `rr-dir`, matcher `rr\|super-rr\|heavy-rr` |
 
 Description, verbatim: `Exhaustive rr — delegate for "heavy rr", "heavy-rr X" when the map must settle whatever the cost; lighter → super-rr. Returns the saved RR path, then the cited map.`
 
 ## How the variant is built
 
-`pfm install` and `pfm codex agents` render it from `rr.md` by the same mechanism as `super-rr`: `name:` and the declared frontmatter keys are overridden, and each `replace` entry swaps one piece of body text that must occur exactly once in `rr.md`'s body, or the render fails naming the text and its count. The swaps, verbatim from `variants.json`:
+`pfm install` and `pfm codex agents` render it from `rr.md` by the same mechanism as `super-rr`: `name:` and the declared frontmatter keys are overridden — for `heavy-rr`, `description`, `effort` and `tools`, the last adding `Read` — and each `replace` entry swaps one piece of body text that must occur exactly once in `rr.md`'s body, or the render fails naming the text and its count. The swaps, verbatim from `variants.json`:
 
 | `rr.md` text | `heavy-rr` text |
 | --- | --- |
@@ -47,6 +48,10 @@ A heavy run digs until the map converges. Two stops remain, both from the family
 - a round settled nothing and added no sub-area.
 
 Nothing else ends a run. A lead that keeps adding sub-areas, or judges each round as having settled something, keeps digging; the brake is the lead's own status block, which names every sub-area's state and `Next: round {n}` or `Digging ended: {condition}` after each round, so a run that will not converge is visible in its transcript while it runs. The accepted risk is cost, not a wrong answer.
+
+## Read, and the name guard it gives up
+
+`heavy-rr` holds `Read`; `rr` and `super-rr` do not (`rr.md` § The document). The harness refuses a Write over an existing file the agent has not read, and lifts that refusal for an agent holding `Read`. A `heavy-rr` run that derives a slug already taken on the same date therefore overwrites the earlier document silently, where the other leads would be refused. The user ruled this accepted: the lead gains local reads, and the ledger loses its overwrite guard for this lead alone. `Read` also lets the lead open an earlier RR document; the prompt still admits only web URLs and document identifiers as sources, so a map built on a local file is a prompt violation, not a permitted path.
 
 ## Cost
 

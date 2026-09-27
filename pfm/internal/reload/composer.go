@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // This file is reload's READER of the pane: every question the choreography
@@ -25,10 +27,17 @@ func composerDrawn(capture string) bool {
 // composerShowsExit reads the composer's own DRAFT, never the whole line: a
 // pane that echoed the keystrokes before its TUI came up draws the marker
 // AFTER them ("/exit❯ "), and a whole-line read took that for a rendered
-// draft and pressed Enter on a chat that had received nothing.
+// draft and pressed Enter on a chat that had received nothing. The draft must
+// BE /exit, not contain it: "old draft/exit" is a prompt, and Enter on it
+// submits the old draft to the model instead of ending the chat.
 func composerShowsExit(capture string) bool {
-	draft := composerDraft(lastReloadComposerLine(capture))
-	return strings.Contains(strings.Join(strings.Fields(draft), " "), "/exit")
+	return composerDraftText(capture) == "/exit"
+}
+
+// composerDraftText is the active composer's draft, whitespace-normalised;
+// empty when the composer is empty or not drawn.
+func composerDraftText(capture string) string {
+	return strings.Join(strings.Fields(composerDraft(lastReloadComposerLine(capture))), " ")
 }
 
 // composerDraft is the text after a composer line's last ❯/› marker.
@@ -128,11 +137,5 @@ func squashSpace(value string) string {
 }
 
 func lastReloadComposerLine(capture string) string {
-	lines := strings.Split(capture, "\n")
-	for index := len(lines) - 1; index >= 0; index-- {
-		if strings.Contains(lines[index], "❯") || strings.Contains(lines[index], "›") {
-			return lines[index]
-		}
-	}
-	return ""
+	return inject.LastComposerLine(capture)
 }

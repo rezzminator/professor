@@ -532,6 +532,13 @@ act_templates() { # the shipped product: mechanical gates, no build
       head_ "templates — refresh-scope fixtures"
       run "templates: refresh-scope fixtures" -- python3 "$REPO_ROOT/scripts/test-refresh-scope.py"
 
+      head_ "templates — pfm-guard across repositories"
+      if bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/templates/project/scripts/pfm-guard.sh" && bash "$REPO_ROOT/scripts/test-pfm-guard.sh" "$REPO_ROOT/.claude/scripts/pfm-guard.sh"; then
+        ok "pfm-guard finds the session's law stamp for another repo's edit and denies an unread law"
+      else
+        fail_step "pfm-guard regression FAILED — a cross-repo edit must open on the session's law stamp and stay shut without one"
+      fi
+
       head_ "templates — go test report under pipefail"
       if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
         ok "go_test_report reaches its log line on filtered and over-cap failure output"
@@ -807,12 +814,11 @@ commands:
   build                  compile
   typecheck              vet / tsc --noEmit
   verify                 pre-test gates (pfm: go vet, fmt-check, lint-new, architecture ratchet;
-                         templates: clone ratchet, leak + token gates)
-  test                   run the test suite (pfm: unit rows, then the e2e rows)
-  e2e                    pfm: the tagged e2e suite alone, its report, skip gate and budget
-  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml)
-  all                    verify + build + test for the project
-  iso <cmd> [project]    run any command above — plus shell — inside the
+                         templates: clone ratchet, leak + token gates) — fence only
+  test                   run the test suite (pfm: unit rows, then the e2e rows) — fence only
+  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml) — fence only
+  all                    verify + build + test for the project — fence only
+  iso <cmd> [project]    run any command above — plus e2e | shell — inside the
                          pfm-dev container fence (infra/), worktree mounted
   iso sim <command…>     run a command in the real-simulation fence: Google Chrome,
                          an X display, pfm installed from the worktree, browser rung on
@@ -828,6 +834,17 @@ EOF
 
 CMD="${1:-status}"
 TARGET="${2:-all}"
+
+# A suite never runs on the host: its tests spawn tmux sessions, git repos and
+# processes against whatever machine they run on. The fence sets
+# PFM_DEV_FENCE=1 (infra/fence/docker-compose.yml, lanes/container.sh).
+case "$CMD" in
+  test|cover|all|verify)
+    if [[ -z "${PFM_DEV_FENCE:-}" ]]; then
+      echo "FENCE-ONLY: dev.sh $CMD runs test suites and never on the host — run: .claude/scripts/dev.sh iso $CMD ${2:-}" >&2
+      exit 2
+    fi ;;
+esac
 
 case "$CMD" in
   status) cmd_status "$TARGET" ;;

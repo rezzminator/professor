@@ -1,6 +1,6 @@
 ---
 name: quality:prompt
-description: MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills); leanness plus correctness law for any prompt. `cut <file>` rewrites the target leaner in place. Harness file rules → /pcm; a `description:` → /quality:description; doc shape → /quality:doc; markdown mechanics → /quality:md-forlint.
+description: MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills); leanness plus correctness law for any prompt. `cut <file>` rewrites the target leaner in place. Harness file rules → /pcm; CLAUDE.md shape → /quality:claude-md; a `description:` → /quality:description; doc shape → /quality:doc; markdown mechanics → /quality:md-forlint.
 ---
 
 # Prompt Quality
@@ -9,7 +9,7 @@ You are about to edit a prompt file that an LLM consumes at runtime. Every line 
 
 ## Cut mode — `quality:prompt cut <file>`
 
-Rewrite the target leaner in place: read it, apply every rule below, cut hard. Preserve every distinct behavioral rule, threshold, and behavior-pinning example; cut scaffolding, never substance; unsure = keep and flag. Never weaken a sacred-ground rule ({SENSITIVE_DATA}, {DOMAIN_ADJ} safety, secrets) to save tokens. Every cut names its justification — the duplicate's surviving location or the failed cut test; a negative claim ("no duplicate", "zero references", "unused") is grep-verified before the cut lands, and a duplicate SECTION's heading is grep-checked for citers first (a cited section is a navigation index: keep it or retarget its citers). Report each cut in one line.
+Rewrite the target leaner in place: read it, apply every rule below, cut hard. Preserve every distinct behavioral rule, threshold, and behavior-pinning example; cut scaffolding, never substance; unsure = keep and flag. Never weaken a sacred-ground rule (secrets, personal data, and whatever the project's law marks sacred) to save tokens. Every cut names its justification — the duplicate's surviving location or the failed cut test; a negative claim ("no duplicate", "zero references", "unused") is grep-verified before the cut lands, and a duplicate SECTION's heading is grep-checked for citers first (a cited section is a navigation index: keep it or retarget its citers). Report each cut in one line.
 
 ## The cut test (apply to every line)
 
@@ -46,7 +46,7 @@ Every consumer imposes size limits on its prompt files; know the target's limits
 4. **Frontmatter ↔ body duplication.** If `description:` says it, the body opening must not.
 5. **Voice flavor that doesn't change behavior.** Backstory, character arcs, "I built this", "the meta layer", provenance ("adapted from X"). Test clause by clause: inside a voice trait, "(no sunk cost fallacy)" is a rule — keep the kernel, cut the costume. Working prompts carry zero voice; voice belongs in the consumer's dedicated persona layer (for the Claude harness: `/pcm § Claude-harness prompt law`).
 6. **Rationale that rephrases the rule — labeled "Why:" or not.** Trailing purpose clauses and rationale parentheticals whose content the rule's wording already implies. The rule's purpose lives in the rule's wording.
-7. **Negative framing where positive works.** "Use prose paragraphs" beats "don't use bullets." Reserve do NOT / NEVER for sacred ground ({SENSITIVE_DATA}, {DOMAIN_ADJ} safety, secrets) — an isolated "do not X" measurably degrades untargeted behavior (~31.5% collateral; see the project's bias-evidence file, where one exists).
+7. **Negative framing where positive works.** "Use prose paragraphs" beats "don't use bullets." Reserve do NOT / NEVER for sacred ground (secrets, personal data, and whatever the project's law marks sacred) — an isolated "do not X" measurably degrades untargeted behavior (~31.5% collateral; see the project's bias-evidence file, where one exists).
 8. **Aggressive emphasis on non-sacred rules** — "CRITICAL", "YOU MUST", "MANDATORY", "(MANDATORY)" heading suffixes, capitalized intensifiers. Frontier models overtrigger on it. Plain language for ordinary rules; reserve emphasis for invariants.
 9. **Inconsistent terminology** — mixing "endpoint / URL / route", "field / box / element", "extract / pull / get". One canonical term per concept, used everywhere.
 10. **Cross-references that say nothing new** ("See § X above" two paragraphs up). If the reference matters, summarize the takeaway inline.

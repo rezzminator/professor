@@ -60,7 +60,7 @@ if (!['generate', 'check', 'doctor'].includes(MODE)) {
 }
 
 const SELF = '.claude/scripts/build-codex.mjs';
-// Maps CLAUDE.md § Model Selection's Claude tier aliases to this repo's own
+// Maps the fleet prompt § Model Selection's Claude tier aliases to this repo's own
 // Codex model names — fill in your actual picks. If § Model Selection also
 // names a {FRONTIER_MODEL} alias (a limited-run model above the base `opus`),
 // add its literal alias word as a fourth key here (same Codex model as `opus`,

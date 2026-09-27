@@ -1,0 +1,654 @@
+[
+  {
+    "theme": "Secret broker",
+    "ask": "Use credentials in local and cross-device workflows without exposing their values to the model or transcript.",
+    "plugin": "An MCP broker stores secrets in the OS vault and exposes scoped actions or opaque handles; a settings hook gates use by domain and owner approval.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      77084,
+      78160,
+      89706,
+      90116,
+      90301,
+      94255,
+      96949,
+      97098
+    ],
+    "thumbs_up": 16,
+    "reactions": 17,
+    "comments": 14,
+    "open": 8,
+    "top_issue": 78160
+  },
+  {
+    "theme": "Masked secret entry",
+    "ask": "Enter credentials through a masked local prompt instead of chat text.",
+    "plugin": "A function hook presents a native masked input prompt and passes the value to a broker tool without adding it to conversation text.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      78717,
+      88380,
+      90681
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 2,
+    "top_issue": 78717
+  },
+  {
+    "theme": "Transcript privacy",
+    "ask": "Remove secrets and personal data before they are persisted or submitted in reports.",
+    "plugin": "Function hooks redact submitted prompts and tool results; a command previews and scrubs diagnostic exports.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      71654,
+      72156,
+      86707,
+      92056,
+      92649,
+      95680,
+      97429
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 20,
+    "open": 4,
+    "top_issue": 72156
+  },
+  {
+    "theme": "Output privacy warnings",
+    "ask": "Warn when command output or assistant text exposes sensitive values.",
+    "plugin": "A tool-result hook scans for credentials and private network details, masking matches and asking before sharing them.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      75869,
+      89115,
+      92096,
+      87092
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 1,
+    "top_issue": 75869
+  },
+  {
+    "theme": "Outbound data guard",
+    "ask": "Check deployments, network calls, and public posts for accidental disclosure.",
+    "plugin": "A PreToolUse hook inspects proposed egress commands and payloads, blocks risky sends, and offers a redacted preview.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      72038,
+      86225,
+      86445,
+      91297,
+      95731
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 8,
+    "open": 2,
+    "top_issue": 72038
+  },
+  {
+    "theme": "Repository security audit",
+    "ask": "Audit owned source code for vulnerabilities and verify fixes.",
+    "plugin": "A skill guides scoped review, an LSP or MCP scanner finds weaknesses, and a command reruns focused verification after patches.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      73288,
+      73465,
+      73624,
+      73898,
+      88389,
+      88401,
+      89695,
+      90037
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 5,
+    "open": 4,
+    "top_issue": 73288
+  },
+  {
+    "theme": "Web application security checks",
+    "ask": "Run authorized web application security checks against a declared test target.",
+    "plugin": "An MCP scanner implements OWASP checks with target scope and safe rate limits; a skill reports findings and remediation.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      77295,
+      87908,
+      89974,
+      94805,
+      95701
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 3,
+    "top_issue": 77295
+  },
+  {
+    "theme": "Authentication audit",
+    "ask": "Record and review authentication and authorization behavior in applications.",
+    "plugin": "A skill and MCP test harness exercise scoped auth endpoints and produce an audit trail.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      91275
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 91275
+  },
+  {
+    "theme": "Remote exposure check",
+    "ask": "Check whether local Windows RDP is exposed and summarize login attempts.",
+    "plugin": "A local executable reads firewall, listener, and event-log state and reports exposure without attempting passwords.",
+    "layer": "bin",
+    "feasibility": "full",
+    "issues": [
+      80137
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 80137
+  },
+  {
+    "theme": "Prompt injection shield",
+    "ask": "Treat tool output, web pages, and repository text as untrusted input.",
+    "plugin": "A tool-result hook labels provenance, isolates instruction-like content, and blocks credential-exfiltration calls that follow it.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      71602,
+      72434,
+      73088,
+      73757,
+      74650,
+      75758,
+      76359,
+      77135,
+      79039,
+      78854,
+      88134,
+      92386,
+      95150,
+      95857
+    ],
+    "thumbs_up": 0,
+    "reactions": 1,
+    "comments": 22,
+    "open": 3,
+    "top_issue": 75758
+  },
+  {
+    "theme": "Agent message provenance",
+    "ask": "Show sender identity and authorization lineage for agent and scheduled-task messages.",
+    "plugin": "Function hooks annotate inter-agent envelopes and reject messages without matching sender, task, and session lineage.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      77495,
+      77533,
+      78399,
+      78785,
+      86821,
+      89453,
+      91372,
+      93546
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 9,
+    "open": 4,
+    "top_issue": 86821
+  },
+  {
+    "theme": "Read boundary",
+    "ask": "Keep agents from reading paths outside a declared project and protected file list.",
+    "plugin": "A PreToolUse hook canonicalizes paths for Read, Grep, Bash, and subagents, then denies access outside configured roots.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      73893,
+      81862,
+      84863,
+      85880,
+      90658,
+      92816,
+      96050
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 17,
+    "open": 5,
+    "top_issue": 84863
+  },
+  {
+    "theme": "Write boundary",
+    "ask": "Restrict edits and destructive operations to approved paths and roles.",
+    "plugin": "A PreToolUse hook checks file tools and shell effects against project roots, protected files, and agent roles.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      71454,
+      82322,
+      84776,
+      84922,
+      89589,
+      92034
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 5,
+    "top_issue": 71454
+  },
+  {
+    "theme": "External action approval",
+    "ask": "Require explicit approval for pushes, deployments, migrations, and production changes.",
+    "plugin": "A PreToolUse hook classifies high-impact commands and MCP calls, presents the exact target and effect, and records one-use approval.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      72744,
+      73287,
+      78544,
+      78599,
+      80868,
+      82063,
+      85450,
+      85495,
+      89618,
+      89638,
+      89901,
+      90300,
+      91007,
+      92256,
+      93002,
+      93072,
+      93641,
+      95136,
+      95749,
+      96080
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 16,
+    "open": 15,
+    "top_issue": 72744
+  },
+  {
+    "theme": "Destructive shell guard",
+    "ask": "Catch destructive shell operations hidden inside compound commands or substitutions.",
+    "plugin": "A shell-aware PreToolUse hook parses commands and requires confirmation for deletions, resets, and system-level writes.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      81273,
+      83058,
+      83127,
+      87177,
+      87240,
+      88770,
+      89055,
+      94579
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 6,
+    "open": 7,
+    "top_issue": 88770
+  },
+  {
+    "theme": "Edit preview",
+    "ask": "Show and allow revision of proposed file changes before accepting them.",
+    "plugin": "A function hook captures pending edits, opens a diff review surface, and submits the revised patch after approval.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      71679,
+      78091,
+      85511,
+      90599
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 5,
+    "open": 2,
+    "top_issue": 90599
+  },
+  {
+    "theme": "Permission rule linter",
+    "ask": "Find ineffective, malformed, or overbroad permission rules and suggest valid replacements.",
+    "plugin": "A command parses settings files, tests sample calls against rule precedence, and emits a scoped repair patch.",
+    "layer": "command",
+    "feasibility": "full",
+    "issues": [
+      71707,
+      72042,
+      72138,
+      76509,
+      78316,
+      78817,
+      79759,
+      83406,
+      86151,
+      88564,
+      88919,
+      90879,
+      92120,
+      92350,
+      95614
+    ],
+    "thumbs_up": 8,
+    "reactions": 8,
+    "comments": 24,
+    "open": 10,
+    "top_issue": 79759
+  },
+  {
+    "theme": "Permission decision explainer",
+    "ask": "Show which rule and scope allowed or denied a tool call.",
+    "plugin": "A function hook traces tool.check decisions, records the matching rule, and displays the effective mode and reason.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      79959,
+      80900,
+      81289,
+      85023,
+      85588,
+      86634,
+      86926,
+      87153,
+      92541,
+      94690
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 7,
+    "open": 7,
+    "top_issue": 85588
+  },
+  {
+    "theme": "Safer approval UI",
+    "ask": "Make permission prompts harder to accept accidentally and easier to understand.",
+    "plugin": "A function hook presents a custom approval surface with stable choices, full paths, structured arguments, and an activation gesture.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      71108,
+      74541,
+      76859,
+      77232,
+      83567,
+      87053,
+      87931,
+      90427,
+      90660,
+      92243,
+      96920,
+      96934
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 12,
+    "open": 6,
+    "top_issue": 87053
+  },
+  {
+    "theme": "Permission mode controls",
+    "ask": "Provide a configurable permission-mode cycle and a read-only discussion mode.",
+    "plugin": "Function hooks expose commands for a chosen mode subset and enforce read-only tool checks while discussion mode is active.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      72263,
+      76981,
+      81432,
+      85848,
+      87280,
+      87973
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 9,
+    "open": 4,
+    "top_issue": 85848
+  },
+  {
+    "theme": "Scoped grants",
+    "ask": "Grant access for one action, project, or path without widening global trust.",
+    "plugin": "A function hook issues expiring, scoped permission grants and rechecks when an action escalates beyond the original grant.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      79101,
+      79732,
+      84231,
+      84800,
+      87111,
+      94271,
+      96166
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 4,
+    "open": 4,
+    "top_issue": 79732
+  },
+  {
+    "theme": "Approval timeout control",
+    "ask": "Keep interactive and background permission requests from silently timing out or hanging.",
+    "plugin": "A function hook provides a configurable approval timeout and a monitor surfaces unanswered background requests with safe expiry.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      73507,
+      73528,
+      73810,
+      78487,
+      86915
+    ],
+    "thumbs_up": 11,
+    "reactions": 11,
+    "comments": 14,
+    "open": 2,
+    "top_issue": 73507
+  },
+  {
+    "theme": "Unattended task approvals",
+    "ask": "Run scheduled tasks with a bounded, reviewable grant set.",
+    "plugin": "A command records a task-specific allowlist and a function hook applies it to each run while logging exceptions.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      79707,
+      81948,
+      83850,
+      85235,
+      89632,
+      96714
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 8,
+    "open": 5,
+    "top_issue": 81948
+  },
+  {
+    "theme": "Worktree access",
+    "ask": "Preapprove a defined set of worktree paths and diagnose denied switches.",
+    "plugin": "A function hook checks EnterWorktree against configurable path globs and grants matched switches.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      77069,
+      94265
+    ],
+    "thumbs_up": 12,
+    "reactions": 12,
+    "comments": 9,
+    "open": 2,
+    "top_issue": 77069
+  },
+  {
+    "theme": "Browser site grants",
+    "ask": "Persist scoped browser grants for approved local and private-network sites.",
+    "plugin": "A function hook checks browser calls against origin and action grants, including reserved local names and private hosts.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      86649,
+      89656,
+      90078,
+      90305,
+      92195,
+      92698,
+      93156,
+      93655,
+      94830,
+      96717
+    ],
+    "thumbs_up": 23,
+    "reactions": 25,
+    "comments": 28,
+    "open": 10,
+    "top_issue": 94830
+  },
+  {
+    "theme": "Agent cost and loop limit",
+    "ask": "Stop runaway agents and unexpected paid tool calls before they spend beyond a budget.",
+    "plugin": "Function hooks count agent spawns and external-tool cost, then request approval or stop at task limits.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      73307,
+      78019,
+      88145,
+      89620,
+      95313,
+      96142
+    ],
+    "thumbs_up": 0,
+    "reactions": 1,
+    "comments": 11,
+    "open": 6,
+    "top_issue": 78019
+  },
+  {
+    "theme": "Read-only specialist agents",
+    "ask": "Enforce the tools and paths that review-only or plan-mode subagents may use.",
+    "plugin": "An agent definition limits tools, while a PreToolUse hook applies the same read-only policy to child agents and shell effects.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      75861,
+      78063,
+      79811,
+      81440,
+      88917,
+      89277,
+      93816,
+      94202,
+      95002,
+      95155
+    ],
+    "thumbs_up": 1,
+    "reactions": 3,
+    "comments": 8,
+    "open": 9,
+    "top_issue": 89277
+  },
+  {
+    "theme": "Approved scripts",
+    "ask": "Allow named, checksum-pinned scripts without repeated broad Bash approvals.",
+    "plugin": "A command registers scripts with scoped arguments and a PreToolUse hook validates the hash and parameters on each run.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      97172
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 97172
+  },
+  {
+    "theme": "Trusted peer sessions",
+    "ask": "Allow trusted local sessions to exchange messages under explicit, revocable grants.",
+    "plugin": "A function hook checks sender identity and receiver scope on session.send and session.receive, logging delivery.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      76714,
+      78706
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 3,
+    "open": 0,
+    "top_issue": 76714
+  },
+  {
+    "theme": "Autofix scope",
+    "ask": "Limit automated pull-request fixes to selected projects and trusted triggers.",
+    "plugin": "A settings hook checks project, CI state, and comment author before an autofix command or agent acts.",
+    "layer": "settings-hook",
+    "feasibility": "full",
+    "issues": [
+      74531
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 74531
+  },
+  {
+    "theme": "Security-sensitive model routing",
+    "ask": "Pin a chosen model for specified security-sensitive tasks.",
+    "plugin": "A function hook selects the configured model on turn.step for matching task contexts.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      89312
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 89312
+  },
+  {
+    "theme": "Answer-first assistant",
+    "ask": "Answer questions before proposing out-of-scope actions.",
+    "plugin": "An output style and skill state the response order and require approval before external actions.",
+    "layer": "output-style",
+    "feasibility": "workaround",
+    "issues": [
+      88554
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 88554
+  }
+]

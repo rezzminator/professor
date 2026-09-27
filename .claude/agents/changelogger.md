@@ -18,7 +18,7 @@ The adopter's update chat, a model following your text literally. It reads every
 
 The bullet's label is the route, and the route decides whether there is an action:
 
-- Global: `templates/global/**`, `workflows/**` — live the moment the clone moves; Codex roles recompile at the update's `pfm install`. An action only when something outside the clone must change: a setting, a file the installer leaves behind, a command the adopter types by habit.
+- Global: `templates/global/**` — live the moment the clone moves; Codex roles recompile at the update's `pfm install`. An action only when something outside the clone must change: a setting, a file the installer leaves behind, a command the adopter types by habit.
 - Project: `templates/project/**` — reaches a project only through `pfm doctor --project-updates` (`UPDATED`, `NEW`, `GONE-UPSTREAM`); the adopter ports what applies and pins. Always a `per project` action; the bullet names the template path and says what the change is for, so a customized copy can take the intent.
 - pfm: `pfm/**`, the embedded fleet prompt and installer assets included — arrives with the update's rebuild. An action when a config key, hook, environment variable, installed file, command or flag is added, renamed or removed.
 - Repo: everything else — CI, docs, infra, scripts, tests. Never an action; one short line.

@@ -26,9 +26,9 @@ A change lands in this file first, then in the templates, then in every surface 
 
 | Member | Kind | Does | Runs at | Design |
 | --- | --- | --- | --- | --- |
-| `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only member holding `Write`, and it holds no `Read` | smart (`opus`), effort `low` | this file |
+| `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only agent holding `Write`, and it holds no `Read` | smart (`opus`), effort `low` | this file |
 | `super-rr` | variant of `rr` | The same body at higher effort with wider caps and the repository lane swapped in by `variants.json` `replace`, rendered by `pfm codex agents` | `opus`, effort `medium` | [super-rr.md](super-rr.md) |
-| `heavy-rr` | variant of `rr` | As `super-rr`, 8 diggers a round and no round ceiling | `opus`, effort `medium` | [heavy-rr.md](heavy-rr.md) |
+| `heavy-rr` | variant of `rr` | As `super-rr`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [heavy-rr.md](heavy-rr.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | mechanical (`sonnet`), effort `low` | [sub-rr.md](sub-rr.md) |
 | `tracer-rr` | agent | The repository digger of `super-rr` and `heavy-rr`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [tracer-rr.md](tracer-rr.md) |
 | `collector-rr` | agent | Fetches named web sources and returns them verbatim; no diggers, no document | mechanical (`sonnet`), effort `low` | [collector-rr.md](collector-rr.md) |
@@ -61,7 +61,7 @@ One run produces one markdown document, `{RR dir}/{slug}-{YYYY-MM-DD}.md`, and n
 
 - One writer. The lead is the only agent that writes it. `sub-rr` holds no `Write`, `Edit` or `Bash`; its `tools:` line carries that invariant, so the harness enforces it and no prose has to. `tracer-rr` holds `Bash` to clone and writes only its own result file under `{RR dir}/tracer-rr/`, which the document lists and never absorbs.
 - One write. The finished document is written once, at SAVE. Nothing is written before it and nothing is appended, so the lead needs no `Edit` tool and no sentinel lines.
-- No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing. It is what turns a second run on a taken name into a refusal instead of the silent loss of the first run's document. Adding `Read` to the lead's `tools:` line removes the guard. It would also let a lead open the ledger and inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path.
+- No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing. It is what turns a second run on a taken name into a refusal instead of the silent loss of the first run's document. Adding `Read` to the lead's `tools:` line removes the guard. It would also let a lead open the ledger and inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path. `heavy-rr` alone opts out: its `tools` override adds `Read`, accepting both costs ([heavy-rr.md](heavy-rr.md) § Read, and the name guard it gives up).
 - A failed save is loud. With no `RR-DIR:` line, an `RR-DIR-ERROR:` line, or a Write that fails for any reason but a taken name, the return opens `NOT SAVED — {reason}` and carries the synthesis inline.
 
 Layout of the finished document:
@@ -211,6 +211,5 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 ## Open items
 
-- The scout footer in `workflows/deep-rr/engine/src/agents/scout/prompts.ts` is goal-blind the way this family's footer was. It has its own engine and snapshot tests, so it is its own pass.
 - A document name made unique by a mechanism: the `rr-dir` hook handing the lead a run token for the file name. A name no other run can hold makes an early stub safe to replace, which would put a dead run's plan on disk.
 - The three numbers under [Measuring a run](#measuring-a-run) have two measured runs behind them: 13 lead calls against a budget of 13 for rounds of 4 and 2 diggers, and one `NOT ON PAGE` in 25 facts on the other run. The next ten runs set the baseline.

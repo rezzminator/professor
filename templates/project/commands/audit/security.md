@@ -195,7 +195,7 @@ argument-hint: [scope]
 
 ## 8I — Supply Chain & Dependency Security
 
-1. **Lock file integrity:** every project ships a committed lock file for its package manager — enumerate the roster and each project's package manager from root `CLAUDE.md` § Architecture (never assume a fixed list), then confirm each project's lock file exists and is tracked.
+1. **Lock file integrity:** every project ships a committed lock file for its package manager — enumerate the roster and each project's package manager from root `CLAUDE.md` § Vocabulary (never assume a fixed list), then confirm each project's lock file exists and is tracked.
 
 2. **Known vulnerabilities:** Check for `node-serialize` (RCE), `lodash` < 4.17.21 (prototype pollution), `jsonwebtoken` < 9.0.0 (algorithm confusion), `express` < 4.19.2 (open redirect).
 

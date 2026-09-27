@@ -20,7 +20,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 
 ### How the pieces connect
 
-- `CLAUDE.md` — request routing + guards; routes non-obvious requests to commands, names mandatory-load obligations; carries no rosters (§ Authoring conventions, no-rosters law)
+- `CLAUDE.md` — the orientation file: Vocabulary, Runtime, Rules; shaped by `/quality:claude-md`
 - `.claude/commands/*.md` — project slash commands (/pcm, /dev, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/pfm`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
 - `.claude/agents/*.md` — root pipeline agents (gitter) + any `{proj}-{role}` specialist wrappers the project wrote
 - `.claude/commands/{project}-testing-manual.md` — one per project: its testing law, read by the flights agents
@@ -34,7 +34,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 - **Path variables** — agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
 - **Pipeline flow lives in the flights commands** (`/flights:spec` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
-- **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
+- **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: `/quality:claude-md`.
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
 - **Never hardcode names, counts, or rosters that change** — table names, enum values, chain names, agent/queue/chain tallies evolve. Tell agents WHERE to discover (`ls`, a registry file, the owning script), not WHAT the values are.
 - **Frontmatter features need registration** — `hooks:`/`model:`/`effort:` load ONLY when an agent is spawned as a registered type via its `subagent_type`; a protocol file read by a general-purpose agent never loads frontmatter. A child agent needing frontmatter features needs a thin root wrapper (the `{proj}-{role}` pattern: registration shell at root, protocol stays in the child file).
@@ -46,7 +46,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 <!-- INSTALL: this section is derive-only by design — no fixed counts to fill in. The bash commands below run against the actual roster/filesystem every time, so a single-project install and a ten-project install both get correct answers from the same text. -->
 
 - **Projects:** derive with `ls -d {project}*/`; each child CLAUDE.md § Quick Start names its package manager
-- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every project specialist is registered at root on the `{proj}-{role}` convention, plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-smart-executor`, `flights-lander`, `general-orchestrator`, `general-mechanical-executor`, `general-smart-executor`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per CLAUDE.md § Model Selection
+- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every project specialist is registered at root on the `{proj}-{role}` convention, plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-smart-executor`, `flights-lander`, `general-orchestrator`, `general-mechanical-executor`, `general-smart-executor`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per the fleet prompt § Model Selection
 - Commands and skills: `ls .claude/commands/ .claude/skills/ ~/.claude/commands/ ~/.claude/skills/`
 
 ---
@@ -61,7 +61,7 @@ In the Claude Code harness the LLM reads one concatenated context: root `CLAUDE.
 
 ### Hard thresholds (Anthropic-published)
 
-- CLAUDE.md (any): ≤ 200 lines
+- CLAUDE.md (any): the line and byte budget of `/quality:claude-md`
 - SKILL.md body: ≤ 500 lines — split via progressive disclosure above this
 - Sub-agent body: no formal cap — Anthropic's own examples run 20–35 lines
 
@@ -150,8 +150,8 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 
 **CLAUDE.md rules:**
 
-- Keep section hierarchy — agents/commands reference sections by name
-- Keep non-negotiable rules exactly as they are
+- Load `/quality:claude-md` first — spine, admission, budget; a heading other files cite is renamed only with every citer
+- Keep every sacred-ground rule's meaning; carry every other rule per `/quality:claude-md` write step 5
 
 **Command rules:**
 
@@ -168,7 +168,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 1. Grep for stale references to old names/paths
 2. Cross-reference agent tools lists
 3. Pipeline completeness — every agent a flights command spawns has a definition
-4. Command completeness — every command referenced in CLAUDE.md (Request Routing) has a file; every `.claude/commands/*.md` has a `description:`
+4. Command completeness — every command referenced in CLAUDE.md has a file; every `.claude/commands/*.md` has a `description:`
 5. Script references exist at stated paths
 6. Directory name consistency across all files
 
@@ -232,7 +232,7 @@ Files: `.claude/commands/**/*.md`
 - **Agent references:** every agent name/path referenced in the command → verify agent file exists
 - **Doc path references:** every `$CDOCS`, `$REFS`, `docs/` path → verify target exists on disk
 - **Subcommand structure:** if command defines subcommands via table/args, verify each is handled in the body
-- **Route-to validity:** if this command is named in CLAUDE.md "Request Routing" (non-obvious calls + guards only), the entry → matches what the command actually handles
+- **Route-to validity:** if this command is named in CLAUDE.md § Rules (non-obvious calls + guards only), the entry → matches what the command actually handles
 - **Size limit:** no command file >35KB
 - **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`/quality:description`); `disable-model-invocation: true` only on user-triggered-by-design commands
 
@@ -241,7 +241,7 @@ Files: `.claude/commands/**/*.md`
 Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — includes command-embedded skills)
 
 - **Structure:** SKILL.md exists in each skill dir, has identifiable trigger patterns
-- **Skill registration:** every skill dir under `.claude/skills/` has a `description` frontmatter (auto-surfaced in the available-skills list) that names every mode/trigger the body defines; CLAUDE.md keeps only the one-line Skills pointer, not a per-skill table
+- **Skill registration:** every skill dir under `.claude/skills/` has a `description` frontmatter (auto-surfaced in the available-skills list) that names every mode/trigger the body defines; CLAUDE.md carries no per-skill table
 - **Registry, not roster:** the skill's `description:` carries its triggers (CLAUDE.md lists no skills — the harness indexes them); a CLAUDE.md mention exists only for a guard or a mandatory-load obligation
 
 ### `pipeline` — Walk the flight chain end-to-end
@@ -281,10 +281,10 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 
 Catches what no single-domain audit can see. Reads across ALL domains simultaneously.
 
-- **Routing ↔ commands:** every command/skill named in CLAUDE.md "Request Routing" (the non-obvious calls + guards only — most route by self-indexing) → file exists and handles claimed scope
-- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches § Inventory's derivation rules (rosters: § Authoring conventions, no-rosters law)
+- **Routing ↔ commands:** every command/skill named in CLAUDE.md § Rules (the non-obvious calls + guards only — most route by self-indexing) → file exists and handles claimed scope
+- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches § Inventory's derivation rules (rosters: `/quality:claude-md`)
 - **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry) — CLAUDE.md carries no command roster
-- **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter; CLAUDE.md Skills section is a pointer, not a list (nothing to drift)
+- **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter; CLAUDE.md lists no skills (nothing to drift)
 - **Frontmatter validity:** every agent has non-empty `name`/`description`/`tools`; root agent `name` matches its `subagent_type` registry entry
 - **Doc ownership:** CLAUDE.md doc-ownership claims → claimed paths exist
 - **Invariant spot-check:** sample 3 critical invariants from § Critical invariants → verify they hold in the actual files
@@ -301,7 +301,7 @@ Catches what no single-domain audit can see. Reads across ALL domains simultaneo
 
 **New skill:** Create `.claude/skills/{name}/SKILL.md` → no CLAUDE.md edit needed (skills self-index from `description:` frontmatter).
 
-**New command:** Create `.claude/commands/{name}.md` with a `description:` → it self-indexes; add to CLAUDE.md "Request Routing" ONLY if it's a non-obvious call or a guard.
+**New command:** Create `.claude/commands/{name}.md` with a `description:` → it self-indexes; add to CLAUDE.md § Rules ONLY if it's a non-obvious call or a guard.
 
 ---
 
@@ -323,11 +323,7 @@ Shape: match the existing files of the same kind — the live registry is the te
 
 ### CLAUDE.md (root + child)
 
-Keep: bash commands Claude can't guess, code-style rules that differ from defaults, architectural decisions / invariants, non-obvious gotchas, repo etiquette / test runners.
-
-NOT: standard language conventions, file-by-file descriptions, "write clean code" platitudes, info Claude can read from the code. **Placement by scope:** root CLAUDE.md carries only rules binding 2+ projects — a rule scoped to one project lives in that project's CLAUDE.md. Child CLAUDE.md files keep only the project-specific delta — never re-declare workspace rules already in root.
-
-**No skill/command rosters.** Claude Code indexes skills and commands itself — it reads every `SKILL.md` and command `description:` at startup and loads a body only on a match. A list of skills or commands in CLAUDE.md is dead weight that rots on every add, so leave it out. CLAUDE.md carries only what auto-indexing can't: **guards** (what's forbidden or must route through a command), **routing decisions** (which handler wins for an ambiguous intent), and **mandatory-load obligations** (when a skill is required at a step). Existence is the filesystem's job; obligation is CLAUDE.md's.
+Law: `/quality:claude-md`.
 
 ---
 

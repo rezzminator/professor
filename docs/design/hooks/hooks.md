@@ -83,7 +83,7 @@ Source `templates/project/settings.json`, scaffolded to `.claude/settings.json` 
 
 | Script | Event | Matcher | Line | Does | On failure |
 | --- | --- | --- | --- | --- | --- |
-| `pfm-guard.sh` | `PreToolUse` | `Edit\|Write` | `templates/project/settings.json:26` | Denies an edit to `.claude/**` or any `CLAUDE.md` unless this session's `/pcm` and quality markers are fresh (`templates/project/scripts/pfm-guard.sh:4-15`) | Blocks: deny JSON and exit 2 (`pfm-guard.sh:65-66`); exits 0 when the path is out of scope |
+| `pfm-guard.sh` | `PreToolUse` | `Edit\|Write` | `templates/project/settings.json:26` | Denies an edit to `.claude/**` or any `CLAUDE.md` unless this session's `/pcm` and quality markers are fresh (`templates/project/scripts/pfm-guard.sh:4-15`) | Blocks: deny JSON and exit 2 (`pfm-guard.sh:78-79`); the quality marker is also read from the session's own project when the edit targets another repo (`pfm-guard.sh:40-52`); exits 0 when the path is out of scope |
 | `guard-stamp.sh` | `PostToolUse` | `Read` | `templates/project/settings.json:37` | Stamps the quality marker when `quality/prompt.md` is read (`templates/project/scripts/guard-stamp.sh:4-7`) | Silent |
 | `format-md.sh` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:46` | Formats the Professor-owned `.md` just written under `.rumdl.toml` (`templates/project/scripts/format-md.sh:4-6`) | Warns: one stderr line per cause, always exits 0 (`format-md.sh:8-11`) |
 | `codex-sync.sh mark` | `PostToolUse` | `Edit\|Write` | `templates/project/settings.json:50` | Marks the Codex and OpenCode mirrors dirty after a Claude source edit (`templates/project/scripts/codex-sync.sh:5-8`) | Silent |

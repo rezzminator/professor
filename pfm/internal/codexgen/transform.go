@@ -125,7 +125,15 @@ func transformMarkdown(text string, options TransformOptions) string {
 	// spelled costs a Codex seat the whole branch diff.
 	text = rewriteCodeReview(text, options.ModelMap)
 	if options.ReplaceClaudeFile {
-		text = strings.ReplaceAll(text, "CLAUDE.md", "AGENTS.md")
+		// A line already naming AGENTS.md states the file pair's relation;
+		// swapping its CLAUDE.md would make that sentence false.
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			if !strings.Contains(line, "AGENTS.md") {
+				lines[i] = strings.ReplaceAll(line, "CLAUDE.md", "AGENTS.md")
+			}
+		}
+		text = strings.Join(lines, "\n")
 	}
 	return text
 }

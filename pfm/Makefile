@@ -57,7 +57,7 @@ LINT_BASE ?= origin/main
 # The tagged e2e suite keeps its own -p 1 in dev.sh.
 TESTFLAGS ?= -p 4 -parallel 4
 
-.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover test testflags iso timing sweep gate install host-install rollback \
+.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
@@ -144,9 +144,6 @@ arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new 
 # e2e row the same way. TESTFLAGS travels through the environment so this
 # file stays a delegate, never a second definition of `go test`'s flags.
 
-test: ## Host test suite (delegates to dev.sh; TESTFLAGS -> `go test`, piped through the timing check)
-	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh test pfm
-
 testflags:
 	@printf '%s\n' '$(TESTFLAGS)'
 
@@ -161,7 +158,7 @@ sweep: ## Measure the fenced concurrency sweep and publish its report
 	cd "$(REPO)" && bash .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-sweep.sh --run --wait-quiet --label fence --out /pfm-timing/sweep-fence.tsv --json /pfm-timing/sweep-json'
 	bash scripts/test-sweep.sh --report "$(TMP_BASE)/timing/sweep-fence.tsv"
 
-gate: fmt-check lint-new vet arch test iso ## Everything a change must pass before it merges
+gate: fmt-check lint-new vet arch iso ## Everything a change must pass before it merges
 	@echo "gate: all passed"
 
 # -------------------------------------------------------------- install ----

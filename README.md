@@ -1,15 +1,16 @@
 <h1 align="center">Professor</h1>
 
 <p align="center">
-  <strong>An LLM-harness fleet boost framework.</strong><br>
+  <strong>Multi-agent framework for Claude Code, Codex &amp; OpenCode.</strong><br>
   Turns the AI coding chats on your machine into a disciplined engineering team —<br>
   one you can see, message, and hold to the rules.
 </p>
 
 <p align="center">
+  <a href="https://github.com/rezzminator/professor/actions/workflows/verify.yml"><img alt="verify" src="https://github.com/rezzminator/professor/actions/workflows/verify.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/rezzminator/professor/releases"><img alt="release" src="https://img.shields.io/github/v/release/rezzminator/professor"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/rezzminator/professor"></a>
-  <img alt="go" src="https://img.shields.io/badge/go-1.24-00ADD8">
+  <img alt="go" src="https://img.shields.io/badge/go-1.27-00ADD8">
   <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey">
   <img alt="works with" src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-8A2BE2">
 </p>
@@ -21,6 +22,10 @@
   <a href="#the-fleet-cli-pfm">Fleet CLI</a> ·
   <a href="#workflows-workflows">Workflows</a> ·
   <a href="docs/BLUEPRINT.md">Blueprint</a>
+</p>
+
+<p align="center">
+  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat_inject, the comms ledger scrolls underneath" width="900">
 </p>
 
 <h2 align="center">Professor is a complete, integrated toolbox for everything you want to do — that Anthropic, OpenAI <em>or anyone else</em> will <em>never</em> give you.</h2>
@@ -54,11 +59,7 @@ Every transcript below is real output from this repository, redacted only of nam
 
 > `pfm ls`: every AI chat on the machine — Claude Code, Codex (⬢), and OpenCode — across accounts (🥇🥈), grouped by repo, live (●), resumable (↻), or agent-run (⚙). `⇄` marks chats that talk to other chats; `←here` is the one you are sitting in; `✦` opens a new one on any harness. Pick one, attach, or fire it a goal without ever attaching. A chat that scrolled off a closed terminal tab is not gone — it is a resumable transcript, and now somebody can find it.
 
-`tab` once more and the same fleet is drawn as a sky:
-
-<p align="center">
-  <img src="docs/img/cards/fleet.webp" alt="The pfm cosmos tab: four project stars — harvester, atlas, lumen, orbit — with their chats in orbit, coloured by engine; a comet flies along every chat_inject, the comms ledger scrolls underneath" width="900">
-</p>
+`tab` once more and the same fleet is drawn as the sky at the top of this page.
 
 > Every project is a star its chats orbit; a spawned chat rises as a moon at its parent's angle, so lineage is visible in the sky itself. When chats talk to each other the sky draws an edge between them, read from a durable comms ledger — an edge is a fact, not a guess. The chronoscope replays the last 24h, and a chat that is dead now still renders as the ghost it was back then.
 
@@ -179,24 +180,40 @@ One Go binary with embedded installer assets. Beyond the six moments above:
 - **Editor.** `pfm install --vscode` installs the Professor VS Code extension — visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown — and makes the `PFM` settings profile (its own icon and colour) the default, so each new integrated terminal opens at the fleet picker. To open a Professor terminal, press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`.
 
 <details>
-<summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.24.13+ for source builds</summary>
+<summary><strong>Requirements</strong> — Linux or macOS, <code>tmux</code>, Go 1.27.1+ for source builds</summary>
 
-From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.24.13 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [harvest README](pfm/internal/harvest/README.md).
+From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux` ≥ 1.8, `git`, `sh`, `bash`, `zsh`, and `sleep`; `setsid` on Linux, `ps`/`lsof`/`launchctl` on macOS. Go **1.27.1 or newer** for source builds and `pfm update`. The `claude` and `codex` CLIs are optional diagnostics. The harvester provisions its own pinned `uv` and CPython (about 3.1 GB to download and 5.8 GB on disk for the current Linux `amd64` lock), skippable with `--skip-harvest`; themes with `--skip-themes`; the Codex probe with `--skip-engine codex`. Run the [dry preview](INSTALL.md#preview-optional-components-and-harvest-footprint) before applying. Harvester configuration: [harvest README](pfm/internal/harvest/README.md).
 
 </details>
 
 ---
 
-## Workflows (`workflows/`)
+## Plugins
 
-- **deep-rr** (`workflows/deep-rr/`) — background research that returns a cited report: a scout swarm, a brainer steering the crawl, quote-pinned claims audited mechanically, lineage clustering so corroboration counts independent sources. Compiled for the Claude Workflow runtime. Start at [workflows/deep-rr/README.md](workflows/deep-rr/README.md).
+Claude Code plugins built with Professor, installable on their own. This repo is their marketplace:
 
----
+```bash
+claude plugin marketplace add rezzminator/professor
+claude plugin install sub-agent-compact@professor
+```
+
+- [sub-agent-compact](https://github.com/rezzminator/sub-agent-compact): a separate auto-compact point for the main chat and every sub-agent, and self-compaction at a milestone the model chooses.
+- [cache-live-control](https://github.com/rezzminator/cache-live-control): a `/cache` command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn.
 
 ## Origin
 
 Extracted from a live production monorepo, not designed in the abstract. Every rule here exists because something went wrong without it — the gate that reads disk instead of chat exists because an agent once claimed green; the scoped-commit rule exists because two concurrent commits once swallowed each other's files; the prevention step exists because the same bug class shipped twice. The characters exist because a generic agent wasn't good enough to argue with.
 
-Built by [@rezzminator](https://github.com/rezzminator). Issues and PRs welcome.
+Built by [@rezzminator](https://github.com/rezzminator).
 
-**License:** MIT
+## Help and community
+
+Questions and ideas go to [Discussions](https://github.com/rezzminator/professor/discussions), bugs to [an issue](https://github.com/rezzminator/professor/issues/new/choose), vulnerabilities privately through [SECURITY.md](SECURITY.md); [SUPPORT.md](SUPPORT.md) has the details.
+
+## Contributing
+
+Work lands on `develop`; `main` moves only by release. [CONTRIBUTING.md](CONTRIBUTING.md) carries the build, the gates and the rules of a repository whose files ship into other people's agent pipelines. Pull requests are welcome.
+
+## License
+
+[MIT](LICENSE)

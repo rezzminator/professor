@@ -145,7 +145,7 @@ Claude Code stops the Agent tool three levels below the main chat and caps concu
 | The agents | `templates/global/agents/flights-speccer.md`, `flights-orchestrator.md`, `flights-mechanical-executor.md`, `flights-lander.md`, `variants.json` | The five protocols; `variants.json` renders the smart executor from the mechanical one |
 | The commands | `templates/global/commands/flights/*.md` | The five commands, machine-global |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names |
-| The adopter contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The sub-agent's first move and the ladder; in this repository's `CLAUDE.md` also the fenced-flight paragraph under § Process |
+| The adopter contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The sub-agent's first move and the ladder; in this repository's `CLAUDE.md` also the fenced-flight rules under § Process |
 | The executors' allowlist | `flights-mechanical-executor`, `flights-smart-executor` | `Read, Write, Edit, Bash, Glob, Grep`: no `Skill`, no `Agent`, no MCP tool; the lander alone adds `Skill` for `/code-review` |
 | The engine | `pfm` settings and launcher | The two harness settings |
 | This directory | `docs/design/flights/` | One design file per member with content of its own; this file for what they share |

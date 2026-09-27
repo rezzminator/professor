@@ -123,7 +123,7 @@ jobs:
 
       - name: Attach files to the GitHub Release
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             release/pfm_*

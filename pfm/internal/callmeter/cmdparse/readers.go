@@ -318,7 +318,7 @@ func (p *callParser) redirFiles(redirs []*syntax.Redirect) []FileRef {
 	for _, r := range redirs {
 		var action string
 		switch r.Op {
-		case syntax.RdrOut, syntax.AppOut, syntax.ClbOut, syntax.RdrAll, syntax.AppAll:
+		case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.RdrAll, syntax.AppAll:
 			action = ActionWrite
 		case syntax.RdrIn:
 			action = ActionReadWhole

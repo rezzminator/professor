@@ -40,7 +40,7 @@ claude
 # Tell Claude: follow the printed blueprint docs/SETUP.md § Install interview.
 ```
 
-`pfm init` prints the exact permanent blueprint `docs/SETUP.md` path to follow. Keep that clone: updates, template diffs, and the deep-rr engine read it.
+`pfm init` prints the exact permanent blueprint `docs/SETUP.md` path to follow. Keep that clone: updates and template diffs read it.
 
 Claude runs Phase 1 (questions), Phase 2 (local adaptation), then Phase 3 (smoke test). You answer about 10 questions. Claude does the rest.
 
@@ -224,7 +224,7 @@ Claude shows you a summary of all answers + a list of files that will be written
 
 Claude takes your answers and:
 
-1. **Writes root `CLAUDE.md`** — `{PROJECT_NAME}`, `{PROJECT_TAGLINE}` and the other scalar tokens come from `tokens` through `pfm init --render`; adapts the Professor persona section and the non-negotiable rules. Emits `{PROJECT_ROSTER}` (one Architecture bullet per roster entry); a single-project install collapses the multi-project framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; the infra rule only if a roster entry owns infra, with that entry's directory as `{PROJECT}` in `make -C {PROJECT}`).
+1. **Writes root `CLAUDE.md`** to `/quality:claude-md`'s spine — fills in `{PROJECT_NAME}`, `{PROJECT_TAGLINE}`, the other scalar tokens (from `tokens`, through `pfm init --render`) and the optional stake line, keeps or deletes the optional docs map and `# Runtime` → `## Codex` blocks, and keeps the `# Rules` groups (sacred ground, `## Your first move as a sub-agent`, `## Dispatch`, Code, Process, Meta). Emits `{PROJECT_ROSTER}` (one `# Vocabulary` entry per roster entry, plus one per other tracked top-level directory); a single-project install collapses the multi-project framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; the infra rule only if a roster entry owns infra, with that entry's directory as `{PROJECT}` in `make -C {PROJECT}`).
 2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
 3. **Writes Tier A command files** — `/pcm`, `/dev`, `/rnd`, `/audit:*` (the machine-global `/flights:*`, `/pfm`, `/quality:*` arrive by `pfm install`). Voice intact, domain content filled.
 4. **Writes Tier B command files** for each opt-in — `/officer`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled through `tokens`. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line. A declined archetype that `pfm init` already scaffolded is deleted, its pin forgotten with `pfm update drop <local>`, then its template silenced with `pfm update ignore <template>`; see [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes).
@@ -235,7 +235,6 @@ Claude takes your answers and:
 | Skill / command | Source | Parameterization |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `legal` | Bundled `templates/project/skills/legal/` | None |
-| `deep-rr` | in-tree at `{BLUEPRINT_CLONE_PATH}/workflows/deep-rr/` — ships with the blueprint clone, no separate fetch | None |
 | `ghostwriter` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/ghost-writer> | None |
 | `vision-factory` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/vision-factory> | None |
 | `/rnd` | Command `templates/project/commands/rnd.md` | `tokens`: `{AI_SERVICE_NAME}`, `{LLM_PROVIDER}`, `{SECONDARY_LANG}`; by hand: `{PROJECT}` (the entry holding the LLM-calling code), `{ai_module}` |
@@ -243,6 +242,7 @@ Claude takes your answers and:
 | `/quality:prompt` | Command `templates/global/commands/quality/prompt.md` | Replace `{DOMAIN_ADJ}`, `{SENSITIVE_DATA}` |
 | `/quality:doc` | Command `templates/global/commands/quality/doc.md` | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples |
 | `/quality:description` | Command `templates/global/commands/quality/description.md` | None |
+| `/quality:claude-md` | Command `templates/global/commands/quality/claude-md.md` | None |
 | `/quality:md-forlint` | Command `templates/global/commands/quality/md-forlint.md`, config `templates/project/rumdl-policy.toml` → adopter `.rumdl.toml` | None |
 | `/quality:llm-codebase`, `/quality:integration-suite` | Commands `templates/global/commands/quality/{llm-codebase,integration-suite}.md` — host-global, linked by `pfm install` | None |
 | `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md` | Hydrated by RR (Phase 2.5) |

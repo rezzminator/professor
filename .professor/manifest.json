@@ -22,7 +22,7 @@
       {
         "dir": "pfm",
         "role": "fleet engine",
-        "stack": "Go 1.24.13",
+        "stack": "Go 1.27.1",
         "pkg_mgr": "go",
         "test_runner": "go test ./...",
         "ports": []
@@ -72,11 +72,10 @@
     ],
     "commands": [
       "dev",
+      "github-marketing",
       "pcm",
       "pfm-testing-manual",
-      "pfm:release",
-      "quality:doc",
-      "quality:prompt"
+      "pfm:release"
     ],
     "scripts": [
       "codex-sync.sh",
@@ -92,28 +91,27 @@
     }
   },
   "file_hashes": {
-    ".claude/agents/changelogger.md": "799448fa5545ffe0728b56fbd247f6b261f4711f290f51c56a4f140ec482a21e",
-    ".claude/agents/gitter.md": "a5c439e2f70f69814f22a9f15dc26ebc5019e6e88a49f41143325de679f5df21",
+    ".claude/agents/changelogger.md": "41e531546a363ea625726f908e7532e705c45c6dfe4fd443684d65285cead304",
+    ".claude/agents/gitter.md": "eb927fdcb07ab7dd7e1b88da2340bd6e0512d820b6f3afbec6bb3b8bd6b4518c",
     ".claude/agents/releaser.md": "5d892c434d1380c97e688be24feb67b0ebe246ba89e0dd4cbce2b8efc24f7b95",
-    ".claude/codex-build.json": "d63f0933e4cfe1e5270101180e37aed48490ab8dc8c3f7204ada67ab01afe115",
-    ".claude/commands/dev.md": "b7b86c57a5ed91328abb834f64553ccf67a0ac58c7ad631251f4b9c7c8e50e96",
-    ".claude/commands/pcm.md": "80bb645c20d6b1f18b8288bf1fd1b8cfd77257bd4f409e222055f3dc277de63a",
-    ".claude/commands/pfm-testing-manual.md": "81dac32f0e7965dac935743f5c0de543523e35ecd82b1ebcf063c5c17fb854cc",
+    ".claude/codex-build.json": "a25e19df556db6fa67cfe410101c9de7816003ba1ef3271e2d70d3ce67adfea7",
+    ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
+    ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
+    ".claude/commands/pcm.md": "888bf417ddde7d21b65547e1ad0927c8ceb0875ad5a72ebe3730ee8a6d5fabc0",
+    ".claude/commands/pfm-testing-manual.md": "ac6b00ed0fde4653d0bf2a3b3939dc37a1c140b7dc3242b2dd073ec4835d99bd",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
-    ".claude/commands/quality/doc.md": "dd3f01c84d9eaace7b45df52a8501c2137b5daa7556049df1980e1183705f67d",
-    ".claude/commands/quality/prompt.md": "5b778fbdf56339f572f3e9595291ff6c83d628557ed7b907639f483593825870",
     ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
-    ".claude/scripts/dev.sh": "ca5285d9767dc466d7798db71ab7c2e83965362259e04a23cc1e4c2bfbee3fda",
+    ".claude/scripts/dev.sh": "a1239c26cadbefb630c6e0176925f620eabaf06f56b871d1b80ba85b3e09b9f0",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
-    ".claude/scripts/pfm-guard.sh": "1fdaecfc779371a8bd68a59b695cd807c9739d196c3ef881c51cc9e991f97069",
+    ".claude/scripts/pfm-guard.sh": "b4e1a5d6f3f827410b40d484aaa687ce0c34b882938ef86080d8828f560d48dc",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
-    ".gitignore": "5e88062e209a02b8251d20e3db1285e99b56bce2f418dc64e417186681bb7d2f",
-    "CLAUDE.md": "bd8ef1ee03ee22724ee055a8fc53b04bd0b94fc454772f1ef0950a49020b848b",
-    "docs/commands/pcm/references/audit-scopes.md": "4c4b8c88706ffc560a25901f0d79a3955313be5fecf437a596661697f77d8cdc",
-    "docs/commands/pcm/references/refresh.md": "efb51c54ef6ce3a695bc39cba8fc0bdd730bbc8e86b7199affe66e33f046c6a3",
+    ".gitignore": "b4b64ebc80d0550100d5afb29b8e1def0ae87ccf3626f16f060e78624377a524",
+    "CLAUDE.md": "c4e6e54c1a73c5f0389609975980401d6dd114272c05ef50c01ac3204fb463e4",
+    "docs/commands/pcm/references/audit-scopes.md": "0eb093cd384472d0cab03d30fe4b562b8424a6d0d6310fe1d51bad7efb04398b",
+    "docs/commands/pcm/references/refresh.md": "39ad4e4e8aa023d9516ed3ec2d1ac5cdad78ebf1c058bcb3cb68cf8a01cd47ff",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
-    "pfm/CLAUDE.md": "bb3645b429c62d91dadf07fd2efd19ef869a81e429c1b54377e5ad76767bb526"
+    "pfm/CLAUDE.md": "baddc5138a6653c80af94181401ff29481e5b9379912c37e48d216353020cc48"
   }
 }

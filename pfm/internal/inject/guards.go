@@ -13,6 +13,18 @@ var (
 	codexMenuPattern  = regexp.MustCompile(`›[\s\v]*\d+\.[\s\v]`)
 	numberedOption    = regexp.MustCompile(`^[\s\v]*›?[\s\v]*\d+\.[\s\v]`)
 	busyPattern       = regexp.MustCompile(`(?i)esc to interrupt|\(\d+s ·|· \d+s|\d+ tokens`)
+	// claudeBusyPattern is a running Claude turn, read only from the shapes the
+	// engine itself draws: "esc to interrupt"; the spinner's parenthesised
+	// timer, minutes included ("(12s ·", "(1m 50s ·"); a column-0 spinner glyph
+	// with a verb still running ("✢ Tempering…"); and an ellipsis followed by
+	// elapsed time ("  Spawning … · 51s"). busyPattern's bare `\d+ tokens` and
+	// `· \d+s` arms are left out on purpose: transcript prose and the rows of
+	// background agents behind an idle input box say exactly that. The finished
+	// row ("✻ Worked for 12s") and the idle agent-wait row ("✻ Waiting for 1
+	// background agent to finish") match none of it.
+	claudeBusyPattern = regexp.MustCompile(
+		`(?im)esc to interrupt|\((?:\d+[hm] )*\d+s ·|^[✻✢✶✳✽·*] +\S[^\n]*…|…\s*·\s*(?:\d+[hm] )*\d+s`,
+	)
 	// The receipt Claude Code prints once a compaction has actually happened.
 	// It is the only positive evidence a pane carries that the turn a --then
 	// waiter was sent to ride out was a compaction AND that it finished.
@@ -75,7 +87,16 @@ const openCodeBusyHint = "esc interrupt"
 // and OpenCode's own running-turn footer says `esc interrupt`, which none of
 // busyPattern's arms match. One rule for three engines was wrong in both
 // directions at once here.
+//
+// Claude needs its own rule too. busyPattern's `\d+ tokens` and `· \d+s` arms
+// read transcript prose ("wrote 24,768 tokens") and background-agent rows
+// under an idle input box as a running turn, while a 2.1.283 spinner past one
+// minute ("(1m 50s · ↓ 9.3k tokens)") matches none of its arms. A Claude turn
+// is busy only on the shapes the engine itself draws (claudeBusyPattern).
 func IsBusyFor(engine pfmengine.ID, capture string) bool {
+	if engine == pfmengine.Claude {
+		return claudeBusyPattern.MatchString(capture)
+	}
 	if engine != pfmengine.OpenCode {
 		return IsBusy(capture)
 	}
@@ -158,6 +179,22 @@ func HasPastePlaceholder(value string) bool {
 		strings.Contains(lower, "[pasted content")
 }
 
+// ComposerIsDimPlaceholder reports whether the composer in a STYLED capture
+// (tmux capture-pane -e) holds only dim hint text — Claude Code's prompt
+// suggestion, Codex's placeholder — and so is empty underneath. Exported so
+// internal/reload reads a composer the way the inject mash guard does.
+func ComposerIsDimPlaceholder(styledCapture string) bool {
+	return isDimPlaceholder(lastComposerLine(styledCapture))
+}
+
+// LastComposerLine is the active composer row of a capture — the last line
+// that STARTS with ❯ or ›, never a status row carrying the glyph mid-line (a
+// "› stashed" marker) nor Claude's focused agent-panel row. Exported so
+// internal/reload reads the same row the inject guards do.
+func LastComposerLine(capture string) string {
+	return lastComposerLine(capture)
+}
+
 func isDimPlaceholder(styledLine string) bool {
 	if !strings.Contains(styledLine, "\x1b[2m") && !strings.Contains(styledLine, ";2m") {
 		return false
@@ -189,12 +226,21 @@ func isDimPlaceholder(styledLine string) bool {
 			if params == "" {
 				dim = false
 			}
-			for _, param := range strings.Split(params, ";") {
-				switch param {
+			fields := strings.Split(params, ";")
+			for index := 0; index < len(fields); index++ {
+				switch fields[index] {
 				case "0", "22":
 					dim = false
 				case "2":
 					dim = true
+				case "38", "48", "58":
+					// Extended colour: "5;N" or "2;R;G;B" are its arguments,
+					// never attributes — the 2 of truecolour is not dim.
+					if index+1 < len(fields) && fields[index+1] == "5" {
+						index += 2
+					} else if index+1 < len(fields) && fields[index+1] == "2" {
+						index += 4
+					}
 				}
 			}
 		}

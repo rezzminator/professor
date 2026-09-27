@@ -16,11 +16,6 @@ node_modules/
 # which the leak gate correctly refuses for this repo.
 .claude/skills/
 # Codex command wrappers are tracked so clean checkouts pass mirror checks.
-# Source-fetched skill trees remain ignored at their Claude source above — and
-# so is the .codex mirror LINK to each one: `pfm codex build` recreates it from
-# whatever `.claude/skills/` holds, and a tracked link into an ignored tree
-# resolves only in the working copy that added it. One line per fetched skill.
-.codex/skills/deep-rr
 # OpenCode mirror (`pfm opencode build`): skill symlinks stay untracked like
 # Generated mirrors are never tracked beside their source: their compiler
 # (`pfm codex build` for Codex, `pfm opencode build` for OpenCode)

@@ -1,0 +1,36 @@
+{
+  "name": "professor",
+  "description": "Claude Code plugins built and maintained with Professor.",
+  "owner": {
+    "name": "rezzminator",
+    "url": "https://github.com/rezzminator/professor"
+  },
+  "plugins": [
+    {
+      "name": "sub-agent-compact",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/sub-agent-compact.git",
+        "path": "plugins/sub-agent-compact",
+        "ref": "main"
+      },
+      "description": "Smart auto-compact for Claude Code: a separate compaction point for every sub-agent, and self-compaction at a milestone the model chooses.",
+      "homepage": "https://github.com/rezzminator/sub-agent-compact",
+      "license": "MIT",
+      "keywords": ["claude-code", "sub-agent", "auto-compact", "compaction", "function-hooks", "professor"]
+    },
+    {
+      "name": "cache-live-control",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/cache-live-control.git",
+        "path": "plugins/cache-live-control",
+        "ref": "main"
+      },
+      "description": "A /cache command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn.",
+      "homepage": "https://github.com/rezzminator/cache-live-control",
+      "license": "MIT",
+      "keywords": ["claude-code", "prompt-cache", "cache-ttl", "function-hooks", "professor"]
+    }
+  ]
+}

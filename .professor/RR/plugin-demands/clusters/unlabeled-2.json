@@ -1,0 +1,1087 @@
+[
+  {
+    "theme": "Agent progress HUD",
+    "ask": "Users want to see agent progress and intervene during long delegated work.",
+    "plugin": "SubagentStart/Stop and tool hooks maintain a progress ledger; a statusline or experimental UI hook displays activity and a command requests pause or handoff.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      30531,
+      31374,
+      33195,
+      37349,
+      41318,
+      41782,
+      41986,
+      42005,
+      43402
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 27,
+    "open": 0,
+    "top_issue": 33195
+  },
+  {
+    "theme": "Apple Reminders connector",
+    "ask": "Users want reminder tags available when creating or updating tasks.",
+    "plugin": "An MCP server wraps Apple Reminders to expose tags as explicit fields.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      59897
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 59897
+  },
+  {
+    "theme": "Attribution guard",
+    "ask": "Users want generated commits and PRs to honor their attribution preference.",
+    "plugin": "An attribution.text function hook or PreToolUse guard rewrites or blocks unwanted commit trailers and injects configured dynamic fields.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      32718,
+      36105,
+      41803,
+      41873,
+      45137,
+      47579,
+      48791
+    ],
+    "thumbs_up": 50,
+    "reactions": 54,
+    "comments": 36,
+    "open": 1,
+    "top_issue": 36105
+  },
+  {
+    "theme": "CAD file adapter",
+    "ask": "Users want DWG and DXF files usable in architectural workflows.",
+    "plugin": "An MCP server parses CAD drawings and exposes structured geometry inspection and conversion tools.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      47915
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 47915
+  },
+  {
+    "theme": "Clipboard image paste",
+    "ask": "Users want image paste in the terminal input.",
+    "plugin": "Experimental ui.input hooks receive clipboard image data and attach it to the prompt.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      42047
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 42047
+  },
+  {
+    "theme": "Codebase ignore generator",
+    "ask": "Users want ignore rules generated for the project type.",
+    "plugin": "A skill inspects the repository and a bin utility writes a reviewed .claudeignore template.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      30857
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 30857
+  },
+  {
+    "theme": "Command and menu extensions",
+    "ask": "Users want convenient aliases, completion, and custom commands for common CLI actions.",
+    "plugin": "Namespaced skills and command.describe/command.run function hooks add shortcuts, ordering, hints, and exact-match behavior.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      31214,
+      33785,
+      35490,
+      41828,
+      41855,
+      42147,
+      42172,
+      53820
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 20,
+    "open": 0,
+    "top_issue": 42147
+  },
+  {
+    "theme": "Compaction continuity",
+    "ask": "Users want long sessions to preserve task state, decisions, and instructions across compaction or clearing.",
+    "plugin": "A skill and PreCompact/PostCompact hooks persist pinned facts and a task ledger, then restore them after a clear or compact.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      32916,
+      35940,
+      38244,
+      44598
+    ],
+    "thumbs_up": 8,
+    "reactions": 8,
+    "comments": 16,
+    "open": 0,
+    "top_issue": 38244
+  },
+  {
+    "theme": "Companion customization",
+    "ask": "Users want to personalize terminal companions, including appearance, name, language, and behavior.",
+    "plugin": "Experimental ui.render and companion event hooks replace supported terminal visuals and add a configurable companion profile.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      41766,
+      41844,
+      41908,
+      41929,
+      41935,
+      41942,
+      41959,
+      41978,
+      41990,
+      42057,
+      42078,
+      42088,
+      42091,
+      42100,
+      42115,
+      42124,
+      42150,
+      42161,
+      42164,
+      42274,
+      42466,
+      42838,
+      43089,
+      43277,
+      43434,
+      44335,
+      44679,
+      44685
+    ],
+    "thumbs_up": 64,
+    "reactions": 71,
+    "comments": 81,
+    "open": 0,
+    "top_issue": 41908
+  },
+  {
+    "theme": "Companion progression",
+    "ask": "Users want a persistent companion game with unlocks and progression.",
+    "plugin": "Experimental UI hooks and plugin data storage track companion levels, unlocks, and optional interactions.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      41789,
+      41895,
+      42060,
+      42741,
+      43155
+    ],
+    "thumbs_up": 6,
+    "reactions": 7,
+    "comments": 17,
+    "open": 0,
+    "top_issue": 41789
+  },
+  {
+    "theme": "Computer use adapter",
+    "ask": "Users want graphical applications available to Claude Code.",
+    "plugin": "An MCP server exposes screenshot, click, keyboard, and element inspection tools.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      39190
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 39190
+  },
+  {
+    "theme": "Context budget watch",
+    "ask": "Users want early, accurate warnings and visibility into context consumption.",
+    "plugin": "A statusline and monitor display context and token use, forecast exhaustion, and warn before a session becomes unrecoverable.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      40567,
+      41810,
+      41822,
+      42084
+    ],
+    "thumbs_up": 9,
+    "reactions": 9,
+    "comments": 21,
+    "open": 0,
+    "top_issue": 41810
+  },
+  {
+    "theme": "Cross-surface conversation export",
+    "ask": "Users want portable conversation history across clients and devices.",
+    "plugin": "A command exports local transcripts and context briefs with redaction; an MCP bridge imports the portable artifact where the target client permits it.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      38545,
+      41945
+    ],
+    "thumbs_up": 6,
+    "reactions": 6,
+    "comments": 5,
+    "open": 0,
+    "top_issue": 38545
+  },
+  {
+    "theme": "Custom compaction policy",
+    "ask": "Users want to control when and how conversation context is compressed or cleared.",
+    "plugin": "Experimental session.measure and session.compact hooks tune compaction policy, hold a requested compact, and rewrite its instructions; native early triggering still depends on the host threshold.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      32946,
+      35069,
+      37891,
+      41818,
+      42149
+    ],
+    "thumbs_up": 15,
+    "reactions": 15,
+    "comments": 18,
+    "open": 0,
+    "top_issue": 37891
+  },
+  {
+    "theme": "Dependency release watcher",
+    "ask": "Users want current package release knowledge during coding.",
+    "plugin": "A monitor fetches tracked package release feeds and an MCP tool returns versioned changelogs on demand.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      34689
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 3,
+    "open": 0,
+    "top_issue": 34689
+  },
+  {
+    "theme": "Directus schema generator",
+    "ask": "Users want a plan turned into a Directus schema.",
+    "plugin": "A skill validates the plan and a Directus MCP server applies the reviewed collection schema.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      41321
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 41321
+  },
+  {
+    "theme": "Ephemeral session mode",
+    "ask": "Users want temporary sessions without retained local history.",
+    "plugin": "SessionEnd hooks and a bin launcher isolate temporary transcript storage and remove it after the session ends.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      42159
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 5,
+    "open": 0,
+    "top_issue": 42159
+  },
+  {
+    "theme": "Feishu media tool",
+    "ask": "Users want to download files and images from Feishu.",
+    "plugin": "An MCP server supplies a Feishu media download tool and stores fetched files locally.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      38532
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 38532
+  },
+  {
+    "theme": "Git change guard",
+    "ask": "Users want explicit checks before risky Git operations or unapproved file changes.",
+    "plugin": "PreToolUse hooks enforce an approved edit scope, require review or a completion checklist before Git writes, and block accidental generated files.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      30597,
+      31261,
+      34922,
+      36368,
+      40917,
+      46165
+    ],
+    "thumbs_up": 7,
+    "reactions": 7,
+    "comments": 21,
+    "open": 0,
+    "top_issue": 46165
+  },
+  {
+    "theme": "Google Sheets connector",
+    "ask": "Users want Google Sheets available as agent tools.",
+    "plugin": "An MCP server exposes spreadsheet read, write, and search actions with a skill for safe sheet editing.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      34953
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 34953
+  },
+  {
+    "theme": "iCloud Calendar connector",
+    "ask": "Users want iCloud calendar available as agent tools.",
+    "plugin": "An MCP server exposes calendar queries and edits using an authorized iCloud connection.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      49858
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 49858
+  },
+  {
+    "theme": "Image input compressor",
+    "ask": "Users want oversized images compressed before they block a conversation.",
+    "plugin": "A bin utility resizes and recompresses local images, with a PreToolUse hook substituting an approved smaller file.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      49873
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 49873
+  },
+  {
+    "theme": "Instruction compliance",
+    "ask": "Users want project rules and explicit constraints checked before the agent acts.",
+    "plugin": "A rules skill and PreToolUse/Stop hooks check proposed actions and final claims against explicit project constraints.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      31607,
+      39915,
+      41707,
+      41850,
+      41936,
+      41957,
+      42121,
+      44960,
+      45661,
+      54117,
+      60139
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 37,
+    "open": 0,
+    "top_issue": 42121
+  },
+  {
+    "theme": "JAR patching toolkit",
+    "ask": "Users want reliable editing of JAR and other binary artifacts.",
+    "plugin": "A bin executable parses and patches binary archives, with a skill for review and validation.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      41927
+    ],
+    "thumbs_up": 0,
+    "reactions": 3,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 41927
+  },
+  {
+    "theme": "Jira intake pipeline",
+    "ask": "Users want a deep interview to produce Jira work items.",
+    "plugin": "An interview skill gathers requirements and a Jira MCP server creates the resulting issues.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      41320
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 41320
+  },
+  {
+    "theme": "Lead scraping agent",
+    "ask": "Users want an autonomous web research workflow for leads.",
+    "plugin": "An agent combines browsing and extraction tools to produce a source-linked lead list.",
+    "layer": "agent",
+    "feasibility": "workaround",
+    "issues": [
+      54854
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 54854
+  },
+  {
+    "theme": "MCP and plugin diagnostics",
+    "ask": "Users want plugin and MCP installation, state, and health visible from automation.",
+    "plugin": "A monitor and command inspect plugin and MCP state, detect stale or disconnected tools, and offer a controlled reconnection workflow.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      37625,
+      41778,
+      41835,
+      41885,
+      41890,
+      42004,
+      42126,
+      42148,
+      45051,
+      60953
+    ],
+    "thumbs_up": 42,
+    "reactions": 43,
+    "comments": 39,
+    "open": 1,
+    "top_issue": 42148
+  },
+  {
+    "theme": "MCP session identity",
+    "ask": "MCP services need to distinguish sessions and expose rate-limit state to automation.",
+    "plugin": "An MCP wrapper and tool.call function hook attach a stable session identifier and surface rate-limit metadata to tools that accept it.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      41836,
+      42175,
+      50518
+    ],
+    "thumbs_up": 37,
+    "reactions": 37,
+    "comments": 21,
+    "open": 1,
+    "top_issue": 41836
+  },
+  {
+    "theme": "Messenger bridge",
+    "ask": "Users want Telegram and Discord messages to preserve formatting and support dispatch.",
+    "plugin": "A channel-bound MCP server bridges these chat systems and formats Telegram MarkdownV2 messages.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      36622,
+      36641
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 36622
+  },
+  {
+    "theme": "Mobile UI test agent",
+    "ask": "Users want automated mobile app UI tests derived from the codebase.",
+    "plugin": "An agent analyzes screens and runs tests through a mobile automation MCP server.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      35597
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 35597
+  },
+  {
+    "theme": "Model and effort router",
+    "ask": "Users want model and reasoning effort chosen or held by task, activity, and session.",
+    "plugin": "Experimental turn.step hooks choose model and effort from task phase and local policy, with a command for explicit override.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      35108,
+      38862,
+      41714,
+      42117
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 10,
+    "open": 0,
+    "top_issue": 35108
+  },
+  {
+    "theme": "Output and accessibility",
+    "ask": "Users want clearer, localized, or accessible assistant output.",
+    "plugin": "Output styles and skills apply chosen language, tone, and vocabulary; a voice MCP or bin adapter supplies custom transcription vocabulary.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      35277,
+      41245,
+      46682,
+      49881,
+      53043,
+      55237
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 14,
+    "open": 0,
+    "top_issue": 35277
+  },
+  {
+    "theme": "Portable project history",
+    "ask": "Users want sessions and memory to survive moving repositories or switching machines.",
+    "plugin": "A bin utility exports and imports project transcripts, memory, and user instructions, mapping relocated repository identities and syncing only chosen files.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      31284,
+      33636,
+      38519,
+      39457,
+      41058,
+      56793,
+      57294,
+      58300
+    ],
+    "thumbs_up": 16,
+    "reactions": 17,
+    "comments": 35,
+    "open": 0,
+    "top_issue": 33636
+  },
+  {
+    "theme": "Private feedback",
+    "ask": "Users want feedback records and reporting that preserve their preferences and privacy.",
+    "plugin": "A command stores local drafts and submission history, previews redaction, and sends approved feedback through a configured endpoint.",
+    "layer": "command",
+    "feasibility": "workaround",
+    "issues": [
+      36912,
+      36913,
+      38982,
+      50064
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 9,
+    "open": 0,
+    "top_issue": 36912
+  },
+  {
+    "theme": "Project memory service",
+    "ask": "Users want durable, searchable project or team memory with explicit scope, freshness, and pruning.",
+    "plugin": "An MCP memory store and SessionStart/Stop hooks capture approved facts, rank them by recency and topic, and retrieve only relevant entries.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      31357,
+      31405,
+      31515,
+      34192,
+      37102,
+      38337,
+      38536,
+      40614,
+      40718,
+      40806,
+      44942,
+      47299,
+      49401,
+      49970,
+      50106,
+      50922,
+      52295,
+      53410,
+      59111,
+      60602
+    ],
+    "thumbs_up": 21,
+    "reactions": 24,
+    "comments": 100,
+    "open": 1,
+    "top_issue": 38536
+  },
+  {
+    "theme": "Project-local skill profiles",
+    "ask": "Users want project and personal skill sets without committing local instructions.",
+    "plugin": "SessionStart hooks load gitignored project-local skill and agent definitions and a command switches named profiles.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      31155,
+      41967,
+      45259,
+      53333
+    ],
+    "thumbs_up": 4,
+    "reactions": 4,
+    "comments": 9,
+    "open": 0,
+    "top_issue": 41967
+  },
+  {
+    "theme": "Prompt and tool hygiene",
+    "ask": "Users want noisy system context, tool metadata, or redundant reads reduced.",
+    "plugin": "Experimental prompt.section and tool.describe hooks trim hidden prompt and tool overhead; a statusline exposes the measured cost.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      41809,
+      41812,
+      50061
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 13,
+    "open": 0,
+    "top_issue": 41812
+  },
+  {
+    "theme": "Related file change agent",
+    "ask": "Users want related files updated when code changes.",
+    "plugin": "An agent uses code search and LSP references to propose companion edits, with a Stop hook flagging missed references.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      31899
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 31899
+  },
+  {
+    "theme": "Remote session bridge",
+    "ask": "Users want to start, inspect, or hand off local sessions from other devices and processes.",
+    "plugin": "An opt-in monitor and MCP server track local sessions, publish liveness, and expose safe attach or handoff operations to remote clients.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      30905,
+      31534,
+      31886,
+      34255,
+      36401,
+      37532,
+      39629,
+      42050,
+      42163,
+      46884,
+      60058
+    ],
+    "thumbs_up": 176,
+    "reactions": 187,
+    "comments": 107,
+    "open": 2,
+    "top_issue": 34255
+  },
+  {
+    "theme": "Rendered plan preview",
+    "ask": "Users want plans and specs available as rich HTML previews.",
+    "plugin": "A bin renderer converts Markdown plans to local HTML with syntax highlighting and diagrams.",
+    "layer": "bin",
+    "feasibility": "full",
+    "issues": [
+      46599
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 46599
+  },
+  {
+    "theme": "Review and verification",
+    "ask": "Users want reviews, source checks, and proof of completed work before an answer.",
+    "plugin": "A review agent and Stop hook verify changes against tests and source evidence, while a command opts selected PRs into review.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      31630,
+      32797,
+      32872,
+      38442,
+      42096,
+      50937
+    ],
+    "thumbs_up": 0,
+    "reactions": 9,
+    "comments": 18,
+    "open": 0,
+    "top_issue": 32872
+  },
+  {
+    "theme": "Rule discovery and injection",
+    "ask": "Users want rules, memory, and environment guidance loaded at the right scope and time.",
+    "plugin": "SessionStart, CwdChanged, and UserPromptSubmit hooks load scoped rules and memory, select branch or topic profiles, and gate memory writes.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      33535,
+      34075,
+      35813,
+      36045,
+      39195,
+      39496,
+      39920,
+      41280,
+      49995,
+      50677,
+      52488,
+      52706,
+      52772,
+      53336,
+      53737,
+      54791,
+      55801,
+      57958,
+      58840,
+      59904
+    ],
+    "thumbs_up": 31,
+    "reactions": 31,
+    "comments": 80,
+    "open": 1,
+    "top_issue": 39195
+  },
+  {
+    "theme": "Scheduled workflow supervisor",
+    "ask": "Users want durable, observable scheduled tasks and background work.",
+    "plugin": "A monitor with a local durable job ledger schedules runs, exposes status and cancellation, and manages follow-up handoffs.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      32806,
+      35280,
+      35802,
+      42157,
+      43467,
+      51924,
+      59337
+    ],
+    "thumbs_up": 14,
+    "reactions": 15,
+    "comments": 22,
+    "open": 0,
+    "top_issue": 42157
+  },
+  {
+    "theme": "Screenshot saver",
+    "ask": "Users want browser screenshots saved directly as files.",
+    "plugin": "A wrapper MCP tool calls the browser screenshot capability and writes the returned image to a selected local path.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      35181,
+      35182
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 35181
+  },
+  {
+    "theme": "Session handoff",
+    "ask": "Users want a reproducible handoff or checkpoint between sessions and collaborators.",
+    "plugin": "A skill and command save checkpoints, fork a task brief, and seed a parallel session with its goals and completed work.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      38075,
+      41632,
+      43909,
+      55472,
+      59818
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 20,
+    "open": 0,
+    "top_issue": 59818
+  },
+  {
+    "theme": "Session launcher",
+    "ask": "Users want a chosen working directory, plan location, and resume behavior at launch.",
+    "plugin": "A bin launcher sets cwd, stores plans relative to the project, and resumes the selected local session.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      30668,
+      33074,
+      47017
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 9,
+    "open": 0,
+    "top_issue": 30668
+  },
+  {
+    "theme": "Session navigator",
+    "ask": "Users want to find, label, link, and navigate sessions and branches easily.",
+    "plugin": "A command and bin index local sessions, assign stable names and labels, and offer a searchable resume picker; UI tab titles need experimental function hooks.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      32835,
+      37777,
+      41746,
+      41761,
+      41770,
+      41851,
+      41888,
+      41931,
+      41982,
+      41987,
+      41993,
+      42139
+    ],
+    "thumbs_up": 18,
+    "reactions": 20,
+    "comments": 33,
+    "open": 0,
+    "top_issue": 42139
+  },
+  {
+    "theme": "Slack tool extension",
+    "ask": "Users want Slack actions missing from the existing connector.",
+    "plugin": "An MCP server wraps Slack APIs to unsave messages and read or write Lists, exposing namespaced tools.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      33345,
+      42783
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 0,
+    "top_issue": 33345
+  },
+  {
+    "theme": "Telemetry and diagnostics",
+    "ask": "Users want inspectable events and useful diagnostics for long sessions and failed tools.",
+    "plugin": "Lifecycle hooks record skill, tool, and session events with identifiers and timings; a command produces project-scoped reports.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      31039,
+      35478,
+      41845,
+      46538,
+      57277
+    ],
+    "thumbs_up": 10,
+    "reactions": 10,
+    "comments": 17,
+    "open": 0,
+    "top_issue": 41845
+  },
+  {
+    "theme": "Theme and status display",
+    "ask": "Users want to customize the terminal welcome, spinner, tips, and session status.",
+    "plugin": "A theme, statusline, and experimental UI hooks customize terminal colors, spinner, session state, and supported display elements.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      41739,
+      41751,
+      41887,
+      41896,
+      41906,
+      42107,
+      42168,
+      48636,
+      58338,
+      59447
+    ],
+    "thumbs_up": 19,
+    "reactions": 20,
+    "comments": 38,
+    "open": 1,
+    "top_issue": 48636
+  },
+  {
+    "theme": "Tool permission broker",
+    "ask": "Users want granular tool permissions, remote approvals, and secret handling.",
+    "plugin": "PermissionRequest/PreToolUse hooks enforce tool-specific policy and route approval; an MCP vault supplies scoped secrets without model-visible values.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      31248,
+      39704,
+      41940,
+      41999,
+      42014,
+      42178,
+      44980,
+      59098
+    ],
+    "thumbs_up": 5,
+    "reactions": 6,
+    "comments": 27,
+    "open": 0,
+    "top_issue": 44980
+  },
+  {
+    "theme": "Transcript vault",
+    "ask": "Users want to retain, back up, archive, search, delete, and export local session history on their terms.",
+    "plugin": "A SessionEnd hook and bin utility back up local transcripts, index attachments, and offer archive, search, and cleanup commands.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      34339,
+      34711,
+      34846,
+      35367,
+      41591,
+      42077,
+      54045,
+      58808
+    ],
+    "thumbs_up": 8,
+    "reactions": 8,
+    "comments": 29,
+    "open": 0,
+    "top_issue": 41591
+  },
+  {
+    "theme": "Usage and cost dashboard",
+    "ask": "Users want local visibility into token spend, limits, and session usage.",
+    "plugin": "A statusline and local monitor display usage, per-project spend, reset times, and configurable warnings using exposed usage data.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      32770,
+      39917,
+      41944,
+      43876,
+      45392,
+      45616,
+      49025,
+      51016
+    ],
+    "thumbs_up": 9,
+    "reactions": 9,
+    "comments": 27,
+    "open": 0,
+    "top_issue": 32770
+  },
+  {
+    "theme": "Voice workflow",
+    "ask": "Users want hands-free voice interaction, transcription options, and durable voice settings.",
+    "plugin": "An audio MCP server or bin executable handles recording and transcription; SessionStart hooks apply saved preferences, with native voice UI gaps treated as workarounds.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      32249,
+      34108,
+      34355,
+      36853,
+      39972,
+      41609,
+      41654,
+      49339,
+      50720,
+      57064,
+      57470
+    ],
+    "thumbs_up": 16,
+    "reactions": 25,
+    "comments": 39,
+    "open": 0,
+    "top_issue": 50720
+  },
+  {
+    "theme": "Worktree safety",
+    "ask": "Users want the agent to stay in the intended worktree and avoid destructive cleanup.",
+    "plugin": "PreToolUse and WorktreeRemove hooks verify the active worktree, branch, path, and pending edits before writes, pushes, or cleanup.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      33596,
+      34458,
+      36194,
+      36943,
+      39394,
+      41564,
+      42034,
+      43779,
+      44130,
+      52356,
+      61062
+    ],
+    "thumbs_up": 13,
+    "reactions": 13,
+    "comments": 32,
+    "open": 0,
+    "top_issue": 36194
+  },
+  {
+    "theme": "Zoom meeting agent",
+    "ask": "Users want Claude to participate in Zoom meetings.",
+    "plugin": "An MCP server joins meetings through supported Zoom APIs and relays transcript and approved actions to a meeting skill.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      41397
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 41397
+  }
+]

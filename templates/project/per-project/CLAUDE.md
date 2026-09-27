@@ -57,7 +57,7 @@
 <!-- KEEP the next line ONLY if this project is the roster's wire-contract/schema hub; delete it
      otherwise. It is a navigation delta, never a restatement: name the hub's own consumer index
      here and leave the command to the root — e.g. "`docs/wire-index.md` summarizes the boundaries
-     the consumer index covers (root CLAUDE.md § Architecture names the command)." -->
+     the consumer index covers (root CLAUDE.md § Vocabulary names the command)." -->
 
 ### {FRAMEWORK} Conventions
 

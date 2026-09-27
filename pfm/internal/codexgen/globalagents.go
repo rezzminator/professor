@@ -506,7 +506,7 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	if override, ok := fields["codex-effort"]; ok {
 		effort = strings.TrimSpace(override)
 		switch effort {
-		case "low", "medium", "high", "xhigh":
+		case codeReviewBareEffort, codexMediumEffort, codexHighEffort, codeReviewTopEffort:
 		default:
 			return "", "", fmt.Errorf("%s: invalid codex-effort %q (want low, medium, high, or xhigh)", mdPath, effort)
 		}

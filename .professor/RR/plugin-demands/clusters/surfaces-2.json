@@ -1,0 +1,1089 @@
+[
+  {
+    "theme": "Agent roster dashboard",
+    "ask": "Users want one live view of sessions, agents, tasks, and their state.",
+    "plugin": "A monitor reads local session records and hook events, then serves a searchable roster with status, project, and activity.",
+    "layer": "monitor",
+    "feasibility": "workaround",
+    "issues": [
+      75624,
+      75863,
+      77531,
+      77720,
+      77905,
+      88177,
+      90188,
+      93734,
+      94374,
+      94620,
+      95581,
+      96486
+    ],
+    "thumbs_up": 22,
+    "reactions": 33,
+    "comments": 25,
+    "open": 8,
+    "top_issue": 75863
+  },
+  {
+    "theme": "Session search and grouping",
+    "ask": "Users want to find, tag, sort, and group sessions by project or priority.",
+    "plugin": "A monitor indexes local session metadata and transcripts and offers search, tags, pins, and project grouping; function UI hooks can surface the same controls in local views.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      75557,
+      76433,
+      77784,
+      77797,
+      77831,
+      79098,
+      82581,
+      83013,
+      83754,
+      84540,
+      85011,
+      87723,
+      88516,
+      88907,
+      89451,
+      90098,
+      90134,
+      91572,
+      94768,
+      94774,
+      95164,
+      84838
+    ],
+    "thumbs_up": 23,
+    "reactions": 23,
+    "comments": 18,
+    "open": 13,
+    "top_issue": 75557
+  },
+  {
+    "theme": "Session titles and identity",
+    "ask": "Users want stable, meaningful session names and identifiers across views and messages.",
+    "plugin": "A function hook maintains a session title registry and rewrites supported UI labels and message metadata; a command lets the user rename a session.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      75733,
+      77120,
+      81646,
+      86561,
+      87593,
+      89434,
+      90966,
+      91124,
+      91826,
+      93515,
+      95358,
+      83051
+    ],
+    "thumbs_up": 27,
+    "reactions": 30,
+    "comments": 13,
+    "open": 10,
+    "top_issue": 75733
+  },
+  {
+    "theme": "Session switching and launch",
+    "ask": "Users want quicker, predictable session creation and switching in local views.",
+    "plugin": "Function UI hooks add shortcuts, current-project defaults, and recent-session navigation in the local session picker.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      74735,
+      77245,
+      86119,
+      90624,
+      90736,
+      90743,
+      91092,
+      91175,
+      92110,
+      93666,
+      94723,
+      97286,
+      97487,
+      94498
+    ],
+    "thumbs_up": 13,
+    "reactions": 13,
+    "comments": 14,
+    "open": 11,
+    "top_issue": 74735
+  },
+  {
+    "theme": "Conversation branching",
+    "ask": "Users want to fork or branch conversations and keep the resulting session findable.",
+    "plugin": "A command creates a branch with local transcript metadata; function hooks register its relationship in local session views.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      76113,
+      94892,
+      94477
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 2,
+    "open": 2,
+    "top_issue": 76113
+  },
+  {
+    "theme": "Transcript backup and recovery",
+    "ask": "Users want durable export, backup, and restoration of session history.",
+    "plugin": "A bin executable and session-end hook export local JSONL transcripts with metadata and restore searchable copies.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      75185,
+      77691,
+      81835
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 8,
+    "open": 1,
+    "top_issue": 75185
+  },
+  {
+    "theme": "Transcript reading and recap",
+    "ask": "Users want a readable record and recap of long or background conversations.",
+    "plugin": "A command parses session JSONL and subagent transcripts into a searchable reader and produces a recap on demand.",
+    "layer": "command",
+    "feasibility": "workaround",
+    "issues": [
+      75924,
+      90520,
+      91573,
+      92950
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 5,
+    "open": 3,
+    "top_issue": 75924
+  },
+  {
+    "theme": "Agent liveness and progress",
+    "ask": "Users want to know whether long-running agents are working, blocked, or wedged.",
+    "plugin": "A monitor combines hook heartbeats with process and transcript activity and emits a progress signal or stall alert.",
+    "layer": "monitor",
+    "feasibility": "workaround",
+    "issues": [
+      75850,
+      76669,
+      77804,
+      79027,
+      79571,
+      85192,
+      86082,
+      87151,
+      89531,
+      91093,
+      95730,
+      96510
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 14,
+    "open": 6,
+    "top_issue": 75850
+  },
+  {
+    "theme": "Agent model and effort display",
+    "ask": "Users want the resolved model, effort, and configuration of each agent to be visible.",
+    "plugin": "An agent-spawn function hook records the resolved settings and adds them to agent status, summaries, and local UI.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      76055,
+      76343,
+      76607,
+      77367,
+      77655,
+      82282,
+      89133,
+      89593,
+      90246,
+      93554,
+      95823
+    ],
+    "thumbs_up": 17,
+    "reactions": 23,
+    "comments": 10,
+    "open": 8,
+    "top_issue": 77655
+  },
+  {
+    "theme": "Agent cost and usage display",
+    "ask": "Users want live token, cost, and context figures for sessions and agent trees.",
+    "plugin": "A function hook reads session usage and accumulates agent subtree totals, then renders a statusline or local UI panel.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      75203,
+      76768,
+      78459,
+      80261,
+      88584,
+      92708
+    ],
+    "thumbs_up": 25,
+    "reactions": 26,
+    "comments": 13,
+    "open": 3,
+    "top_issue": 80261
+  },
+  {
+    "theme": "Agent roster lifecycle",
+    "ask": "Users want to dismiss or reap completed background jobs without losing live work.",
+    "plugin": "A command and monitor reconcile process, transcript, and agent state before archiving completed roster entries.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      79016,
+      92000
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 1,
+    "top_issue": 79016
+  },
+  {
+    "theme": "Cross-session messaging",
+    "ask": "Users want durable messages and stable addresses between Claude Code sessions and agents.",
+    "plugin": "An MCP mailbox stores session-addressed messages and wakes or delivers to recipients; session send and receive hooks keep identity metadata.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      89462,
+      90084,
+      90091,
+      91001,
+      91541,
+      92540
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 6,
+    "top_issue": 89462
+  },
+  {
+    "theme": "Agent orchestration view",
+    "ask": "Users want a visual map of parent, child, and workflow relationships.",
+    "plugin": "A monitor builds a DAG from session and agent metadata and displays running steps with their dependencies.",
+    "layer": "monitor",
+    "feasibility": "workaround",
+    "issues": [
+      76963,
+      89471,
+      94302,
+      95554,
+      96365
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 2,
+    "open": 4,
+    "top_issue": 94302
+  },
+  {
+    "theme": "Agent dispatch controls",
+    "ask": "Users want to choose agent model, effort, isolation, and launch options before dispatch.",
+    "plugin": "A command and agent-spawn function hook collect launch options and enforce resolved model and isolation choices.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      75054,
+      86691,
+      91619,
+      94889,
+      96484,
+      94263
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 4,
+    "open": 5,
+    "top_issue": 94263
+  },
+  {
+    "theme": "Worktree naming and lifecycle",
+    "ask": "Users want predictable worktree names, isolation, and cleanup.",
+    "plugin": "Git lifecycle settings hooks apply naming rules, create isolated worktrees, and verify safety before cleanup.",
+    "layer": "settings-hook",
+    "feasibility": "workaround",
+    "issues": [
+      75031,
+      91472
+    ],
+    "thumbs_up": 11,
+    "reactions": 11,
+    "comments": 6,
+    "open": 1,
+    "top_issue": 75031
+  },
+  {
+    "theme": "Project folder continuity",
+    "ask": "Users want sessions to follow moved folders and remember project paths.",
+    "plugin": "A monitor and command map stable project identities to current paths and relink local session metadata after a move.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      79215,
+      79216,
+      81388,
+      96323
+    ],
+    "thumbs_up": 11,
+    "reactions": 11,
+    "comments": 4,
+    "open": 1,
+    "top_issue": 79215
+  },
+  {
+    "theme": "Git action guardrails",
+    "ask": "Users want agents to obey repository rules before commits, pushes, merges, and destructive git actions.",
+    "plugin": "PreToolUse and function tool-call hooks inspect git commands against a project policy and block unapproved actions.",
+    "layer": "mixed",
+    "feasibility": "full",
+    "issues": [
+      74844,
+      76792,
+      85998,
+      87996
+    ],
+    "thumbs_up": 7,
+    "reactions": 7,
+    "comments": 7,
+    "open": 4,
+    "top_issue": 85998
+  },
+  {
+    "theme": "PR and CI automation",
+    "ask": "Users want repeatable PR checks, CI repair, and branch updates.",
+    "plugin": "A GitHub MCP server and commands inspect PR checks and comments, apply fixes, and open or update PRs under an approval hook.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      90142,
+      90665,
+      95161
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 3,
+    "open": 3,
+    "top_issue": 90142
+  },
+  {
+    "theme": "Browser session targeting",
+    "ask": "Users want deterministic browser, profile, device, and tab selection.",
+    "plugin": "An MCP browser server binds projects to explicit browser profiles and stable tab IDs and shows the active binding.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      74902,
+      77605,
+      91620,
+      95091,
+      95652,
+      75288,
+      79411
+    ],
+    "thumbs_up": 6,
+    "reactions": 6,
+    "comments": 15,
+    "open": 4,
+    "top_issue": 74902
+  },
+  {
+    "theme": "Browser automation controls",
+    "ask": "Users want better viewport, upload, screenshot, and low-level input controls.",
+    "plugin": "A browser MCP server exposes CDP viewport emulation, file upload, screenshot-to-disk, and key or pointer primitives.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      74747,
+      75896,
+      89983,
+      94503,
+      96072
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 5,
+    "top_issue": 74747
+  },
+  {
+    "theme": "Browser access workaround",
+    "ask": "Users want automation of local, private, or authenticated sites that the built-in browser blocks.",
+    "plugin": "A local browser MCP server runs a user-owned profile with explicit origin allowlists and browser authentication support.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      75289,
+      77473,
+      81762,
+      82135,
+      87764,
+      91495,
+      93201,
+      95326,
+      77098
+    ],
+    "thumbs_up": 46,
+    "reactions": 48,
+    "comments": 33,
+    "open": 5,
+    "top_issue": 95326
+  },
+  {
+    "theme": "Browser content extraction",
+    "ask": "Users want reliable reading of dynamic pages and artifact links.",
+    "plugin": "A Playwright or CDP MCP server waits for page readiness and extracts DOM, text, and authenticated artifact content.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      77085,
+      87275,
+      93472
+    ],
+    "thumbs_up": 10,
+    "reactions": 10,
+    "comments": 2,
+    "open": 2,
+    "top_issue": 87275
+  },
+  {
+    "theme": "MCP tool adapter",
+    "ask": "Users want connector tools with usable schemas, payloads, and missing options.",
+    "plugin": "A proxy MCP server normalizes tool schemas and results and adds connector-specific options before exposing them to Claude.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      86705,
+      94357,
+      96149
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 2,
+    "top_issue": 86705
+  },
+  {
+    "theme": "Plugin and skill sync",
+    "ask": "Users want skills and plugin configuration available across execution locations.",
+    "plugin": "A versioned MCP registry and setup skill export instructions into cloud sessions where repository setup scripts or plugins can run.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      75261,
+      96397
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 1,
+    "open": 1,
+    "top_issue": 75261
+  },
+  {
+    "theme": "Notification routing",
+    "ask": "Users want attention, completion, and error notifications that distinguish states without noise.",
+    "plugin": "Lifecycle settings hooks and a monitor classify session events, suppress duplicates, and send configurable desktop or terminal alerts.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      87351,
+      90812,
+      91996,
+      94373,
+      87684
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 7,
+    "open": 5,
+    "top_issue": 87684
+  },
+  {
+    "theme": "Approval inbox",
+    "ask": "Users want pending permissions and questions from many sessions in one place.",
+    "plugin": "PermissionRequest hooks write pending decisions to a local monitor inbox and link each request to its session.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      82764,
+      96115
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 1,
+    "top_issue": 82764
+  },
+  {
+    "theme": "Keyboard shortcuts",
+    "ask": "Users want configurable keyboard shortcuts for local Claude Code views.",
+    "plugin": "Function UI press hooks bind user-configured shortcuts for session, agent, pane, and composer actions.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      76750,
+      79451,
+      84348,
+      87082,
+      88142,
+      88520,
+      89910,
+      89948,
+      90576,
+      95144,
+      95320,
+      96882,
+      97024
+    ],
+    "thumbs_up": 3,
+    "reactions": 5,
+    "comments": 6,
+    "open": 11,
+    "top_issue": 96882
+  },
+  {
+    "theme": "Composer submission and queue",
+    "ask": "Users want control over Enter, newline, queued prompts, and replies.",
+    "plugin": "Function UI input and prompt hooks implement configurable submit keys, durable drafts, and an optional turn queue.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      75663,
+      77010,
+      89673,
+      92988,
+      95125,
+      96608
+    ],
+    "thumbs_up": 44,
+    "reactions": 51,
+    "comments": 17,
+    "open": 6,
+    "top_issue": 89673
+  },
+  {
+    "theme": "Transcript display controls",
+    "ask": "Users want readable tool, thinking, and agent messages in the transcript.",
+    "plugin": "Function UI render hooks collapse or expand chosen message types, preserve scroll position, and expose a compact reading view.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      75500,
+      83418,
+      94722
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 3,
+    "open": 1,
+    "top_issue": 83418
+  },
+  {
+    "theme": "Theme and layout controls",
+    "ask": "Users want readable colors, fonts, widths, image previews, and pane layouts in local Code views.",
+    "plugin": "Function UI render hooks apply user-configured themes and layout rules on the local desktop or terminal surface.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      79629,
+      80507,
+      83110,
+      83867,
+      84260,
+      84503,
+      85636,
+      86925,
+      92117,
+      92707,
+      94752,
+      96825,
+      81570,
+      81705,
+      81709,
+      82103,
+      83027,
+      92973,
+      94587
+    ],
+    "thumbs_up": 22,
+    "reactions": 41,
+    "comments": 18,
+    "open": 9,
+    "top_issue": 81570
+  },
+  {
+    "theme": "File and link handling",
+    "ask": "Users want predictable handling of file paths, attachments, and editor targets.",
+    "plugin": "Function UI hooks and a command retain source filenames, resolve moved paths, and open files in a configured editor.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      74937,
+      77204,
+      89598,
+      94636,
+      95858,
+      89577
+    ],
+    "thumbs_up": 2,
+    "reactions": 2,
+    "comments": 4,
+    "open": 4,
+    "top_issue": 74937
+  },
+  {
+    "theme": "Voice input and spoken output",
+    "ask": "Users want hands-free speech input and spoken answers during Code sessions.",
+    "plugin": "An audio-enabled MCP server or bin executable transcribes microphone audio and speaks session answers, with a command to toggle the loop.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      76097,
+      81697,
+      82790,
+      90287,
+      92803
+    ],
+    "thumbs_up": 9,
+    "reactions": 9,
+    "comments": 5,
+    "open": 3,
+    "top_issue": 76097
+  },
+  {
+    "theme": "Cost and cadence guard",
+    "ask": "Users want autonomous loops bounded by time and spend.",
+    "plugin": "A function hook measures usage per turn and pauses recurring tasks at a configured limit.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      77310
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 3,
+    "open": 0,
+    "top_issue": 77310
+  },
+  {
+    "theme": "Cloud environment bootstrap",
+    "ask": "Users want reproducible cloud session setup from their repository.",
+    "plugin": "A setup skill and bin script install project dependencies and load checked-in configuration when the cloud environment runs the plugin.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      90504
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 90504
+  },
+  {
+    "theme": "Remote session continuity",
+    "ask": "Users want to observe and reconnect to remote-controlled local sessions reliably.",
+    "plugin": "A monitor tracks local remote-control registrations and process state and offers explicit reconnect commands.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      78429,
+      84987,
+      85882,
+      90080,
+      90189,
+      90822,
+      96278,
+      96867
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 8,
+    "open": 6,
+    "top_issue": 78429
+  },
+  {
+    "theme": "Scheduled task control",
+    "ask": "Users want scheduled tasks with explicit model, effort, execution mode, and visibility.",
+    "plugin": "An MCP scheduling facade records model and effort choices, validates permissions, and lists pending and completed runs.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      81253
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 3,
+    "open": 1,
+    "top_issue": 81253
+  },
+  {
+    "theme": "Prompt suggestions",
+    "ask": "Users want to control suggested replies and next-action prompts.",
+    "plugin": "Function prompt-suggest and UI hooks filter, rank, or disable suggestions according to user preferences.",
+    "layer": "function-hooks",
+    "feasibility": "full",
+    "issues": [
+      92052,
+      92348
+    ],
+    "thumbs_up": 3,
+    "reactions": 3,
+    "comments": 0,
+    "open": 2,
+    "top_issue": 92052
+  },
+  {
+    "theme": "Session instruction visibility",
+    "ask": "Users want to know which instructions and settings a live session actually received.",
+    "plugin": "A function prompt-context hook records injected instructions and a command shows their provenance and active values.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      86193,
+      88176,
+      88315,
+      88999
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 4,
+    "open": 3,
+    "top_issue": 86193
+  },
+  {
+    "theme": "Safety and permission guard",
+    "ask": "Users want predictable tool permissions and a check before dangerous or unauthorized actions.",
+    "plugin": "PreToolUse settings hooks and function tool checks enforce a policy over shell, file, browser, and MCP actions.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      79734
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 79734
+  },
+  {
+    "theme": "Command favorites",
+    "ask": "Users want frequently used slash commands easy to reach.",
+    "plugin": "A function UI hook adds favorites to the local command picker and stores choices in plugin state.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      75044
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 1,
+    "open": 0,
+    "top_issue": 75044
+  },
+  {
+    "theme": "MCP discovery",
+    "ask": "Users want browser-exposed tools discovered and available to Claude.",
+    "plugin": "An MCP bridge discovers WebMCP endpoints in the active page and presents approved page tools to Claude.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      76809
+    ],
+    "thumbs_up": 11,
+    "reactions": 11,
+    "comments": 3,
+    "open": 1,
+    "top_issue": 76809
+  },
+  {
+    "theme": "GitHub Projects integration",
+    "ask": "Users want Claude to add items and update fields in GitHub Projects v2.",
+    "plugin": "A GitHub MCP server exposes Projects v2 item and field operations with scoped authentication.",
+    "layer": "mcp",
+    "feasibility": "full",
+    "issues": [
+      97050
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 97050
+  },
+  {
+    "theme": "Personal memory",
+    "ask": "Users want personal context across projects and sessions.",
+    "plugin": "An MCP memory server stores user-scoped notes and a skill retrieves them on demand.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      75293,
+      91425
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 5,
+    "open": 1,
+    "top_issue": 91425
+  },
+  {
+    "theme": "MCP trace context",
+    "ask": "Users want MCP calls correlated with their originating session and prompt.",
+    "plugin": "A function tool-call hook attaches trace metadata and an MCP proxy forwards it downstream.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      76391
+    ],
+    "thumbs_up": 4,
+    "reactions": 4,
+    "comments": 2,
+    "open": 0,
+    "top_issue": 76391
+  },
+  {
+    "theme": "Diff presentation",
+    "ask": "Users want persistent defaults for diff mode and collapsed files.",
+    "plugin": "Function UI hooks persist diff display preferences in local Code views.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      95092
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 95092
+  },
+  {
+    "theme": "Context compaction control",
+    "ask": "Users want visible compaction progress in local Code sessions.",
+    "plugin": "A function UI hook reports compaction state while the session.compact hook runs.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      93983
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 93983
+  },
+  {
+    "theme": "Local shell selection",
+    "ask": "Users want the Code terminal and Run action to use their chosen shell.",
+    "plugin": "A function process-spawn hook selects the configured local shell.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      82486,
+      93025
+    ],
+    "thumbs_up": 5,
+    "reactions": 5,
+    "comments": 1,
+    "open": 1,
+    "top_issue": 82486
+  },
+  {
+    "theme": "Session archive controls",
+    "ask": "Users want completion marking and delayed archiving of local sessions.",
+    "plugin": "A command marks local sessions complete, while a monitor delays archive until the configured PR lifecycle event.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      84235,
+      83781
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 3,
+    "open": 0,
+    "top_issue": 84235
+  },
+  {
+    "theme": "File picker and mentions",
+    "ask": "Users want faster file selection and deep path mentions in local Code views.",
+    "plugin": "Function UI hooks index project paths and present deep files and remembered folders.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      94204,
+      94678
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 2,
+    "top_issue": 94204
+  },
+  {
+    "theme": "Side chat command",
+    "ask": "Users want to open the side chat without typing a prompt.",
+    "plugin": "A command and function UI hook open the local side chat from an empty /btw invocation.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      96001
+    ],
+    "thumbs_up": 0,
+    "reactions": 1,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 96001
+  },
+  {
+    "theme": "Credential handoff",
+    "ask": "Users want opt-in access to their own saved credentials during approved browser tasks.",
+    "plugin": "An MCP vault adapter requests approval per site and action, then fills credentials without exposing them in model context.",
+    "layer": "mcp",
+    "feasibility": "workaround",
+    "issues": [
+      96762
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 1,
+    "open": 1,
+    "top_issue": 96762
+  },
+  {
+    "theme": "Settings backup",
+    "ask": "Users want encrypted recovery of local Desktop configuration and extension settings.",
+    "plugin": "A bin executable exports selected local settings into an encrypted user-owned backup and restores them after inspection.",
+    "layer": "bin",
+    "feasibility": "workaround",
+    "issues": [
+      93208
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 93208
+  },
+  {
+    "theme": "Workflow parallelism",
+    "ask": "Users want I/O-heavy agent workflows to use more than a CPU-derived concurrency cap.",
+    "plugin": "A workflow command dispatches bounded parallel agents with a configurable concurrency limit and reports their results.",
+    "layer": "command",
+    "feasibility": "workaround",
+    "issues": [
+      90483
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 90483
+  },
+  {
+    "theme": "Model picker controls",
+    "ask": "Users want the local model picker to follow their chosen order.",
+    "plugin": "A function UI hook orders model options using plugin userConfig.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      95516
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 95516
+  },
+  {
+    "theme": "Session environment metadata",
+    "ask": "Users want subprocesses to know which Code session owns them.",
+    "plugin": "A function process-spawn hook injects the current session ID into local terminal environments.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      96959
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 96959
+  },
+  {
+    "theme": "Read state sync",
+    "ask": "Users want read and unread state synced across their own devices.",
+    "plugin": "Function UI hooks record local read events in an MCP-backed store and restore them on another device.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      96047
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 96047
+  },
+  {
+    "theme": "Local UI localization",
+    "ask": "Users want Claude Code local UI text available in their language.",
+    "plugin": "Function UI render hooks replace labels using a user-selected localization catalog.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      94695
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 0,
+    "open": 1,
+    "top_issue": 94695
+  },
+  {
+    "theme": "Terminal launch preferences",
+    "ask": "Users want the terminal to open automatically for new local Code sessions.",
+    "plugin": "A function UI hook opens the local terminal panel when a new session starts.",
+    "layer": "function-hooks",
+    "feasibility": "workaround",
+    "issues": [
+      89908
+    ],
+    "thumbs_up": 1,
+    "reactions": 1,
+    "comments": 1,
+    "open": 1,
+    "top_issue": 89908
+  },
+  {
+    "theme": "Session daemon",
+    "ask": "Users want persistent background session management.",
+    "plugin": "A monitor and bin daemon supervise user-owned session processes and report their state through a command.",
+    "layer": "mixed",
+    "feasibility": "workaround",
+    "issues": [
+      88197
+    ],
+    "thumbs_up": 0,
+    "reactions": 0,
+    "comments": 2,
+    "open": 1,
+    "top_issue": 88197
+  }
+]

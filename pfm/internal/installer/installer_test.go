@@ -973,44 +973,6 @@ func TestWireGlobalCommandsSkipsAnAbsentOrEmptySource(t *testing.T) {
 	}
 }
 
-// TestWireGlobalSkillsLinksDeepRR pins the third registry: a whole-directory
-// symlink at {Home}/.claude/skills/deep-rr resolving to the in-tree
-// workflows/deep-rr skill.
-func TestWireGlobalSkillsLinksDeepRR(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
-
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	assertLink(t,
-		filepath.Join(home, ".claude", "skills", "deep-rr"),
-		filepath.Join(home, ".professor", "workflows", "deep-rr"))
-}
-
-// TestWireGlobalSkillsReportsMissingSkillSource pins the exact
-// SKILL-SOURCE-MISSING wording bullet 3 requires when workflows/deep-rr/
-// SKILL.md is absent at link time — reported, no link ever created.
-func TestWireGlobalSkillsReportsMissingSkillSource(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	var output bytes.Buffer
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
-	}); err != nil {
-		t.Fatalf("apply: %v\n%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "SKILL-SOURCE-MISSING deep-rr") {
-		t.Fatalf("apply output omitted the missing-skill-source report:\n%s", output.String())
-	}
-	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "deep-rr")); !os.IsNotExist(err) {
-		t.Fatalf("a missing skill source still produced a link: %v", err)
-	}
-}
-
 // TestWireGlobalSkillsLinksTemplateSkillDirectories pins the second half of
 // the skills registry: every directory shipped under templates/global/skills/
 // becomes ONE whole-directory link in {Home}/.claude/skills, while the
@@ -1190,8 +1152,12 @@ func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	elsewhere := t.TempDir()
-	writeFixture(t, filepath.Join(elsewhere, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
-	writeFixture(t, filepath.Join(home, ".professor", "workflows", "deep-rr", "SKILL.md"), "# wrong deep-rr skill\n")
+	writeFixture(t, filepath.Join(elsewhere, "templates", "global", "skills", "pcm", "SKILL.md"), "# pcm skill\n")
+	writeFixture(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "skills", "pcm", "SKILL.md"),
+		"# wrong pcm skill\n",
+	)
 
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
@@ -1199,8 +1165,8 @@ func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertLink(t,
-		filepath.Join(home, ".claude", "skills", "deep-rr"),
-		filepath.Join(elsewhere, "workflows", "deep-rr"))
+		filepath.Join(home, ".claude", "skills", "pcm"),
+		filepath.Join(elsewhere, "templates", "global", "skills", "pcm"))
 }
 
 // TestGlobalSourceRepoRootFallsBackToTheRecordedMarker pins the second rung:
@@ -1211,14 +1177,14 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	elsewhere := t.TempDir()
-	writeFixture(t, filepath.Join(elsewhere, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
+	writeFixture(t, filepath.Join(elsewhere, "templates", "global", "skills", "pcm", "SKILL.md"), "# pcm skill\n")
 
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(home, ".claude", "skills", "deep-rr")); err != nil {
+	if err := os.RemoveAll(filepath.Join(home, ".claude", "skills", "pcm")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1228,8 +1194,8 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertLink(t,
-		filepath.Join(home, ".claude", "skills", "deep-rr"),
-		filepath.Join(elsewhere, "workflows", "deep-rr"))
+		filepath.Join(home, ".claude", "skills", "pcm"),
+		filepath.Join(elsewhere, "templates", "global", "skills", "pcm"))
 }
 
 func TestApplyRetiresInstalledBBCardsAndHook(t *testing.T) {

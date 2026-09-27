@@ -219,7 +219,14 @@ func braces(w *syntax.Word) []*syntax.Word {
 	if !braceBound(split, &product) {
 		return []*syntax.Word{w}
 	}
-	return expand.Braces(split)
+	var out []*syntax.Word
+	for word, err := range expand.BracesSeq(nil, split) {
+		if err != nil {
+			return []*syntax.Word{w}
+		}
+		out = append(out, word)
+	}
+	return out
 }
 
 // braceBound multiplies product by every brace list's width, nested ones

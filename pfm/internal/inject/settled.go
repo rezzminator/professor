@@ -84,7 +84,9 @@ const paneBusyTailLines = 20
 // agent's `● Agent "X" finished · 46s` or a `⏺ Read 27,615 tokens` matches
 // busyPattern's `· \d+s` / `\d+ tokens` arms and, sitting under an idle
 // composer, kept the pane "busy" until new output scrolled it away — a
-// self-compact waiter never saw its caller yield (2026-09-25).
+// self-compact waiter never saw its caller yield (2026-09-25). For Claude,
+// IsBusyFor itself reads only the engine's spinner row and interrupt hint, so
+// the continuation lines of a final answer cannot hold the pane busy either.
 func IsFooterBusy(engine pfmengine.ID, capture string) bool {
 	tail := lastNonEmptyLines(capture, paneBusyTailLines)
 	if engine != pfmengine.OpenCode {

@@ -49,11 +49,13 @@ type subagentRow struct {
 
 // agentActivity is what a sub-agent's own files add to the payload: its role
 // from agent-<id>.meta.json, the rest from agent-<id>.jsonl. cacheHit is -1
-// until the first model turn lands; err means the transcript could not be
+// until the first model turn lands; effort is the level its latest request
+// went out at, "" until one records it; err means the transcript could not be
 // read and roleErr the meta file, each rendering "?" — never as zero or empty.
 type agentActivity struct {
 	role        string
 	roleErr     error
+	effort      string
 	tools       int
 	errors      int
 	compactions int
@@ -241,7 +243,11 @@ func activeContent(
 	}
 	line = appendSegment(line, gauge)
 	line = appendSegment(line, subagentIdentity(task.Name, activity))
-	line = appendSegment(line, subagentModel(task.Model, task.Effort, inherited))
+	recorded := ""
+	if activity != nil {
+		recorded = activity.effort
+	}
+	line = appendSegment(line, subagentModel(task.Model, recorded, task.Effort, inherited))
 	line = appendSegment(line, subagentStatus(task, activity, now))
 	if activity != nil {
 		line = appendSegment(line, activitySegments(*activity, task.Status == taskRunning, now))
@@ -278,15 +284,19 @@ func subagentIdentity(name string, activity *agentActivity) string {
 }
 
 // subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·🏎️ high. An effort that is not a JSON string is left out. A row without
-// its own effort shows the session's recorded effort (inherited), exactly as
+// opus·🏎️ high. The level its transcript recorded for its latest request
+// (recorded) wins: it is the effort that request went out at, after any
+// plugin pinned it, so it renders plainly on any model. Without one, the
+// payload's effort shows; one that is not a JSON string is left out. A row
+// with neither shows the session's recorded effort (inherited), exactly as
 // a payload effort on the model it was recorded for and muted on another,
 // where Claude Code may resolve a different level.
-func subagentModel(model string, effort json.RawMessage, inherited sessionEffortRecord) string {
+func subagentModel(model, recorded string, effort json.RawMessage, inherited sessionEffortRecord) string {
 	family := modelFamily(model)
-	var level string
+	level := strings.TrimSpace(recorded)
 	color := cEffort
-	if len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "" {
+	if level == "" &&
+		(len(effort) == 0 || json.Unmarshal(effort, &level) != nil || strings.TrimSpace(level) == "") {
 		level = ""
 		if len(effort) == 0 {
 			level = inherited.Level
@@ -404,8 +414,8 @@ func plural(count int, noun string) string {
 // readAgentActivity reads the sub-agent's own files, which Claude Code keeps
 // beside the session's: <session>/subagents/agent-<id>.{meta.json,jsonl}. It
 // counts distinct tool_use blocks, errored tool results and compact
-// boundaries, takes the cache hit from the newest assistant usage, and the
-// newest entry timestamp. A torn final line — the agent is
+// boundaries, takes the cache hit and the effort from the newest assistant
+// entry that carries each, and the newest entry timestamp. A torn final line — the agent is
 // mid-write — is skipped, not an error.
 func readAgentActivity(sessionTranscript, id string) agentActivity {
 	activity := agentActivity{cacheHit: -1}
@@ -466,6 +476,7 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		Type      string    `json:"type"`
 		Subtype   string    `json:"subtype"`
 		Timestamp time.Time `json:"timestamp"`
+		Effort    any       `json:"effort"`
 		Message   struct {
 			Content json.RawMessage `json:"content"`
 			Usage   *struct {
@@ -505,6 +516,10 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 	}
 	if entry.Type != entryAssistant {
 		return
+	}
+	// The level the request went out at; a model that takes none leaves it out.
+	if level, ok := entry.Effort.(string); ok && strings.TrimSpace(level) != "" {
+		activity.effort = strings.TrimSpace(level)
 	}
 	if usage := entry.Message.Usage; usage != nil {
 		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {

@@ -24,8 +24,16 @@ func recordMainLine(t *testing.T, sidDir, model, level string) {
 // returns its body and whatever went to warn.
 func renderEffortRow(t *testing.T, sidDir, task string) (content, warned string) {
 	t.Helper()
+	return renderEffortAgentRow(t, sidDir, "", task)
+}
+
+// renderEffortAgentRow renders one task row for effortSession whose sub-agent
+// transcripts sit beside the session transcript path.
+func renderEffortAgentRow(t *testing.T, sidDir, session, task string) (content, warned string) {
+	t.Helper()
 	var warn bytes.Buffer
-	payload := `{"session_id":"` + effortSession + `","tasks":[` + task + `]}`
+	payload := `{"session_id":"` + effortSession + `","transcript_path":` + jsonText(session) +
+		`,"tasks":[` + task + `]}`
 	got, err := RenderSubagents([]byte(payload), subagentNow, sidDir, &warn)
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
@@ -109,5 +117,51 @@ func TestSubagentRowWithAnUnreadableRecordShowsTheModelAloneAndWarns(t *testing.
 	if !strings.Contains(warned, "session effort") ||
 		!strings.Contains(warned, sessionEffortPath(sidDir, effortSession)) {
 		t.Fatalf("warn = %q, want the unreadable record named", warned)
+	}
+}
+
+const agentTaskWithoutEffort = `{"id":"a","type":"local_agent","status":"running","model":"claude-opus-5-5",` +
+	`"tokenCount":10,"contextWindowSize":100}`
+
+// The effort a sub-agent's request went out at — after a plugin pinned it —
+// is what its transcript records; its latest recorded level wins over the
+// session's live effort, in the plain effort colour on any model, and an
+// entry of a model that takes no effort leaves it standing.
+func TestSubagentRowShowsItsTranscriptsLastRecordedEffort(t *testing.T) {
+	session := subagentSession(t, map[string][]string{"a": {
+		`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","timestamp":"2026-09-24T10:00:05Z","message":{"content":[]},` +
+			`"effort":"low","perTurnEffort":null}`,
+		`{"type":"assistant","timestamp":"2026-09-24T10:00:10Z","message":{"content":[]},` +
+			`"effort":"medium","perTurnEffort":null}`,
+		`{"type":"assistant","timestamp":"2026-09-24T10:00:15Z","message":{"content":[]}}`,
+		`{"type":"assistant","timestamp":"2026-09-24T10:00:20Z","message":{"content":[]},"effort":""}`,
+	}}, map[string]string{"a": "tracer"})
+	for _, sessionModel := range []string{"claude-opus-5-5[1m]", "claude-sonnet-5[1m]"} {
+		t.Run(sessionModel, func(t *testing.T) {
+			sidDir := t.TempDir()
+			recordMainLine(t, sidDir, sessionModel, "xhigh")
+			content, warned := renderEffortAgentRow(t, sidDir, session, agentTaskWithoutEffort)
+			want := opusAlone + cMuted + "·" + reset + cEffort + "🏍️ medium" + reset
+			if !strings.Contains(content, want) || warned != "" {
+				t.Fatalf("row = %q warn=%q, want the transcript's last recorded effort %q", content, warned, want)
+			}
+		})
+	}
+}
+
+// Before its first request records an effort the row falls back to the
+// session's effort, exactly as a row without a transcript.
+func TestSubagentRowWithoutARecordedEffortShowsTheSessionEffort(t *testing.T) {
+	session := subagentSession(t, map[string][]string{"a": {
+		`{"type":"user","timestamp":"2026-09-24T10:00:00Z","message":{"role":"user","content":"go"}}`,
+		`{"type":"assistant","timestamp":"2026-09-24T10:00:05Z","message":{"content":[]}}`,
+	}}, map[string]string{"a": "tracer"})
+	sidDir := t.TempDir()
+	recordMainLine(t, sidDir, "claude-opus-5-5[1m]", "xhigh")
+	content, warned := renderEffortAgentRow(t, sidDir, session, agentTaskWithoutEffort)
+	if want := opusAlone + cMuted + "·" + reset + cEffort + "🚀 xhigh" + reset; !strings.Contains(content, want) ||
+		warned != "" {
+		t.Fatalf("row = %q warn=%q, want the session effort %q", content, warned, want)
 	}
 }

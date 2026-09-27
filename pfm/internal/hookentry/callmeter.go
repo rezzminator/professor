@@ -677,9 +677,13 @@ func resolveCallmeterSeat(env paths.Env, home string) callmeterSeat {
 		dir = filepath.Join(home, ".claude")
 	}
 	shared := filepath.Join(home, ".claude")
-	stateDB := env.Get(paths.EnvStateDB)
-	if stateDB == "" {
-		stateDB = paths.DefaultStateDB(home)
+	stateDB, _, stateErr := pfmconfig.StatePathsFrom(env, home)
+	if stateErr != nil {
+		return callmeterSeat{
+			dir:       &dir,
+			configDir: &shared,
+			err:       fmt.Errorf("resolve state database: %w", stateErr),
+		}
 	}
 	absolute, err := filepath.Abs(dir)
 	if err != nil {

@@ -17,7 +17,6 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -112,7 +111,7 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 	}
 	command.Stdout, command.Stderr = commands.Stdout, commands.Stderr
 	command.Dir = cwd
-	values, resolveErr := paths.Resolve()
+	values, resolveErr := config.ResolvePaths()
 	if resolveErr == nil {
 		resolveErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
 			SessionID: id,

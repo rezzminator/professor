@@ -537,64 +537,84 @@ func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 }
 
 func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
-	t.Setenv(paths.EnvHome, t.TempDir())
-	t.Setenv(paths.EnvStateDB, filepath.Join(t.TempDir(), "pfm.db"))
-	tmux := &fakeReloadTmux{}
-	result, err := Run(
-		context.Background(),
-		Request{
-			Engine:     pfmengine.Claude,
-			SocketPath: "/tmp/tmux-1000/probe-reload",
-			Pane:       "%7",
-			PanePID:    700,
-			SessionID:  "11111111-1111-4111-8111-111111111111",
-			CWD:        "/jail/project",
-			Account:    2,
-			AccountIDs: []int{2},
-			Machine:    reloadTestMachine("", "/jail/home"),
-			Cache1H:    false,
-		},
-		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
-		tmux,
-		nil,
-		nil,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.New || tmux.literal != "/exit" {
-		t.Fatalf("result=%+v literal=%q", result, tmux.literal)
-	}
-	for _, want := range []string{
-		"CLAUDE_CONFIG_DIR=",
-	} {
-		if !strings.Contains(tmux.respawn, want) {
-			t.Fatalf("respawn %q lacks %q", tmux.respawn, want)
+	for _, configKey := range []bool{false, true} {
+		name := "environment"
+		if configKey {
+			name = "config key"
 		}
-	}
-	parsed := parsedReloadShell(t, tmux.respawn)
-	if parsed.Resume != "11111111-1111-4111-8111-111111111111" || parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" {
-		t.Fatalf("respawn resume=%q settings=%#v", parsed.Resume, parsed.SettingsEnv)
-	}
-	values, err := paths.Resolve()
-	if err != nil {
-		t.Fatal(err)
-	}
-	launches, err := fleetdb.OpenLaunches(context.Background(), values)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := launches.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	record, err := launches.LaunchFor(context.Background(), "11111111-1111-4111-8111-111111111111")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record.Account != 2 || record.Cache1H || record.Engine != pfmengine.Claude {
-		t.Fatalf("reload record=%+v", record)
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(paths.EnvHome, t.TempDir())
+			statePath := filepath.Join(t.TempDir(), "pfm.db")
+			t.Setenv(paths.EnvStateDB, statePath)
+			if configKey {
+				configPath := filepath.Join(t.TempDir(), "pfm.config.json")
+				content := []byte(`{"version":2,"state":{"db":"` + statePath + `"}}`)
+				if err := os.WriteFile(configPath, content, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv(paths.EnvConfig, configPath)
+				t.Setenv(paths.EnvStateDB, "")
+				t.Setenv(paths.EnvCacheDB, "")
+			}
+			tmux := &fakeReloadTmux{}
+			result, err := Run(
+				context.Background(),
+				Request{
+					Engine:     pfmengine.Claude,
+					SocketPath: "/tmp/tmux-1000/probe-reload",
+					Pane:       "%7",
+					PanePID:    700,
+					SessionID:  "11111111-1111-4111-8111-111111111111",
+					CWD:        "/jail/project",
+					Account:    2,
+					AccountIDs: []int{2},
+					Machine:    reloadTestMachine("", "/jail/home"),
+					Cache1H:    false,
+				},
+				Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
+				tmux,
+				nil,
+				nil,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.New || tmux.literal != "/exit" {
+				t.Fatalf("result=%+v literal=%q", result, tmux.literal)
+			}
+			for _, want := range []string{
+				"CLAUDE_CONFIG_DIR=",
+			} {
+				if !strings.Contains(tmux.respawn, want) {
+					t.Fatalf("respawn %q lacks %q", tmux.respawn, want)
+				}
+			}
+			parsed := parsedReloadShell(t, tmux.respawn)
+			if parsed.Resume != "11111111-1111-4111-8111-111111111111" ||
+				parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" {
+				t.Fatalf("respawn resume=%q settings=%#v", parsed.Resume, parsed.SettingsEnv)
+			}
+			values, err := pfmconfig.ResolvePaths()
+			if err != nil {
+				t.Fatal(err)
+			}
+			launches, err := fleetdb.OpenLaunches(context.Background(), values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := launches.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			record, err := launches.LaunchFor(context.Background(), "11111111-1111-4111-8111-111111111111")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.Account != 2 || record.Cache1H || record.Engine != pfmengine.Claude {
+				t.Fatalf("reload record=%+v", record)
+			}
+		})
 	}
 }
 

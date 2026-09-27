@@ -61,6 +61,148 @@ func TestOpenMigratesAndReopensIdempotently(t *testing.T) {
 	}
 }
 
+func TestOpenUsesConfiguredStateAndCacheDatabases(t *testing.T) {
+	setStoreTestJail(t)
+	home := os.Getenv(paths.EnvHome)
+	statePath := filepath.Join(home, "custom", "state.db")
+	cachePath := filepath.Join(home, "custom", "cache.db")
+	t.Setenv(paths.EnvStateDB, statePath)
+	t.Setenv(paths.EnvCacheDB, cachePath)
+	seed := openTestStore(t)
+	if err := seed.SetMeta(context.Background(), "location", "configured"); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleetdb.RecordLaunch(context.Background(), paths.Values{StateDB: statePath}, fleetdb.Launch{
+		SessionID: "11111111-1111-4111-8111-111111111111", Engine: "cc", Account: 2,
+	}, 1); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(home, "pfm.config.json")
+	content := []byte(`{"version":2,"state":{"db":"` + statePath + `","cacheDb":"` + cachePath + `"}}`)
+	if err := os.WriteFile(configPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, configPath)
+	t.Setenv(paths.EnvStateDB, "")
+	t.Setenv(paths.EnvCacheDB, "")
+	opened := openTestStore(t)
+	defer func() { _ = opened.Close() }()
+	if opened.Path() != cachePath || opened.state.Path() != statePath {
+		t.Fatalf("opened state/cache = %q/%q, want %q/%q", opened.state.Path(), opened.Path(), statePath, cachePath)
+	}
+	value, found, err := opened.Meta(context.Background(), "location")
+	if err != nil || !found || value != "configured" {
+		t.Fatalf("cache row = %q, %v, %v", value, found, err)
+	}
+	launches, err := fleetdb.OpenLaunches(context.Background(), paths.Values{StateDB: statePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = launches.Close() }()
+	launch, err := launches.LaunchFor(context.Background(), "11111111-1111-4111-8111-111111111111")
+	if err != nil || launch.Account != 2 {
+		t.Fatalf("state row = %+v, %v", launch, err)
+	}
+	for _, file := range []string{paths.DefaultStateDB(home), paths.DefaultCacheDB(home)} {
+		if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("default database %s exists: %v", file, err)
+		}
+	}
+}
+
+func TestOpenStatePathsPrecedenceAndErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, stateEnv, cacheEnv string
+		wantError                        string
+	}{
+		{name: "env wins", config: `{"version":2,"state":{"db":"~/configured-state.db","cacheDb":"~/configured-cache.db"}}`, stateEnv: "env-state.db", cacheEnv: "env-cache.db"},
+		{name: "defaults", config: `{"version":2}`},
+		{name: "broken config", config: "not json", wantError: "resolve store paths"},
+		{name: "both env skip broken config", config: "not json", stateEnv: "env-state.db", cacheEnv: "env-cache.db"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setStoreTestJail(t)
+			home := os.Getenv(paths.EnvHome)
+			if err := os.MkdirAll(home, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(home, "pfm.config.json")
+			if err := os.WriteFile(configPath, []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(paths.EnvConfig, configPath)
+			stateEnv, cacheEnv := tc.stateEnv, tc.cacheEnv
+			if stateEnv != "" {
+				stateEnv = filepath.Join(home, stateEnv)
+				cacheEnv = filepath.Join(home, cacheEnv)
+			}
+			t.Setenv(paths.EnvStateDB, stateEnv)
+			t.Setenv(paths.EnvCacheDB, cacheEnv)
+			opened, err := Open()
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) ||
+					!strings.Contains(err.Error(), configPath) {
+					t.Fatalf("Open() error = %v, want %q and config path", err, tc.wantError)
+				}
+				for _, file := range []string{paths.DefaultStateDB(home), paths.DefaultCacheDB(home)} {
+					if _, statErr := os.Stat(file); !errors.Is(statErr, os.ErrNotExist) {
+						t.Fatalf("database created at %s: %v", file, statErr)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = opened.Close() }()
+			wantState, wantCache := paths.DefaultStateDB(home), paths.DefaultCacheDB(home)
+			if stateEnv != "" {
+				wantState = stateEnv
+				wantCache = cacheEnv
+			}
+			if opened.state.Path() != wantState || opened.Path() != wantCache {
+				t.Fatalf(
+					"opened state/cache = %q/%q, want %q/%q",
+					opened.state.Path(),
+					opened.Path(),
+					wantState,
+					wantCache,
+				)
+			}
+		})
+	}
+}
+
+func TestOpenLegacyGuardUsesConfiguredStatePath(t *testing.T) {
+	setStoreTestJail(t)
+	home := os.Getenv(paths.EnvHome)
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(home, "custom", "state.db")
+	configPath := filepath.Join(home, "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"version":2,"state":{"db":"`+statePath+`"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy := paths.LegacyStateDB(home)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, configPath)
+	t.Setenv(paths.EnvStateDB, "")
+	t.Setenv(paths.EnvCacheDB, "")
+	_, err := Open()
+	if err == nil || !strings.Contains(err.Error(), statePath) || !strings.Contains(err.Error(), "run pfm install") {
+		t.Fatalf("Open() error = %v, want configured-path legacy guard", err)
+	}
+}
+
 func TestCacheV9AdoptsBeforeDroppingHiddenAndBacksUp(t *testing.T) {
 	path := setStoreTestJail(t)
 	ctx := context.Background()

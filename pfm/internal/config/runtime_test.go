@@ -403,6 +403,63 @@ func TestStateDatabasePrecedence(t *testing.T) {
 	}
 }
 
+func TestStatePathsFromPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, stateEnv, cacheEnv, stateKey, cacheKey string
+		missing, wantError                                   bool
+	}{
+		{name: "both env skip broken config", config: "not json", stateEnv: "env-state", cacheEnv: "env-cache", stateKey: "env-state", cacheKey: "env-cache"},
+		{name: "one env and config", config: `{"version":2,"state":{"db":"~/key-state.db","cacheDb":"~/key-cache.db"}}`, stateEnv: "env-state", stateKey: "env-state", cacheKey: "key-cache.db"},
+		{name: "config keys", config: `{"version":2,"state":{"db":"~/key-state.db","cacheDb":"~/key-cache.db"}}`, stateKey: "key-state.db", cacheKey: "key-cache.db"},
+		{name: "no state object", config: `{"version":2}`},
+		{name: "missing config file", missing: true},
+		{name: "explicit missing config file", missing: true},
+		{name: "broken config", config: "not json", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			configPath := filepath.Join(home, "pfm.config.json")
+			if !tc.missing {
+				if err := os.WriteFile(configPath, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := &paths.MapEnv{Values: map[string]string{
+				paths.EnvConfig: configPath, paths.EnvStateDB: tc.stateEnv, paths.EnvCacheDB: tc.cacheEnv,
+			}}
+			if tc.name == "missing config file" {
+				delete(env.Values, paths.EnvConfig)
+			}
+			state, cache, err := StatePathsFrom(env, home)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), configPath) {
+					t.Fatalf("error = %v, want config path", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantState, wantCache := paths.DefaultStateDB(home), paths.DefaultCacheDB(home)
+			if tc.stateKey != "" {
+				wantState = tc.stateKey
+				if tc.stateEnv == "" {
+					wantState = filepath.Join(home, tc.stateKey)
+				}
+			}
+			if tc.cacheKey != "" {
+				wantCache = tc.cacheKey
+				if tc.cacheEnv == "" {
+					wantCache = filepath.Join(home, tc.cacheKey)
+				}
+			}
+			if state != wantState || cache != wantCache {
+				t.Fatalf("state, cache = %q, %q; want %q, %q", state, cache, wantState, wantCache)
+			}
+		})
+	}
+}
+
 // legacyConfigHome builds a jailed home whose default load finds no clone
 // config, with XDG_CONFIG_HOME pointed into it; withMarker records a clone
 // that has no pfm.config.json.

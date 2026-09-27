@@ -117,6 +117,49 @@ func TestCallmeterLaunchAccountAcrossRows(t *testing.T) {
 	}
 }
 
+func TestCallmeterLaunchAccountFromConfiguredState(t *testing.T) {
+	lab := newCallmeterLab(t)
+	seat := filepath.Join(lab.root, "seat-2")
+	statePath := filepath.Join(lab.root, "configured", "pfm.db")
+	configPath := filepath.Join(lab.root, "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"version":2,"state":{"db":"`+statePath+`"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleetdb.RecordLaunch(context.Background(), paths.Values{StateDB: statePath}, fleetdb.Launch{
+		SessionID: cmSessionA, Engine: pfmengine.Claude, Account: 3,
+	}, 1); err != nil {
+		t.Fatal(err)
+	}
+	env := lab.accountEnv(seat)
+	env.(*paths.MapEnv).Values[paths.EnvConfig] = configPath
+	lab.feedChat(env)
+	lab.expectSeat(3, seat)
+	if n := lab.accountFaults(); n != 0 {
+		t.Fatalf("account faults = %d", n)
+	}
+}
+
+func TestCallmeterBrokenConfigReportsStateResolution(t *testing.T) {
+	lab := newCallmeterLab(t)
+	configPath := filepath.Join(lab.root, "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := lab.accountEnv(filepath.Join(lab.root, "seat"))
+	env.(*paths.MapEnv).Values[paths.EnvConfig] = configPath
+	seat := resolveCallmeterSeat(env, lab.root)
+	if seat.stateDB != "" || seat.err == nil || !strings.Contains(seat.err.Error(), "resolve state database:") {
+		t.Fatalf("seat = %+v, want named state resolution failure", seat)
+	}
+	lab.feedEntry(env, lab.payloads("scripted.jsonl")[0])
+	if n := lab.count("SELECT COUNT(*) FROM calls WHERE account IS NULL"); n != 1 {
+		t.Fatalf("NULL-account calls = %d", n)
+	}
+	if n := lab.accountFaults(); n != 1 {
+		t.Fatalf("account faults = %d", n)
+	}
+}
+
 func TestCallmeterNoLaunchLeavesAccountNull(t *testing.T) {
 	lab := newCallmeterLab(t)
 	seat := filepath.Join(lab.root, "seat")

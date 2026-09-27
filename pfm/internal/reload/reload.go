@@ -378,7 +378,7 @@ func Run(
 	}
 	trail.Reach("dead", "pane exited")
 	if request.Engine == pfmengine.Claude && request.SessionID != "" {
-		values, recordErr := paths.Resolve()
+		values, recordErr := pfmconfig.ResolvePaths()
 		if recordErr == nil {
 			recordErr = fleetdb.RecordLaunch(ctx, values, fleetdb.Launch{
 				SessionID: request.SessionID, Engine: pfmengine.Claude,

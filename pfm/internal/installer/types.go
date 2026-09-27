@@ -247,7 +247,11 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 		}
 	}
 	if options.StateDB == "" {
-		options.StateDB = paths.DefaultStateDB(options.Home)
+		var err error
+		options.StateDB, _, err = pfmconfig.StatePathsFrom(options.Env, options.Home)
+		if err != nil {
+			return options, fmt.Errorf("resolve state database: %w", err)
+		}
 	}
 	if options.ConfigDir == "" {
 		options.ConfigDir = options.Home + "/.claude"

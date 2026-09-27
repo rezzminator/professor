@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -158,7 +159,7 @@ func (executor *Executor) recordLaunch(ctx context.Context, record *fleetdb.Laun
 	if record == nil {
 		return
 	}
-	values, err := paths.Resolve()
+	values, err := pfmconfig.ResolvePaths()
 	if err == nil {
 		err = fleetdb.RecordLaunch(ctx, values, *record, clock.Real.Now().Unix())
 	}

@@ -124,54 +124,71 @@ func (tmux *fakeActionTmux) CreateChatServer(
 
 func TestOpenRecordsClaudeBeforePaneStarts(t *testing.T) {
 	for _, kind := range []compose.Kind{compose.NewClaude, compose.ResumeClaude} {
-		t.Run(kind.String(), func(t *testing.T) {
-			jailAction(t)
-			values, err := paths.Resolve()
-			if err != nil {
-				t.Fatal(err)
+		for _, configKey := range []bool{false, true} {
+			name := kind.String()
+			if configKey {
+				name += " config key"
 			}
-			tmux := &fakeActionTmux{alive: map[string]bool{}}
-			var record fleetdb.Launch
-			tmux.onCreate = func() {
-				launches, openErr := fleetdb.OpenLaunches(context.Background(), values)
-				if openErr != nil {
-					t.Fatal(openErr)
+			t.Run(name, func(t *testing.T) {
+				jailAction(t)
+				values, err := paths.Resolve()
+				if err != nil {
+					t.Fatal(err)
 				}
-				defer func() {
-					if err := launches.Close(); err != nil {
-						t.Error(err)
+				if configKey {
+					values.StateDB = filepath.Join(values.Home, "configured", "pfm.db")
+					configPath := filepath.Join(values.Home, "pfm.config.json")
+					content := []byte(`{"version":2,"state":{"db":"` + values.StateDB + `"}}`)
+					if err := os.WriteFile(configPath, content, 0o600); err != nil {
+						t.Fatal(err)
 					}
-				}()
-				id := "44444444-4444-4444-8444-444444444444"
-				if kind == compose.NewClaude {
-					id = "00000000-0000-4000-8000-000000000004"
+					t.Setenv(paths.EnvConfig, configPath)
+					t.Setenv(paths.EnvStateDB, "")
+					t.Setenv(paths.EnvCacheDB, "")
 				}
-				record, openErr = launches.LaunchFor(context.Background(), id)
-				if openErr != nil {
-					t.Fatalf("record before pane: %v", openErr)
+				tmux := &fakeActionTmux{alive: map[string]bool{}}
+				var record fleetdb.Launch
+				tmux.onCreate = func() {
+					launches, openErr := fleetdb.OpenLaunches(context.Background(), values)
+					if openErr != nil {
+						t.Fatal(openErr)
+					}
+					defer func() {
+						if err := launches.Close(); err != nil {
+							t.Error(err)
+						}
+					}()
+					id := "44444444-4444-4444-8444-444444444444"
+					if kind == compose.NewClaude {
+						id = "00000000-0000-4000-8000-000000000004"
+					}
+					record, openErr = launches.LaunchFor(context.Background(), id)
+					if openErr != nil {
+						t.Fatalf("record before pane: %v", openErr)
+					}
 				}
-			}
-			previous := newSessionID
-			newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
-			t.Cleanup(func() { newSessionID = previous })
-			executor, err := New(Dependencies{
-				Tmux: tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
-				Runner: &captureRunner{}, Stderr: io.Discard,
+				previous := newSessionID
+				newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
+				t.Cleanup(func() { newSessionID = previous })
+				executor, err := New(Dependencies{
+					Tmux: tmux, Processes: &fakeProcesses{}, Gate: fixedGate(false),
+					Runner: &captureRunner{}, Stderr: io.Discard,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				row := compose.Row{Kind: kind, ID: "44444444-4444-4444-8444-444444444444", CWD: "/work"}
+				if _, err := executor.Open(context.Background(), Request{
+					Row: row, PrimaryAccount: 1,
+					Home: values.Home, FreshSocket: "cc-record", Config: testMachineConfig(values.Home),
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if record.Account != 1 || record.Cache1H || string(record.Engine) != "cc" {
+					t.Fatalf("record = %#v", record)
+				}
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			row := compose.Row{Kind: kind, ID: "44444444-4444-4444-8444-444444444444", CWD: "/work"}
-			if _, err := executor.Open(context.Background(), Request{
-				Row: row, PrimaryAccount: 1,
-				Home: values.Home, FreshSocket: "cc-record", Config: testMachineConfig(values.Home),
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if record.Account != 1 || record.Cache1H || string(record.Engine) != "cc" {
-				t.Fatalf("record = %#v", record)
-			}
-		})
+		}
 	}
 }
 

@@ -40,28 +40,46 @@ func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
 }
 
 func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
-	commands, argvPath, values := testExecCommands(t)
-	ctx := context.Background()
-	const id = "33333333-3333-4333-8333-333333333333"
-	if err := commands.Resume(ctx, "/account/2", t.TempDir(), id, true); err != nil {
-		t.Fatal(err)
-	}
-	assertAgentLaunch(t, argvPath, "--resume", id)
-	launches, err := fleetdb.OpenLaunches(ctx, values)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := launches.Close(); err != nil {
-			t.Error(err)
+	for _, configKey := range []bool{false, true} {
+		name := "environment"
+		if configKey {
+			name = "config key"
 		}
-	}()
-	record, err := launches.LaunchFor(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record.SessionID != id || record.Engine != pfmengine.Claude || record.Account != 2 || !record.Cache1H {
-		t.Fatalf("resume record=%+v", record)
+		t.Run(name, func(t *testing.T) {
+			commands, argvPath, values := testExecCommands(t)
+			if configKey {
+				configPath := filepath.Join(values.Home, "pfm.config.json")
+				content := []byte(`{"version":2,"state":{"db":"` + values.StateDB + `"}}`)
+				if err := os.WriteFile(configPath, content, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv(paths.EnvConfig, configPath)
+				t.Setenv(paths.EnvStateDB, "")
+				t.Setenv(paths.EnvCacheDB, "")
+			}
+			ctx := context.Background()
+			const id = "33333333-3333-4333-8333-333333333333"
+			if err := commands.Resume(ctx, "/account/2", t.TempDir(), id, true); err != nil {
+				t.Fatal(err)
+			}
+			assertAgentLaunch(t, argvPath, "--resume", id)
+			launches, err := fleetdb.OpenLaunches(ctx, values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := launches.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			record, err := launches.LaunchFor(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.SessionID != id || record.Engine != pfmengine.Claude || record.Account != 2 || !record.Cache1H {
+				t.Fatalf("resume record=%+v", record)
+			}
+		})
 	}
 }
 

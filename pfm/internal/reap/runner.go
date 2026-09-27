@@ -137,7 +137,7 @@ func New(dependencies Dependencies) (*Runner, error) {
 	resolved := dependencies.Paths
 	if resolved.TmuxDir == "" {
 		var err error
-		resolved, err = paths.Resolve()
+		resolved, err = pfmconfig.ResolvePaths()
 		if err != nil {
 			return nil, fmt.Errorf("resolve reap paths: %w", err)
 		}

@@ -299,7 +299,7 @@ func installSpacePreflight(
 }
 
 func migrateInstalledLayoutDatabases(ctx context.Context, statePath, cachePath string) (returnErr error) {
-	resolved, err := paths.Resolve()
+	resolved, err := pfmconfig.ResolvePaths()
 	if err != nil {
 		return fmt.Errorf("resolve moved database paths: %w", err)
 	}

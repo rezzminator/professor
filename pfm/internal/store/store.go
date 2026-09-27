@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
@@ -113,7 +114,7 @@ func Open(options ...OpenOption) (*Store, error) {
 
 // OpenContext is Open with caller-controlled cancellation.
 func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
-	resolved, err := paths.Resolve()
+	resolved, err := pfmconfig.ResolvePaths()
 	if err != nil {
 		return nil, fmt.Errorf("resolve store paths: %w", err)
 	}

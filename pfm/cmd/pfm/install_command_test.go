@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
@@ -743,6 +744,52 @@ func TestInstallMigratesMovedDatabaseSchemas(t *testing.T) {
 	}
 	if _, err := os.Lstat(wrongCache); !os.IsNotExist(err) {
 		t.Fatalf("mismatched cache was touched: %v", err)
+	}
+}
+
+func TestInstallMovesConfiguredStateAndStoreReadsLegacyRow(t *testing.T) {
+	home := t.TempDir()
+	statePath := filepath.Join(home, "custom", "pfm.db")
+	configPath := filepath.Join(home, "pfm.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"version":2,"state":{"db":"`+statePath+`"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		"HOME": home, paths.EnvHome: home, paths.EnvConfig: configPath,
+		paths.EnvStateDB: "", paths.EnvCacheDB: "", "TMUX": "",
+	} {
+		t.Setenv(key, value)
+	}
+	legacy := paths.LegacyStateDB(home)
+	state := fleetdb.OpenSharedState(context.Background(), paths.Values{StateDB: legacy})
+	if err := state.SetMeta(context.Background(), "pre_install", "preserved", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(
+		ctx, testPFMBinary, "install", "--yes", "--skip-harvest", "--skip-themes", "--skip-engine", "codex",
+	)
+	command.Env, command.Dir = os.Environ(), home
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("pfm install --yes: %v\n%s", err, output)
+	}
+	opened, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = opened.Close() }()
+	if opened.SharedPath() != statePath {
+		t.Fatalf("store state path = %q, want %q", opened.SharedPath(), statePath)
+	}
+	if value, found, err := opened.Shared().Meta(ctx, "pre_install"); err != nil || !found || value != "preserved" {
+		t.Fatalf("pre-install row = %q, %v, %v", value, found, err)
+	}
+	if _, err := os.Stat(paths.DefaultStateDB(home)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default state database created: %v", err)
 	}
 }
 

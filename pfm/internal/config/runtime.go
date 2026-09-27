@@ -125,7 +125,7 @@ func LoadInstallRuntime(configPath string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
-	applyStatePaths(&resolved, effective)
+	applyStatePaths(&resolved, effective, paths.OSEnv{})
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
 	return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configExplicit}, nil
 }
@@ -230,7 +230,7 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 		configErr = checkLegacyConfig(configPath, resolved.Home, effective)
 	}
 	if configErr == nil {
-		applyStatePaths(&resolved, effective)
+		applyStatePaths(&resolved, effective, paths.OSEnv{})
 		resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
 		return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configExplicit}, nil
 	}
@@ -245,11 +245,50 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr, ConfigExplicit: configExplicit}, nil
 }
 
-func applyStatePaths(resolved *paths.Values, config Config) {
-	if (paths.OSEnv{}).Get(paths.EnvStateDB) == "" {
+func applyStatePaths(resolved *paths.Values, config Config, env paths.Env) {
+	if env.Get(paths.EnvStateDB) == "" {
 		resolved.StateDB = config.State.DB
 	}
-	if (paths.OSEnv{}).Get(paths.EnvCacheDB) == "" {
+	if env.Get(paths.EnvCacheDB) == "" {
 		resolved.CacheDB = config.State.CacheDB
 	}
+}
+
+// StatePathsFrom applies env, config, then default precedence independently
+// to the two database paths. Explicit env paths need no config read.
+func StatePathsFrom(env paths.Env, home string) (stateDB, cacheDB string, err error) {
+	stateDB, cacheDB = env.Get(paths.EnvStateDB), env.Get(paths.EnvCacheDB)
+	if stateDB != "" && cacheDB != "" {
+		return stateDB, cacheDB, nil
+	}
+	if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
+		return "", "", err
+	}
+	configPath, err := ResolvePathFrom(env, home)
+	if err != nil {
+		if env.Get(paths.EnvConfig) != "" {
+			return "", "", err
+		}
+		configPath = ""
+	}
+	config, err := Load(configPath, home, nil)
+	if err != nil {
+		return "", "", err
+	}
+	resolved := paths.Values{StateDB: stateDB, CacheDB: cacheDB}
+	applyStatePaths(&resolved, config, env)
+	return resolved.StateDB, resolved.CacheDB, nil
+}
+
+// ResolvePaths resolves all process paths, including configured databases.
+func ResolvePaths() (paths.Values, error) {
+	resolved, err := paths.Resolve()
+	if err != nil {
+		return paths.Values{}, fmt.Errorf("resolve state paths: %w", err)
+	}
+	resolved.StateDB, resolved.CacheDB, err = StatePathsFrom(paths.OSEnv{}, resolved.Home)
+	if err != nil {
+		return paths.Values{}, fmt.Errorf("resolve state paths: %w", err)
+	}
+	return resolved, nil
 }

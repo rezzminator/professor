@@ -223,7 +223,7 @@ func ResolveEnv(request Request) (Env, error) {
 		machine = request.Runtime.Config
 	} else {
 		var err error
-		resolved, err = paths.Resolve()
+		resolved, err = pfmconfig.ResolvePaths()
 		if err != nil {
 			return Env{}, err
 		}

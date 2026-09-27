@@ -18,8 +18,9 @@ const (
 	keyEnter
 	keyEscape
 	keyBackspace
-	// keyStash is C-s, the keystroke pfm's reload sends to park a draft
-	// (internal/reload/reload.go:290) before typing /exit.
+	// keyStash is C-s, which pfm's reload sends to park a real draft before
+	// typing /exit (internal/reload/exit_render.go stashDraft). Like Claude
+	// Code's, it toggles: an empty composer gets the pending stash back.
 	keyStash
 )
 
@@ -107,8 +108,13 @@ func (draft *composer) apply(event keyEvent) {
 			draft.draft = draft.draft[:len(draft.draft)-1]
 		}
 	case keyStash:
-		draft.stashed = string(draft.draft)
-		draft.draft = nil
+		if len(draft.draft) > 0 {
+			draft.stashed = string(draft.draft)
+			draft.draft = nil
+		} else if draft.stashed != "" {
+			draft.draft = []rune(draft.stashed)
+			draft.stashed = ""
+		}
 	case keyEnter, keyEscape:
 	}
 }

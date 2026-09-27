@@ -50,6 +50,9 @@ func TestComposerExitProofReadsOnlyTheDraftAfterTheMarker(t *testing.T) {
 		{"codex draft", "Codex\n› /exit", true},
 		{"cooked-tty echo ahead of the marker", "Claude\n/exit❯ ", false},
 		{"empty composer", "Claude\n❯ ", false},
+		{"/exit appended to a restored draft", "Claude\n❯ an old draft/exit", false},
+		{"stash marker on the status row below", "Claude\n❯ /exit\n────\n  Opus │ pfm › stashed", true},
+		{"focused agent row below the box", "Claude\n❯ /exit\n❯ ⏺ main", true},
 	} {
 		if got := composerShowsExit(row.capture); got != row.want {
 			t.Errorf("composerShowsExit(%q) = %t, want %t (%s)", row.capture, got, row.want, row.name)

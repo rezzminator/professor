@@ -158,6 +158,22 @@ func HasPastePlaceholder(value string) bool {
 		strings.Contains(lower, "[pasted content")
 }
 
+// ComposerIsDimPlaceholder reports whether the composer in a STYLED capture
+// (tmux capture-pane -e) holds only dim hint text — Claude Code's prompt
+// suggestion, Codex's placeholder — and so is empty underneath. Exported so
+// internal/reload reads a composer the way the inject mash guard does.
+func ComposerIsDimPlaceholder(styledCapture string) bool {
+	return isDimPlaceholder(lastComposerLine(styledCapture))
+}
+
+// LastComposerLine is the active composer row of a capture — the last line
+// that STARTS with ❯ or ›, never a status row carrying the glyph mid-line (a
+// "› stashed" marker) nor Claude's focused agent-panel row. Exported so
+// internal/reload reads the same row the inject guards do.
+func LastComposerLine(capture string) string {
+	return lastComposerLine(capture)
+}
+
 func isDimPlaceholder(styledLine string) bool {
 	if !strings.Contains(styledLine, "\x1b[2m") && !strings.Contains(styledLine, ";2m") {
 		return false
@@ -189,12 +205,21 @@ func isDimPlaceholder(styledLine string) bool {
 			if params == "" {
 				dim = false
 			}
-			for _, param := range strings.Split(params, ";") {
-				switch param {
+			fields := strings.Split(params, ";")
+			for index := 0; index < len(fields); index++ {
+				switch fields[index] {
 				case "0", "22":
 					dim = false
 				case "2":
 					dim = true
+				case "38", "48", "58":
+					// Extended colour: "5;N" or "2;R;G;B" are its arguments,
+					// never attributes — the 2 of truecolour is not dim.
+					if index+1 < len(fields) && fields[index+1] == "5" {
+						index += 2
+					} else if index+1 < len(fields) && fields[index+1] == "2" {
+						index += 4
+					}
 				}
 			}
 		}

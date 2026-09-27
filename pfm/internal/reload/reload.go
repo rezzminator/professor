@@ -55,6 +55,9 @@ type Tmux interface {
 	PaneInMode(context.Context, string, string) (bool, error)
 	CancelMode(context.Context, string, string) error
 	Capture(context.Context, string, string) (string, error)
+	// CaptureStyled is Capture with SGR attributes kept, so dim hint text in
+	// the composer can be told from a draft.
+	CaptureStyled(context.Context, string, string) (string, error)
 	SendKey(context.Context, string, string, string) error
 	SendLiteral(context.Context, string, string, string) error
 	Respawn(context.Context, string, string, string, string) error
@@ -294,8 +297,8 @@ func Run(
 		}
 		return Result{}, cause
 	}
-	if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "C-s"); err != nil {
-		return Result{}, fmt.Errorf("stash pane draft: %w", err)
+	if err := stashDraft(ctx, request, options.Clock, tmux, capture, stderr); err != nil {
+		return Result{}, err
 	}
 	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, "/exit"); err != nil {
 		return Result{}, fmt.Errorf("send /exit: %w", err)
@@ -387,48 +390,6 @@ func Run(
 		followName(ctx, request, options, tmux, proc, stderr)
 	}
 	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
-}
-
-func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmux Tmux, stderr io.Writer) error {
-	for attempt := 0; attempt < 40; attempt++ {
-		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: confirm typed /exit (try %d): %v\n", attempt+1, err)
-		} else if composerShowsExit(capture) {
-			return nil
-		}
-		if err := clk.Sleep(ctx, 50*time.Millisecond); err != nil {
-			return err
-		}
-	}
-	cause := errors.New("typed /exit never rendered — refusing blind Enter")
-	if err := clearTypedExit(ctx, request, tmux); err != nil {
-		return errors.Join(cause, err)
-	}
-	return cause
-}
-
-// clearTypedExit backspaces the "/exit" this worker itself just typed
-// (SendLiteral, over a composer C-s had already stashed empty) back out of
-// the composer, so a refusal to reboot never leaves that stray text sitting
-// there for a human to notice — or, worse, accidentally submit — then
-// confirms the composer actually cleared. Shared by waitExitRendered (never
-// confirmed rendering, so pressing Enter would be blind) and exitIncomplete
-// (rendered, then the pane never died on it).
-func clearTypedExit(ctx context.Context, request Request, tmux Tmux) error {
-	for range len("/exit") {
-		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "BSpace"); err != nil {
-			return fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err)
-		}
-	}
-	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
-	if err != nil {
-		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
-	}
-	if composerShowsExit(capture) {
-		return errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand")
-	}
-	return nil
 }
 
 // waitCallerIdle holds the /exit until the pane's current turn has ended.
@@ -555,7 +516,13 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 		}
 		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))
 	}
-	return errors.Join(cause, errors.New("the pane shows neither the typed /exit nor an exit dialog"))
+	return errors.Join(
+		cause,
+		fmt.Errorf(
+			"the pane shows neither the typed /exit nor an exit dialog (composer shows %q)",
+			composerDraftText(capture),
+		),
+	)
 }
 
 func sleepPoll(ctx context.Context, clk clock.Clock, poll time.Duration) error {

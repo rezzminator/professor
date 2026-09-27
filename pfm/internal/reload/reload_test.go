@@ -39,6 +39,10 @@ func (tmux *fakeReloadTmux) Capture(context.Context, string, string) (string, er
 	return "Claude\n❯ ", nil
 }
 
+func (tmux *fakeReloadTmux) CaptureStyled(ctx context.Context, socket, pane string) (string, error) {
+	return tmux.Capture(ctx, socket, pane)
+}
+
 func (tmux *fakeReloadTmux) SendKey(_ context.Context, _, _, key string) error {
 	if key == "Enter" && tmux.literal == "/exit" {
 		tmux.dead = true

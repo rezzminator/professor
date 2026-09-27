@@ -155,7 +155,9 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	layoutFindings := installer.ClassifyLayout(layoutEnv)
 	if mode == installer.ModeApply {
 		planOptions := func(runtime commandRuntime) installer.Options {
-			return withFlags(newInstallerOptions(installer.ModeDryRun, *configDir, *skipHarvest, io.Discard, io.Discard, runtime))
+			return withFlags(
+				newInstallerOptions(installer.ModeDryRun, *configDir, *skipHarvest, io.Discard, io.Discard, runtime),
+			)
 		}
 		if code := installSpacePreflight(layoutEnv, layoutFindings, runtime, planOptions, stderr); code != 0 {
 			return code

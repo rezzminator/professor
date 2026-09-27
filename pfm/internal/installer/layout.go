@@ -65,7 +65,7 @@ type LayoutEnv struct {
 	moveProbe       func(source, destination string) (different bool, available uint64, err error)
 	// spaceProbe reports the device and free bytes of the filesystem holding
 	// dir; nil is the statfs default (layout_space.go).
-	spaceProbe   func(dir string) (device uint64, free uint64, err error)
+	spaceProbe   func(dir string) (device, free uint64, err error)
 	runner       CommandRunner
 	writeManaged func(path string, content []byte) error
 }

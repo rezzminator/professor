@@ -55,7 +55,8 @@ func TestApplyRetiresTheWorkflowsDeepRRSkillLink(t *testing.T) {
 
 			var output bytes.Buffer
 			if _, err := Run(context.Background(), Options{
-				Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
+				MCPConfigPath: testConfigPath(t),
+				Mode:          ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{}, CodexHomes: []string{},
 				ConfigDirs: append(append([]string{}, linked...), regularConfig, foreignConfig),
 			}); err != nil {
 				t.Fatalf("apply: %v\n%s", err, output.String())

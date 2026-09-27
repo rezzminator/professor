@@ -49,7 +49,13 @@ func TestLayoutSessionMergeAndRollback(t *testing.T) {
 	if got, err := os.ReadFile(parked); err != nil || string(got) != "account-copy" {
 		t.Fatalf("parked=%q err=%v", got, err)
 	}
-	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), false, &bytes.Buffer{}); err != nil {
+	if err := RollbackLayout(
+		context.Background(),
+		env,
+		filepath.Base(journal.dir),
+		false,
+		&bytes.Buffer{},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(

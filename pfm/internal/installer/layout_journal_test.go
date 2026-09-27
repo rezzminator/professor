@@ -38,7 +38,13 @@ func TestLayoutJournalRollbackRestoresPriorBytesAndLinks(t *testing.T) {
 	if err != nil || !bytes.Contains(raw, []byte(`"backup"`)) || !bytes.Contains(raw, []byte(`"result": "applied"`)) {
 		t.Fatalf("journal=%s err=%v", raw, err)
 	}
-	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.dir), false, &bytes.Buffer{}); err != nil {
+	if err := RollbackLayout(
+		context.Background(),
+		env,
+		filepath.Base(journal.dir),
+		false,
+		&bytes.Buffer{},
+	); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(finding.Path)

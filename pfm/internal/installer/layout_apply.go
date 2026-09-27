@@ -320,7 +320,11 @@ func applyLayoutConfigMigration(journal *Journal) error {
 		return fmt.Errorf("%w: pre-split config path is outside HostLayout", errLayoutRefuse)
 	}
 	change := LayoutFinding{Row: layoutRowConfig, Verdict: VerdictRepoint, Path: env.ConfigPath}
-	if err := journal.mutate(change, layoutConfigMigrationPaths(*env), func() error { return pfmconfig.ApplyMigration(migration) }); err != nil {
+	if err := journal.mutate(
+		change,
+		layoutConfigMigrationPaths(*env),
+		func() error { return pfmconfig.ApplyMigration(migration) },
+	); err != nil {
 		return err
 	}
 	env.Config = migration.Preview(loaded)

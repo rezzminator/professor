@@ -887,7 +887,13 @@ func TestInstallSpacePreflightRefusesBeforeAnyChange(t *testing.T) {
 			t.Fatal("the applying installer ran past a refused space preflight")
 		}
 		// installer.Run marks its journal dry-run; a layout preview does the same here.
-		if _, err := installer.ApplyLayout(ctx, installer.LayoutEnv{Home: home}, options.Journal, false, io.Discard); err != nil {
+		if _, err := installer.ApplyLayout(
+			ctx,
+			installer.LayoutEnv{Home: home},
+			options.Journal,
+			false,
+			io.Discard,
+		); err != nil {
 			return installer.Report{}, err
 		}
 		return installer.Report{}, options.Journal.Write([]string{helper}, func() error {
@@ -899,7 +905,9 @@ func TestInstallSpacePreflightRefusesBeforeAnyChange(t *testing.T) {
 	checked := 0
 	checkInstallSpace = func(_ installer.LayoutEnv, findings []installer.LayoutFinding, paths []string) error {
 		checked, planned = len(findings), paths
-		return errors.New("not enough free space on migrations: need 5 bytes + margin 1073741824, have 1 — nothing changed")
+		return errors.New(
+			"not enough free space on migrations: need 5 bytes + margin 1073741824, have 1 — nothing changed",
+		)
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: home}}
 	var stdout, stderr bytes.Buffer

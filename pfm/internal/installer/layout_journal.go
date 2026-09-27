@@ -389,7 +389,9 @@ func copyLayoutTree(source, target string) error {
 				return err
 			}
 		}
-		return nil
+		// Mkdir applies the umask; the copy keeps the source's mode, set
+		// after the children so a read-only directory still fills.
+		return os.Chmod(target, info.Mode().Perm())
 	case info.Mode().IsRegular():
 		input, err := os.Open(source)
 		if err != nil {

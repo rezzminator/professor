@@ -128,6 +128,11 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	if len(installer.planErrors) != 0 {
 		err = errors.Join(append([]error{err}, installer.planErrors...)...)
 	}
+	if installer.apply {
+		if sealErr := options.Journal.Seal(); sealErr != nil {
+			err = errors.Join(err, fmt.Errorf("seal install journal: %w", sealErr))
+		}
+	}
 	installer.say("")
 	installer.say("summary changed=%d ok=%d skipped=%d", installer.report.Changed,
 		installer.report.OK, installer.report.Skipped)

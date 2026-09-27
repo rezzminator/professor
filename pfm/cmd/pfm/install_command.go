@@ -181,6 +181,11 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			if _, targetErr := os.Stat(finding.Path); targetErr != nil {
 				continue
 			}
+			existing, globErr := journal.MigrationBackups()
+			if globErr != nil {
+				fmt.Fprintf(stderr, "pfm install: %v\n", globErr)
+				return 1
+			}
 			if migrateErr := migrateInstalledLayoutDatabases(
 				context.Background(),
 				layoutEnv.StateDB,
@@ -189,16 +194,10 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 				fmt.Fprintf(stderr, "pfm install: migrate moved databases: %v\n", migrateErr)
 				return 1
 			}
-			// The migration rewrote the moved state database and may have
-			// written its pre-migration backup: this install's own change,
-			// never drift for a rollback.
-			backups, globErr := filepath.Glob(layoutEnv.StateDB + ".bak-before-v*")
-			if globErr != nil {
-				fmt.Fprintf(stderr, "pfm install: list state database backups: %v\n", globErr)
-				return 1
-			}
-			if err := journal.Refingerprint(append([]string{layoutEnv.StateDB}, backups...)...); err != nil {
-				fmt.Fprintf(stderr, "pfm install: fingerprint migrated state database: %v\n", err)
+			// The migration's rewrites and backups are this install's own
+			// changes, which rollback reverses, never drift.
+			if err := journal.JournalMigrationBackups(existing); err != nil {
+				fmt.Fprintf(stderr, "pfm install: journal migrated databases: %v\n", err)
 				return 1
 			}
 			break

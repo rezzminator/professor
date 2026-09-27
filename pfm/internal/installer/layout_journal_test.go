@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -607,6 +608,63 @@ func TestLayoutRollbackRefusesSessionStoreWhileAChatIsLive(t *testing.T) {
 			if err == nil || err.Error() != want {
 				t.Fatalf("%s force=%t err=%v, want %q", destination, force, err, want)
 			}
+		}
+	}
+}
+
+func TestLayoutRollbackAcceptsWritesIntoADirectoryTheInstallCreated(t *testing.T) {
+	env := layoutFixture(t)
+	dir := filepath.Join(env.Home, ".config", "opencode")
+	config := filepath.Join(dir, "opencode.jsonc")
+	journal := NewJournal(context.Background(), env)
+	if err := journal.Write([]string{dir}, func() error { return os.MkdirAll(dir, 0o700) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Write([]string{config}, func() error {
+		return os.WriteFile(config, []byte("{}\n"), 0o600)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := RollbackLayout(context.Background(), env, filepath.Base(journal.Dir()), false, &output); err != nil {
+		t.Fatalf("rollback read the install's own write as drift: %v\n%s", err, output.String())
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Fatalf("rollback left the directory the install created: %v", err)
+	}
+}
+
+// TestCopyLayoutTreeKeepsDirectoryModesUnderAnyUmask: the journal snapshots
+// and restores trees with copyLayoutTree, so a 0775 directory must come back
+// 0775 even when the process umask would strip group write.
+func TestCopyLayoutTreeKeepsDirectoryModesUnderAnyUmask(t *testing.T) {
+	previous := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(previous) })
+	source := filepath.Join(t.TempDir(), "file-history")
+	nested := filepath.Join(source, "session")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{source, nested} {
+		if err := os.Chmod(dir, 0o775); err != nil {
+			t.Fatal(err)
+		}
+	}
+	layoutWrite(t, filepath.Join(nested, "1.txt"), "v1\n")
+	target := filepath.Join(t.TempDir(), "copy")
+	if err := copyLayoutTree(source, target); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{target, filepath.Join(target, "session")} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o775 {
+			t.Fatalf("%s mode = %o, want 775", dir, got)
 		}
 	}
 }

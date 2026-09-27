@@ -120,7 +120,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 | Skill | What's universal (ships) | What's project-specific (hydrated by RR) |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Three lenses at once (`templates/project/CLAUDE.md` § MANDATORY Rules → Meta) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
+| Three lenses at once (`templates/project/CLAUDE.md` § Rules → Meta) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
 | `audit:code-hygiene` | Category structure (ghost fields, dead code, stale deps, arch smells, type safety, naming, quality) | Per-category detection patterns, file paths, known hotspots, linter coverage gaps, project-specific report examples |
 | `audit:security` | OWASP category structure (8A-8I), severity guide, report format | Domain-specific PHI/data sensitivity rules, external API checks, framework-specific vulnerabilities, compliance-driven sub-categories |
 
@@ -134,7 +134,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 ## Category N — {category name}
 
 > **KNOWLEDGE BASE EMPTY** — This section needs project-specific detection patterns.
-> Run the three-lens review (`CLAUDE.md` § MANDATORY Rules → Meta, "Three lenses at once") or `/audit:code-hygiene` after the codebase has enough code to analyze.
+> Run the three-lens review (`CLAUDE.md` § Rules → Meta, "Three lenses at once") or `/audit:code-hygiene` after the codebase has enough code to analyze.
 > The Professor will surface this gap: "Knowledge base is empty, waiting for user specification to fill it in."
 ```
 
@@ -279,7 +279,7 @@ Tier and effort per the fleet prompt § Model Selection: **mechanical (sonnet), 
 
 #### The worker brief
 
-Every dispatch carries all five briefing fields (the fleet prompt's § Orchestration), plus one input the 2-file cap makes it impossible for a worker to fetch:
+Every dispatch carries all five briefing fields (root `CLAUDE.md` § Dispatch), plus one input the 2-file cap makes it impossible for a worker to fetch:
 
 **Quote the source project's commit messages for this live file into the brief** — `git -C {live-root} log --format='%h %s%n%b' {last-sync}.. -- {source}`, where `{last-sync}` is the `Source:` trailer of the newest `release:` commit on `main`. Those messages are where that project ALREADY ruled the change framework-bound, and a worker that cannot see them will read a generic mechanism as install-specific topology and rule it LOCAL. A file with no commits since `{last-sync}` is briefed as such, so "no message quoted" means the orchestrator looked, not that it skipped.
 

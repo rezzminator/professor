@@ -77,7 +77,7 @@ Claude (in your target project) asks these questions, in this order. Answer them
 
 > What does your project do, in one sentence?
 
-This becomes `{PROJECT_NAME}` and `{PROJECT_PITCH}`. Example: "Acme is a developer-tooling platform that watches CI runs and assists the engineer."
+This becomes `{PROJECT_NAME}` and `{PROJECT_TAGLINE}`. Example: "Acme is a developer-tooling platform that watches CI runs and assists the engineer."
 
 ### 2. Character name & voice (MANDATORY — cannot be skipped)
 
@@ -223,7 +223,7 @@ Claude shows you a summary of all answers + a list of files that will be written
 
 Claude takes your answers and:
 
-1. **Writes root `CLAUDE.md`** — fills in `{PROJECT_NAME}`, `{PROJECT_PITCH}`, the Professor persona section, and the non-negotiable rules. Emits `{PROJECT_ROSTER}` (one Architecture bullet per roster entry); a single-project install collapses the multi-project framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; the infra rule only if a roster entry owns infra, with that entry's directory as `{PROJECT}` in `make -C {PROJECT}`).
+1. **Writes root `CLAUDE.md`** to `/quality:claude-md`'s spine — fills in `{PROJECT_NAME}`, `{PROJECT_TAGLINE}` and the optional stake line, keeps or deletes the optional docs map and `# Runtime` → `## Codex` blocks, and keeps the `# Rules` groups (sacred ground, `## Your first move as a sub-agent`, `## Dispatch`, Code, Process, Meta). Emits `{PROJECT_ROSTER}` (one `# Vocabulary` entry per roster entry, plus one per other tracked top-level directory); a single-project install collapses the multi-project framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; the infra rule only if a roster entry owns infra, with that entry's directory as `{PROJECT}` in `make -C {PROJECT}`).
 2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
 3. **Writes Tier A command files** — `/pcm`, `/dev`, `/rnd`, `/audit:*` (the machine-global `/flights:*`, `/pfm`, `/quality:*` arrive by `pfm install`). Voice intact, domain content filled.
 4. **Writes Tier B command files** for each opt-in — `/officer`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line. A declined archetype that `pfm init` already scaffolded is deleted, its pin forgotten with `pfm update drop <local>`, then its template silenced with `pfm update ignore <template>`; see [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes).

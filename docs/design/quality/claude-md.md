@@ -177,7 +177,7 @@ Loaded before any write to an orientation file; the reader applies the law as it
 
 ### `check [path…]`
 
-Certifies each file, read-only: runs § The truth script and the checks below, and emits `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — never a verdict for a file it did not read. An `ERROR` line fails every check it left unrun. A user-level file outside any repository skips the truth script and checks 3 and 4. No path: the hand-edited orientation file at the repository root.
+Certifies each file, read-only: runs § The truth script and the checks below, and emits `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — never a verdict for a file it did not read. An `ERROR` line fails every check it left unrun. A user-level file outside any repository, and a template orientation file whose paths resolve only in the project it scaffolds, skip the truth script and checks 3 and 4. No path: the hand-edited orientation file at the repository root.
 
 1. Spine: a spine section missing where it has content, out of order, or a top-level section that fits a spine section or fails admission.
 2. Budget: over 200 lines or over 16,000 bytes.

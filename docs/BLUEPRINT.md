@@ -249,7 +249,7 @@ A `.claude/` infrastructure — a **transplantable nervous system** — that tur
 - **Worktree isolation** — every feature gets its own git worktree branch + a unique port allocation. Multiple parallel pipelines on the same repo without collisions.
 - **A pipeline that refuses cowboy coding** — one task file per executor, every return verified against its diff, a `flights-lander` per project blocking bad code from reaching `main`.
 - **One agent owns git** — only `gitter` runs `git add` / `commit` / `merge`. Centralized, auditable, safe.
-- **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The three-lens rule (Computer Science, domain, compliance) ships in the project `CLAUDE.md` template, § MANDATORY Rules → Meta, "Three lenses at once".
+- **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The three-lens rule (Computer Science, domain, compliance) ships in the project `CLAUDE.md` template, § Rules → Meta, "Three lenses at once".
 - **Self-improvement** — `/pcm` is the change manager that edits its own pipeline rules at the source.
 - **Optional dual-runtime** — Codex (OpenAI) can mirror the Claude pipeline as a cheaper implementation layer. Same manuals, different runtime. Everything works without it.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths.

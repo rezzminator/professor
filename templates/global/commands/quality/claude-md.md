@@ -119,7 +119,7 @@ echo "checked $(printf '%s\n' "$ps" | grep -c .) paths · $(wc -l < "$f" | tr -d
 ## Modes
 
 - No argument: the law above, applied while writing.
-- `check [path…]`: read-only; no path means the hand-edited orientation file at the repository root. Run the truth script, then the checks below. Emit `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — only a file read earns a verdict. An `ERROR` line fails every check it left unrun. A user-level file outside any repository (`~/.claude/CLAUDE.md`) skips the truth script and checks 3 and 4.
+- `check [path…]`: read-only; no path means the hand-edited orientation file at the repository root. Run the truth script, then the checks below. Emit `APPROVED: {path}`, `REJECTED: {path} — checks {n,…}`, or `UNREAD: {path} — {error}` when the file could not be read — only a file read earns a verdict. An `ERROR` line fails every check it left unrun. A user-level file outside any repository (`~/.claude/CLAUDE.md`) and a template orientation file, whose paths resolve only in the project it scaffolds, skip the truth script and checks 3 and 4.
 - `write <path>`: the steps below, to the law.
 
 Checks:

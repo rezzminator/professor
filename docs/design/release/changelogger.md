@@ -30,7 +30,7 @@ The bullet label names the route by which a change reaches an adopter, because t
 
 | Label | Paths | Reaches the adopter | An action is needed when |
 | --- | --- | --- | --- |
-| `Global` | `templates/global/**`, `workflows/**` | the moment the clone moves: machine-global originals are symlinked live; Codex roles recompile at the update's `pfm install` | something outside the clone must change: a setting, a file the installer does not remove, a command the adopter types by habit |
+| `Global` | `templates/global/**` | the moment the clone moves: machine-global originals are symlinked live; Codex roles recompile at the update's `pfm install` | something outside the clone must change: a setting, a file the installer does not remove, a command the adopter types by habit |
 | `Project` | `templates/project/**` | never by itself: `pfm update check` reports `UPDATED`, `NEW`, `GONE-UPSTREAM`, and the adopter hand-applies and pins | always: the bullet names the template path and whether to adopt; the action is `per project` |
 | `pfm` | `pfm/**`, including the embedded fleet prompt and installer assets | with `pfm update`'s rebuild and install | a config key, hook, environment variable, installed file, command or flag is added, renamed or removed |
 | `Repo` | everything else: CI, docs, infra, scripts, tests | never at runtime | never; the bullet is informational and short |

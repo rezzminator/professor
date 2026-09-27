@@ -188,12 +188,6 @@ From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux
 
 ---
 
-## Workflows (`workflows/`)
-
-- **deep-rr** (`workflows/deep-rr/`) — background research that returns a cited report: a scout swarm, a brainer steering the crawl, quote-pinned claims audited mechanically, lineage clustering so corroboration counts independent sources. Compiled for the Claude Workflow runtime. Start at [workflows/deep-rr/README.md](workflows/deep-rr/README.md).
-
----
-
 ## Plugins
 
 Claude Code plugins built with Professor, installable on their own. This repo is their marketplace:

@@ -206,6 +206,5 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 ## Open items
 
-- The scout footer in `workflows/deep-rr/engine/src/agents/scout/prompts.ts` is goal-blind the way this family's footer was. It has its own engine and snapshot tests, so it is its own pass.
 - A document name made unique by a mechanism: the `rr-dir` hook handing the lead a run token for the file name. A name no other run can hold makes an early stub safe to replace, which would put a dead run's plan on disk.
 - The three numbers under [Measuring a run](#measuring-a-run) have two measured runs behind them: 13 lead calls against a budget of 13 for rounds of 4 and 2 diggers, and one `NOT ON PAGE` in 25 facts on the other run. The next ten runs set the baseline.

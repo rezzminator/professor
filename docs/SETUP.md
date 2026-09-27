@@ -40,7 +40,7 @@ claude
 # Tell Claude: follow the printed blueprint docs/SETUP.md § Install interview.
 ```
 
-`pfm init` prints the exact permanent blueprint `docs/SETUP.md` path to follow. Keep that clone: updates, template diffs, and the deep-rr engine read it.
+`pfm init` prints the exact permanent blueprint `docs/SETUP.md` path to follow. Keep that clone: updates and template diffs read it.
 
 Claude runs Phase 1 (questions), Phase 2 (local adaptation), then Phase 3 (smoke test). You answer about 10 questions. Claude does the rest.
 
@@ -234,7 +234,6 @@ Claude takes your answers and:
 | Skill / command | Source | Parameterization |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `legal` | Bundled `templates/project/skills/legal/` | None |
-| `deep-rr` | in-tree at `{BLUEPRINT_CLONE_PATH}/workflows/deep-rr/` — ships with the blueprint clone, no separate fetch | None |
 | `ghostwriter` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/ghost-writer> | None |
 | `vision-factory` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/vision-factory> | None |
 | `/rnd` | Command `templates/project/commands/rnd.md` | Replace `{PROJECT}` (the entry holding the LLM-calling code), `{AI_SERVICE_NAME}`, `{ai_module}`, `{LLM_PROVIDER}`, `{SECONDARY_LANG}` |

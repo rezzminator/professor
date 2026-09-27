@@ -51,7 +51,7 @@ The label is the route that delivers the change, from a closed set:
 
 | Label | Paths | Reaches the adopter |
 | --- | --- | --- |
-| `Global` | `templates/global/**`, `workflows/**` | when the source clone moves; machine-global files are linked live, Codex roles recompile at `pfm install` |
+| `Global` | `templates/global/**` | when the source clone moves; machine-global files are linked live, Codex roles recompile at `pfm install` |
 | `Project` | `templates/project/**` | only by hand, through `pfm update check` in each project; the bullet names the template path |
 | `pfm` | `pfm/**` | with the binary `pfm update` rebuilds and installs |
 | `Repo` | everything else | never at runtime; informational |

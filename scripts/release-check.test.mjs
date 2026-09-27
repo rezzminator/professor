@@ -170,7 +170,7 @@ describe("scope", () => {
       "FILE A 1 tier1 gates scripts/new.sh",
       "FILE D 1 tier1 templates templates/global/agents/old-agent.md",
       "FILE A 1 tier2 - side.txt",
-      "AREA templates 5 5 templates/ workflows/ pfm/harness-prompts/",
+      "AREA templates 5 5 templates/ pfm/harness-prompts/",
       "AREA gates 1 1 .github/ .githooks/ scripts/ infra/fence/release-rehearsal.sh infra/check-self-hosted-manifest.sh",
       "TIER2 4 5",
       "REMOVED docs/moved.md",
@@ -195,24 +195,25 @@ describe("scope", () => {
       "templates/global/a.md": a0,
       "templates/global/b.md": b0,
       "templates/project/p.md": p0,
-      "workflows/w/w.md": w0,
+      "pfm/harness-prompts/w/w.md": w0,
     });
     commit(r0, {
       "templates/global/a.md": a1,
       "templates/global/b.md": b1,
       "templates/project/p.md": p1,
-      "workflows/w/w.md": w1,
+      "pfm/harness-prompts/w/w.md": w1,
     });
     const r = run(r0, "scope", "--base", base, "--head", "HEAD");
     assertClean(r, "scope");
     const areas = r.out.split("\n").filter((l) => l.startsWith("AREA "));
     assert.deepEqual(areas, [
-      "AREA templates-1 400 1 templates/global/a.md",
-      "AREA templates-2 300 1 templates/global/b.md",
-      "AREA templates-3 250 2 templates/project/ workflows/w/",
+      "AREA templates-1 50 1 pfm/harness-prompts/w/",
+      "AREA templates-2 400 1 templates/global/a.md",
+      "AREA templates-3 300 1 templates/global/b.md",
+      "AREA templates-4 200 1 templates/project/",
     ]);
-    assert.ok(r.out.includes("FILE M 400 tier1 templates-1 templates/global/a.md\n"), r.out);
-    assert.ok(r.out.includes("FILE M 50 tier1 templates-3 workflows/w/w.md\n"), r.out);
+    assert.ok(r.out.includes("FILE M 400 tier1 templates-2 templates/global/a.md\n"), r.out);
+    assert.ok(r.out.includes("FILE M 50 tier1 templates-1 pfm/harness-prompts/w/w.md\n"), r.out);
   });
 
   test("splits pfm-update by package, its table's next path segment", () => {
@@ -246,7 +247,7 @@ describe("scope", () => {
     assertClean(r, "scope");
     for (const line of [
       "FILE R 0 tier1 templates docs/old/gone.md",
-      "AREA templates 0 1 templates/ workflows/ pfm/harness-prompts/ templates/global/agents/gone.md docs/old/gone.md",
+      "AREA templates 0 1 templates/ pfm/harness-prompts/ templates/global/agents/gone.md docs/old/gone.md",
       "TIER2 0 0",
       "REMOVED templates/global/agents/gone.md",
     ])
@@ -716,7 +717,7 @@ describe("ready R1–R6", () => {
     });
     const dir = tmp();
     write(dir, {
-      "scope.md": `RANGE 0000000..${head.slice(0, 7)} COMMITS 1 FILES 1 HUNKS 1\nAREA templates 1 1 templates/ workflows/ pfm/harness-prompts/\nTIER2 0 0\n`,
+      "scope.md": `RANGE 0000000..${head.slice(0, 7)} COMMITS 1 FILES 1 HUNKS 1\nAREA templates 1 1 templates/ pfm/harness-prompts/\nTIER2 0 0\n`,
       "review/templates.md": "### F1 — a finding\nstatus: resolved @abc1234\n",
       "review/sandbox-templates/fixture.md": "status: open — a sandbox file, not a report\n",
       "review/HEAD": `${head}\n`,

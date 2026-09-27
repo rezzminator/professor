@@ -38,7 +38,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 - **Never hardcode names, counts, or rosters that change** — table names, enum values, chain names, agent/queue/chain tallies evolve. Tell agents WHERE to discover (`ls`, a registry file, the owning script), not WHAT the values are.
 - **Frontmatter features need registration** — `hooks:`/`model:`/`effort:` load ONLY when an agent is spawned as a registered type via its `subagent_type`; a protocol file read by a general-purpose agent never loads frontmatter. A protocol needing frontmatter features needs a thin registered wrapper: registration shell in `.claude/agents/`, protocol in the file it reads.
 - **Registries read at session start** — agent types, settings.json hooks, and the injected fleet prompt load at session start; mid-session file changes land at natural boundaries (next spawn, next session). When a long-running session will consume an edited file, add a transitional fallback clause (brief-wins, registry-fallback) rather than assuming hot reload.
-- **A subagent holds no `Workflow` tool** — a protocol that drives a Workflow structurally cannot be an agent; that is the line `deep-rr` (a skill driving its engine) and `agents/rr.md` are split along. Check it before proposing to convert a command into an agent.
+- **A subagent holds no `Workflow` tool** — a protocol that drives a Workflow structurally cannot be an agent. Check it before proposing to convert a command into an agent.
 
 ### Inventory (derive, never recall)
 
@@ -147,7 +147,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 **Command rules:**
 
 - Any change to a body's entry points is followed by a `/quality:description` pass over its `description:`
-- A command that dispatches an agent names the `subagent_type` and the five briefing fields (the fleet prompt's § Orchestration)
+- A command that dispatches an agent names the `subagent_type` and the five briefing fields (root `CLAUDE.md` § Dispatch)
 
 **Script rules:**
 

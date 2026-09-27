@@ -50,9 +50,8 @@ Every command, agent, and rule sorts into one of three tiers:
 - **/quality:integration-suite** — a project's whole test suite designed, every tier's validity law and the live tier's lanes over one shared state: landscape derived from code, a research pass over neighbour projects and literature, crossings asserted from two sides, a machine-derived map gate, and the harness contract.
 - **/audit:code-hygiene** / **/audit:security** — code-hygiene and security audit scopes. Code-hygiene additionally has a Sweep Mode (`code-hygiene sweep`) that promotes a report-only run to actively removing confirmed-dead code and unused dependencies, end-to-end behind QA.
 
-**Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones and the in-tree links):**
+**Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones):**
 
-- **deep-rr** — in-tree research protocol under `workflows/deep-rr/`, linked by host installation.
 - **codeprobe** — in-tree skill under `templates/global/skills/codeprobe/`: the extraction and probe script `collector` and `mapper` run.
 - **ghostwriter** — captures a writer's mechanical fingerprint and generates in that voice.
 - **vision-factory** — forge, validate, and stress-test a startup vision.

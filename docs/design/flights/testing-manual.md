@@ -58,7 +58,7 @@ The speccer takes facts from the manual into the task file as `Decisions` and `F
 ## What stays out
 
 - The generic mechanism of writing and attacking tests: in the two agents.
-- The cross-suite design of an integration suite — landscape, map, lanes, budgets: `/quality:integration-suite` designs it, and the manual's section 3 states the duty it leaves on every change.
+- The cross-suite design of an integration suite — landscape, map, lanes, budgets: `/quality:integration-suite` designs it ([its design](../integration-suite/_index.md)), and the manual's section 3 states the duty it leaves on every change.
 - Pipeline glue (who spawns whom, where reports go): in the orchestrator.
 
 ## Surfaces that stay in sync

@@ -34,7 +34,7 @@ The orchestrator runs at smart, where `flights-orchestrator` runs at mechanical:
 
 ## The boundary
 
-Work takes the lowest of three rungs that fits, and a higher rung needs its named reason. The ladder and a sub-agent's first move live in the fleet prompt's § Orchestration. A Claude sub-agent never sees the fleet prompt: an adopter's project contract repeats the first move for it, and a Codex child gets § Orchestration pasted into its briefing.
+Work takes the lowest of three rungs that fits, and a higher rung needs its named reason. The ladder lives in the fleet prompt's § Orchestration for a main chat and in the project contract's sub-agent first move for a sub-agent, which never sees the fleet prompt.
 
 1. Direct: the solution is in hand and the work fits about 80 calls — the caller does it by hand when it is small, otherwise sends one or two agents of at most 45 calls each, in sequence or in parallel. A change one tool call performs — a codemod, `gopls rename`, one `sed` over a named file list followed by the build — is direct work, however many files it touches. A small failure an agent can read to its cause is direct work too.
 2. `general-orchestrator`: the solution is in hand, but the volume is more than one agent finishes in 45 calls — many tasks in one domain, each with nameable files. ✓ "Add the timeout flag to each of the 12 subcommands." ✓ "Port these 8 test files to the new helper." ✓ "Update every doc that names the renamed flag."
@@ -110,7 +110,7 @@ First line `DONE {batch}`, `PARTIAL {batch}: {n} blocked` or `BLOCKED {batch}: {
 | The wait guard | `pfm internal orchestrator-wait`, attached in the agent's frontmatter | A Bash call that only waits (`echo`, `printf`, `true`, `:`, `sleep N`) is denied; design in [hooks.md](../hooks/hooks.md#agent-attached-hooks-not-machine-global) |
 | The executors | [general-executors.md](general-executors.md) | The hands and their tiers |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` | § Orchestration: the 45-call law and the three-rung ladder, for a main chat |
-| The project contract | `templates/project/CLAUDE.md` | The sub-agent first move: the same ladder and the 45-call cap, for a sub-agent (this repository: the fleet prompt's § Orchestration) |
+| The project contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The sub-agent first move: the same ladder and the 45-call cap, for a sub-agent |
 | The roster | `docs/BLUEPRINT.md`, `docs/SETUP.md`, `scripts/check-agent-roster.mjs` | The agents listed and checked |
 
 ## Evidence

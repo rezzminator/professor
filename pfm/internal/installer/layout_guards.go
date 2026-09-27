@@ -9,8 +9,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 func liveChatPIDs(procRoot, configDir string) ([]string, error) {
@@ -21,6 +23,7 @@ func liveChatPIDs(procRoot, configDir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	var live map[int]bool
 	pids := []string{}
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
@@ -30,13 +33,19 @@ func liveChatPIDs(procRoot, configDir string) ([]string, error) {
 		if _, err := strconv.Atoi(pid); err != nil {
 			continue
 		}
-		_, err := os.Stat(filepath.Join(procRoot, pid))
-		switch {
-		case err == nil:
+		if live == nil {
+			processes, err := gather.NewProcFS(procRoot).PIDs()
+			if err != nil {
+				return nil, err
+			}
+			live = make(map[int]bool, len(processes))
+			for _, process := range processes {
+				live[process] = true
+			}
+		}
+		id, _ := strconv.Atoi(pid)
+		if live[id] {
 			pids = append(pids, pid)
-		case errors.Is(err, fs.ErrNotExist):
-		default:
-			return nil, err
 		}
 	}
 	sort.Strings(pids)
@@ -61,7 +70,7 @@ func processIDs(procRoot string) ([]string, error) {
 	return pids, nil
 }
 
-func dbHolderPIDs(procRoot, db string) ([]string, error) {
+func procFDHolders(procRoot, db string) ([]string, error) {
 	pids, err := processIDs(procRoot)
 	if err != nil {
 		return nil, err
@@ -94,21 +103,63 @@ func dbHolderPIDs(procRoot, db string) ([]string, error) {
 	return holders, nil
 }
 
+func lsofHolderTargets(db string) ([]string, error) {
+	targets := []string{}
+	for _, suffix := range []string{"", layoutDBWAL, layoutDBSHM} {
+		candidate := db + suffix
+		if _, err := os.Lstat(candidate); err == nil {
+			targets = append(targets, candidate)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+	return targets, nil
+}
+
+func parseLsofHolders(stdout, stderr string, exitCode int) ([]string, error) {
+	if exitCode == 1 && strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
+		return nil, nil
+	}
+	if exitCode != 0 {
+		return nil, fmt.Errorf("database holder probe: lsof exited %d: %s", exitCode, strings.TrimSpace(stderr))
+	}
+	holders := map[string]bool{}
+	for _, line := range strings.Split(stdout, "\n") {
+		pid := strings.TrimSpace(line)
+		if pid == "" {
+			continue
+		}
+		num, err := strconv.Atoi(pid)
+		if err != nil || num <= 0 {
+			return nil, fmt.Errorf("database holder probe: lsof printed %q", pid)
+		}
+		holders[pid] = true
+	}
+	pids := make([]string, 0, len(holders))
+	for pid := range holders {
+		pids = append(pids, pid)
+	}
+	sort.Strings(pids)
+	return pids, nil
+}
+
 func stagedPromptUsers(procRoot, staged string) (int, error) {
-	pids, err := processIDs(procRoot)
+	proc := gather.NewProcFS(procRoot)
+	pids, err := proc.PIDs()
 	if err != nil {
 		return 0, err
 	}
 	users := 0
 	for _, pid := range pids {
-		argv, err := os.ReadFile(filepath.Join(procRoot, pid, "cmdline"))
-		if errors.Is(err, fs.ErrNotExist) {
+		argv, err := proc.Cmdline(pid)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) ||
+			errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EINVAL) {
 			continue
 		}
 		if err != nil {
 			return 0, err
 		}
-		for _, word := range strings.Split(string(argv), "\x00") {
+		for _, word := range argv {
 			if strings.HasPrefix(word, staged+string(filepath.Separator)) {
 				users++
 				break

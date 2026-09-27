@@ -3,10 +3,71 @@ package installer
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestParseLsofHolders(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdout, stderr, wantErr string
+		exit                          int
+		want                          []string
+	}{
+		{"holders", "456\n123\n456\n", "", "", 0, []string{"123", "456"}},
+		{"none", "", "", "", 1, nil},
+		{"status error", "", "lsof: status error on db\n", "database holder probe: lsof exited 1: lsof: status error on db", 1, nil},
+		{"other exit", "", "failure\n", "database holder probe: lsof exited 2: failure", 2, nil},
+		{"bad output", "abc", "", "database holder probe: lsof printed \"abc\"", 0, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseLsofHolders(tc.stdout, tc.stderr, tc.exit)
+			if !reflect.DeepEqual(got, tc.want) ||
+				(err != nil && err.Error() != tc.wantErr) || (err == nil && tc.wantErr != "") {
+				t.Fatalf("parseLsofHolders = %v, %v; want %v, %q", got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestLsofHolderTargets(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "state.db")
+	for _, suffix := range []string{"", layoutDBWAL} {
+		if err := os.WriteFile(db+suffix, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := lsofHolderTargets(db)
+	if err != nil || !reflect.DeepEqual(got, []string{db, db + layoutDBWAL}) {
+		t.Fatalf("targets = %v, %v", got, err)
+	}
+	if err := os.Remove(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(db + layoutDBWAL); err != nil {
+		t.Fatal(err)
+	}
+	got, err = lsofHolderTargets(db)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("missing targets = %v, %v", got, err)
+	}
+	if err := os.Symlink(strings.Repeat("x", 1), db); err != nil {
+		t.Fatal(err)
+	}
+	got, err = lsofHolderTargets(db)
+	if err != nil || !reflect.DeepEqual(got, []string{db}) {
+		t.Fatalf("symlink target = %v, %v", got, err)
+	}
+	blocked := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lsofHolderTargets(filepath.Join(blocked, "db")); err == nil {
+		t.Fatal("Lstat error was treated as no targets")
+	}
+}
 
 func TestLayoutLiveChatsRefuseAndUnreadableSessionsFail(t *testing.T) {
 	env := layoutFixture(t)

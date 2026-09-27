@@ -32,7 +32,8 @@ FH="$T/fakehome" # the home= path; freed after the backup so docker's stub can m
 mk_home() {
   rm -rf "$FH"
   mkdir -p "$FH/.claude/projects/p0" "$FH/.cc/2/projects/p1" "$FH/.local/share/pfm/install" \
-    "$FH/.local/state/pfm" "$FH/.local/bin"
+    "$FH/.local/state/pfm" "$FH/.local/bin" "$FH/.config/pfm"
+  echo '{}' >"$FH/.config/pfm/pfm.config.json"
   echo a >"$FH/.claude/projects/p0/a.jsonl"
   echo s1 >"$FH/.cc/2/projects/p1/s1.jsonl"
   echo s2 >"$FH/.cc/2/projects/p1/s2.jsonl"
@@ -78,6 +79,8 @@ case "\$*" in
   echo "pfm install: plan"
   echo "  change  layout .cc/2/projects -> .claude/projects"
   [ "\$mode" = preview-writes ] && echo x >"\$HOME/.local/state/pfm/preview-wrote"
+  # pfm's dependency probe runs \`go version\`; the Go toolchain writes its telemetry under the home.
+  [ "\$mode" = go-telemetry ] && mkdir -p "\$HOME/.config/go/telemetry/local" && echo 1 >"\$HOME/.config/go/telemetry/local/go.count"
   exit 0 ;;
 "install --yes --skip-harvest")
   if [ -d "\$J" ] && [ "\$mode" != apply-again-records ]; then echo "layout: nothing to do"; exit 0; fi
@@ -263,6 +266,9 @@ fail_case doctor-finding "REHEARSAL FAIL doctor: legacy: ~/.cc/fleet.db still pr
 fail_case apply-again-records "REHEARSAL FAIL apply-again: " manifest "second apply records: FAIL apply-again"
 fail_case drop-session "REHEARSAL FAIL manifest: " rollback "manifest: a lost session fails the manifest step"
 if grep -q '\.cc/2/projects/p1/s1\.jsonl' "$T/s-drop-session/rehearsal/verdict.txt" 2>/dev/null; then ok "manifest: the verdict names the session's backup path"; else bad "manifest names path" "$(cat "$T/s-drop-session/rehearsal/verdict.txt" 2>/dev/null)"; fi
+rehearse go-telemetry "$T/s-go-telemetry"
+if [ "$RC" -eq 0 ] && [ "$(verdict "$T/s-go-telemetry")" = "REHEARSAL PASS" ]; then ok "go telemetry: the Go toolchain's own counters under .config/go never fail the tree hash"
+else bad "go telemetry" "rc=$RC" "$(cat "$T/s-go-telemetry/rehearsal/verdict.txt" 2>/dev/null)"; fi
 fail_case rollback-incomplete "REHEARSAL FAIL hash-after: " "" "rollback incomplete: FAIL hash-after"
 if grep -q 'REHEARSAL FAIL hash-after: \.cc/2/projects/p1, ' "$T/s-rollback-incomplete/rehearsal/verdict.txt" 2>/dev/null; then ok "rollback incomplete: names the differing paths"; else bad "hash-after names path" "$(cat "$T/s-rollback-incomplete/rehearsal/verdict.txt" 2>/dev/null)"; fi
 

@@ -39,8 +39,9 @@ func (installer *engine) wireLogDefault() error {
 	if err != nil {
 		return fmt.Errorf("render the log default: %w", err)
 	}
-	return installer.change(
+	return installer.changePaths(
 		fmt.Sprintf("write log default %s into %s", block, path),
+		[]string{path},
 		func() error { return atomicfile.Write(path, content, 0o600) },
 	)
 }

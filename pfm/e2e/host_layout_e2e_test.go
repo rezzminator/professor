@@ -57,6 +57,7 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 	// only the layout-governed paths back into their legacy shapes.
 	h.requireSuccess("stage installed assets", run("install", "--yes", "--skip-harvest", "--skip-themes"))
 	plantLegacyHostLayout(t, home, repo)
+	plantHostInstallerDrift(t, home)
 	filesBefore := hostLayoutPayloads(t, home, "")
 	stateBefore := hostLayoutTableCounts(t, filepath.Join(home, ".cc", "fleet.db"))
 	cacheBefore := hostLayoutTableCounts(t, filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
@@ -130,7 +131,7 @@ func plantLegacyHostLayout(t *testing.T, home, repo string) {
 	if err := json.Unmarshal(configRaw, &config); err != nil {
 		t.Fatal(err)
 	}
-	config["log"] = map[string]any{"level": "off"}
+	delete(config, "log")
 	configRaw, err = json.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
@@ -225,6 +226,44 @@ func plantLegacyHostLayout(t *testing.T, home, repo string) {
 	}
 	if _, err := os.Stat(cache); !os.IsNotExist(err) {
 		t.Fatalf("cache target remains: %v", err)
+	}
+}
+
+func plantHostInstallerDrift(t *testing.T, home string) {
+	t.Helper()
+	asset := filepath.Join(home, ".local", "share", "pfm", "install", "reload.command.md")
+	body, err := os.ReadFile(asset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(asset, append(body, []byte("# drift\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		".config/systemd/user/default.target.wants/pfm-name-sync.path",
+	} {
+		if err := os.Remove(filepath.Join(home, relative)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, directory := range []string{".claude/commands", ".claude/agents", ".codex/agents"} {
+		entries, err := os.ReadDir(filepath.Join(home, directory))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) == 0 {
+			t.Fatalf("no installed entry in %s", directory)
+		}
+		path := filepath.Join(home, directory, entries[0].Name())
+		if entries[0].Type()&os.ModeSymlink != 0 {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := os.WriteFile(path, []byte("drift\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }
 
@@ -453,8 +492,19 @@ func hostLayoutSnapshot(t *testing.T, home string) map[string]string {
 			// removed by the rollback — never part of the host it restores.
 			return fs.SkipDir
 		}
+		if rel == filepath.Join(".config", "go") {
+			return fs.SkipDir
+		}
+		if rel == "scheduler-calls" {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		mode := fmt.Sprintf(":%04o", info.Mode()&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky))
 		if entry.IsDir() {
-			result[rel] = "dir"
+			result[rel] = "dir" + mode
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
@@ -462,7 +512,7 @@ func hostLayoutSnapshot(t *testing.T, home string) map[string]string {
 			if err != nil {
 				return err
 			}
-			result[rel] = "link:" + target
+			result[rel] = "link:" + target + mode
 			return nil
 		}
 		body, err := os.ReadFile(path)
@@ -470,7 +520,7 @@ func hostLayoutSnapshot(t *testing.T, home string) map[string]string {
 			return err
 		}
 		sum := sha256.Sum256(body)
-		result[rel] = "sha256:" + hex.EncodeToString(sum[:])
+		result[rel] = "sha256:" + hex.EncodeToString(sum[:]) + mode
 		return nil
 	})
 	if err != nil {

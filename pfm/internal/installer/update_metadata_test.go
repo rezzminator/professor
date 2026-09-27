@@ -435,3 +435,32 @@ func TestInstallSkipsArmingInsideTheFenceWhenTheGateIsUnarmed(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateMetadataInstallJournalRestoresMarkerAndOwnership(t *testing.T) {
+	home := t.TempDir()
+	repo := t.TempDir()
+	if err := os.MkdirAll(managedRootForHome(home), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	installer, journal, env := journaledEngine(t, home, true)
+	installer.options.SourceRepo = repo
+	if err := installer.writeUpdateMetadata(); err != nil {
+		t.Fatal(err)
+	}
+	marker, ownership := paths.SourceRepoPath(home), binaryOwnershipPath(home)
+	requireJournalPaths(t, installRecordDestinations(t, journal), marker, ownership)
+	idle, idleJournal, _ := journaledEngine(t, home, true)
+	idle.options.SourceRepo = repo
+	if err := idle.writeUpdateMetadata(); err != nil {
+		t.Fatal(err)
+	}
+	if idleJournal.Dir() != "" {
+		t.Fatalf("converged metadata journaled %v", idleJournal.records)
+	}
+	rollbackInstallJournal(t, env, journal)
+	for _, path := range []string{marker, ownership} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("rollback left %s: %v", path, err)
+		}
+	}
+}

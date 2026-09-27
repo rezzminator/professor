@@ -184,7 +184,7 @@ func (installer *engine) registerVSCodeExtension(extensionsDir string) (bool, er
 	encoded = append(encoded, '\n')
 
 	description := "register " + manifest.ID + " in " + indexPath + " (product loads it on next start)"
-	return true, installer.change(description, func() error {
+	return true, installer.changePaths(description, []string{indexPath}, func() error {
 		if err := atomicfile.Write(indexPath, encoded, 0o644); err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func (installer *engine) unregisterVSCodeExtension(indexPath string) error {
 		return err
 	}
 	encoded = append(encoded, '\n')
-	return installer.change("remove professor.professor from "+indexPath, func() error {
+	return installer.changePaths("remove professor.professor from "+indexPath, []string{indexPath}, func() error {
 		return atomicfile.Write(indexPath, encoded, 0o644)
 	})
 }

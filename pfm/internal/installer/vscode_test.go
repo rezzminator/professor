@@ -642,3 +642,50 @@ func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
 		t.Fatalf("VS Code merge changed settings mode to %o, want 644", got)
 	}
 }
+
+func TestVSCodeInstallJournalRestoresSettingsSidecarOwnershipAndIndex(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "product")
+	settings := filepath.Join(home, "settings.json")
+	original := []byte("{}\n")
+	if err := os.WriteFile(settings, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(managedRootForHome(home), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	installer := newVSCodeExtensionEngine(home, []string{root}, true)
+	installer.options.vscodeSettingsPaths = []string{settings}
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+	installer.options.Journal = journal
+	if err := installer.wireVSCode(); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(root, "extensions", vscodeExtensionIndexName)
+	ownership := filepath.Join(installer.managedRoot, vscodeOwnershipName)
+	backup := settings + ".pre-professor-" + installer.stamp
+	requireJournalPaths(t, installRecordDestinations(t, journal), settings, backup, ownership, index)
+	idle := newVSCodeExtensionEngine(home, []string{root}, true)
+	idle.options.vscodeSettingsPaths = []string{settings}
+	idleJournal := NewJournal(context.Background(), LayoutEnv{Home: home})
+	idle.options.Journal = idleJournal
+	if err := idle.wireVSCode(); err != nil {
+		t.Fatal(err)
+	}
+	if idleJournal.Dir() != "" {
+		t.Fatalf("converged VS Code journaled %v", idleJournal.records)
+	}
+	rollbackInstallJournal(t, LayoutEnv{Home: home}, journal)
+	got, err := os.ReadFile(settings)
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("restored settings=%q err=%v", got, err)
+	}
+	for _, path := range []string{backup, ownership, index} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("rollback left %s: %v", path, err)
+		}
+	}
+}

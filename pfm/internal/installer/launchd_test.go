@@ -275,3 +275,63 @@ func TestMCPLaunchAgentRemovalNamesTheConfigItReadEnabledFrom(t *testing.T) {
 		t.Fatalf("wireMCPLaunchAgent() output=%q, want the removal to name %q", stdout.String(), want)
 	}
 }
+
+func TestLaunchdInstallJournalRestoresPlistAndLogDir(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "Library", "Logs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	installer, journal, env := journaledEngine(t, home, true)
+	installer.options.MCPEnabled = map[string]bool{"chat": true}
+	installer.options.Runner = &loadedRunner{}
+	installer.options.Sleep = func(time.Duration) {}
+	plist := installer.mcpLaunchAgentPath()
+	if err := os.MkdirAll(filepath.Dir(plist), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plist, []byte("old plist\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.ensureLaunchdLogDir(); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.wireMCPLaunchAgent(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	backup := plist + ".pre-professor-" + installer.stamp
+	requireJournalPaths(t, installRecordDestinations(t, journal), installer.launchdLogDir(), plist, backup)
+	idle, idleJournal, _ := journaledEngine(t, home, true)
+	idle.options.MCPEnabled = map[string]bool{"chat": true}
+	idle.options.Runner = &loadedRunner{}
+	idle.options.Sleep = func(time.Duration) {}
+	if err := idle.ensureLaunchdLogDir(); err != nil {
+		t.Fatal(err)
+	}
+	if err := idle.wireMCPLaunchAgent(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if idleJournal.Dir() != "" {
+		t.Fatalf("converged launchd journaled %v", idleJournal.records)
+	}
+	rollbackInstallJournal(t, env, journal)
+	got, err := os.ReadFile(plist)
+	if err != nil || string(got) != "old plist\n" {
+		t.Fatalf("restored plist=%q err=%v", got, err)
+	}
+	for _, path := range []string{backup, installer.launchdLogDir()} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("rollback left %s: %v", path, err)
+		}
+	}
+	remover, removalJournal, removalEnv := journaledEngine(t, home, true)
+	remover.options.Runner = &loadedRunner{}
+	if err := remover.wireMCPLaunchAgent(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	requireJournalPaths(t, installRecordDestinations(t, removalJournal), plist)
+	rollbackInstallJournal(t, removalEnv, removalJournal)
+	got, err = os.ReadFile(plist)
+	if err != nil || string(got) != "old plist\n" {
+		t.Fatalf("removed plist not restored=%q err=%v", got, err)
+	}
+}

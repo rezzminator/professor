@@ -69,14 +69,24 @@ func (installer *engine) installMarkdownTool(ctx context.Context) error {
 		if path, lookupErr := processRunner.LookPath("uv"); lookupErr == nil {
 			uvPath = path
 		} else {
-			uvPath = "uv"
+			installer.skip("rumdl: no uv available (checked provisioned harvestpy uv and PATH)")
+			return nil
 		}
 	}
 
 	binDir := filepath.Join(installer.options.Home, ".local", "bin")
-	result, runErr := processRunner.Run(ctx, []string{
-		uvPath, "tool", "install", "rumdl==" + rumdlPinnedVersion,
-	}, deps.RunOptions{Env: deps.EnvironmentWith("UV_TOOL_BIN_DIR", binDir)})
+	toolDir := filepath.Join(installer.options.Home, ".local", "share", "uv", "tools", "rumdl")
+	var result deps.RunResult
+	var runErr error
+	journalErr := installer.options.Journal.Write([]string{filepath.Join(binDir, "rumdl"), toolDir}, func() error {
+		result, runErr = processRunner.Run(ctx, []string{
+			uvPath, "tool", "install", "rumdl==" + rumdlPinnedVersion,
+		}, deps.RunOptions{Env: deps.EnvironmentWith("UV_TOOL_BIN_DIR", binDir)})
+		return nil
+	})
+	if journalErr != nil {
+		return fmt.Errorf("journal rumdl install: %w", journalErr)
+	}
 	output := append(append([]byte(nil), result.Stdout...), result.Stderr...)
 	if runErr != nil || result.ExitCode != 0 {
 		var lookupErr *exec.Error

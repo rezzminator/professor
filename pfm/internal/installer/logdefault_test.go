@@ -174,3 +174,31 @@ func TestInstallRunsTheLogDefaultStep(t *testing.T) {
 		t.Fatalf("install() did not write the log default: %v present=%t", block, present)
 	}
 }
+
+func TestLogDefaultInstallJournalRestoresConfigAndSkipsConverged(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "pfm.config.json")
+	original := []byte(`{"version":2}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installer, journal, env := journaledEngine(t, home, true)
+	installer.options.MCPConfigPath = path
+	if err := installer.wireLogDefault(); err != nil {
+		t.Fatal(err)
+	}
+	requireJournalPaths(t, installRecordDestinations(t, journal), path)
+	idle, idleJournal, _ := journaledEngine(t, home, true)
+	idle.options.MCPConfigPath = path
+	if err := idle.wireLogDefault(); err != nil {
+		t.Fatal(err)
+	}
+	if idleJournal.Dir() != "" {
+		t.Fatalf("converged log block journaled %v", idleJournal.records)
+	}
+	rollbackInstallJournal(t, env, journal)
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("restored config=%q err=%v", got, err)
+	}
+}

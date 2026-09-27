@@ -168,17 +168,20 @@ func (installer *engine) installThemes(ctx context.Context) {
 
 		next := cloneThemeOwnership(ownership)
 		next[name] = themeOwnershipRecord{Path: target, SHA256: digest}
-		if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
-			installer.skip("theme " + name + " install failed: write " + target + ": " + writeErr.Error())
-			continue
-		}
-		if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
-			rollbackErr := rollbackTheme(target, existing, exists)
-			message := "theme " + name + " install failed: record ownership: " + ledgerErr.Error()
-			if rollbackErr != nil {
-				message += "; rollback failed: " + rollbackErr.Error()
+		if err := installer.options.Journal.Write([]string{target, ownershipPath}, func() error {
+			if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
+				return fmt.Errorf("write %s: %w", target, writeErr)
 			}
-			installer.skip(message)
+			if ledgerErr := writeThemeOwnership(ownershipPath, next); ledgerErr != nil {
+				rollbackErr := rollbackTheme(target, existing, exists)
+				if rollbackErr != nil {
+					return fmt.Errorf("record ownership: %w; rollback failed: %v", ledgerErr, rollbackErr)
+				}
+				return fmt.Errorf("record ownership: %w", ledgerErr)
+			}
+			return nil
+		}); err != nil {
+			installer.skip("theme " + name + " install failed: " + err.Error())
 			continue
 		}
 		ownership = next

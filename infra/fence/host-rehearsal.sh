@@ -20,7 +20,9 @@ set -uo pipefail
 #   {step}.log    each container step's output; doctor.log ends with doctor's exit code
 #   hash-before.txt / hash-preview.txt / hash-after.txt
 #                 the tree of SCRATCH/home (path, type, mode, link target or
-#                 sha256), .local/state/pfm/migrations/ excluded
+#                 sha256), .local/state/pfm/migrations/ and .config/go/ excluded
+#                 (.config/go: the Go toolchain's telemetry, written by pfm's
+#                 `go version` dependency probe; outside the backup, not pfm's)
 #   stubs/        systemctl (argv appended to systemctl.log; is-active exits 3), sudo
 #   proc/         the empty PFM_PROC_ROOT: no chat is live in the rehearsal
 # stdout ends with the verdict path.
@@ -139,9 +141,9 @@ cmd_compare() {
 # tree_hash DIR OUT — one sorted line per path: path, type, mode, target or sha256.
 tree_hash() {
   local dir=$1 out=$2
-  (cd "$dir" && find . -path ./.local/state/pfm/migrations -prune -o -type f -print0 | xargs -0 -r sha256sum) \
+  (cd "$dir" && find . \( -path ./.local/state/pfm/migrations -o -path ./.config/go \) -prune -o -type f -print0 | xargs -0 -r sha256sum) \
     >"$out.sha" || return 1
-  (cd "$dir" && find . -path ./.local/state/pfm/migrations -prune -o ! -path . -printf '%P\t%y\t%m\t%l\n') \
+  (cd "$dir" && find . \( -path ./.local/state/pfm/migrations -o -path ./.config/go \) -prune -o ! -path . -printf '%P\t%y\t%m\t%l\n') \
     >"$out.meta" || return 1
   awk -F'\t' 'NR == FNR { o = (substr($0, 1, 1) == "\\") ? 1 : 0; sha[substr($0, 69 + o)] = substr($0, 1 + o, 64); next }
     { v = ($2 == "f") ? sha[$1] : ($2 == "l" ? $4 : "-"); print $1 "\t" $2 "\t" $3 "\t" v }' \

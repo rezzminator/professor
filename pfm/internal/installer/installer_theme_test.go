@@ -174,3 +174,34 @@ func TestThemeManifestFallsBackToReleaseWhenDiscoveredSourceLacksManifest(t *tes
 		t.Fatalf("release manifest sources=%#v, want tokyo-night", sources)
 	}
 }
+
+func TestThemeInstallJournalRestoresPaletteAndLedgerAndSkipsConverged(t *testing.T) {
+	home, repo := t.TempDir(), t.TempDir()
+	manifest := `{"bundled":{"demo":{"file":"demo.json","target":"~/.claude/themes/demo.json","activate":"/theme","requires":"fixture"}}}`
+	writeFixture(t, filepath.Join(repo, "templates", "themes", "sources.json"), manifest)
+	writeFixture(t, filepath.Join(repo, "templates", "themes", "demo.json"), `{"name":"demo","overrides":{}}`)
+	target := filepath.Join(home, ".claude", "themes", "demo.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(managedRootForHome(home), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	installer, journal, env := journaledEngine(t, home, true)
+	installer.options.InstallThemes, installer.options.SourceRepo = true, repo
+	installer.installThemes(context.Background())
+	ownership := filepath.Join(installer.managedRoot, themeOwnershipName)
+	requireJournalPaths(t, installRecordDestinations(t, journal), target, ownership)
+	idle, idleJournal, _ := journaledEngine(t, home, true)
+	idle.options.InstallThemes, idle.options.SourceRepo = true, repo
+	idle.installThemes(context.Background())
+	if idleJournal.Dir() != "" {
+		t.Fatalf("converged theme journaled %v", idleJournal.records)
+	}
+	rollbackInstallJournal(t, env, journal)
+	for _, path := range []string{target, ownership} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("rollback left %s: %v", path, err)
+		}
+	}
+}

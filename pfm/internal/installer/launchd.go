@@ -54,7 +54,7 @@ func (installer *engine) ensureLaunchdLogDir() error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("stat launchd log dir %s: %w", path, err)
 	}
-	return installer.change("create "+path, func() error {
+	return installer.changePaths("create "+path, []string{path}, func() error {
 		return os.MkdirAll(path, 0o755)
 	})
 }
@@ -106,7 +106,11 @@ func (installer *engine) wireLaunchAgent(ctx context.Context) error {
 	if sameFile(path, wanted, 0o644) {
 		installer.ok(path)
 	} else {
-		if err := installer.change("write "+path, func() error {
+		changedPaths := []string{path}
+		if _, err := os.Lstat(path); err == nil {
+			changedPaths = append(changedPaths, availableBackup(path, installer.stamp))
+		}
+		if err := installer.changePaths("write "+path, changedPaths, func() error {
 			if _, statErr := os.Lstat(path); statErr == nil {
 				backup := availableBackup(path, installer.stamp)
 				if err := copyBackup(path, backup); err != nil {
@@ -139,7 +143,7 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 			_ = installer.options.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+mcpLaunchdLabel)
 		}
 		message := fmt.Sprintf("remove %s (no MCP server is enabled in %s)", path, installer.options.MCPConfigPath)
-		return installer.change(message, func() error { return os.Remove(path) })
+		return installer.changePaths(message, []string{path}, func() error { return os.Remove(path) })
 	}
 	template, err := readAsset(mcpLaunchdAsset)
 	if err != nil {
@@ -154,7 +158,11 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 	}
 	plistChanged := false
 	if !sameFile(path, wanted, 0o644) {
-		if err := installer.change("write "+path, func() error {
+		changedPaths := []string{path}
+		if _, err := os.Lstat(path); err == nil {
+			changedPaths = append(changedPaths, availableBackup(path, installer.stamp))
+		}
+		if err := installer.changePaths("write "+path, changedPaths, func() error {
 			if _, statErr := os.Lstat(path); statErr == nil {
 				if err := copyBackup(path, availableBackup(path, installer.stamp)); err != nil {
 					return err

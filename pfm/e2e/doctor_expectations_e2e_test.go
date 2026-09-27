@@ -23,3 +23,18 @@ func schedulerRowWarnings(output string) int {
 	}
 	return 0
 }
+
+// claudePluginRowWarnings counts doctor's claude_plugins gap rows. The jail's
+// stub claude exits 0 on `plugin install` without writing enabledPlugins, so
+// every gap the install could not close stays a warning — a property of the
+// stub, added to the tally the same way the scheduler row is.
+func claudePluginRowWarnings(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "doctor: claude_plugins claude[") &&
+			strings.HasSuffix(line, " — run pfm install --yes") {
+			count++
+		}
+	}
+	return count
+}

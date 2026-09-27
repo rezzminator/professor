@@ -296,6 +296,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.wireSettings(); err != nil {
 		return err
 	}
+	// A failed plugin install is reported at once and fails the run only
+	// after every later step has landed.
+	pluginErr := installer.ensureClaudePlugins(ctx)
 	if err := installer.wireCodexHooks(); err != nil {
 		return err
 	}
@@ -325,7 +328,7 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.writeUpdateMetadata(); err != nil {
 		return err
 	}
-	return nil
+	return pluginErr
 }
 
 // wireCodexAgents runs on every install: it serves the Claude agent

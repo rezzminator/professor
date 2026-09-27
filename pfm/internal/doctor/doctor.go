@@ -261,6 +261,7 @@ func Run(
 	overlayWarnings, overlayFailures := printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
 	tally.warnings += overlayWarnings
 	tally.failures += overlayFailures
+	printClaudePluginsDoctor(stdout, runtime.Config, tally)
 	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalAgents(
 		stdout,
 		resolved.Home,

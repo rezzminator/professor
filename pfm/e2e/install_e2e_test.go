@@ -881,7 +881,7 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 		"doctor: pre-push gate=armed core.hooksPath=.githooks",
 		"doctor: harness-prompt: matches baseline",
 		"doctor: service-manager=",
-		fmt.Sprintf("doctor: warnings=%d", 2+schedulerRowWarnings(output)),
+		fmt.Sprintf("doctor: warnings=%d", 2+schedulerRowWarnings(output)+claudePluginRowWarnings(output)),
 	} {
 		if !strings.Contains(output, want) {
 			h.t.Fatalf(

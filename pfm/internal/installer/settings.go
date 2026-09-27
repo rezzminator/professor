@@ -64,6 +64,9 @@ func updateSettings(
 		document["cleanupPeriodDays"] = float64(36500)
 		changed = true
 	}
+	if !uninstall && addClaudeEnvDefaults(document) {
+		changed = true
+	}
 
 	// pfm's own `pfm statusline` historically read token usage from stale
 	// internal state; overlayStatusCommand (~/.local/bin/pfm-statusline,

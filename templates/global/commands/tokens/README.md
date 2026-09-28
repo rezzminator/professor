@@ -101,7 +101,8 @@ The window comes from the flight, not from `--since`. Bounded: the text stays un
 whatever the flight's size.
 
 One row per agent — task id, agent type, engine, model, calls, wall time, start context, peak
-context, growth per call, input / cached / output tokens, price, failed commands, poll calls,
+context, growth per call, input / cached / output tokens, cache TTL (`5m`, `1h`, or `1h N%`
+when it wrote both), price, failed commands, poll calls,
 re-reads, contract-file reads (`CLAUDE.md` / `AGENTS.md`), compactions, over cap, matched —
 then totals per agent type, the flight total, the three most expensive agents, the gaps line
 and the cross-check line.

@@ -18,7 +18,7 @@ node ~/.claude/commands/tokens/token-audit.mjs [flags]
 
 - Where did the last day go: no flags — the default report, bounded, with `data gaps:` and `CROSS-CHECK` lines.
 - A longer window, one repo: `--since 3d --project <substr>`.
-- Heaviest single runs: section `9 · TOP SINGLE RUNS`; heaviest agent groups: section `8`.
+- Heaviest single runs: section `9 · TOP SINGLE RUNS`; heaviest agent groups: section `8`; both carry each row's cache TTL (`5m`, `1h`, or `1h N%` when mixed).
 - One chat and its agents: `--family <title|agent-type|session-id-prefix>`, or `--session <sid-prefix>` when a sub-agent orchestrated the work and no chat title exists.
 - Codex threads: `--codex` — one row per rollout thread, sub-agents attributed from `session_meta.source`.
 - One flight's agents: `--flight <dir>` — see below.
@@ -30,7 +30,7 @@ node ~/.claude/commands/tokens/token-audit.mjs [flags]
 node ~/.claude/commands/tokens/token-audit.mjs --flight $HOME/.local/state/pfm/flights/{project}/<name>
 ```
 
-Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report. One row per agent: task id, agent type, engine, model, calls, wall time, start and peak context, growth per call, input/cached/output tokens, price, failed commands, poll calls, re-reads, contract-file reads, compactions, over-cap, and how the row was matched. Then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line. The text stays under ~200 lines whatever the flight's size.
+Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report. One row per agent: task id, agent type, engine, model, calls, wall time, start and peak context, growth per call, input/cached/output tokens, cache TTL (`5m`, `1h`, `1h N%` when mixed), price, failed commands, poll calls, re-reads, contract-file reads, compactions, over-cap, and how the row was matched. Then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line. The text stays under ~200 lines whatever the flight's size.
 
 The join key is `<dir>/agents.tsv` — append-only, tab-separated, one row per spawn, header line optional:
 

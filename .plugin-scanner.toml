@@ -1,0 +1,13 @@
+# HOL AI Plugin Scanner config, auto-discovered by .github/workflows/plugin-scan.yml.
+#
+# These test files plant fake, credential-shaped strings on purpose: each test
+# proves the code under test scrubs, refuses or never prints a credential. None
+# is a real key. Each path is named exactly, never globbed, so a secret-shaped
+# string in any other file still fails the scan.
+[scanner]
+ignore_paths = [
+  "infra/fence/lanes/tests/creds_test.sh",
+  "pfm/internal/harvestmcp/auth_test.go",
+  "pfm/internal/obs/recover_test.go",
+  "pfm/internal/obs/scrub_test.go",
+]

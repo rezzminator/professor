@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -140,9 +141,9 @@ func ApplyLayout(
 					stdout,
 					"  warn    layout managed-cleanup %s — sudo -n needs cached credentials; run: sudo mkdir -p %s && printf '%%s\\n' '{\"cleanupPeriodDays\":%d}' | sudo tee %s >/dev/null\n",
 					current.Path,
-					filepath.Dir(current.Path),
+					shellCommandLine(filepath.Dir(current.Path)),
 					env.Config.Claude.CleanupPeriodDays,
-					current.Path,
+					shellCommandLine(current.Path),
 				)
 			} else {
 				detail := strings.TrimPrefix(err.Error(), errLayoutRefuse.Error()+": ")
@@ -293,19 +294,12 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 				return err
 			}
 			defer func() { _ = os.Remove(tmp) }()
-			fmt.Fprintf(stdout, "sudo -n install -D -m 0644 %s %s\n", tmp, finding.Path)
-			if err := env.commandRunner().Run(
-				ctx,
-				"sudo",
-				"-n",
-				"install",
-				"-D",
-				"-m",
-				"0644",
-				tmp,
-				finding.Path,
-			); err != nil {
-				return fmt.Errorf("%w: sudo -n install declined: %v", errLayoutAdvisory, err)
+			for _, args := range managedInstallArgs(tmp, finding.Path) {
+				sudoArgs := append([]string{"-n"}, args...)
+				fmt.Fprintln(stdout, "sudo "+shellCommandLine(sudoArgs...))
+				if err := env.commandRunner().Run(ctx, "sudo", sudoArgs...); err != nil {
+					return fmt.Errorf("%w: sudo -n %s declined: %v", errLayoutAdvisory, args[0], err)
+				}
 			}
 			return nil
 		})
@@ -659,4 +653,28 @@ func (env LayoutEnv) commandRunner() CommandRunner {
 		return env.runner
 	}
 	return execCommandRunner{}
+}
+
+// installProgram is install(1), which managedInstallArgs runs under sudo on
+// both kernels.
+const installProgram = "install"
+
+// shellCommandLine joins words into one POSIX shell line a person can paste:
+// a word of only safe characters stays bare, any other is single-quoted, so a
+// path holding a space (the macOS managed dir) stays one word.
+func shellCommandLine(words ...string) string {
+	quoted := make([]string, len(words))
+	for index, word := range words {
+		if word != "" && strings.IndexFunc(word, func(r rune) bool { return !shellSafeRune(r) }) < 0 {
+			quoted[index] = word
+		} else {
+			quoted[index] = action.Quote(word)
+		}
+	}
+	return strings.Join(quoted, " ")
+}
+
+// shellSafeRune reports whether r needs no shell quoting.
+func shellSafeRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_@%+=:,./-", r)
 }

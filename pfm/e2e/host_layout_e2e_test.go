@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -279,12 +280,25 @@ func plantHostInstallerDrift(t *testing.T, home string) {
 	if err := os.WriteFile(asset, append(body, []byte("# drift\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, relative := range []string{
-		".config/systemd/user/default.target.wants/pfm-name-sync.path",
-	} {
-		if err := os.Remove(filepath.Join(home, relative)); err != nil {
+	if runtime.GOOS == "darwin" {
+		// launchd has no enablement link: the plist is both unit and
+		// enablement, so its drifted body is what install must rewrite.
+		plist := filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist")
+		body, err := os.ReadFile(plist)
+		if err != nil {
 			t.Fatal(err)
 		}
+		drifted := strings.Replace(string(body), "</plist>", "<!-- drift -->\n</plist>", 1)
+		if drifted == string(body) {
+			t.Fatalf("launch agent %s has no </plist> to drift", plist)
+		}
+		if err := os.WriteFile(plist, []byte(drifted), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.Remove(
+		filepath.Join(home, ".config", "systemd", "user", "default.target.wants", "pfm-name-sync.path"),
+	); err != nil {
+		t.Fatal(err)
 	}
 	for _, directory := range []string{".claude/commands", ".claude/agents", ".codex/agents"} {
 		entries, err := os.ReadDir(filepath.Join(home, directory))

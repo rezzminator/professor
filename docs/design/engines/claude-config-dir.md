@@ -1,6 +1,6 @@
 # Claude config dir
 
-What pfm places on disk for Claude Code: one shared session store every account reads, the per-account dirs that keep only identity, the one managed setting at `/etc/claude-code/`, and the registry links. Launch-time values are not files — they ride the command line ([claude-launch.md](claude-launch.md)). Moving an older host onto this layout is [host-migration.md](host-migration.md).
+What pfm places on disk for Claude Code: one shared session store every account reads, the per-account dirs that keep only identity, the one managed setting in Claude Code's system directory, and the registry links. Launch-time values are not files — they ride the command line ([claude-launch.md](claude-launch.md)). Moving an older host onto this layout is [host-migration.md](host-migration.md).
 
 `{config dir}` is one account's `configDir` from `pfm.config.json`; the implicit account's is `~/.claude`.
 
@@ -47,14 +47,14 @@ Per account, owned by Claude Code: `.credentials.json`, `.claude.json` (login, o
 
 ## Managed settings
 
-`pfm install` writes `/etc/claude-code/managed-settings.d/pfm.json`:
+`pfm install` writes `pfm.json` into Claude Code's `managed-settings.d/` — `/etc/claude-code/managed-settings.d/` on Linux, `/Library/Application Support/ClaudeCode/managed-settings.d/` on macOS, the only managed location Claude reads there (`PFM_MANAGED_SETTINGS_DIR` overrides it in a test jail):
 
 ```json
 { "cleanupPeriodDays": 36500 }
 ```
 
 - It is a drop-in: pfm owns only its own file in `managed-settings.d/` and never touches `managed-settings.json` or another file there.
-- Writing it needs root; `pfm install` runs that one step through `sudo`, printing the exact command first, and continues without it when refused — doctor then warns.
+- Writing it needs root; `pfm install` runs that one step through `sudo`, printing the exact command first, and continues without it when refused — doctor then warns. Linux runs `install -D`; BSD `install` has no `-D`, so macOS runs `mkdir -p` then `install`. The macOS path holds a space: every printed command quotes it.
 - The value comes from `claude.cleanupPeriodDays`; the launch `--settings` carries the same value.
 - Claude reads managed settings for every account and every launch path, and nothing below them overrides the value.
 
@@ -102,7 +102,7 @@ A link in the way is replaced, a regular file is backed up first, a foreign targ
 
 ### managed-cleanup
 
-The missing-file line names `/etc/claude-code/managed-settings.d/pfm.json` and warns that any Claude launch outside pfm can delete transcripts older than 30 days. `claude.requireManagedCleanup: false` silences the check; doctor prints `managed-cleanup: check off by config`.
+The missing-file line names the platform's `managed-settings.d/pfm.json` and warns that any Claude launch outside pfm can delete transcripts older than 30 days. `claude.requireManagedCleanup: false` silences the check; doctor prints `managed-cleanup: check off by config`.
 
 ### legacy
 

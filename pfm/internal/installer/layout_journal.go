@@ -538,7 +538,12 @@ func restoreLayoutRecord(ctx context.Context, record layoutJournalRecord) error 
 	if record.Backup == "" {
 		return runner.Run(ctx, "sudo", "rm", "-f", record.Destination)
 	}
-	return runner.Run(ctx, "sudo", "install", "-D", "-m", "0644", record.Backup, record.Destination)
+	for _, args := range managedInstallArgs(record.Backup, record.Destination) {
+		if err := runner.Run(ctx, "sudo", args...); err != nil {
+			return fmt.Errorf("restore %s through sudo %s: %w", record.Destination, args[0], err)
+		}
+	}
+	return nil
 }
 
 func layoutRecordAllowed(env LayoutEnv, record layoutJournalRecord) bool {

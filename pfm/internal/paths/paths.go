@@ -408,7 +408,7 @@ func Resolve() (Values, error) {
 		ArchiveDir:         filepath.Join(home, ".claude-archive"),
 		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 		ProcRoot:           EnvOr(EnvProcRoot, "/proc"),
-		ManagedSettingsDir: EnvOr(EnvManagedSettingsDir, "/etc/claude-code/managed-settings.d"),
+		ManagedSettingsDir: EnvOr(EnvManagedSettingsDir, defaultManagedSettingsDir),
 		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil
 }

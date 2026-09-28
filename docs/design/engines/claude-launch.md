@@ -33,7 +33,7 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 
 ## How Claude layers its settings
 
-Claude Code's own precedence, highest first: managed settings (`/etc/claude-code/`) → command line (`--settings`, flags) → `.claude/settings.local.json` → `.claude/settings.json` → the account's `settings.json`. A settings `env` entry overwrites the same variable exported in the shell. A flag beats its settings key (`--model` over `model`). Hooks merge across every layer rather than replacing each other.
+Claude Code's own precedence, highest first: managed settings (`/etc/claude-code/` on Linux, `/Library/Application Support/ClaudeCode/` on macOS) → command line (`--settings`, flags) → `.claude/settings.local.json` → `.claude/settings.json` → the account's `settings.json`. A settings `env` entry overwrites the same variable exported in the shell. A flag beats its settings key (`--model` over `model`). Hooks merge across every layer rather than replacing each other.
 
 pfm writes at two layers only: managed settings for the one value that must survive any launch path ([claude-config-dir.md](claude-config-dir.md#managed-settings)), and the command line for everything else.
 

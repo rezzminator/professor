@@ -317,6 +317,16 @@ func runInstallE2E(t *testing.T) {
 		harness.assertInstalled(home)
 		result = harness.pfm(home, "doctor")
 		harness.requireSkippedHarvestDoctor(result)
+		// Claude Code reads managed settings only from its platform's system
+		// directory: the drop-in must land there, not merely where doctor looks.
+		managedDropIn := "/etc/claude-code/managed-settings.d/pfm.json"
+		if runtime.GOOS == "darwin" {
+			managedDropIn = "/Library/Application Support/ClaudeCode/managed-settings.d/pfm.json"
+		}
+		if raw, readErr := os.ReadFile(managedDropIn); readErr != nil ||
+			!strings.Contains(string(raw), `"cleanupPeriodDays":`) {
+			t.Fatalf("managed drop-in %s = %q, err=%v", managedDropIn, raw, readErr)
+		}
 		var err error
 		fresh, err = harness.snapshot(home)
 		if err != nil {

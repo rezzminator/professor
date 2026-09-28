@@ -318,7 +318,7 @@ func TestResolveManagedSettingsDirUsesJailOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ManagedSettingsDir != "/etc/claude-code/managed-settings.d" {
+	if got.ManagedSettingsDir != wantDefaultManagedSettingsDir {
 		t.Fatalf("default managed settings dir=%q", got.ManagedSettingsDir)
 	}
 }

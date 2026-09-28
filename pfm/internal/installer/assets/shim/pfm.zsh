@@ -38,6 +38,13 @@ _pfm_primary() { local n; n="$("$HOME/.local/bin/pfm" internal primary-get 2>/de
 # transcript, so pfm recognizes (and lists) a live Codex chat by socket name alone. Claude
 # accounts / ⚡1h don't apply — codex has its own single auth (~/.codex).
 cx() {
+  # A non-interactive shell (an agent tool shell replaying a snapshot, a script) has no terminal
+  # to attach or hand back, and a snapshot may have dropped every `_`-prefixed helper — so cx
+  # refuses there, loudly, and names the door that starts a detached Codex chat instead.
+  [[ -o interactive ]] || {
+    print -u2 -r -- "cx: needs an interactive terminal; from a script use: pfm chat new {name} --engine codex"
+    return 1
+  }
   local sock="cx-$(date +%s)-$$-$RANDOM"
   # PER-ELEMENT quoting, then join: "${(q)@}" joins the
   # array into ONE word FIRST and quotes that, so `cx --resume abc123` arrives as a single

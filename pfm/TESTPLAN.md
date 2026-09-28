@@ -679,7 +679,7 @@ The Go action policy owns fresh Claude launches. The binary executes selected ac
 | Auto-open runs once after shell startup; legacy profile values open the picker | JAIL+sh | `internal/installer/shim/shim_test.go` |
 | `cx` creates its server detached through `pfm internal chat-server` (no tmux call of its own), then attaches; a failed creation stops `cx` with pfm's reason | JAIL+sh | `internal/installer/shim/chat_server_shim_test.go` |
 | `_pfm_selfswitch` prevents nesting the same server | JAIL+tmux | `internal/installer/shim/shim_test.go` |
-| `_pfm_own_terminal` preserves scripts/nested chats and closes owned terminals | JAIL+sh | `internal/installer/shim/shim_test.go` |
+| `_pfm_own_terminal` preserves scripts/nested chats and closes owned terminals | JAIL+sh | `internal/installer/shim/shim_test.go` (`TestPfmOwnTerminalClosesOwnedAndPreservesOthers`) |
 
 ## J — Internal wiring and store
 

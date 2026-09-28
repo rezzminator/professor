@@ -79,13 +79,66 @@ func TestCxHandsArgumentsToCodexLaunch(t *testing.T) {
 		"_cx_server() { print -r -- \"$3\" }\n" +
 		"_pfm_selfswitch() { return 0 }\n" +
 		"cx --resume 'literal prompt'\n"
-	output, err := jailedZshCommand(zsh, script, home).CombinedOutput()
+	// cx() only runs its terminal dance under `[[ -o interactive ]]` (F11), so this drives it
+	// with `-i` even without a tty: real interactivity is covered separately by
+	// TestBareCodexLaunchExecsTheTerminalOwner over a PTY.
+	command := jailedZshCommand(zsh, script, home)
+	command.Args = append([]string{command.Args[0], "-i"}, command.Args[1:]...)
+	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("cx: %v: %s", err, output)
 	}
 	want := `"` + filepath.Join(home, ".local", "bin", "pfm") + `" internal codex-launch --resume literal\ prompt`
 	if strings.TrimSpace(string(output)) != want {
 		t.Fatalf("run=%q, want %q", output, want)
+	}
+}
+
+// TestClaudeCodexCxSkipTerminalOwnershipWithoutHelpers pins F11: an agent tool
+// shell replays a snapshot of the shim that keeps claude()/codex()/cx() but
+// drops every `_`-prefixed helper, and is never interactive. All three must
+// still run their underlying command and return its exit status cleanly —
+// no "command not found" from a terminal-ownership call the guard should
+// have skipped.
+func TestClaudeCodexCxSkipTerminalOwnershipWithoutHelpers(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	home := t.TempDir()
+	binDir := filepath.Join(home, ".local", "bin")
+	fakeBin := filepath.Join(home, "fakebin")
+	for _, directory := range []string{binDir, fakeBin} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeShimFile(t, filepath.Join(binDir, "pfm"), "#!/bin/sh\nexit 0\n")
+	writeShimFile(t, filepath.Join(binDir, "claude"), "#!/bin/sh\nexit 7\n")
+	writeShimFile(t, filepath.Join(fakeBin, "codex"), "#!/bin/sh\nexit 9\n")
+	script := "source " + quoteZsh(embeddedShimPath(t)) + "\n" +
+		// Simulate the snapshot: every `_`-prefixed helper is gone, but the
+		// three callable functions survive.
+		"unfunction -m '_*'\n" +
+		"claude; print -r -- \"claude=$?\"\n" +
+		"codex; print -r -- \"codex=$?\"\n" +
+		"cx --resume x; print -r -- \"cx=$?\"\n"
+	command := jailedZshCommand(
+		zsh, script, home,
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("claude/codex/cx without helpers: %v: %s", err, output)
+	}
+	got := string(output)
+	for _, want := range []string{"claude=7", "codex=9", "cx: needs an interactive terminal", "cx=1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output=%q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "not found") || strings.Contains(got, "command not found") {
+		t.Fatalf("a terminal-ownership helper was called although undefined: %q", got)
 	}
 }
 
@@ -161,6 +214,64 @@ case " $* " in *" attach "*) printf '%s\n' "$$" > "$SHIM_TMUX_PID" ;; esac
 	if got != want {
 		t.Fatalf("tmux pid=%s, shell pid=%s: Codex launch forked and left an outer terminal shell", got, want)
 	}
+}
+
+// TestPfmOwnTerminalClosesOwnedAndPreservesOthers pins `_pfm_own_terminal`
+// itself (TESTPLAN.md's J row), not just a caller that happens to reach it:
+// an owned bare terminal is closed (the process exits, nothing after it
+// runs), while a shell that does not own its terminal — a script, a nested
+// chat pane — is preserved: the function returns the exit status instead of
+// ending the shell.
+func TestPfmOwnTerminalClosesOwnedAndPreservesOthers(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	shimPath := embeddedShimPath(t)
+
+	t.Run("closes an owned bare terminal", func(t *testing.T) {
+		if _, err := exec.LookPath("script"); err != nil {
+			t.Skip("script is not installed")
+		}
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), "#!/bin/sh\nexit 0\n")
+		driver := filepath.Join(home, "driver.zsh")
+		writeShimFile(t, driver,
+			"source "+quoteZsh(shimPath)+"\n"+
+				"_pfm_own_terminal 0\n"+
+				"print -r -- UNREACHABLE\n",
+		)
+		command := testjail.PTYCommand(zsh, "-fi", driver)
+		command.Env = append(os.Environ(), "HOME="+home, "TMUX=", "TERM=dumb")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("owned terminal: %v: %s", err, output)
+		}
+		if strings.Contains(string(output), "UNREACHABLE") {
+			t.Fatalf("an owned terminal kept running past _pfm_own_terminal: %q", output)
+		}
+	})
+
+	t.Run("preserves a script or nested-chat shell", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), "#!/bin/sh\nexit 0\n")
+		script := "source " + quoteZsh(shimPath) + "\n" +
+			"_pfm_own_terminal 3\n" +
+			"print -r -- \"after=$?\"\n"
+		output, err := jailedZshCommand(zsh, script, home).CombinedOutput()
+		if err != nil {
+			t.Fatalf("non-owning shell: %v: %s", err, output)
+		}
+		if !strings.Contains(string(output), "after=3") {
+			t.Fatalf("a non-owning shell was not preserved: %q", output)
+		}
+	})
 }
 
 func TestShimAutoOpenDefersDisarmsAndMapsLegacyValuesToPicker(t *testing.T) {

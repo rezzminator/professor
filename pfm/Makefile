@@ -192,7 +192,7 @@ install: ## Swap in a new build, restart the daemon, sweep obsolete processes, a
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1
+host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refused check on an unmigrated host unless SKIP_INSTALL_CHECK=1
 	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
 	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
 	@# build even starts — $(BIN) is never touched. FORCE=1 in the
@@ -205,10 +205,37 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap
 	reported="$$("$$tmp" --version 2>&1)" || { echo "host-install: smoke test FAILED ($$reported) — $(BIN) untouched" >&2; exit 1; }; \
 	case "$$reported" in *"$(VERSION)"*) ;; \
 	  *) echo "host-install: smoke test reported '$$reported', not $(VERSION) — $(BIN) untouched" >&2; exit 1;; esac; \
+	if [ "$${SKIP_INSTALL_CHECK:-}" = 1 ]; then \
+	  echo "host-install: SKIPPED the install check (SKIP_INSTALL_CHECK=1) — pfm install --check not run" >&2; \
+	else \
+	  checkrc=0; checked="$$("$$tmp" install --check 2>&1)" || checkrc=$$?; \
+	  if [ $$checkrc -eq 0 ]; then echo "$$checked"; else \
+	    printf '%s\n' "$$checked" >&2; \
+	    probe=0; bash "$(REPO)/pfm/scripts/host-migration-probe.sh" "$$tmp" >/dev/null 2>&1 || probe=$$?; \
+	    if [ $$probe -eq 0 ]; then \
+	      echo "host-install: WARNING — the new binary's install check refuses (exit $$checkrc), but this host is migrated, so the new binary reads its config; swapping — resolve the above before the next pfm install --yes" >&2; \
+	    elif [ $$checkrc -eq 4 ]; then \
+	      echo "host-install: the new binary's install gate refuses this host — $(BIN) untouched; close what it names (every Claude chat, Claude's daemon and bg-spare sessions: claude daemon stop --any) and rerun" >&2; \
+	      exit 1; \
+	    else \
+	      echo "host-install: the new binary's install check FAILED (exit $$checkrc) — $(BIN) untouched; fix the error above and rerun" >&2; \
+	      exit 1; \
+	    fi; \
+	  fi; \
+	fi; \
 	kept=""; if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev" && kept="; previous kept at $(BIN).prev"; fi; \
 	mv -f "$$tmp" "$(BIN)"; \
 	echo "installed: $(BIN) ($$reported$$kept)"; \
 	bash "$(REPO)/pfm/scripts/host-migration-probe.sh" "$(BIN)" || true
+	@# The new binary answers `pfm install --check` BEFORE the swap: every
+	@# refusal `pfm install --yes` makes before its first change. On a host
+	@# whose config waits for that install (host-migration-probe.sh asked of the
+	@# new binary: not 0), a refusal keeps $(BIN): the new binary would refuse
+	@# the old config everywhere, the shim's `claude` included, and the install
+	@# that migrates it would refuse too. Exit 4 is the gate's refusal; any other
+	@# non-zero is a refusal before the gate or a check that could not answer. On
+	@# a migrated host a refusal is a WARNING and the swap goes ahead.
+	@# SKIP_INSTALL_CHECK=1 skips the check; FORCE=1 is the downgrade guard's.
 	@# Never write onto the running path directly: an executing binary gives
 	@# ETXTBSY. The build lands BESIDE the target — same directory, same
 	@# filesystem — so the final mv is a rename(2): atomic, never a

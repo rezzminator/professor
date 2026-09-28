@@ -47,10 +47,11 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--check] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
+	check := flags.Bool("check", false, "answer whether --yes would refuse before any change (exit 4: the gate would)")
 	rollback := flags.String("rollback", "", "replay a layout journal backwards")
 	force := flags.Bool("force", false, "with --rollback: overwrite destinations changed since the install")
 	vscode := flags.Bool(
@@ -65,7 +66,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
-	if flags.NArg() != 0 {
+	if flags.NArg() != 0 || *check && *yes {
 		flags.Usage()
 		return 2
 	}
@@ -119,7 +120,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			"--config %s does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)",
 			runtime.Config.Path,
 		)
-		if mode == installer.ModeApply {
+		if mode == installer.ModeApply || *check {
 			fmt.Fprintf(stderr, "pfm install: %s\n", refusal)
 			return 1
 		}
@@ -153,7 +154,8 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		return options
 	}
 	layoutFindings := installer.ClassifyLayout(layoutEnv)
-	if mode == installer.ModeApply {
+	// --check runs the apply's refusals up to its gate, then answers there.
+	if mode == installer.ModeApply || *check {
 		planOptions := func(runtime commandRuntime) installer.Options {
 			return withFlags(
 				newInstallerOptions(installer.ModeDryRun, *configDir, *skipHarvest, io.Discard, io.Discard, runtime),
@@ -162,6 +164,9 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		if code := installSpacePreflight(layoutEnv, layoutFindings, runtime, planOptions, stderr); code != 0 {
 			return code
 		}
+	}
+	if *check {
+		return installer.RunInstallCheck(layoutEnv, layoutFindings, stdout, stderr)
 	}
 	journalDir, err := installer.ApplyLayout(
 		context.Background(), layoutEnv, journal, mode == installer.ModeApply, stdout,

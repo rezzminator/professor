@@ -266,7 +266,7 @@ func TestInstallUsesOnlyTheNewSurface(t *testing.T) {
 			}
 			if !strings.Contains(
 				stderr.String(),
-				"usage: pfm install [--yes] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+				"usage: pfm install [--yes] [--check] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 			) {
 				t.Fatalf("runInstall(%q) stderr=%q, want new usage", retired, stderr.String())
 			}

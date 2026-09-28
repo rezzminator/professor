@@ -226,7 +226,18 @@ cross by hand:
 
 The older `pfm update` rolls itself back first, so nothing changed. Run the crossing commands from a plain shell outside tmux after it exits.
 
-Between `make host-install` and `pfm install --yes`, the new binary sees a config it has not migrated yet. These refuse with `config not migrated: run pfm install` until the migration: `pfm-mcp.service` and the name-sync units (the launch agents on macOS); the Claude hooks (a non-blocking error in every chat); a `claude` launch through the shim; `pfm mcp serve --stdio`; `pfm update`. These still answer: `pfm --version`, `pfm doctor`, the statusline, `pfm config show|validate`, `make stale`, `make mcp-status` and `make sweep-stale`. `make host-install` names the window and exits 0:
+Between `make host-install` and `pfm install --yes`, the new binary sees a config it has not migrated yet. These refuse with `config not migrated: run pfm install` until the migration: `pfm-mcp.service` and the name-sync units (the launch agents on macOS); the Claude hooks (a non-blocking error in every chat); a `claude` launch through the shim; `pfm mcp serve --stdio`; `pfm update`. These still answer: `pfm --version`, `pfm doctor`, the statusline, `pfm config show|validate`, `make stale`, `make mcp-status` and `make sweep-stale`.
+
+Before the swap, `make host-install` asks the new binary `pfm install --check`. It runs every refusal `pfm install --yes` makes before its first change (a `--config` that does not exist, the space preflight, the install gate), moves nothing and writes nothing but pfm's own activity log. It exits 0 when all would pass, 4 when the gate would refuse, and 1 when an earlier refusal fires or the check cannot read what it needs. When the new binary would refuse this host's config (a migration is pending), a non-zero answer keeps the installed `pfm`, so the window never opens on a host whose migration would itself refuse:
+
+```text
+install check: blocked — close what it names, then rerun make -C <clone>/pfm host-install
+host-install: the new binary's install gate refuses this host — ~/.local/bin/pfm untouched; close what it names (every Claude chat, Claude's daemon and bg-spare sessions: claude daemon stop --any) and rerun
+```
+
+The gate counts a chat as live from its `{account}/sessions/{pid}.json` file. Claude Code's background daemon and its `bg-spare` sessions write those files too, so they count; `claude daemon stop --any` ends them. On a host already migrated, the same answer prints as a `host-install: WARNING` and the swap goes ahead, because the new binary reads that config. `SKIP_INSTALL_CHECK=1 make host-install` skips the check with a SKIPPED line; `FORCE=1` passes only the downgrade guard.
+
+Once the check passes, `make host-install` swaps the binary, names the window and exits 0:
 
 ```text
 host-install: binary swapped; pfm refuses until `pfm install --yes` migrates this host — run it now

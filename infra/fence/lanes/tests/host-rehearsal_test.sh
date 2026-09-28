@@ -37,13 +37,25 @@ mk_home() {
   rm -rf "$FH"
   mkdir -p "$FH/.claude/projects/p0" "$FH/.cc/2/projects/p1" "$FH/.local/share/pfm/install" \
     "$FH/.local/state/pfm" "$FH/.local/bin" "$FH/.config/pfm"
-  echo '{}' >"$FH/.config/pfm/pfm.config.json"
+  printf '{"codex":{"homes":[{"home":"%s/.codex","id":1}]}}\n' "$FH" >"$FH/.config/pfm/pfm.config.json"
   echo a >"$FH/.claude/projects/p0/a.jsonl"
   echo s1 >"$FH/.cc/2/projects/p1/s1.jsonl"
   echo s2 >"$FH/.cc/2/projects/p1/s2.jsonl"
   chmod 600 "$FH/.cc/2/projects/p1/s2.jsonl"
   ln -s ../.claude/projects/p0 "$FH/.cc/p0-link"
-  printf '#!/bin/sh\necho old\n' >"$FH/.local/bin/pfm"
+  # the pre-migration binary: like 938b4a5e, a legacy config naming a Codex home
+  # whose auth.json is missing or invalid refuses every command
+  cat >"$FH/.local/bin/pfm" <<'OLD'
+#!/usr/bin/env bash
+cfg="$HOME/.config/pfm/pfm.config.json"
+if [ -e "$cfg" ]; then
+  for h in $(jq -r '.codex.homes[]?.home // empty' "$cfg"); do
+    jq -e '.tokens.access_token and .tokens.account_id' "$h/auth.json" >/dev/null 2>&1 ||
+      { echo "pfm: config: config $cfg: codex.homes[0] must contain a valid auth.json" >&2; exit 1; }
+  done
+fi
+echo old
+OLD
   chmod 755 "$FH/.local/bin/pfm"
   printf '%s\n' "$FH/.professor" >"$FH/.local/share/pfm/install/source-repo"
   # The clone's migrated configs: install-written, beside the tracked tree.

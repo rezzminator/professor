@@ -224,7 +224,7 @@ cmd_rehearse() {
   if [ -e "$scratch" ] && [ -n "$(ls -A "$scratch" 2>/dev/null)" ]; then
     die "SCRATCH $scratch exists and is not empty — refusing to touch it"
   fi
-  for tool in sqlite3 sha256sum rsync git; do
+  for tool in sqlite3 sha256sum rsync git jq; do
     command -v "$tool" >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — $tool not on PATH"
   done
   command -v docker >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — docker not on PATH"
@@ -484,6 +484,19 @@ EOF
   [ ${#cmds[@]} -gt 0 ] || cmds=("make -C $qclone/pfm rollback")
   cmds+=("$qpfm ls")
   : >"$R/pair.log"
+  # A backup never carries credentials, and the pre-migration binary refuses a
+  # config naming a Codex home without a valid auth.json: each such home in the
+  # scratch copy (never the backup) gets a placeholder, after hash-after.
+  local cfg="$H/.config/pfm/pfm.config.json" ch
+  if [ -f "$cfg" ]; then
+    while IFS= read -r ch; do
+      case $ch in "$home"/*) ch=$H/${ch#"$home"/} ;; *) continue ;; esac
+      [ -f "$ch/auth.json" ] && continue
+      mkdir -p "$ch" && printf '{"tokens":{"access_token":"rehearsal","account_id":"rehearsal"}}\n' >"$ch/auth.json" ||
+        fail pair "placeholder $ch/auth.json could not be written"
+      printf '# placeholder credential: %s/auth.json\n' "$ch" >>"$R/pair.log"
+    done < <(jq -r '.codex.homes[]? | if type == "object" then .home else . end // empty' "$cfg" 2>/dev/null)
+  fi
   for c in "${cmds[@]}"; do
     printf '$ %s\n' "$c" >>"$R/pair.log"
     inside "$c" >"$R/pair.last.log" 2>&1

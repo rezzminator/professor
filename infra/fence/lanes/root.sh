@@ -135,11 +135,19 @@ docker rm -f "$BUILD" >/dev/null 2>&1
 # shellcheck source=container.sh
 . "$HERE/container.sh"
 FENCE_CALLER=lanes-root lane_fence_env "$ROOT"
+# shellcheck source=../housekeeping.sh
+. "$HERE/../housekeeping.sh"
+fence_housekeeping
+# The build container goes first, then the pin it held — on every exit path
+# (commit, step failure, fatal, Ctrl-C), so pfm-lane-base:<hash> never outlives
+# its build.
+cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; lane_base_release "$HASH"; }
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 BASE="$(lane_base_image "$ROOT" "$HASH")" || fatal "the pfm-dev fence image could not be built"
-say "base image $BASE (pinned, so a concurrent dev.sh iso rebuild cannot orphan it)"
+say "base image $BASE (pinned for this build, so a concurrent dev.sh iso rebuild cannot orphan it)"
 lane_run "$BUILD" "$BASE" || fatal "the fence container would not start from $BASE"
 
-cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; }
 step_failed() { # step_failed <step> <exit>
   echo "root: ✗ $1 failed (exit $2) — output above; no image was tagged" >&2
   cleanup

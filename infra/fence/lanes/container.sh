@@ -5,6 +5,7 @@
 #
 #   . "$HERE/container.sh"
 #   lane_base_image <hash>          # build the fence image and pin it privately
+#   lane_base_release <hash>        # drop that pin once the root build ends
 #   lane_run <name> <image>         # start a detached lane container from it
 #
 # Why the private tag: the fence image `professor-pfm-dev` is rebuilt by every
@@ -34,6 +35,13 @@ lane_base_image() { # lane_base_image <root> <hash> — prints the pinned base t
   docker compose -f "$root/infra/fence/docker-compose.yml" build pfm-dev >&2 || return 1
   docker tag professor-pfm-dev "$base" || return 1
   printf '%s\n' "$base"
+}
+
+lane_base_release() { # lane_base_release <hash> — drops the pin once the build window closes
+  # The pin only guards the build container's lifetime; the committed root
+  # image keeps the layers it needs. `rmi` without -f only untags a shared
+  # image and refuses one a container still uses. Never fails the caller.
+  docker rmi "pfm-lane-base:$1" >/dev/null 2>&1 || true
 }
 
 lane_run() { # lane_run <name> <image> — a detached lane container, fence contract

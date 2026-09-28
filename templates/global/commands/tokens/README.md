@@ -65,7 +65,12 @@ Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/pr
 
 Writes `<dir>/metrics.md` (or `--metrics-out FILE`) and prints it; `--out FILE` adds JSON. The window comes from the flight, not from `--since`. Bounded: the text stays under ~200 lines whatever the flight's size.
 
-One row per agent — task id, agent type, engine, model, calls, wall time, start context, peak context, growth per call, input / cached / output tokens, price, failed commands, poll calls, re-reads, contract-file reads (`CLAUDE.md` / `AGENTS.md`), compactions, over cap, matched — then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line.
+One row per agent — task id, agent type, engine, model, calls, wall time, start context, peak
+context, growth per call, input / cached / output tokens, cache TTL (`5m`, `1h`, or `1h N%`
+when it wrote both), price, failed commands, poll calls,
+re-reads, contract-file reads (`CLAUDE.md` / `AGENTS.md`), compactions, over cap, matched —
+then totals per agent type, the flight total, the three most expensive agents, the gaps line
+and the cross-check line.
 
 The join key is `<dir>/agents.tsv`, append-only, tab-separated, one row per spawn, header optional:
 

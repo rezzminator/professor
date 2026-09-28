@@ -363,3 +363,37 @@ test("--timeline: a transcript with no .meta.json beside it names the agent type
 });
 
 test.after(() => fs.rmSync(TMP, { recursive: true, force: true }));
+
+// A copy of the fixture root where a1 writes only to the 1-hour cache, c3 writes one call's
+// context there and the rest to 5 minutes, and b2 stays 5-minute: the TTL label per agent.
+function ttlRoot() {
+  const root = fs.mkdtempSync(path.join(TMP, "ttl-"));
+  fs.cpSync(CLAUDE_ROOT, root, { recursive: true });
+  const sub = path.join(root, "-tmp-demo-proj", "sess-main", "subagents");
+  const to1h = /"ephemeral_5m_input_tokens":(\d+),"ephemeral_1h_input_tokens":0/;
+  const a1 = path.join(sub, "agent-a1.jsonl"), c3 = path.join(sub, "agent-c3.jsonl");
+  fs.writeFileSync(a1, fs.readFileSync(a1, "utf8").replace(new RegExp(to1h.source, "g"), '"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":$1'));
+  fs.writeFileSync(c3, fs.readFileSync(c3, "utf8").replace(to1h, '"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":$1'));
+  return root;
+}
+
+test("--flight: each agent row names its cache TTL — 5m, 1h, or the 1-hour share when mixed", () => {
+  const md = path.join(TMP, "ttl-flight.md");
+  const r = run(["--flight", flightDir("flight"), "--root", ttlRoot(), "--codex-root", CODEX_ROOT, "--metrics-out", md]);
+  assert.equal(r.code, 0, r.err);
+  const text = fs.readFileSync(md, "utf8"), row = (id) => text.split("\n").find((l) => l.startsWith(`| ${id} |`)) || "";
+  assert.match(text, /^\| task \|.*\| ttl \|/m, "the per-agent table needs a ttl column");
+  assert.match(row("1-a"), /\| 1h \|/, "a1 wrote only to the 1-hour cache");
+  assert.match(row("1-d"), /\| 5m \|/, "b2 wrote only to the 5-minute cache");
+  assert.match(row("1-e"), /\| 1h \d+% \|/, "c3 mixed both: the 1-hour share");
+});
+
+test("default report: agent groups and single runs carry the cache TTL label", () => {
+  const r = run(["--since", "99999d", "--root", ttlRoot()]);
+  assert.equal(r.code, 0, r.err);
+  const groups = (r.out.split("AGENT GROUPS")[1] || "").split("\n== ")[0], runs = (r.out.split("SINGLE RUNS")[1] || "").split("\n== ")[0];
+  assert.match(groups, /\bttl\b/, "the group header names the ttl column");
+  assert.match(groups.split("\n").find((l) => / executor · /.test(l)) || "", /1h \d+%/, "the executor group mixes a1's 1h with b2's 5m");
+  assert.match(runs.split("\n").find((l) => /task 1-a/.test(l)) || "", /ttl 1h\b/, "a1's run line says 1h");
+  assert.match(runs.split("\n").find((l) => /task 1-b/.test(l)) || "", /ttl 5m\b/, "b2's run line says 5m");
+});

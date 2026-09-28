@@ -571,6 +571,8 @@ for (const r of RUNS) { const root = projRoots.find((p) => r.project === p || r.
 const total = Object.values(G.usd).reduce((a, b) => a + b, 0);
 const q = (arr, p) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 const wallMin = (r) => (r.t1 - r.t0) / 60e3;
+// The cache a run's writes went to: 5m, 1h, or the 1-hour share when it wrote both; — with no writes.
+function ttlMix(t) { const w = t.cw5 + t.cw1; return !w ? "—" : !t.cw1 ? "5m" : !t.cw5 ? "1h" : `1h ${Math.round(100 * t.cw1 / w)}%`; }
 const byProject = {}; for (const r of RUNS) { const p = (byProject[r.project] ??= { usd: 0, main: 0, agent: 0, runs: 0, rewrites: 0, cats: new Float64Array(CATS.length) }); p.usd += r.usd; p[r.kind] += r.usd; p.runs++; p.rewrites += r.rewrites.usd; r.cats.forEach((v, i) => (p.cats[i] += v)); }
 const families = {}; for (const r of RUNS) { const f = (families[r.sid] ??= { sid: r.sid, title: "", project: r.project, own: 0, agents: 0, nAgents: 0, rewrites: 0, calls: 0, peakK: 0, t0: Infinity, t1: 0, agentRuns: [] });
   if (r.kind === "main") { f.title = r.title; f.own += r.usd; f.peakK = Math.round(r.ctxPeak / 1000); f.project = r.project; } else { f.agents += r.usd; f.nAgents++; f.agentRuns.push(r); }
@@ -579,7 +581,8 @@ const famList = Object.values(families).sort((a, b) => b.own + b.agents - (a.own
 const groups = {}; for (const r of RUNS) if (r.kind === "agent") { const k = `${path.basename(r.project)} · ${r.agentType || "(untyped)"} · ${shortModel(r.model)}`; (groups[k] ??= []).push(r); }
 const groupRows = Object.entries(groups).map(([k, rs]) => ({ k, n: rs.length, usd: rs.reduce((a, r) => a + r.usd, 0), med: q(rs.map((r) => r.usd), 0.5), p90: q(rs.map((r) => r.usd), 0.9), max: Math.max(...rs.map((r) => r.usd)),
   calls: q(rs.map((r) => r.calls), 0.5), peakK: q(rs.map((r) => r.ctxPeak / 1000), 0.5), wall: q(rs.map(wallMin), 0.5), errs: rs.reduce((a, r) => a + r.errs, 0) / rs.length,
-  poll: rs.reduce((a, r) => a + r.pollUsd, 0), small: rs.reduce((a, r) => a + r.smallUsd, 0), tests: rs.reduce((a, r) => a + (r.bash[CATS[C_BTEST]]?.n || 0), 0) / rs.length, rereads: rs.reduce((a, r) => a + r.rereadN, 0) / rs.length })).sort((a, b) => b.usd - a.usd);
+  poll: rs.reduce((a, r) => a + r.pollUsd, 0), small: rs.reduce((a, r) => a + r.smallUsd, 0), tests: rs.reduce((a, r) => a + (r.bash[CATS[C_BTEST]]?.n || 0), 0) / rs.length, rereads: rs.reduce((a, r) => a + r.rereadN, 0) / rs.length,
+  ttl: ttlMix(rs.reduce((a, r) => ({ cw5: a.cw5 + r.tok.cw5, cw1: a.cw1 + r.tok.cw1 }), { cw5: 0, cw1: 0 })) })).sort((a, b) => b.usd - a.usd);
 
 const $ = (v) => (v >= 100 ? "$" + v.toFixed(0) : "$" + v.toFixed(2)), pct = (v, t = total) => (t ? (100 * v / t).toFixed(1) : "0.0") + "%";
 
@@ -647,14 +650,14 @@ if (FLIGHT) {
   out.push(`# ${path.basename(dir)} · metrics`, "",
     `source ${FLIGHT_PLAN.source}${FLIGHT_PLAN.baseline ? ` · baseline ${FLIGHT_PLAN.baseline}` : ""} · window ${startISO} → ${endISO}`,
     `${rows.length} matched of ${FLIGHT_PLAN.rows.length} ledger rows · claude ${rows.filter((x) => x.run.engine === "claude").length} · codex ${rows.filter((x) => x.run.engine === "codex").length} · by id ${rows.filter((x) => x.how === "id").length} · by agent path ${rows.filter((x) => x.how === "path").length} · by window ${rows.filter((x) => x.how === "window").length}`, "");
-  out.push("| task | agent | engine | model | calls | wall | ctx0 | peak | +/call | input | cached | output | $ | fail | poll | reread | contract | compact | cap | matched |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+  out.push("| task | agent | engine | model | calls | wall | ctx0 | peak | +/call | input | cached | output | ttl | $ | fail | poll | reread | contract | compact | cap | matched |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   const sorted = [...rows].sort((a, b) => b.run.usd - a.run.usd);
   for (const { led, run, how } of sorted.slice(0, MAX_ROWS)) {
     const cap = capFor(led.agentType || run.agentType);
-    out.push(`| ${led.taskId} | ${led.agentType || run.agentType || "?"} | ${run.engine} | ${shortModel(codexShort(run.model))} | ${run.calls} | ${mins(run)} | ${K(run.ctxFirst)} | ${K(run.ctxPeak)} | ${growth(run)} | ${K(run.tok.in + run.tok.cw5 + run.tok.cw1)} | ${K(run.tok.cr)} | ${K(run.tok.out)} | ${cash(run)} | ${run.failedCmds} | ${run.pollN} | ${run.rereadN} | ${run.contractReads} | ${run.resets} | ${run.calls > cap ? `OVER ${cap}` : `ok/${cap}`} | ${how} |`);
+    out.push(`| ${led.taskId} | ${led.agentType || run.agentType || "?"} | ${run.engine} | ${shortModel(codexShort(run.model))} | ${run.calls} | ${mins(run)} | ${K(run.ctxFirst)} | ${K(run.ctxPeak)} | ${growth(run)} | ${K(run.tok.in + run.tok.cw5 + run.tok.cw1)} | ${K(run.tok.cr)} | ${K(run.tok.out)} | ${ttlMix(run.tok)} | ${cash(run)} | ${run.failedCmds} | ${run.pollN} | ${run.rereadN} | ${run.contractReads} | ${run.resets} | ${run.calls > cap ? `OVER ${cap}` : `ok/${cap}`} | ${how} |`);
   }
-  if (sorted.length > MAX_ROWS) out.push(`| … | ${sorted.length - MAX_ROWS} further agents folded into the totals below | | | | | | | | | | | | | | | | | | |`);
+  if (sorted.length > MAX_ROWS) out.push(`| … | ${sorted.length - MAX_ROWS} further agents folded into the totals below | | | | | | | | | | | | | | | | | | | |`);
   const fold = (rs) => rs.reduce((a, x) => ({ n: a.n + 1, calls: a.calls + x.run.calls, usd: a.usd + x.run.usd, unpriced: a.unpriced + (x.run.unpriced ? 1 : 0),
     in: a.in + x.run.tok.in + x.run.tok.cw5 + x.run.tok.cw1, cr: a.cr + x.run.tok.cr, out: a.out + x.run.tok.out, fail: a.fail + x.run.failedCmds, poll: a.poll + x.run.pollN,
     reread: a.reread + x.run.rereadN, contract: a.contract + x.run.contractReads, compact: a.compact + x.run.resets, over: a.over + (x.run.calls > capFor(x.led.agentType || x.run.agentType) ? 1 : 0),
@@ -743,13 +746,13 @@ H(`7 · TOP ${TOP} CHAT FAMILIES (a chat + the agents it spawned)`);
 for (const f of famList.slice(0, TOP)) L(`  ${pad($(f.own + f.agents), 9)} ${pad(pct(f.own + f.agents), 6)}  ${cut(f.title || f.sid.slice(0, 8), 34)} ${cut(base(f.project), 12)} own ${pad($(f.own), 8)} · ${pad(f.nAgents, 3)} agents ${pad($(f.agents), 8)} · rewrites ${pad($(f.rewrites), 7)} · peak ${f.peakK}K`);
 
 H("8 · AGENT GROUPS (project · agent type · model) — same job, different cost?");
-L(`  ${pad("total", 9)} ${pad("n", 4)} ${pad("median", 8)} ${pad("p90", 8)} ${pad("max", 8)} ${pad("calls", 6)} ${pad("peakK", 6)} ${pad("wall m", 7)} ${pad("errs", 5)} ${pad("tests", 6)} ${pad("reread", 7)} ${pad("poll$", 6)} ${pad("small$", 6)}  group (calls/peak/wall = median, errs/tests/reread = per run, poll/small = share of group $)`);
-for (const g of groupRows.slice(0, TOP + 6)) L(`  ${pad($(g.usd), 9)} ${pad(g.n, 4)} ${pad($(g.med), 8)} ${pad($(g.p90), 8)} ${pad($(g.max), 8)} ${pad(g.calls, 6)} ${pad(Math.round(g.peakK), 6)} ${pad(Math.round(g.wall), 7)} ${pad(g.errs.toFixed(1), 5)} ${pad(g.tests.toFixed(1), 6)} ${pad(g.rereads.toFixed(1), 7)} ${pad(pct(g.poll, g.usd), 6)} ${pad(pct(g.small, g.usd), 6)}  ${g.k}`);
+L(`  ${pad("total", 9)} ${pad("n", 4)} ${pad("median", 8)} ${pad("p90", 8)} ${pad("max", 8)} ${pad("calls", 6)} ${pad("peakK", 6)} ${pad("wall m", 7)} ${pad("errs", 5)} ${pad("tests", 6)} ${pad("reread", 7)} ${pad("poll$", 6)} ${pad("small$", 6)} ${pad("ttl", 7)}  group (calls/peak/wall = median, errs/tests/reread = per run, poll/small = share of group $, ttl = where its cache writes went)`);
+for (const g of groupRows.slice(0, TOP + 6)) L(`  ${pad($(g.usd), 9)} ${pad(g.n, 4)} ${pad($(g.med), 8)} ${pad($(g.p90), 8)} ${pad($(g.max), 8)} ${pad(g.calls, 6)} ${pad(Math.round(g.peakK), 6)} ${pad(Math.round(g.wall), 7)} ${pad(g.errs.toFixed(1), 5)} ${pad(g.tests.toFixed(1), 6)} ${pad(g.rereads.toFixed(1), 7)} ${pad(pct(g.poll, g.usd), 6)} ${pad(pct(g.small, g.usd), 6)} ${pad(g.ttl, 7)}  ${g.k}`);
 
 H(`9 · TOP ${TOP + 3} SINGLE RUNS`);
 const topRuns = [...RUNS].sort((a, b) => b.usd - a.usd);
 const USD = (r) => (r.unpriced ? "n/a" : $(r.usd)); // never render ignorance as zero dollars
-for (const r of topRuns.slice(0, TOP + 3)) L(`  ${pad(USD(r), 9)}  ${cut(r.kind === "main" ? "MAIN " + (r.title || r.sid.slice(0, 8)) : `${r.agentType || "agent"}: ${r.title}`, 44)} ${cut(shortModel(r.model), 12)} ${pad(r.calls, 5)} calls · ctx ${pad(Math.round(r.ctxFirst / 1000), 3)}→${pad(Math.round(r.ctxPeak / 1000), 3)}K · ${pad(Math.round(wallMin(r)), 4)}m wall/${pad(Math.round(r.toolWaitMs / 60e3), 4)}m in tools · rw ${pad($(r.rewrites.usd), 6)} · errs ${pad(r.errs, 3)} · reread ${pad(r.rereadN, 3)} · poll ${pad($(r.pollUsd), 6)}${r.topRepeat ? ` · ${r.topRepeat.n}× "${r.topRepeat.cmd.slice(0, 40)}"` : ""}`);
+for (const r of topRuns.slice(0, TOP + 3)) L(`  ${pad(USD(r), 9)}  ${cut(r.kind === "main" ? "MAIN " + (r.title || r.sid.slice(0, 8)) : `${r.agentType || "agent"}: ${r.title}`, 44)} ${cut(shortModel(r.model), 12)} ${pad(r.calls, 5)} calls · ctx ${pad(Math.round(r.ctxFirst / 1000), 3)}→${pad(Math.round(r.ctxPeak / 1000), 3)}K · ${pad(Math.round(wallMin(r)), 4)}m wall/${pad(Math.round(r.toolWaitMs / 60e3), 4)}m in tools · rw ${pad($(r.rewrites.usd), 6)} · errs ${pad(r.errs, 3)} · reread ${pad(r.rereadN, 3)} · poll ${pad($(r.pollUsd), 6)} · ttl ${ttlMix(r.tok)}${r.topRepeat ? ` · ${r.topRepeat.n}× "${r.topRepeat.cmd.slice(0, 40)}"` : ""}`);
 const ag = RUNS.filter((r) => r.kind === "agent"), agUsd = ag.reduce((a, r) => a + r.usd, 0), agSorted = [...ag].sort((a, b) => b.usd - a.usd), top10n = Math.max(1, Math.round(ag.length * 0.1));
 if (ag.length) L(`  concentration: the costliest 10% of agent runs (${top10n} of ${ag.length}) spent ${pct(agSorted.slice(0, top10n).reduce((a, r) => a + r.usd, 0), agUsd)} of all agent dollars · runs over 150 calls: ${ag.filter((r) => r.calls > 150).length} spending ${pct(ag.filter((r) => r.calls > 150).reduce((a, r) => a + r.usd, 0), agUsd)}`);
 

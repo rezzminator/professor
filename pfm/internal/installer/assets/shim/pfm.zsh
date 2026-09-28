@@ -115,18 +115,19 @@ _pfm_tui_call() {
 # chat does. claude bypasses recursion by calling the managed absolute launcher path, while
 # codex uses `command` to resolve the external command without re-entering this wrapper.
 # Only this shell's own typing is affected — pfm, hooks and scripts exec the binary and never
-# see these functions.
+# see these functions. An agent tool shell replays a snapshot that keeps `claude`/`codex` but drops
+# every `_`-prefixed helper, and is not interactive — the guard keeps it from calling them.
 claude() {
   "$HOME/.local/bin/claude" "$@"
   local exit_status=$?
-  _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
+  [[ -o interactive ]] && _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
   return "$exit_status"
 }
 
 codex() {
   command codex "$@"
   local exit_status=$?
-  _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
+  [[ -o interactive ]] && _pfm_tui_call "$@" && _pfm_own_terminal "$exit_status"
   return "$exit_status"
 }
 

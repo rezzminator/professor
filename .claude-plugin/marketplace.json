@@ -44,6 +44,19 @@
       "homepage": "https://github.com/rezzminator/agent-effort",
       "license": "MIT",
       "keywords": ["claude-code", "sub-agent", "effort", "reasoning-effort", "function-hooks", "professor"]
+    },
+    {
+      "name": "buddy",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/buddy.git",
+        "path": "plugins/buddy",
+        "ref": "main"
+      },
+      "description": "Claude Code buddy plugin: Quack the ASCII duck waddles above your prompt and talks back — or bring back your /buddy",
+      "homepage": "https://github.com/rezzminator/buddy",
+      "license": "MIT",
+      "keywords": ["claude-code", "buddy", "companion", "ascii-art", "terminal-pet", "function-hooks", "professor"]
     }
   ]
 }

@@ -216,6 +216,31 @@ func accountMCPServers(document map[string]any) (map[string]any, error) {
 	return servers, nil
 }
 
+// ledgerOwnedMCP returns the names the ledger owns in one physical registry
+// file and the keys that name it. A key matches when it resolves to that file:
+// older installs keyed the path as reached, and a link on the way (macOS /tmp
+// is /private/tmp) makes that differ from the physical path.
+func ledgerOwnedMCP(registrations map[string]map[string]any, physical string) ([]string, []string) {
+	names := map[string]bool{}
+	keys := []string{}
+	for key, owned := range registrations {
+		if key != physical && physicalSettingsPath(key) != physical {
+			continue
+		}
+		keys = append(keys, key)
+		for name := range owned {
+			names[name] = true
+		}
+	}
+	owned := make([]string, 0, len(names))
+	for name := range names {
+		owned = append(owned, name)
+	}
+	sort.Strings(owned)
+	sort.Strings(keys)
+	return owned, keys
+}
+
 func ownedMCPNames(servers map[string]any, owned []string, shaped mcpShaped) []string {
 	seen := map[string]bool{}
 	for _, name := range owned {

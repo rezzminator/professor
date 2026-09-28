@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -626,11 +625,7 @@ func classifyAccountMCP(env LayoutEnv) []LayoutFinding {
 				mcpOwnershipName,
 			), layoutOwnershipLedger
 		} else if finding.Err == nil && exists {
-			owned := make([]string, 0, len(ownership.Registrations[physical]))
-			for name := range ownership.Registrations[physical] {
-				owned = append(owned, name)
-			}
-			sort.Strings(owned)
+			owned, _ := ledgerOwnedMCP(ownership.Registrations, physical)
 			judgeMCPFile(&finding, info, owned, shaped)
 		}
 		if registry.Account != 0 && finding.Verdict != VerdictOK {

@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -445,17 +444,14 @@ func applyLayoutAccount(journal *Journal, finding LayoutFinding, paths []string)
 	if err != nil {
 		return err
 	}
-	physical := physicalSettingsPath(finding.Path)
-	owned := make([]string, 0, len(ownership.Registrations[physical]))
-	for name := range ownership.Registrations[physical] {
-		owned = append(owned, name)
-	}
-	sort.Strings(owned)
+	owned, keys := ledgerOwnedMCP(ownership.Registrations, physicalSettingsPath(finding.Path))
 	updated, _, err := stripAccountMCP(raw, owned, layoutMCPShaped(env))
 	if err != nil {
 		return err
 	}
-	delete(ownership.Registrations, physical)
+	for _, key := range keys {
+		delete(ownership.Registrations, key)
+	}
 	encoded, err := json.MarshalIndent(ownership, "", "  ")
 	if err != nil {
 		return err

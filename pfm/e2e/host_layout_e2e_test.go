@@ -98,6 +98,11 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 	if err := json.Unmarshal(journalRaw, &journalRecords); err != nil {
 		t.Fatal(err)
 	}
+	// The journal records physical paths; on macOS /tmp is a link to /private/tmp.
+	physicalHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatalf("resolve e2e home %s: %v", home, err)
+	}
 	pluginPaths := map[string]bool{}
 	for _, record := range journalRecords {
 		if record.Row == "install" && record.Result == "applied" {
@@ -105,8 +110,8 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
-		filepath.Join(home, ".claude", "settings.json"),
-		filepath.Join(home, ".claude", "plugins"),
+		filepath.Join(physicalHome, ".claude", "settings.json"),
+		filepath.Join(physicalHome, ".claude", "plugins"),
 	} {
 		if !pluginPaths[path] {
 			t.Fatalf("plugin door did not journal %s", path)

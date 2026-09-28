@@ -75,7 +75,9 @@ build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
 
 prompts: ## Compose the tracked harness prompts from their parts
-	go run ./harness-prompts/compose
+	# The composer runs here, so it builds for the host even when a cross build
+	# exports GOOS/GOARCH (else: "exec format error").
+	GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run ./harness-prompts/compose
 
 tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
 	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh

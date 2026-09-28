@@ -27,6 +27,10 @@ case $mode in live | quiet) ;; *) echo "mode must be live or quiet" >&2; exit 2 
 H=$HOME
 umask 077
 fail() { echo "FAILED: $1" >&2; exit 1; }
+# The manifest step needs GNU find -printf and sha256sum: refuse any other
+# kernel before DEST exists, never midway through a copy.
+kernel=$(uname -s) || fail "platform — uname -s did not answer"
+[ "$kernel" = Linux ] || fail "platform — host-backup.sh runs on Linux only (GNU find -printf, sha256sum); this kernel is $kernel"
 
 mkdir -p "$dest/home" "$dest/etc" "$dest/manifest" || fail "create $dest"
 # Absolute from here: the manifest step runs from inside the copy, and rsync

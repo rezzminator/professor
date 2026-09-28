@@ -56,4 +56,9 @@ OUT=$(run "$T/bad-mode" other); RC=$?
 if [ "$RC" -eq 2 ] && [ "$OUT" = 'mode must be live or quiet' ] && [ ! -e "$T/bad-mode" ]; then ok "bad mode refused before DEST"; else bad "bad mode" "rc=$RC" "$OUT"; fi
 OUT=$(run /sys/host-backup-test live); RC=$?
 if [ "$RC" -eq 1 ] && grep -q '^FAILED: create ' <<<"$OUT" && ! grep -q 'BACKUP OK' <<<"$OUT"; then ok "failed step named, no success"; else bad "failed step" "rc=$RC" "$OUT"; fi
+# A non-Linux kernel is refused before DEST exists: the manifest step needs
+# GNU find -printf and sha256sum, so a macOS run would otherwise fail midway.
+K="$T/uname-darwin"; mkdir -p "$K"; printf '#!/bin/sh\necho Darwin\n' >"$K/uname"; chmod +x "$K/uname"
+OUT=$(PATH="$K:$PATH" run "$T/darwin" live); RC=$?
+if [ "$RC" -eq 1 ] && [ "$OUT" = "FAILED: platform — host-backup.sh runs on Linux only (GNU find -printf, sha256sum); this kernel is Darwin" ] && [ ! -e "$T/darwin" ]; then ok "non-Linux kernel refused before DEST"; else bad "non-Linux kernel" "rc=$RC" "$OUT"; fi
 shtest_end

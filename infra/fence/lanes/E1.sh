@@ -146,14 +146,14 @@ if requires E1.01-open-seat1; then
   else
     before="$(live_field "$CHAT" 9)"
     before_id="$(live_field "$CHAT" 2)"
-    token="E1CONTINUITY$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
-    planted="$(pfm chat inject --allow-unsigned "$CHAT" "Remember the token $token. Reply TOKEN-PLANTED." 2>&1)"
+    nonce="E1CONTINUITY$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
+    planted="$(pfm chat inject --allow-unsigned "$CHAT" "Remember the token $nonce. Reply TOKEN-PLANTED." 2>&1)"
     if [ "$?" -ne 0 ] || ! wait_last "$CHAT" TOKEN-PLANTED 120; then
       fail "could not plant the continuity token before reload: $(one_line "$planted") ${LANE_WAIT_WHY:-}"
     elif ! pfm chat inject --allow-unsigned "$CHAT" "/reload --account $ALT --then \"What token did I ask you to remember before this reload? Reply with the token only.\"" >/dev/null 2>&1; then
       fail "pfm chat inject refused the cross-account reload"
-    elif ! wait_last "$CHAT" "$token" 300; then
-      fail "the resumed chat did not answer the planted token $token: ${LANE_WAIT_WHY:-timeout}"
+    elif ! wait_last "$CHAT" "$nonce" 300; then
+      fail "the resumed chat did not answer the planted token $nonce: ${LANE_WAIT_WHY:-timeout}"
     elif [ "$(live_field "$CHAT" 2)" != "$before_id" ]; then
       fail "the row's session id changed from $before_id to $(live_field "$CHAT" 2)"
     elif [ "$(live_field "$CHAT" 9)" != "$ALT" ]; then

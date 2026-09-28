@@ -50,6 +50,11 @@ set -uo pipefail
 #                 --stress the holder 424242, removed by the stub's stop of
 #                 pfm-mcp.service
 # stdout ends with the verdict path.
+# Disk: on REHEARSAL PASS, SCRATCH/home and SCRATCH/etc (the size of the
+# backed-up home) are deleted and SCRATCH/rehearsal/ is kept; on FAIL SCRATCH is
+# kept whole and stderr says so. PFM_REHEARSAL_KEEP_SCRATCH=1 keeps it on PASS
+# too. Fence housekeeping (infra/fence/housekeeping.sh) runs before the image
+# build, and the container carries --label pfm.fence=1.
 #
 # compare BACKUP HOME JOURNAL: the manifest check alone — every sessions.sha256
 # hash present in HOME/.claude/{projects,file-history,tasks,session-env} or in
@@ -63,7 +68,10 @@ set -uo pipefail
 # missing host tool / unreachable docker daemon (TOOLCHAIN-MISSING) refuse
 # before anything is copied or started, exit 1, naming what. After the copy,
 # the first failed step writes REHEARSAL FAIL {step}: {reason}, stops, exit 1;
-# REHEARSAL PASS is written only after every step's own check passed. compare
+# REHEARSAL PASS is written only after every step's own check passed; a PASS
+# whose copies cannot be deleted stays PASS and prints `WARN could not remove`
+# naming them. Housekeeping never fails the rehearsal: each failed step is one
+# `WARN fence housekeeping: …` line on stderr. compare
 # prints manifest: ok (0), manifest: FAILED — {reason} (1), or
 # manifest: UNREADABLE — {cause} (2) when it could not look.
 
@@ -206,6 +214,7 @@ fail() { # fail STEP REASON — the verdict, then stop.
   STEP_LINES+=("step $1 FAILED $2")
   { echo "REHEARSAL FAIL $1: $2"; printf '%s\n' "${STEP_LINES[@]}"; } >"$R/verdict.txt"
   cat "$R/verdict.txt"
+  echo "host-rehearsal: kept ${R%/rehearsal} whole (home, etc, rehearsal) for inspection — remove it when done" >&2
   echo "$R/verdict.txt"
   exit 1
 }
@@ -229,6 +238,9 @@ cmd_rehearse() {
   done
   command -v docker >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — docker not on PATH"
   docker info >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed)"
+  # shellcheck source=housekeeping.sh
+  . "$REPO_ROOT/infra/fence/housekeeping.sh"
+  fence_housekeeping
   docker container inspect "$NAME" >/dev/null 2>&1 && die "container $NAME already exists — remove it or set PFM_REHEARSAL_NAME"
 
   mkdir -p "$scratch/home" "$scratch/etc" "$scratch/rehearsal/stubs" "$scratch/rehearsal/proc" || die "create $scratch failed"
@@ -353,7 +365,7 @@ EOF
   trap 'docker rm -f "$NAME" >/dev/null 2>&1' EXIT
   # The Go module cache is the fence's volume, read-only; build cache and
   # telemetry config live in the container's /tmp, never in the home.
-  docker run -d --name "$NAME" --init --user "$(id -u):$(id -g)" \
+  docker run -d --name "$NAME" --init --label pfm.fence=1 --user "$(id -u):$(id -g)" \
     -v "$H:$home" \
     -v "$scratch/etc/claude-code:/etc/claude-code:ro" \
     -v "$scratch/etc/claude-code:$C_ETC" \
@@ -508,6 +520,16 @@ EOF
   pass pair
 
   { echo "REHEARSAL PASS"; printf '%s\n' "${STEP_LINES[@]}"; } >"$R/verdict.txt"
+  # The copies go (their read-only directories made writable first); the
+  # verdict, logs, plan.txt and hashes in SCRATCH/rehearsal/ stay.
+  if [ "${PFM_REHEARSAL_KEEP_SCRATCH:-0}" = 1 ]; then
+    echo "host-rehearsal: PFM_REHEARSAL_KEEP_SCRATCH=1 — kept $scratch whole" >&2
+  else
+    docker rm -f "$NAME" >/dev/null 2>&1
+    chmod -R u+w "$H" "$scratch/etc" 2>/dev/null
+    if rm -rf -- "${H:?}" "${scratch:?}/etc"; then echo "host-rehearsal: removed $H and $scratch/etc; kept $R" >&2
+    else echo "host-rehearsal: WARN could not remove all of $H and $scratch/etc — remove them by hand" >&2; fi
+  fi
   echo "REHEARSAL PASS"
   echo "$R/verdict.txt"
 }

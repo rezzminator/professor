@@ -8,6 +8,8 @@
 #
 #   bash infra/fence/lanes/tests/host-rehearsal_test.sh
 #   HOST_REHEARSAL_SUT=/tmp/mutated.sh bash …/host-rehearsal_test.sh   # red-first
+# BROKEN STATE: a harness that cannot start exits 2 (scripts/shtest.sh); every
+# failed case prints FAIL with the run's output and the suite exits 1.
 set -uo pipefail
 
 SUT="${HOST_REHEARSAL_SUT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)/host-rehearsal.sh}"
@@ -206,6 +208,7 @@ info) [ -f "$T/docker-down" ] && exit 1; exit 0 ;;
 build) echo sha256:fixture; exit 0 ;;
 container) exit 1 ;;
 rm) echo "$*" >>"$T/docker-rm.log"; exit 0 ;;
+image | ps | volume | system | rmi | inspect) echo "$*" >>"$T/docker-hk.log"; exit 0 ;;
 run)
   printf '%s\n' "$@" >"$T/docker-run.argv"
   : >"$T/docker.env"; : >"$T/docker.rewrite"
@@ -220,7 +223,7 @@ run)
       if [ "${dst#"$T"/}" != "$dst" ] && [ "${src#/}" != "$src" ] && [ ! -e "$dst" ]; then ln -s "$src" "$dst"
       else printf '%s\t%s\n' "$dst" "$src" >>"$T/docker.rewrite"; fi
       shift 2 ;;
-    --name | --user | -w) shift 2 ;;
+    --name | --user | -w | --label) shift 2 ;;
     -*) shift ;;
     *) break ;;
     esac
@@ -252,6 +255,9 @@ STUB
 chmod +x "$BIN/make" "$BIN/docker" "$BIN/go"
 
 HOSTPATH="$BIN:$PATH"
+# The PASS cleanup (SCRATCH/home and SCRATCH/etc deleted) is off for the cases
+# that inspect the copied home after the run; the cleanup cases turn it back on.
+export PFM_REHEARSAL_KEEP_SCRATCH=1
 # rehearse MODE SCRATCH [BACKUP] [--stress] — one full run; sets RC and OUT.
 rehearse() {
   echo "$1" >"$T/mode"
@@ -355,6 +361,9 @@ if has_pair -v "$S/home:$FH" && has_pair -v "$S/etc/claude-code:/etc/claude-code
   [ -n "$stubmnt" ] && stubdst=${stubmnt#*:} && [ "${pathv%%:*}" = "${stubdst%:ro}" ] && [ -x "$R/stubs/systemctl" ] && [ -x "$R/stubs/sudo" ]; then
   ok "container shape: home at home=, /etc/claude-code :ro plus /rehearsal-etc, HOME, uid:gid, PFM_LOG_LEVEL=off, empty read-write PFM_PROC_ROOT outside home, no -buildvcs=false, clone .git names the mounted gitdir, stubs first on PATH"
 else bad "container shape" "$ARGV" "$(cat "$S/home/.professor/.git" 2>/dev/null)"; fi
+if has_pair --label pfm.fence=1 && grep -qx 'image prune -f --filter label=pfm.fence=1' "$T/docker-hk.log" 2>/dev/null; then
+  ok "fence: housekeeping ran before the build and the container carries --label pfm.fence=1"
+else bad "fence label + housekeeping" "$ARGV" "$(cat "$T/docker-hk.log" 2>/dev/null)"; fi
 
 # stubs: a fresh copy of the rehearsal's stubs keeps its own state and logs.
 FS="$T/fresh"; mkdir -p "$FS/stubs"; cp "$R/stubs/systemctl" "$R/stubs/sudo" "$FS/stubs/"
@@ -428,6 +437,25 @@ S="$T/s-stress-nodb"
 rehearse happy "$S" "$b" --stress
 if [ "$RC" -eq 1 ] && [ "$(verdict "$S")" = "REHEARSAL FAIL copy: no legacy state database to hold" ]; then ok "stress: no legacy state database → FAIL copy"
 else bad "stress no db" "rc=$RC" "$(cat "$S/rehearsal/verdict.txt" 2>/dev/null)" "$OUT"; fi
+
+# ---- scratch cleanup ----------------------------------------------------------
+# PASS deletes the 10G+ home and etc copies and keeps SCRATCH/rehearsal/; FAIL
+# keeps everything and says so.
+export PFM_REHEARSAL_KEEP_SCRATCH=0
+S="$T/s-clean-pass"
+rehearse happy "$S"
+if [ "$RC" -eq 0 ] && [ "$(verdict "$S")" = "REHEARSAL PASS" ] && [ ! -e "$S/home" ] && [ ! -e "$S/etc" ] &&
+  [ -s "$S/rehearsal/plan.txt" ] && [ -s "$S/rehearsal/hash-after.txt" ] && grep -q "removed $S/home and $S/etc" <<<"$OUT" &&
+  [ "$(tail -1 <<<"$OUT")" = "$S/rehearsal/verdict.txt" ]; then
+  ok "scratch: PASS deletes SCRATCH/home and SCRATCH/etc, keeps SCRATCH/rehearsal/, verdict path still last"
+else bad "scratch PASS cleanup" "rc=$RC" "$(ls -A "$S" 2>/dev/null)" "$OUT"; fi
+S="$T/s-clean-fail"
+rehearse preview-writes "$S"
+if [ "$RC" -eq 1 ] && [ -d "$S/home/.cc" ] && [ -d "$S/etc" ] && [ -s "$S/rehearsal/verdict.txt" ] && grep -q "kept $S" <<<"$OUT" &&
+  [ "$(tail -1 <<<"$OUT")" = "$S/rehearsal/verdict.txt" ]; then
+  ok "scratch: FAIL keeps SCRATCH whole and says it kept it, verdict path still last"
+else bad "scratch FAIL keeps" "rc=$RC" "$(ls -A "$S" 2>/dev/null)" "$OUT"; fi
+export PFM_REHEARSAL_KEEP_SCRATCH=1
 
 # ---- compare ----------------------------------------------------------------
 # A migrated home: sessions in the one store, the state DB at its new name.

@@ -24,9 +24,12 @@
 # Runs OUTSIDE the command sandbox: it talks to the Docker socket and the Keychain.
 #
 # BROKEN STATE: a missing tool is TOOLCHAIN-MISSING (exit 1) before anything
-# starts; every in-container step exits non-zero with its own message; the last
-# line is `pfm ls --plain` from inside the container — a listing with no live
-# row means the fleet never came up.
+# starts; a fence cache volume that cannot be created is a
+# `WARN fence housekeeping: volumes failed: …` line, then compose's own error;
+# every in-container step exits non-zero with its own message; the last line is
+# `pfm ls --plain` from inside the container — a listing with no live row means
+# the fleet never came up. The container is labelled pfm.fence.long-lived=1, so
+# fence housekeeping never ends it by age mid-presentation.
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -64,9 +67,13 @@ HOST_CONFIG="${PFM_CONFIG:-${clone:+$clone/pfm.config.json}}"
 
 # 1. The fence, exactly as dev.sh iso mounts it.
 FENCE_CALLER=demo . "$ROOT/infra/fence/fence-env.sh"
+# The compose file declares the fence caches external; they must exist first.
+# shellcheck source=../fence/housekeeping.sh
+. "$ROOT/infra/fence/housekeeping.sh"
+fence_volumes_ensure
 if [ "$FRESH" -eq 1 ] || ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  docker compose -f "$ROOT/infra/fence/docker-compose.yml" run -d --build --name "$NAME" -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json pfm-dev sleep infinity >/dev/null
+  docker compose -f "$ROOT/infra/fence/docker-compose.yml" run -d --build --name "$NAME" --label pfm.fence.long-lived=1 -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json pfm-dev sleep infinity >/dev/null
   echo "demo: container $NAME started"
 else
   echo "demo: reusing running container $NAME"

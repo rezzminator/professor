@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Fixture-driven tests for lanes/container.sh's base-image pin: lane_base_image
-# tags pfm-lane-base:<hash>, lane_base_release untags it without -f and never
-# fails its caller. docker is a stub, so no image is ever built or removed.
+# Fixture-driven tests for lanes/container.sh: lane_base_image tags
+# pfm-lane-base:<hash>, lane_base_release untags it without -f and never fails
+# its caller, and lane_run labels every lane container pfm.fence=1 (fence
+# housekeeping reaps only labelled containers). docker is a stub, so no image is
+# ever built or removed and no container started.
 #
 #   bash infra/fence/lanes/tests/container_test.sh
+#
+# BROKEN STATE: a missing SUT exits 2 before any assertion.
 set -uo pipefail
 
 SUT="${CONTAINER_SUT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/container.sh}"
@@ -41,5 +45,11 @@ fi
 # 2 — an already-gone pin (a second cleanup, a refused rmi) never fails the caller
 if STUB_RMI_RC=1 lane_base_release cafe01; then ok "a failed rmi returns 0 to the caller"
 else bad "a failed rmi returns 0 to the caller"; fi
+
+# 3 — every lane container carries the fence label housekeeping reaps by
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01
+if grep -q -- '^run -d .*--label pfm.fence=1 .*pfm-lane-root:cafe01 sleep infinity$' "$STUB_DOCKER_LOG"; then ok "lane_run labels the container pfm.fence=1"
+else bad "lane_run labels the container pfm.fence=1" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 shtest_end

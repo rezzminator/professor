@@ -16,6 +16,11 @@ services:
     # proc-jailer stress reads "still exists" for a process that is
     # already dead. tini closes that gap.
     init: true
+    # Fence housekeeping (infra/fence/housekeeping.sh) removes only containers
+    # carrying this label: exited ones, and running ones past their age limit
+    # unless `iso shell` or the demo also set pfm.fence.long-lived=1.
+    labels:
+      pfm.fence: "1"
     volumes:
       # Read-only by law: files are edited on the HOST; the container only builds
       # and tests. Build/test outputs land in the cache volumes and container-HOME,
@@ -57,15 +62,21 @@ services:
       # cross-volume copy would cost the environment's full size per edit.
       UV_CACHE_DIR: /root/.local/state/pfm/harvest-python/.uv-cache
 
-# Named explicitly: without `name:` compose prefixes the project (fence_…), and
-# the lanes and the release rehearsal — plain `docker run -v pfm-dev-*` — warm a
-# second copy of every cache that this service never shares.
+# The caches are shared by bare name with plain `docker run -v` mounters, so
+# compose never creates or prefixes them (a compose-made fence_… copy is never
+# shared, and a volume compose did not create draws a warning on every run):
+# they are external, and dev.sh iso and infra/demo/up.sh create them first
+# (fence_volumes_ensure, infra/fence/housekeeping.sh). Bare-name mounters:
+#   pfm-dev-gocache    lanes/container.sh, release-rehearsal.sh
+#   pfm-dev-gomod      lanes/container.sh, release-rehearsal.sh, host-rehearsal.sh (read-only)
+#   pfm-dev-npm-cache  lanes/container.sh
 volumes:
   pfm-dev-gocache:
-    # Named explicitly: host-rehearsal.sh, release-rehearsal.sh and
-    # lanes/container.sh mount this cache by its bare name.
+    external: true
     name: pfm-dev-gocache
   pfm-dev-gomod:
+    external: true
     name: pfm-dev-gomod
   pfm-dev-npm-cache:
+    external: true
     name: pfm-dev-npm-cache

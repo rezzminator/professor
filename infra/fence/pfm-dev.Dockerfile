@@ -34,6 +34,11 @@ ENV HOME=/root \
 COPY tools.env tools.sh /opt/pfm-tools/
 RUN TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
+# Every image built from this file, by any builder (compose, the rehearsals'
+# plain `docker build`, a lane root committed from a container of it), carries
+# the fence label; fence housekeeping prunes dangling images by it
+# (infra/fence/housekeeping.sh).
+LABEL pfm.fence=1
 
 # pfm-sim — the real-simulation fence: the base plus what a real
 # desktop brings to live traffic — Google Chrome (patchright's `chrome` channel

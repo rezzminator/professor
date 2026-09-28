@@ -40,7 +40,11 @@
 # `HASH-UNDERIVABLE: <why>` (exit 2) — never a hash over a partial list; docker
 # missing or its daemon unreachable is TOOLCHAIN-MISSING (exit 2); every
 # in-container step exits non-zero with its own output and the build container
-# is removed, leaving no half-built image tagged as a root.
+# is removed, leaving no half-built image tagged as a root. INT, TERM and HUP
+# exit 130, 143 and 129; on every exit the EXIT trap alone removes the build
+# container and releases its pfm-lane-base pin, once. Fence housekeeping runs
+# before the base build with this root's hash — every other hash's lane images
+# go — and never fails this script (infra/fence/housekeeping.sh).
 set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -137,20 +141,22 @@ docker rm -f "$BUILD" >/dev/null 2>&1
 FENCE_CALLER=lanes-root lane_fence_env "$ROOT"
 # shellcheck source=../housekeeping.sh
 . "$HERE/../housekeeping.sh"
-fence_housekeeping
+fence_housekeeping "$HASH"
+fence_volumes_ensure
 # The build container goes first, then the pin it held — on every exit path
 # (commit, step failure, fatal, Ctrl-C), so pfm-lane-base:<hash> never outlives
 # its build.
 cleanup() { docker rm -f "$BUILD" >/dev/null 2>&1; lane_base_release "$HASH"; }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 BASE="$(lane_base_image "$ROOT" "$HASH")" || fatal "the pfm-dev fence image could not be built"
 say "base image $BASE (pinned for this build, so a concurrent dev.sh iso rebuild cannot orphan it)"
 lane_run "$BUILD" "$BASE" || fatal "the fence container would not start from $BASE"
 
 step_failed() { # step_failed <step> <exit>
   echo "root: ✗ $1 failed (exit $2) — output above; no image was tagged" >&2
-  cleanup
   exit 1
 }
 
@@ -189,7 +195,6 @@ live="$(printf '%s\n' "$rows" | grep -c '^●' || true)"
 if [ "$ADOPT" -eq 0 ] && [ "$live" -ne 0 ]; then
   echo "root: ✗ a --no-adopt root must have an EMPTY fleet, $live live row(s) found:" >&2
   printf '%s\n' "$rows" >&2
-  cleanup
   exit 1
 fi
 say "fleet: $live live row(s) · $(printf '%s\n' "$rows" | grep -c . ) listing line(s)"
@@ -197,9 +202,7 @@ say "fleet: $live live row(s) · $(printf '%s\n' "$rows" | grep -c . ) listing l
 say "step 6/6 · commit"
 if ! docker commit --change "LABEL professor.lane-root=$HASH" --change 'CMD ["sleep","infinity"]' "$BUILD" "$IMAGE" >/dev/null; then
   echo "root: ✗ docker commit failed — if it named a missing content digest, the base image was replaced under this container while it built; lanes/container.sh pins it as pfm-lane-base:$HASH to prevent exactly that, so re-run root.sh and keep other fence builds out of the window" >&2
-  cleanup
   exit 1
 fi
-cleanup
 say "$IMAGE committed in $(( $(date +%s) - T0 ))s — LOCAL ONLY: it carries seat tokens and is never pushed"
 printf '%s\n' "$IMAGE"

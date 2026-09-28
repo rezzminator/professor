@@ -746,9 +746,15 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   if [[ ! -f "$compose" ]]; then
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
   fi
-  # Dangling fence images and the Go cache budget — infra/fence/housekeeping.sh.
+  # infra/fence/housekeeping.sh: the image-building gate actions clear stale
+  # fence containers, images and caches first (status, run, shell and sim pay
+  # nothing); every action finds the three cache volumes compose declares
+  # external. Neither call ever fails this script.
   . "$REPO_ROOT/infra/fence/housekeeping.sh"
-  fence_housekeeping
+  case "$action" in
+    install|build|typecheck|verify|test|e2e|cover|all) fence_housekeeping ;;
+  esac
+  fence_volumes_ensure
 
   # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
   # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the demo
@@ -771,7 +777,9 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   case "$action" in
     shell)
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
+      # Interactive: housekeeping's age limit never ends a shell someone is in.
+      docker compose -f "$compose" run --rm --build --label pfm.fence.long-lived=1 \
+        ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
     install|build|typecheck|verify|test|e2e|cover|all|status)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
     run)

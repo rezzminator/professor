@@ -482,7 +482,7 @@ EOF
   local cmds=() c
   while IFS= read -r c; do cmds+=("$c"); done < <(sed -n 's/^  next    [0-9][0-9]*\. //p' "$R/rollback.log")
   [ ${#cmds[@]} -gt 0 ] || cmds=("make -C $qclone/pfm rollback")
-  cmds+=("$qpfm ls")
+  cmds+=("$qpfm chat ls") # non-interactive: the ls picker needs a terminal
   : >"$R/pair.log"
   # A backup never carries credentials, and the pre-migration binary refuses a
   # config naming a Codex home without a valid auth.json: each such home in the

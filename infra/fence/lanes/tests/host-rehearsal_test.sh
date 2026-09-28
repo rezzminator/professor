@@ -54,6 +54,8 @@ if [ -e "$cfg" ]; then
       { echo "pfm: config: config $cfg: codex.homes[0] must contain a valid auth.json" >&2; exit 1; }
   done
 fi
+# `pfm ls` is the interactive picker: without a terminal it cannot open
+[ "$1" = ls ] && { echo "pfm ls: open picker /dev/tty: no such device or address" >&2; exit 1; }
 echo old
 OLD
   chmod 755 "$FH/.local/bin/pfm"
@@ -334,7 +336,7 @@ if [ -f "$S/home/.professor/pfm.config.json" ] && [ -f "$S/home/.professor/harve
 else bad "clone configs" "$(ls -A "$S/home/.professor" 2>/dev/null)"; fi
 pair_want="\$ make -C $FH/.professor/pfm rollback
 \$ systemctl --user start pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer
-\$ $FH/.local/bin/pfm ls"
+\$ $FH/.local/bin/pfm chat ls"
 if [ "$(grep '^\$ ' "$R/pair.log" 2>/dev/null)" = "$pair_want" ] && [ "$(tail -1 "$R/pair.log")" = old ] && grep -qx -- "-C $FH/.professor/pfm rollback" "$T/make.log" 2>/dev/null; then
   ok "pair: the rollback's next commands in order, then ls on the restored binary"
 else bad "pair" "$(cat "$R/pair.log" 2>/dev/null)"; fi
@@ -407,7 +409,7 @@ S="$T/s-nolegacy"
 rehearse happy "$S" "$BKN"
 if [ "$RC" -eq 0 ] && [ "$(verdict "$S")" = "REHEARSAL PASS" ] && [ "$(tail -n +2 "$S/rehearsal/verdict.txt")" = "$want_steps" ] &&
   [ "$(grep '^\$ ' "$S/rehearsal/pair.log" 2>/dev/null)" = "\$ make -C $FH/.professor/pfm rollback
-\$ $FH/.local/bin/pfm ls" ]; then
+\$ $FH/.local/bin/pfm chat ls" ]; then
   ok "no legacy config: no probe line needed, no next block, pair runs make rollback then ls"
 else bad "no legacy config" "rc=$RC" "$(cat "$S/rehearsal/verdict.txt" 2>/dev/null)" "$(cat "$S/rehearsal/pair.log" 2>/dev/null)" "$OUT"; fi
 

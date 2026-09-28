@@ -163,6 +163,10 @@ func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 
 	rolled := run("install", "--rollback", filepath.Base(journal))
 	h.requireSuccess("layout rollback", rolled)
+	if runtime.GOOS == "darwin" &&
+		!strings.Contains(rolled.stdout, "launchctl bootstrap gui/") {
+		t.Fatalf("rollback did not print the launchd start lines for the jobs it stopped:\n%s", rolled.stdout)
+	}
 	hostLayoutSameSnapshot(t, "rollback", before, hostLayoutSnapshot(t, home))
 }
 
@@ -556,6 +560,11 @@ func hostLayoutSnapshot(t *testing.T, home string) map[string]string {
 		}
 		if rel == "scheduler-calls" {
 			return nil
+		}
+		if rel == "fixture-launchd" {
+			// The launchctl fixture's loaded-job state: a rollback leaves the
+			// jobs it stopped down and prints their bootstrap lines instead.
+			return fs.SkipDir
 		}
 		info, err := entry.Info()
 		if err != nil {

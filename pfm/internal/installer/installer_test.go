@@ -16,50 +16,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
-type fakeRunner struct {
-	manager        bool
-	nameSyncActive bool
-	// nameSyncActive makes the state probe for pfm-name-sync.service answer
-	// "activating" (a oneshot mid-run); nameSyncIdle makes it answer
-	// "inactive". Leaving both false models a probe that could not run at all
-	// (systemctl missing, dead bus, permission denied) via a plain error.
-	nameSyncIdle bool
-	calls        []string
-}
-
-func (runner *fakeRunner) Run(_ context.Context, name string, args ...string) error {
-	call := name + " " + strings.Join(args, " ")
-	runner.calls = append(runner.calls, call)
-	if call == "systemctl --user show-environment" && runner.manager {
-		return nil
-	}
-	if strings.Contains(call, "is-active") || strings.Contains(call, "is-enabled") ||
-		strings.Contains(call, "is-failed") {
-		return errors.New("not loaded")
-	}
-	if runner.manager || name == "launchctl" {
-		return nil
-	}
-	return errors.New("dead user bus")
-}
-
-// nameSyncStateProbe is the exact argv nameSyncServiceRunning runs.
-const nameSyncStateProbe = "systemctl --user show --property=ActiveState --value pfm-name-sync.service"
-
-func (runner *fakeRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
-	call := name + " " + strings.Join(args, " ")
-	runner.calls = append(runner.calls, call)
-	if call == nameSyncStateProbe {
-		if runner.nameSyncActive {
-			return []byte("activating\n"), nil
-		}
-		if runner.nameSyncIdle {
-			return []byte("inactive\n"), nil
-		}
-	}
-	return nil, errors.New("fakeRunner: no output for " + call)
-}
-
 // TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem is C: the
 // prune sibling to wireClaudeLauncher, destructive-defaults-to-preview per
 // pfm/CLAUDE.md, and the preview IS the apply's own preview — same

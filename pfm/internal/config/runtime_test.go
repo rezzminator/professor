@@ -552,3 +552,63 @@ func TestLoadRuntimeExplicitConfigIgnoresLegacyFiles(t *testing.T) {
 		t.Fatalf("LoadRuntime under PFM_CONFIG = %v", err)
 	}
 }
+
+func TestLegacyConfigWaiting(t *testing.T) {
+	for _, name := range []string{FileName, LegacyFileName} {
+		for _, targetState := range []string{"present", "absent", "empty"} {
+			t.Run(name+"/target="+targetState, func(t *testing.T) {
+				root := t.TempDir()
+				legacyDir := filepath.Join(root, "legacy")
+				if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				legacy := filepath.Join(legacyDir, name)
+				if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				target := filepath.Join(root, "clone", FileName)
+				switch targetState {
+				case "present":
+					if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				case "empty":
+					target = ""
+				}
+				got, err := LegacyConfigWaiting(legacyDir, target)
+				if err != nil {
+					t.Fatalf("LegacyConfigWaiting = %v", err)
+				}
+				want := legacy
+				if targetState == "present" {
+					want = ""
+				}
+				if got != want {
+					t.Fatalf("LegacyConfigWaiting = %q, want %q", got, want)
+				}
+			})
+		}
+	}
+	t.Run("no legacy file", func(t *testing.T) {
+		got, err := LegacyConfigWaiting(t.TempDir(), "")
+		if err != nil || got != "" {
+			t.Fatalf("LegacyConfigWaiting = %q, %v; want empty, nil", got, err)
+		}
+	})
+	t.Run("lstat error", func(t *testing.T) {
+		notDir := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := LegacyConfigWaiting(notDir, "")
+		if err == nil || got != "" {
+			t.Fatalf("LegacyConfigWaiting under a file = %q, %v; want an error", got, err)
+		}
+		if !strings.Contains(err.Error(), "inspect legacy config "+filepath.Join(notDir, FileName)) {
+			t.Fatalf("error %q does not name the legacy path", err)
+		}
+	})
+}

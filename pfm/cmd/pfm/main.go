@@ -94,6 +94,15 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	}
 	runtime, err := load(configPath)
 	if err != nil {
+		if len(args) > 0 && (args[0] == versionCommand || args[0] == "--version") {
+			// make host-install smoke-tests a new binary with --version before
+			// pfm install migrates a legacy config: the version needs no config.
+			return runVersion(args[1:], stdout, stderr)
+		}
+		// make install sweeps with stale in that same window: it reads no config.
+		if len(args) > 1 && args[0] == internalCommand && args[1] == "stale" {
+			return stale.Run(args[2:], stdout, stderr)
+		}
 		if !diagnosticCommand(args) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 			return 1

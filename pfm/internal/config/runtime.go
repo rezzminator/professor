@@ -173,18 +173,41 @@ func checkLegacyConfig(configPath, home string, loaded Config) error {
 	if resolveErr != nil {
 		target = "no clone config"
 	}
-	dir := LegacyConfigDir(env, home)
-	for _, name := range []string{FileName, LegacyFileName} {
-		legacy := filepath.Join(dir, name)
-		_, err := os.Lstat(legacy)
-		if err == nil {
-			return fmt.Errorf("%w (%s present, %s absent)", ErrNotMigrated, legacy, target)
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("inspect legacy config %s: %w", legacy, err)
-		}
+	legacy, err := LegacyConfigWaiting(LegacyConfigDir(env, home), "")
+	if err != nil {
+		return err
+	}
+	if legacy != "" {
+		return fmt.Errorf("%w (%s present, %s absent)", ErrNotMigrated, legacy, target)
 	}
 	return nil
+}
+
+// LegacyConfigWaiting returns the legacy pfm.config.json or config.json in
+// legacyDir when one exists while target does not ("" counts as absent), else
+// "". It ignores PFM_CONFIG and --config: the fleet units run a default load,
+// so a rollback asks it whether the restored layout is one pfm refuses.
+func LegacyConfigWaiting(legacyDir, target string) (string, error) {
+	if target != "" {
+		_, err := os.Lstat(target)
+		if err == nil {
+			return "", nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("inspect target config %s: %w", target, err)
+		}
+	}
+	for _, name := range []string{FileName, LegacyFileName} {
+		legacy := filepath.Join(legacyDir, name)
+		_, err := os.Lstat(legacy)
+		if err == nil {
+			return legacy, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("inspect legacy config %s: %w", legacy, err)
+		}
+	}
+	return "", nil
 }
 
 // LegacyConfigDir is the config directory pfm resolved before the config

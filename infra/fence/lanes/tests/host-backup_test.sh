@@ -14,7 +14,16 @@ H="$T/home"; M="$T/managed"; D="$T/live"; Q="$T/quiet"
 mkdir -p "$H/.claude/projects/p0" "$H/.cc/2/projects/p1" "$H/.local/share/pfm/install" "$H/.codex" "$M"
 echo one >"$H/.claude/projects/p0/s.jsonl"
 echo two >"$H/.cc/2/projects/p1/s.jsonl"
-echo marker >"$H/.local/share/pfm/install/source-repo"
+printf '%s\n' "$H/clone" >"$H/.local/share/pfm/install/source-repo"
+# Every other path pfm install writes: the renudge link, the OpenCode config,
+# the VS Code machine settings and the clone's migrated configs.
+mkdir -p "$H/.local/bin" "$H/.config/opencode" "$H/.vscode-server/data/Machine" "$H/clone"
+ln -s "$H/.local/share/pfm/install/bin/tmux-title-renudge" "$H/.local/bin/tmux-title-renudge"
+echo '{}' >"$H/.config/opencode/opencode.jsonc"
+echo '{}' >"$H/.vscode-server/data/Machine/settings.json"
+echo '{}' >"$H/clone/pfm.config.json"
+echo '{}' >"$H/clone/harvester.config.json"
+echo tracked >"$H/clone/README.md"
 echo secret >"$H/.claude/.credentials.json"
 echo secret >"$H/.codex/auth.json"
 echo '{}' >"$M/pfm.json"
@@ -22,6 +31,11 @@ sqlite3 "$H/.cc/fleet.db" 'CREATE TABLE chat(id INTEGER); INSERT INTO chat VALUE
 run() { HOME="$H" PFM_MANAGED_SETTINGS_DIR="$M" bash "$SUT" "$@" 2>&1; }
 OUT=$(run "$D" live); RC=$?
 if [ "$RC" -eq 0 ] && [ "$(tail -1 <<<"$OUT")" = "BACKUP OK $D" ] && [ -d "$D/home" ] && [ -f "$D/etc/claude-code/managed-settings.d/pfm.json" ] && [ -f "$D/manifest/sessions.sha256" ] && [ -f "$D/manifest/files.txt" ] && [ -f "$D/manifest/links.txt" ] && [ -f "$D/manifest/db.txt" ] && grep -qxF "home=$H" "$D/meta"; then ok "live backup layout and metadata"; else bad "live backup" "rc=$RC" "$OUT"; fi
+covered=1
+for p in .local/bin/tmux-title-renudge .config/opencode/opencode.jsonc .vscode-server/data/Machine/settings.json clone/pfm.config.json clone/harvester.config.json; do
+  [ -e "$D/home/$p" ] || [ -L "$D/home/$p" ] || { covered=0; bad "install-written path copied" "$p missing"; }
+done
+if [ "$covered" = 1 ] && [ ! -e "$D/home"/clone/README.md ]; then ok "every install-written path copied, the clone's tracked files not"; elif [ "$covered" = 1 ]; then bad "clone tracked files copied" "clone/README.md present"; fi
 if [ ! -e "$D/home/.claude/.credentials.json" ] && [ ! -e "$D/home/.codex/auth.json" ]; then ok "credentials excluded"; else bad "credentials excluded"; fi
 OUT=$(run "$Q" quiet "$D"); RC=$?
 if [ "$RC" -eq 0 ] && [ "$(tail -1 <<<"$OUT")" = "BACKUP OK $Q" ] && [ "$D/home/.claude/projects/p0/s.jsonl" -ef "$Q/home/.claude/projects/p0/s.jsonl" ]; then ok "quiet backup hard links unchanged file"; else bad "quiet backup" "rc=$RC" "$OUT"; fi
@@ -30,9 +44,14 @@ OUT=$(cd "$T" && run rel-live live); RC=$?
 if [ "$RC" -eq 0 ] && [ "$(tail -1 <<<"$OUT")" = "BACKUP OK $P/rel-live" ] && grep -qx ok "$T/rel-live/manifest/db.txt"; then ok "relative DEST resolved before the manifest step"; else bad "relative DEST" "rc=$RC" "$OUT"; fi
 OUT=$(cd "$T" && run rel-quiet quiet rel-live); RC=$?
 if [ "$RC" -eq 0 ] && [ "$T/rel-live/home/.claude/projects/p0/s.jsonl" -ef "$T/rel-quiet/home/.claude/projects/p0/s.jsonl" ]; then ok "relative PREVIOUS hard links unchanged file"; else bad "relative PREVIOUS" "rc=$RC" "$OUT"; fi
+# No source-repo marker in this home: the backup runs as it did before the marker read.
 N="$T/nodb-home"; mkdir -p "$N/.claude/projects/p0"; echo one >"$N/.claude/projects/p0/s.jsonl"
 OUT=$(HOME="$N" PFM_MANAGED_SETTINGS_DIR="$M" bash "$SUT" "$T/nodb" live 2>&1); RC=$?
 if [ "$RC" -eq 0 ] && grep -qx 'db_integrity_ok=0' <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "BACKUP OK $T/nodb" ]; then ok "no database still reaches BACKUP OK"; else bad "no database" "rc=$RC" "$OUT"; fi
+O="$T/out-home"; mkdir -p "$O/.claude/projects/p0" "$O/.local/share/pfm/install"; echo one >"$O/.claude/projects/p0/s.jsonl"
+printf '%s\n' /opt/elsewhere >"$O/.local/share/pfm/install/source-repo"
+OUT=$(HOME="$O" PFM_MANAGED_SETTINGS_DIR="$M" bash "$SUT" "$T/out" live 2>&1); RC=$?
+if [ "$RC" -eq 0 ] && grep -qxF 'clone outside home, its configs not copied: /opt/elsewhere' <<<"$OUT" && [ ! -e "$T/out/home"/opt ] && [ "$(tail -1 <<<"$OUT")" = "BACKUP OK $T/out" ]; then ok "clone outside home named, its configs not copied"; else bad "clone outside home" "rc=$RC" "$OUT"; fi
 OUT=$(run "$T/bad-mode" other); RC=$?
 if [ "$RC" -eq 2 ] && [ "$OUT" = 'mode must be live or quiet' ] && [ ! -e "$T/bad-mode" ]; then ok "bad mode refused before DEST"; else bad "bad mode" "rc=$RC" "$OUT"; fi
 OUT=$(run /sys/host-backup-test live); RC=$?

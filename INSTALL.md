@@ -226,7 +226,36 @@ cross by hand:
 
 The older `pfm update` rolls itself back first, so nothing changed. Run the crossing commands from a plain shell outside tmux after it exits.
 
-For a journal listed under `~/.local/state/pfm/migrations/`, run `pfm install --rollback <id>` to reverse that install; `pfm install --rollback <id> --force` overrides destination drift when you intend to overwrite newer changes. A pending journal from a crashed or failed install blocks the next install until it is rolled back. After an install seals its journal, pruning keeps the newest three sealed journals and any younger than 14 days.
+Between `make host-install` and `pfm install --yes`, the new binary sees a config it has not migrated yet. These refuse with `config not migrated: run pfm install` until the migration: `pfm-mcp.service` and the name-sync units (the launch agents on macOS); the Claude hooks (a non-blocking error in every chat); a `claude` launch through the shim; `pfm mcp serve --stdio`; `pfm update`. These still answer: `pfm --version`, `pfm doctor`, the statusline, `pfm config show|validate`, `make stale`, `make mcp-status` and `make sweep-stale`. `make host-install` names the window and exits 0:
+
+```text
+host-install: binary swapped; pfm refuses until `pfm install --yes` migrates this host — run it now
+```
+
+`make install` stops there, restarting and rolling back nothing:
+
+```text
+install: stopped after host-install; nothing restarted or rolled back — run pfm install --yes now, then make -C <clone>/pfm sweep-stale
+```
+
+Close every chat first, and run `pfm install --yes` at once.
+
+For a journal listed under `~/.local/state/pfm/migrations/`, run `pfm install --rollback <id>` to reverse that install; `pfm install --rollback <id> --force` overrides destination drift when you intend to overwrite newer changes. A pending journal from a crashed or failed install blocks the next install until it is rolled back. After an install seals its journal, pruning keeps the newest three sealed journals and any younger than 14 days. Undo a crossing in this order:
+
+1. `pfm install --rollback <id>` with the new binary first. When the restored config is a legacy one this pfm refuses, it leaves the fleet units stopped and prints its numbered `next` lines:
+
+   ```text
+     next    this pfm refuses the restored legacy config {legacy}; fleet units left stopped: {units}
+     next    1. systemctl --user daemon-reload
+     next    2. make -C <clone>/pfm rollback
+     next    3. systemctl --user start {units}
+   ```
+
+   The `daemon-reload` line appears only when the rollback restored a systemd unit file, and comes first so that `make rollback`'s MCP restart runs the restored unit; on macOS each start line is a `launchctl bootstrap` of one launch agent.
+2. `make -C <clone>/pfm rollback`, after the printed `daemon-reload` when there is one.
+3. The printed unit restart.
+
+`make rollback` refuses a `pfm.prev` installed before a layout migration that is not rolled back yet, printing this order (`rollback: REFUSED — …`); `FORCE=1 make rollback` overrides it. A failed `make mcp-restart` prints the unit's last log lines after its `MCP-RESTART-FAILED` line.
 
 The project flow is deliberately non-destructive:
 

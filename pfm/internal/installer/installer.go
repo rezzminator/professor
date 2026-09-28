@@ -306,28 +306,31 @@ func (installer *engine) install(ctx context.Context) error {
 	// client wiring can change without changing either. enable --now leaves an
 	// already-running process untouched, so always restart the enabled Linux
 	// daemon after its complete config/client transaction has landed.
+	// A restart that does not come back fails the run after every later step
+	// has landed, like a failed plugin install.
+	var restartErr error
 	if !schedulerIsLaunchd && installer.apply && installer.mcpAnyEnabled() && installer.userManagerAvailable(ctx) {
-		installer.runSystemctl(ctx, "restart", mcpUnitName)
+		restartErr = installer.restartMCPUnit(ctx)
 	}
 	if mcpErr != nil {
-		return mcpErr
+		return errors.Join(mcpErr, restartErr)
 	}
 	if err := installer.wireOpenCodeInstructions(); err != nil {
-		return err
+		return errors.Join(err, restartErr)
 	}
 	if err := installer.wireLogDefault(); err != nil {
-		return err
+		return errors.Join(err, restartErr)
 	}
 	if err := installer.wireShell(false); err != nil {
-		return err
+		return errors.Join(err, restartErr)
 	}
 	if err := installer.wireVSCode(); err != nil {
-		return err
+		return errors.Join(err, restartErr)
 	}
 	if err := installer.writeUpdateMetadata(); err != nil {
-		return err
+		return errors.Join(err, restartErr)
 	}
-	return pluginErr
+	return errors.Join(pluginErr, restartErr)
 }
 
 // wireCodexAgents runs on every install: it serves the Claude agent
@@ -1893,6 +1896,25 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 
 func (installer *engine) userManagerAvailable(ctx context.Context) bool {
 	return installer.options.Runner.Run(ctx, "systemctl", "--user", "show-environment") == nil
+}
+
+// restartMCPUnit restarts pfm-mcp.service, waits the settle and verifies it
+// came back active; a restart that fails or does not come back is an error,
+// reported at once, never a skip.
+func (installer *engine) restartMCPUnit(ctx context.Context) error {
+	err := layoutSystemctl(ctx, installer.options.Runner, "restart", mcpUnitName)
+	if err != nil {
+		err = fmt.Errorf("systemctl --user restart %s: %w", mcpUnitName, err)
+	} else {
+		installer.pause(fleetUnitSettle)
+		err = verifyFleetUnitsActive(ctx, installer.options.Runner, []string{mcpUnitName})
+	}
+	if err != nil {
+		installer.say("  fail    %v", err)
+		return err
+	}
+	installer.ok("systemctl --user restart " + mcpUnitName)
+	return nil
 }
 
 func (installer *engine) unitKnown(ctx context.Context, unit string) bool {

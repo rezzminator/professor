@@ -130,7 +130,8 @@ func TestInstallRollbackAcceptsTheStateDBItMigrated(t *testing.T) {
 	statePath := filepath.Join(home, ".local", "state", "pfm", "pfm.db")
 	cachePath := filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db")
 	procRoot := t.TempDir()
-	binDir, _ := writeManagerFakes(t, "exit 0", "exit 0")
+	// systemctl answers ActiveState as a real one does for a unit not loaded.
+	binDir, _ := writeManagerFakes(t, "case \"$*\" in *ActiveState*) echo inactive ;; esac\nexit 0", "exit 0")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", home)
 	t.Setenv("PFM_HOME", home)

@@ -44,7 +44,17 @@ excl=(
 )
 for db in "${dbs[@]}"; do excl+=(--exclude="$db" --exclude="$db-wal" --exclude="$db-shm"); done
 
-rel=(.claude .claude.json .cc .config/pfm .local/share/pfm .local/state/pfm .codex .zshrc)
+rel=(.claude .claude.json .cc .config/pfm .local/share/pfm .local/state/pfm .codex .zshrc
+	.local/bin/tmux-title-renudge .config/opencode/opencode.jsonc .vscode-server/data/Machine/settings.json)
+# The clone's migrated configs; the clone's tracked files are the checkout's, not install's.
+marker="$H/.local/share/pfm/install/source-repo"
+if [ -f "$marker" ]; then
+	clone=$(head -n 1 "$marker") || fail "read $marker"
+	case $clone in
+	"$H"/?*) rel+=("${clone#"$H"/}/pfm.config.json" "${clone#"$H"/}/harvester.config.json") ;;
+	*) echo "clone outside home, its configs not copied: $clone" ;;
+	esac
+fi
 for f in "$H"/.local/bin/pfm* "$H"/.local/bin/claude \
 	"$H"/.config/systemd/user/pfm* "$H"/.config/systemd/user/*/pfm*; do
 	[ -e "$f" ] || [ -L "$f" ] || continue

@@ -4,15 +4,29 @@ set -uo pipefail
 # host-rehearsal.sh — rehearse the host install on a COPY of a real host
 # backup (infra/fence/host-backup.sh layout), inside the pfm-dev image.
 #
-# usage: infra/fence/host-rehearsal.sh BACKUP SCRATCH
+# usage: infra/fence/host-rehearsal.sh BACKUP SCRATCH [--stress]
 #        infra/fence/host-rehearsal.sh compare BACKUP HOME JOURNAL
 #
 # BACKUP SCRATCH: copies BACKUP/home and BACKUP/etc into SCRATCH (hard links,
 # modes and link targets kept; credentials never), places this repository's
-# tracked files at the clone path the copied source-repo marker names, and
+# tracked files at the clone path the copied source-repo marker names, beside a
+# .git file naming the repository's git dir (so the build is VCS-stamped) and
+# the clone's pfm.config.json / harvester.config.json from the backup, and
 # runs one container with SCRATCH/home mounted at the home= path of
-# BACKUP/meta and SCRATCH/etc/claude-code at /etc/claude-code. Steps, in order:
-#   copy build hash-before preview apply doctor apply-again manifest rollback hash-after
+# BACKUP/meta and SCRATCH/etc/claude-code read-only at /etc/claude-code (the
+# host's root-owned /etc) and read-write at /rehearsal-etc (sudo's view).
+# Steps, in order:
+#   copy build hash-before preview apply doctor apply-again manifest rollback hash-after pair
+# build: when the copied home holds a legacy config (.config/pfm/pfm.config.json
+# or config.json), host-install must name the pending migration; the new pfm
+# must carry vcs.revision = this repository's HEAD. rollback: over a legacy
+# config it must print its `next` block and restart none of the units it left
+# stopped. pair: runs the rollback's numbered `next` commands in order (no
+# block: make -C {clone}/pfm rollback), then {pfm} ls on the restored binary.
+# --stress: the managed drop-in is removed from the copied /etc, and a fake
+# live pid 424242 holds the legacy state database (proc/424242/fd/3); apply
+# must stop pfm-mcp.service (which releases the holder) and write the drop-in
+# through sudo; rollback must remove it again.
 # BACKUP is only read. Outputs in SCRATCH/rehearsal/:
 #   verdict.txt   first line REHEARSAL PASS or REHEARSAL FAIL {step}: {reason},
 #                 then one line per step run: step {name} ok | step {name} FAILED {reason}
@@ -26,8 +40,15 @@ set -uo pipefail
 #                 and every *.db-wal / *.db-shm (SQLite creates them on any open
 #                 of a WAL database; the live host always has them, a .backup
 #                 copy never does; the databases themselves are compared)
-#   stubs/        systemctl (argv appended to systemctl.log; is-active exits 3), sudo
-#   proc/         the empty PFM_PROC_ROOT: no chat is live in the rehearsal
+#   stubs/        systemctl: stateful, one state word per unit in units/{unit}
+#                 (the three fleet units start active, any other unit inactive);
+#                 stop/start/restart set it, is-active and show answer it; argv
+#                 appended to systemctl.log. sudo: drops -n, maps /etc/claude-code
+#                 onto /rehearsal-etc, argv appended to sudo.log, then runs it
+#   pair.log      the pair step's commands and their output
+#   proc/         PFM_PROC_ROOT, read-write: empty (no chat is live), or with
+#                 --stress the holder 424242, removed by the stub's stop of
+#                 pfm-mcp.service
 # stdout ends with the verdict path.
 #
 # compare BACKUP HOME JOURNAL: the manifest check alone — every sessions.sha256
@@ -37,7 +58,7 @@ set -uo pipefail
 # .local/state/pfm/pfm-cache.db, callmeter.db → itself) except swap_event and
 # hidden, each counted from a temp copy with its -wal/-shm.
 #
-# BROKEN STATE: wrong arguments print usage, exit 2. A backup lacking home= in
+# BROKEN STATE: wrong arguments (a third one other than --stress) print usage, exit 2. A backup lacking home= in
 # meta, manifest/sessions.sha256 or manifest/db.txt, a non-empty SCRATCH, or a
 # missing host tool / unreachable docker daemon (TOOLCHAIN-MISSING) refuse
 # before anything is copied or started, exit 1, naming what. After the copy,
@@ -58,16 +79,26 @@ repo_ls_files() {
     git -C "$REPO_ROOT" ls-files -z
   fi
 }
+repo_head() {
+  if [ -n "${PFM_DEV_REPO_GIT_DIR:-}" ]; then
+    GIT_DIR="$PFM_DEV_REPO_GIT_DIR" git -c safe.directory='*' rev-parse HEAD
+  else
+    git -C "$REPO_ROOT" rev-parse HEAD
+  fi
+}
 # Container-side paths: fixed, never under the rehearsed home.
 C_REHEARSAL=/rehearsal
 C_GIT=/pfm-git-common
+C_ETC=/rehearsal-etc
+FLEET_UNITS="pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer"
+HOLDER_PID=424242
 C_GOMOD=/pfm-gomod
 DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db" ".local/state/pfm/callmeter.db .local/state/pfm/callmeter.db")
 
 die() { echo "host-rehearsal: $*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
-usage: infra/fence/host-rehearsal.sh BACKUP SCRATCH
+usage: infra/fence/host-rehearsal.sh BACKUP SCRATCH [--stress]
        infra/fence/host-rehearsal.sh compare BACKUP HOME JOURNAL
 EOF
   exit 2
@@ -184,7 +215,7 @@ pass() { STEP_LINES+=("step $1 ok"); echo "step $1 ok"; }
 inside() { docker exec "$NAME" bash -lc "export PATH=$C_REHEARSAL/stubs:\$PATH; cd /; $1"; }
 
 cmd_rehearse() {
-  local backup=$1 scratch=$2 home f tool
+  local backup=$1 scratch=$2 stress=$3 home f tool
   [ -r "$backup/meta" ] || die "meta missing in $backup"
   home=$(sed -n 's/^home=//p' "$backup/meta" | head -1)
   [ -n "$home" ] || die "home= line in meta missing in $backup"
@@ -204,6 +235,7 @@ cmd_rehearse() {
   scratch="$(cd "$scratch" && pwd -P)"
   R="$scratch/rehearsal"
   local H="$scratch/home" rc
+  local dropin="$scratch/etc/claude-code/managed-settings.d/pfm.json"
 
   # copy
   rsync -aH --exclude=.credentials.json --exclude=.codex/auth.json "$backup/home/" "$H/" >"$R/copy.log" 2>&1 ||
@@ -220,26 +252,102 @@ cmd_rehearse() {
   *) fail copy "clone marker names '$clone', outside home $home" ;;
   esac
   case "/$clone/" in */../*) fail copy "clone marker names '$clone', which climbs out of the home" ;; esac
-  local cand="$H/${clone#"$home"/}"
-  { rm -rf -- "$cand" && mkdir -p "$cand"; } || fail copy "clear $cand failed"
-  repo_ls_files | rsync -a --from0 --files-from=- --ignore-missing-args "$REPO_ROOT/" "$cand/" >>"$R/copy.log" 2>&1 ||
-    fail copy "placing the candidate tree from $REPO_ROOT failed (see copy.log)"
-  pass copy
-
-  # build: stubs, container, make host-install
-  cat >"$R/stubs/systemctl" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >>$(printf '%q' "$R/systemctl.log")
-case " \$* " in *" is-active "*) exit 3 ;; esac
-exit 0
-EOF
-  printf '#!/usr/bin/env bash\n# /etc/claude-code is the uid-owned scratch copy: run unprivileged.\nexec "$@"\n' >"$R/stubs/sudo"
-  chmod 755 "$R/stubs/systemctl" "$R/stubs/sudo"
   local gitvals git_common git_rel
   gitvals=$(ROOT="$REPO_ROOT" FENCE_CALLER=host-rehearsal bash -c \
     'source "$1" && printf "%s\n%s\n" "$PFM_DEV_GIT_COMMON" "$PFM_DEV_GIT_DIR_REL"' _ "$REPO_ROOT/infra/fence/fence-env.sh" 2>&1) ||
-    fail build "resolve the git dir of $REPO_ROOT: $gitvals"
+    fail copy "resolve the git dir of $REPO_ROOT: $gitvals"
   git_common=$(sed -n 1p <<<"$gitvals"); git_rel=$(sed -n 2p <<<"$gitvals")
+  local crel=${clone#"$home"/}
+  local cand="$H/$crel" cf
+  { rm -rf -- "$cand" && mkdir -p "$cand"; } || fail copy "clear $cand failed"
+  repo_ls_files | rsync -a --from0 --files-from=- --ignore-missing-args "$REPO_ROOT/" "$cand/" >>"$R/copy.log" 2>&1 ||
+    fail copy "placing the candidate tree from $REPO_ROOT failed (see copy.log)"
+  # The container runs as the host uid, so git's ownership check passes and
+  # the build stamps vcs.revision from the read-only common dir.
+  printf 'gitdir: %s\n' "$C_GIT/$git_rel" >"$cand/.git" || fail copy "write $cand/.git failed"
+  for cf in pfm.config.json harvester.config.json; do
+    [ -e "$backup/home/$crel/$cf" ] || continue
+    cp -p "$backup/home/$crel/$cf" "$cand/$cf" >>"$R/copy.log" 2>&1 || fail copy "copying the clone's $cf from $backup failed"
+  done
+  local legacy=""
+  for f in .config/pfm/pfm.config.json .config/pfm/config.json; do
+    [ -z "$legacy" ] && [ -e "$H/$f" ] && legacy=$f
+  done
+  if [ "$stress" = 1 ]; then
+    local held=""
+    for f in .cc/fleet.db .local/state/pfm/fleet.db; do
+      [ -z "$held" ] && [ -f "$H/$f" ] && held=$f
+    done
+    [ -n "$held" ] || fail copy "no legacy state database to hold"
+    rm -f "$dropin" || fail copy "removing the managed drop-in $dropin failed"
+    { mkdir -p "$R/proc/$HOLDER_PID/fd" && ln -s "$home/$held" "$R/proc/$HOLDER_PID/fd/3"; } ||
+      fail copy "creating the holder pid $HOLDER_PID failed"
+  fi
+  pass copy
+
+  # build: stubs, container, make host-install
+  {
+    echo '#!/usr/bin/env bash'
+    printf 'stress=%q fleet=%q holder=%q\n' "$stress" "$FLEET_UNITS" "$HOLDER_PID"
+    cat <<'EOF'
+# The rehearsal dir ($C_REHEARSAL in the container): the parent of stubs/.
+D=$(dirname "$(dirname "$0")")
+printf '%s\n' "$*" >>"$D/systemctl.log"
+mkdir -p "$D/units"
+state() {
+  if [ -f "$D/units/$1" ]; then cat "$D/units/$1"; return; fi
+  case " $fleet " in *" $1 "*) echo active ;; *) echo inactive ;; esac
+}
+verb="" prop="" quiet=0 units=()
+while [ $# -gt 0 ]; do
+  case $1 in
+  -p | --property) prop=${2:-}; shift ;;
+  --property=*) prop=${1#--property=} ;;
+  -q | --quiet) quiet=1 ;;
+  -*) ;;
+  *) if [ -z "$verb" ]; then verb=$1; else units+=("$1"); fi ;;
+  esac
+  shift
+done
+case $verb in
+stop)
+  for u in "${units[@]}"; do
+    echo inactive >"$D/units/$u"
+    if [ "$stress" = 1 ] && [ "$u" = pfm-mcp.service ]; then rm -rf "$D/proc/$holder"; fi
+  done ;;
+start | restart) for u in "${units[@]}"; do echo active >"$D/units/$u"; done ;;
+is-active)
+  s=$(state "${units[0]}")
+  [ "$quiet" = 1 ] || echo "$s"
+  [ "$s" = active ] || exit 3 ;;
+show)
+  s=$(state "${units[0]}")
+  case $prop in
+  ActiveState) echo "$s" ;;
+  MainPID) if [ "$s" = active ]; then echo 4242; else echo 0; fi ;;
+  esac ;;
+cat) case " $fleet " in *" ${units[0]} "*) ;; *) exit 1 ;; esac ;;
+esac
+exit 0
+EOF
+  } >"$R/stubs/systemctl"
+  {
+    echo '#!/usr/bin/env bash'
+    cat <<'EOF'
+# /etc/claude-code is mounted read-only, as the host's root-owned /etc is to its
+# user; this sudo writes the read-write mount of the same directory.
+D=$(dirname "$(dirname "$0")")
+printf '%s\n' "$*" >>"$D/sudo.log"
+etc=${PFM_REHEARSAL_ETC:?sudo stub: PFM_REHEARSAL_ETC unset}
+[ "${1:-}" = -n ] && shift
+args=()
+for a in "$@"; do
+  case $a in /etc/claude-code | /etc/claude-code/*) args+=("$etc${a#/etc/claude-code}") ;; *) args+=("$a") ;; esac
+done
+exec "${args[@]}"
+EOF
+  } >"$R/stubs/sudo"
+  chmod 755 "$R/stubs/systemctl" "$R/stubs/sudo"
   docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >"$R/build.log" 2>&1 ||
     fail build "docker build of $IMAGE failed (see build.log)"
   trap 'docker rm -f "$NAME" >/dev/null 2>&1' EXIT
@@ -247,9 +355,10 @@ EOF
   # telemetry config live in the container's /tmp, never in the home.
   docker run -d --name "$NAME" --init --user "$(id -u):$(id -g)" \
     -v "$H:$home" \
-    -v "$scratch/etc/claude-code:/etc/claude-code" \
+    -v "$scratch/etc/claude-code:/etc/claude-code:ro" \
+    -v "$scratch/etc/claude-code:$C_ETC" \
     -v "$R:$C_REHEARSAL" \
-    -v "$R/proc:$C_REHEARSAL/proc:ro" \
+    -v "$R/proc:$C_REHEARSAL/proc" \
     -v "$R/stubs:$C_REHEARSAL/stubs:ro" \
     -v "$git_common:$C_GIT:ro" \
     -v "pfm-dev-gomod:$C_GOMOD:ro" \
@@ -257,7 +366,7 @@ EOF
     -e "PATH=$C_REHEARSAL/stubs:$home/.local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     -e PFM_LOG_LEVEL=off \
     -e "PFM_PROC_ROOT=$C_REHEARSAL/proc" \
-    -e GOFLAGS=-buildvcs=false \
+    -e "PFM_REHEARSAL_ETC=$C_ETC" \
     -e "GOMODCACHE=$C_GOMOD" \
     -e GOCACHE=/tmp/go-build \
     -e GOPATH=/tmp/go \
@@ -267,10 +376,21 @@ EOF
   local qclone qpfm
   qclone=$(printf '%q' "$clone")
   qpfm=$(printf '%q' "$home/.local/bin/pfm")
-  inside "XDG_CONFIG_HOME=/tmp/go-config make -C $qclone/pfm host-install" >>"$R/build.log" 2>&1
+  # The host's own environment: an XDG_CONFIG_HOME override hides the legacy
+  # config that host-install's smoke test meets on a real crossing.
+  inside "make -C $qclone/pfm host-install" >>"$R/build.log" 2>&1
   rc=$?
   [ $rc -eq 0 ] || fail build "make host-install exit $rc: $(tail -1 "$R/build.log")"
   [ -x "$H/.local/bin/pfm" ] || fail build "make host-install left no .local/bin/pfm"
+  if [ -n "$legacy" ] && ! grep -qF 'host-install: binary swapped; pfm refuses until' "$R/build.log"; then
+    fail build "host-install did not name the pending migration"
+  fi
+  local head_sha vcs stamp
+  head_sha=$(repo_head 2>&1) || fail build "reading HEAD of $REPO_ROOT failed: $head_sha"
+  vcs=$(inside "go version -m $qpfm" 2>&1)
+  printf '%s\n' "$vcs" >>"$R/build.log"
+  stamp=$(sed -n 's/^[[:space:]]*build[[:space:]]\{1,\}vcs\.revision=//p' <<<"$vcs" | head -1)
+  { [ -n "$stamp" ] && [ "$stamp" = "$head_sha" ]; } || fail build "pfm carries no VCS stamp of HEAD $head_sha"
   pass build
 
   tree_hash "$H" "$R/hash-before.txt" || fail hash-before "hashing $H failed"
@@ -293,6 +413,11 @@ EOF
   [ -n "$jdir" ] || fail apply "pfm install --yes printed no 'install journal:' line"
   case $jdir in "$home"/?*) ;; *) fail apply "journal $jdir is outside home $home" ;; esac
   jid=${jdir##*/}
+  if [ "$stress" = 1 ]; then
+    [ -f "$dropin" ] || fail apply "--stress: the managed drop-in $C_ETC/managed-settings.d/pfm.json was not written"
+    grep -qF /etc/claude-code/managed-settings.d/pfm.json "$R/sudo.log" 2>/dev/null ||
+      fail apply "--stress: sudo.log names no write of /etc/claude-code/managed-settings.d/pfm.json"
+  fi
   pass apply
 
   inside "$qpfm doctor" >"$R/doctor.log" 2>&1
@@ -317,14 +442,57 @@ EOF
   [ "$verdict" = "manifest: ok" ] || fail manifest "${verdict#manifest: }"
   pass manifest
 
+  # Units the rollback leaves stopped are judged from the log lines it adds.
+  local logged=0
+  [ -f "$R/systemctl.log" ] && logged=$(wc -l <"$R/systemctl.log")
   inside "$qpfm install --rollback $(printf '%q' "$jid")" >"$R/rollback.log" 2>&1
   rc=$?
   [ $rc -eq 0 ] || fail rollback "pfm install --rollback $jid exit $rc: $(tail -1 "$R/rollback.log")"
+  if [ -n "$legacy" ]; then
+    local refuse stopped="" line w x u verb
+    refuse=$(grep -m1 '^  next    this pfm refuses the restored legacy config' "$R/rollback.log")
+    [ -n "$refuse" ] || fail rollback "no next step printed for the restored legacy config"
+    case $refuse in *"fleet units left stopped: "*) stopped=${refuse##*fleet units left stopped: } ;; esac
+    [ "$stopped" = none ] && stopped=""
+    if [ -n "$stopped" ] && [ -f "$R/systemctl.log" ]; then
+      while IFS= read -r line; do
+        read -ra w <<<"$line"
+        verb=""
+        for x in "${w[@]}"; do case $x in -*) ;; *) verb=$x; break ;; esac; done
+        case $verb in start | restart) ;; *) continue ;; esac
+        for u in $stopped; do
+          for x in "${w[@]}"; do
+            [ "$x" = "$u" ] && fail rollback "fleet unit $u restarted on a binary that refuses the legacy config"
+          done
+        done
+      done < <(tail -n +$((logged + 1)) "$R/systemctl.log")
+    fi
+  fi
+  if [ "$stress" = 1 ] && [ -e "$dropin" ]; then
+    fail rollback "--stress: the managed drop-in $C_ETC/managed-settings.d/pfm.json is still present"
+  fi
   pass rollback
 
+  # Before the pairing: make rollback changes .local/bin/pfm.
   tree_hash "$H" "$R/hash-after.txt" || fail hash-after "hashing $H failed"
   cmp -s "$R/hash-before.txt" "$R/hash-after.txt" || fail hash-after "$(tree_diff "$R/hash-before.txt" "$R/hash-after.txt")"
   pass hash-after
+
+  # pair: the rollback's own next steps, then the restored binary answers.
+  local cmds=() c
+  while IFS= read -r c; do cmds+=("$c"); done < <(sed -n 's/^  next    [0-9][0-9]*\. //p' "$R/rollback.log")
+  [ ${#cmds[@]} -gt 0 ] || cmds=("make -C $qclone/pfm rollback")
+  cmds+=("$qpfm ls")
+  : >"$R/pair.log"
+  for c in "${cmds[@]}"; do
+    printf '$ %s\n' "$c" >>"$R/pair.log"
+    inside "$c" >"$R/pair.last.log" 2>&1
+    rc=$?
+    cat "$R/pair.last.log" >>"$R/pair.log"
+    [ $rc -eq 0 ] || fail pair "$c exit $rc: $(tail -1 "$R/pair.last.log")"
+  done
+  rm -f "$R/pair.last.log"
+  pass pair
 
   { echo "REHEARSAL PASS"; printf '%s\n' "${STEP_LINES[@]}"; } >"$R/verdict.txt"
   echo "REHEARSAL PASS"
@@ -333,5 +501,8 @@ EOF
 
 case ${1:-} in
 compare) [ $# -eq 4 ] || usage; cmd_compare "$2" "$3" "$4" ;;
-*) [ $# -eq 2 ] || usage; cmd_rehearse "$1" "$2" ;;
+*)
+  if [ $# -eq 2 ]; then cmd_rehearse "$1" "$2" 0
+  elif [ $# -eq 3 ] && [ "$3" = --stress ]; then cmd_rehearse "$1" "$2" 1
+  else usage; fi ;;
 esac

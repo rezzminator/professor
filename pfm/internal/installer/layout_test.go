@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -48,6 +49,7 @@ func layoutFixture(t *testing.T) LayoutEnv {
 		ManagedRoot:     filepath.Join(home, ".local", "share", "pfm", "install"),
 		LegacyConfigDir: filepath.Join(home, ".config", "pfm"),
 		runner:          &layoutTestRunner{},
+		settle:          func(time.Duration) {},
 	}
 	layoutWrite(t, env.ConfigPath, `{"version":2}`)
 	layoutWrite(t, env.StateDB, "state")

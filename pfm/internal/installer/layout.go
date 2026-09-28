@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -70,6 +71,9 @@ type LayoutEnv struct {
 	writeManaged func(path string, content []byte) error
 	invocation   paths.Env
 	executable   func() (string, error)
+	// settle waits a started fleet unit's settle before its state is read
+	// back; nil is the real clock (layout_services.go).
+	settle func(time.Duration)
 }
 
 func NewLayoutEnv(runtime pfmconfig.Runtime, env paths.Env) (LayoutEnv, error) {

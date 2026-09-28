@@ -28,8 +28,17 @@ var (
 )
 
 // ApplyLayout converges the layout rows, recording into journal (nil: a
-// private one); it returns the journal directory.
-func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply bool, stdout io.Writer) (string, error) {
+// private one); it returns the journal directory. An apply with database work
+// stops the running fleet units once, when the loop reaches the first
+// database row, and restarts and verifies them once, right after the last
+// database row's outcome or at any earlier return.
+func ApplyLayout(
+	ctx context.Context,
+	env LayoutEnv,
+	journal *Journal,
+	apply bool,
+	stdout io.Writer,
+) (dir string, err error) {
 	if journal == nil {
 		journal = NewJournal(ctx, env)
 	}
@@ -44,7 +53,26 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply boo
 	actionable := false
 	configMigrated := false
 	var independentFailures []error
-	for _, planned := range findings {
+	lastDB, dbWork := layoutDatabaseWork(findings)
+	servicesArmed, servicesStopped := false, false
+	var stoppedUnits []string
+	var stopErr error
+	restartServices := func() error {
+		if !servicesArmed {
+			return nil
+		}
+		servicesArmed = false
+		return restartLayoutServices(ctx, env, stoppedUnits)
+	}
+	defer func() { err = errors.Join(err, restartServices()) }()
+	for index, planned := range findings {
+		if servicesArmed && index > lastDB {
+			independentFailures = append(independentFailures, restartServices())
+		}
+		if apply && dbWork && !servicesStopped && layoutDatabaseRow(planned.Row) {
+			servicesStopped, servicesArmed = true, true
+			stoppedUnits, stopErr = stopLayoutServices(ctx, env)
+		}
 		if apply && !configMigrated && planned.Row == layoutRowStateDB {
 			if err := applyLayoutConfigMigration(journal); err != nil {
 				return journal.dir, fmt.Errorf("layout config migration: %w", err)
@@ -52,6 +80,11 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply boo
 			configMigrated = true
 		}
 		if planned.Verdict == VerdictOK && planned.Err == nil {
+			continue
+		}
+		if stopErr != nil && layoutDatabaseRow(planned.Row) {
+			independentFailures = append(independentFailures,
+				fmt.Errorf("layout %s %s: %w", planned.Row, planned.Path, stopErr))
 			continue
 		}
 		current := planned
@@ -140,6 +173,7 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply boo
 		}
 		fmt.Fprintf(stdout, "  ok      layout %s %s\n", current.Row, current.Path)
 	}
+	independentFailures = append(independentFailures, restartServices())
 	if apply {
 		if len(journal.records) == layoutStart {
 			fmt.Fprintln(stdout, "layout: nothing to do")
@@ -148,6 +182,27 @@ func ApplyLayout(ctx context.Context, env LayoutEnv, journal *Journal, apply boo
 		fmt.Fprintln(stdout, "layout: nothing to do")
 	}
 	return journal.dir, errors.Join(independentFailures...)
+}
+
+// layoutDatabaseRow reports whether row moves a database the fleet units hold.
+func layoutDatabaseRow(row string) bool {
+	return row == layoutRowStateDB || row == layoutRowCacheDB
+}
+
+// layoutDatabaseWork returns the index of the last database finding and
+// whether any database finding has work (not ok, or unreadable).
+func layoutDatabaseWork(findings []LayoutFinding) (last int, work bool) {
+	last = -1
+	for index, finding := range findings {
+		if !layoutDatabaseRow(finding.Row) {
+			continue
+		}
+		last = index
+		if finding.Verdict != VerdictOK || finding.Err != nil {
+			work = true
+		}
+	}
+	return last, work
 }
 
 func layoutFindingByPath(findings []LayoutFinding, row, path string) LayoutFinding {
@@ -468,13 +523,10 @@ func applyLayoutHomeMCP(journal *Journal, finding LayoutFinding, paths []string)
 	})
 }
 
-func applyLayoutDB(ctx context.Context, journal *Journal, finding LayoutFinding) (err error) {
+// applyLayoutDB moves one database row; ApplyLayout has stopped the fleet
+// units before the first database row and restarts them after the last.
+func applyLayoutDB(ctx context.Context, journal *Journal, finding LayoutFinding) error {
 	env := journal.env
-	stopped, stopErr := stopLayoutServices(ctx, env)
-	defer func() { err = errors.Join(err, restartLayoutServices(ctx, env, stopped)) }()
-	if stopErr != nil {
-		return stopErr
-	}
 	current := layoutFindingByPath(ClassifyLayout(env), finding.Row, finding.Path)
 	if current.Err != nil {
 		return current.Err
@@ -607,76 +659,4 @@ func (env LayoutEnv) commandRunner() CommandRunner {
 		return env.runner
 	}
 	return execCommandRunner{}
-}
-
-// layoutServiceUnits are the systemd user units that hold a pfm database.
-var layoutServiceUnits = []string{mcpUnitName, nameSyncPathUnit, nameSyncTimerUnit}
-
-// stopLayoutServices stops the pfm services running now and returns them, so
-// the restart brings back exactly those: a unit the host never loaded, or one
-// the operator stopped, is neither stopped nor started. A probe misreading a
-// running service is caught after the stop by the database holder scan.
-func stopLayoutServices(ctx context.Context, env LayoutEnv) ([]string, error) {
-	runner := env.commandRunner()
-	var running []string
-	if schedulerIsLaunchd {
-		var failures []error
-		for _, label := range []string{mcpLaunchdLabel, launchdLabel} {
-			service := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-			if runner.Run(ctx, "launchctl", "print", service) != nil {
-				continue
-			}
-			if err := runner.Run(ctx, "launchctl", "bootout", service); err != nil {
-				failures = append(failures, fmt.Errorf("launchctl bootout %s: %w", service, err))
-				continue
-			}
-			running = append(running, label)
-		}
-		return running, errors.Join(failures...)
-	}
-	for _, unit := range layoutServiceUnits {
-		if layoutSystemctl(ctx, runner, "is-active", "--quiet", unit) == nil {
-			running = append(running, unit)
-		}
-	}
-	if len(running) == 0 {
-		return nil, nil
-	}
-	if err := layoutSystemctl(ctx, runner, append([]string{"stop"}, running...)...); err != nil {
-		return running, fmt.Errorf("systemctl --user stop layout services: %w", err)
-	}
-	return running, nil
-}
-
-// layoutSystemctl runs one systemctl verb on the user manager.
-func layoutSystemctl(ctx context.Context, runner CommandRunner, args ...string) error {
-	return runner.Run(ctx, "systemctl", append([]string{"--user"}, args...)...)
-}
-
-// restartLayoutServices starts again the services stopLayoutServices stopped.
-func restartLayoutServices(ctx context.Context, env LayoutEnv, stopped []string) error {
-	if len(stopped) == 0 {
-		return nil
-	}
-	runner := env.commandRunner()
-	if schedulerIsLaunchd {
-		var failures []error
-		for _, label := range stopped {
-			service := filepath.Join(env.Home, "Library", "LaunchAgents", label+".plist")
-			if err := runner.Run(
-				ctx,
-				"launchctl",
-				"bootstrap",
-				fmt.Sprintf("gui/%d", os.Getuid()),
-				service,
-			); err != nil {
-				failures = append(failures, fmt.Errorf("launchctl bootstrap %s: %w", service, err))
-			}
-		}
-		return errors.Join(failures...)
-	}
-	if err := layoutSystemctl(ctx, runner, append([]string{"start"}, stopped...)...); err != nil {
-		return fmt.Errorf("systemctl --user start layout services: %w", err)
-	}
-	return nil
 }

@@ -83,7 +83,7 @@ Transcripts are append-only JSONL named by session id, so a differing same-named
 ## Guards
 
 - **Live chats.** Only a row that would write refuses for a live Claude process (`{config dir}/sessions/{pid}.json` with a running pid); an `ok` row stays `ok` while a chat is live. A refused row names the chats to close. A running pid is read from the process table (`/proc` on Linux, `sysctl` on macOS). `pfm install --yes` refuses the whole run before any change when any blocking row refuses, naming each refusal; preview still lists the rows without writing.
-- **Database holders.** The state-database rows stop whichever of `pfm-mcp` and `pfm-name-sync` are running first and restart exactly those after — a unit the host never loaded, or one the operator stopped, is neither stopped nor started; a remaining holder (a picker, a live chat's MCP proxy) makes the row refuse, naming each pid. Linux compares symlink-resolved database and fd paths. Another user's process, whose `/proc/{pid}/fd` a normal user cannot read, is skipped. On macOS, `lsof -t` checks holders; a missing or failing `lsof` refuses the row and names the reason. A configured state or cache database path equal to its legacy path, including through symlinks, refuses.
+- **Database holders.** An apply with database work stops whichever of `pfm-mcp.service`, `pfm-name-sync.path` and `pfm-name-sync.timer` are running once, before the first database row, and restarts exactly those once, after the last — a unit the host never loaded, or one the operator stopped, is neither stopped nor started. Each restarted unit must read `active` 3 s after its start, else the install fails naming it: `fleet unit {unit} is {state} 3s after start — journalctl --user -u {unit} -n 20` (on macOS, `launch agent {label} not loaded after bootstrap`). The install's own `pfm-mcp.service` restart is verified the same way. With the units down, a remaining holder (a picker, a live chat's MCP proxy) makes the row refuse, naming each pid. Linux compares symlink-resolved database and fd paths. Another user's process, whose `/proc/{pid}/fd` a normal user cannot read, is skipped. On macOS, `lsof -t` checks holders; a missing or failing `lsof` refuses the row and names the reason. A configured state or cache database path equal to its legacy path, including through symlinks, refuses.
 - **Root.** The managed-settings row tries a direct write, then `sudo -n` if needed. Missing cached credentials produce an advisory warning with the command to run; they never refuse the whole install.
 - **Free space.** Before the first change of `pfm install --yes`, a preflight sums what the run will write per filesystem: the bytes of every path the journal will copy (the layout rows it acts on, the installer's own planned writes, and the whole harvester root when a re-provision is planned) charged to the migrations directory's filesystem, plus the source of every cross-filesystem move charged to its destination's. It refuses the whole apply unless each has `free >= need + max(1 GiB, need/10)`: `pfm install: not enough free space on {dir}: need {need} bytes + margin {margin}, have {free} — nothing changed`, exit 1. A free-space probe that fails refuses too (`could not measure free space on {dir}: {err}`), never read as enough. Each cross-filesystem move checks again before it copies; `rename` within one filesystem needs none.
 - **Live chats at rollback.** A rollback with a session-store record refuses while a chat is live on that account (`{home}/.claude/{entry}` checks every account), `--force` included.
@@ -104,14 +104,31 @@ A journal with pending records blocks the next `pfm install --yes` before any ch
 
 `pfm doctor` prints `install journals: {count} in {root}, {bytes} bytes` and names pending or unreadable journals.
 
-`pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. Scope, live-chat and drift checks run before replay; a database rollback stops the running fleet units before checking for remaining holders:
+`pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. Scope, live-chat and drift checks run before replay; a rollback with a database or config record stops the running fleet units before checking for remaining holders, and restarts them only when this pfm accepts the restored config, verifying each is active after 3 s:
 
 - a journal already rolled back refuses: `rollback {id} refused: already rolled back at {time}`;
 - a journal without `scope.json` refuses: `rollback {id} refused: journal {dir} has no scope.json`;
 - an unreadable or invalid scope refuses: `rollback {id} refused: journal scope {path}: {reason}`;
-- a run that moved state databases stops the running fleet units before database replay and restarts those same units afterward; it refuses if any holder remains;
+- a run that moved state databases or the config stops the running fleet units before replay and restarts those same units afterward, unless the replay restored a legacy config (a config moves at the state-db row, journaled even when that row then refuses); it refuses if any database holder remains;
 - a session-store record refuses while a chat is live on its account (§ Guards);
 - a destination whose fingerprint no longer matches its last applied record — newer work since the install — refuses the whole rollback, naming every drifted path: `rollback {id} refused: drift at {path}[, {path}…] — rerun with --force to overwrite them`. A record without a fingerprint counts as drift. Pending records, the cache database and `-wal`/`-shm` siblings are not checked. `--force` overrides only this check.
+
+When the replay restores a legacy config this pfm refuses (`config.LegacyConfigWaiting`), the rollback restarts no unit and prints, after its `rollback layout …` lines, the order that finishes it:
+
+```text
+  next    this pfm refuses the restored legacy config {legacy}; fleet units left stopped: {units}
+  next    1. systemctl --user daemon-reload
+  next    2. make -C {clone}/pfm rollback
+  next    3. systemctl --user start {units}
+```
+
+- `{units}` lists the units this rollback stopped, space-separated, in fleet-unit order, or `none`; with `none` the start line is absent.
+- `{clone}` is the install's clone, or the literal `<clone>` when it is unknown.
+- The daemon-reload line is present only when the replay restored a path under `.config/systemd/user`; it then replaces the standalone `note    run: systemctl --user daemon-reload` line, and comes first so that `make rollback`'s MCP restart runs the restored unit.
+- Numbering is consecutive over the lines present.
+- On launchd, `{units}` holds labels, and each start line reads `launchctl bootstrap gui/{uid} {home}/Library/LaunchAgents/{label}.plist`, one numbered line per label.
+- Under the journal-aware updater (`PFM_UPDATE_INSTALL=1`), the `make … rollback` line is absent, because `pfm update` restores its own binary.
+- The exit code is 0 when the replay succeeded. A replay that failed while a legacy config waits restarts nothing either; its error gains `fleet units left stopped: {units} — this pfm refuses the restored legacy config`, and no `next` lines print.
 
 A successful rollback keeps the journal and writes `{dir}/rolled-back` (the UTC time); a rollback that fails part-way leaves it unmarked, so it can be retried. `pfm update` rolls a failed candidate back by replaying that candidate install's journal the same way.
 
@@ -139,8 +156,8 @@ Chats born before the move were launched with `--system-prompt-file ~/.local/sha
 
 ## Running it on a host
 
-1. Back up the live host with `infra/fence/host-backup.sh BACKUP live`, then run `infra/fence/host-rehearsal.sh BACKUP SCRATCH` against that backup. The rehearsal runs preview, apply, doctor, a second apply, the manifest check and rollback, and writes its verdict under `SCRATCH/rehearsal/`.
-2. On v0.76–v0.78, cross before the install steps below: close every chat, including the one running an older `pfm update`; from a plain shell outside tmux run `git -C <clone> pull --ff-only`, `make -C <clone>/pfm host-install`, then `pfm install --yes`. The older updater rolls itself back first when its candidate refuses the migration.
+1. Back up the live host with `infra/fence/host-backup.sh BACKUP live`, then run `infra/fence/host-rehearsal.sh BACKUP SCRATCH` against that backup. The backup also copies the clone's untracked `pfm.config.json` and `harvester.config.json`, the OpenCode config, the VS Code machine settings and the `tmux-title-renudge` link. The rehearsal runs preview, apply, doctor, a second apply, the manifest check, rollback, the hash after, and `pair` — the rollback's `next` commands in order, then `pfm ls` on the restored binary — and writes its verdict under `SCRATCH/rehearsal/`. `--stress` adds a live fake holder pid on the legacy state database and a missing managed drop-in that apply writes through sudo.
+2. On v0.76–v0.78, cross before the install steps below: close every chat, including the one running an older `pfm update`; from a plain shell outside tmux run `git -C <clone> pull --ff-only`, `make -C <clone>/pfm host-install`, then `pfm install --yes`. The older updater rolls itself back first when its candidate refuses the migration. Between the swap and the migration the new binary refuses the legacy config (`config not migrated: run pfm install`) in the fleet units, hooks, the shim's `claude` launch, `pfm mcp serve --stdio` and `pfm update`, so run `pfm install --yes` at once. To undo a crossing: `pfm install --rollback <id>` with the new binary first, then `make -C <clone>/pfm rollback`, then the unit restart the rollback printed; `make rollback` refuses the other order unless `FORCE=1`.
 3. Close chats on accounts whose rows need to write; any live-chat refusal blocks `pfm install --yes` before changes.
 4. `pfm install` — read the plan.
 5. `pfm install --yes`.

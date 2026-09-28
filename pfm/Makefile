@@ -168,6 +168,14 @@ gate: fmt-check lint-new vet arch iso ## Everything a change must pass before it
 
 install: ## Swap in a new build, restart the daemon, sweep obsolete processes, and keep compatible stdio proxies
 	@$(MAKE) --no-print-directory host-install
+	@rc=0; bash "$(REPO)/pfm/scripts/host-migration-probe.sh" "$(BIN)" >/dev/null 2>&1 || rc=$$?; \
+	if [ $$rc -eq 3 ]; then \
+	  echo "install: stopped after host-install; nothing restarted or rolled back — run pfm install --yes now, then make -C $(REPO)/pfm sweep-stale" >&2; \
+	  exit 1; fi
+	@# Exit 3 only: host-install already printed why — the swapped binary
+	@# refuses this host until pfm install migrates it, so a restart would fail
+	@# and roll back. A probe that could not ask (exit 2, also printed by
+	@# host-install) is no migration: the restart below judges the binary.
 	@if ! $(MAKE) --no-print-directory mcp-restart; then \
 	  echo "install: FAILED at the MCP restart — rolling back to $(BIN).prev; no process was touched" >&2; \
 	  $(MAKE) --no-print-directory rollback; \
@@ -197,14 +205,16 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap
 	  *) echo "host-install: smoke test reported '$$reported', not $(VERSION) — $(BIN) untouched" >&2; exit 1;; esac; \
 	kept=""; if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev" && kept="; previous kept at $(BIN).prev"; fi; \
 	mv -f "$$tmp" "$(BIN)"; \
-	echo "installed: $(BIN) ($$reported$$kept)"
+	echo "installed: $(BIN) ($$reported$$kept)"; \
+	bash "$(REPO)/pfm/scripts/host-migration-probe.sh" "$(BIN)" || true
 	@# Never write onto the running path directly: an executing binary gives
 	@# ETXTBSY. The build lands BESIDE the target — same directory, same
 	@# filesystem — so the final mv is a rename(2): atomic, never a
 	@# copy-over-the-running-image. Processes already running keep their own
 	@# image, which is exactly why the sweep below has to exist.
 
-rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically and restart the daemon on it
+rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically and restart the daemon on it; refuses a pfm.prev older than a layout migration unless FORCE=1
+	@bash "$(REPO)/pfm/scripts/rollback-guard.sh" "$(BIN)" "$(REPO)"
 	@[ -x "$(BIN).prev" ] || { echo "rollback: no $(BIN).prev to restore — $(BIN) left as is" >&2; exit 1; }
 	@tmp="$$(mktemp "$(BIN).rollback.XXXXXX")"; \
 	cp -f "$(BIN).prev" "$$tmp" && chmod 755 "$$tmp" && mv -f "$$tmp" "$(BIN)" \
@@ -223,6 +233,8 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  state="$$(systemctl --user is-active $(UNIT) || true)"; \
 	  if [ "$$state" != "active" ]; then \
 	    echo "MCP-RESTART-FAILED: $(UNIT) is '$$state' after restart — the fleet has NO professor MCP server" >&2; \
+	    echo "mcp: last log lines of $(UNIT):" >&2; \
+	    journalctl --user -u $(UNIT) -n 20 --no-pager >&2 || echo "(journalctl unavailable)" >&2; \
 	    exit 1; \
 	  fi; \
 	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
@@ -238,6 +250,8 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  done; \
 	  if [ -z "$$pid" ]; then \
 	    echo "MCP-RESTART-FAILED: $(AGENT) has no NEW pid 5s after kickstart (was $${old:-none}) — the fleet may have NO fresh professor MCP server" >&2; \
+	    echo "mcp: last log lines of $(HOME)/Library/Logs/pfm/mcp.log:" >&2; \
+	    tail -n 20 "$(HOME)/Library/Logs/pfm/mcp.log" >&2 || echo "(log unavailable)" >&2; \
 	    exit 1; \
 	  fi; \
 	  echo "mcp: $(AGENT) restarted, pid $$pid"; \

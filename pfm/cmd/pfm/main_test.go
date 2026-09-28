@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -854,6 +855,71 @@ func TestDoctorReportsConfigNotMigrated(t *testing.T) {
 	want := "doctor: config error=config not migrated: run pfm install"
 	if !strings.Contains(stdout.String(), want) || !strings.Contains(stdout.String(), legacy) {
 		t.Fatalf("doctor stdout=%q stderr=%q, want %q naming %s", stdout.String(), stderr.String(), want, legacy)
+	}
+}
+
+// make host-install smoke-tests a freshly built binary with --version before
+// pfm install has migrated the legacy config: the version needs no config.
+func TestVersionAnswersWhileLegacyConfigWaits(t *testing.T) {
+	legacyConfigJail(t)
+	for _, arg := range []string{"--version", versionCommand} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{arg}, &stdout, &stderr); code != 0 {
+			t.Fatalf("%s code=%d stdout=%q stderr=%q, want 0", arg, code, stdout.String(), stderr.String())
+		}
+		if !strings.HasPrefix(stdout.String(), "pfm ") {
+			t.Fatalf("%s stdout=%q, want the pfm version line", arg, stdout.String())
+		}
+	}
+}
+
+// make install sweeps with `pfm internal stale` in the window between the
+// binary swap and pfm install migrating a legacy config: stale needs no config.
+func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
+	legacyConfigJail(t)
+	bin := filepath.Join(jailPaths(t).Home, ".local", "bin", "pfm")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"stale", "--binary", bin}
+	var stdout, stderr bytes.Buffer
+	code := run(append([]string{internalCommand}, args...), &stdout, &stderr)
+	if strings.Contains(stderr.String(), "pfm: config:") {
+		t.Fatalf("internal stale stderr=%q, want no config refusal", stderr.String())
+	}
+	var wantOut, wantErr bytes.Buffer
+	wantCode := stale.Run(args[1:], &wantOut, &wantErr)
+	if code != wantCode || stdout.String() != wantOut.String() || stderr.String() != wantErr.String() {
+		t.Fatalf("internal stale code=%d stdout=%q stderr=%q, want stale.Run's code=%d stdout=%q stderr=%q",
+			code, stdout.String(), stderr.String(), wantCode, wantOut.String(), wantErr.String())
+	}
+}
+
+// Only stale answers config-free: every other internal command still refuses.
+func TestInternalCommandsRefuseWhileLegacyConfigWaits(t *testing.T) {
+	legacyConfigJail(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{internalCommand, "git-guard"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("internal git-guard code=%d stdout=%q stderr=%q, want 1", code, stdout.String(), stderr.String())
+	}
+	if want := "pfm: config: config not migrated: run pfm install"; !strings.HasPrefix(stderr.String(), want) {
+		t.Fatalf("internal git-guard stderr=%q, want %q", stderr.String(), want)
+	}
+}
+
+// host-migration-probe.sh reads this line from `pfm config show`'s stderr to
+// tell a swapped-but-unmigrated host; its exit stays 0.
+func TestConfigShowNamesNotMigrated(t *testing.T) {
+	legacyConfigJail(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{configCommand, "show"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("config show code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
+	}
+	if want := "pfm config show: configuration error: config not migrated"; !strings.Contains(stderr.String(), want) {
+		t.Fatalf("config show stderr=%q, want %q", stderr.String(), want)
 	}
 }
 

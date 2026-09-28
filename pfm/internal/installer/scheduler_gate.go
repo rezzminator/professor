@@ -2,7 +2,6 @@ package installer
 
 import (
 	"context"
-	"strings"
 )
 
 // nameSyncServiceRunning reports whether the Linux name-sync service is
@@ -19,22 +18,9 @@ import (
 // not know — means the probe never got an answer, and the caller must not read
 // that silence as safety.
 func nameSyncServiceRunning(ctx context.Context, runner CommandRunner) (running, probed bool) {
-	reader, ok := runner.(OutputRunner)
-	if !ok {
-		return false, false
-	}
-	output, err := reader.Output(
-		ctx, "systemctl", "--user", "show", "--property=ActiveState", "--value", "pfm-name-sync.service",
-	)
+	state, err := fleetUnitState(ctx, runner, "pfm-name-sync.service")
 	if err != nil {
 		return false, false
 	}
-	switch strings.TrimSpace(string(output)) {
-	case "active", "activating", "deactivating", "reloading", "refreshing":
-		return true, true
-	case "inactive", "failed":
-		return false, true
-	default:
-		return false, false
-	}
+	return unitStateRunning(state)
 }

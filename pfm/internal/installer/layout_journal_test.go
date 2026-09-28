@@ -745,7 +745,7 @@ func TestLayoutRollbackStopsFleetBeforeHolderScanAndRestarts(t *testing.T) {
 		}
 	} else {
 		calls := strings.Join(runner.calls, "\n")
-		if strings.Index(calls, " is-active ") > strings.Index(calls, " stop ") ||
+		if strings.Index(calls, " --property=ActiveState ") > strings.Index(calls, " stop ") ||
 			strings.Index(calls, " stop ") > strings.Index(calls, " start ") ||
 			strings.Count(calls, " stop ") != 1 || strings.Count(calls, " start ") != 1 {
 			t.Fatalf("systemd calls=%v", runner.calls)

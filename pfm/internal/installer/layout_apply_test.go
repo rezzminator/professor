@@ -615,10 +615,20 @@ type layoutTestRunner struct {
 	failStop  bool
 	failStart bool
 	onRun     func(string)
-	// unloaded units answer is-active non-zero, and a stop or start naming
+	// unloaded units answer ActiveState inactive, and a stop or start naming
 	// one fails as systemctl does for a unit that is not loaded (exit 5).
 	unloaded []string
+	// states is each unit's ActiveState (default active); a stop makes a unit
+	// inactive and a start active, unless afterStart holds it in a state.
+	states     map[string]string
+	afterStart map[string]string
+	// failProbe makes every ActiveState probe fail; noManager makes
+	// show-environment fail.
+	failProbe bool
+	noManager bool
 }
+
+const layoutActiveStateProbe = "systemctl --user show --property=ActiveState --value "
 
 func (runner *layoutTestRunner) Run(_ context.Context, name string, args ...string) error {
 	runner.calls = append(runner.calls, name+" "+strings.Join(args, " "))
@@ -627,6 +637,9 @@ func (runner *layoutTestRunner) Run(_ context.Context, name string, args ...stri
 	}
 	if name == "sudo" && runner.failSudo {
 		return os.ErrPermission
+	}
+	if name == "systemctl" && slices.Contains(args, "show-environment") && runner.noManager {
+		return errors.New("Failed to connect to bus")
 	}
 	for _, unit := range runner.unloaded {
 		if slices.Contains(args, unit) {
@@ -639,7 +652,52 @@ func (runner *layoutTestRunner) Run(_ context.Context, name string, args ...stri
 	if strings.Contains(runner.calls[len(runner.calls)-1], " start ") && runner.failStart {
 		return os.ErrPermission
 	}
+	if name == "systemctl" && len(args) > 1 && (args[1] == "stop" || args[1] == "start") {
+		if runner.states == nil {
+			runner.states = map[string]string{}
+		}
+		for _, unit := range args[2:] {
+			runner.states[unit] = "inactive"
+			if args[1] == "start" {
+				runner.states[unit] = "active"
+				if held, ok := runner.afterStart[unit]; ok {
+					runner.states[unit] = held
+				}
+			}
+		}
+	}
 	return nil
+}
+
+func (runner *layoutTestRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	call := name + " " + strings.Join(args, " ")
+	runner.calls = append(runner.calls, call)
+	unit, ok := strings.CutPrefix(call, layoutActiveStateProbe)
+	if !ok {
+		return nil, errors.New("layoutTestRunner: no output for " + call)
+	}
+	if runner.failProbe {
+		return nil, errors.New("exit status 1: Failed to connect to bus")
+	}
+	if state, ok := runner.states[unit]; ok {
+		return []byte(state + "\n"), nil
+	}
+	if slices.Contains(runner.unloaded, unit) {
+		return []byte("inactive\n"), nil
+	}
+	return []byte("active\n"), nil
+}
+
+// layoutServiceLifecycle keeps the stop and start calls, dropping the manager
+// check and the ActiveState probes.
+func layoutServiceLifecycle(calls []string) []string {
+	var lifecycle []string
+	for _, call := range calls {
+		if !strings.Contains(call, " show") {
+			lifecycle = append(lifecycle, call)
+		}
+	}
+	return lifecycle
 }
 
 func TestLayoutDatabaseServiceCommandFailureIsReported(t *testing.T) {
@@ -668,9 +726,7 @@ func TestLayoutDatabaseServiceCommandFailureIsReported(t *testing.T) {
 					t.Fatalf("database moved without stopped services: %v", err)
 				}
 			}
-			if lifecycle := slices.DeleteFunc(slices.Clone(runner.calls), func(call string) bool {
-				return strings.Contains(call, " is-active ")
-			}); len(lifecycle) != 2 {
+			if lifecycle := layoutServiceLifecycle(runner.calls); len(lifecycle) != 2 {
 				t.Fatalf("services not restarted after %s failure: %v", phase, runner.calls)
 			}
 		})
@@ -730,12 +786,7 @@ func TestLayoutDatabaseServicesRestartAfterOutcome(t *testing.T) {
 			if outcome == "moved" && err != nil {
 				t.Fatal(err)
 			}
-			var lifecycle []string
-			for _, call := range runner.calls {
-				if !strings.Contains(call, " is-active ") {
-					lifecycle = append(lifecycle, call)
-				}
-			}
+			lifecycle := layoutServiceLifecycle(runner.calls)
 			if len(lifecycle) != 2 ||
 				lifecycle[0] != "systemctl --user stop pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" ||
 				lifecycle[1] != "systemctl --user start pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" {

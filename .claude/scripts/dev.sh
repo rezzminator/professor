@@ -663,6 +663,9 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   if [[ ! -f "$compose" ]]; then
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
   fi
+  # Dangling fence images and the Go cache budget — infra/fence/housekeeping.sh.
+  . "$REPO_ROOT/infra/fence/housekeeping.sh"
+  fence_housekeeping
 
   # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
   # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the demo

@@ -107,9 +107,9 @@ func TestEnsureClaudePluginsRunsAddThenInstallPerAccount(t *testing.T) {
 func TestEnsureClaudePluginsSkipsAnAlreadyEnabledPlugin(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true}}`
+		`"sub-agent-compact@sub-agent-compact":true,"agent-effort@agent-effort":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
-	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID)
+	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID, claudePlugins[2].ID)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	installer := pluginEngine(home, binary, first, second, runner, &out, true)
@@ -165,10 +165,10 @@ func writeInstalledPlugins(t *testing.T, dir string, ids ...string) {
 func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 	home, binary, first, second := pluginFixture(t)
 	enabled := `{"enabledPlugins":{"cache-live-control@cache-live-control":true,` +
-		`"sub-agent-compact@sub-agent-compact":true}}`
+		`"sub-agent-compact@sub-agent-compact":true,"agent-effort@agent-effort":true}}`
 	writeFixture(t, filepath.Join(first, "settings.json"), enabled)
 	writeFixture(t, filepath.Join(second, "settings.json"), enabled)
-	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID)
+	writeInstalledPlugins(t, first, claudePlugins[0].ID, claudePlugins[1].ID, claudePlugins[2].ID)
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	if err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(
@@ -196,7 +196,7 @@ func TestEnsureClaudePluginsInstallsWhereEnabledButNotInstalled(t *testing.T) {
 }
 
 func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
-	all := []string{claudePlugins[0].ID, claudePlugins[1].ID}
+	all := []string{claudePlugins[0].ID, claudePlugins[1].ID, claudePlugins[2].ID}
 	for _, test := range []struct {
 		name    string
 		prepare func(t *testing.T, dir string)
@@ -204,7 +204,7 @@ func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "no record file", prepare: func(*testing.T, string) {}, want: all},
-		{name: "both installed", prepare: func(t *testing.T, dir string) {
+		{name: "all installed", prepare: func(t *testing.T, dir string) {
 			writeInstalledPlugins(t, dir, all...)
 		}, want: nil},
 		{name: "install path gone", prepare: func(t *testing.T, dir string) {
@@ -212,7 +212,7 @@ func TestClaudePluginsNotInstalledReadsTheAccountRecord(t *testing.T) {
 			if err := os.RemoveAll(filepath.Join(dir, "plugins", "cache", all[1])); err != nil {
 				t.Fatal(err)
 			}
-		}, want: all[1:]},
+		}, want: all[1:2]},
 		{name: "malformed record", prepare: func(t *testing.T, dir string) {
 			writeFixture(t, filepath.Join(dir, "plugins", "installed_plugins.json"), "{")
 		}, wantErr: true},

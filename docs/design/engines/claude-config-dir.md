@@ -63,7 +63,7 @@ Per account, owned by Claude Code: `.credentials.json`, `.claude.json` (login, o
 - No launch setting or env key in any account `settings.json`. Hooks, `statusLine`, `subagentStatusLine` and `cleanupPeriodDays` ride `--settings` at launch.
 - No entry in any `.claude.json`. The one `professor` stdio server (`pfm mcp serve --stdio`, serving every enabled family) rides `--mcp-config` at launch, beside the account's own servers.
 - No `output-styles/`, `keybindings.json` or `CLAUDE.md`.
-- The exception is Claude plugin state: `pfm install` runs `claude plugin marketplace add` and `claude plugin install` per account for `cache-live-control` and `sub-agent-compact`. Claude writes `{config dir}/plugins/**` and `enabledPlugins` in the account's physical `settings.json`. Both paths are journaled and restored at once if a command fails. A live chat on any account sharing that settings file skips the plugin step until the chat closes.
+- The exception is Claude plugin state: `pfm install` runs `claude plugin marketplace add` and `claude plugin install` per account for `cache-live-control`, `sub-agent-compact` and `agent-effort`. Claude writes `{config dir}/plugins/**` and `enabledPlugins` in the account's physical `settings.json`. Both paths are journaled and restored at once if a command fails. A live chat on any account sharing that settings file skips the plugin step until the chat closes.
 
 ## Registries
 

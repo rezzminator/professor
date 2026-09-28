@@ -33,6 +33,7 @@ type claudePlugin struct {
 var claudePlugins = []claudePlugin{
 	{Source: "rezzminator/cache-live-control", ID: "cache-live-control@cache-live-control"},
 	{Source: "rezzminator/sub-agent-compact", ID: "sub-agent-compact@sub-agent-compact"},
+	{Source: "rezzminator/agent-effort", ID: "agent-effort@agent-effort"},
 }
 
 // ErrClaudeSettingsAbsent is ClaudePluginGaps' answer for an account with no

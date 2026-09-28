@@ -572,7 +572,7 @@ const total = Object.values(G.usd).reduce((a, b) => a + b, 0);
 const q = (arr, p) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 const wallMin = (r) => (r.t1 - r.t0) / 60e3;
 // The cache a run's writes went to: 5m, 1h, or the 1-hour share when it wrote both; — with no writes.
-function ttlMix(t) { const w = t.cw5 + t.cw1; return !w ? "—" : !t.cw1 ? "5m" : !t.cw5 ? "1h" : `1h ${Math.round(100 * t.cw1 / w)}%`; }
+function ttlMix(t) { const w = t.cw5 + t.cw1; return !w ? "—" : !t.cw1 ? "5m" : !t.cw5 ? "1h" : `1h ${Math.min(99, Math.max(1, Math.round(100 * t.cw1 / w)))}%`; }
 const byProject = {}; for (const r of RUNS) { const p = (byProject[r.project] ??= { usd: 0, main: 0, agent: 0, runs: 0, rewrites: 0, cats: new Float64Array(CATS.length) }); p.usd += r.usd; p[r.kind] += r.usd; p.runs++; p.rewrites += r.rewrites.usd; r.cats.forEach((v, i) => (p.cats[i] += v)); }
 const families = {}; for (const r of RUNS) { const f = (families[r.sid] ??= { sid: r.sid, title: "", project: r.project, own: 0, agents: 0, nAgents: 0, rewrites: 0, calls: 0, peakK: 0, t0: Infinity, t1: 0, agentRuns: [] });
   if (r.kind === "main") { f.title = r.title; f.own += r.usd; f.peakK = Math.round(r.ctxPeak / 1000); f.project = r.project; } else { f.agents += r.usd; f.nAgents++; f.agentRuns.push(r); }

@@ -397,3 +397,45 @@ test("default report: agent groups and single runs carry the cache TTL label", (
   assert.match(runs.split("\n").find((l) => /task 1-a/.test(l)) || "", /ttl 1h\b/, "a1's run line says 1h");
   assert.match(runs.split("\n").find((l) => /task 1-b/.test(l)) || "", /ttl 5m\b/, "b2's run line says 5m");
 });
+
+// A minimal fixture root where each session's single call writes near-all-5m or
+// near-all-1h: a naive `Math.round` renders 0%/100%, which reads as "not mixed" —
+// the clamp keeps a mixed run visibly mixed.
+function clampRoot() {
+  const root = fs.mkdtempSync(path.join(TMP, "clamp-"));
+  const dir = path.join(root, "-tmp-clamp-proj");
+  fs.mkdirSync(dir, { recursive: true });
+  const usage = (cw5, cw1) => JSON.stringify({
+    type: "assistant", timestamp: "2026-09-20T09:00:00.000Z", cwd: "/tmp/clamp-proj",
+    requestId: `req-${cw5}-${cw1}`, effort: "medium",
+    message: {
+      id: `msg-${cw5}-${cw1}`, model: "claude-sonnet-5", content: [{ type: "text", text: "step" }],
+      usage: {
+        input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0,
+        cache_creation_input_tokens: cw5 + cw1,
+        cache_creation: { ephemeral_5m_input_tokens: cw5, ephemeral_1h_input_tokens: cw1 },
+      },
+    },
+  });
+  fs.writeFileSync(
+    path.join(dir, "sess-lo.jsonl"),
+    '{"type":"custom-title","customTitle":"clamp lo chat","cwd":"/tmp/clamp-proj"}\n' + usage(999, 1) + "\n",
+  );
+  fs.writeFileSync(
+    path.join(dir, "sess-hi.jsonl"),
+    '{"type":"custom-title","customTitle":"clamp hi chat","cwd":"/tmp/clamp-proj"}\n' + usage(1, 999) + "\n",
+  );
+  return root;
+}
+
+test("default report: a mixed run's 1-hour share clamps to 1..99, never 0% or 100%", () => {
+  const r = run(["--since", "99999d", "--root", clampRoot()]);
+  assert.equal(r.code, 0, r.err);
+  const runs = (r.out.split("SINGLE RUNS")[1] || "").split("\n== ")[0];
+  const lo = runs.split("\n").find((l) => /clamp lo chat/.test(l)) || "";
+  const hi = runs.split("\n").find((l) => /clamp hi chat/.test(l)) || "";
+  assert.match(lo, /ttl 1h 1%/, `near-all-5m run rounds to 0% unclamped: ${JSON.stringify(lo)}`);
+  assert.match(hi, /ttl 1h 99%/, `near-all-1h run rounds to 100% unclamped: ${JSON.stringify(hi)}`);
+  assert.doesNotMatch(lo, /ttl 1h 0%/);
+  assert.doesNotMatch(hi, /ttl 1h 100%/);
+});

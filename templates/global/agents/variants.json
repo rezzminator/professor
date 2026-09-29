@@ -33,7 +33,7 @@
   },
   "heavy-rr": {
     "from": "rr",
-    "description": "Exhaustive rr — delegate for \"heavy rr\", \"heavy-rr X\" when the map must settle whatever the cost; lighter → super-rr. Returns the saved RR path, then the cited map.",
+    "description": "Maps a query exhaustively — tier 3, the ultimate: super-rr → here. Delegate for \"heavy rr\", \"heavy-rr X\", when every sub-area must settle whatever the cost. Returns the saved RR path, then the cited map.",
     "effort": "medium",
     "tools": "WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web",
     "replace": {
@@ -46,7 +46,7 @@
   },
   "super-rr": {
     "from": "rr",
-    "description": "Deeper rr for higher stakes — delegate for \"super rr\", \"super-rr X\"; exhaustive → heavy-rr. Returns the saved RR path, then the cited map.",
+    "description": "Maps a query deeper — tier 2, higher stakes: rr → here → heavy-rr. Delegate for \"super rr\", \"super-rr X\", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.",
     "effort": "medium",
     "replace": {
       "Spawn at most 4 diggers a round": "Spawn at most 6 diggers a round",

@@ -35,6 +35,8 @@ func TestKnobsInventory(t *testing.T) {
 		"CLAUDE_PROJECT_DIR",
 		"ENABLE_PROMPT_CACHING_1H",
 		"FORCE_PROMPT_CACHING_5M",
+		"CLAUDE_CODE_PROMPT_CACHE_TTL",
+		"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
 		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
 		"ANTHROPIC_BASE_URL",
 		"ANTHROPIC_AUTH_TOKEN",
@@ -59,13 +61,17 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("duplicate knob %s", knob.Name)
 		}
 		seen[knob.Name] = true
+		if knob.Name == "cache1h" &&
+			knob.Target != "env.CLAUDE_CODE_PROMPT_CACHE_TTL|env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL" {
+			t.Errorf("cache1h target=%q", knob.Target)
+		}
 	}
 	for _, name := range Hygiene() {
 		if !seen[name] {
 			t.Errorf("hygiene row %s missing", name)
 		}
 	}
-	for _, name := range []string{"configDir", "binary", "cache1h", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "tmuxTruecolor", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
+	for _, name := range []string{"configDir", "binary", "cache1h", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "tmuxTruecolor", "noFlicker", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
 		if !seen[name] {
 			t.Errorf("knob %s missing", name)
 		}

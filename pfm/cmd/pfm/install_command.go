@@ -431,6 +431,7 @@ func newInstallerOptions(
 			for _, account := range runtime.Config.Accounts {
 				options.ConfigDirs = append(options.ConfigDirs, account.ConfigDir)
 			}
+			options.ClaudeAccounts = runtime.Config.Accounts
 
 		}
 	}

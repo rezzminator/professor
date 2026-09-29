@@ -370,7 +370,7 @@ func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, variable := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "FORCE_PROMPT_CACHING_5M"} {
+	for _, variable := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROMPT_CACHE_TTL"} {
 		if !strings.Contains(run, variable) {
 			t.Fatalf("run %q does not mention %s", run, variable)
 		}
@@ -591,7 +591,7 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 			}
 			parsed := parsedReloadShell(t, tmux.respawn)
 			if parsed.Resume != "11111111-1111-4111-8111-111111111111" ||
-				parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" {
+				parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" {
 				t.Fatalf("respawn resume=%q settings=%#v", parsed.Resume, parsed.SettingsEnv)
 			}
 			values, err := pfmconfig.ResolvePaths()

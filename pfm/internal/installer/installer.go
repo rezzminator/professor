@@ -298,6 +298,9 @@ func (installer *engine) install(ctx context.Context) error {
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
 	pluginErr := installer.ensureClaudePlugins(ctx)
+	if err := installer.clearFullscreenAutoDisable(); err != nil {
+		return errors.Join(err, pluginErr)
+	}
 	if err := installer.wireCodexHooks(); err != nil {
 		return err
 	}

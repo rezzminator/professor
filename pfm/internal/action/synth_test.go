@@ -66,7 +66,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		t.Fatalf("resume plan = %#v server = %#v", plan, plan.ChatServer)
 	}
 	parsed := parsedShell(t, plan.Run)
-	if parsed.Resume != id || parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" ||
+	if parsed.Resume != id || parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" ||
 		parsed.SettingsEnv[spawnDepthName] != "8" || plan.Record == nil || plan.Record.SessionID != id {
 		t.Fatalf("resume=%q settings=%#v record=%#v", parsed.Resume, parsed.SettingsEnv, plan.Record)
 	}
@@ -82,6 +82,8 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		"CLAUDE_CONFIG_DIR",
 		"ENABLE_PROMPT_CACHING_1H",
 		"FORCE_PROMPT_CACHING_5M",
+		"CLAUDE_CODE_PROMPT_CACHE_TTL",
+		"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
 		// CC_ENDPOINT_UNSET — a chat born inside another
 		// chat must never inherit a translating proxy's endpoint.
 		"ANTHROPIC_BASE_URL",
@@ -113,7 +115,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		t.Fatalf("new Claude line = %q, server = %#v, run = %q", plan.Line, plan.ChatServer, plan.Run)
 	}
 	parsed = parsedShell(t, plan.Run)
-	if parsed.SessionID == "" || parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" ||
+	if parsed.SessionID == "" || parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" ||
 		parsed.Settings["outputStyle"] != "default" || !parsed.Autonomy || plan.Record == nil ||
 		plan.Record.SessionID != parsed.SessionID {
 		t.Fatalf("fresh id=%q settings=%#v record=%#v", parsed.SessionID, parsed.SettingsEnv, plan.Record)
@@ -129,7 +131,7 @@ func TestAgentRouteCarriesCacheFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(plan.Run, "internal agent-open --id") || !strings.Contains(plan.Run, " --cache 1h") ||
-		strings.Contains(plan.Run, " ENABLE_PROMPT_CACHING_1H=") {
+		strings.Contains(plan.Run, " CLAUDE_CODE_PROMPT_CACHE_TTL=") {
 		t.Fatalf("agent route = %q", plan.Run)
 	}
 }
@@ -398,7 +400,7 @@ done
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" {
+	if parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" {
 		t.Fatalf("fallback cache = %#v", parsed.SettingsEnv)
 	}
 }

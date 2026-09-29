@@ -1,6 +1,7 @@
 package claudelaunch
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -57,6 +59,8 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	if result.SessionID == "" {
 		result.SessionID = request.Resume
 	}
+	// settingsDir is the store whose settings.json the launched Claude reads.
+	settingsDir := ""
 	if account, found := machine.AccountByID(request.Account); found && !account.Implicit {
 		dir := account.ConfigDir
 		if request.ConfigDir != "" {
@@ -65,8 +69,12 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		if dir != "" {
 			result.Env = []string{configDirEnv + "=" + dir}
 		}
+		settingsDir = dir
 	} else if request.Account == 0 && request.ConfigDir != "" {
 		result.Env = []string{configDirEnv + "=" + request.ConfigDir}
+		settingsDir = request.ConfigDir
+	} else if found {
+		settingsDir = account.ConfigDir
 	}
 	if request.SessionID != "" {
 		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
@@ -81,7 +89,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		result.Argv = append(result.Argv, flagName, request.Name)
 	}
 	result.Argv = append(result.Argv, request.Args...)
-	settings := settingsFor(request, prefs, result.Cache1H)
+	settings := settingsFor(request, prefs, result.Cache1H, noFlicker(request, settingsDir))
 	payload, err := json.Marshal(settings)
 	if err != nil {
 		return Launch{}, fmt.Errorf("render --settings: %w", err)
@@ -121,7 +129,41 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	return result, nil
 }
 
-func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h bool) map[string]any {
+// noFlicker reports whether a seat's launch carries envNoFlicker: an
+// interactive seat whose account asks for fullscreen (WantsFullscreen). A
+// settings file that cannot be judged never blocks the launch: the failure is
+// logged with its path and the seat launches without the knob.
+func noFlicker(request Request, settingsDir string) bool {
+	if request.Purpose == PurposeQuery || settingsDir == "" {
+		return false
+	}
+	wants, err := WantsFullscreen(settingsDir)
+	if err != nil {
+		obs.Logger(context.Background()).Warn(
+			"claudelaunch: fullscreen settings unreadable; launching without "+envNoFlicker,
+			obs.FieldErr, err.Error(),
+		)
+		return false
+	}
+	return wants
+}
+
+const (
+	cacheTTL1H = "1h"
+	cacheTTL5M = "5m"
+)
+
+// promptCacheTTL is the main chat's prompt-cache lifetime word. The launch sets
+// it through CLAUDE_CODE_PROMPT_CACHE_TTL, never ENABLE_PROMPT_CACHING_1H: that
+// switch lifts every sub-agent to 1h too, so sub-agents are pinned to 5m apart.
+func promptCacheTTL(cache1h bool) string {
+	if cache1h {
+		return cacheTTL1H
+	}
+	return cacheTTL5M
+}
+
+func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h, fullscreen bool) map[string]any {
 	settings := map[string]any{knobOutputStyle: defaultWord, knobCleanupPeriodDays: prefs.CleanupPeriodDays}
 	env := map[string]string{
 		envWebSearches:       strconv.FormatInt(prefs.WebSearchesPerSession, 10),
@@ -143,11 +185,11 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h bool) map
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
-	if cache1h {
-		env[envCache1H] = "1"
-	} else {
-		env[envCache5M] = "1"
+	if fullscreen {
+		env[envNoFlicker] = "1"
 	}
+	env[envPromptCacheTTL] = promptCacheTTL(cache1h)
+	env[envSubagentPromptCacheTTL] = cacheTTL5M
 	if request.Purpose != PurposeQuery && prefs.SystemPrompt == pfmconfig.SystemPromptLean {
 		env[envSimplePrompt] = "1"
 	}

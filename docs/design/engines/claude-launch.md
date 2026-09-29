@@ -67,8 +67,8 @@ type Knob struct {
 | Knob | Wire → target | Source | Default |
 | --- | --- | --- | --- |
 | `configDir` | env `CLAUDE_CONFIG_DIR` | account | the account's `configDir` (omitted for the implicit account) |
-| hygiene | unset `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR`, `ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `CODEX_THREAD_ID` | constant | — |
-| `cache1h` | settings `env.ENABLE_PROMPT_CACHING_1H=1`, or `env.FORCE_PROMPT_CACHING_5M=1`; also written to the [launch record](#the-launch-record) | launch → config | `true` |
+| hygiene | unset `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR`, `ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `CODEX_THREAD_ID` | constant | — |
+| `cache1h` | settings `env.CLAUDE_CODE_PROMPT_CACHE_TTL=1h`, or `=5m`, for the main chat only; `env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=5m` always, since `ENABLE_PROMPT_CACHING_1H` would lift every sub-agent to 1h too; also written to the [launch record](#the-launch-record) | launch → config | `true` |
 | `systemPrompt` | `professor`: flag `--system-prompt-file`; `lean`: settings `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`; `production`: nothing | config | `production` |
 | `nativeCursor` | settings `env.CLAUDE_CODE_NATIVE_CURSOR=1` | config | `false` |
 | `maxSubagentSpawnDepth` | settings `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | config | `8` |
@@ -76,6 +76,7 @@ type Knob struct {
 | `webSearchesPerSession` | settings `env.CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` | config | `9007199254740991` |
 | `autoCompactWindow` | settings `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` | config | `100000` |
 | `tmuxTruecolor` | settings `env.CLAUDE_CODE_TMUX_TRUECOLOR=1` | config | `true` |
+| `noFlicker` | settings `env.CLAUDE_CODE_NO_FLICKER=1`, keeping the fullscreen renderer past Claude's boot canary; not on a query | account settings `tui: fullscreen` | off |
 | agent teams | settings `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` | constant | — |
 | function hooks | settings `env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` | constant | — |
 | output style | settings `outputStyle: "default"` | constant | — |
@@ -99,7 +100,7 @@ type Knob struct {
 - **launch → config** — a choice made for this one launch (the picker's cache toggle, `pfm chat new --cache 1h|5m`, `pfm chat reload --cache`); absent a choice, the config value.
 - **launch** — only a per-launch choice; unset means the flag is omitted.
 - **constant** — fixed in the registry; changing it is a code change.
-- **account / door** — the chosen account's roster entry; the verb that launched.
+- **account / door** — the chosen account's roster entry, or for `noFlicker` its `settings.json` (`WantsFullscreen`: absent file off; an unreadable one logged and launched without the knob, and shown as its error by `pfm config`); the verb that launched.
 
 No inherited environment variable decides a value: the unset list clears them first.
 
@@ -130,6 +131,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `webSearchesPerSession` | `9007199254740991` | web-search cap |
 | `autoCompactWindow` | `100000` | auto-compact window |
 | `tmuxTruecolor` | `true` | truecolor under tmux |
+| `noFlicker` | off | not a config key: on when the account's `settings.json` has top-level `"tui": "fullscreen"` |
 | `cleanupPeriodDays` | `36500` | transcript retention (also the managed value) |
 | `requireManagedCleanup` | `true` | `pfm doctor` warns when the managed `cleanupPeriodDays` file is absent; `false` silences it |
 | `compactNudge` | see `docs/design/hooks/hooks.md` | the compact-nudge hook |

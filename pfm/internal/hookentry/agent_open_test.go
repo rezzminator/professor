@@ -70,12 +70,12 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 			if parsed.Resume != scenario.id {
 				t.Fatalf("resume=%q, want %q", parsed.Resume, scenario.id)
 			}
-			cacheName := "FORCE_PROMPT_CACHING_5M"
+			cacheTTL := "5m"
 			if scenario.cache1H {
-				cacheName = "ENABLE_PROMPT_CACHING_1H"
+				cacheTTL = "1h"
 			}
-			if parsed.SettingsEnv[cacheName] != "1" {
-				t.Fatalf("cache settings=%#v, want %s", parsed.SettingsEnv, cacheName)
+			if parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != cacheTTL {
+				t.Fatalf("cache settings=%#v, want main chat %s", parsed.SettingsEnv, cacheTTL)
 			}
 			launches, err := fleetdb.OpenLaunches(context.Background(), values)
 			if err != nil {

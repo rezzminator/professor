@@ -35,6 +35,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 		PromptFile: prompt,
 		Args:       []string{"hello"},
 	}
+	writeAccountSettings(t, machine.Accounts[1].ConfigDir, `{"tui":"fullscreen"}`)
 	launch, parsed := renderParsed(t, request, machine)
 	if !slices.Equal(parsed.Rest, request.Args) {
 		t.Errorf("rest=%q", parsed.Rest)
@@ -57,7 +58,8 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Errorf("binary=%q", launch.Binary)
 				}
 			case "cache1h":
-				if parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" {
+				if parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" ||
+					parsed.SettingsEnv["CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"] != "5m" {
 					t.Error("cache missing")
 				}
 			case "systemPrompt":
@@ -87,6 +89,10 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 			case "tmuxTruecolor":
 				if parsed.SettingsEnv["CLAUDE_CODE_TMUX_TRUECOLOR"] != "1" {
 					t.Error("truecolor missing")
+				}
+			case "noFlicker":
+				if parsed.SettingsEnv["CLAUDE_CODE_NO_FLICKER"] != "1" {
+					t.Error("no-flicker missing")
 				}
 			case "agentTeams":
 				if parsed.SettingsEnv["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] != "0" {

@@ -82,6 +82,9 @@ type Options struct {
 	// the historical single ~/.codex target for direct legacy callers; an
 	// explicitly empty roster installs no Codex hook.
 	CodexHomes []string
+	// ClaudeAccounts is the configured Claude account roster whose registries
+	// (ClaudeUserRegistries) the fullscreen canary clear visits; nil visits none.
+	ClaudeAccounts []pfmconfig.Account
 	// CodexBinary enables native hook trust registration for command callers.
 	CodexBinary string
 	Clock       clock.Clock

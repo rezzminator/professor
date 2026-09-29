@@ -53,7 +53,8 @@ sub-agents, background shells, and session crons die with the reboot.
 ## Cache-only reboot — `/reload --cache 1h|5m`
 
 For Claude, `--cache` selects the reborn chat's prompt-cache TTL: `1h` sets
-`ENABLE_PROMPT_CACHING_1H=1`; `5m` sets `FORCE_PROMPT_CACHING_5M=1`.
+`CLAUDE_CODE_PROMPT_CACHE_TTL=1h`; `5m` sets it to `5m`. Sub-agents stay on
+`5m` either way (`CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=5m`).
 With no `--account`, `/reload --cache 5m` keeps the current account.
 With no `--cache`, reload carries the chat's recorded cache choice. A chat
 without a launch record uses its selected account's configured cache.

@@ -126,7 +126,7 @@ func assertAgentLaunch(t *testing.T, argvPath string, leading ...string) claudel
 		}
 	}
 	if parsed.Settings["outputStyle"] != "default" ||
-		parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" && parsed.Resume != "" {
+		parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" && parsed.Resume != "" {
 		t.Fatalf("rendered argv=%q parsed=%+v", argv, parsed)
 	}
 	return parsed

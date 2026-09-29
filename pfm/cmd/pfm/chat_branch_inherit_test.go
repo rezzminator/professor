@@ -350,14 +350,17 @@ func TestChatBranchInheritsOneHourCacheFromLiveParentThroughCachingOffShell(t *t
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	environment := forkedSettingsEnv(t, jail)
-	if got := environment["ENABLE_PROMPT_CACHING_1H"]; got != "1" {
+	if got := environment["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "1h" {
 		t.Fatalf(
-			"ENABLE_PROMPT_CACHING_1H=%q, want \"1\" — the fork must inherit the LIVE 1h parent, not the caching-off invoking shell",
+			"CLAUDE_CODE_PROMPT_CACHE_TTL=%q, want \"1h\" — the fork must inherit the LIVE 1h parent, not the caching-off invoking shell",
 			got,
 		)
 	}
 	if got, present := environment["FORCE_PROMPT_CACHING_5M"]; present {
-		t.Fatalf("FORCE_PROMPT_CACHING_5M=%q present, want absent — fork was born 5m despite a live 1h parent", got)
+		t.Fatalf(
+			"FORCE_PROMPT_CACHING_5M=%q present, want absent — the old global cache switch must never reach the settings env",
+			got,
+		)
 	}
 }
 
@@ -394,14 +397,14 @@ func TestChatBranchInheritsFiveMinuteCacheFromLaunchRecord(t *testing.T) {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	environment := forkedSettingsEnv(t, jail)
-	if got := environment["FORCE_PROMPT_CACHING_5M"]; got != "1" {
+	if got := environment["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "5m" {
 		t.Fatalf(
-			"FORCE_PROMPT_CACHING_5M=%q, want \"1\" — the fork must inherit the LIVE 5m parent, not an invoking shell claiming 1h",
+			"CLAUDE_CODE_PROMPT_CACHE_TTL=%q, want \"5m\" — the fork must inherit the LIVE 5m parent, not an invoking shell claiming 1h",
 			got,
 		)
 	}
 	if got, present := environment["ENABLE_PROMPT_CACHING_1H"]; present {
-		t.Fatalf("ENABLE_PROMPT_CACHING_1H=%q present, want absent — fork was born 1h despite a live 5m parent", got)
+		t.Fatalf("ENABLE_PROMPT_CACHING_1H=%q present, want absent — it would lift every sub-agent to 1h", got)
 	}
 }
 
@@ -439,15 +442,15 @@ func TestChatBranchNoParentLaunchUsesPrimaryConfiguredCache(t *testing.T) {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	environment := forkedSettingsEnv(t, jail)
-	if got := environment["FORCE_PROMPT_CACHING_5M"]; got != "1" {
+	if got := environment["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "5m" {
 		t.Fatalf(
-			"FORCE_PROMPT_CACHING_5M=%q, want \"1\" from primary account without a parent launch record",
+			"CLAUDE_CODE_PROMPT_CACHE_TTL=%q, want \"5m\" from primary account without a parent launch record",
 			got,
 		)
 	}
 	if got, present := environment["ENABLE_PROMPT_CACHING_1H"]; present {
 		t.Fatalf(
-			"ENABLE_PROMPT_CACHING_1H=%q present, want absent without a parent launch record",
+			"ENABLE_PROMPT_CACHING_1H=%q present, want absent — it would lift every sub-agent to 1h",
 			got,
 		)
 	}

@@ -2,6 +2,7 @@ package claudelaunch
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,37 @@ func TestRenderHeadlessPayload(t *testing.T) {
 		_, err := RenderHeadless(map[string]any{key: value})
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s error=%v", key, err)
+		}
+	}
+}
+
+func TestRenderHeadlessCacheLifetimeMainChatOnly(t *testing.T) {
+	for _, entry := range []struct {
+		settings map[string]any
+		want     map[string]string
+	}{
+		{
+			map[string]any{"cache1h": true},
+			map[string]string{"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "5m"},
+		},
+		{
+			map[string]any{"cache1h": false},
+			map[string]string{"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "5m"},
+		},
+		// No cache key passed: nothing is set, and the run scrubs the inherited
+		// global switches, so Claude falls back to 5m for main and sub-agents.
+		{nil, map[string]string{}},
+	} {
+		got, err := RenderHeadless(entry.settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct{ Env map[string]string }
+		if err := json.Unmarshal([]byte(got), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if env := cacheEnv(payload.Env); !reflect.DeepEqual(env, entry.want) {
+			t.Errorf("settings=%v: cache env=%#v, want %#v", entry.settings, env, entry.want)
 		}
 	}
 }

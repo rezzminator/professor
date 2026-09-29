@@ -234,7 +234,7 @@ The `description:` is all the model sees at routing time — the harness injects
 
 Shape: match the existing files of the same kind — the live registry is the template.
 
-- **Sub-agents** (`.claude/agents/*.md`): frontmatter `name` (kebab-case), `description` (§ Descriptions — it carries the auto-delegation routing weight), `tools` (minimal allowlist), `model: inherit|opus|sonnet|haiku`. Body IS the system prompt — role sentence, numbered procedure, short checklist, output format; subagents see only their own prompt + env.
+- **Sub-agents** (`.claude/agents/*.md`): frontmatter `name` (kebab-case), `description` (§ Descriptions — it carries the auto-delegation routing weight), `tools` (minimal allowlist), `model:` an alias (`inherit|opus|sonnet|haiku|fable`) or a full model ID (`claude-sonnet-5-5`). Body IS the system prompt — role sentence, numbered procedure, short checklist, output format; subagents see only their own prompt + env.
 - **Slash commands** (`.claude/commands/*.md`): frontmatter `name`, `description` (§ Descriptions), `argument-hint`, `disable-model-invocation: true` on user-triggered-by-design commands. `$ARGUMENTS`/`$1`/`$N` substitute at invocation; a bang-prefixed backticked command (!`cmd`) injects live shell output before Claude sees the prompt.
 - **Skills** (`.claude/skills/*/SKILL.md`): frontmatter `name` (lowercase-hyphenated, ≤64 chars, no reserved words anthropic/claude), `description` (§ Descriptions; third person, highest-signal case first). Body: role line, triggers, behavioral steps, 3–5 diverse `### Example` sections, only non-obvious constraints. Skill content stays in context all session and re-attaches after compaction — every line is a recurring tax.
 

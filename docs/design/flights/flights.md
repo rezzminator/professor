@@ -24,7 +24,7 @@ A change lands in the design doc first, then in the template, then in every surf
 | --- | --- | --- | --- |
 | `flights-speccer` | agent | Turns one flight's work into task files and an index; rewrites the rest after a fault | `opus`, effort `high` |
 | `flights-orchestrator` | agent | The one manual of running a flight: dispatch, wait, verify, react, land, return | mechanical (`sonnet`), effort `high` |
-| `flights-mechanical-executor`, `flights-smart-executor` | agents, one body | One task file each: the code and its covering tests in the project's test pattern; picked by the task's rating | `sonnet` and `opus`, effort `medium` |
+| `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | agents, one body | One task file each: the code and its covering tests in the project's test pattern; picked by the task's rating | Sonnet 5.5 at `high`, Sonnet 5.5 at `xhigh`, `opus` at `high` |
 | `flights-lander` | agent | The landing's first step, one per project: checks, one review of the whole diff, adversarial tests, its own fixes | smart (`opus`), effort `high` |
 | `/flights:spec` | command | The human front of specifying: maps the area, grills the user until no gap is left, hands `flights-speccer` the decisions, presents the index | the main chat |
 | `/flights:orchestrate-nested` | command | Runs the flight in a `flights-orchestrator` sub-agent; the chat hears one return | the main chat spawns the agent |
@@ -146,7 +146,7 @@ Claude Code stops the Agent tool three levels below the main chat and caps concu
 | The commands | `templates/global/commands/flights/*.md` | The five commands, machine-global |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names |
 | The adopter contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The sub-agent's first move and the ladder; in this repository's `CLAUDE.md` also the fenced-flight rules under § Process |
-| The executors' allowlist | `flights-mechanical-executor`, `flights-smart-executor` | `Read, Write, Edit, Bash, Glob, Grep`: no `Skill`, no `Agent`, no MCP tool; the lander alone adds `Skill` for `/code-review` |
+| The executors' allowlist | `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | `Read, Write, Edit, Bash, Glob, Grep`: no `Skill`, no `Agent`, no MCP tool; the lander alone adds `Skill` for `/code-review` |
 | The engine | `pfm` settings and launcher | The two harness settings |
 | This directory | `docs/design/flights/` | One design file per member with content of its own; this file for what they share |
 

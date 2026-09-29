@@ -121,7 +121,7 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
 | --- | --- |
 | `id` | The task file name, `{level}-{letter}` |
 | `needs` | The ids this task waits for; empty means none |
-| `rating` | `mechanical` or `smart` |
+| `rating` | `mechanical`, `precise` or `smart` |
 | `shares` | Named shared resources the task contends for: a test database, a lock, a port |
 | `reads` | The `0-` files its executor opens with the task file |
 | `files` | Every path the task creates, edits or deletes, from its frontmatter; the dispatcher verifies a `DONE` against them and the landing's commit names them |
@@ -185,9 +185,11 @@ The rating is computed from `Execution judgments`, not asserted.
 - More than three judgments: `smart`.
 - Any judgment that is a diagnosis of an unknown cause: `smart`, whatever the count.
 - A deliverable that is a document, a prompt, a spec or a report: `smart`, whatever the count. Writing for a reader to act on is reasoning, however exactly the task file words it.
-- Otherwise: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
+- One to three judgments, with every interface the task touches pinned in `Shapes`: `precise`.
+- No judgment, but the difficulty is the implementation itself — concurrency, failure paths, many error rows: `precise`.
+- Otherwise, no judgment at all: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
 
-The rating picks the executor: `mechanical` → `flights-mechanical-executor` (`sonnet`), `smart` → `flights-smart-executor` (`opus`); the spawn carries no model override.
+The rating picks the executor: `mechanical` → `flights-mechanical-executor` (Sonnet 5.5, `high`), `precise` → `flights-precise-executor` (Sonnet 5.5, `xhigh`), `smart` → `flights-smart-executor` (`opus`, `high`); the spawn carries no model override. `precise` exists because pinning, not size, decides which model wins: [`flights-executors`](flights-executors.md#three-tiers-one-source) holds the measurement.
 
 ## The run
 

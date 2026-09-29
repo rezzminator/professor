@@ -1,13 +1,13 @@
 # The flight executors
 
-`flights-mechanical-executor` and `flights-smart-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body, two tiers. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
+`flights-mechanical-executor`, `flights-precise-executor` and `flights-smart-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body, three tiers. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
 
 Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-mechanical-executor.md`](../../../templates/global/agents/flights-mechanical-executor.md).
 
 ## Contents
 
 - [Why it exists](#why-it-exists)
-- [Two tiers, one source](#two-tiers-one-source)
+- [Three tiers, one source](#three-tiers-one-source)
 - [What it holds](#what-it-holds)
 - [Tests](#tests)
 - [Layout laws at write time](#layout-laws-at-write-time)
@@ -23,14 +23,17 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 A flight had a speccer and an orchestrator and no executor of its own. The executor was whatever agent type the project had, and the instructions of a developer travelled in the spec: a measured 4.3 KB of generic instruction per executor in one flight and 12.3 KB in another, rewritten on every revising round. The orchestrator's brief also had to override the project's agent card ("write the covering tests yourself, whatever your agent card says"). One global body ends both: the generic instructions live once, in the agent, and a task file holds only the task.
 
-## Two tiers, one source
+## Three tiers, one source
 
 | Agent | Model | Effort | Runs |
 | --- | --- | --- | --- |
-| `flights-mechanical-executor` | `sonnet` | `medium` | a task rated `mechanical` |
-| `flights-smart-executor` | `opus` | `medium` | a task rated `smart` |
+| `flights-mechanical-executor` | `claude-sonnet-5-5` | `high` | a task rated `mechanical` |
+| `flights-precise-executor` | `claude-sonnet-5-5` | `xhigh` | a task rated `precise` |
+| `flights-smart-executor` | `opus` | `high` | a task rated `smart` |
 
-The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-smart-executor` as a variant `from` it, overriding `model` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
+The Sonnet tiers pin the full model ID: the `sonnet` alias resolved to different models on different accounts of one host. `precise` is a lateral tier, not a cheaper one. On a task whose spec pinned every interface and whose difficulty was concurrency and failure paths, Sonnet 5.5 at `xhigh` scored 90 against Opus 5.5 at `high`'s 75, at $4.03 against $3.28 a task. On a goal-only task, Opus scored 88 against Sonnet's 66. So the spec's pinning, not the task's size, decides between `precise` and `smart`.
+
+The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-precise-executor` and `flights-smart-executor` as variants `from` it, overriding `model`, `effort` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
 
 ## What it holds
 

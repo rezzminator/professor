@@ -110,7 +110,7 @@ files: [src/accounts/repository.ts, src/accounts/repository.test.ts, src/api/rou
 - Decisions: every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text.
 - Shapes: `EXISTING`, what the executor types against (columns, types, helper signatures, API fields, the directory's conventions), quoted with its file path; `NEW`, what the task creates, by name, inputs, outputs and behaviour.
 - Steps: numbered, inside-out; each names the file, the place as a quoted line of code, and the change as behaviour.
-- Execution judgments: every call left to the executor. More than three, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`; otherwise `mechanical`.
+- Execution judgments: every call left to the executor. None sets `rating: mechanical`. One to three, with every interface the task touches pinned in Shapes, sets `rating: precise`, as does a task with no judgment whose difficulty is the implementation itself: concurrency, failure paths, many error rows. More than three, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`.
 
 ## Altitude
 
@@ -149,7 +149,7 @@ Exactly this shape, nothing around it:
 ```
 SPEC {spec directory}
 {the index table, verbatim}
-DISPATCH A task starts once every id in its needs is done, as many at once as its shares admit. One fresh executor per task file, by rating: mechanical → flights-mechanical-executor, smart → flights-smart-executor. A DONE is verified against the index row's files. SPEC-DRIFT or FAILED goes, with the transcript and what landed, to a revising flights-speccer; only it changes a task file.
+DISPATCH A task starts once every id in its needs is done, as many at once as its shares admit. One fresh executor per task file, by rating: mechanical → flights-mechanical-executor, precise → flights-precise-executor, smart → flights-smart-executor. A DONE is verified against the index row's files. SPEC-DRIFT or FAILED goes, with the transcript and what landed, to a revising flights-speccer; only it changes a task file.
 RECONCILED {n} changes in {m} tasks, {b} batches, {k} blocked, {c} file collisions, largest read {x} chars
 BLOCKED {id or item}: {what is missing} · {the one question} | none
 NOTES {up to five lines} | none

@@ -116,7 +116,8 @@ func InspectSkillSources(home string, accounts []pfmconfig.Account, offline bool
 
 // inspectSkillSource classifies one registered skill: its store root and
 // store must be real directories (install neither reads through nor replaces
-// anything else), its root SKILL.md a regular file, and every target linked.
+// anything else), its root SKILL.md usable (checkSkillFile: an unusable one is
+// SKIPPED, as install skips linking it), and every target linked.
 func inspectSkillSource(
 	source skillSource, storeRoot, store string, configDirs []string, home string, offline bool,
 ) SkillSourceStatus {
@@ -139,6 +140,9 @@ func inspectSkillSource(
 		if offline {
 			status.State = SkillSourceOffline
 		}
+		return status
+	} else if errors.Is(err, errSkillFileUnusable) {
+		status.State, status.Error = SkillSourceSkipped, err.Error()
 		return status
 	} else if err != nil {
 		status.State, status.Error = SkillSourceCheckFailed, err.Error()

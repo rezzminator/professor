@@ -1,17 +1,20 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
@@ -111,6 +114,9 @@ func TestSourceFetchedSkillsTreeProblemsAreOneSkipKeepingTheStore(t *testing.T) 
 		"link out of the tree": func(t *testing.T, repo, outside string) {
 			writeFixture(t, filepath.Join(outside, "elsewhere.md"), "# elsewhere\n")
 			symlinkFixture(t, filepath.Join(outside, "elsewhere.md"), filepath.Join(repo, "SKILL.md"))
+		},
+		"relative link out of the tree": func(t *testing.T, repo, _ string) {
+			symlinkFixture(t, "../.gs.commit", filepath.Join(repo, "SKILL.md"))
 		},
 	}
 	for name, plant := range cases {
@@ -240,9 +246,11 @@ func TestSourceFetchedSkillsIgnoreAHomeRepositoryConfig(t *testing.T) {
 	}
 }
 
-// TestSourceFetchedSkillsRecloneADamagedStore pins F25: a store whose SKILL.md
-// is gone is re-cloned although its recorded commit is current.
-func TestSourceFetchedSkillsRecloneADamagedStore(t *testing.T) {
+// TestSourceFetchedSkillsRecloneAStoreWithoutSKILLMd pins F25: a store whose
+// SKILL.md is gone is re-cloned although its recorded commit is current. Other
+// damage (a deleted .git, a changed file) is not detected: pfm never runs git
+// inside a store.
+func TestSourceFetchedSkillsRecloneAStoreWithoutSKILLMd(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
@@ -261,19 +269,30 @@ func TestSourceFetchedSkillsRecloneADamagedStore(t *testing.T) {
 	assertLink(t, filepath.Join(home, ".agents", "skills", "god-speed"), store)
 }
 
-// TestSourceFetchedSkillsDryRunOfAnUpToDateStorePlansNoChange pins F27: a dry
-// run over an existing store reads no remote and plans no change for it.
-func TestSourceFetchedSkillsDryRunOfAnUpToDateStorePlansNoChange(t *testing.T) {
+// TestSourceFetchedSkillsDryRunOfAnExistingStorePlansItsSnapshot pins F27 and
+// F33: a dry run over an existing store, stale or not, reads no remote and
+// prints no change for it, yet plans the store and its record into the
+// journal, so the space preflight charges the apply's snapshot of them.
+func TestSourceFetchedSkillsDryRunOfAnExistingStorePlansItsSnapshot(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
 	runSkillInstall(t, home, ModeApply)
+	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# gs v2\n"})
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
 
-	output := runSkillInstall(t, home, ModeDryRun)
+	output := runSkillInstall(t, home, ModeDryRun, func(options *Options) { options.Journal = journal })
 
 	if strings.Contains(output, "change  fetch ") || strings.Contains(output, "change  update ") {
 		t.Fatalf("a dry run planned a change for an existing store:\n%s", output)
+	}
+	store := filepath.Join(skillStoreRoot(home), "god-speed")
+	planned := journal.Planned()
+	for _, want := range []string{installRecordPath(store), installRecordPath(skillCommitPath(store))} {
+		if !slices.Contains(planned, want) {
+			t.Fatalf("the dry run did not plan %s for the space preflight: %v\n%s", want, planned, output)
+		}
 	}
 }
 
@@ -324,6 +343,144 @@ func TestSourceFetchedSkillsAdoptAHandMadeClone(t *testing.T) {
 	}
 }
 
+// TestSourceFetchedSkillsAcceptALinkInsideTheTree pins F34: a root SKILL.md
+// linking to a file inside its own tree is fetched, linked and up to date on
+// the next install, and doctor reads it as linked.
+func TestSourceFetchedSkillsAcceptALinkInsideTheTree(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "gs")
+	symlinkFixture(t, filepath.Join("docs", "skill.md"), filepath.Join(repo, "SKILL.md"))
+	skillFixtureRepo(t, repo, map[string]string{filepath.Join("docs", "skill.md"): "# linked\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"gs": "file://" + repo}))
+
+	first := runSkillInstall(t, home, ModeApply)
+
+	store := filepath.Join(skillStoreRoot(home), "gs")
+	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# linked\n" {
+		t.Fatalf("an in-tree SKILL.md link was not fetched: %q\n%s", got, first)
+	}
+	assertLink(t, filepath.Join(home, ".agents", "skills", "gs"), store)
+	if second := runSkillInstall(t, home, ModeApply); !strings.Contains(second, "ok      "+store+" at ") {
+		t.Fatalf("an in-tree SKILL.md link was not up to date on the next install:\n%s", second)
+	}
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
+	if statuses := InspectSkillSources(home, accounts, false); len(statuses) != 1 ||
+		statuses[0].State != SkillSourceLinked {
+		t.Fatalf("doctor did not read an in-tree SKILL.md link as linked: %+v", statuses)
+	}
+}
+
+// blockSkillCommitRecord puts a directory at name's commit record, so the
+// record write that follows a swap fails.
+func blockSkillCommitRecord(t *testing.T, home, name string) {
+	t.Helper()
+	marker := skillCommitMarker(home, name)
+	if err := os.RemoveAll(marker); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(marker, "blocker"), "not a commit record\n")
+}
+
+// TestSourceFetchedSkillsFailedRecordWriteNamesTheTreeInPlace pins F32: with no
+// journal to restore it, a swap whose record write fails leaves the new clone
+// at the store, and the skip says so instead of claiming the old copy kept.
+func TestSourceFetchedSkillsFailedRecordWriteNamesTheTreeInPlace(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# v2\n"})
+	blockSkillCommitRecord(t, home, "god-speed")
+
+	output := runSkillInstall(t, home, ModeApply)
+
+	store := filepath.Join(skillStoreRoot(home), "god-speed")
+	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v2\n" {
+		t.Fatalf("store SKILL.md = %q, want the new clone\n%s", got, output)
+	}
+	if strings.Contains(output, "(keeping "+store+")") ||
+		!strings.Contains(output, store+" holds the new clone at "+shortCommit(repoHead(t, repo))) {
+		t.Fatalf("the skip does not name the new clone at the store:\n%s", output)
+	}
+}
+
+// TestSourceFetchedSkillsFailedSwapOfAFreshStoreRevertsBoth pins F39: a first
+// fetch whose record write fails leaves neither a store nor a changed record,
+// closes its journal, and claims no kept copy.
+func TestSourceFetchedSkillsFailedSwapOfAFreshStoreRevertsBoth(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	blockSkillCommitRecord(t, home, "god-speed")
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+
+	output := runSkillInstall(t, home, ModeApply, func(options *Options) { options.Journal = journal })
+
+	store := filepath.Join(skillStoreRoot(home), "god-speed")
+	requireNoPath(t, store, "a failed first swap left the store")
+	if got := readSkillFile(
+		t,
+		filepath.Join(skillCommitMarker(home, "god-speed"), "blocker"),
+	); got != "not a commit record\n" {
+		t.Fatalf("the record path was not restored: %q\n%s", got, output)
+	}
+	if !strings.Contains(output, "SKILL-FETCH-FAILED god-speed: ") || strings.Contains(output, "(keeping ") {
+		t.Fatalf("a failed first swap was not one skip claiming no kept copy:\n%s", output)
+	}
+	for _, record := range journal.records {
+		if record.Result == layoutRecordPending || record.Result == layoutRecordUnrestored {
+			t.Fatalf("a handled first-swap failure left a journal record open: %+v\n%s", record, output)
+		}
+	}
+}
+
+// TestSourceFetchedSkillsPartialRestoreIsALostStore pins F31: when the
+// journal's restore of the store fails partway, the install fails naming the
+// store, never claims the copy kept, and keeps the old copy the swap moved
+// aside. Serial: it replaces restoreJournalRecord.
+func TestSourceFetchedSkillsPartialRestoreIsALostStore(t *testing.T) {
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# v2\n"})
+	blockSkillCommitRecord(t, home, "god-speed")
+	store := filepath.Join(skillStoreRoot(home), "god-speed")
+	resolved := installRecordPath(store)
+	original := restoreJournalRecord
+	t.Cleanup(func() { restoreJournalRecord = original })
+	restoreJournalRecord = func(ctx context.Context, record layoutJournalRecord) error {
+		if record.Destination != resolved {
+			return original(ctx, record)
+		}
+		if err := os.RemoveAll(record.Destination); err != nil {
+			return err
+		}
+		writeFixture(t, filepath.Join(record.Destination, "partial"), "half\n")
+		return errors.New("no space left on device")
+	}
+	var output bytes.Buffer
+
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
+		Journal: NewJournal(context.Background(), LayoutEnv{Home: home}),
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "replace skill store "+store) {
+		t.Fatalf("a partial restore was not a failure naming the store: %v\n%s", err, output.String())
+	}
+	if strings.Contains(output.String(), "(keeping "+store+")") {
+		t.Fatalf("a partial restore claimed the store kept:\n%s", output.String())
+	}
+	matches, globErr := filepath.Glob(filepath.Join(skillStoreRoot(home), ".god-speed.fetch-*.old", "SKILL.md"))
+	if globErr != nil || len(matches) != 1 || readSkillFile(t, matches[0]) != "# v1\n" {
+		t.Fatalf("the old copy the swap moved aside was not kept: %v %v", matches, globErr)
+	}
+}
+
 // TestCheckSkillFileNamesAnUninspectablePath pins F20's third case at its one
 // door: a SKILL.md path lstat cannot read (ENAMETOOLONG here, which holds for
 // root where a chmod would not) is an error other than fs.ErrNotExist, which
@@ -332,7 +489,7 @@ func TestSourceFetchedSkillsAdoptAHandMadeClone(t *testing.T) {
 func TestCheckSkillFileNamesAnUninspectablePath(t *testing.T) {
 	t.Parallel()
 	err := checkSkillFile(filepath.Join(t.TempDir(), strings.Repeat("a", 300)))
-	if !errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, fs.ErrNotExist) {
+	if !errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, errSkillFileUnusable) {
 		t.Fatalf("an uninspectable SKILL.md path: %v", err)
 	}
 }

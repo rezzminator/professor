@@ -308,10 +308,11 @@ func (installer *engine) wireSkillSourceLink(store, target, storeRoot string) er
 // the store, out of the fetched tree's reach) names that head, a fresh shallow
 // clone in a staging directory beside it is swapped into place, the record
 // rewritten in the same journaled write. Of a fetched tree pfm inspects only
-// its root SKILL.md (checkSkillFile), never following it. A dry run reads no
-// remote. Every failure is one named skip keeping the old copy; the returned
-// error is reserved for a store the swap lost. linkable reports a store
-// holding a root SKILL.md.
+// its root SKILL.md (checkSkillFile). A dry run reads no remote, and plans the
+// store and its record as the apply may snapshot and replace them. Every
+// failure is one named skip naming the tree left at the store; the returned
+// error is reserved for a store the swap lost or its restore left partial.
+// linkable reports a store holding a usable root SKILL.md.
 func (installer *engine) fetchSkillSource(source skillSource, store string) (linkable bool, err error) {
 	info, err := os.Lstat(store)
 	exists := err == nil
@@ -336,7 +337,10 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	}
 	if !installer.apply {
 		if exists {
-			installer.say("check   %s against %s (a dry run reads no remote)", store, source.Repo)
+			installer.planJournal(store)
+			installer.planJournal(skillCommitPath(store))
+			installer.say("check   %s against %s (a dry run reads no remote; the apply replaces it if the head moved)",
+				store, source.Repo)
 			return installer.linkableStore(source.Name, store), nil
 		}
 		return true, installer.changePaths(
@@ -396,6 +400,10 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	if err != nil {
 		return fail(err.Error())
 	}
+	clone, err := os.Lstat(staging)
+	if err != nil {
+		return fail("inspect the fresh clone: " + err.Error())
+	}
 	message := "fetch " + source.Repo + " -> " + store
 	if exists {
 		if was == "" {
@@ -409,11 +417,18 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 		}
 		return atomicfile.Write(record, []byte(cloned+"\n"), 0o644)
 	})
-	if _, statErr := os.Lstat(store); err != nil && exists && statErr != nil {
-		return false, fmt.Errorf("replace skill store %s (its old copy is at %s): %w", store, trash, err)
+	current, statErr := os.Lstat(store)
+	if err != nil && exists && (statErr != nil || installer.options.Journal.leftUnrestored(store)) {
+		return false, fmt.Errorf("replace skill store %s (pfm install --rollback restores it; an old copy the swap "+
+			"moved aside is at %s): %w", store, trash, err)
 	}
 	if removeErr := os.RemoveAll(trash); removeErr != nil {
 		installer.skip("leave the old skill store copy " + trash + ": " + removeErr.Error())
+	}
+	if err != nil && statErr == nil && os.SameFile(current, clone) {
+		installer.skip("SKILL-FETCH-FAILED " + source.Name + ": " + err.Error() + " (" + store +
+			" holds the new clone at " + shortCommit(cloned) + ")")
+		return installer.linkableStore(source.Name, store), nil
 	}
 	if err != nil {
 		return fail(err.Error())
@@ -446,30 +461,65 @@ func skillCommitPath(store string) string {
 	return filepath.Join(filepath.Dir(store), "."+filepath.Base(store)+".commit")
 }
 
+// errSkillFileUnusable marks a root SKILL.md that exists but is no regular file
+// inside its tree.
+var errSkillFileUnusable = errors.New("not a regular file inside its skill tree")
+
 // checkSkillFile is the one inspection pfm makes of a fetched tree: dir's root
-// SKILL.md must be a regular file, never followed. A missing one wraps
-// fs.ErrNotExist; a link, a directory or a path lstat cannot read is an error.
+// SKILL.md must be a regular file, or a link resolving to one inside dir. Its
+// three failures read apart: absent wraps fs.ErrNotExist; a directory, a
+// dangling or looping link or a link out of dir wraps errSkillFileUnusable;
+// any other error is a path pfm could not inspect.
 func checkSkillFile(dir string) error {
 	path := filepath.Join(dir, "SKILL.md")
 	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("inspect %s: %w", path, err)
 	}
-	if kind := info.Mode().Type(); kind != 0 {
-		return fmt.Errorf("%s is not a regular file (mode %s)", path, kind)
+	if info.Mode().Type() == fs.ModeSymlink {
+		root, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			return fmt.Errorf("inspect %s: %w", dir, err)
+		}
+		target, err := filepath.EvalSymlinks(path)
+		var errno syscall.Errno
+		if err != nil && errors.As(err, &errno) && errno != syscall.ENOENT {
+			return fmt.Errorf("inspect %s: %w", path, err)
+		} else if err != nil {
+			return fmt.Errorf("%s: %v: %w", path, err, errSkillFileUnusable)
+		}
+		if !withinGlobalSource(target, root) {
+			return fmt.Errorf("%s -> %s leaves %s: %w", path, target, root, errSkillFileUnusable)
+		}
+		if info, err = os.Lstat(target); err != nil {
+			return fmt.Errorf("inspect %s: %w", target, err)
+		}
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s (mode %s): %w", path, info.Mode().Type(), errSkillFileUnusable)
 	}
 	return nil
 }
 
-// linkableStore reports whether store holds a root SKILL.md regular file; an
-// existing store without one is a named SKILL-SOURCE-MISSING skip.
+// linkableStore reports whether store holds a usable root SKILL.md; an
+// existing store without one is one named skip telling absent
+// (SKILL-SOURCE-MISSING), unusable (SKILL-SOURCE-INVALID) and uninspectable
+// (SKILL-FETCH-FAILED) apart.
 func (installer *engine) linkableStore(name, store string) bool {
 	err := checkSkillFile(store)
 	if err == nil {
 		return true
 	}
-	if _, storeErr := os.Lstat(store); storeErr == nil {
+	if _, storeErr := os.Lstat(store); storeErr != nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
 		installer.skip("SKILL-SOURCE-MISSING " + name + " (" + err.Error() + ")")
+	case errors.Is(err, errSkillFileUnusable):
+		installer.skip("SKILL-SOURCE-INVALID " + name + ": " + err.Error())
+	default:
+		installer.skip("SKILL-FETCH-FAILED " + name + ": inspect store: " + err.Error())
 	}
 	return false
 }

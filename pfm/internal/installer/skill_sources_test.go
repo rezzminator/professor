@@ -214,8 +214,8 @@ func TestSourceFetchedSkillsFetchFailureKeepsTheStoreCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.Contains(entry.Name(), ".fetch-") {
-			t.Fatalf("a failed clone left staging directory %s", entry.Name())
+		if entry.Name() != "ghostwriter" && entry.Name() != ".ghostwriter.commit" {
+			t.Fatalf("a failed fetch left %s in the store root (a staging directory or a record temp)", entry.Name())
 		}
 	}
 }

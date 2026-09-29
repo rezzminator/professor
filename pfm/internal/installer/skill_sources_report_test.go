@@ -225,6 +225,36 @@ func TestInspectSkillSourcesRefuseASymlinkedStoreRoot(t *testing.T) {
 	}
 }
 
+// TestSkillFileStatesReadApartOnBothSurfaces pins F35: a store whose root
+// SKILL.md exists but is unusable (a directory here) is SKILL-SOURCE-INVALID
+// on install, never SKILL-SOURCE-MISSING, and SKIPPED in doctor, a warning
+// with no install hint, never CHECK-FAILED.
+func TestSkillFileStatesReadApartOnBothSurfaces(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"gs": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	skill := filepath.Join(skillStoreRoot(home), "gs", "SKILL.md")
+	if err := os.Remove(skill); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(skill, "nested.md"), "# nested\n")
+
+	output := runSkillInstall(t, home, ModeApply, func(options *Options) { options.SkillSourcesOffline = true })
+
+	if strings.Contains(output, "SKILL-SOURCE-MISSING gs") || !strings.Contains(output, "SKILL-SOURCE-INVALID gs: ") {
+		t.Fatalf("an unusable SKILL.md did not read as SKILL-SOURCE-INVALID on install:\n%s", output)
+	}
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
+	var report bytes.Buffer
+	warnings, failures := ReportSkillSources(&report, home, accounts, false)
+	if row := skillSourceRow(t, report.String(), "gs"); !strings.Contains(row, "state=SKIPPED ") ||
+		strings.Contains(row, "hint=") || warnings != 1 || failures != 0 {
+		t.Fatalf("doctor: warnings=%d failures=%d row %q, want one SKIPPED warning", warnings, failures, row)
+	}
+}
+
 // TestInspectSkillSourcesChecksTheDefaultAccountInstallWrites pins F29: with
 // accounts that omit ~/.claude, doctor still checks the link install writes
 // there.

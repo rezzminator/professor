@@ -180,9 +180,10 @@ Pin what crosses a boundary; describe what stays inside one.
 
 ## Rating
 
-The rating is computed from `Execution judgments`, not asserted.
+The rating is computed from `Execution judgments`, not asserted. A call the task's `Decisions` already settle is not a judgment. A judgment counts only when a wrong call breaks a `Done when` row or reaches past the task's files; a local choice — a helper's name, awk over printf, where a fixture sits — is listed and never counted. Counted literally, 28 of 28 historical `mechanical` tasks carried one or two such local choices and would all have been promoted to `precise`, paying `xhigh` for no quality.
 
 - More than three judgments: `smart`.
+- One to three judgments with an interface the task touches left unpinned: `smart`.
 - Any judgment that is a diagnosis of an unknown cause: `smart`, whatever the count.
 - A deliverable that is a document, a prompt, a spec or a report: `smart`, whatever the count. Writing for a reader to act on is reasoning, however exactly the task file words it.
 - One to three judgments, with every interface the task touches pinned in `Shapes`: `precise`.

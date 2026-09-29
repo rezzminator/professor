@@ -110,7 +110,7 @@ files: [src/accounts/repository.ts, src/accounts/repository.test.ts, src/api/rou
 - Decisions: every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text.
 - Shapes: `EXISTING`, what the executor types against (columns, types, helper signatures, API fields, the directory's conventions), quoted with its file path; `NEW`, what the task creates, by name, inputs, outputs and behaviour.
 - Steps: numbered, inside-out; each names the file, the place as a quoted line of code, and the change as behaviour.
-- Execution judgments: every call left to the executor. None sets `rating: mechanical`. One to three, with every interface the task touches pinned in Shapes, sets `rating: precise`, as does a task with no judgment whose difficulty is the implementation itself: concurrency, failure paths, many error rows. More than three, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`.
+- Execution judgments: every call left to the executor; a call Decisions already settle is not one. A judgment counts toward the rating only when a wrong call breaks a Done when row or reaches past the task's files; a local choice (a helper's name, one idiom over another, where a fixture sits) is listed and never counted. None counted sets `rating: mechanical`. One to three, with every interface the task touches pinned in Shapes, sets `rating: precise`, as does a task with no judgment whose difficulty is the implementation itself: concurrency, failure paths, many error rows. More than three, one to three with a touched interface left unpinned, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`.
 
 ## Altitude
 

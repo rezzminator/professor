@@ -387,12 +387,9 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			return nil, fmt.Errorf("fetch release manifest %s: %w", origin, err)
 		}
 	}
-	if bytes.Contains(content, []byte(themeOwnerPlaceholder)) {
-		owner, ownerErr := themeManifestOwner(options)
-		if ownerErr != nil {
-			return nil, fmt.Errorf("resolve registered placeholder %s: %w", themeOwnerPlaceholder, ownerErr)
-		}
-		content = bytes.ReplaceAll(content, []byte(themeOwnerPlaceholder), []byte(owner))
+	content, err = resolveOwnerPlaceholder(content, options.SourceRepo, options.ThemeManifestURL)
+	if err != nil {
+		return nil, err
 	}
 	var manifest themeManifest
 	decoder := json.NewDecoder(bytes.NewReader(content))
@@ -469,9 +466,28 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 	return sources, nil
 }
 
-func themeManifestOwner(options Options) (string, error) {
-	if strings.TrimSpace(options.SourceRepo) != "" {
-		manifestPath := filepath.Join(options.SourceRepo, ".professor", "manifest.json")
+// resolveOwnerPlaceholder replaces the registered {GH_USER} placeholder in a
+// source-fetched registry (the theme manifest, the global skill sources) with
+// the blueprint repo owner registeredOwner resolves. Content without the
+// placeholder is returned untouched; a resolution failure is an error naming
+// the placeholder, never a silently unresolved URL.
+func resolveOwnerPlaceholder(content []byte, sourceRepo, manifestURL string) ([]byte, error) {
+	if !bytes.Contains(content, []byte(themeOwnerPlaceholder)) {
+		return content, nil
+	}
+	owner, err := registeredOwner(sourceRepo, manifestURL)
+	if err != nil {
+		return nil, fmt.Errorf("resolve registered placeholder %s: %w", themeOwnerPlaceholder, err)
+	}
+	return bytes.ReplaceAll(content, []byte(themeOwnerPlaceholder), []byte(owner)), nil
+}
+
+// registeredOwner resolves {GH_USER}: the owner in the source clone's
+// .professor/manifest.json installed_from.repo, else the owner segment of the
+// release manifest URL.
+func registeredOwner(sourceRepo, manifestURL string) (string, error) {
+	if strings.TrimSpace(sourceRepo) != "" {
+		manifestPath := filepath.Join(sourceRepo, ".professor", "manifest.json")
 		content, err := os.ReadFile(manifestPath)
 		if err == nil {
 			var manifest struct {
@@ -491,13 +507,13 @@ func themeManifestOwner(options Options) (string, error) {
 			return "", fmt.Errorf("read %s: %w", manifestPath, err)
 		}
 	}
-	parsed, err := url.Parse(strings.TrimSpace(options.ThemeManifestURL))
+	parsed, err := url.Parse(strings.TrimSpace(manifestURL))
 	if err != nil {
 		return "", fmt.Errorf("parse release manifest URL: %w", err)
 	}
 	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	if len(segments) < 2 || strings.TrimSpace(segments[0]) == "" {
-		return "", fmt.Errorf("release manifest URL %q does not name an owner/repository", options.ThemeManifestURL)
+		return "", fmt.Errorf("release manifest URL %q does not name an owner/repository", manifestURL)
 	}
 	return segments[0], nil
 }

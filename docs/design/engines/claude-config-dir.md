@@ -74,6 +74,7 @@ Per account, owned by Claude Code: `.credentials.json`, `.claude.json` (login, o
 | `skills/handoff/SKILL.md` | `~/.local/share/pfm/install/handoff.skill.md` |
 | `skills/deep-rr` | `{clone}/workflows/deep-rr` |
 | `skills/*` | `{clone}/templates/global/skills/` dirs holding a `SKILL.md` |
+| `skills/{name}` (also `~/.agents/skills/{name}`) | `~/.local/share/pfm/install/skills/{name}/`, the shallow clone of a repo `templates/global/skills/sources.json` registers |
 | `agents/*.md` | `{clone}/templates/global/agents/`, or a rendered variant under `~/.local/state/pfm/generated/claude-agents` |
 | `themes/*` (`~/.claude` only) | regular files from `templates/themes/sources.json`, tracked in `theme-ownership.json` |
 

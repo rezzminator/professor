@@ -44,6 +44,11 @@ const (
 // successful `pfm uninstall` — the same defect this file's commit fixed for
 // commands and skills, at the one registry this loop had not yet visited.
 func (installer *engine) unwireGlobalRegistries() error {
+	// The source-fetched skills' links resolve into the pfm-owned store, not
+	// the clone: they and the store go first (unwireSkillSources).
+	if err := installer.unwireSkillSources(); err != nil {
+		return err
+	}
 	repos, err := installer.recordedProfessorSourceRepos()
 	if err != nil {
 		return err

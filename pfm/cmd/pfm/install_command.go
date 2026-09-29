@@ -399,11 +399,12 @@ func newInstallerOptions(
 	runtimes ...commandRuntime,
 ) installer.Options {
 	options := installer.Options{
-		Mode:               mode,
-		ConfigDir:          configDir,
-		Stdout:             stdout,
-		ProvisionHarvest:   !skipHarvest,
-		HarvestProvisioner: installHarvestProvisioner(),
+		Mode:                mode,
+		ConfigDir:           configDir,
+		Stdout:              stdout,
+		ProvisionHarvest:    !skipHarvest,
+		SkillSourcesOffline: paths.SkillSourcesOffline(),
+		HarvestProvisioner:  installHarvestProvisioner(),
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]

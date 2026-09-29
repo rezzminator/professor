@@ -379,9 +379,10 @@ func inspectAccountGlobalAgents(account pfmconfig.Account, repo string, sources 
 // wireGlobalSkills first prunes every retired skill's leftover link
 // (retireRetiredGlobalSkills), then links every machine-global skill — each
 // skill directory shipped under templates/global/skills/ — into the skills/
-// registry of every configured Claude account.
-// ghostwriter/vision-factory clone management is explicitly out of scope
-// here — a different owner entirely.
+// registry of every configured Claude account, then fetches and links every
+// source-fetched skill templates/global/skills/sources.json registers
+// (wireSourceFetchedSkills, skill_sources.go — pfm install is that
+// registry's one owner).
 func (installer *engine) wireGlobalSkills() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
@@ -390,7 +391,10 @@ func (installer *engine) wireGlobalSkills() error {
 	if err := installer.retireRetiredGlobalSkills(); err != nil {
 		return err
 	}
-	return installer.wireTemplateSkills(sourceRepo)
+	if err := installer.wireTemplateSkills(sourceRepo); err != nil {
+		return err
+	}
+	return installer.wireSourceFetchedSkills(sourceRepo)
 }
 
 // wireTemplateSkills links every top-level DIRECTORY of

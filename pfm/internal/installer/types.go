@@ -135,10 +135,13 @@ type Options struct {
 	// ProvisionHarvest makes install/uninstall own the pinned conversion
 	// environment. The command sets this for real user actions; existing
 	// installer unit tests leave it false and inject no network-capable worker.
-	ProvisionHarvest   bool
-	HarvestProvisioner HarvestProvisioner
-	HarvestPlatform    harvestpy.Platform
-	HarvestOffline     bool
+	ProvisionHarvest bool
+	// SkillSourcesOffline skips fetching the source-fetched global skills
+	// (paths.EnvSkillSourcesOffline); an existing store copy is still linked.
+	SkillSourcesOffline bool
+	HarvestProvisioner  HarvestProvisioner
+	HarvestPlatform     harvestpy.Platform
+	HarvestOffline      bool
 
 	// ProcRoot is the process table pruneClaudeVersions reads to tell a
 	// version a live chat is executing from one it is safe to remove. Empty

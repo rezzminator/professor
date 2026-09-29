@@ -54,6 +54,12 @@ const (
 	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
 	EnvTmuxDir      = "PFM_TMUX_DIR"
 	EnvHome         = "PFM_HOME"
+	// EnvSkillSourcesOffline=1 stops pfm install from fetching the
+	// source-fetched global skills (templates/global/skills/sources.json):
+	// an existing store copy is still linked, and pfm doctor reports an
+	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
+	// it so no test reaches a public repository.
+	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
@@ -487,4 +493,10 @@ func (values Values) FirstRoot(id pfmengine.ID) string {
 		return roots[0]
 	}
 	return ""
+}
+
+// SkillSourcesOffline reports EnvSkillSourcesOffline=1: pfm install fetches no
+// source-fetched global skill and pfm doctor reports an unfetched one OFFLINE.
+func SkillSourcesOffline() bool {
+	return os.Getenv(EnvSkillSourcesOffline) == "1"
 }

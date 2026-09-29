@@ -629,9 +629,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// archived sign-up wall is refused here by the original address.
 			if result := h.fetchURLWithPolicy(snapshotCtx, snapshot, options, false); result.Error == "" &&
 				!loaders.readerGateOnly(source, result.Content) {
-				result.Source = source
-				result.Rungs = append([]string(nil), rungs...)
-				return result
+				return h.storeWaybackCopy(source, snapshot, result, rungs, options)
 			}
 		}
 	}

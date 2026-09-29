@@ -50,8 +50,10 @@ if (TL) { if (FLIGHT || CODEX || PROJECT || argv.includes("--since")) die("--tim
 const PRICING = [
   ["opus-4-1", 15.0, 75.0, 1.5, 2, 1.5], // deprecated Opus 4.1-era tier
   ["opus-4-20", 15.0, 75.0, 1.5, 2, 1.5], // Opus 4.0 ids carry no minor digit: claude-opus-4-<date>
+  ["opus-5-5", 4.0, 20.0, 0.2, 1, 1], // cache reads 0.05x input; no long-context tier
   ["opus", 5.0, 25.0, 0.5, 2, 1.5], // current tier: opus-5, opus-4-8 … opus-4-5
   ["sonnet-4", 3.0, 15.0, 0.3, 2, 1.5],
+  ["sonnet-5-5", 2.0, 10.0, 0.2, 1, 1], // no long-context tier
   ["sonnet-5", 2.0, 10.0, 0.2, 2, 1.5],
   ["sonnet", 3.0, 15.0, 0.3, 2, 1.5], // older sonnet catch-all (3.7 etc.)
   ["haiku-4-5", 1.0, 5.0, 0.1, 2, 1.5],

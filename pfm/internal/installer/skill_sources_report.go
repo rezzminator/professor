@@ -64,7 +64,7 @@ func (status SkillSourceStatus) Describe() string {
 	case SkillSourceNoClone:
 		return line + ` note="no Professor clone recorded or at the default path — source-fetched skills install from a clone's registry"`
 	case SkillSourceOffline:
-		return line + ` note="not fetched: PFM_SKILL_SOURCES_OFFLINE=1"`
+		return line + ` note="not fetched: PFM_SKILL_SOURCES_OFFLINE=1 is set, and pfm install fetches nothing while it is"`
 	case SkillSourceConflict:
 		return line + ` hint="the conflicting path is not pfm's; remove it, then run pfm install --yes"`
 	case SkillSourceSkipped:
@@ -75,14 +75,11 @@ func (status SkillSourceStatus) Describe() string {
 }
 
 // InspectSkillSources classifies every skill the recorded clone's
-// templates/global/skills/sources.json registers: its store and its links in
-// every account's skills/ (unless no Claude Code binary is installed) and in
-// ~/.agents/skills/.
-func InspectSkillSources(
-	home string,
-	accounts []pfmconfig.Account,
-	claudeAbsent, offline bool,
-) []SkillSourceStatus {
+// templates/global/skills/sources.json registers — its {GH_USER} resolved as
+// pfm install resolves it — its store and its links in every account's
+// skills/ and in ~/.agents/skills/, the same targets install writes whether
+// or not a Claude Code binary is installed.
+func InspectSkillSources(home string, accounts []pfmconfig.Account, offline bool) []SkillSourceStatus {
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
 		return []SkillSourceStatus{{Path: home, State: SkillSourceCheckFailed, Error: err.Error()}}
@@ -93,7 +90,7 @@ func InspectSkillSources(
 		return []SkillSourceStatus{{Path: repo, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}
 	registry := filepath.Join(repo, filepath.FromSlash(skillSourcesRelative))
-	sources, present, err := loadSkillSources(repo, "")
+	sources, present, err := loadSkillSources(repo, ThemeManifestURL(""))
 	if err != nil {
 		return []SkillSourceStatus{{Path: registry, State: SkillSourceCheckFailed, Error: err.Error()}}
 	}
@@ -102,11 +99,9 @@ func InspectSkillSources(
 	}
 	storeRoot := skillStoreRoot(home)
 	targets := func(name string) []string {
-		var list []string
-		if !claudeAbsent {
-			for _, account := range accounts {
-				list = append(list, filepath.Join(account.ConfigDir, "skills", name))
-			}
+		list := make([]string, 0, len(accounts)+1)
+		for _, account := range accounts {
+			list = append(list, filepath.Join(account.ConfigDir, "skills", name))
 		}
 		return append(list, filepath.Join(home, ".agents", "skills", name))
 	}
@@ -116,6 +111,11 @@ func InspectSkillSources(
 		status := SkillSourceStatus{Name: source.Name, Path: store, State: SkillSourceLinked}
 		if source.Problem != "" {
 			status.State, status.Error = SkillSourceSkipped, source.Problem
+			statuses = append(statuses, status)
+			continue
+		}
+		if info, err := os.Lstat(store); err == nil && !info.IsDir() {
+			status.State, status.Conflicts = SkillSourceConflict, []string{store}
 			statuses = append(statuses, status)
 			continue
 		}
@@ -160,17 +160,18 @@ func InspectSkillSources(
 
 // ReportGlobalRegistries is doctor's machine-global registry check: the
 // global agents per account (ReportGlobalAgents), then one row per
-// source-fetched skill (ReportSkillSources, offline per
-// paths.SkillSourcesOffline).
+// source-fetched skill (ReportSkillSources, offline per env — doctor's own
+// injected environment).
 func ReportGlobalRegistries(
 	w io.Writer,
 	home string,
 	accounts []pfmconfig.Account,
 	claudeAbsent bool,
+	env paths.Env,
 	codexHomes ...string,
 ) (warnings, failures int) {
 	warnings, failures = ReportGlobalAgents(w, home, accounts, claudeAbsent, codexHomes...)
-	skillWarnings, skillFailures := ReportSkillSources(w, home, accounts, claudeAbsent, paths.SkillSourcesOffline())
+	skillWarnings, skillFailures := ReportSkillSources(w, home, accounts, paths.SkillSourcesOfflineIn(env))
 	return warnings + skillWarnings, failures + skillFailures
 }
 
@@ -183,9 +184,9 @@ func ReportSkillSources(
 	w io.Writer,
 	home string,
 	accounts []pfmconfig.Account,
-	claudeAbsent, offline bool,
+	offline bool,
 ) (warnings, failures int) {
-	for _, status := range InspectSkillSources(home, accounts, claudeAbsent, offline) {
+	for _, status := range InspectSkillSources(home, accounts, offline) {
 		fmt.Fprintf(w, "doctor: skill-source %s\n", status.Describe())
 		switch status.State {
 		case SkillSourceLinked, SkillSourceOffline, SkillSourceNoClone, SkillSourceNoRegistry:

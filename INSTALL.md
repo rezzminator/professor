@@ -281,6 +281,6 @@ No update regenerates scaffolded project files, replays the interview, or perfor
 
 ## Uninstall
 
-**`pfm`:** `pfm uninstall` — removes installer-owned links and theme files and restores the pre-install backups, per `pfm uninstall --help`. Locally modified theme files are preserved and reported rather than removed.
+**`pfm`:** `pfm uninstall` — removes installer-owned links and theme files, the source-fetched skill store `~/.local/share/pfm/install/skills/` with its links in every account's `skills/` and in `~/.agents/skills/`, and restores the pre-install backups, per `pfm uninstall --help`. Locally modified theme files are preserved and reported rather than removed.
 
 **The discipline layer:** no uninstall command exists anywhere in `templates/` or the shipped commands. Removing it is a manual `git` operation on your side — revert the install commit, or delete the written paths from the ownership table above.

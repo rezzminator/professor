@@ -3,11 +3,16 @@ package installer
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // skillFixtureGit runs git in dir with a fixed identity; fixtures are local
@@ -198,6 +203,9 @@ func TestSourceFetchedSkillsFetchFailureKeepsTheStoreCopy(t *testing.T) {
 	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# kept\n" {
 		t.Fatalf("fetch failure lost the store copy: %q", got)
 	}
+	if strings.Contains(output, "<nil>") {
+		t.Fatalf("a git failure rendered a nil error:\n%s", output)
+	}
 	assertLink(t, filepath.Join(home, ".agents", "skills", "ghostwriter"), store)
 	requireNoPath(t, filepath.Join(skillStoreRoot(home), "fresh"), "a failed first fetch left a store")
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "fresh"), "a failed first fetch linked")
@@ -274,10 +282,15 @@ func TestSourceFetchedSkillsValidateTheRegistryAtEntry(t *testing.T) {
 	t.Run("unparsable", func(t *testing.T) {
 		t.Parallel()
 		home := t.TempDir()
+		store := filepath.Join(skillStoreRoot(home), "kept")
+		writeFixture(t, filepath.Join(store, "SKILL.md"), "# kept\n")
 		path := writeSkillRegistry(t, home, "{not json")
 		output := runSkillInstall(t, home, ModeApply)
 		if !strings.Contains(output, "SKILL-SOURCES-FAILED decode "+path) {
 			t.Fatalf("an unparsable registry was not a failure naming %s:\n%s", path, output)
+		}
+		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# kept\n" {
+			t.Fatalf("an unparsable registry retired a store: %q", got)
 		}
 	})
 }
@@ -347,4 +360,333 @@ func TestSourceFetchedSkillsRetireUnregisteredAndUninstall(t *testing.T) {
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "keep"), "uninstall left the .agents link")
 	requireNoPath(t, storeRoot, "uninstall left the skill store")
 	assertLink(t, operator, drop)
+}
+
+// cleanGitOutput runs git in dir with every inherited GIT_* variable stripped,
+// so a test's own GIT_DIR never steers the probe that checks for damage.
+func cleanGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// TestSourceFetchedSkillsNeverTouchAParentRepository pins F1: a store with no
+// .git of its own, inside a $HOME that IS a git repository — reached by git
+// discovery, or named by an inherited GIT_DIR — is replaced by a fresh clone,
+// and the parent repository, its tracked and its untracked files stay as they
+// were. Serial: the GIT_DIR case sets the process environment.
+func TestSourceFetchedSkillsNeverTouchAParentRepository(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		name := "discovery"
+		if inherited {
+			name = "GIT_DIR"
+		}
+		t.Run(name, func(t *testing.T) { requireParentRepositoryUntouched(t, inherited) })
+	}
+}
+
+func requireParentRepositoryUntouched(t *testing.T, inherited bool) {
+	t.Helper()
+	{
+		home := t.TempDir()
+		skillFixtureRepo(t, home, map[string]string{"tracked.txt": "parent\n"})
+		writeFixture(t, filepath.Join(home, "untracked.txt"), "mine\n")
+		parentHead := cleanGitOutput(t, home, "rev-parse", "HEAD")
+		repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "skill"), map[string]string{"SKILL.md": "# new\n"})
+		writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"skill": "file://" + repo}))
+		store := filepath.Join(skillStoreRoot(home), "skill")
+		writeFixture(t, filepath.Join(store, "SKILL.md"), "# hand-made, no .git\n")
+		if inherited {
+			t.Setenv("GIT_DIR", filepath.Join(home, ".git"))
+		}
+
+		output := runSkillInstall(t, home, ModeApply)
+
+		if got := cleanGitOutput(t, home, "rev-parse", "HEAD"); got != parentHead {
+			t.Fatalf("GIT_DIR=%v: parent HEAD moved %s -> %s\n%s", inherited, parentHead, got, output)
+		}
+		if got := readSkillFile(t, filepath.Join(home, "tracked.txt")); got != "parent\n" {
+			t.Fatalf("GIT_DIR=%v: parent tracked file = %q\n%s", inherited, got, output)
+		}
+		if got := readSkillFile(t, filepath.Join(home, "untracked.txt")); got != "mine\n" {
+			t.Fatalf("GIT_DIR=%v: parent untracked file = %q\n%s", inherited, got, output)
+		}
+		requireNoPath(t, filepath.Join(home, "SKILL.md"), "the skill tree landed in the parent worktree")
+		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# new\n" {
+			t.Fatalf("GIT_DIR=%v: store SKILL.md = %q, want the fresh clone\n%s", inherited, got, output)
+		}
+	}
+}
+
+// TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd pins that
+// an upstream commit dropping SKILL.md never replaces a working store copy.
+func TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "ghost-writer"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"ghostwriter": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	skillFixtureGit(t, repo, "rm", "--quiet", "SKILL.md")
+	skillFixtureCommit(t, repo, map[string]string{"README.md": "# moved\n"})
+
+	output := runSkillInstall(t, home, ModeApply)
+
+	store := filepath.Join(skillStoreRoot(home), "ghostwriter")
+	if !strings.Contains(output, "SKILL-SOURCE-MISSING ghostwriter (") {
+		t.Fatalf("a new tree without SKILL.md was not reported:\n%s", output)
+	}
+	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
+		t.Fatalf("the old store copy was replaced: %q\n%s", got, output)
+	}
+	assertLink(t, filepath.Join(home, ".agents", "skills", "ghostwriter"), store)
+}
+
+// TestSourceFetchedSkillsStoreThatIsNotADirectoryIsOneSkip pins F3: a stray
+// file at the store path is one named skip, preserved, and the install runs on.
+func TestSourceFetchedSkillsStoreThatIsNotADirectoryIsOneSkip(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "vf"), map[string]string{"SKILL.md": "# vf\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"vision-factory": "file://" + repo}))
+	store := filepath.Join(skillStoreRoot(home), "vision-factory")
+	writeFixture(t, store, "stray\n")
+
+	output := runSkillInstall(t, home, ModeApply)
+
+	if !strings.Contains(output, "SKILL-FETCH-FAILED vision-factory: store "+store+" is not a directory") {
+		t.Fatalf("a non-directory store was not one named skip:\n%s", output)
+	}
+	if got := readSkillFile(t, store); got != "stray\n" {
+		t.Fatalf("the stray file was changed: %q", got)
+	}
+	requireNoPath(t, filepath.Join(home, ".agents", "skills", "vision-factory"), "a non-directory store was linked")
+}
+
+// TestSourceFetchedSkillsRefuseASymlinkedStoreRoot pins F6: a store root that
+// is a link is never read through — the operator's directories at its target
+// survive install and uninstall.
+func TestSourceFetchedSkillsRefuseASymlinkedStoreRoot(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "keep"), map[string]string{"SKILL.md": "# keep\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"keep": "file://" + repo}))
+	operator := t.TempDir()
+	writeFixture(t, filepath.Join(operator, "mine", "keep.txt"), "operator\n")
+	storeRoot := skillStoreRoot(home)
+	if err := os.MkdirAll(filepath.Dir(storeRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(operator, storeRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSkillInstall(t, home, ModeApply)
+	if !strings.Contains(output, "SKILL-SOURCES-FAILED refuse skill store root "+storeRoot) {
+		t.Fatalf("a symlinked store root was not refused by name:\n%s", output)
+	}
+	if got := readSkillFile(t, filepath.Join(operator, "mine", "keep.txt")); got != "operator\n" {
+		t.Fatalf("install changed the operator's directory: %q", got)
+	}
+	var uninstall bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &uninstall, Runner: &fakeRunner{},
+	})
+	if err == nil || !strings.Contains(err.Error(), storeRoot) {
+		t.Fatalf("uninstall did not refuse the symlinked store root by name: err=%v\n%s", err, uninstall.String())
+	}
+	if got := readSkillFile(t, filepath.Join(operator, "mine", "keep.txt")); got != "operator\n" {
+		t.Fatalf("uninstall changed the operator's directory: %q", got)
+	}
+}
+
+// TestSourceFetchedSkillsOfflineNamesWhatIsLinked pins F7: the offline skip
+// says whether a store copy exists, never claiming one that is not there.
+func TestSourceFetchedSkillsOfflineNamesWhatIsLinked(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	offline := func(options *Options) { options.SkillSourcesOffline = true }
+
+	output := runSkillInstall(t, home, ModeApply, offline)
+	if !strings.Contains(
+		output,
+		"SKILL-FETCH-SKIPPED god-speed: PFM_SKILL_SOURCES_OFFLINE=1 (no store copy; nothing linked)",
+	) {
+		t.Fatalf("offline with no store claimed a linked copy:\n%s", output)
+	}
+	requireNoPath(t, skillStoreRoot(home), "offline install fetched")
+
+	runSkillInstall(t, home, ModeApply)
+	output = runSkillInstall(t, home, ModeApply, offline)
+	if !strings.Contains(
+		output,
+		"SKILL-FETCH-SKIPPED god-speed: PFM_SKILL_SOURCES_OFFLINE=1 (the store copy is still linked)",
+	) {
+		t.Fatalf("offline with a store did not say it stays linked:\n%s", output)
+	}
+	assertLink(
+		t,
+		filepath.Join(home, ".agents", "skills", "god-speed"),
+		filepath.Join(skillStoreRoot(home), "god-speed"),
+	)
+}
+
+// TestSourceFetchedSkillsNewClashLinksTheTemplateInOneInstall pins F11: a name
+// that newly ships as a template skill is linked to the template by the first
+// install after the clash, its old store link retired first.
+func TestSourceFetchedSkillsNewClashLinksTheTemplateInOneInstall(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "shared"), map[string]string{"SKILL.md": "# fetched\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"shared": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	template := filepath.Join(home, ".professor", "templates", "global", "skills", "shared")
+	writeFixture(t, filepath.Join(template, "SKILL.md"), "# template\n")
+
+	output := runSkillInstall(t, home, ModeApply)
+
+	if !strings.Contains(output, "SKILL-SOURCE-CLASH shared: ") {
+		t.Fatalf("the clash was not reported:\n%s", output)
+	}
+	assertLink(t, filepath.Join(home, ".claude", "skills", "shared"), template)
+	requireNoPath(t, filepath.Join(home, ".agents", "skills", "shared"), "the clashing store link survived")
+}
+
+// TestSourceFetchedSkillsRollbackRemovesTheStoreRoot pins F12 and the F18
+// rollback gap: a rollback of a first install removes the store, the store
+// root it created and every store link.
+func TestSourceFetchedSkillsRollbackRemovesTheStoreRoot(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
+	registry := writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	if err := os.Remove(registry); err != nil {
+		t.Fatal(err)
+	}
+	runSkillInstall(t, home, ModeApply)
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
+
+	output := runSkillInstall(t, home, ModeApply, func(options *Options) { options.Journal = journal })
+	if err := RollbackLayout(
+		context.Background(), LayoutEnv{Home: home}, filepath.Base(journal.Dir()), false, io.Discard,
+	); err != nil {
+		t.Fatalf("rollback: %v\n%s", err, output)
+	}
+
+	requireNoPath(t, skillStoreRoot(home), "rollback left the store root")
+	requireNoPath(t, filepath.Join(home, ".agents", "skills", "god-speed"), "rollback left the .agents link")
+	requireNoPath(t, filepath.Join(home, ".claude", "skills", "god-speed"), "rollback left the account link")
+}
+
+// TestSourceFetchedSkillsBusyStoreIsLeftAlone pins F13: while another install
+// holds the store root, this one fetches, links and retires nothing there —
+// the other install's staging directory survives.
+func TestSourceFetchedSkillsBusyStoreIsLeftAlone(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	storeRoot := skillStoreRoot(home)
+	staging := filepath.Join(storeRoot, ".god-speed.fetch-123")
+	writeFixture(t, filepath.Join(staging, "SKILL.md"), "# in flight\n")
+	holder, err := os.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := holder.Close(); err != nil {
+			t.Errorf("close %s: %v", storeRoot, err)
+		}
+	}()
+	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+
+	output := runSkillInstall(t, home, ModeApply)
+
+	if !strings.Contains(output, "SKILL-SOURCES-BUSY ") {
+		t.Fatalf("a held store root was not reported busy:\n%s", output)
+	}
+	if got := readSkillFile(t, filepath.Join(staging, "SKILL.md")); got != "# in flight\n" {
+		t.Fatalf("the other install's staging directory was retired: %q", got)
+	}
+	requireNoPath(t, filepath.Join(storeRoot, "god-speed"), "a busy store root was fetched into")
+}
+
+// TestSourceFetchedSkillsRegistryWithoutTheObjectRetiresNothing pins F14: a
+// registry of null or one missing source_fetched is a named failure, never an
+// empty registry that retires every store.
+func TestSourceFetchedSkillsRegistryWithoutTheObjectRetiresNothing(t *testing.T) {
+	t.Parallel()
+	for _, content := range []string{"null\n", `{"_comment": "no object"}` + "\n"} {
+		home := t.TempDir()
+		repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
+		writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+		runSkillInstall(t, home, ModeApply)
+		path := writeSkillRegistry(t, home, content)
+
+		output := runSkillInstall(t, home, ModeApply)
+
+		if !strings.Contains(output, "SKILL-SOURCES-FAILED decode "+path+": no source_fetched object") {
+			t.Fatalf("registry %q was not a named failure:\n%s", content, output)
+		}
+		store := filepath.Join(skillStoreRoot(home), "god-speed")
+		if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# gs\n" {
+			t.Fatalf("registry %q retired the store: %q", content, got)
+		}
+		assertLink(t, filepath.Join(home, ".agents", "skills", "god-speed"), store)
+	}
+}
+
+// TestSourceFetchedSkillsDryRunOfAnExistingStoreChangesNothing pins the F18
+// dry-run-update gap: a dry run over an existing store only plans the clone.
+func TestSourceFetchedSkillsDryRunOfAnExistingStoreChangesNothing(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# v2\n"})
+
+	output := runSkillInstall(t, home, ModeDryRun)
+
+	store := filepath.Join(skillStoreRoot(home), "god-speed")
+	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
+		t.Fatalf("a dry run changed the store: %q\n%s", got, output)
+	}
+	if !strings.Contains(output, "file://"+repo) {
+		t.Fatalf("a dry run did not plan the clone:\n%s", output)
+	}
+}
+
+// TestRunSkillGitReturnsWithinItsBound pins F4: a git call whose grandchild
+// keeps stderr open still returns shortly after its timeout, carrying git's
+// stderr tail.
+func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
+	t.Parallel()
+	script := filepath.Join(t.TempDir(), "git")
+	writeFixture(t, script, "#!/bin/sh\necho 'fatal: slow remote' >&2\nsleep 12 &\nsleep 12\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err := runSkillGitWith(deps.RealRunner{}, 200*time.Millisecond, script, t.TempDir(), "clone")
+	if elapsed := time.Since(start); elapsed > 8*time.Second {
+		t.Fatalf("git returned after %s, past its bound (err=%v)", elapsed, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "timed out") ||
+		!strings.Contains(err.Error(), "fatal: slow remote") {
+		t.Fatalf("timeout error does not carry git's stderr tail: %v", err)
+	}
 }

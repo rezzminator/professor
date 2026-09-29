@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 const (
@@ -318,8 +320,20 @@ func mergeThemeOverlay(base, overlay []byte) ([]byte, error) {
 	return append(content, '\n'), nil
 }
 
+// ThemeManifestURL is the release-matched theme manifest URL for
+// currentVersion ("main" for a development or empty version) — install's
+// Options.ThemeManifestURL, and the {GH_USER} fallback pfm doctor resolves a
+// source-fetched skills registry with, as install does.
+func ThemeManifestURL(currentVersion string) string {
+	reference := strings.TrimSpace(currentVersion)
+	if reference == "" || reference == pfmconfig.DevelopmentVersion {
+		reference = "main"
+	}
+	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"
+}
+
 // releaseManifestUnpublishedAlpha reports whether a release theme manifest
-// URL names an -alpha version reference. professorThemeManifestURL builds
+// URL names an -alpha version reference. ThemeManifestURL builds
 // this URL from VERSION, and pfm never publishes an -alpha tag on GitHub, so
 // that raw.githubusercontent.com URL 404s every time; loadThemeSources turns
 // that predictable failure into a named refusal instead of a bare HTTP

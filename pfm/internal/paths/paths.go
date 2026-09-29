@@ -498,5 +498,11 @@ func (values Values) FirstRoot(id pfmengine.ID) string {
 // SkillSourcesOffline reports EnvSkillSourcesOffline=1: pfm install fetches no
 // source-fetched global skill and pfm doctor reports an unfetched one OFFLINE.
 func SkillSourcesOffline() bool {
-	return os.Getenv(EnvSkillSourcesOffline) == "1"
+	return SkillSourcesOfflineIn(OSEnv{})
+}
+
+// SkillSourcesOfflineIn is SkillSourcesOffline read from env, the environment
+// a caller was handed.
+func SkillSourcesOfflineIn(env Env) bool {
+	return env.Get(EnvSkillSourcesOffline) == "1"
 }

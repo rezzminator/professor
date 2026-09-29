@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
@@ -76,8 +77,9 @@ func (status SkillSourceStatus) Describe() string {
 
 // InspectSkillSources classifies every skill the recorded clone's
 // templates/global/skills/sources.json registers — its {GH_USER} resolved as
-// pfm install resolves it — its store and its links in every account's
-// skills/ and in ~/.agents/skills/, the same targets install writes whether
+// pfm install resolves it — its store root, its store and its links in the
+// default ~/.claude and every account's skills/ and in ~/.agents/skills/: the
+// targets install writes (its default config dir plus every account) whether
 // or not a Claude Code binary is installed.
 func InspectSkillSources(home string, accounts []pfmconfig.Account, offline bool) []SkillSourceStatus {
 	repo, err := GlobalSourceRepo(home)
@@ -98,64 +100,75 @@ func InspectSkillSources(home string, accounts []pfmconfig.Account, offline bool
 		return []SkillSourceStatus{{Path: registry, State: SkillSourceNoRegistry}}
 	}
 	storeRoot := skillStoreRoot(home)
-	targets := func(name string) []string {
-		list := make([]string, 0, len(accounts)+1)
-		for _, account := range accounts {
-			list = append(list, filepath.Join(account.ConfigDir, "skills", name))
+	configDirs := []string{filepath.Join(home, ".claude")}
+	for _, account := range accounts {
+		if dir := filepath.Clean(account.ConfigDir); !slices.Contains(configDirs, dir) {
+			configDirs = append(configDirs, dir)
 		}
-		return append(list, filepath.Join(home, ".agents", "skills", name))
 	}
 	statuses := make([]SkillSourceStatus, 0, len(sources))
 	for _, source := range sources {
 		store := filepath.Join(storeRoot, source.Name)
-		status := SkillSourceStatus{Name: source.Name, Path: store, State: SkillSourceLinked}
-		if source.Problem != "" {
-			status.State, status.Error = SkillSourceSkipped, source.Problem
-			statuses = append(statuses, status)
-			continue
-		}
-		if info, err := os.Lstat(store); err == nil && !info.IsDir() {
-			status.State, status.Conflicts = SkillSourceConflict, []string{store}
-			statuses = append(statuses, status)
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(store, "SKILL.md")); errors.Is(err, fs.ErrNotExist) {
-			status.State = SkillSourceNotFetched
-			if offline {
-				status.State = SkillSourceOffline
-			}
-			statuses = append(statuses, status)
-			continue
-		} else if err != nil {
-			status.State, status.Error = SkillSourceCheckFailed, err.Error()
-			statuses = append(statuses, status)
-			continue
-		}
-		for _, target := range targets(source.Name) {
-			state, _, err := codexgen.ClassifyGlobalLink(target, store, storeRoot, codexgen.GlobalLinkDir)
-			if err != nil {
-				status.State, status.Error = SkillSourceCheckFailed, err.Error()
-				break
-			}
-			switch state {
-			case codexgen.GlobalLinkCorrect:
-			case codexgen.GlobalLinkCopy, codexgen.GlobalLinkConflict:
-				status.Conflicts = append(status.Conflicts, target)
-			default:
-				status.Missing = append(status.Missing, target)
-			}
-		}
-		if status.State == SkillSourceLinked {
-			switch {
-			case len(status.Missing) != 0:
-				status.State = SkillSourceMissing
-			case len(status.Conflicts) != 0:
-				status.State = SkillSourceConflict
-			}
-		}
-		statuses = append(statuses, status)
+		statuses = append(statuses, inspectSkillSource(source, storeRoot, store, configDirs, home, offline))
 	}
 	return statuses
+}
+
+// inspectSkillSource classifies one registered skill: its store root and
+// store must be real directories (install neither reads through nor replaces
+// anything else), its root SKILL.md a regular file, and every target linked.
+func inspectSkillSource(
+	source skillSource, storeRoot, store string, configDirs []string, home string, offline bool,
+) SkillSourceStatus {
+	status := SkillSourceStatus{Name: source.Name, Path: store, State: SkillSourceLinked}
+	if source.Problem != "" {
+		status.State, status.Error = SkillSourceSkipped, source.Problem
+		return status
+	}
+	for _, dir := range []string{storeRoot, store} {
+		if info, err := os.Lstat(dir); err == nil && !info.IsDir() {
+			status.State, status.Conflicts = SkillSourceConflict, []string{dir}
+			return status
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			status.State, status.Error = SkillSourceCheckFailed, err.Error()
+			return status
+		}
+	}
+	if err := checkSkillFile(store); errors.Is(err, fs.ErrNotExist) {
+		status.State = SkillSourceNotFetched
+		if offline {
+			status.State = SkillSourceOffline
+		}
+		return status
+	} else if err != nil {
+		status.State, status.Error = SkillSourceCheckFailed, err.Error()
+		return status
+	}
+	targets := make([]string, 0, len(configDirs)+1)
+	for _, dir := range configDirs {
+		targets = append(targets, filepath.Join(dir, "skills", source.Name))
+	}
+	for _, target := range append(targets, filepath.Join(home, ".agents", "skills", source.Name)) {
+		state, _, err := codexgen.ClassifyGlobalLink(target, store, storeRoot, codexgen.GlobalLinkDir)
+		if err != nil {
+			status.State, status.Error = SkillSourceCheckFailed, err.Error()
+			return status
+		}
+		switch state {
+		case codexgen.GlobalLinkCorrect:
+		case codexgen.GlobalLinkCopy, codexgen.GlobalLinkConflict:
+			status.Conflicts = append(status.Conflicts, target)
+		default:
+			status.Missing = append(status.Missing, target)
+		}
+	}
+	switch {
+	case len(status.Missing) != 0:
+		status.State = SkillSourceMissing
+	case len(status.Conflicts) != 0:
+		status.State = SkillSourceConflict
+	}
+	return status
 }
 
 // ReportGlobalRegistries is doctor's machine-global registry check: the

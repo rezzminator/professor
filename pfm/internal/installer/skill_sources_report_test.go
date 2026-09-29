@@ -197,3 +197,53 @@ func TestInspectSkillSourcesNonDirectoryStoreNamesTheRemedy(t *testing.T) {
 		t.Fatalf("a non-directory store: %+v", statuses)
 	}
 }
+
+// TestInspectSkillSourcesRefuseASymlinkedStoreRoot pins F26: a store root that
+// is a link is a CONFLICT naming it on every row — install refuses it, so
+// doctor never reads through it as linked.
+func TestInspectSkillSourcesRefuseASymlinkedStoreRoot(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	storeRoot := skillStoreRoot(home)
+	moved := filepath.Join(filepath.Dir(storeRoot), "moved-skills")
+	if err := os.Rename(storeRoot, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, storeRoot); err != nil {
+		t.Fatal(err)
+	}
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
+
+	statuses := InspectSkillSources(home, accounts, false)
+
+	if len(statuses) != 1 || statuses[0].State != SkillSourceConflict ||
+		len(statuses[0].Conflicts) != 1 || statuses[0].Conflicts[0] != storeRoot {
+		t.Fatalf("a symlinked store root: %+v", statuses)
+	}
+}
+
+// TestInspectSkillSourcesChecksTheDefaultAccountInstallWrites pins F29: with
+// accounts that omit ~/.claude, doctor still checks the link install writes
+// there.
+func TestInspectSkillSourcesChecksTheDefaultAccountInstallWrites(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	second := filepath.Join(home, ".cc", "2")
+	runSkillInstall(t, home, ModeApply, func(options *Options) { options.ConfigDirs = []string{second} })
+	link := filepath.Join(home, ".claude", "skills", "god-speed")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+
+	statuses := InspectSkillSources(home, []pfmconfig.Account{{ID: 2, ConfigDir: second}}, false)
+
+	if len(statuses) != 1 || statuses[0].State != SkillSourceMissing ||
+		len(statuses[0].Missing) != 1 || statuses[0].Missing[0] != link {
+		t.Fatalf("the default account link install writes was not checked: %+v", statuses)
+	}
+}

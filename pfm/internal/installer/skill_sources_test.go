@@ -214,7 +214,7 @@ func TestSourceFetchedSkillsFetchFailureKeepsTheStoreCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") {
+		if strings.Contains(entry.Name(), ".fetch-") {
 			t.Fatalf("a failed clone left staging directory %s", entry.Name())
 		}
 	}
@@ -496,12 +496,10 @@ func TestSourceFetchedSkillsRefuseASymlinkedStoreRoot(t *testing.T) {
 	if got := readSkillFile(t, filepath.Join(operator, "mine", "keep.txt")); got != "operator\n" {
 		t.Fatalf("install changed the operator's directory: %q", got)
 	}
-	var uninstall bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t), Mode: ModeUninstall, Home: home, Stdout: &uninstall, Runner: &fakeRunner{},
-	})
-	if err == nil || !strings.Contains(err.Error(), storeRoot) {
-		t.Fatalf("uninstall did not refuse the symlinked store root by name: err=%v\n%s", err, uninstall.String())
+	uninstall := runSkillInstall(t, home, ModeUninstall)
+	if !strings.Contains(uninstall, "SKILL-SOURCES-FAILED refuse skill store root "+storeRoot) ||
+		!strings.Contains(uninstall, "pfm uninstall") {
+		t.Fatalf("uninstall did not skip the symlinked store root by name with its own remedy:\n%s", uninstall)
 	}
 	if got := readSkillFile(t, filepath.Join(operator, "mine", "keep.txt")); got != "operator\n" {
 		t.Fatalf("uninstall changed the operator's directory: %q", got)
@@ -600,18 +598,7 @@ func TestSourceFetchedSkillsBusyStoreIsLeftAlone(t *testing.T) {
 	storeRoot := skillStoreRoot(home)
 	staging := filepath.Join(storeRoot, ".god-speed.fetch-123")
 	writeFixture(t, filepath.Join(staging, "SKILL.md"), "# in flight\n")
-	holder, err := os.Open(storeRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := holder.Close(); err != nil {
-			t.Errorf("close %s: %v", storeRoot, err)
-		}
-	}()
-	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatal(err)
-	}
+	holdSkillStoreLock(t, home)
 
 	output := runSkillInstall(t, home, ModeApply)
 
@@ -622,6 +609,32 @@ func TestSourceFetchedSkillsBusyStoreIsLeftAlone(t *testing.T) {
 		t.Fatalf("the other install's staging directory was retired: %q", got)
 	}
 	requireNoPath(t, filepath.Join(storeRoot, "god-speed"), "a busy store root was fetched into")
+	uninstall := runSkillInstall(t, home, ModeUninstall)
+	if !strings.Contains(uninstall, "SKILL-SOURCES-BUSY ") || !strings.Contains(uninstall, "pfm uninstall") {
+		t.Fatalf("uninstall did not skip a held store by name and run on:\n%s", uninstall)
+	}
+}
+
+// holdSkillStoreLock takes the skill store lock — the flock on the store
+// root's parent — for the rest of the test, as a concurrent install would.
+func holdSkillStoreLock(t *testing.T, home string) {
+	t.Helper()
+	dir := filepath.Dir(skillStoreRoot(home))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := holder.Close(); err != nil {
+			t.Errorf("close %s: %v", dir, err)
+		}
+	})
+	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestSourceFetchedSkillsRegistryWithoutTheObjectRetiresNothing pins F14: a

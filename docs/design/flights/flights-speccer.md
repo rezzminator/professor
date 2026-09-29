@@ -190,7 +190,7 @@ The rating is computed from `Execution judgments`, not asserted. A call the task
 - No judgment, but the difficulty is the implementation itself — concurrency, failure paths, many error rows: `precise`.
 - Otherwise, no judgment at all: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
 
-The rating picks the executor: `mechanical` → `flights-mechanical-executor` (Sonnet 5.5, `high`), `precise` → `flights-precise-executor` (Sonnet 5.5, `xhigh`), `smart` → `flights-smart-executor` (`opus`, `high`); the spawn carries no model override. `precise` exists because pinning, not size, decides which model wins: [`flights-executors`](flights-executors.md#three-tiers-one-source) holds the measurement.
+The rating picks the executor: `mechanical` → `flights-mechanical-executor`, `precise` → `flights-precise-executor`, `smart` → `flights-smart-executor`; the spawn carries no model override. Each tier's model and effort, and the measurement that set them, are the [tier table](flights-executors.md#three-tiers-one-source).
 
 ## The run
 

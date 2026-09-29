@@ -22,15 +22,9 @@ A flight executor is bound to a flight's contract: a brief file, a task file wit
 
 ## Three tiers, one source
 
-| Agent | Model | Effort | Runs |
-| --- | --- | --- | --- |
-| `general-mechanical-executor` | `claude-sonnet-5-5` | `medium` | a task rated `mechanical` |
-| `general-precise-executor` | `claude-sonnet-5-5` | `xhigh` | a task rated `precise` |
-| `general-smart-executor` | `opus` | `medium` | a task rated `smart` |
+The three tiers, their models and efforts on Claude and Codex, and the measurements behind them are the one tier table in [`flights-executors`](../flights/flights-executors.md#three-tiers-one-source): a general task rated `mechanical`, `precise` or `smart` runs the same model and effort as a flight task of that rating.
 
-`precise` is the lateral tier [`flights-executors`](../flights/flights-executors.md#three-tiers-one-source) measured: pinned-but-hard work, not cheaper work.
-
-The body exists once, in `general-mechanical-executor.md`. `templates/global/agents/variants.json` declares `general-precise-executor` and `general-smart-executor` as variants `from` it, overriding `model`, `effort` and `description`; `pfm install` renders it and links it into the engine registries, the road `flights-smart-executor` and `super-rr` take. The orchestrator picks the agent type by the task's rating and passes no model override.
+The body exists once, in `general-mechanical-executor.md`. `templates/global/agents/variants.json` declares `general-precise-executor` and `general-smart-executor` as variants `from` it, overriding `model`, `effort`, `codex-model`, `codex-effort` and `description`; `pfm install` renders it and links it into the engine registries, the road `flights-smart-executor` and `super-rr` take. The orchestrator picks the agent type by the task's rating and passes no model override.
 
 ## What the brief carries
 

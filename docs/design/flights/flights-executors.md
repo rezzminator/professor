@@ -25,15 +25,23 @@ A flight had a speccer and an orchestrator and no executor of its own. The execu
 
 ## Three tiers, one source
 
-| Agent | Model | Effort | Runs |
-| --- | --- | --- | --- |
-| `flights-mechanical-executor` | `claude-sonnet-5-5` | `high` | a task rated `mechanical` |
-| `flights-precise-executor` | `claude-sonnet-5-5` | `xhigh` | a task rated `precise` |
-| `flights-smart-executor` | `opus` | `high` | a task rated `smart` |
+This is the one tier table for both executor families: `general-*-executor` runs the same tiers as `flights-*-executor`, and a tier change lands in both in the same pass.
 
-The Sonnet tiers pin the full model ID: the `sonnet` alias resolved to different models on different accounts of one host. `precise` is a lateral tier, not a cheaper one. On a task whose spec pinned every interface and whose difficulty was concurrency and failure paths, Sonnet 5.5 at `xhigh` scored 90 against Opus 5.5 at `high`'s 75, at $4.03 against $3.28 a task. On a goal-only task, Opus scored 88 against Sonnet's 66. So the spec's pinning, not the task's size, decides between `precise` and `smart`.
+| Rating | Flights agent | General agent | Claude | Codex role pin |
+| --- | --- | --- | --- | --- |
+| `mechanical` | `flights-mechanical-executor` | `general-mechanical-executor` | `claude-sonnet-5-5` at `high` | `gpt-6-sol` at `low` |
+| `precise` | `flights-precise-executor` | `general-precise-executor` | `claude-sonnet-5-5` at `xhigh` | `gpt-6-sol` at `high` |
+| `smart` | `flights-smart-executor` | `general-smart-executor` | `opus` at `high` | `gpt-6-sol` at `high` |
 
-The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-precise-executor` and `flights-smart-executor` as variants `from` it, overriding `model`, `effort` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
+A seat under [`/flights:orchestrate-cross-harness`](../../../templates/global/commands/flights/orchestrate-cross-harness.md) sets its own Codex effort by rating on its launch line.
+
+The Sonnet tiers pin the full model ID: the `sonnet` alias resolved to different models on different accounts of one host. Each Claude pick was measured against its neighbours on real landed tasks, two seats per configuration, blind-judged:
+
+- `mechanical`: Sonnet 5.5 at `high` scored 83.5 against `medium`'s 74.5.
+- `precise` is a lateral tier, not a cheaper one. On two pinned-but-hard tasks (concurrency and failure paths; a bounded retry with many stop rows), Sonnet 5.5 at `xhigh` averaged 92.5 against Opus 5.5 at `high`'s 84 and Sonnet 5.5 at `high`'s 78.5, whose seats ranged from 64 to 95.
+- `smart`: Opus 5.5 at `high` scored 75 against `medium`'s 65. On a goal-only task that left the design open, Opus at `high` scored 88 against Sonnet 5.5 at `xhigh`'s 66. So the spec's pinning, not the task's size, decides between `precise` and `smart`.
+
+The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-precise-executor` and `flights-smart-executor` as variants `from` it, overriding `model`, `effort`, `codex-model`, `codex-effort` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
 
 ## What it holds
 

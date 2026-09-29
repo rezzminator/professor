@@ -24,7 +24,7 @@ A change lands in the design doc first, then in the template, then in every surf
 | --- | --- | --- | --- |
 | `flights-speccer` | agent | Turns one flight's work into task files and an index; rewrites the rest after a fault | `opus`, effort `high` |
 | `flights-orchestrator` | agent | The one manual of running a flight: dispatch, wait, verify, react, land, return | mechanical (`sonnet`), effort `high` |
-| `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | agents, one body | One task file each: the code and its covering tests in the project's test pattern; picked by the task's rating | Sonnet 5.5 at `high`, Sonnet 5.5 at `xhigh`, `opus` at `high` |
+| `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | agents, one body | One task file each: the code and its covering tests in the project's test pattern; picked by the task's rating | the [tier table](flights-executors.md#three-tiers-one-source) |
 | `flights-lander` | agent | The landing's first step, one per project: checks, one review of the whole diff, adversarial tests, its own fixes | smart (`opus`), effort `high` |
 | `/flights:spec` | command | The human front of specifying: maps the area, grills the user until no gap is left, hands `flights-speccer` the decisions, presents the index | the main chat |
 | `/flights:orchestrate-nested` | command | Runs the flight in a `flights-orchestrator` sub-agent; the chat hears one return | the main chat spawns the agent |

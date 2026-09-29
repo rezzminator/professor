@@ -10,6 +10,8 @@
   "general-precise-executor": {
     "from": "general-mechanical-executor",
     "description": "GENERAL-ONLY — spawned by general-orchestrator, one fresh executor per task rated precise: its change and covering test. Pass the inline brief. general-orchestrator → here. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the check line, the watched-failing test, adaptations, RETRO.",
+    "codex-model": "gpt-6-sol",
+    "codex-effort": "high",
     "model": "claude-sonnet-5-5",
     "effort": "xhigh"
   },
@@ -24,7 +26,10 @@
   "general-smart-executor": {
     "from": "general-mechanical-executor",
     "description": "GENERAL-ONLY — spawned by general-orchestrator, one fresh executor per task rated smart: its change and covering test. Pass the inline brief. general-orchestrator → here. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the check line, the watched-failing test, adaptations, RETRO.",
-    "model": "opus"
+    "codex-model": "gpt-6-sol",
+    "codex-effort": "high",
+    "model": "opus",
+    "effort": "high"
   },
   "heavy-rr": {
     "from": "rr",

@@ -61,7 +61,7 @@ The brief carries, and nothing more:
 - the standing rules, and the worktree when one exists;
 - the path of the testing manual of the project the task changes.
 
-Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, the open hand, the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor` (Sonnet 5.5, `high`), `precise` → `flights-precise-executor` (Sonnet 5.5, `xhigh`), `smart` → `flights-smart-executor` (`opus`, `high`); the spawn carries no model override.
+Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, the open hand, the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor`, `precise` → `flights-precise-executor`, `smart` → `flights-smart-executor`; the spawn carries no model override, so each tier runs the model and effort of the [tier table](flights-executors.md#three-tiers-one-source).
 
 ## Verdicts are evidence, not truth
 

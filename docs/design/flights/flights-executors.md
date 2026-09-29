@@ -29,7 +29,7 @@ This is the one tier table for both executor families: `general-*-executor` runs
 
 | Rating | Flights agent | General agent | Claude | Codex role pin |
 | --- | --- | --- | --- | --- |
-| `mechanical` | `flights-mechanical-executor` | `general-mechanical-executor` | `claude-sonnet-5-5` at `high` | `gpt-6-sol` at `low` |
+| `mechanical` | `flights-mechanical-executor` | `general-mechanical-executor` | `claude-sonnet-5-5` at `high` | `gpt-6-luna` at `xhigh` |
 | `precise` | `flights-precise-executor` | `general-precise-executor` | `claude-sonnet-5-5` at `xhigh` | `gpt-6-sol` at `high` |
 | `smart` | `flights-smart-executor` | `general-smart-executor` | `opus` at `high` | `gpt-6-sol` at `high` |
 
@@ -40,6 +40,12 @@ The Sonnet tiers pin the full model ID: the `sonnet` alias resolved to different
 - `mechanical`: Sonnet 5.5 at `high` scored 83.5 against `medium`'s 74.5.
 - `precise` is a lateral tier, not a cheaper one. On two pinned-but-hard tasks (concurrency and failure paths; a bounded retry with many stop rows), Sonnet 5.5 at `xhigh` averaged 92.5 against Opus 5.5 at `high`'s 84 and Sonnet 5.5 at `high`'s 78.5, whose seats ranged from 64 to 95.
 - `smart`: Opus 5.5 at `high` scored 75 against `medium`'s 65. On a goal-only task that left the design open, Opus at `high` scored 88 against Sonnet 5.5 at `xhigh`'s 66. So the spec's pinning, not the task's size, decides between `precise` and `smart`.
+
+The Codex pins were measured the same way, on the same three tasks, with the Claude seats blinded in as anchors:
+
+- `mechanical`: `gpt-6-luna` at `xhigh` scored 87 against `high`'s 85 and `medium`'s 76, at under $0.10 a task; Sonnet 5.5 at `high` scored 86 and 87.
+- `precise`: `gpt-6-sol` at `high` scored 94, beside Sonnet 5.5 at `xhigh`'s 95 and 97; `gpt-6-luna` scored 81 at `xhigh` and 67 at `high`, both shipping log keys the scrubber redacts.
+- `smart`: `gpt-6-sol` at `high` scored 87 against `xhigh`'s 85, at about 70% of the cost; Opus 5.5 at `high` scored 86.
 
 The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-precise-executor` and `flights-smart-executor` as variants `from` it, overriding `model`, `effort`, `codex-model`, `codex-effort` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
 

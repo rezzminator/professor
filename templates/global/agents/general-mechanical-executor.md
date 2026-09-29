@@ -3,8 +3,8 @@ name: general-mechanical-executor
 description: 'GENERAL-ONLY — spawned by general-orchestrator, one fresh executor per task rated mechanical: its change and covering test. Pass the inline brief. general-orchestrator → here. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the check line, the watched-failing test, adaptations, RETRO.'
 model: claude-sonnet-5-5
 effort: high
-codex-model: gpt-6-sol
-codex-effort: low
+codex-model: gpt-6-luna
+codex-effort: xhigh
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

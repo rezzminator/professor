@@ -2,6 +2,15 @@ package harvest
 
 import "fmt"
 
+// titleDiagnosticMarker is the title diagnostic's own wording, and the only
+// text publicErrorKind reads as "ambiguous": advice that merely names
+// harvester_search_literature never decides a kind.
+const titleDiagnosticMarker = " is a title — use the `harvester_search_literature` tool"
+
+// pubMedSearchMarker names a PubMed search/results URL given as an article:
+// an invalid input, never an ambiguous title.
+const pubMedSearchMarker = " is a PubMed search/results URL, not an article"
+
 // titleGuessResult builds the "that looks like a title, not a fetchable
 // identifier" answer fetchUnshared returns for a bare title.Result — the same
 // wording whether the title arrived as an explicit `title:` prefix (echoed
@@ -11,7 +20,7 @@ func titleGuessResult(source, echoed string) Result {
 	return Result{
 		Source: source,
 		Error: fmt.Sprintf(
-			"%q is a title — use the `harvester_search_literature` tool to list candidate works (it returns a handle for each), then read the one you pick with `harvester_read` (publications). `harvester_read` takes web pages in urls and UNAMBIGUOUS identifiers in publications (DOI, arXiv id, PMID, PMCID, ISBN), never a title.",
+			"%q"+titleDiagnosticMarker+" to list candidate works (it returns a handle for each), then read the one you pick with `harvester_read` (publications). `harvester_read` takes web pages in urls and UNAMBIGUOUS identifiers in publications (DOI, arXiv id, PMID, PMCID, ISBN), never a title.",
 			echoed,
 		),
 	}

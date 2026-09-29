@@ -49,6 +49,11 @@ func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown stri
 		why = fmt.Sprintf("the origin answered the reader HTTP %d", jinaTargetError(body))
 	case isChallenge(body, status):
 		why = "the reader was served a challenge"
+	case !bytes.HasPrefix(bytes.TrimSpace(bytes.TrimPrefix(body, []byte("\xef\xbb\xbf"))), []byte("<")):
+		// Jina answers the HTML ask with its Markdown of a page it could not
+		// render again; parsed as HTML it holds no markup, so every check
+		// would pass on nothing.
+		why = "the reader answered with Markdown in place of the page's HTML"
 	}
 	var doc *html.Node
 	if why == "" {

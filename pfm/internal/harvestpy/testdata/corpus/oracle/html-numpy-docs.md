@@ -1,5 +1,4 @@
 **Title:** NumPy documentation#
-**Published:** 2026-06-28
 **Source:** NumPy v2.5 Manual
 
 ---

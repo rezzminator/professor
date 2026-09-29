@@ -120,6 +120,31 @@ func TestRedirectToLoginIsANamedFailure(t *testing.T) {
 	}
 }
 
+// TestRedirectToLoginIsClassifiedAsLogin: a fetch refused because the site
+// redirected to a login page carries the login kind, never the unclassified
+// one, and its public text says the page needs a signed-in visitor.
+func TestRedirectToLoginIsClassifiedAsLogin(t *testing.T) {
+	const requested = "https://members.example.com/events/7031141634369056768"
+	const landing = "https://members.example.com/uas/login?session_redirect=https%3A%2F%2Fmembers.example.com%2Fevents%2F7031141634369056768"
+	h := landingHarvester(t, redirectingOrigin(map[string]string{requested: landing}), nil)
+	result := h.FetchWithOptions(context.Background(), requested, FetchOptions{Refresh: true})
+	if result.Error == "" || result.Path != "" {
+		t.Fatalf("a redirect to %s was stored (partial %q)", landing, result.Partial)
+	}
+	if result.ErrorKind != errorKindLogin {
+		t.Fatalf("the login redirect's kind is %q, want %q: %q", result.ErrorKind, errorKindLogin, result.Error)
+	}
+	public := PublicFailureMessage(result)
+	if strings.Contains(public, "could not classify") {
+		t.Fatalf("the public message calls the login redirect unclassified: %q", public)
+	}
+	for _, want := range []string{"sign-in", "never signs in"} {
+		if !strings.Contains(public, want) {
+			t.Fatalf("the public message lacks %q: %q", want, public)
+		}
+	}
+}
+
 // TestReaderReportedRedirectIsNamed: a reader follows the site's redirect on
 // its own side and reports only the address it was asked for; the page's
 // canonical address in the reader's HTML (og:url, captured from the reader's

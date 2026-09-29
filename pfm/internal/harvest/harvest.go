@@ -171,7 +171,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		return Result{
 			Source: source,
 			Error: fmt.Sprintf(
-				"%s is a PubMed search/results URL, not an article — use the `harvester_search_literature` tool%s to get candidate works, each with a handle to read with `harvester_read` (publications).",
+				"%s"+pubMedSearchMarker+" — use the `harvester_search_literature` tool%s to get candidate works, each with a handle to read with `harvester_read` (publications).",
 				source,
 				SearchHint(h.settings.searchAvailable,
 					" (or `harvester_search_web`)",
@@ -438,7 +438,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// original HTML-source kind for cache/type semantics.
 			converted, convErr := quoraReaderPage(source, pageText(stripJinaEnvelope(string(body)))), error(nil)
 			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
-				!sameAsShell(appShellText, converted) {
+				!sameAsShell(appShellText, converted) && !loaders.readerGateOnly(source, converted) {
 				stored := h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders)
 				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
 			}
@@ -455,7 +455,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			converted := pageText(stripDefuddleEnvelope(string(body)))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
 			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
-				!sameAsShell(appShellText, converted) {
+				!sameAsShell(appShellText, converted) && !loaders.readerGateOnly(source, converted) {
 				return h.storeResult(
 					source,
 					kindHTML,
@@ -768,6 +768,9 @@ func (h *Harvester) fetchURLWithPolicy(
 		appShellFailure,
 	)
 	message = withRungs(loaders.loginWallNote(source, gaps.fail(message)), rungs) // a refused redirect (landing.go)
+	if gaps.login || loaders.loginGateOnly {
+		lastErrorKind = errorKindLogin // the message leads with the login redirect or gate: the kind is its class
+	}
 	return Result{
 		Source:       source,
 		HTTPStatus:   lastStatus,

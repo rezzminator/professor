@@ -65,6 +65,14 @@ func TestReaderPagesPassTheWallCheck(t *testing.T) {
 			partial:  "its wall check could not run (the reader answered HTTP 503)",
 		},
 		{
+			name:       "a reader answering the HTML ask with its Markdown",
+			source:     paywallURL,
+			origin:     "<html><body><p>Access to this page has been denied.</p></body></html>",
+			markdown:   readerWallFixture(t, "reader-paywalled.md"),
+			readerHTML: readerWallFixture(t, "reader-paywalled.md"),
+			partial:    "its wall check could not run (the reader answered with Markdown in place of the page's HTML)",
+		},
+		{
 			name:     "a paywall only the origin's refused HTML showed",
 			source:   paywallURL,
 			origin:   walledOrigin,
@@ -114,6 +122,48 @@ func TestReaderPagesPassTheWallCheck(t *testing.T) {
 				t.Fatal("the reader's HTML was never asked for; the wall check did not run on the reader's page")
 			}
 		})
+	}
+}
+
+// TestReaderServedSignUpWallIsALoginWall: LinkedIn bounces a signed-out
+// reader it will not show a page to onto its sign-up wall, and a reader rung
+// serves that wall as the page's Markdown (its HTML ask answered with the
+// same Markdown). The wall is never stored as the page: the fetch fails as a
+// login wall, while a real LinkedIn page a reader served is still stored.
+func TestReaderServedSignUpWallIsALoginWall(t *testing.T) {
+	const source = "https://www.linkedin.com/directory/companies"
+	origin := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, 999, "text/html; charset=UTF-8", "<html><body></body></html>"), nil
+	})
+	wall := readerWallFixture(t, "reader-authwall.md")
+	reader := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, http.StatusOK, "text/plain; charset=utf-8", wall), nil
+	})
+	h := mustNew(t, Options{
+		CacheDir: t.TempDir(),
+		Client:   &http.Client{Transport: origin},
+		Chrome:   &http.Client{Transport: origin},
+		Jina:     &http.Client{Transport: reader},
+		OA:       &http.Client{Transport: origin},
+		Converter: &browserSpyConverter{convertFn: func(context.Context, string, string, []byte) (string, error) {
+			return "", nil
+		}},
+		BrowserRung: browserOff(),
+		Clock:       newPacingClock(),
+	})
+	result := h.FetchWithOptions(context.Background(), source, FetchOptions{Refresh: true})
+	if result.Error == "" || result.Path != "" {
+		t.Fatalf("the sign-up wall was stored as the page (method %q, partial %q)", result.Method, result.Partial)
+	}
+	if result.ErrorKind != errorKindLogin {
+		t.Fatalf("the sign-up wall's kind is %q, want %q: %q", result.ErrorKind, errorKindLogin, result.Error)
+	}
+	if public := PublicFailureMessage(result); !strings.Contains(public, "sign-in") {
+		t.Fatalf("the public message does not name the sign-in wall: %q", public)
+	}
+	if !linkedInSignUpWall(source, wall) || linkedInSignUpWall(source, readerWallFixture(t, "reader-loginwall.md")) ||
+		linkedInSignUpWall("https://example.com/directory/companies", wall) {
+		t.Fatal("the sign-up wall is not told apart from a LinkedIn page and from another site's page")
 	}
 }
 

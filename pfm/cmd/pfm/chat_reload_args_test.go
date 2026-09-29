@@ -19,8 +19,7 @@ func TestReloadRejectsProseAndNamesTheRightFlag(t *testing.T) {
 		{args: []string{"cache", "off"}, want: "--cache 1h|5m"},
 		{args: []string{"1h"}, want: "--cache 1h|5m"},
 		{args: []string{"ttl"}, want: "--cache 1h|5m"},
-		{args: []string{"--cache", "off"}, want: "1h|5m"},
-		{args: []string{"--cache", "on"}, want: "1h|5m"},
+		{args: []string{"--cache", "weekly"}, want: "1h|5m"},
 		{args: []string{"account", "2"}, want: "--account N"},
 		{args: []string{"then", "keep going"}, want: "--then"},
 		{args: []string{"socket"}, want: "--sock"},
@@ -179,5 +178,36 @@ func TestReloadUsageTeachesTheFlagsAndTheSocketDefault(t *testing.T) {
 		if !strings.Contains(haystack, needle) {
 			t.Errorf("reload.Usage is missing %q:\n%s", needle, reload.Usage)
 		}
+	}
+}
+
+// The spelling a user actually typed, twice, before the refusal was traced:
+// `/reload --1h on`. Every cache spelling a person reaches for lands on the
+// one canonical --cache 1h|5m before validation, the worker included.
+func TestReloadNormalizesCacheSpellings(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want []string
+	}{
+		{args: []string{"--1h", "on"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--1h"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--5m"}, want: []string{"--cache", "5m"}},
+		{args: []string{"--5m", "on"}, want: []string{"--cache", "5m"}},
+		{args: []string{"--cache", "on"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--cache", "off"}, want: []string{"--cache", "5m"}},
+		{args: []string{"--cache", "1H"}, want: []string{"--cache", "1h"}},
+		{args: []string{"--account", "2", "--1h", "on", "--new"}, want: []string{"--account", "2", "--cache", "1h", "--new"}},
+		{args: []string{"--then", "--1h", "--5m"}, want: []string{"--then", "--1h", "--cache", "5m"}},
+		{args: []string{"--account", "2"}, want: []string{"--account", "2"}},
+	} {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			got := normalizeReloadArgs(test.args)
+			if strings.Join(got, "\x00") != strings.Join(test.want, "\x00") {
+				t.Fatalf("normalizeReloadArgs(%q) = %q, want %q", test.args, got, test.want)
+			}
+			if err := validateReloadArgs(got); err != nil {
+				t.Fatalf("normalized %q still refused: %v", got, err)
+			}
+		})
 	}
 }

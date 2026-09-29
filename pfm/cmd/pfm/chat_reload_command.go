@@ -55,6 +55,7 @@ func runChatReloadWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
+	args = normalizeReloadArgs(args)
 	if len(args) == 1 && (args[0] == helpFlag || args[0] == "-h") {
 		fmt.Fprintln(stdout, reload.Usage)
 		return 0
@@ -131,6 +132,7 @@ func runChatReloadWorkerWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
+	args = normalizeReloadArgs(args)
 	if err := validateReloadArgs(args); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
@@ -492,6 +494,46 @@ func validateReloadArgs(args []string) error {
 // command has one definition of "one line" for this delivery channel.
 func flattenThenLine(text string) string {
 	return strings.NewReplacer("\n", " ", "\r", " ").Replace(text)
+}
+
+// normalizeReloadArgs maps every cache spelling a person reaches for onto the
+// one canonical --cache 1h|5m before validation: `--1h` and `--5m`, each with
+// an optional trailing `on`, and `--cache on|off`, since the launch knob is
+// the cache1h boolean. A flag's value is copied untouched, so `--then --1h`
+// keeps its prompt. The worker's argv is normalized again, idempotently.
+func normalizeReloadArgs(args []string) []string {
+	normalized := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		switch word := args[index]; word {
+		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadModelFlag, reloadEffortFlag, reloadAccountFlag:
+			normalized = append(normalized, word)
+			if index+1 < len(args) {
+				index++
+				normalized = append(normalized, args[index])
+			}
+		case "--1h", "--5m":
+			normalized = append(normalized, reloadCacheFlag, strings.TrimPrefix(word, "--"))
+			if index+1 < len(args) && strings.EqualFold(args[index+1], "on") {
+				index++
+			}
+		case reloadCacheFlag:
+			normalized = append(normalized, word)
+			if index+1 < len(args) {
+				index++
+				value := strings.ToLower(args[index])
+				switch value {
+				case "on":
+					value = "1h"
+				case "off":
+					value = "5m"
+				}
+				normalized = append(normalized, value)
+			}
+		default:
+			normalized = append(normalized, word)
+		}
+	}
+	return normalized
 }
 
 // reloadArgumentHint turns a rejected word into an error the CALLER can act on

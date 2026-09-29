@@ -3,12 +3,12 @@ name: reload
 description: 'USER-ONLY — the user types /reload; never run this without the user''s permission. {{RELOAD_USAGE}}'
 ---
 
-# `/reload [--account N] [--model M] [--effort E] [--cache 1h|5m] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
+# `/reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
 
 Run this ONCE via the Bash tool — and make it your LAST action, the chat is about to exit:
 
 ```
-~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m] [--then "<prompt>"]
+~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--then "<prompt>"]
 ```
 
 **Every setting has a flag. There are no positional arguments.** Whatever words the request

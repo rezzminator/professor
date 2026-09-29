@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,25 +20,23 @@ import (
 )
 
 // The LinkedIn page extractor. A signed-out LinkedIn page states its main
-// entity in schema.org JSON-LD. This file holds the router and the post
-// (/posts/<slug>), feed update (/feed/update/<urn>), job view
-// (/jobs/view/<slug-id>) and member profile (/in/<vanity>[/<section>]) kinds;
-// linkedin_org.go the company family, products, ranking hubs and job-card
-// lists; linkedin_collections.go newsletters, top content, Learning courses,
-// embeds and the guest job posting. For the kinds here the entity is a
+// entity in schema.org JSON-LD. This file holds the router, the JSON-LD
+// reading every kind shares, and the post (/posts/<slug>) and feed update
+// (/feed/update/<urn>) kinds; linkedin_jobs.go the job view, linkedin_profile.go
+// the member profile, linkedin_org.go the company family, products, ranking
+// hubs and job-card lists, linkedin_collections.go newsletters, top content,
+// Learning courses, embeds and the guest job posting. A post's entity is a
 // SocialMediaPosting with its author, counts, text and the comments shown
-// signed-out; a JobPosting; a @graph holding the member's Person beside their
-// Article (Pulse) and DiscussionForumPosting (recent posts) entries. The
-// markup around it is navigation, a sign-in gate and a login form, so the
-// extractor renders the JSON-LD and reads the markup only where it holds more:
-// a job's criteria list, salary and applicant count, and a profile's headline,
-// About, Experience and Education sections. A post's author is the posting's
-// own, never a comment's; a profile states no publication date, so it renders
-// none. A page without the entity its address promises — the /authwall "Join
-// LinkedIn" page, the login page, a 999 answer — is not the shape it knows and
-// falls through to the generic path, which names the wall. Every page rendered
-// is what LinkedIn shows a signed-out reader, so each carries the login wall's
-// partial; a post's comments are reconciled against the count it states.
+// signed-out; the markup around it is navigation, a sign-in gate and a login
+// form, so the extractor renders the JSON-LD. A post's author is the
+// posting's own, never a comment's. A page without the entity its address
+// promises — the /authwall "Join LinkedIn" page, the login page, a 999
+// answer — is not the shape it knows and falls through to the generic path,
+// which names the wall; the fall-through names the JSON-LD as unread only
+// when a block that could not be read may have held that entity. Every page
+// rendered is what LinkedIn shows a signed-out reader, so each carries the
+// login wall's partial, and names any JSON-LD it could not read; a post's
+// comments are reconciled against the count it states.
 
 const linkedInHost = "linkedin.com"
 
@@ -54,13 +53,8 @@ const linkedInUnread = "linkedin page: its JSON-LD could not be read, so its ent
 // linkedInExcerptRunes caps a recent post's excerpt on a profile.
 const linkedInExcerptRunes = 200
 
-var (
-	// linkedInBlankLines parts a post's plain text into paragraphs.
-	linkedInBlankLines = regexp.MustCompile(`\n[ \t]*\n`)
-	// linkedInBreakRuns is a run of hard breaks (<br><br>) in a job
-	// description, which parts paragraphs.
-	linkedInBreakRuns = regexp.MustCompile(`(?: {2}\n){2,}`)
-)
+// linkedInBlankLines parts a post's plain text into paragraphs.
+var linkedInBlankLines = regexp.MustCompile(`\n[ \t]*\n`)
 
 // linkedInPageKind is the entity a LinkedIn address promises.
 type linkedInPageKind int
@@ -108,6 +102,12 @@ func linkedInKind(page *url.URL) linkedInPageKind {
 		return kind
 	}
 	return linkedInNone
+}
+
+// isLinkedInHost reports linkedin.com or one of its subdomains.
+func isLinkedInHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return host == linkedInHost || strings.HasSuffix(host, "."+linkedInHost)
 }
 
 // isLinkedInPage reports a page address the extractor renders.
@@ -168,26 +168,6 @@ func (list *ldList[T]) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ldCredential is a job's education requirement: its credentialCategory, or
-// the requirement as plain text.
-type ldCredential string
-
-func (credential *ldCredential) UnmarshalJSON(data []byte) error {
-	var text string
-	if err := json.Unmarshal(data, &text); err == nil {
-		*credential = ldCredential(strings.TrimSpace(text))
-		return nil
-	}
-	var object struct {
-		Category ldText `json:"credentialCategory"`
-	}
-	if err := json.Unmarshal(data, &object); err != nil {
-		return fmt.Errorf("read a JSON-LD education requirement: %w", err)
-	}
-	*credential = ldCredential(object.Category)
-	return nil
-}
-
 type ldCounter struct {
 	InteractionType ldText `json:"interactionType"`
 	Count           ldText `json:"userInteractionCount"`
@@ -229,47 +209,44 @@ type ldPlace struct {
 	Address ldAddress `json:"address"`
 }
 
-// ldSalary is a JobPosting's baseSalary: a MonetaryAmount whose value is a
-// number or a QuantitativeValue.
-type ldSalary struct {
-	Currency ldText          `json:"currency"`
-	Value    json.RawMessage `json:"value"`
-}
-
-type ldJob struct {
-	Title              ldText               `json:"title"`
-	Description        ldText               `json:"description"`
-	DatePosted         ldText               `json:"datePosted"`
-	ValidThrough       ldText               `json:"validThrough"`
-	EmploymentType     ldList[ldText]       `json:"employmentType"`
-	HiringOrganization ldThing              `json:"hiringOrganization"`
-	JobLocation        ldList[ldPlace]      `json:"jobLocation"`
-	Skills             ldList[ldText]       `json:"skills"`
-	Industry           ldList[ldText]       `json:"industry"`
-	Education          ldList[ldCredential] `json:"educationRequirements"`
-	BaseSalary         *ldSalary            `json:"baseSalary"`
-}
-
-type ldPerson struct {
-	Name        ldText            `json:"name"`
-	URL         ldText            `json:"url"`
-	JobTitle    ldList[ldText]    `json:"jobTitle"`
-	Description ldText            `json:"description"`
-	Address     ldAddress         `json:"address"`
-	WorksFor    ldList[ldThing]   `json:"worksFor"`
-	AlumniOf    ldList[ldThing]   `json:"alumniOf"`
-	Stats       ldList[ldCounter] `json:"interactionStatistic"`
-}
-
 // ldEntity is one JSON-LD entity of a page, undecoded, with its @type.
 type ldEntity struct {
 	kind string
 	raw  json.RawMessage
 }
 
+// ldUnreadError is a JSON-LD block, @graph member or entity that could not
+// be read: what names it for a reader, raw is the text it held.
+type ldUnreadError struct {
+	what string
+	raw  []byte
+	err  error
+}
+
+func (unread *ldUnreadError) Error() string { return "read " + unread.what + ": " + unread.err.Error() }
+
+func (unread *ldUnreadError) Unwrap() error { return unread.err }
+
+// ldUnreadParts is every ldUnreadError err holds, through errors.Join.
+func ldUnreadParts(err error) []*ldUnreadError {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var parts []*ldUnreadError
+		for _, inner := range joined.Unwrap() {
+			parts = append(parts, ldUnreadParts(inner)...)
+		}
+		return parts
+	}
+	var unread *ldUnreadError
+	if errors.As(err, &unread) {
+		return []*ldUnreadError{unread}
+	}
+	return nil
+}
+
 // linkedInEntities reads every JSON-LD block of doc into its entities, a
-// @graph's members flattened; the error names each block that could not be
-// read, the entities of the rest still returned.
+// @graph's members flattened; the error names each block or member that
+// could not be read (an ldUnreadError), the entities of the rest still
+// returned.
 func linkedInEntities(doc *html.Node) ([]ldEntity, error) {
 	var entities []ldEntity
 	var failures []error
@@ -278,19 +255,22 @@ func linkedInEntities(doc *html.Node) ([]ldEntity, error) {
 			continue
 		}
 		var err error
-		if entities, err = appendLDEntities(entities, []byte(rawText(script))); err != nil {
+		if entities, err = appendLDEntities(entities, []byte(rawText(script)), "a JSON-LD block"); err != nil {
 			failures = append(failures, err)
 		}
 	}
 	return entities, errors.Join(failures...)
 }
 
-func appendLDEntities(into []ldEntity, data []byte) ([]ldEntity, error) {
+// appendLDEntities appends the entities of data, one block or @graph member
+// named what; a member that could not be read is named in the error and
+// skipped, its siblings still appended.
+func appendLDEntities(into []ldEntity, data []byte, what string) ([]ldEntity, error) {
 	trimmed := bytes.TrimSpace(data)
 	var members []json.RawMessage
 	if bytes.HasPrefix(trimmed, []byte("[")) {
 		if err := json.Unmarshal(trimmed, &members); err != nil {
-			return into, fmt.Errorf("read a JSON-LD array: %w", err)
+			return into, &ldUnreadError{what: what, raw: trimmed, err: err}
 		}
 	} else {
 		var node struct {
@@ -298,20 +278,21 @@ func appendLDEntities(into []ldEntity, data []byte) ([]ldEntity, error) {
 			Graph []json.RawMessage `json:"@graph"`
 		}
 		if err := json.Unmarshal(trimmed, &node); err != nil {
-			return into, fmt.Errorf("read a JSON-LD block: %w", err)
+			return into, &ldUnreadError{what: what, raw: trimmed, err: err}
 		}
 		if node.Graph == nil {
 			return append(into, ldEntity{kind: ldTypeName(node.Type), raw: trimmed}), nil
 		}
 		members = node.Graph
 	}
+	var failures []error
 	for _, member := range members {
 		var err error
-		if into, err = appendLDEntities(into, member); err != nil {
-			return into, err
+		if into, err = appendLDEntities(into, member, "a JSON-LD @graph member"); err != nil {
+			failures = append(failures, err)
 		}
 	}
-	return into, nil
+	return into, errors.Join(failures...)
 }
 
 // ldTypeName is an entity's @type: the string, or an array's first; "" when
@@ -336,7 +317,7 @@ func ldDecode(entities []ldEntity, kind string, into any) (bool, error) {
 			continue
 		}
 		if err := json.Unmarshal(entity.raw, into); err != nil {
-			return false, fmt.Errorf("decode the page's %s: %w", kind, err)
+			return false, &ldUnreadError{what: "the page's JSON-LD " + kind, raw: entity.raw, err: err}
 		}
 		return true, nil
 	}
@@ -354,7 +335,8 @@ func ldPostings(entities []ldEntity, kind string) ([]ldPosting, error) {
 		}
 		var posting ldPosting
 		if err := json.Unmarshal(entity.raw, &posting); err != nil {
-			failures = append(failures, fmt.Errorf("decode a %s: %w", kind, err))
+			unread := &ldUnreadError{what: "a JSON-LD " + kind + " entity", raw: entity.raw, err: err}
+			failures = append(failures, unread)
 			continue
 		}
 		postings = append(postings, posting)
@@ -363,10 +345,10 @@ func ldPostings(entities []ldEntity, kind string) ([]ldPosting, error) {
 }
 
 // extractLinkedInPage renders a LinkedIn page from the entity its address
-// promises (linkedInKind); false for a page that holds
-// none (a wall), which falls through to the generic path. A JSON-LD block
-// that could not be read is logged; when it leaves the page without its
-// entity, the fall-through names it.
+// promises (linkedInKind); false for a page that holds none (a wall), which
+// falls through to the generic path. JSON-LD that could not be read is
+// logged; a rendered page names it in its partial, and a fall-through names
+// it only when it may have held the kind's entity (linkedInUnreadCause).
 func extractLinkedInPage(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 	entities, readErr := linkedInEntities(doc)
 	renderer := markdownRenderer{base: page}
@@ -376,11 +358,15 @@ func extractLinkedInPage(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 		markdown, partial string
 		found             bool
 		err               error
+		// entity is the JSON-LD @type the kind is proved by; "" for a
+		// markup-only kind.
+		entity string
 	)
 	switch linkedInKind(page) {
 	case linkedInNewsletter:
 		markdown, found = linkedInNewsletterPage(doc, address.String())
 	case linkedInTopContent:
+		entity = "CollectionPage"
 		markdown, found, err = linkedInTopContentPage(doc, address.String(), entities, renderer)
 	case linkedInCourse:
 		return extractLinkedInCourse(doc, page, address.String(), entities, readErr, renderer)
@@ -389,31 +375,91 @@ func extractLinkedInPage(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 	case linkedInGuestJob:
 		markdown, found = linkedInGuestJobPage(doc, address.String(), renderer)
 	case linkedInPost:
+		entity = "SocialMediaPosting"
 		markdown, partial, found, err = linkedInPostPage(address.String(), entities)
 	case linkedInJob:
+		entity = "JobPosting"
 		markdown, found, err = linkedInJobPage(doc, address.String(), entities, renderer)
 	case linkedInProfile:
+		entity = "Person"
 		markdown, found, err = linkedInProfilePage(doc, address.String(), entities, renderer)
+		partial = linkedInSectionReason(page)
 	case linkedInCompany:
+		entity = "Organization"
 		markdown, found, err = linkedInOrgPage(doc, page, address.String(), entities)
 	case linkedInProduct:
 		markdown, found = linkedInProductPage(doc, address.String())
 	case linkedInHub:
+		entity = "ItemList"
 		markdown, found, err = linkedInHubPage(doc, address.String(), entities)
 	case linkedInJobList:
 		markdown, found = linkedInJobListPage(doc, page, address.String())
 	}
-	if err = errors.Join(readErr, err); err != nil {
+	unread := errors.Join(readErr, err)
+	if unread != nil {
 		obs.Logger(context.Background()).Warn("harvest: a LinkedIn page's JSON-LD could not be read whole",
-			"target", logSource(page.String()), obs.FieldErr, err.Error())
+			"target", logSource(page.String()), obs.FieldErr, unread.Error())
 	}
 	if !found {
-		if err != nil {
-			return siteExtraction{unrendered: linkedInUnread}, false
-		}
-		return siteExtraction{}, false
+		return siteExtraction{unrendered: linkedInUnreadCause(err, readErr, entity)}, false
 	}
-	return siteExtraction{markdown: markdown, partial: joinReasons(loginWallReason, partial)}, true
+	return siteExtraction{
+		markdown: markdown,
+		partial:  joinReasons(loginWallReason, partial, linkedInUnreadReason(unread)),
+	}, true
+}
+
+// linkedInUnreadCause is what a page that fell through leaves unrendered:
+// linkedInUnread when its kind's entity (a JSON-LD @type) did not decode
+// (kindErr), or a block that could not be read (readErr) names that type;
+// "" for a markup-only kind or a page whose unreadable JSON-LD held
+// something else — a wall, which the generic path names.
+func linkedInUnreadCause(kindErr, readErr error, entity string) string {
+	if entity == "" {
+		return ""
+	}
+	if kindErr != nil {
+		return linkedInUnread
+	}
+	for _, part := range ldUnreadParts(readErr) {
+		if bytes.Contains(part.raw, []byte(`"`+entity+`"`)) {
+			return linkedInUnread
+		}
+	}
+	return ""
+}
+
+// linkedInUnreadReason names, for a rendered page, the JSON-LD it could not
+// read (or any other part), so the loss never reads as absence; "" when
+// everything was read.
+func linkedInUnreadReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	var names []string
+	for _, part := range ldUnreadParts(err) {
+		if !slices.Contains(names, part.what) {
+			names = append(names, part.what)
+		}
+	}
+	if len(names) == 0 {
+		return "linkedin page: part of it could not be read, so it is not rendered whole"
+	}
+	return "linkedin page: " + strings.Join(names, ", ") + " could not be read, so what it held is not rendered"
+}
+
+// linkedInExcerpt is a posting's text on one line, its articleBody preferred,
+// cut to linkedInExcerptRunes.
+func linkedInExcerpt(post *ldPosting) string {
+	return linkedInTrim(strings.Join(strings.Fields(linkedInBody(post)), " "), linkedInExcerptRunes)
+}
+
+// linkedInBody is a posting's articleBody, its text when it states none.
+func linkedInBody(post *ldPosting) string {
+	if post.ArticleBody != "" {
+		return string(post.ArticleBody)
+	}
+	return string(post.Text)
 }
 
 // linkedInPostPage renders a SocialMediaPosting: its author (the posting's
@@ -454,17 +500,14 @@ func linkedInPostPage(address string, entities []ldEntity) (markdown, partial st
 		partial = "linkedin post: " + progress + " — " + strings.Join(gaps, "; ")
 	}
 
-	body := string(post.ArticleBody)
-	if body == "" {
-		body = string(post.Text)
-	}
+	body := linkedInBody(&post)
 	var out strings.Builder
 	out.WriteString("# " + linkedInHeading(body, string(post.Headline)) + "\n\n")
 	out.WriteString("**Author:** " + linkedInAuthor(post.Author) +
 		" · **Published:** " + linkedInDate(string(post.DatePublished), unknownPosted) + "  \n")
 	out.WriteString("**Post:** " + address + "  \n")
 	if reactions, ok := ldCount(post.Stats, "LikeAction"); ok {
-		out.WriteString(fmt.Sprintf("**Reactions:** %d · ", reactions))
+		fmt.Fprintf(&out, "**Reactions:** %d · ", reactions)
 	}
 	out.WriteString(countLine + "\n\n")
 	if paragraphs := linkedInParagraphs(body); len(paragraphs) > 0 {
@@ -474,7 +517,8 @@ func linkedInPostPage(address string, entities []ldEntity) (markdown, partial st
 	if loaded == 0 {
 		out.WriteString("*No comments are in this page.*\n")
 	}
-	for _, comment := range post.Comments {
+	for index := range post.Comments {
+		comment := &post.Comments[index]
 		out.WriteString("- **" + linkedInAuthor(comment.Author) + "** · " +
 			linkedInDate(string(comment.DatePublished), unknownPosted) + "\n")
 		if paragraphs := linkedInParagraphs(string(comment.Text)); len(paragraphs) > 0 {
@@ -482,245 +526,6 @@ func linkedInPostPage(address string, entities []ldEntity) (markdown, partial st
 		}
 	}
 	return out.String(), partial, true, nil
-}
-
-// linkedInJobPage renders a JobPosting with the criteria, salary and
-// applicant count the page's markup shows beside it.
-func linkedInJobPage(
-	doc *html.Node,
-	address string,
-	entities []ldEntity,
-	renderer markdownRenderer,
-) (string, bool, error) {
-	var job ldJob
-	if found, err := ldDecode(entities, "JobPosting", &job); !found {
-		return "", false, err
-	}
-	title := string(job.Title)
-	if title == "" {
-		title = pageTitle(doc)
-	}
-	var locations []string
-	for _, place := range job.JobLocation {
-		if location := linkedInJoin(", ", string(place.Address.Locality), string(place.Address.Region),
-			string(place.Address.Country)); location != "" {
-			locations = append(locations, location)
-		}
-	}
-	var employment []string
-	for _, kind := range job.EmploymentType {
-		if kind != "" {
-			employment = append(employment, linkedInEmployment(string(kind)))
-		}
-	}
-	salary := ""
-	if node := firstClass(doc, "compensation__salary"); node != nil {
-		salary = nodeText(node)
-	}
-	if salary == "" {
-		salary = linkedInSalary(job.BaseSalary)
-	}
-	applicants := ""
-	if node := firstClass(doc, "num-applicants__caption"); node != nil {
-		applicants = nodeText(node)
-	}
-
-	var out strings.Builder
-	out.WriteString("# " + title + "\n\n")
-	for _, line := range [][]string{
-		{"Company", string(job.HiringOrganization.Name), "Location", strings.Join(locations, " / ")},
-		{
-			"Posted", linkedInDay(string(job.DatePosted)), "Valid through", linkedInDay(string(job.ValidThrough)),
-			"Employment type", strings.Join(employment, ", "),
-		},
-		{"Salary", salary, "Applicants", applicants},
-	} {
-		if meta := linkedInMeta(line...); meta != "" {
-			out.WriteString(meta + "  \n")
-		}
-	}
-	out.WriteString("**Job:** " + address + "\n\n")
-	criteria := linkedInCriteria(doc)
-	if len(criteria) == 0 {
-		if industry := linkedInJoin(", ", linkedInTexts(job.Industry)...); industry != "" {
-			criteria = append(criteria, "- **Industries:** "+industry)
-		}
-	}
-	var education []string
-	for _, credential := range job.Education {
-		if credential != "" {
-			education = append(education, string(credential))
-		}
-	}
-	if len(education) > 0 {
-		criteria = append(criteria, "- **Education:** "+strings.Join(education, ", "))
-	}
-	if skills := linkedInJoin(", ", linkedInTexts(job.Skills)...); skills != "" {
-		criteria = append(criteria, "- **Skills:** "+skills)
-	}
-	if len(criteria) > 0 {
-		out.WriteString("## Criteria\n\n" + strings.Join(criteria, "\n") + "\n\n")
-	}
-	out.WriteString("## Description\n\n")
-	blocks, err := linkedInDescription(string(job.Description), renderer)
-	if len(blocks) == 0 {
-		if markup := firstClass(doc, "show-more-less-html__markup"); markup != nil {
-			blocks = renderer.blocks(markup)
-		}
-	}
-	switch {
-	case len(blocks) > 0:
-		out.WriteString(strings.Join(blocks, "\n\n") + "\n")
-	case err != nil:
-		out.WriteString("*The description could not be read: " + err.Error() + "*\n")
-	default:
-		out.WriteString("*The page states no description.*\n")
-	}
-	return out.String(), true, err
-}
-
-// linkedInDescription renders a job description's HTML as Markdown blocks;
-// a run of hard breaks parts paragraphs.
-func linkedInDescription(description string, renderer markdownRenderer) ([]string, error) {
-	if strings.TrimSpace(description) == "" {
-		return nil, nil
-	}
-	container := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
-	nodes, err := html.ParseFragment(strings.NewReader(description), container)
-	if err != nil {
-		return nil, fmt.Errorf("parse the job description's HTML: %w", err)
-	}
-	for _, node := range nodes {
-		container.AppendChild(node)
-	}
-	blocks := renderer.blocks(container)
-	for index, block := range blocks {
-		blocks[index] = strings.TrimSpace(linkedInBreakRuns.ReplaceAllString(block, "\n\n"))
-	}
-	return blocks, nil
-}
-
-// linkedInProfilePage renders a member's Person: headline, location,
-// followers, About, Experience and Education from the page's sections (the
-// JSON-LD's years where the page shows none), then their articles and recent
-// posts. A profile states no publication date.
-func linkedInProfilePage(
-	doc *html.Node,
-	address string,
-	entities []ldEntity,
-	renderer markdownRenderer,
-) (string, bool, error) {
-	var person ldPerson
-	if found, err := ldDecode(entities, "Person", &person); !found {
-		return "", false, err
-	}
-	articles, articlesErr := ldPostings(entities, "Article")
-	activity, activityErr := ldPostings(entities, "DiscussionForumPosting")
-
-	headline := ""
-	if node := firstClass(doc, "top-card-layout__headline"); node != nil {
-		headline = nodeText(node)
-	}
-	if headline == "" {
-		headline = linkedInJoin(" · ", linkedInTexts(person.JobTitle)...)
-	}
-	followers := ""
-	if count, ok := ldCount(person.Stats, "Follow"); ok {
-		followers = linkedInThousands(strconv.Itoa(count))
-	}
-	// A sub-page (/recent-activity/, /details/…) and the redirect LinkedIn
-	// answers some of them with both carry the member's own address in the
-	// Person entity; the page read is the profile, so the line names it.
-	if canonical, err := url.Parse(string(person.URL)); err == nil && canonical.Scheme == "https" && isLinkedInPage(canonical) {
-		address = canonical.String()
-	}
-	var out strings.Builder
-	out.WriteString("# " + string(person.Name) + "\n\n")
-	if meta := linkedInMeta("Headline", headline, "Location", linkedInJoin(", ",
-		string(person.Address.Locality), string(person.Address.Region)), "Followers", followers); meta != "" {
-		out.WriteString(meta + "  \n")
-	}
-	out.WriteString("**Profile:** " + address + "\n\n")
-
-	var about []string
-	if section := firstWithAttr(doc, "data-section", "summary", nil); section != nil {
-		content := firstClass(section, "core-section-container__content")
-		if content == nil {
-			content = section
-		}
-		about = renderer.blocks(content)
-	}
-	if len(about) == 0 && person.Description != "" {
-		about = linkedInParagraphs(string(person.Description))
-	}
-	if len(about) > 0 {
-		out.WriteString("## About\n\n" + strings.Join(about, "\n\n") + "\n\n")
-	}
-
-	var roles []string
-	for _, item := range classElements(doc, "experience-item") {
-		role := linkedInJoin(" · ", linkedInClassText(item, "experience-item__title"),
-			linkedInClassText(item, "experience-item__subtitle"), linkedInDateRange(firstClass(item, "date-range")))
-		if role != "" {
-			roles = append(roles, "- "+role)
-		}
-	}
-	if len(roles) == 0 {
-		for _, organization := range person.WorksFor {
-			if role := linkedInJoin(" · ", string(organization.Name), linkedInYears(organization.Member)); role != "" {
-				roles = append(roles, "- "+role)
-			}
-		}
-	}
-	if len(roles) > 0 {
-		out.WriteString("## Experience\n\n" + strings.Join(roles, "\n") + "\n\n")
-	}
-
-	var schools []string
-	for _, item := range classElements(doc, "education__list-item") {
-		degree := ""
-		if node := firstElement(item, "h4"); node != nil && strings.Trim(nodeText(node), "- ") != "" {
-			degree = nodeText(node)
-		}
-		school := ""
-		if node := firstElement(item, "h3"); node != nil {
-			school = nodeText(node)
-		}
-		if line := linkedInJoin(" · ", school, degree, linkedInDateRange(firstClass(item, "date-range"))); line != "" {
-			schools = append(schools, "- "+line)
-		}
-	}
-	if len(schools) == 0 {
-		for _, school := range person.AlumniOf {
-			if line := linkedInJoin(" · ", string(school.Name), linkedInYears(school.Member)); line != "" {
-				schools = append(schools, "- "+line)
-			}
-		}
-	}
-	if len(schools) > 0 {
-		out.WriteString("## Education\n\n" + strings.Join(schools, "\n") + "\n\n")
-	}
-
-	if len(articles) > 0 {
-		out.WriteString("## Articles\n\n")
-		for _, article := range articles {
-			label := string(article.Headline)
-			if article.URL != "" {
-				label = "[" + label + "](" + string(article.URL) + ")"
-			}
-			out.WriteString("- " + linkedInJoin(" · ", label, linkedInDay(string(article.DatePublished))) + "\n")
-		}
-		out.WriteString("\n")
-	}
-	if len(activity) > 0 {
-		out.WriteString("## Recent activity\n\n")
-		for _, post := range activity {
-			excerpt := linkedInTrim(strings.Join(strings.Fields(string(post.Text)), " "), linkedInExcerptRunes)
-			out.WriteString("- " + linkedInJoin(" · ", linkedInDay(string(post.DatePublished)), excerpt,
-				string(post.URL)) + "\n")
-		}
-	}
-	return out.String(), true, errors.Join(articlesErr, activityErr)
 }
 
 // ldCount reads the count of the first interaction statistic whose type
@@ -809,88 +614,6 @@ func linkedInDay(value string) string {
 	return value
 }
 
-// linkedInEmployment renders a schema.org employment type ("FULL_TIME") as
-// the page words it ("Full-time").
-func linkedInEmployment(value string) string {
-	words := strings.ToLower(strings.ReplaceAll(value, "_", "-"))
-	if words == "" {
-		return ""
-	}
-	return strings.ToUpper(words[:1]) + words[1:]
-}
-
-// linkedInSalary renders a JobPosting's baseSalary; "" when it states none.
-func linkedInSalary(salary *ldSalary) string {
-	if salary == nil || len(salary.Value) == 0 {
-		return ""
-	}
-	var amount ldText
-	if err := json.Unmarshal(salary.Value, &amount); err == nil && amount != "" {
-		return linkedInJoin(" ", string(salary.Currency), string(amount))
-	}
-	var quantity struct {
-		Value    ldText `json:"value"`
-		MinValue ldText `json:"minValue"`
-		MaxValue ldText `json:"maxValue"`
-		UnitText ldText `json:"unitText"`
-	}
-	if err := json.Unmarshal(salary.Value, &quantity); err != nil {
-		obs.Logger(context.Background()).Warn("harvest: a LinkedIn job's salary could not be read",
-			obs.FieldErr, err.Error())
-		return ""
-	}
-	amount = quantity.Value
-	if quantity.MinValue != "" || quantity.MaxValue != "" {
-		amount = ldText(linkedInJoin(" – ", string(quantity.MinValue), string(quantity.MaxValue)))
-	}
-	if amount == "" {
-		return ""
-	}
-	text := linkedInJoin(" ", string(salary.Currency), string(amount))
-	if quantity.UnitText != "" {
-		text += " per " + strings.ToLower(string(quantity.UnitText))
-	}
-	return text
-}
-
-// linkedInDateRange renders a profile section's date range: its two <time>
-// years joined, or one with "Present" when the range states it.
-func linkedInDateRange(node *html.Node) string {
-	if node == nil {
-		return ""
-	}
-	var times []string
-	for _, element := range elementsByTag(node, atom.Time) {
-		if text := nodeText(element); text != "" {
-			times = append(times, text)
-		}
-	}
-	switch {
-	case len(times) >= 2:
-		return times[0] + " – " + times[1]
-	case len(times) == 1 && strings.Contains(nodeText(node), "Present"):
-		return times[0] + " – Present"
-	case len(times) == 1:
-		return times[0]
-	}
-	return ""
-}
-
-// linkedInYears renders a JSON-LD OrganizationRole's years.
-func linkedInYears(role *ldRole) string {
-	switch {
-	case role == nil:
-		return ""
-	case role.StartDate != "" && role.EndDate != "":
-		return string(role.StartDate) + " – " + string(role.EndDate)
-	case role.StartDate != "":
-		return "since " + string(role.StartDate)
-	case role.EndDate != "":
-		return "until " + string(role.EndDate)
-	}
-	return ""
-}
-
 // linkedInMeta renders label/value pairs as one "**Label:** value · …" line,
 // leaving out the empty values.
 func linkedInMeta(pairs ...string) string {
@@ -969,8 +692,7 @@ func linkedInSignUpWall(source, markdown string) bool {
 			Warn("harvest: the address could not be parsed for its host", obs.FieldErr, err.Error())
 		return false
 	}
-	if host := strings.ToLower(strings.TrimSuffix(page.Hostname(), ".")); host != linkedInHost &&
-		!strings.HasSuffix(host, "."+linkedInHost) {
+	if !isLinkedInHost(page.Hostname()) {
 		return false
 	}
 	tagged, walled := 0, 0

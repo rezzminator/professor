@@ -550,11 +550,8 @@ func publicErrorKind(result Result) string {
 		return errorKindMissing
 	case strings.Contains(err, "invalid url"),
 		strings.Contains(err, "unsupported url"),
-		strings.Contains(err, "source is empty"),
-		strings.Contains(err, strings.ToLower(pubMedSearchMarker)):
+		strings.Contains(err, "source is empty"):
 		return errorKindInvalid
-	case strings.Contains(err, strings.ToLower(titleDiagnosticMarker)):
-		return errorKindAmbiguous
 	case strings.Contains(err, "with `harvester_download_file`"):
 		return errorKindWrongKind
 	case strings.Contains(err, cacheLabel), strings.Contains(err, "storage"), strings.Contains(err, "read local file"):

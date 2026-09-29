@@ -1,15 +1,30 @@
 package harvest
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+	"strings"
+)
 
-// titleDiagnosticMarker is the title diagnostic's own wording, and the only
-// text publicErrorKind reads as "ambiguous": advice that merely names
-// harvester_search_literature never decides a kind.
+// titleDiagnosticMarker is the title diagnostic's own wording. Its kind,
+// "ambiguous", is set by its producer (titleGuessResult), never read from
+// text: the message quotes the caller's title, which may carry any marker.
 const titleDiagnosticMarker = " is a title — use the `harvester_search_literature` tool"
 
 // pubMedSearchMarker names a PubMed search/results URL given as an article:
-// an invalid input, never an ambiguous title.
+// an invalid input, never an ambiguous title. Its producer sets the kind,
+// never the text, which quotes the address.
 const pubMedSearchMarker = " is a PubMed search/results URL, not an article"
+
+// isPubMedSearchURL reports whether raw is a PubMed search/results address.
+func isPubMedSearchURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(u.Hostname(), "pubmed.ncbi.nlm.nih.gov") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(u.Path), "/search") ||
+		strings.Contains(strings.ToLower(u.RawQuery), "term=")
+}
 
 // titleGuessResult builds the "that looks like a title, not a fetchable
 // identifier" answer fetchUnshared returns for a bare title.Result — the same
@@ -18,7 +33,8 @@ const pubMedSearchMarker = " is a PubMed search/results URL, not an article"
 // duplicated at both call sites (fetchUnshared, harvest.go).
 func titleGuessResult(source, echoed string) Result {
 	return Result{
-		Source: source,
+		Source:    source,
+		ErrorKind: errorKindAmbiguous,
 		Error: fmt.Sprintf(
 			"%q"+titleDiagnosticMarker+" to list candidate works (it returns a handle for each), then read the one you pick with `harvester_read` (publications). `harvester_read` takes web pages in urls and UNAMBIGUOUS identifiers in publications (DOI, arXiv id, PMID, PMCID, ISBN), never a title.",
 			echoed,

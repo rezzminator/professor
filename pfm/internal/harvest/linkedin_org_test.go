@@ -1,6 +1,7 @@
 package harvest
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -206,4 +207,63 @@ func TestLinkedInOrgFamilyPagesWithoutTheirEntityFallThrough(t *testing.T) {
 			t.Errorf("%s holding %s was rendered (extractor %q, ok %v)", tc.source, tc.fixture, extractor, ok)
 		}
 	}
+}
+
+// TestLinkedInOrgLinks: a rendered link is an http(s) address without its
+// tracking query — a javascript: or mailto: href is dropped; an update's
+// excerpt prefers its articleBody; a website's link text leaves out its
+// visually hidden caption.
+func TestLinkedInOrgLinks(t *testing.T) {
+	page, err := url.Parse("https://www.linkedin.com/company/contoso-robotics")
+	if err != nil {
+		t.Fatalf("parse the page address: %v", err)
+	}
+	for href, want := range map[string]string{
+		"javascript:alert(1)":                 "",
+		"mailto:hello@contoso.example":        "",
+		"/company/contoso-robotics/?trk=card": "https://www.linkedin.com/company/contoso-robotics/",
+	} {
+		if got := linkedInLink(page, href); got != want {
+			t.Errorf("linkedInLink(%q) = %q, want %q", href, got, want)
+		}
+	}
+
+	update := `{"@type":"SocialMediaPosting","text":"Short teaser","articleBody":"The full update body",` +
+		`"datePublished":"2026-09-01","url":"https://www.linkedin.com/posts/contoso-robotics_x-1?trk=org"}`
+	lines, err := linkedInUpdates(linkedInInline(t, ""), page, linkedInTestEntities(t, update))
+	if err != nil {
+		t.Fatalf("linkedInUpdates: %v", err)
+	}
+	if want := "- 2026-09-01 · The full update body · https://www.linkedin.com/posts/contoso-robotics_x-1"; len(
+		lines) != 1 || lines[0] != want {
+		t.Errorf("updates = %q, want [%q]", lines, want)
+	}
+
+	hub := `{"@type":"ItemList","name":"Top Companies","itemListElement":[{"position":1,` +
+		`"item":{"name":"Contoso","url":"https://www.linkedin.com/company/contoso?trk=hub"}}]}`
+	markdown, found, err := linkedInHubPage(linkedInInline(t, ""), page.String(), linkedInTestEntities(t, hub))
+	if !found || err != nil {
+		t.Fatalf("the hub was not rendered (found %v, err %v)", found, err)
+	}
+	if want := "1. [Contoso](https://www.linkedin.com/company/contoso)"; !strings.Contains(markdown, want) {
+		t.Errorf("the hub lacks %q:\n%s", want, markdown)
+	}
+
+	about := linkedInInline(t, `<dl><div data-test-id="about-us__website"><dt>Website</dt><dd>`+
+		`<a href="https://contoso.example">https://contoso.example`+
+		`<span class="visually-hidden">External link for Contoso</span></a></dd></div></dl>`)
+	fields, _ := linkedInAboutFields(about)
+	if want := "- **Website:** https://contoso.example"; len(fields) != 1 || fields[0] != want {
+		t.Errorf("about fields = %q, want [%q]", fields, want)
+	}
+}
+
+// linkedInTestEntities reads JSON-LD blocks into their entities.
+func linkedInTestEntities(t *testing.T, blocks ...string) []ldEntity {
+	t.Helper()
+	entities, err := linkedInEntities(linkedInInline(t, "", blocks...))
+	if err != nil {
+		t.Fatalf("read the JSON-LD: %v", err)
+	}
+	return entities
 }

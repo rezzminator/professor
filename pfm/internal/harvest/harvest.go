@@ -169,7 +169,8 @@ func (h *Harvester) fetchURLWithPolicy(
 	}
 	if isPubMedSearchURL(source) {
 		return Result{
-			Source: source,
+			Source:    source,
+			ErrorKind: errorKindInvalid, // classified by its producer, never by the address it quotes
 			Error: fmt.Sprintf(
 				"%s"+pubMedSearchMarker+" — use the `harvester_search_literature` tool%s to get candidate works, each with a handle to read with `harvester_read` (publications).",
 				source,
@@ -454,8 +455,9 @@ func (h *Harvester) fetchURLWithPolicy(
 		if err == nil && status < 400 && !isChallenge(body, status) {
 			converted := pageText(stripDefuddleEnvelope(string(body)))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
+			gate := loaders.readerGateOnly(source, converted) // recorded even for a copy not longer
 			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
-				!sameAsShell(appShellText, converted) && !loaders.readerGateOnly(source, converted) {
+				!sameAsShell(appShellText, converted) && !gate {
 				return h.storeResult(
 					source,
 					kindHTML,
@@ -623,7 +625,10 @@ func (h *Harvester) fetchURLWithPolicy(
 				// recursion rejects it before it is stored.
 				snapshotCtx = context.WithValue(ctx, appShellKey{}, appShellText)
 			}
-			if result := h.fetchURLWithPolicy(snapshotCtx, snapshot, options, false); result.Error == "" {
+			// The recursion judges the archive's address, never the original's: an
+			// archived sign-up wall is refused here by the original address.
+			if result := h.fetchURLWithPolicy(snapshotCtx, snapshot, options, false); result.Error == "" &&
+				!loaders.readerGateOnly(source, result.Content) {
 				result.Source = source
 				result.Rungs = append([]string(nil), rungs...)
 				return result
@@ -768,7 +773,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		appShellFailure,
 	)
 	message = withRungs(loaders.loginWallNote(source, gaps.fail(message)), rungs) // a refused redirect (landing.go)
-	if gaps.login || loaders.loginGateOnly {
+	if (gaps.login || loaders.loginGateOnly) && !decisiveFailure(lastErrorKind, lastChallenge) {
 		lastErrorKind = errorKindLogin // the message leads with the login redirect or gate: the kind is its class
 	}
 	return Result{
@@ -781,15 +786,6 @@ func (h *Harvester) fetchURLWithPolicy(
 		ContentChars: lastContentChars,
 		Rungs:        rungs,
 	}
-}
-
-func isPubMedSearchURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || !strings.EqualFold(u.Hostname(), "pubmed.ncbi.nlm.nih.gov") {
-		return false
-	}
-	return strings.Contains(strings.ToLower(u.Path), "/search") ||
-		strings.Contains(strings.ToLower(u.RawQuery), "term=")
 }
 
 func isPrivateURL(source string) bool {

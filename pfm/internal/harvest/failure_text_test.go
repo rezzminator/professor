@@ -452,6 +452,22 @@ func TestAdviceTextNeverDecidesTheErrorKind(t *testing.T) {
 			[]string{"PubMed search", "harvester_search_literature", "publications"},
 			[]string{"ambiguous"},
 		},
+		{
+			"pubmed search url whose query holds a marker",
+			(&Harvester{}).fetchURLWithPolicy(
+				context.Background(), "https://pubmed.ncbi.nlm.nih.gov/?term=democracy", FetchOptions{}, false,
+			),
+			errorKindInvalid,
+			[]string{"PubMed search", "harvester_search_literature"},
+			[]string{"conversion", "ambiguous"},
+		},
+		{
+			"title holding a marker",
+			titleGuessResult("Maximum likelihood estimation", "Maximum likelihood estimation"),
+			errorKindAmbiguous,
+			[]string{"title is ambiguous", "harvester_search_literature"},
+			[]string{"too large"},
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

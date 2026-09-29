@@ -203,3 +203,34 @@ func TestLinkedInClaimsCollectionPages(t *testing.T) {
 		}
 	}
 }
+
+// TestLinkedInCourseContentsFromJSONLD: a course whose JSON-LD states only
+// its syllabus renders the syllabus as its contents; a video name's chapter
+// is its last " - " segment.
+func TestLinkedInCourseContentsFromJSONLD(t *testing.T) {
+	const source = "https://www.linkedin.com/learning/gripper-sensing-basics"
+	for _, tc := range []struct{ name, course, want string }{
+		{
+			name: "syllabus",
+			course: `{"@type":"Course","name":"Gripper Sensing Basics","syllabusSections":[` +
+				`{"@type":"Syllabus","name":"Getting started"},{"@type":"Syllabus","name":"Force sensing"}]}`,
+			want: "## Contents\n\n- Getting started\n- Force sensing\n",
+		},
+		{
+			name: "video chapter",
+			course: `{"@type":"Course","name":"Gripper Sensing Basics","hasPart":[` +
+				`{"@type":"VideoObject","name":"Grip - force - Sensing","duration":"PT1M"}]}`,
+			want: "## Contents\n\n### Sensing\n\n- Grip - force · 1m\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			extraction, _, ok := extractForSite(source, linkedInInline(t, "", tc.course))
+			if !ok {
+				t.Fatalf("the course was not rendered (unrendered %q)", extraction.unrendered)
+			}
+			if !strings.Contains(extraction.markdown, tc.want) {
+				t.Errorf("the rendering lacks %q:\n%s", tc.want, extraction.markdown)
+			}
+		})
+	}
+}

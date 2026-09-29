@@ -40,6 +40,8 @@ func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown stri
 	body, status, _, err := getBodyWithHeaders(ctx, h.jina, target, h.userAgent,
 		map[string]string{readerHTMLFormat: "html"}, h.options.MaxBytes)
 	why := "" // why the reader's HTML is no page to check, safe to repeat (errorReasonClass)
+	// The markup without a BOM or the whitespace on either side of one.
+	markup := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(body), []byte("\xef\xbb\xbf")))
 	switch {
 	case err != nil:
 		why = "the reader's request failed: " + errorReasonClass(err, "fetch error")
@@ -49,7 +51,9 @@ func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown stri
 		why = fmt.Sprintf("the origin answered the reader HTTP %d", jinaTargetError(body))
 	case isChallenge(body, status):
 		why = "the reader was served a challenge"
-	case !bytes.HasPrefix(bytes.TrimSpace(bytes.TrimPrefix(body, []byte("\xef\xbb\xbf"))), []byte("<")):
+	case len(markup) == 0:
+		why = "the reader answered with an empty body"
+	case !bytes.HasPrefix(markup, []byte("<")):
 		// Jina answers the HTML ask with its Markdown of a page it could not
 		// render again; parsed as HTML it holds no markup, so every check
 		// would pass on nothing.
@@ -57,7 +61,7 @@ func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown stri
 	}
 	var doc *html.Node
 	if why == "" {
-		if doc, err = html.Parse(bytes.NewReader(body)); err != nil {
+		if doc, err = html.Parse(bytes.NewReader(markup)); err != nil {
 			why = "unparseable HTML"
 		}
 	}

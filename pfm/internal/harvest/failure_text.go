@@ -70,6 +70,18 @@ func failureStatusText(status int) string {
 
 // failureTextKind classifies an unnamed failure by the wording the core's
 // own error builders use; "" when the text names no class.
+// decisiveFailure reports whether a fetch's last failure kind, or a
+// challenge it met, is a distinct class a login wall seen on another rung
+// must not relabel: a tool outage, a network failure or a cancellation stays
+// its own kind, so its caching and its public text stay true.
+func decisiveFailure(kind string, challenge bool) bool {
+	switch kind {
+	case errorKindConvert, errorKindTimeout, errorKindConnect, errorKindDNS, errorKindCancelled:
+		return true
+	}
+	return challenge
+}
+
 func failureTextKind(err string) string {
 	switch {
 	case strings.Contains(err, "x509:"), strings.Contains(err, "tls:"), strings.Contains(err, "certificate"):

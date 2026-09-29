@@ -158,7 +158,8 @@ func linkedInTopContentPage(doc *html.Node, address string, entities []ldEntity,
 	if len(collection.Posts) == 0 {
 		out.WriteString("*The page lists no posts.*\n")
 	}
-	for _, post := range collection.Posts {
+	for index := range collection.Posts {
+		post := &collection.Posts[index]
 		author := linkedInAuthor(post.Author)
 		for _, named := range post.Author {
 			if named.Name != "" && named.URL != "" {
@@ -170,10 +171,7 @@ func linkedInTopContentPage(doc *html.Node, address string, entities []ldEntity,
 		if count, ok := ldCount(post.Stats, "LikeAction"); ok {
 			reactions = strconv.Itoa(count) + " reactions"
 		}
-		body := string(post.ArticleBody)
-		if body == "" {
-			body = string(post.Text)
-		}
+		body := linkedInBody(post)
 		out.WriteString("- " + linkedInJoin(" · ", author, linkedInDay(string(post.DatePublished)), reactions))
 		if excerpt := linkedInTrim(strings.Join(strings.Fields(body), " "), linkedInExcerptRunes); excerpt != "" {
 			out.WriteString("  \n  " + excerpt)
@@ -350,19 +348,20 @@ func extractLinkedInCourse(
 	renderer markdownRenderer,
 ) (siteExtraction, bool) {
 	var course ldCourse
-	found, err := ldDecode(entities, "Course", &course)
-	if err = errors.Join(readErr, err); err != nil {
+	found, decodeErr := ldDecode(entities, "Course", &course)
+	unread := errors.Join(readErr, decodeErr)
+	if unread != nil {
 		obs.Logger(context.Background()).Warn("harvest: a LinkedIn course's JSON-LD could not be read whole",
-			"target", logSource(page.String()), obs.FieldErr, err.Error())
+			"target", logSource(page.String()), obs.FieldErr, unread.Error())
 	}
 	toc := firstClass(doc, "table-of-contents__list")
 	if (!found || len(course.Videos)+len(course.Syllabus) == 0) && toc == nil {
-		if err != nil {
-			return siteExtraction{unrendered: linkedInUnread}, false
-		}
-		return siteExtraction{}, false
+		return siteExtraction{unrendered: linkedInUnreadCause(decodeErr, readErr, "Course")}, false
 	}
-	return siteExtraction{markdown: linkedInCoursePage(doc, address, course, toc, renderer), partial: paywallReason}, true
+	return siteExtraction{
+		markdown: linkedInCoursePage(doc, address, course, toc, renderer),
+		partial:  joinReasons(paywallReason, linkedInUnreadReason(unread)),
+	}, true
 }
 
 // linkedInCoursePage renders a course's title, instructor, duration, level,
@@ -447,7 +446,7 @@ func linkedInCoursePage(doc *html.Node, address string, course ldCourse, toc *ht
 		out.WriteString("## Skills\n\n" + strings.Join(skills, "\n") + "\n\n")
 	}
 
-	if chapters := linkedInCourseContents(toc, course.Videos); len(chapters) > 0 {
+	if chapters := linkedInCourseContents(toc, course.Videos, course.Syllabus); len(chapters) > 0 {
 		out.WriteString("## Contents\n\n" + strings.Join(chapters, "\n\n") + "\n\n")
 	}
 
@@ -471,8 +470,9 @@ func linkedInCoursePage(doc *html.Node, address string, course ldCourse, toc *ht
 
 // linkedInCourseContents renders a course's chapters, each a "### chapter"
 // heading over its videos and durations: from the page's table of contents,
-// or from the JSON-LD's videos, whose names end " - <chapter>".
-func linkedInCourseContents(toc *html.Node, videos ldList[ldList[ldVideo]]) []string {
+// or from the JSON-LD's videos, whose names end " - <chapter>"; with neither,
+// the JSON-LD syllabus's sections as one list.
+func linkedInCourseContents(toc *html.Node, videos ldList[ldList[ldVideo]], syllabus ldList[ldThing]) []string {
 	var chapters []string
 	if toc != nil {
 		for _, section := range classElements(toc, "toc-section") {
@@ -497,7 +497,10 @@ func linkedInCourseContents(toc *html.Node, videos ldList[ldList[ldVideo]]) []st
 	var lines []string
 	for _, group := range videos {
 		for _, video := range group {
-			title, chapter, _ := strings.Cut(string(video.Name), " - ")
+			title, chapter := string(video.Name), ""
+			if cut := strings.LastIndex(title, " - "); cut >= 0 {
+				title, chapter = title[:cut], title[cut+len(" - "):]
+			}
 			if chapter != name && len(lines) > 0 {
 				chapters = append(chapters, linkedInChapter(name, lines))
 				lines = nil
@@ -509,7 +512,19 @@ func linkedInCourseContents(toc *html.Node, videos ldList[ldList[ldVideo]]) []st
 	if len(lines) > 0 {
 		chapters = append(chapters, linkedInChapter(name, lines))
 	}
-	return chapters
+	if len(chapters) > 0 {
+		return chapters
+	}
+	var sections []string
+	for _, section := range syllabus {
+		if section.Name != "" {
+			sections = append(sections, "- "+string(section.Name))
+		}
+	}
+	if len(sections) == 0 {
+		return nil
+	}
+	return []string{strings.Join(sections, "\n")}
 }
 
 // linkedInChapter renders one chapter of a course's contents.

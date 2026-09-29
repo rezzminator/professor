@@ -1,6 +1,7 @@
 package harvest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -9,6 +10,8 @@ import (
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // The LinkedIn organization family and its lists. A signed-out company page
@@ -200,7 +203,7 @@ func linkedInAboutFields(doc *html.Node) (fields []string, industry string) {
 		}
 		value := linkedInVisibleText(definition)
 		if link := firstElement(definition, "a"); link != nil {
-			value = nodeText(link)
+			value = linkedInVisibleText(link)
 		}
 		label := nodeText(term)
 		switch {
@@ -262,10 +265,10 @@ func linkedInLocations(doc *html.Node) []string {
 func linkedInUpdates(doc *html.Node, page *url.URL, entities []ldEntity) ([]string, error) {
 	postings, err := ldPostings(entities, "SocialMediaPosting")
 	var lines []string
-	for _, post := range postings {
-		excerpt := linkedInTrim(strings.Join(strings.Fields(string(post.Text)), " "), linkedInExcerptRunes)
-		if line := linkedInJoin(" · ", linkedInDay(string(post.DatePublished)), excerpt,
-			string(post.URL)); line != "" {
+	for index := range postings {
+		post := &postings[index]
+		if line := linkedInJoin(" · ", linkedInDay(string(post.DatePublished)), linkedInExcerpt(post),
+			linkedInCleanURL(string(post.URL))); line != "" {
 			lines = append(lines, "- "+line)
 		}
 	}
@@ -278,7 +281,8 @@ func linkedInUpdates(doc *html.Node, page *url.URL, entities []ldEntity) ([]stri
 			when = nodeText(stamp)
 		}
 		excerpt := ""
-		if commentary := firstWithAttr(card, "data-test-id", "main-feed-activity-card__commentary", nil); commentary != nil {
+		commentary := firstWithAttr(card, "data-test-id", "main-feed-activity-card__commentary", nil)
+		if commentary != nil {
 			excerpt = linkedInTrim(linkedInVisibleText(commentary), linkedInExcerptRunes)
 		}
 		link := ""
@@ -378,7 +382,7 @@ func linkedInHubPage(doc *html.Node, address string, entities []ldEntity) (strin
 		}
 		label := string(entry.Item.Name)
 		if entry.Item.URL != "" {
-			label = "[" + label + "](" + string(entry.Item.URL) + ")"
+			label = "[" + label + "](" + linkedInCleanURL(string(entry.Item.URL)) + ")"
 		}
 		lines = append(lines, rank+". "+linkedInJoin(" · ", label, linkedInJoin(", ",
 			string(entry.Item.Address.Locality), string(entry.Item.Address.Region),
@@ -461,13 +465,19 @@ func linkedInSection(out *strings.Builder, heading string, lines []string) {
 }
 
 // linkedInLink resolves href against the page, without its query and
-// fragment (LinkedIn's tracking); "" when href is empty or unreadable.
+// fragment (LinkedIn's tracking); "" when href is empty, unreadable (logged)
+// or no http(s) address (a javascript: or mailto: href).
 func linkedInLink(page *url.URL, href string) string {
 	if strings.TrimSpace(href) == "" {
 		return ""
 	}
 	target, err := page.Parse(strings.TrimSpace(href))
 	if err != nil {
+		obs.Logger(context.Background()).Debug("harvest: a LinkedIn link did not parse; left out",
+			"target", logSource(page.String()), "link", logSource(href), obs.FieldErr, err.Error())
+		return ""
+	}
+	if target.Scheme != schemeHTTP && target.Scheme != schemeHTTPS {
 		return ""
 	}
 	target.RawQuery, target.Fragment = "", ""
@@ -515,8 +525,8 @@ func linkedInVisibleText(node *html.Node) string {
 		case current.Type == html.TextNode:
 			parts = append(parts, current.Data)
 			return
-		case current.Type == html.ElementNode && (hasClass(current, "sr-only") ||
-			hasClass(current, "hidden") || hasClass(current, "screen-reader-text")):
+		case current.Type == html.ElementNode && (hasClass(current, "sr-only") || hasClass(current, "hidden") ||
+			hasClass(current, "visually-hidden") || hasClass(current, "screen-reader-text")):
 			return
 		}
 		for child := current.FirstChild; child != nil; child = child.NextSibling {

@@ -1,9 +1,9 @@
 ---
 name: handoff
-description: 'USER-ONLY — the user types /handoff [message]; never run this without the user''s permission. Hands this chat''s whole working context to a NEW chat: by default reboots this pane into it and hides this conversation; --branch instead writes the handoff and starts a separate, detached chat while this conversation stays completely untouched.'
+description: 'USER-ONLY Moves context to NEW chat — the user types /handoff [--branch] [message]; never run it unasked. Writes a file, seeds a fresh chat from it: default reboots this pane into it; --branch starts it detached. Not for branching/forking this conversation → pfm chat branch.'
 ---
 
-# `/handoff [--branch]` — hand this chat's context to a new chat
+# `/handoff [--branch] [message]`
 
 Write the handoff file first — this step is IDENTICAL in both modes. Then either reboot this pane
 into the new chat (default) or spawn a separate detached one and leave this pane alone (`--branch`).

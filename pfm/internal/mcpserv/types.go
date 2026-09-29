@@ -258,19 +258,20 @@ type NameInput struct {
 }
 
 type NewInput struct {
-	Name     string `json:"name"`
-	Engine   string `json:"engine,omitempty"`
-	CWD      string `json:"cwd,omitempty"`
-	Account  int    `json:"account,omitempty"`
-	Cache    string `json:"cache,omitempty" jsonschema:"prompt cache for this launch: 1h or 5m"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"effort,omitempty"`
-	Prompt   string `json:"prompt,omitempty"`
-	Await    bool   `json:"await,omitempty"`
-	Timeout  int    `json:"timeout,omitempty"`
-	Settle   int    `json:"settle,omitempty"`
-	Progress bool   `json:"progress,omitempty"`
-	Attach   bool   `json:"attach,omitempty"`
+	Name      string `json:"name" jsonschema:"the chat's name in pfm ls and the target chat_inject, chat_status and chat_kill take"`
+	Engine    string `json:"engine,omitempty" jsonschema:"cc/claude, cx/codex or ox/opencode; the caller's engine when empty"`
+	CWD       string `json:"cwd,omitempty" jsonschema:"working directory, relative to the caller's; the caller's directory when empty"`
+	Account   int    `json:"account,omitempty" jsonschema:"account number to launch on; pfm picks when 0"`
+	Cache     string `json:"cache,omitempty" jsonschema:"prompt cache for this launch: 1h or 5m"`
+	Model     string `json:"model,omitempty" jsonschema:"model alias or full id, e.g. claude-sonnet-5-5; the engine's default when empty"`
+	Effort    string `json:"effort,omitempty" jsonschema:"reasoning effort, e.g. high or xhigh; the engine's default when empty"`
+	AgentRole string `json:"agentRole,omitempty" jsonschema:"registered agent the chat runs as, e.g. flights-smart-executor: its role prompt joins the fleet prompt; not on OpenCode"`
+	Prompt    string `json:"prompt,omitempty" jsonschema:"first message; the chat opens idle without one"`
+	Await     bool   `json:"await,omitempty" jsonschema:"wait for the first answer and return it instead of the launch message"`
+	Timeout   int    `json:"timeout,omitempty" jsonschema:"with await: seconds to wait, 0 waits forever; 600 when unset"`
+	Settle    int    `json:"settle,omitempty" jsonschema:"with await: seconds of quiet that end the answer; 3 when unset"`
+	Progress  bool   `json:"progress,omitempty" jsonschema:"with await: the chat's turns go to stderr while waiting"`
+	Attach    bool   `json:"attach,omitempty" jsonschema:"attach a terminal to the new chat; not with await"`
 }
 
 type ActionOutput struct {

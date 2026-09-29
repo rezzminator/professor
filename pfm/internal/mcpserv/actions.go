@@ -166,6 +166,9 @@ func (service *Service) chatNew(
 	if input.Effort != "" {
 		args = append(args, "--effort", input.Effort)
 	}
+	if input.AgentRole != "" {
+		args = append(args, "--agent-role", input.AgentRole)
+	}
 	if input.Await {
 		args = append(args, "--await")
 	}

@@ -46,7 +46,7 @@ var chatToolNames = []string{
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a fresh chat → chat_new; branch or fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; complain about Professor itself → servicedesk. Chats are running sessions, never sub-agents. branch, end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
+const chatInstructions = "Message a chat → chat_inject; list chats → chat_ls; who am I → chat_whoami; start a chat or model run → chat_new, never claude -p or pfm headless exec; chat_kill a run once done; fork this conversation → pfm chat branch; is a chat idle or busy → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; save my transcript → chat_save; complain about Professor itself → servicedesk. Chats are sessions, never sub-agents. branch, end, modal, watch, stream, recover and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -201,7 +201,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	newInputSchema.Properties["cache"].Enum = []any{"1h", "5m"}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_new",
-		Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.",
+		Description: "MANDATORY for every chat or model run this chat starts — a seat, a worker, a probe, at any model, effort or agent role; never claude -p or pfm headless exec. Call chat_new{name:\"auth-review\", model:\"claude-sonnet-5-5\", effort:\"xhigh\", agentRole:\"flights-smart-executor\", prompt:\"…\", await:true}. chat_kill it once its job is done, or it stays listed in pfm ls. Returns status ok with the launch message, or with await the first answer; a tool error = the launch failed, its stderr in the message. Not for a helper inside THIS chat → a harness sub-agent.",
 		Annotations: mutating,
 		InputSchema: newInputSchema,
 	}, obs.Tool("chat_new", service.chatNew))

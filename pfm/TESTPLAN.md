@@ -586,6 +586,7 @@ Each row is one **session kind** crossed with the operations that touch it. This
 | flow | safety | expected behavior (source) | regression |
 | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
 | Tool roster is exactly the canonical `ToolNames()` set with correct read-only / mutating annotations | JAIL | `mcpserv/server.go`, `mcpserv/workflow_roster_test.go` | |
+| `chat_new` passes `agentRole` as `--agent-role`; its description routes every chat or model run here within the 600-rune budget, its example call names only schema fields, and every schema field is described | JAIL | `mcpserv/actions.go` (`chatNew`), `mcpserv/types.go` (`NewInput`), `mcpserv/server_chat_new_test.go` | |
 | `mcp ls` reports each registered server's independent enabled state and source | JAIL | `main.go`, `config_cli_test.go`, `internal/config/config_test.go` | |
 | `mcp chat enable                                                                                          | disable`is atomic/idempotent; disabled`serve` names its remedy | JAIL | `main.go`, `config_cli_test.go`, `internal/config/config_test.go` | |
 | `chat_ls` default view, `all`, `killed`, `project` filter | JAIL | `mcpserv/backend.go:82-253` | B2 |

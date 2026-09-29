@@ -28,7 +28,7 @@ The sub-agent rule of the project contract offered three roads: a brief naming a
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
 | `general-orchestrator` | agent | Cuts a batch into tasks with a dependency tree, dispatches, verifies, closes, returns once | smart (`opus`), effort `high` |
-| `general-mechanical-executor`, `general-precise-executor`, `general-smart-executor` | agents, one body | One task each, from an inline brief; picked by the task's rating | the [tier table](../flights/flights-executors.md#three-tiers-one-source) |
+| `general-mechanical-executor`, `general-precise-executor`, `general-smart-executor` | agents, one body per tier | One task each, from an inline brief; picked by the task's rating | the [tier table](../flights/flights-executors.md#the-tiers) |
 
 The orchestrator runs at smart, where `flights-orchestrator` runs at mechanical: the flights orchestrator executes a plan the speccer made, while this one makes the plan itself, and cutting work is judgment. Judgment never delegates downward.
 

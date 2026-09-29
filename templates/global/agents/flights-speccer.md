@@ -110,7 +110,7 @@ files: [src/accounts/repository.ts, src/accounts/repository.test.ts, src/api/rou
 - Decisions: every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text.
 - Shapes: `EXISTING`, what the executor types against (columns, types, helper signatures, API fields, the directory's conventions), quoted with its file path; `NEW`, what the task creates, by name, inputs, outputs and behaviour.
 - Steps: numbered, inside-out; each names the file, the place as a quoted line of code, and the change as behaviour.
-- Execution judgments: every call left to the executor; a call Decisions already settle is not one. A judgment counts toward the rating only when a wrong call breaks a Done when row or reaches past the task's files; a local choice (a helper's name, one idiom over another, where a fixture sits) is listed and never counted. None counted sets `rating: mechanical`. One to three, with every interface the task touches pinned in Shapes, sets `rating: precise`, as does a task with no judgment whose difficulty is the implementation itself: concurrency, failure paths, many error rows. More than three, one to three with a touched interface left unpinned, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`.
+- Execution judgments: every call left to the executor; a call Decisions already settle is not one. A judgment counts toward the rating only when a wrong call breaks a Done when row or reaches past the task's files; a local choice (a helper's name, one idiom over another, where a fixture sits) is listed and never counted. None counted sets `rating: mechanical`; a mechanical task writes each local choice as a `Decisions` line and quotes the façade and reuse targets it calls as `EXISTING` shapes, since its executor applies the Steps and decides nothing. One to three, with every interface the task touches pinned in Shapes, sets `rating: precise`, as does a task with no judgment whose difficulty is the implementation itself: concurrency, failure paths, many error rows. More than three, one to three with a touched interface left unpinned, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`.
 
 ## Altitude
 
@@ -141,6 +141,7 @@ Given an existing spec directory and a reason (a report, a failing check, a ruli
 - The second red of one id means the cause is unknown, whatever the reports say. Before any rewrite, read the whole unit the task changes — the entire test, beat or module — and the runtime path it exercises (one tracer when the path leaves the unit), with every transcript of that id; write the cause as a `Decisions` line. A third red the caller returns as `BLOCKED`.
 - A red in code the flight forbids fixing is no spec fault: record it where the project keeps known defects, narrow the Done when, name it in NOTES.
 - Never touch a `CLAIMED` task's file: its executor has read it.
+- A rewritten task file states, in `Progress dependency`, what the previous round of the same task already landed, from the executor's return.
 
 ## Return
 

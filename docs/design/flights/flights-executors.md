@@ -1,13 +1,13 @@
 # The flight executors
 
-`flights-mechanical-executor`, `flights-precise-executor` and `flights-smart-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body, three tiers. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
+`flights-mechanical-executor`, `flights-precise-executor` and `flights-smart-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body per tier: this file is the base every tier holds, and each tier's body adds the rules its work needs. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
 
-Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-mechanical-executor.md`](../../../templates/global/agents/flights-mechanical-executor.md).
+Decisions live in this file. The executable wording lives in the three bodies, [`flights-mechanical-executor.md`](../../../templates/global/agents/flights-mechanical-executor.md), [`flights-precise-executor.md`](../../../templates/global/agents/flights-precise-executor.md) and [`flights-smart-executor.md`](../../../templates/global/agents/flights-smart-executor.md); what each tier adds, and why, is in its tier doc: [mechanical](mechanical-executor.md), [precise](precise-executor.md), [smart](smart-executor.md).
 
 ## Contents
 
 - [Why it exists](#why-it-exists)
-- [Three tiers, one source](#three-tiers-one-source)
+- [The tiers](#the-tiers)
 - [What it holds](#what-it-holds)
 - [Tests](#tests)
 - [Layout laws at write time](#layout-laws-at-write-time)
@@ -23,17 +23,17 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 A flight had a speccer and an orchestrator and no executor of its own. The executor was whatever agent type the project had, and the instructions of a developer travelled in the spec: a measured 4.3 KB of generic instruction per executor in one flight and 12.3 KB in another, rewritten on every revising round. The orchestrator's brief also had to override the project's agent card ("write the covering tests yourself, whatever your agent card says"). One global body ends both: the generic instructions live once, in the agent, and a task file holds only the task.
 
-## Three tiers, one source
+## The tiers
 
 This is the one tier table for both executor families: `general-*-executor` runs the same tiers as `flights-*-executor`, and a tier change lands in both in the same pass.
 
 | Rating | Flights agent | General agent | Claude | Codex role pin |
 | --- | --- | --- | --- | --- |
 | `mechanical` | `flights-mechanical-executor` | `general-mechanical-executor` | `claude-sonnet-5-5` at `high` | `gpt-6-luna` at `xhigh` |
-| `precise` | `flights-precise-executor` | `general-precise-executor` | `claude-sonnet-5-5` at `xhigh` | `gpt-6-sol` at `high` |
-| `smart` | `flights-smart-executor` | `general-smart-executor` | `opus` at `high` | `gpt-6-sol` at `high` |
+| `precise` | `flights-precise-executor` | `general-precise-executor` | `claude-sonnet-5-5` at `xhigh` | `gpt-6.1-sol` at `high` |
+| `smart` | `flights-smart-executor` | `general-smart-executor` | `opus` at `high` | `gpt-6.1-sol` at `high` |
 
-A seat under [`/flights:orchestrate-cross-harness`](../../../templates/global/commands/flights/orchestrate-cross-harness.md) sets its own Codex effort by rating on its launch line.
+A seat under [`/flights:orchestrate-cross-harness`](../../../templates/global/commands/flights/orchestrate-cross-harness.md) sets the same Codex model and effort by rating on its launch line; a smart seat always runs `gpt-6.1-sol` at `high`.
 
 The Sonnet tiers pin the full model ID: the `sonnet` alias resolved to different models on different accounts of one host. Each Claude pick was measured against its neighbours on real landed tasks, two seats per configuration, blind-judged:
 
@@ -47,43 +47,56 @@ The Codex pins were measured the same way, on the same three tasks, with the Cla
 - `precise`: `gpt-6-sol` at `high` scored 94, beside Sonnet 5.5 at `xhigh`'s 95 and 97; `gpt-6-luna` scored 81 at `xhigh` and 67 at `high`, both shipping log keys the scrubber redacts.
 - `smart`: `gpt-6-sol` at `high` scored 87 against `xhigh`'s 85, at about 70% of the cost; Opus 5.5 at `high` scored 86.
 
-The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-precise-executor` and `flights-smart-executor` as variants `from` it, overriding `model`, `effort`, `codex-model`, `codex-effort` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
+Those runs used the one shared body. A later round ran the three tier bodies on the same tasks, fenced-graded, two seats per configuration, and moved `precise` and `smart` to `gpt-6.1-sol`:
+
+- `precise`: `gpt-6.1-sol` at `high` passed every gate and 19 of 19 hidden tests in both seats, at $0.61 and $0.69; `gpt-6-sol` at `high` on the same body also passed every gate and 19 of 19, at $0.77.
+- `smart`: `gpt-6.1-sol` at `high` passed every gate in both seats, the full suite included, and they were the first smart seats to pass the architecture ratchet, at $1.46 and $1.53; `gpt-6-sol` at `high` failed the ratchet in 3 of 3 runs, at $1.88 to $2.14.
+- Price per 1M tokens, from OpenAI's API pricing page on 2026-09-29: `gpt-6.1-sol` $2 in, $0.10 cached, $10 out; `gpt-6-sol`'s cached input is $0.20.
+
+Blind-judged together with the Claude anchors: `precise` `gpt-6.1-sol` scored 94 and 95 against `gpt-6-sol`'s 95 on the same body (84 on the old shared body) and Sonnet 5.5 at `xhigh`'s 97, a tie at about 15% less cost; `smart` `gpt-6.1-sol` scored 96 and 91 against `gpt-6-sol`'s 90 and 78 on the specialized bodies (72 on the old one) and Opus 5.5 at `high`'s 89, the best smart seats of every round. `gpt-6.1-sol` is the Codex pin for both tiers.
+
+Each tier is its own body — `flights-mechanical-executor.md`, `flights-precise-executor.md`, `flights-smart-executor.md` — with its model, effort and Codex pin in its own frontmatter, and each has a general twin (`general-{mechanical,precise,smart}-executor.md`, [general-executors](../general/general-executors.md)); no tier is a variant of another. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
 
 ## What it holds
 
 Everything that is true for every task of every flight:
 
-- the first move: open the task file and its `reads` together, in one message;
-- the Goal wins over a detail; a premise that does not hold returns `SPEC-DRIFT` with nothing changed; a decision it cannot make is asked for;
-- a red it did not foresee is read until its cause is named — the line, the value, the code path — and returned as `FAILED` or `SPEC-DRIFT` with that cause, or with what was read and "cause unknown"; a rerun and a fix outside the spec are forbidden, reading never is;
+- the first move: open the brief file, the task file and its `reads` together, in one message; the brief pastes the `DONE` lines of the task's needs, which are what landed before it;
+- a `Progress dependency` that does not hold returns `SPEC-DRIFT` with nothing changed; a decision it cannot make returns `BLOCKED {id}: {question}`;
+- the hand is per tier. `precise` and `smart` reach the Goal their own way inside `Files` and say what they changed. `mechanical` applies the Steps and makes only its listed adaptations — a quoted line found at another place, an import the edit needs, the formatter's output, a fix for its own red; anything else returns `SPEC-DRIFT`;
+- a red its own edit caused inside `Files` is iteration: fix it, rerun. Any other red it did not foresee is read until its cause is named — the line, the value, the code path — and returned as `FAILED` or `SPEC-DRIFT` with that cause, or with what was read and "cause unknown"; an unchanged rerun and a fix outside `Files` are forbidden, reading never is;
+- a red in a test its diff does not reach, or a check rejecting what was there before its edit, is an outside defect, named and never fixed; the task finishes `DONE`;
 - read discipline: find the lines with a search, read that range; never a whole file to find a place, never again a file still in context; a log through `tail` or a search, never whole; the project contract is already in context and is never read;
-- waiting is one call sized to the command's duration, never a poll chain;
+- waiting is one call: `mechanical` runs every command in the foreground as one call at the tool's longest timeout; the other tiers size the timeout to the command; never a poll chain;
+- scratch files (logs, re-break copies, scripts) sit in a directory named for the task id; siblings share the scratch root;
 - it stays inside the task's `Files`; git is read-only;
-- the return format and the ban on progress messages, diffs and logs in a message.
-- the rules a task file used to carry as fixed lines: how a `Done when` row is proven, and the `Progress dependency` check before step 1.
+- the return format and the ban on progress messages, diffs and logs in a message;
+- the rules a task file used to carry as fixed lines: how a `Done when` row is proven, a row read two ways, and the `Progress dependency` check before step 1.
 
 What it does not hold: anything about one project. Project law reaches it through the project contract the harness injects and through the project's [testing manual](testing-manual.md).
 
 ## Tests
 
-The executor writes the covering tests itself, one per `Done when` row, in the project's pattern:
+The executor writes the covering tests itself, one per `Done when` row, in the project's pattern. A row is a matrix row or a `Given` line, on every tier:
 
 - before the first test it opens the project's testing manual, the path named in the orchestrator's brief, and follows its tiers, test home, lane or registry duty, mock boundary, run commands and traps;
 - a test is accepted only after it was watched failing against the unfixed code, or against a deliberate re-break when the fix already landed;
-- it runs only the affected tests plus the type check and lint of its own files — the full suite is the lander's;
-- a test that exists but did not run is missing; when a test and a row disagree the code is wrong, never the row.
+- a row with no behaviour change (a rename, a move, a deletion, a doc) or one a written deliverable meets is proven by its check line, plus the quoted line that meets it for a written deliverable; the orchestrator accepts that in place of a watched-failing test, and every other row needs one;
+- it runs only the affected tests plus the formatter, lint and type check of its own files and the static check the testing manual names (its architecture ratchet included); a ratchet its diff pushes over is its to bring back under — the full suite is the lander's;
+- a test that exists but did not run is missing; when a test and a row disagree the code is wrong, never the row;
+- a row read two ways takes the reading today's code supports, named in the return; `SPEC-DRIFT` only when neither reading settles it and they build different code.
 
 Bias of an author testing its own code is real and accepted here: the executor's tests prove the rows, and the independent attack is [`flights-lander`](flights-lander.md)'s.
 
 ## Layout laws at write time
 
-`/quality:llm-codebase` is a design command; the laws of it that bind at the moment of writing a file live in the executor, so the speccer does not carry them:
+`/quality:llm-codebase` is a design command; the laws of it that bind at the moment of writing a file live in the `precise` and `smart` bodies, so the speccer does not carry them for those tiers. A `mechanical` task makes no design choice: its speccer quotes the façade and the reuse targets as `EXISTING` shapes, and a new name the task does not give returns `SPEC-DRIFT`. The laws:
 
 - search for the concept before creating a file or a function; reuse what exists, never a second implementation under another name;
 - one canonical term per concept, the one the code already uses, identical in file name, identifier, wire key, environment variable and test name;
 - call the project's façade for a cross-cutting mechanism (process execution, database open, file write, environment, clock, LLM invoke, logging, the test scratch root), never the primitive;
 - no directory named by negation (`utils`, `helpers`, `common`, `misc`, `shared`): a new file sits with the unit that changes with it;
-- a source file over the project's size ceiling is split before logic is added to it;
+- a source file over the project's size ceiling is split before logic is added to it, per tier: on `mechanical` an edit pushing a file over the ceiling returns `SPEC-DRIFT`; on `precise` and `smart` a split's new file beside a `Files` entry, in the same unit, is in scope, and a split needing an existing file outside `Files` returns `SPEC-DRIFT {id}` naming it;
 - a runner, parser or census script the task needs is a versioned script under the project's `scripts/`, never a private copy;
 - one test home per source file, every temp path through the project's scratch-root helper.
 
@@ -94,13 +107,13 @@ The design-time laws (unit of change, anatomy, registries, cross-project alignme
 Cost is calls times context, and an executor's starting context is re-sent on every call.
 
 - `tools: Read, Write, Edit, Bash, Glob, Grep` — no `Skill`, no `Agent`, no MCP tool. Listing `Skill` injects the skills listing, a measured 7.4K tokens per call; an MCP tool outside the allowlist costs nothing.
-- The agent body stays under 5 KB.
-- The brief shrinks to the task file path, its `reads`, the pasted `run.md` lines of its `needs`, the standing rules, the testing-manual path and the worktree. Everything else the old brief restated is in the agent.
+- The bodies are 6.7 KB (`mechanical`), 8.0 KB (`precise`) and 9.0 KB (`smart`). They exceed the earlier 5 KB ceiling by the tier-specific rules the transcript audits measured as stopping over-stops and misses; a rule that stops no measured failure is cut.
+- The brief is a file carrying the task file path, its `reads`, the pasted `DONE` lines of its `needs`, the `RETRO` lines so far, the standing rules, the testing-manual path and the worktree. Everything else the old brief restated is in the agent.
 - The project contract is injected by the harness into every sub-agent and no setting stops it; its size is the project's to keep small.
 
 ## The cap
 
-80 tool calls. Past it the executor stops and returns `FAILED {id}: cap` with the handoff: what landed, what is left, the next step. The number is in the agent, not in the brief; the speccer sizes tasks to it (a task that needs 150 calls is three tasks). The measured healthy band is 40 to 80 calls; the runaway executors of the audited flights ran 135 to 254.
+80 tool calls. Past it the executor stops and returns `FAILED {id}: cap` with the handoff: what landed, what is left, the next step. The number is in the agent, not in the brief; the speccer sizes tasks to it (a task that needs 150 calls is three tasks). A `smart` executor estimates its calls once its design is stated and returns `SPEC-DRIFT {id}: too large` with the split it would make, nothing changed; that goes to the speccer to cut the task and counts toward neither diagnose-first nor the third-red `BLOCKED`. The measured healthy band is 40 to 80 calls; the runaway executors of the audited flights ran 135 to 254.
 
 ## What it no longer does
 
@@ -114,13 +127,14 @@ First line `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOC
 
 ## Codex and OpenCode
 
-`pfm codex agents` and `pfm opencode build` compile both agents like every global role. On Codex a role cannot restrict tools or MCP servers — those settings are global — so the allowlist is a Claude saving only; the cap, the read discipline and the single-wait rule are the Codex savings, and the wait recipe itself lives in the Codex part of the fleet prompt.
+`pfm codex agents` and `pfm opencode build` compile the three agents, and their three general twins, like every global role. On Codex a role cannot restrict tools or MCP servers — those settings are global — so the allowlist is a Claude saving only; the cap, the read discipline and the single-wait rule are the Codex savings, and the wait recipe itself lives in the Codex part of the fleet prompt.
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-mechanical-executor.md`, `templates/global/agents/variants.json` | The executable wording; the smart tier's frontmatter |
+| The agents | `templates/global/agents/flights-{mechanical,precise,smart}-executor.md` | The executable wording, one body per tier, each with its own frontmatter pins |
+| The tier docs | [mechanical](mechanical-executor.md), [precise](precise-executor.md), [smart](smart-executor.md) | What each tier's body adds, and the measurements behind it |
 | The orchestrator | [`flights-orchestrator`](flights-orchestrator.md) | The brief, the verification of a `DONE`, the agent type by rating |
 | The speccer | [`flights-speccer`](flights-speccer.md) | Task size against the cap; test tier and home in `Done when` and `Files` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project's test law the executor follows |

@@ -45,8 +45,10 @@ Inline in the spawn prompt, nothing the executor's body holds:
 | `DONE` not verified: a file outside the task, a check line missing | Treated as `FAILED` with that cause |
 | `FAILED {id}: cap` | A fresh executor of the same rating continues from the handoff; a second cap on one task means it was cut too big: re-cut it once |
 | `FAILED` with a cause | One re-dispatch with the cause in a changed brief, never the same brief twice; a second red is blocked with both causes |
+| `SPEC-DRIFT {id}: too large` | Re-cut the task along the split it proposes; not a red |
 | `SPEC-DRIFT` | The premise was wrong: re-cut the task once from what the executor found; a second drift is blocked |
 | `BLOCKED` with a question | Answered by `SendMessage` to the same executor from what the caller handed over, else carried to the caller; the rest of the batch keeps running |
+| Any message to an executor after its dispatch | Closes with "continue, then return once more in the return shape" |
 
 ## Return
 

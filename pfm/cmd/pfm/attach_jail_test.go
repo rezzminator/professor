@@ -150,9 +150,7 @@ func newAttachJail(t *testing.T) *attachJail {
 	wrapper := "#!/bin/sh\nexec " + shellQuote(executable) +
 		" -test.run '^TestPFMAttachHelper$' -- --config " + shellQuote(configPath) + " \"$@\"\n"
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := os.WriteFile(binary, []byte(wrapper), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testjail.WriteExecutable(t, binary, []byte(wrapper))
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -256,9 +254,7 @@ func (jail *attachJail) proveAttach(
 		// cleanup writes the same release file before killing the server.
 		script += "while [[ ! -e " + shellQuote(releasePath) + " ]]; do sleep 0.01; done\n"
 	}
-	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	testjail.WriteExecutable(t, scriptPath, []byte(script))
 
 	var command *exec.Cmd
 	var input io.WriteCloser

@@ -13,10 +13,11 @@ set -euo pipefail
 # those still fail, named, after the restamp. A check whose only failures are
 # derived-field drift says so and names `--write` as the fix.
 #
-# Usage: check-self-hosted-manifest.sh [--write] <repo-root> [scoped-project...]
+# Usage: check-self-hosted-manifest.sh [--write] <repo-root> <scoped-project>...
 #
 # What this script's own broken state reports:
 #   - no ROOT given: NO-ROOT, exit 2, nothing verified.
+#   - no scoped project given: NO-ROSTER, exit 2, nothing verified.
 #   - git/jq/sort missing: TOOLCHAIN-MISSING <tool>, exit 1.
 #   - repo-root/manifest/VERSION files absent: `missing <path>`, exit 1.
 #   - manifest is not valid JSON: `unreadable JSON: <path>`, exit 1.
@@ -127,7 +128,13 @@ enumerate_installed() {
 # ever asked about — which reads as a broken install instead of a call with no
 # argument.
 if [[ -z "$ROOT" ]]; then
-  echo "self-hosted-manifest: NO-ROOT — usage: $0 [--write] <repo-root> [scoped-project...]; nothing was verified" >&2
+  echo "self-hosted-manifest: NO-ROOT — usage: $0 [--write] <repo-root> <scoped-project>...; nothing was verified" >&2
+  exit 2
+fi
+# No roster is a CALLER error too: compared against an empty roster, the
+# manifest's answers.roster reads as drift and the diff blames the manifest.
+if (( $# == 0 )); then
+  echo "self-hosted-manifest: NO-ROSTER — pass the development roster after <repo-root> (dev.sh verify templates passes: templates pfm); nothing was verified" >&2
   exit 2
 fi
 

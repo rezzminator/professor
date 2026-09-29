@@ -8,10 +8,10 @@ import (
 
 func TestDefaultOpenCodeModelMap(t *testing.T) {
 	want := map[string]string{
-		"opus":   "openai/gpt-5.6-sol",
-		"sonnet": "openai/gpt-5.6-sol-fast",
+		"opus":   "openai/gpt-6.1-sol",
+		"sonnet": "openai/gpt-6.1-sol-fast",
 		"haiku":  "openai/gpt-5.5-fast",
-		"fable":  "openai/gpt-5.6-sol",
+		"fable":  "openai/gpt-6.1-sol",
 	}
 	got := defaultOpenCodeModelMap()
 	for alias, model := range want {
@@ -36,8 +36,8 @@ func TestLoadOpenCodeModelMapMergesOverride(t *testing.T) {
 	if got["sonnet"] != "openai/other" {
 		t.Fatalf("sonnet override = %q, want openai/other", got["sonnet"])
 	}
-	if got["opus"] != "openai/gpt-5.6-sol" {
-		t.Fatalf("unlisted opus default = %q, want openai/gpt-5.6-sol", got["opus"])
+	if got["opus"] != "openai/gpt-6.1-sol" {
+		t.Fatalf("unlisted opus default = %q, want openai/gpt-6.1-sol", got["opus"])
 	}
 }
 

@@ -68,7 +68,7 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	}
 	worker, _ := os.ReadFile(filepath.Join(root, ".opencode", "agent", "worker.md"))
 	if !strings.Contains(string(worker), "mode: all") ||
-		!strings.Contains(string(worker), "model: openai/gpt-5.6-sol-fast") ||
+		!strings.Contains(string(worker), "model: openai/gpt-6.1-sol-fast") ||
 		!strings.Contains(string(worker), "tools:\n") ||
 		!strings.Contains(string(worker), "  edit: false\n") ||
 		strings.Contains(string(worker), "  read: false\n") ||
@@ -190,7 +190,7 @@ func TestOpenCodeUnmappedModelAliasIsOmittedWithAWarning(t *testing.T) {
 		t.Fatalf("unmapped agent: worker=%q err=%v", worker, err)
 	}
 	lead, err := os.ReadFile(filepath.Join(root, ".opencode", "agent", "lead.md"))
-	if err != nil || !strings.Contains(string(lead), "model: openai/gpt-5.6-sol\n") {
+	if err != nil || !strings.Contains(string(lead), "model: openai/gpt-6.1-sol\n") {
 		t.Fatalf("mapped agent: lead=%q err=%v", lead, err)
 	}
 }

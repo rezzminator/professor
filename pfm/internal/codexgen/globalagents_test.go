@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -70,18 +71,20 @@ func TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes(t *testing.T) {
 		all = append(all, source{variant.Path, string(variant.Content)})
 	}
 	checked := 0
+	var pinned []string
 	for _, src := range all {
 		fields, _, err := parseFrontmatter(src.raw)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, present := fields["codex-model"]; present {
+		name := strings.TrimSuffix(filepath.Base(src.path), ".md")
+		_, pinsModel := fields["codex-model"]
+		_, pinsEffort := fields["codex-effort"]
+		if pinsModel || pinsEffort {
+			pinned = append(pinned, name)
 			continue
 		}
-		if _, present := fields["codex-effort"]; present {
-			continue
-		}
-		t.Run(strings.TrimSuffix(filepath.Base(src.path), ".md"), func(t *testing.T) {
+		t.Run(name, func(t *testing.T) {
 			_, got, err := renderGlobalAgentTOML(src.path, src.raw, agentsDir)
 			if err != nil {
 				t.Fatal(err)
@@ -93,8 +96,17 @@ func TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes(t *testing.T) {
 		})
 		checked++
 	}
-	if checked != len(all)-2 {
-		t.Fatalf("checked %d of %d roles; want all except the two flights executors", checked, len(all))
+	// The executor tiers are the roles that pin their own Codex model.
+	sort.Strings(pinned)
+	wantPinned := []string{
+		"flights-mechanical-executor", "flights-precise-executor", "flights-smart-executor",
+		"general-mechanical-executor", "general-precise-executor", "general-smart-executor",
+	}
+	if strings.Join(pinned, ",") != strings.Join(wantPinned, ",") {
+		t.Fatalf("roles pinning a Codex model = %v, want %v", pinned, wantPinned)
+	}
+	if checked != len(all)-len(pinned) {
+		t.Fatalf("checked %d of %d roles; want every role without a Codex pin", checked, len(all))
 	}
 }
 
@@ -265,7 +277,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		"; do not edit — edit the source, then re-run: pfm codex build\n" +
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
-		"model = \"gpt-5.6-sol\"\n" +
+		"model = \"gpt-6.1-sol\"\n" +
 		"model_reasoning_effort = \"high\"\n" +
 		"sandbox_mode = \"read-only\"\n" +
 		"developer_instructions = \"\"\"\n"

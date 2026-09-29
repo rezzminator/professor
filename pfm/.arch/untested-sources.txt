@@ -27,7 +27,6 @@ internal/archive/manifest.go
 internal/chat/inject_engine.go
 internal/chat/keys.go
 internal/codexgen/compiler.go
-internal/codexgen/config.go
 internal/codexgen/toml.go
 internal/codexgen/transform.go
 internal/compose/doc.go

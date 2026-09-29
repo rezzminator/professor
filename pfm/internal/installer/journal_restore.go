@@ -68,6 +68,22 @@ func (journal *Journal) leftUnrestored(path string) bool {
 	return false
 }
 
+// restored reports whether this run's journal put path back from its
+// pre-image after a failed write, so path holds what was there before. A nil
+// journal restored nothing.
+func (journal *Journal) restored(path string) bool {
+	if journal == nil {
+		return false
+	}
+	resolved := installRecordPath(path)
+	for _, record := range journal.records {
+		if record.Destination == resolved && record.Result == layoutRecordRestored {
+			return true
+		}
+	}
+	return false
+}
+
 func (journal *Journal) restoreWrite(start int) error {
 	if start >= len(journal.records) {
 		return nil

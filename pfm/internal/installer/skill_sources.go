@@ -425,7 +425,10 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	if removeErr := os.RemoveAll(trash); removeErr != nil {
 		installer.skip("leave the old skill store copy " + trash + ": " + removeErr.Error())
 	}
-	if err != nil && statErr == nil && os.SameFile(current, clone) {
+	// A journal restore removes the clone and copies the old store into a fresh
+	// directory, which can reuse the clone's inode: only a store the journal did
+	// not restore is compared by identity.
+	if err != nil && statErr == nil && !installer.options.Journal.restored(store) && os.SameFile(current, clone) {
 		installer.skip("SKILL-FETCH-FAILED " + source.Name + ": " + err.Error() + " (" + store +
 			" holds the new clone at " + shortCommit(cloned) + ")")
 		return installer.linkableStore(source.Name, store), nil

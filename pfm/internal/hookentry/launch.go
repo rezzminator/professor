@@ -249,18 +249,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	}()
 	if interactive {
 		failed = false
-		arguments := []string{
-			pfmtmux.Binary,
-			"-S",
-			socketPath,
-			"wait-for",
-			"-S",
-			startChannel,
-			";",
-			"attach-session",
-			"-t",
-			session,
-		}
+		arguments := attachArguments(socketPath, startChannel, session, env.Get("TMUX") != "")
 		if err := LaunchExec(tmuxBinary, arguments, deps.EnvironmentWith("TMUX", "")); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: attach tmux session: %v\n", err)
 			return 1
@@ -312,6 +301,31 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	}
 	failed = false
 	return status
+}
+
+// attachArguments releases the gated pane and attaches this terminal to the
+// seat. Nested inside a tmux pfm does not own, the outer pane already keeps the
+// chat alive, so the seat also takes destroy-unattached: killing that pane or
+// its server ends the chat instead of leaving a detached seat holding a Claude
+// process nobody can see. The option is set after attach-session, so the seat
+// is never unattached while it is on.
+func attachArguments(socketPath, startChannel, session string, nested bool) []string {
+	arguments := []string{
+		pfmtmux.Binary,
+		"-S",
+		socketPath,
+		"wait-for",
+		"-S",
+		startChannel,
+		";",
+		"attach-session",
+		"-t",
+		session,
+	}
+	if nested {
+		arguments = append(arguments, ";", "set-option", "-t", session, "destroy-unattached", "on")
+	}
+	return arguments
 }
 
 func launcherStatusRun(startWait, realRun, tmuxBinary, socketPath, doneChannel, statusPath string) string {

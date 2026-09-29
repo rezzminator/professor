@@ -159,3 +159,15 @@ func TestReadLaunchStatusRejectsMissingAndInvalidFiles(t *testing.T) {
 		t.Fatalf("readLaunchStatus invalid error=%v", err)
 	}
 }
+
+func TestAttachArgumentsBindNestedSeatToItsPane(t *testing.T) {
+	t.Parallel()
+	base := []string{"tmux", "-S", "/s/cc-1", "wait-for", "-S", "start", ";", "attach-session", "-t", "cc-1"}
+	if got := attachArguments("/s/cc-1", "start", "cc-1", false); !reflect.DeepEqual(got, base) {
+		t.Fatalf("plain terminal: attachArguments = %q, want %q", got, base)
+	}
+	nested := append(append([]string{}, base...), ";", "set-option", "-t", "cc-1", "destroy-unattached", "on")
+	if got := attachArguments("/s/cc-1", "start", "cc-1", true); !reflect.DeepEqual(got, nested) {
+		t.Fatalf("nested tmux: attachArguments = %q, want %q", got, nested)
+	}
+}

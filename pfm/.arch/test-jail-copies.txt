@@ -11,7 +11,6 @@ internal/config/tmux_titles_render_jail_test.go 1
 internal/gather/tmux_jail_test.go 1
 internal/gather/tmuxprobe_test.go 1
 internal/hookentry/chat_server_test.go 1
-internal/inject/claude_stash_real_test.go 1
 internal/kill/tmux_jail_test.go 1
 internal/mcpserv/server_test.go 1
 internal/resolve/tmux_jail_test.go 1

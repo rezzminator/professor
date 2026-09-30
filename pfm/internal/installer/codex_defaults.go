@@ -52,6 +52,11 @@ func (installer *engine) wireCodexDefaults() error {
 			return err
 		}
 		wanted := string(raw)
+		_, _, yielded, err := installer.codexMCPYield(wanted)
+		if err != nil {
+			return fmt.Errorf("read Codex MCP config %s: %w", path, err)
+		}
+		wanted = yielded
 		if defaults != "" {
 			if wanted, err = mergeCodexDefaults(wanted, defaults); err != nil {
 				return fmt.Errorf("merge Codex defaults into %s: %w", path, err)

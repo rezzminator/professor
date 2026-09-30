@@ -320,6 +320,31 @@ func TestVersionIsPinnedPerEngineAndOverridable(t *testing.T) {
 	}
 }
 
+func TestVersionAmongFlagsExitsWithoutStartingAnEngine(t *testing.T) {
+	for _, tc := range []struct {
+		engine string
+		args   []string
+		want   string
+	}{
+		{"codex", []string{"--dangerously-bypass-approvals-and-sandbox", "--version"}, DefaultCodexVersion},
+		{"codex", []string{"-c", "k=v", "--version"}, DefaultCodexVersion},
+		{"claude", []string{"--settings", "x", "--version"}, DefaultClaudeVersion},
+	} {
+		t.Run(tc.engine+strings.Join(tc.args, "_"), func(t *testing.T) {
+			fix := newFixture(t)
+			code, stdout, stderr := runOnce(fix, tc.engine, tc.args, "")
+			if code != 0 || strings.TrimSpace(stdout) != tc.want || stderr != "" {
+				t.Fatalf("version exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+			for _, path := range []string{filepath.Join(fix.codexHome, "sessions"), filepath.Join(fix.configDir, "projects")} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("version created session state %s: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
 func TestAMissingScenarioFileIsAnErrorNotTheDefault(t *testing.T) {
 	fix := newFixture(t)
 	if err := os.Remove(fix.scenario); err != nil {

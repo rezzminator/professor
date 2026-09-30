@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -336,7 +337,7 @@ func request(ctx context.Context, options Options) (usageResult Usage, returnErr
 	if err != nil {
 		return Usage{}, err
 	}
-	outbound, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, http.NoBody)
+	outbound, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodGet, options.Endpoint, http.NoBody)
 	if err != nil {
 		return Usage{}, fmt.Errorf("build usage request: %w", err)
 	}

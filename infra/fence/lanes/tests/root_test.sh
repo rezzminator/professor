@@ -3,7 +3,7 @@
 # the root's own hash and the cache volumes are ensured before the build; the
 # EXIT trap alone releases the build container and the base pin, exactly once,
 # on success, on a failed step, and on INT/TERM/HUP, whose exit codes are
-# 130/143/129. docker, creds.sh and housekeeping are stubs in a throwaway git
+# 130/143/129. docker, provisioning and housekeeping are stubs in a throwaway git
 # repo, so no image is built and no container is started.
 #
 #   bash infra/fence/lanes/tests/root_test.sh
@@ -28,9 +28,7 @@ cat >"$R/infra/fence/housekeeping.sh" <<'EOF'
 fence_housekeeping() { echo "fence_housekeeping $*" >>"$STUB_DOCKER_LOG"; }
 fence_volumes_ensure() { echo "fence_volumes_ensure" >>"$STUB_DOCKER_LOG"; }
 EOF
-cat >"$R/infra/fence/lanes/creds.sh" <<'EOF'
-case "$1" in --print-config) echo '{"accounts":[{"id":1}]}' ;; esac
-EOF
+for script in provision adopt cred-scan; do printf '#!/bin/bash\nexit 0\n' >"$R/infra/fence/lanes/$script.sh"; done
 (cd "$R" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
 
 # STUB_STEP1: what step 1's exec does — ok, fail (exit 7), or a signal name it
@@ -44,13 +42,16 @@ case "$1" in
   image) exit 1 ;; # image inspect: no root for this hash yet
   exec)
     case "$*" in
-      *"setup.sh tools"*)
+      *"provision.sh tools"*)
         case "${STUB_STEP1:-ok}" in
           ok) ;;
           fail) exit 7 ;;
           *) kill -"$STUB_STEP1" "$PPID" ;;
         esac ;;
-      *"pfm ls --plain"*) echo "no chats" ;;
+      *"cred-scan.sh"*)
+        if [ "${STUB_REFUSE:-0}" = 1 ]; then echo 'cred-scan: ✗ CREDENTIAL-REFUSED /root/.credentials.json — not a registered fixture'; exit 1; fi ;;
+      *"pfm ls --plain"*)
+        if [ "${STUB_NONEMPTY:-0}" = 1 ]; then echo '● FIXTURE chat'; else echo 'no chats'; fi ;;
       *) cat >/dev/null 2>&1 || true ;;
     esac ;;
 esac
@@ -61,7 +62,7 @@ export PATH="$BIN:$PATH" STUB_DOCKER_LOG="$T/docker.log"
 
 run_root() { # run_root STEP1 — sets RC and OUT
   : >"$STUB_DOCKER_LOG"
-  OUT="$(STUB_STEP1="$1" bash "$R/infra/fence/lanes/root.sh" --no-adopt 2>&1 </dev/null)"
+  OUT="$(STUB_STEP1="$1" bash "$R/infra/fence/lanes/root.sh" --rebuild 2>&1 </dev/null)"
   RC=$?
   HASH="$(bash "$R/infra/fence/lanes/root.sh" --print-hash 2>/dev/null)"
 }
@@ -72,7 +73,8 @@ released_once() { # the pin released once; the build container removed at the st
 
 # 1 — success: the image is the last stdout line, cleanup ran once
 run_root ok
-if [ "$RC" -eq 0 ] && [ "$(tail -1 <<<"$OUT")" = "pfm-lane-root:$HASH" ] && released_once; then
+if [ "$RC" -eq 0 ] && [ "$(tail -1 <<<"$OUT")" = "pfm-lane-root:$HASH" ] && released_once &&
+  [ "$(grep -c '^root: step [1-7]/7' <<<"$OUT")" -eq 7 ]; then
   ok "success: the root is committed and the EXIT trap alone releases the build, once"
 else bad "success" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 
@@ -86,7 +88,7 @@ else bad "housekeeping before build" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 3 — a failed step: exit 1, cleanup once
 run_root fail
-if [ "$RC" -eq 1 ] && grep -q 'setup.sh tools failed (exit 7)' <<<"$OUT" && released_once; then
+if [ "$RC" -eq 1 ] && grep -q 'provision.sh tools failed (exit 7)' <<<"$OUT" && released_once; then
   ok "a failed step exits 1 and the EXIT trap releases the build, once"
 else bad "failed step" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 
@@ -97,4 +99,49 @@ for pair in INT:130 TERM:143 HUP:129; do
   else bad "SIG${pair%%:*}" "rc=$RC want ${pair#*:}" "$(cat "$STUB_DOCKER_LOG")"; fi
 done
 
+# 5 — a contaminated root is never committed, and is always removed.
+STUB_REFUSE=1 run_root ok
+if [ "$RC" -eq 1 ] && grep -q '^root: ✗ .*CREDENTIAL-REFUSED /root/.credentials.json' <<<"$OUT" &&
+  ! grep -q '^commit ' "$STUB_DOCKER_LOG" && released_once; then ok "credential refusal stops before commit and removes the build"
+else bad "credential gate" "rc=$RC" "$OUT"; fi
+STUB_NONEMPTY=1 run_root ok
+if [ "$RC" -eq 1 ] && grep -q 'EMPTY fleet' <<<"$OUT" && ! grep -q '^commit ' "$STUB_DOCKER_LOG" && released_once; then ok "a populated fleet cannot become a root"
+else bad "empty fleet gate" "rc=$RC" "$OUT"; fi
+
+# 6 — only root build inputs change the image identity.
+H="$T/hash-repo"
+mkdir -p "$H/infra/fence/lanes" "$H/pfm"
+cp "$SUT" "$H/infra/fence/lanes/root.sh"
+cp "$LANES/container.sh" "$H/infra/fence/lanes/container.sh"
+cp "$LANES/../fence-env.sh" "$H/infra/fence/fence-env.sh"
+cp "$R/infra/fence/housekeeping.sh" "$H/infra/fence/housekeeping.sh"
+for script in provision adopt cred-scan; do cp "$R/infra/fence/lanes/$script.sh" "$H/infra/fence/lanes/$script.sh"; done
+for file in E1.sh lib.sh beats.md; do printf 'fixture\n' >"$H/infra/fence/lanes/$file"; done
+printf 'module example.test/pfm\n' >"$H/pfm/go.mod"
+(cd "$H" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
+base="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+for file in infra/fence/lanes/E1.sh infra/fence/lanes/lib.sh infra/fence/lanes/beats.md infra/fence/lanes/Z.sh infra/fence/lanes/provision.sh pfm/go.mod; do
+  printf 'edit\n' >>"$H/$file"
+  changed="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
+  case "$file" in
+    infra/fence/lanes/provision.sh|pfm/go.mod) expected=different ;;
+    *) expected=equal ;;
+  esac
+  if { [ "$expected" = equal ] && [ "$changed" = "$base" ]; } ||
+     { [ "$expected" = different ] && [ "$changed" != "$base" ]; }; then
+    ok "hash $file is $expected after edit"
+  else
+    bad "hash $file should be $expected after edit" "base=$base" "changed=$changed"
+  fi
+  case "$file" in
+    infra/fence/lanes/Z.sh) rm "$H/$file" ;;
+    *) git -C "$H" checkout -- "$file" ;;
+  esac
+done
+for flag in --accounts --no-adopt; do
+  case "$flag" in --accounts) set -- "$flag" 1 ;; *) set -- "$flag" ;; esac
+  OUT="$(bash "$R/infra/fence/lanes/root.sh" "$@" 2>&1)"; RC=$?
+  if [ "$RC" -eq 2 ] && grep -q '^usage: root.sh' <<<"$OUT"; then ok "unsupported root input $flag reports usage"
+  else bad "invalid root input $flag" "rc=$RC" "$OUT"; fi
+done
 shtest_end

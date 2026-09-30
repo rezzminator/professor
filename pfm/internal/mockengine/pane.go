@@ -45,18 +45,31 @@ type paneEngine interface {
 // statusline. Every change repaints the whole thing, so a capture sees only
 // what is true now.
 type pane struct {
-	history   []string
-	footer    string
-	menu      *Step
-	selected  int
-	agentRows []string
-	draft     composer
-	queued    []string
-	status    string
-	glyph     string
+	history     []string
+	footer      string
+	menu        *Step
+	selected    int
+	agentRows   []string
+	draft       composer
+	queued      []string
+	status      string
+	glyph       string
+	placeholder string
+	renameDraft *composer
+	renameError string
 }
 
 const historyKeep = 12
+
+// These dialog strings are read by internal/spawn/spawn.go's Codex birth.
+const (
+	codexRenameCommand = "/rename"
+	codexRenameOffer   = "rename the current thread"
+	codexRenameTitle   = "Rename thread"
+	codexRenameHint    = "Type a name and press Enter"
+	codexRenameEmpty   = "Thread name cannot be empty."
+	codexRenameFooter  = "Press enter to confirm or esc to go back"
+)
 
 func (screen *pane) say(line string) {
 	screen.history = append(screen.history, line)
@@ -75,6 +88,15 @@ func (screen *pane) render() string {
 	if screen.footer != "" {
 		out.WriteString("\r\n" + screen.footer + "\r\n")
 	}
+	if screen.renameDraft != nil {
+		out.WriteString("\r\n" + codexRenameTitle + "\r\n" + codexRenameHint + "\r\n")
+		out.WriteString(screen.glyph + " " + screen.renameDraft.text() + "\r\n")
+		if screen.renameError != "" {
+			out.WriteString(screen.renameError + "\r\n")
+		}
+		out.WriteString(codexRenameFooter + "\r\n")
+		return out.String()
+	}
 	if screen.menu != nil {
 		out.WriteString("\r\n")
 		for index, option := range screen.menu.Options {
@@ -86,7 +108,17 @@ func (screen *pane) render() string {
 		}
 		out.WriteString("Enter to confirm · Esc to cancel\r\n")
 	} else {
-		out.WriteString("\r\n" + screen.glyph + " " + screen.draft.text() + "\r\n")
+		draft := screen.draft.text()
+		text := draft
+		if text == "" {
+			if screen.placeholder != "" {
+				text = "\x1b[2m" + screen.placeholder + "\x1b[0m"
+			}
+		}
+		out.WriteString("\r\n" + screen.glyph + " " + text + "\r\n")
+		if screen.placeholder != "" && draft != "" && strings.HasPrefix(codexRenameCommand, draft) {
+			out.WriteString(codexRenameOffer + "\r\n")
+		}
 		if len(screen.queued) > 0 {
 			out.WriteString("  Press up to edit queued messages\r\n")
 		}
@@ -121,6 +153,22 @@ func runPane(proc *process, engine paneEngine, launchPrompt string, resumed bool
 		return ExitUsage
 	}
 	loop := &paneLoop{proc: proc, engine: engine, screen: &pane{glyph: engine.composerGlyph()}}
+	if codex, ok := engine.(interface{ composerPlaceholder() string }); ok {
+		loop.screen.placeholder = codex.composerPlaceholder()
+	}
+	if proc.engine == engineCodex {
+		// Codex repaints in an alternate screen so old busy footers cannot
+		// remain in tmux scrollback after the caller's turn ends.
+		if _, err := proc.stdout.Write([]byte("\x1b[?1049h")); err != nil {
+			warn(proc.stderr, "enter Codex alternate screen: %v", err)
+			return ExitUsage
+		}
+		defer func() {
+			if _, err := proc.stdout.Write([]byte("\x1b[?1049l")); err != nil {
+				warn(proc.stderr, "leave Codex alternate screen: %v", err)
+			}
+		}()
+	}
 	loop.keys = readKeys(proc.ctx, proc.stdin)
 	loop.refreshStatus(proc.script.Tokens)
 	loop.paint()
@@ -179,6 +227,11 @@ func (loop *paneLoop) run() int {
 
 func (loop *paneLoop) idleKey(event keyEvent) (int, bool) {
 	screen := loop.screen
+	if screen.renameDraft != nil {
+		loop.renameKey(event)
+		loop.paint()
+		return 0, false
+	}
 	if screen.menu != nil {
 		switch {
 		case event.kind == keyEnter:
@@ -202,6 +255,30 @@ func (loop *paneLoop) idleKey(event keyEvent) (int, bool) {
 		return 0, false
 	}
 	return loop.submit(line)
+}
+
+func (loop *paneLoop) renameKey(event keyEvent) {
+	screen := loop.screen
+	switch event.kind {
+	case keyEscape:
+		screen.renameDraft, screen.renameError = nil, ""
+	case keyEnter:
+		name := strings.TrimSpace(screen.renameDraft.text())
+		if name == "" {
+			screen.renameError = codexRenameEmpty
+			return
+		}
+		if err := loop.engine.rename(name); err != nil {
+			warn(loop.proc.stderr, "rename: %v", err)
+			screen.renameError = "Rename failed: " + err.Error()
+			return
+		}
+		screen.renameDraft, screen.renameError = nil, ""
+		loop.refreshStatus(loop.usage)
+	default:
+		screen.renameDraft.apply(event)
+		screen.renameError = ""
+	}
 }
 
 // closeMenu answers the open menu. A menu opened by /exit with background
@@ -236,15 +313,38 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 			step = *next
 			proc.script.advance(1)
 		}
+		if codex, ok := loop.engine.(interface{ compactBusyDuration(Step) time.Duration }); ok {
+			proceed, err := loop.busy(time.Now(), codex.compactBusyDuration(step), "")
+			if err != nil {
+				warn(proc.stderr, "compact busy footer: %v", err)
+			}
+			if !proceed || err != nil {
+				screen.footer = ""
+				loop.paint()
+				return 0, false
+			}
+		}
 		if err := loop.engine.compact(step); err != nil {
 			warn(proc.stderr, "compact: %v", err)
+			screen.footer = ""
+			loop.paint()
+			return 0, false
 		}
+		screen.footer = ""
 		screen.say(loop.engine.compactedLine())
 		loop.paint()
 		return 0, false
-	case "/rename":
+	case codexRenameCommand:
+		if screen.placeholder != "" && strings.TrimSpace(rest) == "" {
+			screen.renameDraft = &composer{}
+			loop.paint()
+			return 0, false
+		}
 		if err := loop.engine.rename(strings.TrimSpace(rest)); err != nil {
 			warn(proc.stderr, "rename: %v", err)
+		}
+		if screen.placeholder != "" {
+			loop.refreshStatus(loop.usage)
 		}
 		loop.paint()
 		return 0, false
@@ -271,7 +371,7 @@ func (loop *paneLoop) submit(line string) (int, bool) {
 		warn(proc.stderr, "record prompt: %v", err)
 	}
 	loop.paint()
-	code, exited := loop.turn()
+	code, exited := loop.turn(proc.script.forPrompt(line))
 	if exited {
 		return code, true
 	}
@@ -295,20 +395,25 @@ func (loop *paneLoop) peekStep() *Step {
 
 // turn runs scenario steps until a terminal one. Keys typed while the turn
 // is busy edit the composer; Enter queues the draft; Escape interrupts.
-func (loop *paneLoop) turn() (int, bool) {
+func (loop *paneLoop) turn(running *script) (int, bool) {
 	proc, screen := loop.proc, loop.screen
 	started := time.Now()
 	for {
-		step := proc.script.next()
+		step := running.next()
 		switch step.Type {
 		case StepTurn:
-			reply, busyMS, usage := proc.script.turnReply(step)
+			reply, busyMS, usage := running.turnReply(step)
 			if proceed, _ := loop.busy(started, time.Duration(busyMS)*time.Millisecond, ""); !proceed {
 				return loop.interrupted()
 			}
 			loop.usage = usage
 			if err := loop.engine.recordAssistant(reply, usage); err != nil {
 				warn(proc.stderr, "record reply: %v", err)
+			}
+			if stopper, ok := loop.engine.(interface{ stop() error }); ok {
+				if err := stopper.stop(); err != nil {
+					warn(proc.stderr, "Stop: %v", err)
+				}
 			}
 			screen.footer = ""
 			screen.say("⏺ " + reply)

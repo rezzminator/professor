@@ -231,7 +231,7 @@ func TestChatNewDefaultsToRequestScopedCallerCWD(t *testing.T) {
 	}
 }
 
-// metadataThenSpawner keeps a valid self-compact call inside the test process.
+// metadataThenSpawner keeps detached waiter tests inside the test process.
 // CommandThenSpawner deliberately uses os.Executable; under go test that is
 // the test binary, so launching it as `internal then` would recursively rerun
 // the package instead of exercising the waiter command.
@@ -267,54 +267,6 @@ func (resolver metadataNamedResolver) Resolve(
 		return resolve.Outcome{Stdout: resolver.socket + "\t" + resolver.pane + "\n"}, nil
 	}
 	return resolver.fallback.Resolve(ctx, kind, query)
-}
-
-type recordingCompactInjector struct {
-	scheduled      inject.Request
-	scheduledFocus string
-	scheduledThen  []string
-}
-
-func (recorder *recordingCompactInjector) Resolve(context.Context, string) (inject.Target, int, string, error) {
-	return inject.Target{}, 0, "", nil
-}
-
-func (recorder *recordingCompactInjector) ResolveEngine(
-	context.Context,
-	string,
-	string,
-) (inject.Target, int, string, error) {
-	return inject.Target{}, 0, "", nil
-}
-
-func (recorder *recordingCompactInjector) Capture(
-	context.Context,
-	string,
-	int,
-) (inject.Target, string, int, string, error) {
-	return inject.Target{}, "", 0, "", nil
-}
-
-func (recorder *recordingCompactInjector) Inject(context.Context, inject.Request) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
-func (recorder *recordingCompactInjector) ScheduleAfterCurrentTurn(
-	_ context.Context,
-	request inject.Request,
-) (inject.Result, error) {
-	recorder.scheduled = request
-	return inject.Result{Status: "scheduled", Code: 0}, nil
-}
-
-func (recorder *recordingCompactInjector) ScheduleSelfCompact(
-	_ context.Context,
-	focus string,
-	then []string,
-) (inject.Result, error) {
-	recorder.scheduledFocus = focus
-	recorder.scheduledThen = then
-	return inject.Result{Status: "scheduled", Code: 0}, nil
 }
 
 // TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats pins the real
@@ -818,126 +770,5 @@ func TestMCPMetadataSignsExplicitTargetWithoutRedirectingIt(t *testing.T) {
 		!strings.Contains(output.Proof, "sid thread-a") ||
 		!strings.Contains(output.Proof, `to reply: chat_inject "Codex A" <message>`) {
 		t.Fatalf("explicit target injection lost target or caller provenance: %+v", output)
-	}
-}
-
-func TestChatSelfCompactRequiresSteerAndTargetsRequestingSeat(t *testing.T) {
-	service := metadataIdentityService(t)
-	client := connectInMemory(t, service.Server())
-	meta := mcp.Meta{"threadId": "thread-a"}
-
-	steerless := callToolWithMeta[InjectOutput](
-		t, client.clientSession, "chat_self_compact", meta,
-		SelfCompactInput{Focus: "preserve the active MCP investigation"},
-	)
-	if steerless.Code != inject.CodeUndelivered || steerless.Typed ||
-		!strings.Contains(steerless.Message, "requires exactly one then steer") {
-		t.Fatalf("steerless self compact = %+v", steerless)
-	}
-
-	recursive := callToolWithMeta[InjectOutput](
-		t, client.clientSession, "chat_self_compact", meta,
-		SelfCompactInput{
-			Focus: "preserve the active MCP investigation",
-			Then:  "/compact again",
-		},
-	)
-	if recursive.Code != inject.CodeUndelivered || recursive.Typed ||
-		!strings.Contains(recursive.Message, "must not itself start with /compact") {
-		t.Fatalf("recursive self compact = %+v", recursive)
-	}
-
-	scheduled := callToolWithMeta[InjectOutput](
-		t, client.clientSession, "chat_self_compact", meta,
-		SelfCompactInput{
-			Focus: "preserve the active MCP investigation; drop resolved setup noise",
-			Then:  "resume the MCP stress test",
-		},
-	)
-	if scheduled.Code != 0 || scheduled.Status != "scheduled" || scheduled.Typed ||
-		scheduled.Steers != 1 || scheduled.Unsigned ||
-		scheduled.SocketPath == "" || scheduled.Pane == "" ||
-		!strings.Contains(scheduled.Message, "after the current turn settles") {
-		t.Fatalf("request-scoped self compact = %+v", scheduled)
-	}
-}
-
-// TestChatSelfCompactForwardsFocusAndThenToScheduleSelfCompact is the Task D
-// regression test, re-pointed: composing "/compact " + focus onto the
-// delivered command is now Engine.ScheduleSelfCompact's job
-// (internal/inject/engine.go), the one implementation `pfm chat
-// self-compact` shares — not chatSelfCompact's. What chatSelfCompact itself
-// must still get right is forwarding the validated focus and the ONE steer
-// to the injector unmodified, never discarding or recomposing them. Renamed
-// from ...ComposesFocusIntoScheduledCommand, which pinned the composition
-// here before Task D moved it.
-func TestChatSelfCompactForwardsFocusAndThenToScheduleSelfCompact(t *testing.T) {
-	recorder := &recordingCompactInjector{}
-	service := newService("test", &backend{
-		injector:             recorder,
-		allowAmbientIdentity: true,
-	})
-	_, _, err := service.chatSelfCompact(
-		context.Background(),
-		nil,
-		SelfCompactInput{
-			Focus: "preserve the signed MCP acceptance verdict",
-			Then:  "resume the acceptance test",
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "preserve the signed MCP acceptance verdict"
-	if recorder.scheduledFocus != want {
-		t.Fatalf("forwarded focus = %q, want %q", recorder.scheduledFocus, want)
-	}
-	if !reflect.DeepEqual(recorder.scheduledThen, []string{"resume the acceptance test"}) {
-		t.Fatalf("forwarded continuation = %q", recorder.scheduledThen)
-	}
-}
-
-// TestChatSelfCompactValidationRefusesBadFocus pins the validation
-// chatSelfCompact keeps as its own tool-call error even though
-// Engine.ScheduleSelfCompact validates focus again on the way in — this
-// handler must still return a Go error (not an InjectOutput refusal) for a
-// bad focus, so the check stays here too. None of these cases may reach the
-// injector.
-func TestChatSelfCompactValidationRefusesBadFocus(t *testing.T) {
-	tests := []struct {
-		name  string
-		focus string
-	}{
-		{name: "empty", focus: ""},
-		{name: "blank", focus: "   "},
-		{name: "multi-line", focus: "line one\nline two"},
-		{name: "carriage-return", focus: "line one\rline two"},
-		{name: "nul byte", focus: "wave three\x00closeout"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			recorder := &recordingCompactInjector{}
-			service := newService("test", &backend{
-				injector:             recorder,
-				allowAmbientIdentity: true,
-			})
-			_, _, err := service.chatSelfCompact(
-				context.Background(),
-				nil,
-				SelfCompactInput{
-					Focus: test.focus,
-					Then:  "resume the acceptance test",
-				},
-			)
-			if err == nil || !strings.Contains(err.Error(), "focus must be one non-empty line") {
-				t.Fatalf("focus %q error = %v, want the one-non-empty-line refusal", test.focus, err)
-			}
-			if recorder.scheduledFocus != "" || len(recorder.scheduledThen) != 0 {
-				t.Fatalf(
-					"invalid focus %q reached the injector: focus=%q then=%q",
-					test.focus, recorder.scheduledFocus, recorder.scheduledThen,
-				)
-			}
-		})
 	}
 }

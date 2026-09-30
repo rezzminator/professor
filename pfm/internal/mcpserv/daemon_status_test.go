@@ -71,11 +71,11 @@ func TestDaemonStatusOmitsChatRuntimeIdentityWithoutChat(t *testing.T) {
 	}
 }
 
-// TestProbeDaemonUnreachableIsAbsentAndAnErrorRecord: a refused probe reports
+// TestProbeDaemonUnreachableIsAbsentAndAWarnRecord: a refused probe reports
 // ErrDaemonAbsent — nothing is listening, the one state in which binding the
 // port is the right next move — and the log says the request failed rather
 // than that the daemon answered nothing.
-func TestProbeDaemonUnreachableIsAbsentAndAnErrorRecord(t *testing.T) {
+func TestProbeDaemonUnreachableIsAbsentAndAWarnRecord(t *testing.T) {
 	_, recorder := obs.Test(t)
 	server := httptest.NewServer(http.NotFoundHandler())
 	address := strings.TrimPrefix(server.URL, "http://")
@@ -91,8 +91,8 @@ func TestProbeDaemonUnreachableIsAbsentAndAnErrorRecord(t *testing.T) {
 		t.Fatalf("closed-port probe error = %v, want the dial failure's own cause", err)
 	}
 	records := recorder.Records()
-	if len(records) != 1 || records[0].Level != "ERROR" {
-		t.Fatalf("want one ERROR http.out record: %s", recorder.Raw())
+	if len(records) != 1 || records[0].Level != "WARN" {
+		t.Fatalf("want one WARN http.out record: %s", recorder.Raw())
 	}
 	if got, found := records[0].Field(obs.FieldErr); !found || got == "" {
 		t.Fatalf("the failed probe's record names no error: %v", records[0].Fields)

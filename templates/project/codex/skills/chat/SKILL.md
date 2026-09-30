@@ -1,6 +1,6 @@
 ---
 name: chat
-description: Messages the tmux agent chats through `pfm chat` — `pfm chat inject {target} '{one line}'` sends a turn to a teammate's pane, `pfm whoami` gives your own address; read the delivery receipt. Use when a protocol says "ping", "inject", or "reply to {session}". Compaction → `pfm chat self-compact`.
+description: Messages the tmux agent chats through `pfm chat` — `pfm chat inject {target} '{one line}'` sends a turn to a teammate's pane, `pfm whoami` gives your own address; read the delivery receipt. Use when a protocol says "ping", "inject", or "reply to {session}".
 ---
 
 <!--
@@ -33,5 +33,5 @@ Native subagents communicate through `collaboration.send_message` to the parent 
 
 ## Boundaries
 
-- Use `pfm chat self-compact` for compaction; `chat inject` rejects `/compact`. Check `pfm chat inject --help` for supported delivery flags.
+- `chat inject` rejects `/compact`: pfm never types a compaction. Check `pfm chat inject --help` for supported delivery flags.
 - Never capture or scrape another pane to infer state — ping and ask; the orchestrator rules from reports.

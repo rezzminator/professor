@@ -225,8 +225,20 @@ func layoutSnapshotPaths(env LayoutEnv, finding LayoutFinding) ([]string, error)
 			return []string{finding.Source, finding.Path}, nil
 		}
 	case layoutRowSessionStore:
-		if finding.Verdict == VerdictMerge {
-			return []string{finding.Path, layoutSessionStore(env, finding)}, nil
+		store := layoutSessionStore(env, finding)
+		switch finding.Verdict {
+		case VerdictMerge:
+			return []string{finding.Path, store}, nil
+		case VerdictCreate, VerdictRepoint:
+			// These change only the seat's link. A store other seats already
+			// hold is journaled by none of them, so neither the journal nor the
+			// space preflight copies its transcripts; one this row creates is.
+			if _, err := os.Lstat(store); err == nil {
+				return []string{finding.Path}, nil
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("stat session store %s: %w", store, err)
+			}
+			return []string{finding.Path, store}, nil
 		}
 	case layoutRowMemoryHelpers:
 		planner := &engine{options: Options{Home: env.Home, ConfigDirs: accountDirs(env), Stdout: io.Discard}}
@@ -332,6 +344,19 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 			return journal.mutate(finding, paths, func() error {
 				if err := os.MkdirAll(filepath.Dir(finding.Path), 0o700); err != nil {
 					return err
+				}
+				if err := os.MkdirAll(store, 0o700); err != nil {
+					return fmt.Errorf("create store entry %s: %w", store, err)
+				}
+				if target, err := os.Readlink(finding.Path); err == nil {
+					if !filepath.IsAbs(target) {
+						target = filepath.Join(filepath.Dir(finding.Path), target)
+					}
+					if filepath.Clean(target) == store {
+						return nil
+					}
+				} else if !errors.Is(err, fs.ErrNotExist) {
+					return fmt.Errorf("read session-store link %s: %w", finding.Path, err)
 				}
 				if finding.Verdict == VerdictRepoint {
 					if err := os.Remove(finding.Path); err != nil {

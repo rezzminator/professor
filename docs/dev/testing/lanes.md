@@ -1,19 +1,19 @@
-# Tier B lanes — the live DFS suite: one root, one container, lanes in sequence
+# Tier B lanes — the hermetic end-to-end suite
 
 **Home:** `infra/fence/lanes/`. **Coverage index:** `infra/fence/lanes/beats.md` (per-lane beats) + `infra/fence/lanes/map.tsv` (`name · lane · beat`, one row per pfm command and MCP tool).
 
-Tier B drives the REAL binary against REAL engines: real Claude Code, Codex and OpenCode processes, real tmux panes, real seats, real model turns. It is the release gate and the on-demand suite, never a per-commit one — Tier U (unit) and Tier A (e2e, jailed) run at every commit. Tier B runs on linux containers only; darwin has no Tier B.
+Tier B drives the pfm binary against a mock engine that plays `claude`, `codex` and `opencode`. Every run has two invented Claude fixture seats plus Codex and OpenCode fixture homes, registered fixture credentials only, `--network none` and `GOPROXY=off`. It spends no model turn and works in Linux containers on any Docker host. A human runs it on demand, or a flight lander runs it when that flight's spec names the lanes. Neither CI nor the releaser GATE runs the lanes. The host-side release rehearsal is the one real-model run; it is outside every test suite.
 
 ## The shape
 
 ```
 pfm-lane-root:<hash>          built once per template change (root.sh), never pushed
-   └─► ONE container per run  the fleet's state accumulates lane after lane:
+   └─► ONE offline container per run  the fleet's state accumulates lane after lane:
        O1 → E1 → E2 → E3 → F → M → A → O2
 ```
 
 - **One container, lanes in sequence.** Every lane inherits the pfm state the lanes before it built: E1's named chat is still alive when F storms, when M restarts the daemon, when A rewrites the adopter's hooks. pfm is ONE state (one daemon, one `pfm.db` and one `pfm-cache.db`, one tmux server, one hook set) and the effect of each area on that shared state is where the bugs live.
-- **Any lane runs alone.** `run.sh --lanes M` starts a fresh container from the same root and runs M only; its `need` prelude makes the preconditions the sequence would have made (a live chat, the daemon, a working directory) and is a no-op when they already exist. A solo lane is the dev/qa loop; the sequence is the wave-close and release gate.
+- **Any lane runs alone.** `run.sh --lanes M` starts a fresh container from the same root and runs M only; its `need` prelude makes the preconditions the sequence would have made (a live chat, the daemon, a working directory) and is a no-op when they already exist. A solo lane is the dev/qa loop; the sequence checks accumulated state.
 - **No `--parallel`, ever.** Concurrency is a scripted beat (`storm`, two writers, inject-during-busy), never a scheduling strategy: two lanes racing on one fleet would make every red row order-dependent.
 - **Order is a design decision:** state builders first, readers over the richest state, destroyers last. Lane O is one area with two entry points — **O1** before any chat exists, **O2** the destructive tail that ends with `uninstall`.
 
@@ -24,7 +24,7 @@ infra/fence/lanes/run.sh --lanes E1 --dry-run     # the plan: hash, image decisi
 infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from the root image
 ```
 
-`--dry-run` executes nothing — no container, no model turn — and is the cheap way to see what a run would cost. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
+`--dry-run` creates no container and runs no beat; it prints the root decision, lane order, budgets and seats. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
 
 | file | what it carries |
 | --- | --- |
@@ -44,11 +44,15 @@ infra/fence/lanes/run.sh --root rebuild             # force a fresh root image f
 
 Lanes named on `--lanes` in any order run in canonical order. A lane that is not written yet is listed in `infra/fence/lanes/pending.txt`: naming it explicitly is refused (exit 2), and a bare `run.sh` drops it with a named `NOT WRITTEN` line rather than shrinking the sequence silently. The header names the mode (`solo` / `sequence`) and, in sequence mode, the lanes that ran before each lane.
 
-**The root image.** `root.sh` builds it from the `pfm-dev` fence image: pfm compiled from the mounted tree, the real engines installed (`infra/demo/setup.sh tools`), the seats' credentials staged (`lanes/creds.sh`), `pfm install --yes` plus the seats' first-run state (`infra/demo/setup.sh install`), express adopted by a real Claude chat (`infra/demo/adopt.sh`, ~10–15 min, one seat), then `docker commit`. `<hash>` covers the tracked content of `pfm/**`, `templates/**`, `docs/SETUP.md`, `infra/fence/**` plus the worktree's dirty diff, so an uncommitted edit changes the hash and can never be served by a stale image. Same hash → the image is reused, printed by name. It carries real seat tokens: it is local only, `root.sh` never pushes and refuses a `--tag` that names a registry. `root.sh --no-adopt` builds without a single model turn (no interview, no OpenCode liveness probe) — the way to prove the build path for free.
+**The root image.** `root.sh` builds from the `pfm-dev` fence image in seven steps: (1) `provision.sh tools` builds pfm and `pfm/cmd/mock-engine`, linked as all three engine CLIs; (2) `provision.sh seats` writes two fixture seats and fixture Codex/OpenCode homes; (3) `provision.sh install` runs `pfm install --yes` and creates invented local projects; (4) `adopt.sh` scripts `pfm init` and `pfm init --render` for the invented express project; (5) `pfm ls --plain` confirms an empty fleet; (6) `cred-scan.sh` refuses any unregistered credential under `/root`, `/tmp` or `/home`, reporting its path without its value; (7) `docker commit` makes the local `pfm-lane-root:<hash>` image. A failed step commits no image.
 
-**Seats.** `--seats cc:1` is not a hint: it is the container's whole Claude roster. `run.sh` hands the run's `cc:` seats to `root.sh --accounts`, the roster is a root-hash input (so a one-seat image is never reused for a two-seat run), and `lanes/creds.sh` drops any seat this host cannot log in — by name, in both modes. A lane therefore never reads a second seat out of the config and finds nothing staged for it; with one seat the account-switch beats report `blocked`, not `✗`.
+`<hash>` covers the root's build inputs listed by `HASH_PATHS` in `root.sh`: the pfm product and templates, `VERSION`, `docs/SETUP.md`, `docs/PLACEHOLDERS.md`, the pre-push hook, the fence image files, and `root.sh`, `container.sh`, `provision.sh`, `adopt.sh`, `cred-scan.sh`, `fixtures/` and `scenarios/`. Dirty and untracked content in those inputs contributes to the hash. A lane-script, `lib.sh` or registry edit reuses the root. A matching image is printed as `REUSE`; the root stays local and `root.sh` refuses a registry tag.
 
-**Credentials.** `lanes/creds.sh` reads the seats from pfm's own config and stages each one at the container's `~/.cc/<id>`: on darwin through the Keychain (`infra/demo/creds.sh` is the reader), on linux by copying each seat's `.credentials.json` plus the Codex and OpenCode auth files. Every seat is reported by name; a missing one is `seat 2 (🥈): NO CREDENTIAL — <why>`, never an empty success, and no credential body is ever printed. A copied seat shares the host's refresh token — the first refresh inside the container rotates it, so the host seat may need a re-login; that is the accepted cost of a reusable root.
+**Seats.** `--seats cc:1` names the primary Claude seat for the run, not the roster. Both fixture seats always exist; `SEAT` names the first requested `cc:` seat and `ALT` or `SPARE` names the other.
+
+## The fake engine
+
+`provision.sh` stages `scenarios/default.json` as the default scenario. The mock engine chooses its Claude, Codex or OpenCode behavior from its invoked name and records panes and transcripts that pfm reads. A beat can script one turn with `mock_steps '<json>'`: the inline steps include `turn`, `hold`, `tool_call`, `compact` and `crash`. `wait_prompt <chat> <needle> <seconds>` proves pfm's transcript reader saw the submitted prompt; `wait_last` can then prove the scripted reply. See `infra/fence/lanes/scenarios/` and `lib.sh` for the fixtures and helpers. Assertions judge pfm's report, pane, transcript or state, never the mock's answer alone.
 
 ## Read a red row
 
@@ -61,11 +65,11 @@ Four verdicts, and no fifth:
 - `✓` the assertion held.
 - `✗` it did not. The lane keeps going to its end, so one report carries every failure.
 - `known` the beat is an entry in `infra/fence/lanes/known-gaps.yml`: counted apart, does not fail the run. **A listed beat that PASSES is a red row** (`known-gap now passes — remove the entry`), an entry with no `expires:` or past it makes the run red before a single lane starts, and an `arch:`-scoped entry is a gap only on that architecture.
-- `blocked` a declared precondition failed — a beat before it (`blocked-by <beat>`), the run's own shape (`blocked-by seats cc:1 — no second seat in this run`), or the chat itself: a beat that declared `target_live <chat>` and finds no live row for it is blocked in seconds, `blocked-by` the beat that last saw that chat alive. Never `✗` for someone else's failure, and never silence.
+- `blocked` a declared precondition failed — a beat before it (`blocked-by <beat>`), a named capability such as O2.01b's `clock-door`, or the chat itself: a beat that declared `target_live <chat>` and finds no live row for it is blocked in seconds, `blocked-by` the beat that last saw that chat alive. Never `✗` for someone else's failure, and never silence.
 
 **A dead chat costs seconds, not minutes.** Every wait (`wait_last`, `wait_for`) abandons a beat's declared live chat the moment its row dies and says which happened — `timed out after Ns` or `has no live row` are different findings. After the first blocked beat the lane spends its ONE `lane_reopen` command to bring the chat back, `need`-style and never in a loop; whether it came back is a named line in the lane log. Where a reboot takes the NAME off the live session — `/reload --new` leaves the label with the id it replaced and auto-names the reborn session from its steer — a beat follows the chat by its tmux SOCKET instead (`anchor_socket <socket>`, column 11 of `pfm ls --tsv`, unchanged across the reboot) and renames it back with `pfm chat name <id> <name>`.
 
-A beat also fails on a dirty activity log: `lib.sh` snapshots `<pfm home>/log/pfm.jsonl` before each beat and fails it on any `"level":"error"` record in its own slice that no `expect-log <pattern>` declared. Until Wave 6 lands that file does not exist, and the run summary says so by name: `activity log: ABSENT (Wave 6 not landed) — log assertions not enforced`.
+A beat also fails on a dirty activity log: `lib.sh` snapshots `<pfm home>/log/pfm.jsonl` before each beat and fails it on any `"level":"error"` record in its own slice that no `expect-log <pattern>` declared.
 
 ## Budgets
 
@@ -79,7 +83,7 @@ infra/fence/lanes/run.sh --check-budget E1 700   # the verdict for a recorded wa
 
 1. Add its beat to `infra/fence/lanes/beats.md` under its lane, naming what it asserts and the seat it spends.
 2. Add the `name · lane · beat` row to `infra/fence/lanes/map.tsv`: `name` is the command as typed (`pfm chat new`) or the MCP tool's name (`chat_ls`).
-3. Write the beat in `infra/fence/lanes/<lane>.sh` using only `lib.sh`: `beat <id>`, `spends <seat>`, `target <chat>` (or `target_live <chat>` when the beat cannot assert anything without that chat alive), then exactly one of `pass` / `fail` / `known` / `blocked`. Assert from pfm's own report or the pane — never from what a model said.
+3. Write the beat in `infra/fence/lanes/<lane>.sh` using `lib.sh`: `beat <id>`, `spends <seat>`, `target <chat>` (or `target_live <chat>` when the beat cannot assert anything without that chat alive), then exactly one of `pass` / `fail` / `known` / `blocked`. Script its prompt with `mock_steps` and verify delivery with `wait_prompt`; assert from pfm's own report or the pane.
 4. Run the gate: `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. It fails on a map row whose beat no lane carries; on any command in `pfm --help` or MCP tool the map does not carry (derived from the binary); and on a row naming a command or tool pfm does not serve (a verb missing from the help tree is asked of pfm's dispatcher). If it cannot build or drive pfm it prints `DERIVE-FAILED: <why>` and exits 2; it never reports clean for a check it could not run.
 
 ```bash
@@ -93,4 +97,4 @@ The harness has its own tests — plain bash, no docker, no model:
 for t in infra/fence/lanes/tests/*_test.sh; do bash "$t" || break; done
 ```
 
-They cover the beat library's verdicts and the three known-gap red rows, the runner's plan/order/mode/budget verdicts, the credential staging (including "no token on stdout"), and the map gate's findings. Each failure path was watched red against a deliberately broken copy of the script it guards before it was trusted.
+They cover the beat library's verdicts and the known-gap red rows, the runner's plan/order/mode/budget verdicts, `cred-scan_test.sh`'s registered-fixture credential gate, and the map gate's findings. Run these tests inside the fence through `.claude/scripts/dev.sh iso run`.

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
-	"github.com/rezzminator/professor/pfm/internal/nudge"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -29,20 +28,14 @@ type sessionEffortRecord struct {
 }
 
 // RecordSession persists what the main statusline payload says about its
-// session. The used-percentage feeds the compact-nudge hook, which reads
-// Claude Code's own number instead of re-deriving a context window it cannot
-// know (the transcript names the model, never the window); the effort feeds
-// the agent-panel rows of the same session. Fail-open like the
-// rest of the statusline: a record that cannot be written goes to warn and
-// costs one reminder or one row's effort, never the status line.
+// session. Its effort feeds the agent-panel rows of the same session. Fail-open
+// like the rest of the statusline: a record that cannot be written goes to warn
+// and costs one row's effort, never the status line.
 func RecordSession(raw []byte, sidDir string, warn io.Writer) {
 	var sample struct {
 		SessionID      string `json:"session_id"`
 		TranscriptPath string `json:"transcript_path"`
-		ContextWindow  struct {
-			UsedPercentage float64 `json:"used_percentage"`
-		} `json:"context_window"`
-		Model struct {
+		Model          struct {
 			ID string `json:"id"`
 		} `json:"model"`
 		Effort struct {
@@ -58,9 +51,6 @@ func RecordSession(raw []byte, sidDir string, warn io.Writer) {
 	}
 	if sessionID == "" {
 		return
-	}
-	if err := nudge.RecordContext(sidDir, sessionID, int(sample.ContextWindow.UsedPercentage)); err != nil {
-		fmt.Fprintf(warn, "pfm statusline: record context sample (fail-open): %v\n", err)
 	}
 	record := sessionEffortRecord{
 		Level: strings.TrimSpace(sample.Effort.Level),

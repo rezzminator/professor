@@ -310,7 +310,7 @@ func probeProfessorRoute(ctx context.Context, address string) error {
 	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	endpoint := "http://" + address + pfmconfig.MCPPathProfessor
-	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(probeCtx), http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build route probe for %s: %w", endpoint, err)
 	}
@@ -676,7 +676,7 @@ func (proxy *stdioProxy) closeSession() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), proxyCloseTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, proxy.endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodDelete, proxy.endpoint, http.NoBody)
 	if err != nil {
 		proxy.warn("build daemon session close: %v", err)
 		return

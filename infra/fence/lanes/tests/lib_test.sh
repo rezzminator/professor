@@ -32,6 +32,7 @@ cat >"$BIN/pfm" <<STUB
 #!/usr/bin/env bash
 ROWS="$ROWS"
 LAST="$T/last.txt"
+READ="$T/read.json"
 STUB
 cat >>"$BIN/pfm" <<'STUB'
 case "$1 ${2:-}" in
@@ -54,6 +55,12 @@ case "$1 ${2:-}" in
     [ -f "$ROWS" ] && cat "$ROWS"
     exit 0 ;;
   "chat last") [ -f "$LAST" ] && cat "$LAST"; exit 0 ;;
+  "chat read") [ -f "$READ" ] && cat "$READ"; exit 0 ;;
+  "chat end"|"chat kill")
+    if [ "${STUB_STORM_SURVIVES:-0}" != 1 ]; then
+      awk -F'\t' -v n="$3" '$5 != n && $2 != n' "$ROWS" >"$ROWS.tmp" && mv "$ROWS.tmp" "$ROWS"
+    fi
+    exit 0 ;;
   *) exit 0 ;;
 esac
 STUB
@@ -763,4 +770,70 @@ else
   bad "PFM_LOG_LEVEL ruling" "got '$level', want 'debug'"
 fi
 
+# ---- 26: inline steps preserve JSON, compacted onto one marker line.
+steps="$(bash -c ". '$LIB'; mock_steps '[ { \"type\": \"turn\", \"reply\": \"fixture\" } ]'" 2>&1)"
+if [ "$steps" = 'mock-engine: [{"type":"turn","reply":"fixture"}]' ]; then ok "mock_steps prints compact JSON after its marker"
+else bad "mock_steps" "$steps"; fi
+
+# ---- 27: only a user transcript record satisfies wait_prompt.
+printf '{"entries":[{"role":"assistant","text":"needle"},{"role":"user","text":"sent needle"}]}\n' >"$T/read.json"
+prompt="$(LANE_WAIT_LAST_EVERY_SECS=0.1 bash -c ". '$LIB'; wait_prompt X needle 2; echo RC=\$? WHY=\"\$LANE_WAIT_WHY\"" 2>&1)"
+if grep -q 'RC=0' <<<"$prompt"; then ok "wait_prompt finds a user record"
+else bad "wait_prompt user" "$prompt"; fi
+printf '{"entries":[{"role":"assistant","text":"needle"}]}\n' >"$T/read.json"
+prompt="$(LANE_WAIT_LAST_EVERY_SECS=0.1 bash -c ". '$LIB'; wait_prompt X needle 1; echo RC=\$? WHY=\"\$LANE_WAIT_WHY\"" 2>&1)"
+if grep -q 'RC=1 WHY=timed out after 1s' <<<"$prompt"; then ok "wait_prompt times out on assistant-only text"
+else bad "wait_prompt timeout" "$prompt"; fi
+: >"$ROWS"
+prompt="$(LANE_ALIVE_RETRY_SECS=0.05 LANE_WAIT_LAST_EVERY_SECS=0.1 bash -c ". '$LIB'; target_live X; wait_prompt X needle 3; echo RC=\$? WHY=\"\$LANE_WAIT_WHY\"" 2>&1)"
+if grep -q 'RC=2 WHY=.*has no live row' <<<"$prompt"; then ok "wait_prompt abandons a dead anchor"
+else bad "wait_prompt dead anchor" "$prompt"; fi
+
+# ---- 28: storm cleanup proves survivors and preserves the other live rows.
+printf 'live-claude\ts1\tp\t/work\tSTORM_1\t1\t10\t1\t1\tfalse\tcc-storm\n' >"$ROWS"
+printf 'resume-claude\ts2\tp\t/work\tSTORM_2\t1\t10\t1\t1\tfalse\t\n' >>"$ROWS"
+printf 'live-claude\ts3\tp\t/work\tSTORM_REVIEW\t1\t10\t1\t1\tfalse\tcc-review\n' >>"$ROWS"
+cleanup="$(STUB_STORM_SURVIVES=1 bash -c ". '$LIB'; lane_storm_kill; echo RC=\$?" 2>&1)"
+if grep -q 'STORM rows left: 2' <<<"$cleanup" && grep -q 'RC=1' <<<"$cleanup"; then ok "storm survivors make cleanup fail"
+else bad "storm survivor" "$cleanup"; fi
+cleanup="$(bash -c ". '$LIB'; lane_storm_kill; echo RC=\$?" 2>&1)"
+if grep -q 'STORM rows left: 0 · other live rows: 1 → 1' <<<"$cleanup" && grep -q 'RC=0' <<<"$cleanup"; then ok "storm cleanup removes live and resume rows and preserves other names"
+else bad "storm clean" "$cleanup"; fi
+# ---- 29: a live row's bare socket is resolved under the tmux directory.
+live_rows
+export PFM_TMUX_DIR="$T/live-tmuxdir"
+mkdir -p "$PFM_TMUX_DIR"
+mv "$BIN/tmux" "$BIN/tmux.default"
+cat >"$BIN/tmux" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = -S ] && [ "$2" = "$PFM_TMUX_DIR/cc-1-2-3" ]; then
+  echo 'live target pane fixture'
+  exit 0
+fi
+echo "tmux stub: wrong socket path $*" >&2
+exit 1
+STUB
+chmod +x "$BIN/tmux"
+run_lane liveevidence \
+  'lane_begin TL' \
+  'beat TL.70-live; target TL_CHAT; fail "fixture failure"' \
+  'lane_end'
+log="$(cat "$LANE_DIR/TL.log" 2>/dev/null)"
+if grep -qF "raw-dump: tmux -S $PFM_TMUX_DIR/cc-1-2-3 capture-pane" <<<"$log" &&
+  grep -qF 'live target pane fixture' <<<"$log"; then
+  ok "raw dump resolves the live target's bare socket and records its pane"
+else
+  bad "raw dump live socket" "$log"
+fi
+mv "$BIN/tmux.default" "$BIN/tmux"
+unset PFM_TMUX_DIR
+dead_rows
+
+# ---- 30: the picker search line is not its selected fleet row.
+selected="$(bash -c ". '$LIB'; tui_pane() { printf '%s\n' '│ find › New 1/1 visible' '│ › ● New_CHAT  cc:1  1  5s' '│   ● OTHER_CHAT  cc:2  2  10s'; }; tui_selected" 2>&1)"
+if [ "$selected" = '● New_CHAT' ]; then
+  ok "tui_selected returns the row marker and name beneath a typed search"
+else
+  bad "tui_selected search" "got=[$selected]"
+fi
 shtest_end

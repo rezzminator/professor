@@ -58,9 +58,13 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	}},
 	"internal/inject/engine.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/kill/manager.go":  {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
-	"internal/mockengine/claude.go": {"parses mock Claude argv", []string{
-		"--settings", "--system-prompt-file", "--session-id", "--mcp-config", "--resume",
-	}},
+	"internal/mockengine/claude.go": {
+		"mock argv",
+		[]string{
+			"--settings", "--system-prompt-file", "--session-id", "--mcp-config",
+			"--resume", "--fork-session", "CLAUDE_CODE_SESSION_ID=",
+		},
+	},
 	"internal/resolve/whoami.go": {"reads caller session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 	"internal/statusline/render.go": {"reads engine telemetry", []string{
 		"ANTHROPIC_MODEL", "CLAUDE_CODE_AUTO_COMPACT_WINDOW",

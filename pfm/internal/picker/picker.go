@@ -457,7 +457,8 @@ func killApplier(
 	}
 	return func(change ui.KillChange) error {
 		if !change.Killed {
-			return manager.Unkill(ctx, change.ID)
+			_, err := manager.Unkill(ctx, change.ID)
+			return err
 		}
 		request := kill.Request{
 			ID: change.ID,

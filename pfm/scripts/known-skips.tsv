@@ -4,15 +4,13 @@
 github.com/rezzminator/professor/pfm/cmd/pfm	TestInternalLaunchPrintHelper	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/cmd/pfm	TestPFMAttachHelper	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/e2e	TestClaudePluginInstallFixture	helper	re-exec fixture: runs only as the jailed claude stub of its parent test
-github.com/rezzminator/professor/pfm/e2e	TestClaudeHarnessCaptureFixture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
-github.com/rezzminator/professor/pfm/e2e	TestCodexHookAPIFixture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+github.com/rezzminator/professor/pfm/e2e	TestClaudeHarnessCaptureFixture	helper	re-exec fixture: runs only as the jailed claude -p stub of its parent test (loopback sink only)
+github.com/rezzminator/professor/pfm/e2e	TestCodexHookAPIFixture	helper	re-exec fixture: runs only as the jailed codex app-server stub of its parent test
 github.com/rezzminator/professor/pfm/internal/agentrole	TestUnreadableDirectoryIsAnError	root-noop	the fence runs as root, where permission bits deny nothing
-github.com/rezzminator/professor/pfm/internal/codexappendix	TestNativeHookDelivery	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
 github.com/rezzminator/professor/pfm/internal/codexgen	TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/compose	TestCodexLineageStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/compose	TestComposeStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/deps	TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence	platform	darwin-only gate
-github.com/rezzminator/professor/pfm/internal/doctor	TestHarnessPromptNativeRepeatedCapture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
 github.com/rezzminator/professor/pfm/internal/gather	TestGatherStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveFetchRequestedDOI	opt-in-live	live network provider probe; opt-in
 github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderAnna	opt-in-live	live network provider probe; opt-in
@@ -43,7 +41,6 @@ github.com/rezzminator/professor/pfm/internal/harvestpy	TestLiveBrowserCallerHea
 github.com/rezzminator/professor/pfm/internal/hostfixture	TestReadOnlyHomeRefusesAWriteInsideIt	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/index	TestIndexStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/index	TestIndexStressHelper	helper	re-exec fixture: runs only as the child of its parent test
-github.com/rezzminator/professor/pfm/internal/inject	TestRealClaudeStashSemantics	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
 github.com/rezzminator/professor/pfm/internal/installer	TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/installer	TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateAnnouncesWhenItCannotProbe	platform	darwin-only gate

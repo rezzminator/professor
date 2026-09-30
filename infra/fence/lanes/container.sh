@@ -6,7 +6,7 @@
 #   . "$HERE/container.sh"
 #   lane_base_image <hash>          # build the fence image and pin it privately
 #   lane_base_release <hash>        # drop that pin once the root build ends
-#   lane_run <name> <image>         # start a detached lane container from it
+#   lane_run <name> <image> [network] # start a detached lane container from it
 #
 # Why the private tag: the fence image `professor-pfm-dev` is rebuilt by every
 # `dev.sh iso` run on this host, and under docker's containerd image store a
@@ -46,9 +46,13 @@ lane_base_release() { # lane_base_release <hash> — drops the pin once the buil
   docker rmi "pfm-lane-base:$1" >/dev/null 2>&1 || true
 }
 
-lane_run() { # lane_run <name> <image> — a detached lane container, fence contract
+lane_run() { # lane_run <name> <image> [network] — a detached fence container
   local name="$1" image="$2"
+  if [ "${3:-}" = none ]; then set -- --network none -e GOPROXY=off
+  elif [ -n "${3:-}" ]; then set -- --network "$3"
+  else set --; fi
   docker run -d --init --name "$name" --label pfm.fence=1 \
+    "$@" \
     -v "$PFM_DEV_WORKTREE:/worktree:ro" \
     -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" \
     -v pfm-dev-gocache:/root/.cache/go-build \
@@ -57,6 +61,7 @@ lane_run() { # lane_run <name> <image> — a detached lane container, fence cont
     -w /worktree \
     -e PFM_DEV_FENCE=1 -e IS_SANDBOX=1 -e LANG=C.UTF-8 -e GOFLAGS=-buildvcs=false \
     -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json \
+    -e MOCK_ENGINE_SCENARIO=/root/.local/share/pfm-lanes/default.json \
     -e "PFM_DEV_REPO_GIT_DIR=/pfm-git-common/$PFM_DEV_GIT_DIR_REL" \
     -e PFM_DEV_REPO_WORK_TREE=/worktree \
     "$image" sleep infinity >/dev/null

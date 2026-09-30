@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+# .claude/scripts/dev.sh must loop infra/demo/tests/*_test.sh.
 # The demo must refuse a host Codex login before it touches Docker.
 set -uo pipefail
 SHTEST_TAG=codex-fence-home-test
-source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd -P)"
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../scripts/shtest.sh"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 FAKE_HOME="$T/home"
 mkdir -p "$FAKE_HOME/.codex" "$T/bin"
 printf '{"tokens":{"access_token":"HOST-ONLY-TOKEN"}}\n' >"$FAKE_HOME/.codex/auth.json"

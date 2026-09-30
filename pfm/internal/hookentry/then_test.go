@@ -67,7 +67,6 @@ func TestThenLogsItsContractBeforeWaiting(t *testing.T) {
 		done <- Then([]string{
 			"--socket", "/tmp/tmux-jail/cc-1-2-3",
 			"--target", "%0",
-			"--self",
 			"--steer", "resume the wave",
 			"--steer", "then report",
 		}, log)
@@ -85,8 +84,7 @@ func TestThenLogsItsContractBeforeWaiting(t *testing.T) {
 		t.Fatalf("Then returned %d before the waiter was released — the fake did not block", code)
 	default:
 	}
-	want := "then waiter: start — target %0 on /tmp/tmux-jail/cc-1-2-3 · self=true · 2 steer(s) · waiting for: " +
-		inject.WaitingFor(true, "") + "\n"
+	want := "then waiter: start — target %0 on /tmp/tmux-jail/cc-1-2-3 · 2 steer(s) · waiting for: the current turn to end\n"
 	if got := log.String(); got != want {
 		t.Fatalf("first log line = %q, want %q", got, want)
 	}
@@ -127,11 +125,59 @@ func TestThenHandsTheEngineAndTheContractToTheWaiter(t *testing.T) {
 		Engine:     string(pfmengine.Codex),
 	}
 	if waiter.got.SocketPath != want.SocketPath || waiter.got.Target != want.Target ||
-		waiter.got.Engine != want.Engine || waiter.got.SelfTarget ||
+		waiter.got.Engine != want.Engine ||
 		len(waiter.got.Steers) != 1 || waiter.got.Steers[0] != want.Steers[0] {
 		t.Fatalf("waiter was handed %+v, want %+v", waiter.got, want)
 	}
 	if !strings.Contains(log.String(), "engine codex") {
 		t.Fatalf("start line does not name the Codex contract: %q", log.String())
+	}
+}
+
+// The waiter's Codex guard (inject.DeliverThen) compares the canonical id, so
+// a long engine name on --engine must reach it as that id: otherwise the start
+// line promises the Codex contract while the wait types on a steady-idle guess.
+func TestThenCanonicalizesTheEngineBeforeTheWaiterSeesIt(t *testing.T) {
+	waiter := &blockingWaiter{release: make(chan struct{}), result: inject.Result{Code: inject.CodeUndelivered}}
+	close(waiter.release)
+	swapThenWaiter(t, waiter)
+	var log bytes.Buffer
+
+	Then([]string{
+		"--socket", "/tmp/tmux-jail/cx-1-2-3",
+		"--target", "%0",
+		"--engine", "codex",
+		"--steer", "resume the wave",
+	}, &log)
+
+	if waiter.got.Engine != string(pfmengine.Codex) {
+		t.Fatalf("waiter was handed engine %q, want the canonical %q", waiter.got.Engine, pfmengine.Codex)
+	}
+	if !strings.Contains(log.String(), "engine codex") {
+		t.Fatalf("start line does not name the Codex contract: %q", log.String())
+	}
+}
+
+func TestThenRefusesAnUnknownEngineBeforeWaiting(t *testing.T) {
+	waiter := &blockingWaiter{release: make(chan struct{}), result: inject.Result{Code: inject.CodeUndelivered}}
+	close(waiter.release)
+	swapThenWaiter(t, waiter)
+	var log bytes.Buffer
+
+	code := Then([]string{
+		"--socket", "/tmp/tmux-jail/cx-1-2-3",
+		"--target", "%0",
+		"--engine", "gemini",
+		"--steer", "resume the wave",
+	}, &log)
+
+	if code != 2 {
+		t.Fatalf("Then = %d, want 2 for an unknown engine; log %q", code, log.String())
+	}
+	if waiter.got.Target != "" {
+		t.Fatalf("waiter ran for an unknown engine: %+v", waiter.got)
+	}
+	if !strings.Contains(log.String(), `unknown engine "gemini"`) {
+		t.Fatalf("refusal does not name the engine: %q", log.String())
 	}
 }

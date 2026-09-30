@@ -29,7 +29,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Fence
 
-- `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since origin/develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone.
+- `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since the Makefile's `LINT_BASE`, origin/main: a develop base judges nothing on a push to develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone.
 - One package or probe: `.claude/scripts/dev.sh iso run 'go -C pfm test -count=1 ./internal/{pkg}/'`; the lint burn-down view: `iso run 'make -C pfm lint'`.
 - The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools; `make -C pfm prompts` likewise runs on the host.
 
@@ -45,7 +45,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - **Tests NEVER touch a live `cc-*` / `cx-*` socket or the real `/tmp/cc-sid`:** every test sets `TMUX_TMPDIR = t.TempDir()`.
 - **Destructive commands default to a dry run, and the dry run IS the apply's preview:** `reap`, `archive` and `heal` classify identically with and without `--apply`; every unknown — an unanswerable busy query, a silent socket, a chat writing its transcript right now — resolves toward keeping what exists.
-- **A `REAL-SESSION` flow is scheduled deliberately, NEVER incidentally:** one that cannot be jailed is named in `TESTPLAN.md` § Flows that CANNOT be jailed, never left quietly uncovered.
+- **No suite runs a real engine or a real credential:** a flow the fake engine cannot play is named `UNPLAYED` in `TESTPLAN.md` § Flows the fake engine does not yet play, never run against a real engine and never left quietly uncovered.
 
 ## Code Standards
 

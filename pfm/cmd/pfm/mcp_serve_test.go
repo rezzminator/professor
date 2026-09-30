@@ -333,7 +333,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	ctx := context.Background()
 	for path, want := range map[string][]string{
 		config.MCPPathProfessor:                         {"harvester_read", "chat_whoami", "servicedesk"},
-		config.MCPFamilyPath(config.MCPServerChat):      {"chat_keys", "chat_whoami", "chat_self_compact", "chat_new"},
+		config.MCPFamilyPath(config.MCPServerChat):      {"chat_keys", "chat_whoami", "chat_new"},
 		config.MCPFamilyPath(config.MCPServerHarvester): {"harvester_read", "harvester_download_file"},
 	} {
 		session, err := connectHTTPMCP(t, ctx, server.URL+path, client)

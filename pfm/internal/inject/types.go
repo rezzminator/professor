@@ -43,11 +43,11 @@ const (
 	// so this is additive: a caller that wants to tell the two apart can
 	// switch on it explicitly.
 	CodeCaptureFailed = 9
-	// ClaudeInlineMax and CodexInlineMax are 10% below the earliest
-	// empirically observed composer failure for each engine. Claude's smaller
+	// ClaudeInlineMax and CodexInlineMax are configured boundaries, 10% below
+	// the composer edge each engine's boundary input names: Claude's smaller
 	// bracketed-paste edge is 801 characters; Codex's inline and paste edge is
-	// 1001. TESTPLAN.md records the authentic probe method and both
-	// transports.
+	// 1001. TESTPLAN.md § Composer transport boundaries records both
+	// transports and the engine-side probe procedure, which is UNPLAYED.
 	//
 	// On the LIVE delivery path (engine.go's transport ladder) this is the
 	// inline-SendLiteral-vs-bracketed-SendPaste boundary, not an
@@ -58,8 +58,9 @@ const (
 	// which writes directly into a transcript with no composer to paste
 	// into, it is still the inline-vs-file-pointer boundary it always was.
 	// Renamed from ClaudeAutoFileMax/CodexAutoFileMax when the live meaning
-	// changed — do not raise these numbers on a guess; they are re-measured
-	// only by the REAL-SESSION probe TESTPLAN.md's edge table describes.
+	// changed — do not raise these numbers on a guess; only the engine-side
+	// probe TESTPLAN.md's edge table describes re-measures them, and the
+	// fake engine does not play it.
 	ClaudeInlineMax = 720
 	CodexInlineMax  = 900
 	// CommandChunkRunes stays safely below both measured literal-paste edges.
@@ -184,8 +185,7 @@ type Tmux interface {
 }
 
 // ThenSpawner starts the detached waiter that delivers --then steers. It must
-// outlive the caller: for a self-inject the waiter waits on the very turn that
-// spawned it, so a synchronous wait would deadlock.
+// outlive the inject that typed the primary so it can observe that turn end.
 type ThenSpawner interface {
 	Spawn(ctx context.Context, request SteerSpawn) error
 }
@@ -196,7 +196,7 @@ type SteerSpawn struct {
 	Target     string
 	// Engine is the target's engine as the spawning chat resolved it
 	// (Target.Engine), handed to the waiter as `--engine` because a Codex
-	// pane's turn boundary is not readable yet (ThenWait.Engine).
+	// pane with no observed boundary leaves its steer undelivered (ThenWait.Engine).
 	Engine  string
 	Steers  []string
 	LogPath string
@@ -204,31 +204,18 @@ type SteerSpawn struct {
 	// Sender is the spawning chat's own identity, carried down because the
 	// waiter runs detached and can derive none of its own.
 	Sender Sender
-	// SelfTarget marks the one shape where the pane being watched is ALSO the
-	// pane that asked for the wait. Only then is the pane busy with a turn
-	// that is not the primary's when the waiter starts, and only then must the
-	// waiter let that turn finish before it can recognise the primary's. For
-	// every other target the first busy IS the primary's turn, and waiting for
-	// an idle that already went by would delay the steer for nothing.
-	SelfTarget bool
 }
 
 // ThenWait is what the detached waiter (`pfm internal then`, hookentry.Then)
 // hands Engine.DeliverThen: the pane to ride out, the steers to deliver once
-// it settles, and the two facts about the pane the waiter cannot derive on
-// its own.
+// it settles, and the engine identity the waiter cannot derive on its own.
 type ThenWait struct {
 	SocketPath string
 	Target     string
 	Steers     []string
-	// SelfTarget: the pane being watched is the pane that asked for the
-	// wait, so the caller's own turn must end before any turn can be the
-	// primary's (SteerSpawn.SelfTarget).
-	SelfTarget bool
 	// Engine is Target.Engine as the spawning chat resolved it. On a Codex
-	// pane the busy/compaction footer is not pinned, so an unobserved turn
-	// boundary leaves the steer UNDELIVERED by name rather than typed into
-	// a compaction on the steady-idle guess (DeliverThen).
+	// pane an unobserved turn boundary leaves the steer UNDELIVERED by name
+	// rather than typed on a steady-idle guess (DeliverThen).
 	Engine string
 }
 
@@ -270,7 +257,7 @@ type Options struct {
 	// TypistQuiet is how long a target's composer must have gone without a
 	// keystroke before a normal (non-force-now) delivery or --then steer will
 	// type into it. C-s protects a PARKED draft, never a human mid-keystroke;
-	// this is the guard for the latter (the 2026-09-03 self-compact that ate an operator's live draft).
+	// this is the guard for the latter (the 2026-09-03 compaction that ate an operator's live draft).
 	TypistQuiet time.Duration
 
 	// --then waiter cadence, mirroring chat.sh's __then subcommand.

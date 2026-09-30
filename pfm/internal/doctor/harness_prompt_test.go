@@ -324,19 +324,6 @@ func TestHarnessPromptVerdictIgnoresOptionalEnvironmentMetadata(t *testing.T) {
 	}
 }
 
-func TestKnownSIDMetadataIncludesNudgeRecords(t *testing.T) {
-	for _, name := range []string{"nudge-ctx-11111111-2222-4333-8444-555555555555", "nudge-band-11111111-2222-4333-8444-555555555555", "nudge-ctx-session-a"} {
-		if !knownSIDMetadata(name) {
-			t.Errorf("valid nudge record %q rejected", name)
-		}
-	}
-	for _, name := range []string{"nudge-ctx-", "nudge-band-", "nudge-band-   "} {
-		if knownSIDMetadata(name) {
-			t.Errorf("invalid nudge record %q accepted", name)
-		}
-	}
-}
-
 const (
 	harnessCatalogLineA = " - The most recent Claude models are the Claude 5 family and Haiku 4.5. Model IDs — Fable 5.1: 'claude-fable-5-1', Opus 5: 'claude-opus-5', Sonnet 5: 'claude-sonnet-5', Haiku 4.5: 'claude-haiku-4-5-20251001'. When building AI applications, default to the latest and most capable Claude models."
 	harnessCatalogLineB = " - The most recent Claude models are the Claude 5 family and Haiku 4.5. Model IDs — Fable 5.1: 'claude-fable-5-1', Opus 5.5: 'claude-opus-5-5', Sonnet 5: 'claude-sonnet-5', Haiku 4.5: 'claude-haiku-4-5-20251001'. When building AI applications, default to the latest and most capable Claude models."

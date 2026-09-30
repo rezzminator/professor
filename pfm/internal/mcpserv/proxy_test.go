@@ -24,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -949,4 +950,37 @@ func TestStdioProxyCancelsOutstandingCallAtEOF(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("daemon request context survived proxy EOF")
 	}
+}
+
+func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	address := strings.TrimPrefix(server.URL, "http://")
+	server.Close()
+	t.Run("route", func(t *testing.T) {
+		_, recorder := obs.Test(t)
+		if err := probeProfessorRoute(context.Background(), address); err == nil ||
+			!strings.Contains(err.Error(), "probe ") {
+			t.Fatalf("route error=%v", err)
+		}
+		records := recorder.Records()
+		if len(records) != 1 || records[0].Level != "WARN" {
+			t.Fatalf("records=%s", recorder.Raw())
+		}
+	})
+	t.Run("close", func(t *testing.T) {
+		_, recorder := obs.Test(t)
+		var warnings bytes.Buffer
+		proxy := &stdioProxy{
+			endpoint: server.URL, client: obs.WrapClient(&http.Client{}),
+			warnings: &warnings, sessionID: "session",
+		}
+		proxy.closeSession()
+		if !strings.Contains(warnings.String(), "close daemon session") {
+			t.Fatalf("warning=%s", warnings.String())
+		}
+		records := recorder.Records()
+		if len(records) != 1 || records[0].Level != "WARN" {
+			t.Fatalf("records=%s", recorder.Raw())
+		}
+	})
 }

@@ -36,14 +36,6 @@ func (captureCodeInjector) Inject(context.Context, inject.Request) (inject.Resul
 	return inject.Result{}, nil
 }
 
-func (captureCodeInjector) ScheduleAfterCurrentTurn(context.Context, inject.Request) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
-func (captureCodeInjector) ScheduleSelfCompact(context.Context, string, []string) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
 // TestChatCaptureAnswersADeadPaneDistinctlyFromNotFound pins the honesty
 // split chatOpenDetached already makes in this package: "no such chat"
 // (statusNotFound) is reserved for a target that matched nothing. A pane that

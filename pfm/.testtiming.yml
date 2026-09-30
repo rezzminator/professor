@@ -60,7 +60,6 @@ suites:
       github.com/rezzminator/professor/pfm/internal/mcpserv: 198
       github.com/rezzminator/professor/pfm/internal/mockengine: 22
       github.com/rezzminator/professor/pfm/internal/naming: 2
-      github.com/rezzminator/professor/pfm/internal/nudge: 2
       github.com/rezzminator/professor/pfm/internal/obs: 2
       github.com/rezzminator/professor/pfm/internal/opencodegen: 4
       github.com/rezzminator/professor/pfm/internal/paths: 6

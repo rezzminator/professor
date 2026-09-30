@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func opencodeMachine(binary, home string) pfmconfig.Config {
@@ -440,4 +443,113 @@ func equalStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+func TestOpenCodeReadinessOfflineRecordsWarn(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	address := server.URL
+	server.Close()
+	for _, tc := range []struct {
+		name string
+		call func(context.Context) (bool, error)
+	}{
+		{"health", func(ctx context.Context) (bool, error) { return openCodeServerHealthy(ctx, address, nil) }},
+		{"catalog", func(ctx context.Context) (bool, error) { return openCodeToolCatalog(ctx, address, "/tmp", nil) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, recorder := obs.Test(t)
+			ready, err := tc.call(ctx)
+			if ready || err != nil {
+				t.Fatalf("ready=%v err=%v", ready, err)
+			}
+			records := recorder.Records()
+			if len(records) != 1 || records[0].Level != "WARN" {
+				t.Fatalf("records=%s", recorder.Raw())
+			}
+		})
+	}
+}
+
+func TestOpenCodeRefusalReasons(t *testing.T) {
+	for _, row := range []struct {
+		name, body, want string
+		status           int
+	}{
+		{"plain", "  seeding unpinned\n", "seeding unpinned", 501},
+		{"nested JSON", `{"name":"BadRequest","data":{"message":"model not found"}}`, "model not found", 400},
+		{"message", `{"message":"m"}`, "m", 400},
+		{"error", `{"error":"e"}`, "e", 400},
+		{"JSON fallback", `{"name":"BadRequest"}`, `{"name":"BadRequest"}`, 400},
+		{"multiline", "line one\n\nline two", "line one line two", 500},
+		{"long Unicode", strings.Repeat("é", 2000), strings.Repeat("é", 256) + "…", 502},
+		{"empty", "", "(empty response body)", 403},
+		{"whitespace", " \n\t ", "(empty response body)", 403},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(row.status)
+				_, _ = w.Write([]byte(row.body))
+			}))
+			defer server.Close()
+			_, err := openCodeJSON(context.Background(), http.MethodPost, server.URL+"/session", "/tmp", nil, nil)
+			want := fmt.Sprintf("OpenCode API POST /session failed with HTTP status %d: %s", row.status, row.want)
+			if err == nil || err.Error() != want {
+				t.Fatalf("err=%v want=%q", err, want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeRefusalReadiness(t *testing.T) {
+	for _, row := range []struct {
+		name, path, body, want string
+		status                 int
+		call                   func(context.Context, string) (bool, error)
+	}{
+		{"health", "/global/health", "bad credentials", "OpenCode health request failed with HTTP status 401: bad credentials", 401, func(ctx context.Context, address string) (bool, error) {
+			return openCodeServerHealthy(ctx, address, nil)
+		}},
+		{"health retry", "/global/health", "down", "", 500, func(ctx context.Context, address string) (bool, error) {
+			return openCodeServerHealthy(ctx, address, nil)
+		}},
+		{"catalog forbidden", "/experimental/tool/ids", "denied", "OpenCode tool catalog request failed with HTTP status 403: denied", 403, func(ctx context.Context, address string) (bool, error) {
+			return openCodeToolCatalog(ctx, address, "/tmp", nil)
+		}},
+		{"catalog server", "/experimental/tool/ids", "boom", "OpenCode tool catalog request failed with HTTP status 500 after server became healthy: boom", 500, func(ctx context.Context, address string) (bool, error) {
+			return openCodeToolCatalog(ctx, address, "/tmp", nil)
+		}},
+		{"catalog missing", "/experimental/tool/ids", "missing", "OpenCode tool catalog endpoint is unavailable", 404, func(ctx context.Context, address string) (bool, error) {
+			return openCodeToolCatalog(ctx, address, "/tmp", nil)
+		}},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != row.path {
+					t.Errorf("path=%q", r.URL.Path)
+				}
+				w.WriteHeader(row.status)
+				_, _ = w.Write([]byte(row.body))
+			}))
+			defer server.Close()
+			ready, err := row.call(context.Background(), server.URL)
+			if ready || (row.want == "" && err != nil) || (row.want != "" && (err == nil || err.Error() != row.want)) {
+				t.Fatalf("ready=%v err=%v want=%q", ready, err, row.want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeJSONSuccessBodies(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{"id":"seed"}`))
+		}
+	}))
+	defer server.Close()
+	for _, row := range []struct{ method, want string }{{http.MethodPost, `{"id":"seed"}`}, {http.MethodDelete, ""}} {
+		body, err := openCodeJSON(context.Background(), row.method, server.URL+"/session", "/tmp", nil, nil)
+		if err != nil || string(body) != row.want {
+			t.Fatalf("method=%s body=%q err=%v", row.method, body, err)
+		}
+	}
 }

@@ -150,7 +150,7 @@ func TestPlainQueries(t *testing.T) {
 	if len(killedChats) != 2 || killedChats[1].BaselinePrompts != nil {
 		t.Fatalf("KilledChats() = %#v, want two rows and a nil lazy baseline", killedChats)
 	}
-	if err := store.Unkill(ctx, killed.ID); err != nil {
+	if _, err := store.Unkill(ctx, killed.ID); err != nil {
 		t.Fatalf("Unkill() error = %v", err)
 	}
 	if _, found, err := store.Killed(ctx, killed.ID); err != nil || found {
@@ -357,7 +357,7 @@ func TestDefaultRolloutsKilledOnAnyLineageMember(t *testing.T) {
 		t.Fatalf("counts after member kill = %+v, want killed=1", counts)
 	}
 
-	if err := database.Unkill(ctx, "child-old"); err != nil {
+	if _, err := database.Unkill(ctx, "child-old"); err != nil {
 		t.Fatal(err)
 	}
 	_, rollouts, _, err = database.DefaultCandidates(ctx, 10, 10)

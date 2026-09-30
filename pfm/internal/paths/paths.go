@@ -174,7 +174,12 @@ func ComposedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve composed harness prompt: %w", err)
 	}
-	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md"), nil
+	return ComposedHarnessPromptIn(repo, id), nil
+}
+
+// ComposedHarnessPromptIn locates the engine prompt in the given clone.
+func ComposedHarnessPromptIn(repo string, id pfmengine.ID) string {
+	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md")
 }
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,

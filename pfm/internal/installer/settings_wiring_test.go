@@ -176,6 +176,10 @@ func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 		{name: "bare pfm agent inject", command: "pfm dream hook agent-inject", want: "dream-agent-inject"},
 		{name: "path cc fleet nudge", command: "/opt/legacy/.local/bin/cc-fleet dream hook nudge", want: "dream-nudge"},
 		{
+			name: "retired compact nudge", command: "/opt/legacy/.local/bin/pfm internal compact-nudge",
+			want: "compact-nudge",
+		},
+		{
 			name:    "bare codex injection",
 			command: "cc-fleet dream hook codex-subagent-inject",
 			want:    "dream-codex-subagent-inject",
@@ -202,6 +206,27 @@ func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 		if name, retired := retiredHookCommandName(command); retired {
 			t.Fatalf("near-miss command %q classified as retired %q", command, name)
 		}
+	}
+}
+
+func TestRetiredCompactNudgeHookStrippedFromAccountSettings(t *testing.T) {
+	home := t.TempDir()
+	retired := filepath.Join(home, ".local", "bin", "pfm") + " internal compact-nudge"
+	personal := "personal-hook"
+	raw := fmt.Sprintf(`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[`+
+		`{"type":"command","command":%q},{"type":"command","command":%q}]}]}}`, retired, personal)
+	updated, removed, err := stripAccountSettings([]byte(raw), home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0] != "hooks" {
+		t.Fatalf("removed=%v, want hooks", removed)
+	}
+	if got := hookCommandCount(t, string(updated), "UserPromptSubmit", retired); got != 0 {
+		t.Errorf("retired command remains in account settings: %s", updated)
+	}
+	if got := hookCommandCount(t, string(updated), "UserPromptSubmit", personal); got != 1 {
+		t.Errorf("personal hook changed in account settings: %s", updated)
 	}
 }
 

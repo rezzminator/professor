@@ -21,6 +21,15 @@ func Retry(ctx context.Context, ordinal int) context.Context {
 	return context.WithValue(ctx, retryKey{}, ordinal)
 }
 
+type presenceKey struct{}
+
+// Presence marks a request whose transport failure the caller renders as an
+// answer: a presence probe, readiness poll, optional refresh, or best-effort
+// close, following runner.lookpath's optional-binary rule.
+func Presence(ctx context.Context) context.Context {
+	return context.WithValue(ctx, presenceKey{}, true)
+}
+
 // outboundTripper is the http.out middleware: one record per round trip,
 // written after next answered, with the result exactly as next returned it.
 type outboundTripper struct {
@@ -36,8 +45,8 @@ type outboundTripper struct {
 // The record carries method, host, path (never the query), status, the
 // response's declared ContentLength as bytes (-1 when the server did not
 // declare one), dur_ms, the Retry ordinal when the caller set one, and err.
-// Headers and bodies never reach it. A transport error logs at ERROR, a 4xx or
-// 5xx response at WARN, everything else at INFO.
+// Headers and bodies never reach it. A transport error logs at ERROR unless Presence marked the request (WARN);
+// a 4xx or 5xx response logs at WARN, everything else at INFO.
 func RoundTripper(next http.RoundTripper) http.RoundTripper {
 	if wrapped, already := next.(*outboundTripper); already {
 		return wrapped
@@ -85,6 +94,9 @@ func (tripper *outboundTripper) RoundTrip(request *http.Request) (*http.Response
 	switch {
 	case err != nil:
 		level = slog.LevelError
+		if marked, _ := ctx.Value(presenceKey{}).(bool); marked {
+			level = slog.LevelWarn
+		}
 		attrs = append(attrs, slog.String(FieldErr, requestErrorText(err)))
 	case response != nil:
 		attrs = append(attrs, slog.Int("status", response.StatusCode), slog.Int64("bytes", response.ContentLength))

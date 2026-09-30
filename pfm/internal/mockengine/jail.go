@@ -57,7 +57,7 @@ func bindSeat(proc *process, engine, transcript string) (*seat, error) {
 		}
 		bound.procDir = dir
 	}
-	if jail.SIDDir != "" && engine == engineClaude && transcript != "" {
+	if jail.SIDDir != "" && engine == engineClaude && transcript != "" && !proc.script.Quiet {
 		socket, _, _ := strings.Cut(proc.env("TMUX"), ",")
 		socket = filepath.Base(socket)
 		if socket != "." && socket != "" {

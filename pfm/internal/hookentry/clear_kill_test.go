@@ -17,7 +17,7 @@ func (failingReader) Read([]byte) (int, error) { return 0, errors.New("simulated
 // ClearKill's decode and empty-payload branches returned 0 with no trace on
 // stderr — fail-open is right for a hook, but the missing line meant `/clear`
 // silently not recording a kill left no evidence anywhere. Every sibling
-// (ExitClose, CompactNudge, EpicInject, ReloadIntercept, ExitIntercept) logs
+// (ExitClose, EpicInject, ReloadIntercept, ExitIntercept) logs
 // its decode error in the same "pfm internal <hook>: decode hook payload
 // (fail-open): %v" voice; ClearKill now does too.
 func TestClearKillLogsAMalformedPayloadInsteadOfSwallowingIt(t *testing.T) {

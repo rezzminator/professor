@@ -45,7 +45,7 @@ func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {
 // It drives them through engine.inject (via injectChain) rather than the
 // public Inject(), because Inject() now refuses a /compact primary outright
 // (Task C) before checkSteerChain ever runs — these guards are reached today
-// only by a chain hop (DeliverThen, Chain: true) or ScheduleAfterCurrentTurn.
+// only by a chain hop (DeliverThen, Chain: true).
 func TestCompactFocusRuleRefusesBeforeAnyKey(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -139,7 +139,7 @@ func TestCompactWithSteerArmsWaiterOnlyAfterConfirmedSubmit(t *testing.T) {
 	// Task E: the log is scoped by SOCKET as well as pane
 	// (chat-then-<base(SocketPath)>-<Pane>.log) — a bare pane-derived name
 	// collided across every chat sharing the fleet-standard %0 pane
-	// (the 2026-09-03 self-compact that ate an operator's live draft).
+	// (the 2026-09-03 compaction that ate an operator's live draft).
 	wantLog := engine.steerLogPath(Target{
 		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-1-2-3"),
 		Pane:       "%1",
@@ -502,13 +502,12 @@ func TestLockNamespaceMatchesChatShell(t *testing.T) {
 }
 
 // TestDeliverThenLeavesACodexSteerUndeliveredWithoutATurnBoundary is Wave 8
-// item 5's Codex ruling (the two 2026-09-18 sightings: a chat_self_compact
+// item 5's Codex ruling (the two 2026-09-18 sightings: a compaction
 // steer never landed on a Codex chat, its log said "no turn boundary was
-// observed"). The Claude busy regex does not know the Codex footer and the
-// receipt regex does not know its compaction line, so "the pane never went
-// busy" is what a Codex compaction IN PROGRESS looks like — the steady-idle
-// fallback typed the steer into it. A steer lost with a named cause beats
-// that: on a Codex pane an unobserved boundary is `undelivered`, by name,
+// observed"). The Codex footer is now readable, while its compaction receipt
+// spelling remains unconfirmed. A steady-idle pane without an observed busy
+// turn is still a guess. On a Codex pane that leaves the steer `undelivered`,
+// by name,
 // with the steer text kept in the message (= the log). The Claude path is
 // unchanged: it still delivers, WITH the WARNING.
 func TestDeliverThenLeavesACodexSteerUndeliveredWithoutATurnBoundary(t *testing.T) {
@@ -538,7 +537,7 @@ func TestDeliverThenLeavesACodexSteerUndeliveredWithoutATurnBoundary(t *testing.
 		}
 		for _, want := range []string{
 			"no turn boundary observed on a Codex pane",
-			"E2.09",
+			"steady-idle guess",
 			`"resume the wave"`,
 		} {
 			if !strings.Contains(result.Message, want) {

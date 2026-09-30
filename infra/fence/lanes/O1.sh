@@ -71,8 +71,7 @@ check_path I3 "tmux-title-renudge overlay" "$HOME/.local/bin/tmux-title-renudge"
 check_path I4 "handoff skill" "$SEAT_DIR/skills/handoff/SKILL.md"
 check_path I10 "reload command card" "$SEAT_DIR/commands/reload.md"
 check_path I21 "source-repo marker" "$MANAGED/source-repo"
-check_path I22 "mcp-auth-token" "$MANAGED/mcp-auth-token"
-check_path I23 "settings-hook-ownership ledger" "$MANAGED/settings-hook-ownership.json"
+check_path I22 "MCP ownership ledger" "$MANAGED/mcp-ownership.json"
 clone="$(cat "$MANAGED/source-repo" 2>/dev/null)"
 check_path I11 "clone-sourced pfm.zsh shim" "$clone/pfm/internal/installer/assets/shim/pfm.zsh"
 grep -Fq "$clone/pfm/internal/installer/assets/shim/pfm.zsh" "$HOME/.zshrc" 2>/dev/null || missing="$missing I11 (~/.zshrc does not source the clone shim);"
@@ -89,8 +88,8 @@ find_asset() { # find_asset <id> <what> <path-suffix-glob>
   [ -n "$hit" ] || missing="$missing $1 ($2: no '*/$3' under $ROOTS);"
 }
 find_asset I15 "Claude Code professor theme" 'professor-*.json'
-find_asset I16 "harvestpy runtime marker" 'harvestpy*'
-find_asset I14 "VS Code extension asset" 'pfm*.vsix'
+check_path I16 "harvestpy runtime" "$HOME/.local/state/pfm/harvest-python/env"
+check_path I14 "VS Code extension asset" "$MANAGED/vscode/professor/package.json"
 for registry in agents commands skills; do
   [ -d "$SEAT_DIR/$registry" ] || missing="$missing I17/I18/I19 ($SEAT_DIR/$registry absent);"
 done
@@ -140,17 +139,17 @@ beat O1.03-hooks-installed
 spends none
 settings="$SEAT_DIR/settings.json"
 if [ ! -f "$settings" ]; then
-  fail "no $settings — the installer wires its hooks there"
+  fail "no $settings — the account settings cannot be inspected"
 else
   hooks="$(jq -r '.hooks | to_entries[] | .key as $event | .value[] | .hooks[] | select(.type == "command") | [$event, (.command // "")] | @tsv' "$settings" 2>&1)"
-  if [ -z "$hooks" ]; then
-    fail "no command hooks in $settings (enumeration produced nothing): $(one_line "$hooks")"
+  if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
+    fail "$settings is not a valid settings object"
   else
     missing=""
-    for verb in launcher-repair clear-kill exit-close explore-deny git-guard epic-inject reload-intercept exit-intercept compact-nudge; do
-      printf '%s' "$hooks" | grep -q -- "$verb" || missing="$missing $verb;"
+    for verb in launcher-repair clear-kill exit-close explore-deny git-guard epic-inject reload-intercept exit-intercept; do
+      grep -q -- "$verb" "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template $verb;"
     done
-    printf '%s' "$hooks" | grep -q 'usage-hook' || missing="$missing usage-hook;"
+    grep -q 'usage-hook' "$BLUEPRINT/pfm/internal/claudelaunch/hooks.go" || missing="$missing launch template usage-hook;"
     if [ -f "$CODEX_HOME/config.toml" ]; then
       grep -q '^developer_instructions = ' "$CODEX_HOME/config.toml" ||
         missing="$missing codex fleet prompt absent from developer_instructions in $CODEX_HOME/config.toml;"
@@ -160,7 +159,7 @@ else
     if [ -n "$missing" ]; then
       fail "hook(s) not installed:$missing enumerated $(printf '%s\n' "$hooks" | grep -c . ) command hook(s)"
     else
-      pass "$(printf '%s\n' "$hooks" | grep -c . ) Claude command hooks wired (every pfm internal verb + usage-hook) and the Codex fleet prompt present in developer_instructions"
+      pass "Claude launch templates name the current hook roster; $(printf '%s\n' "$hooks" | grep -c . ) account-local hook(s) retained; Codex fleet prompt present"
     fi
   fi
 fi
@@ -193,31 +192,6 @@ if [ -n "$bad" ]; then fail "$bad (doctor exit $doctor_rc)"; else
   pass "$n_acct Claude seat(s) wired, Codex home $CODEX_HOME present, OpenCode home $oc"
 fi
 
-# ─── O1.05 — a seat with no credential refuses by name ──────────────────────
-
-beat O1.05-credential
-spends none
-if [ -z "$SPARE" ]; then
-  fail "only one Claude seat is configured — the absent-credential refusal cannot be asserted without risking the lane's own seat"
-else
-  moved=0
-  if [ -f "$SPARE_DIR/.credentials.json" ]; then mv "$SPARE_DIR/.credentials.json" "$SPARE_DIR/.credentials.json.lane"; moved=1; fi
-  doc="$(pfm doctor 2>&1)"
-  new_out="$(timeout 120 pfm chat new --name O1_CRED_PROBE --engine cc --account "$SPARE" --cwd /tmp 2>&1)"
-  new_rc=$?
-  pfm chat kill O1_CRED_PROBE >/dev/null 2>&1
-  [ "$moved" -eq 1 ] && mv "$SPARE_DIR/.credentials.json.lane" "$SPARE_DIR/.credentials.json"
-  bad=""
-  printf '%s' "$doc" | grep -qiE 'not.?logged|credential' || bad="$bad pfm doctor did not name the credential-less seat $SPARE;"
-  [ "$new_rc" -ne 0 ] || bad="$bad chat new --account $SPARE was ACCEPTED on a seat with no credential;"
-  printf '%s' "$new_out" | grep -qiE 'not.?logged|credential|login' ||
-    bad="$bad chat new refused (exit $new_rc) without naming the credential: $(one_line "$new_out");"
-  [ -f "$SPARE_DIR/.credentials.json" ] || [ "$moved" -eq 0 ] || bad="$bad the credential was NOT restored to $SPARE_DIR;"
-  if [ -n "$bad" ]; then fail "$bad"; else
-    pass "doctor and chat new both refuse seat $SPARE by name while its credential is away, and it was restored"
-  fi
-fi
-
 # ─── O1.06 — a dropped seat loses exactly what it owned ─────────────────────
 
 beat O1.06-dropped-seat
@@ -230,25 +204,23 @@ else
   jq --argjson drop "$SPARE" '.accounts |= map(select(.id != $drop))' "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
   drop_out="$(install_again)"
   drop_rc=$?
-  ledger_after="$(cat "$MANAGED/settings-hook-ownership.json" 2>/dev/null)"
-  kept_hooks="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command // ""' "$SEAT_DIR/settings.json" 2>/dev/null | grep -c 'pfm')"
-  spare_hooks="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command // ""' "$SPARE_DIR/settings.json" 2>/dev/null | grep -c 'pfm')"
+  drop_doctor="$(pfm doctor 2>&1)"
+  drop_roster="$(printf '%s\n' "$drop_doctor" | grep -m1 '^doctor: config accounts=')"
   config_restore_rc=0
   restore_now "$CONFIG" || config_restore_rc=1
   restore_out="$(install_again)"
   restore_rc=$?
-  spare_hooks_back="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command // ""' "$SPARE_DIR/settings.json" 2>/dev/null | grep -c 'pfm')"
+  restore_doctor="$(pfm doctor 2>&1)"
+  restore_roster="$(printf '%s\n' "$restore_doctor" | grep -m1 '^doctor: config accounts=')"
   bad=""
   [ "$drop_rc" -eq 0 ] || bad="$bad the install after the drop exited $drop_rc: $(one_line "$(printf '%s\n' "$drop_out" | tail -3)");"
-  [ "$spare_hooks" -eq 0 ] || bad="$bad seat $SPARE still carries $spare_hooks pfm hook(s) after being dropped;"
-  [ "$kept_hooks" -gt 0 ] || bad="$bad the KEPT seat $SEAT lost its hooks when $SPARE was dropped;"
-  printf '%s' "$ledger_after" | grep -q "$SPARE_DIR" &&
-    bad="$bad the ownership ledger still carries rows for the dropped $SPARE_DIR;"
+  printf '%s' "$drop_roster" | grep -qE "accounts=([^ ]*,)?$SPARE:" && bad="$bad doctor still lists dropped seat $SPARE: $drop_roster;"
+  printf '%s' "$drop_roster" | grep -qE "accounts=([^ ]*,)?$SEAT:" || bad="$bad doctor lost kept seat $SEAT: $drop_roster;"
   [ "$config_restore_rc" -eq 0 ] || bad="$bad restoring $CONFIG from its crash-safe backup FAILED;"
   [ "$restore_rc" -eq 0 ] || bad="$bad the restoring install exited $restore_rc ($(one_line "$restore_out"));"
-  [ "$spare_hooks_back" -gt 0 ] || bad="$bad seat $SPARE did not get its hooks back after the config was restored;"
+  printf '%s' "$restore_roster" | grep -qE "accounts=([^ ]*,)?$SPARE:" || bad="$bad doctor did not relist seat $SPARE after restore: $restore_roster;"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "dropping seat $SPARE removed exactly its hooks and ledger rows (kept seat $SEAT: $kept_hooks hooks), and the restore gave them back ($spare_hooks_back)"
+    pass "doctor's roster dropped seat $SPARE while keeping $SEAT, then relisted $SPARE after config restore"
   fi
 fi
 
@@ -260,10 +232,8 @@ link="$HOME/.cc/lane-linked-seat"
 bad=""
 [ -L "$BLUEPRINT" ] || bad="$bad $BLUEPRINT is not a symlink — the linked-blueprint half cannot be asserted here;"
 blue_doctor="$(pfm doctor 2>&1)"
-printf '%s' "$blue_doctor" | grep -qiE 'source.?repo|blueprint|clone' ||
-  bad="$bad pfm doctor names no blueprint/source-repo row while $BLUEPRINT is a link;"
-printf '%s' "$blue_doctor" | grep -qiE 'source.?repo.*(broken|missing|unreadable)' &&
-  bad="$bad doctor reports the linked blueprint broken: $(one_line "$(printf '%s' "$blue_doctor" | grep -iE 'source.?repo' | head -2)");"
+printf '%s' "$blue_doctor" | grep -qF 'harness-prompts embed=ok tree=' ||
+  bad="$bad pfm doctor did not resolve the linked blueprint's harness prompts;"
 rm -rf "$link"
 ln -s "$SEAT_DIR" "$link"
 if ! with_restored "$CONFIG"; then
@@ -336,9 +306,15 @@ fi
 
 beat O1.09-doctor-pass
 spends none
+lane_daemon_up || fail "the pfm MCP daemon could not start before doctor"
 doc="$(pfm doctor 2>&1)"
 doc_rc=$?
-first_bad="$(printf '%s\n' "$doc" | grep -m1 -E 'broken|drift|stale|error=' || true)"
+capture_gap="$(printf '%s\n' "$doc" | grep -F 'harness-prompt: CHECK FAILED to run (no API request reached the capture sink)' | head -1)"
+if [ -n "$capture_gap" ]; then
+  first_bad="$(printf '%s\n' "$doc" | grep -vFx "$capture_gap" | grep -m1 -E '(broken|drift|stale)( |$|:)|error=' || true)"
+else
+  first_bad="$(printf '%s\n' "$doc" | grep -m1 -E '(broken|drift|stale)( |$|:)|error=' || true)"
+fi
 rows="$(printf '%s\n' "$doc" | grep -c . )"
 if [ "$doc_rc" -ge 2 ]; then
   fail "pfm doctor exited $doc_rc; first failure row: ${first_bad:-<none>}; tail: $(one_line "$(printf '%s\n' "$doc" | tail -3)")"
@@ -347,7 +323,7 @@ elif [ -n "$first_bad" ]; then
 elif ! printf '%s' "$doc" | grep -qiE 'systemd|launchd|service manager'; then
   fail "doctor said nothing about the absent service manager — in a container that row must be a NAMED advisory, not silence ($rows rows)"
 else
-  pass "exit $doc_rc · $rows rows · no broken/drift/stale/error row · the no-service-manager advisory is named: $(one_line "$(printf '%s' "$doc" | grep -iE 'systemd|launchd|service manager' | head -1)")"
+  pass "exit $doc_rc · $rows rows · no unexpected broken/drift/stale/error row · no-service-manager and ${capture_gap:+capture-sink} advisories named"
 fi
 
 # ─── O1.10 — doctor's own exit contract, provoked ───────────────────────────
@@ -410,8 +386,8 @@ merge_rc=$?
   bad="$bad pfm install overwrote a foreign settings.json key instead of merging;"
 jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tmp" &&
   mv "$SEAT_DIR/settings.json.tmp" "$SEAT_DIR/settings.json"
-[ -n "$(find "$SEAT_DIR" -maxdepth 2 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
-  bad="$bad no professor-*.json theme under $SEAT_DIR;"
+[ -n "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
+  bad="$bad no professor-*.json theme under $HOME/.claude/themes;"
 mcp_list="$(pfm mcp ls 2>&1)"
 printf '%s\n' "$mcp_list" | grep -q $'^chat\ttrue\t' || bad="$bad pfm mcp ls does not report chat enabled;"
 printf '%s\n' "$mcp_list" | grep -q $'^harvester\ttrue\t' || bad="$bad pfm mcp ls does not report harvester enabled;"

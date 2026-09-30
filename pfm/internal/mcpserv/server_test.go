@@ -124,14 +124,6 @@ func (resolveGateInjector) Inject(context.Context, inject.Request) (inject.Resul
 	return inject.Result{}, nil
 }
 
-func (resolveGateInjector) ScheduleAfterCurrentTurn(context.Context, inject.Request) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
-func (resolveGateInjector) ScheduleSelfCompact(context.Context, string, []string) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
 func TestChatResolveEveryKindUsesTheInjectionResolutionGate(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", t.TempDir())
 	t.Setenv("PFM_SID_DIR", t.TempDir())

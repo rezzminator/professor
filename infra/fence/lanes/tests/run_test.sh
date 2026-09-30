@@ -22,6 +22,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 LANES="$T/infra/fence/lanes"
 mkdir -p "$LANES" "$T/infra/fence"
 cp "$SUT_DIR"/*.sh "$SUT_DIR"/*.yml "$SUT_DIR"/*.tsv "$SUT_DIR"/*.md "$SUT_DIR"/pending.txt "$LANES/" 2>/dev/null
+cp -R "$SUT_DIR/fixtures" "$SUT_DIR/scenarios" "$LANES/"
 cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
 (cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
 RUN="$LANES/run.sh"
@@ -38,6 +39,15 @@ printf '%s\n' "$*" >>"${STUB_DOCKER_LOG:-/dev/null}"
 case "$1 ${2:-}" in
   "image inspect") [ "${STUB_IMAGE_PRESENT:-1}" = 1 ] ;;
   "info") exit 0 ;;
+  "exec "*)
+    case "$*" in
+      *cred-scan.sh*)
+        if [ "${STUB_REFUSE:-0}" = 1 ]; then
+          echo 'cred-scan: ✗ CREDENTIAL-REFUSED /root/.codex/auth.json — not a registered fixture'
+          exit 1
+        fi ;;
+    esac
+    exit 0 ;;
   *) exit 0 ;;
 esac
 STUB
@@ -45,8 +55,7 @@ chmod +x "$BIN/docker"
 cat >"$T/root-stub.sh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${STUB_ROOT_LOG:-/dev/null}"
-# The real root.sh parses its flags in any order, so the stub must too: the
-# runner now passes the seat roster (--accounts N) ahead of the verb.
+# The root builder receives its own flags only.
 for arg in "$@"; do
   if [ "$arg" = --print-hash ]; then printf 'deadbeefcafe\n'; exit 0; fi
 done
@@ -215,41 +224,25 @@ else
   bad "image decision" "rc=$RC" "$OUT"
 fi
 
-# ---- 13: --seats selects the root's seat roster --------------------------
-# A root built with every seat, driven by a run that was told `--seats cc:1`,
-# offers the lane a second seat it holds no credential for: the account-switch
-# beats then fail for the harness's reason, not the product's.
+# ---- 13: seats are passed to the lanes, while both fixtures stay in the root.
+: >"$T/root.log"; : >"$T/docker.log"
+run_sut --lanes E1 --seats cc:2
+if grep -q -- '-e LANE_SEATS=cc:2' "$T/docker.log" &&
+  [ "$(cat "$T/root.log")" = --print-hash ] &&
+  grep -q -- '--network none' "$T/docker.log" && grep -q -- '-e GOPROXY=off' "$T/docker.log"; then
+  ok "--seats reaches LANE_SEATS; root receives only --print-hash; run is offline"
+else bad "seat plumbing" "root=[$(cat "$T/root.log")]" "$(cat "$T/docker.log")"; fi
 
-: >"$T/root.log"
-run_sut --lanes E1 --seats cc:1 --dry-run
-if [ "$RC" -eq 0 ] && grep -q -- '--accounts 1' "$T/root.log" &&
-  printf '%s' "$OUT" | grep -q 'run: seats       cc:1'; then
-  ok "--seats cc:1 reaches the root builder as --accounts 1 (the container roster is the run's seats)"
-else
-  bad "seat plumbing" "rc=$RC" "root.log=[$(cat "$T/root.log")]" "$OUT"
-fi
+# ---- 14: the same tree gives the same root for different selected seats.
+REAL_ROOT="$LANES/root.sh"
+LANE_ROOT_SH="$REAL_ROOT" run_sut --lanes E1 --seats cc:1 --dry-run
+h1="$(sed -n 's/^run: root hash   \([^ ]*\).*/\1/p' <<<"$OUT")"
+LANE_ROOT_SH="$REAL_ROOT" run_sut --lanes E1 --seats cc:2 --dry-run
+h2="$(sed -n 's/^run: root hash   \([^ ]*\).*/\1/p' <<<"$OUT")"
+if [ "$RC" -eq 0 ] && [ -n "$h1" ] && [ "$h1" = "$h2" ]; then ok "root hash is stable across selected seats"
+else bad "root hash across seats" "h1=[$h1] h2=[$h2]" "$OUT"; fi
 
-: >"$T/root.log"
-run_sut --lanes E1 --seats cc:1,cc:2 --dry-run
-if [ "$RC" -eq 0 ] && grep -q -- '--accounts 1,2' "$T/root.log"; then
-  ok "--seats cc:1,cc:2 reaches the root builder as --accounts 1,2"
-else
-  bad "seat plumbing (two seats)" "rc=$RC" "root.log=[$(cat "$T/root.log")]"
-fi
-
-# ---- 14: the root hash covers the seat roster ---------------------------
-# Same tree, different seats = a different container config. One hash for both
-# would serve a one-seat image to a two-seat run and call it REUSE.
-
-REAL_ROOT="$SUT_DIR/root.sh"
-h1="$(bash "$REAL_ROOT" --print-hash --accounts 1 2>&1)"
-h2="$(bash "$REAL_ROOT" --print-hash --accounts 1,2 2>&1)"
-h3="$(bash "$REAL_ROOT" --print-hash --accounts 1 2>&1)"
-if [ -n "$h1" ] && [ "$h1" = "$h3" ] && [ "$h1" != "$h2" ]; then
-  ok "root hash: the seat roster is a hash input ($h1 vs $h2), and it is stable for one roster"
-else
-  bad "root hash over seats" "h1=[$h1] h2=[$h2] h3=[$h3]"
-fi
+rm -rf "$T/out"
 
 # ---- 15: a lane that produces no result row fails the run's exit code -----
 # (F11) The docker stub never actually copies a row.tsv into $OUT — a real
@@ -299,4 +292,12 @@ else
 fi
 mv "$T/map.tsv.bak" "$LANES/map.tsv"
 
+# ---- 18: the credential gate runs before any lane and EXIT removes the run.
+: >"$T/docker.log"
+STUB_REFUSE=1 run_sut --lanes E1
+if [ "$RC" -eq 1 ] && grep -q 'run: ✗ CREDENTIAL-REFUSED' <<<"$OUT" &&
+  ! grep -q '/lanes/E1.sh' "$T/docker.log" &&
+  [ "$(grep -c '^rm -f pfm-lane-' "$T/docker.log")" -eq 2 ]; then
+  ok "credential refusal stops before the first lane and removes the container"
+else bad "run credential gate" "rc=$RC" "$OUT" "$(cat "$T/docker.log")"; fi
 shtest_end

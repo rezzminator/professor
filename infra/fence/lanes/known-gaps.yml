@@ -1,4 +1,4 @@
-# Tier B known gaps — a listed beat reports `known-gap` and does not fail the suite;
+# Tier B hermetic lane known gaps — a listed beat reports `known` and does not fail the suite;
 # a listed beat that PASSES is a red row ("known-gap now passes — remove the entry").
 # Source: docs/dev/trains/testing-foundation/waves/4-integration-dfs/spec.md
 #

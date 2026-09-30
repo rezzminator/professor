@@ -11,8 +11,8 @@ import (
 )
 
 // SettledTurn is this package's ONE wait for "the turn the pane is running
-// now is over". The --then waiter rides out a self-compaction with it
-// (Engine.waitForSettledTurn), and internal/reload holds its own tmux seam and
+// now is over". The --then waiter uses it for the typed primary on a chained hop
+// (Engine.waitForSettledTurn); internal/reload holds its own tmux seam and
 // its own captures — so the wait takes the capture and the sleep as seams
 // rather than an Engine, and neither surface grows a second copy of the
 // turn-identification rules below.
@@ -29,10 +29,7 @@ type SettledTurn struct {
 	// the footer THIS TUI renders (IsBusyFor). Empty keeps the historical
 	// Claude/Codex rule, which is what a caller that could not resolve an
 	// engine has always used.
-	Engine pfmengine.ID
-	// SelfTarget marks the shape where the pane being watched is the pane
-	// that asked, so the CALLER's own turn must be seen to end first.
-	SelfTarget bool
+	Engine     pfmengine.ID
 	Min        time.Duration
 	Poll       time.Duration
 	Settle     time.Duration
@@ -43,9 +40,8 @@ type SettledTurn struct {
 
 // paneSample is one observation of the target pane. Busy alone cannot answer
 // "is the turn I was sent to ride out over yet" — it is true for ANY turn,
-// including the caller's own and the one the session starts by itself after a
-// compaction. The receipt is the only positive evidence in the pane that a
-// compaction actually ran.
+// including an earlier turn and the one the session starts by itself after a
+// compaction. A new receipt also proves that a chained compaction ran.
 //
 // receipts is a COUNT, not a bool, and it is counted over the captured
 // history rather than the visible fold. A bool answers "a receipt is on
@@ -84,7 +80,7 @@ const paneBusyTailLines = 20
 // agent's `● Agent "X" finished · 46s` or a `⏺ Read 27,615 tokens` matches
 // busyPattern's `· \d+s` / `\d+ tokens` arms and, sitting under an idle
 // composer, kept the pane "busy" until new output scrolled it away — a
-// self-compact waiter never saw its caller yield (2026-09-25). For Claude,
+// chained waiter could miss the turn boundary (2026-09-25). For Claude,
 // IsBusyFor itself reads only the engine's spinner row and interrupt hint, so
 // the continuation lines of a final answer cannot hold the pane busy either.
 func IsFooterBusy(engine pfmengine.ID, capture string) bool {
@@ -138,60 +134,9 @@ func (sample paneSample) newReceipt(baseline paneSample) bool {
 	return sample.receipts > baseline.receipts
 }
 
-// Run rides out the turn the PRIMARY started and reports whether
-// it ever actually saw that turn.
-//
-// The old shape (chat.sh:1062-1077) waited for the pane to go busy and then for
-// idle to hold steady. That works only if the busy it latches onto belongs to
-// the primary — and busy carries no identity. For a self-inject the pane is
-// already busy with the caller's own turn when the waiter wakes up, so the
-// waiter would ride out the WRONG turn and then race whichever idle came first,
-// losing in one of two directions depending on nothing but timing:
-//
-//   - caller stops promptly -> the waiter sees the idle BEFORE the queued
-//     /compact has run and delivers the steer into a session that is about to
-//     be compacted away, taking the steer with it.
-//   - caller keeps working -> the brief idle right after the compaction is
-//     shorter than the stability window, so the waiter sleeps through the one
-//     usable moment and delivers on top of work that already resumed.
-//
-// Both are the same defect. The fix is to stop inferring the turn from a
-// coincidence and identify it instead:
-//
-//  1. the caller's own turn must END first (an idle observation) — until then
-//     nothing on screen can belong to the primary;
-//  2. a turn must START after that (a busy observation) — that one is the
-//     primary's;
-//  3. a compaction receipt seen after BOTH is positive proof the primary was a
-//     compaction and that it finished, so the first quiet sample after it is
-//     the delivery point.
-//
-// Requiring the receipt to arrive after step 2 is what keeps step 3 from
-// becoming a coincidence detector in its own right: a receipt already on screen
-// when the waiter wakes up is scrollback from an EARLIER compaction and proves
-// nothing about this one.
-//
-// Step 3 has a second door, for the pane a background sub-agent keeps busy.
-// Its footer matches busyPattern for as long as the agent runs, so the pane
-// NEVER reads idle: step 1 cannot complete for a self-inject, and the
-// "receipt AND quiet" test never passes for anyone — the waiter burned its
-// whole budget (~10 min) and then delivered on the WARNING path (Wave 8 item
-// 5, beat E1.20). Sidechains are allowed — /compact works beside a background
-// agent — so the receipt is the boundary: a BASELINE capture before the loop
-// records whether a receipt was already on screen, and a receipt that appears
-// afterwards while the pane still reads busy is this turn's, footer or no
-// footer. A receipt already in the baseline stays scrollback and proves
-// nothing, exactly as before. A receipt that appears at an IDLE sample before
-// any turn was seen to start is still not taken as proof: that is also what a
-// stale receipt uncovered by the caller's footer clearing looks like
-// (TestCompactionReceiptNeedsToAppear), and the steady-idle path below still
-// delivers that shape — with the WARNING that says the guarantee is weaker.
-//
-// Step 3 cannot apply to a primary that prints no receipt — a reload steer, a
-// plain queued message, and (a NAMED gap) a Codex compaction, whose receipt
-// spelling nobody here has confirmed. Those fall back to steps 1-2 plus the
-// steady-idle window, which is strictly better than the old behaviour because
-// the caller's own turn can no longer be mistaken for the primary's.
+// Run waits for the chained primary's turn to start and end, or for a new
+// compaction receipt relative to the baseline. If the turn never appears
+// busy, stable idle remains a weak fallback.
 //
 // The returned bool is false when the bound expired without ever observing a
 // turn boundary. It is not an error — refusing to deliver would strand the
@@ -208,11 +153,6 @@ func (sample paneSample) newReceipt(baseline paneSample) bool {
 func (wait SettledTurn) Run(ctx context.Context) (bool, error) {
 	wait.Sleep(ctx, wait.Min)
 
-	// Step 1 exists only for a self-inject, where the pane is busy with the
-	// CALLER's turn when the waiter wakes up. For any other target nothing else
-	// owns that pane, so its first busy already belongs to the primary and
-	// insisting on a prior idle would wait out a boundary that never comes.
-	callerYielded := !wait.SelfTarget
 	turnStarted := false
 	stable := 0
 	sinceYield := 0
@@ -241,11 +181,7 @@ func (wait SettledTurn) Run(ctx context.Context) (bool, error) {
 		// and the delivery attempt reports a dead pane truthfully rather than
 		// spinning here. It carries no receipt either, so it can only delay a
 		// door, never open one.
-
-		switch {
-		case !callerYielded:
-			callerYielded = !sample.busy
-		case !turnStarted:
+		if !turnStarted {
 			turnStarted = sample.busy
 			sinceYield++
 		}
@@ -280,8 +216,7 @@ func (wait SettledTurn) Run(ctx context.Context) (bool, error) {
 		// than delivering on a weaker guarantee. So fall back to steady idle
 		// and return false, which is what puts the warning on the result
 		// instead of letting a guess pass for proof.
-		if callerYielded && !turnStarted &&
-			sinceYield > wait.BusyTries {
+		if !turnStarted && sinceYield > wait.BusyTries {
 			if sample.busy {
 				stable = 0
 			} else {
@@ -306,7 +241,6 @@ func (wait SettledTurn) Run(ctx context.Context) (bool, error) {
 func (engine *Engine) waitForSettledTurn(
 	ctx context.Context,
 	socketPath, target string,
-	selfTarget bool,
 	engineID pfmengine.ID,
 ) (bool, error) {
 	return SettledTurn{
@@ -316,7 +250,6 @@ func (engine *Engine) waitForSettledTurn(
 		},
 		Sleep:      engine.sleepContext,
 		Pane:       target,
-		SelfTarget: selfTarget,
 		Min:        engine.options.ThenMin,
 		Poll:       engine.options.ThenIdlePoll,
 		Settle:     engine.options.ThenSettle,

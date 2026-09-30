@@ -17,7 +17,7 @@ import (
 // at the receipt door spelled "no compaction receipt was on screen", the one
 // affirmative claim that opens it. One transient capture-pane failure at the
 // baseline therefore converted the guard into its opposite: the first
-// successful sample showed a STALE receipt plus the caller's own busy footer
+// successful sample showed a STALE receipt plus the target's busy footer
 // and was accepted as this turn's proof, and the steer went into the caller's
 // live turn while the result still reported the strong guarantee.
 //
@@ -26,15 +26,15 @@ import (
 func TestSettledTurnRetriesTheBaselineUntilThePaneWasReallyRead(t *testing.T) {
 	transient := errors.New("no server running on /tmp/tmux-jail/cc-1-2-3")
 	var frames []paneFrame
-	frames = append(frames, paneFrame{phase: phaseCaller, err: transient})
-	// Every later frame is the caller's own turn running over a receipt left
+	frames = append(frames, paneFrame{phase: phasePrimary, err: transient})
+	// Every later frame is a busy turn running over a receipt left
 	// by an EARLIER compaction: busy, receipt on screen, nothing new printed.
-	frames = append(frames, repeatFrame(phaseCaller, captureBusyReceipt, 12)...)
+	frames = append(frames, repeatFrame(phasePrimary, captureBusyReceipt, 12)...)
 
 	engine, script := newScriptedEngine(t, frames)
 	engine.options.ThenBusyTries = 3
 	engine.options.ThenIdleTries = 6
-	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", true, pfmengine.Claude)
+	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", pfmengine.Claude)
 	if err != nil {
 		t.Fatalf("waitForSettledTurn() errored although a later capture succeeded: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestSettledTurnRetriesTheBaselineUntilThePaneWasReallyRead(t *testing.T) {
 		t.Fatal(
 			"waiter treated a FAILED baseline capture as proof no receipt was on " +
 				"screen and then took the stale receipt in its first real sample as " +
-				"this turn's — it would type into the caller's own live turn",
+				"this turn's — it would type into the target's live turn",
 		)
 	}
 	if script.served < 3 {
@@ -60,7 +60,7 @@ func TestDeliverThenReportsAPaneItNeverReadOnce(t *testing.T) {
 	fake := &fakeTmux{capture: captureIdle, submitOnEnter: true}
 	spawner := &fakeSpawner{}
 	engine := newTestEngineWith(t, "cc-blind", fake, spawner)
-	script := &paneScript{fakeTmux: fake, frames: repeatFrame(phaseCaller, "", 1)}
+	script := &paneScript{fakeTmux: fake, frames: repeatFrame(phasePrimary, "", 1)}
 	script.frames[0].err = blind
 	engine.tmux = script
 	engine.options.ThenMin = time.Nanosecond
@@ -104,7 +104,7 @@ func TestDeliverThenReportsAPaneItNeverReadOnce(t *testing.T) {
 // was absent from the baseline capture. Absent from a capture is not the same
 // as not yet printed: a receipt clipped out of the visible fold (a footer
 // collapse, a pane resize, a redraw) and scrolling back in later satisfies
-// that test exactly, and the steer lands in the caller's own turn.
+// that test exactly, and the steer lands in the target's turn.
 //
 // The fixture is that clipping, spelled as the pane really renders it: the
 // receipt is in the pane's history the whole time, and only the VISIBLE fold
@@ -120,13 +120,13 @@ func TestSettledTurnRefusesAReceiptThatMerelyScrolledBackIntoView(t *testing.T) 
 	var frames []paneFrame
 	// The baseline and the first polls: the receipt is in history but clipped
 	// out of the visible fold.
-	frames = append(frames, repeatFrame(phaseCaller, history, 3)...)
+	frames = append(frames, repeatFrame(phasePrimary, history, 3)...)
 	for index := range frames {
 		frames[index].visible = clipped
 	}
-	// The same receipt scrolls back into view while the caller's turn is still
+	// The same receipt scrolls back into view while the target's turn is still
 	// running. Nothing was printed; the fold moved.
-	scrolled := repeatFrame(phaseCaller, history, 12)
+	scrolled := repeatFrame(phasePrimary, history, 12)
 	for index := range scrolled {
 		scrolled[index].visible = uncovered
 	}
@@ -135,10 +135,10 @@ func TestSettledTurnRefusesAReceiptThatMerelyScrolledBackIntoView(t *testing.T) 
 	engine, script := newScriptedEngine(t, frames)
 	engine.options.ThenBusyTries = 3
 	engine.options.ThenIdleTries = 6
-	if observed := mustSettle(t, engine, true); observed {
+	if observed := mustSettle(t, engine); observed {
 		t.Fatal(
 			"waiter accepted a receipt that was only newly VISIBLE as proof this " +
-				"turn's compaction ran — the pane was busy with the CALLER's turn " +
+				"turn's compaction ran — the pane was busy with the target's turn " +
 				"throughout, so the steer would land inside it",
 		)
 	}
@@ -189,9 +189,9 @@ const idleAfterAgentRecord = "● Agent \"Commit release fixes\" finished · 46s
 	"─────────────────────────\n❯ \n─────────────────────────\n" +
 	"  🟢 ▱▱▱▱ 8% │ .professor │ develop\n"
 
-// TestIsFooterBusyIgnoresTranscriptRecords is the 2026-09-25 self-compact that
+// TestIsFooterBusyIgnoresTranscriptRecords is the 2026-09-25 compaction that
 // typed its /compact minutes late: a record line inside the busy window made
-// the idle pane read busy, so the waiter never saw the caller yield. A record
+// the idle pane read busy, so the waiter missed the turn boundary. A record
 // line is transcript; only the live spinner and footer say a turn is running.
 func TestIsFooterBusyIgnoresTranscriptRecords(t *testing.T) {
 	cases := []struct {
@@ -211,45 +211,5 @@ func TestIsFooterBusyIgnoresTranscriptRecords(t *testing.T) {
 				t.Fatalf("IsFooterBusy(%q) = %t, want %t", tc.capture, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestSelfWaiterSeesTheYieldPastATranscriptRecord drives Run over a pane that
-// goes busy, then idle with an agent-finished record in its busy window, and
-// stays idle. The waiter must see the caller yield and release on the
-// steady-idle fallback — within its busy bound plus the stability window,
-// counted in polls, not after its whole ten-minute budget.
-func TestSelfWaiterSeesTheYieldPastATranscriptRecord(t *testing.T) {
-	const busyTries, idleTries, idleStable = 25, 1500, 3
-	captures := 0
-	wait := SettledTurn{
-		Capture: func(context.Context) (string, error) {
-			captures++
-			if captures <= 3 {
-				return captureBusy, nil
-			}
-			return idleAfterAgentRecord, nil
-		},
-		Sleep:      func(context.Context, time.Duration) {},
-		Pane:       "%0",
-		Engine:     pfmengine.Claude,
-		SelfTarget: true,
-		BusyTries:  busyTries,
-		IdleTries:  idleTries,
-		IdleStable: idleStable,
-	}
-	observed, err := wait.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run() errored over a readable pane: %v", err)
-	}
-	if observed {
-		t.Fatal("Run() claimed a turn boundary although no turn started after the yield")
-	}
-	if bound := 3 + busyTries + idleStable + 3; captures > bound {
-		t.Fatalf(
-			"self waiter released after %d captures, want at most %d: the idle pane read busy "+
-				"from a transcript record, so the caller's yield was never seen",
-			captures, bound,
-		)
 	}
 }

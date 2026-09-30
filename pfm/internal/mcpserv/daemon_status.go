@@ -45,7 +45,12 @@ var ErrDaemonAbsent = errors.New("no service answered")
 // one false made a foreign service on pfm's port read as a free port.
 func ProbeDaemon(address string) (DaemonStatus, error) {
 	endpoint := "http://" + address + "/status"
-	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(
+		obs.Presence(context.Background()),
+		http.MethodGet,
+		endpoint,
+		http.NoBody,
+	)
 	if err != nil {
 		return DaemonStatus{}, fmt.Errorf("build daemon probe for %s: %w", endpoint, err)
 	}

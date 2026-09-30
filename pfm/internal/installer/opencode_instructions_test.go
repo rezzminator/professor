@@ -192,3 +192,89 @@ func TestOpenCodeInstructionsJournalRecordsTheConfigAndRollsBack(t *testing.T) {
 		t.Fatalf("converged OpenCode wiring journaled %v", idle.records)
 	}
 }
+
+func TestFirstInstallWiresOpenCodeInstructions(t *testing.T) {
+	for _, alias := range []bool{false, true} {
+		name := "clone"
+		if alias {
+			name = "alias"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			clone := t.TempDir()
+			source := clone
+			if alias {
+				source = filepath.Join(t.TempDir(), "clone")
+				if err := os.Symlink(clone, source); err != nil {
+					t.Fatal(err)
+				}
+			}
+			configPath := filepath.Join(home, "pfm.config.json")
+			writeFixture(t, configPath, "{\"version\":2}\n")
+			config := OpenCodeConfigPath(home)
+			writeFixture(t, config, "{\n // operator comment\n \"instructions\": [\"operator.md\"]\n}\n")
+			var output strings.Builder
+			options := Options{
+				Mode: ModeApply, Home: home, SourceRepo: source,
+				MCPConfigPath: configPath, Runner: &fakeRunner{},
+				Stdout: &output, OpenCodeConfigPath: config,
+			}
+			if _, err := Run(context.Background(), options); err != nil {
+				t.Fatal(err)
+			}
+			physical, err := filepath.EvalSymlinks(clone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			composed := filepath.Join(physical, "pfm", "harness-prompts", "composed", "opencode.md")
+			raw := readFixture(t, config)
+			entries, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, raw), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 2 || entries[0] != composed || entries[1] != "operator.md" {
+				t.Fatalf("first install instructions=%v, want [%s operator.md]", entries, composed)
+			}
+			if !strings.Contains(raw, "// operator comment") {
+				t.Fatalf("operator comment lost: %s", raw)
+			}
+			if marker := readFixture(t, paths.SourceRepoPath(home)); marker != physical+"\n" {
+				t.Fatalf("marker=%q, want %q", marker, physical+"\n")
+			}
+			for _, fromMarker := range []bool{false, true} {
+				if fromMarker {
+					options.SourceRepo = ""
+				}
+				output.Reset()
+				if _, err := Run(context.Background(), options); err != nil {
+					t.Fatal(err)
+				}
+				if got := readFixture(t, config); got != raw {
+					t.Fatalf("repeat install (from marker=%v) changed config: %s", fromMarker, got)
+				}
+				if !strings.Contains(output.String(), "ok      "+config+" OpenCode prompt wiring") {
+					t.Fatalf("repeat install prompt report: %s", output.String())
+				}
+			}
+		})
+	}
+}
+
+func TestOpenCodeInstructionsRejectsUnusableClone(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(t.TempDir(), "missing")
+	config := OpenCodeConfigPath(home)
+	original := "{\"instructions\":[\"operator.md\"]}\n"
+	writeFixture(t, config, original)
+	installer := &engine{options: Options{
+		Home: home, SourceRepo: source, OpenCodeConfigPath: config, Stdout: io.Discard,
+	}}
+	err := installer.wireOpenCodeInstructions()
+	if err == nil || !strings.HasPrefix(err.Error(), "resolve OpenCode prompt:") ||
+		!strings.Contains(err.Error(), source) {
+		t.Fatalf("unusable clone error=%v", err)
+	}
+	if raw := readFixture(t, config); raw != original {
+		t.Fatalf("config changed: %q", raw)
+	}
+}

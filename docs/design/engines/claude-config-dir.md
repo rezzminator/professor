@@ -36,7 +36,7 @@ What pfm places on disk for Claude Code: one shared session store every account 
 | `tasks/` | task lists, `tasks/{session id}/` |
 | `session-env/` | per-session environment captures, `session-env/{session id}/` |
 
-- The store is `~/.claude`. For every account whose `configDir` is not `~/.claude`, each entry is a symlink: `{config dir}/projects → ~/.claude/projects`, and so on.
+- The store is `~/.claude`. For every account whose `configDir` is not `~/.claude`, `pfm install` creates each absent store entry as a directory (0700) and links the account to it: `{config dir}/projects → ~/.claude/projects`, and so on. An existing link to an absent store entry is healed by creating the directory.
 - An account whose whole `configDir` is a symlink to `~/.claude` (the implicit account's usual `~/.cc/1`) already satisfies every row.
 - A transcript's path no longer names its account; the [launch record](claude-launch.md#the-launch-record) does.
 - Transcript roots collapse to `~/.claude/projects` (`engine.claudeDefaultRoots`); no reader resolves symlinks to de-duplicate, and `PFM_CLAUDE_ROOTS` is a test-jail override only.
@@ -93,7 +93,7 @@ A link in the way is replaced, a regular file is backed up first, a foreign targ
 
 | Thing | Broken state reports |
 | --- | --- |
-| session store, per account and entry | `session-store: {config dir}/{entry} missing`, `… is a real dir ({n} entries) — run pfm install`, `… points at {target}, want ~/.claude/{entry}` |
+| session store, per account and entry | `session-store: {config dir}/{entry} missing — run pfm install`, `… links to ~/.claude/{entry}, which is missing — run pfm install`, `… is a real dir ({n} entries) — run pfm install`, `… points at {target}, want ~/.claude/{entry}` |
 | managed cleanup | `managed-cleanup: … missing`, `… cleanupPeriodDays={v}, want {config value}` |
 | legacy account writes | `legacy: {file} still carries pfm {key} — run pfm install`; `legacy: {file} UNREADABLE error={cause}` |
 | every other `HostLayout` row | `layout: {row} {verdict} {path}` for each row not `ok` — the same `ClassifyLayout` verdicts install acts on |
@@ -111,4 +111,4 @@ The account key is one of `hooks`, `statusLine`, `subagentStatusLine`, `mcpServe
 
 ## Provisioned seats
 
-The demo and fence lane containers build seats from scratch (`infra/fence/lanes/root.sh` → `infra/demo/setup.sh`): machine config from `creds.sh` (`configDir: ~/.cc/{id}`, `systemPrompt: professor`), written where the container's `PFM_CONFIG` points, credentials copied mode 0600, then `pfm install --yes`, which creates the session-store links. `setup.sh` itself adds demo-only keys (onboarding, trust, permission-prompt skips, `tui`, `effortLevel`, `attribution`) that pfm never writes. `IS_SANDBOX=1` is exported where a root container launches with the bypass flags.
+The lane root builds fixture seats with `infra/fence/lanes/provision.sh`: it writes the machine config at `PFM_CONFIG`, stages registered fixture credentials mode 0600, then runs `pfm install --yes`, which creates the session-store directories and their links. The separate presentation demo builds real seats with `infra/demo/setup.sh`; its demo-only keys include onboarding, trust, permission-prompt skips, `tui`, `effortLevel` and `attribution`. `IS_SANDBOX=1` is exported where a root container launches with the bypass flags.

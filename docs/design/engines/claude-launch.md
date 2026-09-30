@@ -134,7 +134,6 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `noFlicker` | off | not a config key: on when the account's `settings.json` has top-level `"tui": "fullscreen"` |
 | `cleanupPeriodDays` | `36500` | transcript retention (also the managed value) |
 | `requireManagedCleanup` | `true` | `pfm doctor` warns when the managed `cleanupPeriodDays` file is absent; `false` silences it |
-| `compactNudge` | see `docs/design/hooks/hooks.md` | the compact-nudge hook |
 
 ## The rendered launch
 

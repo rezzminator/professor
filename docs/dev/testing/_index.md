@@ -7,4 +7,4 @@
 | Slow tests | [slow-tests.md](slow-tests.md) | Source-grounded test cost and disposition |
 | Unit cost audit | [slow-tests-unit.md](slow-tests-unit.md) | Unit dependencies and wait seams |
 | Integration cost audit | [slow-tests-integration.md](slow-tests-integration.md) | Real process and protocol tests |
-| Tier B lanes | [lanes.md](lanes.md) | The live DFS suite: one root, one container, lanes in sequence |
+| Tier B lanes | [lanes.md](lanes.md) | Hermetic mock-engine suite: one fixture root, one offline container, lanes in sequence |

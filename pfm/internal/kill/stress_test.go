@@ -194,7 +194,7 @@ func TestKillStressProcessHelper(t *testing.T) {
 		if _, err := manager.Kill(ctx, Request{ID: drop}); err != nil {
 			t.Fatal(err)
 		}
-		if err := manager.Unkill(ctx, drop); err != nil {
+		if _, err := manager.Unkill(ctx, drop); err != nil {
 			t.Fatal(err)
 		}
 	}

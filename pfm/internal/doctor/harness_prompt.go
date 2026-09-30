@@ -33,7 +33,7 @@ var harnessRemoveAll = os.RemoveAll
 
 // harnessCaptureOverride is nil in production; printHarnessPromptDoctor then
 // runs the real capture below. A jail has no genuine `claude` binary to spawn
-// — that is REAL-SESSION territory (TESTPLAN.md), never jailable — so the
+// — that flow is UNPLAYED (TESTPLAN.md § Flows the fake engine does not yet play), never jailable — so the
 // command-package TestMain supplies a deterministic stub here, the same
 // pattern as dependencyProbeOverride and installer.HookProbeOverride. Only the CAPTURE
 // step is ever swapped; the baseline read and the verdict comparison stay

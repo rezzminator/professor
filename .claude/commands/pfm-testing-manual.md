@@ -10,8 +10,8 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 ## Tiers
 
 - Unit: a package test beside its package, no real tmux server, no real engine process.
-- `JAIL`, `JAIL+tmux`, `JAIL+sh`, `LIVE-READ`, `REAL-SESSION`: `pfm/TESTPLAN.md` § Legend. The boundary that decides: whether the test needs a real tmux server (a scratch socket inside the jail's `TMUX_TMPDIR`) or a genuine `claude`/`codex` process (`REAL-SESSION`, scheduled deliberately, named in `TESTPLAN.md` § "Flows that CANNOT be jailed").
-- e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`; the host-layout migration rehearsal `TestHostLayoutMigratesLegacyHome` lives there) and the fence lanes; both run only inside the fence.
+- `JAIL`, `JAIL+tmux`, `JAIL+sh`, `LIVE-READ`, `UNPLAYED`: `pfm/TESTPLAN.md` § Legend. The boundary that decides: whether the test needs a real tmux server (a scratch socket inside the jail's `TMUX_TMPDIR`); a flow the fake engine cannot play is `UNPLAYED`, named in `TESTPLAN.md` § "Flows the fake engine does not yet play".
+- e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`; the host-layout migration rehearsal `TestHostLayoutMigratesLegacyHome` lives there) and the fence lanes (hermetic: mock engine, fixture seats, `--network none`); both run only inside the fence.
 
 ## Where a test lives
 
@@ -27,6 +27,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 ## Mock boundary
 
 - Always real: the filesystem under the jail, SQLite, tmux on a scratch socket. Never real in a test: a live `cc-*` / `cx-*` socket, the real `/tmp/cc-sid`, a provider account. Engine processes are played by `internal/mockengine`.
+- The release rehearsal (`/pfm:release` REHEARSE) is the one real-model run: host-side, never a suite.
 
 ## Environments and cleanup
 

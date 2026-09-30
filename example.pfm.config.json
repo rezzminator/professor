@@ -17,11 +17,6 @@
     "tmuxTruecolor": true,
     "cleanupPeriodDays": 36500,
     "requireManagedCleanup": true,
-    "compactNudge": {
-      "enabled": true,
-      "start": 35,
-      "step": 10
-    },
     "maxSubagentSpawnDepth": 8,
     "maxConcurrentSubagents": null
   },

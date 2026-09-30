@@ -1,15 +1,13 @@
 // Package ask defines the content-agnostic process contract shared by
 // prepared-source callers. Process lifecycle is owned by headless/run; this
 // package remains the compatibility adapter that renders the evidence prompt
-// and extracts the older usage-line shape.
+// and takes usage from the parsed engine output.
 package ask
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -43,9 +41,7 @@ type FileStatus struct {
 	File, Status, Note string
 }
 
-type TokenUsage struct {
-	Input, CachedInput, Output int
-}
+type TokenUsage = headlessrun.TokenUsage
 
 type AskResult struct {
 	Answer   string
@@ -182,17 +178,13 @@ func (engine processEngine) Run(parent context.Context, input AskInput) (AskResu
 	if err != nil {
 		return AskResult{}, err
 	}
-	args := []string{"--output-format", "text"}
-	if engine.engine == pfmengine.Codex {
-		args = []string{"--ephemeral", "--skip-git-repo-check", "--color", "never", "-"}
-	}
 	timeout := input.Timeout
 	if timeout == 0 {
 		timeout = engineTimeout
 	}
 	request := headlessrun.Request{
 		Config: engine.machine, Engine: engine.engine, Model: input.Model, Effort: input.Effort,
-		Prompt: prompt, Timeout: timeout, Native: true, Args: args,
+		Prompt: prompt, Timeout: timeout, NoSessionPersistence: engine.engine == pfmengine.Codex,
 	}
 	result, runErr := headlessrun.Run(parent, request)
 	if runErr != nil {
@@ -212,69 +204,9 @@ func (engine processEngine) Run(parent context.Context, input AskInput) (AskResu
 		}
 		return AskResult{}, fmt.Errorf("%s ask failed: %w", pfmengine.MustLookup(engine.engine).LongName, runErr)
 	}
-	answer, usage := extractUsage(result.Stdout, result.Stderr)
+	answer, usage := result.Answer, result.Usage
 	if answer == "" {
 		return AskResult{}, fmt.Errorf("%s ask returned an empty answer", pfmengine.MustLookup(engine.engine).LongName)
 	}
 	return AskResult{Answer: answer, Usage: usage, Duration: result.Duration}, nil
-}
-
-var usageField = regexp.MustCompile(`(?i)\b(cached_input_tokens|input_tokens|output_tokens)\b\s*[:=]\s*([0-9]+)`)
-
-func extractUsage(stdout, stderr string) (string, *TokenUsage) {
-	var usage *TokenUsage
-	kept := make([]string, 0)
-	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
-		if parsed, ok := parseUsage(line); ok {
-			usage = mergeUsage(usage, parsed)
-			continue
-		}
-		kept = append(kept, line)
-	}
-	for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
-		if parsed, ok := parseUsage(line); ok {
-			usage = mergeUsage(usage, parsed)
-		}
-	}
-	return strings.TrimSpace(strings.Join(kept, "\n")), usage
-}
-
-func parseUsage(line string) (TokenUsage, bool) {
-	normalized := strings.NewReplacer(`"`, "", `'`, "").Replace(line)
-	matches := usageField.FindAllStringSubmatch(normalized, -1)
-	if len(matches) == 0 {
-		return TokenUsage{}, false
-	}
-	var usage TokenUsage
-	for _, match := range matches {
-		value, err := strconv.Atoi(match[2])
-		if err != nil {
-			continue
-		}
-		switch strings.ToLower(match[1]) {
-		case "input_tokens":
-			usage.Input = value
-		case "cached_input_tokens":
-			usage.CachedInput = value
-		case "output_tokens":
-			usage.Output = value
-		}
-	}
-	return usage, true
-}
-
-func mergeUsage(current *TokenUsage, next TokenUsage) *TokenUsage {
-	if current == nil {
-		current = &TokenUsage{}
-	}
-	if next.Input != 0 {
-		current.Input = next.Input
-	}
-	if next.CachedInput != 0 {
-		current.CachedInput = next.CachedInput
-	}
-	if next.Output != 0 {
-		current.Output = next.Output
-	}
-	return current
 }

@@ -287,6 +287,7 @@ act_templates() { # the shipped product: mechanical gates, no build
       # broken state is a named red line and rc 1/2, never a silent pass.
       run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
       run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
+      run "templates: demo fence self-tests" -- bash -c 'for t in "$1"/infra/demo/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
       head_ "templates — leak gate"
       # EVERY tracked file in this repo is published, so the gate scans the
       # whole tracked tree — the same set CI scans — plus every changed or

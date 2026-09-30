@@ -112,6 +112,8 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, s
 	}
 	var failures []error
 	unitsRestored := false
+	createdStores := layoutCreatedSessionStores(env, records)
+	keptStores := map[string]bool{}
 	for index := len(records) - 1; index >= 0; index-- {
 		record := records[index]
 		if record.Result == layoutRecordRestored {
@@ -120,6 +122,36 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, s
 		if !layoutRecordSafe(env, dir, record) {
 			failures = append(failures, fmt.Errorf("record %d has unsafe path", index))
 			continue
+		}
+		if destination := filepath.Clean(record.Destination); createdStores[destination] {
+			// Judged once, before any of its records is replayed: a later
+			// record's restore would otherwise empty the store the earlier
+			// one is judged by.
+			holdsData, judged := keptStores[destination]
+			if !judged {
+				var inspectErr error
+				holdsData, inspectErr = layoutStoreHoldsData(record.Destination)
+				if inspectErr != nil {
+					// Unjudged is kept: no later record of it replays either.
+					keptStores[destination] = true
+					failures = append(
+						failures,
+						fmt.Errorf("record %d inspect session store %s: %w", index, record.Destination, inspectErr),
+					)
+					continue
+				}
+				keptStores[destination] = holdsData
+				if holdsData {
+					fmt.Fprintf(
+						stdout,
+						"  keep    session store %s holds data written since the install; left in place\n",
+						record.Destination,
+					)
+				}
+			}
+			if holdsData {
+				continue
+			}
 		}
 		if err := restoreLayoutRecord(ctx, record); err != nil {
 			failures = append(failures, fmt.Errorf("record %d restore %s: %w", index, record.Destination, err))

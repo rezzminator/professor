@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# lib.sh — the Tier B beat library: sourced by every lane (`lanes/<id>.sh`) and,
-# later, by infra/demo/verify.sh, so the demo deck is a subset VIEW of the lanes
-# and never a second implementation.
+# lib.sh — the Tier B beat library, sourced by every lane (`lanes/<id>.sh`).
 #
 #   . "$(dirname "$0")/lib.sh"
 #   lane_begin E1
@@ -577,7 +575,7 @@ _lane_fleet_dump() {
 }
 
 _lane_raw_dump() { # the failed beat's pane, escapes included (zellij's rule)
-  local sock
+  local dir sock
   if [ -z "$LANE_TARGET" ]; then
     _lane_log_only "   raw-dump: no pane target declared for this beat (target <chat> declares one)"
     return 0
@@ -589,6 +587,11 @@ _lane_raw_dump() { # the failed beat's pane, escapes included (zellij's rule)
     _lane_fleet_dump
     return 0
   fi
+  if ! dir="$(_lane_tmux_dir)"; then
+    _lane_fleet_dump
+    return 0
+  fi
+  sock="$dir/$sock"
   _lane_log_only "   raw-dump: tmux -S $sock capture-pane -e -p -S - ($LANE_TARGET)"
   if ! tmux -S "$sock" capture-pane -e -p -S - >>"$LANE_LOG" 2>&1; then
     _lane_log_only "   raw-dump: capture-pane FAILED on $sock (the server may be gone) — the fleet listing and every tmux socket follow"
@@ -835,7 +838,7 @@ tui_open() {
 # tui_selected — the selected row's marker and name (`● F_CC`): the columns
 # after the name (badges, prompts, size, AGE) are cut, because the age ticks
 # between two captures and would make an unmoved cursor read as moved.
-tui_selected() { tui_pane | grep -F '› ' | head -1 | sed -e 's/^.*› *//' -e 's/  .*//'; }
+tui_selected() { tui_pane | grep -E '^[[:space:]│┃]*› ' | head -1 | sed -e 's/^.*› *//' -e 's/  .*//'; }
 
 # ─── shared assertions every lane uses ──────────────────────────────────────
 
@@ -930,4 +933,111 @@ wait_for() {
   # shellcheck disable=SC2034 # read by the lanes, which name the reason in their verdict
   LANE_WAIT_WHY="timed out after ${secs}s waiting for: $*"
   return 1
+}
+
+mock_steps() {
+  local steps
+  steps="$(jq -c . <<<"$1")" || return 1
+  printf 'mock-engine: %s\n' "$steps"
+}
+
+wait_prompt() { # wait_prompt <chat> <needle> <secs> — user transcript records
+  local deadline=$(( $(_lane_now) + $3 )) records
+  LANE_WAIT_WHY="" LANE_WAIT_MISSES=0
+  while [ "$(_lane_now)" -lt "$deadline" ]; do
+    _lane_wait_dead && return 2
+    if records="$(pfm chat read "$1" --json --tail 40 2>/dev/null)" &&
+      jq -e --arg needle "$2" 'any(.entries[]; .role == "user" and ((.text // "") | contains($needle)))' <<<"$records" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" 5)"
+  done
+  LANE_WAIT_WHY="timed out after $3s waiting for '$2' from $1"
+  return 1
+}
+
+lane_daemon_up() {
+  local port="${PORT:-18377}" log=/tmp/pfm-mcp.log stale pid code i
+  stale="$(pgrep -f 'pfm mc[p] serve$' | head -1 || true)"
+  if [ -n "$stale" ] && readlink "/proc/$stale/exe" 2>/dev/null | grep -q ' (deleted)$'; then
+    echo "daemon: pfm mcp serve (pid $stale) runs a replaced binary — restarting it"
+    kill "$stale" || { echo "daemon: cannot stop replaced pid $stale" >&2; return 1; }
+    for i in {1..10}; do
+      code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+      [ "$code" = 000 ] && break
+      sleep 0.5
+    done
+  fi
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+  if [ -n "$code" ] && [ "$code" != 000 ]; then echo "daemon: pfm mcp serve already answering on :$port"; return 0; fi
+  nohup pfm mcp serve >"$log" 2>&1 </dev/null &
+  pid=$!
+  disown "$pid"
+  for i in {1..20}; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+    if [ -n "$code" ] && [ "$code" != 000 ]; then echo "daemon: pfm mcp serve up on :$port (pid $pid, log $log)"; return 0; fi
+    sleep 0.5
+  done
+  echo "daemon: pfm mcp serve never answered on :$port — log tail:" >&2
+  tail -20 "$log" >&2
+  return 1
+}
+
+lane_storm_start() { # lane_storm_start <n> [sends]
+  local n="$1" sends="${2:-30}" i me project engine rows sock sid pair
+  local projects=(atlas lumen orbit) engines posture
+  read -r -a engines <<<"${STORM_ENGINES:-cc cx}"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] && [[ "$sends" =~ ^[1-9][0-9]*$ ]] && [ "${#engines[@]}" -gt 0 ] ||
+    { echo 'storm: n and sends must be positive integers; engines must be nonempty' >&2; return 1; }
+  lane_daemon_up || return 1
+  for ((i=1; i<=n; i++)); do
+    me="STORM_$i"; project="${projects[$(( (i - 1) % ${#projects[@]} ))]}"
+    engine="${engines[$(( (i - 1) % ${#engines[@]} ))]}"
+    rows="$(pfm ls --tsv)" || { echo 'storm: fleet enumeration failed' >&2; return 1; }
+    if awk -F'\t' -v name="$me" '$1 ~ /^live-/ && $5 == name {found=1} END {exit !found}' <<<"$rows"; then echo "kept $me (live)"; continue; fi
+    case "$engine" in
+      cc) posture=(--account "${STORM_CC_ACCOUNT:-${SEAT:-1}}" --model "${STORM_CC_MODEL:-sonnet}" --effort "${STORM_CC_EFFORT:-low}") ;;
+      cx) posture=(--model "${STORM_GPT_MODEL:-lane-fixture}" --effort "${STORM_GPT_EFFORT:-medium}") ;;
+      ox) posture=(--model "openai/${STORM_GPT_MODEL:-lane-fixture}" --effort "${STORM_GPT_EFFORT:-medium}") ;;
+      *) echo "storm: unsupported engine $engine" >&2; return 1 ;;
+    esac
+    pfm chat new --name "$me" --engine "$engine" "${posture[@]}" --cwd "/work/$project" "lane storm fixture $me ($sends sends)" >/dev/null ||
+      { echo "storm: spawn $me failed" >&2; return 1; }
+    echo "spawned $me ($engine · $project)"
+    sleep 4
+  done
+  sleep 6
+  rows="$(pfm ls --tsv)" || { echo 'storm: fleet enumeration failed before seeds' >&2; return 1; }
+  for ((i=1; i<=n; i++)); do
+    awk -F'\t' -v name="STORM_$i" '$1 ~ /^live-/ && $5 == name {found=1} END {exit !found}' <<<"$rows" ||
+      { echo "storm: STORM_$i has no live row" >&2; return 1; }
+  done
+  for pair in 'STORM_1 STORM_2' 'STORM_3 STORM_4' 'STORM_5 STORM_6'; do
+    read -r me engine <<<"$pair"
+    [ "${engine#STORM_}" -le "$n" ] || continue
+    sock="$(awk -F'\t' -v name="$engine" '$1 ~ /^live-/ && $5 == name {print $11; exit}' <<<"$rows")"
+    sid="$(awk -F'\t' -v name="$engine" '$1 ~ /^live-/ && $5 == name {print $2; exit}' <<<"$rows")"
+    CHAT_SENDER_LABEL="$engine" CHAT_SENDER_SESSION="$sock" CHAT_SENDER_SID="$sid" \
+      pfm chat inject "$me" 'lane storm seed' >/dev/null || { echo "storm: seed $engine → $me failed" >&2; return 1; }
+    echo "seeded $engine → $me"
+  done
+}
+
+lane_storm_kill() {
+  local rows before after failed=0 n id left
+  rows="$(pfm ls --tsv)" || { echo 'kill-storm: initial fleet enumeration failed' >&2; return 1; }
+  before="$(awk -F'\t' '$1 ~ /^live-/ && $5 !~ /^STORM_[0-9]+$/ {n++} END {print n+0}' <<<"$rows")"
+  for n in $(awk -F'\t' '$1 ~ /^live-/ && $5 ~ /^STORM_[0-9]+$/ {print $5}' <<<"$rows"); do
+    if pfm chat end "$n" >/dev/null; then echo "ended $n"; else echo "kill-storm: pfm chat end $n failed (see above)" >&2; failed=1; fi
+  done
+  sleep 2
+  rows="$(pfm ls --tsv)" || { echo 'kill-storm: resume fleet enumeration failed' >&2; return 1; }
+  for id in $(awk -F'\t' '$1 ~ /^resume-/ && $5 ~ /^STORM_[0-9]+$/ {print $2}' <<<"$rows"); do
+    if pfm chat kill "$id" >/dev/null; then echo "hid $id"; else echo "kill-storm: pfm chat kill $id failed (see above)" >&2; failed=1; fi
+  done
+  rows="$(pfm ls --tsv)" || { echo 'kill-storm: final fleet enumeration failed' >&2; return 1; }
+  left="$(awk -F'\t' '$5 ~ /^STORM_[0-9]+$/ {n++} END {print n+0}' <<<"$rows")"
+  after="$(awk -F'\t' '$1 ~ /^live-/ && $5 !~ /^STORM_[0-9]+$/ {n++} END {print n+0}' <<<"$rows")"
+  echo "kill-storm: STORM rows left: $left · other live rows: $before → $after"
+  [ "$failed" -eq 0 ] && [ "$left" -eq 0 ] && [ "$before" = "$after" ]
 }

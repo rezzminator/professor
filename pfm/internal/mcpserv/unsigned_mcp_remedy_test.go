@@ -43,18 +43,6 @@ func (fakeUnsignedInjector) Inject(context.Context, inject.Request) (inject.Resu
 	}, nil
 }
 
-func (fakeUnsignedInjector) ScheduleAfterCurrentTurn(
-	context.Context, inject.Request,
-) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
-func (fakeUnsignedInjector) ScheduleSelfCompact(
-	context.Context, string, []string,
-) (inject.Result, error) {
-	return inject.Result{}, nil
-}
-
 // TestMCPUnsignedRefusalNamesAnMCPReachableRemedy pins the actual field
 // failure: nine chat_inject calls over the shared HTTP daemon, an explicit
 // (non-self) target, every one refused because the daemon derived no sender

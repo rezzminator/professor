@@ -95,7 +95,20 @@ func (installer *engine) installThemes(ctx context.Context) {
 		return
 	}
 
-	bases := map[string][]byte{} // fetched base palettes, one download per run
+	type themeLoad struct {
+		content []byte
+		err     error
+	}
+	loads := map[string]themeLoad{}
+	load := func(name string) themeLoad {
+		if cached, ok := loads[name]; ok {
+			return cached
+		}
+		content, err := loadThemeContent(ctx, installer.options.ThemeHTTPClient, sources[name])
+		result := themeLoad{content: content, err: err}
+		loads[name] = result
+		return result
+	}
 	for _, name := range sortedThemeNames(sources) {
 		source := sources[name]
 		target, targetErr := themeTarget(installer.options.Home, source.Target)
@@ -140,22 +153,19 @@ func (installer *engine) installThemes(ctx context.Context) {
 			continue
 		}
 
-		content, loadErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, source)
-		if loadErr != nil {
-			installer.skip("theme " + name + " " + loadErr.Error())
+		loaded := load(name)
+		if loaded.err != nil {
+			installer.skip("theme " + name + " " + loaded.err.Error())
 			continue
 		}
+		content := loaded.content
 		if source.base != "" {
-			base, cached := bases[source.base]
-			if !cached {
-				fetched, baseErr := loadThemeContent(ctx, installer.options.ThemeHTTPClient, sources[source.base])
-				if baseErr != nil {
-					installer.skip("theme " + name + " base " + source.base + " " + baseErr.Error())
-					continue
-				}
-				base, bases[source.base] = fetched, fetched
+			base := load(source.base)
+			if base.err != nil {
+				installer.skip("theme " + name + " base " + source.base + " " + base.err.Error())
+				continue
 			}
-			merged, mergeErr := mergeThemeOverlay(base, content)
+			merged, mergeErr := mergeThemeOverlay(base.content, content)
 			if mergeErr != nil {
 				installer.skip("theme " + name + " overlay onto " + source.base + " failed: " + mergeErr.Error())
 				continue
@@ -565,7 +575,7 @@ func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, e
 	if client == nil {
 		client = obs.WrapClient(&http.Client{Timeout: 30 * time.Second})
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodGet, raw, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("create GET %s: %w", raw, err)
 	}

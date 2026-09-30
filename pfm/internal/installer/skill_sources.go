@@ -400,7 +400,20 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	if err != nil {
 		return fail(err.Error())
 	}
-	clone, err := os.Lstat(staging)
+	// The clone stays open until its identity check below: a journal restore
+	// deletes it and recreates the store, and a filesystem that reuses a freed
+	// inode number (ext4, overlayfs) would hand the restored copy the clone's,
+	// so os.SameFile would name the old store the new clone.
+	cloneDir, err := os.Open(staging)
+	if err != nil {
+		return fail("open the fresh clone: " + err.Error())
+	}
+	defer func() {
+		if closeErr := cloneDir.Close(); closeErr != nil {
+			installer.skip("close the fresh clone " + staging + ": " + closeErr.Error())
+		}
+	}()
+	clone, err := cloneDir.Stat()
 	if err != nil {
 		return fail("inspect the fresh clone: " + err.Error())
 	}

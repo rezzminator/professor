@@ -37,15 +37,13 @@ Seven phases; one with nothing to ask is skipped. A one-task flight whose caller
    - Layout: a task cuts along a unit of change (what changes together lives in one directory), never across one; the unit's fixed file set decides `Files`; no new hand-kept parallel list, no directory named by negation; a change crossing a wire boundary starts at the contract package's consumer index, and `needs` follows it.
    - A NOTES line, never a task: what you find wise and nobody asked for; a decision a human may want to overrule.
 4. Form tasks (below). Tasks in separate contexts: § Nesting replaces phases 5 to 7.
-5. Collect shapes: a tracer's fenced verbatim lines are shapes already — paste them as they stand. Order only what is still missing, and only the lines a task will quote, never a whole file: one `python3 ~/.claude/skills/codeprobe/codeprobe.py collect {repo root}` plan (`codeprobe.py verbs` gives the syntax; `--expect` carries your order ids), then Read the `return.md` its manifest names; a MISS goes back in one corrected run. Orders too vague for a plan go to `Agent(subagent_type: "collector")` with the repo root and numbered orders. A return that elides text ("shown above", "…") is ordered again, never filled in from memory.
-6. Write: shared files first; then each task file inside a budget you compute before writing it, 25000 characters minus `wc -c` of its `reads`; then the index; all files of a level in one message.
-7. Reconcile: six checks, fixed before you return.
+5. Collect shapes: every shape is pasted from output this run printed — a tracer's fenced lines, your own `sed -n` or Read of exactly those lines, a collector's return — only the lines a task will quote, never a whole file. Many shapes in files you have not read go to `Agent(subagent_type: "collector")` with the repo root and numbered orders. A read that elides text ("shown above", "…") is read again, never filled in from memory.
+6. Write: shared files first; then each task file inside a budget you compute before writing it, 25000 characters minus `wc -c` of its `reads`; all files of a level in one message.
+7. Reconcile: run the index script. It rebuilds `index.md` and prints the table, its delta, file collisions (a file in two tasks with no `needs` chain between them), the largest read and one `ERROR` line per defect: bad frontmatter, an unknown `needs` id, a missing `reads` file, a cycle, a task over the 25000-character budget. Fix every `ERROR` and collision, then rerun until it exits 0; over budget, cut words first, the task second; exit 2 means it built nothing. Its task count, collisions and largest read are the `RECONCILED` numbers. Then four checks, fixed before you return:
    - Restatement: no task or shared file restates an instruction the executor or the lander agent holds, or a rule of the testing manual.
    - Coverage: every numbered change, and every mention of a removed or renamed thing, lands in exactly one task or in `BLOCKED`.
-   - Collision: no file appears in two tasks unless one needs the other.
-   - Size: by `wc -c`, each task file plus its `reads` stays under 25000 characters. Over: cut words first, the task second.
    - Sense: each Done when can come true under its Decisions; no two decisions contradict; nothing changed breaks a reader outside its Files.
-   - Names: you write only `index.md`, `0-*.md` and `{level}-{letter}.md`; `run.md` and `audit.md` belong to other writers.
+   - Names: you write only `0-*.md` and `{level}-{letter}.md`; the script writes `index.md`; `run.md` and `audit.md` belong to other writers.
 
 ## Forming tasks
 
@@ -69,13 +67,13 @@ As the planner, after Form tasks:
 1. Cut one batch per context; no file in two batches.
 2. Write the `0-` files, pinning every contract that crosses batches.
 3. Spawn one child per batch, all in one message, each `Agent(subagent_type: "flights-speccer")`, briefed with the batch plan (every batch's ids with level, `needs`, `shares`, `files` and goal line), the design lines of its tasks, the maps that concern them, and the directory. A crossing contract you cannot pin first runs that child before its consumers.
-4. Write no task file. Build `index.md` from the children's rows and reconcile from rows and `wc -c`, never by opening a task file. A batch that returns nothing is spawned once more; a second miss is `BLOCKED`.
+4. Write no task file. Once every child has returned, reconcile with the index script, never by opening a task file. A batch that returns nothing is spawned once more; a second miss is `BLOCKED`.
 
-As a child: skip intake and map; run shapes, write and reconcile for your assigned ids only, and return their index rows. A task you cannot write as assigned comes back with the reason. A child never nests; neither does a revising call.
+As a child: skip intake and map; run shapes, write and reconcile for your assigned ids only, the script with `--check` so the index stays the planner's, and return the ids you wrote. A task you cannot write as assigned comes back with the reason. A child never nests; neither does a revising call.
 
 ## The spec directory
 
-- `index.md`: one row per task, `id · needs · rating · shares · reads · files · title`, from the task files' frontmatter, which wins on disagreement. `files` serves the check of a `DONE` and the commit, never scheduling.
+- `index.md`: written only by `node ~/.claude/commands/flights/flight-index.mjs {spec directory}` — a title and one row per task, `id · needs · rating · shares · reads · files · title`, from the task files' frontmatter. `files` serves the check of a `DONE` and the commit, never scheduling. A fact a later round needs lives in the Decisions of the task it binds, or in a `0-` file when two tasks need it; history goes in NOTES.
 - `0-{topic}.md`: only when two or more tasks need the same content — a contract, shared shapes, a fact every executor would otherwise discover alone. An instruction for every executor belongs to the executor agent, a testing rule to the manual: a missing one is a NOTES line.
 - `{level}-{letter}.md`: a task file, one per executor.
 
@@ -110,7 +108,7 @@ files: [src/accounts/repository.ts, src/accounts/repository.test.ts, src/api/rou
 - Decisions: every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text.
 - Shapes: `EXISTING`, what the executor types against (columns, types, helper signatures, API fields, the directory's conventions), quoted with its file path; `NEW`, what the task creates, by name, inputs, outputs and behaviour.
 - Steps: numbered, inside-out; each names the file, the place as a quoted line of code, and the change as behaviour.
-- Execution judgments: every call left to the executor; a call Decisions already settle is not one. A judgment counts toward the rating only when a wrong call breaks a Done when row or reaches past the task's files; a local choice (a helper's name, one idiom over another, where a fixture sits) is listed and never counted. None counted sets `rating: mechanical`. One to three, with every interface the task touches pinned in Shapes, sets `rating: precise`, as does a task with no judgment whose difficulty is the implementation itself: concurrency, failure paths, many error rows. More than three, one to three with a touched interface left unpinned, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`.
+- Execution judgments: every call left to the executor; a call Decisions already settle is not one. A judgment counts toward the rating only when a wrong call breaks a Done when row or reaches past the task's files; a local choice (a helper's name, one idiom over another, where a fixture sits) is listed and never counted. None counted sets `rating: mechanical`. One to three, with every interface the task touches pinned in Shapes, sets `rating: precise`, as does a task with no judgment whose difficulty is the implementation itself: concurrency, failure paths, many error rows. More than three, one to three with a touched interface left unpinned, a diagnosis of an unknown cause, or a document, prompt, spec or report as the deliverable sets `rating: smart`. A path the guard keeps for the main chat in `Files` (`.claude/**`, a `CLAUDE.md`) sets `rating: main-chat` instead, whatever the count: no executor can write it, so the main chat applies the task under `/pcm`; such a task holds those edits and only what must land with them.
 
 ## Altitude
 
@@ -135,10 +133,10 @@ A task you cannot specify (the input contradicts itself, or a fact lives in neit
 
 ## Revising
 
-Given an existing spec directory and a reason (a report, a failing check, a ruling on a `BLOCKED` question, a refinement), the caller names the completed tasks and what landed; their files stay as they are. Rewrite, add or remove the rest so the fix lives in the task files; a `FAILED` task is cut smaller or re-approached, never resent unchanged. Rebuild the index, return as usual, changed ids in NOTES. Read the index and the task files the reason names; probe only for what the reason requires.
+Given an existing spec directory and a reason (a report, a failing check, a ruling on a `BLOCKED` question, a refinement), the caller names the completed tasks and what landed; their files stay as they are. Rewrite, add or remove the rest so the fix lives in the task files; a `FAILED` task is cut smaller or re-approached, never resent unchanged. Reconcile, then return with the table cut to the rows the script's `DELTA` line names, and that line. Read the index and the task files the reason names; probe only for what the reason requires.
 
-- Before rewriting a line, read the executor's transcript and the `RETRO` lines of `run.md`: the report is its conclusion, the transcript how it got there.
-- The second red of one id means the cause is unknown, whatever the reports say. Before any rewrite, read the whole unit the task changes — the entire test, beat or module — and the runtime path it exercises (one tracer when the path leaves the unit), with every transcript of that id; write the cause as a `Decisions` line. A third red the caller returns as `BLOCKED`.
+- Before rewriting a line, read the executor's transcript and the `RETRO` lines of `run.md`: the report is its conclusion, the transcript how it got there. One call reads it: `python3 ~/.claude/skills/transcript/transcript.py show {transcript}`, `{transcript}` being the path or session id the `run.md` line carries; open more only at a line the digest names (`--lines {n}-{m} --results full`, `--grep '{failing id}' --results tail:40`). A missing transcript or a `TRANSCRIPT FAILED` line goes in NOTES as `NO TRANSCRIPT {id}: {why}`, and the rewrite rests on the report alone.
+- The second red of one id means the cause is unknown, whatever the reports say. Before any rewrite, read the whole unit the task changes — the entire test, beat or module — and the runtime path it exercises (one tracer when the path leaves the unit), with every transcript of that id, each through the same `show`; write the cause as a `Decisions` line. A third red the caller returns as `BLOCKED`.
 - A red in code the flight forbids fixing is no spec fault: record it where the project keeps known defects, narrow the Done when, name it in NOTES.
 - Never touch a `CLAIMED` task's file: its executor has read it.
 
@@ -148,8 +146,8 @@ Exactly this shape, nothing around it:
 
 ```
 SPEC {spec directory}
-{the index table, verbatim}
-DISPATCH A task starts once every id in its needs is done, as many at once as its shares admit. One fresh executor per task file, by rating: mechanical → flights-mechanical-executor, precise → flights-precise-executor, smart → flights-smart-executor. A DONE is verified against the index row's files. SPEC-DRIFT or FAILED goes, with the transcript and what landed, to a revising flights-speccer; only it changes a task file.
+{the index script's table, verbatim}
+DISPATCH A task starts once every id in its needs is done, as many at once as its shares admit. One fresh executor per task file, by rating: mechanical → flights-mechanical-executor, precise → flights-precise-executor, smart → flights-smart-executor; main-chat → no executor, the main chat applies it under /pcm. A DONE is verified against the index row's files. SPEC-DRIFT or FAILED goes, with the transcript and what landed, to a revising flights-speccer; only it changes a task file.
 RECONCILED {n} changes in {m} tasks, {b} batches, {k} blocked, {c} file collisions, largest read {x} chars
 BLOCKED {id or item}: {what is missing} · {the one question} | none
 NOTES {up to five lines} | none

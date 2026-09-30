@@ -237,6 +237,18 @@ class ExtractionVerbsTest(unittest.TestCase):
         self.assertIn('pkg/caller.py:5\t    return greet("world")\n', text)
         self.assertIn("pkg/greet.py:1\tdef greet(name):\n", text)
 
+    def test_verb_grep_reads_an_invalid_regex_the_way_grep_does(self):
+        with open(os.path.join(self.root, "pkg", "client.py"), "w") as fh:
+            fh.write("resp = client.Do(req)\n")
+        text = self.collect_one(r"grep '\.Do(' pkg")
+        self.assertIn("· 1 hits in 1 files · read as grep BRE", text)
+        self.assertIn("pkg/client.py:1\tresp = client.Do(req)\n", text)
+
+    def test_a_grep_miss_names_how_its_pattern_was_read(self):
+        proc = run_collect(self.root, self.out_dir, "= 1 t\ngrep '\\.Do[' pkg\n")
+        self.assertIn("MISS 1", proc.stdout)
+        self.assertIn("not a valid regex; matched literally", proc.stdout)
+
     def test_verb_block(self):
         text = self.collect_one("block config.yml build:")
         self.assertIn("@ config.yml:2-4 · block /build:/ · 3 lines", text)

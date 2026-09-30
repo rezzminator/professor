@@ -511,6 +511,9 @@ act_templates() { # the shipped product: mechanical gates, no build
         ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
       fi
 
+      head_ "templates — flight-index tests"
+      node_test_suite "flight-index" "$TMP_BASE/templates/flight-index.tap" templates/global/commands/flights/flight-index.test.mjs
+
       head_ "templates — release-check tests and the notes grammar"
       node_test_suite "release-check" "$TMP_BASE/templates/release-check.tap" scripts/release-check.test.mjs
       if node scripts/release-check.mjs notes --all releases >"$TMP_BASE/templates/release-notes.txt" 2>&1; then
@@ -568,22 +571,25 @@ act_templates() { # the shipped product: mechanical gates, no build
       head_ "templates — OpenCode writer check tests"
       node_test_suite "opencode-writer check" "$TMP_BASE/templates/opencode-writer.tap" scripts/check-opencode-writer.test.mjs
 
-      head_ "templates — codeprobe skill tests"
-      local cp_out="$TMP_BASE/templates/codeprobe.txt"
-      if [[ ! -f templates/global/skills/codeprobe/codeprobe_test.py ]]; then
-        fail_step "codeprobe tests NOT RUN — templates/global/skills/codeprobe/codeprobe_test.py is missing"
-      elif ! python3 -m unittest templates/global/skills/codeprobe/codeprobe_test.py >"$cp_out" 2>&1; then
-        cat "$cp_out"
-        fail_step "codeprobe tests FAILED — a verb or probe command regressed, or python3 could not run the suite (see output)"
-      elif ! grep -Eq '^Ran [1-9][0-9]* tests?' "$cp_out"; then
-        cat "$cp_out"
-        fail_step "codeprobe tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
-      elif grep -Eq 'skipped=[1-9]' "$cp_out"; then
-        cat "$cp_out"
-        fail_step "codeprobe tests SKIPPED — a skipped test is a named gap, never a pass"
-      else
-        ok "codeprobe verbs and probe commands hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
-      fi
+      local skill cp_out
+      for skill in codeprobe transcript; do
+        head_ "templates — $skill skill tests"
+        cp_out="$TMP_BASE/templates/$skill.txt"
+        if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
+          fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
+        elif ! python3 -m unittest "templates/global/skills/$skill/${skill}_test.py" >"$cp_out" 2>&1; then
+          cat "$cp_out"
+          fail_step "$skill tests FAILED — a verb or filter regressed, or python3 could not run the suite (see output)"
+        elif ! grep -Eq '^Ran [1-9][0-9]* tests?' "$cp_out"; then
+          cat "$cp_out"
+          fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
+        elif grep -Eq 'skipped=[1-9]' "$cp_out"; then
+          cat "$cp_out"
+          fail_step "$skill tests SKIPPED — a skipped test is a named gap, never a pass"
+        else
+          ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
+        fi
+      done
 
       head_ "templates — OpenCode writer references"
       if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then

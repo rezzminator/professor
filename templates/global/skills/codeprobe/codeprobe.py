@@ -565,21 +565,25 @@ def numbered(lines, a, b, mark=None):
 
 def bre_or_re(pattern):
     """A caller's grep pattern may be BRE (`a\\|b`, `f(`); read it the way grep would. -> (regex, how)."""
-    if "\\|" in pattern or "\\(" in pattern:
-        out, i = [], 0
-        while i < len(pattern):
-            c = pattern[i]
-            if c == "\\" and i + 1 < len(pattern):
-                nxt = pattern[i + 1]
-                out.append({"|": "|", "(": "(", ")": ")", "{": "{", "}": "}", "+": "+", "?": "?"}.get(nxt, "\\" + nxt))
-                i += 2
-                continue
-            out.append("\\" + c if c in "()|{}+?" else c)
-            i += 1
+    if "\\|" not in pattern and "\\(" not in pattern:
         try:
-            return re.compile("".join(out)), "read as grep BRE"
+            return re.compile(pattern), None
         except re.error:
             pass
+    out, i = [], 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\" and i + 1 < len(pattern):
+            nxt = pattern[i + 1]
+            out.append({"|": "|", "(": "(", ")": ")", "{": "{", "}": "}", "+": "+", "?": "?"}.get(nxt, "\\" + nxt))
+            i += 2
+            continue
+        out.append("\\" + c if c in "()|{}+?" else c)
+        i += 1
+    try:
+        return re.compile("".join(out)), "read as grep BRE"
+    except re.error:
+        pass
     try:
         return re.compile(pattern), None
     except re.error:
@@ -647,9 +651,10 @@ def run_verb(root, files, verb, args):
             pos.append(a)
             k += 1
     if verb == "grep":
-        header, body = grep_block(root, files, pos, opts)
+        header, body, how = grep_block(root, files, pos, opts)
         if " · 0 hits " in header and not body:
-            raise Miss(f"no line matches /{pos[0]}/ in {' '.join(pos[1:]) or 'the whole repo'} (searched)")
+            read = f", {how}" if how else ""
+            raise Miss(f"no line matches /{pos[0]}/ in {' '.join(pos[1:]) or 'the whole repo'} (searched{read})")
         return [(header, body)]
     if verb == "consts":
         return [consts_block(root, files, pos)]
@@ -842,7 +847,7 @@ def grep_block(root, files, pos, opts):
         body.append(f"UNREAD {b}")
     note = f" · {how}" if how else ""
     ctx = f" · ±{opts['C']} lines, hits marked *" if opts["C"] else ""
-    return (f"@ grep /{rx.pattern}/ in {' '.join(pos[1:]) or 'the whole repo'} · {n} hits in {len(hits)} files{ctx}{note}", body)
+    return (f"@ grep /{rx.pattern}/ in {' '.join(pos[1:]) or 'the whole repo'} · {n} hits in {len(hits)} files{ctx}{note}", body, how)
 
 
 def merge_windows(nums, c, total):

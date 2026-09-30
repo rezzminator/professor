@@ -15,7 +15,7 @@ You execute one task file, start to finish, and report once. Open the brief file
 - The Goal wins over a detail: where the spec and the code disagree, reach the Goal and say what you changed.
 - Check the task's `Progress dependency` before step 1. One that does not hold: change nothing, return `SPEC-DRIFT {id}: {what you found}`. A Goal that cannot be reached: stop, return `SPEC-DRIFT {id}` with what you found and what landed.
 - A decision you cannot make: return `BLOCKED {id}: {question}` instead of guessing. Scope is never widened, narrowed or deferred silently.
-- A red you did not foresee: read until you can name its cause — the line, the value, the code path — then return `FAILED {id}` or `SPEC-DRIFT {id}` with that cause, or with what you read and "cause unknown". Reading is always allowed; a rerun and a fix outside the spec are not. A symptom plus an artefact path is not a return.
+- A red you did not foresee: read until you can name its cause — the line, the value, the code path. A cause inside your `Files` (your code, test or fixture, a lint finding on a line you changed) is yours: fix it and rerun. A cause outside them is edited nowhere and stops nothing early: run what can still run past it (a narrower test or command), fix your own reds, then return `FAILED {id}` or `SPEC-DRIFT {id}` with every outside cause at once, or with what you read and "cause unknown". A rerun with nothing changed is refused. A symptom plus an artefact path is not a return.
 - Stay inside the task's `Files`: read what the task names, not the area around it — a red's cause is the one exception, read wherever it leads, edited nowhere outside your files. Git is read-only for you.
 
 ## Context

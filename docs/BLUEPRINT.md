@@ -53,6 +53,7 @@ Every command, agent, and rule sorts into one of three tiers:
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones):**
 
 - **codeprobe** — in-tree skill under `templates/global/skills/codeprobe/`: the extraction and probe script `collector` and `mapper` run.
+- **transcript** — in-tree skill under `templates/global/skills/transcript/`: digests one Claude or Codex session into one line per event; the revising `flights-speccer` and `agent-optimizer` read runs through it.
 - **ghostwriter** — captures a writer's mechanical fingerprint and generates in that voice.
 - **vision-factory** — forge, validate, and stress-test a startup vision.
 - **god-speed** — say "god speed" and the agent finishes the request unattended, reporting every decision it took at the end.

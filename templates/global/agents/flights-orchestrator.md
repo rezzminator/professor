@@ -35,7 +35,7 @@ You hold the index and the verdicts and nothing else: no task file's content, no
 
 ## An executor
 
-Spawn `Agent(subagent_type: {the index row's rating: mechanical → "flights-mechanical-executor", precise → "flights-precise-executor", smart → "flights-smart-executor"})`, no model override. The agent holds its own rules, cap and return format; the brief carries, and nothing more:
+Spawn `Agent(subagent_type: {the index row's rating: mechanical → "flights-mechanical-executor", precise → "flights-precise-executor", smart → "flights-smart-executor"})`, no model override. A `main-chat` row spawns nothing (§ Situations). The agent holds its own rules, cap and return format; the brief carries, and nothing more:
 
 - the task file path and the paths its index row `reads`;
 - the `run.md` lines of the tasks it `needs`, pasted;
@@ -52,11 +52,12 @@ Verify before recording. Match the first line's token, never the prose. `DONE`: 
 | Situation | Reaction |
 | --- | --- |
 | `DONE`, verified | `{id} DONE · {what it adapted, or as specified}`; dispatch what it unblocked |
-| `FAILED`, including a cap | `{id} FAILED · round {n} · {the executor's cause} · transcript {path}`; start nothing that needs it; a revising call to `flights-speccer` (§ Revising); the same task file never goes out again unchanged |
-| `SPEC-DRIFT` | `{id} SPEC-DRIFT · round {n} · {the executor's cause} · transcript {path}`; the same road as `FAILED` |
+| `FAILED`, including a cap | `{id} FAILED · round {n} · {the executor's cause} · transcript {path or session id}`; start nothing that needs it; a revising call to `flights-speccer` (§ Revising); the same task file never goes out again unchanged |
+| `SPEC-DRIFT` | `{id} SPEC-DRIFT · round {n} · {the executor's cause} · transcript {path or session id}`; the same road as `FAILED` |
 | A second `FAILED` or `SPEC-DRIFT` of the same id | the revising call is marked diagnose-first and carries every transcript of that id; `flights-speccer` names the cause in the task file before it rewrites |
 | A third red of the same id | `{id} BLOCKED · {the executor's cause line}`; no third revising call; the question travels in your return and the flight lands without the task |
 | `BLOCKED`, a question only the user can answer | `{id} BLOCKED · {question}`; every other task continues; the question travels in your return. The ruling comes back to `flights-speccer` as a revising call made by your caller, who re-runs you naming the revised ids |
+| A `main-chat` task whose needs are done | no executor: its files are the main chat's alone. You are the main chat: `{id} CLAIMED · main chat`, apply the task file under `/pcm`, then verify and record it like a returned `DONE`. You are a sub-agent: `{id} MAIN-CHAT · waits for the main chat`; start nothing that needs it; every other task continues; it travels in your return, and your caller applies it and re-runs you naming it |
 | A question the index or the brief answers | answer it by `SendMessage` to the same executor |
 | A return carries `RETRO {lesson}` | `{id} RETRO · {lesson}` in `run.md`, unless the same cause is already recorded or the lesson serves a step the executors do not run (a review, a full suite); an environment or tooling lesson goes by one `SendMessage` to every executor still in flight; every later brief carries it |
 | A lander returns `PASS {project}` | `gate {project} PASS · {time}`; when every lander has returned, the standing checks, then the commit |
@@ -68,7 +69,7 @@ Verify before recording. Match the first line's token, never the prose. `DONE`: 
 | A defect a return names outside the task's files, or a lander's finding outside the flight | `NOTES`; never a fix by you |
 | A spec fault you can see (two decisions contradict, an index row without a file) | a revising call; never a patch, never a ruling written beside the directory |
 
-Revising: send the report, what already landed, the completed ids and the executor's transcript to a fresh `Agent(subagent_type: "flights-speccer", model: "opus")` handed the directory and the reason — every revising round runs on opus, the diagnose-first round included; only a speccer you spawned that already runs on opus is revised by `SendMessage`. The transcript is `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl` (default `~/.claude`), the id being the task id the spawn returned; the report is the executor's conclusion, the transcript is how it got there, and the speccer reads it before rewriting. Its return is the new index; continue from it and count the round per id.
+Revising: send the report, what already landed, the completed ids and the executor's transcript to a fresh `Agent(subagent_type: "flights-speccer", model: "opus")` handed the directory and the reason — every revising round runs on opus, the diagnose-first round included. The transcript is `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl` (default `~/.claude`), the id being the task id the spawn returned; the report is the executor's conclusion, the transcript is how it got there, and the speccer reads it before rewriting. Its return is the new index; continue from it and count the round per id.
 
 ## The gate
 
@@ -76,7 +77,7 @@ Executors run no review. After the last verdict, spawn one `Agent(subagent_type:
 
 ## run.md
 
-`{flight directory}/run.md`: the header on creation, then one line per event, appended as it happens: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`, `gate {project} {CLAIMED|PASS|FIXED|FAIL} · {one line}` per lander, and `{id} RETRO · {lesson}`. A `FAILED` or `SPEC-DRIFT` line carries the round for that id, the cause the executor gave, and its transcript path — the audit and the next revising call read the ledger, not your memory.
+`{flight directory}/run.md`: the header on creation, then one line per event, appended as it happens: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED|MAIN-CHAT} · {one line}`, `gate {project} {CLAIMED|PASS|FIXED|FAIL} · {one line}` per lander, and `{id} RETRO · {lesson}`. A `FAILED` or `SPEC-DRIFT` line carries the round for that id, the cause the executor gave, and its transcript path or session id — the audit and the next revising call read the ledger, not your memory.
 
 `{flight directory}/agents.tsv`: one tab-separated row per spawn, appended the moment the spawn returns its agent id — `{task id, or gate-{project}, or spec} {agent type} {agent id} {round} {ISO time} {claude|codex|seat}` — for every executor, lander and speccer you spawn. The agent id is whatever the spawn returned, verbatim: an agent id, or on Codex the agent path (`/root/{name}`). The time is printed by `date -u +%Y-%m-%dT%H:%M:%SZ` inside the appending command, never typed. A claim you void keeps its row: the agent ran and its spend is the flight's. Append only: you never read it back. Nothing else is written.
 
@@ -99,6 +100,7 @@ COMMIT {sha} | none
 DISPATCHED {n} executors, {g} landers, {m} returns, {k} revising rounds
 COST {calls} calls · {tokens} · {price} · worst {agent}: {price}, {calls} calls | failed: {error}
 BLOCKED {id}: {question} | none
+MAIN-CHAT {id}: {task file} | none
 RETRO {id}: {lesson}, marked MANUAL when it proposes a testing-manual addition | none
 NOTES {up to five lines} | none
 ```

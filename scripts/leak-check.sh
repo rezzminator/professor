@@ -19,8 +19,9 @@
 # Structural patterns stay inline because they name nobody. Their discriminator: a home
 # path is a leak only when it names a CONCRETE directory, so the blueprint's own
 # documented defaults (`~/work/<project>`, `$HOME/work/{MEMORY_VAULT_DIR}`) pass while a
-# real directory under the same root does not. Written as a bracket class, these three
-# patterns also cannot match their own source text — which is why this file passes the
+# real directory under the same root does not. A personal mailbox (a gmail address) is
+# PII whoever owns it; a fixture carries an invented address instead. Written with a
+# bracket class, these four patterns also cannot match their own source text — which is why this file passes the
 # scan it now submits itself to.
 #
 # MATCHED CASE-INSENSITIVELY (grep -i), and that is load-bearing: the pattern once spelled
@@ -30,7 +31,8 @@
 set -euo pipefail
 
 # Named nowhere, identifying nobody — safe to keep in the public file.
-STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]'
+STRUCTURAL_PATTERN='/home/[A-Za-z0-9]|/Users/[A-Za-z0-9]|~/work/[A-Za-z0-9]|@gmail[.]com'
+STRUCTURAL_COUNT=$(( $(printf '%s' "$STRUCTURAL_PATTERN" | tr -cd '|' | wc -c) + 1 ))
 
 # Tokens that MATCH a structural pattern but name nobody. Each is removed from a line
 # before the line is judged, so a line carrying a real path ALONGSIDE one still fails.
@@ -262,7 +264,7 @@ scan_diff_stream() {
     printf 'added_lines=%d\n' "$added_lines"
     printf 'distinct_files=%d\n' "$distinct_files"
     printf 'term_count=%d\n' "${#terms[@]}"
-    printf 'structural_patterns=3\n'
+    printf 'structural_patterns=%d\n' "$STRUCTURAL_COUNT"
     printf 'suppressed=%d\n' "$suppressed"
     printf 'unattributed=%d\n' "$unattributed"
   } > "$coverage_file"
@@ -329,7 +331,7 @@ case "$mode" in
         "${#files[@]}" "$excluded" "$skipped" >> "$hits_file"
     fi
     printf 'leak-check: scanned %d file(s) (%d excluded by design, %d not a regular file) against %d private term(s) + %d structural pattern(s); %d benign-token line(s) suppressed\n' \
-      "$scanned" "$excluded" "$skipped" "${#terms[@]}" 3 "$suppressed" >&2
+      "$scanned" "$excluded" "$skipped" "${#terms[@]}" "$STRUCTURAL_COUNT" "$suppressed" >&2
     ;;
 esac
 

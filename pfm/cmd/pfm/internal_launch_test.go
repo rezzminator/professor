@@ -180,7 +180,7 @@ exit 3
 	for _, want := range []string{
 		"tmux=" + socket,
 		"argv=--resume fixture-id --dangerously-skip-permissions --settings {",
-		`"CLAUDE_CODE_PROMPT_CACHE_TTL":"1h"`,
+		`"CACHE_LIVE_CONTROL_MAIN_TTL":"1h"`,
 		"config=" + filepath.Join(root, "caller-config"),
 		"force=unset", "sid=unset", "child=unset", "endpoint=unset",
 	} {

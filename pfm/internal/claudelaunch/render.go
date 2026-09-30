@@ -153,9 +153,10 @@ const (
 	cacheTTL5M = "5m"
 )
 
-// promptCacheTTL is the main chat's prompt-cache lifetime word. The launch sets
-// it through CLAUDE_CODE_PROMPT_CACHE_TTL, never ENABLE_PROMPT_CACHING_1H: that
-// switch lifts every sub-agent to 1h too, so sub-agents are pinned to 5m apart.
+// promptCacheTTL is the main chat's starting prompt-cache TTL word, handed to
+// the cache-live-control plugin as CACHE_LIVE_CONTROL_MAIN_TTL. The plugin sets
+// Claude Code's own TTL variables and owns every TTL, main chat and sub-agents,
+// from then on; pfm writes no Claude Code TTL variable itself.
 func promptCacheTTL(cache1h bool) string {
 	if cache1h {
 		return cacheTTL1H
@@ -188,8 +189,7 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h, fullscre
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}
-	env[envPromptCacheTTL] = promptCacheTTL(cache1h)
-	env[envSubagentPromptCacheTTL] = cacheTTL5M
+	env[envCacheLiveControlMainTTL] = promptCacheTTL(cache1h)
 	if request.Purpose != PurposeQuery && prefs.SystemPrompt == pfmconfig.SystemPromptLean {
 		env[envSimplePrompt] = "1"
 	}

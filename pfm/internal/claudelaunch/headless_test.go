@@ -47,11 +47,11 @@ func TestRenderHeadlessCacheLifetimeMainChatOnly(t *testing.T) {
 	}{
 		{
 			map[string]any{"cache1h": true},
-			map[string]string{"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "5m"},
+			map[string]string{"CACHE_LIVE_CONTROL_MAIN_TTL": "1h"},
 		},
 		{
 			map[string]any{"cache1h": false},
-			map[string]string{"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "5m"},
+			map[string]string{"CACHE_LIVE_CONTROL_MAIN_TTL": "5m"},
 		},
 		// No cache key passed: nothing is set, and the run scrubs the inherited
 		// global switches, so Claude falls back to 5m for main and sub-agents.

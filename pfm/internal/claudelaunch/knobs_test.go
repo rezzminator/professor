@@ -37,6 +37,8 @@ func TestKnobsInventory(t *testing.T) {
 		"FORCE_PROMPT_CACHING_5M",
 		"CLAUDE_CODE_PROMPT_CACHE_TTL",
 		"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+		"CACHE_LIVE_CONTROL_MAIN_TTL",
+		"CACHE_LIVE_CONTROL_AGENTS_TTL",
 		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
 		"ANTHROPIC_BASE_URL",
 		"ANTHROPIC_AUTH_TOKEN",
@@ -62,7 +64,7 @@ func TestKnobsInventory(t *testing.T) {
 		}
 		seen[knob.Name] = true
 		if knob.Name == "cache1h" &&
-			knob.Target != "env.CLAUDE_CODE_PROMPT_CACHE_TTL|env.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL" {
+			knob.Target != "env.CACHE_LIVE_CONTROL_MAIN_TTL" {
 			t.Errorf("cache1h target=%q", knob.Target)
 		}
 	}

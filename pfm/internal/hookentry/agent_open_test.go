@@ -74,7 +74,7 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 			if scenario.cache1H {
 				cacheTTL = "1h"
 			}
-			if parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != cacheTTL {
+			if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != cacheTTL {
 				t.Fatalf("cache settings=%#v, want main chat %s", parsed.SettingsEnv, cacheTTL)
 			}
 			launches, err := fleetdb.OpenLaunches(context.Background(), values)

@@ -40,7 +40,7 @@ func TestHeadlessClaudeDefaultsCacheFromAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsedShell(t, plan.Run).SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" ||
+	if parsedShell(t, plan.Run).SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" ||
 		plan.Record == nil || !plan.Record.Cache1H {
 		t.Fatalf("configured 1h cache missing: record=%#v run=%s", plan.Record, plan.Run)
 	}
@@ -79,7 +79,7 @@ func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
 	}
 	parsed := parsedShell(t, plan.Run)
 	if parsed.Name != "_KILL worker 3" || !parsed.Autonomy ||
-		parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" ||
+		parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" ||
 		parsed.SettingsEnv[spawnDepthName] != "8" ||
 		parsed.Settings["outputStyle"] != "default" {
 		t.Fatalf("headless launch shape: name=%q autonomy=%t settings=%#v",
@@ -168,7 +168,7 @@ func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
 	// Match the assignments themselves, never "…=1 claude": launch-env words
 	// sit between the cache assignment and the binary, so an adjacency check
 	// would pass vacuously with both cache modes set.
-	if parsedShell(t, plan.Run).SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" {
+	if parsedShell(t, plan.Run).SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" {
 		t.Fatalf("1h cache not armed: %s", plan.Run)
 	}
 	if parsedShell(t, plan.Run).SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "" {

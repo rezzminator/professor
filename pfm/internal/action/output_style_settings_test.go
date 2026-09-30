@@ -52,11 +52,11 @@ func TestClaudeSpawnRendersRegistryPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" {
+	if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" {
 		t.Fatalf("settings env = %#v", parsed.SettingsEnv)
 	}
 	for _, entry := range command.Env {
-		if strings.HasPrefix(entry, "CLAUDE_CODE_PROMPT_CACHE_TTL=") {
+		if strings.HasPrefix(entry, "CACHE_LIVE_CONTROL_MAIN_TTL=") {
 			t.Fatalf("cache escaped settings into process env: %q", entry)
 		}
 	}

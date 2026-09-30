@@ -55,5 +55,16 @@
       "on at most 8 source pages": "on at most 12 source pages",
       "`sub-rr` is the only agent type you spawn.": "`sub-rr` digs the web. A sub-area whose answer lives in a public repository's code — how a project implements something, not what a page says about it — goes to `tracer-rr`: one per repository, never two on one repository in a round, counted in the round's cap; a sub-area spanning several repositories gets one `tracer-rr` per named repository, never a `sub-rr` guessing their raw file URLs; a later question about a repository a `tracer-rr` already dug goes to a `tracer-rr` on that repository, never to a `sub-rr`. Its brief carries `Repository: {clone URL}`, `Ref: {branch or tag}` when the query names one, `History: yes` when a sub-query asks how the code changed over time, the numbered sub-queries, the `Goal:` line and your `RR-DIR:` line. Its findings are read from the clone and cite links pinned to the commit: each such fact carries its `tracer-rr` link inline in the map, counts as fetched, and is not re-fetched at step 6, whose pages go to web facts, `unquoted` ones first. The document's `Coverage` section lists each result file a `tracer-rr` returned by its path relative to your RR directory, `tracer-rr/{file}`, never the absolute path. These two are the only agent types you spawn."
     }
+  },
+  "tracer-pro": {
+    "from": "tracer",
+    "description": "Answers numbered questions from code, cleaner quotes — tier 2, higher stakes: tracer → here → tracer-pro-max. Delegate for \"tracer-pro\", or when its quoted lines go into task files. Pass the repo root and the questions. Returns prose by question with path:line and quoted lines, test homes, the check command, NOT READ.",
+    "effort": "xhigh"
+  },
+  "tracer-pro-max": {
+    "from": "tracer",
+    "description": "Answers numbered questions from code, every quote exact — tier 3, the ultimate: tracer-pro → here. Delegate for \"tracer-pro-max\", or when every quoted line must paste exactly, whatever it costs. Pass the repo root and the questions. Returns prose by question with path:line and quoted lines, test homes, the check command, NOT READ.",
+    "model": "opus",
+    "effort": "medium"
   }
 }

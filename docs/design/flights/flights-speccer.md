@@ -330,6 +330,6 @@ A spec is judged from the transcript of the executor that ran it.
 
 - The size limits (absorb under about 5 files or 8 steps, cut over about 20 files or 25 steps) and the reading budget (25,000 characters, raised from 16,000 because trimming task files to fit was most of a large run's cost) are first values. Tune them until executors land between about 40 and 80 calls.
 - Distilling `/architecture-design` into how `Decisions` is written.
-- Experiment: map probes are `tracer` (general-purpose made specific to the speccer), measured on one bench against open-handed `general-purpose` (tracer 28.0/30 with 2 wrong at $1.17, against 29.5 with 3 wrong at $2.26); a whole-flight replay against the open-hand opus baseline decides whether it stays.
+- Experiment: map probes are `tracer` (general-purpose made specific to the speccer), measured on one bench against open-handed `general-purpose` (the `opus` tier, `tracer-pro-max`, 28.0/30 with 2 wrong at $0.80, against 29.5 with 3 wrong at $1.37; the speccer spawns tier 1, `tracer` — [tracer-bench.md](../tracing/tracer-bench.md)); a whole-flight replay against the open-hand opus baseline decides whether it stays.
 - A test on this repository that measures whether `flights-speccer` reuses what exists instead of inventing it.
 - A `pfm` verb that compiles and validates `index.md` from the task files' frontmatter.

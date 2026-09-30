@@ -15,7 +15,7 @@
 | Seat | Type, model | Takes | Returns | Cap |
 | --- | --- | --- | --- | --- |
 | lead | `reviewer`, opus, effort high | the brief: TREE, BASE..HEAD, PATHSPECS, MODE, SANDBOX, claims | `review.md`, one line | 40 calls |
-| tracer | `tracer` (opus, medium) | 3–6 threads as numbered questions, at most 5 tracers | facts with quoted `path:line`, no verdicts | its own 25 |
+| tracer | `tracer` (Sonnet 5.5, high) | 3–6 threads as numbered questions, at most 5 tracers | facts with quoted `path:line`, no verdicts | its own 25 |
 | hunter | `general-purpose`, opus | ~100 hunks or ~1200 changed lines, at most 6, every changed file to one hunter; the § Hunter procedure verbatim | findings, ruled out, coverage | 35 calls |
 | test | `general-purpose`, sonnet | build, vet, `-count=1` tests of changed packages and their direct importers, the diff's own gates, budget and count claims measured at BASE and HEAD | commands, exit codes, NEW vs FAILS-AT-BASE | 40 calls |
 

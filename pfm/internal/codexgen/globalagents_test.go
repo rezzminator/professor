@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,6 +70,13 @@ func TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes(t *testing.T) {
 	for _, variant := range variants {
 		all = append(all, source{variant.Path, string(variant.Content)})
 	}
+	// Every executor of both families carries a Codex role pin; every other
+	// role must render byte-identical to the pre-override compiler.
+	pinned := []string{
+		"flights-mechanical-executor", "flights-precise-executor", "flights-smart-executor",
+		"general-mechanical-executor", "general-precise-executor", "general-smart-executor",
+	}
+	var skipped []string
 	checked := 0
 	for _, src := range all {
 		fields, _, err := parseFrontmatter(src.raw)
@@ -76,9 +84,11 @@ func TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, present := fields["codex-model"]; present {
+			skipped = append(skipped, strings.TrimSuffix(filepath.Base(src.path), ".md"))
 			continue
 		}
 		if _, present := fields["codex-effort"]; present {
+			skipped = append(skipped, strings.TrimSuffix(filepath.Base(src.path), ".md"))
 			continue
 		}
 		t.Run(strings.TrimSuffix(filepath.Base(src.path), ".md"), func(t *testing.T) {
@@ -93,8 +103,10 @@ func TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes(t *testing.T) {
 		})
 		checked++
 	}
-	if checked != len(all)-2 {
-		t.Fatalf("checked %d of %d roles; want all except the two flights executors", checked, len(all))
+	slices.Sort(skipped)
+	if !slices.Equal(skipped, pinned) || checked != len(all)-len(pinned) {
+		t.Fatalf("checked %d of %d roles, skipped %v; want every role except the pinned executors %v",
+			checked, len(all), skipped, pinned)
 	}
 }
 

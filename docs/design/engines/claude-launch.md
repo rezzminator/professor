@@ -68,7 +68,7 @@ type Knob struct {
 | --- | --- | --- | --- |
 | `configDir` | env `CLAUDE_CONFIG_DIR` | account | the account's `configDir` (omitted for the implicit account) |
 | hygiene | unset `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR`, `ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `CODEX_THREAD_ID` | constant | — |
-| `cache1h` | settings `env.CLAUDE_CODE_PROMPT_CACHE_TTL=1h`, or `=5m` — the main chat only; never `FORCE_PROMPT_CACHING_5M`, which outranks the cache-live-control plugin's `/cache`, nor `ENABLE_PROMPT_CACHING_1H`, which raises every sub-agent; also written to the [launch record](#the-launch-record) | launch → config | `true` |
+| `cache1h` | env `CLAUDE_CODE_PROMPT_CACHE_TTL=1h`, or `=5m` — the main chat only; in the process environment, never the settings `env` block, which Claude Code re-applies on every settings-file reload and so would overwrite the cache-live-control plugin's live `/cache`; never `FORCE_PROMPT_CACHING_5M`, which outranks the cache-live-control plugin's `/cache`, nor `ENABLE_PROMPT_CACHING_1H`, which raises every sub-agent; also written to the [launch record](#the-launch-record) | launch → config | `true` |
 | `systemPrompt` | `professor`: flag `--system-prompt-file`; `lean`: settings `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`; `production`: nothing | config | `production` |
 | `nativeCursor` | settings `env.CLAUDE_CODE_NATIVE_CURSOR=1` | config | `false` |
 | `maxSubagentSpawnDepth` | settings `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | config | `8` |
@@ -122,7 +122,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 | `binary` | `claude` | the real binary behind the launcher |
 | `permissionMode` | `bypass` | autonomy flags (`prompted` omits them) |
 | `systemPrompt` | `production` | `production` / `lean` / `professor` |
-| `cache1h` | `true` | the cache env pair |
+| `cache1h` | `true` | `CLAUDE_CODE_PROMPT_CACHE_TTL` in the process environment |
 | `theme` | unset | `theme` |
 | `nativeCursor` | `false` | native cursor |
 | `maxSubagentSpawnDepth` | `8` | sub-agent depth |
@@ -137,7 +137,7 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 ## The rendered launch
 
 ```text
-env -u {hygiene…} [CLAUDE_CONFIG_DIR={config dir}] {binary} {door verbs} \
+env -u {hygiene…} [CLAUDE_CONFIG_DIR={config dir}] CLAUDE_CODE_PROMPT_CACHE_TTL={1h|5m} {binary} {door verbs} \
   --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
   [--mcp-config '{"mcpServers":{"professor":{"type":"stdio","command":"{home}/.local/bin/pfm","args":["mcp","serve","--stdio"]}}}'] \
   [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions]

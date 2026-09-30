@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -66,7 +65,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		t.Fatalf("resume plan = %#v server = %#v", plan, plan.ChatServer)
 	}
 	parsed := parsedShell(t, plan.Run)
-	if parsed.Resume != id || parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" ||
+	if parsed.Resume != id || launchEnv(t, plan.Run)["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" ||
 		parsed.SettingsEnv[spawnDepthName] != "8" || plan.Record == nil || plan.Record.SessionID != id {
 		t.Fatalf("resume=%q settings=%#v record=%#v", parsed.Resume, parsed.SettingsEnv, plan.Record)
 	}
@@ -113,7 +112,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		t.Fatalf("new Claude line = %q, server = %#v, run = %q", plan.Line, plan.ChatServer, plan.Run)
 	}
 	parsed = parsedShell(t, plan.Run)
-	if parsed.SessionID == "" || parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" ||
+	if parsed.SessionID == "" || launchEnv(t, plan.Run)["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" ||
 		parsed.Settings["outputStyle"] != "default" || !parsed.Autonomy || plan.Record == nil ||
 		plan.Record.SessionID != parsed.SessionID {
 		t.Fatalf("fresh id=%q settings=%#v record=%#v", parsed.SessionID, parsed.SettingsEnv, plan.Record)
@@ -328,15 +327,9 @@ if [ "$1" = internal ] && [ "$2" = agent-open ]; then exit 1; fi
 exit 2
 `, 0o700)
 	writeActionFile(t, claudeScript, `#!/bin/sh
-previous=
-settings=
-for word in "$@"; do
-  if [ "$previous" = --settings ]; then settings=$word; break; fi
-  previous=$word
-done
 {
   printf 'argv=%s\n' "$*"
-  printf 'settings=%s\n' "$settings"
+  printf 'ttl=%s\n' "${CLAUDE_CODE_PROMPT_CACHE_TTL-unset}"
   printf 'sid=%s\n' "${CLAUDE_CODE_SESSION_ID-unset}"
   printf 'code=%s\n' "${CLAUDECODE-unset}"
   printf 'cfg=%s\n' "${CLAUDE_CONFIG_DIR-unset}"
@@ -393,13 +386,8 @@ done
 		!strings.Contains(line, "\ngateway=unset\n") {
 		t.Fatalf("fallback result = %q", content)
 	}
-	settings := strings.TrimSuffix(strings.SplitN(strings.SplitN(line, "\nsettings=", 2)[1], "\n", 2)[0], "\r")
-	parsed, err := claudelaunch.Parse([]string{"claude", "--settings", settings})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "1h" {
-		t.Fatalf("fallback cache = %#v", parsed.SettingsEnv)
+	if !strings.Contains(line, "\nttl=1h\n") {
+		t.Fatalf("fallback cache: want ttl=1h in the process environment, got %q", content)
 	}
 }
 

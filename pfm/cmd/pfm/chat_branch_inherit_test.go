@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -233,20 +232,6 @@ func forkedEnvironment(t *testing.T, jail *branchInheritJail) map[string]string 
 	return parseEnvDump(string(content))
 }
 
-func forkedSettingsEnv(t *testing.T, jail *branchInheritJail) map[string]string {
-	t.Helper()
-	raw, err := waitForFile(t, jail.argsPath, 10*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	argv := append([]string{"claude"}, strings.Split(strings.TrimSpace(string(raw)), "\n")...)
-	parsed, err := claudelaunch.Parse(argv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return parsed.SettingsEnv
-}
-
 // TestChatBranchInheritsParentAccountWhenNoFlagGiven is the account half of
 // the user's report ("branch ... does not inherit the ... account number, it
 // has to be exactly the same"): a parent chat on account 7 (N), a machine
@@ -349,7 +334,7 @@ func TestChatBranchInheritsOneHourCacheFromLiveParentThroughCachingOffShell(t *t
 	if code != 0 {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	environment := forkedSettingsEnv(t, jail)
+	environment := forkedEnvironment(t, jail)
 	if got := environment["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "1h" {
 		t.Fatalf(
 			"CLAUDE_CODE_PROMPT_CACHE_TTL=%q, want \"1h\" — the fork must inherit the LIVE 1h parent, not the caching-off invoking shell",
@@ -393,7 +378,7 @@ func TestChatBranchInheritsFiveMinuteCacheFromLaunchRecord(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	environment := forkedSettingsEnv(t, jail)
+	environment := forkedEnvironment(t, jail)
 	if got := environment["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "5m" {
 		t.Fatalf(
 			"CLAUDE_CODE_PROMPT_CACHE_TTL=%q, want \"5m\" — the fork must inherit the LIVE 5m parent, not an invoking shell claiming 1h",
@@ -438,7 +423,7 @@ func TestChatBranchNoParentLaunchUsesPrimaryConfiguredCache(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	environment := forkedSettingsEnv(t, jail)
+	environment := forkedEnvironment(t, jail)
 	if got := environment["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "5m" {
 		t.Fatalf(
 			"CLAUDE_CODE_PROMPT_CACHE_TTL=%q, want \"5m\" from primary account without a parent launch record",

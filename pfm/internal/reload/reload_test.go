@@ -20,18 +20,44 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func parsedReloadShell(t *testing.T, run string) claudelaunch.Parsed {
+func respawnWords(t *testing.T, run string) []string {
 	t.Helper()
 	output, err := exec.Command("sh", "-c", "set -- "+run+"; printf '%s\\000' \"$@\"").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	words := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
-	parsed, err := claudelaunch.Parse(append([]string{"claude"}, words...))
+	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+}
+
+func parsedReloadShell(t *testing.T, run string) claudelaunch.Parsed {
+	t.Helper()
+	parsed, err := claudelaunch.Parse(append([]string{"claude"}, respawnWords(t, run)...))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return parsed
+}
+
+// respawnEnv is the environment a respawn line assigns its Claude process:
+// the NAME=value operands of the leading env word, up to the binary.
+func respawnEnv(t *testing.T, run string) map[string]string {
+	t.Helper()
+	env := map[string]string{}
+	words := respawnWords(t, run)
+	for index := 0; index < len(words); index++ {
+		switch word := words[index]; {
+		case index == 0 && word == "env":
+		case word == "-u":
+			index++
+		default:
+			name, value, found := strings.Cut(word, "=")
+			if !found || name == "" || strings.Contains(name, "/") {
+				return env
+			}
+			env[name] = value
+		}
+	}
+	return env
 }
 
 type fakeReloadTmux struct {
@@ -591,8 +617,8 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 			}
 			parsed := parsedReloadShell(t, tmux.respawn)
 			if parsed.Resume != "11111111-1111-4111-8111-111111111111" ||
-				parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" {
-				t.Fatalf("respawn resume=%q settings=%#v", parsed.Resume, parsed.SettingsEnv)
+				respawnEnv(t, tmux.respawn)["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" {
+				t.Fatalf("respawn resume=%q env=%#v", parsed.Resume, respawnEnv(t, tmux.respawn))
 			}
 			values, err := pfmconfig.ResolvePaths()
 			if err != nil {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -46,7 +47,9 @@ func TestRenderFreshInteractive(t *testing.T) {
 	if !reflect.DeepEqual(launch.Unset, Hygiene()) || len(launch.Unset) != 20 {
 		t.Errorf("unset=%q", launch.Unset)
 	}
-	if !reflect.DeepEqual(launch.Env, []string{"CLAUDE_CONFIG_DIR=" + machine.Accounts[1].ConfigDir}) {
+	if !reflect.DeepEqual(launch.Env, []string{
+		"CLAUDE_CONFIG_DIR=" + machine.Accounts[1].ConfigDir, "CLAUDE_CODE_PROMPT_CACHE_TTL=1h",
+	}) {
 		t.Errorf("env=%q", launch.Env)
 	}
 	if len(launch.Argv) < 2 || launch.Argv[0] != "--session-id" || launch.Argv[1] != "S" {
@@ -59,7 +62,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 		t.Errorf("settings=%#v", parsed.Settings)
 	}
 	for name, want := range map[string]string{
-		"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h", "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "8",
+		"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":     "8",
 		"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "9007199254740991", "CLAUDE_CODE_TMUX_TRUECOLOR": "1",
 		"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
 		"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":    "1", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
@@ -128,8 +131,8 @@ func TestRenderPluginEnvEveryPurposeAndAccount(t *testing.T) {
 func TestRenderImplicitAccount(t *testing.T) {
 	home, machine := renderMachine(t)
 	launch, _ := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Account: 1}, machine)
-	if len(launch.Env) != 0 {
-		t.Errorf("implicit env=%q", launch.Env)
+	if !reflect.DeepEqual(launch.Env, []string{"CLAUDE_CODE_PROMPT_CACHE_TTL=1h"}) {
+		t.Errorf("implicit env=%q, want the cache TTL and no CLAUDE_CONFIG_DIR", launch.Env)
 	}
 }
 
@@ -137,11 +140,17 @@ func TestRenderCacheChoice(t *testing.T) {
 	home, machine := renderMachine(t)
 	falseValue := false
 	launch, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Cache1H: &falseValue}, machine)
-	if launch.Cache1H || parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != "5m" {
-		t.Errorf("cache=%#v env=%#v", launch, parsed.SettingsEnv)
+	if launch.Cache1H || !slices.Contains(launch.Env, "CLAUDE_CODE_PROMPT_CACHE_TTL=5m") {
+		t.Errorf("cache=%t env=%q, want CLAUDE_CODE_PROMPT_CACHE_TTL=5m in the process env", launch.Cache1H, launch.Env)
+	}
+	// Claude Code re-applies the settings env on every settings-file reload,
+	// which would overwrite the cache-live-control plugin's live /cache.
+	if value, ok := parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"]; ok {
+		t.Errorf("settings env carries CLAUDE_CODE_PROMPT_CACHE_TTL=%q; a settings reload would undo /cache", value)
 	}
 	for _, name := range []string{"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M"} {
-		if _, ok := parsed.SettingsEnv[name]; ok {
+		_, inSettings := parsed.SettingsEnv[name]
+		if inSettings || slices.ContainsFunc(launch.Env, func(entry string) bool { return strings.HasPrefix(entry, name+"=") }) {
 			t.Errorf("%s set; it would outrank the cache-live-control plugin or raise sub-agents", name)
 		}
 	}

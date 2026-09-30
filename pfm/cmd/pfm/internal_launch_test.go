@@ -84,6 +84,7 @@ printf '%s' "$CC_LAUNCH_TRANSCRIPT" > "$PFM_SID_DIR/$socket"
   printf 'argv=%s\n' "$*"
   printf 'config=%s\n' "${CLAUDE_CONFIG_DIR-unset}"
   printf 'force=%s\n' "${FORCE_PROMPT_CACHING_5M-unset}"
+  printf 'ttl=%s\n' "${CLAUDE_CODE_PROMPT_CACHE_TTL-unset}"
   printf 'sid=%s\n' "${CLAUDE_CODE_SESSION_ID-unset}"
   printf 'child=%s\n' "${CLAUDE_CODE_CHILD_SESSION-unset}"
   printf 'endpoint=%s\n' "${ANTHROPIC_BASE_URL-unset}"
@@ -180,7 +181,7 @@ exit 3
 	for _, want := range []string{
 		"tmux=" + socket,
 		"argv=--resume fixture-id --dangerously-skip-permissions --settings {",
-		`"CLAUDE_CODE_PROMPT_CACHE_TTL":"1h"`,
+		"ttl=1h",
 		"config=" + filepath.Join(root, "caller-config"),
 		"force=unset", "sid=unset", "child=unset", "endpoint=unset",
 	} {

@@ -151,8 +151,8 @@ var Knobs = func() []Knob {
 		},
 		Knob{
 			knobCache1H,
-			WireSettings,
-			"env." + envPromptCacheTTL,
+			WireEnv,
+			envPromptCacheTTL,
 			SourceLaunchThenConfig,
 			true,
 			"Choose the main chat's prompt cache lifetime; sub-agents and /cache stay with the plugin.",

@@ -68,6 +68,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	} else if request.Account == 0 && request.ConfigDir != "" {
 		result.Env = []string{configDirEnv + "=" + request.ConfigDir}
 	}
+	result.Env = append(result.Env, envPromptCacheTTL+"="+cacheTTL(result.Cache1H))
 	if request.SessionID != "" {
 		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
 	}
@@ -81,7 +82,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		result.Argv = append(result.Argv, flagName, request.Name)
 	}
 	result.Argv = append(result.Argv, request.Args...)
-	settings := settingsFor(request, prefs, result.Cache1H)
+	settings := settingsFor(request, prefs)
 	payload, err := json.Marshal(settings)
 	if err != nil {
 		return Launch{}, fmt.Errorf("render --settings: %w", err)
@@ -121,7 +122,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	return result, nil
 }
 
-func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h bool) map[string]any {
+func settingsFor(request Request, prefs pfmconfig.ClaudePrefs) map[string]any {
 	settings := map[string]any{knobOutputStyle: defaultWord, knobCleanupPeriodDays: prefs.CleanupPeriodDays}
 	env := map[string]string{
 		envWebSearches:       strconv.FormatInt(prefs.WebSearchesPerSession, 10),
@@ -143,7 +144,6 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h bool) map
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
-	env[envPromptCacheTTL] = cacheTTL(cache1h)
 	if request.Purpose != PurposeQuery && prefs.SystemPrompt == pfmconfig.SystemPromptLean {
 		env[envSimplePrompt] = "1"
 	}
@@ -233,7 +233,10 @@ func NewSessionID() (string, error) {
 // cacheTTL names the main chat's prompt-cache lifetime. It sets only
 // CLAUDE_CODE_PROMPT_CACHE_TTL: FORCE_PROMPT_CACHING_5M would outrank the
 // cache-live-control plugin's /cache, and ENABLE_PROMPT_CACHING_1H would
-// raise every sub-agent to 1h.
+// raise every sub-agent to 1h. Render carries it in the process environment,
+// never the settings env block: Claude Code re-applies that block on every
+// settings-file reload, which would overwrite a live /cache. RenderHeadless
+// keeps it in the settings, since a -p run takes no /cache.
 func cacheTTL(cache1h bool) string {
 	if cache1h {
 		return "1h"

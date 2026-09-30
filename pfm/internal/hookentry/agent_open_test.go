@@ -21,7 +21,8 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 	if err := os.WriteFile(
 		bin,
 		[]byte(
-			"#!/bin/sh\nif [ \"$1\" = agents ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$AGENT_OPEN_ARGV\"\n",
+			"#!/bin/sh\nif [ \"$1\" = agents ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$AGENT_OPEN_ARGV\"\n"+
+				"printf '%s\\n' \"${CLAUDE_CODE_PROMPT_CACHE_TTL-unset}\" > \"$AGENT_OPEN_ARGV.ttl\"\n",
 		),
 		0o700,
 	); err != nil {
@@ -74,8 +75,12 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 			if scenario.cache1H {
 				wantTTL = "1h"
 			}
-			if parsed.SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"] != wantTTL {
-				t.Fatalf("cache settings=%#v, want CLAUDE_CODE_PROMPT_CACHE_TTL=%s", parsed.SettingsEnv, wantTTL)
+			ttl, err := os.ReadFile(argvPath + ".ttl")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(string(ttl)); got != wantTTL {
+				t.Fatalf("process CLAUDE_CODE_PROMPT_CACHE_TTL=%q, want %s", got, wantTTL)
 			}
 			launches, err := fleetdb.OpenLaunches(context.Background(), values)
 			if err != nil {

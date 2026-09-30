@@ -57,7 +57,7 @@ func TestRunRespawnsWithConfiguredClaudePolicy(t *testing.T) {
 			t.Fatalf("respawn command %q lacks configured policy %q", tmux.respawn, want)
 		}
 	}
-	if got := parsedReloadShell(t, tmux.respawn).SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "1h" {
+	if got := respawnEnv(t, tmux.respawn)["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "1h" {
 		t.Fatalf("reload cache setting = %q", got)
 	}
 	if strings.Contains(tmux.respawn, "skip-permissions") {

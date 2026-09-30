@@ -35,7 +35,7 @@ You hold the index and the verdicts and nothing else: no task file's content, no
 
 ## An executor
 
-Spawn `Agent(subagent_type: {the index row's rating: mechanical → "flights-mechanical-executor", smart → "flights-smart-executor"})`, no model override. The agent holds its own rules, cap and return format; the brief carries, and nothing more:
+Spawn `Agent(subagent_type: {the index row's rating: mechanical → "flights-mechanical-executor", precise → "flights-precise-executor", smart → "flights-smart-executor"})`, no model override. The agent holds its own rules, cap and return format; the brief carries, and nothing more:
 
 - the task file path and the paths its index row `reads`;
 - the `run.md` lines of the tasks it `needs`, pasted;

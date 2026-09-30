@@ -137,3 +137,33 @@ func WaybackRawURL(ctx context.Context, client *http.Client, source string) (str
 	}
 	return "https://web.archive.org/web/" + data.Snapshots.Closest.Timestamp + "id_/" + source, nil
 }
+
+// waybackStamp is the snapshot timestamp in a Wayback raw address
+// (WaybackRawURL).
+var waybackStamp = regexp.MustCompile(`/web/(\d{4})(\d{2})(\d{2})\d*id_/`)
+
+// waybackReason is the partial reason of an artifact read from the Wayback
+// Machine's snapshot at address snapshot: the archive's copy of its day,
+// never the live page.
+func waybackReason(snapshot string) string {
+	day := "an undated day"
+	if m := waybackStamp.FindStringSubmatch(snapshot); m != nil {
+		day = m[1] + "-" + m[2] + "-" + m[3]
+	}
+	return "archived copy: the Wayback Machine's snapshot of " + day + ", not the live page"
+}
+
+// storeWaybackCopy stores the Wayback Machine's copy of source (result, read
+// from snapshot) under source itself: its method the wayback rung, its
+// partial naming the snapshot beside whatever the copy's own read left out.
+func (h *Harvester) storeWaybackCopy(
+	source, snapshot string,
+	result Result,
+	rungs []string,
+	options FetchOptions,
+) Result {
+	content := storedContent(result)
+	archived := withPartial(partialBody(content), joinReasons(waybackReason(snapshot), partialReason(content)))
+	return h.storeResult(source, result.Kind, rungWayback, archived, result.Bytes, result.HTTPStatus,
+		append([]string(nil), rungs...), options)
+}

@@ -28,7 +28,7 @@ The sub-agent rule of the project contract offered three roads: a brief naming a
 | Member | Kind | Does | Runs at |
 | --- | --- | --- | --- |
 | `general-orchestrator` | agent | Cuts a batch into tasks with a dependency tree, dispatches, verifies, closes, returns once | smart (`opus`), effort `high` |
-| `general-mechanical-executor`, `general-smart-executor` | agents, one body | One task each, from an inline brief; picked by the task's rating | `sonnet` and `opus`, effort `medium` |
+| `general-mechanical-executor`, `general-precise-executor`, `general-smart-executor` | agents, one body | One task each, from an inline brief; picked by the task's rating | the [tier table](../flights/flights-executors.md#three-tiers-one-source) |
 
 The orchestrator runs at smart, where `flights-orchestrator` runs at mechanical: the flights orchestrator executes a plan the speccer made, while this one makes the plan itself, and cutting work is judgment. Judgment never delegates downward.
 
@@ -58,7 +58,7 @@ No directory, no index, no task files. The orchestrator's own context is the led
 
 1. Route, before anything is dispatched: work on the direct rung (it fits about 80 calls, or one tool call does it whole) returns `BLOCKED {batch}: direct` with the one- or two-agent cut named; work whose solution is not in hand returns `BLOCKED {batch}: flights` with the cut it would make; clear work past about fifteen tasks returns `BLOCKED {batch}: split` with the cut into batches of about fifteen, each its own `general-orchestrator`.
 2. Survey. Read what the caller named; find each task's files with a search, never a read of the area around them. Record `git status --short` before the first dispatch.
-3. Cut. Each task is one deliverable with its own files and its own check, sized to finish within an executor's 45 calls. The dependency tree has two edges: a task that consumes another's output needs it, and two tasks that touch one file never run at once. Rate each task: `mechanical` only for repetitive, straightforward work that needs no reasoning to do right (the same known edit across files, a rename, a move, a named command run, code whose every line the brief fixes); `smart` for any bounded judgment inside the task's own files, and for every task whose deliverable is a document, a prompt, a spec or a report, however exactly the brief words it. A written document always carries reasoning its reader acts on; an exact brief does not make it mechanical. A task that needs a design or a diagnosis is not this family's: it goes back to the caller as `BLOCKED`, and the rest of the batch runs.
+3. Cut. Each task is one deliverable with its own files and its own check, sized to finish within an executor's 45 calls. The dependency tree has two edges: a task that consumes another's output needs it, and two tasks that touch one file never run at once. Rate each task: `mechanical` only for repetitive, straightforward work that needs no reasoning to do right (the same known edit across files, a rename, a move, a named command run, code whose every line the brief fixes); `precise` for one to three bounded judgments inside the task's own files — a judgment counts only when a wrong call breaks the check or reaches past those files, never a local choice such as a helper's name or one idiom over another — with every interface the brief touches pinned, or for code the brief fixes whose difficulty is the implementation itself (concurrency, failure paths, many error rows); `smart` for more than three judgments, and for every task whose deliverable is a document, a prompt, a spec or a report, however exactly the brief words it. A written document always carries reasoning its reader acts on; an exact brief does not make it mechanical. A task that needs a design or a diagnosis is not this family's: it goes back to the caller as `BLOCKED`, and the rest of the batch runs.
 4. Dispatch every task whose needs are done, in one message, as many at once as the harness admits. The task's rating picks the agent type; the spawn carries no model override.
 5. Wait: end the turn; each return arrives on its own. The agent's frontmatter hook `pfm internal orchestrator-wait` denies a Bash call that only waits.
 6. Verify each return against the disk: the first-line token, `git diff --stat` showing the change inside the task's files, no changed file outside every task's files and the step-2 record (parallel tasks and a tree already dirty both change files the one task never touched), the task's check line quoted from what ran.
@@ -72,7 +72,7 @@ Inline in the spawn prompt, the five parts of the briefing contract and nothing 
 
 1. The task's goal in one sentence and the artifact it returns.
 2. Its files, and explicitly what is not its.
-3. The exact change: the symbols, the lines, the command; for a `smart` task, the judgment it owns and its bounds.
+3. The exact change: the symbols, the lines, the command; for a `precise` or `smart` task, the judgment it owns and its bounds.
 4. The check that proves it, and the testing manual path when code changes.
 5. The standing rules the caller passed, and what already landed that this task needs.
 

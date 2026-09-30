@@ -123,12 +123,12 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 		)
 	}
 	if status >= 400 {
-		meaning := map[int]string{400: "bad request", 401: "unauthorized", 403: "forbidden", 404: "page not found", 405: "method not allowed", 408: "request timeout", 410: "gone", 429: "too many requests", 500: "internal server error", 502: "bad gateway", 503: "service unavailable", 504: "gateway timeout"}[status]
+		meaning := map[int]string{400: "bad request", 401: "unauthorized", 403: "forbidden", 404: "page not found", 405: "method not allowed", 408: "request timeout", 410: "gone", 429: "too many requests", 500: "internal server error", 502: "bad gateway", 503: "service unavailable", 504: "gateway timeout", statusBotBlock: "request denied (the site's bot block)"}[status]
 		if meaning == "" {
 			meaning = "request failed"
 		}
 		note := ""
-		if status == 403 || status == 429 || status == 503 {
+		if status == 403 || status == 429 || status == 503 || status == statusBotBlock {
 			note = " — likely a bot-block or rate limit"
 		}
 		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(

@@ -1,13 +1,13 @@
 # The general executors
 
-`general-mechanical-executor` and `general-smart-executor` are the hands of a [`general-orchestrator`](general-orchestrator.md): one fresh agent per task, briefed inline, which makes the change, proves it and returns once. One body, two tiers, on the same pattern as the [flight executors](../flights/flights-executors.md).
+`general-mechanical-executor`, `general-precise-executor` and `general-smart-executor` are the hands of a [`general-orchestrator`](general-orchestrator.md): one fresh agent per task, briefed inline, which makes the change, proves it and returns once. One body, two tiers, on the same pattern as the [flight executors](../flights/flights-executors.md).
 
 Decisions live in this file. The executable wording lives in `templates/global/agents/general-mechanical-executor.md`.
 
 ## Contents
 
 - [Why not the flight executors](#why-not-the-flight-executors)
-- [Two tiers, one source](#two-tiers-one-source)
+- [Three tiers, one source](#three-tiers-one-source)
 - [What the brief carries](#what-the-brief-carries)
 - [What the body holds](#what-the-body-holds)
 - [Tests](#tests)
@@ -20,14 +20,11 @@ Decisions live in this file. The executable wording lives in `templates/global/a
 
 A flight executor is bound to a flight's contract: a brief file, a task file with `Done when` rows, the `run.md` lines of its needs. A general task has none of them; its whole spec is the inline brief. Reusing the flight body would carry that contract as dead text into every general spawn, and every general brief would have to override it. The law both share (the Goal wins, a red is read to its cause, stay inside the files, report once) is carried by each body: a sub-agent never receives the fleet prompt — it runs on its own agent body plus the project's `CLAUDE.md`.
 
-## Two tiers, one source
+## Three tiers, one source
 
-| Agent | Model | Effort | Runs |
-| --- | --- | --- | --- |
-| `general-mechanical-executor` | `sonnet` | `medium` | a task rated `mechanical` |
-| `general-smart-executor` | `opus` | `medium` | a task rated `smart` |
+The three tiers, their models and efforts on Claude and Codex, and the measurements behind them are the one tier table in [`flights-executors`](../flights/flights-executors.md#three-tiers-one-source): a general task rated `mechanical`, `precise` or `smart` runs the same model and effort as a flight task of that rating.
 
-The body exists once, in `general-mechanical-executor.md`. `templates/global/agents/variants.json` declares `general-smart-executor` as a variant `from` it, overriding `model` and `description`; `pfm install` renders it and links it into the engine registries, the road `flights-smart-executor` and `super-rr` take. The orchestrator picks the agent type by the task's rating and passes no model override.
+The body exists once, in `general-mechanical-executor.md`. `templates/global/agents/variants.json` declares `general-precise-executor` and `general-smart-executor` as variants `from` it, overriding `model`, `effort`, `codex-model`, `codex-effort` and `description`; `pfm install` renders it and links it into the engine registries, the road `flights-smart-executor` and `super-rr` take. The orchestrator picks the agent type by the task's rating and passes no model override.
 
 ## What the brief carries
 

@@ -192,7 +192,7 @@ func (gaps carriedGaps) landedThrough(ctx context.Context, requested, final stri
 	if err != nil {
 		return gaps
 	}
-	gaps.redirect, gaps.refused, gaps.moved = "", "", ""
+	gaps.redirect, gaps.refused, gaps.login, gaps.moved = "", "", false, ""
 	where := "the site redirected " + safeURL(requested) + " to " + safeURL(final)
 	landing := classifyLanding(ctx, requested, final)
 	if landing == landedElsewhere && movedPage(requested, final, hops) {
@@ -209,6 +209,7 @@ func (gaps carriedGaps) landedThrough(ctx context.Context, requested, final stri
 		gaps.redirect = where + " — a different page (the requested page may no longer exist)"
 	case landedLogin:
 		gaps.refused = where + " — a login page: the requested page was not served"
+		gaps.login = true
 	case landedHome:
 		gaps.refused = where + " — the site's home page (the requested page may no longer exist)"
 	case landedSame:

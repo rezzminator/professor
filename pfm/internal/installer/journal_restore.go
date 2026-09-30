@@ -48,6 +48,26 @@ func (journal *Journal) WriteOrRestore(targets []string, action func() error) er
 	return journal.markRecordsApplied(indexes)
 }
 
+// restoreJournalRecord is restoreWrite's restore of one record: a variable so a
+// test can fail a restore partway.
+var restoreJournalRecord = restoreLayoutRecord
+
+// leftUnrestored reports whether this run's journal holds a write to path
+// whose restore failed, so path may hold a partial copy. A nil journal holds
+// none.
+func (journal *Journal) leftUnrestored(path string) bool {
+	if journal == nil {
+		return false
+	}
+	resolved := installRecordPath(path)
+	for _, record := range journal.records {
+		if record.Destination == resolved && record.Result == layoutRecordUnrestored {
+			return true
+		}
+	}
+	return false
+}
+
 func (journal *Journal) restoreWrite(start int) error {
 	if start >= len(journal.records) {
 		return nil
@@ -55,7 +75,7 @@ func (journal *Journal) restoreWrite(start int) error {
 	var failures []error
 	for index := len(journal.records) - 1; index >= start; index-- {
 		record := &journal.records[index]
-		if err := restoreLayoutRecord(journal.ctx, *record); err != nil {
+		if err := restoreJournalRecord(journal.ctx, *record); err != nil {
 			failures = append(failures, fmt.Errorf("restore %s: %w", record.Destination, err))
 			record.Result = layoutRecordUnrestored
 			continue

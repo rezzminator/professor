@@ -655,3 +655,60 @@ func TestHTMLFullDOMConversionDropsHiddenElements(t *testing.T) {
 		t.Logf("markdown:\n%s", result.Markdown)
 	}
 }
+
+// TestHTMLMetadataDateComesFromMarkupOnly: htmldate's extensive search turned a
+// bare year ("© 2026") or a stray "Updated in 2019" into a Published line on
+// pages with no date markup. A page without date markup writes no Published
+// line; one whose meta tag carries the date writes it. It needs the pinned
+// interpreter (HARVESTPY_CORPUS_PYTHON).
+func TestHTMLMetadataDateComesFromMarkupOnly(t *testing.T) {
+	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
+	if python == "" {
+		t.Skip("HARVESTPY_CORPUS_PYTHON is not set; the metadata date check needs the pinned interpreter")
+	}
+	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
+	page := func(head string) string {
+		return `<!doctype html><html><head><title>Field notes on river gauges</title>` + head + `</head><body>` +
+			`<article><h1>Field notes on river gauges</h1>` +
+			`<p>The stilling well and the corrected staff gauge now agree to within two millimetres, which is inside` +
+			` the tolerance the network asks of a manual station.</p>` +
+			`<p>Updated in 2019</p>` +
+			`<p>Readings from the stilling well are logged each morning and compared against the staff gauge before` +
+			` the record is filed with the regional office.</p>` +
+			`</article><footer><p>© 2026 River Gauge Society</p></footer></body></html>`
+	}
+	cases := []struct {
+		name, head string
+		want       string
+	}{
+		{name: "no date markup", head: "", want: ""},
+		{
+			name: "meta published time",
+			head: `<meta property="article:published_time" content="2024-05-06T10:00:00Z">`,
+			want: "2024-05-06",
+		},
+	}
+	converter := testConverter(t, python)
+	t.Cleanup(func() { _ = converter.Close() })
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "page.html")
+			if err := os.WriteFile(path, []byte(page(tc.head)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			result, err := converter.Convert(context.Background(), Request{Path: path, Kind: "html"})
+			if err != nil {
+				t.Fatalf("convert: %v", err)
+			}
+			var published string
+			for _, line := range strings.Split(result.Markdown, "\n") {
+				if strings.HasPrefix(line, "**Published:**") {
+					published = strings.TrimSpace(strings.TrimPrefix(line, "**Published:**"))
+				}
+			}
+			if published != tc.want {
+				t.Errorf("Published = %q, want %q; markdown:\n%s", published, tc.want, result.Markdown)
+			}
+		})
+	}
+}

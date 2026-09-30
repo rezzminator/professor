@@ -1,6 +1,6 @@
 # rr
 
-`rr` maps the knowledge area one query asks about. A lead opens the query, plans its sub-areas, sends diggers down the rabbit holes that serve the plan, checks the facts its answer rests on against their pages, and saves one cited document. `collector-rr` is the family's one member that maps nothing: it fetches sources a caller has already located. This file holds the family's shared decisions and the `rr` lead's; each other member's own decisions live in its file beside this one.
+`rr` maps the knowledge area one query asks about. A lead opens the query, plans its sub-areas, sends diggers down the rabbit holes that serve the plan, checks the facts its answer rests on against their pages, and saves one cited document. This file holds the family's shared decisions and the `rr` lead's; each other member's own decisions live in its file beside this one.
 
 A change lands in this file first, then in the templates, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -31,7 +31,6 @@ A change lands in this file first, then in the templates, then in every surface 
 | `heavy-rr` | variant of `rr` | As `super-rr`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [heavy-rr.md](heavy-rr.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | mechanical (`sonnet`), effort `low` | [sub-rr.md](sub-rr.md) |
 | `tracer-rr` | agent | The repository digger of `super-rr` and `heavy-rr`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [tracer-rr.md](tracer-rr.md) |
-| `collector-rr` | agent | Fetches named web sources and returns them verbatim; no diggers, no document | mechanical (`sonnet`), effort `low` | [collector-rr.md](collector-rr.md) |
 | `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|super-rr\|heavy-rr` | `pfm internal rr-dir` | this file |
 
 The leads differ in their caps and in the repository lane, which sends a sub-area whose answer lives in a repository's code to `tracer-rr` ([tracer-rr.md](tracer-rr.md), § Who spawns it); every other line of the body is `rr.md`'s:
@@ -203,7 +202,7 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `tracer-rr.md`, `collector-rr.md`, `variants.json` | The four protocols; the `super-rr` and `heavy-rr` overrides, whose `replace` text must occur exactly once in `rr.md`, and their repository lane, identical in both entries |
+| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `tracer-rr.md`, `variants.json` | The three protocols; the `super-rr` and `heavy-rr` overrides, whose `replace` text must occur exactly once in `rr.md`, and their repository lane, identical in both entries |
 | The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `super-rr` and `heavy-rr`, re-rendered by `pfm codex agents` after every edit of `rr.md` |
 | The hook | `pfm internal rr-dir`, wired by `pfm/internal/installer/expected_hooks.go` | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
 | The roster line | `docs/BLUEPRINT.md` | The family's members and the variant mechanism |

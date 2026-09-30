@@ -1,5 +1,4 @@
 **Title:** Tutorials | Ubuntu
-**Published:** 2026-01-01
 **Source:** Ubuntu
 
 ---

@@ -312,11 +312,12 @@ func setupScriptJail(env *testscript.Env, source string) error {
 		"PFM_TEST_NOW_NS":        "1800000000000000000",
 		"PFM_TEST_PROBE_SOCKETS": "1",
 		"PFM_E2E_HOME":           home, e2eSourceRepo: scriptSource,
-		"PFM_SOURCE_REPO":       scriptSource,
-		"PFM_HARVESTPY_OFFLINE": "1",
-		mockengine.EnvScenario:  scenario,
-		mockengine.EnvEngine:    "claude",
-		"PATH":                  path,
+		"PFM_SOURCE_REPO":           scriptSource,
+		"PFM_HARVESTPY_OFFLINE":     "1",
+		"PFM_SKILL_SOURCES_OFFLINE": "1",
+		mockengine.EnvScenario:      scenario,
+		mockengine.EnvEngine:        "claude",
+		"PATH":                      path,
 	}
 	for name, value := range values {
 		env.Setenv(name, value)

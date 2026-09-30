@@ -350,11 +350,8 @@ func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
 		},
 		{
 			"ambiguous",
-			Result{
-				Source: "https://example.test/y",
-				Error:  "Choose another record with harvester_search_literature and read it with harvester_read (publications).",
-			},
-			"ambiguous",
+			titleGuessResult("Attention Is All You Need", "Attention Is All You Need"),
+			errorKindAmbiguous,
 			[]string{"title is ambiguous", "harvester_search_literature", "harvester_read"},
 		},
 		{
@@ -384,6 +381,127 @@ func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
 		}
 		if again := PublicFailureMessage(published); again != published.Error {
 			t.Errorf("%s: second pass = %q, want the published text %q", test.name, again, published.Error)
+		}
+	}
+}
+
+// TestAdviceTextNeverDecidesTheErrorKind: the ladder's failure messages end
+// with advice naming harvester_search_literature, and that advice never
+// classifies the failure. Only the title diagnostic is "ambiguous"; LinkedIn's
+// HTTP 999 is a refusal like a 403; a PubMed search URL is an invalid input.
+func TestAdviceTextNeverDecidesTheErrorKind(t *testing.T) {
+	const advice = "Find an alternative copy with harvester_search_literature or another URL."
+	linkedIn := "https://www.linkedin.com/school/example-university/"
+	pubMed := (&Harvester{}).fetchURLWithPolicy(
+		context.Background(), "https://pubmed.ncbi.nlm.nih.gov/?term=example+query", FetchOptions{}, false,
+	)
+	cases := []struct {
+		name   string
+		result Result
+		kind   string
+		want   []string
+		refuse []string
+	}{
+		{
+			"bot block 999",
+			Result{
+				Source:     linkedIn,
+				ErrorKind:  "http",
+				HTTPStatus: statusBotBlock,
+				Error:      linkedIn + " returned HTTP 999 (request failed). " + advice,
+			},
+			errorKindForbidden,
+			[]string{"refused the harvester", "HTTP 999", "bot block"},
+			[]string{"ambiguous", "request failed"},
+		},
+		{
+			"bot block 999 ladder text",
+			Result{
+				Source:     linkedIn,
+				ErrorKind:  "http",
+				HTTPStatus: statusBotBlock,
+				Error:      FailureMessage(linkedIn, statusBotBlock, "http", false, false),
+			},
+			errorKindForbidden,
+			[]string{"refused the harvester", "HTTP 999"},
+			[]string{"ambiguous", "request failed"},
+		},
+		{
+			"unnamed status 418",
+			Result{
+				Source:     "https://example.test/teapot",
+				ErrorKind:  "http",
+				HTTPStatus: http.StatusTeapot,
+				Error:      "https://example.test/teapot returned HTTP 418 (request failed). " + advice,
+			},
+			errorKindUnclassified,
+			[]string{"could not classify"},
+			[]string{"ambiguous"},
+		},
+		{
+			"title diagnostic",
+			titleGuessResult("Attention Is All You Need", "Attention Is All You Need"),
+			errorKindAmbiguous,
+			[]string{"title is ambiguous", "harvester_search_literature"},
+			nil,
+		},
+		{
+			"pubmed search url",
+			pubMed,
+			errorKindInvalid,
+			[]string{"PubMed search", "harvester_search_literature", "publications"},
+			[]string{"ambiguous"},
+		},
+		{
+			"pubmed search url whose query holds a marker",
+			(&Harvester{}).fetchURLWithPolicy(
+				context.Background(), "https://pubmed.ncbi.nlm.nih.gov/?term=democracy", FetchOptions{}, false,
+			),
+			errorKindInvalid,
+			[]string{"PubMed search", "harvester_search_literature"},
+			[]string{"conversion", "ambiguous"},
+		},
+		{
+			"title holding a marker",
+			titleGuessResult("Maximum likelihood estimation", "Maximum likelihood estimation"),
+			errorKindAmbiguous,
+			[]string{"title is ambiguous", "harvester_search_literature"},
+			[]string{"too large"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := publicErrorKind(test.result); got != test.kind {
+				t.Errorf("kind = %q, want %q (error text %q)", got, test.kind, test.result.Error)
+			}
+			published := PublicFailure(test.result.Source, test.result)
+			for _, want := range test.want {
+				if !strings.Contains(published.Error, want) {
+					t.Errorf("message lacks %q:\n%s", want, published.Error)
+				}
+			}
+			for _, refuse := range test.refuse {
+				if strings.Contains(published.Error, refuse) {
+					t.Errorf("message carries %q:\n%s", refuse, published.Error)
+				}
+			}
+			if again := PublicFailureMessage(published); again != published.Error {
+				t.Errorf("second pass = %q, want the published text %q", again, published.Error)
+			}
+		})
+	}
+}
+
+// TestBotBlockStatusIsNamedLikeAForbidden: HTTP 999 classifies as a 403 does,
+// and the ladder's own text names it as the site's bot block.
+func TestBotBlockStatusIsNamedLikeAForbidden(t *testing.T) {
+	if got, want := failureStatusKind(statusBotBlock), failureStatusKind(http.StatusForbidden); got != want {
+		t.Errorf("failureStatusKind(999) = %q, want the 403 kind %q", got, want)
+	}
+	text := FailureMessage("https://www.linkedin.com/school/example-university/", statusBotBlock, "http", false, false)
+	for _, want := range []string{"HTTP 999 (request denied (the site's bot block))", "likely a bot-block or rate limit"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("FailureMessage(999) = %q, want it to carry %q", text, want)
 		}
 	}
 }

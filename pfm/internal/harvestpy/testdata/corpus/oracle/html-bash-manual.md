@@ -1,5 +1,4 @@
 **Title:** Bash Features ¶
-**Published:** 2008-11-03
 
 ---
 

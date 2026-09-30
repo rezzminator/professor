@@ -1,10 +1,13 @@
 package harvest
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func (h *Harvester) storeResult(
@@ -52,17 +55,11 @@ func (h *Harvester) storeResultAlias(
 	rungs []string,
 	options FetchOptions,
 ) Result {
-	content := result.Content
-	if result.Path != "" {
-		if raw, err := os.ReadFile(result.Path); err == nil {
-			_, content = parseCacheFrontmatter(string(raw))
-		}
-	}
 	stored := h.storeResult(
 		canonicalSource,
 		result.Kind,
 		result.Method,
-		content,
+		storedContent(result),
 		result.Bytes,
 		result.HTTPStatus,
 		rungs,
@@ -70,6 +67,24 @@ func (h *Harvester) storeResultAlias(
 	)
 	stored.Source = source
 	return stored
+}
+
+// storedContent is result's whole content: its stored artifact without the
+// cache frontmatter, or the inline content (which may be truncated,
+// truncateInline) when the artifact could not be read.
+func storedContent(result Result) string {
+	if result.Path == "" {
+		return result.Content
+	}
+	raw, err := os.ReadFile(result.Path)
+	if err != nil {
+		obs.Logger(context.Background()).
+			Warn("harvest: the stored artifact could not be read; its inline content stands in",
+				"path", result.Path, obs.FieldErr, err.Error())
+		return result.Content
+	}
+	_, content := parseCacheFrontmatter(string(raw))
+	return content
 }
 
 func (h *Harvester) resultFromCache(source, kind, content string, meta map[string]string, path string) Result {

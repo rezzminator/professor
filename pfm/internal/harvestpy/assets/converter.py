@@ -45,7 +45,8 @@ def html_metadata(raw: str) -> str:
     from trafilatura.metadata import extract_metadata
 
     try:
-        meta = extract_metadata(raw)
+        # htmldate's extensive search turns a bare year or a stray number into a publication date; the date comes from the page's structured markup (meta tags, JSON-LD, <time>) or is absent.
+        meta = extract_metadata(raw, extensive=False)
     except Exception as exc:
         print(f"metadata extraction failed: {exc}", file=sys.stderr)
         return ""

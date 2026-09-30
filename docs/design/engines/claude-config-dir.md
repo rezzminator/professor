@@ -63,7 +63,7 @@ Per account, owned by Claude Code: `.credentials.json`, `.claude.json` (login, o
 - No launch setting or env key in any account `settings.json`. Hooks, `statusLine`, `subagentStatusLine` and `cleanupPeriodDays` ride `--settings` at launch.
 - No entry in any `.claude.json`. The one `professor` stdio server (`pfm mcp serve --stdio`, serving every enabled family) rides `--mcp-config` at launch, beside the account's own servers.
 - No `output-styles/`, `keybindings.json` or `CLAUDE.md`.
-- The exception is Claude plugin state: `pfm install` runs `claude plugin marketplace add` and `claude plugin install` per account for `cache-live-control` and `sub-agent-compact`. Claude writes `{config dir}/plugins/**` and `enabledPlugins` in the account's physical `settings.json`. Both paths are journaled and restored at once if a command fails. A live chat on any account sharing that settings file skips the plugin step until the chat closes.
+- The exception is Claude plugin state: `pfm install` runs `claude plugin marketplace add` and `claude plugin install` per account for `cache-live-control`, `sub-agent-compact` and `agent-effort`. Claude writes `{config dir}/plugins/**` and `enabledPlugins` in the account's physical `settings.json`. Both paths are journaled and restored at once if a command fails. A live chat on any account sharing that settings file skips the plugin step until the chat closes.
 
 ## Registries
 
@@ -74,6 +74,7 @@ Per account, owned by Claude Code: `.credentials.json`, `.claude.json` (login, o
 | `skills/handoff/SKILL.md` | `~/.local/share/pfm/install/handoff.skill.md` |
 | `skills/deep-rr` | `{clone}/workflows/deep-rr` |
 | `skills/*` | `{clone}/templates/global/skills/` dirs holding a `SKILL.md` |
+| `skills/{name}` (also `~/.agents/skills/{name}`) | `~/.local/share/pfm/install/skills/{name}/`, the shallow clone of a repo `templates/global/skills/sources.json` registers |
 | `agents/*.md` | `{clone}/templates/global/agents/`, or a rendered variant under `~/.local/state/pfm/generated/claude-agents` |
 | `themes/*` (`~/.claude` only) | regular files from `templates/themes/sources.json`, tracked in `theme-ownership.json` |
 

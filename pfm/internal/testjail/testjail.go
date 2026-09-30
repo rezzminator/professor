@@ -93,6 +93,12 @@ func Run(m *testing.M) int {
 			return 1
 		}
 	}
+	// No test fetches a source-fetched global skill from its public repo: an
+	// install run in the jail skips the fetch and doctor reports OFFLINE.
+	if err := os.Setenv(paths.EnvSkillSourcesOffline, "1"); err != nil {
+		warnSetup("set %s: %v", paths.EnvSkillSourcesOffline, err)
+		return 1
+	}
 	// A `go` child (internal/update's rebuild, a `go run`) derives its cache and
 	// telemetry directories from HOME/XDG_CONFIG_HOME when they are unset, and
 	// every jail below rehomes both — so those directories would land INSIDE

@@ -50,7 +50,7 @@ Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/pr
 ## Counting and pricing
 
 - **Codex counters reset.** `info.total_token_usage` is cumulative but restarts on resume and on compaction, and duplicate events re-emit an identical cumulative. So: dedupe on the cumulative, split the thread wherever it drops, sum **each segment's peak**. The final counter alone undercounts a long thread by orders of magnitude; summing per-turn deltas double-counts. Cached input is a subset of input and bills at the cached rate; output already includes reasoning.
-- **Claude cache writes** split 5-minute (1.25x input) from 1-hour (2x input) via `cache_creation.ephemeral_1h_input_tokens`; cache reads bill at the per-model rate in `PRICING` (0.025x input on Fable/Mythos 5.1, 0.1x elsewhere).
+- **Claude cache writes** split 5-minute (1.25x input) from 1-hour (2x input) via `cache_creation.ephemeral_1h_input_tokens`; cache reads bill at the per-model rate in `PRICING` (0.025x input on Fable/Mythos 5.1, 0.05x on Opus 5.5, 0.1x elsewhere).
 - **Every dollar is traced to the context that caused it**: the replay charges `[0, cache_read)` at the read rate, `[cache_read, +cache_write)` at the write rate and the tail at 1x, then attributes each slice to the category that put it there.
 - `PRICING` at the top of `token-audit.mjs` is an **editable** table, matched by substring on the lowercased model id, first match wins — keep specific ids above broader ones. Columns 5 and 6 are the >200K long-context multipliers, an **estimate** that feeds the CROSS-CHECK line only. `scripts/check-token-pricing.mjs` resolves published ids against the table; a row no published id reaches is dead code and it says so.
 

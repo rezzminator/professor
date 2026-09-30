@@ -1,5 +1,4 @@
 **Title:** pandas documentation#
-**Published:** 2026-07-22
 **Source:** pandas 3.0.5 documentation
 
 ---

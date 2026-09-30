@@ -22,7 +22,7 @@
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
 | Start hook | `rr-dir`, matcher `rr\|super-rr\|heavy-rr` |
 
-Description, verbatim: `Deeper rr for higher stakes — delegate for "super rr", "super-rr X"; exhaustive → heavy-rr. Returns the saved RR path, then the cited map.`
+Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → here → heavy-rr. Delegate for "super rr", "super-rr X", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.`
 
 ## How the variant is built
 
@@ -49,7 +49,6 @@ A run costs `r(d + 1) + 5` lead calls (the family's lead-call budget: one spawn 
 
 | Need | Agent |
 | --- | --- |
-| Known sources, their exact words | `collector-rr` |
 | A map of a question, cheaply | `rr` |
 | A map where a wrong or missing fact costs something, or whose answer is partly in a repository's code | `super-rr` |
 | A map that must settle every sub-area whatever the cost | `heavy-rr` |

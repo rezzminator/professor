@@ -121,7 +121,7 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
 | --- | --- |
 | `id` | The task file name, `{level}-{letter}` |
 | `needs` | The ids this task waits for; empty means none |
-| `rating` | `mechanical` or `smart` |
+| `rating` | `mechanical`, `precise` or `smart` |
 | `shares` | Named shared resources the task contends for: a test database, a lock, a port |
 | `reads` | The `0-` files its executor opens with the task file |
 | `files` | Every path the task creates, edits or deletes, from its frontmatter; the dispatcher verifies a `DONE` against them and the landing's commit names them |
@@ -180,14 +180,17 @@ Pin what crosses a boundary; describe what stays inside one.
 
 ## Rating
 
-The rating is computed from `Execution judgments`, not asserted.
+The rating is computed from `Execution judgments`, not asserted. A call the task's `Decisions` already settle is not a judgment. A judgment counts only when a wrong call breaks a `Done when` row or reaches past the task's files; a local choice — a helper's name, awk over printf, where a fixture sits — is listed and never counted. Counted literally, 28 of 28 historical `mechanical` tasks carried one or two such local choices and would all have been promoted to `precise`, paying `xhigh` for no quality.
 
 - More than three judgments: `smart`.
+- One to three judgments with an interface the task touches left unpinned: `smart`.
 - Any judgment that is a diagnosis of an unknown cause: `smart`, whatever the count.
 - A deliverable that is a document, a prompt, a spec or a report: `smart`, whatever the count. Writing for a reader to act on is reasoning, however exactly the task file words it.
-- Otherwise: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
+- One to three judgments, with every interface the task touches pinned in `Shapes`: `precise`.
+- No judgment, but the difficulty is the implementation itself — concurrency, failure paths, many error rows: `precise`.
+- Otherwise, no judgment at all: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
 
-The rating picks the executor: `mechanical` → `flights-mechanical-executor` (`sonnet`), `smart` → `flights-smart-executor` (`opus`); the spawn carries no model override.
+The rating picks the executor: `mechanical` → `flights-mechanical-executor`, `precise` → `flights-precise-executor`, `smart` → `flights-smart-executor`; the spawn carries no model override. Each tier's model and effort, and the measurement that set them, are the [tier table](flights-executors.md#three-tiers-one-source).
 
 ## The run
 

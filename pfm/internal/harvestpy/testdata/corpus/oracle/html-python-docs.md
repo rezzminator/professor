@@ -1,5 +1,4 @@
 **Title:** Python 3.14 documentation
-**Published:** 2014-07-03
 **Source:** Python documentation
 
 ---

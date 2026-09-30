@@ -86,6 +86,23 @@ func TestWallsAreNamedNeverStoredSilently(t *testing.T) {
 			kept:    "aerospace festival",
 		},
 		{
+			name:   "a logged-out directory page whose gate is the site's legacy join link",
+			source: "https://www.linkedin.com/pub/dir/Avery/Example",
+			page: `<html><body><main>` + articlePreview + `</main><p>` +
+				`<a href="/reg/join-context?_ed=0_abc&amp;trk=ndir_getpro">Join to see all 3,210 profiles.</a></p></body></html>`,
+			partial: loginWall,
+			kept:    "opening a new front",
+		},
+		{
+			name:   "a logged-out app page whose schema.org flag marks what a signed-out reader is not shown",
+			source: "https://www.linkedin.com/pulse/robot-fleet-notes-avery-example-0000",
+			page: `<html><head><script type="application/ld+json">{"@type":"Article",` +
+				`"hasPart":{"@type":"WebPageElement","isAccessibleForFree":false,"cssSelector":".details"}}</script>` +
+				`</head><body><article>` + articlePreview + `</article></body></html>`,
+			partial: loginWall,
+			kept:    "opening a new front",
+		},
+		{
 			name:    "a logged-out app page holding nothing but the gate",
 			source:  "https://x.com/NASA",
 			page:    `<html><body><main><h1>Sign in to X</h1></main>` + xBottomBar + `</body></html>`,

@@ -64,7 +64,7 @@ var topLevelSubcommands = []string{
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
 	"agent-open", callmeterCommand, "chat-server", "claude-launch", "claude-version", "clear-kill",
-	"codex-launch", "compact-nudge", "epic-inject",
+	"codex-launch", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "rr-dir",
 	reloadRunCommand, "stale", statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
@@ -380,8 +380,13 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		return code
 	}
 	defer func() { cli.CloseResource(database, "pfm chat unkill: close database", stderr, &exitCode) }()
-	if err := manager.Unkill(context.Background(), flags.Arg(0)); err != nil {
+	removed, err := manager.Unkill(context.Background(), flags.Arg(0))
+	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
+		return 1
+	}
+	if !removed {
+		fmt.Fprintf(stderr, "pfm chat unkill: %s is not killed; nothing was unkilled\n", flags.Arg(0))
 		return 1
 	}
 	fmt.Fprintf(stdout, "unkilled %s\n", flags.Arg(0))
@@ -442,9 +447,6 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "exit-close" {
 		return hookentry.ExitClose(os.Stdin, stderr)
 	}
-	if len(args) != 0 && args[0] == "compact-nudge" {
-		return hookentry.CompactNudge(os.Stdin, stdout, stderr, runtime, nil)
-	}
 	if len(args) != 0 && args[0] == "reload-run" {
 		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime, paths.OSEnv{})
 	}
@@ -499,7 +501,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|callmeter|chat-server|claude-launch|claude-version|clear-kill|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|callmeter|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

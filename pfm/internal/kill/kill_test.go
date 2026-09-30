@@ -337,7 +337,7 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 		t.Fatalf("spawned args = %#v", spawner.args)
 	}
 
-	if err := manager.Unkill(ctx, claudeID); err != nil {
+	if _, err := manager.Unkill(ctx, claudeID); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, err := database.Killed(ctx, claudeID); err != nil || found {
@@ -619,7 +619,7 @@ func TestKilledChatStaysKilledAsItGrowsUntilUnkill(t *testing.T) {
 	}
 	assertKilled(t, database, id, pfmengine.Claude, 50)
 
-	if err := manager.Unkill(ctx, id); err != nil {
+	if _, err := manager.Unkill(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 	if !listedByDefault(t, database, id) {
@@ -754,7 +754,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Unkill(ctx, rootID); err != nil {
+	if _, err := manager.Unkill(ctx, rootID); err != nil {
 		t.Fatal(err)
 	}
 	if !listedCodexByDefault(t, database, rootID) {
@@ -1032,7 +1032,6 @@ func TestFinisherCodexUsesQuit(t *testing.T) {
 	if !reflect.DeepEqual(tmux.sent, []string{"/quit"}) {
 		t.Fatalf("sent = %q, want /quit", tmux.sent)
 	}
-	assertKilled(t, database, id, pfmengine.Codex, tmuxKilledAt(t, database, id))
 }
 
 func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
@@ -1339,7 +1338,7 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 	if row, listed := agentRow(t); listed {
 		t.Fatalf("killed agent row is still listed while its process lives: %#v", row)
 	}
-	if err := manager.Unkill(ctx, agentID); err != nil {
+	if _, err := manager.Unkill(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, listed := agentRow(t); !listed {

@@ -142,7 +142,7 @@ func TestMain(m *testing.M) {
 	}
 	installer.HookProbeOverride = func(string, pfmconfig.Config) []installer.HookProbeResult { return nil }
 	// No jail has a real `claude` to spawn — captureHarnessPrompt's own doc
-	// comment marks that REAL-SESSION. This stub stands in for every test;
+	// comment marks that flow UNPLAYED. This stub stands in for every test;
 	// whether a doctor fixture reads as matches/DRIFT/CHECK-FAILED still
 	// depends only on what baseline (if any) the fixture stages, via
 	// stageHarnessPromptBaseline in main_test.go.

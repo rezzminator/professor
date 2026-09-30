@@ -29,8 +29,6 @@ type injectionService interface {
 	ResolveEngine(context.Context, string, string) (inject.Target, int, string, error)
 	Capture(context.Context, string, int) (inject.Target, string, int, string, error)
 	Inject(context.Context, inject.Request) (inject.Result, error)
-	ScheduleAfterCurrentTurn(context.Context, inject.Request) (inject.Result, error)
-	ScheduleSelfCompact(ctx context.Context, focus string, then []string) (inject.Result, error)
 }
 
 type backend struct {

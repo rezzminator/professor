@@ -12,7 +12,6 @@ chat_open	M	M.10-chat-tools-gap
 chat_read	M	M.09-chat-tools
 chat_resolve	M	M.09-chat-tools
 chat_save	M	M.10-chat-tools-gap
-chat_self_compact	M	M.09-chat-tools
 chat_status	M	M.09-chat-tools
 chat_unkill	M	M.10-chat-tools-gap
 chat_whoami	M	M.09-chat-tools
@@ -57,7 +56,6 @@ pfm chat reload	E1	E1.08-reload-sock
 pfm chat reload	E1	E1.11-role-reload
 pfm chat resolve	F	F.15-addressing
 pfm chat save	F	F.15-addressing
-pfm chat self-compact	E1	E1.20-self-compact
 pfm chat status	E1	E1.12-status
 pfm chat status	F	F.18-e1-chat-survives-storm
 pfm chat stream	E1	E1.13-last-read-stream
@@ -87,11 +85,10 @@ pfm install	O1	O1.02a-session-store
 pfm internal agent-open	F	F.16-picker-plumbing
 pfm internal callmeter	O2	O2.05c-callmeter
 pfm internal chat-server	F	F.16-picker-plumbing
-pfm internal claude-launch	E1	E1.23-launcher
+pfm internal claude-launch	E1	E1.01-open-seat1
 pfm internal claude-version	O2	O2.05-internal-plumbing
 pfm internal clear-kill	O2	O2.05-internal-plumbing
 pfm internal codex-launch	E2	E2.10-codex-launch
-pfm internal compact-nudge	E1	E1.21-exit-close
 pfm internal epic-inject	O2	O2.05-internal-plumbing
 pfm internal exit-close	E1	E1.21-exit-close
 pfm internal exit-intercept	E1	E1.19-kill-unkill

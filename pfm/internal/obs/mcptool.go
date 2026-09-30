@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -34,8 +35,9 @@ var nonChatTargetTools = map[string]bool{
 // One record per call — tool, kind=tool, target (the input's Target or Chat
 // field when it has one and the tool is not in nonChatTargetTools), the
 // argument SHAPE (field names and byte sizes, never a value), the result's
-// size in bytes, dur_ms and err — written after the handler returned and
-// returning exactly what it returned. Both transports share the
+// size in bytes, dur_ms and err — written after the handler returned. A
+// non-zero typed output beside a non-protocol error becomes structuredContent
+// on an IsError result. Both transports share the
 // registration, so stdio and HTTP calls log once each. A handler error logs
 // at ERROR; a result the handler marked IsError at WARN.
 //
@@ -77,6 +79,13 @@ func Tool[In, Out any](name string, handler mcp.ToolHandlerFor[In, Out]) mcp.Too
 			attrs = append(attrs, slog.Int("bytes", encodedSize(output)))
 		}
 		Logger(Component(ctx, compMCP)).LogAttrs(ctx, level, "mcp.call", attrs...)
+		if err != nil && !reflect.ValueOf(&output).Elem().IsZero() {
+			if _, protocolError := err.(*jsonrpc.Error); !protocolError {
+				var errorResult mcp.CallToolResult
+				errorResult.SetError(err)
+				return &errorResult, output, nil
+			}
+		}
 		return result, output, err
 	}
 }

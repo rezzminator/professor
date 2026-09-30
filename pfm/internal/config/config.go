@@ -98,9 +98,6 @@ type ClaudePrefs struct {
 	// the unset sentinel on both.
 	MaxSubagentSpawnDepth  int
 	MaxConcurrentSubagents int
-	// CompactNudge governs the UserPromptSubmit reminder that a self-compact
-	// is due at a context milestone — see decodeClaudePrefs for the defaults.
-	CompactNudge CompactNudge
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -274,18 +271,19 @@ type rawAccount struct {
 }
 
 type rawClaude struct {
-	PermissionMode        *string          `json:"permissionMode,omitempty"`
-	WebSearchesPerSession *int64           `json:"webSearchesPerSession,omitempty"`
-	AutoCompactWindow     *int64           `json:"autoCompactWindow,omitempty"`
-	TmuxTruecolor         *bool            `json:"tmuxTruecolor,omitempty"`
-	CleanupPeriodDays     *int             `json:"cleanupPeriodDays,omitempty"`
-	RequireManagedCleanup *bool            `json:"requireManagedCleanup,omitempty"`
-	Binary                *string          `json:"binary,omitempty"`
-	Theme                 *string          `json:"theme,omitempty"`
-	Cache1H               *bool            `json:"cache1h,omitempty"`
-	NativeCursor          *bool            `json:"nativeCursor,omitempty"`
-	SystemPrompt          *string          `json:"systemPrompt,omitempty"`
-	CompactNudge          *rawCompactNudge `json:"compactNudge,omitempty"`
+	PermissionMode        *string `json:"permissionMode,omitempty"`
+	WebSearchesPerSession *int64  `json:"webSearchesPerSession,omitempty"`
+	AutoCompactWindow     *int64  `json:"autoCompactWindow,omitempty"`
+	TmuxTruecolor         *bool   `json:"tmuxTruecolor,omitempty"`
+	CleanupPeriodDays     *int    `json:"cleanupPeriodDays,omitempty"`
+	RequireManagedCleanup *bool   `json:"requireManagedCleanup,omitempty"`
+	Binary                *string `json:"binary,omitempty"`
+	Theme                 *string `json:"theme,omitempty"`
+	Cache1H               *bool   `json:"cache1h,omitempty"`
+	NativeCursor          *bool   `json:"nativeCursor,omitempty"`
+	SystemPrompt          *string `json:"systemPrompt,omitempty"`
+	// RetiredCompactNudge accepts old config files; it is never read or written.
+	RetiredCompactNudge json.RawMessage `json:"compactNudge,omitempty"`
 	// The sub-agent ceilings — see subagents.go.
 	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
 	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
@@ -483,7 +481,6 @@ func defaultsWithMCPServers(
 			CleanupPeriodDays:     36500,
 			RequireManagedCleanup: true,
 			Cache1H:               true,
-			CompactNudge:          DefaultCompactNudge(),
 
 			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 		},
@@ -721,12 +718,6 @@ func loadWithMCPServers(
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
 		}
-		applied, err := applyCompactNudge(result.Claude.CompactNudge, raw.Claude.CompactNudge, result.Path, name, -1)
-		if err != nil {
-			return Config{}, err
-		}
-		result.Claude.CompactNudge = applied
-		recordCompactNudgeSources(result.Sources, name, raw.Claude.CompactNudge)
 		if err := applySubagentCaps(
 			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
 		); err != nil {
@@ -775,21 +766,6 @@ func loadWithMCPServers(
 					return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
 				}
 				applyNativeCursor(&prefs, value.Claude.NativeCursor, result.Claude.NativeCursor, result.Sources, index)
-				// Same inheritance for the nudge policy: seeded from the
-				// resolved top level, then only the fields this account set.
-				applied, err := applyCompactNudge(
-					result.Claude.CompactNudge,
-					value.Claude.CompactNudge,
-					result.Path,
-					"accounts",
-					index,
-				)
-				if err != nil {
-					return Config{}, err
-				}
-				prefs.CompactNudge = applied
-				key := fmt.Sprintf("accounts[%d].claude", index)
-				recordCompactNudgeSources(result.Sources, key, value.Claude.CompactNudge)
 				if err := applySubagentCaps(
 					&prefs, *value.Claude, result.Claude, result.Path, "accounts", index, result.Sources,
 				); err != nil {
@@ -969,10 +945,8 @@ func finishHarvester(result *Config, home string, registered map[string]MCPServe
 	return nil
 }
 
-// parseNameSyncInterval validates nameSync.interval the way compactNudge's
-// percentages are validated: a bad value is a refused config, never a silently
-// substituted default, because the value it renders into is a scheduler nobody
-// reads again after install.
+// parseNameSyncInterval refuses invalid nameSync.interval values rather than
+// silently substituting a default for the scheduler installed from this value.
 func parseNameSyncInterval(value, path string) (time.Duration, error) {
 	interval, err := time.ParseDuration(strings.TrimSpace(value))
 	if err != nil {
@@ -1225,7 +1199,6 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		result.TmuxTruecolor = account.Claude.TmuxTruecolor
 		result.CleanupPeriodDays = account.Claude.CleanupPeriodDays
 		result.RequireManagedCleanup = account.Claude.RequireManagedCleanup
-		result.CompactNudge = account.Claude.CompactNudge
 		// Zero is unset on both caps, so Load's inheritance already put the
 		// resolved top-level value here — same unconditional copy as Cache1H.
 		result.MaxSubagentSpawnDepth = account.Claude.MaxSubagentSpawnDepth
@@ -1474,11 +1447,6 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			keyTheme:                themeMarshalValue(config.Claude.Theme),
 			"cache1h":               config.Claude.Cache1H,
 			"nativeCursor":          config.Claude.NativeCursor,
-			"compactNudge": map[string]any{
-				jsonKeyEnabled: config.Claude.CompactNudge.Enabled,
-				"start":        config.Claude.CompactNudge.Start,
-				"step":         config.Claude.CompactNudge.Step,
-			},
 		},
 		codexName: codexValue,
 		"tmux": map[string]any{

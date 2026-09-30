@@ -26,7 +26,7 @@ func TestSummarizeCachesCompleteExchangeAndBoundsAnswer(t *testing.T) {
 	bin := filepath.Join(root, "bin")
 	writeSummaryStub(t, bin, "codex", `
 printf x >> "$ASK_COUNTER"
-printf 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three thirty-four thirty-five thirty-six thirty-seven thirty-eight thirty-nine forty forty-one forty-two\n'`)
+printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"item.completed","item":{"type":"agent_message","text":"one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three thirty-four thirty-five thirty-six thirty-seven thirty-eight thirty-nine forty forty-one forty-two"}}' '{"type":"turn.completed"}'`)
 	t.Setenv("PATH", bin)
 	t.Setenv("ASK_COUNTER", counter)
 	options := SummaryOptions{
@@ -61,7 +61,12 @@ func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 	)
 	counter := filepath.Join(root, "calls")
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "printf x >> \"$ASK_COUNTER\"\nprintf 'checks are running\\n'")
+	writeSummaryStub(
+		t,
+		bin,
+		"claude",
+		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"checks are running\"}'",
+	)
 	t.Setenv("PATH", bin)
 	t.Setenv("ASK_COUNTER", counter)
 	options := SummaryOptions{Config: summaryMachine("claude"), Database: database, TempDir: filepath.Join(root, "tmp")}
@@ -92,7 +97,7 @@ set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
 [ "$#" -eq 1 ]
 [ -f "$1" ]
 rm "$1"
-printf 'cleanup-resistant summary\n'`)
+printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"item.completed","item":{"type":"agent_message","text":"cleanup-resistant summary"}}' '{"type":"turn.completed"}'`)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
 

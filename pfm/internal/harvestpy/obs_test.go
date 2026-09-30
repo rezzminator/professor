@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -226,7 +227,7 @@ func TestDownloadFileWrapsTheClientForHTTPOut(t *testing.T) {
 	}))
 	defer server.Close()
 	path := t.TempDir() + "/artifact"
-	if err := downloadFile(ctx, server.URL, path, int64(len(body))); err != nil {
+	if err := downloadFile(ctx, clock.Real, server.URL, path, int64(len(body))); err != nil {
 		t.Fatal(err)
 	}
 

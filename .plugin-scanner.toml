@@ -6,7 +6,7 @@
 ignore_paths = [
   # Test files that plant fake, credential-shaped strings on purpose: each test
   # proves the code under test scrubs, refuses or never prints a credential.
-  "infra/fence/lanes/tests/creds_test.sh",
+  "infra/fence/lanes/tests/cred-scan_test.sh",
   "pfm/internal/harvestmcp/auth_test.go",
   "pfm/internal/obs/recover_test.go",
   "pfm/internal/obs/scrub_test.go",

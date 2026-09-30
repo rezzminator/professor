@@ -240,24 +240,17 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	if err != nil {
 		return err
 	}
-	var lines []string
-	if len(raw) != 0 {
-		lines = strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	kept, foreign, _, err := installer.codexMCPYield(string(raw))
+	if err != nil {
+		return fmt.Errorf("read Codex MCP config %s: %w", path, err)
 	}
 	body, err := codexStdioBody(installer.mcpChatCommand())
 	if err != nil {
 		return fmt.Errorf("encode Codex MCP registration for %s: %w", path, err)
 	}
-	kept := stripPFMCodexLines(lines, installer.options.MCPPort, body)
-	var foreign struct {
-		Servers map[string]any `toml:"mcp_servers"`
-	}
-	if _, err := toml.Decode(strings.Join(kept, "\n"), &foreign); err != nil {
-		return fmt.Errorf("parse unmanaged Codex MCP config %s: %w", path, err)
-	}
 	var generated []string
 	for _, name := range names {
-		if _, present := foreign.Servers[name]; present {
+		if _, present := foreign[name]; present {
 			installer.skip("preserve conflicting manual MCP client " + name + " in " + path)
 			continue
 		}
@@ -276,6 +269,45 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 		return nil
 	}
 	return installer.changeMCPFile(changeDescription(path, existed), path, raw, []byte(wanted), existed)
+}
+
+// codexMCPYield reads the hand-written view before any install step decodes
+// the complete config. A matching manual table makes pfm yield its fenced
+// registration; wireMCP uses the same view to preserve that table.
+func (installer *engine) codexMCPYield(raw string) ([]string, map[string]any, string, error) {
+	var lines []string
+	if raw != "" {
+		lines = strings.Split(strings.TrimSuffix(raw, "\n"), "\n")
+	}
+	body, err := codexStdioBody(installer.mcpChatCommand())
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("encode Codex MCP registration: %w", err)
+	}
+	kept := stripPFMCodexLines(lines, installer.options.MCPPort, body)
+	var foreign struct {
+		Servers map[string]any `toml:"mcp_servers"`
+	}
+	if _, err := toml.Decode(strings.Join(kept, "\n"), &foreign); err != nil {
+		return nil, nil, "", fmt.Errorf("parse unmanaged Codex MCP config: %w", err)
+	}
+	yielded := raw
+	inside := false
+	for _, line := range lines {
+		switch line {
+		case mcpFenceBegin:
+			inside = true
+		case mcpFenceEnd:
+			inside = false
+		default:
+			if inside && strings.HasPrefix(line, "[mcp_servers.") && strings.HasSuffix(line, "]") {
+				name := strings.TrimSuffix(strings.TrimPrefix(line, "[mcp_servers."), "]")
+				if _, present := foreign.Servers[name]; present {
+					yielded = strings.TrimRight(strings.Join(kept, "\n"), "\n") + "\n"
+				}
+			}
+		}
+	}
+	return kept, foreign.Servers, yielded, nil
 }
 
 // codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]

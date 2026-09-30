@@ -49,10 +49,25 @@ func (s *Store) Kill(ctx context.Context, killed Killed) error {
 }
 
 // Unkill removes a kill from the shared store under the same busy policy.
-func (s *Store) Unkill(ctx context.Context, id string) error {
-	return s.killedWrite(ctx, "unkill", id, func() error {
-		return s.state.Unkill(ctx, id)
+func (s *Store) Unkill(ctx context.Context, id string) (bool, error) {
+	var removed bool
+	err := s.killedWrite(ctx, "unkill", id, func() error {
+		var writeErr error
+		removed, writeErr = s.state.Unkill(ctx, id)
+		return writeErr
 	})
+	return removed, err
+}
+
+// ReassertKill makes a standing kill permanent without recreating a removed row.
+func (s *Store) ReassertKill(ctx context.Context, id string) (bool, error) {
+	var reasserted bool
+	err := s.killedWrite(ctx, "reassert", id, func() error {
+		var writeErr error
+		reasserted, writeErr = s.state.ReassertKill(ctx, id)
+		return writeErr
+	})
+	return reasserted, err
 }
 
 func (s *Store) killedWrite(

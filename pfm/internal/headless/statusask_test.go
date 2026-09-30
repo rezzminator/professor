@@ -87,7 +87,12 @@ func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 	)
 	bin := filepath.Join(root, "bin")
 	counter := filepath.Join(root, "calls")
-	writeSummaryStub(t, bin, "claude", "printf x >> \"$ASK_COUNTER\"\nprintf 'nothing has changed\\n'")
+	writeSummaryStub(
+		t,
+		bin,
+		"claude",
+		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"nothing has changed\"}'",
+	)
 	t.Setenv("PATH", bin)
 	t.Setenv("ASK_COUNTER", counter)
 	tempDir := filepath.Join(root, "tmp", "chat-status")
@@ -127,7 +132,7 @@ set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
 [ "$#" -eq 1 ]
 [ -f "$1" ]
 rm "$1"
-printf 'cleanup-resistant answer\n'`)
+printf '%s\n' '{"result":"cleanup-resistant answer"}'`)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
 
@@ -159,7 +164,7 @@ func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
 		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
 	)
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "printf 'answer\\n'")
+	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"answer\"}'")
 	// Prepend, not replace: the capture-failure call below still needs the
 	// REAL tmux binary to reach (and be refused by) the empty socket path.
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -201,7 +206,7 @@ func TestAskCapturesLivePaneAndReportsPaneOnlyWithoutExchange(t *testing.T) {
 	socketPath, session := startHeadlessTmuxSession(t)
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
-	writeSummaryStub(t, bin, "claude", "cat >/dev/null\nprintf 'quietly idling\\n'")
+	writeSummaryStub(t, bin, "claude", "cat >/dev/null\nprintf '%s\\n' '{\"result\":\"quietly idling\"}'")
 	// Prepend, not replace: capturePane still needs the REAL tmux binary
 	// from the ambient PATH to reach the session started above.
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -286,7 +291,7 @@ func TestAskReportsEngineBinaryMissingAndCleansUpOnEveryErrorReturn(t *testing.T
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
-	writeSummaryStub(t, bin, "claude", "printf 'all clear\\n'")
+	writeSummaryStub(t, bin, "claude", "printf '%s\\n' '{\"result\":\"all clear\"}'")
 	ok := Ask(context.Background(), chat, AskOptions{Config: summaryMachine("claude"), TempDir: tempDir})
 	if !strings.HasPrefix(ok.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): ") {
 		t.Fatalf("ok ask=%+v", ok)

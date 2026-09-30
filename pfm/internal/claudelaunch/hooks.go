@@ -33,7 +33,6 @@ func HookTemplates(home string) []Hook {
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal epic-inject", Name: "epic-inject"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal exit-intercept", Name: "exit-intercept"},
-		{Event: HookEventUserPromptSubmit, Command: binary + " internal compact-nudge", Name: "compact-nudge"},
 	}
 	for _, placement := range []struct{ event, matcher string }{
 		{hookEventPreToolUse, "Bash"},

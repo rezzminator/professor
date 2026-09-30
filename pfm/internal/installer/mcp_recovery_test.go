@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -11,6 +12,67 @@ import (
 
 	"github.com/BurntSushi/toml"
 )
+
+func TestInstallYieldsProfessorFenceToManualCodexTable(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".codex", "config.toml")
+	manual := "[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n"
+	writeFixture(t, path, codexProfessorFence(home)+manual)
+	options := Options{
+		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{chatName: true},
+		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{nameSyncIdle: true},
+	}
+	var output bytes.Buffer
+	options.Stdout = &output
+	if _, err := Run(context.Background(), options); err != nil {
+		t.Fatalf("dry run: %v\n%s", err, output.String())
+	}
+	if got := readFixture(t, path); got != codexProfessorFence(home)+manual {
+		t.Fatalf("dry run changed config: %q", got)
+	}
+	options.Mode = ModeApply
+	output.Reset()
+	if _, err := Run(context.Background(), options); err != nil {
+		t.Fatalf("apply: %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "preserve conflicting manual MCP client professor in "+path) {
+		t.Fatalf("missing preserve report:\n%s", output.String())
+	}
+	got := readFixture(t, path)
+	if !strings.Contains(got, manual) || strings.Contains(got, mcpFenceBegin) || strings.Contains(got, mcpFenceEnd) {
+		t.Fatalf("manual professor table was not kept without pfm's fence:\n%s", got)
+	}
+	var document map[string]any
+	if _, err := toml.Decode(got, &document); err != nil {
+		t.Fatalf("repaired config is not TOML: %v", err)
+	}
+	output.Reset()
+	if _, err := Run(context.Background(), options); err != nil {
+		t.Fatalf("second apply: %v\n%s", err, output.String())
+	}
+	for _, line := range strings.Split(output.String(), "\n") {
+		if strings.Contains(line, "change") && strings.Contains(line, path) {
+			t.Fatalf("second apply rewrote Codex config:\n%s", output.String())
+		}
+	}
+}
+
+func TestInstallRejectsUnrelatedCodexTOMLDuplicate(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".codex", "config.toml")
+	broken := "model = 'first'\nmodel = 'second'\n" + codexProfessorFence(home)
+	writeFixture(t, path, broken)
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), MCPEnabled: map[string]bool{chatName: true},
+		Mode: ModeDryRun, Home: home, Runner: &fakeRunner{nameSyncIdle: true},
+	})
+	if err == nil || !strings.Contains(err.Error(), "toml:") || !strings.Contains(err.Error(), "model") {
+		t.Fatalf("error=%v, want unrelated TOML parse refusal", err)
+	}
+	if got := readFixture(t, path); got != broken {
+		t.Fatalf("refused install changed config: %q", got)
+	}
+}
 
 func TestMCPPreservesManualSecondaryCodexClient(t *testing.T) {
 	t.Parallel()

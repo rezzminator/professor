@@ -304,6 +304,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.wireCodexHooks(); err != nil {
 		return err
 	}
+	if err := installer.removeRetiredNudgeState(); err != nil {
+		installer.warnRetiredNudge("retired compact-nudge state", err)
+	}
 	mcpErr := installer.wireMCP()
 	// A host build replaces the binary without changing the unit file, and MCP
 	// client wiring can change without changing either. enable --now leaves an

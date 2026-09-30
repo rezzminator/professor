@@ -80,7 +80,16 @@ func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment pat
 			}
 			switch finding.Verdict {
 			case installer.VerdictCreate:
-				fmt.Fprintf(stdout, "session-store: %s missing — run pfm install\n", finding.Path)
+				if finding.Source != "" {
+					fmt.Fprintf(
+						stdout,
+						"session-store: %s links to %s, which is missing — run pfm install\n",
+						finding.Path,
+						finding.Source,
+					)
+				} else {
+					fmt.Fprintf(stdout, "session-store: %s missing — run pfm install\n", finding.Path)
+				}
 			case installer.VerdictMerge:
 				fmt.Fprintf(
 					stdout,

@@ -3,9 +3,7 @@ package inject
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -13,7 +11,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // countingClock hands back a fresh, later instant on every Now() call while
@@ -45,40 +42,6 @@ type fixedClock struct {
 
 func (c fixedClock) Now() time.Time { return c.now }
 
-// fakeSelf answers "who am I" without asking the machine. Resolving the target
-// "self" for real needs a live tmux seat, so a test that leans on the ambient
-// environment passes on a developer box that happens to be running inside a
-// chat and fails in the container — which is exactly what this one did before
-// the fence caught it. Supplying the identity makes the test measure the code.
-type fakeSelf struct {
-	identity resolve.Identity
-}
-
-func (fake fakeSelf) Identify(context.Context) (resolve.Identity, error) {
-	return fake.identity, nil
-}
-
-// The two repros below pin the SAME defect from its two opposite ends.
-//
-// waitForSettledTurn rides out "the turn the primary started" using nothing but
-// a busy bit. That bit has no identity: it reads true while the compaction runs
-// AND while the caller's own turn runs AND while the post-compaction session
-// resumes on its own. So the waiter latches onto whichever turn happened to be
-// busy when it woke up, and then races whichever idle arrives first.
-//
-// Which way it loses depends on timing alone:
-//
-//   - the caller stops promptly -> the waiter latches the caller's turn, sees
-//     the idle BEFORE compaction even starts, and delivers the steer EARLY,
-//     into a pane that is about to be compacted out from under it.
-//   - the caller keeps working -> the brief idle that follows the compaction is
-//     shorter than the stability window, so the waiter misses its one true window
-//     and delivers LATE, into work that already resumed.
-//
-// One bug, two faces. A fix that only moves the delivery point earlier or later
-// trades one face for the other; the waiter has to identify the turn instead of
-// counting on a coincidence.
-
 // paneFrame is one observation of the pane plus the phase it belongs to, so a
 // test can assert WHERE the waiter made its decision and not merely that it
 // eventually returned.
@@ -98,7 +61,7 @@ type paneFrame struct {
 }
 
 const (
-	phaseCaller     = "caller-turn"      // the caller's own turn, still running
+	phasePrimary    = "primary-turn"     // the typed primary is still running
 	phaseGap        = "pre-compact-idle" // idle, compaction has NOT started
 	phaseCompacting = "compacting"       // the compaction turn is running
 	phaseDone       = "compaction-done"  // idle, compaction provably finished
@@ -183,9 +146,9 @@ func newScriptedEngine(t *testing.T, frames []paneFrame) (*Engine, *paneScript) 
 // mustSettle runs the settled-turn wait and fails the test on the baseline
 // error — the state that means the pane could not be read even once, which no
 // scripted fixture here produces (settled_test.go covers that one on purpose).
-func mustSettle(t *testing.T, engine *Engine, selfTarget bool) bool {
+func mustSettle(t *testing.T, engine *Engine) bool {
 	t.Helper()
-	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", selfTarget, pfmengine.Claude)
+	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", pfmengine.Claude)
 	if err != nil {
 		t.Fatalf("waitForSettledTurn() baseline error: %v", err)
 	}
@@ -200,21 +163,19 @@ func repeatFrame(phase, capture string, count int) []paneFrame {
 	return frames
 }
 
-// TestThenWaiterDoesNotDeliverBeforeTheCompactionRuns is the EARLY-landing
-// repro. The caller ends its turn promptly, so the pane goes idle while the
-// queued /compact is still waiting its turn. A waiter that only knows "was
-// busy, now idle" reads that gap as the compaction having finished and fires
-// the steer into a pane that is about to be compacted — the steer is consumed
-// by the pre-compaction session and vanishes with it.
+// TestThenWaiterDoesNotDeliverBeforeTheCompactionRuns guards the chained hop.
+// It starts after /compact was typed; an idle gap before that turn runs is not
+// the boundary for the following steer.
 func TestThenWaiterDoesNotDeliverBeforeTheCompactionRuns(t *testing.T) {
 	var frames []paneFrame
-	frames = append(frames, repeatFrame(phaseCaller, captureBusy, 2)...)
 	frames = append(frames, repeatFrame(phaseGap, captureIdle, 6)...)
 	frames = append(frames, repeatFrame(phaseCompacting, captureBusy, 3)...)
 	frames = append(frames, repeatFrame(phaseDone, captureReceipt, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	mustSettle(t, engine, true)
+	if observed := mustSettle(t, engine); !observed {
+		t.Fatal("chained hop did not observe the compaction turn")
+	}
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -226,16 +187,10 @@ func TestThenWaiterDoesNotDeliverBeforeTheCompactionRuns(t *testing.T) {
 	}
 }
 
-// TestThenWaiterDoesNotDeliverIntoResumedWork is the LATE-landing repro, and
-// the one that actually happened. The caller does not stop after queueing the
-// compaction, so the idle between its turn and the compaction is a single
-// blink — shorter than the stability window. The waiter misses it, misses the
-// equally brief idle right after the compaction, and finally releases once the
-// resumed session goes quiet: the steer lands on top of work already in
-// progress, which is the collision this pair of tests exists to prevent.
+// TestThenWaiterDoesNotDeliverIntoResumedWork guards the chained hop against
+// waiting past a brief receipt after compaction into work that resumed later.
 func TestThenWaiterDoesNotDeliverIntoResumedWork(t *testing.T) {
 	var frames []paneFrame
-	frames = append(frames, repeatFrame(phaseCaller, captureBusy, 4)...)
 	frames = append(frames, paneFrame{phase: phaseGap, capture: captureIdle})
 	frames = append(frames, repeatFrame(phaseCompacting, captureBusy, 3)...)
 	frames = append(frames, paneFrame{phase: phaseDone, capture: captureReceipt})
@@ -243,7 +198,9 @@ func TestThenWaiterDoesNotDeliverIntoResumedWork(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseLate, captureReceipt, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	mustSettle(t, engine, true)
+	if observed := mustSettle(t, engine); !observed {
+		t.Fatal("chained hop did not observe the compaction turn")
+	}
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -255,11 +212,9 @@ func TestThenWaiterDoesNotDeliverIntoResumedWork(t *testing.T) {
 	}
 }
 
-// TestThenWaiterStillReleasesWithoutACompactionReceipt keeps the fix honest for
-// every non-compaction primary (a reload steer, a plain queued message): those
-// panes never print a receipt, and a waiter that insisted on one would hang
-// until its bound expired and strand the chain. It must still ride out the
-// turn — and it must still refuse to mistake the caller's own turn for it.
+// TestThenWaiterStillReleasesWithoutACompactionReceipt guards the chained hop
+// for a primary that prints no receipt, such as a reload or plain message. It
+// must still ride out the turn after the idle gap.
 func TestThenWaiterStillReleasesWithoutACompactionReceipt(t *testing.T) {
 	// The pre-compaction gap is deliberately LONGER than the stability window,
 	// so a waiter that counts steady idle before it has seen the primary's turn
@@ -268,42 +223,41 @@ func TestThenWaiterStillReleasesWithoutACompactionReceipt(t *testing.T) {
 	// without ever deciding ends up in resumed work, not in a phase that would
 	// have let it pass by accident.
 	var frames []paneFrame
-	frames = append(frames, repeatFrame(phaseCaller, captureBusy, 2)...)
 	frames = append(frames, repeatFrame(phaseGap, captureIdle, 5)...)
 	frames = append(frames, repeatFrame(phaseCompacting, captureBusy, 3)...)
 	frames = append(frames, repeatFrame(phaseDone, captureIdle, 3)...)
 	frames = append(frames, repeatFrame(phaseResumed, captureBusy, 8)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	mustSettle(t, engine, true)
+	if observed := mustSettle(t, engine); !observed {
+		t.Fatal("chained hop did not observe the primary turn")
+	}
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
 			"waiter released in phase %q, want %q: with no receipt to key on "+
-				"it must still ride out the turn that started AFTER the "+
-				"caller's own turn ended",
+				"the chained hop must still ride out the typed primary's turn",
 			got, phaseDone,
 		)
 	}
 }
 
-// TestCompactionReceiptNeedsToAppear guards the one way the receipt rule could
-// itself become a coincidence detector: a receipt still sitting in the pane
-// from a PREVIOUS compaction is not evidence that this one ran. Only a receipt
-// that appears while the waiter is watching counts.
+// TestCompactionReceiptNeedsToAppear guards the chained hop against an old
+// receipt already in its baseline. Only a receipt from this turn counts.
 func TestCompactionReceiptNeedsToAppear(t *testing.T) {
 	var frames []paneFrame
 	// The pane already shows an older receipt when the waiter wakes up.
-	frames = append(frames, repeatFrame(phaseCaller, captureBusy, 2)...)
 	frames = append(frames, repeatFrame(phaseGap, captureReceipt, 4)...)
 	frames = append(frames, repeatFrame(phaseCompacting, captureBusy, 3)...)
 	frames = append(frames, repeatFrame(phaseDone, captureReceipt, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	if !strings.Contains(frames[2].capture, "Compacted") {
+	if !strings.Contains(frames[0].capture, "Compacted") {
 		t.Fatalf("fixture no longer shows a stale receipt during the gap")
 	}
-	mustSettle(t, engine, true)
+	if observed := mustSettle(t, engine); !observed {
+		t.Fatal("chained hop did not observe the current compaction turn")
+	}
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -330,7 +284,7 @@ func TestThenWaiterDoesNotBurnTheBudgetWaitingForATurnThatAlreadyRan(t *testing.
 	engine.options.ThenIdleTries = 500
 	engine.options.ThenIdleStable = 2
 
-	observed := mustSettle(t, engine, true)
+	observed := mustSettle(t, engine)
 
 	if observed {
 		t.Fatal(
@@ -349,86 +303,10 @@ func TestThenWaiterDoesNotBurnTheBudgetWaitingForATurnThatAlreadyRan(t *testing.
 	}
 }
 
-// TestSelfCompactScheduleTellsTheCallerToStop covers the result half of the
-// stop rule at the layer that actually writes it, so BOTH callers — the
-// chat_self_compact MCP tool and `pfm chat self-compact` — are covered by
-// one assertion instead of one of them being quietly missed. That miss was
-// real: the notice first shipped in the MCP handler only, which left the
-// CLI path saying nothing. `pfm chat inject` no longer has a /compact path
-// at all (Task C: chat_self_compact / `pfm chat self-compact` own
-// compaction, and both share Engine.ScheduleSelfCompact -> this
-// ScheduleAfterCurrentTurn call, which is where SelfCompactStopNotice is
-// actually appended).
-func TestSelfCompactScheduleTellsTheCallerToStop(t *testing.T) {
-	fake := &fakeTmux{capture: "Working (10s)\n› Ask Codex to do anything"}
-	engine := newTestEngineWith(t, "cx-self-compact", fake, &fakeSpawner{})
-	engine.whoami = fakeSelf{identity: resolve.Identity{
-		Session:    "cx-self-compact",
-		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cx-self-compact"),
-		Pane:       "%1",
-		Engine:     "codex",
-		Source:     "test",
-	}}
-
-	result, err := engine.ScheduleAfterCurrentTurn(context.Background(), Request{
-		Target:  "self",
-		Message: "/compact hold the wave state",
-		Then:    []string{"resume the wave"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Code != 0 {
-		t.Fatalf("scheduled self-compaction = %+v", result)
-	}
-	if !strings.Contains(result.Message, "STOP NOW") {
-		t.Fatalf(
-			"a queued SELF-compaction does not tell the caller to stop; the "+
-				"waiter needs this caller's turn to end so it can tell the "+
-				"compaction apart from it.\ngot: %s",
-			result.Message,
-		)
-	}
-}
-
-// TestCompactOfAnotherChatDoesNotTellTheCallerToStop keeps the notice from
-// becoming noise on the shape it does not apply to. When the target is somebody
-// else's pane, the waiter watches THAT pane; what this caller does next cannot
-// blur a boundary it is not part of, so telling it to stop would be wrong.
-func TestCompactOfAnotherChatDoesNotTellTheCallerToStop(t *testing.T) {
-	fake := &fakeTmux{capture: "Working (10s)\n› Ask Codex to do anything"}
-	engine := newTestEngineWith(t, "cx-other-compact", fake, &fakeSpawner{})
-
-	result, err := engine.ScheduleAfterCurrentTurn(context.Background(), Request{
-		Target:  "chat",
-		Message: "/compact hold the wave state",
-		Then:    []string{"resume the wave"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(result.Message, "STOP NOW") {
-		t.Fatalf(
-			"compacting ANOTHER chat told this caller to stop working; the "+
-				"rule applies only to a chat compacting itself.\ngot: %s",
-			result.Message,
-		)
-	}
-}
-
-// TestNonSelfWaiterDoesNotWaitOutATurnItDidNotStart pins the boundary of the
-// caller-yield rule, and a regression the rule nearly introduced.
-//
-// Requiring an idle observation BEFORE the primary's turn is correct only when
-// the pane being watched is the pane that asked for the wait — a chat compacting
-// itself, whose own turn is still running when the waiter wakes. For any other
-// target nothing else owns that pane, so its first busy already IS the primary's
-// turn. Demanding a prior idle there waits out the primary, then waits again for
-// a second turn that never comes, and finally releases on the bounded fallback:
-// seconds late, and carrying a "no turn boundary observed" warning that is
-// simply false. This is the shape every `--then` steer to another chat takes, so
-// the regression would have been the common case, not the exotic one.
-func TestNonSelfWaiterDoesNotWaitOutATurnItDidNotStart(t *testing.T) {
+// TestThenWaiterAcceptsThePrimaryTurnAlreadyBusy pins the chained hop's
+// first sample: a busy pane can already be running the primary turn, and the
+// waiter must release when it ends rather than wait for another turn.
+func TestThenWaiterAcceptsThePrimaryTurnAlreadyBusy(t *testing.T) {
 	// The pane is already busy with the primary's own turn on the first sample.
 	var frames []paneFrame
 	frames = append(frames, repeatFrame(phaseCompacting, captureBusy, 3)...)
@@ -436,19 +314,18 @@ func TestNonSelfWaiterDoesNotWaitOutATurnItDidNotStart(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseLate, captureBusy, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	observed := mustSettle(t, engine, false)
+	observed := mustSettle(t, engine)
 
 	if !observed {
 		t.Fatal(
-			"waiter reported no turn boundary for a non-self target whose " +
+			"waiter reported no turn boundary for a chained hop whose " +
 				"turn it watched start and finish — a false warning on the " +
-				"most common --then shape",
+				"chained --then hop",
 		)
 	}
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
-			"waiter released in phase %q, want %q: it treated the primary's "+
-				"own turn as somebody else's and waited for a second turn "+
+			"waiter released in phase %q, want %q: it waited for a second turn "+
 				"that was never going to come",
 			got, phaseDone,
 		)
@@ -549,91 +426,6 @@ func TestDeliverThenRefusesWhenTypistNeverClears(t *testing.T) {
 	}
 }
 
-// TestScheduleSelfCompactComposesPerEngineAndForwardsThen pins Task D's
-// shared composition: ScheduleSelfCompact composes "/compact " + focus for
-// a Claude self target and the bare "/compact" for a Codex one, and forwards
-// the caller's then steer(s) unmodified. Revert to a bare "/compact" for
-// every target and the "claude composes the focus" case fails.
-func TestScheduleSelfCompactComposesPerEngineAndForwardsThen(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		engine string
-		want   string
-	}{
-		{name: "claude composes the focus", engine: "", want: "/compact hold the wave state"},
-		{name: "codex sends the bare command", engine: string(pfmengine.Codex), want: "/compact"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			fake := &fakeTmux{capture: "conversation\n❯ "}
-			spawner := &fakeSpawner{}
-			engine := newTestEngineWith(t, "cc-self-compact-compose", fake, spawner)
-			engine.whoami = fakeSelf{identity: resolve.Identity{
-				Session:    "self-session",
-				SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-compose"),
-				Pane:       "%1",
-				Engine:     test.engine,
-			}}
-			result, err := engine.ScheduleSelfCompact(
-				context.Background(),
-				"hold the wave state",
-				[]string{"resume the wave"},
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.Code != 0 {
-				t.Fatalf("ScheduleSelfCompact() = %+v", result)
-			}
-			spawned := spawner.spawned()
-			if len(spawned) != 1 || len(spawned[0].Steers) == 0 || spawned[0].Steers[0] != test.want {
-				t.Fatalf("composed command = %+v, want primary %q", spawned, test.want)
-			}
-			if !reflect.DeepEqual(spawned[0].Steers[1:], []string{"resume the wave"}) {
-				t.Fatalf("then was not forwarded unmodified: %+v", spawned[0].Steers)
-			}
-		})
-	}
-}
-
-// TestScheduleSelfCompactRefusesAnInvalidFocusBeforeScheduling pins Task D's
-// validation: an empty, whitespace-only, or multi-line focus is refused
-// before anything is scheduled. Revert the validation in
-// Engine.ScheduleSelfCompact and this fails: an empty focus reaches the
-// spawner as a bare "/compact ".
-//
-// The ESC- and BEL-carrying cases pin F8 of the merge-gating review: the
-// doc comment above this validation (and SelfCompactInput's in
-// mcpserv/types.go) claims "no control characters," but the old check only
-// excluded \r\n\x00 — three bytes, not the full control-character class —
-// so ESC/BEL/the rest of C0/DEL passed through unfiltered into a string
-// typed as literal keystrokes. Narrow the check back to
-// strings.ContainsAny(focus, "\r\n\x00") and these two cases stop failing.
-func TestScheduleSelfCompactRefusesAnInvalidFocusBeforeScheduling(t *testing.T) {
-	for _, focus := range []string{
-		"", "   ", "line one\nline two",
-		"focus with an ESC\x1bbyte", "focus with a BEL\x07byte",
-	} {
-		fake := &fakeTmux{capture: "conversation\n❯ "}
-		spawner := &fakeSpawner{}
-		engine := newTestEngineWith(t, "cc-self-compact-validate", fake, spawner)
-		engine.whoami = fakeSelf{identity: resolve.Identity{
-			Session:    "self-session",
-			SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-validate"),
-			Pane:       "%1",
-		}}
-		result, err := engine.ScheduleSelfCompact(context.Background(), focus, []string{"resume"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.Code != CodeUndelivered || !strings.Contains(result.Message, "focus must be one non-empty line") {
-			t.Fatalf("focus %q result = %+v", focus, result)
-		}
-		if len(spawner.spawned()) != 0 {
-			t.Fatalf("invalid focus %q reached the spawner: %+v", focus, spawner.spawned())
-		}
-	}
-}
-
 // TestDeliverThenReportsUndeliveredWhenTmuxUnreadable pins the tri-state half
 // of the typist guard (F1 of the merge-gating review): when ClientActivity
 // errors on EVERY poll across the whole ThenIdleTries wait window — a dead
@@ -709,7 +501,7 @@ func TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait(t *testing.T) {
 	// baseline-retry fixture for the sibling shape.
 	script := &paneScript{
 		fakeTmux: fake,
-		frames:   []paneFrame{{phase: phaseCaller, err: context.Canceled}},
+		frames:   []paneFrame{{phase: phasePrimary, err: context.Canceled}},
 	}
 	engine.tmux = script
 	engine.options.ThenMin = 2 * time.Second
@@ -770,34 +562,30 @@ const captureBusyReceipt = "Compacted (ctrl+o to see full summary)\n" +
 // that was NOT on screen when the waiter woke and IS on screen now proves
 // this turn's compaction ran, whatever the footer says.
 func TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy(t *testing.T) {
-	for _, selfTarget := range []bool{true, false} {
-		t.Run(fmt.Sprintf("self=%t", selfTarget), func(t *testing.T) {
-			var frames []paneFrame
-			frames = append(frames, repeatFrame(phaseCaller, captureBusy, 3)...)
-			frames = append(frames, repeatFrame(phaseDone, captureBusyReceipt, 6)...)
+	var frames []paneFrame
+	frames = append(frames, repeatFrame(phasePrimary, captureBusy, 3)...)
+	frames = append(frames, repeatFrame(phaseDone, captureBusyReceipt, 6)...)
 
-			engine, script := newScriptedEngine(t, frames)
-			engine.options.ThenBusyTries = 4
-			engine.options.ThenIdleTries = 8
-			observed := mustSettle(t, engine, selfTarget)
+	engine, script := newScriptedEngine(t, frames)
+	engine.options.ThenBusyTries = 4
+	engine.options.ThenIdleTries = 8
+	observed := mustSettle(t, engine)
 
-			if !observed {
-				t.Fatal(
-					"waiter reported no turn boundary although this turn's own receipt " +
-						"appeared while it watched — it waited for an idle a background " +
-						"agent never grants and will deliver late WITH the WARNING",
-				)
-			}
-			if got := script.decidedIn(); got != phaseDone {
-				t.Fatalf("waiter released in phase %q, want %q", got, phaseDone)
-			}
-			// The baseline capture takes the first caller frame, the loop the
-			// other two, and the FIRST receipt frame decides: any later release
-			// rode the busy footer instead.
-			if script.served != 4 {
-				t.Fatalf("waiter sampled %d times, want 4 (baseline + 2 busy + the receipt frame)", script.served)
-			}
-		})
+	if !observed {
+		t.Fatal(
+			"waiter reported no turn boundary although this turn's own receipt " +
+				"appeared while it watched — it waited for an idle a background " +
+				"agent never grants and will deliver late WITH the WARNING",
+		)
+	}
+	if got := script.decidedIn(); got != phaseDone {
+		t.Fatalf("waiter released in phase %q, want %q", got, phaseDone)
+	}
+	// The baseline capture takes the first primary frame, the loop the
+	// other two, and the FIRST receipt frame decides: any later release
+	// rode the busy footer instead.
+	if script.served != 4 {
+		t.Fatalf("waiter sampled %d times, want 4 (baseline + 2 busy + the receipt frame)", script.served)
 	}
 }
 
@@ -816,14 +604,14 @@ func TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy(t *tes
 // differ in the RESULT, not merely in when they returned.
 func TestThenWaiterIgnoresAReceiptThatWasAlreadyOnScreenWhenItWoke(t *testing.T) {
 	var frames []paneFrame
-	frames = append(frames, repeatFrame(phaseCaller, captureBusyReceipt, 3)...)
+	frames = append(frames, repeatFrame(phasePrimary, captureBusyReceipt, 3)...)
 	frames = append(frames, repeatFrame(phaseLate, captureReceipt, 12)...)
 
 	engine, script := newScriptedEngine(t, frames)
 	engine.options.ThenBusyTries = 2
 	engine.options.ThenIdleTries = 6
 	engine.options.ThenIdleStable = 30
-	observed := mustSettle(t, engine, false)
+	observed := mustSettle(t, engine)
 
 	if observed {
 		t.Fatal(

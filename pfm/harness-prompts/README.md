@@ -54,7 +54,9 @@ newer — a clone checked out to an older revision than the binary is the binary
 
 - `claude/baselines/harness-original-v2.1.280.md` and `claude/baselines/harness-opus-v2.1.280.md`
   are reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic
-  sections excluded. Each has a `.sha256` pin and `.model` provenance file under its
+  sections excluded. These are frozen captures: no test or suite re-captures or re-verifies them
+  against a real Claude CLI. The only live capture is `pfm doctor` on a host; re-pinning follows
+  the human review described below. Each has a `.sha256` pin and `.model` provenance file under its
   `harness-original` or `harness-opus` stem; the doctor reads them from the recorded clone.
 - `pfm doctor` checks both stable aliases, `sonnet` and `opus`, against their respective baselines.
   It records the requested alias, resolved model ID, CLI version, baseline filename, and original

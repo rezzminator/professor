@@ -25,7 +25,7 @@ func TestChatStatusEngineModelGuardCoversAskAndSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(jail.binDir, "claude"), []byte(
-		"#!/bin/sh\nprintf 'engine ran\\n'\n",
+		"#!/bin/sh\nprintf '%s\\n' '{\"result\":\"engine ran\"}'\n",
 	), 0o700); err != nil {
 		t.Fatal(err)
 	}

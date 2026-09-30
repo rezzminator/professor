@@ -147,7 +147,6 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
 		Cache1H:               true,
-		CompactNudge:          DefaultCompactNudge(),
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -320,7 +319,6 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 		CleanupPeriodDays:     36500,
 		RequireManagedCleanup: true,
 		Cache1H:               true,
-		CompactNudge:          DefaultCompactNudge(),
 
 		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 	}) {
@@ -466,6 +464,44 @@ func TestLoadRejectsUnknownKeysAtEveryConfigLevel(t *testing.T) {
 				t.Fatalf("error = %q, want it to name %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadAcceptsRetiredCompactNudgeWithoutChangingOtherPreferences(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	base := `{"version":2,"claude":{"permissionMode":"prompt","cache1h":false},` +
+		`"accounts":[{"id":1,"configDir":"` + filepath.Join(home, "account") +
+		`","claude":{"theme":"ocean"}}]}`
+	if err := os.WriteFile(path, []byte(base), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{`{"enabled":false,"start":0,"step":101}`, `false`, `null`, `[1,"old"]`} {
+		retired := `{"version":2,"claude":{"permissionMode":"prompt","cache1h":false,"compactNudge":` + value + `},` +
+			`"accounts":[{"id":1,"configDir":"` + filepath.Join(home, "account") +
+			`","claude":{"theme":"ocean","compactNudge":` + value + `}}]}`
+		if err := os.WriteFile(path, []byte(retired), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Load(path, home, nil)
+		if err != nil {
+			t.Fatalf("retired value %s: %v", value, err)
+		}
+		if !reflect.DeepEqual(got.Claude, want.Claude) || !reflect.DeepEqual(got.Accounts, want.Accounts) ||
+			!reflect.DeepEqual(got.Sources, want.Sources) {
+			t.Fatalf("retired value %s changed effective preferences or sources", value)
+		}
+		encoded, err := Marshal(got, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), "compactNudge") {
+			t.Fatalf("serializer wrote retired key: %s", encoded)
+		}
 	}
 }
 

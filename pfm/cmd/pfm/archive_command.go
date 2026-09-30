@@ -40,7 +40,8 @@ func (adapter killStoreAdapter) Killed(
 }
 
 func (adapter killStoreAdapter) Unkill(ctx context.Context, id string) error {
-	return adapter.manager.Unkill(ctx, id)
+	_, err := adapter.manager.Unkill(ctx, id)
+	return err
 }
 
 // runArchive moves chats out of both engines' sight, reversibly.

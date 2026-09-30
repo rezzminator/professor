@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/nudge"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 )
 
@@ -192,38 +191,6 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 			stdout.String(),
 			stderr.String(),
 		)
-	}
-}
-
-// The nudge hook never re-derives the context window: it reads the
-// used-percentage Claude Code hands the statusline, which the statusline
-// persists per session on every render.
-func TestStatuslineRecordsTheContextSampleForTheNudge(t *testing.T) {
-	jailTest(t)
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PFM_HOME", root)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "1"))
-	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
-	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
-
-	var stdout, stderr bytes.Buffer
-	code := runStatusline(
-		nil,
-		strings.NewReader(
-			`{"session_id":"sess-nudge","model":{"display_name":"Opus 4"},"context_window":{"used_percentage":47.6}}`,
-		),
-		&stdout,
-		&stderr,
-	)
-	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("code=%d stderr=%q", code, stderr.String())
-	}
-	percent, found, err := nudge.ReadContext(filepath.Join(root, "sid"), "sess-nudge")
-	if err != nil || !found || percent != 47 {
-		t.Fatalf("recorded sample = %d found=%t err=%v, want 47", percent, found, err)
 	}
 }
 

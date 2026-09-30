@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
@@ -27,20 +29,18 @@ var newThenWaiter = func(runtime *config.Runtime) (thenWaiter, error) {
 // stderr IS the waiter's log (CommandThenSpawner.Spawn redirects both streams
 // to the steer log), and the FIRST line on it goes down before anything can
 // block: an operator reading the log while the waiter still waits sees what
-// it is waiting for, in the same words the pane notice used
-// (inject.WaitingFor), instead of an empty file that reads identically for
+// it is waiting for (inject.WaitingFor), instead of an empty file that reads identically for
 // "waiting" and "never started".
 func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 	flags := cli.NewFlagSet(
 		"internal then",
-		"usage: pfm internal then --socket path --target name [--self] [--engine cc|cx] --steer text [--steer text]...",
+		"usage: pfm internal then --socket path --target name [--engine cc|cx] --steer text [--steer text]...",
 		stderr,
 	)
 	socket := flags.String("socket", "", "tmux socket path of the target")
 	target := flags.String("target", "", "tmux session name or pane id")
 	var steers cli.StringList
 	flags.Var(&steers, "steer", "follow-up steer; repeat for a chain")
-	selfTarget := flags.Bool("self", false, "the target pane is the caller's own")
 	engineName := flags.String("engine", "", "the target pane's engine id (cc|cx) as the spawning chat resolved it")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -49,14 +49,24 @@ func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 		flags.Usage()
 		return 2
 	}
+	// DeliverThen's Codex guard compares the canonical id, so an engine's long name
+	// is resolved here and an unknown one refused before any wait.
+	engineID := ""
+	if strings.TrimSpace(*engineName) != "" {
+		id, err := pfmengine.Parse(*engineName)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm internal then: --engine: %v\n", err)
+			return 2
+		}
+		engineID = string(id)
+	}
 	fmt.Fprintf(
 		stderr,
-		"then waiter: start — target %s on %s · self=%t · %d steer(s) · waiting for: %s\n",
+		"then waiter: start — target %s on %s · %d steer(s) · waiting for: %s\n",
 		*target,
 		*socket,
-		*selfTarget,
 		len(steers),
-		inject.WaitingFor(*selfTarget, *engineName),
+		inject.WaitingFor(engineID),
 	)
 	var runtime *config.Runtime
 	if len(runtimes) != 0 {
@@ -71,8 +81,7 @@ func Then(args []string, stderr io.Writer, runtimes ...config.Runtime) int {
 		SocketPath: *socket,
 		Target:     *target,
 		Steers:     steers,
-		SelfTarget: *selfTarget,
-		Engine:     *engineName,
+		Engine:     engineID,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal then: %v\n", err)

@@ -1,13 +1,10 @@
 package inject
 
 import (
-	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // stateRecords returns the comp=state records for coordinator kind.
@@ -22,11 +19,10 @@ func stateRecords(recorder *obs.Recorder, kind string) []obs.Record {
 	return out
 }
 
-// TestInjectAndSelfCompactRecordTheirOutcomeAsATransition: the inject and
-// self-compact coordinators are state doors — one comp=state record per call
+// TestInjectRecordsItsOutcomeAsATransition: inject is a state door — one comp=state record per call
 // from `requested` to the outcome (typed, or refused with the code as
 // cause), and the message text never reaches the file.
-func TestInjectAndSelfCompactRecordTheirOutcomeAsATransition(t *testing.T) {
+func TestInjectRecordsItsOutcomeAsATransition(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
 	spawner := &fakeSpawner{}
@@ -48,30 +44,9 @@ func TestInjectAndSelfCompactRecordTheirOutcomeAsATransition(t *testing.T) {
 		t.Fatalf("no dur_ms: %v", records[0].Fields)
 	}
 
-	engine.whoami = fakeSelf{identity: resolve.Identity{
-		Session:    "self-session",
-		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-state-door"),
-		Pane:       "%1",
-	}}
-	if result, err := engine.ScheduleSelfCompact(
-		ctx,
-		"line one\nPLANTED two",
-		[]string{"resume"},
-	); err != nil ||
-		result.Code != CodeUndelivered {
-		t.Fatalf("ScheduleSelfCompact() = %+v, %v", result, err)
-	}
-	compact := stateRecords(recorder, "self-compact")
-	if len(compact) != 1 {
-		t.Fatalf("self-compact transitions = %d, want 1: %s", len(compact), recorder.Raw())
-	}
-	if next, _ := compact[0].Field("next"); next != "refused" {
-		t.Fatalf("next = %v, want refused", next)
-	}
 	if strings.Contains(recorder.Raw(), "PLANTED") {
 		t.Fatalf("message text reached the file: %s", recorder.Raw())
 	}
-	_ = context.Background
 }
 
 // TestDeliverThenRecordsItsOutcomeAsATransition: the then-delivery

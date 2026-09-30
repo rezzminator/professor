@@ -180,7 +180,7 @@ func TestKilledBusyPolicyWarnsAndRejectsTheChange(t *testing.T) {
 	}
 
 	warnings.Reset()
-	if err := writer.Unkill(ctx, "busy-unkill"); err == nil {
+	if _, err := writer.Unkill(ctx, "busy-unkill"); err == nil {
 		t.Fatal("Unkill() under persistent SQLITE_BUSY reported success")
 	}
 	if got := warnings.String(); !strings.Contains(got, "WARNING:") ||

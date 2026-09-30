@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 type SearchOptions struct {
@@ -394,7 +396,7 @@ func ProbeSearch(ctx context.Context, options SearchOptions, client *http.Client
 		}
 		// Through the fetch gateway like every other egress; a trusted origin,
 		// because the operator's own SearXNG may sit on loopback.
-		response, err := gatewayAttempt(ctx, gatewayRequest{
+		response, err := gatewayAttempt(obs.Presence(ctx), gatewayRequest{
 			url: strings.TrimRight(options.SearXNGURL, "/") + "/healthz", client: client, ua: searchUA,
 			max:              64 * 1024,
 			trustedOrigin:    true,

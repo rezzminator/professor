@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -214,6 +215,9 @@ func (installer *engine) processRunner() deps.Runner {
 }
 
 func (execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
+	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+		return fmt.Errorf("run %q: %w", name, lookErr)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
 	if err != nil {
 		return err
@@ -225,6 +229,9 @@ func (execCommandRunner) Run(ctx context.Context, name string, args ...string) e
 }
 
 func (execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+		return nil, fmt.Errorf("run %q: %w", name, lookErr)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
 	if err != nil {
 		return nil, err
@@ -236,6 +243,13 @@ func (execCommandRunner) Output(ctx context.Context, name string, args ...string
 }
 
 func normalizeInstallerOptions(options Options) (Options, error) {
+	if options.SourceRepo != "" {
+		abs, err := filepath.Abs(options.SourceRepo)
+		if err != nil {
+			return options, fmt.Errorf("resolve source repository %q: %w", options.SourceRepo, err)
+		}
+		options.SourceRepo = paths.PhysicalPath(abs)
+	}
 	if options.Clock == nil {
 		options.Clock = clock.Real
 	}

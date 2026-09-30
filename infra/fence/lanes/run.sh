@@ -59,13 +59,7 @@ while [ $# -gt 0 ]; do
 done
 case "$ROOT_MODE" in reuse|rebuild) ;; *) echo "run: --root takes reuse|rebuild, not '$ROOT_MODE'" >&2; exit 2 ;; esac
 
-# The run's Claude seats ARE the root's seat roster: `--seats cc:1` builds a
-# container whose pfm config lists seat 1 only, so a lane can never read a
-# second seat out of the config and then find nothing staged for it. The
-# selection is a root-hash input (root.sh), so a one-seat image is never reused
-# for a two-seat run. No cc: seat named leaves the roster at the host's own.
-ACCOUNTS="$(printf '%s\n' $SEATS | awk -F: '/^cc:/ { printf "%s%s", sep, $2; sep = "," }')"
-root_sh() { bash "$ROOT_SH" ${ACCOUNTS:+--accounts "$ACCOUNTS"} "$@"; }
+root_sh() { bash "$ROOT_SH" "$@"; }
 
 # The beat library is the one ledger parser: run.sh never re-reads known-gaps.yml
 # with its own rules. Both variables below are read by lib.sh on the next line.
@@ -206,7 +200,7 @@ OUT="$OUT_ROOT/$STAMP"
 if [ "$DRY" -eq 1 ]; then
   say "run: PLAN (--dry-run — nothing was executed, no container, no model turn)"
   say "run: mode        $MODE"
-  say "run: root hash   $HASH (pfm/**, templates/**, docs/SETUP.md, infra/fence/**, seats ${ACCOUNTS:-<all>})"
+  say "run: root hash   $HASH (the root's build inputs — root.sh HASH_PATHS)"
   say "run: root image  $IMAGE — $ROOT_DECISION"
   say "run: lane order  $(printf '%s' "$ORDER" | tr ' ' '>' | sed 's/>/ → /g')"
   say "run: seats       $SEATS"
@@ -244,8 +238,11 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || die "no image $IMAGE after the 
 FENCE_CALLER=lanes-run lane_fence_env "$ROOT"
 CNAME="pfm-lane-$STAMP"
 docker rm -f "$CNAME" >/dev/null 2>&1
-lane_run "$CNAME" "$IMAGE" || die "the lane container would not start from $IMAGE" 1
+lane_run "$CNAME" "$IMAGE" none || die "the lane container would not start from $IMAGE" 1
 trap 'docker rm -f "$CNAME" >/dev/null 2>&1' EXIT
+scan="$(docker exec "$CNAME" bash /worktree/infra/fence/lanes/cred-scan.sh 2>&1)" ||
+  die "✗ CREDENTIAL-REFUSED — $scan" 1
+
 
 say "run: $MODE · container $CNAME · image $IMAGE ($ROOT_DECISION) · seats $SEATS · out $OUT"
 [ -n "$SKIPPED" ] && say "run: NOT WRITTEN — pending lanes not run:$SKIPPED"
@@ -256,7 +253,7 @@ for l in $ORDER; do
   say "── lane $l${prior:+ (after $prior)}"
   docker exec -w /tmp \
     -e "LANE_MODE=$MODE" -e "LANE_PRIOR=$prior" -e "LANE_SEATS=$SEATS" \
-    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e IS_SANDBOX=1 \
+    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e IS_SANDBOX=1 -e GOPROXY=off \
     "$CNAME" bash "/worktree/infra/fence/lanes/$l.sh" 2>&1 | tee "$OUT/$l.stream.log"
   rc="${PIPESTATUS[0]}"
   for f in "$l.log" "$l.timeline.tsv" "$l.row.tsv" "$l.logstate" "$l.seats"; do

@@ -1,80 +1,38 @@
 #!/usr/bin/env bash
 # E3.sh — lane E3, OpenCode: one chat on the fleet's one OpenCode home, walked
-# depth-first through the spawn ceremony, the confirmed-absent MCP wiring (a
-# known gap), then every outside-in verb the shared CLI surface already proves
+# depth-first through the spawn ceremony, the MCP wiring, then outside-in verbs
 # in E1/F/O. Runs INSIDE a lane container (run.sh), never on a host.
 #
 #   run.sh --lanes E3            solo, from a fresh root
 #   run.sh                       in the sequence, after E2
 #
-# Every beat asserts from pfm's OWN report (`pfm ls --tsv`, a verb's exit code,
-# the chat's last assistant message) or from the pane, never from a model's
-# prose: a beat that can only be satisfied by what the model said is a beat
-# asserting the wrong thing. Beat ids are the contract in
+# Every beat asserts from pfm's OWN report (`pfm ls --tsv`, a verb's exit code)
+# or from the pane. Beat ids are the contract in
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
-# Three facts this lane is built on, each read from the Go source, none
-# assumed:
-#   1. `pfm chat new` has NO OpenCode door. `action.RegisterPlanner` (the
-#      headless-chat door `chat new` walks) is wired for Claude and Codex only
-#      (pfm/cmd/pfm/engines.go); an unregistered engine's `PlannerFor` returns
-#      "OpenCode does not support headless chat" (pfm/internal/action/planner.go)
-#      — this holds for BOTH `--engine oc` and `--engine opencode` (the
-#      accepted spellings, pfm/internal/engine/engine.go Parse/accepted). The
-#      only live door is the picker's merged "New OpenCode chat" row
-#      (infra/demo/storm.sh names it) — compose.Kind NewOpenCode, "launches a
-#      fresh OpenCode TUI in a fleet-owned ox socket" (compose/types.go).
-#   2. `pfm ls` has NO live-OpenCode row kind at all. compose.Kind's whole enum
-#      (compose/types.go) is LiveClaude/LiveCodex/LiveSplit/Agent/Resume{Claude,
-#      Codex,OpenCode}/New{Claude,Codex,OpenCode}/Booting/ProfessorUpdate —
-#      OpenCode gets ONLY Resume/New. `openCodeSessionRow` (compose/compose.go)
-#      never sets Socket, and Kind.IsAddressable() (compose/types.go) is true
-#      only for LiveClaude/LiveCodex/LiveSplit/Agent/Booting — never
-#      ResumeOpenCode. So `chat.Live` (pfm/internal/chat/target.go: `Live:
-#      row.Kind.IsAddressable()`) is ALWAYS false for an OpenCode chat, live TUI
-#      or not: this lane can never assert a "live-opencode" row, so it doesn't.
-#      What IS real and deterministic: `onChatServer` (action/synth.go) titles
-#      the fresh tmux WINDOW `pfmengine.MustLookup(OpenCode).Short` == literally
-#      "OpenCode" — that convergence this lane asserts instead.
-#   3. Every chat verb gated on `chat.Live` therefore ALWAYS refuses an
-#      OpenCode target by name: `pfm chat name` ("... is not running", exit 3 —
-#      chat_command.go runChatNameWith), `pfm chat capture` (same message, same
-#      exit), and `pfm chat inject` (its liveSeats-only NameResolver excludes
-#      any Socket-less row — chat/names.go liveSeats — so it falls through to
-#      the plain "no chat named" refusal, exit 4 — chat_dispatch.go
-#      writeInjectResult). `pfm chat status` still answers (a dead chat is a
-#      status, not an error — chat/status.go), reporting state=dead, never
-#      idle/working, because headless.Inspect only ever upgrades State away
-#      from StateDead when chat.Live (headless/headless.go). `pfm chat
-#      last`/`read` refuse "has not written a transcript yet" (exit 3) because
-#      Row.Path is never set for an OpenCode row either. `pfm chat kill`/
-#      `unkill` are the one pair that do NOT require Live — `chat.Resolve`
-#      (chat/target.go) scans compose.AllView, so an id-addressed kill/unkill
-#      tombstones a resume-opencode row exactly as it would a dead Claude one.
-#      E3.03 asserts every one of these REAL, sourced outcomes — a refusal
-#      named by pfm IS the assertion, never a fabricated pass.
+# The picker opens the OpenCode TUI in a fleet-owned ox- socket; once its first
+# prompt writes a session, pfm reports a live-opencode row with that socket
+# (compose/types.go). OpenCode content reads still refuse by name; E3.03 pins
+# each verb's current result against the running row.
 #
 # Unlike Claude and Codex, OpenCode carries no seat roster in pfm.config.json —
 # it is the fleet's ONE implicit account, recognized only once its session
 # store (opencode.db) exists on disk (pfm/internal/config/config.go), which
 # also gates whether the picker offers "New OpenCode chat" at all
 # (compose/compose.go: `includeNewOpenCode: … len(OpenCodeAccountIDs) != 0`). A
-# --no-adopt root (lanes/root.sh) spends no model turn, so that store is never
-# created there — this lane's own prelude makes it, the same way
-# infra/demo/setup.sh's install phase does when DEMO_OPENCODE_PROBE=1: a bare
-# `opencode run` outside pfm entirely, once.
+# root has no session store before the probe; this lane's prelude makes it with
+# one mock `opencode run` outside pfm.
 #
-# Cost: one OpenCode home (no seat accounting beyond `oc`) plus one bare
+# Cost: one OpenCode home (no seat accounting beyond `oc`) plus one mock
 # `opencode run` in the prelude when the store does not exist yet, plus one
 # throwaway `pfm` TUI driven headless in its own tmux server (never pfm's own
 # tmux dir, so the fleet scan never mistakes it for a chat) to reach the
-# picker's merged new-chat row. Roughly 6 short turns (the prelude's probe, one
-# raw stimulus typed into the freshly opened OpenCode pane).
+# picker's merged new-chat row.
 #
 # BROKEN STATE: the prelude aborts the lane by name when the OpenCode home
-# cannot be made (no `opencode` binary, or its first run never answers) or the
-# chat cannot be opened through the picker (the "New OpenCode chat" row never
-# converges, or no fresh ox- socket/resume-opencode row appears after Enter); a
+# cannot be made (no `opencode` binary, or its first run fails) or the chat
+# cannot be opened through the picker (the OpenCode row never converges, or no
+# fresh ox- socket/live-opencode row appears after Enter); a
 # beat whose precondition beat failed reports `blocked-by`, and each ✗ carries
 # the raw pane bytes in the lane log beside its assertion.
 set -uo pipefail
@@ -83,7 +41,7 @@ LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$LANES_DIR/lib.sh"
 lane_preamble
 
-WANT_NAME="${E3_CHAT:-E3_MAIN}" # the label E3.03 attempts (and asserts refused) — see fact 3
+WANT_NAME="${E3_CHAT:-E3_MAIN}"
 CWD="${E3_CWD:-/work/lumen}"
 CONFIG="${PFM_CONFIG:?PFM_CONFIG is required in the container}"
 # The OpenCode session store: pfm's own root-resolution rule
@@ -105,26 +63,20 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   lane_abort "no working directory for the chat to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
   "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
-  "bash /worktree/infra/demo/daemon.sh" ||
+  'lane_daemon_up' ||
   lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
 
-# make_oc_home — the ONE bare, non-pfm OpenCode turn that creates opencode.db,
-# mirroring infra/demo/setup.sh's own DEMO_OPENCODE_PROBE=1 path exactly (never
-# a second implementation): `opencode run` answers "ready" for real, which
-# proves its ChatGPT auth is live too. OpenCode invents its own row name for
-# that run ("Ready Request" one day, "Ready instruction request" the next), so
-# the row this probe leaves behind is found by DIFFERENCE and killed (kill is
-# Live-independent — fact 3), never by name — E3.01 opens the lane's own chat
-# fresh, after this.
+# make_oc_home — the mock OpenCode CLI creates opencode.db. Its resume rows
+# are found by difference and killed before E3.01 opens the lane's own chat.
 make_oc_home() {
   command -v opencode >/dev/null 2>&1 || { echo "no opencode binary on PATH"; return 1; }
   local before after out rc
   before="$(pfm ls --tsv 2>/dev/null | awk -F'\t' '$1 == "resume-opencode" { print $2 }' | sort)"
-  out="$(cd "$CWD" && timeout 180 opencode run "reply with one word: ready" 2>&1)"
+  out="$(cd "$CWD" && timeout 180 opencode run 'lane probe' 2>&1)"
   rc=$?
   printf '%s\n' "$out"
   [ "$rc" -eq 0 ] || return "$rc"
-  printf '%s' "$out" | tail -1 | grep -qi ready || { echo "opencode run never answered ready — its auth may not be live"; return 1; }
+  [ -f "$OC_DB" ] || { echo "opencode run exited 0 but wrote no session store at $OC_DB"; return 1; }
   after="$(pfm ls --tsv 2>/dev/null | awk -F'\t' '$1 == "resume-opencode" { print $2 }' | sort)"
   comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | xargs -r -n1 pfm chat kill >/dev/null 2>&1
   [ -f "$OC_DB" ]
@@ -158,18 +110,13 @@ oc_resume_ids() { pfm ls --tsv 2>/dev/null | awk -F'\t' '$1 == "resume-opencode"
 
 # ─── E3.01 — the spawn ceremony, then title + a real session converge ───────
 
-# open_main — the lane's chat, opened the ONE live door (fact 1): the picker's
-# merged "New chat" row, cycled to OpenCode and read back from capture-pane —
-# never assumed by position, since the row is Claude by default and the
-# merge/no-merge picker mode changes whether Left/Right cycles it or Down
-# walks to a separate row. Sets OC_ID (the resume-opencode row's ID, the
-# addressable handle every later verb uses — fact 3) and OC_SOCK (the fresh
-# ox- socket) on success. The library's single re-open (lane_reopen) spends
-# this same command after the chat dies under a later beat.
-OC_ID="" OC_SOCK=""
+# open_main — select OpenCode on the picker's New row. The selected row's
+# brackets move with Right; Down cannot move through a fuzzy-filtered lone row.
+# A prompt then births a live-opencode row on the new ox- socket.
+OC_ID="" OC_SOCK="" OC_NAME=""
 open_main() {
-  local before_ox before_ids after_ox after_ids label i sockpath
-  OC_ID="" OC_SOCK=""
+  local before_ox before_ids after_ox label i sockpath row new_resume
+  OC_ID="" OC_SOCK="" OC_NAME=""
   before_ox="$(ox_sockets)"
   before_ids="$(oc_resume_ids)"
   if ! tui_open 100 30 ls; then
@@ -179,16 +126,13 @@ open_main() {
   tui_type New
   label="$(tui_selected)"
   i=0
-  # Merged picker: Right cycles the ONE new-chat row's engine. Unmerged
-  # picker: a separate "New OpenCode chat" row exists already, or Down walks
-  # to it. Alternating covers both without assuming which mode is configured.
-  while [ "$i" -lt 6 ] && [ "$label" != "New OpenCode chat" ]; do
-    if [ $((i % 2)) -eq 0 ]; then tui_keys Right; else tui_keys Down; fi
+  while [ "$i" -lt 3 ] && [[ "$label" != *'[ OpenCode ]'* && "$label" != 'New OpenCode chat' ]]; do
+    tui_keys Right
     label="$(tui_selected)"
     i=$((i + 1))
   done
-  if [ "$label" != "New OpenCode chat" ]; then
-    echo "the fuzzy-filtered 'New' row never read 'New OpenCode chat' after 6 tries (Right/Down alternating); last read: '$label'; pane: $(one_line "$(tui_pane)")"
+  if [[ "$label" != *'[ OpenCode ]'* && "$label" != 'New OpenCode chat' ]]; then
+    echo "the fuzzy-filtered 'New' row never selected OpenCode after 3 Right keys; last read: '$label'; pane: $(one_line "$(tui_pane)")"
     tui_close
     return 1
   fi
@@ -198,25 +142,29 @@ open_main() {
   after_ox="$(ox_sockets)"
   OC_SOCK="$(comm -13 <(printf '%s\n' "$before_ox") <(printf '%s\n' "$after_ox") | head -1)"
   if [ -z "$OC_SOCK" ]; then
-    echo "Enter on 'New OpenCode chat' never produced a fresh ox- socket under $(oc_tmux_dir 2>/dev/null || echo '<no tmux dir found>'); sockets now: $(one_line "$after_ox")"
+    echo "Enter on the OpenCode New row never produced a fresh ox- socket under $(oc_tmux_dir 2>/dev/null || echo '<no tmux dir found>'); sockets now: $(one_line "$after_ox")"
     return 1
   fi
   sockpath="$(oc_tmux_dir)/$OC_SOCK"
-  # A raw stimulus typed directly into the pane (never a pfm verb — none can
-  # address this chat yet, fact 3): the needle a later wait reads, and the
-  # turn OpenCode's own session index needs before it writes a row at all.
+  # A raw prompt typed directly into the pane writes OpenCode's session row.
   tmux -S "$sockpath" send-keys -l "reply with one word: ready" 2>/dev/null
   tmux -S "$sockpath" send-keys Enter 2>/dev/null
   i=0
   while [ "$i" -lt 30 ]; do
-    after_ids="$(oc_resume_ids)"
-    OC_ID="$(comm -13 <(printf '%s\n' "$before_ids") <(printf '%s\n' "$after_ids") | head -1)"
+    row="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v s="$OC_SOCK" 'NR > 1 && $1 == "live-opencode" && $11 == s { print; exit }')"
+    OC_ID="$(awk -F'\t' '{ print $2 }' <<<"$row")"
+    OC_NAME="$(awk -F'\t' '{ print $5 }' <<<"$row")"
     [ -n "$OC_ID" ] && break
     sleep 2
     i=$((i + 1))
   done
   if [ -z "$OC_ID" ]; then
-    echo "socket $OC_SOCK is live but no new resume-opencode row appeared in 60s (ids now: $(one_line "$after_ids")) — nothing this lane's other verbs can address by id"
+    echo "socket $OC_SOCK is live but pfm ls reported no live-opencode row on it in 60s: $(one_line "$(pfm ls --tsv 2>&1)")"
+    return 1
+  fi
+  new_resume="$(comm -13 <(printf '%s\n' "$before_ids") <(printf '%s\n' "$(oc_resume_ids)"))"
+  if [ -n "$new_resume" ]; then
+    echo "the live socket also created a new resume-opencode row: $(one_line "$new_resume")"
     return 1
   fi
   return 0
@@ -226,12 +174,15 @@ lane_reopen 'open_main'
 beat E3.01-open-seat
 spends oc
 target "$WANT_NAME"
-if out="$(open_main)"; then
+open_log="$LANE_OUT_DIR/E3.open.log"
+if open_main >"$open_log" 2>&1; then
   bad=""
   sockpath="$(oc_tmux_dir)/$OC_SOCK"
-  # fact 2: onChatServer titles the fresh window literally
-  # pfmengine.MustLookup(OpenCode).Short == "OpenCode" — the one deterministic
-  # label/title convergence this engine has (no `pfm chat name`: fact 3).
+  [ "$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v i="$OC_ID" '$2 == i { print $1; exit }')" = live-opencode ] ||
+    bad="$bad session $OC_ID is not a live-opencode row;"
+  [ "$OC_NAME" = 'reply with one word: ready' ] ||
+    bad="$bad the live row's name '$OC_NAME' is not the prompt text;"
+  # onChatServer titles the fresh window literally OpenCode.
   if window="$(tmux -S "$sockpath" list-windows -F '#{window_name}' 2>&1)"; then
     case "$window" in
       OpenCode) ;;
@@ -253,11 +204,12 @@ if out="$(open_main)"; then
   if [ -n "$bad" ]; then
     fail "$bad"
   else
-    pass "opened via the picker's 'New OpenCode chat' row: session $OC_ID on socket $OC_SOCK · window '$window' · statusline $(one_line "$render" | cut -c1-120)"
+    pass "opened via the picker's OpenCode New row: live-opencode session $OC_ID on socket $OC_SOCK · window '$window' · statusline $(one_line "$render" | cut -c1-120)"
   fi
 else
-  fail "the picker could not open a new OpenCode chat: $(one_line "$out")"
+  fail "the picker could not open a new OpenCode chat: $(one_line "$(cat "$open_log")")"
 fi
+rm -f "$open_log"
 
 # ─── E3.02 — OpenCode MCP wiring: chat local + harvester remote, doctor row ─
 # The file pfm's OWN installer registers MCP into: pfm/internal/installer/
@@ -272,8 +224,7 @@ beat E3.02-mcp-registered
 spends none
 assert_opencode_mcp_registered "$PFM_BIN" "$PORT"
 
-# ─── E3.03 — everything else: the shared CLI surface's REAL, sourced verdict
-#             against a chat that is structurally never "live" (fact 2/3) ───
+# ─── E3.03 — outside-in CLI results for the live OpenCode row ───────────────
 
 beat E3.03-everything-else
 spends oc
@@ -281,56 +232,46 @@ target "$WANT_NAME"
 if requires E3.01-open-seat; then
   bad=""
 
-  # status: never an error for a dead chat (chat/status.go) — it must report
-  # state=dead, and ONLY dead, since headless.Inspect never upgrades State
-  # away from StateDead without chat.Live (fact 2).
+  # The promptless OpenCode pane settles idle after its scripted first turn.
   st="$(pfm chat status "$OC_ID" 2>&1)"
   st_rc=$?
-  [ "$st_rc" -eq 3 ] || bad="$bad status exited $st_rc (want 3, codeDeadChat — a dead-but-resolved chat is a status, not a crash): $(one_line "$st");"
-  [ "$(printf '%s' "$st" | awk -F'\t' 'NR == 1 { print $2 }')" = dead ] || bad="$bad status did not report state=dead: $(one_line "$st");"
+  [ "$st_rc" -eq 0 ] || bad="$bad status exited $st_rc for a live-opencode row: $(one_line "$st");"
+  [ "$(printf '%s' "$st" | awk -F'\t' 'NR == 1 { print $2 }')" = idle ] || bad="$bad status did not report state=idle: $(one_line "$st");"
 
-  # last/read: Row.Path is never set for an OpenCode row, so both refuse with
-  # the documented ErrNoTranscript wording, exit 3 (chat_dispatch.go).
+  # OpenCode's session content is deliberately unsupported by pfm readers.
   last="$(pfm chat last "$OC_ID" 2>&1)"
   last_rc=$?
-  if [ "$last_rc" -ne 3 ] || ! printf '%s' "$last" | grep -qi 'has not written a transcript yet'; then
-    bad="$bad last exited $last_rc without naming 'has not written a transcript yet': $(one_line "$last");"
+  if [ "$last_rc" -ne 1 ] || ! grep -qF 'reading OpenCode session content is not supported' <<<"$last"; then
+    bad="$bad last exited $last_rc without naming the OpenCode content refusal: $(one_line "$last");"
   fi
   read_out="$(pfm chat read "$OC_ID" --tail 2 --condensed 2>&1)"
   read_rc=$?
-  if [ "$read_rc" -ne 3 ] || ! printf '%s' "$read_out" | grep -qi 'has not written a transcript yet'; then
-    bad="$bad read exited $read_rc without naming 'has not written a transcript yet': $(one_line "$read_out");"
+  if [ "$read_rc" -ne 1 ] || ! grep -qF 'reading OpenCode session content is not supported' <<<"$read_out"; then
+    bad="$bad read exited $read_rc without naming the OpenCode content refusal: $(one_line "$read_out");"
   fi
 
-  # capture: chat.Live gates it directly (chat_command.go runChatCapture) —
-  # "is not running", codeDeadChat.
+  # capture reads the live ox- pane.
   cap="$(pfm chat capture "$OC_ID" 2>&1)"
   cap_rc=$?
-  if [ "$cap_rc" -ne 3 ] || ! printf '%s' "$cap" | grep -qi 'is not running'; then
-    bad="$bad capture exited $cap_rc without naming 'is not running': $(one_line "$cap");"
+  if [ "$cap_rc" -ne 0 ] || [ -z "$cap" ]; then
+    bad="$bad capture exited $cap_rc without a live pane: $(one_line "$cap");"
   fi
 
-  # inject: the injector's own roster (liveSeats, chat/names.go) excludes any
-  # Socket-less row outright, so it falls to the plain "no chat named"
-  # refusal — codeUnknownChat (4), never a delivery.
+  # inject addresses the live row by its session id.
   inj="$(pfm chat inject --allow-unsigned "$OC_ID" "reply with exactly one word: OC-INJECT-OK" 2>&1)"
   inj_rc=$?
-  if [ "$inj_rc" -ne 4 ] || ! printf '%s' "$inj" | grep -qi 'no chat named'; then
-    bad="$bad inject exited $inj_rc without naming 'no chat named': $(one_line "$inj");"
+  if [ "$inj_rc" -ne 0 ] || [ -z "$inj" ]; then
+    bad="$bad inject exited $inj_rc without a delivery report: $(one_line "$inj");"
   fi
 
-  # name: ALSO chat.Live-gated (chat_command.go runChatNameWith) — the
-  # coordinator's "so the lane's by-name verbs work" premise does not hold for
-  # OpenCode; asserting the refusal IS the correct, real assertion.
+  # name is gated on chat.Live and now changes the live row.
   name_out="$(pfm chat name "$OC_ID" "$WANT_NAME" 2>&1)"
   name_rc=$?
-  if [ "$name_rc" -ne 3 ] || ! printf '%s' "$name_out" | grep -qi 'is not running'; then
-    bad="$bad name exited $name_rc without naming 'is not running' — pfm was expected to REFUSE this rename (fact 3): $(one_line "$name_out");"
+  if [ "$name_rc" -ne 0 ] || ! grep -qF "named $OC_ID -> $WANT_NAME" <<<"$name_out"; then
+    bad="$bad name exited $name_rc without renaming the live row: $(one_line "$name_out");"
   fi
 
-  # kill/unkill: chat.Resolve scans compose.AllView (chat/target.go) and the
-  # id-based tombstone path never requires Live (chat_command.go
-  # runChatKill/runChatUnkill) — these are real, working verbs here. The
+  # kill/unkill work by id. The
   # killed column is read from the ALL view (`-a`): the default view omits
   # killed rows by design (same reason F.sh's all_field exists).
   all_killed_field() { pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v n="$1" 'NR > 1 && $2 == n { print $10; exit }'; }
@@ -348,7 +289,7 @@ if requires E3.01-open-seat; then
   if [ -n "$bad" ]; then
     fail "$bad"
   else
-    pass "status(dead)/last+read(no transcript)/capture(not running)/inject(no chat named)/name(not running)/kill+unkill(tombstone by id) all asserted for real against the never-live OpenCode chat $OC_ID"
+    pass "status(idle)/last+read(OpenCode content unsupported)/capture(live pane)/inject(delivery report)/name(live row)/kill+unkill(killed column) all asserted for live-opencode $OC_ID"
   fi
 fi
 

@@ -8,8 +8,8 @@ import (
 func TestHookTemplates(t *testing.T) {
 	home := t.TempDir()
 	hooks := HookTemplates(home)
-	if len(hooks) != 18 {
-		t.Fatalf("registrations=%d, want 18", len(hooks))
+	if len(hooks) != 17 {
+		t.Fatalf("registrations=%d, want 17", len(hooks))
 	}
 	callmeter := 0
 	for _, hook := range hooks {

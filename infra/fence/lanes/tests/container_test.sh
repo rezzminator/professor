@@ -52,4 +52,16 @@ PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lan
 if grep -q -- '^run -d .*--label pfm.fence=1 .*pfm-lane-root:cafe01 sleep infinity$' "$STUB_DOCKER_LOG"; then ok "lane_run labels the container pfm.fence=1"
 else bad "lane_run labels the container pfm.fence=1" "$(cat "$STUB_DOCKER_LOG")"; fi
 
+# 4 — run containers can disable networking; root builds keep docker's default.
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01 none
+if grep -q -- '--network none' "$STUB_DOCKER_LOG" && grep -q -- '-e GOPROXY=off' "$STUB_DOCKER_LOG"; then ok "lane_run none disables networking and the Go proxy at container start"
+else bad "run network and Go proxy" "$(cat "$STUB_DOCKER_LOG")"; fi
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-build pfm-lane-base:cafe01
+if ! grep -qE -- '--network|-e GOPROXY=off' "$STUB_DOCKER_LOG"; then ok "root build uses docker's default network and Go proxy"
+else bad "build network and Go proxy" "$(cat "$STUB_DOCKER_LOG")"; fi
+if grep -q -- '-e MOCK_ENGINE_SCENARIO=/root/.local/share/pfm-lanes/default.json' "$STUB_DOCKER_LOG"; then ok "every container receives the default mock scenario"
+else bad "scenario environment" "$(cat "$STUB_DOCKER_LOG")"; fi
+
 shtest_end

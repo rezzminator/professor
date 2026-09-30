@@ -2,6 +2,7 @@ package usagehook
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,45 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+type failingUsageTransport struct{}
+
+func (failingUsageTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("fixture network unavailable")
+}
+
+func TestFetchOfflineRecordsPresenceWarning(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, ".claude")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"),
+		[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, recorder := obs.Test(t)
+	_, _, err := Fetch(context.Background(), Options{
+		ConfigDir: configDir, Endpoint: "https://fixture.invalid/usage",
+		CacheDir: filepath.Join(root, "cache"), Env: &paths.MapEnv{Values: map[string]string{paths.EnvHome: root}},
+		Client: &http.Client{Transport: failingUsageTransport{}},
+	}, 1)
+	if err == nil || !strings.Contains(err.Error(), "fixture network unavailable") {
+		t.Fatalf("Fetch error = %v", err)
+	}
+	var count int
+	for _, record := range recorder.Records() {
+		if record.Message == "http.out.request" {
+			count++
+			if record.Level != "WARN" {
+				t.Fatalf("offline request level = %s, want WARN", record.Level)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("http.out.request count = %d, want 1: %s", count, recorder.Raw())
+	}
+}
 
 // TestFetchWritesAnHTTPOutRecord proves options.Client is wrapped with
 // obs.WrapClient (item 9), both when normalize constructs the default client

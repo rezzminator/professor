@@ -15,7 +15,7 @@ $ARGUMENTS
 Operator verbs:
 
 - ls: list or pick fleet chats (`--killed` for the graveyard)
-- chat: operate on one chat — new, open, status, last, read, stream, inject, self-compact, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve
+- chat: operate on one chat — new, open, status, last, read, stream, inject, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
 - index: refresh the transcript index
@@ -55,7 +55,7 @@ The blueprint never rewrites a project file after `pfm init`; every upstream cha
 
 ## Chat: MCP first, shell for the rest
 
-Inside a chat, the `chat_*` MCP tools are the preferred surface for inject, read, last, find, ls, status, whoami, new, save, and self-compact (`chat_inject`, `chat_read`, `chat_last`, `chat_find`, `chat_ls`, `chat_status`, `chat_whoami`, `chat_new`, `chat_save`, `chat_self_compact`). `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat inject` refuses `/compact` — compaction is `self-compact`. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
+Inside a chat, the `chat_*` MCP tools are the preferred surface for inject, read, last, find, ls, status, whoami, new, and save (`chat_inject`, `chat_read`, `chat_last`, `chat_find`, `chat_ls`, `chat_status`, `chat_whoami`, `chat_new`, `chat_save`). `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat inject` refuses `/compact`: pfm never types a compaction. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
 
 ## Harvest: MCP first, CLI for batches
 

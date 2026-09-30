@@ -20,10 +20,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// writeFakeHarnessClaude stages a shell `claude` stand-in used ONLY by the
-// three regression tests below: real REAL-SESSION coverage stays in
-// harness_prompt_native_test.go (PFM_TEST_CLAUDE_NATIVE), this fixture never
-// touches a network endpoint that is not pfm's own loopback sink.
+// writeFakeHarnessClaude stages a shell `claude` stand-in used only by the
+// capture regression tests in this file. It never touches a network endpoint
+// other than pfm's own loopback sink.
 func writeFakeHarnessClaude(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()

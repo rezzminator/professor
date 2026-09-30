@@ -96,20 +96,6 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	}
 }
 
-func TestClaudeHookTemplatesIncludesCompactNudge(t *testing.T) {
-	t.Parallel()
-	home := filepath.Join("neutral", "home")
-	templates := claudeHookTemplates(home)
-	if got := commandByName(templates, "compact-nudge"); got != home+"/.local/bin/pfm internal compact-nudge" {
-		t.Fatalf("compact-nudge command=%q", got)
-	}
-	for _, template := range templates {
-		if template.Name == "compact-nudge" && (template.Event != "UserPromptSubmit" || template.Matcher != "") {
-			t.Fatalf("compact-nudge template=%#v, want UserPromptSubmit with an empty matcher", template)
-		}
-	}
-}
-
 func TestClaudeHookTemplatesIncludesGitGuard(t *testing.T) {
 	t.Parallel()
 	home := filepath.Join("neutral", "home")

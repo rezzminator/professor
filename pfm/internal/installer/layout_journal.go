@@ -410,6 +410,49 @@ func layoutRecordSafe(env LayoutEnv, dir string, record layoutJournalRecord) boo
 		(record.Backup == "" || strings.HasPrefix(record.Backup, filepath.Join(dir, "backup")+string(os.PathSeparator)))
 }
 
+// layoutCreatedSessionStores names each session store (~/.claude/{entry}) this
+// install created: the journal's first record for that path is a session-store
+// row with no backup, because nothing stood there. A later row of the same
+// install (a second account's merge) journals the store again with a backup
+// of what the first row made; the store is still the install's own.
+func layoutCreatedSessionStores(env LayoutEnv, records []layoutJournalRecord) map[string]bool {
+	parent := filepath.Clean(filepath.Join(env.Home, ".claude"))
+	created := map[string]bool{}
+	seen := map[string]bool{}
+	for index := range records {
+		record := &records[index]
+		destination := filepath.Clean(record.Destination)
+		if seen[destination] {
+			continue
+		}
+		seen[destination] = true
+		if record.Row == layoutRowSessionStore && record.Backup == "" && filepath.Dir(destination) == parent {
+			created[destination] = true
+		}
+	}
+	return created
+}
+
+var layoutStoreReadDir = os.ReadDir
+
+func layoutStoreHoldsData(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return true, nil
+	}
+	entries, err := layoutStoreReadDir(path)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
 // layoutRollbackLiveChats refuses a journal with a session-store record while
 // a chat is live on its account: {account}/{entry} checks that account, the
 // shared store {home}/.claude/{entry} checks every account.
@@ -452,12 +495,13 @@ func layoutRollbackDrift(env LayoutEnv, dir string, records []layoutJournalRecor
 			last[filepath.Clean(record.Destination)] = index
 		}
 	}
+	createdStores := layoutCreatedSessionStores(env, records)
 	drifted := []string{}
 	for index, record := range records {
 		destination := filepath.Clean(record.Destination)
 		if last[destination] != index || record.Result != layoutRecordApplied || record.Row == layoutRowCacheDB ||
 			strings.HasSuffix(destination, layoutDBWAL) || strings.HasSuffix(destination, layoutDBSHM) ||
-			!layoutRecordSafe(env, dir, record) {
+			!layoutRecordSafe(env, dir, record) || createdStores[destination] {
 			continue
 		}
 		if record.After == "" {

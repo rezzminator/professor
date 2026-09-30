@@ -111,21 +111,21 @@ func TestEvidenceStaysContentAgnosticForTranscriptAndHarvesterAdapters(t *testin
 
 func TestProcessEnginesUseRosterHomesConfigAndPrompt(t *testing.T) {
 	directory := t.TempDir()
+	capture := filepath.Join(directory, "capture")
 	writeAskStub(t, directory, "codex", `
-printf 'home=%s\n' "$CODEX_HOME"
-printf 'args=%s\n' "$*"
+printf 'home=%s\nargs=%s\n' "$CODEX_HOME" "$*" > "$ASK_CAPTURE"
 IFS= read -r first
-printf 'prompt=%s\n' "$first"
-printf 'usage: input_tokens=11 cached_input_tokens=3 output_tokens=5\n'
-printf 'codex answer\n'`)
+printf 'prompt=%s\n' "$first" >> "$ASK_CAPTURE"
+printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"codex answer"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":11,"cached_input_tokens":3,"output_tokens":5}}'`)
 	writeAskStub(t, directory, "claude", `
-printf 'home=%s\n' "$CLAUDE_CONFIG_DIR"
-printf 'args=%s\n' "$*"
+printf 'home=%s\nargs=%s\n' "$CLAUDE_CONFIG_DIR" "$*" > "$ASK_CAPTURE"
 IFS= read -r first
-printf 'prompt=%s\n' "$first"
-printf 'usage: input_tokens=7 cached_input_tokens=2 output_tokens=4\n'
-printf 'claude answer\n'`)
+printf 'prompt=%s\n' "$first" >> "$ASK_CAPTURE"
+printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input_tokens":2,"cache_creation_input_tokens":6,"output_tokens":4}}'`)
 	t.Setenv("PATH", directory)
+	t.Setenv("ASK_CAPTURE", capture)
 
 	machine := pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 2, ConfigDir: "/fixture/claude-2"}},
@@ -149,9 +149,10 @@ printf 'claude answer\n'`)
 				"exec",
 				"--model cx-model",
 				`model_reasoning_effort="high"`,
+				"--json",
 				"--ephemeral",
 				"--skip-git-repo-check",
-				"-",
+				"--color never",
 			},
 			wantAnswer: "codex answer",
 			wantUsage:  TokenUsage{Input: 11, CachedInput: 3, Output: 5},
@@ -160,9 +161,9 @@ printf 'claude answer\n'`)
 			name:       "claude",
 			input:      AskInput{Engine: pfmengine.Claude, Model: "cc-model", Effort: "medium"},
 			wantHome:   "/fixture/claude-2",
-			wantArgs:   []string{"-p", "--model cc-model", "--effort medium", "--output-format text"},
+			wantArgs:   []string{"-p", "--model cc-model", "--effort medium", "--output-format json"},
 			wantAnswer: "claude answer",
-			wantUsage:  TokenUsage{Input: 7, CachedInput: 2, Output: 4},
+			wantUsage:  TokenUsage{Input: 7, CachedInput: 2, CacheCreation: 6, Output: 4},
 		},
 	}
 	for _, test := range tests {
@@ -183,12 +184,16 @@ printf 'claude answer\n'`)
 			if err != nil {
 				t.Fatalf("Run(): %v", err)
 			}
+			raw, err := os.ReadFile(capture)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, want := range append([]string{"home=" + test.wantHome, "prompt=Read the prepared content files"}, test.wantArgs...) {
-				if !strings.Contains(result.Answer, want) {
-					t.Errorf("answer %q does not contain %q", result.Answer, want)
+				if !strings.Contains(string(raw), want) {
+					t.Errorf("capture %q does not contain %q", raw, want)
 				}
 			}
-			if strings.Contains(result.Answer, "usage:") || !strings.Contains(result.Answer, test.wantAnswer) {
+			if result.Answer != test.wantAnswer {
 				t.Errorf("answer = %q", result.Answer)
 			}
 			if result.Usage == nil || *result.Usage != test.wantUsage {
@@ -200,7 +205,12 @@ printf 'claude answer\n'`)
 
 func TestProcessEngineUsageIsNilWhenAbsent(t *testing.T) {
 	directory := t.TempDir()
-	writeAskStub(t, directory, "codex", "printf 'answer only\\n'")
+	writeAskStub(
+		t,
+		directory,
+		"codex",
+		`printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"item.completed","item":{"type":"agent_message","text":"answer only"}}' '{"type":"turn.completed"}'`,
+	)
 	t.Setenv("PATH", directory)
 	engine, err := ResolveEngine(pfmengine.Codex, askMachine("codex"))
 	if err != nil {
@@ -212,6 +222,40 @@ func TestProcessEngineUsageIsNilWhenAbsent(t *testing.T) {
 	}
 	if result.Usage != nil {
 		t.Fatalf("usage = %#v, want nil", result.Usage)
+	}
+}
+
+func TestProcessEngineTakesAnswerAndErrorsFromJSON(t *testing.T) {
+	for _, test := range []struct {
+		name, engine, output, wantAnswer, wantError string
+	}{
+		{"quoted count", "claude", `{"result":"input_tokens: 5","usage":{"input_tokens":12}}`, "input_tokens: 5", ""},
+		{"Claude error", "claude", `{"result":"failed","is_error":true}`, "", "claude ask failed"},
+		{"Codex failure", "codex", `{"type":"turn.failed","error":{"message":"failed"}}`, "", "codex ask failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			writeAskStub(t, directory, test.engine, "printf '%s\\n' '"+test.output+"'")
+			t.Setenv("PATH", directory)
+			id, err := pfmengine.Parse(test.engine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine, err := ResolveEngine(id, askMachine(test.engine))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := engine.Run(context.Background(), validAskInput(test.engine))
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("error=%v, want %q", err, test.wantError)
+				}
+				return
+			}
+			if err != nil || result.Answer != test.wantAnswer || result.Usage == nil || result.Usage.Input != 12 {
+				t.Fatalf("result=%+v error=%v", result, err)
+			}
+		})
 	}
 }
 

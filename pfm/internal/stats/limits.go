@@ -796,7 +796,7 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	if endpoint == "" {
 		endpoint = defaultCodexUsageEndpoint
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)
 	}

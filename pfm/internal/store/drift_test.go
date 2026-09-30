@@ -77,7 +77,7 @@ ON CONFLICT(uuid) DO UPDATE SET
 	}
 
 	// And an unkill clears the authoritative row.
-	if err := database.Unkill(ctx, "go-hid"); err != nil {
+	if _, err := database.Unkill(ctx, "go-hid"); err != nil {
 		t.Fatal(err)
 	}
 	if listed = runSQLite3(
@@ -168,7 +168,7 @@ VALUES ('cache-kill', 'cc', 4242, 9)`); err != nil {
 	}
 
 	// An unkill followed by a reopen must not re-adopt the backup row.
-	if err := first.Unkill(ctx, "cache-kill"); err != nil {
+	if _, err := first.Unkill(ctx, "cache-kill"); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Close(); err != nil {

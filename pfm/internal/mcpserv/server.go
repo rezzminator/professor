@@ -37,22 +37,16 @@ const (
 	statusDead = "dead"
 )
 
-// selfCompactDescription is a named const so the registered text and the test
-// that pins it read the same string. The STOP clause is not decoration: the
-// --then waiter recognises the compaction turn by watching this pane yield and
-// then go busy again, and a caller that keeps working erases that boundary.
-const selfCompactDescription = "Compacts THIS chat in place after its turn settles and KEEPS the session (crons, sub-agents, pane) — the only answer to \"compact yourself\" / \"self-compact at this milestone\", this tool and nothing else, never a hand-typed /compact. Call chat_self_compact{focus:\"one line\", then:\"one steer\"} — exactly ONE post-compact steer, a string never a list. Only focus and then cross the boundary — write durable state to disk FIRST. END THE TURN IMMEDIATELY after it returns, run no further tool; more work lands the steer beside the compaction. Main chat only — a sub-agent has no pane."
-
 var chatToolNames = []string{
 	"chat_capture", "chat_find", "chat_inject",
 	"chat_keys", "chat_kill", "chat_last", "chat_ls", "chat_name",
 	"chat_new", "chat_open", "chat_read", "chat_resolve",
-	"chat_save", "chat_self_compact", "chat_status", "chat_unkill",
+	"chat_save", "chat_status", "chat_unkill",
 	"chat_whoami", "servicedesk",
 }
 
 // chatInstructions is the chat part of every professor server's routing text.
-const chatInstructions = "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; compact myself at a milestone → chat_self_compact; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands."
+const chatInstructions = "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents. end, modal, watch, stream, recover, and history stay shell-only pfm chat commands."
 
 // ToolNames returns the canonical advertised chat MCP roster. The jailed
 // protocol test compares it to tools/list, so a registered tool cannot vanish
@@ -165,11 +159,6 @@ func (service *Service) registerTools(server *mcp.Server) {
 		Description: "Types and submits a message into another live chat — every \"send / tell / message / reply to / inject into chat X\" ask. Call chat_inject{target:\"my-chat\", message:\"…\"}; follow-up steers go in then. Cross-chat only — one independent chat addressing another; a sub-agent reports to its parent by returning its result and never calls this. Returns status delivered with proof; queued = target mid-turn, submits after; refused or undelivered = not sent, message says why; not_found = no such chat; a tool error = delivery itself broke.",
 		Annotations: mutating,
 	}, obs.Tool("chat_inject", service.chatInject))
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "chat_self_compact",
-		Description: selfCompactDescription,
-		Annotations: mutating,
-	}, obs.Tool("chat_self_compact", service.chatSelfCompact))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_keys",
 		Description: "Presses tmux keys in a live chat — \"press Escape / Enter in chat X\", accept a modal, interrupt a turn. Call chat_keys{target:\"my-chat\", keys:[\"Escape\"]}; raw text is keys:[\"y\"] with literal:true. For a whole message use chat_inject; a sub-agent never drives its parent's pane. Returns status ok with count sent; not_found = no such chat; dead = the pane vanished mid-sequence, count says how many landed; a tool error = an unknown key name, the valid ones listed.",
@@ -293,20 +282,6 @@ const noAmbientCallerRemedy = "MCP request has no _meta.threadId, and this " +
 	"equivalent `pfm chat ...` command from the chat's own shell instead — " +
 	"that process IS the chat. A Codex chat should resolve automatically; " +
 	"if it does not, its MCP client is not attaching _meta.threadId to this call."
-
-// selfCompactNoAmbientRemedy replaces noAmbientCallerRemedy for
-// chat_self_compact alone: the generic message's remedy — "run the
-// equivalent `pfm chat ...` command" — never says which subcommand.
-// chat_self_compact's CLI twin is `pfm chat self-compact`, which shares this
-// tool's engine method (Engine.ScheduleSelfCompact) and its wait-for-the-
-// caller's-own-turn-to-end contract — never a live /compact keystroke.
-const selfCompactNoAmbientRemedy = "MCP request has no _meta.threadId, and " +
-	"this server is pfm's shared HTTP daemon (one process serving every chat " +
-	"on the machine), so it cannot derive who is calling: Claude Code does " +
-	"not attach per-call caller identity over this transport. From the " +
-	"chat's own shell, run `pfm chat self-compact --then '<steer>' " +
-	"'<focus>'`. A Codex chat should resolve automatically; if it does not, " +
-	"its MCP client is not attaching _meta.threadId to this call."
 
 func (service *Service) selfCallerRefusal(caller callerIdentity) (bool, string) {
 	if caller.valid {
@@ -530,47 +505,6 @@ func (service *Service) chatInject(
 		ForceNow: input.ForceNow,
 		Then:     input.Then,
 	})
-	return nil, outputFromInject(result), err
-}
-
-func (service *Service) chatSelfCompact(
-	ctx context.Context,
-	request *mcp.CallToolRequest,
-	input SelfCompactInput,
-) (*mcp.CallToolResult, InjectOutput, error) {
-	focus := strings.TrimSpace(input.Focus)
-	if focus == "" || strings.ContainsAny(focus, "\r\n\x00") {
-		return nil, InjectOutput{}, fmt.Errorf("focus must be one non-empty line")
-	}
-	injector, caller, err := service.injectorForRequest(ctx, request)
-	if err != nil {
-		return nil, InjectOutput{}, err
-	}
-	if refused, detail := service.selfCallerRefusal(caller); refused {
-		if detail == noAmbientCallerRemedy {
-			detail = selfCompactNoAmbientRemedy
-		}
-		return nil, InjectOutput{
-			Status: statusNotFound, Code: inject.CodeUnknown, Message: detail,
-		}, nil
-	}
-	// One steer, by the operator's rule. The engine's own guards still run on
-	// it — a steer is required, and it must not start with /compact — and a
-	// blank string reaches them as no steer at all rather than as an empty one.
-	var then []string
-	if steer := strings.TrimSpace(input.Then); steer != "" {
-		then = []string{steer}
-	}
-	// Composition ("/compact " + focus, the Codex bare-command exception) is
-	// the engine's own job now (Task D: Engine.ScheduleSelfCompact) — the one
-	// implementation `pfm chat self-compact` shares. focus is re-validated
-	// there too; the check above stays because this handler must return a
-	// tool-call error for a bad focus, not an InjectOutput refusal.
-	result, err := injector.ScheduleSelfCompact(ctx, focus, then)
-	// The stop notice is appended by the engine itself
-	// (inject.SelfCompactStopNotice), which is the single writer for every
-	// caller — MCP tool and `pfm chat self-compact` alike. Restating it here
-	// would double it on the MCP path only.
 	return nil, outputFromInject(result), err
 }
 

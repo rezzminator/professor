@@ -24,7 +24,7 @@ func TestChatStatusSummaryIsOptInCachedAndStructured(t *testing.T) {
 	}
 	counter := filepath.Join(jail.root, "ask-calls")
 	if err := os.WriteFile(filepath.Join(jail.binDir, "claude"), []byte(
-		"#!/bin/sh\nprintf x >> \"$ASK_COUNTER\"\nprintf 'cache now keys the last exchange\\n'\n",
+		"#!/bin/sh\nprintf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"cache now keys the last exchange\"}'\n",
 	), 0o700); err != nil {
 		t.Fatal(err)
 	}

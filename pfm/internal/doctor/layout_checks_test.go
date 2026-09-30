@@ -164,6 +164,15 @@ func TestLayoutDoctorSessionLinesAndFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "missing — run pfm install"},
+		{"dangling", func(t *testing.T, path string) {
+			store, err := os.Readlink(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(store); err != nil {
+				t.Fatal(err)
+			}
+		}, "links to {store}, which is missing — run pfm install"},
 		{"real-dir", func(t *testing.T, path string) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
@@ -188,7 +197,12 @@ func TestLayoutDoctorSessionLinesAndFailures(t *testing.T) {
 			path := filepath.Join(runtime.Paths.Home, ".cc", "2", "projects")
 			testCase.change(t, path)
 			output, _, failures := layoutDoctorOutput(t, runtime)
-			if failures < 1 || !strings.Contains(output, "session-store: "+path+" "+testCase.want) {
+			want := strings.ReplaceAll(
+				testCase.want,
+				"{store}",
+				filepath.Join(runtime.Paths.Home, ".claude", "projects"),
+			)
+			if failures < 1 || !strings.Contains(output, "session-store: "+path+" "+want) {
 				t.Fatalf("failures=%d output=%q", failures, output)
 			}
 		})

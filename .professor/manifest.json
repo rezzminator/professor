@@ -98,10 +98,10 @@
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
     ".claude/commands/pcm.md": "097af533e61159d83e5ac50514c02748ad5d457b75ec1fc894d394acec004ea0",
-    ".claude/commands/pfm-testing-manual.md": "38f7f1bf1d7a905b0632024c6b0893e120c070efd305434975ace682c0d9b004",
+    ".claude/commands/pfm-testing-manual.md": "acea9c90af01288d4eb6b31cd671c96bce9da28baddd020432a563bde2a4584a",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
     ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
-    ".claude/scripts/dev.sh": "a093d4df32b4172ba91f3ae9481eae610638bd8abbfece3a4f0e41d45219308f",
+    ".claude/scripts/dev.sh": "9665aed2c824ea80e5d357375f565826c8dd2ff37fb6c72c4a79d85100e14100",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
     ".claude/scripts/pfm-guard.sh": "b4e1a5d6f3f827410b40d484aaa687ce0c34b882938ef86080d8828f560d48dc",
@@ -112,6 +112,6 @@
     "docs/commands/pcm/references/audit-scopes.md": "0eb093cd384472d0cab03d30fe4b562b8424a6d0d6310fe1d51bad7efb04398b",
     "docs/commands/pcm/references/refresh.md": "39ad4e4e8aa023d9516ed3ec2d1ac5cdad78ebf1c058bcb3cb68cf8a01cd47ff",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
-    "pfm/CLAUDE.md": "f3706b4fa70ab4bd2d924c29e114222c59d0568fe4a7db34556dee238b82125e"
+    "pfm/CLAUDE.md": "b1a97e6da3cd0d91cc72c826cb13e777c886fd4f0bd475f54f725866f1d1f077"
   }
 }

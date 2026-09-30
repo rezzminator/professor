@@ -2,7 +2,7 @@
 # E2.sh — lane E2, Codex: one chat on the Codex home, walked depth-first from
 # the spawn ceremony through the `/reload` matrix as far as Codex supports it,
 # recovery from its rollout, the appendix hook, MCP over HTTP, the outside-in
-# verbs, the tmux-less kill alias, self-compact, the launcher entry and doctor's
+# verbs, the tmux-less kill alias, the launcher entry and doctor's
 # codex_pane rows. Runs INSIDE a lane container (run.sh), never on a host.
 #
 #   run.sh --lanes E2            solo, from a fresh root
@@ -10,10 +10,9 @@
 #
 # Every beat asserts from pfm's OWN report (`pfm ls --tsv`, a verb's exit code,
 # a file pfm wrote, the chat's last assistant message) or from the pane, never
-# from a model's prose. Codex has no UserPromptSubmit hook, so `/reload` — `$reload`
-# in the Codex composer — travels THROUGH the model, which runs `pfm chat reload`
-# from its tool shell: the beat asserts that path from pfm's side (the worker's
-# log, the respawned pane, the row), the model is only the stimulus. Beat ids
+# from a model's prose. Codex has no UserPromptSubmit hook, so the lane invokes
+# `pfm chat reload` with the Codex thread identity and checks the worker's log,
+# respawned pane, row and scripted steer in the rollout. Beat ids
 # are the contract in beats.md and map.tsv — check-map.sh
 # fails when this file and those disagree.
 #
@@ -21,7 +20,7 @@
 # The chat is left ALIVE at lane end on purpose: M.15 and O2.06 assert against it.
 #
 # BROKEN STATE: the prelude aborts the lane by name when the Codex home is not
-# configured, carries no credential, has no `codex` binary, or the chat cannot be
+# configured, has no `codex` binary, or the chat cannot be
 # opened; every later beat whose precondition failed reports `blocked-by`, and
 # each ✗ carries the raw pane bytes in the lane log beside its assertion.
 set -uo pipefail
@@ -45,7 +44,6 @@ CODEX_HOME="$(jq -r '.codex.homes[0].home // empty' "$CONFIG")"
 case "$CODEX_HOME" in "~"*) CODEX_HOME="$HOME${CODEX_HOME#\~}" ;; esac
 CODEX_HOMES="$(jq -r '.codex.homes | length' "$CONFIG")"
 [ -d "$CODEX_HOME" ] || lane_abort "the configured Codex home $CODEX_HOME does not exist"
-[ -s "$CODEX_HOME/auth.json" ] || lane_abort "BLOCKED — no fence login was staged at $CODEX_HOME/auth.json (lanes/creds.sh stages the dedicated fence home)"
 command -v codex >/dev/null 2>&1 || lane_abort "no codex binary on PATH — the root image was built without the Codex CLI"
 
 need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
@@ -53,7 +51,7 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   lane_abort "no working directory for the chat to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
   "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
-  "bash /worktree/infra/demo/daemon.sh" ||
+  'lane_daemon_up' ||
   lane_abort "the professor MCP daemon never answered on :$PORT — a Codex chat's professor stdio server would have no daemon to forward to"
 
 # ─── E2.01 — the spawn ceremony on the Codex home ───────────────────────────
@@ -61,9 +59,9 @@ need "the pfm MCP daemon on :$PORT" \
 # open_main — the lane's chat, opened the one way: E2.01 spawns it and the
 # library's single re-open (lane_reopen) spends the same command after the
 # chat dies under a later beat. No --account: the Codex primary is the one home
-# this run stages (lanes/creds.sh).
+# this run stages.
 open_main() {
-  pfm chat new --name "$CHAT" --engine cx --cwd "$CWD" --await --timeout 300 \
+  pfm chat new --name "$CHAT" --engine cx --agent-role tracer --cwd "$CWD" --await --timeout 300 \
     "You are $CHAT, the Codex chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." 2>&1
 }
 lane_reopen 'open_main'
@@ -75,7 +73,7 @@ pane_pid() {
   local sock
   sock="$(live_field "$CHAT" 11)"
   [ -n "$sock" ] || return 1
-  tmux -S "$sock" list-panes -F '#{pane_pid}' 2>/dev/null | head -1
+  tmux -S "$(_lane_tmux_dir)/$sock" list-panes -F '#{pane_pid}' 2>/dev/null | head -1
 }
 
 # rollout_of <thread-id> — the rollout file the thread writes under the Codex
@@ -114,8 +112,8 @@ else
     window=""
     # The label converges on the window through name-sync's Codex half, not at
     # spawn — a bounded wait, and the failure names the window it did read.
-    wait_for 60 "tmux -S '$sock' list-windows -F '#{window_name}' 2>/dev/null | grep -qF '$CHAT'"
-    window="$(tmux -S "$sock" list-windows -F '#{window_name}' 2>&1 | head -1)"
+    wait_for 60 "tmux -S '$(_lane_tmux_dir)/$sock' list-windows -F '#{window_name}' 2>/dev/null | grep -qF '$CHAT'"
+    window="$(tmux -S "$(_lane_tmux_dir)/$sock" list-windows -F '#{window_name}' 2>&1 | head -1)"
     case "$window" in
       *"$CHAT"*) pass "live row, kind live-codex, thread $(live_field "$CHAT" 2), account $(live_field "$CHAT" 9), socket $sock; tmux window '$window' carries the label" ;;
       *) fail "live-codex row present but the tmux window name '$(one_line "$window")' never carried the label $CHAT within 60s" ;;
@@ -161,31 +159,44 @@ fi
 
 # ─── E2.03 — the /reload matrix, as far as Codex supports it ────────────────
 
-# reload_via_model <needle> <flags…> — the Codex path: `$reload …` typed into
-# the composer (pfm's compiled card, $CODEX_HOME/prompts/reload.md) reaches the
-# MODEL, which runs `pfm chat reload …` from its tool shell. Asserted from pfm's
-# side: the pane pid changes (the pane was respawned) and the --then steer's own
-# word arrives. Prints nothing; returns 1 with $REPLY_WHY set on any failure.
+# reload_via_lane <needle> <flags…> — schedule from the Codex identity shell.
+# The pane must respawn and the --then steer must enter the rollout as a user
+# record. Prints nothing; returns 1 with $REPLY_WHY set on any failure.
 REPLY_WHY=""
-reload_via_model() {
-  local needle="$1" before out
+reload_via_lane() {
+  local needle="$1" before out rc id deadline log_start fresh
   shift
   REPLY_WHY=""
+  id="$(addr)"
   before="$(pane_pid)"
-  out="$(pfm chat inject --allow-unsigned "$(addr)" \
-    "\$reload $* --then \"reply with exactly one word: $needle\" — the user typed this; run pfm chat reload now, exactly as the reload card says, then end your turn." 2>&1)" || {
-    REPLY_WHY="pfm chat inject refused the \$reload prompt: $(one_line "$out")"
-    return 1
-  }
-  if ! wait_for 300 "[ -n \"\$(pane_pid)\" ] && [ \"\$(pane_pid)\" != '$before' ]"; then
-    REPLY_WHY="the pane was never respawned in 300s (pane pid still $before): the model did not run pfm chat reload, or the worker refused — ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$(addr)" 2>&1)")"
+  log_start=0
+  [ ! -f "$worker_log" ] || log_start="$(wc -c <"$worker_log" | tr -d ' ')"
+  [ -n "$log_start" ] || log_start=0
+  out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id" pfm chat reload "$@" --then "$needle" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ] || ! grep -qF 'reload scheduled in place' <<<"$out"; then
+    REPLY_WHY="pfm chat reload exited $rc without scheduling in place: $(one_line "$out")"
     return 1
   fi
-  wait_last "$(addr)" "$needle" 300
+  deadline=$(( $(_lane_now) + 300 ))
+  while [ "$(_lane_now)" -lt "$deadline" ]; do
+    [ -n "$(pane_pid)" ] && [ "$(pane_pid)" != "$before" ] && break
+    fresh="$(tail -c "+$((log_start + 1))" "$worker_log" 2>/dev/null)"
+    if grep -qE 'will not stash|reload ABORTED|/exit was not typed' <<<"$fresh"; then
+      REPLY_WHY="the reload worker refused the composer: $(one_line "$(tail -n 3 "$worker_log")")"
+      return 1
+    fi
+    sleep 2
+  done
+  if [ "$(pane_pid)" = "$before" ]; then
+    REPLY_WHY="the pane was never respawned in 300s (pane pid still $before); worker log: $(one_line "$(tail -n 3 "$worker_log" 2>/dev/null)")"
+    return 1
+  fi
+  wait_prompt "$(addr)" "$needle" 300
   case $? in
     0) return 0 ;;
     2) REPLY_WHY="$LANE_WAIT_WHY (waiting for $needle)"; return 1 ;;
-    *) REPLY_WHY="the pane was respawned but no $needle from $CHAT in 300s; its last: $(one_line "$(pfm chat last "$(addr)" 2>&1)")"; return 1 ;;
+    *) REPLY_WHY="the pane was respawned but no user steer $needle in 300s; waiter log: $(one_line "$(tail -1 "$SID_DIR/reload-$(live_field "$CHAT" 11).log" 2>/dev/null)")"; return 1 ;;
   esac
 }
 
@@ -197,10 +208,10 @@ if requires E2.01-open-seat; then
   sock="$(live_field "$CHAT" 11)"
   id_before="$(live_field "$CHAT" 2)"
   worker_log="$SID_DIR/reload-${sock##*/}.log"
-  log_before="$(wc -c <"$worker_log" 2>/dev/null | tr -d ' ')"
+  log_before=0
+  [ ! -f "$worker_log" ] || log_before="$(wc -c <"$worker_log" | tr -d ' ')"
   [ -n "$log_before" ] || log_before=0
-  # The path this beat exists for: no UserPromptSubmit hook on the Codex home
-  # (pfm's own hooks.json carries none), and the reload card the model reads.
+  # The Codex home has no UserPromptSubmit hook; pfm's reload card still ships.
   if [ -f "$CODEX_HOME/hooks.json" ] && grep -q 'reload-intercept' "$CODEX_HOME/hooks.json"; then
     bad="$bad $CODEX_HOME/hooks.json carries a reload-intercept hook — Codex has no UserPromptSubmit, this beat's premise is wrong;"
   fi
@@ -217,7 +228,7 @@ if requires E2.01-open-seat; then
       note="$note --model not exercised (the rollout named no model for the chat);"
       exercised="$exercised --effort medium,"
     fi
-    if ! reload_via_model RELOADED-CX-1 "$@"; then
+    if ! reload_via_lane RELOADED-CX-1 "$@"; then
       bad="$bad [$*]: $REPLY_WHY;"
     elif [ "$(live_field "$CHAT" 2)" != "$id_before" ]; then
       bad="$bad [$*] resumed a DIFFERENT thread ($(live_field "$CHAT" 2), was $id_before) — a flag reload must resume the same conversation;"
@@ -230,12 +241,14 @@ if requires E2.01-open-seat; then
     # hidden) and a name-addressed wait would sit on a dead conversation.
     anchor_socket "$sock"
     before_pid="$(pane_pid)"
-    out="$(pfm chat inject --allow-unsigned "$id_before" \
-      "\$reload --new --hide --then \"reply with exactly one word: RELOADED-CX-2\" — the user typed this; run pfm chat reload now, exactly as the reload card says, then end your turn." 2>&1)" ||
-      bad="$bad [--new --hide]: pfm chat inject refused the \$reload prompt: $(one_line "$out");"
+    out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id_before" pfm chat reload --new --hide --then RELOADED-CX-2 2>&1)"
+    rc=$?
+    if [ "$rc" -ne 0 ] || ! grep -qF 'reload scheduled in place' <<<"$out"; then
+      bad="$bad [--new --hide]: pfm chat reload exited $rc without scheduling in place: $(one_line "$out");"
+    fi
     if [ -z "$bad" ]; then
       if ! wait_for 300 "[ -n \"\$(socket_field '$sock' 2)\" ] && [ \"\$(socket_field '$sock' 2)\" != '$id_before' ]"; then
-        bad="$bad [--new --hide]: no fresh thread id on socket $sock in 300s (it still reads '$(socket_field "$sock" 2)', pane pid $before_pid → $(tmux -S "$sock" list-panes -F '#{pane_pid}' 2>/dev/null | head -1)); ${LANE_WAIT_WHY:-no wait reason recorded};"
+        bad="$bad [--new --hide]: no fresh thread id on socket $sock in 300s (it still reads '$(socket_field "$sock" 2)', pane pid $before_pid → $(tmux -S "$(_lane_tmux_dir)/$sock" list-panes -F '#{pane_pid}' 2>/dev/null | head -1)); ${LANE_WAIT_WHY:-no wait reason recorded};"
       else
         id_new="$(socket_field "$sock" 2)"
         new_name="$(socket_field "$sock" 5)"
@@ -244,8 +257,8 @@ if requires E2.01-open-seat; then
         sleep 3
         if [ "$name_rc" -ne 0 ] || [ "$(socket_field "$sock" 5)" != "$CHAT" ]; then
           bad="$bad [--new --hide]: fresh thread $id_new on $sock (auto-named '$new_name') could not be renamed back to $CHAT (pfm chat name exited $name_rc: $(one_line "$name_out")); the row reads '$(socket_field "$sock" 5)';"
-        elif ! wait_last "$id_new" RELOADED-CX-2 300; then
-          bad="$bad [--new --hide]: fresh thread $id_new but no RELOADED-CX-2: ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$id_new" 2>&1)");"
+        elif ! wait_prompt "$id_new" RELOADED-CX-2 300; then
+          bad="$bad [--new --hide]: fresh thread $id_new but no user steer RELOADED-CX-2: ${LANE_WAIT_WHY:-no wait reason recorded};"
         else
           visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $10 == "false" { c++ } END { print c + 0 }')"
           # -a: the thread left behind is expected to read killed=true, which
@@ -273,14 +286,13 @@ if requires E2.01-open-seat; then
       bad="$bad [--sock]: exit 0 but the scheduler did not report 'reload scheduled in place': $(one_line "$out");"
     elif ! wait_for 300 "[ -n \"\$(pane_pid)\" ] && [ \"\$(pane_pid)\" != '$before_pid' ]"; then
       bad="$bad [--sock]: scheduled, but the pane was never respawned in 300s (pane pid still $before_pid); ${LANE_WAIT_WHY:-no wait reason recorded};"
-    elif ! wait_last "$(addr)" RELOADED-CX-3 300; then
-      bad="$bad [--sock]: respawned but no RELOADED-CX-3: ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$(addr)" 2>&1)");"
+    elif ! wait_prompt "$(addr)" RELOADED-CX-3 300; then
+      bad="$bad [--sock]: respawned but no user steer RELOADED-CX-3: ${LANE_WAIT_WHY:-no wait reason recorded};"
     fi
     exercised="$exercised --sock,"
   fi
   # The worker's own record (cmd/pfm/chat_reload_command.go: reload-<socket>.log
-  # in the SID dir): every reload above appends to it, from the model's tool
-  # shell and from this shell alike.
+  # in the SID dir): every reload above appends to it.
   log_after="$(wc -c <"$worker_log" 2>/dev/null | tr -d ' ')"
   [ -n "$log_after" ] || log_after=0
   if [ ! -f "$worker_log" ]; then
@@ -298,7 +310,7 @@ if requires E2.01-open-seat; then
   fi
   note="$note --cache not supported on cx by design (the cache window is Claude's prompt-cache setting; the Codex launch line carries none);"
   if [ -n "$bad" ]; then fail "$bad exercised:${exercised:-none}; $note"; else
-    pass "through the model:${exercised} worker log grew $log_before → $log_after bytes;$note"
+    pass "lane-driven:${exercised} worker log grew $log_before → $log_after bytes;$note"
   fi
 fi
 
@@ -326,7 +338,7 @@ if requires E2.01-open-seat; then
     for f in brief.md compaction-memory.md transcript.md; do
       [ -s "$dir/$f" ] || bad="$bad $dir/$f absent or empty;"
     done
-    grep -qF "$CHAT" "$dir/transcript.md" 2>/dev/null || bad="$bad transcript.md does not carry the chat's own prompt (no '$CHAT' in it);"
+    grep -qF RELOADED-CX-3 "$dir/transcript.md" 2>/dev/null || bad="$bad transcript.md does not carry the current thread's reload steer (no 'RELOADED-CX-3' in it);"
     # The rollout-path form of the same verb, and the named absence.
     out_path="$(pfm chat recover "$rollout" 2>&1)"
     rc_path=$?
@@ -369,27 +381,19 @@ if requires E2.01-open-seat; then
   fi
   [ -f "$staged" ] || bad="$bad no composed Codex prompt at $staged to compare the config against;"
   marker="$(head -1 "$staged" 2>/dev/null)"
-  id="$(live_field "$CHAT" 2)"
-  rollout="$(rollout_of "$id")"
-  if [ -z "$rollout" ]; then
-    bad="$bad no rollout for thread $id under $CODEX_HOME/sessions — the first turn cannot be read;"
-  elif [ -n "$marker" ]; then
-    # First turn: the developer message carrying the prompt must come BEFORE
-    # the first assistant message in the rollout (line order).
-    prompt_at="$(grep -n '"role":"developer"' "$rollout" | grep -F "$marker" | head -1 | cut -d: -f1)"
-    assistant_at="$(grep -n '"role":"assistant"' "$rollout" | head -1 | cut -d: -f1)"
-    if [ -z "$prompt_at" ]; then
-      bad="$bad the rollout $(basename "$rollout") carries no developer message with the prompt's first line — developer_instructions never reached the session;"
-    elif [ -z "$assistant_at" ]; then
-      bad="$bad the rollout carries the fleet prompt (line $prompt_at) but no assistant message at all — the first turn never happened;"
-    elif [ "$prompt_at" -gt "$assistant_at" ]; then
-      bad="$bad the fleet prompt landed at rollout line $prompt_at, AFTER the first assistant message (line $assistant_at) — not in the first turn;"
-    fi
-    grep -qF 'Warning: truncated output' "$rollout" &&
-      bad="$bad the rollout carries a truncated hook-output block — something is still delivering context through a capped hook;"
+  sock="$(live_field "$CHAT" 11)"
+  start="$(tmux -S "$(_lane_tmux_dir)/$sock" display -p '#{pane_start_command}' 2>&1)"
+  pid="$(pane_pid)"
+  argv="$(tr '\0' '\n' <"/proc/$pid/cmdline" 2>/dev/null)"
+  if [ -z "$marker" ]; then
+    bad="$bad the composed Codex prompt has no first line;"
+  elif ! grep -qF 'developer_instructions=' <<<"$argv"; then
+    bad="$bad the live pane's process argv carries no developer_instructions argument (start command ${#start} bytes; process argv ${#argv} bytes);"
+  elif ! grep -qF -- "$marker" <<<"$argv"; then
+    bad="$bad the live pane's developer_instructions argument lacks the composed prompt's first line '$marker';"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "config.toml carries the pfm-owned developer_instructions fence, no appendix hook remains, and the prompt is at rollout line $prompt_at before the first assistant line $assistant_at"
+    pass "config.toml carries the pfm-owned developer_instructions fence, no appendix hook remains, and the live pane process argv carries the composed prompt's first line"
   fi
 fi
 
@@ -428,15 +432,15 @@ if requires E2.01-open-seat; then
   elif ! printf '%s' "$out" | grep -q '"serverInfo"'; then
     bad="$bad the initialize response over stdio carried no serverInfo: $(one_line "$out" | cut -c1-200);"
   else
-    tools="$(printf '%s' "$out" | grep '"id":2' | jq -r '.result.tools[]?.name' 2>/dev/null | sort)"
+    tools="$(printf '%s' "$out" | grep '"id":2' | jq -r '.result.tools[]?.name | select(startswith("chat_") or . == "servicedesk")' 2>/dev/null | sort)"
     if [ -z "$tools" ]; then
       bad="$bad tools/list over stdio returned no tool names: $(one_line "$out" | cut -c1-200);"
     else
-      for want in chat_ls chat_status chat_last chat_read chat_inject chat_self_compact chat_whoami chat_new chat_kill chat_unkill chat_name; do
+      for want in chat_ls chat_status chat_last chat_read chat_inject chat_whoami chat_new chat_kill chat_unkill chat_name; do
         printf '%s\n' "$tools" | grep -qx "$want" || bad="$bad tools/list lacks $want;"
       done
-      # The daemon's own roster (/status servers.chat) and the stdio-served
-      # list must be one list — two readers of one truth.
+      # Compare the chat server roster, leaving the separate harvester tools
+      # out of this chat-server assertion.
       status_tools="$(curl -s -m 5 "http://127.0.0.1:$PORT/status" | jq -r '.servers.chat[]?' 2>/dev/null | sort)"
       if [ -z "$status_tools" ]; then
         bad="$bad /status names no servers.chat tools (the daemon's own roster is unreadable);"
@@ -458,10 +462,10 @@ target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
   id="$(addr)"
-  out="$(pfm chat inject --allow-unsigned "$id" "reply with exactly one word: INJECT-CX-OK" 2>&1)" ||
+  out="$(pfm chat inject --allow-unsigned "$id" INJECT-CX-OK 2>&1)" ||
     bad="$bad base inject was refused: $(one_line "$out");"
-  [ -n "$bad" ] || wait_last "$id" INJECT-CX-OK 240 || bad="$bad the base inject never reached the chat (no INJECT-CX-OK): ${LANE_WAIT_WHY:-no wait reason recorded};"
-  ask="$(pfm chat ask "$id" --timeout 240 "reply with exactly one word: ASK-CX-OK" 2>&1)"
+  [ -n "$bad" ] || wait_prompt "$id" INJECT-CX-OK 240 || bad="$bad the base inject never reached the rollout as a user record (INJECT-CX-OK): ${LANE_WAIT_WHY:-no wait reason recorded};"
+  ask="$(CHAT_SENDER_SESSION=lane-E2 CHAT_SENDER_LABEL=lane-E2 pfm chat ask --timeout 240 "$id" "$(mock_steps '{"type":"turn","reply":"ASK-CX-OK"}')" 2>&1)"
   ask_rc=$?
   if [ "$ask_rc" -ne 0 ]; then
     bad="$bad pfm chat ask exited $ask_rc: $(one_line "$ask");"
@@ -478,7 +482,7 @@ if requires E2.01-open-seat; then
     bad="$bad watch exited 0 but printed nothing — no transition was reported;"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "inject delivered (INJECT-CX-OK), ask blocked for the fresh turn (ASK-CX-OK), watch --idle-after 10 --once reported: $(one_line "$watch")"
+    pass "inject wrote the user record (INJECT-CX-OK), ask blocked for the scripted reply (ASK-CX-OK), watch --idle-after 10 --once reported: $(one_line "$watch")"
   fi
 fi
 
@@ -528,77 +532,6 @@ if requires E2.01-open-seat; then
   fi
 fi
 
-# ─── E2.09 — self-compact composes the bare /compact on Codex ───────────────
-
-# waiter_steer <socket> — the FIRST --steer of the live `pfm internal then`
-# waiter for that socket, read from its argv in /proc: the composed command
-# exactly as pfm scheduled it, before anything is typed.
-waiter_steer() {
-  local f
-  for f in /proc/[0-9]*/cmdline; do
-    tr '\0' '\n' <"$f" 2>/dev/null | awk -v sock="$1" '
-      { a[NR] = $0 }
-      END {
-        then = 0; ours = 0
-        for (i = 1; i < NR; i++) {
-          if (a[i] == "internal" && a[i + 1] == "then") then = 1
-          if (a[i] == "--socket" && index(a[i + 1], sock) > 0) ours = 1
-        }
-        if (!then || !ours) exit 1
-        for (i = 1; i < NR; i++) if (a[i] == "--steer") { print a[i + 1]; exit 0 }
-        exit 1
-      }' && return 0
-  done
-  return 1
-}
-
-beat E2.09-self-compact
-spends cx
-target_live "$CHAT"
-if requires E2.01-open-seat; then
-  id="$(live_field "$CHAT" 2)"
-  sock="$(live_field "$CHAT" 11)"
-  # `pfm chat self-compact` resolves the CALLER: from a Codex tool shell that is
-  # CODEX_THREAD_ID with no TMUX (internal/inject/engine.go Resolve "self"), the
-  # same environment this shell reproduces.
-  out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id" pfm chat self-compact --then "reply with exactly one word: COMPACTED-CX" lane-e2 2>&1)"
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    fail "pfm chat self-compact exited $rc from the tmux-less Codex shell: $(one_line "$out")"
-  elif ! printf '%s' "$out" | grep -q 'scheduled COMMAND'; then
-    fail "self-compact exited 0 but did not report 'scheduled COMMAND …': $(one_line "$out")"
-  else
-    # The composed form, from pfm's own record: the waiter's argv.
-    steer=""
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      steer="$(waiter_steer "$sock")" && break
-      sleep 1
-    done
-    typed=0 landed=0
-    deadline=$(( $(_lane_now) + 300 ))
-    while [ "$(_lane_now)" -lt "$deadline" ]; do
-      pane "$id" | grep -qF '/compact' && typed=1
-      pfm chat last "$id" 2>/dev/null | grep -qF COMPACTED-CX && { landed=1; break; }
-      lane_alive || break
-      sleep 5
-    done
-    [ "$typed" -eq 1 ] || { pane "$id" | grep -qF '/compact' && typed=1; }
-    steer_log="$(printf '%s' "$out" | sed -n 's/.*(log: \([^)]*\)).*/\1/p')"
-    log_tail="$(tail -1 "$steer_log" 2>/dev/null)"
-    if [ -z "$steer" ]; then
-      fail "pfm scheduled it but no 'pfm internal then --socket $sock … --steer' waiter was seen in /proc within 10s — the composed form could not be read (typed=$typed, landed=$landed; waiter log: $(one_line "${log_tail:-<none>}"))"
-    elif [ "$steer" != "/compact" ]; then
-      fail "the waiter's first steer is '$(one_line "$steer")' on a Codex target — pfm composed the focus form, not the bare /compact Codex takes (held, not disproved: the composer claim is wrong)"
-    elif [ "$landed" -eq 0 ]; then
-      fail "pfm composed the bare /compact (waiter argv) but no COMPACTED-CX in 300s (typed on pane: $typed); last: $(one_line "$(pfm chat last "$id" 2>&1)"); waiter log: $(one_line "${log_tail:-<none>}")"
-    elif [ "$typed" -eq 0 ]; then
-      fail "pfm composed the bare /compact and the steer landed, but the pane never showed /compact typed — the compaction is claimed, not seen; waiter log: $(one_line "${log_tail:-<none>}")"
-    else
-      pass "bare /compact composed for the Codex target (waiter argv), /compact seen typed on the pane, steer delivered (COMPACTED-CX); waiter log: $(one_line "${log_tail:-<none>}" | cut -c1-160)"
-    fi
-  fi
-fi
-
 # ─── E2.10 — the Codex-specific launcher entry ──────────────────────────────
 
 beat E2.10-codex-launch
@@ -608,7 +541,7 @@ if requires E2.01-open-seat; then
   bad=""
   # The pane pfm started runs the Codex binary — the launcher's product.
   sock="$(live_field "$CHAT" 11)"
-  cmd="$(tmux -S "$sock" list-panes -F '#{pane_current_command}' 2>&1 | head -1)"
+  cmd="$(tmux -S "$(_lane_tmux_dir)/$sock" list-panes -F '#{pane_current_command}' 2>&1 | head -1)"
   case "$cmd" in
     *codex*|node) ;;
     *) bad="$bad the live pane on $sock runs '$(one_line "$cmd")', not the Codex binary;" ;;

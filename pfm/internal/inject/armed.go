@@ -10,15 +10,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // armedRecord is the ONE post-command steer armed on a pane, kept beside the
-// steer log (armedPathFor) from the moment the waiter is spawned until the
-// chain's last hop finishes. Without it a second chat_self_compact while one
-// was armed passed every guard, spawned a second waiter whose O_TRUNC wiped
-// the first one's log, and left two waiters racing to type into one pane.
+// steer log (armedPathFor) from spawn until the chain's last hop finishes.
+// A live record keeps a later spawn from replacing its owner's identity.
 //
 // PID is 0 while nobody owns the record yet: the spawner writes it before the
 // detached waiter has a pid (setsid -f forks, so the spawner never learns it),
@@ -52,7 +48,7 @@ func armedPathFor(logPath string) string {
 // its own dedicated socket, so a bare pane-derived name collided across
 // EVERY chat on the machine: a fresh chain on one chat truncated the exact
 // log file another chat's forensics depended on
-// (the 2026-09-03 self-compact that ate an operator's live draft). The path is now
+// (the 2026-09-03 compaction that ate an operator's live draft). The path is now
 // ${TMPDIR:-/tmp}/chat-then-<sanitized base(SocketPath)>.<sanitized Pane>.log:
 // each component is sanitized SEPARATELY, every non-alphanumeric byte in it
 // (including a literal '-' inside the socket name itself) folded to '_',
@@ -143,76 +139,10 @@ func (record armedRecord) since() string {
 	return time.Unix(record.Stamp, 0).UTC().Format(time.RFC3339)
 }
 
-// armedEngineLabel names the target's engine for a refusal — a Codex-pane
-// refusal must not read identically to a Claude one, because the two carry
-// different waiter contracts (announce.go's WaitingFor says so out loud). The
-// spelling comes from the engine registry, never from a local table; an
-// Engine this package cannot resolve is named as itself rather than defaulted
-// to Claude, because "which engine" is exactly what the reader came for.
-func armedEngineLabel(engineID string) string {
-	if engineID == "" {
-		return "engine unknown"
-	}
-	id, err := pfmengine.Parse(engineID)
-	if err != nil {
-		return "engine " + engineID
-	}
-	return "engine " + strings.ToLower(pfmengine.MustLookup(id).Short)
-}
-
-// refuseIfArmed is ScheduleAfterCurrentTurn's gate before it spawns: a live
-// arming on this pane refuses the request BY NAME; a stale one (waiter gone)
-// is replaced with a note on the log; an unreadable one refuses with the
-// read error. A chain hop (request.Chain) is the SAME arming continuing and
-// is never refused by its own record.
-func (engine *Engine) refuseIfArmed(target Target, request Request, logPath string) (Result, bool) {
-	if request.Chain {
-		return Result{}, true
-	}
-	path := armedPathFor(logPath)
-	record, exists, err := readArmedRecord(path)
-	if err != nil {
-		return refused(
-			CodeUndelivered,
-			fmt.Sprintf(
-				"could not read the armed steer record %s: %v — refusing to arm a second waiter over it",
-				path,
-				err,
-			),
-		), false
-	}
-	if !exists {
-		return Result{}, true
-	}
-	if record.alive(engine.options.Clock.Now()) {
-		return refused(
-			CodeBusy,
-			fmt.Sprintf(
-				"a post-command steer is already armed on %q (%s) (waiter %s since %s, steer: %q) — wait for it or kill that waiter",
-				target.Pane,
-				armedEngineLabel(target.Engine),
-				record.waiter(),
-				record.since(),
-				record.Steer,
-			),
-		), false
-	}
-	engine.warnf(
-		"pfm: replacing a stale armed steer record %s (waiter %s since %s is gone, steer: %q)\n",
-		path,
-		record.waiter(),
-		record.since(),
-		record.Steer,
-	)
-	return Result{}, true
-}
-
 // armRecord is the spawner's half: written before the waiter is started so a
 // concurrent schedule already sees the pane armed, with PID 0 until the
-// waiter claims it. A record naming a LIVE arming is left alone: a plain
-// `inject --then` spawned over an armed compaction (inject() is not gated by
-// refuseIfArmed) must not rewrite the compaction's record as its own — the
-// record keeps naming the first arming, exactly as the refusal reports it.
+// waiter claims it. A record naming a live arming is left alone: a later
+// `inject --then` spawn must not rewrite the first waiter's record.
 func armRecord(request SteerSpawn, now time.Time) error {
 	if existing, exists, err := readArmedRecord(armedPathFor(request.LogPath)); err == nil && exists &&
 		existing.alive(now) {

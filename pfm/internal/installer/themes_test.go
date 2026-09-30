@@ -333,6 +333,90 @@ func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
 	}
 }
 
+func TestThemeOverlayLoadsBaseOncePerInstall(t *testing.T) {
+	for _, status := range []int{0, http.StatusServiceUnavailable, -1} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			ctx, recorder := obs.Test(t)
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				if status == http.StatusServiceUnavailable {
+					http.Error(w, "unavailable", status)
+					return
+				}
+				_, _ = io.WriteString(w, `{"name":"Tokyo Night","base":"dark","overrides":{"claude":"#123456"}}`)
+			}))
+			url := server.URL + "/tokyo-night.json"
+			if status == -1 {
+				server.Close()
+			} else {
+				defer server.Close()
+			}
+			sourceRepo := t.TempDir()
+			writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), fmt.Sprintf(`{
+ "source_fetched":{"tokyo-night":{"repo":%q,"raw":%q,"target":"~/.claude/themes/tokyo-night.json"}},
+ "bundled":{
+  "first":{"file":"first.json","base":"tokyo-night","target":"~/.claude/themes/first.json"},
+  "second":{"file":"second.json","base":"tokyo-night","target":"~/.claude/themes/second.json"}
+ }
+}`, server.URL, url))
+			for _, name := range []string{"first", "second"} {
+				writeFixture(
+					t, filepath.Join(sourceRepo, "templates", "themes", name+".json"),
+					fmt.Sprintf(`{"name":%q,"overrides":{"promptBorder":"#abcdef"}}`, name),
+				)
+			}
+			home := t.TempDir()
+			var output bytes.Buffer
+			_, err := Run(ctx, Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: sourceRepo,
+				Stdout: &output, Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{},
+				InstallThemes: true,
+			})
+			if err != nil {
+				t.Fatalf("Run: %v\n%s", err, output.String())
+			}
+			records := []obs.Record{}
+			for _, record := range recorder.Records() {
+				if record.Message == "http.out.request" {
+					records = append(records, record)
+				}
+			}
+			if len(records) != 1 {
+				t.Fatalf("records=%d, want 1: %s", len(records), recorder.Raw())
+			}
+			switch status {
+			case -1:
+				if records[0].Level != "WARN" {
+					t.Fatalf("level=%s, want WARN", records[0].Level)
+				}
+				if got, _ := records[0].Field(obs.FieldErr); got == nil || got == "" {
+					t.Fatalf("missing err: %v", records[0].Fields)
+				}
+				for _, name := range []string{"tokyo-night", "first", "second"} {
+					if !strings.Contains(output.String(), "theme "+name+" ") ||
+						!strings.Contains(output.String(), "fetch failed") {
+						t.Fatalf("missing skip %s: %s", name, output.String())
+					}
+				}
+			case http.StatusServiceUnavailable:
+				if records[0].Level != "WARN" || !strings.Contains(output.String(), "503") {
+					t.Fatalf("status result: %s %s", recorder.Raw(), output.String())
+				}
+			default:
+				if requests != 1 {
+					t.Fatalf("requests=%d, want 1", requests)
+				}
+				for _, name := range []string{"first", "second"} {
+					if _, err := os.Stat(filepath.Join(home, ".claude", "themes", name+".json")); err != nil {
+						t.Fatalf("overlay %s: %v", name, err)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients pins
 // the installer's http.out door (spec § Middleware): the theme fetch leaves
 // one comp=http.out record whether it built its own client or was handed one,

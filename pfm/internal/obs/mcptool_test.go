@@ -2,12 +2,14 @@ package obs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -111,6 +113,9 @@ func TestToolRecordsAHandlerErrorAtErrorLevelCappedAtTheFieldLimit(t *testing.T)
 	if err != nil || !result.IsError {
 		t.Fatalf("a handler error did not become a tool error: %v, %v", result, err)
 	}
+	if result.StructuredContent != nil {
+		t.Fatalf("zero output gained structured content: %+v", result.StructuredContent)
+	}
 	record := onlyRecord(t, recorder)
 	if record.Level != slog.LevelError.String() {
 		t.Fatalf("a failed tool logged at %s, want ERROR", record.Level)
@@ -147,6 +152,65 @@ func TestToolWarnsWhenTheResultItselfIsAnError(t *testing.T) {
 	wantField(t, record, "args", "ask:4,target:4")
 	wantField(t, record, "target", "cc-9")
 	wantField(t, record, FieldErr, "tool result IsError")
+}
+
+func TestToolKeepsTypedOutputBesideAHandlerError(t *testing.T) {
+	ctx, recorder := Test(t)
+	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "chat_keys"}, Tool("chat_keys",
+		func(context.Context, *mcp.CallToolRequest, toolInput) (*mcp.CallToolResult, toolOutput, error) {
+			return nil, toolOutput{Status: "dead"}, errors.New("send failed")
+		},
+	))
+	result, err := connectInProcess(t, server).CallTool(ctx, &mcp.CallToolParams{
+		Name: "chat_keys", Arguments: map[string]any{"target": "gone", "message": ""},
+	})
+	if err != nil || !result.IsError || len(result.Content) != 1 {
+		t.Fatalf("call = %+v, %v", result, err)
+	}
+	content, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || content.Text != "send failed" {
+		t.Fatalf("content = %+v", result.Content)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"status":"dead"}` {
+		t.Fatalf("structuredContent = %s", encoded)
+	}
+	record := onlyRecord(t, recorder)
+	if record.Level != slog.LevelError.String() {
+		t.Fatalf("level = %s", record.Level)
+	}
+	wantField(t, record, FieldErr, "send failed")
+	if _, found := record.Field("bytes"); found {
+		t.Fatalf("failed call carries bytes: %+v", record.Fields)
+	}
+}
+
+func TestToolKeepsJSONRPCErrorAsProtocolError(t *testing.T) {
+	ctx, recorder := Test(t)
+	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "chat_keys"}, Tool("chat_keys",
+		func(context.Context, *mcp.CallToolRequest, toolInput) (*mcp.CallToolResult, toolOutput, error) {
+			return nil, toolOutput{Status: "dead"}, &jsonrpc.Error{Code: -32000, Message: "protocol failed"}
+		},
+	))
+	result, err := connectInProcess(t, server).CallTool(ctx, &mcp.CallToolParams{
+		Name: "chat_keys", Arguments: map[string]any{"target": "gone", "message": ""},
+	})
+	if err == nil || result != nil {
+		t.Fatalf("call = %+v, %v; want protocol error without result", result, err)
+	}
+	record := onlyRecord(t, recorder)
+	if record.Level != slog.LevelError.String() {
+		t.Fatalf("level = %s", record.Level)
+	}
+	wantField(t, record, FieldErr, (&jsonrpc.Error{Code: -32000, Message: "protocol failed"}).Error())
+	if _, found := record.Field("bytes"); found {
+		t.Fatalf("failed call carries bytes: %+v", record.Fields)
+	}
 }
 
 func TestPromptRecordsKindPromptWithTheArgumentShape(t *testing.T) {

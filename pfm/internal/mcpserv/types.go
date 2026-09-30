@@ -72,7 +72,7 @@ type InjectInput struct {
 	Target   string   `json:"target" jsonschema:"live session, Claude label, Codex thread name, self, or tmux pane"`
 	Message  string   `json:"message" jsonschema:"message to type and submit"`
 	ForceNow bool     `json:"force_now,omitempty" jsonschema:"interrupt a busy target with Escape before delivery"`
-	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here; use chat_self_compact"`
+	Then     []string `json:"then,omitempty" jsonschema:"follow-up steers delivered by a detached waiter after the primary turn settles to idle; in order, one settled turn apart. No steer may itself start with /compact — /compact itself is refused as a message here"`
 }
 
 // InjectOutput is a stable MCP representation of inject.Result.
@@ -93,31 +93,6 @@ type InjectOutput struct {
 	Unsigned      bool   `json:"unsigned,omitempty"`
 	AutoFilePath  string `json:"auto_file_path,omitempty"`
 	LiteralChunks int    `json:"literal_chunks,omitempty"`
-}
-
-// SelfCompactInput safely compacts the requesting chat and carries the ONE
-// turn that resumes work after compaction. Focus is retained in the tool-call
-// history for the compactor AND composed onto the delivered command
-// ("/compact " + focus) by Engine.ScheduleSelfCompact — the single
-// implementation `pfm chat self-compact` shares — whose single-line,
-// control-character-free validation is exactly what makes that
-// concatenation safe. A target known to be Codex still receives the bare
-// command: an earlier investigation recorded that Codex accepts no inline
-// arguments on /compact, and nothing here re-tests it, so that constraint is
-// held rather than assumed away. See Engine.ScheduleSelfCompact
-// (internal/inject/engine.go) for the full reasoning and what would retire
-// it.
-//
-// Focus and Then are the ONLY things that survive. A caller holding durable
-// state of its own — a ledger, a state file, a chat-specific memory — writes
-// to it before calling, because nothing here can carry that state across.
-//
-// Then is a single string by the operator's rule — one steer, never a list.
-// The engine still takes a slice (chat_inject legitimately chains several);
-// this tool is the one caller that must not.
-type SelfCompactInput struct {
-	Focus string `json:"focus" jsonschema:"single-line compact focus authored after inspecting the requesting chat's current context and in-flight work"`
-	Then  string `json:"then" jsonschema:"the ONE mandatory post-compact steer, typed into the reborn chat once the compaction settles — a single string, never a list; must not start with /compact"`
 }
 
 // KeysInput requests tmux keypresses for one resolved live chat. Keys are

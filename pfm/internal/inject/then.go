@@ -15,18 +15,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// DeliverThen is the waiter half of chat.sh's __then subcommand
-// (chat.sh:1048-1085). It rides out the primary turn — typically a /compact
-// compaction — and delivers the FIRST steer once the pane has been idle long
-// enough to hold, passing the remainder along so the chain re-arms itself one
-// confirmed delivery at a time: steer N+1 always waits out steer N's whole
-// turn. It runs in a DETACHED process because for a self-inject the waiter
-// waits on the very turn that spawned it.
+// DeliverThen rides out the turn its predecessor typed before delivering the
+// next steer. Each hop passes the remainder along so the chain re-arms itself
+// one confirmed delivery at a time in a detached process.
 //
 // The armed record beside the steer log (armed.go) names this waiter for as
 // long as the chain runs: claimed on entry, handed to the next hop when this
 // one delivered and armed it, removed on the chain's last delivery or on any
-// refusal — so ScheduleAfterCurrentTurn can refuse a second arming by name.
+// refusal.
 func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Result, err error) {
 	states := trail(ctx, "then")
 	defer func() { outcome(states, result, err) }()
@@ -66,7 +62,7 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 		engine.releaseArmed(armed, err == nil && result.Code == 0 && result.Steers > 0)
 	}()
 	observed, baselineErr := engine.waitForSettledTurn(
-		ctx, socketPath, target, wait.SelfTarget, pfmengine.ID(wait.Engine),
+		ctx, socketPath, target, pfmengine.ID(wait.Engine),
 	)
 	if baselineErr != nil {
 		// Not one capture of the pane succeeded, so the waiter never had a
@@ -86,18 +82,16 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 		}, nil
 	}
 	if !observed && wait.Engine == string(pfmengine.Codex) {
-		// The steady-idle fallback below is a GUESS, and on a Codex pane it
-		// is the wrong one: the Claude busy regex does not know the Codex
-		// footer and the receipt regex does not know its compaction line
-		// (guards.go), so "never went busy" is what a Codex compaction in
-		// progress looks like, and the two 2026-09-18 sightings were steers
-		// typed into exactly that. A steer lost with a named cause beats one
-		// typed into a compacting pane; the spelling lands with Tier B E2.09.
+		// On Codex the boundary is the typed primary's observed
+		// busy-then-idle turn or a new receipt. The receipt spelling in guards.go is
+		// unconfirmed. The two 2026-09-18 sightings were steers typed into
+		// compacting panes after an unobserved boundary, so steady idle alone
+		// cannot authorize delivery.
 		return Result{
 			Status: statusUndelivered,
 			Code:   CodeUndelivered,
 			Message: fmt.Sprintf(
-				"then steer NOT delivered: no turn boundary observed on a Codex pane — the Codex busy/compaction footer is not yet pinned (Tier B beat E2.09 captures it); steer kept in the log: %q",
+				"then steer NOT delivered: no turn boundary observed on a Codex pane — no busy turn was seen to end and the Codex compaction receipt spelling is unconfirmed, so nothing is typed on a steady-idle guess; steer kept in the log: %q",
 				steers[0],
 			),
 		}, nil
@@ -106,7 +100,7 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 		// Never deliver over a typing human, and never force: the waiter has
 		// no operator standing by to authorize force_now, and the whole point
 		// of this guard is that a live keystroke is not a safe queue surface
-		// (the 2026-09-03 self-compact that ate an operator's live draft).
+		// (the 2026-09-03 compaction that ate an operator's live draft).
 		// readErr distinguishes "tmux could not be read for the whole wait
 		// window" from "a human kept typing" — the two exhaust the same loop
 		// identically, but only one of them is evidence of a typist, and an
@@ -161,9 +155,10 @@ const statusUndelivered = "undelivered"
 
 // waitForQuietTypist holds the waiter back from delivering a steer over a
 // human mid-keystroke — the same guard engine.inject applies to a live
-// delivery (the 2026-09-03 self-compact that ate an operator's live draft). DeliverThen types through
-// engine.inject too, but only AFTER waitForSettledTurn has already decided
-// the primary's turn is over; this runs once more here so the waiter never
+// delivery (the 2026-09-03 compaction that ate an operator's live draft).
+// DeliverThen types through engine.inject too, but only after
+// waitForSettledTurn has decided the typed primary's turn is over. This runs
+// once more so the waiter never
 // spends waitForSettledTurn's decision polling for a turn boundary while
 // missing a typist that started AFTER the turn settled.
 //
@@ -247,9 +242,6 @@ func (spawner CommandThenSpawner) Spawn(
 		"--target",
 		request.Target,
 	)
-	if request.SelfTarget {
-		arguments = append(arguments, "--self")
-	}
 	if request.Engine != "" {
 		arguments = append(arguments, "--engine", request.Engine)
 	}

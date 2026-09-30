@@ -822,7 +822,13 @@ if requires; then
     tui_has '⟲' && tui_has '5m' || bad="$bad T25 [ did not scrub 5 minutes back (no ⟲ … −5m chip): $(one_line "$(tui_pane | grep -F '⟲')");"
     tui_type '{'
     tui_has '⟲' && tui_has '1h' || bad="$bad T25 { did not scrub an hour back: $(one_line "$(tui_pane | grep -F '⟲')");"
-    tui_type ']'; tui_type '}'
+    # A paused playhead keeps its instant while now moves on, so ] } only land
+    # back on the moment [ was pressed, seconds behind now (⟲ … −0m); space
+    # there resumes a seconds-long replay that 60× plays out in ~70ms, faster
+    # than any poll. The second } lands past now, which returns to live, and
+    # space from live replays the last hour — sixty seconds of ▸▸.
+    tui_type ']'; tui_type '}'; tui_type '}'
+    tui_has '⟲' && bad="$bad T25 ] } } did not return to now (⟲ chip still shown): $(one_line "$(tui_pane | grep -F '⟲')");"
     tmux -S "$TUI_SOCK" send-keys -t tui Space
     space_frame="" played=0
     for attempt in 1 2 3 4 5 6 7 8 9 10; do

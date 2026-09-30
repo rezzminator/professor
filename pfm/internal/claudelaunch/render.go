@@ -143,11 +143,7 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h bool) map
 	if prefs.NativeCursor {
 		env[envNativeCursor] = "1"
 	}
-	if cache1h {
-		env[envCache1H] = "1"
-	} else {
-		env[envCache5M] = "1"
-	}
+	env[envPromptCacheTTL] = cacheTTL(cache1h)
 	if request.Purpose != PurposeQuery && prefs.SystemPrompt == pfmconfig.SystemPromptLean {
 		env[envSimplePrompt] = "1"
 	}
@@ -232,4 +228,15 @@ func NewSessionID() (string, error) {
 	bytes[6] = (bytes[6] & 0x0f) | 0x40
 	bytes[8] = (bytes[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", bytes[:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:]), nil
+}
+
+// cacheTTL names the main chat's prompt-cache lifetime. It sets only
+// CLAUDE_CODE_PROMPT_CACHE_TTL: FORCE_PROMPT_CACHING_5M would outrank the
+// cache-live-control plugin's /cache, and ENABLE_PROMPT_CACHING_1H would
+// raise every sub-agent to 1h.
+func cacheTTL(cache1h bool) string {
+	if cache1h {
+		return "1h"
+	}
+	return "5m"
 }

@@ -66,3 +66,48 @@ func TestChatReloadRefusesAnOpenCodeSocketUpFront(t *testing.T) {
 		t.Fatal("a worker log was written for a reload that never ran")
 	}
 }
+
+// `/reload --account 99` used to print "reload scheduled" and exit 0; the
+// detached worker then refused the roster miss into its log, so the chat
+// simply never rebooted. The front refuses it where the caller reads.
+func TestChatReloadRefusesAnUnknownAccountUpFront(t *testing.T) {
+	root := jailTest(t)
+	configPath := writeConfigFixture(t, root, `{
+  "version": 1,
+  "accounts": [{"id": 1, "configDir": "`+filepath.Join(root, "account-1")+`"}]
+}`)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	dir := filepath.Join(os.TempDir(), "tmux-"+strconv.Itoa(os.Getuid()))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "cc-probe-pfm-reload-"+strconv.Itoa(os.Getpid()))
+	server := exec.Command(
+		"tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe", "sleep 120",
+	)
+	server.Env = append(server.Environ(), "TMUX=")
+	if output, err := server.CombinedOutput(); err != nil {
+		t.Fatalf("start probe socket: %v: %s", err, output)
+	}
+	cleanupProbeReloadSocket(t, socket)
+
+	old := startReloadWorker
+	t.Cleanup(func() { startReloadWorker = old })
+	started := 0
+	startReloadWorker = func([]string, deps.StartOptions) error {
+		started++
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--config", configPath, "chat", "reload", "--sock", socket, "--account", "99"}, &stdout, &stderr)
+	if code != 2 || started != 0 || stdout.String() != "" {
+		t.Fatalf("rc=%d started=%d stdout=%q stderr=%q; want rc 2, no worker, empty stdout",
+			code, started, stdout.String(), stderr.String())
+	}
+	want := "pfm chat reload: requested Claude account 99 is not in the configured roster"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}

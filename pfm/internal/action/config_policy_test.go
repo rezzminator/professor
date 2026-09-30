@@ -67,7 +67,7 @@ func TestSynthesizeUsesConfiguredClaudeAccountAndPromptPolicy(t *testing.T) {
 			t.Fatalf("resume run %q lacks configured policy %q", plan.Run, want)
 		}
 	}
-	if got := parsedShell(t, plan.Run).SettingsEnv["ENABLE_PROMPT_CACHING_1H"]; got != "1" {
+	if got := parsedShell(t, plan.Run).SettingsEnv["CLAUDE_CODE_PROMPT_CACHE_TTL"]; got != "1h" {
 		t.Fatalf("resume cache setting = %q", got)
 	}
 	if strings.Contains(plan.Run, "skip-permissions") {

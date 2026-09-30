@@ -87,9 +87,9 @@ type ClaudePrefs struct {
 	// SystemPrompt is one of the SystemPrompt* values; empty means
 	// SystemPromptProduction.
 	SystemPrompt string
-	// Cache1H is Claude Code's prompt-cache TTL choice: true selects the
-	// ~32%-cheaper 1-hour TTL (ENABLE_PROMPT_CACHING_1H), false the 5-minute
-	// TTL. Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
+	// Cache1H is the main chat's prompt-cache TTL choice, carried as
+	// CLAUDE_CODE_PROMPT_CACHE_TTL: true selects the ~32%-cheaper 1-hour TTL,
+	// false the 5-minute TTL. Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
 	Cache1H      bool
 	NativeCursor bool
 	// MaxSubagentSpawnDepth and MaxConcurrentSubagents lift Claude Code's

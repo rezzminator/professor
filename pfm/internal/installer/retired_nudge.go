@@ -26,7 +26,7 @@ func (installer *engine) removeRetiredNudgeStateWith(
 	if env == nil {
 		env = paths.OSEnv{}
 	}
-	sidDir := paths.EnvOrFrom(env, paths.EnvSIDDir, "/tmp/cc-sid")
+	sidDir := paths.SIDDirFrom(env)
 	entries, err := readDir(sidDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

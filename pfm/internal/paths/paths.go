@@ -256,6 +256,12 @@ func EnvOrFrom(env Env, name, fallback string) string {
 	return fallback
 }
 
+// SIDDirFrom is the SID directory resolved over an injected Env: PFM_SID_DIR,
+// else /tmp/cc-sid. Resolve and every caller holding its own Env share it.
+func SIDDirFrom(env Env) string {
+	return EnvOrFrom(env, EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid"))
+}
+
 // DevRepoGitDir returns the fence-mounted git directory when root is the
 // corresponding mounted worktree.
 func DevRepoGitDir(root string) (string, bool) {
@@ -412,7 +418,7 @@ func Resolve() (Values, error) {
 	return Values{
 		CacheDB:            EnvOr(EnvCacheDB, DefaultCacheDB(home)),
 		StateDB:            EnvOr(EnvStateDB, DefaultStateDB(home)),
-		SIDDir:             EnvOr(EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid")),
+		SIDDir:             SIDDirFrom(OSEnv{}),
 		Roots:              roots,
 		TmuxDir:            EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
 		Home:               home,

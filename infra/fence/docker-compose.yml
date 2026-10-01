@@ -10,6 +10,10 @@ services:
       # Named explicitly, never left to stage order: pfm-sim shares this
       # Dockerfile, and a dev lane handed the Chrome image tests the wrong machine.
       target: pfm-dev
+      # infra/fence/image-key.sh computes this from the resolved build inputs;
+      # an ordinary builder leaves an unkeyed image for the next fence start.
+      labels:
+        pfm.fence.inputs: ${PFM_DEV_INPUTS_KEY:-unkeyed}
     image: professor-pfm-dev
     # A real machine has an init that reaps orphans; a bare container does
     # not, so a double-forked descendant lingers as a zombie and the

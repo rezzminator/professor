@@ -6,7 +6,7 @@
 # a real Google Chrome and a display) and `pfm-dev` (build, test, e2e). pfm-dev
 # is the LAST stage, so an untargeted `docker build` of this file
 # (release-rehearsal.sh) still produces pfm-dev, never the Chrome image.
-FROM ubuntu:24.04 AS pfm-base
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS pfm-base
 # The converter sidecar's OCR stack (OpenCV) loads these system libraries on
 # import, and `pfm install` stages its models on any fence image.
 RUN apt-get update && apt-get install -y --no-install-recommends \

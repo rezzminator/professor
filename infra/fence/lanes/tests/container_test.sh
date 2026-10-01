@@ -18,15 +18,40 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 
 # STUB_RMI_RC: the exit status `docker rmi` answers with (1 = no such image).
 BIN="$T/bin"
-mkdir -p "$BIN"
+mkdir -p "$BIN" "$T/infra/fence"
+printf 'FROM scratch\n' >"$T/infra/fence/pfm-dev.Dockerfile"
+printf 'fixture\n' >"$T/infra/fence/data"
+printf 'services: {}\n' >"$T/infra/fence/docker-compose.yml"
 cat >"$BIN/docker" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
-case "$1" in rmi) exit "${STUB_RMI_RC:-0}" ;; *) exit 0 ;; esac
+case "$1 ${2:-}" in
+  'compose -f')
+    if [[ "$*" == *' config '* ]]; then
+      [ "${STUB_CONFIG_FAIL:-0}" = 0 ] || { echo 'fixture config error' >&2; exit 7; }
+      cat <<EOF
+services:
+  pfm-dev:
+    build:
+      context: $STUB_CONTEXT
+      dockerfile: pfm-dev.Dockerfile
+      target: pfm-dev
+      labels:
+        pfm.fence.inputs: unkeyed
+    image: professor-pfm-dev
+EOF
+    elif [[ "$*" == *' build '* ]]; then
+      printf 'KEY %s\n' "${PFM_DEV_INPUTS_KEY:-unset}" >>"$STUB_DOCKER_LOG"
+      [ "${STUB_BUILD_FAIL:-0}" = 0 ] || { echo 'fixture build refused' >&2; exit 8; }
+    fi ;;
+  'image inspect') printf '%s\n' "${STUB_LABEL:-unkeyed}" ;;
+  'rmi '*) exit "${STUB_RMI_RC:-0}" ;;
+esac
+exit 0
 STUB
 chmod +x "$BIN/docker"
 export PATH="$BIN:$PATH"
-export STUB_DOCKER_LOG="$T/docker.log"
+export STUB_DOCKER_LOG="$T/docker.log" STUB_CONTEXT="$T/infra/fence"
 
 # shellcheck source=/dev/null
 . "$SUT"
@@ -41,6 +66,26 @@ if [ "$base" = "pfm-lane-base:cafe01-unique" ] && grep -qx 'tag professor-pfm-de
 else
   bad "pin and release pair" "base=[$base]" "$(cat "$STUB_DOCKER_LOG")"
 fi
+key="$(fence_image_key "$T/infra/fence/docker-compose.yml" pfm-dev)"
+: >"$STUB_DOCKER_LOG"
+stale_out="$(STUB_LABEL=unkeyed lane_base_image "$T" pfm-lane-base:stale 2>&1 >/dev/null)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^compose .* build pfm-dev$' "$STUB_DOCKER_LOG" &&
+  grep -qx "KEY $key" "$STUB_DOCKER_LOG" && grep -q 'rebuilds' <<<"$stale_out"; then
+  ok "stale lane base builds with the derived inputs key"
+else bad "stale lane base did not build" "$(cat "$STUB_DOCKER_LOG")"; fi
+
+: >"$STUB_DOCKER_LOG"
+base="$(STUB_LABEL="$key" STUB_BUILD_FAIL=1 lane_base_image "$T" pfm-lane-base:current 2>"$T/current.err")"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$base" = pfm-lane-base:current ] && grep -q 'current (inputs ' "$T/current.err" &&
+  grep -qx 'tag professor-pfm-dev pfm-lane-base:current' "$STUB_DOCKER_LOG"; then
+  ok "current lane base pins the labeled image"
+else bad "current lane base" "$(cat "$T/current.err")" "$(cat "$STUB_DOCKER_LOG")"; fi
+
+: >"$STUB_DOCKER_LOG"
+base="$(STUB_CONFIG_FAIL=1 lane_base_image "$T" pfm-lane-base:underivable 2>"$T/underivable.err")"; rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'INPUTS-UNDERIVABLE pfm-dev: fixture config error' "$T/underivable.err"; then
+  ok "underivable lane base reports the config error"
+else bad "underivable lane base" "rc=$rc" "$(cat "$T/underivable.err")"; fi
 
 # 2 — an already-gone pin (a second cleanup, a refused rmi) never fails the caller
 if STUB_RMI_RC=1 lane_base_release pfm-lane-base:cafe01-unique; then ok "a failed rmi returns 0 to the caller"

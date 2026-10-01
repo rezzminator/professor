@@ -27,6 +27,9 @@ mkdir -p "$R/infra/fence/lanes"
 cp "$SUT" "$R/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$R/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$R/infra/fence/fence-env.sh"
+cp "$LANES/../image-key.sh" "$R/infra/fence/image-key.sh"
+printf 'FROM scratch\n' >"$R/infra/fence/pfm-dev.Dockerfile"
+printf 'services: {}\n' >"$R/infra/fence/docker-compose.yml"
 cat >"$R/infra/fence/housekeeping.sh" <<'EOF'
 fence_housekeeping() { echo "fence_housekeeping $*" >>"$STUB_DOCKER_LOG"; }
 fence_volumes_ensure() { echo "fence_volumes_ensure" >>"$STUB_DOCKER_LOG"; }
@@ -42,6 +45,20 @@ cat >"$BIN/docker" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
 case "$1" in
+  compose)
+    if [[ "$*" == *' config '* ]]; then
+      cat <<EOF
+services:
+  pfm-dev:
+    build:
+      context: $STUB_CONTEXT
+      dockerfile: pfm-dev.Dockerfile
+      target: pfm-dev
+      labels:
+        pfm.fence.inputs: unkeyed
+    image: professor-pfm-dev
+EOF
+    fi ;;
   image)
     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then
       if [ "${STUB_PROBE_FAIL:-0}" = 1 ]; then echo 'fixture image probe error' >&2; exit 6; fi
@@ -94,7 +111,7 @@ esac
 exit 0
 STUB
 chmod +x "$BIN/docker"
-export PATH="$BIN:$PATH" STUB_DOCKER_LOG="$T/docker.log" STUB_COMMIT_COUNT="$T/commit.count"
+export PATH="$BIN:$PATH" STUB_DOCKER_LOG="$T/docker.log" STUB_COMMIT_COUNT="$T/commit.count" STUB_CONTEXT="$R/infra/fence"
 
 run_root() { # run_root STEP1 — sets RC and OUT
   : >"$STUB_DOCKER_LOG"

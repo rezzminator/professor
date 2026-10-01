@@ -852,6 +852,8 @@ _tui_settle() {
 }
 tui_keys() { local b; b="$(tui_pane)"; tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; _tui_settle "$b" "keys $*"; }
 tui_type() { local b; b="$(tui_pane)"; tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; _tui_settle "$b" "type $1"; }
+tui_send() { tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; }
+tui_send_text() { tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; }
 tui_has() { grep -qF -- "$1" <<<"$(tui_pane)"; }
 tui_wait() { # tui_wait <secs> <needle> — 0 once the pane shows the literal needle
   local deadline=$(( $(_lane_now) + $1 )) t0="${EPOCHREALTIME:-}"

@@ -5,7 +5,6 @@ model: opus
 effort: high
 codex-model: gpt-6-sol
 codex-effort: high
-experimental: { cacheTtl: 1h }
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent, SendMessage
 hooks:
   PreToolUse:

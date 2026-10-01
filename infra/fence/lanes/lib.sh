@@ -1000,8 +1000,8 @@ wait_for() {
       [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_for "$*" "$t0" ok
       return 0
     fi
-    # Default half a second, as wait_last; self-tests shorten it further.
-    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.5)"
+    # Default 0.2 seconds; self-tests shorten it further.
+    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.2)"
   done
   # shellcheck disable=SC2034 # read by the lanes, which name the reason in their verdict
   LANE_WAIT_WHY="timed out after ${secs}s waiting for: $*"

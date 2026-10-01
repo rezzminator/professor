@@ -615,10 +615,23 @@ run_lane poll_intervals \
      wait_for 1 false
    done'
 polls="$(paste -sd, "$LANE_DIR/sleeps" 2>/dev/null)"
-if [ "$polls" = '1,1,0.5,0.5,1,1,0.5,0.5,1,1,0.5,0.5,0.05,0.05,0.05,0.05' ]; then
+if [ "$polls" = '1,1,0.5,0.2,1,1,0.5,0.2,1,1,0.5,0.2,0.05,0.05,0.05,0.05' ]; then
   ok "poll intervals: defaults and invalid values keep production pacing; overrides reach each sleep"
 else
   bad "poll intervals" "got=[$polls]"
+fi
+
+# tui_wait keeps its poll when the measured gain does not meet the threshold.
+run_lane tui_poll \
+  'mkdir -p "$LANE_OUT_DIR"; sleep() { printf "%s\n" "$1" >>"$LANE_OUT_DIR/sleeps"; }' \
+  'tui_pane() { printf "other\n"; }
+   _lane_now() { local n; n=$(cat "$LANE_OUT_DIR/clock"); if [ "$n" -lt 3 ]; then printf "0\n"; else printf "2\n"; fi; printf "%s\n" "$((n + 1))" >"$LANE_OUT_DIR/clock"; }
+   printf "0\n" >"$LANE_OUT_DIR/clock"; tui_wait 1 needle'
+polls="$(paste -sd, "$LANE_DIR/sleeps" 2>/dev/null)"
+if [ "$polls" = '0.2,0.2' ]; then
+  ok "tui_wait: unsuccessful probes keep the measured poll interval"
+else
+  bad "tui_wait poll" "got=[$polls]" "$OUT"
 fi
 
 # ---- 20: blocked carries a reason beside the beat that blocked it ---------

@@ -236,7 +236,6 @@ Claude takes your answers and:
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `legal` | Bundled `templates/project/skills/legal/` | None |
 | `ghostwriter` | host-global source-fetched (`templates/global/skills/sources.json`), fetched and linked by `pfm install` <https://github.com/rezzminator/ghost-writer> | None |
-| `vision-factory` | host-global source-fetched (`templates/global/skills/sources.json`), fetched and linked by `pfm install` <https://github.com/rezzminator/vision-factory> | None |
 | `god-speed` | host-global source-fetched (`templates/global/skills/sources.json`), fetched and linked by `pfm install` <https://github.com/rezzminator/god-speed> | None |
 | `/rnd` | Command `templates/project/commands/rnd.md` | `tokens`: `{AI_SERVICE_NAME}`, `{LLM_PROVIDER}`, `{SECONDARY_LANG}`; by hand: `{PROJECT}` (the entry holding the LLM-calling code), `{ai_module}` |
 | `/flights:*` | Commands `templates/global/commands/flights/*.md` — host-global, linked by `pfm install` | None (pipeline-coupled) |

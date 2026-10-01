@@ -65,6 +65,12 @@ case "$1 ${2:-}" in
         fi ;;
     esac
     exit 0 ;;
+  "cp "*)
+    case "$2" in
+      *.row.tsv) [ -n "${STUB_ROW_FIXTURE:-}" ] && cp "$STUB_ROW_FIXTURE" "$3" ;;
+      *.waits.tsv) [ -n "${STUB_WAITS_FIXTURE:-}" ] && cp "$STUB_WAITS_FIXTURE" "$3" ;;
+    esac
+    exit 0 ;;
   *) exit 0 ;;
 esac
 STUB
@@ -317,4 +323,34 @@ if [ "$RC" -eq 1 ] && grep -q 'run: ✗ CREDENTIAL-REFUSED' <<<"$OUT" &&
   [ "$(grep -c '^rm -f pfm-lane-' "$T/docker.log")" -eq 2 ]; then
   ok "credential refusal stops before the first lane and removes the container"
 else bad "run credential gate" "rc=$RC" "$OUT" "$(cat "$T/docker.log")"; fi
+# ---- 19: profile copies each lane's waits and prints the longest first ---
+
+printf 'E1\t12\t3\t0\t0\t0\n' >"$T/row.fixture.tsv"
+printf 'lane\tbeat\thelper\tcondition\telapsed_s\toutcome\n' >"$T/waits.fixture.tsv"
+printf 'E1\tE1.01\twait_for\tfirst state\t0.125\tok\n' >>"$T/waits.fixture.tsv"
+printf 'E1\tE1.02\twait_last\tCHAT answer\t2.500\ttimeout\n' >>"$T/waits.fixture.tsv"
+rm -rf "$T/out"
+STUB_ROW_FIXTURE="$T/row.fixture.tsv" STUB_WAITS_FIXTURE="$T/waits.fixture.tsv" LANE_PROFILE=1 run_sut --lanes E1 --root reuse
+profile_out="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+if [ "$RC" -eq 0 ] &&
+  grep -qF -- '-e LANE_PROFILE=1' "$T/docker.log" &&
+  grep -qF -- 'E1.waits.tsv' "$T/docker.log" &&
+  [ "$(head -1 "$profile_out/waits.tsv")" = "$(head -1 "$T/waits.fixture.tsv")" ] &&
+  grep -qF "$(tail -1 "$T/waits.fixture.tsv")" "$profile_out/waits.tsv" &&
+  grep -qF 'profile: top waits' <<<"$OUT" &&
+  grep -qF 'wait 2.500s E1 E1.02 wait_last timeout CHAT answer' <<<"$OUT" &&
+  grep -qF 'wait 0.125s E1 E1.01 wait_for ok first state' <<<"$OUT"; then
+  ok "profile runner: docker env and cp, merged waits, longest-first top waits"
+else
+  bad "profile runner" "rc=$RC" "$OUT" "$(cat "$profile_out/waits.tsv" 2>&1)"
+fi
+
+rm -rf "$T/out"
+STUB_ROW_FIXTURE="$T/row.fixture.tsv" LANE_PROFILE=1 run_sut --lanes E1 --root reuse
+if [ "$RC" -eq 0 ] && grep -qF 'profile: ✗ lane E1 wrote no waits.tsv' <<<"$OUT"; then
+  ok "profile runner: a missing lane waits file is named without changing exit status"
+else
+  bad "profile missing waits" "rc=$RC" "$OUT"
+fi
+
 shtest_end

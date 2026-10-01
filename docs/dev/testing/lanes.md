@@ -22,6 +22,7 @@ pfm-lane-root:<hash>          built once per template change (root.sh), never pu
 ```bash
 infra/fence/lanes/run.sh --lanes E1 --dry-run     # the plan: hash, image decision, beats, seats
 infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from the root image
+LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes E1 # record each wait and print the ten longest
 ```
 
 `--dry-run` creates no container and runs no beat; it prints the root decision, lane order, budgets and seats. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
@@ -31,6 +32,7 @@ infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from
 | `<lane>.log` | every beat line, plus a failed beat's raw pane bytes (`tmux capture-pane -e -p -S -`) and its activity-log slice |
 | `<lane>.stream.log` | exactly what the lane printed, as it printed it |
 | `timeline.tsv` | `lane · beat · t+s · verdict · dur_s · seat · detail` |
+| `waits.tsv` | with `LANE_PROFILE=1`, each wait's lane, beat, helper, condition, elapsed seconds and outcome, longest first |
 | `lanes.tsv` | `lane · wall_s · beats · failed · known · blocked` (the Wave 2 TSV shape) |
 | `summary.md` | the header (mode, root image, order, seats), the table, the budget verdicts, the verdict |
 

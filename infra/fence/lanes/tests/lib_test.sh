@@ -891,4 +891,69 @@ if [ "$selected" = '● New_CHAT' ]; then
 else
   bad "tui_selected search" "got=[$selected]"
 fi
+# ---- 31: profile rows retain each wait's outcome and beat context --------
+
+LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" LANE_PROFILE=1 run_lane profile_waits \
+  'lane_begin TL' \
+  'wait_for 1 true' \
+  'beat TL.profile' \
+  'wait_for 1 true; wait_for 0 false' \
+  '_lane_wait_dead() { return 0; }; wait_for 1 false; wait_last CHAT needle 1; wait_prompt CHAT needle 1' \
+  '_lane_wait_dead() { return 1; }; pfm() { if [ "$1 $2" = "chat last" ]; then echo needle; else printf "{\"entries\":[{\"role\":\"user\",\"text\":\"needle\"}]}\n"; fi; }' \
+  'wait_last CHAT needle 1; wait_prompt CHAT needle 1' \
+  'tui_pane() { echo " tabs "; }; tui_wait 1 " tabs "; tui_wait 0 missing' \
+  'tui_open 80 24 chat ls' \
+  'tmux() { return 0; }; tui_open 80 24 chat ls' \
+  'wait_for 1 "printf x\\ty"' \
+  'cond=$(printf "a\tb\n%s" "$(printf "%170s" x)"); wait_for 0 "$cond"' \
+  'pass "profiled"; lane_end'
+waits="$LANE_DIR/TL.waits.tsv"
+if [ "$RC" -eq 0 ] && [ -f "$waits" ] &&
+  [ "$(head -1 "$waits")" = "$(printf 'lane\tbeat\thelper\tcondition\telapsed_s\toutcome')" ] &&
+  awk -F'\t' 'NR > 1 && (NF != 6 || $5 !~ /^[0-9]+\.[0-9][0-9][0-9]$/ || length($4) > 160) { exit 1 }' "$waits" &&
+  awk -F'\t' '$3 == "wait_for" && index($4, "a b ") == 1 && length($4) == 160 { found=1 } END { exit !found }' "$waits" &&
+  grep -q "$(printf 'TL\t-\twait_for\ttrue\t')" "$waits" &&
+  grep -q "$(printf 'TL\tTL.profile\twait_for\tfalse\t')" "$waits" &&
+  grep -q "$(printf '\ttimeout$')" "$waits" &&
+  grep -q "$(printf '\tdead$')" "$waits" &&
+  grep -q "$(printf '\twait_last\tCHAT needle\t')" "$waits" &&
+  grep -q "$(printf '\twait_prompt\tCHAT needle\t')" "$waits" &&
+  grep -q "$(printf '\ttui_wait\tmissing\t')" "$waits" &&
+  grep -q "$(printf '\ttui_open\tpfm chat ls\t')" "$waits" &&
+  grep -q "$(printf '\tfail$')" "$waits" &&
+  grep -q "$(printf '\tok$')" "$waits"; then
+  ok "profile waits: header, beat/prelude, six fields, elapsed, helper conditions and outcomes"
+else
+  bad "profile waits" "rc=$RC" "$(cat "$waits" 2>&1)" "$OUT"
+fi
+
+LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" LANE_PROFILE=1 run_lane profile_settle \
+  'lane_begin TL; beat TL.settle' \
+  'tui_pane() { case "$(cat "$LANE_OUT_DIR/mode" 2>/dev/null)" in cap) n=$(cat "$LANE_OUT_DIR/n"); echo "$((n % 2))"; echo "$((n + 1))" >"$LANE_OUT_DIR/n" ;; *) cat "$LANE_OUT_DIR/pane" ;; esac; }' \
+  'tmux() { [ "$(cat "$LANE_OUT_DIR/mode")" = moved ] && printf new >"$LANE_OUT_DIR/pane"; return 0; }; sleep() { :; }' \
+  'printf old >"$LANE_OUT_DIR/pane"; echo moved >"$LANE_OUT_DIR/mode"; tui_keys Enter' \
+  'echo static >"$LANE_OUT_DIR/mode"; tui_type "text"' \
+  'echo cap >"$LANE_OUT_DIR/mode"; echo 0 >"$LANE_OUT_DIR/n"; tui_keys Down' \
+  'pass "settled"; lane_end'
+waits="$LANE_DIR/TL.waits.tsv"
+if [ "$RC" -eq 0 ] &&
+  grep -q "$(printf '\tsettle\tkeys Enter\t.*\tmoved$')" "$waits" &&
+  grep -q "$(printf '\tsettle\ttype text\t.*\tstatic$')" "$waits" &&
+  grep -q "$(printf '\tsettle\tkeys Down\t.*\tcap$')" "$waits"; then
+  ok "profile settle: moved, static and cap keep their key/type conditions"
+else
+  bad "profile settle" "rc=$RC" "$(cat "$waits" 2>&1)" "$OUT"
+fi
+
+LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" LANE_PROFILE=1 run_lane profile_unwritable \
+  'lane_begin TL; beat TL.warning' \
+  'rm "$LANE_OUT_DIR/TL.waits.tsv"; mkdir "$LANE_OUT_DIR/TL.waits.tsv"' \
+  'wait_for 1 true; wait_for 1 true; pass "unaffected"; lane_end'
+if [ "$RC" -eq 0 ] &&
+  [ "$(grep -cF "LANE_PROFILE: cannot append to $LANE_DIR/TL.waits.tsv" "$LANE_DIR/TL.log")" -eq 1 ]; then
+  ok "profile unwritable: one lane-log warning and the beat remains green"
+else
+  bad "profile unwritable" "rc=$RC" "$(cat "$LANE_DIR/TL.log" 2>&1)" "$OUT"
+fi
+
 shtest_end

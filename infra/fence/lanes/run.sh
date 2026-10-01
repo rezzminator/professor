@@ -16,6 +16,7 @@
 # Written per run, under /tmp/{project}/lanes/<stamp>/:
 #   <lane>.log     every beat line, the failed beats' raw pane bytes, log slices
 #   timeline.tsv   lane · beat · t+s · verdict · dur · seat · detail
+#   waits.tsv      profiled waits, longest first (LANE_PROFILE=1)
 #   lanes.tsv      lane · wall_s · beats · failed · known · blocked (Wave 2 shape)
 #   summary.md     the header (mode, root image, order, seats), the table, verdicts
 #
@@ -253,10 +254,10 @@ for l in $ORDER; do
   say "── lane $l${prior:+ (after $prior)}"
   docker exec -w /tmp \
     -e "LANE_MODE=$MODE" -e "LANE_PRIOR=$prior" -e "LANE_SEATS=$SEATS" \
-    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e IS_SANDBOX=1 -e GOPROXY=off \
+    -e "LANE_OUT_DIR=$CONT_OUT" -e "LANE_STAMP=$STAMP" -e "LANE_PROFILE=${LANE_PROFILE:-}" -e IS_SANDBOX=1 -e GOPROXY=off \
     "$CNAME" bash "/worktree/infra/fence/lanes/$l.sh" 2>&1 | tee "$OUT/$l.stream.log"
   rc="${PIPESTATUS[0]}"
-  for f in "$l.log" "$l.timeline.tsv" "$l.row.tsv" "$l.logstate" "$l.seats"; do
+  for f in "$l.log" "$l.timeline.tsv" "$l.row.tsv" "$l.logstate" "$l.seats" "$l.waits.tsv"; do
     docker cp "$CNAME:$CONT_OUT/$f" "$OUT/$f" >/dev/null 2>&1
   done
   if [ ! -f "$OUT/$l.row.tsv" ]; then
@@ -342,6 +343,22 @@ if [ -n "$log_absent" ]; then
   say "activity log: ✗ ABSENT at lane start [lanes:$log_absent] — see each lane's own PRELUDE-LOG failure"
 fi
 say "run: $total_beats beats · $total_failed failed · $total_known known-gap · $total_blocked blocked · ${total_wall}s · $OUT/summary.md"
+if [ "${LANE_PROFILE:-}" = 1 ]; then
+  printf 'lane\tbeat\thelper\tcondition\telapsed_s\toutcome\n' >"$OUT/waits.tsv"
+  for l in $ORDER; do
+    if [ -f "$OUT/$l.waits.tsv" ]; then
+      tail -n +2 "$OUT/$l.waits.tsv" >>"$OUT/waits.tsv"
+    else
+      say "profile: ✗ lane $l wrote no waits.tsv"
+    fi
+  done
+  { head -n 1 "$OUT/waits.tsv"; tail -n +2 "$OUT/waits.tsv" | sort -t$'\t' -k5,5gr; } >"$OUT/waits.sorted.tsv"
+  mv "$OUT/waits.sorted.tsv" "$OUT/waits.tsv"
+  say 'profile: top waits'
+  while IFS=$'\t' read -r lane beat helper condition elapsed outcome; do
+    say "wait ${elapsed}s $lane $beat $helper $outcome $condition"
+  done < <(tail -n +2 "$OUT/waits.tsv" | head -n 10)
+fi
 
 status=0
 [ -n "$failed_lanes" ] && { say "run: ✗ lane(s) with a failing beat:$failed_lanes"; status=1; }

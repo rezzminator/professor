@@ -37,7 +37,7 @@ printf 'F\n' >"$LANES/pending.txt"
 # PATH with no pfm at all, so the derive cannot run unless a test provides one.
 BIN="$T/bin"
 mkdir -p "$BIN"
-for tool in bash awk sed grep sort uniq head tail cut tr wc find mktemp mkfifo rm cat printf jq basename dirname expr date cp cmp diff env sleep timeout; do
+for tool in bash awk sed grep sort uniq head tail cut tr wc find mktemp mkfifo rm cat printf jq basename dirname expr date cp cmp diff env sleep timeout nproc; do
   real="$(command -v "$tool" 2>/dev/null)" || continue
   ln -sf "$real" "$BIN/$tool"
 done
@@ -318,6 +318,36 @@ if [ "$RC" -eq 1 ] &&
   ok "STALE-NAME: a row for a verb or tool pfm answers 'unknown' to is red, top-level, chat, internal and tool alike"
 else
   bad "stale name" "rc=$RC" "$OUT"
+fi
+
+# ---- 11: hidden probes overlap, while their findings stay in map order ---
+
+write_derive_stub "$(cat <<'ARM'
+  "mcp serve --stdio") echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"chat_ls"},{"name":"harvester_read"}]}}' ;;
+  "chat a-wait --help")
+    for ((i=0; i<100; i++)); do
+      if [ -f "${PFM_CONFIG%/*}/peer-ready" ]; then echo 'usage: pfm chat a-wait'; exit 2; fi
+      sleep 0.01
+    done
+    echo 'unknown command: a-wait'; exit 2 ;;
+  "chat b-signal --help")
+    printf 'ready\n' >"${PFM_CONFIG%/*}/peer-ready"
+    echo 'usage: pfm chat b-signal'; exit 2 ;;
+  "chat c-slow --help") sleep 0.1; echo 'unknown command: c-slow'; exit 2 ;;
+  "chat d-fast --help") echo 'unknown command: d-fast'; exit 2 ;;
+ARM
+)"
+map "${FULL}pfm chat a-wait\tO1\tO1.01-fixture\npfm chat b-signal\tO1\tO1.01-fixture\npfm chat c-slow\tO1\tO1.01-fixture\npfm chat d-fast\tO1\tO1.01-fixture\n"
+run_sut
+slow_line="$(grep -n '^check-map: ✗ STALE-NAME: pfm chat c-slow ' <<<"$OUT" | cut -d: -f1)"
+fast_line="$(grep -n '^check-map: ✗ STALE-NAME: pfm chat d-fast ' <<<"$OUT" | cut -d: -f1)"
+if [ "$RC" -eq 1 ] && [ -n "$slow_line" ] && [ -n "$fast_line" ] &&
+  [ "$slow_line" -lt "$fast_line" ] &&
+  grep -q 'map names: .* · 2 stale ·' <<<"$OUT" &&
+  grep -q 'check-map: ✗ 2 finding(s)' <<<"$OUT"; then
+  ok "hidden probes overlap; slow and fast stale findings print in map order"
+else
+  bad "hidden probe order" "rc=$RC" "$OUT"
 fi
 
 shtest_end

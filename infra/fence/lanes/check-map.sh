@@ -199,6 +199,8 @@ JSON
       framed_cmds=$'\n'"$cmds"$'\n'
       framed_subs=$'\n'"$subs"$'\n'
       framed_tools=$'\n'"$all_tools"$'\n'
+      probe_limit="$(nproc)"
+      probe_pids=() unmatched_names=() unmatched_results=()
       for n in $(printf '%s\n' "$names" | tr ' ' '~'); do
         n="${n//\~/ }"
         set -- $n
@@ -212,14 +214,25 @@ JSON
         # pfm's own dispatcher decides; only its "unknown" answer is stale.
         if [ "$1" = pfm ] && [ $# -ge 2 ]; then
           shift
-          # Captured first: `grep -q` quitting early would SIGPIPE the writer,
-          # and pipefail would read that as "not unknown".
-          answer="$(pfm_jailed_timed "$@" --help </dev/null 2>&1)"
-          if ! grep -qE 'unknown (sub)?command' <<<"$answer"; then
-            hidden=$((hidden + 1)); continue
+          probe_file="$JAIL/probe.${#unmatched_names[@]}"
+          unmatched_names+=("$n") unmatched_results+=("$probe_file")
+          pfm_jailed_timed "$@" --help </dev/null >"$probe_file" 2>&1 &
+          probe_pids+=("$!")
+          if [ "${#probe_pids[@]}" -ge "$probe_limit" ]; then
+            wait "${probe_pids[0]}" || true
+            probe_pids=("${probe_pids[@]:1}")
           fi
+        else
+          unmatched_names+=("$n") unmatched_results+=("")
         fi
-        red "STALE-NAME: $n — a $(basename "$MAP") row names a command or tool pfm does not serve"
+      done
+      for pid in "${probe_pids[@]}"; do wait "$pid" || true; done
+      for i in "${!unmatched_names[@]}"; do
+        if [ -n "${unmatched_results[i]}" ] &&
+          ! grep -qE 'unknown (sub)?command' "${unmatched_results[i]}"; then
+          hidden=$((hidden + 1)); continue
+        fi
+        red "STALE-NAME: ${unmatched_names[i]} — a $(basename "$MAP") row names a command or tool pfm does not serve"
         stale=$((stale + 1))
       done
       say "map names: $(printf '%s\n' "$names" | grep -c .) · $stale stale · $hidden judged by pfm's dispatcher (verbs the help tree does not list)"

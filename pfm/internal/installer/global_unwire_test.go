@@ -97,7 +97,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	agentsSource := filepath.Join(repo, "templates", "global", "agents")
-	for _, name := range []string{"mapper", "tracer"} {
+	for _, name := range []string{"collector", "tracer"} {
 		body := "---\nname: " + name + "\ndescription: " + name + " role.\n---\n\nbody\n"
 		writeFixture(t, filepath.Join(agentsSource, name+".md"), body)
 	}
@@ -111,7 +111,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, config := range accounts {
-		for _, name := range []string{"mapper", "tracer"} {
+		for _, name := range []string{"collector", "tracer"} {
 			assertLink(t,
 				filepath.Join(config, "agents", name+".md"),
 				filepath.Join(repo, "templates", "global", "agents", name+".md"))
@@ -125,7 +125,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, config := range accounts {
-		for _, name := range []string{"mapper", "tracer"} {
+		for _, name := range []string{"collector", "tracer"} {
 			path := filepath.Join(config, "agents", name+".md")
 			if _, err := os.Lstat(path); !os.IsNotExist(err) {
 				t.Fatalf("uninstall left the machine-global agent link %s: %v", path, err)

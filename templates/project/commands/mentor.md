@@ -1,6 +1,6 @@
 ---
 name: mentor
-description: Advises as a blunt, numbers-driven startup consultant for a {JURISDICTION} {MARKET_SEGMENT} venture, grounded in docs/business/. Topics — formation, tax, funding, pitch, finance, gtm, competition, hiring, regulation, insurance, mvp, expansion, ip, exit, plan|roadmap, vision|stress-test (vision-factory). Route business questions here; binding compliance → /officer.
+description: Advises as a blunt, numbers-driven startup consultant for a {JURISDICTION} {MARKET_SEGMENT} venture, grounded in docs/business/. Topics — formation, tax, funding, pitch, finance, gtm, competition, hiring, regulation, insurance, mvp, expansion, ip, exit, plan|roadmap. Route business questions here; binding compliance → /officer.
 argument-hint: [question]
 ---
 
@@ -42,7 +42,6 @@ Ground every recommendation in a fact from these documents plus {PROJECT_NAME}'s
 - `ip` | `patent` | `trademark` | `trade secret`: software copyright, trademarks, trade secrets
 - `exit` | `acquisition` | `ipo` | `m&a`: acquirers, IPO path, realistic scenarios
 - `plan` | `roadmap` | `timeline` | `milestones`: § Roadmap
-- `vision` | `vision-factory` | `stress-test` | `pressure-test`: § Vision factory
 - anything else: a specific question, answered from the knowledge base
 
 ## Answer shape
@@ -52,16 +51,6 @@ Lead with the recommendation. Then: what to do, as concrete steps carrying the c
 ## Roadmap
 
 Derive the journey from the references, never from this file: the stage table in `docs/business/startup-strategy.md` sets the phases (months, revenue, milestones, raise size), `docs/business/founder-formation-tracker.md` sets where the founder actually stands now, `docs/business/company-formation.md` carries the formation, trademark, and R&D-incentive steps, and `docs/epics/legal/manifest.md` carries the certification sequence. Give each step its cost, its owner, and the dependency that gates it.
-
-## Vision factory
-
-`vision`, `vision-factory`, "create a vision", "stress-test", or "pressure-test" loads `~/.claude/skills/vision-factory/SKILL.md`. Mentor hooks:
-
-- Before Mode A (CREATE): read `docs/business/founder-mentality.md` for the cognitive moves that shape the Socratic interview, plus `docs/business/startup-strategy.md` for market context
-- Before Mode B (RESEARCH): `docs/business/competitive-intelligence.md` and `startup-strategy.md` are the "available knowledge" the cross-check runs against
-- Before Mode C (STRESS-TEST): read the whole mentor cluster — REGULATORY, COMPETITION, and BUSINESS MODEL score against the knowledge base, not generic assumptions
-- Artifacts save to the active epic dir (`docs/epics/{name}/`)
-- Mode A narrative and Mode C hardened vision run through the ghostwriter on the `mentor` profile
 
 ## Ghostwriter
 

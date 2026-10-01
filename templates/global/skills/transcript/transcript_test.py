@@ -76,7 +76,7 @@ def codex_records():
         rec("response_item", 11, {"type": "function_call_output", "call_id": "c3", "output": "Chunk ID: 1\nProcess exited with code 2\nOutput:\nvet: bad"}),
         done(12, {"type": "FileChange", "status": "completed", "changes": {
             "/work/repo/infra/E1.sh": {"type": "update", "unified_diff": "@@ -1,3 +1,2 @@\n-old\n-older\n+new\n"}}}),
-        done(13, {"type": "McpToolCall", "server": "professor", "tool": "chat_inject", "arguments": {"target": "PFM", "file": "/tmp/r.md"},
+        done(13, {"type": "McpToolCall", "server": "professor", "tool": "chat_inject", "arguments": {"target": "PFM", "file": "/work/repo/r.md"},
                   "status": "failed", "result": {"content": [{"type": "text", "text": "unexpected additional properties [\"file\"]"}], "isError": True}}),
         rec("event_msg", 14, {"type": "token_count", "info": {}}),
         {"timestamp": ts(15), "type": "brand_new_record", "payload": {"type": "mystery"}},

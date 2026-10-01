@@ -231,7 +231,7 @@ func TestGitGuardStashDenyNamesThePathStash(t *testing.T) {
 
 func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 	command := "git status && git add f && git commit -m x; git push"
-	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, t.TempDir(), "general-smart-executor"))
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, t.TempDir(), "general-executor"))
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 	}
@@ -248,7 +248,7 @@ func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 
 func TestGitGuardDeniesAGitCommandItCannotRead(t *testing.T) {
 	command := `bash -c "git commit -m 'x"`
-	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, t.TempDir(), "general-smart-executor"))
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, t.TempDir(), "general-executor"))
 	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
 	}

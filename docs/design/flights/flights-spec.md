@@ -21,7 +21,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 ## S1 — Walk the code
 
-Read the child `CLAUDE.md` of every project the tasks touch (the root one the chat already holds): the specs must stay inside their rules, and S2 must not re-ask what they settle. Then one message of probes, one per area the tasks touch: `tracer` for a question ("who feeds X", "where does Y end"), `mapper` for a whole area ("everything about the users table"). Each probe returns a map of about one page with no file content quoted: where the area lives, who writes and reads it, which files would change, where the codebase already solves a similar problem, how the area is checked, and every referent the tasks name that does not exist. Probes retrieve; the command judges and asks. After spawning the round the command ends its message and lets the maps arrive.
+Read the child `CLAUDE.md` of every project the tasks touch (the root one the chat already holds): the specs must stay inside their rules, and S2 must not re-ask what they settle. Then one message of probes, one per area the tasks touch: a `tracer`, its numbered questions covering the area ("who feeds X", "where does Y end"). Each probe returns a map of about one page with no file content quoted: where the area lives, who writes and reads it, which files would change, where the codebase already solves a similar problem, how the area is checked, and every referent the tasks name that does not exist. Probes retrieve; the command judges and asks. After spawning the round the command ends its message and lets the maps arrive.
 
 A referent that does not exist, an edit two tasks would both make to one target, or a dependency nobody can order is a question for S2, never a silent fix.
 
@@ -39,7 +39,7 @@ The rounds work like this:
 - Round one always holds the scope boundary (the user's whole objective restated, what this flight includes, what it defers; scope never narrows silently) and every task the maps could not ground (`NEEDS-USER-SPEC`): specify, defer or drop.
 - A round asks the whole frontier in one plain-text message, numbered, each question with its recommended answer. The chat then ends its turn and waits.
 - Each answer pushes the frontier outward. The chat recomputes it and asks the next round.
-- Facts are the chat's job. A question that needs one goes to a `tracer` or `mapper` probe, and only the questions downstream of a running probe wait for it.
+- Facts are the chat's job. A question that needs one goes to a `tracer` probe, and only the questions downstream of a running probe wait for it.
 - The grill ends when the frontier is empty. The rulings are restated as one numbered list, and the hand-off waits for the user to confirm that list.
 
 A round is a chat message, not an `AskUserQuestion` call: the frontier can hold more than the four questions one call admits, and each question carries a recommended answer the user can accept in one word.

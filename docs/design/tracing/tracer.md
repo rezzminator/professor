@@ -1,6 +1,6 @@
 # tracer
 
-`tracer` answers a spec writer's numbered questions about a codebase from its code, in prose, each fact a `path:line` with the line quoted. It is a `general-purpose` reader made specific to that caller: the prompt keeps what an open-hand agent does well and fixes what it did wrong or wasted, measured against an independent key. It uses no script and writes no file; the final message is the answer. Exact text only goes to `collector`, a whole area to `mapper`. It ships in three tiers of one body: `tracer` → `tracer-pro` → `tracer-pro-max`.
+`tracer` answers a spec writer's numbered questions about a codebase from its code, in prose, each fact a `path:line` with the line quoted. It is a `general-purpose` reader made specific to that caller: the prompt keeps what an open-hand agent does well and fixes what it did wrong or wasted, measured against an independent key. It uses no script and writes no file; the final message is the answer. Exact text only goes to `collector`. It ships in three tiers of one body: `tracer` → `tracer-pro` → `tracer-pro-max`.
 
 ## Contents
 

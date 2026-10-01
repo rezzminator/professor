@@ -1,6 +1,6 @@
 ---
 name: tracer
-description: 'Answers a spec writer''s numbered questions from code — tier 1, the default: tracer → tracer-pro → tracer-pro-max. "Every caller of X and what each does", "which tests pin X", "what happens when X fails", "quote X". Pass the repo root and the questions. Returns prose by question with path:line and quoted lines, test homes, the check command, NOT READ. A whole area → mapper; exact text → collector.'
+description: 'Answers a spec writer''s numbered questions from code — tier 1, the default: tracer → tracer-pro → tracer-pro-max. "Every caller of X and what each does", "which tests pin X", "what happens when X fails", "quote X". Pass the repo root and the questions. Returns prose by question with path:line and quoted lines, test homes, the check command, NOT READ. Exact text → collector.'
 tools: Read, Grep, Glob, Bash
 model: sonnet
 effort: high

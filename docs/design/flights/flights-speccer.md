@@ -41,7 +41,7 @@ Three consequences shape everything below.
 ### Human in the loop: `/flights:spec`
 
 1. The user calls `/flights:spec`.
-2. The command sends `tracer` and `mapper` agents to map the area.
+2. The command sends `tracer` agents to map the area.
 3. The command asks the user its questions, technical and product.
 4. The command hands `flights-speccer` the decisions, the maps, the requirements and the flight directory.
 5. `flights-speccer` writes the flight directory and returns.

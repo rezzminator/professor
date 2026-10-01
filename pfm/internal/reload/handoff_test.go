@@ -142,6 +142,50 @@ func TestAdoptHandoffUsesEntryAndBreadcrumbAndExplicitFlags(t *testing.T) {
 	}
 }
 
+func TestAdoptHandoffKeepsTheReloadsOwnResolutionForAnOlderRecordWithoutBreadcrumb(t *testing.T) {
+	entry := time.Unix(200000, 0)
+	for _, tc := range []struct {
+		name    string
+		engine  pfmengine.ID
+		written time.Time
+		adopt   bool
+	}{
+		{name: "stale Codex", engine: pfmengine.Codex, written: entry.Add(-48 * time.Hour)},
+		{name: "stale Claude", engine: pfmengine.Claude, written: entry.Add(-time.Second)},
+		{name: "queued Codex", engine: pfmengine.Codex, written: entry.Add(time.Second), adopt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv(paths.EnvHome, t.TempDir())
+			record := handoffRecord{Engine: tc.engine, SessionID: "session-x", Account: 2, CWD: dir, WrittenAt: tc.written}
+			request := Request{
+				Engine: tc.engine, SocketPath: "/tmp/probe-1", Pane: "%7",
+				SessionID: "session-z", Account: 1, AccountIDs: []int{1, 2}, CWD: dir,
+				LeftBehind: "request-left-behind", Machine: reloadTestMachine("", dir),
+			}
+			if tc.engine == pfmengine.Codex {
+				request.Machine = pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{
+					{ID: 1, Home: dir}, {ID: 2, Home: dir},
+				}}
+			}
+			got, left, adopted, err := adoptHandoff(request, record, entry, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if adopted != tc.adopt {
+				t.Fatalf("adopted=%t, want %t; session=%q", adopted, tc.adopt, got.SessionID)
+			}
+			if tc.adopt {
+				if got.SessionID != record.SessionID || got.Account != record.Account || left != record.SessionID {
+					t.Fatalf("queued handoff request=%+v left=%q", got, left)
+				}
+			} else if got.SessionID != request.SessionID || got.Account != request.Account || left != request.LeftBehind {
+				t.Fatalf("stale handoff request=%+v left=%q", got, left)
+			}
+		})
+	}
+}
+
 func TestAdoptHandoffRefusesUnknownCodexConversation(t *testing.T) {
 	request := Request{Engine: pfmengine.Codex, SocketPath: "/tmp/cx-1", Pane: "%7"}
 	record := handoffRecord{Engine: pfmengine.Codex, WrittenAt: time.Unix(2, 0)}

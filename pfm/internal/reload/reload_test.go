@@ -429,8 +429,8 @@ func TestRunQueuesBehindAnOverlappingPaneReload(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
-			PanePID: 700, SessionID: "11111111-1111-4111-8111-111111111111",
-			CWD: "/jail/project", Account: 1, AccountIDs: []int{1}, Then: "S",
+			SessionID: "11111111-1111-4111-8111-111111111111",
+			CWD:       "/jail/project", Account: 1, AccountIDs: []int{1}, Then: "S",
 			Machine: reloadTestMachine("", dir),
 		},
 		Options{SIDDir: dir, Delay: -1, Poll: -1, IdleTries: 5, ExitTries: 2, ThenTries: 2, Clock: clk},
@@ -627,7 +627,7 @@ func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.OpenCode, SocketPath: "/tmp/ox-session", Pane: "%7",
-			PanePID: 700, Account: 1, AccountIDs: []int{1}, CWD: "/work",
+			Account: 1, AccountIDs: []int{1}, CWD: "/work",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
 		tmux, nil, nil,
@@ -664,7 +664,6 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 					Engine:     pfmengine.Claude,
 					SocketPath: "/tmp/tmux-1000/probe-reload",
 					Pane:       "%7",
-					PanePID:    700,
 					SessionID:  "11111111-1111-4111-8111-111111111111",
 					CWD:        "/jail/project",
 					Account:    2,
@@ -725,7 +724,7 @@ func TestRunWaitsForExitTextToRenderBeforeSubmitting(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-reload-render", Pane: "%7",
-			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
+			SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
 			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
@@ -753,7 +752,7 @@ func TestRunRefusesBlindExitWhenTextNeverRenders(t *testing.T) {
 		ctx,
 		Request{
 			Engine: pfmengine.Codex, SocketPath: filepath.Join(t.TempDir(), "fake-codex-socket"), Pane: "%7",
-			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
+			SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
 			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
@@ -777,7 +776,6 @@ func TestRunWaitsForTheRebornPromptBeforeCheckingClaudeAndSubmittingThen(t *test
 			Engine:     pfmengine.Claude,
 			SocketPath: "/tmp/tmux-1000/probe-reload-then",
 			Pane:       "%7",
-			PanePID:    700,
 			SessionID:  "11111111-1111-4111-8111-111111111111",
 			CWD:        "/jail/project",
 			Account:    1,

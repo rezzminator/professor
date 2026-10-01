@@ -15,12 +15,13 @@ import (
 )
 
 type handoffRecord struct {
-	Engine    pfmengine.ID `json:"engine"`
-	SessionID string       `json:"session_id"`
-	Account   int          `json:"account"`
-	Cache1H   bool         `json:"cache_1h"`
-	CWD       string       `json:"cwd"`
-	WrittenAt time.Time    `json:"written_at"`
+	Engine     pfmengine.ID `json:"engine"`
+	SessionID  string       `json:"session_id"`
+	LeftBehind string       `json:"left_behind"`
+	Account    int          `json:"account"`
+	Cache1H    bool         `json:"cache_1h"`
+	CWD        string       `json:"cwd"`
+	WrittenAt  time.Time    `json:"written_at"`
 }
 
 func prepareReload(request Request) (Request, string, bool, error) {
@@ -70,12 +71,12 @@ func continueFromHandoff(
 	if !exists {
 		return request, "", request.LeftBehind, false, nil
 	}
-	updated, leftBehind, adopted, err := adoptHandoff(request, record, entry, sidDir)
+	updated, continuedID, adopted, err := adoptHandoff(request, record, entry, sidDir)
 	if err != nil {
 		return request, "", "", false, err
 	}
 	if !adopted {
-		return request, "", leftBehind, false, nil
+		return request, "", continuedID, false, nil
 	}
 	updated, run, wasNew, err := prepareReload(updated)
 	if err != nil {
@@ -84,10 +85,10 @@ func continueFromHandoff(
 	fmt.Fprintf(
 		stderr,
 		"pfm chat reload: the reload before this one rebooted this pane — continuing from session %s on account %d\n",
-		record.SessionID,
+		continuedID,
 		record.Account,
 	)
-	return updated, run, leftBehind, wasNew, nil
+	return updated, run, continuedID, wasNew, nil
 }
 
 func readHandoff(lock *os.File) (handoffRecord, bool, error) {
@@ -151,22 +152,29 @@ func adoptHandoff(
 	if !record.WrittenAt.After(entry) && err == nil && !info.ModTime().Before(record.WrittenAt) {
 		return request, request.LeftBehind, false, nil
 	}
+	continuedID := record.SessionID
 	if !request.New {
 		if record.SessionID == "" {
-			return request, "", false, errors.New(
-				"the reload before this one started a new Codex conversation whose id is not known yet — nothing changed; reload again once that chat has answered",
-			)
+			if record.Engine != pfmengine.Codex || request.SessionID == "" ||
+				request.Transcript == "" || record.LeftBehind == "" ||
+				request.SessionID == record.LeftBehind {
+				return request, "", false, errors.New(
+					"the reload before this one started a new Codex conversation whose id is not known yet — nothing changed; reload again once that chat has answered",
+				)
+			}
+			continuedID = request.SessionID
+		} else {
+			values, err := pfmconfig.ResolvePaths()
+			if err != nil {
+				return request, "", false, fmt.Errorf("resolve reload transcript paths: %w", err)
+			}
+			transcript, err := SessionTranscript(values, request.Machine, request.Engine, record.SessionID)
+			if err != nil {
+				return request, "", false, fmt.Errorf("find reload handoff transcript: %w", err)
+			}
+			request.SessionID, request.Transcript = record.SessionID, transcript
+			request.fresh = transcript == ""
 		}
-		values, err := pfmconfig.ResolvePaths()
-		if err != nil {
-			return request, "", false, fmt.Errorf("resolve reload transcript paths: %w", err)
-		}
-		transcript, err := SessionTranscript(values, request.Machine, request.Engine, record.SessionID)
-		if err != nil {
-			return request, "", false, fmt.Errorf("find reload handoff transcript: %w", err)
-		}
-		request.SessionID, request.Transcript = record.SessionID, transcript
-		request.fresh = transcript == ""
 	}
 	if !request.AccountGiven {
 		selection, err := ValidateAccount(request.Machine, request.Engine, record.Account)
@@ -183,5 +191,5 @@ func adoptHandoff(
 	if info, err := os.Stat(record.CWD); err == nil && info.IsDir() {
 		request.CWD = record.CWD
 	}
-	return request, record.SessionID, true, nil
+	return request, continuedID, true, nil
 }

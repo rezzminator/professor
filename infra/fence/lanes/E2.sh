@@ -307,6 +307,8 @@ if requires E2.01-open-seat; then
     # --sock: the ONE handle a caller outside the pane has — no model, pfm
     # resolves the socket's single live pane itself.
     before_pid="$(pane_pid)"
+    worker_start="$(wc -c <"$worker_log" 2>/dev/null | tr -d ' ')"
+    [ -n "$worker_start" ] || worker_start=0
     out="$(pfm chat reload --sock "$sock" --then "reply with exactly one word: RELOADED-CX-3" 2>&1)"
     rc=$?
     if [ "$rc" -ne 0 ]; then
@@ -314,9 +316,9 @@ if requires E2.01-open-seat; then
     elif ! grep -q 'reload scheduled in place' <<<"$out"; then
       bad="$bad [--sock]: exit 0 but the scheduler did not report 'reload scheduled in place': $(one_line "$out");"
     elif ! wait_for 300 "[ -n \"\$(pane_pid)\" ] && [ \"\$(pane_pid)\" != '$before_pid' ]"; then
-      bad="$bad [--sock]: scheduled, but the pane was never respawned in 300s (pane pid still $before_pid); ${LANE_WAIT_WHY:-no wait reason recorded};"
+      bad="$bad [--sock]: scheduled, but the pane was never respawned in 300s (pane pid still $before_pid); ${LANE_WAIT_WHY:-no wait reason recorded}; worker: $(one_line "$(tail -c "+$((worker_start + 1))" "$worker_log" 2>/dev/null | tail -n 5)");"
     elif ! wait_prompt "$(addr)" RELOADED-CX-3 300; then
-      bad="$bad [--sock]: respawned but no user steer RELOADED-CX-3: ${LANE_WAIT_WHY:-no wait reason recorded};"
+      bad="$bad [--sock]: respawned but no user steer RELOADED-CX-3: ${LANE_WAIT_WHY:-no wait reason recorded}; worker: $(one_line "$(tail -c "+$((worker_start + 1))" "$worker_log" 2>/dev/null | tail -n 5)");"
     fi
     exercised="$exercised --sock,"
   fi

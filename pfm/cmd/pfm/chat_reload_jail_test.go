@@ -768,6 +768,128 @@ func TestChatReloadWorkerContinuesAccountAfterNew(t *testing.T) {
 	}
 }
 
+func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
+	root := jailTest(t)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 is not installed")
+	}
+	const (
+		oldID = "11111111-1111-4111-8111-111111111111"
+		newID = "22222222-2222-4222-8222-222222222222"
+		then  = "BOUND-CODEX-THEN"
+	)
+	promptScript := filepath.Join(t.TempDir(), "prompt.py")
+	if err := os.WriteFile(promptScript, []byte(strings.ReplaceAll(reloadPromptFixture, "❯", "›")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	argvFile := filepath.Join(t.TempDir(), "codex-argv.txt")
+	fixtureCodex := filepath.Join(t.TempDir(), "codex-fixture.sh")
+	script := "#!/bin/sh\n{ printf 'CALL\\n'; for a in \"$@\"; do printf 'ARG:%s\\n' \"$a\"; done; } >> '" + argvFile + "'\nexec bash -c 'exec -a codex-fixture.sh python3 " + promptScript + "'\n"
+	if err := os.WriteFile(fixtureCodex, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	codexHome := filepath.Join(root, "codex")
+	configPath := writeConfigFixture(t, root, `{"version":1,"codex":{"binary":"`+fixtureCodex+`","homes":[{"id":1,"home":"`+codexHome+`"}]}}`)
+	runtime, err := pfmconfig.LoadRuntime(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.ProcRoot = "/proc"
+	socket := strings.Replace(probeReloadSocket(t, "bound-new"), "cc-probe-", "cx-probe-", 1)
+	server := exec.Command("tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-s", "probe", "python3", promptScript)
+	server.Env = append(server.Environ(), "TMUX=")
+	if output, err := server.CombinedOutput(); err != nil {
+		t.Fatalf("start Codex probe socket: %v: %s", err, output)
+	}
+	cleanupProbeReloadSocket(t, socket)
+	paneOutput, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pane := strings.TrimSpace(string(paneOutput))
+	for _, id := range []string{oldID, newID} {
+		rollout := filepath.Join(codexHome, "sessions", "rollout-2026-08-24T00-00-00-"+id+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(rollout), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(rollout, []byte(`{"cwd":"`+root+`"}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bind := func(id string) {
+		database, err := store.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager, err := kill.New(database, fleet.KillDependencies(runtime))
+		if err != nil {
+			_ = database.Close()
+			t.Fatal(err)
+		}
+		if _, _, err := manager.AdvanceCodexPane(context.Background(), filepath.Base(socket), pane, id); err != nil {
+			_ = database.Close()
+			t.Fatal(err)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bind(oldID)
+	t.Setenv("PFM_RELOAD_DELAY_MS", "0")
+	t.Setenv("PFM_RELOAD_POLL_MS", "20")
+	t.Setenv("PFM_RELOAD_EXIT_TRIES", "50")
+	t.Setenv("PFM_RELOAD_IDLE_TRIES", "500")
+	t.Setenv("PFM_RELOAD_THEN_TRIES", "500")
+	var stdout, stderr bytes.Buffer
+	if code := runChatReloadWorkerWithRuntime([]string{"--sock", socket, "--new", "--hide"}, &stdout, &stderr, runtime, nil); code != 0 {
+		t.Fatalf("new reload rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	lockPath := reload.LockPath(runtime.Paths.SIDDir, filepath.Base(socket), pane)
+	readHandoff := func() (string, string) {
+		content, err := os.ReadFile(lockPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var record struct {
+			SessionID  string `json:"session_id"`
+			LeftBehind string `json:"left_behind"`
+		}
+		if err := json.Unmarshal(content, &record); err != nil {
+			t.Fatal(err)
+		}
+		return record.SessionID, record.LeftBehind
+	}
+	if sessionID, leftBehind := readHandoff(); sessionID != "" || leftBehind != oldID {
+		t.Fatalf("new handoff session=%q left behind=%q", sessionID, leftBehind)
+	}
+	bind(newID)
+	stdout.Reset()
+	stderr.Reset()
+	if code := runChatReloadWorkerWithRuntime([]string{"--sock", socket, "--then", then}, &stdout, &stderr, runtime, nil); code != 0 {
+		t.Fatalf("bound reload rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "continuing from session "+newID+" on account 1") {
+		t.Fatalf("continued conversation absent from stderr: %q", stderr.String())
+	}
+	if sessionID, leftBehind := readHandoff(); sessionID != newID || leftBehind != newID {
+		t.Fatalf("continued handoff session=%q left behind=%q", sessionID, leftBehind)
+	}
+	argv, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(argv), "ARG:resume\nARG:"+newID+"\n") {
+		t.Fatalf("reborn Codex did not resume bound conversation: %q", argv)
+	}
+	output, err := exec.Command("tmux", "-S", socket, "capture-pane", "-p").Output()
+	if err != nil || !strings.Contains(string(output), then) {
+		t.Fatalf("reborn pane steer=%q err=%v", output, err)
+	}
+}
+
 func TestChatReloadWorkerHidesTheSessionItContinuedFrom(t *testing.T) {
 	configPath, socket, _ := reloadWorkerAccountFixture(t)
 	runtime, err := pfmconfig.LoadRuntime(configPath)

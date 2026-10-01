@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -113,8 +114,10 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 				t.Fatalf("Launch code=%d stderr=%q", code, stderr.String())
 			}
 			if !test.session {
-				if !reflect.DeepEqual(got, inherited) {
-					t.Fatalf("non-session env changed: got=%q want=%q", got, inherited)
+				// Only the re-entry marker joins an otherwise untouched environment.
+				want := append(append([]string(nil), inherited...), "PFM_CLAUDE_LAUNCH_PID="+strconv.Itoa(os.Getpid()))
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("non-session env changed: got=%q want=%q", got, want)
 				}
 				return
 			}

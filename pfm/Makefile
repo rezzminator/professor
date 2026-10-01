@@ -118,9 +118,12 @@ lint: ## Every finding in the module — the burn-down view
 # `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
 # fence-wide it hijacks every `git init` the test suite runs.
 FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
+# GOMEMLIMIT: a change to a widely imported package (testjail, deps) leaves the
+# lint cache cold for its importers; golangci-lint then peaked at 1752 MiB and
+# was OOM-killed in the 2 GiB fence. Capped at 1000MiB it peaked at 1289 MiB.
 lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gate view
 	$(call need-tool,LINT)
-	$(FENCE_GIT) $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
+	$(FENCE_GIT) GOMEMLIMIT=1000MiB $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 
 vet: ## go vet the whole module
 	go vet ./...

@@ -55,6 +55,19 @@ var KeepAmbientIdentity bool
 // /tmp is the answer to both: it is short everywhere, and resolving it once
 // yields /private/tmp on macOS and /tmp on Linux — canonical on each.
 func Run(m *testing.M) int {
+	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
+	// `claude` launcher shim; a jailed test resolving a binary through PATH must
+	// never reach it. Scrub before anything below resolves a binary.
+	hostEnv := paths.OSEnv{}
+	operatorHome, homeErr := hostEnv.Home()
+	if homeErr != nil {
+		warnSetup("user home unknown, stripping only pfm install bin dirs from PATH: %v", homeErr)
+		operatorHome = ""
+	}
+	if err := os.Setenv("PATH", scrubOperatorPATH(hostEnv.Get("PATH"), operatorHome)); err != nil {
+		warnSetup("scrub PATH: %v", err)
+		return 1
+	}
 	// Installer tests must not inherit an operator account as an MCP write
 	// target. Packages that can install host state enter through this jail.
 	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {
@@ -135,6 +148,49 @@ func Run(m *testing.M) int {
 	}
 	defer jailHome(base)()
 	return m.Run()
+}
+
+// pfmInstallBinSuffix is the tail of pfm's managed install bin dir, whichever
+// home owns it.
+var pfmInstallBinSuffix = filepath.Join(".local", "share", "pfm", "install", "bin")
+
+// scrubOperatorPATH drops every PATH entry that is <home>/.local/bin or a pfm
+// install bin dir (a path ending .local/share/pfm/install/bin, any home),
+// comparing after filepath.Clean and, where it resolves, EvalSymlinks. Order
+// and every other entry — empty ones included — are kept. An empty home matches
+// no ~/.local/bin, so only install bin dirs go.
+func scrubOperatorPATH(pathEnv, home string) string {
+	var homeBins []string
+	if home != "" {
+		bin := filepath.Join(home, ".local", "bin")
+		homeBins = append(homeBins, bin)
+		if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+			homeBins = append(homeBins, filepath.Clean(resolved))
+		}
+	}
+	isOperatorBin := func(candidate string) bool {
+		candidate = filepath.Clean(candidate)
+		for _, bin := range homeBins {
+			if candidate == bin {
+				return true
+			}
+		}
+		return candidate == pfmInstallBinSuffix ||
+			strings.HasSuffix(candidate, string(filepath.Separator)+pfmInstallBinSuffix)
+	}
+	var kept []string
+	for _, entry := range filepath.SplitList(pathEnv) {
+		if entry != "" {
+			if isOperatorBin(entry) {
+				continue
+			}
+			if resolved, err := filepath.EvalSymlinks(entry); err == nil && isOperatorBin(resolved) {
+				continue
+			}
+		}
+		kept = append(kept, entry)
+	}
+	return strings.Join(kept, string(os.PathListSeparator))
 }
 
 // warnSetup reports a testjail setup failure on stderr, in the "testjail:

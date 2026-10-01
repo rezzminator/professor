@@ -1,7 +1,11 @@
-# Gate wall budgets: 2026-09-30 medians of three eligible iso gate runs,
-# rounded up; ratchet a pinned budget down only.
+# Gate wall budgets: maximum WALL of three eligible 2026-10-01 iso gate all
+# captures r5/all-2, all-3, all-4, rounded up and doubled, the same rule as
+# pfm/.testtiming.yml. The pfm and templates targets take the all budget
+# because each runs a subset of its steps.
+# Host load 1m ranged 8.00-12.69 across these captures.
+# Evidence: $HOME/.local/state/pfm/flights/professor/fast-gate/measure/r5/.
 tolerance: 1.25
 gate:
-  all: 121
-  pfm: 106
-  templates: 15
+  all: 198
+  pfm: 198
+  templates: 198

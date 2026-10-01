@@ -73,9 +73,9 @@ Run the parser inside the fence against captures available on its artifact mount
 
 Malformed or incomplete input, unreadable budgets, missing dependencies, failed tests, missing packages, and exceeded budgets must remain distinct from success. The shell fixture suites exercise these failure paths through `dev.sh iso run`.
 
-The steady-state ratchet uses three independent successful captures with identical package sets and flags. Record host load and uptime before and after each capture. A failed run cannot establish or lower a budget. For the sharded unit re-baseline above, an `iso gate` run whose only red is package timing against the superseded unit block is an eligible capture when its tests and skip checks pass and it has no `SHARD-LOST`. Median durations are rounded up to seconds. Preserve all raw captures beside the measurement log so each budget can be traced back to evidence.
+The steady-state ratchet uses three independent successful captures with identical package sets and flags. Record host load and uptime before and after each capture. A failed run cannot establish or lower a budget. For the sharded unit re-baseline above, an `iso gate` run whose only red is package timing against the superseded unit block is an eligible capture when its tests and skip checks pass and it has no `SHARD-LOST`. Preserve all raw captures beside the measurement log so each budget can be traced back to evidence.
 
-For the shared-host unit block at `-p 4 -parallel 4`, the current baseline uses the maximum of three passing fenced captures, rounded up and doubled per package and suite. The tagged e2e block retains its initial serial-capture rule: round up and double. Both blocks are checked at budget × `tolerance` (`1.25`). This shared-host rule does not claim a quiet-host median; a later measurement can establish one.
+At `-p 6 -parallel 4`, the unit block, tagged e2e block, and gate walls use one rule: take the maximum of three eligible `iso gate all` captures, round up to whole seconds (with a one-second floor), then double each package, suite, and gate target budget. `pfm` and `templates` take the `all` gate budget because each runs a subset of its steps. Every budget is checked at budget × `tolerance` (`1.25`). The doubling absorbs shared-host load: clean `all` walls of one tree spanned 61.3–115.6 s on 2026-10-01; the slowest was the first gate after a merge, with cold build and lint caches.
 
 ## Concurrency sweep
 
@@ -87,72 +87,78 @@ The unit gate is pinned at `-p 6 -parallel 4` by the [2026-10 hermetic sweep](co
 
 ## Accepted measurements
 
-The tagged e2e budget remains from the 2026-09-18 serial capture: 09:03:42 to 09:05:36 UTC, load 10.25 → 14.63, event span 111.784 s, rounded up and doubled to 224 s. Its raw JSON, TSV, candidates, and load evidence are under `tmp/timing/provisional-serial-utf8-20260918/`.
+The 2026-10-01 baseline uses the three eligible `iso gate all` captures `all-2`, `all-3`, and `all-4` under `$HOME/.local/state/pfm/flights/professor/fast-gate/measure/r5/`. All 79 unit package rows, the unit suite, the tagged e2e package and suite, and every gate step passed. Each capture had `EGRESS PASS`, zero `memory.swap.peak`, and an exclusive lock with zero fence containers. The `all-1` and `all-2-pre-ruling` timing-only reds are retained beside them; neither supplies a baseline span. The two new pricing rows were set to 2 s each from `all-1` before the three eligible captures.
 
-The 2026-09-30 sharded unit baseline uses the three eligible `iso gate` captures `all-1`, `all-2`, and `all-3` under `$HOME/.local/state/pfm/flights/professor/fast-gate/measure/r3/`. All 77 packages and the suite passed test execution; their only gate red was timing against the superseded unit block. Unit SUITE event spans were 88.992, 85.286, and 91.026 s. The maximum, rounded up and doubled, sets the unit suite budget to 184 s; the same rule sets every package row. The per-package values and old/new budgets are in `$HOME/.local/state/pfm/flights/professor/fast-gate/measure/unit-derivation.tsv`. Each capture rechecked green against the new block. The recorded one-minute host load across these captures ranged from 3.85 to 18.55.
+The unit SUITE event spans were 49.790, 40.513, and 29.297 s. The maximum, rounded up and doubled, sets `unit.wall_s` to 100 s. The tagged e2e SUITE spans were 74.988, 61.079, and 45.553 s, setting `e2e.wall_s` to 150 s by the same rule. Every package row uses its own maximum. Old budgets, all three spans, and the new values are in `measure/r5/derivation.tsv`; the stored unit and e2e streams rechecked green against the new file.
 
-The gate wall budgets are the rounded-up medians of three eligible 2026-09-30 captures per target. The shared host's load was recorded and did not disqualify a run.
+The `all` gate wall budget is the maximum of its three WALL values, rounded up and doubled: 98.6 s becomes 198 s. `pfm` and `templates` take the same 198 s budget because each target runs a subset of `all`.
 
-| Target | Three WALL values (s) | Start load range | End load range | Median (s) | Budget (s) |
+| Target | Three WALL values (s) | Three memory peaks (MB) | Start → end 1m loads | Max WALL (s) | Budget (s) |
 | --- | --- | --- | --- | --- | --- |
-| `all` | 119.8, 120.2, 122.2 | 3.85–16.03 | 14.30–18.55 | 120.2 | 121 |
-| `pfm` | 106.0, 105.6, 104.4 | 14.60–18.51 | 13.91–16.30 | 105.6 | 106 |
-| `templates` | 14.4, 13.6, 14.4 | 6.76–7.67 | 7.23–8.08 | 14.4 | 15 |
+| `all` | 98.6, 78.2, 61.3 | 1972, 1891, 2062 | 8.26→12.69, 8.00→10.92, 8.98→9.40 | 98.6 | 198 |
+| `pfm` | subset of `all` | bounded by `all` | same captures | bounded by `all` | 198 |
+| `templates` | subset of `all` | bounded by `all` | same captures | bounded by `all` | 198 |
 
-The median `all` wall missed the ≤45 s target by 75.2 s. Its `gate.tsv` below is from `measure/r3/all-2/`; `pfm.unit` and `WALL` read FAIL because that capture was judged against the superseded unit block. The post-pin `all` run printed `budget: ✓ gate(all)`, 136 s within its 151 s tolerated ceiling, but its steps were red: seven unit package timing rows exceeded the new block and the lane map self-test found `UNMAPPED-TOOL: harvester_read`. That run is retained as `measure/r3/all-judged/`, outside the baseline.
+The median `all` wall fell from r3's 120.2 s to 78.2 s, but still misses the ≤45 s target by 33.2 s. The memory-peak median was 1972 MB, and swap was zero in all three captures. `r5/all-1` (115.6 s, timing-only red on the superseded file) and `r4/all-1` (106.0 s, eight reds since repaired) remain outside the baseline and recheck green against the 198 s gate budget.
+
+The median capture's `gate.tsv`, from `measure/r5/all-3/run.rlWIks/`:
 
 ```text
 step	verdict	seconds
-pfm.unit	FAIL	106.4
-pfm.e2e	PASS	120.2
-pfm.lint-new	PASS	74.7
-templates.check-map	PASS	10.5
-templates.lanes.check-map	PASS	2.9
-templates.lanes.checks	PASS	0.3
-templates.lanes.container	PASS	0.2
+pfm.unit	PASS	56.2
+pfm.e2e	PASS	63.6
+pfm.self.arch-c24	PASS	1.4
+pfm.self.arch-check	PASS	4.7
+pfm.self.host-window	PASS	3.3
+pfm.self.install-downgrade-guard	PASS	2.4
+pfm.self.rollback-guard	PASS	0.9
+pfm.self.skip-check	PASS	0.8
+pfm.self.test-shard	PASS	3.8
+pfm.self.test-sweep	PASS	2.7
+pfm.self.test-timing	PASS	5.3
+templates.lanes.check-map	PASS	3.8
+templates.lanes.checks	PASS	0.8
+templates.lanes.container	PASS	0.4
 templates.lanes.cred-scan	PASS	0.4
-templates.lanes.host-backup	PASS	1.0
-templates.lanes.host-rehearsal	PASS	13.5
-templates.lanes.housekeeping	PASS	3.7
-templates.lanes.iso-housekeeping	PASS	0.7
-templates.lanes.lib	PASS	6.1
-templates.lanes.mcp-stdio	PASS	3.0
-templates.lanes.release-rehearsal	PASS	0.1
-templates.lanes.root	PASS	2.6
-templates.lanes.run	PASS	2.3
-templates.lanes.steps	PASS	0.8
-pfm.vet	PASS	48.5
-pfm.vet-darwin	PASS	48.0
-pfm.fmt-check	PASS	75.1
-pfm.arch	PASS	86.9
-pfm.self.arch-c24	PASS	2.6
-pfm.self.arch-check	PASS	2.9
-pfm.self.host-window	PASS	1.9
-pfm.self.install-downgrade-guard	PASS	3.0
-pfm.self.rollback-guard	PASS	0.3
-pfm.self.skip-check	PASS	0.3
-pfm.self.test-shard	PASS	17.6
-pfm.self.test-sweep	PASS	60.1
-pfm.self.test-timing	PASS	62.9
-templates.demo.codex_fence_home	PASS	5.3
-templates.clone	PASS	27.4
-templates.leak	PASS	51.3
-templates.placeholders	PASS	0.5
-templates.scratch-paths	PASS	18.3
-templates.descriptions	PASS	7.0
-templates.mirrors	PASS	20.8
-templates.token-pricing	PASS	0.3
-templates.token-audit	PASS	13.9
-templates.release-check	PASS	16.1
-templates.codex-sync	PASS	0.3
-templates.refresh-scope	PASS	3.2
-templates.pfm-guard	PASS	1.6
-templates.dev-report	PASS	1.3
-templates.opencode-writer-tests	PASS	1.5
-templates.codeprobe	PASS	7.0
-templates.opencode-writer-refs	PASS	0.3
-WALL	FAIL	120.2
+templates.lanes.egress	PASS	3.4
+templates.lanes.host-backup	PASS	1.1
+templates.lanes.host-rehearsal	PASS	4.8
+templates.lanes.housekeeping	PASS	4.8
+templates.lanes.image-key	PASS	4.0
+templates.lanes.iso-housekeeping	PASS	3.4
+templates.lanes.lib	PASS	4.6
+templates.lanes.mcp-stdio	PASS	3.2
+templates.lanes.release-rehearsal	PASS	0.2
+templates.lanes.root	PASS	4.1
+templates.lanes.run	PASS	6.6
+templates.lanes.steps	PASS	1.9
+templates.demo.codex_fence_home	PASS	0.1
+pfm.lint-new	PASS	8.7
+pfm.vet	PASS	5.9
+pfm.vet-darwin	PASS	2.3
+pfm.fmt-check	PASS	6.4
+pfm.arch	PASS	8.9
+templates.check-map	PASS	2.2
+templates.clone	PASS	1.1
+templates.leak	PASS	6.2
+templates.placeholders	PASS	0.1
+templates.scratch-paths	PASS	3.9
+templates.descriptions	PASS	0.7
+templates.mirrors	PASS	5.4
+templates.token-audit	PASS	4.4
+templates.flight-index	PASS	0.6
+templates.release-check	PASS	2.3
+templates.codex-sync	PASS	0.1
+templates.refresh-scope	PASS	0.6
+templates.pfm-guard	PASS	0.2
+templates.dev-report	PASS	0.2
+templates.opencode-writer-tests	PASS	0.2
+templates.skill-tests	PASS	2.4
+templates.opencode-writer-refs	PASS	0.0
+WALL	PASS	78.2
 ```
+
+The tagged e2e budget from the 2026-09-18 serial capture was 224 s: 09:03:42 to 09:05:36 UTC, load 10.25 → 14.63, event span 111.784 s. The r5 e2e rows supersede that budget; its raw JSON, TSV, candidates, and load evidence remain under `tmp/timing/provisional-serial-utf8-20260918/`.
 
 The superseded unit block was re-baselined on 2026-09-27 at `-p 4 -parallel 4` from `speed-3a-1`, `speed-3a-1-repeat`, and `speed-3a-2`. Their start loads were 19.55, 26.08, and 18.25; SUITE event spans were 239.680, 227.630, and 260.828 s. Twice the rounded-up maximum gives a 522 s unit suite budget, down from the serial-calibrated 1174 s. All 76 package rows and the suite passed re-checks against that 2026-09-27 file; the independent `speed-3a-3` validation passed at 234.939 s event span and 246.774 s host wall. Raw JSON, TSV, check logs, metadata, and the derivation table are under `$HOME/.local/state/pfm/flights/professor/test-speed/rebaseline/`; the capture table, with host walls and dates, is in [concurrency-sweep.md](concurrency-sweep.md).
 

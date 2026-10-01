@@ -56,7 +56,7 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-codex-then", Pane: "%7",
-			PanePID: 700, Then: "continue the task",
+			Then: "continue the task",
 		},
 		Options{ThenTries: 2},
 		tmux,
@@ -79,7 +79,6 @@ func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 			Engine:     pfmengine.Claude,
 			SocketPath: "/tmp/tmux-1000/probe-reload-then-pid",
 			Pane:       "%7",
-			PanePID:    tmux.oldPID,
 			SessionID:  "11111111-1111-4111-8111-111111111111",
 			CWD:        "/jail/project",
 			Account:    2,
@@ -136,7 +135,7 @@ func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-wrapped-then", Pane: "%7",
-			PanePID: 700, Then: then,
+			Then: then,
 		},
 		Options{ThenTries: 2},
 		tmux,
@@ -199,7 +198,7 @@ func (tmux *stuckExitTmux) SendKey(_ context.Context, _, _, key string) error {
 
 func reloadIdleWaitRequest(socket string) Request {
 	return Request{
-		Engine: pfmengine.Claude, SocketPath: socket, Pane: "%7", PanePID: 700,
+		Engine: pfmengine.Claude, SocketPath: socket, Pane: "%7",
 		SessionID: "11111111-1111-4111-8111-111111111111", CWD: "/jail/project",
 		Account: 2, AccountIDs: []int{2}, Machine: reloadTestMachine("", "/jail/home"),
 	}

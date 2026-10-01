@@ -77,7 +77,6 @@ type Request struct {
 	Engine       pfmengine.ID
 	SocketPath   string
 	Pane         string
-	PanePID      int
 	New          bool
 	AccountGiven bool
 	CacheGiven   bool

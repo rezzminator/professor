@@ -148,6 +148,9 @@ func adoptHandoff(
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return request, "", false, fmt.Errorf("stat reload breadcrumb %s: %w", crumb, err)
 	}
+	if errors.Is(err, os.ErrNotExist) && !record.WrittenAt.After(entry) && record.SessionID != "" {
+		return request, request.LeftBehind, false, nil
+	}
 	if !record.WrittenAt.After(entry) && err == nil && !info.ModTime().Before(record.WrittenAt) {
 		return request, request.LeftBehind, false, nil
 	}

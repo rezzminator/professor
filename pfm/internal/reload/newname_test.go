@@ -126,7 +126,6 @@ func runNewOnClock(
 			Engine:     pfmengine.Claude,
 			SocketPath: "/tmp/tmux-1000/probe-reload-new",
 			Pane:       "%7",
-			PanePID:    700,
 			SessionID:  "",
 			Transcript: transcript,
 			Name:       name,

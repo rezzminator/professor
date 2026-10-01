@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install the pinned developer tools from infra/fence/tools.env.
-#   infra/fence/tools.sh [--bin DIR]   default DIR: $TOOLS_BIN, else <repo>/tmp/tools/<os>-<arch>/bin
-# Prints one line per tool: TOOL <name> <version> INSTALLED|PRESENT <path>.
+#   infra/fence/tools.sh [--bin DIR] [--print-bin]   default DIR: $TOOLS_BIN, else <repo>/tmp/tools/<os>-<arch>/bin
+# --print-bin prints the selected directory without installing tools.
+# Installation prints one line per tool: TOOL <name> <version> INSTALLED|PRESENT <path>.
 # BROKEN STATE: a missing tools.env, an unset version, a failed `go install`,
 # or a binary that does not answer --version = a named line and a non-zero
 # exit — never a silent partial install. `make tools` and the fence image
@@ -14,15 +15,24 @@ ENV_FILE="$HERE/tools.env"
 source "$ENV_FILE"
 # Default keyed by OS/arch — the same rule pfm/Makefile resolves with, so a
 # darwin host and the linux fence never see each other's binaries.
-BIN="${TOOLS_BIN:-$HERE/../../tmp/tools/$(go env GOOS)-$(go env GOARCH)/bin}"
+BIN="${TOOLS_BIN:-}"
+PRINT_BIN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --bin) BIN="$2"; shift 2 ;;
-    *) echo "usage: tools.sh [--bin DIR]" >&2; exit 2 ;;
+    --bin) [[ $# -ge 2 ]] || { echo "usage: tools.sh [--bin DIR] [--print-bin]" >&2; exit 2; }; BIN="$2"; shift 2 ;;
+    --print-bin) PRINT_BIN=true; shift ;;
+    *) echo "usage: tools.sh [--bin DIR] [--print-bin]" >&2; exit 2 ;;
   esac
 done
-mkdir -p "$BIN"
 command -v go >/dev/null || { echo "tools: TOOLCHAIN-MISSING — go not on PATH" >&2; exit 1; }
+if [[ -z "$BIN" ]]; then
+  BIN="$HERE/../../tmp/tools/$(go env GOOS)-$(go env GOARCH)/bin"
+fi
+if [[ "$PRINT_BIN" == true ]]; then
+  printf '%s\n' "$BIN"
+  exit 0
+fi
+mkdir -p "$BIN"
 # Build every tool with ONE explicit Go (tools.env TOOLS_GO): the formatters
 # embed that Go's go/printer, and alignment differs across releases — with
 # GOTOOLCHAIN=auto the host and the fence would each pick their own.

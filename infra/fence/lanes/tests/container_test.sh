@@ -22,6 +22,8 @@ mkdir -p "$BIN" "$T/infra/fence"
 printf 'FROM scratch\n' >"$T/infra/fence/pfm-dev.Dockerfile"
 printf 'fixture\n' >"$T/infra/fence/data"
 printf 'services: {}\n' >"$T/infra/fence/docker-compose.yml"
+shtest_compose_config "$T/infra/fence" >"$T/compose-config.yml"
+export STUB_COMPOSE_CONFIG="$T/compose-config.yml"
 cat >"$BIN/docker" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
@@ -29,17 +31,7 @@ case "$1 ${2:-}" in
   'compose -f')
     if [[ "$*" == *' config '* ]]; then
       [ "${STUB_CONFIG_FAIL:-0}" = 0 ] || { echo 'fixture config error' >&2; exit 7; }
-      cat <<EOF
-services:
-  pfm-dev:
-    build:
-      context: $STUB_CONTEXT
-      dockerfile: pfm-dev.Dockerfile
-      target: pfm-dev
-      labels:
-        pfm.fence.inputs: unkeyed
-    image: professor-pfm-dev
-EOF
+      cat "$STUB_COMPOSE_CONFIG"
     elif [[ "$*" == *' build '* ]]; then
       printf 'KEY %s\n' "${PFM_DEV_INPUTS_KEY:-unset}" >>"$STUB_DOCKER_LOG"
       [ "${STUB_BUILD_FAIL:-0}" = 0 ] || { echo 'fixture build refused' >&2; exit 8; }

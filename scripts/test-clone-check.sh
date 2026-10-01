@@ -25,7 +25,19 @@ fi
 echo scanned > "$JSCPD_SCAN_MARKER"
 case "${JSCPD_STUB_MODE:-pass}" in
   pass) echo 'Found 17 clones' ;;
-  new) echo 'Clone found in fixture'; echo 'new clone'; exit 1 ;;
+  new) echo 'Clone found in fixture [NEW]'; echo ' - new-left'; echo '   new-right'; echo 'ERROR: jscpd found 1 new clones'; exit 1 ;;
+  late-new)
+    for ((i = 0; i < 15; i++)); do
+      echo 'Clone found in fixture'
+      echo " - known-left-$i"
+      echo "   known-right-$i"
+    done
+    echo 'Clone found in fixture [NEW]'
+    echo ' - late-new-left'
+    echo '   late-new-right'
+    echo 'ERROR: jscpd found 1 new clones'
+    exit 1
+    ;;
   crash) echo 'fixture scan crashed' >&2; exit 3 ;;
 esac
 EOF
@@ -66,6 +78,27 @@ if [[ $rc -eq 1 && "$out" == *'CLONES FAIL new clone(s) above'* && -e "$T/scanne
   ok 'a new clone fails the ratchet with return 1'
 else
   bad 'a new clone fails the ratchet with return 1' "rc=$rc; $out"
+fi
+
+out=$(clone "$T/bin" "$JSCPD_VERSION" late-new); rc=$?
+if [[ $rc -eq 1 && "$out" == *'late-new-left'* && "$out" == *'late-new-right'* ]]; then
+  ok 'a new clone after the known listing names both files'
+else
+  bad 'a new clone after the known listing names both files' "rc=$rc; $out"
+fi
+
+out=$(env TOOLS_BIN="$T/selected-bin" bash "$TOOLS_SCRIPT" --print-bin 2>&1); rc=$?
+if [[ $rc -eq 0 && "$out" == "$T/selected-bin" ]]; then
+  ok 'tools --print-bin resolves the configured bin'
+else
+  bad 'tools --print-bin resolves the configured bin' "rc=$rc; $out"
+fi
+
+out=$(env -u TOOLS_BIN PATH="$T/path:/usr/bin:/bin" bash "$TOOLS_SCRIPT" --print-bin 2>&1); rc=$?
+if [[ $rc -ne 0 && "$out" == *'tools: TOOLCHAIN-MISSING — go not on PATH'* ]]; then
+  ok 'tools --print-bin names a missing Go toolchain'
+else
+  bad 'tools --print-bin names a missing Go toolchain' "rc=$rc; $out"
 fi
 
 out=$(TOOLS_BIN=/usr/local/bin bash "$TOOLS_SCRIPT" 2>&1); rc=$?

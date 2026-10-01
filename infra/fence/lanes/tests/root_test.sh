@@ -30,6 +30,8 @@ cp "$LANES/../fence-env.sh" "$R/infra/fence/fence-env.sh"
 cp "$LANES/../image-key.sh" "$R/infra/fence/image-key.sh"
 printf 'FROM scratch\n' >"$R/infra/fence/pfm-dev.Dockerfile"
 printf 'services: {}\n' >"$R/infra/fence/docker-compose.yml"
+shtest_compose_config "$R/infra/fence" >"$T/compose-config.yml"
+export STUB_COMPOSE_CONFIG="$T/compose-config.yml"
 cat >"$R/infra/fence/housekeeping.sh" <<'EOF'
 fence_housekeeping() { echo "fence_housekeeping $*" >>"$STUB_DOCKER_LOG"; }
 fence_volumes_ensure() { echo "fence_volumes_ensure" >>"$STUB_DOCKER_LOG"; }
@@ -47,17 +49,7 @@ printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
 case "$1" in
   compose)
     if [[ "$*" == *' config '* ]]; then
-      cat <<EOF
-services:
-  pfm-dev:
-    build:
-      context: $STUB_CONTEXT
-      dockerfile: pfm-dev.Dockerfile
-      target: pfm-dev
-      labels:
-        pfm.fence.inputs: unkeyed
-    image: professor-pfm-dev
-EOF
+      cat "$STUB_COMPOSE_CONFIG"
     fi ;;
   image)
     if [ "${2:-}" = inspect ] && [ "${3:-}" = --format ]; then

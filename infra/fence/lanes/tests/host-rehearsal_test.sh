@@ -553,6 +553,14 @@ if [ "$RC" -eq 2 ] && [[ "$OUT" == "manifest: UNREADABLE — "*pfm.db* ]]; then 
 
 mk_migrated; echo garbage >"$MH/.local/state/pfm/pfm.db"; compare
 if [ "$RC" -eq 2 ] && [[ "$OUT" == "manifest: UNREADABLE — "*pfm.db* ]]; then ok "compare: unreadable DB → UNREADABLE, exit 2"; else bad "compare garbage db" "rc=$RC" "$OUT"; fi
+
+# A backup taken before callmeter was retired lists its database: the rehearsal
+# names it as retired and skips it, never refuses it as unreadable.
+mk_migrated
+BKR="$T/backup-retired"; rm -rf "$BKR"; cp -a "$BK" "$BKR"
+printf '== .local/state/pfm/callmeter.db\nok\ncall 7\n' >>"$BKR/manifest/db.txt"
+OUT="$(bash "$SUT" compare "$BKR" "$MH" "$T/journal" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] && grep -qxF 'retired database, not rehearsed: .local/state/pfm/callmeter.db' <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "manifest: ok" ]; then ok "compare: a retired callmeter.db is named and skipped"; else bad "compare retired db" "rc=$RC" "$OUT"; fi
 fi
 
 shtest_end

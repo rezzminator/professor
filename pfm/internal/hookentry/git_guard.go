@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 )
@@ -29,6 +27,8 @@ const (
 	gitGuardWorktreeSh  = ".claude/scripts/worktree.sh"
 	gitGuardOnlyGitter  = `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.`
 	gitGuardUnreadable  = "could not read this command; split it so each git call is its own simple command."
+	gitGuardBounded     = "could not read this command in full: it passes a parse bound (over 64 KiB, or a `-c`" +
+		" string nested past 8 levels). Shorten the command; write long content to a file with the Write tool."
 	gitGuardNoSetupHint = "gitter creates and removes worktrees (Phase SETUP)."
 	gitGuardStashHint   = "To park only your own files, " + "`git stash push -- <path>...`" +
 		" is allowed (restore with " + "`git stash pop`" +
@@ -101,8 +101,8 @@ type gitGuardBlock struct {
 // state (worktrees, history, branches and tags, remotes, the index, wide
 // working-tree destruction, repository settings) to every caller but the
 // gitter agent. A read or decode failure is fail-open to stderr; a command
-// that mentions git (gitGuardMentionsGit) but does not parse, or hits a parse
-// bound, is denied.
+// that mentions git (gitGuardMentionsGit) but does not parse is denied, and
+// so is every command that passed the git filter and hits a parse bound.
 func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(input)
 	if err != nil {
@@ -133,11 +133,17 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 	var blocks []gitGuardBlock
-	unreadable := false
+	unreadable, bounded := false, false
 	parts := parsed["git-guard"]
 	for i := range parts {
 		part := &parts[i]
-		if part.Status == cmdparse.StatusError || part.Bounded {
+		if part.Bounded {
+			// The filter above found git or worktree.sh in the command, and a
+			// bound leaves no read to tell a git call from the text around it.
+			bounded = true
+			continue
+		}
+		if part.Status == cmdparse.StatusError {
 			unreadable = unreadable || gitGuardMentionsGit(command)
 			continue
 		}
@@ -145,10 +151,11 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 			blocks = append(blocks, block)
 		}
 	}
-	if len(blocks) == 0 && !unreadable {
+	if len(blocks) == 0 && !unreadable && !bounded {
 		return 0
 	}
-	if err := json.NewEncoder(stdout).Encode(preToolUseDenyResponse(gitGuardReason(blocks, unreadable))); err != nil {
+	reason := gitGuardReason(blocks, unreadable, bounded)
+	if err := json.NewEncoder(stdout).Encode(preToolUseDenyResponse(reason)); err != nil {
 		fmt.Fprintf(stderr, "pfm internal git-guard: write deny: %v\n", err)
 		return 1
 	}
@@ -156,23 +163,32 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 }
 
 // gitGuardMentionsGit reports a command naming git as a program could: the
-// word git followed by any whitespace, or the worktree script. A command
-// that never does reaches git only through obfuscation, so a part of it the
-// parser could not read is not the git guard's to refuse.
+// token git with the string's edge or a non-word byte (anything outside
+// [A-Za-z0-9_]) on each side, so `"git"`, `git;`, `git<` and git before a
+// tab match while digits, legit and mygit do not; or the worktree script. A
+// command that never does reaches git only through obfuscation, so a part of
+// it the parser could not read is not the git guard's to refuse.
 func gitGuardMentionsGit(command string) bool {
 	if strings.Contains(command, gitGuardWorktreeSh) {
 		return true
 	}
-	for rest := command; ; {
-		i := strings.Index(rest, "git")
+	for from := 0; ; {
+		i := strings.Index(command[from:], "git")
 		if i < 0 {
 			return false
 		}
-		rest = rest[i+len("git"):]
-		if r, _ := utf8.DecodeRuneInString(rest); unicode.IsSpace(r) {
+		start, end := from+i, from+i+len("git")
+		if (start == 0 || !gitGuardWordByte(command[start-1])) &&
+			(end == len(command) || !gitGuardWordByte(command[end])) {
 			return true
 		}
+		from = end
 	}
+}
+
+// gitGuardWordByte reports a word byte: [A-Za-z0-9_].
+func gitGuardWordByte(b byte) bool {
+	return b == '_' || ('0' <= b && b <= '9') || ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z')
 }
 
 // gitGuardPart decides one parsed part: a git call, or a repo's worktree
@@ -287,11 +303,6 @@ func gitGuardCheckout(rest []string, repoDir string) bool {
 		return true
 	}
 	if len(operands) == 1 {
-		// A glob metacharacter makes the operand a pathspec: git
-		// check-ref-format forbids `*`, `?` and `[` in a ref name.
-		if strings.ContainsAny(operands[0], "*?[") {
-			return false
-		}
 		// One operand that is not an existing path is a branch or commit.
 		_, err := os.Lstat(gitGuardJoin(repoDir, operands[0]))
 		return err != nil
@@ -413,25 +424,63 @@ func gitGuardHasShortFlag(rest []string, letter rune, long string) bool {
 }
 
 // gitGuardAnyWide reports a pathspec that covers the whole tree: ".", ":/",
-// "*", or a path that resolves to the repository's top level.
+// "*", a path that resolves to the repository's top level, or an all-star
+// glob (gitGuardAllStarGlob) whose literal prefix is empty, ".", or resolves
+// to the top level.
 func gitGuardAnyWide(paths []string, repoDir string) bool {
 	top := ""
+	resolvesToTop := func(p string) bool {
+		if repoDir == "" {
+			return false
+		}
+		if top == "" {
+			top = gitGuardTopLevel(repoDir)
+		}
+		return top != "" && filepath.Clean(gitGuardJoin(repoDir, p)) == top
+	}
 	for _, p := range paths {
 		switch strings.TrimSuffix(p, "/") {
 		case ".", "", ":", ":/", ":/.", "*", ":(top)":
 			return true
 		}
-		if repoDir == "" {
-			continue
+		if prefix, ok := gitGuardAllStarGlob(p); ok && (prefix == "" || prefix == "." || resolvesToTop(prefix)) {
+			return true
 		}
-		if top == "" {
-			top = gitGuardTopLevel(repoDir)
-		}
-		if top != "" && filepath.Clean(gitGuardJoin(repoDir, p)) == top {
+		if resolvesToTop(p) {
 			return true
 		}
 	}
 	return false
+}
+
+// gitGuardAllStarGlob returns a pathspec's literal prefix and reports whether
+// at least one element follows it and every one is all-star: only `*` and
+// `?`, at least one `*`. The pathspec loses one leading magic prefix
+// (`:(…)`, `:/` or a lone `:`) and a leading `./`, then a trailing `/`, and
+// splits into elements on `/`; the literal prefix is the elements before the
+// first holding `*` or `?`.
+func gitGuardAllStarGlob(p string) (string, bool) {
+	switch {
+	case strings.HasPrefix(p, ":("):
+		if end := strings.IndexByte(p, ')'); end >= 0 {
+			p = p[end+1:]
+		}
+	case strings.HasPrefix(p, ":/"):
+		p = p[len(":/"):]
+	case strings.HasPrefix(p, ":"):
+		p = p[len(":"):]
+	}
+	elems := strings.Split(strings.TrimSuffix(strings.TrimPrefix(p, "./"), "/"), "/")
+	first := slices.IndexFunc(elems, func(e string) bool { return strings.ContainsAny(e, "*?") })
+	if first < 0 {
+		return "", false
+	}
+	for _, e := range elems[first:] {
+		if strings.Trim(e, "*?") != "" || !strings.Contains(e, "*") {
+			return "", false
+		}
+	}
+	return strings.Join(elems[:first], "/"), true
 }
 
 func gitGuardJoin(dir, p string) string {
@@ -462,9 +511,10 @@ func gitGuardTopLevel(dir string) string {
 
 // gitGuardReason is the one deny message: every blocked part as written, the
 // gitter instruction, the worktree way for each repository a worktree write
-// named, the path-stash line when a stash was blocked, and the
-// unreadable-command line.
-func gitGuardReason(blocks []gitGuardBlock, unreadable bool) string {
+// named, the path-stash line when a stash was blocked, the unreadable-command
+// line, and the parse-bound line. The bound line alone sends nobody to
+// gitter: a shortened command is read and judged like any other.
+func gitGuardReason(blocks []gitGuardBlock, unreadable, bounded bool) string {
 	var lines []string
 	if len(blocks) > 0 {
 		named := make([]string, 0, len(blocks))
@@ -498,6 +548,9 @@ func gitGuardReason(blocks []gitGuardBlock, unreadable bool) string {
 		if len(blocks) == 0 {
 			lines = append(lines, gitGuardOnlyGitter)
 		}
+	}
+	if bounded {
+		lines = append(lines, "git-guard "+gitGuardBounded)
 	}
 	return strings.Join(lines, "\n")
 }

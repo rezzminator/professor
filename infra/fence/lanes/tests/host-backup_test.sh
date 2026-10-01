@@ -52,6 +52,18 @@ O="$T/out-home"; mkdir -p "$O/.claude/projects/p0" "$O/.local/share/pfm/install"
 printf '%s\n' /opt/elsewhere >"$O/.local/share/pfm/install/source-repo"
 OUT=$(HOME="$O" PFM_MANAGED_SETTINGS_DIR="$M" bash "$SUT" "$T/out" live 2>&1); RC=$?
 if [ "$RC" -eq 0 ] && grep -qxF 'clone outside home, its configs not copied: /opt/elsewhere' <<<"$OUT" && [ ! -e "$T/out/home"/opt ] && [ "$(tail -1 <<<"$OUT")" = "BACKUP OK $T/out" ]; then ok "clone outside home named, its configs not copied"; else bad "clone outside home" "rc=$RC" "$OUT"; fi
+# pfm no longer owns callmeter.db and an install never touches it, but an old
+# chat may still write it: the backup names it and never copies it, or its -wal/-shm.
+R="$T/retired-home"; mkdir -p "$R/.claude/projects/p0" "$R/.local/state/pfm"
+echo one >"$R/.claude/projects/p0/s.jsonl"
+for s in "" -wal -shm; do echo torn >"$R/.local/state/pfm/callmeter.db$s"; done
+echo keep >"$R/.local/state/pfm/other.state"
+OUT=$(HOME="$R" PFM_MANAGED_SETTINGS_DIR="$M" bash "$SUT" "$T/retired" live 2>&1); RC=$?
+leaked=""
+for s in "" -wal -shm; do [ -e "$T/retired/home/.local/state/pfm/callmeter.db$s" ] && leaked+=" callmeter.db$s"; done
+if [ "$RC" -eq 0 ] && [ -z "$leaked" ] && [ -f "$T/retired/home/.local/state/pfm/other.state" ] && grep -qxF 'retired database, not copied: .local/state/pfm/callmeter.db' <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "BACKUP OK $T/retired" ]; then ok "retired callmeter.db named, never copied"; else bad "retired callmeter.db" "rc=$RC leaked:$leaked" "$OUT"; fi
+OUT=$(run "$T/no-retired" live); RC=$?
+if [ "$RC" -eq 0 ] && ! grep -q 'retired database' <<<"$OUT"; then ok "no retired line without a callmeter.db"; else bad "no retired line" "rc=$RC" "$OUT"; fi
 OUT=$(run "$T/bad-mode" other); RC=$?
 if [ "$RC" -eq 2 ] && [ "$OUT" = 'mode must be live or quiet' ] && [ ! -e "$T/bad-mode" ]; then ok "bad mode refused before DEST"; else bad "bad mode" "rc=$RC" "$OUT"; fi
 OUT=$(run /sys/host-backup-test live); RC=$?

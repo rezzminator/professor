@@ -107,6 +107,8 @@ FLEET_UNITS="pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer"
 HOLDER_PID=424242
 C_GOMOD=/pfm-gomod
 DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db")
+# Databases pfm no longer owns: an older backup still lists them, so they are named and skipped, never refused.
+RETIRED_DBS=(.local/state/pfm/callmeter.db)
 
 die() { echo "host-rehearsal: $*" >&2; exit 1; }
 usage() {
@@ -171,6 +173,12 @@ cmd_compare() {
     "== "*" ABSENT") skip=1; continue ;;
     "== "*)
       src=${line#== }; skip=0; target=""
+      for entry in "${RETIRED_DBS[@]}"; do
+        if [ "$entry" = "$src" ]; then target=retired; fi
+      done
+      if [ "$target" = retired ]; then
+        echo "retired database, not rehearsed: $src"; skip=1; continue
+      fi
       for entry in "${DB_MAP[@]}"; do [ "${entry%% *}" = "$src" ] && target=${entry#* }; done
       [ -n "$target" ] || unreadable "db.txt names $src, which has no mapped database"
       [ -r "$home/$target" ] || unreadable "$home/$target unreadable (backup lists $src)"

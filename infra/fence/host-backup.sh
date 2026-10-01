@@ -46,6 +46,10 @@ excl=(
 	--exclude=.codex/sessions --exclude=.codex/archived_sessions --exclude=.codex/packages
 	--exclude='.codex/*.sqlite*' --exclude=.codex/log
 )
+# pfm no longer owns callmeter.db and an install never touches it; an old chat
+# may still write it, so a raw copy could be torn: named, never copied.
+retired=.local/state/pfm/callmeter.db
+excl+=(--exclude="$retired" --exclude="$retired-wal" --exclude="$retired-shm")
 for db in "${dbs[@]}"; do excl+=(--exclude="$db" --exclude="$db-wal" --exclude="$db-shm"); done
 
 rel=(.claude .claude.json .cc .config/pfm .local/share/pfm .local/state/pfm .codex .zshrc
@@ -64,6 +68,7 @@ for f in "$H"/.local/bin/pfm* "$H"/.local/bin/claude \
 	[ -e "$f" ] || [ -L "$f" ] || continue
 	rel+=("${f#"$H"/}")
 done
+if [ -e "$H/$retired" ]; then echo "retired database, not copied: $retired"; fi
 sources=()
 for r in "${rel[@]}"; do
 	if [ -e "$H/$r" ] || [ -L "$H/$r" ]; then sources+=("$H/./$r"); else echo "absent, skipped: ~/$r"; fi

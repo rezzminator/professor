@@ -146,6 +146,22 @@ func TestWordsExpandingToNothing(t *testing.T) {
 	}
 }
 
+// TestEmptyArrayCallParsesWithoutPanic: a call whose every word expands to
+// nothing once panicked on its missing program word; it parses.
+func TestEmptyArrayCallParsesWithoutPanic(t *testing.T) {
+	t.Parallel()
+	for _, command := range []string{`e=(); "${e[@]}"`, `"${empty[@]}"`} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%q: parse panicked: %v", command, r)
+				}
+			}()
+			parseOne(t, command)
+		}()
+	}
+}
+
 // A command over maxCommandBytes is one unparsed, Bounded part: no shell
 // parse is attempted. One of exactly maxCommandBytes parses as any other.
 func TestOversizeCommandIsOneUnparsedPart(t *testing.T) {

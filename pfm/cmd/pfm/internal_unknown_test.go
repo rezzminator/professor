@@ -39,7 +39,7 @@ func TestRunInternalUnknownSubcommandIsANonBlockingHookError(t *testing.T) {
 // print nothing — a UserPromptSubmit hook's stdout becomes prompt context, and
 // its stderr is a warning on every prompt that no install can clear.
 func TestRunInternalRetiredHookIsASilentNoOp(t *testing.T) {
-	for _, name := range []string{"compact-nudge", "clear-hide"} {
+	for _, name := range []string{"compact-nudge", "clear-hide", "callmeter"} {
 		var stdout, stderr bytes.Buffer
 		if code := runInternal([]string{name}, &stdout, &stderr, commandRuntime{}); code != 0 ||
 			stdout.Len() != 0 || stderr.Len() != 0 {

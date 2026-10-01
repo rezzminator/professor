@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -134,8 +133,4 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 			t.Errorf("service runtime %s = %q, want %q", tc.name, tc.got, tc.want)
 		}
 	}
-}
-
-func contains(value, needle string) bool {
-	return strings.Contains(value, needle)
 }

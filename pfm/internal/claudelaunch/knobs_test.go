@@ -3,6 +3,8 @@ package claudelaunch
 import (
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -78,4 +80,27 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("knob %s missing", name)
 		}
 	}
+}
+
+// TestKnobHooksCountMatchesRegistry pins the hooks knob's "N registrations"
+// default to the registry it describes, so the two cannot drift apart.
+func TestKnobHooksCountMatchesRegistry(t *testing.T) {
+	for _, knob := range Knobs {
+		if knob.Name != knobHooks {
+			continue
+		}
+		text, ok := knob.Default.(string)
+		if !ok {
+			t.Fatalf("hooks knob default %v (%T), want a string leading with a count", knob.Default, knob.Default)
+		}
+		count, err := strconv.Atoi(strings.Fields(text)[0])
+		if err != nil {
+			t.Fatalf("hooks knob default %q does not lead with a count: %v", text, err)
+		}
+		if want := len(HookTemplates(t.TempDir())); count != want {
+			t.Fatalf("hooks knob default %q, but HookTemplates returns %d", text, want)
+		}
+		return
+	}
+	t.Fatal("no hooks knob in Knobs")
 }

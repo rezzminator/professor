@@ -17,7 +17,7 @@ import (
 )
 
 // TestChatKillAndUnkillRecordChatStateTransitions: the CLI kill/unkill verbs
-// (cmd/pfm/chat_command.go's runResolvedChatKill and runChatUnkill) walk the
+// (cmd/pfm/chat_command.go's runResolvedChatKillContext and runChatUnkill) walk the
 // state door (spec § Middleware, `state`) on their real success path —
 // comp=state, kind=chat — never the resolved chat's id or socket. Pattern:
 // TestKillCLIVouchesEngineForUnindexedButVisibleRows in

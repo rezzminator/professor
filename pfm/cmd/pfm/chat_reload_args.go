@@ -38,7 +38,7 @@ func validateReloadArgs(args []string) error {
 			if index+1 >= len(args) {
 				return errors.New("--account needs an account number, as in --account 2")
 			}
-			if _, valid := positiveAccount(args[index+1]); !valid {
+			if !positiveAccount(args[index+1]) {
 				return fmt.Errorf(
 					"--account takes an account NUMBER, not %q — see `pfm config show` for the configured accounts",
 					args[index+1],
@@ -55,7 +55,7 @@ func validateReloadArgs(args []string) error {
 			}
 			index++
 		default:
-			if _, valid := positiveAccount(args[index]); !valid {
+			if !positiveAccount(args[index]) {
 				return errors.New(reloadArgumentHint(args[index]))
 			}
 			if account {

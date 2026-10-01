@@ -18,7 +18,7 @@ import (
 // dispatcher (mcpserv.cliAction) had nothing else to read: it reported "ok"
 // for a chat whose TUI was still running, because the row it resolved was the
 // resumable twin of a live seat the scan had not recognised. The pane-closing
-// form already names its mechanism (runResolvedChatKill); this is its twin.
+// form already names its mechanism (runResolvedChatKillContext); this is its twin.
 func TestChatKillOfAResumableRowSaysItOnlyDeListed(t *testing.T) {
 	root := jailTest(t)
 	const id = "44444444-4444-4444-8444-444444444444"

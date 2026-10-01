@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 
-	callmetercmd "github.com/rezzminator/professor/pfm/internal/callmeter/command"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -48,7 +47,6 @@ const (
 	doctorCommand     = "doctor"
 	checkAction       = "check"
 	statuslineCommand = "statusline"
-	callmeterCommand  = "callmeter"
 	staleCommand      = "stale"
 )
 
@@ -60,13 +58,13 @@ var topLevelSubcommands = []string{
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
-	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log", callmeterCommand,
+	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
 	"price",
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
-	"agent-open", callmeterCommand, "chat-server", "claude-launch", "claude-version", "clear-kill",
+	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-launch", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "rr-dir",
@@ -143,8 +141,6 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runIndex(args[1:], stdout, stderr, runtime, clock.Real)
 	case "log":
 		return runLog(args[1:], stdout, stderr, runtime)
-	case "callmeter":
-		return callmetercmd.CLI(args[1:], stdout, stderr, runtime)
 	case "price":
 		return pricecmd.Price(args[1:], stdout, stderr, runtime)
 	case "doctor":
@@ -219,7 +215,6 @@ func printUsage(w io.Writer) {
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
-		"  callmeter report which files, commands and calls filled agent contexts",
 		"  price     print the model price table pfm owns: --json --check",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
@@ -435,9 +430,6 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
 	}
-	if len(args) != 0 && args[0] == "callmeter" {
-		return hookentry.Callmeter(os.Stdin, stderr, paths.OSEnv{})
-	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
 	}
@@ -510,7 +502,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|callmeter|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

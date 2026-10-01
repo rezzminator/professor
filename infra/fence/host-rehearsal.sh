@@ -62,7 +62,7 @@ set -uo pipefail
 # hash present in HOME/.claude/{projects,file-history,tasks,session-env} or in
 # JOURNAL/backup/conflicts; every db.txt table count equal in HOME's database
 # (.cc/fleet.db → .local/state/pfm/pfm.db, .local/state/pfm/fleet.db →
-# .local/state/pfm/pfm-cache.db, callmeter.db → itself) except swap_event and
+# .local/state/pfm/pfm-cache.db) except swap_event and
 # hidden, each counted from a temp copy with its -wal/-shm.
 #
 # BROKEN STATE: wrong arguments (a third one other than --stress) print usage, exit 2. A backup lacking home= in
@@ -106,7 +106,9 @@ C_ETC=/rehearsal-etc
 FLEET_UNITS="pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer"
 HOLDER_PID=424242
 C_GOMOD=/pfm-gomod
-DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db" ".local/state/pfm/callmeter.db .local/state/pfm/callmeter.db")
+DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db")
+# Databases pfm no longer owns: an older backup still lists them, so they are named and skipped, never refused.
+RETIRED_DBS=(.local/state/pfm/callmeter.db)
 
 die() { echo "host-rehearsal: $*" >&2; exit 1; }
 usage() {
@@ -171,6 +173,12 @@ cmd_compare() {
     "== "*" ABSENT") skip=1; continue ;;
     "== "*)
       src=${line#== }; skip=0; target=""
+      for entry in "${RETIRED_DBS[@]}"; do
+        if [ "$entry" = "$src" ]; then target=retired; fi
+      done
+      if [ "$target" = retired ]; then
+        echo "retired database, not rehearsed: $src"; skip=1; continue
+      fi
       for entry in "${DB_MAP[@]}"; do [ "${entry%% *}" = "$src" ] && target=${entry#* }; done
       [ -n "$target" ] || unreadable "db.txt names $src, which has no mapped database"
       [ -r "$home/$target" ] || unreadable "$home/$target unreadable (backup lists $src)"

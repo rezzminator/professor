@@ -63,13 +63,8 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 		"missing": func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return hooks[1:] },
 		"extra":   func(hooks []claudelaunch.Hook) []claudelaunch.Hook { return append(hooks, hooks[0]) },
 		"moved":   func(hooks []claudelaunch.Hook) []claudelaunch.Hook { hooks[0].Matcher = "other"; return hooks },
-		"async lost": func(hooks []claudelaunch.Hook) []claudelaunch.Hook {
-			for index := range hooks {
-				if hooks[index].Async {
-					hooks[index].Async = false
-					break
-				}
-			}
+		"async flipped": func(hooks []claudelaunch.Hook) []claudelaunch.Hook {
+			hooks[0].Async = !hooks[0].Async
 			return hooks
 		},
 	} {

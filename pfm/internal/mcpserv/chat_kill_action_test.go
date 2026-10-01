@@ -12,7 +12,7 @@ import (
 // chat_kill fix: the tool must never answer status "ok" while the target's
 // engine process is still running. cliAction already maps a non-zero CLI
 // exit to a tool error (internal/mcpserv/actions.go); this pins that chat_kill
-// specifically relies on it, so runResolvedChatKill's ConfirmExit failure
+// specifically relies on it, so runResolvedChatKillContext's ConfirmExit failure
 // (cmd/pfm/chat_command.go) reaches the caller as a tool error, not "ok".
 func TestChatKillSurfacesAKilledButStillAliveFailure(t *testing.T) {
 	t.Parallel()

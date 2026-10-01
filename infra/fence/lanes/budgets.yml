@@ -1,23 +1,26 @@
-# Tier B hermetic lane wall budgets — pinned from three green sequence runs.
+# Tier B hermetic lane wall budgets — pinned from green sequence runs.
 #
 # `unpinned` means RECORD, DO NOT JUDGE: run.sh prints the measured wall next to
 # the word so nobody reads silence as a pass. A lane with NO row here is red
 # (`UNBUDGETED`) — a new lane must declare itself before it can run.
 # Pinning: take the median of three green runs and ratchet DOWN only, the rule
-# pfm/.testtiming.yml already follows. Values came from three green sequence
-# runs on 2026-09-30. Targets: root build ≤ 15 min (not budgeted here),
+# pfm/.testtiming.yml already follows. The 2026-09-30 pins (three green
+# sequence runs) were each ratcheted down to its wall in one green
+# LANE_PROFILE=1 sequence run on 2026-10-01 after the fast-gate lane-wait
+# changes; evidence: $HOME/.local/state/pfm/flights/professor/fast-gate/
+# measure/r4/lanes-r2/. Targets: root build ≤ 15 min (not budgeted here),
 # full sequence ≤ 5 min with the root cached.
 tolerance: 1.25
 
 # The whole canonical sequence, O1 → … → O2, in one container.
-sequence: 780
+sequence: 763
 
 lanes:
   O1: 70
-  E1: 196
+  E1: 194
   E2: 39
   E3: 14
-  F: 169
+  F: 134
   M: 156
   A: 49
   O2: 86

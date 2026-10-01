@@ -155,10 +155,20 @@ func adoptHandoff(
 		return request, request.LeftBehind, false, nil
 	}
 	continuedID := record.SessionID
+	// A record without a session id comes from a Codex reload that booted a
+	// conversation with no id yet. A reload that entered after it resolved the
+	// pane as that reboot left it, so a resolution past what the record left
+	// behind is that conversation; a queued one resolved before it, and with
+	// nothing left behind cannot tell.
+	unknownLeft := record.LeftBehind == "" && record.WrittenAt.After(entry)
+	if request.New && record.SessionID == "" && !record.WrittenAt.After(entry) &&
+		request.LeftBehind != "" && request.LeftBehind != record.LeftBehind {
+		continuedID = request.LeftBehind
+	}
 	if !request.New {
 		if record.SessionID == "" {
 			if record.Engine != pfmengine.Codex || request.SessionID == "" ||
-				request.Transcript == "" || record.LeftBehind == "" ||
+				request.Transcript == "" || unknownLeft ||
 				request.SessionID == record.LeftBehind {
 				return request, "", false, errors.New(
 					"the reload before this one started a new Codex conversation whose id is not known yet — nothing changed; reload again once that chat has answered",

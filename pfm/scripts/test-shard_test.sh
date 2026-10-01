@@ -231,13 +231,26 @@ cpu0 50 0 50 50 0 0 0 0 0 0
 cpu1 50 0 50 50 0 0 0 0 0 0
 STAT
 printf 'usage_usec 1000000\n' >"$T/cpu.stat"
-rc=0; PFM_TEST_SHARD_PROC_STAT="$T/proc.stat" PFM_TEST_SHARD_CPU_STAT="$T/cpu.stat" bash "$SUT" run --out "$T/load.json" -- -p 4 >"$T/load.log" 2>&1 || rc=$?
+# The wall clock steps back on every read, as a VM clock correction does: the record's time still rises.
+mkdir -p "$T/clock"
+cat >"$T/clock/sitecustomize.py" <<'PY'
+import time
+_base = time.time()
+_reads = [0]
+def _stepping_back():
+    _reads[0] += 1
+    return _base - _reads[0] * 0.001
+time.time = _stepping_back
+PY
+rc=0; PYTHONPATH="$T/clock" PFM_TEST_SHARD_PROC_STAT="$T/proc.stat" PFM_TEST_SHARD_CPU_STAT="$T/cpu.stat" bash "$SUT" run --out "$T/load.json" -- -p 4 >"$T/load.log" 2>&1 || rc=$?
 if [ "$rc" -eq 1 ] && python3 - "$T/load.load" <<'PY'
 import sys
 rows = open(sys.argv[1]).read().splitlines()
 assert rows[0] == 'epoch_s\tvm_busy_s\town_s\tcpus', rows
 assert len(rows) >= 3, rows
 assert all(len(row.split('\t')) == 4 and row.split('\t')[3] == '2' for row in rows[1:]), rows
+epochs = [float(row.split('\t')[0]) for row in rows[1:]]
+assert all(later > earlier for earlier, later in zip(epochs, epochs[1:])), epochs
 PY
 then ok load-record-fixture; else bad "load-record-fixture: rc=$rc" "$(cat "$T/load.log")"; fi
 rc=0; PFM_TEST_SHARD_PROC_STAT="$T/missing.stat" bash "$SUT" run --out "$T/unavailable.json" -- -p 4 >"$T/unavailable.log" 2>&1 || rc=$?

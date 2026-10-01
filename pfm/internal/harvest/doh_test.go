@@ -119,7 +119,7 @@ func TestDOHResolverSkipsSpecialUseNames(t *testing.T) {
 			return []net.IP{net.ParseIP("127.0.0.1")}, nil
 		},
 	)
-	for _, host := range []string{"fixture.test", "thing.invalid", "printer.local", "a.example", "svc.internal", "localhost", "mirror.example.com", "example.org", "a.example.net"} {
+	for _, host := range []string{"fixture.test", "thing.invalid", "printer.local", "a.example", "svc.internal", "localhost"} {
 		if !isSpecialUseName(host) {
 			t.Fatalf("isSpecialUseName(%q) = false, want special-use name", host)
 		}
@@ -128,8 +128,10 @@ func TestDOHResolverSkipsSpecialUseNames(t *testing.T) {
 			t.Fatalf("LookupIP(%q) = %v, %v; want the system resolver consulted directly", host, ips, err)
 		}
 	}
-	if isSpecialUseName("notexample.com") {
-		t.Fatal("isSpecialUseName(notexample.com) = true, want an ordinary domain")
+	for _, host := range []string{"notexample.com", "www.example.com", "example.org", "a.example.net"} {
+		if isSpecialUseName(host) {
+			t.Fatalf("isSpecialUseName(%q) = true, want a publicly served domain", host)
+		}
 	}
 }
 

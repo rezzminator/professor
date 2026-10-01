@@ -303,6 +303,9 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
     sampling = None
     record = None
     record_error = False
+    # Sample times rise on the monotonic clock from one wall-clock anchor: a VM
+    # clock correction can step time.time() back between two samples.
+    wall_anchor, mono_anchor = time.time(), time.monotonic()
     proc_stat = Path(os.environ.get('PFM_TEST_SHARD_PROC_STAT', '/proc/stat'))
     cpu_stat = Path(os.environ.get('PFM_TEST_SHARD_CPU_STAT', '/sys/fs/cgroup/cpu.stat'))
 
@@ -344,7 +347,8 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
             write_record(f'UNAVAILABLE\t{cpu_stat}: {exc}')
             stop_sampling.set()
             return
-        if not write_record(f'{time.time():.6f}\t{busy:.6f}\t{own:.6f}\t{cpus}'):
+        epoch = wall_anchor + (time.monotonic() - mono_anchor)
+        if not write_record(f'{epoch:.6f}\t{busy:.6f}\t{own:.6f}\t{cpus}'):
             stop_sampling.set()
 
     def sample_loop():

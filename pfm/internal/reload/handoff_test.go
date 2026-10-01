@@ -157,7 +157,13 @@ func TestAdoptHandoffKeepsTheReloadsOwnResolutionForAnOlderRecordWithoutBreadcru
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv(paths.EnvHome, t.TempDir())
-			record := handoffRecord{Engine: tc.engine, SessionID: "session-x", Account: 2, CWD: dir, WrittenAt: tc.written}
+			record := handoffRecord{
+				Engine:    tc.engine,
+				SessionID: "session-x",
+				Account:   2,
+				CWD:       dir,
+				WrittenAt: tc.written,
+			}
 			request := Request{
 				Engine: tc.engine, SocketPath: "/tmp/probe-1", Pane: "%7",
 				SessionID: "session-z", Account: 1, AccountIDs: []int{1, 2}, CWD: dir,
@@ -208,6 +214,11 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		newSeat    bool
 		explicit   bool
 		wantRefuse bool
+		// later: this reload entered after the record, so its own resolution
+		// was made on the pane that record's reboot left.
+		later         bool
+		bound         string
+		wantContinued string
 	}{
 		{name: "bound after new", leftBehind: oldID, id: newID, transcript: true},
 		{name: "explicit account and cache", leftBehind: oldID, id: newID, transcript: true, explicit: true},
@@ -217,6 +228,13 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		{name: "new left nothing", id: newID, transcript: true, wantRefuse: true},
 		{name: "legacy record", id: newID, transcript: true, wantRefuse: true},
 		{name: "another new reload", leftBehind: oldID, id: newID, transcript: true, newSeat: true},
+		{name: "later reload after a fresh boot that left nothing", id: newID, transcript: true, later: true},
+		{name: "later reload over a legacy record", id: newID, transcript: true, later: true},
+		{name: "later reload before the new chat answered", leftBehind: oldID, id: oldID, transcript: true, later: true, wantRefuse: true},
+		{
+			name: "later new reload after the binding moved", leftBehind: oldID, bound: newID,
+			newSeat: true, later: true, wantContinued: newID,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -233,7 +251,7 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 			if err := json.Unmarshal(content, &fields); err != nil {
 				t.Fatal(err)
 			}
-			if tc.name != "legacy record" {
+			if !strings.Contains(tc.name, "legacy record") {
 				fields["left_behind"] = tc.leftBehind
 			}
 			content, err = json.Marshal(fields)
@@ -254,12 +272,16 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 				Engine: pfmengine.Codex, SocketPath: "/tmp/cx-1", Pane: "%7",
 				SessionID: tc.id, Transcript: transcript, New: tc.newSeat,
 				Account: 1, AccountIDs: []int{1, 2}, CWD: dir,
-				AccountGiven: tc.explicit, CacheGiven: tc.explicit,
+				AccountGiven: tc.explicit, CacheGiven: tc.explicit, LeftBehind: tc.bound,
 				Machine: pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{
 					{ID: 1, Home: dir}, {ID: 2, Home: cwd},
 				}},
 			}
-			got, continued, adopted, err := adoptHandoff(request, record, time.Unix(1, 0), dir)
+			entry := time.Unix(1, 0)
+			if tc.later {
+				entry = time.Unix(3, 0)
+			}
+			got, continued, adopted, err := adoptHandoff(request, record, entry, dir)
 			if tc.wantRefuse {
 				if err == nil || !strings.Contains(err.Error(), "new Codex conversation whose id is not known yet") ||
 					adopted {
@@ -275,8 +297,12 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 				got.Account != wantAccount || got.Cache1H != wantCache || got.CWD != cwd {
 				t.Fatalf("adopted=%t request=%+v err=%v", adopted, got, err)
 			}
-			if !tc.newSeat && continued != tc.id {
-				t.Fatalf("continued=%q, want %q", continued, tc.id)
+			wantContinued := tc.wantContinued
+			if wantContinued == "" && !tc.newSeat {
+				wantContinued = tc.id
+			}
+			if continued != wantContinued {
+				t.Fatalf("continued=%q, want %q", continued, wantContinued)
 			}
 		})
 	}

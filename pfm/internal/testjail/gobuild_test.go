@@ -174,7 +174,8 @@ chmod +x "$1"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "build -trimpath -buildvcs=false -o " + got + " ./cmd/mock-engine"; !strings.Contains(string(data), want) {
+	want := "build -trimpath -buildvcs=false -o " + got + " ./cmd/mock-engine"
+	if !strings.Contains(string(data), want) {
 		t.Fatalf("go build log %q missing %q", data, want)
 	}
 }

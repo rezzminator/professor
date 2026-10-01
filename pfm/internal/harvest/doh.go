@@ -288,17 +288,15 @@ func (r *dohResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	return fallbackIPs, nil
 }
 
-// specialUseTLDs includes RFC 6761/6762 reserved suffixes and the RFC 6761
-// §6.5 example domains. None of them resolves in the public DNS.
+// specialUseTLDs are the RFC 6761/6762 reserved suffixes that never resolve in
+// the public DNS. The RFC 6761 §6.5 example domains (example.com, .org, .net)
+// are not among them: IANA serves those zones, so they take the DoH path.
 var specialUseTLDs = []string{
 	".test",
 	".invalid",
 	".localhost",
 	".local",
 	".example",
-	".example.com",
-	".example.org",
-	".example.net",
 	".internal",
 	".home.arpa",
 }

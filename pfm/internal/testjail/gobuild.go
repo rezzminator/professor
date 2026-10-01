@@ -41,38 +41,31 @@ func GoBuild(moduleDir, output, target string, flags ...string) error {
 
 // PFMBinary returns a validated run-wide binary or builds one for this process.
 func PFMBinary(moduleDir, dir string) (string, error) {
-	if binary, set := paths.PrebuiltPFMBinary(); set {
-		info, err := os.Stat(binary)
-		if err != nil {
-			return "", fmt.Errorf("%s=%q: %w", paths.EnvTestPFMBinary, binary, err)
-		}
-		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			return "", fmt.Errorf("%s=%q: not an executable regular file", paths.EnvTestPFMBinary, binary)
-		}
-		return binary, nil
-	}
-	binary := filepath.Join(dir, "pfm")
-	if err := GoBuild(moduleDir, binary, "./cmd/pfm"); err != nil {
-		return "", err
-	}
-	return binary, nil
+	binary, set := paths.PrebuiltPFMBinary()
+	return prebuiltOrBuild(moduleDir, dir, paths.EnvTestPFMBinary, binary, set, "pfm")
 }
 
 // MockEngineBinary returns a validated run-wide binary or builds one for this process.
 func MockEngineBinary(moduleDir, dir string) (string, error) {
-	if binary, set := paths.PrebuiltMockEngineBinary(); set {
+	binary, set := paths.PrebuiltMockEngineBinary()
+	return prebuiltOrBuild(moduleDir, dir, paths.EnvTestMockEngineBinary, binary, set, "mock-engine")
+}
+
+// prebuiltOrBuild validates the binary env names, or builds ./cmd/{command} into dir.
+func prebuiltOrBuild(moduleDir, dir, env, binary string, set bool, command string) (string, error) {
+	if set {
 		info, err := os.Stat(binary)
 		if err != nil {
-			return "", fmt.Errorf("%s=%q: %w", paths.EnvTestMockEngineBinary, binary, err)
+			return "", fmt.Errorf("%s=%q: %w", env, binary, err)
 		}
 		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			return "", fmt.Errorf("%s=%q: not an executable regular file", paths.EnvTestMockEngineBinary, binary)
+			return "", fmt.Errorf("%s=%q: not an executable regular file", env, binary)
 		}
 		return binary, nil
 	}
-	binary := filepath.Join(dir, "mock-engine")
-	if err := GoBuild(moduleDir, binary, "./cmd/mock-engine"); err != nil {
+	built := filepath.Join(dir, command)
+	if err := GoBuild(moduleDir, built, "./cmd/"+command); err != nil {
 		return "", err
 	}
-	return binary, nil
+	return built, nil
 }

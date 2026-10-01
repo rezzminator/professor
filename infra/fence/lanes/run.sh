@@ -248,6 +248,21 @@ scan="$(docker exec "$CNAME" bash /worktree/infra/fence/lanes/cred-scan.sh 2>&1)
 say "run: $MODE · container $CNAME · image $IMAGE ($ROOT_DECISION) · seats $SEATS · out $OUT"
 [ -n "$SKIPPED" ] && say "run: NOT WRITTEN — pending lanes not run:$SKIPPED"
 CONT_OUT="/tmp/lanes/$STAMP"
+printf -v egress_wait 'touch %q; until [ -e %q ]; do sleep 0.2; done' \
+  "$CONT_OUT/egress.ready" "$CONT_OUT/egress.stop"
+printf -v egress_command 'PFM_TEST_TIMING_DIR=%q bash /worktree/infra/fence/egress.sh run bash -c %q >%q 2>&1' \
+  "$CONT_OUT" "$egress_wait" "$CONT_OUT/egress.out"
+egress_ready=0
+if docker exec "$CNAME" mkdir -p "$CONT_OUT" &&
+  docker exec -d "$CNAME" bash -c "$egress_command"; then
+  for ((i=0; i<50; i++)); do
+    if docker exec "$CNAME" test -e "$CONT_OUT/egress.ready"; then
+      egress_ready=1
+      break
+    fi
+    sleep 0.2
+  done
+fi
 failed_lanes="" missing_rows=""
 for l in $ORDER; do
   prior="$(prior_of "$l")"
@@ -267,6 +282,19 @@ for l in $ORDER; do
   fi
   [ "$rc" -ne 0 ] && failed_lanes="$failed_lanes $l"
 done
+
+egress_stop_error="" egress_evidence_error="" egress_verdict=""
+docker exec "$CNAME" touch "$CONT_OUT/egress.stop" || egress_stop_error="egress: could not stop the capture"
+for ((i=0; i<150; i++)); do
+  docker exec "$CNAME" grep -q '^EGRESS ' "$CONT_OUT/egress.out" && break
+  sleep 0.2
+done
+if docker cp "$CNAME:$CONT_OUT/egress.out" "$OUT/egress.out" >/dev/null 2>&1; then
+  egress_verdict="$(grep -m1 '^EGRESS ' "$OUT/egress.out")"
+fi
+mkdir -p "$OUT/egress"
+docker cp "$CNAME:$CONT_OUT/egress/." "$OUT/egress/" >/dev/null 2>&1 ||
+  egress_evidence_error="egress: could not copy recorder evidence to $OUT/egress/"
 
 # ─── aggregation ────────────────────────────────────────────────────────────
 
@@ -366,4 +394,14 @@ status=0
 [ -n "$unmapped" ] && status=1
 [ -n "$log_absent" ] && status=1
 [ "$budget_reds" -gt 0 ] && { say "run: ✗ $budget_reds budget verdict(s) red"; status=1; }
+[ "$egress_ready" -eq 0 ] && { say 'egress: ✗ NOT RECORDED — the capture did not start in 10s'; status=1; }
+[ -n "$egress_stop_error" ] && { say "$egress_stop_error"; status=1; }
+[ -n "$egress_evidence_error" ] && say "$egress_evidence_error"
+if [ -n "$egress_verdict" ]; then
+  case "$egress_verdict" in EGRESS\ PASS\ *) ;; *) status=1 ;; esac
+  awk '/^EGRESS / { verdict=$0; next } { print } END { print verdict }' "$OUT/egress.out"
+else
+  say 'egress: ✗ NOT RECORDED — no verdict from egress.sh in 30s'
+  status=1
+fi
 exit "$status"

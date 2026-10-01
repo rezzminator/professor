@@ -63,18 +63,34 @@ case "$1 ${2:-}" in
           echo 'cred-scan: ✗ CREDENTIAL-REFUSED /root/.codex/auth.json — not a registered fixture'
           exit 1
         fi ;;
+      *'test -e '*egress.ready*) [ "${STUB_EGRESS_READY:-1}" = 1 ] || exit 1 ;;
+      *'grep -q '^EGRESS*) [ -n "${STUB_EGRESS_VERDICT-PASS}" ] || exit 1 ;;
     esac
     exit 0 ;;
   "cp "*)
     case "$2" in
       *.row.tsv) [ -n "${STUB_ROW_FIXTURE:-}" ] && cp "$STUB_ROW_FIXTURE" "$3" ;;
       *.waits.tsv) [ -n "${STUB_WAITS_FIXTURE:-}" ] && cp "$STUB_WAITS_FIXTURE" "$3" ;;
+      *.out)
+        [ "${STUB_EGRESS_COPY_FAIL:-0}" = 0 ] || exit 1
+        [ -n "${STUB_EGRESS_VERDICT-PASS}" ] || exit 1
+        printf '%s\n' "${STUB_EGRESS_OUTPUT:-EGRESS ${STUB_EGRESS_VERDICT-PASS} fixture}" >"$3" ;;
+      */egress/.)
+        [ "${STUB_EGRESS_EVIDENCE_COPY_FAIL:-0}" = 0 ] || exit 1
+        mkdir -p "$3"
+        printf 'fixture pcap\n' >"$3/fixture.pcap"
+        printf 'fixture log\n' >"$3/fixture.log" ;;
     esac
     exit 0 ;;
   *) exit 0 ;;
 esac
 STUB
 chmod +x "$BIN/docker"
+cat >"$BIN/sleep" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$BIN/sleep"
 cat >"$T/root-stub.sh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${STUB_ROOT_LOG:-/dev/null}"
@@ -352,5 +368,65 @@ if [ "$RC" -eq 0 ] && grep -qF 'profile: ✗ lane E1 wrote no waits.tsv' <<<"$OU
 else
   bad "profile missing waits" "rc=$RC" "$OUT"
 fi
+
+# ---- 20: the capture starts after credential scan and before the first lane.
+: >"$T/docker.log"
+STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+capture_line="$(grep -n 'exec -d .*egress.sh run' "$T/docker.log" | head -1 | cut -d: -f1)"
+scan_line="$(grep -n 'cred-scan.sh' "$T/docker.log" | head -1 | cut -d: -f1)"
+lane_line="$(grep -n '/lanes/E1.sh' "$T/docker.log" | head -1 | cut -d: -f1)"
+ready_line="$(grep -n 'test -e .*egress.ready' "$T/docker.log" | head -1 | cut -d: -f1)"
+if [ "$RC" -eq 0 ] && [ -n "$capture_line" ] && [ -n "$ready_line" ] &&
+  [ "$scan_line" -lt "$capture_line" ] && [ "$capture_line" -lt "$ready_line" ] &&
+  [ "$ready_line" -lt "$lane_line" ] &&
+  grep -q 'touch .*/egress.stop' "$T/docker.log" &&
+  [ "$(tail -1 <<<"$OUT")" = 'EGRESS PASS fixture' ]; then
+  ok "capture starts after credential scan, waits ready before the lane, then stops with PASS last"
+else bad "capture order and PASS" "rc=$RC" "$OUT" "$(cat "$T/docker.log")"; fi
+
+# ---- 21: no ready file is red, but the lane still runs.
+: >"$T/docker.log"
+STUB_EGRESS_READY=0 STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+if [ "$RC" -eq 1 ] &&
+  grep -qF 'egress: ✗ NOT RECORDED — the capture did not start in 10s' <<<"$OUT" &&
+  grep -q '/lanes/E1.sh' "$T/docker.log"; then
+  ok "capture readiness timeout names NOT RECORDED and still runs the lane"
+else bad "capture readiness timeout" "rc=$RC" "$OUT"; fi
+
+# ---- 22: capture FAIL carries its DNS detail and fails the run.
+fail_output=$'EGRESS FAIL 1 DNS queries, 0 outside destinations (fixture.pcap)\n  dns www.rfc-editor.org ×1 first 12:00:00Z'
+STUB_EGRESS_OUTPUT="$fail_output" STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+if [ "$RC" -eq 1 ] &&
+  grep -qF '  dns www.rfc-editor.org ×1' <<<"$OUT" &&
+  [ "$(tail -1 <<<"$OUT")" = 'EGRESS FAIL 1 DNS queries, 0 outside destinations (fixture.pcap)' ]; then
+  ok "FAIL prints DNS detail, ends on its verdict, and exits red"
+else bad "capture FAIL" "rc=$RC" "$OUT"; fi
+
+# ---- 23: NOT RECORDED is a red verdict.
+STUB_EGRESS_OUTPUT='EGRESS NOT RECORDED — tcpdump not listening' STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+if [ "$RC" -eq 1 ] && [ "$(tail -1 <<<"$OUT")" = 'EGRESS NOT RECORDED — tcpdump not listening' ]; then
+  ok "NOT RECORDED is the final line and exits red"
+else bad "capture NOT RECORDED" "rc=$RC" "$OUT"; fi
+
+# ---- 24: a capture that never writes a verdict is named and red.
+STUB_EGRESS_VERDICT='' STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+if [ "$RC" -eq 1 ] &&
+  [ "$(tail -1 <<<"$OUT")" = 'egress: ✗ NOT RECORDED — no verdict from egress.sh in 30s' ]; then
+  ok "missing verdict is named and exits red"
+else bad "capture missing verdict" "rc=$RC" "$OUT"; fi
+
+# ---- 25: the recorder's artifacts are copied beside the lane output.
+STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+capture_out="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d | head -1)"
+if [ "$RC" -eq 0 ] && [ -f "$capture_out/egress.out" ] &&
+  [ -f "$capture_out/egress/fixture.pcap" ] && [ -f "$capture_out/egress/fixture.log" ]; then
+  ok "capture output, pcap and recorder log are copied to the run output"
+else bad "capture evidence copy" "rc=$RC" "$OUT"; fi
+
+STUB_EGRESS_EVIDENCE_COPY_FAIL=1 STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+if [ "$RC" -eq 0 ] && grep -q 'egress: could not copy recorder evidence' <<<"$OUT" &&
+  [ "$(tail -1 <<<"$OUT")" = 'EGRESS PASS fixture' ]; then
+  ok "failed evidence copy is named without changing a PASS verdict"
+else bad "capture evidence copy failure" "rc=$RC" "$OUT"; fi
 
 shtest_end

@@ -25,12 +25,13 @@ infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from
 LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes E1 # record each wait and print the ten longest
 ```
 
-`--dry-run` creates no container and runs no beat; it prints the root decision, lane order, budgets and seats. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
+`--dry-run` creates no container and runs no beat; it prints the root decision, lane order, budgets and seats. A non-dry run starts one `egress.sh` capture before its first lane and ends with its `EGRESS PASS`, `EGRESS FAIL` or `EGRESS NOT RECORDED` verdict as the last line. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
 
 | file | what it carries |
 | --- | --- |
 | `<lane>.log` | every beat line, plus a failed beat's raw pane bytes (`tmux capture-pane -e -p -S -`) and its activity-log slice |
 | `<lane>.stream.log` | exactly what the lane printed, as it printed it |
+| `egress.out` | the capture's verdict and any DNS or destination detail; `egress/` holds its pcap and tcpdump log |
 | `timeline.tsv` | `lane · beat · t+s · verdict · dur_s · seat · detail` |
 | `waits.tsv` | with `LANE_PROFILE=1`, each wait's lane, beat, helper, condition, elapsed seconds and outcome, longest first |
 | `lanes.tsv` | `lane · wall_s · beats · failed · known · blocked` (the Wave 2 TSV shape) |

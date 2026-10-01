@@ -174,7 +174,7 @@ JQ_AGG='
 # all (an enumerator that found nothing is an error here, never a silent
 # empty pass — CLAUDE.md: absence and failure-to-look must read differently).
 parse_agg() {
-  local src="$1" agg="$2" raw="$T/raw.jsonl" clean="$T/clean.jsonl" jqerr="$T/jq.err" total kept
+  local src="$1" agg="$2" raw="$T/raw.jsonl" clean="$T/clean.jsonl" jqerr="$T/jq.err" rc
   if [ -n "$src" ] && [ "$src" != "-" ]; then
     cat -- "$src" > "$raw" 2>"$T/cat.err" || { echo "TIMING-UNREADABLE: cannot read $src" >&2; cat "$T/cat.err" >&2; return 2; }
   else
@@ -183,51 +183,50 @@ parse_agg() {
       return 2
     fi
   fi
-  total=$(awk 'NF {n++} END {print n+0}' "$raw")
   # Every nonblank line must be one complete JSON event. A stray print or
   # container/build chatter is not part of a trustworthy timing stream:
   # accepting a complete-looking subset could manufacture a green result.
-  jq -R -c 'fromjson? // empty' "$raw" > "$clean" 2>"$jqerr"
+  jq -n --rawfile input "$raw" '
+    ($input | split("\n") | map(select(test("[^[:space:]]")))) as $lines |
+    ($lines | map(try (fromjson | {valid: true, value: .}) catch {valid: false})) as $parsed |
+    {
+      total: ($lines | length),
+      kept: ([$parsed[] | select(.valid and (.value != null and .value != false))] | length),
+      events: [$parsed[] | select(.valid and (.value != null and .value != false)) | .value]
+    }
+  ' > "$clean" 2>"$jqerr"
   if [ $? -ne 0 ]; then
     echo "TIMING-UNREADABLE: jq could not read the stream at all" >&2
     sed 's/^/  /' "$jqerr" >&2
     return 2
   fi
-  kept=$(wc -l < "$clean" | tr -d ' ')
-  if [ "$kept" -lt "$total" ]; then
-    echo "TIMING-UNREADABLE: $((total - kept)) non-JSON or malformed JSON line(s) in the stream" >&2
-    return 2
-  fi
-  jq -s "$JQ_AGG" "$clean" > "$agg" 2>"$jqerr"
-  local rc=$?
-  if [ "$rc" -ne 0 ]; then
-    echo "TIMING-UNREADABLE: jq could not aggregate the go test -json stream" >&2
-    sed 's/^/  /' "$jqerr" >&2
-    return 2
-  fi
-  local n
-  if ! n=$(jq -r '.packages | length' "$agg" 2>"$jqerr"); then
-    echo "TIMING-UNREADABLE: jq could not count package summaries" >&2
-    sed 's/^/  /' "$jqerr" >&2
-    return 2
-  fi
-  if [ "${n:-0}" -eq 0 ]; then
-    echo "TIMING-UNREADABLE: 0 package summaries parsed — the input was not a go test -json stream, or the run produced none" >&2
-    return 2
-  fi
-  if jq -e '
-      (.times | type) != "array" or (.times | length) < 1 or .invalid_time_events > 0 or
-      any(.packages[];
-        (.package | type) != "string" or .package == "" or
-        (.terminal_summaries | type) != "number" or .terminal_summaries != 1 or
-        (.status != "pass" and .status != "fail" and .status != "skip") or
-        (.wall_s | type) != "number" or .wall_s < 0 or
-        (.test_elapsed_valid != true)
-      )
-    ' "$agg" >/dev/null; then
-    echo "TIMING-INCOMPLETE: one or more packages has no terminal go test summary (or a valid timestamp/wall value)" >&2
-    return 2
-  fi
+  jq "
+    if .kept < .total then
+      ((.total - .kept) | tostring | halt_error(10))
+    else
+      (.events | $JQ_AGG) as \$result |
+      if (\$result.packages | length) == 0 then
+        \"empty\" | halt_error(11)
+      elif (\$result.times | type) != \"array\" or (\$result.times | length) < 1 or \$result.invalid_time_events > 0 or
+        any(\$result.packages[];
+          (.package | type) != \"string\" or .package == \"\" or
+          (.terminal_summaries | type) != \"number\" or .terminal_summaries != 1 or
+          (.status != \"pass\" and .status != \"fail\" and .status != \"skip\") or
+          (.wall_s | type) != \"number\" or .wall_s < 0 or
+          (.test_elapsed_valid != true)
+        ) then
+        \"incomplete\" | halt_error(12)
+      else \$result end
+    end
+  " "$clean" > "$agg" 2>"$jqerr"
+  rc=$?
+  case "$rc" in
+    0) ;;
+    10) echo "TIMING-UNREADABLE: $(cat "$jqerr") non-JSON or malformed JSON line(s) in the stream" >&2; return 2 ;;
+    11) echo "TIMING-UNREADABLE: 0 package summaries parsed — the input was not a go test -json stream, or the run produced none" >&2; return 2 ;;
+    12) echo "TIMING-INCOMPLETE: one or more packages has no terminal go test summary (or a valid timestamp/wall value)" >&2; return 2 ;;
+    *) echo "TIMING-UNREADABLE: jq could not aggregate the go test -json stream" >&2; sed 's/^/  /' "$jqerr" >&2; return 2 ;;
+  esac
   return 0
 }
 
@@ -271,11 +270,13 @@ PY
       sed 's/^/  /' "$T/time.err" >&2
       return 2
     fi
-    pkgcount=$(jq -r '.packages | length' "$agg")
-    serial=$(jq -r '([.packages[].wall_s] | add // 0)' "$agg")
-    slowpkg=$(jq -r '(.packages | sort_by(-.wall_s) | .[0].package) // "-"' "$agg")
-    slowwall=$(jq -r '(.packages | sort_by(-.wall_s) | .[0].wall_s) // 0' "$agg")
-    overall=$(jq -r 'if any(.packages[]; .status == "fail" or (.status == "skip" and .tests > 0)) then "FAIL" else "PASS" end' "$agg")
+    IFS=$'\t' read -r pkgcount serial slowpkg slowwall overall < <(jq -r '
+      [(.packages | length),
+       ([.packages[].wall_s] | add // 0),
+       ((.packages | sort_by(-.wall_s) | .[0].package) // "-"),
+       ((.packages | sort_by(-.wall_s) | .[0].wall_s) // 0),
+       (if any(.packages[]; .status == "fail" or (.status == "skip" and .tests > 0)) then "FAIL" else "PASS" end)] | @tsv
+    ' "$agg")
     printf 'SUITE\t%s\t%s\t%s\t%s\t%s\t%s\n' "$wall" "$pkgcount" "$serial" "$slowpkg" "$slowwall" "$overall"
   } > "$out"
 }

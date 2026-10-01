@@ -358,10 +358,7 @@ fi
 
 dockerfail="$T/dockerfail-bin"
 mkdir -p "$dockerfail"
-for tool in bash jq python3 awk sed sort date mktemp cat grep wc mv rm mkdir cut tr head tail xargs comm dirname basename; do
-  real="$(command -v "$tool" 2>/dev/null)" || continue
-  ln -sf "$real" "$dockerfail/$tool"
-done
+cp -a "$NODOCK/." "$dockerfail/"
 cat > "$dockerfail/docker" <<'SH'
 #!/usr/bin/env bash
 echo docker-daemon-unreachable >&2

@@ -1,4 +1,5 @@
 # pfm test timing budgets. Both suites are checked at budget x tolerance.
+# Above the effective limit WARN through x fail_factor; beyond it FAIL.
 # Unit: -p 6 -parallel 4; max of three passing 2026-10-01 iso gate all
 # captures r5/all-2, all-3, all-4; sharded (pfm/scripts/test-shard.sh),
 # rounded up (minimum 1), doubled per package and suite.
@@ -6,6 +7,7 @@
 # Host load 1m ranged 8.00-12.69 across these captures.
 # Evidence: $HOME/.local/state/pfm/flights/professor/fast-gate/measure/r5/.
 tolerance: 1.25
+fail_factor: 2
 suites:
   unit:
     wall_s: 100

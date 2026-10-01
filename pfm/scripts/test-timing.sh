@@ -11,8 +11,10 @@
 # script does not print the ratio itself).
 #
 # --check   compares every package + the suite against --yml (default
-#           pfm/.testtiming.yml) at budget * tolerance; exits 1 naming every
-#           offender (FAIL), load-explained overage (CORRECTED), or unlisted package (UNBUDGETED, always red — a
+#           pfm/.testtiming.yml). Within budget * tolerance passes; load-explained
+#           overage is CORRECTED; over the effective limit up to fail_factor
+#           times that limit is WARN (exit 0), and beyond it is FAIL (exit 1).
+#           An unlisted package is UNBUDGETED (always red — a
 #           package the tree ships that this file does not list is never
 #           silently allowed). A run carrying ANY `fail` status is never given
 #           a timing verdict at all — TIMING TESTS-FAILED, exit 1, before any
@@ -283,7 +285,7 @@ PY
   } > "$out"
 }
 
-# yml_fields <yml-file> — prints "tolerance\tX", one "suite\tNAME\tWALL_S"
+# yml_fields <yml-file> — prints "tolerance\tX", "fail_factor\tX", one "suite\tNAME\tWALL_S"
 # line per Tier under `suites:` (unit, e2e, ...), and one
 # "pkg\tNAME\tPATH\tBUDGET" line per package budgeted WITHIN that Tier —
 # budgets are scoped per suite (an e2e run never sees the 63 unit packages,
@@ -327,6 +329,10 @@ if "tolerance" not in data:
     fail("is missing tolerance")
 tol = positive_number(data["tolerance"], "tolerance")
 print(f"tolerance\t{tol:g}")
+if "fail_factor" not in data:
+    fail("is missing fail_factor")
+factor = positive_number(data["fail_factor"], "fail_factor")
+print(f"fail_factor\t{factor:g}")
 
 suites = data.get("suites")
 if not isinstance(suites, dict) or not suites:
@@ -497,6 +503,7 @@ check_timing() {
     }
     FNR==NR {
       if ($1=="tolerance") tol=$2
+      else if ($1=="fail_factor") fail_factor=$2
       else if ($1=="suite" && $2==want) suite_budget=$3
       else if ($1=="suite") suite_seen[$2]=1
       else if ($1=="pkg" && $2==want) { budget[$3]=$4; nbudget++ }
@@ -515,7 +522,7 @@ check_timing() {
           if (load[pkg] == "" || load[pkg] == "unmeasured") suffix = " other-load=unmeasured"
           else {
             corrected = threshold/(1-load[pkg])
-            suffix = sprintf(" other-load=%.0f%% limit=%.3fs", load[pkg]*100, corrected)
+            suffix = sprintf(" other-load=%.0f%%", load[pkg]*100)
           }
         }
         if (wall+0 > threshold+0) {
@@ -524,8 +531,14 @@ check_timing() {
             printf "TIMING CORRECTED %s budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs\n", pkg, budget[pkg], wall, load[pkg]*100, corrected
             corrected_count++
           } else {
-            printf "TIMING FAIL %s budget=%ss measured=%ss over=%.0f%%%s\n", pkg, budget[pkg], wall, pct, suffix > "/dev/stderr"
-            bad++
+            if (wall+0 <= fail_factor*corrected) {
+              printf "TIMING WARN %s budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", pkg, budget[pkg], wall, pct, suffix, corrected, fail_factor*corrected
+              warnings++
+              warning_names = warning_names (warning_names == "" ? "" : ", ") pkg
+            } else {
+              printf "TIMING FAIL %s budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", pkg, budget[pkg], wall, pct, suffix, corrected, fail_factor*corrected > "/dev/stderr"
+              bad++
+            }
           }
         }
       } else {
@@ -553,7 +566,7 @@ check_timing() {
             if (load["SUITE"] == "" || load["SUITE"] == "unmeasured") suffix = " other-load=unmeasured"
             else {
               corrected = threshold/(1-load["SUITE"])
-              suffix = sprintf(" other-load=%.0f%% limit=%.3fs", load["SUITE"]*100, corrected)
+              suffix = sprintf(" other-load=%.0f%%", load["SUITE"]*100)
             }
           }
           if (suite_wall+0 > threshold+0) {
@@ -562,15 +575,26 @@ check_timing() {
               printf "TIMING CORRECTED SUITE(%s) budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs\n", want, suite_budget, suite_wall, load["SUITE"]*100, corrected
               corrected_count++
             } else {
-              printf "TIMING FAIL SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s\n", want, suite_budget, suite_wall, pct, suffix > "/dev/stderr"
-              bad++
+              if (suite_wall+0 <= fail_factor*corrected) {
+                printf "TIMING WARN SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", want, suite_budget, suite_wall, pct, suffix, corrected, fail_factor*corrected
+                warnings++
+                warning_names = warning_names (warning_names == "" ? "" : ", ") "SUITE(" want ")"
+              } else {
+                printf "TIMING FAIL SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", want, suite_budget, suite_wall, pct, suffix, corrected, fail_factor*corrected > "/dev/stderr"
+                bad++
+              }
             }
           } else {
             printf "TIMING: SUITE(%s) within budget (%.3fs <= %.3fs x%s)\n", want, suite_wall, suite_budget, tol
           }
         }
       }
+      if (warnings > 0) printf "GATE-WARN %d timing warning(s): %s\n", warnings, warning_names
       if (bad>0) { printf "TIMING: %d offender(s)\n", bad > "/dev/stderr"; exit 1 }
+      if (warnings > 0) {
+        printf "TIMING: %d package(s) measured, %d over budget within the fail limit (fail at x%s)\n", measured, warnings, fail_factor
+        exit 0
+      }
       if (corrected_count > 0) printf "TIMING: %d package(s) measured, all within budget (tolerance x%s; %d within the load-corrected limit)\n", measured, tol, corrected_count
       else printf "TIMING: %d package(s) measured, all within budget (tolerance x%s)\n", measured, tol
       exit 0
@@ -711,8 +735,9 @@ PY
         echo "# of every field: docs/dev/testing/timing.md."
         echo "#"
         echo "# tolerance: a measured wall may exceed a package's budget by up to this"
-        echo "# fraction before \`scripts/test-timing.sh --check\` reports it FAIL — it"
+        echo "# fraction before \`scripts/test-timing.sh --check\` reports an overage — it"
         echo "# absorbs ordinary run-to-run noise on a shared fence, nothing more."
+        echo "# fail_factor: overages up to this multiple of the effective limit WARN; beyond it FAIL."
         echo "#"
         echo "# suites: one wall_s + packages block per Tier (unit ./..., e2e ./e2e/..."
         echo "# -tags e2e) — dev.sh checks each Tier separately, on its own package set."
@@ -720,6 +745,7 @@ PY
         echo "# A package the tree ships that its suite does not list is UNBUDGETED —"
         echo "# always red, never silently allowed."
         echo "tolerance: 1.25"
+        echo "fail_factor: 2"
         suite_med=$(awk -F'\t' '$1=="SUITE"{print $2}' "$MEDIANS")
         echo "suites:"
         printf '  %s:\n' "$SUITE_NAME"
@@ -788,9 +814,11 @@ PY
     awk -F'\t' -v skip="$SUITE_NAME" '$1=="suite" && $2!=skip {print $2}' "$BUDGETS" | sort -u > "$OTHERSUITES"
 
     tol=$(awk -F'\t' '$1=="tolerance"{print $2}' "$BUDGETS")
+    factor=$(awk -F'\t' '$1=="fail_factor"{print $2}' "$BUDGETS")
     {
       grep '^#' "$YML"
       echo "tolerance: $tol"
+      echo "fail_factor: $factor"
       echo "suites:"
       printf '  %s:\n' "$SUITE_NAME"
       printf '    wall_s: %s\n' "$new_suite"

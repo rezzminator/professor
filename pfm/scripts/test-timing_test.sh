@@ -69,6 +69,7 @@ sample_yml() {
   cat <<'YML'
 # fixture budgets
 tolerance: 1.25
+fail_factor: 2
 suites:
   u:
     wall_s: 5
@@ -223,6 +224,7 @@ fi
 raise_yml="$T/raise.yml"
 cat > "$raise_yml" <<'YML'
 tolerance: 1.25
+fail_factor: 2
 suites:
   u:
     wall_s: 5
@@ -384,6 +386,7 @@ fi
 absent_suite_yml="$T/16.yml"
 cat > "$absent_suite_yml" <<'YML'
 tolerance: 1.25
+fail_factor: 2
 suites:
   e2e:
     wall_s: 99
@@ -453,6 +456,7 @@ fi
 skip_yml="$T/19.yml"
 cat > "$skip_yml" <<'YML'
 tolerance: 1.25
+fail_factor: 2
 suites:
   u:
     wall_s: 1
@@ -528,5 +532,54 @@ for case in header numeric time cpus; do
   rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
   if [ "$rc" -eq 2 ] && grep -q "TIMING-UNREADABLE: load record $T/load.load:" "$T/load.out"; then ok "load-malformed-$case"; else bad "load-malformed-$case: rc=$rc" "$(cat "$T/load.out")"; fi
 done
+
+# The fail limit applies to each package and to the suite wall separately.
+timed_json() {
+  local wall="$1"
+  printf '{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK"}\n'
+  printf '{"Time":"2024-01-01T00:00:00.%09dZ","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK","Elapsed":%s}\n' "$2" "$wall"
+  printf '{"Time":"2024-01-01T00:00:00.%09dZ","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Elapsed":%s}\n' "$2" "$wall"
+}
+for scope in package suite; do
+  tier_yml="$T/$scope-tier.yml"
+  if [ "$scope" = package ]; then tier_suite=1; tier_pkg=0.1; tier_name='github.com/rezzminator/professor/pfm/internal/quick'
+  else tier_suite=0.1; tier_pkg=1; tier_name='SUITE(u)'; fi
+  cat > "$tier_yml" <<YML
+tolerance: 1.25
+fail_factor: 2
+suites:
+  u:
+    wall_s: $tier_suite
+    packages:
+      github.com/rezzminator/professor/pfm/internal/quick: $tier_pkg
+YML
+  for tier in warn fail; do
+    if [ "$tier" = warn ]; then wall=0.1875; nanos=187500000; expected_rc=0; expected_verdict=WARN
+    else wall=0.2625; nanos=262500000; expected_rc=1; expected_verdict=FAIL; fi
+    tier_out="$T/$scope-$tier.out"
+    rc=0; timed_json "$wall" "$nanos" | run_sut --check --yml "$tier_yml" --suite u --out "$T/$scope-$tier.tsv" > "$tier_out" 2>&1 || rc=$?
+    if [ "$rc" -eq "$expected_rc" ] && grep -q "^TIMING $expected_verdict $tier_name .*limit=0.125s fail-at=0.250s" "$tier_out"; then
+      if [ "$tier" = warn ] && grep -q "^GATE-WARN 1 timing warning(s): $tier_name" "$tier_out" && grep -q 'over budget within the fail limit (fail at x2)' "$tier_out"; then
+        ok "$scope warning stays green and names its fail limit"
+      elif [ "$tier" = fail ]; then
+        ok "$scope beyond the fail limit is an offender"
+      else bad "$scope warning summary or gate marker" "$(cat "$tier_out")"; fi
+    else bad "$scope $tier: rc=$rc" "$(cat "$tier_out")"; fi
+  done
+done
+
+missing_factor_yml="$T/missing-factor.yml"
+cat > "$missing_factor_yml" <<'YML'
+tolerance: 1.25
+suites:
+  u:
+    wall_s: 1
+    packages:
+      github.com/rezzminator/professor/pfm/internal/quick: 1
+YML
+rc=0; timed_json 0.1 100000000 | run_sut --check --yml "$missing_factor_yml" --suite u --out "$T/missing-factor.tsv" > "$T/missing-factor.out" 2>&1 || rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'TIMING-CONFIG-INVALID: .* is missing fail_factor' "$T/missing-factor.out"; then
+  ok 'missing fail_factor is a named configuration error'
+else bad "missing fail_factor: rc=$rc" "$(cat "$T/missing-factor.out")"; fi
 
 shtest_end

@@ -170,5 +170,12 @@ steps_run() { # steps_run <run-dir>
   done
   if (( red )); then row=FAIL; else row=PASS; fi
   printf 'WALL\t%s\t%s\n' "$row" "$(steps_seconds "$first" "$last")"
+  for (( i=0; i<n; i++ )); do
+    [[ "${verdict[$i]}" == PASS ]] || continue
+    log="$run/steps/${STEPS_NAMES[$i]}.log"
+    while IFS= read -r warning; do
+      printf 'WARN %s: %s — %s\n' "${STEPS_NAMES[$i]}" "$warning" "$log"
+    done < <(grep '^GATE-WARN ' "$log" || true)
+  done
   (( red == 0 ))
 }

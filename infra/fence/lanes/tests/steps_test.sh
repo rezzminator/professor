@@ -39,6 +39,14 @@ if steps_run "$T/table" >"$T/table.out" &&
 else bad 'table shape or output'; fi
 if grep -q "$(printf '^c\tPASS\t')" "$T/table/gate.tsv"; then ok 'zero exit and zero FAILURES pass'; else bad 'pass verdict'; fi
 
+warn_step() { printf 'GATE-WARN 2 timing warning(s): package-a, SUITE(unit)\n'; }
+steps_reset; steps_add warned warn_step
+if steps_run "$T/warn" >"$T/warn.out" &&
+  grep -q "$(printf '^warned\tPASS\t')" "$T/warn/gate.tsv" &&
+  grep -Fxq "WARN warned: GATE-WARN 2 timing warning(s): package-a, SUITE(unit) — $T/warn/steps/warned.log" "$T/warn.out"; then
+  ok 'PASS step surfaces its generic GATE-WARN with the log path'
+else bad 'PASS warning surface' "$(cat "$T/warn.out")"; fi
+
 exit_three() { return 3; }
 steps_reset; steps_add broken exit_three
 if ! steps_run "$T/exit" >"$T/exit.out" && grep -q "$(printf '^broken\tFAIL\t')" "$T/exit/gate.tsv" &&

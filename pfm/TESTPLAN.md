@@ -72,6 +72,7 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | unknown subcommand → usage, rc 2 | JAIL | `main.go:62-66` | |
 | `help` / `-h` / `--help` → usage on stdout, rc 0 | JAIL | `main.go:59-61` | |
 | `version` → `pfm <version>`; extra arg → rc 2 | JAIL | `main.go:95-106` | |
+| `price [--json \| --check]` → effective table, each row shipped/override; invalid `pfm.prices.json` → rc 1 naming it; `--json` + `--check` → rc 2 | JAIL | `internal/pricing/command/command.go`; `command_test.go`, `cmd/pfm/price_command_test.go` | |
 | global `--config PATH` loads once before dispatch; malformed present files name their path and JSON byte | JAIL | `runtime_config.go`, `config_cli_test.go`, `internal/config/config_test.go` | |
 | configured account roots are the exact transcript boundary; absent config preserves the three-account discovery | JAIL | `runtime_config.go`, `config_cli_test.go`, `internal/config/config_test.go` | |
 | configured Claude/Codex binary and permission policy reach actual launch argv; absent config preserves current argv | JAIL+tmux | `chat_new_jail_test.go`, `internal/action/*_test.go`, `internal/reload/reload_test.go` | |

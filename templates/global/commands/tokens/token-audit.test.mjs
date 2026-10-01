@@ -16,9 +16,11 @@ const FIX = path.join(HERE, "fixtures");
 const CLAUDE_ROOT = path.join(FIX, "claude", "projects");
 const CODEX_ROOT = path.join(FIX, "codex");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "token-audit-test-"));
+// pfm's shipped table, read where pfm keeps it: every run prices from it unless env says otherwise.
+const PRICES = path.join(HERE, "../../../../pfm/internal/pricing/prices.json");
 
-function run(args) {
-  const r = spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8", cwd: HERE, maxBuffer: 64 << 20 });
+function run(args, env = {}) {
+  const r = spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8", cwd: HERE, maxBuffer: 64 << 20, env: { ...process.env, TOKEN_AUDIT_PRICES: PRICES, ...env } });
   if (r.error) assert.fail(`could not run ${BIN}: ${r.error.message}`);
   return { code: r.status, out: r.stdout || "", err: r.stderr || "" };
 }
@@ -155,7 +157,7 @@ test("--flight: an unpriced model renders n/a with its tokens still counted, nev
   assert.ok(e.tok.in + e.tok.cr + e.tok.out > 0, "its tokens must still be counted");
   assert.match(f.md, /\| n\/a \|/, "the $ column must read n/a");
   assert.doesNotMatch(f.md.split("## totals")[0], /\| \$0\.00 \|/, "no row may render an unknown price as $0.00");
-  assert.match(f.md, /data gaps:.*UNPRICED calls.*unobtanium/);
+  assert.match(f.md, /data gaps:.*UNPRICED calls \{[^}]*unobtanium[^}]*\} — tokens counted, dollars "n\/a"; add the model to pfm\.prices\.json/);
 });
 
 test("--flight: the report stays bounded and carries the gaps and cross-check lines", () => {
@@ -165,13 +167,13 @@ test("--flight: the report stays bounded and carries the gaps and cross-check li
   assert.match(f.md, /^cross-check: /m);
 });
 
-test("--flight: the long-context premium is a per-model PRICING rate, not a flat constant", () => {
+test("--flight: the long-context premium is a per-model price-table rate, not a flat constant", () => {
   const f = flight("flight");
-  const m = /this flight reads \$([\d.]+) \(([\d.]+)x the headline\)/.exec(f.md);
+  const m = /per-model rate in pfm's price table — an estimate\) this flight reads \$([\d.]+) \(([\d.]+)x the headline\)/.exec(f.md);
   assert.ok(m, `no cross-check ratio in:\n${f.md}`);
-  // claude-sonnet-5 and gpt-5.6-sol bill their whole window at standard rates (PRICING 1/1),
+  // claude-sonnet-5 and gpt-5.6-sol bill their whole window at standard rates (long_in/long_out 1/1),
   // so a run past 200K reads 1.00x; a flat long-context constant would lift it above.
-  assert.equal(m[2], "1.00", `a 1/1 PRICING row must leave the long-context number at 1.00x, got ${m[2]}x`);
+  assert.equal(m[2], "1.00", `a 1/1 price-table row must leave the long-context number at 1.00x, got ${m[2]}x`);
 });
 
 test("--flight: with no agents.tsv, run.md is the fallback and every row is marked window", () => {
@@ -269,10 +271,7 @@ test("an unreadable root is a failure to look, not an empty result", () => {
 const TL_ROOT = path.join(FIX, "timeline"), TL_SUB = path.join(TL_ROOT, "-tmp-tl-proj", "sess-tl", "subagents");
 const TL_PRICED = path.join(TL_SUB, "agent-t1.jsonl"), TL_UNPRICED = path.join(TL_SUB, "agent-t2.jsonl");
 function runTl(args) {
-  const home = fs.mkdtempSync(path.join(TMP, "tl-home-"));
-  const r = spawnSync(process.execPath, [BIN, ...args], { encoding: "utf8", cwd: HERE, maxBuffer: 64 << 20, env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "" } });
-  if (r.error) assert.fail(`could not run ${BIN}: ${r.error.message}`);
-  return { code: r.status, out: r.stdout || "", err: r.stderr || "" };
+  return run(args, { HOME: fs.mkdtempSync(path.join(TMP, "tl-home-")), CLAUDE_CONFIG_DIR: "" });
 }
 const tlRows = (out) => out.split("\n").filter((l) => /^ {2}#\d+ /.test(l));
 const tlHeader = (out) => out.split("\n").find((l) => l.startsWith("TIMELINE ")) || "";
@@ -530,4 +529,84 @@ test("pricing: content-block lines of one message.id are one call even when a li
   // Haiku 3.5: 1000×$0.80 + 1000×$4 + 500×$1 + 500×$1.60 + 10000×$0.08 = $0.0069
   cols(j, { in: 0.0008, out: 0.004, cw5: 0.0005, cw1: 0.0008, cr: 0.0008 });
   assert.equal(j.calls, 1);
+});
+
+// ---------- prices: one `pfm price --json` per run. These runs clear TOKEN_AUDIT_PRICES and
+// name a stand-in pfm, a shell script written into TMP.
+function fakePfm(body) {
+  const p = path.join(fs.mkdtempSync(path.join(TMP, "pfm-")), "pfm");
+  fs.writeFileSync(p, `#!/bin/sh\n${body}\n`);
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+const viaPfm = (bin) => ({ TOKEN_AUDIT_PRICES: "", TOKEN_AUDIT_PFM: bin });
+// Every pricing mode over the fixtures rooted at `fix`; flight output goes to TMP, never the fixture.
+const MODES = {
+  report: (fix) => ["--since", "99999d", "--root", path.join(fix, "claude", "projects")],
+  codex: (fix) => ["--codex", "--since", "99999d", "--codex-root", path.join(fix, "codex")],
+  timeline: (fix) => ["--timeline", path.join(fix, "timeline", "-tmp-tl-proj", "sess-tl", "subagents", "agent-t2.jsonl")],
+  flight: (fix, md) => ["--flight", path.join(fix, "flight"), "--root", path.join(fix, "claude", "projects"), "--codex-root", path.join(fix, "codex"), "--metrics-out", md, "--out", md.replace(/\.md$/, ".json")],
+};
+
+test("prices: a missing pfm exits 2 naming it, with nothing on stdout", () => {
+  const bin = path.join(TMP, "no-such-pfm");
+  const r = run(MODES.report(FIX), viaPfm(bin));
+  assert.equal(r.code, 2, r.out);
+  assert.equal(r.out, "");
+  assert.equal(r.err, `token-audit: pfm not found (${bin}) — prices come from \`pfm price --json\`; install pfm or set TOKEN_AUDIT_PFM\n`);
+});
+
+test("prices: a pfm that exits non-zero stops the run with its exit code and trimmed stderr", () => {
+  const bin = fakePfm(`echo "pfm: pfm.prices.json: row 3: unknown field \\"rate\\"" >&2; exit 3`);
+  const r = run(MODES.report(FIX), viaPfm(bin));
+  assert.equal(r.code, 2, r.out);
+  assert.equal(r.out, "");
+  assert.equal(r.err, `token-audit: \`${bin} price --json\` failed (exit 3): pfm: pfm.prices.json: row 3: unknown field "rate"\n`);
+});
+
+test("prices: a pfm that prints no JSON is an unreadable table", () => {
+  const bin = fakePfm(`echo "price table"`);
+  const r = run(MODES.report(FIX), viaPfm(bin));
+  assert.equal(r.code, 2, r.out);
+  assert.equal(r.out, "");
+  assert.ok(r.err.startsWith(`token-audit: \`${bin} price --json\` returned an unreadable table: `), r.err);
+});
+
+test("prices: an unreadable TOKEN_AUDIT_PRICES exits 2 naming it", () => {
+  const missing = path.join(TMP, "no-such-table.json");
+  const r = run(MODES.report(FIX), { TOKEN_AUDIT_PRICES: missing, TOKEN_AUDIT_PFM: path.join(TMP, "no-such-pfm") });
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.err, new RegExp(`^token-audit: TOKEN_AUDIT_PRICES ${missing}: .*ENOENT`));
+});
+
+test("prices: a bad flag is refused before pfm is looked for", () => {
+  const r = run(["--since", "3x"], viaPfm(path.join(TMP, "no-such-pfm")));
+  assert.equal(r.code, 2);
+  assert.equal(r.err, "token-audit: --since wants a number plus h or d, e.g. 24h or 3d\n");
+});
+
+test("prices: every mode runs `pfm price --json` once, before any transcript is read", () => {
+  for (const [mode, args] of Object.entries(MODES)) {
+    const dir = fs.mkdtempSync(path.join(TMP, "spawn-")), fix = path.join(dir, "fix"), spawns = path.join(dir, "spawns");
+    // The fixtures appear only when pfm runs: a transcript read before the spawn finds nothing.
+    const bin = fakePfm(`echo x >> '${spawns}'; [ -e '${fix}' ] || ln -s '${FIX}' '${fix}'; cat '${PRICES}'`);
+    const r = run(args(fix, path.join(dir, "metrics.md")), { ...viaPfm(bin), HOME: dir, CLAUDE_CONFIG_DIR: "" });
+    assert.equal(r.code, 0, `${mode}: ${r.err}`);
+    assert.doesNotMatch(r.out, /READ ERRORS|NO CALLS/, `${mode}: a transcript was read before pfm ran`);
+    assert.equal(fs.existsSync(spawns) ? fs.readFileSync(spawns, "utf8") : "", "x\n", `${mode}: pfm must run exactly once`);
+  }
+});
+
+test("prices: an active override leads every data-gaps line, naming its file and row count", () => {
+  const doc = path.join(TMP, "override-table.json");
+  fs.writeFileSync(doc, JSON.stringify({ ...JSON.parse(fs.readFileSync(PRICES, "utf8")), override: { path: "/cfg/pfm.prices.json", rows: 2 } }));
+  const bin = fakePfm(`cat '${doc}'`);
+  for (const [mode, args] of Object.entries(MODES)) {
+    const md = path.join(fs.mkdtempSync(path.join(TMP, "override-")), "metrics.md");
+    const r = run(args(FIX, md), { ...viaPfm(bin), HOME: path.dirname(md), CLAUDE_CONFIG_DIR: "" });
+    assert.equal(r.code, 0, `${mode}: ${r.err}`);
+    const gaps = (r.out + (fs.existsSync(md) ? fs.readFileSync(md, "utf8") : "")).split("\n").filter((l) => l.startsWith("data gaps:"));
+    assert.ok(gaps.length, `${mode}: no data-gaps line in:\n${r.out}`);
+    for (const g of gaps) assert.match(g, /^data gaps: price override active: 2 rows from \/cfg\/pfm\.prices\.json( · |$)/, `${mode}: ${g}`);
+  }
 });

@@ -154,6 +154,7 @@ func Run(
 	tally.failures += configFailures
 	tally.warnings += printHarvesterConfigDoctorWithEnv(stdout, runtime, dependencies.Env)
 	tally.warnings += printDuplicateSeatLogins(stdout, runtime, dependencies.Env)
+	tally.warnings += printPriceOverride(stdout, runtime)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
 	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	tally.warnings += PrintEngineCapabilities(stdout, dependencies)

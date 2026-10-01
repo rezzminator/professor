@@ -1,6 +1,6 @@
 # token-audit
 
-One read-only script over both engines' transcripts, one pricing table: **where did the tokens go?** Zero dependencies (node: builtins only), no network, nothing written outside `--out` / `--metrics-out` / a flight's own `metrics.md`.
+One read-only script over both engines' transcripts, one pricing table: **where did the tokens go?** Node builtins plus the `pfm` binary, no network, nothing written outside `--out` / `--metrics-out` / a flight's own `metrics.md`.
 
 ```bash
 node .claude/commands/tokens/token-audit.mjs            # last 24h, every project
@@ -50,9 +50,9 @@ Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/pr
 ## Counting and pricing
 
 - **Codex counters reset.** `info.total_token_usage` is cumulative but restarts on resume and on compaction, and duplicate events re-emit an identical cumulative. So: dedupe on the cumulative, split the thread wherever it drops, sum **each segment's peak**. The final counter alone undercounts a long thread by orders of magnitude; summing per-turn deltas double-counts. Cached input is a subset of input and bills at the cached rate; output already includes reasoning.
-- **Claude, per response:** input × In + output × Out + `cache_creation.ephemeral_5m_input_tokens` × 1.25 In + `ephemeral_1h_input_tokens` × 2 In + `cache_read_input_tokens` × the row's read rate (0.025x input on Fable/Mythos 5.1, 0.05x on Opus 5.5, 0.1x elsewhere), at that response's own model. Any part of `cache_creation_input_tokens` the 5m/1h breakdown does not cover bills as the default 5-minute TTL; a write with no breakdown at all is counted in the gaps line. A response whose top-level counts are all zero is priced from `usage.iterations[]`.
+- **Claude, per response:** input × In + output × Out + `cache_creation.ephemeral_5m_input_tokens` × the row's `w5m` + `ephemeral_1h_input_tokens` × its `w1h` (1.25x and 2x In on every shipped row) + `cache_read_input_tokens` × the row's read rate (0.025x input on Fable/Mythos 5.1, 0.05x on Opus 5.5, 0.1x elsewhere), at that response's own model. Any part of `cache_creation_input_tokens` the 5m/1h breakdown does not cover bills as the default 5-minute TTL; a write with no breakdown at all is counted in the gaps line. A response whose top-level counts are all zero is priced from `usage.iterations[]`.
 - **Every dollar is traced to the context that caused it**: the replay charges `[0, cache_read)` at the read rate, `[cache_read, +cache_write)` at the write rate and the tail at 1x, then attributes each slice to the category that put it there.
-- `PRICING` at the top of `token-audit.mjs` is an **editable** table, matched by substring on the lowercased model id, first match wins — keep specific ids above broader ones. Columns 5 and 6 are the >200K long-context multipliers, an **estimate** that feeds the CROSS-CHECK line only. `scripts/check-token-pricing.mjs` resolves published ids against the table; a row no published id reaches is dead code and it says so.
+- **Prices come from `pfm price --json`**, run once per run: pfm's embedded table merged by model key with `pfm.prices.json` beside `pfm.config.json`. Of the patterns found in the lowercased model id, the longest wins, whatever the row order. To change a rate, edit `pfm.prices.json` and check it with `pfm price --check`; an active override leads the data-gaps line. `long_in`/`long_out` are the >200K long-context multipliers, an **estimate** that feeds the CROSS-CHECK line only. `TOKEN_AUDIT_PFM` names another pfm; `TOKEN_AUDIT_PRICES` reads a saved table instead of running pfm. With no pfm the run exits 2 naming it; there is no fallback table.
 
 ## Honesty rules
 
@@ -87,7 +87,7 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 
 ## `--timeline <file>`
 
-One transcript, the whole file — no window applies, and `--flight`, `--codex`, `--project` or `--since` beside it is refused. `<file>` is a sub-agent's `…/subagents/agent-{id}.jsonl` (its agent type comes from the `.meta.json` beside it) or a main session file; repeat the flag for several. The file goes through the same `auditFile` replay and `PRICING` table as the default report, so the header's price equals that run's price there.
+One transcript, the whole file — no window applies, and `--flight`, `--codex`, `--project` or `--since` beside it is refused. `<file>` is a sub-agent's `…/subagents/agent-{id}.jsonl` (its agent type comes from the `.meta.json` beside it) or a main session file; repeat the flag for several. The file goes through the same `auditFile` replay and price table as the default report, so the header's price equals that run's price there.
 
 Per file, one header line — agent type, model(s), effort, calls, wall seconds from the first to the last timestamped record, peak context, output tokens, tool errors, tool results over 20 KB, USD — then one row per model call (a call written as several assistant lines sharing one `message.id` is one row): call number, clock time (UTC), seconds since the previous tool result, context (input + cache read + cache write), output tokens, the call's USD, and each tool the call issued as `name: target` (target cut to 100 chars) with its result chars, `ERR` when `is_error`, and the tool's wait; `(no result)` when none came back. Then the file's own `data gaps:` line.
 
@@ -96,7 +96,7 @@ An unpriced model renders `n/a` in the header and on every row, never `$0`. A pa
 ## Tests
 
 ```bash
-node --test .claude/commands/tokens/
+node --test templates/global/commands/tokens/
 ```
 
-`token-audit.test.mjs` runs the CLI as a child process over the synthetic JSONL under `fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, and a flight ledger exercising an id match, a window match and a row with no transcript; `fixtures/timeline/` holds five sub-agent runs for `--timeline` (calls split across several assistant lines, a failed Bash, a result over 20 KB, an unpriced model, an all-malformed transcript, an empty transcript, and a valid transcript with no `.meta.json` beside it). Set `TOKEN_AUDIT_BIN` to point the suite at another build. No fixture is markdown: every `.md` below the commands tree would compile into a slash command.
+`token-audit.test.mjs` runs the CLI as a child process over the synthetic JSONL under `fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction, 85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter resets after a compaction with three empty `write_stdin` polls, and a flight ledger exercising an id match, a window match and a row with no transcript; `fixtures/timeline/` holds five sub-agent runs for `--timeline` (calls split across several assistant lines, a failed Bash, a result over 20 KB, an unpriced model, an all-malformed transcript, an empty transcript, and a valid transcript with no `.meta.json` beside it). Every CLI run prices from pfm's shipped `pfm/internal/pricing/prices.json` through `TOKEN_AUDIT_PRICES`, so the suite runs from the repo checkout. `pricing.test.mjs` resolves every id of the published-rates fixture `pfm/internal/pricing/testdata/published-rates.json`, the one pfm's Go test reads, over that table, and covers the loader's refusals. Set `TOKEN_AUDIT_BIN` to point the suite at another build. No fixture is markdown: every `.md` below the commands tree would compile into a slash command.

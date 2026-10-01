@@ -486,13 +486,6 @@ act_templates() { # the shipped product: mechanical gates, no build
         fail_step "agent roster FAILED — a source role is missing or cannot perform its protocol"
       fi
 
-      head_ "templates — token-audit pricing"
-      if node scripts/check-token-pricing.mjs; then
-        ok "every published model id resolves to its intended rate"
-      else
-        fail_step "token pricing FAILED — a published model id resolves to the wrong rate, or the PRICING table could not be read (see output)"
-      fi
-
       head_ "templates — token-audit tests"
       # node --test exits 0 when it finds no tests, so a moved or renamed suite
       # would read as a pass: enumerate the files and count the passes instead.

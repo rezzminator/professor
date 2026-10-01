@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
+	pricecmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -59,6 +60,7 @@ var topLevelSubcommands = []string{
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log", callmeterCommand,
+	"price",
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
@@ -139,6 +141,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runLog(args[1:], stdout, stderr, runtime)
 	case "callmeter":
 		return callmetercmd.CLI(args[1:], stdout, stderr, runtime)
+	case "price":
+		return pricecmd.Price(args[1:], stdout, stderr, runtime)
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -212,6 +216,7 @@ func printUsage(w io.Writer) {
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
 		"  callmeter report which files, commands and calls filled agent contexts",
+		"  price     print the model price table pfm owns: --json --check",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
 		"  statusline render the native Claude status line",

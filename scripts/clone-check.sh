@@ -19,8 +19,8 @@ source "$ROOT/infra/fence/tools.env"
 JSCPD=""
 if [[ -n "${TOOLS_BIN:-}" ]]; then
   candidate="$TOOLS_BIN/jscpd"
-elif command -v go >/dev/null; then
-  candidate="$ROOT/tmp/tools/$(go env GOOS)-$(go env GOARCH)/bin/jscpd"
+elif bin="$(bash "$ROOT/infra/fence/tools.sh" --print-bin 2>/dev/null)"; then
+  candidate="$bin/jscpd"
 else
   candidate=""
 fi
@@ -43,7 +43,8 @@ fi
 [[ -f "$BASELINE" ]] || { echo "CLONES ERROR baseline .jscpd-baseline.json missing — cannot tell new from old"; exit 2; }
 if run --fail-on-new-clones 0; then echo "CLONES PASS $(grep -oE 'Found [0-9]+ clones' "$LOG" | tail -1 || echo 'count unreadable'), none new"; exit 0; fi
 if grep -qiE 'new clone' "$LOG"; then
-  grep -iE 'new clone|Clone found' -A3 "$LOG" | head -40
+  grep -iE 'Clone found.*\[NEW\]' -A2 "$LOG" \
+    || { echo "CLONES ERROR jscpd reported new clones without a named pair"; exit 2; }
   echo "CLONES FAIL new clone(s) above — fix, or name the baseline update in the commit"; exit 1
 fi
 echo "CLONES ERROR jscpd did not run: $(tail -1 "$LOG")"; exit 2

@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { fakePfm as fakePfmIn } from "./fake-pfm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = process.env.TOKEN_AUDIT_BIN || path.join(HERE, "token-audit.mjs");
@@ -533,12 +534,7 @@ test("pricing: content-block lines of one message.id are one call even when a li
 
 // ---------- prices: one `pfm price --json` per run. These runs clear TOKEN_AUDIT_PRICES and
 // name a stand-in pfm, a shell script written into TMP.
-function fakePfm(body) {
-  const p = path.join(fs.mkdtempSync(path.join(TMP, "pfm-")), "pfm");
-  fs.writeFileSync(p, `#!/bin/sh\n${body}\n`);
-  fs.chmodSync(p, 0o755);
-  return p;
-}
+const fakePfm = (body) => fakePfmIn(TMP, body);
 const viaPfm = (bin) => ({ TOKEN_AUDIT_PRICES: "", TOKEN_AUDIT_PFM: bin });
 // Every pricing mode over the fixtures rooted at `fix`; flight output goes to TMP, never the fixture.
 const MODES = {

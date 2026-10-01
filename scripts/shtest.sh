@@ -12,4 +12,17 @@ PASS=0
 FAIL=0
 ok() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL + 1)); }
+shtest_compose_config() { # shtest_compose_config <build-context>
+  cat <<EOF
+services:
+  pfm-dev:
+    build:
+      context: $1
+      dockerfile: pfm-dev.Dockerfile
+      target: pfm-dev
+      labels:
+        pfm.fence.inputs: unkeyed
+    image: professor-pfm-dev
+EOF
+}
 shtest_end() { printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]; }

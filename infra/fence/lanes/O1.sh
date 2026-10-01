@@ -433,4 +433,28 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "version/config show/config validate/issues answer; whoami refuses by name outside a chat (exit $who_rc) and its alias matches; usage-hook is fail-open"
 fi
 
+# ─── O1.14 — price table report and usage error ────────────────────────────
+
+beat O1.14-price
+spends none
+bad=""
+price_out="$(pfm price 2>&1)"; price_rc=$?
+if [ "$price_rc" -ne 0 ]; then
+  bad="$bad pfm price exited $price_rc: $(one_line "$price_out");"
+elif ! grep -qE '^price table: [0-9]+ rows · override: ' <<<"$price_out" ||
+  ! grep -qE '^KEY[[:space:]]+ENGINE[[:space:]]+MATCH[[:space:]]+IN[[:space:]]+OUT[[:space:]]+HIT[[:space:]]+CACHED[[:space:]]+W5M[[:space:]]+W1H[[:space:]]+LONG[[:space:]]+SOURCE$' <<<"$price_out"; then
+  bad="$bad pfm price omitted its summary or table header: $(one_line "$price_out");"
+fi
+check_out="$(pfm price --check 2>&1)"; check_rc=$?
+if [ "$check_rc" -ne 0 ] || ! grep -qE '^price table: ok · [0-9]+ rows · override: ' <<<"$check_out"; then
+  bad="$bad pfm price --check did not report a valid table (exit $check_rc): $(one_line "$check_out");"
+fi
+error_out="$(pfm price --json --check 2>&1)"; error_rc=$?
+if [ "$error_rc" -ne 2 ] || ! grep -qF 'pfm price: --json and --check are exclusive' <<<"$error_out"; then
+  bad="$bad pfm price conflicting flags did not name the usage error (exit $error_rc): $(one_line "$error_out");"
+fi
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "price table summary, columns and --check report; conflicting flags exit 2 with a named error"
+fi
+
 lane_end

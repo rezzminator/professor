@@ -6,7 +6,6 @@ const (
 	HookEventUserPromptSubmit = "UserPromptSubmit"
 	HookExploreMatcher        = "Agent|Task"
 	HookRRDirMatcher          = "rr|super-rr|heavy-rr"
-	HookMatchAll              = "*"
 	hookEventPreToolUse       = "PreToolUse"
 )
 
@@ -17,7 +16,7 @@ type Hook struct {
 
 func HookTemplates(home string) []Hook {
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	templates := []Hook{
+	return []Hook{
 		{Event: "SessionStart", Command: binary + " internal launcher-repair", Name: "launcher-repair"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " usage-hook", Name: "usage"},
 		{Event: "SessionEnd", Command: binary + " internal clear-kill", Name: "clear-kill"},
@@ -34,21 +33,6 @@ func HookTemplates(home string) []Hook {
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},
 		{Event: HookEventUserPromptSubmit, Command: binary + " internal exit-intercept", Name: "exit-intercept"},
 	}
-	for _, placement := range []struct{ event, matcher string }{
-		{hookEventPreToolUse, "Bash"},
-		{"PostToolUse", HookMatchAll},
-		{"PostToolUseFailure", HookMatchAll},
-		{"PostToolBatch", ""},
-		{"SubagentStart", HookMatchAll},
-		{"SubagentStop", HookMatchAll},
-		{"Stop", ""},
-	} {
-		templates = append(templates, Hook{
-			Event: placement.event, Matcher: placement.matcher,
-			Command: binary + " internal callmeter", Name: "callmeter", Async: true,
-		})
-	}
-	return templates
 }
 
 func StatusLineCommand(home string) string {

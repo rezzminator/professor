@@ -182,15 +182,6 @@ func runChatKillContext(
 	return code
 }
 
-func runResolvedChatKill(
-	chat headless.Chat,
-	exit bool,
-	stdout, stderr io.Writer,
-	runtimes ...commandRuntime,
-) (exitCode int) {
-	return pfmchat.KillResolved(context.Background(), chat, exit, stdout, stderr, firstRuntime(runtimes))
-}
-
 func runResolvedChatKillContext(
 	ctx context.Context,
 	chat headless.Chat,
@@ -351,10 +342,6 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 		filepath.Join(codexHome, "recovered-"+result.ThreadID, "brief.md"),
 	)
 	return 0
-}
-
-func runChatName(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	return runChatNameContext(context.Background(), args, stdout, stderr, runtimes...)
 }
 
 func runChatNameContext(

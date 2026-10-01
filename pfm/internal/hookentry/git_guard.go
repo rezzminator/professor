@@ -1,7 +1,6 @@
 package hookentry
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,8 +8,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
-	"github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/cmdparse"
 )
 
 type gitGuardHookInput struct {
@@ -86,15 +87,6 @@ var (
 	}
 )
 
-// gitGuardNoPython answers every Python snippet with no result, so the hook
-// never spawns python3: a git call inside a Python snippet is not inspected
-// (docs/design/hooks/git-guard.md § Named gaps).
-type gitGuardNoPython struct{}
-
-func (gitGuardNoPython) Analyze(context.Context, []cmdparse.Snippet) ([]cmdparse.PyResult, error) {
-	return nil, nil
-}
-
 // gitGuardBlock is one blocked part: the command as its words read, and,
 // for a worktree write, the directory its repository is found from; stash
 // marks a blocked git stash, whose deny names the path stash.
@@ -109,7 +101,8 @@ type gitGuardBlock struct {
 // state (worktrees, history, branches and tags, remotes, the index, wide
 // working-tree destruction, repository settings) to every caller but the
 // gitter agent. A read or decode failure is fail-open to stderr; a command
-// that mentions git but does not parse is denied.
+// that mentions git (gitGuardMentionsGit) but does not parse, or hits a parse
+// bound, is denied.
 func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(input)
 	if err != nil {
@@ -134,8 +127,7 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 	if !filepath.IsAbs(parseCwd) {
 		parseCwd = string(filepath.Separator)
 	}
-	parsed, err := cmdparse.ParseBatch(context.Background(),
-		[]cmdparse.Call{{ID: "git-guard", Command: command, Cwd: parseCwd}}, gitGuardNoPython{})
+	parsed, err := cmdparse.ParseBatch([]cmdparse.Call{{ID: "git-guard", Command: command, Cwd: parseCwd}})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal git-guard: parse command (fail-open): %v\n", err)
 		return 0
@@ -145,8 +137,8 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 	parts := parsed["git-guard"]
 	for i := range parts {
 		part := &parts[i]
-		if part.Status == cmdparse.StatusError {
-			unreadable = unreadable || strings.Contains(command, "git ")
+		if part.Status == cmdparse.StatusError || part.Bounded {
+			unreadable = unreadable || gitGuardMentionsGit(command)
 			continue
 		}
 		if block, ok := gitGuardPart(part, cwd); ok {
@@ -161,6 +153,26 @@ func GitGuard(input io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// gitGuardMentionsGit reports a command naming git as a program could: the
+// word git followed by any whitespace, or the worktree script. A command
+// that never does reaches git only through obfuscation, so a part of it the
+// parser could not read is not the git guard's to refuse.
+func gitGuardMentionsGit(command string) bool {
+	if strings.Contains(command, gitGuardWorktreeSh) {
+		return true
+	}
+	for rest := command; ; {
+		i := strings.Index(rest, "git")
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+len("git"):]
+		if r, _ := utf8.DecodeRuneInString(rest); unicode.IsSpace(r) {
+			return true
+		}
+	}
 }
 
 // gitGuardPart decides one parsed part: a git call, or a repo's worktree
@@ -275,6 +287,11 @@ func gitGuardCheckout(rest []string, repoDir string) bool {
 		return true
 	}
 	if len(operands) == 1 {
+		// A glob metacharacter makes the operand a pathspec: git
+		// check-ref-format forbids `*`, `?` and `[` in a ref name.
+		if strings.ContainsAny(operands[0], "*?[") {
+			return false
+		}
 		// One operand that is not an existing path is a branch or commit.
 		_, err := os.Lstat(gitGuardJoin(repoDir, operands[0]))
 		return err != nil

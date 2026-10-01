@@ -247,15 +247,7 @@ func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 }
 
 func TestGitGuardDeniesAGitCommandItCannotRead(t *testing.T) {
-	command := `bash -c "git commit -m 'x"`
-	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, t.TempDir(), "general-executor"))
-	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
-		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
-	}
-	const unreadable = "could not read this command; split it so each git call is its own simple command"
-	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, unreadable) {
-		t.Fatalf("reason=%q, want the unreadable-command message", reason)
-	}
+	gitGuardRequireUnreadable(t, `bash -c "git commit -m 'x"`, t.TempDir())
 }
 
 func TestGitGuardFailsOpenLoudlyOnAMalformedPayload(t *testing.T) {
@@ -266,4 +258,114 @@ func TestGitGuardFailsOpenLoudlyOnAMalformedPayload(t *testing.T) {
 	if !strings.Contains(stderr, "pfm internal git-guard: decode hook payload (fail-open):") {
 		t.Fatalf("stderr=%q, want the named fail-open decode error", stderr)
 	}
+}
+
+// gitGuardRequireUnreadable fails unless the guard denied command with the
+// unreadable-command message.
+func gitGuardRequireUnreadable(t *testing.T, command, cwd string) {
+	t.Helper()
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, "general-executor"))
+	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
+	}
+	const unreadable = "could not read this command; split it so each git call is its own simple command"
+	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, unreadable) {
+		t.Fatalf("reason=%q, want the unreadable-command message", reason)
+	}
+}
+
+// gitGuardNestShell wraps command in levels of `bash -c "…"`.
+func gitGuardNestShell(command string, levels int) string {
+	for range levels {
+		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "`", "\\`").Replace(command)
+		command = `bash -c "` + escaped + `"`
+	}
+	return command
+}
+
+// A command past the parser's size bound is never read as parsed: a git read
+// that the guard would allow, padded past 64 KiB, is denied as unreadable.
+func TestGitGuardDeniesACommandOverTheSizeBound(t *testing.T) {
+	command := "git status; echo " + strings.Repeat("x", 64<<10)
+	gitGuardRequireUnreadable(t, command, t.TempDir())
+}
+
+// A git call inside -c strings nested past the parser's depth bound is never
+// read as parsed; at the bound itself the git call is still inspected.
+func TestGitGuardDeniesShellNestingOverTheDepthBound(t *testing.T) {
+	cwd := t.TempDir()
+	gitGuardRequireUnreadable(t, gitGuardNestShell("git status", 9), cwd)
+	code, stdout, stderr := runGitGuard(
+		t,
+		gitGuardPayload(t, "Bash", gitGuardNestShell("git worktree add x", 8), cwd, "general-executor"),
+	)
+	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
+	}
+	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, "git worktree add x") {
+		t.Fatalf("reason=%q, want the worktree add read at depth 8", reason)
+	}
+}
+
+// gitGuardTwoFiles makes a cwd holding a.txt and b.txt, so an unquoted glob
+// there has something a shell would expand it to.
+func gitGuardTwoFiles(t *testing.T) string {
+	t.Helper()
+	cwd := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(cwd, name), []byte("x\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	return cwd
+}
+
+// gitGuardRequireAllowed fails unless the guard let command through silently.
+func gitGuardRequireAllowed(t *testing.T, command, cwd string) {
+	t.Helper()
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
+	if code != 0 || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want allowed with no output", code, stdout, stderr)
+	}
+}
+
+// gitGuardRequireBlocked fails unless the guard denied command by name.
+func gitGuardRequireBlocked(t *testing.T, command, cwd string) {
+	t.Helper()
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
+	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
+	}
+	if reason := gitGuardDenyReason(t, stdout); !strings.Contains(reason, "git-guard blocked `"+command+"`") {
+		t.Fatalf("reason=%q, want it to name %q as blocked", reason, command)
+	}
+}
+
+// An unquoted `*` reaches the guard as written, a whole-tree pathspec, never
+// as the file names a shell would expand it to.
+func TestGitGuardDeniesCheckoutOfAnUnquotedStar(t *testing.T) {
+	gitGuardRequireBlocked(t, "git checkout -- *", gitGuardTwoFiles(t))
+}
+
+func TestGitGuardDeniesStashPushOfAnUnquotedStar(t *testing.T) {
+	gitGuardRequireBlocked(t, "git stash push -- *", gitGuardTwoFiles(t))
+}
+
+// One checkout operand carrying a glob metacharacter is a pathspec: git
+// forbids `*`, `?` and `[` in a ref name, so it is never a branch switch.
+func TestGitGuardAllowsCheckoutOfAGlobPathspec(t *testing.T) {
+	gitGuardRequireAllowed(t, "git checkout *.txt", gitGuardTwoFiles(t))
+}
+
+// A command that does not parse and names git only before a tab still
+// mentions git, so it is denied as unreadable.
+func TestGitGuardDeniesAnUnparsableCommandNamingGitBeforeATab(t *testing.T) {
+	gitGuardRequireUnreadable(t, "git\tpush origin main && (", t.TempDir())
+}
+
+// A command past the size bound that never mentions git is not the git
+// guard's to refuse. Its padding carries "git" inside a word ("digits"), so
+// it passes the guard's first substring filter and reaches the bound.
+func TestGitGuardAllowsAnOversizeCommandThatNeverMentionsGit(t *testing.T) {
+	gitGuardRequireAllowed(t, "echo "+strings.Repeat("digits ", 10<<10), t.TempDir())
 }

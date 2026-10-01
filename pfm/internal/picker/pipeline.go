@@ -622,7 +622,3 @@ func primaryWriteback(kind ui.OutcomeKind, account, current int) (int, bool) {
 	}
 	return account, true
 }
-
-func inBunker() bool {
-	return fleet.CurrentSocket() == "vsct"
-}

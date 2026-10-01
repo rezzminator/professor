@@ -47,7 +47,7 @@ Tracked at the repo root. It holds every key pfm reads, each at its default, wit
 
 ## Other state
 
-All under `~/.local/state/pfm/`: `callmeter.db` (the tool-call recorder, `docs/design/hooks/callmeter.md`), `log/pfm.jsonl`, `migrations/` ([host-migration.md](host-migration.md#the-journal)), and flight directories under `flights/`.
+All under `~/.local/state/pfm/`: `log/pfm.jsonl`, `migrations/` ([host-migration.md](host-migration.md#the-journal)), and flight directories under `flights/`.
 
 ## pfm doctor checks
 

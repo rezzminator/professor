@@ -62,7 +62,7 @@ set -uo pipefail
 # hash present in HOME/.claude/{projects,file-history,tasks,session-env} or in
 # JOURNAL/backup/conflicts; every db.txt table count equal in HOME's database
 # (.cc/fleet.db → .local/state/pfm/pfm.db, .local/state/pfm/fleet.db →
-# .local/state/pfm/pfm-cache.db, callmeter.db → itself) except swap_event and
+# .local/state/pfm/pfm-cache.db) except swap_event and
 # hidden, each counted from a temp copy with its -wal/-shm.
 #
 # BROKEN STATE: wrong arguments (a third one other than --stress) print usage, exit 2. A backup lacking home= in
@@ -106,7 +106,7 @@ C_ETC=/rehearsal-etc
 FLEET_UNITS="pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer"
 HOLDER_PID=424242
 C_GOMOD=/pfm-gomod
-DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db" ".local/state/pfm/callmeter.db .local/state/pfm/callmeter.db")
+DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db")
 
 die() { echo "host-rehearsal: $*" >&2; exit 1; }
 usage() {

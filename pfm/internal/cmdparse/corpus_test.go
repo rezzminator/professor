@@ -1,21 +1,16 @@
 package cmdparse
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // corpusFixture holds real Bash commands from Claude sessions,
-// each with the parse the spec requires (docs/design/hooks/callmeter.md,
-// "Test corpora" item 1). Every path in it is rewritten under corpusRoot.
+// each with the parse it must yield. Every path in it lies under corpusRoot.
 const (
 	corpusFixture = "testdata/commands-corpus.json"
 	corpusRoot    = "/tmp/demo-proj"
@@ -28,12 +23,8 @@ type corpusCase struct {
 	Name string `json:"name"`
 	// Covers names the shape the case guards (heredoc, cd chain, wrapper…).
 	Covers string `json:"covers"`
-	// Cwd is the call's directory, under corpusRoot.
-	Cwd string `json:"cwd"`
-	// Dirs and Files are created under the case's root, relative to it; a
-	// path a case names but does not list stays absent on purpose.
-	Dirs    []string     `json:"dirs,omitempty"`
-	Files   []string     `json:"files,omitempty"`
+	// Cwd is the call's directory, under corpusRoot; the parse never reads it.
+	Cwd     string       `json:"cwd"`
 	Command string       `json:"command"`
 	Parts   []corpusPart `json:"parts"`
 	// KnownDefect names a parser defect against the spec: the case skips
@@ -42,19 +33,10 @@ type corpusCase struct {
 }
 
 type corpusPart struct {
-	Program     string       `json:"program"`
-	Lang        string       `json:"lang"`
-	Status      string       `json:"status"`
-	Error       string       `json:"error,omitempty"`
-	Conditional bool         `json:"conditional"`
-	Files       []corpusFile `json:"files,omitempty"`
-}
-
-type corpusFile struct {
-	Path   string `json:"path"`
-	Action string `json:"action"`
-	Range  string `json:"range,omitempty"`
-	Exists bool   `json:"exists"`
+	Program string   `json:"program"`
+	Args    []string `json:"args"`
+	Status  string   `json:"status"`
+	Bounded bool     `json:"bounded,omitempty"`
 }
 
 func loadCorpus(t *testing.T) []corpusCase {
@@ -88,69 +70,30 @@ func loadCorpus(t *testing.T) []corpusCase {
 	return cases
 }
 
-// materialize creates the case's tree under a fresh root and returns it.
-func materialize(t *testing.T, c corpusCase) string {
-	t.Helper()
-	root := t.TempDir()
-	for _, d := range append(c.Dirs, strings.TrimPrefix(strings.TrimPrefix(c.Cwd, corpusRoot), "/")) {
-		if err := os.MkdirAll(filepath.Join(root, d), 0o700); err != nil {
-			t.Fatalf("case %q: mkdir %s: %v", c.Name, d, err)
-		}
-	}
-	for _, f := range c.Files {
-		path := filepath.Join(root, f)
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatalf("case %q: mkdir for %s: %v", c.Name, f, err)
-		}
-		if err := os.WriteFile(path, []byte("line\n"), 0o600); err != nil {
-			t.Fatalf("case %q: write %s: %v", c.Name, f, err)
-		}
-	}
-	return root
-}
-
-// asCorpus renders parsed parts in the fixture's terms, the case's root
-// rewritten back to corpusRoot.
-func asCorpus(parts []Part, root string) []corpusPart {
-	back := func(s string) string { return strings.ReplaceAll(s, root, corpusRoot) }
+// asCorpus renders parsed parts in the fixture's terms, no arguments read
+// as an empty list.
+func asCorpus(parts []Part) []corpusPart {
 	out := make([]corpusPart, 0, len(parts))
-	for i := range parts {
-		p := &parts[i]
-		cp := corpusPart{
-			Program:     back(p.Program),
-			Lang:        p.Lang,
-			Status:      p.Status,
-			Error:       back(p.Error),
-			Conditional: p.Conditional,
+	for _, p := range parts {
+		args := p.Args
+		if args == nil {
+			args = []string{}
 		}
-		for _, f := range p.Files {
-			cp.Files = append(
-				cp.Files,
-				corpusFile{Path: back(f.Path), Action: f.Action, Range: f.Range, Exists: f.Exists},
-			)
-		}
-		out = append(out, cp)
+		out = append(out, corpusPart{Program: p.Program, Args: args, Status: p.Status, Bounded: p.Bounded})
 	}
 	return out
 }
 
-// TestRealCommandsCorpus parses every corpus command in one batch, as a
-// report run does, through the real python3 (its absence fails the test),
-// and compares each call's parts, files, actions, ranges, exists and
-// conditional flags with the fixture.
+// TestRealCommandsCorpus parses every corpus command in one batch and
+// compares each call's parts, programs, arguments, statuses and bounds with
+// the fixture.
 func TestRealCommandsCorpus(t *testing.T) {
 	cases := loadCorpus(t)
-	roots := make([]string, len(cases))
 	calls := make([]Call, len(cases))
 	for i, c := range cases {
-		roots[i] = materialize(t, c)
-		calls[i] = Call{
-			ID:      fmt.Sprintf("corpus-%d", i),
-			Command: strings.ReplaceAll(c.Command, corpusRoot, roots[i]),
-			Cwd:     strings.Replace(c.Cwd, corpusRoot, roots[i], 1),
-		}
+		calls[i] = Call{ID: fmt.Sprintf("corpus-%d", i), Command: c.Command, Cwd: c.Cwd}
 	}
-	got, err := ParseBatch(context.Background(), calls, Python3{Runner: deps.RealRunner{}})
+	got, err := ParseBatch(calls)
 	if err != nil {
 		t.Fatalf("ParseBatch over corpus %s: %v", corpusFixture, err)
 	}
@@ -160,7 +103,7 @@ func TestRealCommandsCorpus(t *testing.T) {
 			if !ok {
 				t.Fatalf("ParseBatch returned no entry for call %s", calls[i].ID)
 			}
-			have := asCorpus(parts, roots[i])
+			have := asCorpus(parts)
 			want := c.Parts
 			if want == nil {
 				want = []corpusPart{}

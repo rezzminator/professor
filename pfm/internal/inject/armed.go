@@ -135,10 +135,6 @@ func (record armedRecord) waiter() string {
 	return "still launching"
 }
 
-func (record armedRecord) since() string {
-	return time.Unix(record.Stamp, 0).UTC().Format(time.RFC3339)
-}
-
 // armRecord is the spawner's half: written before the waiter is started so a
 // concurrent schedule already sees the pane armed, with PID 0 until the
 // waiter claims it. A record naming a live arming is left alone: a later

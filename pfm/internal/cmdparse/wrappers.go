@@ -103,23 +103,3 @@ func (w wrapper) skip(args []arg) (int, bool) {
 	}
 	return len(args), false
 }
-
-// programFile attributes a program given as a path (`./run.sh`,
-// `scripts/x.sh`, an absolute path inside the directory) that is a regular
-// file under the directory its part runs in, after any `cd`, as an exec. A
-// bare name, a path outside that directory (/bin/ls), or any path once a
-// `cd` left the directory unknown attributes nothing.
-func (p *callParser) programFile(program arg) []FileRef {
-	if !strings.Contains(program.text, "/") || p.dir == "" {
-		return nil
-	}
-	path, ok := p.file(program)
-	if !ok {
-		return nil
-	}
-	rel, err := filepath.Rel(p.dir, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
-		return nil
-	}
-	return []FileRef{{Path: path, Action: ActionExec, Exists: true}}
-}

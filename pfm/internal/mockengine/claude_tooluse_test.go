@@ -8,24 +8,24 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/callmeter"
 )
 
-func callmeterCapturePath(t *testing.T) string {
+// hookCapturePath is the hook payloads a real Claude session sent, captured
+// once: the shape the fake engine's tool responses must keep.
+func hookCapturePath(t *testing.T) string {
 	t.Helper()
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("locate callmeter capture")
+		t.Fatal("locate hook capture")
 	}
-	return filepath.Join(filepath.Dir(source), "..", "hookentry", "testdata", "callmeter", "scripted.jsonl")
+	return filepath.Join(filepath.Dir(source), "testdata", "scripted.jsonl")
 }
 
-func TestClaudeToolResponsesMatchCapturedKeysAndPfmReader(t *testing.T) {
+func TestClaudeToolResponsesMatchCapturedKeys(t *testing.T) {
 	fix := newFixture(t)
 	session := &claudeSession{proc: &process{cwd: fix.work}}
 	path := filepath.Join(fix.work, "notes.md")
-	capture, err := os.ReadFile(callmeterCapturePath(t))
+	capture, err := os.ReadFile(hookCapturePath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,17 +79,6 @@ func TestClaudeToolResponsesMatchCapturedKeysAndPfmReader(t *testing.T) {
 				t.Fatalf("Write response type %v, want %s", got["type"], kind)
 			}
 		}
-		call := &callmeter.Call{}
-		if err := callmeter.FileColumnsFromInput(call, test.tool, json.RawMessage(test.input), fix.work); err != nil {
-			t.Fatal(err)
-		}
-		if err := callmeter.FileColumnsFromResult(call, test.tool, response); err != nil {
-			t.Fatal(err)
-		}
-		if call.FilePath == nil || *call.FilePath != path ||
-			call.FileBytesBefore == nil || *call.FileBytesBefore != int64(len(test.original)) {
-			t.Fatalf("%s columns %+v", test.tool, call)
-		}
 	}
 }
 
@@ -124,7 +113,7 @@ func TestClaudePostToolUseEdit(t *testing.T) {
 	if payload["hook_event_name"] != hookPostToolUse || payload["tool_name"] != "Edit" {
 		t.Fatalf("payload %v", payload)
 	}
-	capture, err := os.ReadFile(callmeterCapturePath(t))
+	capture, err := os.ReadFile(hookCapturePath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +312,7 @@ func TestClaudePostToolUseDeniedAndBrokenHandler(t *testing.T) {
 }
 
 // Real Claude runs an async handler in the background and ignores its outcome,
-// so one that cannot finish (pfm's async callmeter on a stalled store) never
+// so one that cannot finish (an async hook on a stalled store) never
 // ends the turn nor keeps the event's other handlers from firing.
 func TestClaudeInlineAsyncFailureNeitherEndsTheTurnNorSkipsLaterHandlers(t *testing.T) {
 	fix := newFixture(t)

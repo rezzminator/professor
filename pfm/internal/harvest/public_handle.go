@@ -234,17 +234,3 @@ func (h *Harvester) readPublicHandle(source string) (string, error) {
 	}
 	return target, nil
 }
-
-func (h *Harvester) publicDisplayHandle(identity, exportedPath string) (string, error) {
-	if publicIdentityHandle(identity) {
-		return identity, nil
-	}
-	if isLocalSource(identity) || strings.HasPrefix(strings.ToLower(identity), "file://") {
-		return exportedPath, nil
-	}
-	if err := validateFetchURL(identity, false); err != nil {
-		log.Printf("harvest: cache identity is not a public URL %q: %v", logSource(identity), err)
-		return "", errors.New("cache match has no public identity")
-	}
-	return h.PublicHandle(identity)
-}

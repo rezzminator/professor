@@ -35,7 +35,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
 	})
 	// Two SEPARATE sessions, one per fake chat: a real kill now really closes
-	// the pane it targets (runResolvedChatKill's ConfirmExit verifies and, if
+	// the pane it targets (runResolvedChatKillContext's ConfirmExit verifies and, if
 	// needed, force-closes it), and two independent live chats never actually
 	// share one pane — sharing one here would have the first kill's pane
 	// close take the second fixture's socket down with it.
@@ -109,7 +109,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 
 	// F1 regression: runChatKill now resolves EVERY target — uuid or name —
 	// through pfmchat.Resolve first, and a resolved row that is Live with a
-	// non-empty Socket and Pane is closed through runResolvedChatKill(...,
+	// non-empty Socket and Pane is closed through runResolvedChatKillContext(...,
 	// true, ...), not merely tombstoned. The old code short-circuited
 	// resolution entirely for a well-formed uuid target (both agentID and
 	// codexID are uuids) and only ever passed --exit when the CLI caller

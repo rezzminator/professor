@@ -197,20 +197,6 @@ func compileOpenCode(options Options) (Result, error) {
 }
 
 func Compile(options Options) (Result, error) { return compileOpenCode(options) }
-func BuildOpenCode(options Options) (Result, error) {
-	options.Mode = ModeBuild
-	return compileOpenCode(options)
-}
-
-func CheckOpenCode(options Options) (Result, error) {
-	options.Mode = ModeCheck
-	return compileOpenCode(options)
-}
-
-func DoctorOpenCode(options Options) (Result, error) {
-	options.Mode = ModeDoctor
-	return compileOpenCode(options)
-}
 
 func resolveOpenCodePath(path, label string) (string, error) {
 	if path == "" {

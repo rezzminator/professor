@@ -39,7 +39,7 @@ dest=$(cd "$dest" && pwd -P) || fail "resolve $dest"
 if [ -n "$previous" ]; then previous=$(cd "$previous" && pwd -P) || fail "resolve $previous"; fi
 chmod 700 "$dest"
 
-dbs=(.cc/fleet.db .local/state/pfm/fleet.db .local/state/pfm/callmeter.db)
+dbs=(.cc/fleet.db .local/state/pfm/fleet.db)
 excl=(
 	--exclude=.credentials.json --exclude=.codex/auth.json
 	--exclude=.local/state/pfm/harvest-python --exclude=.local/state/pfm/releases

@@ -488,4 +488,45 @@ else
   fi
 fi
 
+over_budget_json >"$T/load.json"
+load_record() {
+  printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\t0\t0\t2\n1704067211\t%s\t0\t2\n' "$1" >"$T/load.load"
+}
+load_record 19.2
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'TIMING CORRECTED github.com/rezzminator/professor/pfm/internal/slow .*other-load=80% limit=12.500s' "$T/load.out" && grep -q 'TIMING CORRECTED SUITE(u).*other-load=80% limit=31.250s' "$T/load.out" && grep -q 'within the load-corrected limit' "$T/load.out"; then ok load-corrected; else bad "load-corrected: rc=$rc" "$(cat "$T/load.out")"; fi
+
+load_record 4.8
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING FAIL github.com/rezzminator/professor/pfm/internal/slow .*other-load=20% limit=3.125s' "$T/load.out"; then ok load-unexplained; else bad "load-unexplained: rc=$rc" "$(cat "$T/load.out")"; fi
+
+load_record 0
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING FAIL github.com/rezzminator/professor/pfm/internal/slow .*other-load=0% limit=2.500s' "$T/load.out"; then ok load-zero; else bad "load-zero: rc=$rc" "$(cat "$T/load.out")"; fi
+
+printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067201\t0\t0\t2\n1704067211\t16\t0\t2\n' >"$T/load.load"
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING FAIL github.com/rezzminator/professor/pfm/internal/slow .*other-load=unmeasured' "$T/load.out"; then ok load-uncovered; else bad "load-uncovered: rc=$rc" "$(cat "$T/load.out")"; fi
+
+printf 'epoch_s\tvm_busy_s\town_s\tcpus\nUNAVAILABLE\t/proc/stat: missing\n' >"$T/load.load"
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING: other load not measured — /proc/stat: missing; limits uncorrected' "$T/load.out"; then ok load-unavailable; else bad "load-unavailable: rc=$rc" "$(cat "$T/load.out")"; fi
+
+rm "$T/load.load"
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING: other load not measured — load record .*load.load missing; limits uncorrected' "$T/load.out"; then ok load-missing; else bad "load-missing: rc=$rc" "$(cat "$T/load.out")"; fi
+rc=0; over_budget_json | run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" - >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING: other load not measured — stream read from stdin; limits uncorrected' "$T/load.out"; then ok load-stdin; else bad "load-stdin: rc=$rc" "$(cat "$T/load.out")"; fi
+
+for case in header numeric time cpus; do
+  case "$case" in
+    header) printf 'bad\n1704067199\t0\t0\t2\n' >"$T/load.load" ;;
+    numeric) printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\tbad\t0\t2\n' >"$T/load.load" ;;
+    time) printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\t0\t0\t2\n1704067199\t1\t0\t2\n' >"$T/load.load" ;;
+    cpus) printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\t0\t0\t0\n' >"$T/load.load" ;;
+  esac
+  rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+  if [ "$rc" -eq 2 ] && grep -q "TIMING-UNREADABLE: load record $T/load.load:" "$T/load.out"; then ok "load-malformed-$case"; else bad "load-malformed-$case: rc=$rc" "$(cat "$T/load.out")"; fi
+done
+
 shtest_end

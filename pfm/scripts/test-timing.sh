@@ -12,13 +12,15 @@
 #
 # --check   compares every package + the suite against --yml (default
 #           pfm/.testtiming.yml) at budget * tolerance; exits 1 naming every
-#           offender (FAIL) or unlisted package (UNBUDGETED, always red — a
+#           offender (FAIL), load-explained overage (CORRECTED), or unlisted package (UNBUDGETED, always red — a
 #           package the tree ships that this file does not list is never
 #           silently allowed). A run carrying ANY `fail` status is never given
 #           a timing verdict at all — TIMING TESTS-FAILED, exit 1, before any
 #           budget is even consulted: a broken suite has nothing to measure,
 #           and its wall time (often inflated by retries/timeouts the failure
 #           itself causes) is not a number to gate on.
+#           A missing load record names why limits are uncorrected; a malformed
+#           load record is TIMING-UNREADABLE, exit 2.
 # --measure --suite NAME F1 F2 F3   three separate `go test -json` runs of the
 #           SAME suite; takes the median wall_s per package and ratchets
 #           pfm/.testtiming.yml DOWN only — a package already in that suite's
@@ -370,7 +372,113 @@ fail_report() {
   return 0
 }
 
-# check_timing <timing-tsv> <budgets-tsv> <suite-name> — the awk(1) comparator.
+# load_factors <input-json> <out-tsv> — match each event window to bracketing
+# CPU samples. The first row is LOADED or UNAVAILABLE with its reason.
+load_factors() {
+  local input="$1" factors="$2" record
+  if [ -z "$input" ] || [ "$input" = - ]; then
+    printf 'UNAVAILABLE\tstream read from stdin\n' > "$factors"
+    return 0
+  fi
+  if [[ "$input" != *.json ]]; then
+    printf 'UNAVAILABLE\tstream path does not end in .json\n' > "$factors"
+    return 0
+  fi
+  record="${input%.json}.load"
+  if [ ! -e "$record" ]; then
+    printf 'UNAVAILABLE\tload record %s missing\n' "$record" > "$factors"
+    return 0
+  fi
+  python3 - "$record" "$T/clean.jsonl" "$factors" <<'PY'
+import datetime
+import json
+import math
+import sys
+
+record_path, events_path, out_path = sys.argv[1:]
+
+
+def invalid(cause):
+    print(f'TIMING-UNREADABLE: load record {record_path}: {cause}', file=sys.stderr)
+    raise SystemExit(2)
+
+
+try:
+    with open(record_path, encoding='utf-8') as source:
+        lines = source.read().splitlines()
+except OSError as exc:
+    invalid(str(exc))
+if not lines or lines[0] != 'epoch_s\tvm_busy_s\town_s\tcpus':
+    invalid('bad header')
+samples = []
+unavailable = None
+for number, line in enumerate(lines[1:], 2):
+    if line.startswith('UNAVAILABLE\t'):
+        if number != len(lines) or not line.split('\t', 1)[1]:
+            invalid(f'line {number}: malformed UNAVAILABLE')
+        unavailable = line.split('\t', 1)[1]
+        break
+    fields = line.split('\t')
+    if len(fields) != 4:
+        invalid(f'line {number}: expected four fields')
+    try:
+        epoch, busy, own = map(float, fields[:3])
+        cpus = int(fields[3])
+    except ValueError:
+        invalid(f'line {number}: non-numeric field')
+    if not all(math.isfinite(value) for value in (epoch, busy, own)) or cpus < 1:
+        invalid(f'line {number}: invalid numeric field or cpus < 1')
+    if samples and epoch <= samples[-1][0]:
+        invalid(f'line {number}: time not increasing')
+    samples.append((epoch, busy, own, cpus))
+if not samples and unavailable is None:
+    invalid('no samples')
+if unavailable is not None:
+    with open(out_path, 'w', encoding='utf-8') as output:
+        output.write(f'UNAVAILABLE\t{unavailable}\n')
+    raise SystemExit(0)
+
+try:
+    with open(events_path, encoding='utf-8') as source:
+        events = json.load(source)['events']
+except (OSError, ValueError, KeyError, TypeError) as exc:
+    invalid(f'could not read parsed events: {exc}')
+
+windows = {}
+all_times = []
+for event in events:
+    value = event.get('Time')
+    if not value:
+        continue
+    try:
+        instant = datetime.datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    except (ValueError, AttributeError) as exc:
+        invalid(f'event timestamp {value!r}: {exc}')
+    all_times.append(instant)
+    package = event.get('Package')
+    if package:
+        windows.setdefault(package, []).append(instant)
+if not all_times:
+    invalid('no event timestamps')
+windows['SUITE'] = all_times
+
+with open(out_path, 'w', encoding='utf-8') as output:
+    output.write('LOADED\n')
+    for package, times in windows.items():
+        start, end = min(times), max(times)
+        before = next((row for row in reversed(samples) if row[0] <= start), None)
+        after = next((row for row in samples if row[0] >= end), None)
+        if before is None or after is None or before[0] == after[0]:
+            output.write(f'{package}\tunmeasured\n')
+            continue
+        elapsed = (after[0] - before[0]) * before[3]
+        other = (after[1] - before[1]) - (after[2] - before[2])
+        factor = max(0.0, min(0.9, other / elapsed))
+        output.write(f'{package}\t{factor:.9f}\n')
+PY
+}
+
+# check_timing <timing-tsv> <budgets-tsv> <suite-name> <load-factors> — the awk(1) comparator.
 # Deliberately POSIX awk (no gawk-only length(array)/asort): the fence
 # image's /usr/bin/awk is not guaranteed to be gawk. <suite-name> selects
 # which `suites:` entry (and ONLY that entry's own packages) gates this run —
@@ -378,8 +486,15 @@ fail_report() {
 # since dev.sh checks each tier separately and an e2e run never sees the unit
 # package set.
 check_timing() {
-  local timing="$1" budgets="$2" want="$3"
-  awk -F'\t' -v OFS='\t' -v want="$want" '
+  local timing="$1" budgets="$2" want="$3" factors="$4" active="$5"
+  awk -F'\t' -v OFS='\t' -v want="$want" -v factors="$factors" -v active="$active" '
+    BEGIN {
+      while ((getline row < factors) > 0) {
+        split(row, parts, "\t")
+        if (parts[1] != "LOADED" && parts[1] != "UNAVAILABLE") load[parts[1]]=parts[2]
+      }
+      close(factors)
+    }
     FNR==NR {
       if ($1=="tolerance") tol=$2
       else if ($1=="suite" && $2==want) suite_budget=$3
@@ -394,10 +509,24 @@ check_timing() {
       if (pkg in budget) {
         if (!(pkg in seen)) { seen[pkg]=1; seen_count++ }
         threshold = budget[pkg]*tol
+        corrected = threshold
+        suffix = ""
+        if (active) {
+          if (load[pkg] == "" || load[pkg] == "unmeasured") suffix = " other-load=unmeasured"
+          else {
+            corrected = threshold/(1-load[pkg])
+            suffix = sprintf(" other-load=%.0f%% limit=%.3fs", load[pkg]*100, corrected)
+          }
+        }
         if (wall+0 > threshold+0) {
           pct = (wall-budget[pkg])/budget[pkg]*100
-          printf "TIMING FAIL %s budget=%ss measured=%ss over=%.0f%%\n", pkg, budget[pkg], wall, pct > "/dev/stderr"
-          bad++
+          if (wall+0 <= corrected+0 && corrected > threshold) {
+            printf "TIMING CORRECTED %s budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs\n", pkg, budget[pkg], wall, load[pkg]*100, corrected
+            corrected_count++
+          } else {
+            printf "TIMING FAIL %s budget=%ss measured=%ss over=%.0f%%%s\n", pkg, budget[pkg], wall, pct, suffix > "/dev/stderr"
+            bad++
+          }
         }
       } else {
         printf "TIMING UNBUDGETED %s measured=%ss\n", pkg, wall > "/dev/stderr"
@@ -418,17 +547,32 @@ check_timing() {
           bad++
         } else {
           threshold = suite_budget*tol
+          corrected = threshold
+          suffix = ""
+          if (active) {
+            if (load["SUITE"] == "" || load["SUITE"] == "unmeasured") suffix = " other-load=unmeasured"
+            else {
+              corrected = threshold/(1-load["SUITE"])
+              suffix = sprintf(" other-load=%.0f%% limit=%.3fs", load["SUITE"]*100, corrected)
+            }
+          }
           if (suite_wall+0 > threshold+0) {
             pct = (suite_wall-suite_budget)/suite_budget*100
-            printf "TIMING FAIL SUITE(%s) budget=%ss measured=%ss over=%.0f%%\n", want, suite_budget, suite_wall, pct > "/dev/stderr"
-            bad++
+            if (suite_wall+0 <= corrected+0 && corrected > threshold) {
+              printf "TIMING CORRECTED SUITE(%s) budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs\n", want, suite_budget, suite_wall, load["SUITE"]*100, corrected
+              corrected_count++
+            } else {
+              printf "TIMING FAIL SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s\n", want, suite_budget, suite_wall, pct, suffix > "/dev/stderr"
+              bad++
+            }
           } else {
             printf "TIMING: SUITE(%s) within budget (%.3fs <= %.3fs x%s)\n", want, suite_wall, suite_budget, tol
           }
         }
       }
       if (bad>0) { printf "TIMING: %d offender(s)\n", bad > "/dev/stderr"; exit 1 }
-      printf "TIMING: %d package(s) measured, all within budget (tolerance x%s)\n", measured, tol
+      if (corrected_count > 0) printf "TIMING: %d package(s) measured, all within budget (tolerance x%s; %d within the load-corrected limit)\n", measured, tol, corrected_count
+      else printf "TIMING: %d package(s) measured, all within budget (tolerance x%s)\n", measured, tol
       exit 0
     }
   ' "$budgets" "$timing"
@@ -456,7 +600,15 @@ case "$MODE" in
     fail_report "$OUT" || exit 1
     BUDGETS="$T/budgets.tsv"
     yml_fields "$YML" > "$BUDGETS" || exit 2
-    check_timing "$OUT" "$BUDGETS" "$SUITE_NAME"
+    FACTORS="$T/load-factors.tsv"
+    load_factors "$INPUT" "$FACTORS" || exit 2
+    LOAD_ACTIVE=0
+    if IFS=$'\t' read -r state reason < "$FACTORS" && [ "$state" = LOADED ]; then
+      LOAD_ACTIVE=1
+    else
+      echo "TIMING: other load not measured — $reason; limits uncorrected"
+    fi
+    check_timing "$OUT" "$BUDGETS" "$SUITE_NAME" "$FACTORS" "$LOAD_ACTIVE"
     exit $?
     ;;
   measure)

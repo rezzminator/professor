@@ -57,3 +57,22 @@ func PFMBinary(moduleDir, dir string) (string, error) {
 	}
 	return binary, nil
 }
+
+// MockEngineBinary returns a validated run-wide binary or builds one for this process.
+func MockEngineBinary(moduleDir, dir string) (string, error) {
+	if binary, set := paths.PrebuiltMockEngineBinary(); set {
+		info, err := os.Stat(binary)
+		if err != nil {
+			return "", fmt.Errorf("%s=%q: %w", paths.EnvTestMockEngineBinary, binary, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+			return "", fmt.Errorf("%s=%q: not an executable regular file", paths.EnvTestMockEngineBinary, binary)
+		}
+		return binary, nil
+	}
+	binary := filepath.Join(dir, "mock-engine")
+	if err := GoBuild(moduleDir, binary, "./cmd/mock-engine"); err != nil {
+		return "", err
+	}
+	return binary, nil
+}

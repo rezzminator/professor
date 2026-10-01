@@ -11,6 +11,8 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -276,20 +278,90 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
     expected = {}
     run_env = os.environ.copy()
     run_env.pop('PFM_TEST_PFM_BINARY', None)
-    prebuild_error = None
+    run_env.pop('PFM_TEST_MOCK_ENGINE_BINARY', None)
+    prebuild_errors = []
     if args.mode == 'run':
-        prebuilt = binary_dir / 'pfm'
         build_env = os.environ.copy()
         build_env.update({'CGO_ENABLED': '0', 'GOFLAGS': '', 'GOTOOLCHAIN': 'local',
                           'GOTELEMETRY': 'off', 'HOME': os.environ.get('HOME', '')})
-        build = subprocess.run(['go', 'build', '-trimpath', '-buildvcs=false', '-o', str(prebuilt), './cmd/pfm'],
-                               cwd=MODULE, env=build_env, text=True, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT)
-        if build.returncode:
-            prebuild_error = build.stdout or f'go build exited {build.returncode}'
-            print(f'test-shard: prebuilt pfm build failed: {prebuild_error.rstrip()}', file=sys.stderr)
+        for name, variable in (('pfm', 'PFM_TEST_PFM_BINARY'),
+                               ('mock-engine', 'PFM_TEST_MOCK_ENGINE_BINARY')):
+            prebuilt = binary_dir / name
+            target = './cmd/' + name
+            build = subprocess.run(['go', 'build', '-trimpath', '-buildvcs=false', '-o', str(prebuilt), target],
+                                   cwd=MODULE, env=build_env, text=True, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT)
+            if build.returncode:
+                output = build.stdout or f'go build exited {build.returncode}'
+                prebuild_errors.append((target, output))
+                print(f'test-shard: prebuilt {name} build failed: {output.rstrip()}', file=sys.stderr)
+            else:
+                run_env[variable] = str(prebuilt)
+
+    load_path = Path(args.out).with_suffix('.load')
+    stop_sampling = threading.Event()
+    sampling = None
+    record = None
+    record_error = False
+    proc_stat = Path(os.environ.get('PFM_TEST_SHARD_PROC_STAT', '/proc/stat'))
+    cpu_stat = Path(os.environ.get('PFM_TEST_SHARD_CPU_STAT', '/sys/fs/cgroup/cpu.stat'))
+
+    def write_record(line):
+        nonlocal record_error
+        if record is None or record_error:
+            return False
+        try:
+            record.write(line + '\n')
+            record.flush()
+            return True
+        except OSError as exc:
+            print(f'test-shard: load record {load_path}: {exc}', file=sys.stderr)
+            record_error = True
+            return False
+
+    def sample():
+        try:
+            lines = proc_stat.read_text(encoding='utf-8').splitlines()
+            total = next((line for line in lines if line.startswith('cpu ')), None)
+            cpus = sum(bool(re.match(r'cpu[0-9]+ ', line)) for line in lines)
+            if total is None or cpus < 1:
+                raise ValueError('missing cpu aggregate or cpuN rows')
+            fields = total.split()
+            if len(fields) < 9:
+                raise ValueError('cpu aggregate has too few fields')
+            busy = sum(int(fields[index]) for index in (1, 2, 3, 6, 7, 8)) / os.sysconf('SC_CLK_TCK')
+        except (OSError, UnicodeError, ValueError) as exc:
+            write_record(f'UNAVAILABLE\t{proc_stat}: {exc}')
+            stop_sampling.set()
+            return
+        try:
+            values = cpu_stat.read_text(encoding='utf-8').splitlines()
+            usage = [line.split() for line in values if line.startswith('usage_usec ')]
+            if len(usage) != 1 or len(usage[0]) != 2:
+                raise ValueError('missing or malformed usage_usec')
+            own = int(usage[0][1]) / 1e6
+        except (OSError, UnicodeError, ValueError) as exc:
+            write_record(f'UNAVAILABLE\t{cpu_stat}: {exc}')
+            stop_sampling.set()
+            return
+        if not write_record(f'{time.time():.6f}\t{busy:.6f}\t{own:.6f}\t{cpus}'):
+            stop_sampling.set()
+
+    def sample_loop():
+        while not stop_sampling.wait(0.5):
+            sample()
+
+    if args.mode == 'run':
+        try:
+            record = load_path.open('w', encoding='utf-8')
+        except OSError as exc:
+            print(f'test-shard: load record {load_path}: {exc}', file=sys.stderr)
         else:
-            run_env['PFM_TEST_PFM_BINARY'] = str(prebuilt)
+            if write_record('epoch_s\tvm_busy_s\town_s\tcpus'):
+                sample()
+                if not stop_sampling.is_set():
+                    sampling = threading.Thread(target=sample_loop, daemon=True)
+                    sampling.start()
 
     def start(command, cwd, package=None):
         index = len(streams) + 1
@@ -368,17 +440,30 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
         return 0
     if processes and processes[0][2] is None:
         finish(processes[:1])
+    sampled_to_end = not stop_sampling.is_set()
+    stop_sampling.set()
+    if sampling is not None:
+        sampling.join()
+    if record is not None:
+        if sampled_to_end and not record_error:
+            sample()
+        try:
+            record.close()
+        except OSError as exc:
+            if not record_error:
+                print(f'test-shard: load record {load_path}: {exc}', file=sys.stderr)
     code = merged_streams(streams, args.out, expected)
-    if prebuild_error:
+    if prebuild_errors:
         with open(args.out, 'ab') as output:
-            for line in prebuild_error.splitlines(keepends=True):
-                output.write(json.dumps({'Action': 'build-output', 'ImportPath': './cmd/pfm',
-                                         'Output': line if line.endswith('\n') else line + '\n'}).encode() + b'\n')
-            output.write(json.dumps({'Action': 'build-fail', 'ImportPath': './cmd/pfm'}).encode() + b'\n')
+            for target, build_error in prebuild_errors:
+                for line in build_error.splitlines(keepends=True):
+                    output.write(json.dumps({'Action': 'build-output', 'ImportPath': target,
+                                             'Output': line if line.endswith('\n') else line + '\n'}).encode() + b'\n')
+                output.write(json.dumps({'Action': 'build-fail', 'ImportPath': target}).encode() + b'\n')
     for path, returncode, executable in exits:
         if code == 0 or returncode != 1:
             print(f'test-shard: {executable} for {path} exited {returncode}', file=sys.stderr)
-    return 1 if exits or prebuild_error else code
+    return 1 if exits or prebuild_errors else code
 
 
 if __name__ == '__main__':

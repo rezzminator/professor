@@ -77,7 +77,7 @@ The unit runner writes `unit.load` beside `unit.json`, sampling the VM's busy CP
 
 The steady-state ratchet uses three independent successful captures with identical package sets and flags. Record host load and uptime before and after each capture. A failed run cannot establish or lower a budget. For the sharded unit re-baseline above, an `iso gate` run whose only red is package timing against the superseded unit block is an eligible capture when its tests and skip checks pass and it has no `SHARD-LOST`. Preserve all raw captures beside the measurement log so each budget can be traced back to evidence.
 
-At `-p 6 -parallel 4`, the unit block, tagged e2e block, and gate walls use one rule: take the maximum of three eligible `iso gate all` captures, round up to whole seconds (with a one-second floor), then double each package, suite, and gate target budget. `pfm` and `templates` take the `all` gate budget because each runs a subset of its steps. Every budget is checked at budget × `tolerance` (`1.25`). The doubling absorbs shared-host load: clean `all` walls of one tree spanned 61.3–115.6 s on 2026-10-01; the slowest was the first gate after a merge, with cold build and lint caches.
+At `-p 6 -parallel 4`, the unit block, tagged e2e block, and gate walls use one rule: take the maximum of three eligible captures, round up to whole seconds (with a one-second floor), then double each package, suite, and gate target budget. Unit, tagged e2e, and `all` use `iso gate all` captures; `templates` uses `iso gate templates` captures. `pfm` takes the `all` gate budget because it runs a subset of its steps. Every budget is checked at budget × `tolerance` (`1.25`). The doubling absorbs shared-host load: clean `all` walls of one tree spanned 61.3–115.6 s on 2026-10-01; the slowest was the first gate after a merge, with cold build and lint caches.
 
 ## Concurrency sweep
 
@@ -93,13 +93,15 @@ The 2026-10-01 baseline uses the three eligible `iso gate all` captures `all-2`,
 
 The unit SUITE event spans were 49.790, 40.513, and 29.297 s. The maximum, rounded up and doubled, sets `unit.wall_s` to 100 s. The tagged e2e SUITE spans were 74.988, 61.079, and 45.553 s, setting `e2e.wall_s` to 150 s by the same rule. Every package row uses its own maximum. Old budgets, all three spans, and the new values are in `measure/r5/derivation.tsv`; the stored unit and e2e streams rechecked green against the new file.
 
-The `all` gate wall budget is the maximum of its three WALL values, rounded up and doubled: 98.6 s becomes 198 s. `pfm` and `templates` take the same 198 s budget because each target runs a subset of `all`.
+The `all` gate wall budget is the maximum of its three WALL values, rounded up and doubled: 98.6 s becomes 198 s. `pfm` takes the same 198 s budget because it runs a subset of `all`.
 
 | Target | Three WALL values (s) | Three memory peaks (MB) | Start → end 1m loads | Max WALL (s) | Budget (s) |
 | --- | --- | --- | --- | --- | --- |
 | `all` | 98.6, 78.2, 61.3 | 1972, 1891, 2062 | 8.26→12.69, 8.00→10.92, 8.98→9.40 | 98.6 | 198 |
 | `pfm` | subset of `all` | bounded by `all` | same captures | bounded by `all` | 198 |
-| `templates` | subset of `all` | bounded by `all` | same captures | bounded by `all` | 198 |
+| `templates` | 15.1, 14.1, 13.7 | not measured | 4.37→6.75, 3.25→4.57, 4.57→5.96 | 15.1 | 32 |
+
+The three eligible `iso gate templates` captures `tmpl-1`, `tmpl-2`, and `tmpl-3` are under `$HOME/.local/state/pfm/flights/professor/fast-gate/measure/r7/`. Each had 34 passing steps, `EGRESS PASS`, an exclusive lock, and zero fence containers before the run. Their 1m host loads ranged 3.25–6.75. The maximum WALL, 15.1 s, rounds up to 16 s and doubles to a 32 s `templates` budget; the unchanged 1.25 tolerance sets its limit at 40 s.
 
 The median `all` wall fell from r3's 120.2 s to 78.2 s, but still misses the ≤45 s target by 33.2 s. The memory-peak median was 1972 MB, and swap was zero in all three captures. `r5/all-1` (115.6 s, timing-only red on the superseded file) and `r4/all-1` (106.0 s, eight reds since repaired) remain outside the baseline and recheck green against the 198 s gate budget.
 

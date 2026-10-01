@@ -15,6 +15,7 @@ cat >"$SERVER" <<'SERVER'
 #!/usr/bin/env bash
 case "$1" in
   immediate) read -r frame; printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'; read -r frame ;;
+  quick) read -r frame; printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
   delayed) read -r frame; sleep 0.2; read -t 0.2 -r frame; rc=$?; [ "$rc" -gt 128 ] || exit 0; printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'; read -r frame ;;
   other) read -r frame; printf '%s\n' '{"jsonrpc":"2.0","id":20,"result":{}}' ;;
   empty) read -r frame ;;
@@ -42,6 +43,23 @@ exchange 1 immediate
 if [ "$RC" -eq 0 ] && [ "$WALL" -lt 1000 ] && grep -q '"id":2' <<<"$OUT"; then
   ok "immediate id-2 reply returns before the bound"
 else bad "immediate reply" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
+
+# Make the first match attempt finish after the server exits, then inspect the
+# reply on the next attempt. The server's completed output remains authoritative.
+jq_first=1
+jq() {
+  if [ "$jq_first" -eq 1 ]; then
+    jq_first=0
+    wait "$pid" 2>/dev/null || true
+    return 1
+  fi
+  command jq "$@"
+}
+exchange 1 quick
+unset -f jq
+if [ "$RC" -eq 0 ] && grep -q '"id":2' <<<"$OUT"; then
+  ok "reply written before server exit is accepted on the next read"
+else bad "reply after server exit" "rc=$RC why=$WHY out=$OUT"; fi
 
 exchange 1 delayed
 if [ "$RC" -eq 0 ] && [ "$WALL" -lt 1000 ] && grep -q '"id":2' <<<"$OUT"; then

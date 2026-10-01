@@ -425,25 +425,35 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
   if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
+  # infra/fence/image-key.sh: a service image is built only when the key of its
+  # build inputs differs from the pfm.fence.inputs label the image carries, so a
+  # current image starts with no build and no registry round trip.
+  case "$action" in
+    shell|install|build|typecheck|verify|test|e2e|cover|all|status|gate|run|sim)
+      local service=pfm-dev
+      [[ "$action" != sim ]] || service=pfm-sim
+      . "$REPO_ROOT/infra/fence/image-key.sh"
+      fence_image_prepare "$compose" "$service" || { fail_step "iso: the $service image could not be keyed — see the line above"; exit 1; } ;;
+  esac
   case "$action" in
     shell)
       # Interactive: housekeeping's age limit never ends a shell someone is in.
-      docker compose -f "$compose" run --rm --build --label pfm.fence.long-lived=1 \
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} --label pfm.fence.long-lived=1 \
         ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
     install|build|typecheck|verify|test|e2e|cover|all|status)
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
     gate)
       # The flight gate: pfm and templates rows as concurrent steps in ONE
       # container, the per-step table in the run dir under /pfm-timing. The
       # whole gate runs under the egress recorder; its verdict is the last line.
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; bash infra/fence/egress.sh run ./.claude/scripts/dev.sh gate ${2:-all}" ;;
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; bash infra/fence/egress.sh run ./.claude/scripts/dev.sh gate ${2:-all}" ;;
     run)
       # An arbitrary command inside the fence, from the worktree root — for the
       # probes the fixed rows do not cover (`go test -json ./cmd/pfm`, a single
       # package, `make -C pfm lint`). Exit status is the command's own.
       local cmd="${*:2}"
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
     sim)
       # The real-simulation fence: `run` on the pfm-sim service — Google Chrome
       # (headless only), and pfm built + installed from this worktree with the
@@ -454,7 +464,7 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       local cmd="${*:2}"
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso sim <command…>" >&2; exit 2; }
       extra+=(-v "$(sim_volume):/root/.local/state/pfm/harvest-python")
-      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-sim bash -c "$proof; $cmd" ;;
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-sim bash -c "$proof; $cmd" ;;
     sim-reset)
       # Drops this worktree's harvester volume (several GB of provisioned
       # sidecars); the next `iso sim` provisions from scratch. An absent volume

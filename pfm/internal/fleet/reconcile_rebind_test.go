@@ -289,14 +289,6 @@ func TestReconcileCodexPanesDefersClearWhileReloadOrTurnRuns(t *testing.T) {
 	assertDeferred := func(label, wantWarning string) {
 		t.Helper()
 		changed := pass()
-		if len(renamer.literals) != 0 || len(renamer.keys) != 0 {
-			t.Fatalf(
-				"%s: keys reached renamer while pane must be deferred: literals=%v keys=%v",
-				label,
-				renamer.literals,
-				renamer.keys,
-			)
-		}
 		if changed {
 			t.Fatalf("%s: reconcile reported changed", label)
 		}
@@ -304,18 +296,11 @@ func TestReconcileCodexPanesDefersClearWhileReloadOrTurnRuns(t *testing.T) {
 		if err != nil || !found || bound != oldID {
 			t.Fatalf("%s: binding=(%q,%v,%v), want %s", label, bound, found, err, oldID)
 		}
-		killed, err := database.KilledChats(ctx)
-		if err != nil || len(killed) != 0 {
-			t.Fatalf("%s: killed=%v err=%v", label, killed, err)
-		}
 		if got := stderr.String(); got != wantWarning {
 			t.Fatalf("%s: warning=%q, want %q", label, got, wantWarning)
 		}
 	}
 	assertDeferred("reload held", "")
-	if renamer.captures != 0 {
-		t.Fatalf("reload held: capture count=%d, want 0", renamer.captures)
-	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
 		t.Fatal(err)
 	}

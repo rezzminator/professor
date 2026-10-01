@@ -31,7 +31,7 @@ func TestRunRejectsUnreadableHandoffBeforeChangingPane(t *testing.T) {
 	}
 }
 
-func TestHandoffRecordRoundTripsAndReadClearsIt(t *testing.T) {
+func TestHandoffRecordRoundTripsAndSurvivesARead(t *testing.T) {
 	lock, err := os.CreateTemp(t.TempDir(), "lock")
 	if err != nil {
 		t.Fatal(err)
@@ -51,8 +51,8 @@ func TestHandoffRecordRoundTripsAndReadClearsIt(t *testing.T) {
 		!got.WrittenAt.Equal(want.WrittenAt) {
 		t.Fatalf("read=%+v exists=%t err=%v, want %+v", got, exists, err, want)
 	}
-	if _, exists, err := readHandoff(lock); err != nil || exists {
-		t.Fatalf("second read exists=%t err=%v", exists, err)
+	if again, exists, err := readHandoff(lock); err != nil || !exists || again.SessionID != want.SessionID {
+		t.Fatalf("second read=%+v exists=%t err=%v", again, exists, err)
 	}
 	if err := writeHandoff(lock, want); err != nil {
 		t.Fatal(err)
@@ -235,5 +235,37 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 				t.Fatalf("continued=%q, want %q", continued, tc.id)
 			}
 		})
+	}
+}
+
+// A queued reload that adopts the record and then fails before respawn leaves
+// the pane on the previous reboot, so the record must survive for the next one.
+func TestRunKeepsTheHandoffWhenAQueuedReloadFailsBeforeRespawn(t *testing.T) {
+	const oldID = "11111111-1111-4111-8111-111111111111"
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	lockPath := LockPath(dir, "cx-1", "%7")
+	content, err := json.Marshal(handoffRecord{
+		Engine: pfmengine.Codex, LeftBehind: oldID, Account: 2, CWD: cwd, WrittenAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		Engine: pfmengine.Codex, SocketPath: "/tmp/cx-1", Pane: "%7",
+		SessionID: oldID, Transcript: filepath.Join(dir, "rollout.jsonl"),
+		Account: 1, AccountIDs: []int{1, 2}, CWD: dir,
+		Machine: pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: dir}, {ID: 2, Home: cwd}}},
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		tmux := &fakeReloadTmux{}
+		_, err := Run(context.Background(), request, Options{SIDDir: dir, Delay: -1, Poll: -1}, tmux, nil, nil)
+		if err == nil || !strings.Contains(err.Error(), "new Codex conversation whose id is not known yet") ||
+			tmux.literal != "" {
+			t.Fatalf("queued reload %d err=%v literal=%q", attempt, err, tmux.literal)
+		}
 	}
 }

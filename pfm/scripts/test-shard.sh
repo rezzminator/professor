@@ -111,7 +111,7 @@ def split_flags(flags):
             build.append(name + (('=' + value) if value is not None else ''))
         elif name == '-tags':
             build.extend([name, value])
-        if name in ('-parallel', '-short', '-failfast', '-cpu'):
+        if name in ('-parallel', '-short', '-failfast', '-cpu', '-timeout'):
             binary.append('-test.' + name[1:] + (('=' + value) if value is not None else ''))
         index += 1
     return build, binary
@@ -322,7 +322,8 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
 
     unsharded = [package for package in packages if package not in selected]
     if args.mode == 'run' and unsharded:
-        start(['go', 'test', *args.flags, '-count=1', '-timeout', '25m', '-json', *unsharded], MODULE)
+        # The default timeout goes first so a caller's -timeout wins.
+        start(['go', 'test', '-timeout', '25m', *args.flags, '-count=1', '-json', *unsharded], MODULE)
 
     for package in selected:
         binary = binary_dir / (package.rsplit('/', 1)[-1] + '.test')

@@ -112,9 +112,8 @@ func readHandoff(lock *os.File) (handoffRecord, bool, error) {
 	if _, err := pfmengine.Lookup(record.Engine); err != nil {
 		return handoffRecord{}, false, fmt.Errorf("reload handoff engine: %w", err)
 	}
-	if err := lock.Truncate(0); err != nil {
-		return handoffRecord{}, false, fmt.Errorf("clear reload handoff: %w", err)
-	}
+	// The record stays until the next respawn overwrites it: a holder that
+	// adopts it and fails before respawn leaves the pane on that reboot.
 	return record, true, nil
 }
 

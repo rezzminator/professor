@@ -246,7 +246,7 @@ PY
 then ok sharded-compile-failure; else bad "sharded-compile-failure: rc=$rc" "$(cat "$T/error.log")"; fi
 : >"$STUB_LOG"
 rc=0; bash "$SUT" run --out "$T/run.json" -- -p 4 -parallel 4 -short -failfast -cpu=2 -race -tags=demo -count=2 -timeout=3m >"$T/run.log" 2>&1 || rc=$?
-if [ "$rc" -eq 1 ] && grep -q '^test -c .* -race -tags demo ' "$STUB_LOG" && grep -q -- '-test.parallel=4' "$STUB_LOG" && grep -q -- '-test.short' "$STUB_LOG" && grep -q -- '-test.failfast' "$STUB_LOG" && grep -q -- '-test.cpu=2' "$STUB_LOG" && ! grep '^tool test2json ' "$STUB_LOG" | grep -q -- '-test.count=2'; then ok accepted-flags-split; else bad "accepted-flags-split: rc=$rc" "$(cat "$STUB_LOG")"; fi
+if [ "$rc" -eq 1 ] && grep -q '^test -c .* -race -tags demo ' "$STUB_LOG" && grep -q -- '-test.parallel=4' "$STUB_LOG" && grep -q -- '-test.short' "$STUB_LOG" && grep -q -- '-test.failfast' "$STUB_LOG" && grep -q -- '-test.cpu=2' "$STUB_LOG" && ! grep '^tool test2json ' "$STUB_LOG" | grep -q -- '-test.count=2' && ! grep '^tool test2json ' "$STUB_LOG" | grep -v -q -- '-test.timeout=3m$' && grep '^test .* -json ' "$STUB_LOG" | grep -q -- '-timeout=3m -count=1 -json '; then ok accepted-flags-split; else bad "accepted-flags-split: rc=$rc" "$(cat "$STUB_LOG")"; fi
 : >"$STUB_LOG"
 rc=0; bash "$SUT" run --out "$T/run.json" -- -race=false >"$T/run.log" 2>&1 || rc=$?
 if [ "$rc" -eq 1 ] && grep -q '^test -c .* -race=false ' "$STUB_LOG"; then ok boolean-build-flag; else bad "boolean-build-flag: rc=$rc" "$(cat "$STUB_LOG")"; fi

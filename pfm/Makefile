@@ -88,24 +88,18 @@ define need-tool
 	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/fence/tools.env)" >&2; exit 1; }
 endef
 
-fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt), both kernels
+fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt)
 	$(call need-tool,LINT)
-	@# Build-tagged files load only for the current GOOS, so each supported
-	@# kernel is formatted in turn; golines splits a long line and gofumpt
-	@# regroups the result, so a pass can leave a file the next pass still
-	@# changes: run until a pass is a no-op.
+	@# golangci-lint fmt sees files for both kernels in one pass, including
+	@# build-tagged files. Golines and gofumpt can need another pass to settle.
 	@for pass in 1 2 3; do \
-	  for goos in linux darwin; do GOOS=$$goos $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; done; \
-	  if [ -z "$$(GOOS=linux $(LINT) fmt --diff ./... 2>/dev/null)$$(GOOS=darwin $(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
+	  $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; \
+	  if [ -z "$$($(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
 	done; echo "fmt: did not converge in 3 passes — a formatter fight; run 'make fmt-check' to see the files" >&2; exit 1
 
-fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
+fmt-check: ## Fail if anything is unformatted, naming the files
 	$(call need-tool,LINT)
-	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
-	GOOS=linux $(LINT) fmt --diff ./... >"$$tmp/linux" 2>&1 & linux_pid=$$!; \
-	GOOS=darwin $(LINT) fmt --diff ./... >"$$tmp/darwin" 2>&1 & darwin_pid=$$!; \
-	wait $$linux_pid || true; wait $$darwin_pid || true; \
-	diff="$$(cat "$$tmp/linux" "$$tmp/darwin")"; \
+	@diff="$$($(LINT) fmt --diff ./... 2>&1)" || true; \
 	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||' | sort -u || true)"; \
 	if [ -n "$$files" ]; then \
 	  echo "UNFORMATTED — $$(echo "$$files" | wc -l | tr -d ' ') file(s), run 'make fmt' (first 20):"; \
@@ -113,7 +107,7 @@ fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
 	elif [ -n "$$diff" ]; then \
 	  echo "fmt-check: golangci-lint fmt did not run cleanly — NO file was checked:"; echo "$$diff" | tail -5; exit 2; \
 	fi; \
-	echo "fmt: clean (linux + darwin)"
+	echo "fmt: clean"
 
 lint: ## Every finding in the module — the burn-down view
 	$(call need-tool,LINT)

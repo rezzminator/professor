@@ -15,7 +15,7 @@ cat >"$SERVER" <<'SERVER'
 #!/usr/bin/env bash
 case "$1" in
   immediate) read -r frame; printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'; read -r frame ;;
-  delayed) read -r frame; sleep 1; read -t 1 -r frame; rc=$?; [ "$rc" -gt 128 ] || exit 0; printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'; read -r frame ;;
+  delayed) read -r frame; sleep 0.2; read -t 0.2 -r frame; rc=$?; [ "$rc" -gt 128 ] || exit 0; printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'; read -r frame ;;
   other) read -r frame; printf '%s\n' '{"jsonrpc":"2.0","id":20,"result":{}}' ;;
   empty) read -r frame ;;
   silent) read -r frame; sleep 30 ;;
@@ -26,47 +26,80 @@ SERVER
 chmod +x "$SERVER"
 
 exchange() {
-  local started
-  started="$(date +%s)"
-  mcp_stdio_exchange 2 "$1" '{"id":2}' "$SERVER" "$2" >"$T/output"
-  RC=$? WHY="$MCP_STDIO_WHY" WALL=$(( $(date +%s) - started ))
+  local started="${EPOCHREALTIME/./}" ended
+  if [ "$#" -eq 3 ]; then
+    MCP_STDIO_GRACE_SECS="$3" mcp_stdio_exchange 2 "$1" '{"id":2}' "$SERVER" "$2" >"$T/output"
+  else
+    mcp_stdio_exchange 2 "$1" '{"id":2}' "$SERVER" "$2" >"$T/output"
+  fi
+  RC=$? WHY="$MCP_STDIO_WHY"
+  ended="${EPOCHREALTIME/./}"
+  WALL=$(( (ended - started) / 1000 ))
   OUT="$(cat "$T/output")"
 }
 
-exchange 3 immediate
-if [ "$RC" -eq 0 ] && [ "$WALL" -lt 3 ] && grep -q '"id":2' <<<"$OUT"; then
+exchange 1 immediate
+if [ "$RC" -eq 0 ] && [ "$WALL" -lt 1000 ] && grep -q '"id":2' <<<"$OUT"; then
   ok "immediate id-2 reply returns before the bound"
 else bad "immediate reply" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
-exchange 3 delayed
-if [ "$RC" -eq 0 ] && [ "$WALL" -lt 3 ] && grep -q '"id":2' <<<"$OUT"; then
+exchange 1 delayed
+if [ "$RC" -eq 0 ] && [ "$WALL" -lt 1000 ] && grep -q '"id":2' <<<"$OUT"; then
   ok "delayed reply arrives while stdin remains open"
 else bad "delayed reply" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
-exchange 3 other
-if [ "$RC" -eq 1 ] && [ "$WALL" -lt 3 ] && grep -q '"id":20' <<<"$OUT" && [ "$WHY" = 'exited before answering' ]; then
+exchange 1 other
+if [ "$RC" -eq 1 ] && [ "$WALL" -lt 1000 ] && grep -q '"id":20' <<<"$OUT" && [ "$WHY" = 'exited before answering' ]; then
   ok "id 20 cannot satisfy wanted id 2"
 else bad "exact id" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
-exchange 3 empty
-if [ "$RC" -eq 1 ] && [ "$WALL" -lt 3 ] && [ -z "$OUT" ] && [ "$WHY" = 'exited before answering' ]; then
+exchange 1 empty
+if [ "$RC" -eq 1 ] && [ "$WALL" -lt 1000 ] && [ -z "$OUT" ] && [ "$WHY" = 'exited before answering' ]; then
   ok "empty server exits unanswered at once"
 else bad "empty reply" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
-exchange 1 silent
-if [ "$RC" -eq 2 ] && [ "$WALL" -le 2 ] && [ "$WHY" = 'no answer in 1s' ]; then
+exchange 0.3 silent
+if [ "$RC" -eq 2 ] && [ "$WALL" -ge 300 ] && [ "$WALL" -le 800 ] && [ "$WHY" = 'no answer in 0.3s' ]; then
   ok "silent server is stopped at the bound"
 else bad "bounded silence" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
-exchange 3 lingering
-if [ "$RC" -eq 0 ] && [ "$WALL" -le 5 ] && grep -q '"id":2' <<<"$OUT"; then
+exchange 1 lingering 0.3
+if [ "$RC" -eq 0 ] && [ "$WALL" -ge 300 ] && [ "$WALL" -le 800 ] && grep -q '"id":2' <<<"$OUT"; then
   ok "an answered server that never ends on EOF is stopped, its reply kept"
 else bad "server lingering after EOF" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
-exchange 1 stubborn
-if [ "$RC" -eq 2 ] && [ "$WALL" -le 5 ] && [ "$WHY" = 'no answer in 1s' ]; then
+exchange 0.3 stubborn 0.3
+if [ "$RC" -eq 2 ] && [ "$WALL" -ge 600 ] && [ "$WALL" -le 1100 ] && [ "$WHY" = 'no answer in 0.3s' ]; then
   ok "a silent server that ignores TERM is killed after the bound"
 else bad "TERM-ignoring server" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
+
+unset MCP_STDIO_GRACE_SECS
+mcp_stdio_grace_ticks
+if [ "$MCP_STDIO_TICKS" -eq 20 ]; then
+  ok "production grace resolves to 2 s"
+else bad "production grace" "ticks=$MCP_STDIO_TICKS"; fi
+
+exchange 0.5 immediate
+mcp_stdio_ticks 0.5
+if [ "$RC" -eq 0 ] && [ "$WALL" -lt 1000 ] && [ "$MCP_STDIO_TICKS" -eq 5 ]; then
+  ok "fractional bound is accepted as 5 ticks"
+else bad "fractional bound" "rc=$RC wall=$WALL why=$WHY"; fi
+
+for value in abc 1.25 -1; do
+  mcp_stdio_exchange 2 "$value" '{"id":2}' "$SERVER" immediate >"$T/output"
+  RC=$?
+  if [ "$RC" -eq 3 ] && [ "$MCP_STDIO_WHY" = "bad bound: $value" ]; then
+    ok "bad bound $value is rejected"
+  else bad "bad bound $value" "rc=$RC why=$MCP_STDIO_WHY"; fi
+done
+
+for value in abc 1.25 -1; do
+  MCP_STDIO_GRACE_SECS="$value" mcp_stdio_exchange 2 1 '{"id":2}' "$SERVER" immediate >"$T/output"
+  RC=$?
+  if [ "$RC" -eq 3 ] && [ "$MCP_STDIO_WHY" = "bad grace: $value" ]; then
+    ok "bad grace $value is rejected"
+  else bad "bad grace $value" "rc=$RC why=$MCP_STDIO_WHY"; fi
+done
 
 mcp_stdio_exchange 2 1 '{"id":2}' /no/such/mcp-server >"$T/output"
 RC=$?

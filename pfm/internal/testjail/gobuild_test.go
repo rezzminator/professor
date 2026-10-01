@@ -103,6 +103,82 @@ chmod +x "$1"
 	}
 }
 
+func TestMockEngineBinaryUsesExecutablePrebuilt(t *testing.T) {
+	prebuilt := filepath.Join(t.TempDir(), "mock-engine")
+	if err := os.WriteFile(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvTestMockEngineBinary, prebuilt)
+	got, err := MockEngineBinary(t.TempDir(), t.TempDir())
+	if err != nil || got != prebuilt {
+		t.Fatalf("MockEngineBinary() = %q, %v; want %q", got, err, prebuilt)
+	}
+}
+
+func TestMockEngineBinaryRejectsBrokenPrebuilt(t *testing.T) {
+	nonExecutable := filepath.Join(t.TempDir(), "mock-engine")
+	if err := os.WriteFile(nonExecutable, []byte("binary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(t.TempDir(), "missing"), nonExecutable, t.TempDir()} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Setenv(paths.EnvTestMockEngineBinary, path)
+			got, err := MockEngineBinary(t.TempDir(), t.TempDir())
+			if got != "" || err == nil ||
+				!strings.Contains(err.Error(), paths.EnvTestMockEngineBinary) || !strings.Contains(err.Error(), path) {
+				t.Fatalf("MockEngineBinary() = %q, %v; want named error for %q", got, err, path)
+			}
+		})
+	}
+}
+
+func TestMockEngineBinaryBuildsWhenUnset(t *testing.T) {
+	previous, hadPrevious := os.LookupEnv(paths.EnvTestMockEngineBinary)
+	if err := os.Unsetenv(paths.EnvTestMockEngineBinary); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		var err error
+		if hadPrevious {
+			err = os.Setenv(paths.EnvTestMockEngineBinary, previous)
+		} else {
+			err = os.Unsetenv(paths.EnvTestMockEngineBinary)
+		}
+		if err != nil {
+			t.Errorf("restore %s: %v", paths.EnvTestMockEngineBinary, err)
+		}
+	})
+	goDir := t.TempDir()
+	log := filepath.Join(t.TempDir(), "go.log")
+	stub := `#!/bin/sh
+printf '%s\n' "$*" > "$TEST_GO_BUILD_LOG"
+while [ "$1" != -o ]; do shift; done
+shift
+printf '#!/bin/sh\nexit 0\n' > "$1"
+chmod +x "$1"
+`
+	if err := os.WriteFile(filepath.Join(goDir, "go"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))
+	t.Setenv("TEST_GO_BUILD_LOG", log)
+	dir := t.TempDir()
+	got, err := MockEngineBinary(t.TempDir(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "mock-engine"); got != want {
+		t.Fatalf("MockEngineBinary() = %q, want %q", got, want)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "build -trimpath -buildvcs=false -o " + got + " ./cmd/mock-engine"; !strings.Contains(string(data), want) {
+		t.Fatalf("go build log %q missing %q", data, want)
+	}
+}
+
 func TestGoBuildReportsCombinedOutput(t *testing.T) {
 	goDir := t.TempDir()
 	if err := os.WriteFile(

@@ -22,8 +22,8 @@ func TestBuiltBinaryAnswersByTheNameItIsInstalledUnder(t *testing.T) {
 		t.Skip("TOOLCHAIN-MISSING go: cannot build cmd/mock-engine")
 	}
 	root := t.TempDir()
-	binary := filepath.Join(root, "mock-engine")
-	if err := testjail.GoBuild(".", binary, "."); err != nil {
+	binary, err := testjail.MockEngineBinary("../..", root)
+	if err != nil {
 		t.Fatalf("go build: %v", err)
 	}
 	scenario := filepath.Join(root, "scenario.json")
@@ -53,7 +53,7 @@ func TestBuiltBinaryAnswersByTheNameItIsInstalledUnder(t *testing.T) {
 	command.Env = append(os.Environ(), mockengine.EnvScenario+"="+scenario, mockengine.EnvEngine+"=")
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
-	err := command.Run()
+	err = command.Run()
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != mockengine.ExitUsage ||
 		!strings.Contains(stderr.String(), "2.1.238") {

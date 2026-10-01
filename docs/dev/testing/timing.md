@@ -53,7 +53,7 @@ Event span excludes build work before the first event. The sweep records externa
 
 The script compiles the `cmd/pfm` test binary once, lists its tests from that binary, and starts all four shards as `go tool test2json` runs of the same binary. It starts the unsharded process first and runs it alongside the sharded package. Sharded packages run one at a time, so at most one unsharded process plus the largest shard count are direct children of the script.
 
-A unit run builds pfm once and hands it to the tests through `PFM_TEST_PFM_BINARY`.
+A unit run builds pfm and mock-engine once each and hands them to the tests through `PFM_TEST_PFM_BINARY` and `PFM_TEST_MOCK_ENGINE_BINARY`.
 
 The merged stream has one terminal event per package. A sharded package's `wall_s` is its slowest shard's elapsed time; its existing `pfm/.testtiming.yml` budget is judged the same way as before. `SHARD-LOST <test>` means a listed test did not run and fails the package. Each process's raw JSON stream is kept in `unit-shards/` beside `unit.json` for diagnosis.
 
@@ -72,6 +72,8 @@ Run the parser inside the fence against captures available on its artifact mount
 ```
 
 Malformed or incomplete input, unreadable budgets, missing dependencies, failed tests, missing packages, and exceeded budgets must remain distinct from success. The shell fixture suites exercise these failure paths through `dev.sh iso run`.
+
+The unit runner writes `unit.load` beside `unit.json`, sampling the VM's busy CPU seconds from `/proc/stat` and the fence container's own CPU seconds from `/sys/fs/cgroup/cpu.stat` from before the first test process through after the last. For each package's event window and the suite window, the checker uses the samples bracketing that window: `f = ((busy₁ − busy₀) − (own₁ − own₀)) / ((time₁ − time₀) × cpus)`, clamped to 0–0.9. It compares elapsed time with `budget × tolerance / (1 − f)`. An overage explained by that measured other load prints `TIMING CORRECTED`; an unexplained one remains `TIMING FAIL`. A missing or unavailable record prints `TIMING: other load not measured` and leaves the limits uncorrected. A malformed record is `TIMING-UNREADABLE`, exit 2.
 
 The steady-state ratchet uses three independent successful captures with identical package sets and flags. Record host load and uptime before and after each capture. A failed run cannot establish or lower a budget. For the sharded unit re-baseline above, an `iso gate` run whose only red is package timing against the superseded unit block is an eligible capture when its tests and skip checks pass and it has no `SHARD-LOST`. Preserve all raw captures beside the measurement log so each budget can be traced back to evidence.
 

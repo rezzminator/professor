@@ -68,13 +68,14 @@ const (
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
 	// test` is refused the real home rather than handed it silently.
-	EnvRealHome           = "PFM_TEST_REAL_HOME"
-	EnvTestPFMBinary      = "PFM_TEST_PFM_BINARY"
-	EnvProcRoot           = "PFM_PROC_ROOT"
-	EnvManagedSettingsDir = "PFM_MANAGED_SETTINGS_DIR"
-	EnvCgroupRoot         = "PFM_CGROUP_ROOT"
-	EnvDevRepoGitDir      = "PFM_DEV_REPO_GIT_DIR"
-	EnvDevRepoWorkTree    = "PFM_DEV_REPO_WORK_TREE"
+	EnvRealHome            = "PFM_TEST_REAL_HOME"
+	EnvTestPFMBinary       = "PFM_TEST_PFM_BINARY"
+	EnvTestMockEngineBinary = "PFM_TEST_MOCK_ENGINE_BINARY"
+	EnvProcRoot            = "PFM_PROC_ROOT"
+	EnvManagedSettingsDir  = "PFM_MANAGED_SETTINGS_DIR"
+	EnvCgroupRoot          = "PFM_CGROUP_ROOT"
+	EnvDevRepoGitDir       = "PFM_DEV_REPO_GIT_DIR"
+	EnvDevRepoWorkTree     = "PFM_DEV_REPO_WORK_TREE"
 	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
 	// the way a real chat runs — the server loads ~/.tmux.conf like every other
 	// terminal on the machine, because a chat IS a terminal the user lives in:
@@ -537,4 +538,9 @@ func ThemesOfflineIn(env Env) bool {
 // PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.
 func PrebuiltPFMBinary() (string, bool) {
 	return OSEnv{}.Lookup(EnvTestPFMBinary)
+}
+
+// PrebuiltMockEngineBinary is the mock-engine binary a unit run built once.
+func PrebuiltMockEngineBinary() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestMockEngineBinary)
 }

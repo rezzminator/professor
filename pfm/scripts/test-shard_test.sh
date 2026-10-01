@@ -99,13 +99,18 @@ case "$1" in
     [ "${STUB_LIST_FAIL:-0}" = 0 ] || exit 9
     printf '%s\n' github.com/rezzminator/professor/pfm/cmd/pfm github.com/rezzminator/professor/pfm/internal/quick ;;
   build)
-    [ "${STUB_PREBUILD_FAIL:-0}" = 0 ] || { printf 'prebuild.go:7: broken fixture\n' >&2; exit 1; }
+    if [[ " $* " == *" ./cmd/mock-engine "* ]]; then
+      [ "${STUB_MOCK_PREBUILD_FAIL:-0}" = 0 ] || { printf 'mock-build.go:7: broken fixture\n' >&2; exit 1; }
+    else
+      [ "${STUB_PREBUILD_FAIL:-0}" = 0 ] || { printf 'prebuild.go:7: broken fixture\n' >&2; exit 1; }
+    fi
     while [ "$1" != -o ]; do shift; done
     shift
     printf '#!/bin/sh\nexit 0\n' >"$1"
     chmod +x "$1" ;;
   test)
     printf 'child-env %s\n' "${PFM_TEST_PFM_BINARY-<unset>}" >>"$STUB_LOG"
+    printf 'mock-env %s\n' "${PFM_TEST_MOCK_ENGINE_BINARY-<unset>}" >>"$STUB_LOG"
     args=" $* "
     if [[ "$args" == *" -c "* ]]; then
       [ "${STUB_COMPILE_FAIL:-0}" = 0 ] || { printf 'compile.go:7: broken fixture\n' >&2; exit 1; }
@@ -117,6 +122,7 @@ case "$1" in
 set -eu
 printf 'binary %s\n' "$*" >>"$STUB_LOG"
 printf 'child-env %s\n' "${PFM_TEST_PFM_BINARY-<unset>}" >>"$STUB_LOG"
+printf 'mock-env %s\n' "${PFM_TEST_MOCK_ENGINE_BINARY-<unset>}" >>"$STUB_LOG"
 if [[ " $* " == *" -test.list "* ]]; then
   [ "${STUB_TEST_LIST_FAIL:-0}" = 0 ] || { echo 'fixture list failed' >&2; exit 8; }
   printf 'TestHeavyA\nTestHeavyB\nTestLost\nExampleOptional\nBenchmarkDrop\n'
@@ -154,6 +160,7 @@ BIN
   tool)
     [ "$2" = test2json ] || exit 7
     printf 'child-env %s\n' "${PFM_TEST_PFM_BINARY-<unset>}" >>"$STUB_LOG"
+    printf 'mock-env %s\n' "${PFM_TEST_MOCK_ENGINE_BINARY-<unset>}" >>"$STUB_LOG"
     shift 5
     "$@" ;;
   *) exit 7 ;;
@@ -188,9 +195,16 @@ parts = builds[0].split()
 assert parts[:3] == ['build', '-trimpath', '-buildvcs=false'], lines
 assert parts[-1] == './cmd/pfm', lines
 binary = parts[parts.index('-o') + 1]
+assert len(builds) == 2, builds
+mock = builds[1].split()
+assert mock[:3] == ['build', '-trimpath', '-buildvcs=false'], lines
+assert mock[-1] == './cmd/mock-engine', lines
+mock_binary = mock[mock.index('-o') + 1]
 assert all(lines.index(builds[0]) < i for i, line in enumerate(lines) if line.startswith(('test ', 'tool test2json ', 'binary '))), lines
+assert all(lines.index(builds[1]) < i for i, line in enumerate(lines) if line.startswith(('test ', 'tool test2json ', 'binary '))), lines
 assert [line for line in lines if line.startswith('child-env ')], lines
 assert all(line == 'child-env ' + binary for line in lines if line.startswith('child-env ')), lines
+assert all(line == 'mock-env ' + mock_binary for line in lines if line.startswith('mock-env ')), lines
 PY
 then ok prebuilt-before-tests; else bad "prebuilt-before-tests: rc=$rc" "$(cat "$STUB_LOG")"; fi
 : >"$STUB_LOG"
@@ -201,6 +215,53 @@ children = [line for line in open(sys.argv[1]).read().splitlines() if line.start
 assert children and all(line == 'child-env <unset>' for line in children), children
 PY
 then ok prebuild-failure-kept; else bad "prebuild-failure-kept: rc=$rc" "$(cat "$T/run.log")"; fi
+: >"$STUB_LOG"
+rc=0; STUB_MOCK_PREBUILD_FAIL=1 bash "$SUT" run --out "$T/run.json" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'test-shard: prebuilt mock-engine build failed: mock-build.go:7: broken fixture' "$T/run.log" && grep -q '"Action": "build-output", "ImportPath": "./cmd/mock-engine"' "$T/run.json" && grep -q '"Action": "build-fail", "ImportPath": "./cmd/mock-engine"' "$T/run.json" && python3 - "$STUB_LOG" <<'PY'
+import sys
+lines = open(sys.argv[1]).read().splitlines()
+assert any(line.startswith('child-env ') and line != 'child-env <unset>' for line in lines), lines
+assert [line for line in lines if line.startswith('mock-env ')] and all(line == 'mock-env <unset>' for line in lines if line.startswith('mock-env ')), lines
+PY
+then ok mock-prebuild-failure-kept; else bad "mock-prebuild-failure-kept: rc=$rc" "$(cat "$T/run.log")"; fi
+
+cat >"$T/proc.stat" <<'STAT'
+cpu  100 0 100 100 0 0 0 0 0 0
+cpu0 50 0 50 50 0 0 0 0 0 0
+cpu1 50 0 50 50 0 0 0 0 0 0
+STAT
+printf 'usage_usec 1000000\n' >"$T/cpu.stat"
+rc=0; PFM_TEST_SHARD_PROC_STAT="$T/proc.stat" PFM_TEST_SHARD_CPU_STAT="$T/cpu.stat" bash "$SUT" run --out "$T/load.json" -- -p 4 >"$T/load.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && python3 - "$T/load.load" <<'PY'
+import sys
+rows = open(sys.argv[1]).read().splitlines()
+assert rows[0] == 'epoch_s\tvm_busy_s\town_s\tcpus', rows
+assert len(rows) >= 3, rows
+assert all(len(row.split('\t')) == 4 and row.split('\t')[3] == '2' for row in rows[1:]), rows
+PY
+then ok load-record-fixture; else bad "load-record-fixture: rc=$rc" "$(cat "$T/load.log")"; fi
+rc=0; PFM_TEST_SHARD_PROC_STAT="$T/missing.stat" bash "$SUT" run --out "$T/unavailable.json" -- -p 4 >"$T/unavailable.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q "^UNAVAILABLE.*$T/missing.stat" "$T/unavailable.load"; then ok load-unavailable; else bad "load-unavailable: rc=$rc" "$(cat "$T/unavailable.log")"; fi
+rc=0; bash "$SUT" run --out "$T/real.json" -- -p 4 >"$T/real.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && python3 - "$T/real.load" <<'PY'
+import re, sys
+rows = open(sys.argv[1]).read().splitlines()
+if rows[-1].startswith('UNAVAILABLE\t'):
+    assert '/proc/stat' in rows[-1] or '/sys/fs/cgroup/cpu.stat' in rows[-1], rows
+else:
+    assert len(rows) >= 3, rows
+    with open('/proc/stat') as source:
+        cpus = sum(bool(re.match(r'cpu[0-9]+ ', line)) for line in source)
+    assert all(int(row.split('\t')[3]) == cpus for row in rows[1:]), rows
+PY
+then ok load-record-real; else bad "load-record-real: rc=$rc" "$(cat "$T/real.log")"; fi
+ln -s /dev/full "$T/write-fail.load"
+rc=0; bash "$SUT" run --out "$T/write-fail.json" -- -p 4 >"$T/write-fail.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q "test-shard: load record $T/write-fail.load:" "$T/write-fail.log" && python3 - "$T/write-fail.json" "$QUICK" <<'PY'
+import json, sys
+assert any(json.loads(line).get('Package') == sys.argv[2] for line in open(sys.argv[1]))
+PY
+then ok load-write-failure-continues; else bad "load-write-failure-continues: rc=$rc" "$(cat "$T/write-fail.log")"; fi
 rc=0; bash "$SUT" plan --out "$T/plan.json" --history "$T/history.json" >"$T/plan.tsv" 2>"$T/plan.err" || rc=$?
 if [ "$rc" -eq 0 ] && python3 - "$T/plan.tsv" "$PKG" <<'PY'
 import sys

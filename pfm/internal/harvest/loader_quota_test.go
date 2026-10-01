@@ -20,6 +20,7 @@ import (
 // waits for the reset — each only within the one-wait cap and the fetch's
 // budget; past them, the stop names when the quota resets.
 func TestALoaderIsPacedByTheSiteQuota(t *testing.T) {
+	t.Parallel()
 	answer := func(status int, used, remaining, reset string) rateLimitAnswer {
 		return rateLimitAnswer{status: status, quota: [3]string{used, remaining, reset}}
 	}
@@ -112,6 +113,7 @@ func TestALoaderIsPacedByTheSiteQuota(t *testing.T) {
 // TestRedditLoadersReadTheQuota: a thread's more-comments loaders opt into
 // the quota pacing; its continue links (a page GET, sent no quota) do not.
 func TestRedditLoadersReadTheQuota(t *testing.T) {
+	t.Parallel()
 	doc, err := html.Parse(strings.NewReader(wallFixture(t, "reddit-thread-ssr.html")))
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +145,7 @@ func TestRedditLoadersReadTheQuota(t *testing.T) {
 // loaded of those stated, the quota the headers reported, the minutes the
 // rest would take and when the quota resets.
 func TestRedditPacingStopsAtItsBudgetAndNamesTheRest(t *testing.T) {
+	t.Parallel()
 	tree := []string{
 		threadComment("c1", "alpha_placeholder", "Alpha top comment."),
 		threadComment("c2", "bravo_placeholder", "Bravo top comment."),
@@ -185,6 +188,7 @@ func TestRedditPacingStopsAtItsBudgetAndNamesTheRest(t *testing.T) {
 // TestPacingLeftFallsBackToTheDocumentedRate: a site that reported no used
 // count names its documented rate as such.
 func TestPacingLeftFallsBackToTheDocumentedRate(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 23, 21, 0, 0, 0, time.UTC)
 	budget := &loaderBudget{
 		requests: 10, pacingStop: true, quotaRate: &redditQuota,

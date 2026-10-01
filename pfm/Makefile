@@ -55,7 +55,7 @@ COVER_DIR ?= $(REPO)/tmp/cover
 LINT_BASE ?= origin/main
 # The fenced unit captures in docs/dev/testing/concurrency-sweep.md pin these flags.
 # The tagged e2e suite keeps its own -p 1 in dev.sh.
-TESTFLAGS ?= -p 4 -parallel 4
+TESTFLAGS ?= -p 6 -parallel 4
 
 .PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
@@ -101,7 +101,11 @@ fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint f
 
 fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
 	$(call need-tool,LINT)
-	@diff="$$(for goos in linux darwin; do GOOS=$$goos $(LINT) fmt --diff ./... 2>&1 || true; done)"; \
+	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	GOOS=linux $(LINT) fmt --diff ./... >"$$tmp/linux" 2>&1 & linux_pid=$$!; \
+	GOOS=darwin $(LINT) fmt --diff ./... >"$$tmp/darwin" 2>&1 & darwin_pid=$$!; \
+	wait $$linux_pid || true; wait $$darwin_pid || true; \
+	diff="$$(cat "$$tmp/linux" "$$tmp/darwin")"; \
 	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||' | sort -u || true)"; \
 	if [ -n "$$files" ]; then \
 	  echo "UNFORMATTED — $$(echo "$$files" | wc -l | tr -d ' ') file(s), run 'make fmt' (first 20):"; \

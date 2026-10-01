@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"debug/buildinfo"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,6 +33,8 @@ const (
 	e2eMockEngineEnv = "PFM_E2E_MOCK_ENGINE"
 )
 
+var e2eCoverageAtStart = os.Getenv("GOCOVERDIR")
+
 type jailedTestMain struct{ m *testing.M }
 
 func (m jailedTestMain) Run() int {
@@ -45,8 +48,7 @@ func (m jailedTestMain) Run() int {
 		fmt.Fprintln(os.Stderr, "e2e harness refuses to run without PFM_DEV_FENCE=1")
 		return 1
 	}
-	goBinary, err := exec.LookPath("go")
-	if err != nil {
+	if _, err := exec.LookPath("go"); err != nil {
 		fmt.Fprintf(os.Stderr, "TOOLCHAIN-MISSING go: %v\n", err)
 		return 1
 	}
@@ -54,11 +56,23 @@ func (m jailedTestMain) Run() int {
 		fmt.Fprintln(os.Stderr, "TOOLCHAIN-MISSING tmux: executable not found before testscript setup")
 		return 1
 	}
-	if err := prepareScriptBinary(goBinary); err != nil {
+	if err := prepareScriptBinary(); err != nil {
 		fmt.Fprintf(os.Stderr, "build e2e pfm binary: %v\n", err)
 		return 1
 	}
+	var err error
+	e2eStageRoot, err = os.MkdirTemp("", "pfm-e2e-stage-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create e2e stage root: %v\n", err)
+		return 1
+	}
 	code := testjail.Run(m.m)
+	if err := os.RemoveAll(e2eStageRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "remove e2e stage root: %v\n", err)
+		if code == 0 {
+			code = 1
+		}
+	}
 	if os.Getenv(e2eScriptOwnerEnv) == strconv.Itoa(os.Getpid()) {
 		if root := os.Getenv(e2eScriptRootEnv); root != "" {
 			if err := os.RemoveAll(root); err != nil && code == 0 {
@@ -89,7 +103,7 @@ func TestMain(m *testing.M) {
 	})
 }
 
-func prepareScriptBinary(goBinary string) error {
+func prepareScriptBinary() error {
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return errors.New("locate script harness source")
@@ -104,7 +118,7 @@ func prepareScriptBinary(goBinary string) error {
 			if err != nil {
 				return fmt.Errorf("create short mock-engine root: %w", err)
 			}
-			if err := buildMockEngine(goBinary, pfmRoot, root); err != nil {
+			if err := buildMockEngine(pfmRoot, root); err != nil {
 				_ = os.RemoveAll(root)
 				return err
 			}
@@ -125,16 +139,16 @@ func prepareScriptBinary(goBinary string) error {
 		return fmt.Errorf("create short binary root: %w", err)
 	}
 	binary := filepath.Join(root, "pfm")
-	command := exec.Command(
-		goBinary, "build", "-cover", "-covermode=atomic", "-ldflags", "-X main.version=test", "-o", binary, "./cmd/pfm",
-	)
-	command.Dir = pfmRoot
-	command.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOTELEMETRY=off")
-	if output, buildErr := command.CombinedOutput(); buildErr != nil {
-		_ = os.RemoveAll(root)
-		return fmt.Errorf("%w: %s", buildErr, strings.TrimSpace(string(output)))
+	flags := []string{"-ldflags", "-X main.version=test"}
+	// To feed make cover, run the e2e suite with GOCOVERDIR=$COVER_DIR/e2e.
+	if os.Getenv("GOCOVERDIR") != "" {
+		flags = append(flags, "-cover", "-covermode=atomic")
 	}
-	if err := buildMockEngine(goBinary, pfmRoot, root); err != nil {
+	if err := testjail.GoBuild(pfmRoot, binary, "./cmd/pfm", flags...); err != nil {
+		_ = os.RemoveAll(root)
+		return err
+	}
+	if err := buildMockEngine(pfmRoot, root); err != nil {
 		_ = os.RemoveAll(root)
 		return err
 	}
@@ -152,13 +166,10 @@ func prepareScriptBinary(goBinary string) error {
 }
 
 // buildMockEngine builds cmd/mock-engine into root and publishes its path.
-func buildMockEngine(goBinary, pfmRoot, root string) error {
+func buildMockEngine(pfmRoot, root string) error {
 	binary := filepath.Join(root, "mock-engine")
-	command := exec.Command(goBinary, "build", "-o", binary, "./cmd/mock-engine")
-	command.Dir = pfmRoot
-	command.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOTELEMETRY=off")
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("build mock-engine: %w: %s", err, strings.TrimSpace(string(output)))
+	if err := testjail.GoBuild(pfmRoot, binary, "./cmd/mock-engine"); err != nil {
+		return fmt.Errorf("build mock-engine: %w", err)
 	}
 	if err := os.Setenv(e2eMockEngineEnv, binary); err != nil {
 		return fmt.Errorf("set %s: %w", e2eMockEngineEnv, err)
@@ -167,30 +178,47 @@ func buildMockEngine(goBinary, pfmRoot, root string) error {
 }
 
 func prepareCoverageDirectory() error {
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return errors.New("locate coverage root")
+	coverDir := os.Getenv("GOCOVERDIR")
+	if coverDir == "" {
+		return nil
 	}
-	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
-	coverRoot := strings.TrimSpace(os.Getenv("COVER_DIR"))
-	if coverRoot == "" {
-		coverRoot = filepath.Join(repositoryRoot, "tmp", "cover")
-	} else if !filepath.IsAbs(coverRoot) {
-		coverRoot = filepath.Join(repositoryRoot, coverRoot)
-	}
-	coverDir := filepath.Join(coverRoot, "e2e")
 	if err := os.MkdirAll(coverDir, 0o700); err != nil {
 		return fmt.Errorf("create coverage directory: %w", err)
-	}
-	if err := os.Setenv("GOCOVERDIR", coverDir); err != nil {
-		return fmt.Errorf("set GOCOVERDIR: %w", err)
 	}
 	return nil
 }
 
+func TestScriptHarnessBuildSettings(t *testing.T) {
+	requireE2EFence(t)
+	if got := os.Getenv("GOCOVERDIR"); got != e2eCoverageAtStart {
+		t.Errorf("GOCOVERDIR after harness = %q, want original %q", got, e2eCoverageAtStart)
+	}
+	binary := os.Getenv(e2eScriptBinaryEnv)
+	info, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		t.Fatalf("read harness pfm build info: %v", err)
+	}
+	settings := make(map[string]string, len(info.Settings))
+	for _, setting := range info.Settings {
+		settings[setting.Key] = setting.Value
+	}
+	for key, want := range map[string]string{
+		"-trimpath":   "true",
+		"CGO_ENABLED": "0",
+	} {
+		if got := settings[key]; got != want {
+			t.Errorf("harness pfm build setting %s = %q, want %q", key, got, want)
+		}
+	}
+	output, err := exec.Command(binary, "version").CombinedOutput()
+	if err != nil || string(output) != "pfm test\n" {
+		t.Errorf("harness pfm version: output=%q err=%v, want pfm test", output, err)
+	}
+}
+
 func TestScripts(t *testing.T) {
 	requireE2EFence(t)
-	source := sourceRepo(t)
+	source := sharedSourceRepo(t)
 	testscript.Run(t, testscript.Params{
 		Dir:                 "testdata/scripts",
 		RequireExplicitExec: true,
@@ -315,6 +343,7 @@ func setupScriptJail(env *testscript.Env, source string) error {
 		"PFM_SOURCE_REPO":           scriptSource,
 		"PFM_HARVESTPY_OFFLINE":     "1",
 		"PFM_SKILL_SOURCES_OFFLINE": "1",
+		"PFM_THEMES_OFFLINE":        "1",
 		mockengine.EnvScenario:      scenario,
 		mockengine.EnvEngine:        "claude",
 		"PATH":                      path,

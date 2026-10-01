@@ -319,6 +319,9 @@ func (set hookSet) fire(
 	return answers, failures
 }
 
+// hookWaitDelay bounds output pipes held open after the hook exits or is killed.
+const hookWaitDelay = 250 * time.Millisecond
+
 func runHookCommand(
 	ctx context.Context,
 	command string,
@@ -336,11 +339,13 @@ func runHookCommand(
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = hookWaitDelay
 	err := cmd.Run()
 	answer := hookAnswer{stderr: strings.TrimSpace(stderr.String())}
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:
+	case errors.Is(err, exec.ErrWaitDelay):
 	case errors.As(err, &exitErr):
 		answer.exitCode = exitErr.ExitCode()
 	default:

@@ -19,16 +19,16 @@ Resolver metadata lookups (OpenAlex, Crossref and the rest) and web-search backe
 
 ## The central retrieval function
 
-`Harvester.Retrieve(ctx, target string, want Want, policy Policy) (Retrieved, error)` in a new `retrieve.go` (with `retrieve_test.go`, arch rule C13).
+`Harvester.retrieveWith(ctx, retrieveRequest) (Retrieved, error)` in `retrieve.go` (with `retrieve_test.go`, arch rule C13), unexported, with every package caller filling a `retrieveRequest`.
 
 - `Want` is `WantPage` (Markdown through the converter, with every check that exists today) or `WantFile` (the bytes, unparsed, streamed to the binary cache).
 - `Policy` names the rungs a caller may use and their budget. The default policies:
-  - `PolicyPage`: today's `fetchURLWithPolicy` ladder unchanged. `Retrieve` with `WantPage` calls it; the ladder's body does not move (`harvest.go` is at its ceiling).
+  - `PolicyPage`: today's `fetchURLWithPolicy` ladder unchanged. `retrieveWith` with `WantPage` calls it; the ladder's body does not move (`harvest.go` is at its ceiling).
   - `PolicyFile`: direct → Chrome impersonation → Wayback raw copy (`id_` form) → browser download (the browser rung captures a download or the response body of the navigation). Reader rungs never run: they return text, not bytes.
   - `PolicyInlineImage`: direct → Chrome impersonation, with the page as Referer. A page with 60 images must not start 60 browsers; the narrower policy is named in the code and in the page's image note when an image is skipped.
   - `PolicyGateway`: direct → Chrome → headless browser → headed browser, for the scholarly providers and the DOI mirror.
-- `FetchImage`, `fetchArchiveBytes`, `LocalizeImages`' client call, `providerFetch`/`providerDownload` and the DOI mirror all call `Retrieve`. The gateway's rung code becomes the browser step of `Retrieve`; `gatewayFetch` stops existing as a separate ladder.
-- The binary guard lives in `Retrieve`: with `WantPage`, a body is converted only when it is text or a document format the converter reads (routed by magic bytes, never by extension); any other body ends in a `file` result that names its detected type and points at `download_file`. A body is never stored as page content when it is not text.
+- `FetchImage`, `fetchArchiveBytes`, `LocalizeImages`' client call, `providerFetch`/`providerDownload` and the DOI mirror all call `retrieveWith`. The gateway's rung code becomes the browser step of `retrieveWith`; `gatewayFetch` stops existing as a separate ladder.
+- The binary guard lives in `retrieveWith`: with `WantPage`, a body is converted only when it is text or a document format the converter reads (routed by magic bytes, never by extension); any other body ends in a `file` result that names its detected type and points at `download_file`. A body is never stored as page content when it is not text.
 - File mode writes through `internal/atomicfile` (arch rule C6) into the binary cache, streams (never a whole body in memory), and caps at `harvest.maxDownloadBytes` (default 2 GiB); a body over the cap is a named failure with the size the server declared.
 - No new `http.Client` construction (C24), no new `time.Now` or `os.Getenv` door (C22), logs through `obs` (C23).
 
@@ -75,7 +75,7 @@ The tools, their inputs and their output fields are named by `naming-spec.md` (t
 
 - `archive`: the tool, `Harvester.Archive`, `archiveList`, the zip, tar, 7z and rar member readers (`archive.go`), their tests, `PublicArchiveListing`, and the texts that send a caller to it. A zip is a `download_file`.
 - `searchCache`: the tool, `Cache.Search`, `Harvester.SearchCache`, `SearchCachePublic`, `searchPrivateCache`, `publicSearchRegexp` (unless another caller is found; the build task enumerates the callers first), their tests.
-- `fetchImage`: the tool; `FetchImage` becomes the file path of `Retrieve` behind `download_file`.
+- `fetchImage`: the tool; `FetchImage` becomes the file path of `retrieveWith` behind `download_file`.
 - Every user-facing string that names an old tool is rewritten to the new names: the inventory lists about 20 in `harvest.go`, `net.go`, `public.go`, `known_id.go`, `harvest_diagnostics.go`, the corpus manifest's pinned errors, and `pfm/cmd/pfm/harvest_ask_command_test.go`.
 
 ## Callers, same pass

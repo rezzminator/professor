@@ -2,6 +2,7 @@ package reload
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,38 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 )
+
+type failedThenDisplayTmux struct {
+	fakeReloadTmux
+	displayErr error
+}
+
+func (tmux *failedThenDisplayTmux) Display(ctx context.Context, socket, pane, message string) error {
+	_ = tmux.fakeReloadTmux.Display(ctx, socket, pane, message)
+	return tmux.displayErr
+}
+
+func TestRunMarksFailedThenOnlyWhenPaneWasTold(t *testing.T) {
+	for _, displayErr := range []error{nil, errors.New("display failed")} {
+		dir := t.TempDir()
+		tmux := &failedThenDisplayTmux{displayErr: displayErr}
+		_, err := Run(context.Background(), Request{
+			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-then", Pane: "%7",
+			SessionID: "11111111-1111-4111-8111-111111111111", Account: 1,
+			AccountIDs: []int{1}, Then: "follow up",
+		}, Options{SIDDir: dir, Delay: -1, Poll: -1, ExitTries: 2, ThenTries: 1},
+			tmux, fakeReloadProc{}, io.Discard)
+		if err == nil || PaneTold(err) != (displayErr == nil) {
+			t.Fatalf("displayErr=%v runErr=%v paneTold=%t", displayErr, err, PaneTold(err))
+		}
+		if content, readErr := os.ReadFile(
+			filepath.Join(dir, "probe-then.then-failed"),
+		); readErr != nil ||
+			string(content) != "follow up\n" {
+			t.Fatalf("sentinel=%q error=%v", content, readErr)
+		}
+	}
+}
 
 func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 	tmux := &delayedThenTmux{marker: "›"}

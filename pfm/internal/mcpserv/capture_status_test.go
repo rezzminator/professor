@@ -44,6 +44,7 @@ func (captureCodeInjector) Inject(context.Context, inject.Request) (inject.Resul
 // other failed capture must answer something else, or a live chat reads as
 // absent during one transient tmux read.
 func TestChatCaptureAnswersADeadPaneDistinctlyFromNotFound(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		code   int
@@ -89,6 +90,7 @@ func TestChatCaptureAnswersADeadPaneDistinctlyFromNotFound(t *testing.T) {
 // chatOpenDetached and cliAction (actions.go) already return one for their
 // statusError outcomes, not just a JSON status field a caller can miss.
 func TestChatCaptureSurfacesCodeCaptureFailedAsAToolError(t *testing.T) {
+	t.Parallel()
 	service := newService("test", &backend{
 		injector: captureCodeInjector{
 			code:   inject.CodeCaptureFailed,
@@ -110,6 +112,7 @@ func TestChatCaptureSurfacesCodeCaptureFailedAsAToolError(t *testing.T) {
 // TestChatCaptureKeepsOKForASuccessfulCapture is the control arm: the split
 // above must not turn a healthy capture into a failure status.
 func TestChatCaptureKeepsOKForASuccessfulCapture(t *testing.T) {
+	t.Parallel()
 	service := newService("test", &backend{
 		injector:             captureCodeInjector{code: 0},
 		allowAmbientIdentity: true,

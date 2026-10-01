@@ -27,6 +27,8 @@ set -uo pipefail
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+# shellcheck source=mcp-stdio.sh
+. "$LANES_DIR/mcp-stdio.sh"
 lane_preamble
 
 CHAT="${E2_CHAT:-E2_MAIN}"
@@ -112,7 +114,7 @@ else
     window=""
     # The label converges on the window through name-sync's Codex half, not at
     # spawn — a bounded wait, and the failure names the window it did read.
-    wait_for 60 "tmux -S '$(_lane_tmux_dir)/$sock' list-windows -F '#{window_name}' 2>/dev/null | grep -qF '$CHAT'"
+    wait_for 60 "grep -qF '$CHAT' <<<\"\$(tmux -S '$(_lane_tmux_dir)/$sock' list-windows -F '#{window_name}' 2>/dev/null)\""
     window="$(tmux -S "$(_lane_tmux_dir)/$sock" list-windows -F '#{window_name}' 2>&1 | head -1)"
     case "$window" in
       *"$CHAT"*) pass "live row, kind live-codex, thread $(live_field "$CHAT" 2), account $(live_field "$CHAT" 9), socket $sock; tmux window '$window' carries the label" ;;
@@ -150,8 +152,8 @@ if requires E2.01-open-seat; then
   render_rc=$?
   [ "$render_rc" -eq 0 ] || bad="$bad pfm statusline exited $render_rc ($(one_line "$render"));"
   [ -n "$render" ] || bad="$bad pfm statusline rendered nothing;"
-  printf '%s' "$render" | grep -q '🍀' || bad="$bad the render carries no Codex segment (🍀 <model>): $(one_line "$render" | cut -c1-200);"
-  printf '%s' "$render" | grep -qE 'used:[0-9]+%|ChatGPT ' || bad="$bad the Codex segment names neither a usage window (…-used:N%) nor the plan (ChatGPT …): $(one_line "$render" | cut -c1-200);"
+  grep -q '🍀' <<<"$render" || bad="$bad the render carries no Codex segment (🍀 <model>): $(one_line "$render" | cut -c1-200);"
+  grep -qE 'used:[0-9]+%|ChatGPT ' <<<"$render" || bad="$bad the Codex segment names neither a usage window (…-used:N%) nor the plan (ChatGPT …): $(one_line "$render" | cut -c1-200);"
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "--refresh-gpt wrote $cache · render: $(one_line "$(printf '%s\n' "$render" | tail -1)" | cut -c1-160)"
   fi
@@ -186,7 +188,8 @@ reload_via_lane() {
       REPLY_WHY="the reload worker refused the composer: $(one_line "$(tail -n 3 "$worker_log")")"
       return 1
     fi
-    sleep 2
+    # POLL-STEP: pane respawn or a refusal in the reload worker log.
+    sleep 0.5
   done
   if [ "$(pane_pid)" = "$before" ]; then
     REPLY_WHY="the pane was never respawned in 300s (pane pid still $before); worker log: $(one_line "$(tail -n 3 "$worker_log" 2>/dev/null)")"
@@ -194,10 +197,22 @@ reload_via_lane() {
   fi
   wait_prompt "$(addr)" "$needle" 300
   case $? in
-    0) return 0 ;;
+    0)
+      if ! wait_for 30 "grep -qF 'respawned in place' <<<\"\$(tail -c '+$((log_start + 1))' '$worker_log')\""; then
+        REPLY_WHY="the reload worker did not finish after $needle: ${LANE_WAIT_WHY:-no wait reason recorded}; worker log: $(one_line "$(tail -n 3 "$worker_log" 2>/dev/null)")"
+        return 1
+      fi
+      return 0 ;;
     2) REPLY_WHY="$LANE_WAIT_WHY (waiting for $needle)"; return 1 ;;
     *) REPLY_WHY="the pane was respawned but no user steer $needle in 300s; waiter log: $(one_line "$(tail -1 "$SID_DIR/reload-$(live_field "$CHAT" 11).log" 2>/dev/null)")"; return 1 ;;
   esac
+}
+
+e2_reload_rows_ready() {
+  local visible hidden
+  visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $10 == "false" { c++ } END { print c + 0 }')"
+  hidden="$(pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v i="$id_before" 'NR > 1 && $2 == i { print $10; exit }')"
+  [ "$visible" -eq 1 ] && [ "$hidden" = true ]
 }
 
 beat E2.03-reload-matrix
@@ -230,8 +245,12 @@ if requires E2.01-open-seat; then
     fi
     if ! reload_via_lane RELOADED-CX-1 "$@"; then
       bad="$bad [$*]: $REPLY_WHY;"
-    elif [ "$(live_field "$CHAT" 2)" != "$id_before" ]; then
-      bad="$bad [$*] resumed a DIFFERENT thread ($(live_field "$CHAT" 2), was $id_before) — a flag reload must resume the same conversation;"
+    else
+      thread_wait=""
+      LANE_ANCHOR="sock:$sock" wait_for 10 "[ \"\$(live_field '$CHAT' 2)\" = '$id_before' ]" || thread_wait="$LANE_WAIT_WHY"
+      if [ -n "$thread_wait" ] || [ "$(live_field "$CHAT" 2)" != "$id_before" ]; then
+        bad="$bad [$*] resumed a DIFFERENT thread ($(live_field "$CHAT" 2), was $id_before) — a flag reload must resume the same conversation; ${thread_wait:+$thread_wait;}"
+      fi
     fi
     exercised="$exercised --then,"
   fi
@@ -241,6 +260,8 @@ if requires E2.01-open-seat; then
     # hidden) and a name-addressed wait would sit on a dead conversation.
     anchor_socket "$sock"
     before_pid="$(pane_pid)"
+    worker_start="$(wc -c <"$worker_log" 2>/dev/null | tr -d ' ')"
+    [ -n "$worker_start" ] || worker_start=0
     out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id_before" pfm chat reload --new --hide --then RELOADED-CX-2 2>&1)"
     rc=$?
     if [ "$rc" -ne 0 ] || ! grep -qF 'reload scheduled in place' <<<"$out"; then
@@ -252,24 +273,32 @@ if requires E2.01-open-seat; then
       else
         id_new="$(socket_field "$sock" 2)"
         new_name="$(socket_field "$sock" 5)"
-        name_out="$(pfm chat name "$id_new" "$CHAT" 2>&1)"
-        name_rc=$?
-        sleep 3
-        if [ "$name_rc" -ne 0 ] || [ "$(socket_field "$sock" 5)" != "$CHAT" ]; then
-          bad="$bad [--new --hide]: fresh thread $id_new on $sock (auto-named '$new_name') could not be renamed back to $CHAT (pfm chat name exited $name_rc: $(one_line "$name_out")); the row reads '$(socket_field "$sock" 5)';"
-        elif ! wait_prompt "$id_new" RELOADED-CX-2 300; then
-          bad="$bad [--new --hide]: fresh thread $id_new but no user steer RELOADED-CX-2: ${LANE_WAIT_WHY:-no wait reason recorded};"
+        if ! wait_prompt "$id_new" RELOADED-CX-2 300; then
+          bad="$bad [--new --hide]: fresh thread $id_new but no user steer RELOADED-CX-2: ${LANE_WAIT_WHY:-no wait reason recorded}; worker: $(one_line "$(tail -c "+$((worker_start + 1))" "$worker_log" 2>/dev/null | tail -n 5)"); sentinel: $(one_line "$(cat "$SID_DIR/${sock##*/}.then-failed" 2>/dev/null)");"
         else
-          visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $10 == "false" { c++ } END { print c + 0 }')"
-          # -a: the thread left behind is expected to read killed=true, which
-          # the default --tsv view would never show (it drops killed rows).
-          hidden="$(pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v i="$id_before" 'NR > 1 && $2 == i { print $10; exit }')"
-          if [ "$visible" -ne 1 ]; then
-            bad="$bad [--new --hide]: $visible unhidden rows carry the name $CHAT (want exactly 1: the fresh thread $id_new);"
-          elif [ "$hidden" != true ]; then
-            bad="$bad [--new --hide]: the thread left behind ($id_before) reads killed='${hidden:-<no row>}' — --hide must hide it;"
+          # Naming through the pane can collide with the worker's --then keys.
+          name_out="$(pfm chat name "$id_new" "$CHAT" 2>&1)"
+          name_rc=$?
+          name_wait=""
+          if [ "$name_rc" -eq 0 ]; then
+            LANE_ANCHOR="sock:$sock" wait_for 10 "[ \"\$(socket_field '$sock' 5)\" = '$CHAT' ]" || name_wait="$LANE_WAIT_WHY"
           fi
-          exercised="$exercised --new --hide (thread $id_before → $id_new on one socket),"
+          if [ "$name_rc" -ne 0 ] || [ -n "$name_wait" ] || [ "$(socket_field "$sock" 5)" != "$CHAT" ]; then
+            bad="$bad [--new --hide]: fresh thread $id_new on $sock (auto-named '$new_name') could not be renamed back to $CHAT (pfm chat name exited $name_rc: $(one_line "$name_out")); the row reads '$(socket_field "$sock" 5)'; ${name_wait:+$name_wait;}"
+          else
+            rows_wait=""
+            LANE_ANCHOR="sock:$sock" wait_for 10 "e2_reload_rows_ready" || rows_wait="$LANE_WAIT_WHY"
+            visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $10 == "false" { c++ } END { print c + 0 }')"
+            # -a: the thread left behind is expected to read killed=true, which
+            # the default --tsv view would never show (it drops killed rows).
+            hidden="$(pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v i="$id_before" 'NR > 1 && $2 == i { print $10; exit }')"
+            if [ "$visible" -ne 1 ] || { [ -n "$rows_wait" ] && [ "$hidden" = true ]; }; then
+              bad="$bad [--new --hide]: $visible unhidden rows carry the name $CHAT (want exactly 1: the fresh thread $id_new); ${rows_wait:+$rows_wait;}"
+            elif [ "$hidden" != true ] || [ -n "$rows_wait" ]; then
+              bad="$bad [--new --hide]: the thread left behind ($id_before) reads killed='${hidden:-<no row>}' — --hide must hide it; ${rows_wait:+$rows_wait;}"
+            fi
+            exercised="$exercised --new --hide (thread $id_before → $id_new on one socket),"
+          fi
         fi
       fi
     fi
@@ -282,7 +311,7 @@ if requires E2.01-open-seat; then
     rc=$?
     if [ "$rc" -ne 0 ]; then
       bad="$bad [--sock]: pfm chat reload --sock $sock exited $rc: $(one_line "$out");"
-    elif ! printf '%s' "$out" | grep -q 'reload scheduled in place'; then
+    elif ! grep -q 'reload scheduled in place' <<<"$out"; then
       bad="$bad [--sock]: exit 0 but the scheduler did not report 'reload scheduled in place': $(one_line "$out");"
     elif ! wait_for 300 "[ -n \"\$(pane_pid)\" ] && [ \"\$(pane_pid)\" != '$before_pid' ]"; then
       bad="$bad [--sock]: scheduled, but the pane was never respawned in 300s (pane pid still $before_pid); ${LANE_WAIT_WHY:-no wait reason recorded};"
@@ -293,14 +322,16 @@ if requires E2.01-open-seat; then
   fi
   # The worker's own record (cmd/pfm/chat_reload_command.go: reload-<socket>.log
   # in the SID dir): every reload above appends to it.
+  log_wait=""
+  wait_for 30 "grep -qE 'respawned in place|rebooted FRESH' <<<\"\$(tail -c '+$((log_before + 1))' '$worker_log')\"" || log_wait="$LANE_WAIT_WHY"
   log_after="$(wc -c <"$worker_log" 2>/dev/null | tr -d ' ')"
   [ -n "$log_after" ] || log_after=0
   if [ ! -f "$worker_log" ]; then
-    bad="$bad no reload worker log at $worker_log — the worker records every reload there;"
+    bad="$bad no reload worker log at $worker_log — the worker records every reload there; ${log_wait:+$log_wait;}"
   elif [ "$log_after" -le "$log_before" ]; then
-    bad="$bad the reload worker log $worker_log did not grow ($log_before → $log_after bytes) across the reloads;"
-  elif ! tail -c "+$((log_before + 1))" "$worker_log" | grep -qE 'respawned in place|rebooted FRESH'; then
-    bad="$bad the worker log grew but its new slice reports neither 'respawned in place' nor 'rebooted FRESH': $(one_line "$(tail -c "+$((log_before + 1))" "$worker_log" | tail -3)");"
+    bad="$bad the reload worker log $worker_log did not grow ($log_before → $log_after bytes) across the reloads; ${log_wait:+$log_wait;}"
+  elif [ -n "$log_wait" ] || ! grep -qE 'respawned in place|rebooted FRESH' <<<"$(tail -c "+$((log_before + 1))" "$worker_log")"; then
+    bad="$bad the worker log grew but its new slice reports neither 'respawned in place' nor 'rebooted FRESH': $(one_line "$(tail -c "+$((log_before + 1))" "$worker_log" | tail -3)"); ${log_wait:+$log_wait;}"
   fi
   # Named, never silently omitted: what this run cannot or does not exercise.
   if [ "$CODEX_HOMES" -lt 2 ]; then
@@ -330,11 +361,11 @@ if requires E2.01-open-seat; then
     rc=$?
     dir="$CODEX_HOME/recovered-$id"
     [ "$rc" -eq 0 ] || bad="$bad pfm chat recover <thread-id> exited $rc ($(one_line "$out"));"
-    summary="$(printf '%s\n' "$out" | grep -E '^messages=[0-9]+ carried=[0-9]+ malformed=[0-9]+$' | head -1)"
+    summary="$(grep -E '^messages=[0-9]+ carried=[0-9]+ malformed=[0-9]+$' <<<"$out" | head -1)"
     [ -n "$summary" ] || bad="$bad no 'messages=N carried=N malformed=N' summary line: $(one_line "$out");"
     messages="$(printf '%s' "$summary" | sed -n 's/^messages=\([0-9]*\).*/\1/p')"
     [ "${messages:-0}" -ge 1 ] || bad="$bad recover found ${messages:-0} messages in a rollout the chat has spoken in;"
-    printf '%s' "$out" | grep -qF "recovered thread $id" || bad="$bad output does not name 'recovered thread $id': $(one_line "$out");"
+    grep -qF "recovered thread $id" <<<"$out" || bad="$bad output does not name 'recovered thread $id': $(one_line "$out");"
     for f in brief.md compaction-memory.md transcript.md; do
       [ -s "$dir/$f" ] || bad="$bad $dir/$f absent or empty;"
     done
@@ -343,13 +374,13 @@ if requires E2.01-open-seat; then
     out_path="$(pfm chat recover "$rollout" 2>&1)"
     rc_path=$?
     [ "$rc_path" -eq 0 ] || bad="$bad pfm chat recover <rollout-path> exited $rc_path ($(one_line "$out_path"));"
-    printf '%s' "$out_path" | grep -qF "recovered thread $id" || bad="$bad the rollout-path form did not recover thread $id: $(one_line "$out_path");"
+    grep -qF "recovered thread $id" <<<"$out_path" || bad="$bad the rollout-path form did not recover thread $id: $(one_line "$out_path");"
     expect-log 'no rollout found'
     missing="$(pfm chat recover lane-no-such-thread 2>&1)"
     missing_rc=$?
     if [ "$missing_rc" -eq 0 ]; then
       bad="$bad recover on a thread that does not exist exited 0 ($(one_line "$missing"));"
-    elif ! printf '%s' "$missing" | grep -q 'no rollout found'; then
+    elif ! grep -q 'no rollout found' <<<"$missing"; then
       bad="$bad recover on a missing thread exited $missing_rc but did not say 'no rollout found': $(one_line "$missing");"
     fi
     rm -rf "$dir" 2>/dev/null
@@ -413,9 +444,9 @@ if requires E2.01-open-seat; then
   else
     fence="$(sed -n '/^# BEGIN pfm mcp_servers — installer-owned$/,/^# END pfm mcp_servers — installer-owned$/p' "$toml")"
     [ -n "$fence" ] || bad="$bad $toml carries no '# BEGIN/END pfm mcp_servers — installer-owned' fence;"
-    printf '%s' "$fence" | grep -qF '[mcp_servers.professor]' || bad="$bad the fence has no [mcp_servers.professor];"
-    printf '%s' "$fence" | grep -qF "command = \"$bin\"" || bad="$bad the fence does not point professor's command at $bin: $(one_line "$fence");"
-    printf '%s' "$fence" | grep -qF 'args = ["mcp", "serve", "--stdio"]' || bad="$bad the fence does not wire professor's args to [\"mcp\", \"serve\", \"--stdio\"]: $(one_line "$fence");"
+    grep -qF '[mcp_servers.professor]' <<<"$fence" || bad="$bad the fence has no [mcp_servers.professor];"
+    grep -qF "command = \"$bin\"" <<<"$fence" || bad="$bad the fence does not point professor's command at $bin: $(one_line "$fence");"
+    grep -qF 'args = ["mcp", "serve", "--stdio"]' <<<"$fence" || bad="$bad the fence does not wire professor's args to [\"mcp\", \"serve\", \"--stdio\"]: $(one_line "$fence");"
   fi
   # The served surface: three JSON-RPC frames on stdin to the stdio command
   # itself (initialize, notifications/initialized, tools/list) — the same
@@ -423,21 +454,23 @@ if requires E2.01-open-seat; then
   init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"lane-e2","version":"1"}}}'
   initd='{"jsonrpc":"2.0","method":"notifications/initialized"}'
   list='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-  # stdin is HELD OPEN after the frames: on EOF the server ends at once and the
-  # tools/list reply still in flight is lost (check-map.sh does the same).
-  out="$( { printf '%s\n%s\n%s\n' "$init" "$initd" "$list"; sleep 5; } | timeout 15 "$bin" mcp serve --stdio 2>/tmp/e2-mcp-stdio.err)"
+  # stdin stays open until the id-2 tools/list reply (check-map.sh does the same).
+  mcp_stdio_exchange 2 15 "$(printf '%s\n%s\n%s\n' "$init" "$initd" "$list")" "$bin" mcp serve --stdio 2>/tmp/e2-mcp-stdio.err >/tmp/e2-mcp-stdio.out
+  stdio_rc=$?
+  out="$(cat /tmp/e2-mcp-stdio.out)"
   tools=""
+  [ "$stdio_rc" -eq 0 ] || bad="$bad pfm mcp serve --stdio did not answer id 2: ${MCP_STDIO_WHY:-exit $stdio_rc};"
   if [ -z "$out" ]; then
     bad="$bad pfm mcp serve --stdio produced no output on the three-frame handshake: $(one_line "$(cat /tmp/e2-mcp-stdio.err 2>/dev/null)");"
-  elif ! printf '%s' "$out" | grep -q '"serverInfo"'; then
+  elif ! grep -q '"serverInfo"' <<<"$out"; then
     bad="$bad the initialize response over stdio carried no serverInfo: $(one_line "$out" | cut -c1-200);"
   else
-    tools="$(printf '%s' "$out" | grep '"id":2' | jq -r '.result.tools[]?.name | select(startswith("chat_") or . == "servicedesk")' 2>/dev/null | sort)"
+    tools="$(grep '"id":2' <<<"$out" | jq -r '.result.tools[]?.name | select(startswith("chat_") or . == "servicedesk")' 2>/dev/null | sort)"
     if [ -z "$tools" ]; then
       bad="$bad tools/list over stdio returned no tool names: $(one_line "$out" | cut -c1-200);"
     else
       for want in chat_ls chat_status chat_last chat_read chat_inject chat_whoami chat_new chat_kill chat_unkill chat_name; do
-        printf '%s\n' "$tools" | grep -qx "$want" || bad="$bad tools/list lacks $want;"
+        grep -qx "$want" <<<"$tools" || bad="$bad tools/list lacks $want;"
       done
       # Compare the chat server roster, leaving the separate harvester tools
       # out of this chat-server assertion.
@@ -450,7 +483,7 @@ if requires E2.01-open-seat; then
     fi
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "config.toml fence wires professor's stdio command at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) tools ($(printf '%s' "$tools" | grep -c '^chat_') chat_*), matching /status"
+    pass "config.toml fence wires professor's stdio command at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) tools ($(grep -c '^chat_' <<<"$tools") chat_*), matching /status"
   fi
 fi
 
@@ -469,7 +502,7 @@ if requires E2.01-open-seat; then
   ask_rc=$?
   if [ "$ask_rc" -ne 0 ]; then
     bad="$bad pfm chat ask exited $ask_rc: $(one_line "$ask");"
-  elif ! printf '%s' "$ask" | grep -qF ASK-CX-OK; then
+  elif ! grep -qF ASK-CX-OK <<<"$ask"; then
     bad="$bad ask returned without the fresh answer: $(one_line "$ask");"
   fi
   watch="$(timeout 240 pfm chat watch "$id" --idle-after 10 --once 2>&1)"
@@ -500,21 +533,27 @@ if requires E2.01-open-seat; then
   for alias in self me; do
     out="$(env -u TMUX -u TMUX_PANE CODEX_THREAD_ID="$id" pfm chat kill "$alias" 2>&1)"
     rc=$?
-    sleep 2
+    kill_wait=""
+    if [ "$rc" -eq 0 ]; then
+      LANE_ANCHOR= wait_for 10 "[ \"\$(row_field '$CHAT' 10)\" = true ]" || kill_wait="$LANE_WAIT_WHY"
+    fi
     if [ "$rc" -ne 0 ]; then
       bad="$bad kill $alias exited $rc: $(one_line "$out");"
-    elif ! printf '%s' "$out" | grep -qF "killed $id"; then
+    elif ! grep -qF "killed $id" <<<"$out"; then
       bad="$bad kill $alias exited 0 but did not report 'killed $id': $(one_line "$out");"
-    elif [ "$(row_field "$CHAT" 10)" != true ]; then
-      bad="$bad after kill $alias the row's killed column is '$(row_field "$CHAT" 10)', not true;"
+    elif [ -n "$kill_wait" ] || [ "$(row_field "$CHAT" 10)" != true ]; then
+      bad="$bad after kill $alias the row's killed column is '$(row_field "$CHAT" 10)', not true; ${kill_wait:+$kill_wait;}"
     fi
     unkill="$(pfm chat unkill "$id" 2>&1)"
     unkill_rc=$?
-    sleep 2
+    unkill_wait=""
+    if [ "$unkill_rc" -eq 0 ]; then
+      LANE_ANCHOR= wait_for 10 "[ \"\$(row_field '$CHAT' 10)\" = false ]" || unkill_wait="$LANE_WAIT_WHY"
+    fi
     if [ "$unkill_rc" -ne 0 ]; then
       bad="$bad unkill $id exited $unkill_rc: $(one_line "$unkill");"
-    elif [ "$(row_field "$CHAT" 10)" != false ]; then
-      bad="$bad after unkill the row's killed column is '$(row_field "$CHAT" 10)', not false;"
+    elif [ -n "$unkill_wait" ] || [ "$(row_field "$CHAT" 10)" != false ]; then
+      bad="$bad after unkill the row's killed column is '$(row_field "$CHAT" 10)', not false; ${unkill_wait:+$unkill_wait;}"
     fi
   done
   # A thread id no live seat carries must be refused by name, never a kill.
@@ -555,7 +594,7 @@ if requires E2.01-open-seat; then
   version_rc=$?
   if [ "$version_rc" -ne 0 ]; then
     bad="$bad codex-launch --version exited $version_rc: $(one_line "$version");"
-  elif ! printf '%s' "$version" | grep -qE '[0-9]+\.[0-9]+'; then
+  elif ! grep -qE '[0-9]+\.[0-9]+' <<<"$version"; then
     bad="$bad codex-launch codex --version exited 0 but printed no version: $(one_line "$version");"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
@@ -572,25 +611,25 @@ if requires E2.01-open-seat; then
   bad=""
   report="$(pfm doctor --skip-harvest 2>&1)"
   doctor_rc=$?
-  bindings="$(printf '%s\n' "$report" | grep -E '^doctor: codex_pane_bindings total=' | tail -1)"
-  panes="$(printf '%s\n' "$report" | grep -E '^doctor: codex_panes live=' | tail -1)"
-  warnings="$(printf '%s\n' "$report" | grep -E '^doctor: warning codex_pane' || true)"
+  bindings="$(grep -E '^doctor: codex_pane_bindings total=' <<<"$report" | tail -1)"
+  panes="$(grep -E '^doctor: codex_panes live=' <<<"$report" | tail -1)"
+  warnings="$(grep -E '^doctor: warning codex_pane' <<<"$report" || true)"
   if [ "$doctor_rc" -eq 3 ]; then
-    bad="$bad pfm doctor exited 3 (failures) — the codex_pane rows are read off a machine doctor calls unhealthy: $(one_line "$(printf '%s\n' "$report" | grep -iE 'unhealthy|failure' | head -2)");"
+    bad="$bad pfm doctor exited 3 (failures) — the codex_pane rows are read off a machine doctor calls unhealthy: $(one_line "$(grep -iE 'unhealthy|failure' <<<"$report" | head -2)");"
   fi
   if [ -z "$bindings" ]; then
     bad="$bad doctor printed no 'codex_pane_bindings total=…' row (unreadable or absent: $(one_line "$(printf '%s\n' "$report" | grep -F codex_pane_bindings | head -1)"));"
   else
-    printf '%s' "$bindings" | grep -q ' contested=0 ' || bad="$bad contested bindings: $bindings;"
-    printf '%s' "$bindings" | grep -q ' retired=0 ' || bad="$bad retired-thread bindings: $bindings;"
-    printf '%s' "$bindings" | grep -q ' undecodable=0$' || bad="$bad undecodable bindings: $bindings;"
+    grep -q ' contested=0 ' <<<"$bindings" || bad="$bad contested bindings: $bindings;"
+    grep -q ' retired=0 ' <<<"$bindings" || bad="$bad retired-thread bindings: $bindings;"
+    grep -q ' undecodable=0$' <<<"$bindings" || bad="$bad undecodable bindings: $bindings;"
   fi
   if [ -z "$panes" ]; then
     bad="$bad doctor printed no 'codex_panes live=N unfollowable=N' row ($(one_line "$(printf '%s\n' "$report" | grep -F codex_panes | head -1)"));"
   else
     live_n="$(printf '%s' "$panes" | sed -n 's/.*live=\([0-9]*\).*/\1/p')"
     [ "${live_n:-0}" -ge 1 ] || bad="$bad doctor sees $live_n live Codex panes while $CHAT is live: $panes;"
-    printf '%s' "$panes" | grep -q ' unfollowable=0$' || bad="$bad unfollowable Codex panes: $panes;"
+    grep -q ' unfollowable=0$' <<<"$panes" || bad="$bad unfollowable Codex panes: $panes;"
   fi
   [ -z "$warnings" ] || bad="$bad codex_pane warnings: $(one_line "$warnings");"
   if [ -n "$bad" ]; then fail "$bad"; else

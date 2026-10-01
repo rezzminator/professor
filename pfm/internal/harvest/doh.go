@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -60,12 +61,36 @@ var dohBootstrapIPs = []string{"1.1.1.1:443", "1.0.0.1:443", "[2606:4700:4700::1
 // rather than resolving the name a second time through the system resolver.
 var sharedDOHResolver = sync.OnceValue(newDOHResolver)
 
+type publicResolverFunc func(context.Context, string) ([]net.IP, error)
+
+var testPublicResolver atomic.Pointer[publicResolverFunc]
+
 // ResolvePublicHost resolves host through the shared DNS-over-HTTPS resolver.
 // It is exported for the browser adapter, which must hand Chrome an explicit
 // address: Chrome performs its own resolution with no pinning hop, so without
 // this it would re-resolve through the very resolver DoH exists to bypass.
 func ResolvePublicHost(ctx context.Context, host string) ([]net.IP, error) {
+	if resolve := testPublicResolver.Load(); resolve != nil {
+		return (*resolve)(ctx, host)
+	}
 	return sharedDOHResolver().LookupIP(ctx, host)
+}
+
+// StubPublicResolverForTest swaps the public resolver for a test and returns
+// a function that restores the prior resolver. Nil restores the DoH path.
+func StubPublicResolverForTest(resolve func(context.Context, string) ([]net.IP, error)) (restore func()) {
+	var next *publicResolverFunc
+	if resolve != nil {
+		resolver := publicResolverFunc(resolve)
+		next = &resolver
+	}
+	previous := testPublicResolver.Swap(next)
+	return func() { testPublicResolver.Store(previous) }
+}
+
+// RefusePublicLookupsForTest answers a public lookup with the offline resolver's error.
+func RefusePublicLookupsForTest(_ context.Context, host string) ([]net.IP, error) {
+	return nil, &net.DNSError{Err: "public lookup refused in tests", Name: host}
 }
 
 // BrowserHostResolverRule returns the Chrome --host-resolver-rules value that
@@ -263,9 +288,9 @@ func (r *dohResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	return fallbackIPs, nil
 }
 
-// specialUseTLDs are the RFC 6761/6762 reserved suffixes plus the reserved
-// second-level example names. None of them resolves in the public DNS.
-var specialUseTLDs = []string{".test", ".invalid", ".localhost", ".local", ".example", ".internal", ".home.arpa"}
+// specialUseTLDs includes RFC 6761/6762 reserved suffixes and the RFC 6761
+// §6.5 example domains. None of them resolves in the public DNS.
+var specialUseTLDs = []string{".test", ".invalid", ".localhost", ".local", ".example", ".example.com", ".example.org", ".example.net", ".internal", ".home.arpa"}
 
 func isSpecialUseName(host string) bool {
 	for _, suffix := range specialUseTLDs {

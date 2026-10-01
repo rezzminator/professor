@@ -3,18 +3,77 @@ package mcpserv
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
+
+func shortenDaemonProbeTimeout(t *testing.T) {
+	t.Helper()
+	previous := DaemonProbeTimeoutOverride
+	DaemonProbeTimeoutOverride = 100 * time.Millisecond
+	t.Cleanup(func() { DaemonProbeTimeoutOverride = previous })
+}
+
+func TestProbeDaemonSilentListenerIsUnresponsive(t *testing.T) {
+	shortenDaemonProbeTimeout(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := listener.Close(); closeErr != nil {
+			t.Errorf("close silent listener: %v", closeErr)
+		}
+	})
+	address := listener.Addr().String()
+	started := time.Now()
+	_, err = ProbeDaemon(address)
+	if !errors.Is(err, ErrDaemonUnresponsive) || errors.Is(err, ErrDaemonAbsent) {
+		t.Fatalf("silent-listener probe error = %v, want unresponsive outside absent chain", err)
+	}
+	if !strings.Contains(err.Error(), address) || !strings.Contains(err.Error(), "100ms") {
+		t.Fatalf("silent-listener probe error = %v, want address and shortened deadline", err)
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("silent-listener probe error = %v, want wrapped transport timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("silent-listener probe took %s, want shortened deadline", elapsed)
+	}
+}
+
+func TestProbeDaemonProductionDeadlineAllowsSlowHealthyAnswer(t *testing.T) {
+	if daemonProbeTimeout != 2*time.Second {
+		t.Fatalf("production probe deadline = %s, want 2s", daemonProbeTimeout)
+	}
+	previous := DaemonProbeTimeoutOverride
+	DaemonProbeTimeoutOverride = 0
+	t.Cleanup(func() { DaemonProbeTimeoutOverride = previous })
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+		if err := json.NewEncoder(writer).Encode(DaemonStatus{PID: 4242}); err != nil {
+			t.Errorf("encode delayed status: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+	status, err := ProbeDaemon(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil || status.PID != 4242 {
+		t.Fatalf("slow healthy probe = %+v, %v; want the status document", status, err)
+	}
+}
 
 // TestProbeDaemonWritesAnHTTPOutRecord pins the http.out door in the daemon
 // probe: its client is wrapped, so the loopback status read leaves one
 // comp=http.out record with the probe's shape (spec § Middleware).
 func TestProbeDaemonWritesAnHTTPOutRecord(t *testing.T) {
+	// obs.Test replaces the process logger, which other tests also use.
 	_, recorder := obs.Test(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/status" {
@@ -49,6 +108,7 @@ func TestProbeDaemonWritesAnHTTPOutRecord(t *testing.T) {
 }
 
 func TestProbeDaemonPreservesOpaqueChatRuntimeIdentity(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(NewDaemonHandler(DaemonOptions{
 		Version: "test", Chat: http.NotFoundHandler(), ChatRuntimeIdentity: "sha256:opaque",
 	}))
@@ -63,6 +123,7 @@ func TestProbeDaemonPreservesOpaqueChatRuntimeIdentity(t *testing.T) {
 }
 
 func TestDaemonStatusOmitsChatRuntimeIdentityWithoutChat(t *testing.T) {
+	t.Parallel()
 	handler := NewDaemonHandler(DaemonOptions{ChatRuntimeIdentity: "sha256:must-not-leak"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
@@ -76,6 +137,7 @@ func TestDaemonStatusOmitsChatRuntimeIdentityWithoutChat(t *testing.T) {
 // port is the right next move — and the log says the request failed rather
 // than that the daemon answered nothing.
 func TestProbeDaemonUnreachableIsAbsentAndAWarnRecord(t *testing.T) {
+	// obs.Test replaces the process logger, which other tests also use.
 	_, recorder := obs.Test(t)
 	server := httptest.NewServer(http.NotFoundHandler())
 	address := strings.TrimPrefix(server.URL, "http://")
@@ -86,6 +148,12 @@ func TestProbeDaemonUnreachableIsAbsentAndAWarnRecord(t *testing.T) {
 	}
 	if !errors.Is(err, ErrDaemonAbsent) {
 		t.Fatalf("closed-port probe error = %v, want it to be ErrDaemonAbsent", err)
+	}
+	if errors.Is(err, ErrDaemonUnresponsive) {
+		t.Fatalf("closed-port probe error = %v, must not be unresponsive", err)
+	}
+	if !strings.Contains(err.Error(), "no service answered at "+address+":") {
+		t.Fatalf("closed-port probe error = %v, want original absent message", err)
 	}
 	if !strings.Contains(err.Error(), address) {
 		t.Fatalf("closed-port probe error = %v, want the dial failure's own cause", err)
@@ -105,6 +173,7 @@ func TestProbeDaemonUnreachableIsAbsentAndAWarnRecord(t *testing.T) {
 // `pfm mcp serve` on to bind a port that is already taken. Each way the
 // answer can fail to be pfm's status document is named separately.
 func TestProbeDaemonNamesAPortHeldBySomethingElse(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		handler http.HandlerFunc

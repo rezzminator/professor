@@ -52,6 +52,7 @@ func (fakeUnsignedInjector) Inject(context.Context, inject.Request) (inject.Resu
 // here. The MCP surface must replace that remedy with one the caller can
 // actually act on, and must drop the impossible instructions entirely.
 func TestMCPUnsignedRefusalNamesAnMCPReachableRemedy(t *testing.T) {
+	t.Parallel()
 	service := newService("test", &backend{
 		injector:             fakeUnsignedInjector{},
 		allowAmbientIdentity: false,
@@ -85,6 +86,7 @@ func TestMCPUnsignedRefusalNamesAnMCPReachableRemedy(t *testing.T) {
 // disabled): the config-fact wording the daemon used to return told the
 // reader nothing they could do about it.
 func TestMCPSelfRefusalNamesAnMCPReachableRemedy(t *testing.T) {
+	t.Parallel()
 	service := newService("test", &backend{allowAmbientIdentity: false})
 	_, output, err := service.chatWhoami(context.Background(), nil, WhoamiInput{})
 	if err != nil {

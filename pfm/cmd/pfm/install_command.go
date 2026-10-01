@@ -395,6 +395,7 @@ func newInstallerOptions(
 		Stdout:              stdout,
 		ProvisionHarvest:    !skipHarvest,
 		SkillSourcesOffline: paths.SkillSourcesOffline(),
+		ThemesOffline:       paths.ThemesOffline(),
 		HarvestProvisioner:  installHarvestProvisioner(),
 	}
 	if len(runtimes) != 0 {

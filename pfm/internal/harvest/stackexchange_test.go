@@ -163,6 +163,7 @@ var (
 // both counts reconcile, the artifact is complete, and a second harvest is
 // identical.
 func TestStackExchangeQuestionLoadsEveryAnswerAndComment(t *testing.T) {
+	t.Parallel()
 	site := seQuestionSite(t)
 	h, pacing := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), seQuestionURL, FetchOptions{Refresh: true})
@@ -281,6 +282,7 @@ func TestStackExchangeQuestionLoadsEveryAnswerAndComment(t *testing.T) {
 // comments the API did not list, another question's answers, an answer
 // stating no comment count — flags the artifact partial and is named.
 func TestStackExchangeGapsFlagThePartial(t *testing.T) {
+	t.Parallel()
 	page2 := seQuestionAPI + "/answers#2"
 	for _, tc := range []struct {
 		name   string
@@ -376,6 +378,7 @@ func TestStackExchangeGapsFlagThePartial(t *testing.T) {
 // delays the next request by it; one asking for longer than a fetch waits
 // ends the following, named, the next page never requested.
 func TestStackExchangeHonoursTheAPIBackoff(t *testing.T) {
+	t.Parallel()
 	withBackoff := func(site *seSite, seconds int) {
 		site.api[seQuestionAPI+"/answers#1"] = strings.Replace(site.api[seQuestionAPI+"/answers#1"],
 			`"has_more": true,`, `"has_more": true, "backoff": `+strconv.Itoa(seconds)+`,`, 1)
@@ -412,6 +415,7 @@ func TestStackExchangeHonoursTheAPIBackoff(t *testing.T) {
 // of the network is read with that site as the API's site; any other address
 // on the network's hosts, and every other host, is not a question.
 func TestStackExchangeClaimsQuestionsOnEveryNetworkSite(t *testing.T) {
+	t.Parallel()
 	for raw, want := range map[string]string{
 		"https://superuser.com/questions/209437/how-do-i-scroll-in-tmux": "superuser.com#209437",
 		"https://math.stackexchange.com/questions/1/x":                   "math.stackexchange.com#1",
@@ -462,6 +466,7 @@ func TestStackExchangeClaimsQuestionsOnEveryNetworkSite(t *testing.T) {
 // requested. With the browser rung off, the wall is a failed fetch, never
 // stored.
 func TestStackExchangeRecordNotLoadedFallsToTheBrowser(t *testing.T) {
+	t.Parallel()
 	rendered := "RENDERED QUESTION " + strings.Repeat("an answer the browser rendered ", 30)
 	for _, browser := range []bool{true, false} {
 		site := seQuestionSite(t)
@@ -513,6 +518,7 @@ func TestStackExchangeRecordNotLoadedFallsToTheBrowser(t *testing.T) {
 // address's daily quota spent (quota_remaining 0) ends the following, named,
 // before another request is sent — the answer it came with still kept.
 func TestStackExchangeSpentQuotaEndsTheFollowing(t *testing.T) {
+	t.Parallel()
 	site := seQuestionSite(t)
 	site.api[seQuestionAPI+"/answers#1"] = strings.Replace(site.api[seQuestionAPI+"/answers#1"],
 		`"quota_remaining": 293`, `"quota_remaining": 0`, 1)

@@ -94,6 +94,7 @@ var lobstersCommentHeaderRe = regexp.MustCompile(
 // named apart from the stated count, which reconciles — the artifact is
 // complete (no image partial), and a second harvest is identical.
 func TestLobstersStoryRendersCommentsWithoutAvatarsOrVoteLinks(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("testdata/lobsters/story.html")
 	if err != nil {
 		t.Fatalf("read the captured Lobsters fixture: %v", err)

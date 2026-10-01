@@ -13,6 +13,7 @@ import (
 // the loaded count exactly, so stated · loaded · the remainder reconcile —
 // never a "first 200" beside 199 loaded.
 func TestIMDbReviewsRepeatNamed(t *testing.T) {
+	t.Parallel()
 	// Eight cursor pages of two reviews each, built from the captured first
 	// page; the last page repeats the previous page's second review, and the
 	// list names a further page the bound does not read.

@@ -1,0 +1,7 @@
+# Gate wall budgets: 2026-09-30 medians of three eligible iso gate runs,
+# rounded up; ratchet a pinned budget down only.
+tolerance: 1.25
+gate:
+  all: 121
+  pfm: 106
+  templates: 15

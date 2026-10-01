@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -47,6 +48,8 @@ var startReloadWorker = func(argv []string, opts deps.StartOptions) error {
 	}
 	return process.Release()
 }
+
+var displayReloadWorkerFailure = reloadCommandTmux{}.Display
 
 func runChatReloadWithRuntime(
 	args []string,
@@ -125,12 +128,55 @@ func runChatReloadWorker(args []string, stdout, stderr io.Writer) int {
 	return runChatReloadWorkerWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
 }
 
+func announceReloadWorkerFailure(
+	args []string,
+	workerLog string,
+	display func(context.Context, string, string, string) error,
+	stderr io.Writer,
+) {
+	sock, pane := reloadSocketArgument(args), reloadPaneArgument(args)
+	if sock == "" || pane == "" {
+		fmt.Fprintln(stderr, "pfm chat reload: cannot announce worker failure: socket or pane missing")
+		return
+	}
+	socketPath, err := paths.SocketPath(sock)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: resolve worker failure pane: %v\n", err)
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(workerLog), "\n")
+	message := lines[len(lines)-1]
+	if err := display(context.Background(), socketPath, pane, message); err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: display worker failure on %s %s: %v\n", sock, pane, err)
+	}
+}
+
+func reloadWorkerConfigFailure(args []string, err error, stderr io.Writer) int {
+	line := fmt.Sprintf("pfm: config: %v", err)
+	fmt.Fprintln(stderr, line)
+	announceReloadWorkerFailure(normalizeReloadArgs(args), line, displayReloadWorkerFailure, stderr)
+	return 1
+}
+
 func runChatReloadWorkerWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 	env paths.Env,
-) int {
+) (code int) {
+	var workerLog bytes.Buffer
+	paneTold := false
+	workerStderr := io.MultiWriter(stderr, &workerLog)
+	stderr = workerStderr
+	defer func() {
+		if code == 0 || paneTold {
+			return
+		}
+		if workerLog.Len() == 0 {
+			fmt.Fprintf(workerStderr, "pfm chat reload: detached worker failed (exit %d)\n", code)
+		}
+		announceReloadWorkerFailure(args, workerLog.String(), displayReloadWorkerFailure, stderr)
+	}()
 	env = defaultEnv(env)
 	args = normalizeReloadArgs(args)
 	if err := validateReloadArgs(args); err != nil {
@@ -292,7 +338,8 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	if account == "" {
+	kept := account == ""
+	if kept {
 		account = strconv.Itoa(birthAccount)
 		fmt.Fprintf(stdout, "pfm chat reload: no account given — keeping the chat's current account %s\n", account)
 	}
@@ -333,7 +380,10 @@ func runChatReloadWorkerWithRuntime(
 			Engine:        engine,
 			SocketPath:    socketPath,
 			Pane:          pane,
-			PanePID:       paneState.PID,
+			New:           newSeat,
+			AccountGiven:  !kept,
+			CacheGiven:    cacheOverride != "",
+			LeftBehind:    leftBehind,
 			SessionID:     id,
 			Transcript:    transcript,
 			CWD:           cwd,
@@ -357,17 +407,14 @@ func runChatReloadWorkerWithRuntime(
 		stderr,
 	)
 	if err != nil {
+		paneTold = reload.PaneTold(err)
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
+	leftBehind = result.LeftBehind
 	if result.New {
 		if newSeat {
-			fmt.Fprintf(
-				stdout,
-				"pfm chat reload: rebooted FRESH as requested: %s %s\n",
-				filepath.Base(socketPath),
-				pane,
-			)
+			fmt.Fprintln(stdout, "pfm chat reload: rebooted FRESH as requested:", filepath.Base(socketPath), pane)
 		} else {
 			fmt.Fprintln(stdout, "pfm chat reload: no transcript yet — rebooted FRESH")
 		}
@@ -375,15 +422,20 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stdout, "pfm chat reload: respawned in place: %s %s\n", filepath.Base(socketPath), pane)
 	}
 	if newSeat && hide {
-		// Only now: the old chat has /exited and the reborn one owns the
-		// pane. A reload that failed returned above, so a live chat is never
-		// hidden by the command that failed to replace it.
+		// Hide the session Run says this pane left behind.
 		if leftBehind == "" {
 			fmt.Fprintln(
 				stdout,
 				"pfm chat reload: --hide — nothing to hide, the conversation left behind had no transcript yet",
 			)
 			return 0
+		}
+		if engine == pfmengine.Codex {
+			transcript, err = reload.SessionTranscript(resolved, runtime.Config, engine, leftBehind)
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm chat reload: find conversation to hide: %v\n", err)
+				return 1
+			}
 		}
 		hidden, err := hideReloadedConversation(context.Background(), runtime, engine, leftBehind, transcript, stderr)
 		if err != nil {
@@ -437,32 +489,6 @@ func flattenThenLine(text string) string {
 func positiveAccount(value string) (int, bool) {
 	account, err := strconv.Atoi(value)
 	return account, err == nil && account > 0
-}
-
-func reloadRequestedAccount(args []string) int {
-	for index := 0; index < len(args); index++ {
-		switch args[index] {
-		case reloadNewFlag, reloadHideFlag:
-			continue
-		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadCacheFlag, reloadModelFlag, reloadEffortFlag:
-			index++
-			continue
-		case reloadAccountFlag:
-			if index+1 < len(args) {
-				if account, valid := positiveAccount(args[index+1]); valid {
-					return account
-				}
-			}
-			index++
-			continue
-		}
-		// The bare positional stays accepted for callers already using it;
-		// only the documented spelling changed.
-		if account, valid := positiveAccount(args[index]); valid {
-			return account
-		}
-	}
-	return 0
 }
 
 func reloadDurationEnv(name string, fallbackMS int, env paths.Env) time.Duration {

@@ -17,6 +17,7 @@ import (
 // rows value so Crossref 400s and search_literature' Crossref widening is dead on every
 // host that configures an email — the exact hosts it was added to serve.
 func TestReviewFindCrossrefKeepsRowsSeparateFromContact(t *testing.T) {
+	t.Parallel()
 	var seen string
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen = r.URL.String()
@@ -42,6 +43,7 @@ func TestReviewFindCrossrefKeepsRowsSeparateFromContact(t *testing.T) {
 // resolution failure. Returning ("", nil) made it indistinguishable from "this
 // accession has no pdf-format link at all".
 func TestReviewPMCOAPDFURLUnrewritableHrefIsAnErrorNotAbsence(t *testing.T) {
+	t.Parallel()
 	payload := `<OA><records><record id="PMC7"><link format="pdf" href="gopher://elsewhere.invalid/x.pdf"/></record></records></OA>`
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "text/xml", payload), nil
@@ -80,6 +82,7 @@ func (ocrBrokenConverter) ConvertOCR(_ context.Context, _, _ string, _ []byte) (
 }
 
 func TestReviewOCRBackendFailureNeverRendersAsEmptyPDF(t *testing.T) {
+	t.Parallel()
 	pdfTransport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "application/pdf", "%PDF-1.7 scanned pages"), nil
 	})
@@ -110,6 +113,7 @@ func TestReviewOCRBackendFailureNeverRendersAsEmptyPDF(t *testing.T) {
 // The exhausted-DOI receipt lists the sources actually queried. Unpaywall is
 // gated on an operator email, so a keyless run naming it is a false claim.
 func TestReviewExhaustedDOIReceiptNamesOnlyQueriedSources(t *testing.T) {
+	t.Parallel()
 	missing := roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return response(nil, http.StatusNotFound, "application/json", `{}`), nil
 	})

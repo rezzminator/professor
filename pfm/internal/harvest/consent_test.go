@@ -10,6 +10,7 @@ import (
 // TestWithoutConsentMarkupDropsOnlyConsentContainers: every consent manager's
 // container goes, the page's own content and a lookalike name stay.
 func TestWithoutConsentMarkupDropsOnlyConsentContainers(t *testing.T) {
+	t.Parallel()
 	page := `<html><body><article class="trusted-content">KEEP-ARTICLE</article>` +
 		`<div id="onetrust-consent-sdk">VENDOR-ONETRUST</div><div class="qc-cmp2-container">VENDOR-TCF</div>` +
 		`<div id="sp_message_container_1"><iframe></iframe>VENDOR-SP</div></body></html>`
@@ -31,6 +32,7 @@ func TestWithoutConsentMarkupDropsOnlyConsentContainers(t *testing.T) {
 // TestIsChallengeStillSeesAWallBesideAConsentBanner: stripping consent
 // markup never hides a real wall on the same page.
 func TestIsChallengeStillSeesAWallBesideAConsentBanner(t *testing.T) {
+	t.Parallel()
 	page := `<html><body><div id="onetrust-consent-sdk">cookies</div>` +
 		`<div id="cf-wrapper">Checking your browser before accessing</div></body></html>`
 	if !isChallenge([]byte(page), http.StatusForbidden) {

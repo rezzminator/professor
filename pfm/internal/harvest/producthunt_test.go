@@ -103,6 +103,7 @@ func (site *productHuntSite) harvester(t *testing.T) *Harvester {
 // page's own count is named beside it; the artifact is complete, and a
 // second harvest is identical.
 func TestProductHuntReviewsLoadEveryReview(t *testing.T) {
+	t.Parallel()
 	site := newProductHuntSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), productHuntURL, FetchOptions{Refresh: true})
@@ -151,6 +152,7 @@ func TestProductHuntReviewsLoadEveryReview(t *testing.T) {
 // reviews than the bounded page count reads renders the newest pages and
 // names the rest, stated · loaded, in the partial marker.
 func TestProductHuntReviewsBeyondTheBoundAreNamed(t *testing.T) {
+	t.Parallel()
 	site := newProductHuntSite(t)
 	first := strings.Replace(site.answers[1], `"totalCount":5`, `"totalCount":90000`, 1)
 	for page := 1; page <= productHuntReviewPages+1; page++ {
@@ -179,6 +181,7 @@ func TestProductHuntReviewsBeyondTheBoundAreNamed(t *testing.T) {
 // reviews render and the rest are named against the list's total, never a
 // product with only those reviews.
 func TestProductHuntReviewsNotLoadedNameTheGap(t *testing.T) {
+	t.Parallel()
 	for name, mutate := range map[string]func(site *productHuntSite){
 		"refused": func(site *productHuntSite) { site.status[1] = http.StatusForbidden },
 		"graphql error": func(site *productHuntSite) {
@@ -211,6 +214,7 @@ func TestProductHuntReviewsNotLoadedNameTheGap(t *testing.T) {
 // TestProductHuntPageWithoutStateFallsThrough: a reviews address whose page
 // holds no embedded product state is not claimed: it keeps the generic path.
 func TestProductHuntPageWithoutStateFallsThrough(t *testing.T) {
+	t.Parallel()
 	site := newProductHuntSite(t)
 	site.page = strings.Replace(site.page, "ApolloSSRDataTransport", "SomeOtherTransport", 1)
 	result := site.harvester(t).FetchWithOptions(context.Background(), productHuntURL, FetchOptions{Refresh: true})

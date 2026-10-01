@@ -68,15 +68,6 @@ func runHeadless(
 	return runChatWithRuntime(args, os.Stdin, stdout, stderr, runtime, context.Background())
 }
 
-func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm: config: %v\n", err)
-		return 1
-	}
-	return runChatWithRuntime(args, stdin, stdout, stderr, runtime, context.Background())
-}
-
 func runChatWithRuntime(
 	args []string,
 	stdin io.Reader,

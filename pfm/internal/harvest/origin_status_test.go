@@ -56,6 +56,7 @@ var errorPageProse = strings.Repeat("We could not find what you were looking for
 // not the origin's page, and not the reader rung's 200 copy of it (the deleted
 // Google Sheet came back 200 through jina while the origin said 410).
 func TestOriginMissingPageIsAnErrorNotStored(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		status int
 		want   string
@@ -118,6 +119,7 @@ the block details (displayed in the box below), so we can assist you in troubles
 // TestVendorBlockPageIsAWallNeverStored: a Sucuri 403 block page is judged a
 // wall; with the browser off the fetch fails loud as a challenge, nothing stored.
 func TestVendorBlockPageIsAWallNeverStored(t *testing.T) {
+	t.Parallel()
 	if !isChallenge([]byte(sucuriBlockPage), http.StatusForbidden) {
 		t.Fatal("the Sucuri block page is not judged a wall")
 	}
@@ -152,6 +154,7 @@ func TestVendorBlockPageIsAWallNeverStored(t *testing.T) {
 // names is still no content, and jina's 200 envelope that says the target
 // returned an error is the origin's error page, not a way past it.
 func TestReaderCopyOfAnOriginErrorIsNotStored(t *testing.T) {
+	t.Parallel()
 	origin := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html",
 			"<html><body><h1>Forbidden</h1><p>"+errorPageProse+"</p></body></html>"), nil
@@ -180,6 +183,7 @@ func TestReaderCopyOfAnOriginErrorIsNotStored(t *testing.T) {
 }
 
 func TestPublicMethodNamesTheRungNeverTheProvider(t *testing.T) {
+	t.Parallel()
 	for _, tc := range [][2]string{
 		{"direct", "direct"},
 		{"browser-chrome", "browser-chrome"},
@@ -199,6 +203,7 @@ func TestPublicMethodNamesTheRungNeverTheProvider(t *testing.T) {
 // status (200), the rung that delivered the stored content, never the wall's —
 // in the core result and in the public JSON a consumer reads.
 func TestSiteAPIRenderReportsTheDeliveringStatus(t *testing.T) {
+	t.Parallel()
 	site := seQuestionSite(t)
 	h, _ := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), seQuestionURL, FetchOptions{Refresh: true})

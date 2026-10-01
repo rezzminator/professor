@@ -11,8 +11,19 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
 )
+
+func statuslineTestRuntime(t *testing.T) commandRuntime {
+	t.Helper()
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtime
+}
 
 func TestStatuslineCommandRendersFromJailedInput(t *testing.T) {
 	jailTest(t)
@@ -27,17 +38,55 @@ func TestStatuslineCommandRendersFromJailedInput(t *testing.T) {
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 
 	var stdout, stderr bytes.Buffer
-	code := runStatusline(
+	code := runStatuslineWithRuntime(
 		nil,
 		strings.NewReader(`{"model":{"display_name":"Opus 4"}}`),
 		&stdout,
 		&stderr,
+		statuslineTestRuntime(t),
+		paths.OSEnv{},
 	)
 	if code != 0 || !strings.Contains(stdout.String(), "◆ Opus 4") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr=%q", stderr.String())
+	}
+}
+
+func TestStatuslineOnABrokenConfigRendersTheConfigWarning(t *testing.T) {
+	root := jailTest(t)
+	configPath := writeConfigFixture(t, root, "{")
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.WriteString(`{"session_id":"broken-config","model":{"display_name":"Opus 4"}}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdin
+	os.Stdin = reader
+	defer func() {
+		os.Stdin = previous
+		_ = reader.Close()
+	}()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", configPath, "statusline"}, &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "Opus 4") || !strings.Contains(stdout.String(), "💾⚠config") {
+		t.Fatalf("broken config statusline code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestUsageHookOnABrokenConfigStopsAtTheDispatcher(t *testing.T) {
+	root := jailTest(t)
+	configPath := writeConfigFixture(t, root, "{")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", configPath, "usage-hook"}, &stdout, &stderr); code != 1 ||
+		!strings.HasPrefix(stderr.String(), "pfm: config:") {
+		t.Fatalf("broken config usage-hook code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 
@@ -63,28 +112,13 @@ func TestDetachedRefreshCLIPathWritesCodexCacheInTwinHome(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := runStatusline([]string{"--refresh-gpt"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+	if code := runStatuslineWithRuntime([]string{"--refresh-gpt"}, strings.NewReader(""), &stdout, &stderr,
+		statuslineTestRuntime(t), paths.OSEnv{}); code != 0 {
 		t.Fatalf("--refresh-gpt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	path := filepath.Join(cacheDir, "cc-gpt-usage-"+strconv.Itoa(os.Getuid())+".json")
 	if info, err := os.Stat(path); err != nil || info.Size() == 0 {
 		t.Fatalf("native refresher did not write %s: info=%v err=%v", path, info, err)
-	}
-}
-
-func TestStatuslineRejectsRetiredVertexRefreshFlag(t *testing.T) {
-	jailTest(t)
-	root := t.TempDir()
-	t.Setenv("PFM_HOME", root)
-
-	var stdout, stderr bytes.Buffer
-	if code := runStatusline([]string{"--refresh-vertex"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
-		t.Fatalf(
-			"--refresh-vertex code=%d stdout=%q stderr=%q, want usage error",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
 	}
 }
 
@@ -126,7 +160,8 @@ func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 	jailTest(t)
 	root := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	if code := runStatusline(nil, strings.NewReader("{"), &stdout, &stderr); code != 0 ||
+	if code := runStatuslineWithRuntime(nil, strings.NewReader("{"), &stdout, &stderr,
+		statuslineTestRuntime(t), paths.OSEnv{}); code != 0 ||
 		!strings.Contains(stderr.String(), "fail-open") {
 		t.Fatalf("malformed statusline: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -157,7 +192,14 @@ func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUsageHook(nil, &stdout, &stderr); code != 0 || stdout.Len() != 0 ||
+	if code := runUsageHookWithRuntime(
+		nil,
+		&stdout,
+		&stderr,
+		statuslineTestRuntime(t),
+		paths.OSEnv{},
+	); code != 0 ||
+		stdout.Len() != 0 ||
 		!strings.Contains(stderr.String(), "fail-open") {
 		t.Fatalf("usage hook: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -209,14 +251,29 @@ func TestStatuslineRecordsTheSessionEffortForTheAgentPanel(t *testing.T) {
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 
 	var stdout, stderr bytes.Buffer
-	if code := runStatusline(nil, strings.NewReader(`{"session_id":"sess-eff","model":{"id":"claude-opus-5-5[1m]",`+
-		`"display_name":"Opus"},"effort":{"level":"xhigh"},"context_window":{"used_percentage":5}}`),
-		&stdout, &stderr); code != 0 || stderr.Len() != 0 {
+	runtime := statuslineTestRuntime(t)
+	if code := runStatuslineWithRuntime(
+		nil,
+		strings.NewReader(`{"session_id":"sess-eff","model":{"id":"claude-opus-5-5[1m]",`+
+			`"display_name":"Opus"},"effort":{"level":"xhigh"},"context_window":{"used_percentage":5}}`),
+		&stdout,
+		&stderr,
+		runtime,
+		paths.OSEnv{},
+	); code != 0 ||
+		stderr.Len() != 0 {
 		t.Fatalf("main line: code=%d stderr=%q", code, stderr.String())
 	}
 	stdout.Reset()
-	if code := runStatusline([]string{"--subagents"}, strings.NewReader(`{"session_id":"sess-eff","tasks":[{"id":"t1",`+
-		`"model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10}]}`), &stdout, &stderr); code != 0 ||
+	if code := runStatuslineWithRuntime(
+		[]string{"--subagents"},
+		strings.NewReader(`{"session_id":"sess-eff","tasks":[{"id":"t1",`+
+			`"model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10}]}`),
+		&stdout,
+		&stderr,
+		runtime,
+		paths.OSEnv{},
+	); code != 0 ||
 		stderr.Len() != 0 {
 		t.Fatalf("row: code=%d stderr=%q", code, stderr.String())
 	}
@@ -232,12 +289,15 @@ func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
 	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
 
 	var stdout, stderr bytes.Buffer
-	code := runStatusline(
+	runtime := statuslineTestRuntime(t)
+	code := runStatuslineWithRuntime(
 		[]string{"--subagents"},
 		strings.NewReader(`{"columns":100,"tasks":[{"id":"t1","label":"trace it","model":"claude-opus-5-5",`+
 			`"contextWindowSize":1000000,"tokenCount":500000}]}`),
 		&stdout,
 		&stderr,
+		runtime,
+		paths.OSEnv{},
 	)
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
@@ -250,7 +310,8 @@ func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStatusline([]string{"--subagents"}, strings.NewReader(`{"tasks":`), &stdout, &stderr); code != 0 ||
+	if code := runStatuslineWithRuntime([]string{"--subagents"}, strings.NewReader(`{"tasks":`), &stdout, &stderr,
+		runtime, paths.OSEnv{}); code != 0 ||
 		stdout.Len() != 0 || !strings.Contains(stderr.String(), "--subagents: render (fail-open)") {
 		t.Fatalf("malformed payload: code=%d stdout=%q stderr=%q, want exit 0, no rows, named error", code,
 			stdout.String(), stderr.String())
@@ -258,16 +319,8 @@ func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStatusline([]string{"--subagents", "--refresh-gpt"}, strings.NewReader(""), &stdout,
-		&stderr); code != 2 {
+	if code := runStatuslineWithRuntime([]string{"--subagents", "--refresh-gpt"}, strings.NewReader(""), &stdout,
+		&stderr, runtime, paths.OSEnv{}); code != 2 {
 		t.Fatalf("--subagents with --refresh-gpt: code=%d, want usage error 2", code)
-	}
-}
-
-func TestStatuslineRunsOnABrokenConfig(t *testing.T) {
-	for _, args := range [][]string{{"statusline"}, {"internal", "statusline"}} {
-		if !diagnosticCommand(args) {
-			t.Fatalf("pfm %v exits on a broken config; its cache segment must show the error instead", args)
-		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 // (net_ua_transport.go:RoundTrip -> t.base.RoundTrip) the gateway chokepoint
 // test recognizes as transport-internal, below the gateway.
 func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
+	t.Parallel()
 	var seenUA string
 	var sameRequest bool
 	base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -51,6 +52,7 @@ func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
 // the wrapped transport — the SSRF guard the gateway relies on holds even at
 // this innermost layer, not only at gatewayAttempt's own check.
 func TestUserAgentTransportRefusesPrivateHostBeforeForwarding(t *testing.T) {
+	t.Parallel()
 	called := false
 	base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		called = true
@@ -73,6 +75,7 @@ func TestUserAgentTransportRefusesPrivateHostBeforeForwarding(t *testing.T) {
 // header set the Chrome-impersonation rung depends on — only added when
 // chrome is true, never for the plain UA wrapper.
 func TestUserAgentTransportChromeAddsFingerprintHeaders(t *testing.T) {
+	t.Parallel()
 	var seen http.Header
 	base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen = r.Header

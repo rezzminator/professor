@@ -20,6 +20,7 @@ func (convert legacyConverterFunc) Convert(ctx context.Context, kind, source str
 }
 
 func TestLegacyNegativeCacheAnnotatesRetryAndExpiresByFailureKind(t *testing.T) {
+	t.Parallel()
 	cache := newNegativeCache(120*time.Second, 15*time.Second)
 	permanent := Result{Source: "https://fixture.example.test/permanent", Error: "forbidden", HTTPStatus: 403}
 	cache.put("permanent", permanent)
@@ -58,6 +59,7 @@ func TestLegacyNegativeCacheAnnotatesRetryAndExpiresByFailureKind(t *testing.T) 
 }
 
 func TestLegacyConcurrentFailuresShareOneInFlightFetch(t *testing.T) {
+	t.Parallel()
 	var calls int
 	var mu sync.Mutex
 	release := make(chan struct{})
@@ -123,6 +125,7 @@ func TestLegacyConcurrentFailuresShareOneInFlightFetch(t *testing.T) {
 }
 
 func TestLegacyDOINegativeCacheFormsShareOneKey(t *testing.T) {
+	t.Parallel()
 	want := canonicalNegativeKey("fetch", "10.1234/example")
 	for _, form := range []string{"doi:10.1234/example", "https://doi.org/10.1234/example"} {
 		if got := canonicalNegativeKey("fetch", form); got != want {
@@ -132,6 +135,7 @@ func TestLegacyDOINegativeCacheFormsShareOneKey(t *testing.T) {
 }
 
 func TestLegacyPDFErrorBodiesNeverBecomeConvertedSuccess(t *testing.T) {
+	t.Parallel()
 	wall := `<html><head><title>Article unavailable</title></head><body>` + strings.Repeat(
 		"the requested document is unavailable ",
 		80,
@@ -171,6 +175,7 @@ func TestLegacyPDFErrorBodiesNeverBecomeConvertedSuccess(t *testing.T) {
 }
 
 func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
+	t.Parallel()
 	pdfTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusOK, "application/pdf", "%PDF-1.4 fixture"), nil
 	})
@@ -197,6 +202,7 @@ func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
 }
 
 func TestLegacyPlainTextPassesThroughVerbatimAndCaches(t *testing.T) {
+	t.Parallel()
 	body := "CHAPTER I\n\n" + strings.Repeat("Napoleon and the war and peace of nations. ", 4000)
 	var calls int
 	plainTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -248,6 +254,7 @@ func TestLegacyPlainTextPassesThroughVerbatimAndCaches(t *testing.T) {
 }
 
 func TestLegacyMisservedHTMLAsTextPlainStillUsesHTMLConverter(t *testing.T) {
+	t.Parallel()
 	body := "<html><body>" + strings.Repeat("article prose ", 100) + "</body></html>"
 	plainTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusOK, "text/plain", body), nil
@@ -269,6 +276,7 @@ func TestLegacyMisservedHTMLAsTextPlainStillUsesHTMLConverter(t *testing.T) {
 }
 
 func TestLegacyDOISuccessCachesUnderCanonicalIdentifierBeforeProviderResolution(t *testing.T) {
+	t.Parallel()
 	var providerCalls atomic.Int64
 	oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		providerCalls.Add(1)
@@ -321,6 +329,7 @@ func TestLegacyDOISuccessCachesUnderCanonicalIdentifierBeforeProviderResolution(
 }
 
 func TestLegacyPDFAddressMustContainPDFBytesLocallyAndRemotely(t *testing.T) {
+	t.Parallel()
 	wall := "<html><head><title>Subscriber access</title></head><body>" + strings.Repeat(
 		"paywall login required ",
 		100,
@@ -377,6 +386,7 @@ func TestLegacyPDFAddressMustContainPDFBytesLocallyAndRemotely(t *testing.T) {
 }
 
 func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *testing.T) {
+	t.Parallel()
 	t.Run("no snapshot", func(t *testing.T) {
 		oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return jsonResponse(request, `{}`), nil

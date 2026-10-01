@@ -13,6 +13,7 @@ import (
 // delivered a page is stored with its cache entry, so a later cache hit
 // reports the same status as the fresh read did.
 func TestCacheHitCarriesTheDeliveringStatus(t *testing.T) {
+	t.Parallel()
 	const source = "https://example.test/article"
 	direct := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "text/html", strings.Repeat("<p>article body text</p>\n", 40)), nil
@@ -40,6 +41,7 @@ func TestCacheHitCarriesTheDeliveringStatus(t *testing.T) {
 // TestCacheEntryWithoutStatusReportsNone: an entry stored before the status
 // was recorded carries no status on a hit, never a made-up 200.
 func TestCacheEntryWithoutStatusReportsNone(t *testing.T) {
+	t.Parallel()
 	const source = "https://example.test/older"
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Converter: &fakeConverter{}})
 	path := h.cache.path(source, kindHTML)

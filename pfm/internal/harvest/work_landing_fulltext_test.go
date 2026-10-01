@@ -58,6 +58,7 @@ func articleLandingMarkdown() string {
 // TestLandingFullTextTellsAnAbstractPageFromAnArticle: the measured abstract
 // pages carry no body section; an article carries its body under several.
 func TestLandingFullTextTellsAnAbstractPageFromAnArticle(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		content string
 		want    bool

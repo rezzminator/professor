@@ -101,6 +101,51 @@ func TestLadderOrderAndFailureKinds(t *testing.T) {
 	}
 }
 
+// TestNormalizeTargetStripsOneQuotedLayer pins both readings of the reply hint.
+// The CLI form quotes a spaced label to make one argument; an MCP caller may
+// pass those quotes inside its JSON string. Both must reach the same chat, while
+// quotes genuinely inside a label must remain intact.
+func TestNormalizeTargetStripsOneQuotedLayer(t *testing.T) {
+	for _, test := range []struct{ in, want string }{
+		{`"Delivery Trust"`, "Delivery Trust"},
+		{`" Delivery Trust "`, "Delivery Trust"},
+		{`Delivery Trust`, "Delivery Trust"},
+		{`  "P:DO"  `, "P:DO"},
+		{`P:DO`, "P:DO"},
+		{`cc-1787705979-3980493-30867`, "cc-1787705979-3980493-30867"},
+		{`say "hi" now`, `say "hi" now`},
+		{`"`, `"`},
+		{``, ``},
+	} {
+		if got := NormalizeTarget(test.in); got != test.want {
+			t.Fatalf("NormalizeTarget(%q) = %q, want %q", test.in, got, test.want)
+		}
+	}
+}
+
+func TestSeatFromPartsNamesTheSocketEngine(t *testing.T) {
+	for _, test := range []struct {
+		socket, pane, probe, want string
+	}{
+		{"/tmp/tmux-0/ox-1-2-3,99,0", "%5", "", string(pfmengine.OpenCode)},
+		{"/tmp/tmux-0/cc-9,1,0", "%1", "", string(pfmengine.Claude)},
+		{"/tmp/jail/probe-ox-7,3,0", "%2", "1", string(pfmengine.OpenCode)},
+		{"/tmp/tmux-0/unmanaged,1,0", "%2", "", "unknown"},
+	} {
+		env := &paths.MapEnv{Values: map[string]string{"PFM_TEST_PROBE_SOCKETS": test.probe}}
+		if got := SeatFromParts(test.socket, test.pane, env).Engine; got != test.want {
+			t.Fatalf(
+				"SeatFromParts(%q, %q, probe=%q).Engine = %q, want %q",
+				test.socket,
+				test.pane,
+				test.probe,
+				got,
+				test.want,
+			)
+		}
+	}
+}
+
 func TestLadderRosterMissFallsThroughAndEngineScopeNarrowsRaw(t *testing.T) {
 	raw := &ladderRaw{outcomes: map[Kind]Outcome{
 		CxWindow: {Code: 0, Stdout: "/tmp/cx-seat\t%9"},

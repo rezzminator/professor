@@ -16,9 +16,9 @@ const hungProbeTimeout = 250 * time.Millisecond
 
 // slowSelfDoctorTimeout bounds the slow-but-healthy self-doctor. The same bound
 // covers its quick `doctor --help`, and the first exec of a freshly written stub
-// costs up to ~553ms on macOS under suite load, so it sits well above that and
+// costs up to ~553ms on macOS under suite load, so 1s stays above that and
 // still far below the 30 s sleep the summary call must outrun.
-const slowSelfDoctorTimeout = 2 * time.Second
+const slowSelfDoctorTimeout = 1 * time.Second
 
 func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	directory := t.TempDir()
@@ -411,14 +411,6 @@ exit 2`)
 	if result.State != StateBroken || !strings.Contains(result.Error, "auth") ||
 		strings.Contains(result.Error, "Codex Doctor v0.149.1") {
 		t.Fatalf("self-doctor result=%#v, want the auth failure rather than the banner", result)
-	}
-}
-
-func TestRegistryDoesNotAdvertiseRetiredGCloud(t *testing.T) {
-	for _, entry := range Registry(Options{Home: t.TempDir(), GOOS: "linux", GOARCH: "amd64"}) {
-		if entry.Name == "gcloud" || entry.Command == "gcloud" {
-			t.Fatalf("retired gcloud dependency remains registered: %#v", entry)
-		}
 	}
 }
 

@@ -32,15 +32,6 @@ func claudeHookTemplates(home string) []ExpectedHook {
 	return templates
 }
 
-func commandByName(hooks []ExpectedHook, name string) string {
-	for _, hook := range hooks {
-		if hook.Name == name {
-			return hook.Command
-		}
-	}
-	panic("installer expected hook is missing: " + name)
-}
-
 func physicalSettingsPath(path string) string {
 	return paths.PhysicalPath(path)
 }

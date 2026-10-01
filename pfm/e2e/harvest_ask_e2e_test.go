@@ -12,14 +12,18 @@ import (
 
 func TestHarvestAskE2E(t *testing.T) {
 	requireE2EFence(t)
-	repo := sourceRepo(t)
+	repo := t.TempDir()
+	headBinary := os.Getenv(e2eScriptBinaryEnv)
+	if headBinary == "" {
+		t.Fatalf("%s: e2e binary was not built", e2eScriptBinaryEnv)
+	}
 	harness := &e2eHarness{
 		t:          t,
 		repo:       repo,
+		headBinary: headBinary,
 		goCache:    requiredGoEnv(t, "GOCACHE"),
 		goModCache: requiredGoEnv(t, "GOMODCACHE"),
 	}
-	harness.headBinary = harness.build(repo, filepath.Join(t.TempDir(), "pfm-head"))
 	home := harness.newHome(harness.headBinary)
 	source := filepath.Join(home, "evidence.txt")
 	if err := os.WriteFile(source, []byte("full cached evidence reaches the adapter\n"), 0o600); err != nil {

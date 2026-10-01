@@ -63,7 +63,7 @@ line_is_real_hit() {
       line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")"
     done
   fi
-  printf '%s' "$line" | grep -qiE "$PATTERN"
+  grep -qiE "$PATTERN" <<<"$line"
 }
 
 usage() {
@@ -302,6 +302,7 @@ case "$mode" in
     skipped=0
     excluded=0
     suppressed=0
+    regular=()
     for f in "${files[@]}"; do
       if is_excluded_path "$f"; then
         excluded=$((excluded + 1))
@@ -309,23 +310,72 @@ case "$mode" in
       fi
       if [[ -f "$f" ]]; then
         scanned=$((scanned + 1))
-        matches="$(grep -niE "$PATTERN" "$f")" && rc=0 || rc=$?
-        if (( rc >= 2 )); then
-          printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$f" "$rc" >> "$hits_file"
-        elif [[ -n "$matches" ]]; then
-          while IFS=: read -r lnum content; do
-            if line_is_real_hit "$content"; then
-              printf 'LEAK %s: %s\n' "$f" "$content" >> "$hits_file"
-            else
-              suppressed=$((suppressed + 1))
-            fi
-          done <<< "$matches"
-        fi
+        regular+=("$f")
       else
         skipped=$((skipped + 1))
         printf 'NOT-SCANNED %s: not a regular file (deleted or misnamed) — examined by nothing, counted as clean by nothing\n' "$f" >&2
       fi
     done
+    if (( ${#regular[@]} > 0 )); then
+      grep -niEH --null -e "$PATTERN" -- "${regular[@]}" > "$coverage_file" 2>/dev/null && rc=0 || rc=$?
+      if (( rc >= 2 )); then
+        for f in "${regular[@]}"; do
+          matches="$(grep -niE "$PATTERN" "$f")" && rc=0 || rc=$?
+          if (( rc >= 2 )); then
+            printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$f" "$rc" >> "$hits_file"
+          elif [[ -n "$matches" ]]; then
+            while IFS=: read -r lnum content; do
+              if line_is_real_hit "$content"; then
+                printf 'LEAK %s: %s\n' "$f" "$content" >> "$hits_file"
+              else
+                suppressed=$((suppressed + 1))
+              fi
+            done <<< "$matches"
+          fi
+        done
+      else
+        matched_files=()
+        matched_contents=()
+        while IFS= read -r -d '' f && IFS=: read -r lnum content; do
+          matched_files+=("$f")
+          matched_contents+=("$content")
+        done < "$coverage_file"
+        if (( ${#matched_files[@]} > 0 )); then
+          # Apply line_is_real_hit's substitutions to the candidate lines together;
+          # forking its sed and grep pipeline per line dominates a whole-tree scan.
+          normalized_file="$coverage_file.normalized"
+          lower_file="$coverage_file.lower"
+          real_file="$coverage_file.real"
+          trap 'rm -f "$hits_file" "$coverage_file" "$normalized_file" "$lower_file" "$real_file"' EXIT
+          printf '%s \n' "${matched_contents[@]}" \
+            | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g" > "$normalized_file"
+          if (( ${#ignore_tokens[@]} > 0 )); then
+            tr '[:upper:]' '[:lower:]' < "$normalized_file" > "$lower_file"
+            sed_args=()
+            for tok in "${ignore_tokens[@]}"; do
+              sed_args+=(-e "s#${tok}#<IGNORED>#g")
+            done
+            sed -E "${sed_args[@]}" "$lower_file" > "$normalized_file"
+          fi
+          grep -niE "$PATTERN" "$normalized_file" > "$real_file" && rc=0 || rc=$?
+          if (( rc >= 2 )); then
+            printf 'SCAN-ERROR %s: leak-check could NOT read this file (grep rc=%d) — treated as FAILURE, never as clean\n' "$normalized_file" "$rc" >> "$hits_file"
+          else
+            real_indices=()
+            while IFS=: read -r lnum content; do
+              real_indices[lnum]=1
+            done < "$real_file"
+            for (( i=0; i<${#matched_files[@]}; i++ )); do
+              if [[ -n "${real_indices[i+1]:-}" ]]; then
+                printf 'LEAK %s: %s\n' "${matched_files[i]}" "${matched_contents[i]}" >> "$hits_file"
+              else
+                suppressed=$((suppressed + 1))
+              fi
+            done
+          fi
+        fi
+      fi
+    fi
     if (( scanned == 0 && skipped > 0 )); then
       printf 'SCAN-ERROR: --files named %d path(s), %d excluded by design, and every one of the remaining %d was NOT a regular file — nothing was examined, refusing to report clean\n' \
         "${#files[@]}" "$excluded" "$skipped" >> "$hits_file"

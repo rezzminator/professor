@@ -114,8 +114,12 @@ oc_resume_ids() { pfm ls --tsv 2>/dev/null | awk -F'\t' '$1 == "resume-opencode"
 # brackets move with Right; Down cannot move through a fuzzy-filtered lone row.
 # A prompt then births a live-opencode row on the new ox- socket.
 OC_ID="" OC_SOCK="" OC_NAME=""
+fresh_ox_sockets() { comm -13 <(printf '%s\n' "$before_ox") <(printf '%s\n' "$(ox_sockets)"); }
+live_oc_row() { pfm ls --tsv 2>/dev/null | awk -F'\t' -v s="$OC_SOCK" 'NR > 1 && $1 == "live-opencode" && $11 == s { print; exit }'; }
+live_oc_name() { live_oc_row | awk -F'\t' '{ print $5 }'; }
+oc_status_state() { pfm chat status "$OC_ID" 2>/dev/null | awk -F'\t' 'NR == 1 { print $2 }'; }
 open_main() {
-  local before_ox before_ids after_ox label i sockpath row new_resume
+  local before_ox before_ids after_ox label i sockpath row new_resume ox_wait_why row_wait_why
   OC_ID="" OC_SOCK="" OC_NAME=""
   before_ox="$(ox_sockets)"
   before_ids="$(oc_resume_ids)"
@@ -137,29 +141,24 @@ open_main() {
     return 1
   fi
   tui_keys Enter
-  sleep 2
+  wait_for 15 '[ -n "$(fresh_ox_sockets)" ]' || ox_wait_why="$LANE_WAIT_WHY"
   tui_close # the outer driver's job is done; the ox- server is independent (action/executor.go CreateChatServer runs before the exec'd attach)
   after_ox="$(ox_sockets)"
   OC_SOCK="$(comm -13 <(printf '%s\n' "$before_ox") <(printf '%s\n' "$after_ox") | head -1)"
   if [ -z "$OC_SOCK" ]; then
-    echo "Enter on the OpenCode New row never produced a fresh ox- socket under $(oc_tmux_dir 2>/dev/null || echo '<no tmux dir found>'); sockets now: $(one_line "$after_ox")"
+    echo "Enter on the OpenCode New row never produced a fresh ox- socket under $(oc_tmux_dir 2>/dev/null || echo '<no tmux dir found>'); sockets now: $(one_line "$after_ox")${ox_wait_why:+; $ox_wait_why}"
     return 1
   fi
   sockpath="$(oc_tmux_dir)/$OC_SOCK"
   # A raw prompt typed directly into the pane writes OpenCode's session row.
   tmux -S "$sockpath" send-keys -l "reply with one word: ready" 2>/dev/null
   tmux -S "$sockpath" send-keys Enter 2>/dev/null
-  i=0
-  while [ "$i" -lt 30 ]; do
-    row="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v s="$OC_SOCK" 'NR > 1 && $1 == "live-opencode" && $11 == s { print; exit }')"
-    OC_ID="$(awk -F'\t' '{ print $2 }' <<<"$row")"
-    OC_NAME="$(awk -F'\t' '{ print $5 }' <<<"$row")"
-    [ -n "$OC_ID" ] && break
-    sleep 2
-    i=$((i + 1))
-  done
+  wait_for 60 '[ -n "$(live_oc_row)" ]' || row_wait_why="$LANE_WAIT_WHY"
+  row="$(live_oc_row)"
+  OC_ID="$(awk -F'\t' '{ print $2 }' <<<"$row")"
+  OC_NAME="$(awk -F'\t' '{ print $5 }' <<<"$row")"
   if [ -z "$OC_ID" ]; then
-    echo "socket $OC_SOCK is live but pfm ls reported no live-opencode row on it in 60s: $(one_line "$(pfm ls --tsv 2>&1)")"
+    echo "socket $OC_SOCK is live but pfm ls reported no live-opencode row on it in 60s: $(one_line "$(pfm ls --tsv 2>&1)")${row_wait_why:+; $row_wait_why}"
     return 1
   fi
   new_resume="$(comm -13 <(printf '%s\n' "$before_ids") <(printf '%s\n' "$(oc_resume_ids)"))"
@@ -180,16 +179,21 @@ if open_main >"$open_log" 2>&1; then
   sockpath="$(oc_tmux_dir)/$OC_SOCK"
   [ "$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v i="$OC_ID" '$2 == i { print $1; exit }')" = live-opencode ] ||
     bad="$bad session $OC_ID is not a live-opencode row;"
+  name_wait_why=""
+  wait_for 10 '[ "$(live_oc_name)" = "reply with one word: ready" ]' || name_wait_why="$LANE_WAIT_WHY"
+  OC_NAME="$(live_oc_name)"
   [ "$OC_NAME" = 'reply with one word: ready' ] ||
-    bad="$bad the live row's name '$OC_NAME' is not the prompt text;"
+    bad="$bad the live row's name '$OC_NAME' is not the prompt text${name_wait_why:+ ($name_wait_why)};"
   # onChatServer titles the fresh window literally OpenCode.
+  window_wait_why=""
+  wait_for 10 'grep -qxF OpenCode <<<"$(tmux -S "$sockpath" list-windows -F "#{window_name}" 2>/dev/null)"' || window_wait_why="$LANE_WAIT_WHY"
   if window="$(tmux -S "$sockpath" list-windows -F '#{window_name}' 2>&1)"; then
     case "$window" in
       OpenCode) ;;
-      *) bad="$bad tmux window name '$(one_line "$window")' is not 'OpenCode' (action/synth.go onChatServer titles it pfmengine.OpenCode.Short);" ;;
+      *) bad="$bad tmux window name '$(one_line "$window")' is not 'OpenCode' (action/synth.go onChatServer titles it pfmengine.OpenCode.Short)${window_wait_why:+ ($window_wait_why)};" ;;
     esac
   else
-    bad="$bad tmux list-windows FAILED on the fresh socket $OC_SOCK ($(one_line "$window")) — the window could not be read at all;"
+    bad="$bad tmux list-windows FAILED on the fresh socket $OC_SOCK ($(one_line "$window")) — the window could not be read at all${window_wait_why:+ ($window_wait_why)};"
   fi
   # T31, needs:none — the CLI surface renders, fail-open, regardless of which
   # engine branch it resolves through (OpenCode exports no session/home env
@@ -233,10 +237,12 @@ if requires E3.01-open-seat; then
   bad=""
 
   # The promptless OpenCode pane settles idle after its scripted first turn.
+  status_wait_why=""
+  wait_for 30 '[ "$(oc_status_state)" = idle ]' || status_wait_why="$LANE_WAIT_WHY"
   st="$(pfm chat status "$OC_ID" 2>&1)"
   st_rc=$?
   [ "$st_rc" -eq 0 ] || bad="$bad status exited $st_rc for a live-opencode row: $(one_line "$st");"
-  [ "$(printf '%s' "$st" | awk -F'\t' 'NR == 1 { print $2 }')" = idle ] || bad="$bad status did not report state=idle: $(one_line "$st");"
+  [ "$(printf '%s' "$st" | awk -F'\t' 'NR == 1 { print $2 }')" = idle ] || bad="$bad status did not report state=idle: $(one_line "$st")${status_wait_why:+ ($status_wait_why)};"
 
   # OpenCode's session content is deliberately unsupported by pfm readers.
   last="$(pfm chat last "$OC_ID" 2>&1)"
@@ -277,14 +283,16 @@ if requires E3.01-open-seat; then
   all_killed_field() { pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v n="$1" 'NR > 1 && $2 == n { print $10; exit }'; }
   kill_out="$(pfm chat kill "$OC_ID" 2>&1)"
   kill_rc=$?
-  sleep 2
+  kill_wait_why=""
+  wait_for 10 '[ "$(all_killed_field "$OC_ID")" = true ]' || kill_wait_why="$LANE_WAIT_WHY"
   [ "$kill_rc" -eq 0 ] || bad="$bad kill exited $kill_rc: $(one_line "$kill_out");"
-  [ "$(all_killed_field "$OC_ID")" = true ] || bad="$bad the row's killed column is '$(all_killed_field "$OC_ID")' after kill (want true);"
+  [ "$(all_killed_field "$OC_ID")" = true ] || bad="$bad the row's killed column is '$(all_killed_field "$OC_ID")' after kill (want true)${kill_wait_why:+ ($kill_wait_why)};"
   unkill_out="$(pfm chat unkill "$OC_ID" 2>&1)"
   unkill_rc=$?
-  sleep 2
+  unkill_wait_why=""
+  wait_for 10 '[ "$(all_killed_field "$OC_ID")" = false ]' || unkill_wait_why="$LANE_WAIT_WHY"
   [ "$unkill_rc" -eq 0 ] || bad="$bad unkill exited $unkill_rc: $(one_line "$unkill_out");"
-  [ "$(all_killed_field "$OC_ID")" = false ] || bad="$bad the row's killed column is '$(all_killed_field "$OC_ID")' after unkill (want false);"
+  [ "$(all_killed_field "$OC_ID")" = false ] || bad="$bad the row's killed column is '$(all_killed_field "$OC_ID")' after unkill (want false)${unkill_wait_why:+ ($unkill_wait_why)};"
 
   if [ -n "$bad" ]; then
     fail "$bad"

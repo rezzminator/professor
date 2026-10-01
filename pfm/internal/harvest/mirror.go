@@ -10,14 +10,6 @@ import (
 	"time"
 )
 
-func DOIToPMCID(ctx context.Context, client *http.Client, doi string) (string, error) {
-	return idToPMCID(ctx, client, doi, nil)
-}
-
-func PMIDToPMCID(ctx context.Context, client *http.Client, pmid string) (string, error) {
-	return idToPMCID(ctx, client, pmid, nil)
-}
-
 // idToPMCID converts through the NCBI ID converter. A nil resolver sends no
 // operator identity; the ladder passes its own so NCBI sees the contact.
 func idToPMCID(ctx context.Context, client *http.Client, id string, r *Resolver) (string, error) {
@@ -44,30 +36,6 @@ func idToPMCID(ctx context.Context, client *http.Client, id string, r *Resolver)
 		return "", nil
 	}
 	return data.Records[0].PMCID, nil
-}
-
-func EuropePMCFulltextXML(ctx context.Context, client *http.Client, pmcid string) (string, error) {
-	if client == nil {
-		client = safeHTTPClientTimeout(false, 30*time.Second)
-	}
-	body, status, _, err := getBody(
-		ctx,
-		client,
-		"https://www.ebi.ac.uk/europepmc/webservices/rest/"+url.PathEscape(pmcid)+"/fullTextXML",
-		defaultUA,
-		50*1024*1024,
-	)
-	if err != nil {
-		return "", err
-	}
-	if status >= 400 {
-		return "", fmt.Errorf("HTTP %d", status)
-	}
-	return string(body), nil
-}
-
-func EuropePMCFiguresURL(pmcid string) string {
-	return "https://www.ebi.ac.uk/europepmc/webservices/rest/" + pmcid + "/supplementaryFiles"
 }
 
 func PMCArticleURL(pmcid string) string {

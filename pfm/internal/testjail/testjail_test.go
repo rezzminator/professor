@@ -136,6 +136,33 @@ func TestRunPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	}
 }
 
+func TestRunPinsSIDDirInsideTheJail(t *testing.T) {
+	home := os.Getenv(paths.EnvHome)
+	sid := os.Getenv(paths.EnvSIDDir)
+	if sid != filepath.Join(home, "sid") {
+		t.Fatalf("%s=%q, want sid directory under jail home %q", paths.EnvSIDDir, sid, home)
+	}
+	if info, err := os.Stat(sid); err != nil || !info.IsDir() {
+		t.Fatalf("sid directory %q: %v, %v", sid, info, err)
+	}
+}
+
+func TestRunPreservesCallerSIDDir(t *testing.T) {
+	const marker = "PFM_TEST_CALLER_SID_DIR"
+	if want := os.Getenv(marker); want != "" {
+		if got := os.Getenv(paths.EnvSIDDir); got != want {
+			t.Fatalf("%s=%q, want caller value %q", paths.EnvSIDDir, got, want)
+		}
+		return
+	}
+	want := filepath.Join(t.TempDir(), "caller-sid")
+	command := exec.Command(os.Args[0], "-test.run=^TestRunPreservesCallerSIDDir$")
+	command.Env = append(os.Environ(), paths.EnvSIDDir+"="+want, marker+"="+want)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("child test with caller SID dir: %v: %s", err, output)
+	}
+}
+
 func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 	check := func(home, configPath string) {
 		t.Helper()

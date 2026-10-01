@@ -14,6 +14,7 @@ import (
 )
 
 func TestToolErrorsKeepHandlerOutput(t *testing.T) {
+	t.Parallel()
 	const detail = "fixture failure"
 	tests := []struct {
 		name, tool string

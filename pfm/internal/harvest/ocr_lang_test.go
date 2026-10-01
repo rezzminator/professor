@@ -14,6 +14,7 @@ import (
 // converter is handed "ar" (a fresh read, never the cached Latin copy); an
 // unknown script is a named error listing the staged ones.
 func TestOCRLangReachesTheConverterAndTheLatinDefaultIsFlagged(t *testing.T) {
+	t.Parallel()
 	scan := filepath.Join(t.TempDir(), "scan.pdf")
 	if err := os.WriteFile(scan, []byte("%PDF-1.7\n% a scan\n"), 0o600); err != nil {
 		t.Fatal(err)

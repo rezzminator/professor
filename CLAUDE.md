@@ -62,13 +62,13 @@ This repo is the framework, not an app that uses it: everything under `templates
 
 ## Local
 
-- On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` only; `verify`, `test`, `cover` and `all` refuse outside the fence.
+- On the host, `.claude/scripts/dev.sh {status|install|build|typecheck} {templates|pfm}` only; `verify`, `test`, `cover`, `all` and `gate` refuse outside the fence.
 - Scratch lives in `/tmp/{project}/{purpose}/`: `{project}` is this repo's directory name minus any leading dot (`.professor` → `professor`), derived, never hardcoded.
 - One scratch subdirectory per purpose, owned by its protocol (`/tmp/{project}/{timing|lanes|guard}/`); a run never dirties the checkout; a scratch path named to a human or a model is absolute.
 
 ## Fence
 
-- `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]` or `iso {run|sim} {command…}` runs in the fence against a worktree under `.worktrees/{flight}/`; it needs a reachable docker daemon.
+- `.claude/scripts/dev.sh iso {install|build|typecheck|verify|test|cover|all|gate|status|e2e|shell} [project]` or `iso {run|sim} {command…}` runs in the fence against a worktree under `.worktrees/{flight}/`; it needs a reachable docker daemon.
 - `/pfm:release` drives `infra/fence/release-rehearsal.sh`.
 
 ## CI
@@ -151,6 +151,6 @@ Tiers and effort live in the fleet prompt's § Model Selection; the cast and eac
 
 ## Testing
 
-- **Every test runs inside the fence, never on the host:** the gate is `.claude/scripts/dev.sh iso test {templates|pfm}`, run before claiming anything works; never report a suite you did not watch run.
+- **Every test runs inside the fence, never on the host:** the gate is `.claude/scripts/dev.sh iso gate [pfm|templates]`, run before claiming anything works; never report a suite you did not watch run.
 - A regression test counts only after it was watched failing against the unfixed code.
 - A skipped or filtered suite is a named gap in the report, never a pass.

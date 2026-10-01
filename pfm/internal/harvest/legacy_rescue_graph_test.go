@@ -11,6 +11,7 @@ import (
 )
 
 func TestLegacyUnresolvedBotChallengeIsNeverCached(t *testing.T) {
+	t.Parallel()
 	challenge := "<html><body>Are you a robot? verify you are human</body></html>"
 	wallTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", challenge), nil
@@ -67,6 +68,7 @@ func TestLegacyUnresolvedBotChallengeIsNeverCached(t *testing.T) {
 // named challenge failure — never a cached success — once every rung is
 // exhausted.
 func TestCloudflare403BlockPageEscalatesInsteadOfCachingSuccess(t *testing.T) {
+	t.Parallel()
 	blockPage := cloudflareBlockPageFixture()
 	if len(blockPage) <= 4000 {
 		t.Fatalf(
@@ -149,6 +151,7 @@ func cloudflareBlockPageFixture() string {
 }
 
 func TestLegacyChallengeCanRecoverAtChromeAndPersistsTrace(t *testing.T) {
+	t.Parallel()
 	direct := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", "<html>checking your browser</html>"), nil
 	})
@@ -176,6 +179,7 @@ func TestLegacyChallengeCanRecoverAtChromeAndPersistsTrace(t *testing.T) {
 }
 
 func TestLegacyCitationPDFMetaRescueCachesThePublisherSource(t *testing.T) {
+	t.Parallel()
 	const publisher = "https://publisher.example.test/walled-article"
 	const mirror = "https://repository.example.test/open-paper.pdf"
 	wall := `<html><head><meta name="citation_pdf_url" content="` + mirror + `"></head><body>checking your browser</body></html>`
@@ -231,6 +235,7 @@ func TestLegacyCitationPDFMetaRescueCachesThePublisherSource(t *testing.T) {
 }
 
 func TestLegacySelfReferentialOACandidateCannotRecurse(t *testing.T) {
+	t.Parallel()
 	const source = "https://publisher.example.test/10.1234/recursive"
 	const candidate = "https://mirror.example.test/10.1234/recursive.pdf"
 	var providerCalls atomic.Int64
@@ -316,6 +321,7 @@ func forumArticleCaptchaWordFixture(phrase string) string {
 // 403/429/503 status, a short body, or an actual captcha widget in the
 // markup. A long HTTP-200 page that merely quotes a phrase is content.
 func TestForumWallPhrasesNeedCorroboration(t *testing.T) {
+	t.Parallel()
 	type row struct {
 		name          string
 		body          string
@@ -423,6 +429,7 @@ func TestForumWallPhrasesNeedCorroboration(t *testing.T) {
 // opens for any Referer: the direct rung itself carries one, so the real page
 // arrives on the first request instead of the wall being escalated (or cached).
 func TestDirectRungSendsProvenanceReferer(t *testing.T) {
+	t.Parallel()
 	page := "<html><body><h1>Thread title</h1>" + strings.Repeat("original post and replies ", 60) + "</body></html>"
 	var directReferer atomic.Value
 	directReferer.Store("")

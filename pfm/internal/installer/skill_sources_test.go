@@ -694,7 +694,7 @@ func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	_, err := runSkillGitWith(deps.RealRunner{}, 200*time.Millisecond, script, t.TempDir(), "clone")
+	_, err := runSkillGitWith(deps.RealRunner{}, 200*time.Millisecond, 100*time.Millisecond, script, t.TempDir(), "clone")
 	if elapsed := time.Since(start); elapsed > 8*time.Second {
 		t.Fatalf("git returned after %s, past its bound (err=%v)", elapsed, err)
 	}

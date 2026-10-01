@@ -87,6 +87,7 @@ func (b recordCloseBody) Close() error {
 // defer that calls it — the body (and the connection) leaked on every hit.
 // Watched FAILING before the fix (closed stayed false).
 func TestGatewayReadBodyClosesOnUnsupportedEncoding(t *testing.T) {
+	t.Parallel()
 	closed := false
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -105,6 +106,7 @@ func TestGatewayReadBodyClosesOnUnsupportedEncoding(t *testing.T) {
 // TestReadDOIMirrorResponseClosesOnUnsupportedEncoding is doi_mirror.go's
 // twin of the F5 fix above (readDOIMirrorResponse's own defer ordering).
 func TestReadDOIMirrorResponseClosesOnUnsupportedEncoding(t *testing.T) {
+	t.Parallel()
 	closed := false
 	resp := &http.Response{
 		StatusCode: http.StatusOK,

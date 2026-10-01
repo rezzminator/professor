@@ -53,6 +53,7 @@ func (c *fakeConverter) Convert(_ context.Context, kind, source string, body []b
 }
 
 func TestFetchLadderDirectChromeJinaAndPrivateSkip(t *testing.T) {
+	t.Parallel()
 	cacheDir := t.TempDir()
 	converter := &fakeConverter{}
 	direct := &recordingTransport{respond: func(r *http.Request) (*http.Response, error) {
@@ -111,6 +112,7 @@ func TestFetchLadderDirectChromeJinaAndPrivateSkip(t *testing.T) {
 }
 
 func TestCacheTypePartitionTTLAndRefresh(t *testing.T) {
+	t.Parallel()
 	var count int
 	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		count++
@@ -166,6 +168,7 @@ func TestExistingLocalFileWinsOverISBNClassification(t *testing.T) {
 }
 
 func TestSearchSearxThenBraveFallback(t *testing.T) {
+	t.Parallel()
 	searx := &recordingTransport{respond: func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusServiceUnavailable, "application/json", `{}`), nil
 	}}
@@ -191,6 +194,7 @@ func TestSearchSearxThenBraveFallback(t *testing.T) {
 }
 
 func TestSearchLegacySingularEngineAndBraveLanguage(t *testing.T) {
+	t.Parallel()
 	searx := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if got := request.URL.Query().Get("language"); got != "zh" {
 			t.Errorf("SearXNG language=%q, want zh", got)
@@ -231,6 +235,7 @@ func TestSearchLegacySingularEngineAndBraveLanguage(t *testing.T) {
 }
 
 func TestLocalDenyResolvedPaths(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	secret := filepath.Join(root, "credentials.pem")
 	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
@@ -264,6 +269,7 @@ func jsonResponse(r *http.Request, body string) *http.Response {
 }
 
 func TestCacheKeyUsesSHA1Suffix(t *testing.T) {
+	t.Parallel()
 	key := "https://example.test/a?b=1"
 	sum := sha1.Sum([]byte(key))
 	want := hex.EncodeToString(sum[:])[:10]
@@ -273,6 +279,7 @@ func TestCacheKeyUsesSHA1Suffix(t *testing.T) {
 }
 
 func TestExtensionlessSniffedKindCachesAndJinaEnvelopeIsStripped(t *testing.T) {
+	t.Parallel()
 	var calls int
 	pdfTransport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
@@ -318,6 +325,7 @@ func TestExtensionlessSniffedKindCachesAndJinaEnvelopeIsStripped(t *testing.T) {
 }
 
 func TestGoogleDriveFileViewFetchesCompleteDownloadInsteadOfPreviewHTML(t *testing.T) {
+	t.Parallel()
 	const source = "https://drive.google.com/file/d/1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy/view"
 	transport := &recordingTransport{respond: func(request *http.Request) (*http.Response, error) {
 		if request.URL.Hostname() == "drive.usercontent.google.com" {
@@ -366,6 +374,7 @@ func TestGoogleDriveFileViewFetchesCompleteDownloadInsteadOfPreviewHTML(t *testi
 }
 
 func TestGoogleDriveDownloadURLRecognizesOnlyOwnedFileLinks(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		source string
 		wantID string
@@ -404,6 +413,7 @@ func TestGoogleDriveDownloadURLRecognizesOnlyOwnedFileLinks(t *testing.T) {
 }
 
 func TestTokenEstimateMatchesOracleRegimes(t *testing.T) {
+	t.Parallel()
 	if got := EstimateTokens(strings.Repeat("word ", 100)); got != 250 {
 		t.Fatalf("prose tokens=%d", got)
 	}
@@ -422,6 +432,7 @@ func TestTokenEstimateMatchesOracleRegimes(t *testing.T) {
 // now CJK runes x1.3 plus the remaining runes at the prose or code rate,
 // weighted by each kind's own share.
 func TestTokenEstimateWeighsByShareNotByPresence(t *testing.T) {
+	t.Parallel()
 	mixed := strings.Repeat("word ", 2000)[:10000-1] + "漢" // 1 CJK rune among 10,000 prose runes
 	if n := len([]rune(mixed)); n != 10000 {
 		t.Fatalf("fixture has %d runes, want 10000", n)
@@ -446,10 +457,15 @@ func TestTokenEstimateWeighsByShareNotByPresence(t *testing.T) {
 }
 
 func TestChromeTransportUsesUTLSAndRejectsMixedDNSAnswers(t *testing.T) {
+	t.Parallel()
 	h := mustNew(t, Options{CacheDir: t.TempDir(), ResolvePublic: func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("203.0.113.10"), net.ParseIP("127.0.0.1")}, nil
 	}})
-	if !ChromeTransport(h.chrome) {
+	wrapped, ok := h.chrome.Transport.(*userAgentTransport)
+	if !ok || !wrapped.chrome {
+		t.Fatal("production Chrome client is not the uTLS transport")
+	}
+	if _, ok := wrapped.base.(*chromeTransport); !ok {
 		t.Fatal("production Chrome client is not the uTLS transport")
 	}
 	req, err := http.NewRequest(http.MethodGet, "https://rebind.test/", http.NoBody)
@@ -462,6 +478,7 @@ func TestChromeTransportUsesUTLSAndRejectsMixedDNSAnswers(t *testing.T) {
 }
 
 func TestChromeHeadersMatchCapturedChrome146Profile(t *testing.T) {
+	t.Parallel()
 	base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		want := map[string]string{
 			"User-Agent":                chromeUA,
@@ -494,6 +511,7 @@ func TestChromeHeadersMatchCapturedChrome146Profile(t *testing.T) {
 }
 
 func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
+	t.Parallel()
 	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusFound,
@@ -533,6 +551,7 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 }
 
 func TestGetBodyCapsAtMaxWithoutFailure(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "text/plain", "0123456789abcdef"), nil
 	})}
@@ -543,6 +562,7 @@ func TestGetBodyCapsAtMaxWithoutFailure(t *testing.T) {
 }
 
 func TestDetectTablesMatchOracle(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ source, want string }{
 		{"https://x.test/a.tar.gz", "tar"},
 		{"https://x.test/a.tgz", "tar"},
@@ -575,15 +595,21 @@ func TestDetectTablesMatchOracle(t *testing.T) {
 		{"text/csv", "a,b", "csv"},
 		{"application/octet-stream", "%PDF-1.7", "pdf"},
 		{"application/octet-stream", "Rar!\x1a\x07", "rar"},
+		{"application/octet-stream", "Rar!\x1a\x07\x00", "rar"},
+		{"application/octet-stream", "Rar!\x1a\x07\x01\x00", "rar"},
+		{"application/octet-stream", "Rar!\x1a", "html"},
 		{"application/octet-stream", "\x1f\x8b\x08", "tar"},
 		{"application/octet-stream", "BZh91", "tar"},
 		{"application/octet-stream", "\xfd7zXZ\x00", "tar"},
-		{"text/html", "PK\x03\x04", ""},
-		{"text/plain", "hello", ""},
-		{"", "\x89PNG\r\n\x1a\n", "image"},
+		{"text/html", "PK\x03\x04", "html"},
+		{"text/plain", "hello", "txt"},
+		{"", "\x89PNG\r\n\x1a\n", "png"},
+		{"image/jpeg", "", "jpg"},
+		{"image/svg+xml", "", "svg"},
+		{"image/x-icon", "", "image"},
 	} {
-		if got := SniffKind(tc.ct, []byte(tc.head)); got != tc.want {
-			t.Errorf("SniffKind(%q,%q) = %q, want %q", tc.ct, tc.head, got, tc.want)
+		if got := classifyKind("https://x.test/a", tc.ct, []byte(tc.head)); got != tc.want {
+			t.Errorf("classifyKind(%q,%q) = %q, want %q", tc.ct, tc.head, got, tc.want)
 		}
 	}
 	for _, tc := range []struct {
@@ -614,6 +640,7 @@ func TestDetectTablesMatchOracle(t *testing.T) {
 // otherwise a local .docx reaches harvestpy's converter tagged "zip", and the
 // converter refuses archive kinds outright (harvestpy/converter.go:84).
 func TestClassifyKindOOXMLExtensionBeatsZipMagic(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	w, err := zw.Create("[Content_Types].xml")
@@ -649,6 +676,7 @@ func TestClassifyKindOOXMLExtensionBeatsZipMagic(t *testing.T) {
 }
 
 func TestFetchBareTitleRefusesToGuess(t *testing.T) {
+	t.Parallel()
 	h := mustNew(
 		t,
 		Options{
@@ -666,6 +694,7 @@ func TestFetchBareTitleRefusesToGuess(t *testing.T) {
 }
 
 func TestLocalizeImagesSkipsOverLimitResponse(t *testing.T) {
+	t.Parallel()
 	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "image/png", strings.Repeat("x", maxImageBytes+1)), nil
 	})
@@ -689,6 +718,7 @@ func TestLocalizeImagesSkipsOverLimitResponse(t *testing.T) {
 // host is hotlink-protected the real way: it 403s anything but the exact
 // page URL.
 func TestLocalizeImagesSendsThePageAsReferer(t *testing.T) {
+	t.Parallel()
 	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64)
 	const pageURL = "https://example.test/article"
 	var referers []string
@@ -726,6 +756,7 @@ func TestLocalizeImagesSendsThePageAsReferer(t *testing.T) {
 // play) must carry no Referer. HTML page fetches through the same ladder are
 // pinned unchanged by TestDirectRungSendsProvenanceReferer.
 func TestFetchDirectPDFURLSendsNoReferer(t *testing.T) {
+	t.Parallel()
 	var referers []string
 	hotlinkProtected := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		referer := r.Header.Get("Referer")

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
@@ -101,14 +102,8 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	}
 	moduleRoot := filepath.Dir(packageDir)
 	oldPFM := filepath.Join(binDir, "pfm")
-	build := exec.Command(
-		"go", "-C", moduleRoot, "build",
-		"-ldflags", "-X main.version=v0.61.1",
-		"-o", oldPFM, "./cmd/pfm",
-	)
-	build.Env = replaceUpdateE2EEnv(os.Environ(), map[string]string{"GOFLAGS": "-buildvcs=false"})
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build older pfm: %v: %s", err, output)
+	if err := testjail.GoBuild(moduleRoot, oldPFM, "./cmd/pfm", "-ldflags", "-X main.version=v0.61.1"); err != nil {
+		t.Fatalf("build older pfm: %v", err)
 	}
 
 	proof := filepath.Join(root, "engine-proof")

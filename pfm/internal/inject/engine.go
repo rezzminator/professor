@@ -1384,25 +1384,6 @@ func signatureParts(sender Sender) []string {
 	return parts
 }
 
-// unquoteTarget strips one layer of surrounding double quotes from a target.
-//
-// It is the read side of the reply hint's write side: a label containing
-// spaces is advertised as chat_inject "Delivery Trust" <message>, because the
-// CLI form needs the shell quoting to see one argument. A recipient reaching
-// for the MCP tool instead passes the target as a JSON string, where those
-// quotes are just two extra characters that would make the label match
-// nothing. Accepting both spellings costs one trim; refusing one of them
-// would make the hint wrong for whichever caller read it the other way.
-func unquoteTarget(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if len(trimmed) >= 2 &&
-		strings.HasPrefix(trimmed, `"`) &&
-		strings.HasSuffix(trimmed, `"`) {
-		return strings.TrimSpace(trimmed[1 : len(trimmed)-1])
-	}
-	return trimmed
-}
-
 // replyAddress is the one string a recipient can pass straight back to
 // chat_inject. A label with whitespace is quoted, because a codex chat's
 // label is its tmux WINDOW name and those legitimately contain spaces —
@@ -1574,10 +1555,6 @@ func (engine *Engine) senderLabel(
 		return ""
 	}
 	return strings.TrimSpace(window)
-}
-
-func targetFromParts(socketPath, pane string) Target {
-	return targetFromSeat(resolve.SeatFromParts(socketPath, pane, paths.OSEnv{}))
 }
 
 func refused(code int, message string) Result {

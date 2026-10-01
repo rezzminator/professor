@@ -37,6 +37,7 @@ func refusingFallback(t *testing.T) func(context.Context, string) ([]net.IP, err
 // page and the failure reads as if the SOURCE refused us. Resolving over HTTPS
 // takes the answer out of the network's hands.
 func TestDOHResolverPrefersTheHTTPSAnswer(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("type") != "A" {
 			_, _ = w.Write([]byte(`{"Status":0,"Answer":[]}`))
@@ -47,7 +48,7 @@ func TestDOHResolverPrefersTheHTTPSAnswer(t *testing.T) {
 	defer server.Close()
 
 	resolver := newTestDOHResolver(server.URL, refusingFallback(t))
-	ips, err := resolver.LookupIP(context.Background(), "mirror.example.com")
+	ips, err := resolver.LookupIP(context.Background(), "mirror.doh-seam.net")
 	if err != nil {
 		t.Fatalf("LookupIP error = %v", err)
 	}
@@ -61,6 +62,7 @@ func TestDOHResolverPrefersTheHTTPSAnswer(t *testing.T) {
 // a silent downgrade to the rewritten resolver would report the block page's
 // failures as the source's own.
 func TestDOHResolverFallsBackWhenDoHCannotAnswer(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "blocked", http.StatusTeapot)
 	}))
@@ -71,7 +73,7 @@ func TestDOHResolverFallsBackWhenDoHCannotAnswer(t *testing.T) {
 		called = true
 		return []net.IP{net.ParseIP("203.0.113.9")}, nil
 	})
-	ips, err := resolver.LookupIP(context.Background(), "mirror.example.com")
+	ips, err := resolver.LookupIP(context.Background(), "mirror.doh-seam.net")
 	if err != nil {
 		t.Fatalf("LookupIP error = %v, want the system-resolver fallback", err)
 	}
@@ -85,6 +87,7 @@ func TestDOHResolverFallsBackWhenDoHCannotAnswer(t *testing.T) {
 // does not exist" when the real story may be "our resolver was unreachable" —
 // an outage rendered as an absence.
 func TestDOHResolverReportsBothFailures(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "blocked", http.StatusTeapot)
 	}))
@@ -93,7 +96,7 @@ func TestDOHResolverReportsBothFailures(t *testing.T) {
 	resolver := newTestDOHResolver(server.URL, func(context.Context, string) ([]net.IP, error) {
 		return nil, errors.New("system resolver unreachable")
 	})
-	_, err := resolver.LookupIP(context.Background(), "mirror.example.com")
+	_, err := resolver.LookupIP(context.Background(), "mirror.doh-seam.net")
 	if err == nil {
 		t.Fatal("LookupIP error = nil, want a failure naming both resolvers")
 	}
@@ -109,17 +112,24 @@ func TestDOHResolverReportsBothFailures(t *testing.T) {
 // NXDOMAIN. Asking anyway costs a round trip, emits a misleading degradation
 // warning on every lookup, and drags local fixture hosts onto the network.
 func TestDOHResolverSkipsSpecialUseNames(t *testing.T) {
+	t.Parallel()
 	resolver := newTestDOHResolver(
 		"http://doh.invalid/should-never-be-called",
 		func(_ context.Context, _ string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP("127.0.0.1")}, nil
 		},
 	)
-	for _, host := range []string{"fixture.test", "thing.invalid", "printer.local", "a.example", "svc.internal", "localhost"} {
+	for _, host := range []string{"fixture.test", "thing.invalid", "printer.local", "a.example", "svc.internal", "localhost", "mirror.example.com", "example.org", "a.example.net"} {
+		if !isSpecialUseName(host) {
+			t.Fatalf("isSpecialUseName(%q) = false, want special-use name", host)
+		}
 		ips, err := resolver.LookupIP(context.Background(), host)
 		if err != nil || len(ips) != 1 || ips[0].String() != "127.0.0.1" {
 			t.Fatalf("LookupIP(%q) = %v, %v; want the system resolver consulted directly", host, ips, err)
 		}
+	}
+	if isSpecialUseName("notexample.com") {
+		t.Fatal("isSpecialUseName(notexample.com) = true, want an ordinary domain")
 	}
 }
 
@@ -130,13 +140,14 @@ func TestDOHResolverSkipsSpecialUseNames(t *testing.T) {
 // "no such host" answer with its own block address, and warns about a
 // failure that never happened.
 func TestDOHResolverTreatsNXDOMAINAsAuthoritative(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"Status":3,"Answer":[]}`))
 	}))
 	defer server.Close()
 
 	resolver := newTestDOHResolver(server.URL, refusingFallback(t))
-	_, err := resolver.LookupIP(context.Background(), "nonexistent.example.com")
+	_, err := resolver.LookupIP(context.Background(), "nonexistent.doh-seam.net")
 	if err == nil {
 		t.Fatal("LookupIP error = nil, want a not-found error for an NXDOMAIN answer")
 	}
@@ -149,6 +160,7 @@ func TestDOHResolverTreatsNXDOMAINAsAuthoritative(t *testing.T) {
 // TestDOHResolverCachesWithinTTL keeps a burst of rungs against one host from
 // re-querying the resolver for every dial.
 func TestDOHResolverCachesWithinTTL(t *testing.T) {
+	t.Parallel()
 	queries := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queries++
@@ -162,7 +174,7 @@ func TestDOHResolverCachesWithinTTL(t *testing.T) {
 
 	resolver := newTestDOHResolver(server.URL, refusingFallback(t))
 	for i := 0; i < 3; i++ {
-		if _, err := resolver.LookupIP(context.Background(), "mirror.example.com"); err != nil {
+		if _, err := resolver.LookupIP(context.Background(), "mirror.doh-seam.net"); err != nil {
 			t.Fatalf("LookupIP #%d error = %v", i, err)
 		}
 	}
@@ -177,6 +189,7 @@ func TestDOHResolverCachesWithinTTL(t *testing.T) {
 // resolver that cached forever would pass it too. An entry already past its
 // expires time must be re-queried, not served stale.
 func TestDOHResolverRequeriesAfterTTLExpires(t *testing.T) {
+	t.Parallel()
 	queries := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queries++
@@ -189,14 +202,14 @@ func TestDOHResolverRequeriesAfterTTLExpires(t *testing.T) {
 	defer server.Close()
 
 	resolver := newTestDOHResolver(server.URL, refusingFallback(t))
-	resolver.store("mirror.example.com", []net.IP{net.ParseIP("203.0.113.99")}, dohMinTTL)
+	resolver.store("mirror.doh-seam.net", []net.IP{net.ParseIP("203.0.113.99")}, dohMinTTL)
 	resolver.mu.Lock()
-	expired := resolver.cache["mirror.example.com"]
+	expired := resolver.cache["mirror.doh-seam.net"]
 	expired.expires = time.Now().Add(-time.Second)
-	resolver.cache["mirror.example.com"] = expired
+	resolver.cache["mirror.doh-seam.net"] = expired
 	resolver.mu.Unlock()
 
-	ips, err := resolver.LookupIP(context.Background(), "mirror.example.com")
+	ips, err := resolver.LookupIP(context.Background(), "mirror.doh-seam.net")
 	if err != nil {
 		t.Fatalf("LookupIP error = %v", err)
 	}
@@ -247,6 +260,7 @@ func TestNewKeepsAnInjectedResolver(t *testing.T) {
 // real host while the browser rung alone landed on a block page, and the wall
 // would read as the source's own refusal.
 func TestBrowserHostResolverRulePinsTheDoHAnswer(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("type") != "A" {
 			_, _ = w.Write([]byte(`{"Status":0,"Answer":[]}`))
@@ -257,14 +271,14 @@ func TestBrowserHostResolverRulePinsTheDoHAnswer(t *testing.T) {
 	defer server.Close()
 
 	resolver := newTestDOHResolver(server.URL, refusingFallback(t))
-	ips, err := resolver.LookupIP(context.Background(), "mirror.example.com")
+	ips, err := resolver.LookupIP(context.Background(), "mirror.doh-seam.net")
 	if err != nil || len(ips) == 0 {
 		t.Fatalf("LookupIP = %v, %v", ips, err)
 	}
 	if rule := browserHostResolverRuleFrom(
-		"https://mirror.example.com/doc",
+		"https://mirror.doh-seam.net/doc",
 		ips,
-	); rule != "MAP mirror.example.com 198.51.100.7" {
+	); rule != "MAP mirror.doh-seam.net 198.51.100.7" {
 		t.Fatalf("rule = %q, want Chrome pinned to the DoH answer", rule)
 	}
 }
@@ -273,14 +287,15 @@ func TestBrowserHostResolverRulePinsTheDoHAnswer(t *testing.T) {
 // rule, and a private answer must never be pinned — pinning one would hand
 // Chrome an internal address the SSRF guard exists to refuse.
 func TestBrowserHostResolverRuleRefusesPrivateAndUnpinnable(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		url string
 		ips []net.IP
 	}{
 		"literal ip":       {"https://198.51.100.7/doc", []net.IP{net.ParseIP("198.51.100.7")}},
 		"special-use name": {"https://fixture.test/doc", []net.IP{net.ParseIP("198.51.100.7")}},
-		"private answer":   {"https://mirror.example.com/doc", []net.IP{net.ParseIP("10.0.0.5")}},
-		"no answer":        {"https://mirror.example.com/doc", nil},
+		"private answer":   {"https://mirror.doh-seam.net/doc", []net.IP{net.ParseIP("10.0.0.5")}},
+		"no answer":        {"https://mirror.doh-seam.net/doc", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if rule := browserHostResolverRuleFrom(tc.url, tc.ips); rule != "" {
@@ -296,18 +311,19 @@ func TestBrowserHostResolverRuleRefusesPrivateAndUnpinnable(t *testing.T) {
 // pin on lexical order alone and strand the browser rung on an unreachable route
 // while every HTTP rung succeeds over IPv4.
 func TestBrowserHostResolverRulePrefersIPv4(t *testing.T) {
+	t.Parallel()
 	ips := []net.IP{net.ParseIP("2001:db8::1"), net.ParseIP("198.51.100.7")}
 	if rule := browserHostResolverRuleFrom(
-		"https://mirror.example.com/doc",
+		"https://mirror.doh-seam.net/doc",
 		ips,
-	); rule != "MAP mirror.example.com 198.51.100.7" {
+	); rule != "MAP mirror.doh-seam.net 198.51.100.7" {
 		t.Fatalf("rule = %q, want the IPv4 address pinned", rule)
 	}
 	only6 := []net.IP{net.ParseIP("2001:db8::1")}
 	if rule := browserHostResolverRuleFrom(
-		"https://mirror.example.com/doc",
+		"https://mirror.doh-seam.net/doc",
 		only6,
-	); rule != "MAP mirror.example.com 2001:db8::1" {
+	); rule != "MAP mirror.doh-seam.net 2001:db8::1" {
 		t.Fatalf("rule = %q, want the IPv6 address when it is the only one", rule)
 	}
 }

@@ -319,6 +319,8 @@ func TestChatInjectResolvesUnindexedLiveSessionAcrossProbeSockets(t *testing.T) 
 	if err := os.WriteFile(compatPath, []byte(compatBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("CHAT_INJECT_ENTER_SETTLE", "0.4")
+	t.Setenv("CHAT_INJECT_PROOF_SETTLE", "0.5")
 	stdout.Reset()
 	stderr.Reset()
 	code = run([]string{"chat", "inject", fileSession, "--file", compatPath}, &stdout, &stderr)

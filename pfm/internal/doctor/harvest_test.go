@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
@@ -106,13 +107,14 @@ func TestDoctorHarvestReportsPinnedInterpreterLockInventoryAndLiveSmokeHealthy(t
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(
+	warnings := printHarvestPythonDoctorWithRunner(
 		context.Background(),
 		&output,
 		home,
 		harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"},
 		fake,
 		false,
+		&deps.FakeRunner{},
 	)
 	if warnings != 0 {
 		t.Fatalf("healthy doctor warnings=%d, want 0\n%s", warnings, output.String())
@@ -151,13 +153,14 @@ func TestDoctorHarvestDistinguishesBrokenEnvironmentAndSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(
+	warnings := printHarvestPythonDoctorWithRunner(
 		context.Background(),
 		&output,
 		home,
 		harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"},
 		fake,
 		false,
+		&deps.FakeRunner{},
 	)
 	if warnings == 0 {
 		t.Fatalf("broken doctor warnings=%d, want nonzero\n%s", warnings, output.String())
@@ -202,13 +205,14 @@ func TestDoctorHarvestLockIncompleteReflectsInterruptedProvisionState(t *testing
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(
+	warnings := printHarvestPythonDoctorWithRunner(
 		context.Background(),
 		&output,
 		home,
 		harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"},
 		fake,
 		false,
+		&deps.FakeRunner{},
 	)
 	if warnings == 0 {
 		t.Fatalf("interrupted-provision doctor warnings=%d, want nonzero\n%s", warnings, output.String())
@@ -259,13 +263,14 @@ func TestDoctorHarvestUnnamedFailedCheckIsNotHiddenAsClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(
+	warnings := printHarvestPythonDoctorWithRunner(
 		context.Background(),
 		&output,
 		home,
 		harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"},
 		fake,
 		false,
+		&deps.FakeRunner{},
 	)
 	if warnings == 0 {
 		t.Fatalf(
@@ -281,7 +286,7 @@ func TestDoctorHarvestUnnamedFailedCheckIsNotHiddenAsClean(t *testing.T) {
 
 func TestDoctorHarvestMissingRootIsSkipped(t *testing.T) {
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(
+	warnings := printHarvestPythonDoctorWithRunner(
 		context.Background(),
 		&output,
 		t.TempDir(),
@@ -291,6 +296,7 @@ func TestDoctorHarvestMissingRootIsSkipped(t *testing.T) {
 			checkErr: errors.New("harvestpy root is absent"),
 		},
 		false,
+		&deps.FakeRunner{},
 	)
 	if warnings != 0 {
 		t.Fatalf("missing harvest root warnings=%d, want 0\n%s", warnings, output.String())
@@ -313,7 +319,7 @@ func TestDoctorHarvestUnreadableRootIsNotSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(
+	warnings := printHarvestPythonDoctorWithRunner(
 		context.Background(),
 		&output,
 		home,
@@ -323,6 +329,7 @@ func TestDoctorHarvestUnreadableRootIsNotSkipped(t *testing.T) {
 			checkErr: os.ErrPermission,
 		},
 		false,
+		&deps.FakeRunner{},
 	)
 	if warnings == 0 {
 		t.Fatalf("unreadable harvest root warnings=0, want a visible probe failure\n%s", output.String())
@@ -552,13 +559,14 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 // rung renders as silence.
 func TestDoctorBrowserRowPrintsEvenWhenHarvestpyIsSkipped(t *testing.T) {
 	var output strings.Builder
-	warnings := printHarvestPythonDoctor(
+	warnings := printHarvestPythonDoctorWithRunner(
 		context.Background(),
 		&output,
 		t.TempDir(),
 		harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"},
 		harvestDoctorFake{},
 		true,
+		&deps.FakeRunner{},
 	)
 	if !strings.Contains(output.String(), "harvestpy_browser") ||
 		!strings.Contains(output.String(), "NOT_PROVISIONED") {

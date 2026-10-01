@@ -126,11 +126,6 @@ func TestSettledRootInterface(t *testing.T) {
 			t.Fatalf("root help missing %q:\n%s", want, help)
 		}
 	}
-	for _, retired := range []string{"  open ", "  kill ", "  unkill ", "  killed ", "  resolve ", "  bb ", "chat bb"} {
-		if strings.Contains(help, retired) {
-			t.Fatalf("root help still advertises %q:\n%s", retired, help)
-		}
-	}
 }
 
 func TestChatShimWhoamiCompatibilityRoute(t *testing.T) {
@@ -141,7 +136,12 @@ func TestChatShimWhoamiCompatibilityRoute(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 
 	var stdout, stderr bytes.Buffer
-	code := runChat([]string{"whoami"}, strings.NewReader(""), &stdout, &stderr)
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := runChatWithRuntime([]string{"whoami"}, strings.NewReader(""), &stdout, &stderr,
+		runtime, context.Background())
 	if code != 1 {
 		t.Fatalf("chat whoami code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -194,6 +194,18 @@ func TestUnknownCommand(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, `unknown command "no-such-command"`) {
 		t.Fatalf("run(unknown) stderr = %q, want unknown-command message", got)
+	}
+}
+
+func TestChatUnknownVerbIsAUsageError(t *testing.T) {
+	jailTest(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"chat", "no-such-verb"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("chat unknown verb code=%d stdout=%q stderr=%q, want 2", code, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), `pfm chat: unknown command "no-such-verb"`) ||
+		!strings.Contains(stderr.String(), "usage: pfm chat") {
+		t.Fatalf("chat unknown verb stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 

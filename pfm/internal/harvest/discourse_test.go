@@ -276,6 +276,7 @@ var discourseAllPosts = []string{
 // order with its author, date and likes, and the count reconciles — the
 // artifact is complete, not partial. A second harvest is identical.
 func TestDiscourseTopicIsFollowedAcrossItsPagesAndReconciles(t *testing.T) {
+	t.Parallel()
 	site := newDiscourseSite(7)
 	h, pacing := site.harvester(t, &browserSpyConverter{}, browserOn())
 	result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
@@ -331,6 +332,7 @@ func TestDiscourseTopicIsFollowedAcrossItsPagesAndReconciles(t *testing.T) {
 // a QAPage; without that meta it is a page like any other: the generic path
 // converts it.
 func TestDiscourseIsRecognisedByItsGeneratorOnAnyDomain(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name          string
 		generator, qa bool
@@ -369,6 +371,7 @@ func TestDiscourseIsRecognisedByItsGeneratorOnAnyDomain(t *testing.T) {
 // than any page serves, and no page link is left. The remainder is named on
 // the count line and flags the artifact partial.
 func TestDiscourseStatedPostsInNoPageAreNamed(t *testing.T) {
+	t.Parallel()
 	site := newDiscourseSite(9)
 	h, _ := site.harvester(t, &browserSpyConverter{}, browserOn())
 	result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
@@ -390,6 +393,7 @@ func TestDiscourseStatedPostsInNoPageAreNamed(t *testing.T) {
 // by something that is not the topic, the request cap and an unread count
 // each leave the artifact partial with the posts not loaded and why.
 func TestDiscourseFollowingStopsAreNamedPartials(t *testing.T) {
+	t.Parallel()
 	t.Run("rate limited", func(t *testing.T) {
 		site := newDiscourseSite(7)
 		site.status = map[string]int{discoursePageURL(2): http.StatusTooManyRequests}
@@ -476,6 +480,7 @@ func TestDiscourseFollowingStopsAreNamedPartials(t *testing.T) {
 // that post alone, with no page link; the topic's first page is followed from
 // it, then every next page, and the whole topic renders in number order.
 func TestDiscourseSinglePostPageLoadsTheWholeTopic(t *testing.T) {
+	t.Parallel()
 	site := newDiscourseSite(7)
 	h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
 	result := h.FetchWithOptions(context.Background(), discourseTopicURL+"/6", FetchOptions{Refresh: true})
@@ -492,6 +497,7 @@ func TestDiscourseSinglePostPageLoadsTheWholeTopic(t *testing.T) {
 // first one followed replayed into its own page — none is requested again,
 // and none is dropped from it.
 func TestFollowedLoaderAnswersAreReplayedIntoALaterConversion(t *testing.T) {
+	t.Parallel()
 	site := newDiscourseSite(7)
 	h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
 	page, err := url.Parse(discourseTopicURL)
@@ -534,6 +540,7 @@ func TestFollowedLoaderAnswersAreReplayedIntoALaterConversion(t *testing.T) {
 // the artifact is partial and names why; a page naming no topic address, whose
 // count could never be requested, is named apart from one whose read failed.
 func TestDiscourseUnreadCountFlagsTheTopicPartial(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		setup func(site *discourseSite)
@@ -598,6 +605,7 @@ func TestDiscourseUnreadCountFlagsTheTopicPartial(t *testing.T) {
 // unknown identity (no topic address on either side) merges nothing — neither
 // grafts a foreign topic's posts in as this one's; each is named.
 func TestDiscourseAnswersNotProvedThisTopicAreNotMerged(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		setup func(site *discourseSite)
@@ -642,6 +650,7 @@ func TestDiscourseAnswersNotProvedThisTopicAreNotMerged(t *testing.T) {
 // per address — the answer holding no new post is a named failure, never a
 // loop.
 func TestDiscourseLoopingNextPagesEndBounded(t *testing.T) {
+	t.Parallel()
 	loopTo := func(site *discourseSite, page, next int) string {
 		return strings.ReplaceAll(discourseCrawlerPage(site.pages, page, true),
 			`href="`+discoursePageURL(page+1)+`"`, `href="`+discoursePageURL(next)+`"`)
@@ -701,6 +710,7 @@ func discourseConvertTwice(
 // replay store's bound left out, are each named as followed-but-unreplayed —
 // never as not followed, and never dropped silently.
 func TestDiscourseAnswersALaterConversionCannotTakeAreNamed(t *testing.T) {
+	t.Parallel()
 	t.Run("would not graft", func(t *testing.T) {
 		site := newDiscourseSite(7)
 		// The later page already holds page two's posts: its answer adds none.
@@ -736,6 +746,7 @@ func TestDiscourseAnswersALaterConversionCannotTakeAreNamed(t *testing.T) {
 // TestDiscourseUnparsableLikeCountRendersUnread: a like count stated but not a
 // number renders as unread, never as no likes.
 func TestDiscourseUnparsableLikeCountRendersUnread(t *testing.T) {
+	t.Parallel()
 	site := newDiscourseSite(3)
 	body := strings.Replace(discourseCrawlerPage(site.pages[:1], 1, true),
 		`itemprop="userInteractionCount" content="12"`, `itemprop="userInteractionCount" content="twelve"`, 1)

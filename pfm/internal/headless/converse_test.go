@@ -355,7 +355,7 @@ func TestAwaitAnswersTheLatestQuestion(t *testing.T) {
 	}()
 	options := fastOptions()
 	options.Progress = gate
-	options.Settle = 2 * time.Second
+	options.Settle = 250 * time.Millisecond
 	turn, err := Await(context.Background(), talk.resolve, options)
 	if err != nil {
 		t.Fatalf("Await() error = %v", err)

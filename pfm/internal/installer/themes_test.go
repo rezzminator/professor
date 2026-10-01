@@ -98,6 +98,61 @@ func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *
 	}
 }
 
+func TestOfflineThemesSkipRemoteAndInstallBundled(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sourceRepo := t.TempDir()
+	recordFixtureSourceRepo(t, home, sourceRepo)
+	writeFixture(t, filepath.Join(sourceRepo, themeManifestRelative), `{
+  "source_fetched": {"remote": {"repo": "https://example.invalid", "raw": "https://example.invalid/remote.json", "target": "~/.claude/themes/remote.json"}},
+  "bundled": {"local": {"file": "local.json", "target": "~/.claude/themes/local.json"}}
+}`)
+	palette := `{"name":"Local","base":"dark","overrides":{"claude":"#ffd60a"}}`
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "local.json"), palette)
+	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
+	})}
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: sourceRepo,
+		Stdout: &output, Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{},
+		InstallThemes: true, ThemesOffline: true, ThemeHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("offline theme install: %v\n%s", err, output.String())
+	}
+	if got := readFixture(t, filepath.Join(home, ".claude", "themes", "local.json")); got != palette {
+		t.Fatalf("bundled palette = %q, want %q", got, palette)
+	}
+	if !strings.Contains(output.String(), "theme remote fetch failed: fetch skipped: PFM_THEMES_OFFLINE=1") ||
+		!strings.Contains(output.String(), "write theme local") {
+		t.Fatalf("offline theme report lacks the named skip or bundled write:\n%s", output.String())
+	}
+}
+
+func TestOfflineThemesWithoutLocalManifestNameSkip(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sourceRepo := t.TempDir()
+	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
+	})}
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: sourceRepo,
+		ThemeManifestURL: "https://example.invalid/templates/themes/sources.json",
+		Stdout:           &output, Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{},
+		InstallThemes: true, ThemesOffline: true, ThemeHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("offline install without local manifest: %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "themes NOT installed: load "+themeManifestRelative) ||
+		!strings.Contains(output.String(), "fetch skipped: PFM_THEMES_OFFLINE=1") {
+		t.Fatalf("offline manifest report lacks the named skip:\n%s", output.String())
+	}
+}
+
 func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing.T) {
 	t.Parallel()
 	load := func(manifest string) error {

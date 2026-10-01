@@ -1099,19 +1099,6 @@ func configuredHarvestDoctor() harvestDoctor {
 	return pinnedHarvestDoctor{}
 }
 
-func printHarvestPythonDoctor(
-	ctx context.Context,
-	stdout io.Writer,
-	home string,
-	platform harvestpy.Platform,
-	doctor harvestDoctor,
-	browserGate bool,
-) int {
-	return printHarvestPythonDoctorWithRunner(
-		ctx, stdout, home, platform, doctor, browserGate, obs.Runner(deps.RealRunner{}),
-	)
-}
-
 func printHarvestPythonDoctorWithRunner(
 	ctx context.Context,
 	stdout io.Writer,

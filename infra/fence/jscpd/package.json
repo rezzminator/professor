@@ -1,0 +1,7 @@
+{
+  "name": "pfm-jscpd",
+  "private": true,
+  "dependencies": {
+    "jscpd": "5.2.1"
+  }
+}

@@ -359,7 +359,7 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 		Width: 120, Height: 20,
 	}
 	model := NewModel(snapshot)
-	line := model.renderRow(snapshot.Rows[0], false, 118)
+	line := model.renderGroupedRow(snapshot.Rows[0], false, 118, false)
 	plain := ansi.Strip(line)
 	for _, want := range []string{"✦ PROFESSOR UPDATE ✦", "v0.61.2", "◖ Claude ◗", "[ Codex ]", "[ OpenCode ]", "guided upgrade"} {
 		if !strings.Contains(plain, want) {
@@ -371,7 +371,7 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 	}
 	model.nowNS += int64(500 * time.Millisecond)
 	if next := ansi.Strip(
-		model.renderRow(snapshot.Rows[0], false, 118),
+		model.renderGroupedRow(snapshot.Rows[0], false, 118, false),
 	); !strings.Contains(
 		next,
 		"✧ PROFESSOR UPDATE ✧",

@@ -2,6 +2,7 @@ package reload
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ type stashToggleTmux struct {
 	suggestion  string
 	stash       string
 	refuseStash bool
+	displayErr  error
 	// statusMarker draws Claude Code 2.1.257's "› stashed" status-row marker
 	// beneath the input box while a stash is pending.
 	statusMarker bool
@@ -27,6 +29,11 @@ type stashToggleTmux struct {
 	hintAfterStash string
 	stashKeys      int
 	submitted      []string
+}
+
+func (tmux *stashToggleTmux) Display(ctx context.Context, socket, pane, message string) error {
+	_ = tmux.fakeReloadTmux.Display(ctx, socket, pane, message)
+	return tmux.displayErr
 }
 
 func (tmux *stashToggleTmux) Capture(context.Context, string, string) (string, error) {
@@ -160,11 +167,26 @@ func TestRunRefusesADraftThatWillNotStash(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "half-typed question") {
 		t.Fatalf("Run error=%v, want a refusal naming the draft", err)
 	}
+	if !PaneTold(err) {
+		t.Fatalf("pane-told marker absent: %v", err)
+	}
 	if len(tmux.submitted) != 0 || tmux.literal != "" {
 		t.Fatalf("submitted=%q literal=%q, want nothing typed or submitted", tmux.submitted, tmux.literal)
 	}
 	if tmux.composer != "half-typed question" || tmux.respawn != "" {
 		t.Fatalf("composer=%q respawn=%q, want the draft intact and no respawn", tmux.composer, tmux.respawn)
+	}
+}
+
+func TestRunDoesNotMarkStashRefusalWhenDisplayFails(t *testing.T) {
+	tmux := &stashToggleTmux{
+		composer:    "half-typed question",
+		refuseStash: true,
+		displayErr:  errors.New("display failed"),
+	}
+	err := runStashToggle(t, tmux)
+	if err == nil || PaneTold(err) || !strings.Contains(err.Error(), "display stash refusal") {
+		t.Fatalf("stash error=%v paneTold=%t", err, PaneTold(err))
 	}
 }
 

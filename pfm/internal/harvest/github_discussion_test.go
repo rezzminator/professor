@@ -111,6 +111,7 @@ func ghdEntries(content string) (ids []string, depths []int) {
 // under its comment, and the stated counts reconcile — the artifact complete,
 // a second harvest identical.
 func TestGitHubDiscussionLoadsHiddenItemsAndReplies(t *testing.T) {
+	t.Parallel()
 	site := newGHDSite(t)
 	h, pacing := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), ghdURL, FetchOptions{Refresh: true})

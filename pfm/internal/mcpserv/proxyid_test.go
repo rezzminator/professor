@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
+	t.Parallel()
 	raw := map[string]any{
 		"v":          float64(ProxyWireVersion),
 		"session":    "cc-seat",
@@ -34,6 +35,7 @@ func TestParseProxyIdentityAcceptsWirePayload(t *testing.T) {
 }
 
 func TestParseProxyIdentityNamesMalformedPayloads(t *testing.T) {
+	t.Parallel()
 	valid := func() map[string]any {
 		return map[string]any{"v": ProxyWireVersion, "session": "cc-seat"}
 	}
@@ -77,6 +79,7 @@ func TestParseProxyIdentityNamesMalformedPayloads(t *testing.T) {
 }
 
 func TestParseProxyIdentityRejectsUnsupportedWireVersions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		version  any

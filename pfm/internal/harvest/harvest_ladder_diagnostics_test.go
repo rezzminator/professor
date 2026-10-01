@@ -14,6 +14,7 @@ import (
 // receipt reported an empty ErrorKind for a rung that actually failed to
 // reach the network. Watched FAILING before the fix (ErrorKind was "").
 func TestDefuddleRungTransportFailureReachesTerminalDiagnostic(t *testing.T) {
+	t.Parallel()
 	const source = "https://example.test/article"
 	const challengeBody = "<html><body>Checking your browser before accessing this site</body></html>"
 	client := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -62,6 +63,7 @@ func TestDefuddleRungTransportFailureReachesTerminalDiagnostic(t *testing.T) {
 // outage. Watched FAILING before the fix (the message named neither a
 // conversion failure nor a tool outage).
 func TestStaticRungConverterFailureIsNamedToolOutage(t *testing.T) {
+	t.Parallel()
 	const source = "https://example.test/article"
 	// The direct rung answers with usable-looking HTML (long enough to pass
 	// the thin-page floor) so the ladder reaches the converter at all; the

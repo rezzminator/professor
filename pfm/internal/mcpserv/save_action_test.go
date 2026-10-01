@@ -26,6 +26,7 @@ import (
 // home directory). The fix refuses any target without a path separator
 // before it ever reaches the dispatcher.
 func TestChatSaveRefusesATargetWithNoPathSeparator(t *testing.T) {
+	t.Parallel()
 	dispatched := false
 	service := &Service{backend: &backend{
 		dispatch: func(context.Context, []string, io.Writer, io.Writer) int {
@@ -48,6 +49,7 @@ func TestChatSaveRefusesATargetWithNoPathSeparator(t *testing.T) {
 // target that DOES contain a path separator is still accepted and reaches
 // the dispatcher unchanged, transcript argument included when supplied.
 func TestChatSaveDispatchesAPathShapedTarget(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	service := &Service{backend: &backend{
 		allowAmbientIdentity: true,
@@ -70,6 +72,7 @@ func TestChatSaveDispatchesAPathShapedTarget(t *testing.T) {
 }
 
 func TestChatSaveResolvesCallerRelativePathsAndScopesRepository(t *testing.T) {
+	t.Parallel()
 	callerCWD := filepath.Join(t.TempDir(), "caller")
 	row := compose.Row{
 		Kind: compose.LiveClaude, ID: "caller-id", CWD: callerCWD,
@@ -153,6 +156,7 @@ func TestChatSaveDefaultsToExactIndexedCallerTranscript(t *testing.T) {
 }
 
 func TestChatSaveKeepsExplicitAbsolutePathsWithInvalidCaller(t *testing.T) {
+	t.Parallel()
 	target := filepath.Join(t.TempDir(), "notes", "chat.md")
 	transcriptPath := filepath.Join(t.TempDir(), "transcripts", "chat.jsonl")
 	var calls [][]string
@@ -177,6 +181,7 @@ func TestChatSaveKeepsExplicitAbsolutePathsWithInvalidCaller(t *testing.T) {
 }
 
 func TestChatSaveKeepsExplicitAbsolutePathSpellingForValidCaller(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := root + "/notes/../chat.md"
 	transcriptPath := root + "/transcripts/../chat.jsonl"
@@ -206,6 +211,7 @@ func TestChatSaveKeepsExplicitAbsolutePathSpellingForValidCaller(t *testing.T) {
 }
 
 func TestChatSaveKeepsAmbientRelativeArgumentsAndDefaultInference(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	service := newService("test", &backend{
 		allowAmbientIdentity: true,
@@ -227,6 +233,7 @@ func TestChatSaveKeepsAmbientRelativeArgumentsAndDefaultInference(t *testing.T) 
 }
 
 func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		row         compose.Row
@@ -297,6 +304,7 @@ func TestChatSaveRefusesCallerDependentPathsWithoutUsableCallerContext(t *testin
 }
 
 func TestChatSaveKeepsInterleavedCallerContextsIsolated(t *testing.T) {
+	t.Parallel()
 	rows := []compose.Row{
 		{
 			Kind: compose.LiveClaude, ID: "alpha", CWD: "/work/alpha",

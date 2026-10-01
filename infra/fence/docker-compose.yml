@@ -31,7 +31,7 @@ services:
       - ${PFM_DEV_GIT_COMMON:?set by dev.sh iso — the common Git directory}:/pfm-git-common:ro
       - pfm-dev-gocache:/root/.cache/go-build
       - pfm-dev-gomod:/root/go/pkg/mod
-      - pfm-dev-npm-cache:/root/.npm
+      - pfm-dev-lintcache:/root/.cache/golangci-lint
     working_dir: /worktree
     environment:
       PFM_DEV_FENCE: "1"
@@ -69,7 +69,9 @@ services:
 # (fence_volumes_ensure, infra/fence/housekeeping.sh). Bare-name mounters:
 #   pfm-dev-gocache    lanes/container.sh, release-rehearsal.sh
 #   pfm-dev-gomod      lanes/container.sh, release-rehearsal.sh, host-rehearsal.sh (read-only)
-#   pfm-dev-npm-cache  lanes/container.sh
+#   pfm-dev-lintcache  docker-compose.yml (pfm-dev, pfm-sim by extends)
+#   pfm-lane-harvest-cache  lanes/root.sh (via lanes/container.sh)
+#   pfm-lane-uv-cache       lanes/root.sh (via lanes/container.sh)
 volumes:
   pfm-dev-gocache:
     external: true
@@ -77,6 +79,6 @@ volumes:
   pfm-dev-gomod:
     external: true
     name: pfm-dev-gomod
-  pfm-dev-npm-cache:
+  pfm-dev-lintcache:
     external: true
-    name: pfm-dev-npm-cache
+    name: pfm-dev-lintcache

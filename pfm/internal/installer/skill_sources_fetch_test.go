@@ -216,7 +216,7 @@ func TestRunSkillGitStripsOnlyRepositorySelection(t *testing.T) {
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := runSkillGitWith(deps.RealRunner{}, 10*time.Second, script, t.TempDir(), "ls-remote")
+	got, err := runSkillGitWith(deps.RealRunner{}, 10*time.Second, skillGitWaitDelay, script, t.TempDir(), "ls-remote")
 	if err != nil {
 		t.Fatal(err)
 	}

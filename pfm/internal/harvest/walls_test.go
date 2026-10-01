@@ -36,6 +36,7 @@ const xBottomBar = `<div data-testid="BottomBar"><p>Don't miss what's happening.
 // nothing but the gate fails naming it; prose asking for a subscription alone
 // names nothing.
 func TestWallsAreNamedNeverStoredSilently(t *testing.T) {
+	t.Parallel()
 	const paywall = "paywalled: only the preview the site serves without a subscription was read"
 	const loginWall = "login wall: only what the site shows signed-out was read"
 	newsURL := "https://news.example.com/2023/12/27/business/lawsuit.html"

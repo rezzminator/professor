@@ -13,6 +13,7 @@ import (
 // TestSearchHintNamesSearchOnlyWhenAvailable pins the one shared helper every
 // "use `harvester_search_web`" message routes through.
 func TestSearchHintNamesSearchOnlyWhenAvailable(t *testing.T) {
+	t.Parallel()
 	if got := SearchHint(true, "with", "without"); got != "with" {
 		t.Fatalf("SearchHint(true) = %q, want %q", got, "with")
 	}
@@ -26,6 +27,7 @@ func TestSearchHintNamesSearchOnlyWhenAvailable(t *testing.T) {
 // configured backend cannot possibly use — FailureMessage used to name
 // `harvester_search_web` unconditionally in every one of these branches.
 func TestFailureMessageNamesSearchOnlyWhenAvailable(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"invalid", "timeout", "dns", "connect"} {
 		on := FailureMessage("https://example.test/x", 0, kind, false, true)
 		if !strings.Contains(on, "`harvester_search_web`") {
@@ -72,6 +74,7 @@ func TestFailureMessageNamesSearchOnlyWhenAvailable(t *testing.T) {
 // reaching the ladder's own settings, the one place its failure messages
 // read the flag from.
 func TestNewCarriesSearchAvailableIntoSettings(t *testing.T) {
+	t.Parallel()
 	on := mustNew(t, Options{CacheDir: t.TempDir(), SearchAvailable: true})
 	if !on.settings.searchAvailable {
 		t.Fatal("New(SearchAvailable: true) did not carry into settings.searchAvailable")
@@ -86,6 +89,7 @@ func TestNewCarriesSearchAvailableIntoSettings(t *testing.T) {
 // failures a caller must be able to errors.Is against, distinct from a
 // backend outage that might clear on retry.
 func TestSearchConfigurationErrorsAreSentinels(t *testing.T) {
+	t.Parallel()
 	_, _, err := Search(context.Background(), "q", SearchOptions{DisableSearch: true})
 	if !errors.Is(err, ErrSearchDisabled) {
 		t.Fatalf("Search(disabled) = %v, want errors.Is ErrSearchDisabled", err)
@@ -105,6 +109,7 @@ func TestSearchConfigurationErrorsAreSentinels(t *testing.T) {
 // caveat; an unreachable one is a warning; a configured Brave key is reported
 // without ever being probed (a probe would spend the operator's quota).
 func TestProbeSearchReportsEveryState(t *testing.T) {
+	t.Parallel()
 	t.Run("off disabled", func(t *testing.T) {
 		probe := ProbeSearch(
 			context.Background(),
@@ -168,6 +173,7 @@ func TestProbeSearchReportsEveryState(t *testing.T) {
 }
 
 func TestSearchBackendErrorNamesBackendAndSafeCause(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		backend string

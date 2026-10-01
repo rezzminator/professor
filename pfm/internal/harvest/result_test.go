@@ -5,12 +5,10 @@ import (
 )
 
 func TestLegacyRungReceiptsGroupOnlyConsecutiveOACandidates(t *testing.T) {
+	t.Parallel()
 	rungs := []string{"direct", "oa:unpaywall", "oa:openalex", "oa:core", "wayback"}
 	if got := rungsPhrase(rungs); got != "direct, oa-mirror(3 sources), wayback" {
 		t.Fatalf("rungsPhrase()=%q", got)
-	}
-	if got := rungsSummary([]string{"direct", "oa:unpaywall"}); got != "direct, oa:unpaywall" {
-		t.Fatalf("rungsSummary()=%q", got)
 	}
 	if got := withRungs("boom", []string{"direct"}); got != "boom" {
 		t.Fatalf("single-rung receipt=%q", got)

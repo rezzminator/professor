@@ -29,7 +29,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 ## Fence
 
-- `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since the Makefile's `LINT_BASE`, origin/main: a develop base judges nothing on a push to develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone.
+- `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since the Makefile's `LINT_BASE`, origin/main: a develop base judges nothing on a push to develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone; `iso gate pfm` — the gate — runs all of these as concurrent steps in one container, the unit suite sharded by `scripts/test-shard.sh`, and prints a per-step table.
 - One package or probe: `.claude/scripts/dev.sh iso run 'go -C pfm test -count=1 ./internal/{pkg}/'`; the lint burn-down view: `iso run 'make -C pfm lint'`.
 - The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools; `make -C pfm prompts` likewise runs on the host.
 

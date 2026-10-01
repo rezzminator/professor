@@ -49,6 +49,7 @@ const (
 	checkAction       = "check"
 	statuslineCommand = "statusline"
 	callmeterCommand  = "callmeter"
+	staleCommand      = "stale"
 )
 
 var version = config.DevelopmentVersion
@@ -69,7 +70,7 @@ var internalSubcommands = []string{
 	"codex-launch", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "rr-dir",
-	reloadRunCommand, "stale", statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
+	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
 }
 
 func main() {
@@ -102,8 +103,11 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 			return runVersion(args[1:], stdout, stderr)
 		}
 		// make install sweeps with stale in that same window: it reads no config.
-		if len(args) > 1 && args[0] == internalCommand && args[1] == "stale" {
+		if len(args) > 1 && args[0] == internalCommand && args[1] == staleCommand {
 			return stale.Run(args[2:], stdout, stderr)
+		}
+		if len(args) > 1 && args[0] == internalCommand && args[1] == reloadRunCommand {
+			return reloadWorkerConfigFailure(args[2:], err, stderr)
 		}
 		if !diagnosticCommand(args) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)

@@ -60,7 +60,6 @@ import io
 import json
 from html import escape as html_escape
 import os.path
-import re
 import shutil
 import sys
 import urllib.parse
@@ -531,13 +530,6 @@ CONSENT_CLEAR_JS = r"""(args) => {
   }
   return {pressed: [], removed: removed};
 }"""
-
-
-def is_reject_label(label):
-    """Whether a control's visible label is a privacy-preserving consent
-    choice (reject, decline, necessary-only) — the only kind the rung presses.
-    The same pattern runs in the page (CONSENT_DISMISS_JS)."""
-    return bool(re.match(CONSENT_REJECT_PATTERN, " ".join(str(label or "").split()), re.IGNORECASE))
 
 
 async def dismiss_consent(page):

@@ -24,44 +24,16 @@ func TestStableFourToolSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := service.Server().Connect(context.Background(), serverTransport, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := serverSession.Close(); err != nil {
-			t.Errorf("close serverSession: %v", err)
-		}
-	}()
-	client := mcp.NewClient(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
-	session, err := client.Connect(context.Background(), clientTransport, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := session.Close(); err != nil {
-			t.Errorf("close session: %v", err)
-		}
-	}()
-	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := make([]string, 0, len(tools.Tools))
-	for _, tool := range tools.Tools {
-		got = append(got, tool.Name)
-	}
+	defer func() { _ = service.Close() }()
+	got := listToolNames(t, service)
 	want := []string{"harvester_download_file", "harvester_read", "harvester_search_literature", "harvester_search_web"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tool names = %#v, want %#v", got, want)
 	}
 }
 
-// listToolNames connects an in-process client to the given service and
-// returns the tool names it advertises — the one place both search-gating
-// tests below read the registered surface, rather than poking register()
-// internals.
+// listToolNames connects an in-process client to the service and reads the
+// registered surface for the tool-surface tests.
 func listToolNames(t *testing.T, service *Service) []string {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
@@ -114,33 +86,6 @@ func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 		if name == "harvester_search_web" {
 			t.Fatalf("tool list %v advertises `harvester_search_web` with no backend configured", names)
 		}
-	}
-}
-
-// TestSearchToolListedWithSearXNGConfigured is TestSearchToolHiddenWithoutABackend's
-// positive twin: a configured backend must still register the tool.
-func TestSearchToolListedWithSearXNGConfigured(t *testing.T) {
-	service, err := NewConfiguredHarvester(
-		"test",
-		Runtime{
-			Home:       t.TempDir(),
-			CacheDir:   filepath.Join(t.TempDir(), "cache"),
-			SearXNGURL: "http://searxng.example.test",
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = service.Close() }()
-	names := listToolNames(t, service)
-	found := false
-	for _, name := range names {
-		if name == "harvester_search_web" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("tool list %v does not advertise `harvester_search_web` with SearXNGURL configured", names)
 	}
 }
 

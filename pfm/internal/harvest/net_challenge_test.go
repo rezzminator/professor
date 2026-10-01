@@ -12,6 +12,7 @@ import (
 // (<=4000) for the first gate but not (<4000) for the second, so a
 // forum-wall phrase at exactly that length went unflagged.
 func TestIsChallengeUsesOneShortDefinitionAtTheBoundary(t *testing.T) {
+	t.Parallel()
 	phrase := "prove your humanity"
 	body := []byte(strings.Repeat("a", 4000-len(phrase)) + phrase)
 	if got := contentChars(string(body)); got != 4000 {

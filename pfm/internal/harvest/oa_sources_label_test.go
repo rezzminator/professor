@@ -11,6 +11,7 @@ import (
 // hands out a HAL record page, abstract and metadata only); a record page is
 // an HTML candidate, and the location's pdf_url is the PDF one.
 func TestOAOpenAlexLabelsACandidateByWhatItIs(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		payload string
 		want    map[string]string

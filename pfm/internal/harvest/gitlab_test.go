@@ -85,6 +85,7 @@ var gitlabNoteRe = regexp.MustCompile(`(?m)^ *- \*\*[^*]+\*\* · [^·]+ · \[#(\
 // reconcile, the artifact is complete, and a second harvest is identical. On
 // gitlab.com (by host) and on a self-hosted instance (by its markup) alike.
 func TestGitLabIssueLoadsEveryNote(t *testing.T) {
+	t.Parallel()
 	for _, host := range []string{"gitlab.com", "gitlab.example"} {
 		site, want := gitlabSite(t, host)
 		h := site.harvester(t)
@@ -129,6 +130,7 @@ func TestGitLabIssueLoadsEveryNote(t *testing.T) {
 // TestGitLabUnansweredPageFlagsThePartial: a notes page the API would not answer
 // is named, and the notes it held are counted as not loaded.
 func TestGitLabUnansweredPageFlagsThePartial(t *testing.T) {
+	t.Parallel()
 	site, _ := gitlabSite(t, "gitlab.com")
 	var first gitlabFixture
 	if err := json.Unmarshal([]byte(site.answers[gitlabAPIKey("gitlab.com", "")]), &first); err != nil {
@@ -152,6 +154,7 @@ func TestGitLabUnansweredPageFlagsThePartial(t *testing.T) {
 // TestGitLabRecordNotLoadedServesThePage: an issue whose first answer never
 // loaded is not claimed; the page goes the generic path, the gap named.
 func TestGitLabRecordNotLoadedServesThePage(t *testing.T) {
+	t.Parallel()
 	site, _ := gitlabSite(t, "gitlab.com")
 	site.status = map[string]int{gitlabAPIKey("gitlab.com", ""): http.StatusNotFound}
 	result := site.servingHarvester(t).FetchWithOptions(context.Background(), "https://gitlab.com"+gitlabIssuePath,

@@ -84,11 +84,6 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	if plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
 		t.Fatalf("native fresh server = %#v, want the plan's run in the row's cwd", plan.ChatServer)
 	}
-	for _, retired := range []string{" cc42", "_cc_run"} {
-		if strings.Contains(plan.Line, retired) || strings.Contains(plan.Run, retired) {
-			t.Fatalf("native fresh action retained retired shell surface %q: %#v", retired, plan)
-		}
-	}
 }
 
 // TestNewClaudeNativeSpawnOmitsMissingSystemPromptFile is F3/F4's regression

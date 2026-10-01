@@ -6,7 +6,7 @@ export PATH="$HOME/.local/bin:$PATH"
 step='create project'
 trap 'rc=$?; echo "adopt: $step failed at line $LINENO (exit $rc) — output above" >&2; exit 1' ERR
 DIR=/work/express
-if [ -f "$DIR/.professor/baseline.json" ] && git -C "$DIR" log --format=%s | grep -qx 'professor: install'; then
+if [ -f "$DIR/.professor/baseline.json" ] && grep -qx 'professor: install' <<<"$(git -C "$DIR" log --format=%s)"; then
   echo 'adopt: express already adopted'; exit 0
 fi
 mkdir -p "$DIR/test"

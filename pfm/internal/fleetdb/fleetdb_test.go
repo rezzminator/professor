@@ -92,22 +92,6 @@ ORDER BY name`)
 	}
 }
 
-func TestKillDoesNotRecreateTheRetiredCarrier(t *testing.T) {
-	t.Parallel()
-	state, values := openTestStore(t)
-	legacyCarrier := filepath.Join(
-		values.Home,
-		".claude",
-		".cc-ls-hidden",
-	)
-	if err := state.Kill(context.Background(), "database-only", 42); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(legacyCarrier); !os.IsNotExist(err) {
-		t.Fatalf("Kill recreated retired carrier %s: %v", legacyCarrier, err)
-	}
-}
-
 func TestUnkillReportsDeletedRow(t *testing.T) {
 	t.Parallel()
 	state, _ := openTestStore(t)

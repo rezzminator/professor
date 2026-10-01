@@ -8,6 +8,7 @@ import (
 // TestLinkedInJobSalaryRange: a baseSalary stating only its minimum renders
 // "from", only its maximum "up to", never as an exact amount.
 func TestLinkedInJobSalaryRange(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ value, want string }{
 		{`{"minValue":90000,"unitText":"YEAR"}`, "**Salary:** from USD 90000 per year"},
 		{`{"maxValue":120000,"unitText":"YEAR"}`, "**Salary:** up to USD 120000 per year"},

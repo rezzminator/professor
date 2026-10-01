@@ -150,3 +150,12 @@ func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 		t.Fatal("claudeHookTemplates dropped the exit-close hook")
 	}
 }
+
+func commandByName(hooks []ExpectedHook, name string) string {
+	for _, hook := range hooks {
+		if hook.Name == name {
+			return hook.Command
+		}
+	}
+	panic("installer expected hook is missing: " + name)
+}

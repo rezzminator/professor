@@ -105,6 +105,7 @@ func followRateLimited(
 // the stop names the server's wait; a second 429 on the retry ends the
 // following, naming the retry.
 func TestALoaderRateLimitIsWaitedOutAndRetriedOnce(t *testing.T) {
+	t.Parallel()
 	limited := func(retryAfter string) rateLimitAnswer {
 		return rateLimitAnswer{status: http.StatusTooManyRequests, retryAfter: retryAfter}
 	}
@@ -199,6 +200,7 @@ func (c *cancellingClock) Sleep(ctx context.Context, d time.Duration) error {
 // TestALoaderRateLimitWaitEndsWithTheFetch: a fetch cancelled during the
 // rate-limit wait sends no retry and names the cancellation.
 func TestALoaderRateLimitWaitEndsWithTheFetch(t *testing.T) {
+	t.Parallel()
 	const host = "api.example.test"
 	var requests []string
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {

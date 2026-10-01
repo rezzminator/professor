@@ -23,6 +23,7 @@ const driveVirusScanPage = `<!DOCTYPE html><html><head><title>Google Drive - Vir
 	`</div></div><div class="uc-footer"><hr class="uc-footer-divider"></div></body></html>`
 
 func TestShareDirectLinkRewritesEachService(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		source, service, target string
 	}{
@@ -99,6 +100,7 @@ func failOnRequest(t *testing.T) *recordingTransport {
 }
 
 func TestShareRefusedServicesFailByNameWithoutAFetch(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ source, service string }{
 		{"https://contoso.sharepoint.com/:w:/s/team/EXampleShareToken", "SharePoint"},
 		{"https://contoso-my.sharepoint.com/:b:/p/someone/EXampleShareToken", "OneDrive for Business"},
@@ -134,6 +136,7 @@ func TestShareRefusedServicesFailByNameWithoutAFetch(t *testing.T) {
 }
 
 func TestShareRewriteReachesReadPageAndDownload(t *testing.T) {
+	t.Parallel()
 	const source = "https://www.dropbox.com/s/abc123xyz/report.pdf?dl=0"
 	transport := &recordingTransport{respond: func(request *http.Request) (*http.Response, error) {
 		if request.URL.Query().Get("dl") == "1" {
@@ -165,6 +168,7 @@ func TestShareRewriteReachesReadPageAndDownload(t *testing.T) {
 }
 
 func TestShareSignInPageIsANamedFailureNeverTheDocument(t *testing.T) {
+	t.Parallel()
 	const source = "https://docs.google.com/document/d/1PrivateDocExample0000/edit"
 	transport := &recordingTransport{respond: func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusOK, "text/html; charset=utf-8",
@@ -196,6 +200,7 @@ func TestShareSignInPageIsANamedFailureNeverTheDocument(t *testing.T) {
 }
 
 func TestShareDriveVirusScanPageIsFollowedToTheFile(t *testing.T) {
+	t.Parallel()
 	confirmed, ok := driveConfirmURL([]byte(driveVirusScanPage))
 	parsed, err := url.Parse(confirmed)
 	if !ok || err != nil || parsed.Hostname() != "drive.usercontent.google.com" ||

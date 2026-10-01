@@ -107,6 +107,7 @@ func cachedArtifacts(t *testing.T, root string) []string {
 // floor was stored as the page itself at the direct rung. The shell must
 // escalate, and the rendering reader's route content must win.
 func TestAppShellEscalatesToRenderingReader(t *testing.T) {
+	t.Parallel()
 	jina := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusOK, "text/plain", renderedEventsMarkdown), nil
 	})
@@ -134,6 +135,7 @@ func TestAppShellEscalatesToRenderingReader(t *testing.T) {
 // shell into content. With no renderer available, the failure names the app
 // shell and the enable path, and nothing is cached.
 func TestAppShellNeverLaunderedThroughNonRenderingReader(t *testing.T) {
+	t.Parallel()
 	h := shellSite(t, nil, nil)
 	result := h.Fetch(context.Background(), "https://club.example.test/events")
 	if result.Error == "" {
@@ -159,6 +161,7 @@ func TestAppShellNeverLaunderedThroughNonRenderingReader(t *testing.T) {
 // TestAppShellBrowserRenderWins pins the browser rung's door: with jina
 // missing, a real-browser render carrying the route's content is accepted.
 func TestAppShellBrowserRenderWins(t *testing.T) {
+	t.Parallel()
 	rendered := `<html><body><div id="root"><h1>Events</h1>` + strings.Repeat(
 		`<p>Wed 16 Sep — Example Club Amsterdam meetup with 5 hosts and 13 speakers on agent evaluation and retrieval pipelines.</p>`,
 		6,
@@ -177,6 +180,7 @@ func TestAppShellBrowserRenderWins(t *testing.T) {
 // TestAppShellBrowserRenderOfShellIsRejected: a render that still shows only
 // the shell (the bundle failed to boot) is not the route's content.
 func TestAppShellBrowserRenderOfShellIsRejected(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{html: appShellFixture(), status: http.StatusOK}
 	h := shellSite(t, nil, spy)
 	result := h.Fetch(context.Background(), "https://club.example.test/events")
@@ -196,6 +200,7 @@ func TestAppShellBrowserRenderOfShellIsRejected(t *testing.T) {
 // SSR page that also ships a module bundle and a #root mount serves a
 // DIFFERENT document for a nonexistent sibling, so it is accepted directly.
 func TestServerRenderedPageWithBundleIsNotAShell(t *testing.T) {
+	t.Parallel()
 	page := `<html><head><script type="module" src="/assets/app.js"></script></head><body><div id="root"><h1>Events</h1>` +
 		strings.Repeat(
 			`<p>Wed 16 Sep — Amsterdam meetup, server-rendered with every talk listed in the markup itself.</p>`,
@@ -235,6 +240,7 @@ func TestServerRenderedPageWithBundleIsNotAShell(t *testing.T) {
 // TestPlainPageIsNeverProbed: a page with no client-app markers never pays
 // for the sibling probe.
 func TestPlainPageIsNeverProbed(t *testing.T) {
+	t.Parallel()
 	page := `<html><body><article><h1>Notes</h1>` + strings.Repeat(
 		`<p>A plain static article with enough prose to clear the thin-page floor on its own.</p>`,
 		10,
@@ -263,6 +269,7 @@ func TestPlainPageIsNeverProbed(t *testing.T) {
 }
 
 func TestAppShellProbeURLIsASibling(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ source, wantPrefix string }{
 		{"https://club.example.test/events", "https://club.example.test/"},
 		{"https://club.example.test/", "https://club.example.test/"},
@@ -281,6 +288,7 @@ func TestAppShellProbeURLIsASibling(t *testing.T) {
 // own host is NOT a catch-all (its sibling probe 404s), so only the shell text
 // carried into the recursion stops it being stored and returned as content.
 func TestAppShellWaybackSnapshotOfShellIsRejected(t *testing.T) {
+	t.Parallel()
 	shell := appShellFixture()
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Host == "web.archive.org" && strings.Contains(request.URL.Path, appShellProbePrefix) {
@@ -335,6 +343,7 @@ func TestAppShellWaybackSnapshotOfShellIsRejected(t *testing.T) {
 // sibling probe meets the wall, so the probe "could not compare" and the shell
 // was stored as the route's content. The probe arrives the way the page did.
 func TestAppShellProbeSendsTheProvenanceReferer(t *testing.T) {
+	t.Parallel()
 	shell := appShellFixture()
 	var probeReferer []string
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {

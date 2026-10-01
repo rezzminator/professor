@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for `.claude/scripts/dev.sh iso`'s fence housekeeping
 # call site: the image-building gate actions (install build typecheck verify
-# test e2e cover all) run infra/fence/housekeeping.sh first; status, run, shell
+# test e2e cover all gate) run infra/fence/housekeeping.sh first; status, run, shell
 # and sim never do (zero housekeeping cost); every compose action finds the
-# three cache volumes ensured first (compose declares them external). docker is
+# cache volumes housekeeping.sh lists ensured first (compose declares them external). docker is
 # a stub and dev.sh runs from a throwaway git repo, so nothing is built or run.
 #
 #   bash infra/fence/lanes/tests/iso-housekeeping_test.sh
@@ -24,7 +24,9 @@ R="$T/.$FXNAME"
 mkdir -p "$R/.claude/scripts" "$R/pfm/scripts" "$R/infra/fence/lanes"
 cp "$SUT" "$R/.claude/scripts/dev.sh"
 cp "$REPO/pfm/scripts/repo-git.sh" "$R/pfm/scripts/"
-cp "$REPO/infra/fence/housekeeping.sh" "$REPO/infra/fence/fence-env.sh" "$REPO/infra/fence/docker-compose.yml" "$R/infra/fence/"
+cp "$REPO/infra/fence/housekeeping.sh" "$REPO/infra/fence/fence-env.sh" "$REPO/infra/fence/docker-compose.yml" "$REPO/infra/fence/steps.sh" "$REPO/infra/fence/checks.sh" "$R/infra/fence/"
+# A fixture volume makes a hard-coded copy of today's list fail the order check.
+sed -i 's/^\(FENCE_CACHE_VOLUMES="[^"]*\)"/\1 fixture-cache"/' "$R/infra/fence/housekeeping.sh"
 printf 'printf "%%s\\n" aaa\n' >"$R/infra/fence/lanes/root.sh"
 (cd "$R" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
 
@@ -44,7 +46,9 @@ export PATH="$BIN:$PATH" STUB_DOCKER_LOG="$T/docker.log" PFM_FENCE_STAMP_DIR="$T
 iso() { : >"$STUB_DOCKER_LOG"; OUT="$(bash "$R/.claude/scripts/dev.sh" iso "$@" 2>&1)"; RC=$?; }
 line_of() { grep -n -- "$1" "$STUB_DOCKER_LOG" | head -1 | cut -d: -f1; }
 ensured_before_compose() {
-  local e c; e="$(line_of '^volume inspect pfm-dev-gocache pfm-dev-gomod pfm-dev-npm-cache$')"; c="$(line_of '^compose ')"
+  local e c volumes
+  volumes="$(sed -n 's/^FENCE_CACHE_VOLUMES="\([^"]*\)"/\1/p' "$R/infra/fence/housekeeping.sh")"
+  e="$(line_of "^volume inspect $volumes\$")"; c="$(line_of '^compose ')"
   [ -n "$e" ] && [ -n "$c" ] && [ "$e" -lt "$c" ]
 }
 housekept() { grep -q '^image prune' "$STUB_DOCKER_LOG"; }
@@ -63,8 +67,14 @@ for a in test build; do
   else bad "iso $a" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 done
 
+iso gate
+if [ "$RC" -eq 0 ] && housekept && ensured_before_compose && [ "$(grep -c '^compose ' "$STUB_DOCKER_LOG")" -eq 1 ] \
+  && grep -q '^compose .*pfm-dev bash -c .*bash infra/fence/egress\.sh run \./\.claude/scripts/dev\.sh gate all$' "$STUB_DOCKER_LOG"; then
+  ok "iso gate: housekeeping, then one compose run of the egress recorder"
+else bad "iso gate" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
+
 STUB_VOLUME=0 iso status
-if [ "$RC" -eq 0 ] && grep -qx 'volume create pfm-dev-gocache' "$STUB_DOCKER_LOG" && grep -qx 'volume create pfm-dev-npm-cache' "$STUB_DOCKER_LOG"; then
+if [ "$RC" -eq 0 ] && grep -qx 'volume create pfm-dev-gocache' "$STUB_DOCKER_LOG" && grep -qx 'volume create pfm-dev-lintcache' "$STUB_DOCKER_LOG" && grep -qx 'volume create fixture-cache' "$STUB_DOCKER_LOG"; then
   ok "iso status: absent caches are created before compose runs"
 else bad "iso status creates caches" "rc=$RC" "$(cat "$STUB_DOCKER_LOG")"; fi
 

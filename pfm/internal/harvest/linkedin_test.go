@@ -40,6 +40,7 @@ var linkedInChrome = []string{
 // datePosted; a profile with no publication date — with the login wall named
 // and none of the page's chrome.
 func TestLinkedInPagesRenderTheirEntity(t *testing.T) {
+	t.Parallel()
 	const postPath = "/posts/contoso-robotics_harvest-activity-7000000000000000001-abcd"
 	for _, tc := range []struct {
 		name, source, fixture string
@@ -151,6 +152,7 @@ func TestLinkedInPagesRenderTheirEntity(t *testing.T) {
 // post's or a job's place — is not rendered, and names nothing unrendered,
 // so the generic path names the wall.
 func TestLinkedInWallsFallThrough(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{
 		"https://www.linkedin.com/in/avery-example-0000",
 		"https://www.linkedin.com/posts/contoso-robotics_harvest-activity-7000000000000000001-abcd",
@@ -173,6 +175,7 @@ func TestLinkedInWallsFallThrough(t *testing.T) {
 // a job view, a post and a feed update on linkedin.com and its country
 // subdomains, and nothing else of the site.
 func TestLinkedInClaimsOnlyItsPages(t *testing.T) {
+	t.Parallel()
 	var linkedIn *siteExtractor
 	for index := range siteExtractors {
 		if siteExtractors[index].name == "linkedin-page" {

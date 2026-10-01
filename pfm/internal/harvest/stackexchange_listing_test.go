@@ -48,6 +48,7 @@ func seListingFixtureIDs(t *testing.T) []string {
 // reconciles the page, the later pages are named, the status reported is the
 // API's that delivered it, and a second harvest is identical.
 func TestStackExchangeListingReadsThePageFromTheAPI(t *testing.T) {
+	t.Parallel()
 	realPage := "<html><head><title>Highest scored 'rust' questions - Page 2</title></head><body>" +
 		"<div id=\"questions\">" + strings.Repeat("<div class=\"s-post-summary\"><h3>A question</h3>"+
 		"<p>Score of 204 · 9 answers · 132681 views</p></div>", 43) + "</div></body></html>"
@@ -105,6 +106,7 @@ func TestStackExchangeListingReadsThePageFromTheAPI(t *testing.T) {
 // TestStackExchangeListingAddresses: a listing is claimed only for a tab the
 // API's /questions answers, the default tab and page size read as the site's.
 func TestStackExchangeListingAddresses(t *testing.T) {
+	t.Parallel()
 	for address, want := range map[string]string{
 		"https://stackoverflow.com/questions/tagged/rust":                          "stackoverflow.com rust creation 1 15",
 		"https://superuser.com/questions/tagged/tmux+linux?tab=Active&page=3":      "superuser.com tmux;linux activity 3 15",
@@ -136,6 +138,7 @@ func TestStackExchangeListingAddresses(t *testing.T) {
 // holds no question (the tag does not exist) is not claimed, so the origin's
 // 404 stays an error and nothing is stored.
 func TestStackExchangeListingOfNoQuestionsIsNotStored(t *testing.T) {
+	t.Parallel()
 	origin := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Host == "api.stackexchange.com" {
 			return response(request, http.StatusOK, "application/json", seFixture(t, "listing-empty.json")), nil

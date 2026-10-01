@@ -13,6 +13,7 @@ import (
 // Published line on a collection; the course named paywalled, every other
 // page the login wall — and none of the page's chrome.
 func TestLinkedInCollectionPagesRender(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, source, fixture string
 		want, absent          []string
@@ -157,6 +158,7 @@ func TestLinkedInCollectionPagesRender(t *testing.T) {
 // posting's address is not rendered and names nothing unrendered; a Learning
 // catalog page is no course, even carrying a course's markup.
 func TestLinkedInCollectionWallsFallThrough(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ source, fixture string }{
 		{"https://www.linkedin.com/newsletters/field-robotics-weekly-7000000000000000010", "authwall.html"},
 		{"https://www.linkedin.com/top-content/robotics/", "authwall.html"},
@@ -180,6 +182,7 @@ func TestLinkedInCollectionWallsFallThrough(t *testing.T) {
 // a top-content page, a course, an embedded post and a guest job posting,
 // and no Learning catalog page or bare prefix.
 func TestLinkedInClaimsCollectionPages(t *testing.T) {
+	t.Parallel()
 	for source, want := range map[string]bool{
 		"https://www.linkedin.com/newsletters/field-robotics-weekly-7000000000000000010": true,
 		"https://www.linkedin.com/top-content/robotics/robots-in-farming/":               true,
@@ -208,6 +211,7 @@ func TestLinkedInClaimsCollectionPages(t *testing.T) {
 // its syllabus renders the syllabus as its contents; a video name's chapter
 // is its last " - " segment.
 func TestLinkedInCourseContentsFromJSONLD(t *testing.T) {
+	t.Parallel()
 	const source = "https://www.linkedin.com/learning/gripper-sensing-basics"
 	for _, tc := range []struct{ name, course, want string }{
 		{

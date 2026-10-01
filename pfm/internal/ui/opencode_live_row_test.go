@@ -20,13 +20,13 @@ func TestLiveOpenCodeRendersAsALiveOpenCodeRow(t *testing.T) {
 	if got := model.rowBadges(row); got != "◇" {
 		t.Fatalf("rowBadges(LiveOpenCode) = %q, want the OpenCode badge ◇", got)
 	}
-	rendered := model.renderRow(row, false, 120)
+	rendered := model.renderGroupedRow(row, false, 120, false)
 	styled, _, found := strings.Cut(openCodeStyle.Render("x"), "x")
 	if !found {
 		t.Fatal("openCodeStyle renders no escape prefix to assert on")
 	}
 	if !strings.HasPrefix(rendered, styled) {
-		t.Fatalf("renderRow(LiveOpenCode) = %q, want OpenCode's own row style %q", rendered, styled)
+		t.Fatalf("renderGroupedRow(LiveOpenCode) = %q, want OpenCode's own row style %q", rendered, styled)
 	}
 }
 

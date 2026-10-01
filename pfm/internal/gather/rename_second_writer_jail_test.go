@@ -69,20 +69,25 @@ func writePaneEscape(t *testing.T, tty, sequence string) {
 	}
 }
 
-// windowNameSettles polls until tmux has drained the pane output, so a name
-// that is going to change has had its chance before the assertion runs.
-func windowNameSettles(t *testing.T, socket string) string {
+// windowNameSettles waits for a pane title after the subject escape. tmux
+// processes pane output in order, so seeing the title proves it saw the escape.
+func windowNameSettles(t *testing.T, socket, tty, title string) string {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	name := renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}")
-	for time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-		next := renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}")
-		if next != name {
-			return next
-		}
+	if title == "" {
+		title = "PFM-ESCAPE-PROCESSED"
+		writePaneEscape(t, tty, "\033]2;"+title+"\007")
 	}
-	return name
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := renameProbeTmux(t, socket, "display-message", "-p", "#{pane_title}")
+		if got == title {
+			return renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}")
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pane_title = %q; processed signal %q not seen within 2s", got, title)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // Candidate 1: tmux's automatic-rename. RULED OUT — rename-window turns it off
@@ -106,7 +111,10 @@ func TestAutomaticRenameIsNotTheSecondWriter(t *testing.T) {
 	); got != "automatic-rename off" {
 		t.Fatalf("automatic-rename after rename-window = %q, want it disabled for this window", got)
 	}
-	if got := windowNameSettles(t, socket); got != "WANTED" {
+	// tmux 3.4 tmux.h NAME_INTERVAL is 500000 us (names.c checks once per
+	// interval); one automatic-rename check is enough for this negative case.
+	time.Sleep(500 * time.Millisecond)
+	if got := renameProbeTmux(t, socket, "display-message", "-p", "#{window_name}"); got != "WANTED" {
 		t.Fatalf("window name = %q, want WANTED — automatic-rename took it back", got)
 	}
 }
@@ -123,7 +131,7 @@ func TestOSCTitleWriteNeverTouchesTheWindowName(t *testing.T) {
 	}
 	renameProbeTmux(t, socket, "set-window-option", "-g", "allow-rename", "on")
 	writePaneEscape(t, tty, "\033]2;OSC-TITLE\007")
-	if got := windowNameSettles(t, socket); got != "WANTED" {
+	if got := windowNameSettles(t, socket, tty, "OSC-TITLE"); got != "WANTED" {
 		t.Fatalf("window name = %q, want WANTED — an OSC title write must not rename a window", got)
 	}
 	if got := renameProbeTmux(t, socket, "display-message", "-p", "#{pane_title}"); got != "OSC-TITLE" {
@@ -139,7 +147,7 @@ func TestScreenTitleEscapeIsTheSecondWriterWhenAllowRenameIsOn(t *testing.T) {
 	renameProbeTmux(t, socket, "rename-window", "-t", windowID, "WANTED")
 
 	writePaneEscape(t, tty, "\033kSECOND-WRITER\033\\")
-	if got := windowNameSettles(t, socket); got != "SECOND-WRITER" {
+	if got := windowNameSettles(t, socket, tty, ""); got != "SECOND-WRITER" {
 		t.Skipf(
 			"this tmux does not honour \\ek with allow-rename on (name=%q); the latch below is then simply inert",
 			got,
@@ -169,7 +177,7 @@ func TestRenameWindowLatchSurvivesAScreenTitleEscape(t *testing.T) {
 		t.Fatalf("allow-rename after RenameWindow = %q, want it latched off for this window", got)
 	}
 	writePaneEscape(t, tty, "\033kSECOND-WRITER\033\\")
-	if got := windowNameSettles(t, socket); got != "WANTED" {
+	if got := windowNameSettles(t, socket, tty, ""); got != "WANTED" {
 		t.Fatalf("window name = %q, want WANTED — the latch did not hold", got)
 	}
 }

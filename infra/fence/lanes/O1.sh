@@ -46,12 +46,12 @@ beat O1.01-install-idempotent
 spends none
 out="$(install_again)"
 rc=$?
-summary="$(printf '%s\n' "$out" | grep -E '^.*summary changed=' | tail -1)"
+summary="$(grep -E '^.*summary changed=' <<<"$out" | tail -1)"
 if [ "$rc" -ne 0 ]; then
   fail "the second pfm install --yes exited $rc: $(one_line "$(printf '%s\n' "$out" | tail -5)")"
 elif [ -z "$summary" ]; then
   fail "pfm install --yes printed no 'summary changed=' line — idempotence cannot be judged: $(one_line "$(printf '%s\n' "$out" | tail -5)")"
-elif ! printf '%s' "$summary" | grep -q 'changed=0'; then
+elif ! grep -q 'changed=0' <<<"$summary"; then
   fail "the second install still changed something: $(one_line "$summary")"
 else
   pass "$(one_line "$summary")"
@@ -127,7 +127,7 @@ done < <(jq -r '.accounts[] | "\(.id)\t\(.configDir)"' "$CONFIG")
 doctor_store="$(pfm doctor 2>&1)"
 doctor_rc=$?
 [ "$doctor_rc" -le 1 ] || bad="$bad pfm doctor exited $doctor_rc, so its session-store enumeration cannot be trusted;"
-printf '%s\n' "$doctor_store" | grep -q '^session-store:' && bad="$bad pfm doctor still reports session-store: $(one_line "$(printf '%s\n' "$doctor_store" | grep '^session-store:' | head -1)");"
+grep -q '^session-store:' <<<"$doctor_store" && bad="$bad pfm doctor still reports session-store: $(one_line "$(grep '^session-store:' <<<"$doctor_store" | head -1)");"
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "pfm install linked projects, file-history, tasks and session-env for every non-primary seat; doctor has no session-store finding"
 fi
@@ -187,7 +187,7 @@ if [ -f "$HOME/.local/share/opencode/opencode.db" ]; then
 else
   oc="ABSENT (no opencode.db — lane E3's prelude makes it)"
 fi
-printf '%s' "$doctor" | grep -qiE 'account|seat' || bad="$bad pfm doctor names no account/seat row;"
+grep -qiE 'account|seat' <<<"$doctor" || bad="$bad pfm doctor names no account/seat row;"
 if [ -n "$bad" ]; then fail "$bad (doctor exit $doctor_rc)"; else
   pass "$n_acct Claude seat(s) wired, Codex home $CODEX_HOME present, OpenCode home $oc"
 fi
@@ -214,11 +214,11 @@ else
   restore_roster="$(printf '%s\n' "$restore_doctor" | grep -m1 '^doctor: config accounts=')"
   bad=""
   [ "$drop_rc" -eq 0 ] || bad="$bad the install after the drop exited $drop_rc: $(one_line "$(printf '%s\n' "$drop_out" | tail -3)");"
-  printf '%s' "$drop_roster" | grep -qE "accounts=([^ ]*,)?$SPARE:" && bad="$bad doctor still lists dropped seat $SPARE: $drop_roster;"
-  printf '%s' "$drop_roster" | grep -qE "accounts=([^ ]*,)?$SEAT:" || bad="$bad doctor lost kept seat $SEAT: $drop_roster;"
+  grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$drop_roster" && bad="$bad doctor still lists dropped seat $SPARE: $drop_roster;"
+  grep -qE "accounts=([^ ]*,)?$SEAT:" <<<"$drop_roster" || bad="$bad doctor lost kept seat $SEAT: $drop_roster;"
   [ "$config_restore_rc" -eq 0 ] || bad="$bad restoring $CONFIG from its crash-safe backup FAILED;"
   [ "$restore_rc" -eq 0 ] || bad="$bad the restoring install exited $restore_rc ($(one_line "$restore_out"));"
-  printf '%s' "$restore_roster" | grep -qE "accounts=([^ ]*,)?$SPARE:" || bad="$bad doctor did not relist seat $SPARE after restore: $restore_roster;"
+  grep -qE "accounts=([^ ]*,)?$SPARE:" <<<"$restore_roster" || bad="$bad doctor did not relist seat $SPARE after restore: $restore_roster;"
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "doctor's roster dropped seat $SPARE while keeping $SEAT, then relisted $SPARE after config restore"
   fi
@@ -232,7 +232,7 @@ link="$HOME/.cc/lane-linked-seat"
 bad=""
 [ -L "$BLUEPRINT" ] || bad="$bad $BLUEPRINT is not a symlink — the linked-blueprint half cannot be asserted here;"
 blue_doctor="$(pfm doctor 2>&1)"
-printf '%s' "$blue_doctor" | grep -qF 'harness-prompts embed=ok tree=' ||
+grep -qF 'harness-prompts embed=ok tree=' <<<"$blue_doctor" ||
   bad="$bad pfm doctor did not resolve the linked blueprint's harness prompts;"
 rm -rf "$link"
 ln -s "$SEAT_DIR" "$link"
@@ -248,7 +248,7 @@ else
   restore_now "$CONFIG" || bad="$bad restoring $CONFIG from its crash-safe backup FAILED;"
   [ "$linked_rc" -le 1 ] || bad="$bad pfm doctor exited $linked_rc with the seat reached through a symlink: $(one_line "$(printf '%s\n' "$linked_doctor" | tail -3)");"
   [ "$linked_ls_rc" -eq 0 ] || bad="$bad pfm ls exited $linked_ls_rc with a symlinked seat dir: $(one_line "$linked_ls");"
-  printf '%s' "$linked_doctor" | grep -qiE 'duplicate' &&
+  grep -qiE 'duplicate' <<<"$linked_doctor" &&
     bad="$bad doctor called the symlinked seat a duplicate of its own target;"
   [ "$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")" != "$link" ] ||
     bad="$bad the config still points seat $SEAT at the temporary link;"
@@ -290,12 +290,12 @@ else
     dup="$(pfm doctor 2>&1)"
     restore_now "$SEAT_JSON" || bad="$bad restoring $SEAT_JSON from its crash-safe backup FAILED;"
     restore_now "$SPARE_JSON" || bad="$bad restoring $SPARE_JSON from its crash-safe backup FAILED;"
-    line="$(printf '%s\n' "$dup" | grep -F 'duplicate-seat-login' | grep -F "$EMAIL" | head -1)"
-    seats_field="$(printf '%s' "$line" | grep -oE 'seats=[^ ]*')"
+    line="$(grep -F 'duplicate-seat-login' <<<"$dup" | grep -F "$EMAIL" | head -1)"
+    seats_field="$(grep -oE 'seats=[^ ]*' <<<"$line")"
     [ -n "$line" ] || bad="$bad pfm doctor did not name the planted duplicate: $(one_line "$(printf '%s\n' "$dup" | grep -iF duplicate | head -1)");"
-    printf '%s' "$seats_field" | grep -qF "$SEAT:" || bad="$bad the advisory's seats= field is missing seat $SEAT: $(one_line "$seats_field");"
-    printf '%s' "$seats_field" | grep -qF "$SPARE:" || bad="$bad the advisory's seats= field is missing seat $SPARE: $(one_line "$seats_field");"
-    printf '%s' "$line" | grep -qF "share one OAuth usage cap" || bad="$bad the advisory line dropped its remediation text: $(one_line "$line");"
+    grep -qF "$SEAT:" <<<"$seats_field" || bad="$bad the advisory's seats= field is missing seat $SEAT: $(one_line "$seats_field");"
+    grep -qF "$SPARE:" <<<"$seats_field" || bad="$bad the advisory's seats= field is missing seat $SPARE: $(one_line "$seats_field");"
+    grep -qF "share one OAuth usage cap" <<<"$line" || bad="$bad the advisory line dropped its remediation text: $(one_line "$line");"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "planting $EMAIL into $SEAT_JSON and $SPARE_JSON made pfm doctor emit: $(one_line "$line")"
@@ -309,9 +309,9 @@ spends none
 lane_daemon_up || fail "the pfm MCP daemon could not start before doctor"
 doc="$(pfm doctor 2>&1)"
 doc_rc=$?
-capture_gap="$(printf '%s\n' "$doc" | grep -F 'harness-prompt: CHECK FAILED to run (no API request reached the capture sink)' | head -1)"
+capture_gap="$(grep -F 'harness-prompt: CHECK FAILED to run (no API request reached the capture sink)' <<<"$doc" | head -1)"
 if [ -n "$capture_gap" ]; then
-  first_bad="$(printf '%s\n' "$doc" | grep -vFx "$capture_gap" | grep -m1 -E '(broken|drift|stale)( |$|:)|error=' || true)"
+  first_bad="$(grep -vFx "$capture_gap" <<<"$doc" | grep -m1 -E '(broken|drift|stale)( |$|:)|error=' || true)"
 else
   first_bad="$(printf '%s\n' "$doc" | grep -m1 -E '(broken|drift|stale)( |$|:)|error=' || true)"
 fi
@@ -320,7 +320,7 @@ if [ "$doc_rc" -ge 2 ]; then
   fail "pfm doctor exited $doc_rc; first failure row: ${first_bad:-<none>}; tail: $(one_line "$(printf '%s\n' "$doc" | tail -3)")"
 elif [ -n "$first_bad" ]; then
   fail "pfm doctor exited $doc_rc with a failure row: $(one_line "$first_bad")"
-elif ! printf '%s' "$doc" | grep -qiE 'systemd|launchd|service manager'; then
+elif ! grep -qiE 'systemd|launchd|service manager' <<<"$doc"; then
   fail "doctor said nothing about the absent service manager — in a container that row must be a NAMED advisory, not silence ($rows rows)"
 else
   pass "exit $doc_rc · $rows rows · no unexpected broken/drift/stale/error row · no-service-manager and ${capture_gap:+capture-sink} advisories named"
@@ -345,7 +345,7 @@ fi
 repaired_rc=0
 pfm doctor >/dev/null 2>&1 || repaired_rc=$?
 case "$clean_rc" in 0|1) ;; *) bad="$bad a healthy install made doctor exit $clean_rc (want 0 or 1);" ;; esac
-if [ -n "$broken_rc" ] && [ "$broken_rc" -le "$clean_rc" ] && ! printf '%s' "$broken_out" | grep -qi 'pfm-statusline'; then
+if [ -n "$broken_rc" ] && [ "$broken_rc" -le "$clean_rc" ] && ! grep -qi 'pfm-statusline' <<<"$broken_out"; then
   bad="$bad with $overlay deleted doctor still exited $broken_rc and never named pfm-statusline — it cannot tell healthy from broken;"
 fi
 case "$repaired_rc" in 0|1) ;; *) bad="$bad after the repair doctor still exits $repaired_rc;" ;; esac
@@ -389,8 +389,8 @@ jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tm
 [ -n "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
   bad="$bad no professor-*.json theme under $HOME/.claude/themes;"
 mcp_list="$(pfm mcp ls 2>&1)"
-printf '%s\n' "$mcp_list" | grep -q $'^chat\ttrue\t' || bad="$bad pfm mcp ls does not report chat enabled;"
-printf '%s\n' "$mcp_list" | grep -q $'^harvester\ttrue\t' || bad="$bad pfm mcp ls does not report harvester enabled;"
+grep -q $'^chat\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report chat enabled;"
+grep -q $'^harvester\ttrue\t' <<<"$mcp_list" || bad="$bad pfm mcp ls does not report harvester enabled;"
 [ -n "$(find "$SEAT_DIR/skills" -maxdepth 2 -type l -o -maxdepth 2 -type d -name '*git*' 2>/dev/null | head -1)" ] ||
   _lane_log_only "   O1.12: no git-bridge skill directory under $SEAT_DIR/skills (I94 reads the global fan-out instead)"
 if [ -n "$bad" ]; then fail "$bad"; else

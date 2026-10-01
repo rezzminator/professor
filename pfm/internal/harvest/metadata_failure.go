@@ -15,8 +15,7 @@ type doiMetadataFailure struct {
 
 // doiMetadataError aggregates every provider's own failure for one lookup
 // that came back with nothing usable. subject names what was being looked up
-// ("DOI metadata" when unset, for ResolveDOI's original caller; "title
-// lookup" for ResolveTitle's F13 fix; "book" for ResolveBook's F14 fix) so
+// ("DOI metadata" when unset, for ResolveDOI's original caller; "book" for ResolveBook's F14 fix) so
 // the rendered message never claims a DOI lookup failed when the query was
 // actually a book title.
 type doiMetadataError struct {

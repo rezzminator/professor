@@ -81,6 +81,7 @@ func fetchGenericPage(t *testing.T, source, page string) Result {
 // stated against loaded; a page carrying what it states, and a listing whose
 // counters belong to its cards or to the site, are not flagged.
 func TestStatedCountsAgainstLoaded(t *testing.T) {
+	t.Parallel()
 	const source = "https://jobs.example.com/Reviews/Example-Reviews-E1234.htm"
 	head := func(jsonLD string) string {
 		return `<html><head><script type="application/ld+json">` + jsonLD + `</script></head><body><article>` +
@@ -158,6 +159,7 @@ func TestStatedCountsAgainstLoaded(t *testing.T) {
 // rendered and reconciled keeps its own count line; a stated count in its
 // markup is never read again by the generic check.
 func TestStatedCountsLeaveReconciledExtractorPagesAlone(t *testing.T) {
+	t.Parallel()
 	page := strings.Replace(hnFixture(t), "</head>", `<script type="application/ld+json">`+
 		`{"@type":"DiscussionForumPosting","commentCount":999}</script></head>`, 1)
 	page = strings.Replace(page, "<body>", "<body><h2>999 comments</h2>", 1)

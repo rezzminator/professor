@@ -8,6 +8,7 @@ import (
 )
 
 func TestSafeURLStripsQueryAndUserinfo(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"https://api.example.test/v1/volumes?q=numpy&key=SENTINEL-KEY-1234": "https://api.example.test/v1/volumes",
 		"http://user:pass@internal.example.test/path?token=abc":             "http://internal.example.test/path",
@@ -22,6 +23,7 @@ func TestSafeURLStripsQueryAndUserinfo(t *testing.T) {
 }
 
 func TestSafeURLNeverContainsSentinelKey(t *testing.T) {
+	t.Parallel()
 	const sentinel = "SENTINEL-KEY-1234"
 	raw := "https://www.googleapis.com/books/v1/volumes?q=numpy&country=US&key=" + sentinel
 	if got := safeURL(raw); strings.Contains(got, sentinel) {
@@ -30,6 +32,7 @@ func TestSafeURLNeverContainsSentinelKey(t *testing.T) {
 }
 
 func TestSanitizeTransportErrorStripsURLErrorButKeepsCause(t *testing.T) {
+	t.Parallel()
 	const sentinel = "SENTINEL-KEY-1234"
 	raw := "https://api.example.test/lookup?key=" + sentinel
 	inner := errors.New("connection refused")
@@ -47,6 +50,7 @@ func TestSanitizeTransportErrorStripsURLErrorButKeepsCause(t *testing.T) {
 }
 
 func TestSanitizeTransportErrorLeavesNonURLErrorUntouched(t *testing.T) {
+	t.Parallel()
 	plain := errors.New("some other failure")
 	if got := sanitizeTransportError(plain, "https://example.test/?key=x"); got != plain {
 		t.Fatalf("sanitizeTransportError changed a non-*url.Error: got %v, want the same error back", got)
@@ -59,6 +63,7 @@ func TestSanitizeTransportErrorLeavesNonURLErrorUntouched(t *testing.T) {
 // D1 (hands-on stress test): a URL the caller wrote with credentials in it was
 // echoed whole into the MCP answer and into daemon stderr.
 func TestPublicSourceLabelDropsUserinfoAndKeepsWhatTellsSourcesApart(t *testing.T) {
+	t.Parallel()
 	for _, row := range []struct{ name, raw, want string }{
 		{"userinfo", "https://USER:PASSWORD@example.com/a?q=1", "https://example.com/a?q=1"},
 		{"plain url", "https://example.com/a?q=1", "https://example.com/a?q=1"},
@@ -73,6 +78,7 @@ func TestPublicSourceLabelDropsUserinfoAndKeepsWhatTellsSourcesApart(t *testing.
 }
 
 func TestPublicFailureNeverEchoesURLCredentialsAndNamesAPolicyRefusal(t *testing.T) {
+	t.Parallel()
 	const source = "https://USER:PASSWORD@example.com/?token=SECRET"
 	out := PublicFailure(source, Result{Source: source, Error: "URL userinfo is not allowed"})
 	if strings.Contains(out.Source, "PASSWORD") || strings.Contains(out.Source, "USER") {

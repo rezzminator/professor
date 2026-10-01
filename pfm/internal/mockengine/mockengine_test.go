@@ -101,8 +101,8 @@ func newFixture(t *testing.T) *fixture {
 	return fix
 }
 
-// write installs a scenario, filling the jail bindings and the record dir so
-// every test's mock lands its evidence in the fixture.
+// write installs a scenario, filling the jail bindings, record dir, and test
+// busy time so every mock lands its evidence without waiting between turns.
 func (fix *fixture) write(scenario Scenario) {
 	fix.t.Helper()
 	if scenario.Jail == (Jail{}) {
@@ -111,11 +111,37 @@ func (fix *fixture) write(scenario Scenario) {
 	if scenario.RecordDir == "" {
 		scenario.RecordDir = fix.recordDir
 	}
+	if scenario.BusyMS == nil {
+		scenario.BusyMS = intPtr(0)
+	}
 	if err := scenario.Write(fix.scenario); err != nil {
 		fix.t.Fatal(err)
 	}
 	if err := os.Remove(fix.scenario + cursorSuffix); err != nil && !os.IsNotExist(err) {
 		fix.t.Fatal(err)
+	}
+}
+
+func TestFixtureWriteSetsBusyOnlyWhenUnset(t *testing.T) {
+	fix := newFixture(t)
+	for _, row := range []struct {
+		name     string
+		busy     *int
+		wantBusy int
+	}{
+		{name: "unset", wantBusy: 0},
+		{name: "set", busy: intPtr(37), wantBusy: 37},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			fix.write(Scenario{BusyMS: row.busy})
+			got, err := LoadScenario(fix.scenario, engineClaude)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.BusyMS == nil || *got.BusyMS != row.wantBusy {
+				t.Fatalf("written busy = %v, want %d", got.BusyMS, row.wantBusy)
+			}
+		})
 	}
 }
 

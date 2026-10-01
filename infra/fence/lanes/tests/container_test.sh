@@ -33,17 +33,17 @@ export STUB_DOCKER_LOG="$T/docker.log"
 
 # 1 — the pin and its release name the same tag; the release never forces
 : >"$STUB_DOCKER_LOG"
-base="$(lane_base_image "$T" cafe01 2>/dev/null)"
-lane_base_release cafe01
-if [ "$base" = "pfm-lane-base:cafe01" ] && grep -qx 'tag professor-pfm-dev pfm-lane-base:cafe01' "$STUB_DOCKER_LOG" &&
-  grep -qx 'rmi pfm-lane-base:cafe01' "$STUB_DOCKER_LOG"; then
+base="$(lane_base_image "$T" pfm-lane-base:cafe01-unique 2>/dev/null)"
+lane_base_release pfm-lane-base:cafe01-unique
+if [ "$base" = "pfm-lane-base:cafe01-unique" ] && grep -qx 'tag professor-pfm-dev pfm-lane-base:cafe01-unique' "$STUB_DOCKER_LOG" &&
+  grep -qx 'rmi pfm-lane-base:cafe01-unique' "$STUB_DOCKER_LOG"; then
   ok "release untags exactly the pin lane_base_image made, without -f"
 else
   bad "pin and release pair" "base=[$base]" "$(cat "$STUB_DOCKER_LOG")"
 fi
 
 # 2 — an already-gone pin (a second cleanup, a refused rmi) never fails the caller
-if STUB_RMI_RC=1 lane_base_release cafe01; then ok "a failed rmi returns 0 to the caller"
+if STUB_RMI_RC=1 lane_base_release pfm-lane-base:cafe01-unique; then ok "a failed rmi returns 0 to the caller"
 else bad "a failed rmi returns 0 to the caller"; fi
 
 # 3 — every lane container carries the fence label housekeeping reaps by
@@ -51,6 +51,8 @@ else bad "a failed rmi returns 0 to the caller"; fi
 PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01
 if grep -q -- '^run -d .*--label pfm.fence=1 .*pfm-lane-root:cafe01 sleep infinity$' "$STUB_DOCKER_LOG"; then ok "lane_run labels the container pfm.fence=1"
 else bad "lane_run labels the container pfm.fence=1" "$(cat "$STUB_DOCKER_LOG")"; fi
+if ! grep -q 'pfm-lane-harvest-cache\|pfm-lane-uv-cache' "$STUB_DOCKER_LOG"; then ok "lane run has no root-build download caches"
+else bad "lane run mounted a root-build cache" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 4 — run containers can disable networking; root builds keep docker's default.
 : >"$STUB_DOCKER_LOG"
@@ -63,5 +65,12 @@ if ! grep -qE -- '--network|-e GOPROXY=off' "$STUB_DOCKER_LOG"; then ok "root bu
 else bad "build network and Go proxy" "$(cat "$STUB_DOCKER_LOG")"; fi
 if grep -q -- '-e MOCK_ENGINE_SCENARIO=/root/.local/share/pfm-lanes/default.json' "$STUB_DOCKER_LOG"; then ok "every container receives the default mock scenario"
 else bad "scenario environment" "$(cat "$STUB_DOCKER_LOG")"; fi
+
+# 5 — optional docker arguments follow the network selector before the image.
+: >"$STUB_DOCKER_LOG"
+PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-build pfm-lane-base:cafe01 '' -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy
+if grep -q -- '--label pfm.fence=1 -v pfm-lane-uv-cache:/root/.cache/uv -e UV_LINK_MODE=copy -v ' "$STUB_DOCKER_LOG"; then
+  ok "lane_run passes optional docker arguments before the image"
+else bad "lane_run optional arguments" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 shtest_end

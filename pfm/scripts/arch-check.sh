@@ -113,9 +113,13 @@ ratchet_counts() {
 count_by_file() { cut -d: -f1 "$1" | sort | uniq -c | awk '{print $2" "$1}'; }
 
 # C1/C2 size ceilings: an over-ceiling file may not appear, and a listed one may not grow.
-: > "$T/c1"; while read -r f; do n=$(wc -l < "$f"); [ "$n" -gt "$CEIL_SRC" ] && echo "$f $n"; done < "$T/src.list" > "$T/c1"
+wc -l $(cat "$T/src.list") | awk -v ceil="$CEIL_SRC" '$2 != "total" && $1 > ceil {print $2" "$1}' > "$T/c1"
 ratchet_counts C1-ceiling-src ceiling-src "$T/c1" "$CEIL_SLACK"
-while read -r f; do n=$(wc -l < "$f"); [ "$n" -gt "$CEIL_TEST" ] && echo "$f $n"; done < "$T/test.list" > "$T/c2"
+if [ -s "$T/test.list" ]; then
+  wc -l $(cat "$T/test.list") | awk -v ceil="$CEIL_TEST" '$2 != "total" && $1 > ceil {print $2" "$1}' > "$T/c2"
+else
+  : > "$T/c2"
+fi
 ratchet_counts C2-ceiling-test ceiling-test "$T/c2" "$CEIL_SLACK"
 
 # C3 cmd/pfm is dispatch: its non-test line total may not exceed .arch/cmd-budget.txt.
@@ -179,11 +183,14 @@ if find internal cmd -type d \( -iname '*util*' -o -name helpers -o -name common
 else say C8-negation-dirs ERROR "find failed under internal/ cmd/"; fi
 
 # C9 every package states what it owns in a `// Package` doc comment.
-: > "$T/c9"
-for dir in $(xargs -n1 dirname < "$T/src.list" | sort -u); do
-  grep -lq '^// Package ' $(grep "^$dir/[^/]*$" "$T/src.list") 2>/dev/null || echo "$dir" >> "$T/c9"
-done
-ratchet C9-package-doc no-package-doc "$T/c9"
+awk '{sub(/\/[^/]*$/, ""); print}' "$T/src.list" | sort -u > "$T/pkgdirs"
+if g "$T/docs.list" "$T/src.list" -l '^// Package '; then
+  awk '{sub(/\/[^/]*$/, ""); print}' "$T/docs.list" | sort -u > "$T/docdirs"
+  comm -23 "$T/pkgdirs" "$T/docdirs" > "$T/c9"
+  ratchet C9-package-doc no-package-doc "$T/c9"
+else
+  say C9-package-doc ERROR "grep could not read sources"
+fi
 
 # C10 MCP reaches chat verbs through typed calls, never argv into package main.
 grep '^internal/mcpserv/' "$T/src.list" > "$T/mcp.list"
@@ -207,16 +214,37 @@ else
   # declaring it: the literal on a line that is not `name = "PFM_X"`, or the
   # declared constant's name on some other line. A constant only tests set is
   # a dead knob, not a read.
-  for v in $(grep -oE 'PFM_[A-Z_]+' CLAUDE.md | sort -u); do
-    grep -h "\"$v\"" $(cat "$T/src.list") > "$T/uses"
-    decl='^[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(string[[:space:]]*)?=[[:space:]]*"'"$v"'"'
-    if grep -vqE "$decl" "$T/uses"; then continue; fi
-    read=""
-    for name in $(grep -oE '^[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*' "$T/uses" | awk '{print $NF}' | sort -u); do
-      grep -hw "$name" $(cat "$T/src.list") | grep -vq "\"$v\"" && { read=1; break; }
-    done
-    [ -n "$read" ] || echo "$v" >> "$T/c12"
-  done
+  grep -hE '"PFM_[A-Z_]+"' $(cat "$T/src.list") > "$T/uses-all" || true
+  grep -oE '^[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*' "$T/uses-all" | awk '{print $NF}' | sort -u > "$T/use-names"
+  : > "$T/name-uses"
+  if [ -s "$T/use-names" ]; then
+    grep -hwE "$(paste -sd '|' "$T/use-names")" $(cat "$T/src.list") > "$T/name-uses" || true
+  fi
+  grep -oE 'PFM_[A-Z_]+' CLAUDE.md | sort -u > "$T/vars"
+  awk '
+    FILENAME == ARGV[1] { vars[++count]=$0; next }
+    FILENAME == ARGV[2] {
+      for (i=1; i<=count; i++) {
+        v=vars[i]
+        if (index($0, "\"" v "\"") == 0) continue
+        decl="^[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(string[[:space:]]*)?=[[:space:]]*\"" v "\""
+        if ($0 !~ decl) { read[v]=1; continue }
+        match($0, /^[[:space:]]*(const[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*/)
+        name=substr($0, RSTART, RLENGTH)
+        sub(/^.*[[:space:]]/, "", name)
+        names[v SUBSEP name]=1
+      }
+      next
+    }
+    {
+      for (key in names) {
+        split(key, parts, SUBSEP)
+        v=parts[1]; name=parts[2]
+        if (index($0, "\"" v "\"") == 0 && $0 ~ ("(^|[^[:alnum:]_])" name "([^[:alnum:]_]|$)")) read[v]=1
+      }
+    }
+    END { for (i=1; i<=count; i++) { v=vars[i]; if (!read[v]) print v } }
+  ' "$T/vars" "$T/uses-all" "$T/name-uses" >> "$T/c12"
   ratchet C12-claude-pointers claude-dangling "$T/c12"
 fi
 
@@ -228,7 +256,8 @@ ratchet C13-test-mirror untested-sources "$T/c13"
 cases=$(awk '/^func run\(/,/^}/' cmd/pfm/main.go | grep -oE 'case "[a-z-]+"' | grep -oE '"[a-z-]+"' | tr -d '"' | grep -vE '^(help|version|internal)$')
 if [ -z "$cases" ]; then say C14-usage-parity ERROR "no case labels parsed from cmd/pfm/main.go run()"
 else
-  : > "$T/c14"; for c in $cases; do awk '/^func printUsage/,/^}/' cmd/pfm/main.go | grep -qE "\"  $c " || echo "$c" >> "$T/c14"; done
+  usage="$(awk '/^func printUsage/,/^}/' cmd/pfm/main.go)"
+  : > "$T/c14"; for c in $cases; do grep -qE "\"  $c " <<<"$usage" || echo "$c" >> "$T/c14"; done
   ratchet C14-usage-parity usage-missing "$T/c14"
 fi
 
@@ -238,7 +267,7 @@ line=$(grep -oE 'usage: pfm internal [a-z-]+(\|[a-z-]+)+' cmd/pfm/main.go | head
 if [ -z "$iv" ]; then say C15-internal-usage ERROR "no entries parsed from cmd/pfm/main.go runInternal()"
 elif [ -z "$line" ]; then say C15-internal-usage ERROR "no multi-entry 'usage: pfm internal a|b' line in cmd/pfm/main.go"
 else
-  : > "$T/c15"; for v in $iv; do echo "$line" | grep -qE "(^|[ |])$v([|]|$)" || echo "$v" >> "$T/c15"; done
+  : > "$T/c15"; for v in $iv; do grep -qE "(^|[ |])$v([|]|$)" <<<"$line" || echo "$v" >> "$T/c15"; done
   ratchet C15-internal-usage internal-usage-missing "$T/c15"
 fi
 

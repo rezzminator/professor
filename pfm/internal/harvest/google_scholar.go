@@ -59,10 +59,6 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 	return candidates, nil
 }
 
-func parseGoogleScholar(body []byte, limit int) []Candidate {
-	return parseGoogleScholarFiltered(body, limit, "")
-}
-
 func (r *Resolver) googleScholarDOI(ctx context.Context, doi string, limit int) ([]Candidate, error) {
 	base := strings.TrimRight(strings.TrimSpace(r.GoogleScholarURL), "/")
 	if base == "" {
@@ -148,23 +144,6 @@ type scholarRow struct {
 	citationURL string
 	directPDF   string
 	versionsURL string
-}
-
-func parseGoogleScholarFiltered(body []byte, limit int, wantedDOI string) []Candidate {
-	rows := parseGoogleScholarRows(body, limit, wantedDOI)
-	out := make([]Candidate, 0, len(rows))
-	for i := range rows {
-		row := &rows[i]
-		candidate := row.candidate
-		candidate.URL = row.citationURL
-		if row.directPDF != "" {
-			candidate.URL = row.directPDF
-		}
-		if candidate.URL != "" {
-			out = append(out, candidate)
-		}
-	}
-	return out
 }
 
 func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarRow {

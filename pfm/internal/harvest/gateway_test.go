@@ -133,6 +133,7 @@ func TestGatewayNeverSpendsBrowserRungOnBinaryDownload(t *testing.T) {
 // session an earlier rung established silently cleared. The reviewer flagged
 // this branch as untested and therefore free to drift.
 func TestGatewayClientJarSemantics(t *testing.T) {
+	t.Parallel()
 	baseJar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatalf("cookiejar.New: %v", err)
@@ -188,6 +189,7 @@ func TestGatewayFetchHonorsTrustedOrigin(t *testing.T) {
 // client is a caller bug, not a network failure, and must surface as an
 // error naming the missing client rather than panicking the process.
 func TestGatewayAttemptTrustedOriginNilClientErrors(t *testing.T) {
+	t.Parallel()
 	_, err := gatewayAttempt(context.Background(), gatewayRequest{
 		url:           "http://127.0.0.1:9/healthz",
 		trustedOrigin: true,

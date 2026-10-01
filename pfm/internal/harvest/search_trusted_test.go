@@ -21,6 +21,7 @@ func (fn searchRoundTrip) RoundTrip(request *http.Request) (*http.Response, erro
 // recommends first. Its URL is operator configuration, so the search request
 // must reach it (GitHub #21: the SSRF guard refused 127.0.0.1 outright).
 func TestSearchReachesOperatorConfiguredLoopbackSearXNG(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" || r.URL.Query().Get("q") != "quantum" || r.URL.Query().Get("format") != "json" {
 			http.Error(w, "unexpected request "+r.URL.String(), http.StatusBadRequest)
@@ -43,6 +44,7 @@ func TestSearchReachesOperatorConfiguredLoopbackSearXNG(t *testing.T) {
 // Trust is the exact configured origin, never a redirect target: a SearXNG
 // answering with a 3xx to an internal address must not walk the request off.
 func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
+	t.Parallel()
 	var internalHits atomic.Int32
 	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		internalHits.Add(1)
@@ -70,6 +72,7 @@ func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
 // A failed search reports WHAT failed for each backend — never a generic
 // "unreachable or failing" that sends the operator to debug the wrong system.
 func TestSearchFailureCarriesEachBackendError(t *testing.T) {
+	t.Parallel()
 	searx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "upstream down", http.StatusBadGateway)
 	}))
@@ -100,6 +103,7 @@ func TestSearchFailureCarriesEachBackendError(t *testing.T) {
 
 // Disabled search is decided before any backend is contacted.
 func TestDisabledSearchNeverContactsABackend(t *testing.T) {
+	t.Parallel()
 	var hits atomic.Int32
 	counting := &http.Client{Transport: searchRoundTrip(func(r *http.Request) (*http.Response, error) {
 		hits.Add(1)
@@ -124,6 +128,7 @@ func TestDisabledSearchNeverContactsABackend(t *testing.T) {
 // Trusting the configured SearXNG origin for search must not open fetch to
 // it: fetch URLs arrive from untrusted content and keep the full guard.
 func TestTrustedSearXNGOriginDoesNotOpenFetch(t *testing.T) {
+	t.Parallel()
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)

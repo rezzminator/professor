@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net"
 	"slices"
 	"strings"
 
@@ -67,7 +66,7 @@ func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings in
 				runtime.Version,
 			)
 		}
-	case mcpDaemonTimedOut(daemonErr):
+	case errors.Is(daemonErr, mcpserv.ErrDaemonUnresponsive):
 		warnings++
 		fmt.Fprintf(stdout, "doctor: mcp daemon=unresponsive error=%v\n", daemonErr)
 	case errors.Is(daemonErr, mcpserv.ErrDaemonAbsent):
@@ -82,13 +81,6 @@ func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings in
 		fmt.Fprintf(stdout, "doctor: mcp daemon=foreign-service error=%v\n", daemonErr)
 	}
 	return warnings
-}
-
-// mcpDaemonTimedOut reports whether the probe failed on its timeout: the
-// transport error stays in ProbeDaemon's ErrDaemonAbsent chain.
-func mcpDaemonTimedOut(err error) bool {
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // printMCPDaemonFamiliesDoctor compares the families the running daemon

@@ -11,6 +11,7 @@ import (
 // answered with a page that is not this discussion's fragment, stays a named
 // gap, and the counts it hides flag the artifact partial.
 func TestGitHubDiscussionUnloadedFlagsThePartial(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		setup func(site *ghdSite)

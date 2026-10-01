@@ -546,7 +546,7 @@ func (installer *engine) runSkillGit(args ...string) (string, error) {
 		return "", fmt.Errorf("resolve git: %w", err)
 	}
 	dir := filepath.Dir(skillStoreRoot(installer.options.Home))
-	return runSkillGitWith(installer.processRunner(), skillGitTimeout, git, dir, args...)
+	return runSkillGitWith(installer.processRunner(), skillGitTimeout, skillGitWaitDelay, git, dir, args...)
 }
 
 // runSkillGitWith runs git in dir without the inherited variables that select
@@ -555,7 +555,7 @@ func (installer *engine) runSkillGit(args ...string) (string, error) {
 // appended last, so each wins over an inherited value. WaitDelay bounds the
 // wait for a grandchild (git-remote-https) still holding the output pipes
 // after the timeout kills git; every failure carries git's stderr tail.
-func runSkillGitWith(runner deps.Runner, timeout time.Duration, git, dir string, args ...string) (string, error) {
+func runSkillGitWith(runner deps.Runner, timeout, waitDelay time.Duration, git, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	env := make([]string, 0, len(os.Environ())+4)
@@ -567,7 +567,7 @@ func runSkillGitWith(runner deps.Runner, timeout time.Duration, git, dir string,
 	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=",
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
 	result, err := runner.Run(ctx, append([]string{git}, args...), deps.RunOptions{
-		Dir: dir, Env: env, WaitDelay: skillGitWaitDelay,
+		Dir: dir, Env: env, WaitDelay: waitDelay,
 	})
 	tail := strings.TrimSpace(string(result.Stderr))
 	if lines := strings.Split(tail, "\n"); len(lines) > 3 {

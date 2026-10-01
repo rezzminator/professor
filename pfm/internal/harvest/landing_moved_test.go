@@ -28,6 +28,7 @@ func movingOrigin(status int, hops map[string]string) roundTripFunc {
 // another segment, or a temporary one, stays a named "different page" partial
 // with no moved note.
 func TestSameHostPermanentMoveIsTheMovedPage(t *testing.T) {
+	t.Parallel()
 	const (
 		requested = "https://docs.example.org/3/library/functions.html"
 		moved     = "https://docs.example.org/3/builtins/functions.html"

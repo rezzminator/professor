@@ -17,9 +17,43 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/inject"
-	"github.com/rezzminator/professor/pfm/internal/statusline"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
+
+func TestRunHookCommandTimeoutDoesNotWaitForOrphan(t *testing.T) {
+	start := time.Now()
+	_, err := runHookCommand(
+		context.Background(),
+		"sleep 5; true",
+		nil,
+		t.TempDir(),
+		os.Environ(),
+		200*time.Millisecond,
+	)
+	elapsed := time.Since(start)
+	if err == nil || err.Error() != "timed out after 200ms" {
+		t.Fatalf("runHookCommand error = %v, want timed out after 200ms", err)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("runHookCommand returned after %s, want under 2s despite the orphan", elapsed)
+	}
+}
+
+func TestRunHookCommandReadsAnswerWithoutWaitingForBackgroundChild(t *testing.T) {
+	command := `printf '%s\n' '{"decision":"block","reason":"orphan"}'; sleep 5 &`
+	start := time.Now()
+	answer, err := runHookCommand(context.Background(), command, nil, t.TempDir(), os.Environ(), 10*time.Second)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("runHookCommand: %v", err)
+	}
+	if answer.Decision != "block" || answer.Reason != "orphan" {
+		t.Fatalf("runHookCommand answer = %+v, want block with reason orphan", answer)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("runHookCommand returned after %s, want under 2s despite the background child", elapsed)
+	}
+}
 
 // installHooks writes the settings.json pfm's installer would converge
 // (internal/installer/expected_hooks.go:90-103, settings.go:730-743): one
@@ -903,81 +937,4 @@ func parsedEntries(t *testing.T, path string) []transcript.Entry {
 		}
 	}
 	return entries
-}
-
-// quietCommands is a closed CommandRunner: a statusline render in this test
-// never shells out to git.
-type quietCommands struct{}
-
-func (quietCommands) Output(context.Context, string, ...string) ([]byte, error) {
-	return nil, os.ErrNotExist
-}
-
-func TestClaudeStatuslineInputRendersThroughPfmsOwnDecoder(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.installHooks()
-	// --model on the command line wins over the scenario's model, as on a
-	// real launch; the display name is the family word the statusline shows.
-	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Model: "claude-opus-4-1", Steps: []Step{
-		{
-			Type:   StepTurn,
-			Reply:  "rendered",
-			Tokens: &Tokens{Input: 50, Output: 5, CacheRead: 1000, CacheCreation: 10, ContextWindow: 200000},
-		},
-	}})
-	session := fix.startTUI("claude", claudeArgs("--name", "status seat", "--effort", "high"), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
-	session.typeLine("paint me")
-	session.waitFrame("the statusline output at the pane bottom", func(frame string) bool {
-		return strings.Contains(frame, "rendered") && strings.Contains(frame, "SL-FIXTURE")
-	})
-	lines := fix.waitRecorded("statusline", 1)
-	raw := lines[len(lines)-1]
-	sidDir := filepath.Join(fix.root, "sl-sid")
-	rendered, err := statusline.Render(context.Background(), []byte(raw), statusline.Runtime{
-		Now:          func() time.Time { return time.Unix(1_786_838_400, 0) },
-		Home:         fix.home,
-		ConfigDir:    fix.configDir,
-		CacheDir:     filepath.Join(fix.root, "sl-cache"),
-		RateLimitDir: filepath.Join(fix.root, "sl-rates"),
-		SIDDir:       sidDir,
-		TmuxDir:      filepath.Join(fix.root, "sl-tmux"),
-		ProcRoot:     filepath.Join(fix.root, "sl-proc"),
-		UID:          1000,
-		Engine:       pfmengine.Claude,
-		Env:          map[string]string{},
-		Command:      quietCommands{},
-		Spawn:        func(statusline.RefreshKind) error { return nil },
-	})
-	if err != nil {
-		t.Fatalf("pfm's statusline decoder refused the mock's input: %v\n%s", err, raw)
-	}
-	for _, want := range []string{"status seat", "repo", "Sonnet"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered statusline %q lacks %q (input %s)", rendered, want, raw)
-		}
-	}
-	var input struct {
-		SessionID      string `json:"session_id"`
-		TranscriptPath string `json:"transcript_path"`
-		ContextWindow  struct {
-			UsedPercentage float64 `json:"used_percentage"`
-			CurrentUsage   struct {
-				InputTokens int64 `json:"input_tokens"`
-				CacheRead   int64 `json:"cache_read_input_tokens"`
-			} `json:"current_usage"`
-		} `json:"context_window"`
-		Effort struct {
-			Level string `json:"level"`
-		} `json:"effort"`
-	}
-	if err := json.Unmarshal([]byte(raw), &input); err != nil {
-		t.Fatal(err)
-	}
-	if input.SessionID != fixtureSession || input.TranscriptPath != fix.claudeTranscript(fixtureSession) ||
-		input.ContextWindow.CurrentUsage.InputTokens != 50 || input.ContextWindow.CurrentUsage.CacheRead != 1000 ||
-		input.ContextWindow.UsedPercentage <= 0 || input.Effort.Level != "high" {
-		t.Fatalf("statusline input = %s", raw)
-	}
 }

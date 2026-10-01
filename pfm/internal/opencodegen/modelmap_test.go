@@ -89,6 +89,11 @@ const openCodeBuiltinDenialsForReadBashAgent = "tools:\n" +
 	"  invalid: false\n  lsp: false\n  plan_exit: false\n  question: false\n  skill: false\n" +
 	"  todowrite: false\n  webfetch: false\n  websearch: false\n  write: false\n"
 
+const openCodeBuiltinDenialsForReadOnly = "tools:\n" +
+	"  apply_patch: false\n  bash: false\n  edit: false\n  execute: false\n  glob: false\n  grep: false\n" +
+	"  invalid: false\n  lsp: false\n  plan_exit: false\n  question: false\n  skill: false\n" +
+	"  task: false\n  todowrite: false\n  webfetch: false\n  websearch: false\n  write: false\n"
+
 func TestRenderOpenCodeToolsBlockWithoutMCPEntriesDeniesEveryKnownServer(t *testing.T) {
 	got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "professor"})
 	want := openCodeBuiltinDenialsForReadBashAgent + "  local_*: false\n  professor_*: false\n"
@@ -99,10 +104,6 @@ func TestRenderOpenCodeToolsBlockWithoutMCPEntriesDeniesEveryKnownServer(t *test
 
 func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 	known := []string{"alpha", "my_server", "professor"}
-	builtinDenials, _, err := renderOpenCodeToolsBlock("worker.md", "Read", nil)
-	if err != nil {
-		t.Fatalf("render Read: %v", err)
-	}
 	for _, tc := range []struct {
 		name      string
 		allowList string
@@ -140,18 +141,20 @@ func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, known)
-			if err != nil || got != builtinDenials+tc.mcpLines || len(warnings) != 0 {
-				t.Fatalf("tools block = %q, %v, warnings %q; want %q", got, err, warnings, builtinDenials+tc.mcpLines)
+			if err != nil || got != openCodeBuiltinDenialsForReadOnly+tc.mcpLines || len(warnings) != 0 {
+				t.Fatalf(
+					"tools block = %q, %v, warnings %q; want %q",
+					got,
+					err,
+					warnings,
+					openCodeBuiltinDenialsForReadOnly+tc.mcpLines,
+				)
 			}
 		})
 	}
 }
 
 func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
-	builtinDenials, _, err := renderOpenCodeToolsBlock("worker.md", "Read", nil)
-	if err != nil {
-		t.Fatalf("render Read: %v", err)
-	}
 	for _, tc := range []struct {
 		name      string
 		allowList string
@@ -180,7 +183,7 @@ func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"professor"})
-			want := builtinDenials + "  professor_*: false\n"
+			want := openCodeBuiltinDenialsForReadOnly + "  professor_*: false\n"
 			if err != nil || got != want {
 				t.Fatalf("tools block = %q, %v; want %q", got, err, want)
 			}

@@ -29,13 +29,13 @@ source "$FENCE/../../scripts/shtest.sh"
 # /tmp/hkfx-N/fence).
 FXNAME="hkfx-$$"
 FX="$T/.$FXNAME"
-SECOND="$T/second"
+SECOND="$T/hkwt-$$"
 mkdir -p "$FX/infra/fence/lanes"
 cp "$SUT" "$FX/infra/fence/housekeeping.sh"
 cat >"$FX/infra/fence/lanes/root.sh" <<'EOF'
-h="$(dirname -- "$0")/hash"
+h="${0%/*}/hash"
 [ -s "$h" ] || { echo "root: HASH-UNDERIVABLE: fixture" >&2; exit 2; }
-cat "$h"
+printf '%s\n' "$(<"$h")"
 EOF
 (cd "$FX" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture && git worktree add -q "$SECOND" 2>/dev/null) ||
   { echo "housekeeping_test: the fixture repo could not be built" >&2; exit 2; }
@@ -54,49 +54,81 @@ hashes aaa eee
 # STUB_MB: the gocache size df reports ("" = none) · STUB_VOLUME=0: no such volume.
 BIN="$T/bin"
 mkdir -p "$BIN"
-cat >"$BIN/docker" <<'STUB'
-#!/usr/bin/env bash
+cat >"$BIN/docker-stub.bash" <<'STUB'
+_stub_f() { [ -f "$S/$1" ] && printf '%s' "$(<"$S/$1")"; return 0; }
+_stub_inuse() { [ -f "$S/inuse" ] && [[ $'\n'"$(<"$S/inuse")"$'\n' == *$'\n'"$1"$'\n'* ]]; }
+docker() {
+local -
+set +eu +o pipefail
+local IFS=$' \t\n'
+local S="$STUB_DIR" all want a id ref hash
 printf '%s\n' "$*" >>"$STUB_DOCKER_LOG"
-S="$STUB_DIR"
-f() { cat "$S/$1" 2>/dev/null; return 0; }
-inuse() { grep -qxF -- "$1" "$S/inuse" 2>/dev/null; }
-[ "${STUB_DOWN:-0}" = 1 ] && { echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock" >&2; exit 1; }
+[ "${STUB_DOWN:-0}" = 1 ] && { echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock" >&2; return 1; }
 case "$1" in
-  ps) case "$*" in *status=exited*) f exited ;; *name=pfm-lane-build-*) f builds ;; *) f running ;; esac ;;
-  inspect) f created ;;
-  rm) for a in "${@:2}"; do [ "$a" = -f ] || ! inuse "$a" || { echo "Error response from daemon: conflict" >&2; exit 1; }; done ;;
-  rmi) if inuse "$2"; then echo "Error response from daemon: conflict: unable to remove repository reference \"$2\" (must force) - container 0bad is using its referenced image 1f2e" >&2; exit 1; fi ;;
+  ps) case "$*" in
+    *status=exited*) _stub_f exited ;;
+    *name=pfm-lane-build-*)
+      if [ "${STUB_BUILDS_FAIL:-0}" = 1 ]; then echo 'fixture build listing daemon error' >&2; return 12; fi
+      _stub_f builds ;;
+    *) _stub_f running ;;
+  esac ;;
+  inspect) _stub_f created ;;
+  rm) for a in "${@:2}"; do [ "$a" = -f ] || ! _stub_inuse "$a" || { echo "Error response from daemon: conflict" >&2; return 1; }; done ;;
+  rmi)
+    case "${STUB_RMI:-ok}" in
+      missing) echo "Error response from daemon: No such image: $2" >&2; return 1 ;;
+      fail) echo "Error response from daemon: rmi boom" >&2; return 1 ;;
+    esac
+    if _stub_inuse "$2"; then echo "Error response from daemon: conflict: unable to remove repository reference \"$2\" (must force) - container 0bad is using its referenced image 1f2e" >&2; return 1; fi ;;
   image)
     case "$2" in
       prune)
         case "${STUB_PRUNE:-ok}" in
           ok) echo "Total reclaimed space: 0B" ;;
-          busy) echo "Error response from daemon: a prune operation is already running" >&2; exit 1 ;;
-          *) echo "Error response from daemon: prune boom" >&2; exit 1 ;;
+          busy) echo "Error response from daemon: a prune operation is already running" >&2; return 1 ;;
+          *) echo "Error response from daemon: prune boom" >&2; return 1 ;;
         esac ;;
       ls)
+        if [ "${STUB_IMAGE_LS_FAIL:-0}" = 1 ]; then echo 'fixture image listing daemon error' >&2; return 12; fi
         case "$*" in
-          *label=professor.lane-root=*) all="$*"; want="${all##*label=professor.lane-root=}"; awk -v h="${want%% *}" '$3 == h { print $1 }' "$S/roots" 2>/dev/null ;;
-          *label=professor.lane-root*) awk '{ print $1, $2 }' "$S/roots" 2>/dev/null ;;
-          *pfm-lane-base*) f pins ;;
+          *label=professor.lane-root=*)
+            all="$*"; want="${all##*label=professor.lane-root=}"; want="${want%% *}"
+            [ -f "$S/roots" ] || return 0
+            while read -r id ref hash; do
+              [ "$hash" = "$want" ] && printf '%s\n' "$id"
+            done <"$S/roots"
+            ;;
+          *label=professor.lane-root*)
+            [ -f "$S/roots" ] || return 0
+            while read -r id ref hash; do
+              printf '%s %s\n' "$id" "$ref"
+            done <"$S/roots"
+            ;;
+          *pfm-lane-base*) _stub_f pins ;;
         esac ;;
     esac ;;
   volume)
     case "$2" in
-      ls) f volumes ;;
-      inspect) [ "${STUB_VOLUME:-1}" = 1 ] || { echo "Error response from daemon: get $3: no such volume" >&2; exit 1; } ;;
-      rm) if inuse "$3"; then echo "Error response from daemon: remove $3: volume is in use - [0bad]" >&2; exit 1; fi ;;
+      ls) _stub_f volumes ;;
+      inspect) [ "${STUB_VOLUME:-1}" = 1 ] || { echo "Error response from daemon: get $3: no such volume" >&2; return 1; } ;;
+      rm) if _stub_inuse "$3"; then echo "Error response from daemon: remove $3: volume is in use - [0bad]" >&2; return 1; fi ;;
       create) echo "$3" ;;
     esac ;;
   system)
-    [ "${STUB_DF:-ok}" = ok ] || { echo "Error response from daemon: df boom" >&2; exit 1; }
+    [ "${STUB_DF:-ok}" = ok ] || { echo "Error response from daemon: df boom" >&2; return 1; }
     [ -z "${STUB_MB:-}" ] || printf 'acme_pgdata\t9.5GB\npfm-dev-gocache\t%sMB\n' "$STUB_MB" ;;
   run) # the pre-fix sizer (`docker run … alpine du -sm /c`) fails with the df probe
-    [ "${STUB_DF:-ok}" = ok ] || exit 125
+    [ "${STUB_DF:-ok}" = ok ] || return 125
     case "$*" in *"du -sm"*) [ -z "${STUB_MB:-}" ] || printf '%s\t/c\n' "$STUB_MB" ;; esac ;;
 esac
-exit 0
+return 0
+}
 STUB
+cat >"$BIN/docker" <<'STUB_WRAPPER'
+#!/usr/bin/env bash
+. "${0%/*}/docker-stub.bash"
+docker "$@"
+STUB_WRAPPER
 chmod +x "$BIN/docker"
 # git passes through, except `worktree list` fails under STUB_GIT_FAIL=1.
 cat >"$BIN/git" <<EOF
@@ -107,6 +139,8 @@ EOF
 chmod +x "$BIN/git"
 export PATH="$BIN:$PATH"
 export STUB_DOCKER_LOG="$T/docker.log" STUB_DIR="$T/stub" PFM_FENCE_STAMP_DIR="$T/stamp" PFM_FENCE_GOCACHE_MB=100
+. "$BIN/docker-stub.bash"
+export -f docker _stub_f _stub_inuse
 STAMP="$PFM_FENCE_STAMP_DIR/gocache-budget.stamp"
 
 # shellcheck source=/dev/null
@@ -129,7 +163,7 @@ printf 'e1\ne2\n' >"$STUB_DIR/exited"; printf 'c1\nc2\nc3\n' >"$STUB_DIR/running
 printf '/old-shell %s\n/young-lane %s\n/odd garbage\n' "$(iso_ago $((7 * 3600)))" "$(iso_ago 600)" >"$STUB_DIR/created"
 hk
 if logged 'ps -a -q --filter label=pfm.fence=1 --filter status=exited' && logged 'ps -q --filter label=pfm.fence=1' &&
-  logged 'rm e1 e2' && logged 'rm -f old-shell' && ! grep '^rm' "$STUB_DOCKER_LOG" | grep -q 'young-lane\|odd' &&
+  logged 'rm e1 e2' && logged 'rm -f old-shell' && ! grep -q 'young-lane\|odd' <<<"$(grep '^rm' "$STUB_DOCKER_LOG")" &&
   grep -q 'removed old-shell' "$T/err" && warned containers && grep -q "odd" "$T/err"; then
   ok "containers: labelled exited removed, labelled running > 6h forced out, younger and unparsable kept"
 else bad "containers" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
@@ -153,6 +187,23 @@ fresh; touch "$STAMP"; STUB_PRUNE=busy hk; r2=0; nowarn && r2=1
 fresh; touch "$STAMP"; STUB_PRUNE=fail hk; r3=0; warned images && grep -q 'prune boom' "$T/err" && r3=1
 if [ "$r1$r2$r3" = 111 ]; then ok "images: prune filters label=pfm.fence=1; a concurrent prune is silent, a failure warns"
 else bad "images" "scoped=$r1 busy-silent=$r2 fail-warns=$r3" "$(cat "$T/err")"; fi
+fresh; touch "$STAMP"; printf 'pfm-lane-build-aaa-123\npfm-lane-build-bbb\n' >"$STUB_DIR/builds"; hk aaa
+if ! logged 'image prune -f --filter label=pfm.fence=1' &&
+  [ "$(grep -c 'fence housekeeping: skipped the dangling fence image prune — lane root build(s) in flight: pfm-lane-build-aaa-123 pfm-lane-build-bbb' "$T/err")" -eq 1 ] &&
+  nowarn && logged 'volume ls -q'; then
+  ok "images: running suffixed and legacy lane builds skip only image prune; later steps run"
+else bad "running-build prune guard" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+fresh; touch "$STAMP"; : >"$STUB_DIR/builds"; hk aaa
+if logged 'image prune -f --filter label=pfm.fence=1' && nowarn; then
+  ok "images: an empty build listing still prunes"
+else bad "empty-build prune" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+fresh; touch "$STAMP"; STUB_BUILDS_FAIL=1 hk aaa
+if ! logged 'image prune -f --filter label=pfm.fence=1' &&
+  [ "$(grep -c '^WARN fence housekeeping: images failed: listing running lane builds, prune skipped: fixture build listing daemon error$' "$T/err")" -eq 1 ] &&
+  logged 'volume ls -q' &&
+  (set -euo pipefail; STUB_BUILDS_FAIL=1 fence_housekeeping aaa >/dev/null 2>/dev/null); then
+  ok "images: failed build listing warns, skips prune and keeps the caller alive"
+else bad "failed-build-list prune guard" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 4 — lane images: every root but the current hash of each checkout git lists
 #     (the caller's aaa, the linked worktree's eee), and pins no running build
@@ -174,15 +225,32 @@ fresh; touch "$STAMP"; lane_fixture; STUB_GIT_FAIL=1 hk
 r4=0; ! grep -q '^rmi' "$STUB_DOCKER_LOG" && warned lane-images && grep -q 'worktree list' "$T/err" && r4=1
 if [ "$r1$r2$r3$r4" = 1111 ]; then ok "lane images: every listed checkout's current roots and running builds' pins survive; a failing worktree list or an underivable checkout removes nothing and warns"
 else bad "lane images" "given=$r1 derived=$r2 underivable-checkout=$r3 worktree-list-fails=$r4" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
+fresh; touch "$STAMP"; printf 'aaa-unique\n' >"$STUB_DIR/pins"; : >"$STUB_DIR/builds"; hk aaa
+if ! logged 'rmi pfm-lane-base:aaa-unique'; then
+  ok "a current-hash pin survives before its build container starts"
+else bad "pin creation race" "$(cat "$STUB_DOCKER_LOG")"; fi
+fresh; STUB_RMI=missing _fence_hk_rmi pfm-lane-root:gone 2>"$T/err"
+if grep -q 'fence housekeeping: image pfm-lane-root:gone already removed' "$T/err" && nowarn; then
+  ok "an image removed by another run is reported without WARN"
+else bad "already-removed image" "$(cat "$T/err")"; fi
+fresh; STUB_RMI=fail _fence_hk_rmi pfm-lane-root:broken 2>"$T/err"
+if warned lane-images && grep -q 'rmi boom' "$T/err"; then ok "another rmi failure still warns without failing the caller"
+else bad "rmi failure" "$(cat "$T/err")"; fi
+
+fresh; STUB_IMAGE_LS_FAIL=1 _fence_hk_lane_images aaa 2>"$T/err"
+if grep -qxF 'WARN fence housekeeping: lane-images failed: listing lane roots: fixture image listing daemon error' "$T/err" &&
+  [ "$(<"$STUB_DOCKER_LOG")" = "image ls --filter label=professor.lane-root --format {{.ID}} {{.Repository}}:{{.Tag}}" ]; then
+  ok "lane images: a failed root listing warns and stops the sweep"
+else bad "lane-image listing failure" "$(cat "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
 
 # 5 — legacy volumes: ^(fence|infra)_pfm-dev- only; the host's other stacks untouched
 fresh; touch "$STAMP"
-printf '%s\n' fence_pfm-dev-gocache infra_pfm-dev-npm-cache fence_pfm-dev-gomod pfm-dev-gocache pfm-dev-gomod \
+printf '%s\n' fence_pfm-dev-gocache infra_pfm-dev-lintcache fence_pfm-dev-gomod pfm-dev-gocache pfm-dev-gomod \
   acme_pgdata shop_db tracing_clickhouse notes_data 3f2a9c0e1b7d4a5f8e6c2d1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f \
   myfence_pfm-dev-gocache fence_pfm-devx fence_other >"$STUB_DIR/volumes"
 printf 'fence_pfm-dev-gomod\n' >"$STUB_DIR/inuse"
 hk
-if [ "$(grep '^volume rm ' "$STUB_DOCKER_LOG" | sort | tr '\n' ' ')" = "volume rm fence_pfm-dev-gocache volume rm fence_pfm-dev-gomod volume rm infra_pfm-dev-npm-cache " ] &&
+if [ "$(grep '^volume rm ' "$STUB_DOCKER_LOG" | sort | tr '\n' ' ')" = "volume rm fence_pfm-dev-gocache volume rm fence_pfm-dev-gomod volume rm infra_pfm-dev-lintcache " ] &&
   grep -q 'removed legacy volume fence_pfm-dev-gocache' "$T/err" && grep -q 'fence_pfm-dev-gomod' "$T/err" && nowarn; then
   ok "legacy volumes: the three fence_/infra_pfm-dev- volumes only (an in-use one kept); every other volume untouched"
 else bad "legacy volumes" "$(grep '^volume' "$STUB_DOCKER_LOG")" "$(cat "$T/err")"; fi
@@ -249,22 +317,21 @@ fresh; rm -rf "/tmp/$FXNAME"
 env -u PFM_FENCE_STAMP_DIR STUB_MB=40 bash -c '. "$1"; fence_housekeeping' _ "$HK" 2>"$T/err"
 r1=0; [ -f "/tmp/$FXNAME/fence/gocache-budget.stamp" ] && r1=1
 rm -rf "/tmp/$FXNAME"
-MAIN="$T/.hkmain-$$"; WTNAME="hkmain-$$"
-mkdir -p "$MAIN/infra/fence/lanes"; cp "$HK" "$MAIN/infra/fence/"; cp "$FX/infra/fence/lanes/root.sh" "$MAIN/infra/fence/lanes/"
-(cd "$MAIN" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture && git worktree add -q .worktrees/wt 2>/dev/null)
-rm -rf "/tmp/$WTNAME" "/tmp/wt"
-env -u PFM_FENCE_STAMP_DIR STUB_MB=40 bash -c '. "$1"; fence_housekeeping' _ "$MAIN/.worktrees/wt/infra/fence/housekeeping.sh" 2>>"$T/err"
-r2=0; [ -f "/tmp/$WTNAME/fence/gocache-budget.stamp" ] && [ ! -e /tmp/wt/fence ] && r2=1
-rm -rf "/tmp/$WTNAME"
+rm -f "$FX/infra/fence/lanes/hash"
+rm -rf "/tmp/$FXNAME" "/tmp/hkwt-$$"
+env -u PFM_FENCE_STAMP_DIR STUB_MB=40 bash -c '. "$1"; fence_housekeeping' _ "$SECOND/infra/fence/housekeeping.sh" 2>>"$T/err"
+r2=0; [ -f "/tmp/$FXNAME/fence/gocache-budget.stamp" ] && [ ! -e "/tmp/hkwt-$$/fence" ] && r2=1
+rm -rf "/tmp/$FXNAME" "/tmp/hkwt-$$"
+hashes aaa eee
 if [ "$r1$r2" = 11 ]; then ok "stamp: /tmp/{project}/fence/ from the checkout and from a linked worktree"
 else bad "stamp home" "checkout=$r1 worktree=$r2" "$(cat "$T/err")"; fi
 
-# 15 — fence_volumes_ensure: one inspect when all three exist, a create each when
+# 15 — fence_volumes_ensure: one inspect when all five exist, a create each when
 #      not, and a dead daemon never fails a set -euo pipefail caller
 fresh; fence_volumes_ensure 2>"$T/err"
-r1=0; logged 'volume inspect pfm-dev-gocache pfm-dev-gomod pfm-dev-npm-cache' && ! grep -q '^volume create' "$STUB_DOCKER_LOG" && r1=1
+r1=0; logged 'volume inspect pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache pfm-lane-harvest-cache pfm-lane-uv-cache' && ! grep -q '^volume create' "$STUB_DOCKER_LOG" && r1=1
 fresh; STUB_VOLUME=0 fence_volumes_ensure 2>"$T/err"
-r2=0; logged 'volume create pfm-dev-gocache' && logged 'volume create pfm-dev-gomod' && logged 'volume create pfm-dev-npm-cache' && r2=1
+r2=0; logged 'volume create pfm-dev-gocache' && logged 'volume create pfm-dev-gomod' && logged 'volume create pfm-dev-lintcache' && logged 'volume create pfm-lane-harvest-cache' && logged 'volume create pfm-lane-uv-cache' && r2=1
 fresh; STUB_DOWN=1 bash -c 'set -euo pipefail; . "$1"; fence_volumes_ensure; echo SURVIVED' _ "$HK" >"$T/out" 2>"$T/err"
 r3=0; [ "$(cat "$T/out")" = SURVIVED ] && warned volumes && r3=1
 if [ "$r1$r2$r3" = 111 ]; then ok "volumes: ensured with one inspect, created when absent, a dead daemon warns"
@@ -276,13 +343,14 @@ if python3 - "$FENCE/docker-compose.yml" <<'PY' 2>"$T/err"; then
 import sys, yaml
 c = yaml.safe_load(open(sys.argv[1]))
 vols = c["volumes"]
-assert sorted(vols) == ["pfm-dev-gocache", "pfm-dev-gomod", "pfm-dev-npm-cache"], vols
+assert sorted(vols) == ["pfm-dev-gocache", "pfm-dev-gomod", "pfm-dev-lintcache"], vols
 for k, v in vols.items():
     assert v.get("external") is True and v.get("name") == k, (k, v)
 assert str(c["services"]["pfm-dev"]["labels"]["pfm.fence"]) == "1", c["services"]["pfm-dev"].get("labels")
 assert "labels" not in c["services"]["pfm-sim"] and c["services"]["pfm-sim"]["extends"]["service"] == "pfm-dev"
+assert "pfm-dev-lintcache:/root/.cache/golangci-lint" in c["services"]["pfm-dev"]["volumes"]
 PY
-  ok "compose: three external bare-named caches, pfm-dev (and pfm-sim by extends) labelled pfm.fence=1"
+  ok "compose: three external bare-named caches, including shared lint cache"
 else bad "compose contract" "$(cat "$T/err")"; fi
 if awk '/^FROM .* AS pfm-base/ { b = 1; next } /^FROM / { b = 0 } b && /^LABEL pfm\.fence=1$/ { f = 1 } END { exit !f }' "$FENCE/pfm-dev.Dockerfile"; then
   ok "Dockerfile: LABEL pfm.fence=1 in the base stage, so every builder's image carries it"

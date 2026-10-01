@@ -99,6 +99,10 @@ func Run(m *testing.M) int {
 		warnSetup("set %s: %v", paths.EnvSkillSourcesOffline, err)
 		return 1
 	}
+	if err := os.Setenv(paths.EnvThemesOffline, "1"); err != nil {
+		warnSetup("set %s: %v", paths.EnvThemesOffline, err)
+		return 1
+	}
 	// A `go` child (internal/update's rebuild, a `go run`) derives its cache and
 	// telemetry directories from HOME/XDG_CONFIG_HOME when they are unset, and
 	// every jail below rehomes both — so those directories would land INSIDE
@@ -189,6 +193,14 @@ func jailHome(base string) func() {
 	// Keep child tools' XDG files inside the package jail.
 	if err := os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")); err != nil {
 		warnSetup("set XDG_CONFIG_HOME under %s: %v", home, err)
+	}
+	if paths.EnvOr(paths.EnvSIDDir, "") == "" {
+		sidDir := filepath.Join(home, "sid")
+		if err := os.Mkdir(sidDir, 0o700); err != nil {
+			warnSetup("create %s under %s: %v", paths.EnvSIDDir, home, err)
+		} else if err := os.Setenv(paths.EnvSIDDir, sidDir); err != nil {
+			warnSetup("set %s to %s: %v", paths.EnvSIDDir, sidDir, err)
+		}
 	}
 	return func() {
 		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {

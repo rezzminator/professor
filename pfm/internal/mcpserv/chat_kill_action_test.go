@@ -15,6 +15,7 @@ import (
 // specifically relies on it, so runResolvedChatKill's ConfirmExit failure
 // (cmd/pfm/chat_command.go) reaches the caller as a tool error, not "ok".
 func TestChatKillSurfacesAKilledButStillAliveFailure(t *testing.T) {
+	t.Parallel()
 	service := &Service{backend: &backend{
 		dispatch: func(_ context.Context, _ []string, _, stderr io.Writer) int {
 			_, _ = io.WriteString(stderr, "pfm chat kill: pane %3 still alive after kill\n")
@@ -41,6 +42,7 @@ func TestChatKillSurfacesAKilledButStillAliveFailure(t *testing.T) {
 // tell a closed pane from a row that was merely de-listed — the warning was
 // written and then dropped on the floor.
 func TestChatKillCarriesAWarningWrittenOnAZeroExit(t *testing.T) {
+	t.Parallel()
 	const warning = "pfm chat kill: ses_live is live but carries no tmux address " +
 		"(socket \"\" pane \"\") — recording the kill without closing it"
 	service := &Service{backend: &backend{
@@ -73,6 +75,7 @@ func TestChatKillCarriesAWarningWrittenOnAZeroExit(t *testing.T) {
 // now says which of the two it did (chat.KillOutcome), and MCP must not
 // flatten that back into "killed <id>".
 func TestChatKillMessageCarriesTheDeListedMechanism(t *testing.T) {
+	t.Parallel()
 	service := &Service{backend: &backend{
 		dispatch: func(_ context.Context, _ []string, stdout, _ io.Writer) int {
 			_, _ = io.WriteString(stdout, "killed ses_cold\tde-listed only, no live pane closed\n")
@@ -93,6 +96,7 @@ func TestChatKillMessageCarriesTheDeListedMechanism(t *testing.T) {
 // chat_kill{target, exit:true} reaches the CLI as `chat kill <target> --exit`
 // unchanged, and a clean (verified) exit reports status ok.
 func TestChatKillDispatchesTargetAndExitFlag(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	service := &Service{backend: &backend{
 		dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {

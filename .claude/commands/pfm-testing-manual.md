@@ -37,13 +37,14 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 ## Run commands
 
-- Affected, an executor's only run (flight or general): `.claude/scripts/dev.sh iso run "go -C pfm test ./internal/<package>/ -run <Test> -count=1"` in the fence, `go -C pfm test ./internal/<package>/ -run <Test>` on the host — timeout 600 s. Beside it, in the fence, the static checks on what the executor changed: `.claude/scripts/dev.sh iso run "make -C pfm lint-new"` (a finding on a line it did not change is burn-down, never its red); `make -C pfm arch` the same way when a Go file is added or grows (size ceilings; every `x.go` has its `x_test.go`); `go -C pfm test ./internal/claudelaunch/ -run TestNoLaunchLiteralOutsideRegistry -count=1` when a changed line spells a Claude flag, env value or `--settings` key.
-- Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh iso test pfm`, in the fence only — a suite never runs on the host — about 5 minutes, timeout 600 s, background past that.
+- Affected, an executor's only run (flight or general): `.claude/scripts/dev.sh iso run "go -C pfm test ./internal/<package>/ -run <Test> -count=1"` in the fence, `go -C pfm test ./internal/<package>/ -run <Test>` on the host — timeout 600 s.
+- Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh iso gate` (`iso gate pfm` for pfm alone) — the verify and test rows of pfm and templates as concurrent steps in one container, a `step · verdict · seconds` table in the run's `gate.tsv` under the timing dir, the wall judged against `infra/fence/gate-budget.yml` — in the fence only, a suite never runs on the host; timeout 600 s, background past that. `iso verify pfm` and `iso test pfm` still run their rows one after another.
 - Static: `.claude/scripts/dev.sh iso verify pfm` (vet, fmt-check, lint-new, the architecture ratchet, the gate scripts' self-tests). Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`.
 
 ## Concurrency
 
-- Package and test concurrency is pinned by `TESTFLAGS ?= -p 4 -parallel 4` in `pfm/Makefile`; callers may override it. A test that mutates process state (`t.Setenv`, `t.Chdir`, or a package variable) stays serial; a jail contained in a subprocess may use `t.Parallel` with `testjail.FleetEnv`. Isolation is the jail, one temp root per test. Timing budgets per package and per suite: `docs/dev/testing/timing.md`; an unbudgeted package fails.
+- Package and test concurrency is pinned by `TESTFLAGS` in `pfm/Makefile` (`make -s -C pfm testflags` prints it; the pick: `docs/dev/testing/concurrency-sweep.md`); callers may override it. A test that mutates process state (`t.Setenv`, `t.Chdir`, or a package variable) stays serial; a jail contained in a subprocess may use `t.Parallel` with `testjail.FleetEnv`. Isolation is the jail, one temp root per test. Timing budgets per package and per suite: `docs/dev/testing/timing.md`; an unbudgeted package fails.
+- Unit packages over the shard threshold run split by top-level test across concurrent `go test` processes (`pfm/scripts/test-shard.sh`; `docs/dev/testing/timing.md` § Sharded packages): a test never depends on another top-level test of its package having run in the same process, nor on a fixed port, path or name another process of that package could hold.
 
 ## Gates and floors
 

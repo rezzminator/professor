@@ -555,7 +555,12 @@ func (installer *engine) runSkillGit(args ...string) (string, error) {
 // appended last, so each wins over an inherited value. WaitDelay bounds the
 // wait for a grandchild (git-remote-https) still holding the output pipes
 // after the timeout kills git; every failure carries git's stderr tail.
-func runSkillGitWith(runner deps.Runner, timeout, waitDelay time.Duration, git, dir string, args ...string) (string, error) {
+func runSkillGitWith(
+	runner deps.Runner,
+	timeout, waitDelay time.Duration,
+	git, dir string,
+	args ...string,
+) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	env := make([]string, 0, len(os.Environ())+4)

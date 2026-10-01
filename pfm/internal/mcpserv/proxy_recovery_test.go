@@ -365,7 +365,10 @@ func TestStdioProxyRetriesOnlyConnectPhaseFailures(t *testing.T) {
 				if got := calls.Load(); got <= 1 {
 					t.Errorf("transport calls = %d, want retries", got)
 				}
-				if !strings.HasPrefix(err.Error(), "pfm MCP daemon 127.0.0.1:1 stayed unreachable for 60ms; start it with `pfm mcp serve` and retry:") {
+				if !strings.HasPrefix(
+					err.Error(),
+					"pfm MCP daemon 127.0.0.1:1 stayed unreachable for 60ms; start it with `pfm mcp serve` and retry:",
+				) {
 					t.Errorf("retry error = %q, want the unreachable-daemon verdict", err)
 				}
 				return

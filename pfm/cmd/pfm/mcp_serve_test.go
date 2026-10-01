@@ -408,8 +408,13 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	if err := json.Unmarshal(encoded, &readOutput); err != nil {
 		t.Fatalf("decode harvester_read item: %v", err)
 	}
-	if len(readOutput.Publications) != 1 || !strings.HasPrefix(readOutput.Publications[0].Error, "No open copy of this work could be retrieved:") {
-		t.Fatalf("harvester_read item = %+v, want the public exhausted DOI explanation; text: %q", readOutput.Publications, toolResultText(read))
+	if len(readOutput.Publications) != 1 ||
+		!strings.HasPrefix(readOutput.Publications[0].Error, "No open copy of this work could be retrieved:") {
+		t.Fatalf(
+			"harvester_read item = %+v, want the public exhausted DOI explanation; text: %q",
+			readOutput.Publications,
+			toolResultText(read),
+		)
 	}
 	seen := map[string]bool{}
 	for len(seenAPIHosts) > 0 {

@@ -167,7 +167,14 @@ func TestHTTPStatusClassifiersMatchAStatusCodeNotADigitRun(t *testing.T) {
 			}
 			status, ok := rateLimitedStatus(err)
 			if status != test.wantStatus || ok != test.wantOK {
-				t.Errorf("rateLimitedStatus(%q) = (%q, %t), want (%q, %t)", test.message, status, ok, test.wantStatus, test.wantOK)
+				t.Errorf(
+					"rateLimitedStatus(%q) = (%q, %t), want (%q, %t)",
+					test.message,
+					status,
+					ok,
+					test.wantStatus,
+					test.wantOK,
+				)
 			}
 		})
 	}

@@ -106,7 +106,12 @@ chmod +x "$1"
 func TestGoBuildReportsCombinedOutput(t *testing.T) {
 	goDir := t.TempDir()
 	if err := os.WriteFile(
-		filepath.Join(goDir, "go"), []byte("#!/bin/sh\necho 'fixture compile output'\necho 'fixture compile error' >&2\nexit 41\n"), 0o700,
+		filepath.Join(
+			goDir,
+			"go",
+		),
+		[]byte("#!/bin/sh\necho 'fixture compile output'\necho 'fixture compile error' >&2\nexit 41\n"),
+		0o700,
 	); err != nil {
 		t.Fatal(err)
 	}

@@ -115,7 +115,8 @@ func TestRefusePublicLookupsForTestReturnsDNSError(t *testing.T) {
 	t.Parallel()
 	ips, err := RefusePublicLookupsForTest(context.Background(), "publisher.doh-seam.net")
 	var dnsErr *net.DNSError
-	if len(ips) != 0 || !errors.As(err, &dnsErr) || dnsErr.Name != "publisher.doh-seam.net" || dnsErr.Err != "public lookup refused in tests" {
+	if len(ips) != 0 || !errors.As(err, &dnsErr) || dnsErr.Name != "publisher.doh-seam.net" ||
+		dnsErr.Err != "public lookup refused in tests" {
 		t.Fatalf("refused lookup = %v, %v; want a named *net.DNSError", ips, err)
 	}
 }

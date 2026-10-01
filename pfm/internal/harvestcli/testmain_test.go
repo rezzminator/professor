@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/ask"
-	"github.com/rezzminator/professor/pfm/internal/harvest"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
 	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 

@@ -105,7 +105,12 @@ func (installer *engine) installThemes(ctx context.Context) {
 		if cached, ok := loads[name]; ok {
 			return cached
 		}
-		content, err := loadThemeContent(ctx, installer.options.ThemeHTTPClient, sources[name], installer.options.ThemesOffline)
+		content, err := loadThemeContent(
+			ctx,
+			installer.options.ThemeHTTPClient,
+			sources[name],
+			installer.options.ThemesOffline,
+		)
 		result := themeLoad{content: content, err: err}
 		loads[name] = result
 		return result
@@ -391,7 +396,11 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 				)
 			}
 			if options.ThemesOffline {
-				return nil, fmt.Errorf("local theme manifest unavailable: %v; fetch skipped: %s=1", localErr, paths.EnvThemesOffline)
+				return nil, fmt.Errorf(
+					"local theme manifest unavailable: %v; fetch skipped: %s=1",
+					localErr,
+					paths.EnvThemesOffline,
+				)
 			}
 			content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 			if err != nil {

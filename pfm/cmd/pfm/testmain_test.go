@@ -93,7 +93,8 @@ func TestMain(m *testing.M) {
 	binaryDir := ""
 	// This daemon test exercises its in-process handler and never starts the
 	// shared CLI binary. Its one-test run need not pay for a Go build.
-	if flag.Lookup("test.list").Value.String() == "" && os.Getenv(attachHelperEnv) != "1" && !runningOnlyMCPDaemonMountedTest() {
+	if flag.Lookup("test.list").Value.String() == "" && os.Getenv(attachHelperEnv) != "1" &&
+		!runningOnlyMCPDaemonMountedTest() {
 		var err error
 		binaryDir, err = os.MkdirTemp("", "pfm-cmd-test-binary-")
 		if err != nil {

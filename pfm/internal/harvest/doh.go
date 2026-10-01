@@ -290,7 +290,18 @@ func (r *dohResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 
 // specialUseTLDs includes RFC 6761/6762 reserved suffixes and the RFC 6761
 // §6.5 example domains. None of them resolves in the public DNS.
-var specialUseTLDs = []string{".test", ".invalid", ".localhost", ".local", ".example", ".example.com", ".example.org", ".example.net", ".internal", ".home.arpa"}
+var specialUseTLDs = []string{
+	".test",
+	".invalid",
+	".localhost",
+	".local",
+	".example",
+	".example.com",
+	".example.org",
+	".example.net",
+	".internal",
+	".home.arpa",
+}
 
 func isSpecialUseName(host string) bool {
 	for _, suffix := range specialUseTLDs {

@@ -16,7 +16,7 @@ mcp_stdio_grace_ticks() {
 }
 
 mcp_stdio_exchange() {
-  local want="$1" bound="$2" frames="$3" dir fifo out pid rc pipe_trap i bound_ticks grace_ticks grace
+  local want="$1" bound="$2" frames="$3" dir fifo out pid rc pipe_trap i bound_ticks grace_ticks grace alive
   shift 3
   MCP_STDIO_WHY=""
   if ! mcp_stdio_ticks "$bound"; then
@@ -64,11 +64,12 @@ mcp_stdio_exchange() {
 
   rc=1 i=0
   while :; do
+    if kill -0 "$pid" 2>/dev/null; then alive=1; else alive=0; fi
     if jq -e --argjson wanted "$want" 'select(.id == $wanted)' "$out" >/dev/null 2>&1; then
       rc=0
       break
     fi
-    if ! kill -0 "$pid" 2>/dev/null; then
+    if [ "$alive" -eq 0 ]; then
       MCP_STDIO_WHY="exited before answering"
       break
     fi

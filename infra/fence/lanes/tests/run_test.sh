@@ -437,6 +437,7 @@ if [ "$RC" -eq 1 ] &&
 else bad "capture missing verdict" "rc=$RC" "$OUT"; fi
 
 # ---- 25: the recorder's artifacts are copied beside the lane output.
+rm -rf "$T/out"
 STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
 capture_out="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d | head -1)"
 if [ "$RC" -eq 0 ] && [ -f "$capture_out/egress.out" ] &&

@@ -43,6 +43,7 @@ check_merge merge-pass 0 pass "$T/quick.json" "$T/a.json" "$T/b.json"
 if cmp -s "$T/quick.json" <(head -n 3 "$T/merged.json"); then ok unsharded-identical; else bad unsharded-identical; fi
 cat >"$T/timing.yml" <<YML
 tolerance: 1.25
+fail_factor: 2
 suites:
   u:
     wall_s: 20

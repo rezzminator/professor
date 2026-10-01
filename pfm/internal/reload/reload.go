@@ -389,7 +389,7 @@ func Run(
 	}
 	if err := writeHandoff(lock, handoffRecord{
 		Engine: request.Engine, SessionID: request.SessionID, Account: request.Account,
-		Cache1H: request.Cache1H, CWD: request.CWD, WrittenAt: options.Clock.Now(),
+		LeftBehind: leftBehind, Cache1H: request.Cache1H, CWD: request.CWD, WrittenAt: options.Clock.Now(),
 	}); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: record reload handoff: %v\n", err)
 	}

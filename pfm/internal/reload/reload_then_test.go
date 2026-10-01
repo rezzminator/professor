@@ -2,6 +2,7 @@ package reload
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,38 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 )
+
+type failedThenDisplayTmux struct {
+	fakeReloadTmux
+	displayErr error
+}
+
+func (tmux *failedThenDisplayTmux) Display(ctx context.Context, socket, pane, message string) error {
+	_ = tmux.fakeReloadTmux.Display(ctx, socket, pane, message)
+	return tmux.displayErr
+}
+
+func TestRunMarksFailedThenOnlyWhenPaneWasTold(t *testing.T) {
+	for _, displayErr := range []error{nil, errors.New("display failed")} {
+		dir := t.TempDir()
+		tmux := &failedThenDisplayTmux{displayErr: displayErr}
+		_, err := Run(context.Background(), Request{
+			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-then", Pane: "%7",
+			SessionID: "11111111-1111-4111-8111-111111111111", Account: 1,
+			AccountIDs: []int{1}, Then: "follow up",
+		}, Options{SIDDir: dir, Delay: -1, Poll: -1, ExitTries: 2, ThenTries: 1},
+			tmux, fakeReloadProc{}, io.Discard)
+		if err == nil || PaneTold(err) != (displayErr == nil) {
+			t.Fatalf("displayErr=%v runErr=%v paneTold=%t", displayErr, err, PaneTold(err))
+		}
+		if content, readErr := os.ReadFile(
+			filepath.Join(dir, "probe-then.then-failed"),
+		); readErr != nil ||
+			string(content) != "follow up\n" {
+			t.Fatalf("sentinel=%q error=%v", content, readErr)
+		}
+	}
+}
 
 func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 	tmux := &delayedThenTmux{marker: "›"}
@@ -23,7 +56,7 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-codex-then", Pane: "%7",
-			PanePID: 700, Then: "continue the task",
+			Then: "continue the task",
 		},
 		Options{ThenTries: 2},
 		tmux,
@@ -46,7 +79,6 @@ func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 			Engine:     pfmengine.Claude,
 			SocketPath: "/tmp/tmux-1000/probe-reload-then-pid",
 			Pane:       "%7",
-			PanePID:    tmux.oldPID,
 			SessionID:  "11111111-1111-4111-8111-111111111111",
 			CWD:        "/jail/project",
 			Account:    2,
@@ -103,7 +135,7 @@ func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-wrapped-then", Pane: "%7",
-			PanePID: 700, Then: then,
+			Then: then,
 		},
 		Options{ThenTries: 2},
 		tmux,
@@ -166,7 +198,7 @@ func (tmux *stuckExitTmux) SendKey(_ context.Context, _, _, key string) error {
 
 func reloadIdleWaitRequest(socket string) Request {
 	return Request{
-		Engine: pfmengine.Claude, SocketPath: socket, Pane: "%7", PanePID: 700,
+		Engine: pfmengine.Claude, SocketPath: socket, Pane: "%7",
 		SessionID: "11111111-1111-4111-8111-111111111111", CWD: "/jail/project",
 		Account: 2, AccountIDs: []int{2}, Machine: reloadTestMachine("", "/jail/home"),
 	}

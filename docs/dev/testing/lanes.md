@@ -22,15 +22,18 @@ pfm-lane-root:<hash>          built once per template change (root.sh), never pu
 ```bash
 infra/fence/lanes/run.sh --lanes E1 --dry-run     # the plan: hash, image decision, beats, seats
 infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from the root image
+LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes E1 # record each wait and print the ten longest
 ```
 
-`--dry-run` creates no container and runs no beat; it prints the root decision, lane order, budgets and seats. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
+`--dry-run` creates no container and runs no beat; it prints the root decision, lane order, budgets and seats. A non-dry run starts one `egress.sh` capture before its first lane and ends with its `EGRESS PASS`, `EGRESS FAIL` or `EGRESS NOT RECORDED` verdict as the last line. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
 
 | file | what it carries |
 | --- | --- |
 | `<lane>.log` | every beat line, plus a failed beat's raw pane bytes (`tmux capture-pane -e -p -S -`) and its activity-log slice |
 | `<lane>.stream.log` | exactly what the lane printed, as it printed it |
+| `egress.out` | the capture's verdict and any DNS or destination detail; `egress/` holds its pcap and tcpdump log |
 | `timeline.tsv` | `lane · beat · t+s · verdict · dur_s · seat · detail` |
+| `waits.tsv` | with `LANE_PROFILE=1`, each wait's lane, beat, helper, condition, elapsed seconds and outcome, longest first |
 | `lanes.tsv` | `lane · wall_s · beats · failed · known · blocked` (the Wave 2 TSV shape) |
 | `summary.md` | the header (mode, root image, order, seats), the table, the budget verdicts, the verdict |
 
@@ -44,9 +47,9 @@ infra/fence/lanes/run.sh --root rebuild             # force a fresh root image f
 
 Lanes named on `--lanes` in any order run in canonical order. A lane that is not written yet is listed in `infra/fence/lanes/pending.txt`: naming it explicitly is refused (exit 2), and a bare `run.sh` drops it with a named `NOT WRITTEN` line rather than shrinking the sequence silently. The header names the mode (`solo` / `sequence`) and, in sequence mode, the lanes that ran before each lane.
 
-**The root image.** `root.sh` builds from the `pfm-dev` fence image in seven steps: (1) `provision.sh tools` builds pfm and `pfm/cmd/mock-engine`, linked as all three engine CLIs; (2) `provision.sh seats` writes two fixture seats and fixture Codex/OpenCode homes; (3) `provision.sh install` runs `pfm install --yes` and creates invented local projects; (4) `adopt.sh` scripts `pfm init` and `pfm init --render` for the invented express project; (5) `pfm ls --plain` confirms an empty fleet; (6) `cred-scan.sh` refuses any unregistered credential under `/root`, `/tmp` or `/home`, reporting its path without its value; (7) `docker commit` makes the local `pfm-lane-root:<hash>` image. A failed step commits no image.
+**The root image.** `root.sh` builds from the `pfm-dev` fence image in seven steps: (1) `provision.sh tools` builds pfm and `pfm/cmd/mock-engine`, linked as all three engine CLIs; (2) `provision.sh seats` writes two fixture seats and fixture Codex/OpenCode homes; (3) `provision.sh install` runs `pfm install --yes` and creates invented local projects; (4) `adopt.sh` scripts `pfm init` and `pfm init --render` for the invented express project; (5) `pfm ls --plain` confirms an empty fleet; (6) `cred-scan.sh` refuses any unregistered credential under `/root`, `/tmp` or `/home`, reporting its path without its value; (7) `docker commit` makes the local `pfm-lane-root:<hash>` image. A failed step commits no image and leaves diagnostics at `/tmp/{project}/lanes/root-failures/<hash>-<stamp>.txt`. A commit that loses its containerd lease is committed again, up to three attempts, each lost attempt leaving its own diagnostics file. Fence housekeeping skips its dangling-image prune while any `pfm-lane-build-*` container runs, from any checkout.
 
-`<hash>` covers the root's build inputs listed by `HASH_PATHS` in `root.sh`: the pfm product and templates, `VERSION`, `docs/SETUP.md`, `docs/PLACEHOLDERS.md`, the pre-push hook, the fence image files, and `root.sh`, `container.sh`, `provision.sh`, `adopt.sh`, `cred-scan.sh`, `fixtures/` and `scenarios/`. Dirty and untracked content in those inputs contributes to the hash. A lane-script, `lib.sh` or registry edit reuses the root. A matching image is printed as `REUSE`; the root stays local and `root.sh` refuses a registry tag.
+`<hash>` covers the content of the root's build inputs listed by `HASH_PATHS` in `root.sh`: the pfm product and templates, `VERSION`, `docs/SETUP.md`, `docs/PLACEHOLDERS.md`, the pre-push hook, the fence image files, and `root.sh`, `container.sh`, `provision.sh`, `adopt.sh`, `cred-scan.sh`, `fixtures/` and `scenarios/`. The hash is the same whether that content is dirty, staged or committed; untracked build inputs count too. Test files, testdata and the e2e tree are excluded. A lane-script, `lib.sh` or registry edit reuses the root. A matching image is printed as `REUSE`; the root stays local and `root.sh` refuses a registry tag.
 
 **Seats.** `--seats cc:1` names the primary Claude seat for the run, not the roster. Both fixture seats always exist; `SEAT` names the first requested `cc:` seat and `ALT` or `SPARE` names the other.
 
@@ -67,13 +70,13 @@ Four verdicts, and no fifth:
 - `known` the beat is an entry in `infra/fence/lanes/known-gaps.yml`: counted apart, does not fail the run. **A listed beat that PASSES is a red row** (`known-gap now passes — remove the entry`), an entry with no `expires:` or past it makes the run red before a single lane starts, and an `arch:`-scoped entry is a gap only on that architecture.
 - `blocked` a declared precondition failed — a beat before it (`blocked-by <beat>`), a named capability such as O2.01b's `clock-door`, or the chat itself: a beat that declared `target_live <chat>` and finds no live row for it is blocked in seconds, `blocked-by` the beat that last saw that chat alive. Never `✗` for someone else's failure, and never silence.
 
-**A dead chat costs seconds, not minutes.** Every wait (`wait_last`, `wait_for`) abandons a beat's declared live chat the moment its row dies and says which happened — `timed out after Ns` or `has no live row` are different findings. After the first blocked beat the lane spends its ONE `lane_reopen` command to bring the chat back, `need`-style and never in a loop; whether it came back is a named line in the lane log. Where a reboot takes the NAME off the live session — `/reload --new` leaves the label with the id it replaced and auto-names the reborn session from its steer — a beat follows the chat by its tmux SOCKET instead (`anchor_socket <socket>`, column 11 of `pfm ls --tsv`, unchanged across the reboot) and renames it back with `pfm chat name <id> <name>`.
+**A dead chat costs seconds, not minutes.** Every wait (`wait_last`, `wait_for`) abandons a beat's declared live chat the moment its row dies and says which happened — `timed out after Ns` or `has no live row` are different findings. A lane waits on the state it needs with `wait_for`, `tui_wait` or a row reader; a check made immediately after a wait or a `pfm` verb waits on the exact state it asserts, never on poll slack or a fixed sleep. Every `sleep` left in a lane script is a poll step, a window that must elapse, or a planted payload, named in the comment above it. After the first blocked beat the lane spends its ONE `lane_reopen` command to bring the chat back, `need`-style and never in a loop; whether it came back is a named line in the lane log. Where a reboot takes the NAME off the live session — `/reload --new` leaves the label with the id it replaced and auto-names the reborn session from its steer — a beat follows the chat by its tmux SOCKET instead (`anchor_socket <socket>`, column 11 of `pfm ls --tsv`, unchanged across the reboot) and renames it back with `pfm chat name <id> <name>`.
 
 A beat also fails on a dirty activity log: `lib.sh` snapshots `<pfm home>/log/pfm.jsonl` before each beat and fails it on any `"level":"error"` record in its own slice that no `expect-log <pattern>` declared.
 
 ## Budgets
 
-`infra/fence/lanes/budgets.yml` carries a row per lane plus the sequence, with tolerance ×1.25. Every row reads `unpinned` today: run.sh RECORDS the wall and says `unpinned — recorded, not judged` rather than judging it. A lane with no row at all is red (`UNBUDGETED`). Pin a number from the median of three green runs and ratchet DOWN only, the rule `pfm/.testtiming.yml` already follows. The spec's targets until then: root ≤ 15 min, a solo lane ≤ 12 min, the full sequence ≤ 75 min with the root cached.
+`infra/fence/lanes/budgets.yml` carries pinned seconds for every lane and the sequence, measured as the median of three green sequence runs and judged at ×1.25 in solo and sequence runs. A new lane starts with `unpinned`: run.sh records its wall and says `unpinned — recorded, not judged`. A lane with no row at all is red (`UNBUDGETED`). Ratchet pinned values DOWN only, the rule `pfm/.testtiming.yml` already follows. The targets are a root build ≤ 15 min and the full sequence ≤ 5 min with the root cached.
 
 ```bash
 infra/fence/lanes/run.sh --check-budget E1 700   # the verdict for a recorded wall, by hand
@@ -97,4 +100,4 @@ The harness has its own tests — plain bash, no docker, no model:
 for t in infra/fence/lanes/tests/*_test.sh; do bash "$t" || break; done
 ```
 
-They cover the beat library's verdicts and the known-gap red rows, the runner's plan/order/mode/budget verdicts, `cred-scan_test.sh`'s registered-fixture credential gate, and the map gate's findings. Run these tests inside the fence through `.claude/scripts/dev.sh iso run`.
+They cover the beat library's verdicts and the known-gap red rows, the runner's plan/order/mode/budget verdicts, `cred-scan_test.sh`'s registered-fixture credential gate, the stdio exchange helper shared by check-map and E2, and the map gate's findings. Run these tests inside the fence through `.claude/scripts/dev.sh iso run`.

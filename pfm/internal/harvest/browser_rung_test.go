@@ -89,6 +89,7 @@ func wallHarvester(t *testing.T, converter Converter, browserRung *bool) *Harves
 // gate ON and every earlier rung failing, the trace reads direct,
 // chrome-impersonation, jina, defuddle, browser, wayback.
 func TestBrowserRungSitsBetweenDefuddleAndWayback(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{err: errors.New("browser unavailable")}
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -123,6 +124,7 @@ func TestBrowserRungIsOffByDefault(t *testing.T) {
 // could not run (patchright missing) is reported as an outage and NEVER as
 // "the browser tried and found nothing".
 func TestBrowserOutageIsNotAbsence(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{err: errors.New("patchright not installed")}
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -138,6 +140,7 @@ func TestBrowserOutageIsNotAbsence(t *testing.T) {
 // ladder dead-ends on a challenge with the gate off, the terminal message
 // names the enable path.
 func TestDisabledBrowserRungNamesEnablePath(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{err: errors.New("must never run")}
 	h := wallHarvester(t, spy, nil)
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -151,6 +154,7 @@ func TestDisabledBrowserRungNamesEnablePath(t *testing.T) {
 // render that returns a LONGER Cloudflare challenge page is rejected — the
 // cache stays free of content artifacts.
 func TestBrowserChallengePageIsNeverLaunderedIntoContent(t *testing.T) {
+	t.Parallel()
 	blockPage := cloudflareBlockPageFixture()
 	if len(blockPage) <= 4000 {
 		t.Fatalf(
@@ -189,6 +193,7 @@ func TestBrowserChallengePageIsNeverLaunderedIntoContent(t *testing.T) {
 // rendered HTML that converts longer than everything before it wins at the
 // browser rung and is cached under method browser-chrome.
 func TestBrowserSuccessStoresAcceptedContent(t *testing.T) {
+	t.Parallel()
 	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat(
 		"real rendered evidence ",
 		100,
@@ -247,6 +252,7 @@ func browserHarvester(t *testing.T, converter Converter) *Harvester {
 // pattern), Result.Challenge is set and the terminal message says the rung
 // ran — the flag must not depend on rung one having seen the wall first.
 func TestBrowserDetectedChallengeIsReported(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{
 		html:   cloudflareBlockPageFixture(),
 		status: http.StatusForbidden,
@@ -272,6 +278,7 @@ func TestBrowserDetectedChallengeIsReported(t *testing.T) {
 // The blank page is what Chrome ACTUALLY serialises for an empty document —
 // never the empty string, which the real worker cannot emit (review 2, B4).
 func TestBrowserEmptyRenderIsNotAnOutage(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{html: "<html><head></head><body></body></html>", status: 200}
 	h := browserHarvester(t, spy)
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -287,6 +294,7 @@ func TestBrowserEmptyRenderIsNotAnOutage(t *testing.T) {
 // refuses the address, the terminal message says POLICY — never "tool
 // outage", which would send the caller retrying a permanent refusal.
 func TestBrowserPolicyDenialIsNotAnOutage(t *testing.T) {
+	t.Parallel()
 	spy := &browserSpyConverter{
 		err: fmt.Errorf("wrapped: %w", ErrBrowserPolicyDenied),
 	}
@@ -307,6 +315,7 @@ func TestBrowserPolicyDenialIsNotAnOutage(t *testing.T) {
 // wall and rendered the article, then the conversion step failed. The user
 // must hear "tool outage", never the definitive verdict that the wall won.
 func TestBrowserConverterOutageIsNamed(t *testing.T) {
+	t.Parallel()
 	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat(
 		"real rendered evidence ",
 		100,
@@ -333,6 +342,7 @@ func TestBrowserConverterOutageIsNamed(t *testing.T) {
 // converts to a few hundred chars must NOT be cached as the article under
 // method browser-chrome.
 func TestBrowserThinRenderIsNeverStored(t *testing.T) {
+	t.Parallel()
 	rendered := "<html><body><div id=paywall>Subscribe to keep reading this site</div></body></html>"
 	spy := &browserSpyConverter{
 		html:   rendered,
@@ -357,6 +367,7 @@ func TestBrowserThinRenderIsNeverStored(t *testing.T) {
 // lastStatus=status in the jina rung clobbers a genuine earlier 403 and the
 // receipt reports HTTPStatus 0.
 func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
+	t.Parallel()
 	wall := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", "<html>checking your browser</html>"), nil
 	})
@@ -399,6 +410,7 @@ const recoveredArticleHTML = "<html><body><h1>Recovered article</h1>real rendere
 // TestBrowserRungRendersOnce: a render that passes is accepted from the one
 // headless request the rung sends.
 func TestBrowserRungRendersOnce(t *testing.T) {
+	t.Parallel()
 	spy := recoveredArticleSpy(func() (string, int, error) { return recoveredArticleHTML, http.StatusOK, nil })
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -417,6 +429,7 @@ func TestBrowserRungRendersOnce(t *testing.T) {
 // — and return the headless wall verdict. Watched FAILING before the change:
 // both rungs sent a second, headed request ([true false]).
 func TestBrowserRungsNeverRequestAHeadedBrowser(t *testing.T) {
+	t.Parallel()
 	t.Run("render", func(t *testing.T) {
 		spy := recoveredArticleSpy(func() (string, int, error) {
 			return cloudflareBlockPageFixture(), http.StatusForbidden, nil
@@ -456,6 +469,7 @@ const consentBannerPageHTML = `<html><body><h1>Recovered article</h1><p>real ren
 // when its vendor list names Cloudflare or a captcha provider — the render
 // stands.
 func TestBrowserConsentBannerIsNotAWall(t *testing.T) {
+	t.Parallel()
 	spy := recoveredArticleSpy(func() (string, int, error) { return consentBannerPageHTML, http.StatusOK, nil })
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -483,6 +497,7 @@ func catalogOrRender(ctx context.Context, kind, source string, body []byte) (str
 // asked for: the flagged page is stored. A render that IS the page still wins,
 // at the page's canonical address too.
 func TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	bodies := []string{long, long, long}
 	flaggedThread := redditThreadHTML(4, bodies, true)
@@ -546,6 +561,7 @@ func TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage(t *t
 // and kept for the browser rung to beat. Its images are fetched only when it
 // is the page stored — never for a page the browser render then supersedes.
 func TestImagesAreLocalizedOnlyForTheStoredPage(t *testing.T) {
+	t.Parallel()
 	withFigure := func(ctx context.Context, kind, source string, body []byte) (string, error) {
 		converted, err := catalogOrRender(ctx, kind, source, body)
 		if err == nil && strings.Contains(string(body), "<species-card") {

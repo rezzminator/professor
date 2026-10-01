@@ -39,6 +39,7 @@ func slashdotSite(t *testing.T) *socialSite {
 // the answer), in comment order; the stated total is the answer's own; the
 // artifact is complete, and a second harvest is identical.
 func TestSlashdotStoryLoadsEveryComment(t *testing.T) {
+	t.Parallel()
 	site := slashdotSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), slashdotURL, FetchOptions{Refresh: true})
@@ -87,6 +88,7 @@ func TestSlashdotStoryLoadsEveryComment(t *testing.T) {
 // discussion id and seen list to the page host's /ajax.pl, asking for every
 // comment at the lowest threshold.
 func TestSlashdotLoaderAsksForTheWholeDiscussion(t *testing.T) {
+	t.Parallel()
 	doc, err := html.Parse(strings.NewReader(socialFixture(t, "slashdot/story-page.html")))
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +117,7 @@ func TestSlashdotLoaderAsksForTheWholeDiscussion(t *testing.T) {
 // that is not this discussion's comment list, is never rendered: the story
 // renders its page's comments with the rest named, stated · loaded.
 func TestSlashdotCommentsNotLoadedNameTheGap(t *testing.T) {
+	t.Parallel()
 	for name, mutate := range map[string]func(site *socialSite){
 		"refused": func(site *socialSite) { site.status = map[string]int{slashdotAjax: http.StatusForbidden} },
 		"another discussion": func(site *socialSite) {

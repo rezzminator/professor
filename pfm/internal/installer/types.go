@@ -158,6 +158,9 @@ type Options struct {
 	// Command callers set it by default; unit callers opt in explicitly so a
 	// test can never acquire network access by accident.
 	InstallThemes bool
+	// ThemesOffline skips remote theme manifests and palettes while allowing
+	// bundled palettes from SourceRepo to install.
+	ThemesOffline bool
 	// ThemeManifestURL is the release-matched fallback used when SourceRepo is
 	// unavailable (for example, the checksum-verified binary install path).
 	ThemeManifestURL string

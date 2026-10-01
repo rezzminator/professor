@@ -9,7 +9,7 @@
 # call fence_volumes_ensure before every compose run.
 #
 #   fence_housekeeping [lane-hash]   # the five steps below, in order
-#   fence_volumes_ensure             # the three shared cache volumes exist
+#   fence_volumes_ensure             # the five shared cache volumes exist
 #
 # Only fence-owned objects are ever removed: containers and dangling images
 # labelled pfm.fence=1 (pfm-dev.Dockerfile, docker-compose.yml and every fence
@@ -26,7 +26,8 @@
 #                   checkout's gate run must not end it.
 #   images          dangling images labelled pfm.fence=1 — each rebuild's previous
 #                   professor-pfm-{dev,sim} or lane root, ~3 GB each; docker skips
-#                   any a container uses. An overlapping prune is a skip, not a WARN.
+#                   any a container uses. A running lane root build skips the
+#                   prune; an overlapping prune is a skip, not a WARN.
 #   lane-images     lane roots whose hash is not current in any checkout, and
 #                   pfm-lane-base:<hash> pins of such hashes no running
 #                   pfm-lane-build-<hash> holds; `docker rmi` without -f, so a
@@ -58,7 +59,7 @@
 # removal is printed as `fence housekeeping: removed …`.
 
 FENCE_HK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || FENCE_HK_DIR=""
-FENCE_CACHE_VOLUMES="pfm-dev-gocache pfm-dev-gomod pfm-dev-npm-cache"
+FENCE_CACHE_VOLUMES="pfm-dev-gocache pfm-dev-gomod pfm-dev-lintcache pfm-lane-harvest-cache pfm-lane-uv-cache"
 FENCE_GOCACHE_VOLUME=pfm-dev-gocache
 
 _fence_hk_warn() { printf 'WARN fence housekeeping: %s failed: %s\n' "$1" "$2" >&2; }
@@ -119,7 +120,15 @@ _fence_hk_containers() {
 }
 
 _fence_hk_images() {
-  local out
+  local out builds
+  if ! builds="$(docker ps --filter name=pfm-lane-build- --format '{{.Names}}' 2>&1)"; then
+    _fence_hk_warn images "listing running lane builds, prune skipped: $(_fence_hk_line "$builds")"
+    return 0
+  fi
+  if [ -n "$builds" ]; then
+    _fence_hk_say "skipped the dangling fence image prune — lane root build(s) in flight: $(_fence_hk_line "$builds")"
+    return 0
+  fi
   if out="$(docker image prune -f --filter label=pfm.fence=1 2>&1)"; then
     case "$out" in *Deleted*) _fence_hk_say "removed dangling fence images — $(grep -i 'reclaimed' <<<"$out")" ;; esac
     return 0
@@ -131,27 +140,37 @@ _fence_hk_images() {
 _fence_hk_rmi() { # _fence_hk_rmi <ref> — untag/remove without -f; in use is a keep
   local out
   if out="$(docker rmi "$1" 2>&1)"; then _fence_hk_say "removed image $1"; return 0; fi
-  case "$out" in *conflict* | *"is using"* | *"being used"*) _fence_hk_say "kept image $1 — a container still uses it"; return 0 ;; esac
+  case "$out" in
+    *"No such image"*) _fence_hk_say "image $1 already removed"; return 0 ;;
+    *conflict* | *"is using"* | *"being used"*) _fence_hk_say "kept image $1 — a container still uses it"; return 0 ;;
+  esac
   _fence_hk_warn lane-images "docker rmi $1: $(_fence_hk_line "$out")"
 }
 
+_fence_hk_has_line() { [[ $'\n'"$1"$'\n' == *$'\n'"$2"$'\n'* ]]; }
+
 _fence_hk_lane_images() {
-  local keep="${1:-}" repo out wt h bad all current ids pins builds id ref tag
+  local keep="${1:-}" repo out wt h bad all current ids pins builds id ref tag tag_hash
   # The keep-set: the argument plus every registered checkout's current hash.
   repo="$(cd -- "$FENCE_HK_DIR/../.." 2>/dev/null && pwd -P)" || repo="$FENCE_HK_DIR"
   if ! out="$(git -C "$repo" worktree list --porcelain 2>&1)"; then
     _fence_hk_warn lane-images "git worktree list in $repo failed, no lane image removed: $(_fence_hk_line "$out")"; return
   fi
   while IFS= read -r wt; do
+    case "$wt" in worktree\ *) wt="${wt#worktree }" ;; *) continue ;; esac
     [ -f "$wt/infra/fence/lanes/root.sh" ] || continue
     if ! h="$(bash "$wt/infra/fence/lanes/root.sh" --print-hash 2>&1)"; then
       _fence_hk_warn lane-images "the lane-root hash of checkout $wt is underivable, no lane image removed: $(_fence_hk_line "$h")"; return
     fi
-    keep="$keep"$'\n'"$(printf '%s\n' "$h" | tail -1)"
-  done < <(sed -n 's/^worktree //p' <<<"$out")
-  keep="$(printf '%s\n' "$keep" | sed '/^$/d' | sort -u)"
+    keep="$keep"$'\n'"${h##*$'\n'}"
+  done <<<"$out"
+  keep="$(sort -u <<<"$keep")"
+  keep="${keep#$'\n'}"
   [ -n "$keep" ] || { _fence_hk_warn lane-images "no checkout yields a lane-root hash, no lane image removed"; return; }
-  bad="$(grep -v '^[0-9a-f][0-9a-f]*$' <<<"$keep" | head -1)"
+  bad=""
+  while IFS= read -r h; do
+    case "$h" in *[!0123456789abcdef]*) bad="$h"; break ;; esac
+  done <<<"$keep"
   [ -z "$bad" ] || { _fence_hk_warn lane-images "'$bad' is not a lane-root hash, no lane image removed"; return; }
   all="$(docker image ls --filter label=professor.lane-root --format '{{.ID}} {{.Repository}}:{{.Tag}}' 2>&1)" ||
     { _fence_hk_warn lane-images "listing lane roots: $(_fence_hk_line "$all")"; return; }
@@ -163,7 +182,7 @@ _fence_hk_lane_images() {
   done <<<"$keep"
   while read -r id ref; do
     [ -n "$id" ] || continue
-    grep -qxF -- "$id" <<<"$current" && continue
+    _fence_hk_has_line "$current" "$id" && continue
     [ "$ref" = "<none>:<none>" ] && ref="$id"
     _fence_hk_rmi "$ref"
   done <<<"$all"
@@ -173,8 +192,9 @@ _fence_hk_lane_images() {
     { _fence_hk_warn lane-images "listing running lane builds: $(_fence_hk_line "$builds")"; return; }
   while read -r tag; do
     case "$tag" in '' | "<none>") continue ;; esac
-    grep -qxF -- "$tag" <<<"$keep" && continue
-    grep -qxF -- "pfm-lane-build-$tag" <<<"$builds" && continue
+    tag_hash="${tag%%-*}"
+    _fence_hk_has_line "$keep" "$tag_hash" && continue
+    _fence_hk_has_line "$builds" "pfm-lane-build-$tag" && continue
     _fence_hk_rmi "pfm-lane-base:$tag"
   done <<<"$pins"
 }
@@ -253,7 +273,7 @@ fence_housekeeping() { # fence_housekeeping [lane-hash]
 fence_volumes_ensure() { # compose declares the caches external: they must exist before it runs
   (
     set +eEu +o pipefail; trap - ERR; IFS=$' \t\n'
-    # shellcheck disable=SC2086 # three fixed names
+    # shellcheck disable=SC2086 # five fixed names
     docker volume inspect $FENCE_CACHE_VOLUMES >/dev/null 2>&1 && exit 0
     for v in $FENCE_CACHE_VOLUMES; do
       out="$(docker volume create "$v" 2>&1)" || _fence_hk_warn volumes "docker volume create $v: $(_fence_hk_line "$out")"

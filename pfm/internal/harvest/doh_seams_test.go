@@ -1,6 +1,9 @@
 package harvest
 
 import (
+	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,6 +29,7 @@ import (
 // the fallback without ever querying DoH, which is exactly the path this test
 // must not take.
 func TestAssertFetchableConsultsTheDoHResolver(t *testing.T) {
+	t.Cleanup(StubPublicResolverForTest(nil))
 	previousResolver := sharedDOHResolver
 	t.Cleanup(func() { sharedDOHResolver = previousResolver })
 
@@ -65,5 +69,54 @@ func TestAssertFetchableConsultsTheDoHResolver(t *testing.T) {
 	})
 	if err := AssertFetchable("https://sinkhole.doh-seam.net/"); err != nil {
 		t.Fatalf("AssertFetchable(sinkhole.doh-seam.net) with a public DoH answer = %v, want nil", err)
+	}
+}
+
+func TestPublicResolverStubCanBeRestored(t *testing.T) {
+	t.Cleanup(StubPublicResolverForTest(nil))
+	previousResolver := sharedDOHResolver
+	t.Cleanup(func() { sharedDOHResolver = previousResolver })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("type") == "A" {
+			_, _ = w.Write([]byte(`{"Status":0,"Answer":[{"type":1,"TTL":300,"data":"198.51.100.7"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"Status":0,"Answer":[]}`))
+	}))
+	defer server.Close()
+	sharedDOHResolver = sync.OnceValue(func() *dohResolver {
+		return newTestDOHResolver(server.URL, refusingFallback(t))
+	})
+
+	restore := StubPublicResolverForTest(func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.10")}, nil
+	})
+	ips, err := ResolvePublicHost(context.Background(), "resolver.doh-seam.net")
+	if err != nil || len(ips) != 1 || !ips[0].Equal(net.ParseIP("203.0.113.10")) {
+		t.Fatalf("stubbed ResolvePublicHost = %v, %v; want 203.0.113.10", ips, err)
+	}
+	restore()
+	ips, err = ResolvePublicHost(context.Background(), "resolver.doh-seam.net")
+	if err != nil || len(ips) != 1 || !ips[0].Equal(net.ParseIP("198.51.100.7")) {
+		t.Fatalf("restored ResolvePublicHost = %v, %v; want the DoH answer 198.51.100.7", ips, err)
+	}
+	restore = StubPublicResolverForTest(func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.10")}, nil
+	})
+	StubPublicResolverForTest(nil)
+	ips, err = ResolvePublicHost(context.Background(), "resolver.doh-seam.net")
+	if err != nil || len(ips) != 1 || !ips[0].Equal(net.ParseIP("198.51.100.7")) {
+		t.Fatalf("cleared ResolvePublicHost = %v, %v; want the DoH answer 198.51.100.7", ips, err)
+	}
+	restore()
+}
+
+func TestRefusePublicLookupsForTestReturnsDNSError(t *testing.T) {
+	t.Parallel()
+	ips, err := RefusePublicLookupsForTest(context.Background(), "publisher.doh-seam.net")
+	var dnsErr *net.DNSError
+	if len(ips) != 0 || !errors.As(err, &dnsErr) || dnsErr.Name != "publisher.doh-seam.net" ||
+		dnsErr.Err != "public lookup refused in tests" {
+		t.Fatalf("refused lookup = %v, %v; want a named *net.DNSError", ips, err)
 	}
 }

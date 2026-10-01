@@ -90,6 +90,7 @@ func TestBrowserProxyPassesAnAllowedHostThrough(t *testing.T) {
 // same one every other client in this package dials under — and it is NAMED
 // on the wire, not delivered as a bare connection failure.
 func TestBrowserProxyRefusesAPrivateTarget(t *testing.T) {
+	t.Parallel()
 	proxyURL := startProxyForTest(t)
 	for _, target := range []string{"127.0.0.1:80", "169.254.169.254:80", "10.0.0.5:8080"} {
 		status, reason := proxyConnect(t, proxyURL, target)
@@ -126,6 +127,7 @@ func TestBrowserProxyRefusesARebindingHost(t *testing.T) {
 // TestBrowserProxyStopClosesTheListener proves stop is real: the port stops
 // answering, and no goroutine the proxy started is still running.
 func TestBrowserProxyStopClosesTheListener(t *testing.T) {
+	t.Parallel()
 	before := runtime.NumGoroutine()
 	proxyURL, stop, err := StartBrowserProxy(context.Background(), nil)
 	if err != nil {
@@ -149,6 +151,7 @@ func TestBrowserProxyStopClosesTheListener(t *testing.T) {
 // TestBrowserProxyContextCancelStopsIt pins the other half of the lifetime
 // contract: the caller's context ending is the same shutdown as stop.
 func TestBrowserProxyContextCancelStopsIt(t *testing.T) {
+	t.Parallel()
 	before := runtime.NumGoroutine()
 	ctx, cancel := context.WithCancel(context.Background())
 	proxyURL, stop, err := StartBrowserProxy(ctx, nil)

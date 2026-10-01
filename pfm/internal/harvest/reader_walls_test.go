@@ -29,6 +29,7 @@ func readerWallFixture(t *testing.T, name string) string {
 // rung's HTML showed is named on the reader's page when the reader's HTML
 // cannot be read.
 func TestReaderPagesPassTheWallCheck(t *testing.T) {
+	t.Parallel()
 	const paywallURL = "https://www.bloomberg.com/news/articles/2025-10-22/reddit-sues-perplexity-others-over-alleged-data-scraping"
 	walledOrigin := `<html><head><script type="application/ld+json">{"@type":"Article","isAccessibleForFree":false}</script>` +
 		`</head><body><p>Access to this page has been denied.</p></body></html>`
@@ -152,6 +153,7 @@ func TestReaderPagesPassTheWallCheck(t *testing.T) {
 // same Markdown). The wall is never stored as the page: the fetch fails as a
 // login wall, while a real LinkedIn page a reader served is still stored.
 func TestReaderServedSignUpWallIsALoginWall(t *testing.T) {
+	t.Parallel()
 	const source = "https://www.linkedin.com/directory/companies"
 	origin := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, 999, "text/html; charset=UTF-8", "<html><body></body></html>"), nil
@@ -194,6 +196,7 @@ func TestReaderServedSignUpWallIsALoginWall(t *testing.T) {
 // more comments than it carries is stored partial naming both counts, and
 // markdown keeping a fraction of the page's visible text names what it kept.
 func TestReaderPagesPassTheStatedCountAndRecallChecks(t *testing.T) {
+	t.Parallel()
 	const source = "https://forum.example.com/t/how-teams-use-ai-4g9c"
 	article := strings.Repeat("The newspaper sued two technology companies for copyright infringement on Wednesday, "+
 		"opening a new front.\n\n", 8)
@@ -300,6 +303,7 @@ func signUpWallHarvester(t *testing.T, serve func(*http.Request) bool,
 // however it arrived: a defuddle copy shorter than the origin's page, or a
 // Wayback snapshot judged by the original LinkedIn address.
 func TestSignUpWallFailuresNameTheirDecisiveKind(t *testing.T) {
+	t.Parallel()
 	const source = "https://www.linkedin.com/directory/companies"
 	isJina := func(request *http.Request) bool { return strings.Contains(request.URL.Host, "jina") }
 	isDefuddle := func(request *http.Request) bool { return request.URL.Host == "defuddle.md" }

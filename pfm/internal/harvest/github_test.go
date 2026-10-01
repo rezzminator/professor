@@ -166,6 +166,7 @@ func ghRendered(content string) []string {
 // comment once in order with its author and time; the count reconciles, the
 // artifact is complete, and a second harvest is identical.
 func TestGitHubIssueLoadsEveryCommentAndReconciles(t *testing.T) {
+	t.Parallel()
 	site := ghIssueSite(t)
 	h, pacing := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), ghIssueURL, FetchOptions{Refresh: true})
@@ -224,6 +225,7 @@ func TestGitHubIssueLoadsEveryCommentAndReconciles(t *testing.T) {
 // with a body or a verdict, merged in time order; both stated counts
 // reconcile and the reviews are read to the end of their list.
 func TestGitHubPullRequestLoadsCommentsReviewCommentsAndReviews(t *testing.T) {
+	t.Parallel()
 	site := ghPullSite(t)
 	h, _ := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), ghPullURL, FetchOptions{Refresh: true})
@@ -278,6 +280,7 @@ func TestGitHubPullRequestLoadsCommentsReviewCommentsAndReviews(t *testing.T) {
 // and repeats nothing of the API's message), stated comments the API did not
 // list, and a page of another thread's comments.
 func TestGitHubUnloadedCommentsFlagThePartial(t *testing.T) {
+	t.Parallel()
 	page2 := ghIssueAPI + "/comments?per_page=100&page=2"
 	for _, tc := range []struct {
 		name   string
@@ -355,6 +358,7 @@ func TestGitHubUnloadedCommentsFlagThePartial(t *testing.T) {
 // issue's or pull request's conversation — a repository, a pull request's
 // files, a page naming another item or none — is not claimed.
 func TestGitHubNonThreadURLsTakeTheGenericPath(t *testing.T) {
+	t.Parallel()
 	page := ghFixture(t, "pull-page.html")
 	for _, tc := range []struct{ source, page string }{
 		{"https://github.com/example-org/example-runtime", page},
@@ -378,6 +382,7 @@ func TestGitHubNonThreadURLsTakeTheGenericPath(t *testing.T) {
 // record's gap and the rate limit named in its partial marker, and no comment
 // page is requested after the limit.
 func TestGitHubRecordNotLoadedServesThePage(t *testing.T) {
+	t.Parallel()
 	site := ghIssueSite(t)
 	site.status = map[string]int{ghIssueAPI: http.StatusForbidden}
 	site.bodies = map[string]string{ghIssueAPI: ghRateLimited}

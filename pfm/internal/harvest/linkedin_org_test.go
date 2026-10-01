@@ -13,6 +13,7 @@ import (
 // publication date, none of the page's chrome, a job card linked to its view
 // with the tracking query stripped — with the login wall named.
 func TestLinkedInOrgFamilyPagesRender(t *testing.T) {
+	t.Parallel()
 	const company = "https://www.linkedin.com/company/contoso-robotics"
 	affiliated := "- [Contoso Field Lab](https://www.linkedin.com/showcase/contoso-field-lab/) · Research Services"
 	similar := "- [Fabrikam Labs](https://www.linkedin.com/company/fabrikam-labs) · Automation Machinery Manufacturing\n" +
@@ -188,6 +189,7 @@ func TestLinkedInOrgFamilyPagesRender(t *testing.T) {
 // JobPosting's page under a company address, a product's top card under a
 // company tab — is not rendered, and falls through to the generic path.
 func TestLinkedInOrgFamilyPagesWithoutTheirEntityFallThrough(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ source, fixture string }{
 		{"https://www.linkedin.com/company/contoso-robotics", "authwall.html"},
 		{"https://www.linkedin.com/company/contoso-robotics/jobs", "authwall.html"},
@@ -214,6 +216,7 @@ func TestLinkedInOrgFamilyPagesWithoutTheirEntityFallThrough(t *testing.T) {
 // excerpt prefers its articleBody; a website's link text leaves out its
 // visually hidden caption.
 func TestLinkedInOrgLinks(t *testing.T) {
+	t.Parallel()
 	page, err := url.Parse("https://www.linkedin.com/company/contoso-robotics")
 	if err != nil {
 		t.Fatalf("parse the page address: %v", err)

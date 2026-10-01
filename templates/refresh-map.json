@@ -79,6 +79,9 @@
     "global/commands/tokens/SKILL.md": {
       "curated": true
     },
+    "global/commands/tokens/fake-pfm.mjs": {
+      "curated": true
+    },
     "global/commands/tokens/lib/claude.mjs": {
       "curated": true
     },

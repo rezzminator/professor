@@ -32,6 +32,7 @@ const linkedInTestPerson = `{"@type":"Person","name":"Avery Example",` +
 // member before its Person, still renders the Person — and its partial names
 // what was not read, never rendering the loss as absence.
 func TestLinkedInProfileNamesWhatItDidNotRead(t *testing.T) {
+	t.Parallel()
 	const source = "https://www.linkedin.com/in/avery-example-0000"
 	for _, tc := range []struct {
 		name   string
@@ -74,6 +75,7 @@ func TestLinkedInProfileNamesWhatItDidNotRead(t *testing.T) {
 // address only on linkedin.com; a section other than the root or the recent
 // activity is named in the partial as not what was read.
 func TestLinkedInProfileAddress(t *testing.T) {
+	t.Parallel()
 	foreign := `{"@type":"Person","name":"Avery Example","url":"https://other.example/in/avery-example-0000"}`
 	extraction, _, ok := extractForSite("https://www.linkedin.com/in/avery-example-0000/recent-activity/all/",
 		linkedInInline(t, "", foreign))
@@ -107,6 +109,7 @@ func TestLinkedInProfileAddress(t *testing.T) {
 // block that could not be read may have held it; a markup-only kind and a
 // wall with an unrelated broken block fall through clean.
 func TestLinkedInUnreadOnlyWhenTheEntityWasLost(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, source, block, want string
 	}{

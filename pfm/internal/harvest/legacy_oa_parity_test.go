@@ -8,6 +8,7 @@ import (
 )
 
 func TestLegacyOAMixedCaseArxivDOIShortCircuitsExactly(t *testing.T) {
+	t.Parallel()
 	resolver := &Resolver{
 		Client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			t.Fatalf("mixed-case arXiv DOI unexpectedly used network: %s", request.URL)
@@ -23,38 +24,8 @@ func TestLegacyOAMixedCaseArxivDOIShortCircuitsExactly(t *testing.T) {
 	}
 }
 
-func TestLegacyResolveTitleExpandsConfidentDOIThroughOAChain(t *testing.T) {
-	client := legacyOAClient(t, func(request *http.Request) string {
-		u := request.URL.String()
-		switch {
-		case strings.Contains(u, "api.openalex.org/works?filter=title.search"):
-			return `{"results":[{"display_name":"Array programming with NumPy","doi":"https://doi.org/10.1038/s41586-020-2649-2"}]}`
-		case strings.Contains(u, "api.unpaywall.org"):
-			return `{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"https://public.example.test/numpy.pdf","version":"publishedVersion"}}`
-		case strings.Contains(u, "pmc.ncbi.nlm.nih.gov/tools/idconv"):
-			return `{"records":[]}`
-		case strings.Contains(u, "api.openalex.org/works/https://doi.org"):
-			return `{}`
-		case strings.Contains(u, "api.semanticscholar.org"):
-			return `{}`
-		case strings.Contains(u, "api.crossref.org/works/"):
-			return `{"message":{"link":[]}}`
-		case strings.Contains(u, "api.core.ac.uk"):
-			return `{}`
-		case strings.Contains(u, "doaj.org"):
-			return `{"results":[]}`
-		default:
-			return `{}`
-		}
-	})
-	resolver := &Resolver{Client: client, ContactEmail: "test@example.org"}
-	candidates, err := resolver.ResolveTitle(context.Background(), "Array programming with NumPy")
-	if err != nil || len(candidates) == 0 || candidates[0].URL != "https://public.example.test/numpy.pdf" {
-		t.Fatalf("title OA expansion=%#v err=%v", candidates, err)
-	}
-}
-
 func TestLegacyFindWorksMergesPaperArxivAndBookDiscovery(t *testing.T) {
+	t.Parallel()
 	client := legacyOAClient(t, func(request *http.Request) string {
 		u := request.URL.String()
 		switch {

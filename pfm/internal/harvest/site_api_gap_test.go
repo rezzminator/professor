@@ -14,6 +14,7 @@ import (
 // record's gap and why following stopped in its partial marker, once: what a
 // reader renders is no more than the page shows, never the complete thread.
 func TestSiteAPIRecordGapSurvivesTheReaderRung(t *testing.T) {
+	t.Parallel()
 	read := "# Example thread\n\n" + strings.Repeat("a post the reader rendered ", 40)
 	sites := []struct {
 		name, source, gap string

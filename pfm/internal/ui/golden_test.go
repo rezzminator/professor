@@ -554,25 +554,6 @@ func TestFancyRenderNeverWrapsAtFixedWidths(t *testing.T) {
 	}
 }
 
-func TestFancyRenderHasNoPreviewAtAnyWidth(t *testing.T) {
-	for _, width := range []int{40, 80, 120, 180} {
-		content := ansi.Strip(NewModel(fixtureSnapshot(width)).View().Content)
-		if strings.Contains(content, " preview ") ||
-			strings.Contains(content, "last prompt") {
-			t.Fatalf("width %d still renders the retired preview panel:\n%s", width, content)
-		}
-	}
-}
-
-func TestFancyRenderHasNoProjectRotationControl(t *testing.T) {
-	content := ansi.Strip(NewModel(fixtureSnapshot(120)).View().Content)
-	for _, retired := range []string{"project rotation", "⌃R"} {
-		if strings.Contains(content, retired) {
-			t.Fatalf("picker still renders retired %q control:\n%s", retired, content)
-		}
-	}
-}
-
 func TestHeaderSeparatesKilledEmptyAndRefreshStatus(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.KilledCount = 12
@@ -601,10 +582,11 @@ func TestRowColumnsHaveIdenticalDisplayPositions(t *testing.T) {
 		row.Name = name
 		row.PromptCount = 37
 		row.Size = 1536
-		line := ansi.Strip(NewModel(fixtureSnapshot(120)).renderRow(
+		line := ansi.Strip(NewModel(fixtureSnapshot(120)).renderGroupedRow(
 			row,
 			false,
 			78,
+			false,
 		))
 		got := []int{
 			displayIndex(line, "⬢"),

@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as P from "./lib/pricing.mjs";
+import { fakePfm as fakePfmIn } from "./fake-pfm.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PRICES = path.join(HERE, "../../../../pfm/internal/pricing/prices.json");
@@ -17,12 +18,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "token-audit-pricing-test-"));
 const NO_PFM = path.join(TMP, "no-such-pfm");
 
 // A stand-in pfm: a shell script written into TMP.
-function fakePfm(body) {
-  const p = path.join(fs.mkdtempSync(path.join(TMP, "pfm-")), "pfm");
-  fs.writeFileSync(p, `#!/bin/sh\n${body}\n`);
-  fs.chmodSync(p, 0o755);
-  return p;
-}
+const fakePfm = (body) => fakePfmIn(TMP, body);
 const file = (name, text) => { const p = path.join(fs.mkdtempSync(path.join(TMP, "table-")), name); fs.writeFileSync(p, text); return p; };
 const row = (key, match, rate) => ({ key, engine: "claude", match, in: rate, out: 1, hit: 0, w5m: 0, w1h: 0, long_in: 1, long_out: 1 });
 

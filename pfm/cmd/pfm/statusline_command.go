@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -20,15 +19,6 @@ import (
 
 var statuslineCodexOptions = func() statusline.CodexOptions {
 	return statusline.CodexOptions{}
-}
-
-func runStatusline(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	runtime, err := pfmconfig.LoadDiagnosticRuntime("")
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm statusline: load config (fail-open): %v\n", err)
-		return 0
-	}
-	return runStatuslineWithRuntime(args, stdin, stdout, stderr, runtime, paths.OSEnv{})
 }
 
 func runStatuslineWithRuntime(
@@ -122,15 +112,6 @@ func canonicalAccountPath(path string) string {
 		return filepath.Clean(absolute)
 	}
 	return filepath.Clean(path)
-}
-
-func runUsageHook(args []string, stdout, stderr io.Writer) int {
-	runtime, err := pfmconfig.LoadDiagnosticRuntime("")
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm usage-hook: load config (fail-open): %v\n", err)
-		return 0
-	}
-	return runUsageHookWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
 }
 
 func runUsageHookWithRuntime(

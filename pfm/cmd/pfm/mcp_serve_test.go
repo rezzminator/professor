@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -288,7 +289,24 @@ func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 	}
 }
 
+type scholarlyNotFoundTransport struct{ seen chan<- string }
+
+func (transport scholarlyNotFoundTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	transport.seen <- request.URL.Hostname()
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Status:     "404 Not Found",
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{}`)),
+		Request:    request,
+	}, nil
+}
+
 func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
+	t.Cleanup(harvest.StubPublicResolverForTest(func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.10")}, nil
+	}))
+	seenAPIHosts := make(chan string, 64)
 	root := jailTest(t)
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -305,6 +323,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	}()
 	harvester, err := harvestmcp.NewConfiguredHarvester("test", harvestmcp.Runtime{
 		Home: root, CacheDir: root + "/cache",
+		Client: &http.Client{Transport: scholarlyNotFoundTransport{seen: seenAPIHosts}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -381,8 +400,30 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("harvester_read: %v", err)
 	}
-	if len(read.Content) == 0 {
-		t.Fatalf("harvester_read answered no content: %+v", read)
+	var readOutput harvestmcp.ReadOutput
+	encoded, err := json.Marshal(read.StructuredContent)
+	if err != nil {
+		t.Fatalf("encode harvester_read item: %v", err)
+	}
+	if err := json.Unmarshal(encoded, &readOutput); err != nil {
+		t.Fatalf("decode harvester_read item: %v", err)
+	}
+	if len(readOutput.Publications) != 1 ||
+		!strings.HasPrefix(readOutput.Publications[0].Error, "No open copy of this work could be retrieved:") {
+		t.Fatalf(
+			"harvester_read item = %+v, want the public exhausted DOI explanation; text: %q",
+			readOutput.Publications,
+			toolResultText(read),
+		)
+	}
+	seen := map[string]bool{}
+	for len(seenAPIHosts) > 0 {
+		seen[<-seenAPIHosts] = true
+	}
+	for _, host := range []string{"api.openalex.org", "api.crossref.org"} {
+		if !seen[host] {
+			t.Fatalf("scholarly stub saw %v, want a request to %s", seen, host)
+		}
 	}
 }
 
@@ -543,42 +584,47 @@ func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 // exit BEFORE the port is ever bound, not start an empty daemon that answers
 // nothing.
 func TestMCPServeBothDisabledRefusesBeforeBindingPort(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	if err := probe.Close(); err != nil {
-		t.Fatal(err)
-	}
+	// A different process can claim the probe's port after Close. A refusal
+	// that bound the port will fail the rebind on every fresh attempt.
+	for attempt := 0; attempt < 5; attempt++ {
+		probe, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := probe.Addr().(*net.TCPAddr).Port
+		if err := probe.Close(); err != nil {
+			t.Fatal(err)
+		}
 
-	runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
-	runtime.Config.MCP.HTTP.Port = port
-	// config.Defaults leaves both chat and harvester disabled; do not enable
-	// either here — that is the case under test.
+		runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
+		runtime.Config.MCP.HTTP.Port = port
+		// config.Defaults leaves both chat and harvester disabled.
 
-	var stdout, stderr bytes.Buffer
-	if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
-		t.Fatalf("both-disabled serve code = %d, want 1", code)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("both-disabled serve stdout = %q, want no startup line — nothing was mounted", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "every registered server is disabled by config") ||
-		!strings.Contains(stderr.String(), "pfm mcp <server> enable") {
-		t.Fatalf(
-			"both-disabled serve stderr = %q, want the disabled-config refusal and its enable hint",
-			stderr.String(),
-		)
-	}
+		var stdout, stderr bytes.Buffer
+		if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
+			t.Fatalf("both-disabled serve code = %d, want 1", code)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("both-disabled serve stdout = %q, want no startup line — nothing was mounted", stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "every registered server is disabled by config") ||
+			!strings.Contains(stderr.String(), "pfm mcp <server> enable") {
+			t.Fatalf(
+				"both-disabled serve stderr = %q, want the disabled-config refusal and its enable hint",
+				stderr.String(),
+			)
+		}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
-	if err != nil {
-		t.Fatalf("port %d still bound after refusal: %v", port, err)
+		listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+		if err != nil {
+			continue
+		}
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
+	t.Fatal("both-disabled serve did not leave a freshly probed port bindable after 5 attempts")
 }
 
 func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
@@ -612,6 +658,46 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "already running (pid") || !strings.Contains(stderr.String(), "since") {
 		t.Fatalf("second serve stderr=%q", stderr.String())
+	}
+}
+
+func shortenMCPServeDaemonProbeTimeout(t *testing.T) {
+	t.Helper()
+	previous := mcpserv.DaemonProbeTimeoutOverride
+	mcpserv.DaemonProbeTimeoutOverride = 100 * time.Millisecond
+	t.Cleanup(func() { mcpserv.DaemonProbeTimeoutOverride = previous })
+}
+
+func TestMCPServeRefusesAPortHeldByASilentListener(t *testing.T) {
+	shortenMCPServeDaemonProbeTimeout(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := listener.Close(); closeErr != nil {
+			t.Errorf("close silent listener: %v", closeErr)
+		}
+	})
+	port := listener.Addr().(*net.TCPAddr).Port
+	runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
+	runtime.Config.MCP.HTTP.Port = port
+	runtime.Config.MCPServers["chat"] = config.MCPServer{Enabled: true}
+	var stdout, stderr bytes.Buffer
+	if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
+		t.Fatalf("silent-listener serve code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	line := stderr.String()
+	if !strings.Contains(
+		line,
+		"port "+strconv.Itoa(port)+" is held by a listener that did not answer pfm's status probe",
+	) ||
+		strings.Contains(line, "listen loopback") ||
+		strings.Contains(line, "already running") {
+		t.Fatalf("silent-listener serve stderr=%q, want named refusal before bind", line)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("silent-listener serve stdout=%q, want no startup line", stdout.String())
 	}
 }
 

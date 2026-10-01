@@ -239,8 +239,8 @@ func newRunJail(t *testing.T) *runJail {
 	previousTimings := runSpawnTimings
 	runSpawnTimings = spawn.Timings{
 		Poll:  10 * time.Millisecond,
-		Boot:  time.Second,
-		Step:  time.Second,
+		Boot:  10 * time.Second,
+		Step:  5 * time.Second,
 		Typed: 10 * time.Millisecond,
 	}
 	t.Cleanup(func() { runSpawnTimings = previousTimings })
@@ -492,6 +492,7 @@ func TestRunReportsACodexBuildThatCannotBeRenamed(t *testing.T) {
 		t.Skip("tmux is not installed")
 	}
 	jail := newRunJail(t)
+	runSpawnTimings.Step = 250 * time.Millisecond
 	defer jail.killSockets(t)
 	t.Setenv("CX_STUB_NO_RENAME", "1")
 
@@ -669,13 +670,15 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		engine    string
+		proofFile string
 		argvFile  string
 		forbidden []string
 	}{
 		{
-			name:     "claude prompt permissions",
-			engine:   "claude",
-			argvFile: "cc-argv",
+			name:      "claude prompt permissions",
+			engine:    "claude",
+			proofFile: "cc-argv",
+			argvFile:  "cc-argv",
 			forbidden: []string{
 				"--allow-dangerously-skip-permissions",
 				"--dangerously-skip-permissions",
@@ -684,6 +687,7 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 		{
 			name:      "codex workspace sandbox",
 			engine:    "codex",
+			proofFile: "cx-prompt",
 			argvFile:  "cx-argv",
 			forbidden: []string{"--dangerously-bypass-approvals-and-sandbox"},
 		},
@@ -731,7 +735,14 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("run exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
-			argv := jail.await(t, test.argvFile, "inspect")
+			proof := jail.await(t, test.proofFile, "inspect")
+			if !strings.Contains(proof, "inspect") {
+				t.Fatalf("launch evidence %q lacks inspect: %q", test.proofFile, proof)
+			}
+			argv := jail.read(t, test.argvFile)
+			if strings.TrimSpace(argv) == "" {
+				t.Fatalf("configured %s argv file %q is empty or absent", test.engine, test.argvFile)
+			}
 			for _, value := range test.forbidden {
 				if strings.Contains(argv, value) {
 					t.Fatalf("configured %s argv still contains %q: %q", test.engine, value, argv)
@@ -945,7 +956,7 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 	t.Run("during await", func(t *testing.T) {
 		jail := newRunJail(t)
 		defer jail.killSockets(t)
-		t.Setenv("CC_STUB_MUTE", "1")
+		t.Setenv("STUB_MUTE", "1")
 		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
@@ -973,6 +984,13 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 		if code != 1 || !strings.Contains(stderr.String(), context.Canceled.Error()) ||
 			strings.Contains(stderr.String(), "died at birth") {
 			t.Fatalf("cancelled await exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+		content, err := os.ReadFile(jail.transcript)
+		if err != nil {
+			t.Fatalf("read cancelled await transcript: %v", err)
+		}
+		if strings.Contains(string(content), "ack: cancel await") {
+			t.Fatalf("cancelled await transcript contains stub answer: %q", content)
 		}
 	})
 }

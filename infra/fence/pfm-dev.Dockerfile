@@ -6,11 +6,11 @@
 # a real Google Chrome and a display) and `pfm-dev` (build, test, e2e). pfm-dev
 # is the LAST stage, so an untargeted `docker build` of this file
 # (release-rehearsal.sh) still produces pfm-dev, never the Chrome image.
-FROM ubuntu:24.04 AS pfm-base
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS pfm-base
 # The converter sidecar's OCR stack (OpenCV) loads these system libraries on
 # import, and `pfm install` stages its models on any fence image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 \
+    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 tcpdump \
     libgl1 libglib2.0-0 libxcb1 \
  && rm -rf /var/lib/apt/lists/*
 # Go pinned to pfm/go.mod — bump both together or the fence tests a different compiler.
@@ -35,6 +35,7 @@ ENV HOME=/root \
 # Pinned developer tools (infra/fence/tools.env) — the same versions `make tools`
 # installs on the host, so a lint verdict is the same on both sides of the fence.
 COPY tools.env tools.sh /opt/pfm-tools/
+COPY jscpd/ /opt/pfm-tools/jscpd/
 RUN TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
 # Every image built from this file, by any builder (compose, the rehearsals'

@@ -3,6 +3,7 @@ package mcpserv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -28,6 +29,7 @@ func (testClock *proxyCancellationClock) NewTimer(delay time.Duration) clock.Tim
 }
 
 func TestStdioProxyCancellationStopsUndeliveredRetry(t *testing.T) {
+	t.Parallel()
 	firstAttempt := make(chan struct{})
 	cancellationForwarded := make(chan struct{})
 	var attempts atomic.Int32
@@ -68,6 +70,7 @@ func TestStdioProxyCancellationStopsUndeliveredRetry(t *testing.T) {
 }
 
 func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T) {
+	t.Parallel()
 	firstAttempt := make(chan struct{})
 	cancellationForwarded := make(chan struct{})
 	fakeClock := clock.NewFake(time.Unix(0, 0))
@@ -151,6 +154,7 @@ func TestStdioProxyCancellationWinsAtRetryReinitializationBoundary(t *testing.T)
 }
 
 func TestStdioProxyReusesCancelledStartedRequestID(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	cancellationStarted := make(chan struct{})
 	releaseCancellation := make(chan struct{})
@@ -216,5 +220,68 @@ func TestStdioProxyReusesCancelledStartedRequestID(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("started request ID reached daemon %d times, want cancelled and reused calls", calls.Load())
+	}
+}
+
+// TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe pins that the
+// runtime probe before a replay honours the caller's cancellation: a daemon
+// that accepts the connection and never answers must not hold a cancelled
+// request for the probe's whole deadline.
+func TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close silent daemon: %v", err)
+		}
+	})
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if conn, acceptErr := listener.Accept(); acceptErr == nil {
+			accepted <- conn
+		}
+	}()
+	previous := DaemonProbeTimeoutOverride
+	DaemonProbeTimeoutOverride = 30 * time.Second
+	t.Cleanup(func() { DaemonProbeTimeoutOverride = previous })
+	proxy := newStdioProxy(context.Background(), listener.Addr().String(), io.Discard)
+	proxy.identity = nil
+	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
+	proxy.retryDelay = time.Millisecond
+	proxy.retryWindow = time.Minute
+	proxy.sessionID = "session-before-refusal"
+	proxy.protocol = "2025-06-18"
+	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
+	proxy.client = &http.Client{Transport: proxyTestTransport(func(*http.Request) (*http.Response, error) {
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, sendErr := proxy.sendWithRetry(ctx, []byte(proxyTestToolCall(2, "chat_ls", `{}`)), false)
+		done <- sendErr
+	}()
+	var conn net.Conn
+	select {
+	case conn = <-accepted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the replay never probed the daemon's runtime")
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close probe connection: %v", err)
+		}
+	}()
+	cancel()
+	select {
+	case sendErr := <-done:
+		if !errors.Is(sendErr, context.Canceled) {
+			t.Fatalf("sendWithRetry() error = %v, want context.Canceled", sendErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a cancelled request stayed blocked on the unresponsive daemon's runtime probe")
 	}
 }

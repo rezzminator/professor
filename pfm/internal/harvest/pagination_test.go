@@ -19,6 +19,7 @@ import (
 // — is not a continuation, nor is a link differing only in a query key that
 // does not page.
 func TestAnUnfollowedNextPageFlagsAGenericPagePartial(t *testing.T) {
+	t.Parallel()
 	article := strings.Repeat("A long paragraph of the article's own text, with enough words to count. ", 20)
 	for _, tc := range []struct {
 		name, source, next, gap string
@@ -66,6 +67,7 @@ func TestAnUnfollowedNextPageFlagsAGenericPagePartial(t *testing.T) {
 // one. A list of links to other documents with numeric ids, or WordPress's
 // post ids, is not a paginator.
 func TestANumberedPaginatorNamesTheNextPage(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, source, gap string
 		links             []string
@@ -181,6 +183,7 @@ var listingMarkdown = "# Questions tagged go\n\n" + strings.Repeat(
 // reader's own markdown names it — a Next link or the page number plus one —
 // under the HTML guard's exclusions.
 func TestAReaderRungNamesTheNextPage(t *testing.T) {
+	t.Parallel()
 	const listing = "https://qa.example.test/questions/tagged/go?tab=votes&page=2&pagesize=50"
 	const pageThree = "https://qa.example.test/questions/tagged/go?tab=votes&page=3&pagesize=50"
 	t.Run("carried from a refused page", func(t *testing.T) {
@@ -237,6 +240,7 @@ func TestAReaderRungNamesTheNextPage(t *testing.T) {
 // shell it stores the app's home view. The ladder skips them; the browser
 // renders the full address, #/route included.
 func TestAHashRouteOfAnAppShellIsRenderedNeverRead(t *testing.T) {
+	t.Parallel()
 	const source = "https://docs.example.test/#/quickstart"
 	shell := `<!doctype html><html><head><title>docs</title></head><body><div id="app"></div>` +
 		`<script src="//cdn.example.test/app.min.js"></script></body></html>`
@@ -270,6 +274,7 @@ func TestAHashRouteOfAnAppShellIsRenderedNeverRead(t *testing.T) {
 // A pager showing this page as the last, or a WordPress post id (?p=2), names
 // nothing.
 func TestAPagedAddressNamesItsUnfetchedPages(t *testing.T) {
+	t.Parallel()
 	const listing = "https://qa.example.test/questions/tagged/go?tab=votes&page=2&pagesize=50"
 	wall := `<html><body><main><h1>Access denied</h1><p>` + strings.Repeat("Your request was blocked. ", 20) +
 		`</p></main></body></html>`

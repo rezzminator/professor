@@ -329,7 +329,7 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	jail := newInjectTmuxJail(t)
 	socket := "probe-pfm-inject-then"
-	pane := jail.startBusyPane(t, socket, "steer-session", 2500*time.Millisecond)
+	pane := jail.startBusyPane(t, socket, "steer-session", 900*time.Millisecond)
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 
 	engine, err := New(Dependencies{

@@ -93,6 +93,8 @@ if requires E1.01-open-seat1; then
   # beat's value: a reboot in between moves the chat and the old socket answers
   # "error connecting to …" — an error that must never be read as a window name.
   sock="$(live_field "$CHAT" 11)"
+  wait_for 10 "grep -qF '$CHAT' <<<\"\$(tmux -S '$(_lane_tmux_dir)/$sock' list-windows -F '#{window_name}' 2>/dev/null)\"" ||
+    bad="$bad tmux window name did not converge on $CHAT: ${LANE_WAIT_WHY:-no wait reason recorded};"
   if window="$(tmux -S "$(_lane_tmux_dir)/$sock" list-windows -F '#{window_name}' 2>&1)"; then
     case "$window" in *"$CHAT"*) ;; *) bad="$bad tmux window name '$(one_line "$window")' does not carry the label;" ;; esac
   else
@@ -122,29 +124,64 @@ user_record_starts() {
   jq -e --arg text "$2" 'any(.entries[]; .role == "user" and ((.text // "") | startswith($text)))' \
     <<<"$records" >/dev/null 2>&1
 }
+chat_idle() {
+  pfm chat status "$1" --json 2>/dev/null | jq -e '.state == "idle"' >/dev/null
+}
+settle_chat() {
+  wait_for 120 "chat_idle '$1'"
+}
+reload_finished() {
+  tail -c "+$(($2 + 1))" "$1" 2>/dev/null |
+    grep -E 'pfm chat reload: (respawned in place|.*rebooted FRESH)' >/dev/null
+}
+reload_hold_logged() {
+  tail -c "+$(($2 + 1))" "$1" 2>/dev/null |
+    grep -F "pfm chat reload: the chat's turn is still running — holding /exit until it ends" >/dev/null
+}
+beat_settle() {
+  settle_chat "$CHAT" && return 0
+  fail "$CHAT was still mid-turn when $1 began: ${LANE_WAIT_WHY:-no wait reason recorded}"
+  return 1
+}
 wait_steer() {
-  wait_prompt "$1" "$2" "$3" || return $?
-  wait_for "$3" "user_record_starts '$1' 'lane steer $2'"
+  local rc
+  wait_prompt "$1" "$2" "$3" || {
+    rc=$?; LANE_WAIT_WHY="steer $2 prompt: $LANE_WAIT_WHY"; return "$rc"
+  }
+  wait_for "$3" "user_record_starts '$1' 'lane steer $2'" || {
+    rc=$?; LANE_WAIT_WHY="steer $2 user record: $LANE_WAIT_WHY"; return "$rc"
+  }
+  settle_chat "$1" || {
+    rc=$?; LANE_WAIT_WHY="steer $2 turn idle: $LANE_WAIT_WHY"; return "$rc"
+  }
 }
 reload_via_pane() {
   local needle="$1"
   shift
-  local out
+  local out sock reload_log reload_offset inject_rc steer_rc
   REPLY_WHY=""
+  sock="$(live_field "$CHAT" 11)"
+  reload_log="$SID_DIR/reload-$sock.log"
+  if [ -f "$reload_log" ]; then reload_offset="$(wc -c <"$reload_log")"; else reload_offset=0; fi
   out="$(pfm chat inject --allow-unsigned "$CHAT" "/reload $* --then \"lane steer $needle\"" 2>&1)"
-  local inject_rc=$?
+  inject_rc=$?
   wait_steer "$CHAT" "$needle" 300
-  case $? in
-    0) return 0 ;;
+  steer_rc=$?
+  case "$steer_rc" in
+    0) ;;
     2) REPLY_WHY="$LANE_WAIT_WHY (waiting for $needle; inject rc $inject_rc: $(one_line "$out"))"; return 1 ;;
-    *) REPLY_WHY="no user record for $needle from $CHAT in 300s: ${LANE_WAIT_WHY:-timeout}; inject rc $inject_rc: $(one_line "$out")"; return 1 ;;
+    *) REPLY_WHY="steer $needle did not settle in 300s: ${LANE_WAIT_WHY:-timeout}; inject rc $inject_rc: $(one_line "$out")"; return 1 ;;
   esac
+  if ! wait_for 60 "reload_finished '$reload_log' '$reload_offset'"; then
+    REPLY_WHY="the reload worker never logged its end in 60s; ${LANE_WAIT_WHY:-no wait reason recorded}; log tail: $(one_line "$(tail -n 5 "$reload_log" 2>&1)")"
+    return 1
+  fi
 }
 
 beat E1.03-reload-account
 spends "cc:${ALT:-none}"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.03-reload-account; then
   if [ -z "$ALT" ]; then
     # Not a failure: this run was given one seat, so there is no second seat to
     # reboot onto. An empty ALT is the run's own shape, not a defect.
@@ -156,6 +193,8 @@ if requires E1.01-open-seat1; then
     planted="$(pfm chat inject --allow-unsigned "$CHAT" "Remember the token $nonce." 2>&1)"
     if [ "$?" -ne 0 ] || ! wait_prompt "$CHAT" "$nonce" 120; then
       fail "could not plant the continuity token before reload: $(one_line "$planted") ${LANE_WAIT_WHY:-}"
+    elif ! settle_chat "$CHAT"; then
+      fail "could not plant the continuity token before reload: ${LANE_WAIT_WHY:-no wait reason recorded}"
     elif ! reload_via_pane "E1-ACCOUNT-$nonce" --account "$ALT"; then
       fail "the cross-account reload did not deliver its steer: $REPLY_WHY"
     elif [ "$(live_field "$CHAT" 2)" != "$before_id" ]; then
@@ -182,7 +221,7 @@ fi
 beat E1.04-reload-model-effort
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.04-reload-model-effort; then
   if ! reload_via_pane RELOADED-MODEL --model sonnet --effort medium; then
     fail "$REPLY_WHY"
   elif ! live_chat "$CHAT"; then
@@ -201,7 +240,7 @@ fi
 beat E1.05-reload-1h
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.05-reload-1h; then
   if ! reload_via_pane RELOADED-1H-ON --cache 1h; then
     fail "--cache 1h: $REPLY_WHY"
   else
@@ -248,7 +287,7 @@ reload_new_on_socket() {
 beat E1.06-reload-new
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.06-reload-new; then
   sock="$(live_field "$CHAT" 11)"
   id_before="$(socket_field "$sock" 2)"
   anchor_socket "$sock" # from here the NAME is not a handle; the socket is
@@ -266,16 +305,20 @@ if requires E1.01-open-seat1; then
     fi
     if [ "$id_new" = "$id_before" ]; then
       fail "--new kept the same session id $id_before on socket $sock — it must open a fresh session"
-    elif [ "$name_rc" -ne 0 ] || [ "$(socket_field "$sock" 5)" != "$CHAT" ]; then
+    elif ! LANE_ANCHOR="sock:$sock" wait_for 30 "[ \"\$(socket_field '$sock' 5)\" = '$CHAT' ]"; then
+      fail "the reborn session could not be renamed back to $CHAT (pfm chat name exited $name_rc: $(one_line "$name_out")); the row on $sock reads '$(socket_field "$sock" 5)' — $observed; ${LANE_WAIT_WHY:-no wait reason recorded}"
+    elif [ "$name_rc" -ne 0 ]; then
       fail "the reborn session could not be renamed back to $CHAT (pfm chat name exited $name_rc: $(one_line "$name_out")); the row on $sock reads '$(socket_field "$sock" 5)' — $observed"
     elif ! reload_new_on_socket "$sock" "$id_new" --new --hide; then
       fail "--new --hide: $REPLY_WHY (plain --new had already produced $id_new) — $observed"
     else
       id_hide="$NEW_ID"
       [ "$NEW_NAME" = "$CHAT" ] || pfm chat name "$id_hide" "$CHAT" >/dev/null 2>&1
+      LANE_ANCHOR="sock:$sock" wait_for 10 "[ \"\$(pfm ls --tsv 2>/dev/null | awk -F'\\t' -v n='$CHAT' 'NR > 1 && \$5 == n && \$10 == \"false\" { c++ } END { print c + 0 }')\" = 1 ]" ||
+        visible_wait="$LANE_WAIT_WHY"
       visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $10 == "false" { c++ } END { print c + 0 }')"
-      if [ "$visible" -ne 1 ]; then
-        fail "after --new --hide, $visible unhidden rows carry the name $CHAT (want exactly 1: the new session) — $observed"
+      if [ -n "${visible_wait:-}" ] || [ "$visible" -ne 1 ]; then
+        fail "after --new --hide, $visible unhidden rows carry the name $CHAT (want exactly 1: the new session) — $observed; ${visible_wait:-}"
       else
         pass "fresh session ids $id_before → $id_new → $id_hide on one unchanged socket $sock; --hide left exactly one visible row · $observed"
       fi
@@ -294,18 +337,19 @@ fi
 beat E1.26-resolver-prefers-live
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.06-reload-new; then
+if requires E1.06-reload-new && beat_settle E1.26-resolver-prefers-live; then
   old_transcript="$(find "$HOME/.claude/projects" -type f -name "$id_before.jsonl" -print -quit 2>/dev/null)"
   if [ -n "$old_transcript" ]; then
     jq -cn --arg name "$CHAT" --arg id "$id_before" \
       '{type:"custom-title",customTitle:$name,sessionId:$id}' >>"$old_transcript"
   fi
+  wait_for 10 "[ \"\$(pfm ls --tsv 2>/dev/null | awk -F'\\t' -v n='$CHAT' 'NR > 1 && \$5 == n && \$1 ~ /^live-/ { c++ } END { print c + 0 }')\" = 1 ] && [ \"\$(pfm ls --tsv 2>/dev/null | awk -F'\\t' -v n='$CHAT' 'NR > 1 && \$5 == n && \$1 !~ /^live-/ { c++ } END { print c + 0 }')\" -ge 1 ]" || rows_wait="$LANE_WAIT_WHY"
   live_rows="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $1 ~ /^live-/ { c++ } END { print c + 0 }')"
   resume_rows="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $1 !~ /^live-/ { c++ } END { print c + 0 }')"
   if [ -z "$old_transcript" ]; then
     fail "the old transcript for $id_before could not be found to stage the duplicate-name resolver fixture"
-  elif [ "$live_rows" -ne 1 ] || [ "$resume_rows" -lt 1 ]; then
-    fail "the shape this beat exists to assert is not present: $live_rows live row(s) and $resume_rows resume row(s) carry '$CHAT' (want exactly 1 live plus at least its own resume row) — nothing was asserted"
+  elif [ -n "${rows_wait:-}" ] || [ "$live_rows" -ne 1 ] || [ "$resume_rows" -lt 1 ]; then
+    fail "the shape this beat exists to assert is not present: $live_rows live row(s) and $resume_rows resume row(s) carry '$CHAT' (want exactly 1 live plus at least its own resume row) — nothing was asserted; ${rows_wait:-}"
   else
     out="$(pfm chat inject --allow-unsigned "$CHAT" "lane resolver RESOLVE-OK" 2>&1)"
     rc=$?
@@ -322,7 +366,7 @@ fi
 beat E1.07-reload-then
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.07-reload-then; then
   if ! reload_via_pane THEN-OK; then
     fail "$REPLY_WHY"
   else
@@ -333,14 +377,18 @@ fi
 beat E1.08-reload-sock
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.08-reload-sock; then
   sock="$(live_field "$CHAT" 11)"
+  reload_log="$SID_DIR/reload-$sock.log"
+  if [ -f "$reload_log" ]; then reload_offset="$(wc -c <"$reload_log")"; else reload_offset=0; fi
   out="$(pfm chat reload --sock "$sock" --then "lane steer SOCK-OK" 2>&1)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     fail "pfm chat reload --sock $sock exited $rc: $(one_line "$out")"
   elif ! wait_steer "$CHAT" SOCK-OK 300; then
-    fail "reload --sock accepted but no SOCK-OK user record: ${LANE_WAIT_WHY:-no wait reason recorded}"
+    fail "reload --sock accepted but SOCK-OK did not settle: ${LANE_WAIT_WHY:-no wait reason recorded}"
+  elif ! wait_for 60 "reload_finished '$reload_log' '$reload_offset'"; then
+    fail "the reload worker never logged its end in 60s; ${LANE_WAIT_WHY:-no wait reason recorded}; log tail: $(one_line "$(tail -n 5 "$reload_log" 2>&1)")"
   else
     pass "reload addressed by its own socket $sock rebooted and steered"
   fi
@@ -351,34 +399,33 @@ fi
 beat E1.09-reload-while-busy
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.09-reload-while-busy; then
   gate="$LANE_OUT_DIR/e1-reload-hold.gate"
   : >"$gate"
   steps="$(jq -cn --arg gate "$gate" '[{type:"hold",until_gone:$gate},{type:"turn",reply:"held"}]')"
   busy="$(pfm chat inject --allow-unsigned "$CHAT" "/lane hold $(mock_steps "$steps")" 2>&1)"
   busy_rc=$?
   [ "$busy_rc" -eq 0 ] || _lane_log_only "   E1.09: the busy-making inject exited $busy_rc: $(one_line "$busy")"
-  wait_for 30 "pfm chat status '$CHAT' 2>/dev/null | grep -qi working" ||
+  wait_for 30 "grep -qi working <<<\"\$(pfm chat status '$CHAT' 2>/dev/null)\"" ||
     _lane_log_only "   E1.09: held chat never reported working: ${LANE_WAIT_WHY:-}"
   sock="$(live_field "$CHAT" 11)"
   reload_log="$SID_DIR/reload-$sock.log"
-  reload_offset="$(wc -c <"$reload_log" 2>/dev/null || echo 0)"
+  if [ -f "$reload_log" ]; then reload_offset="$(wc -c <"$reload_log")"; else reload_offset=0; fi
   out="$(pfm chat reload --sock "$sock" --then "lane steer BUSY-RELOADED" 2>&1)"
   rc=$?
   # A headless tmux server has no client to retain display-message. The
   # worker's own log records the same hold decision for this beat's slice.
-  hold=""
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    hold="$(tail -c "+$((reload_offset + 1))" "$reload_log" 2>/dev/null |
-      grep -F "pfm chat reload: the chat's turn is still running — holding /exit until it ends" | tail -1)"
-    [ -n "$hold" ] && break
-    sleep 1
-  done
+  hold_wait=""
+  wait_for 10 "reload_hold_logged '$reload_log' '$reload_offset'" || hold_wait="$LANE_WAIT_WHY"
+  hold="$(tail -c "+$((reload_offset + 1))" "$reload_log" 2>/dev/null |
+    grep -F "pfm chat reload: the chat's turn is still running — holding /exit until it ends" | tail -1)"
   rm -f "$gate"
   if ! wait_steer "$CHAT" BUSY-RELOADED 420; then
     fail "no BUSY-RELOADED user record after a mid-turn /reload: ${LANE_WAIT_WHY:-timeout}; inject rc $rc: $(one_line "$out")"
-  elif [ -z "$hold" ]; then
-    fail "the reboot landed but the worker log for this beat on $sock never reported holding /exit while the turn was busy"
+  elif ! wait_for 60 "reload_finished '$reload_log' '$reload_offset'"; then
+    fail "the reload worker never logged its end in 60s; ${LANE_WAIT_WHY:-no wait reason recorded}; log tail: $(one_line "$(tail -n 5 "$reload_log" 2>&1)")"
+  elif [ -z "$hold" ] || [ -n "$hold_wait" ]; then
+    fail "the reboot landed but the worker log for this beat on $sock never reported holding /exit while the turn was busy: ${hold_wait:-no wait reason recorded}"
   else
     pass "worker reported holding /exit ('$(one_line "$hold")'), then the reboot and its steer"
   fi
@@ -425,7 +472,7 @@ fi
 beat E1.12-status
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.12-status; then
   bad=""
   base="$(pfm chat status "$CHAT" 2>&1)" || bad="$bad status base exited non-zero ($(one_line "$base"));"
   base_state="$(awk -F '\t' 'NR == 1 { print $2 }' <<<"$base")"
@@ -444,15 +491,12 @@ if requires E1.01-open-seat1; then
     "/lane status $(mock_steps '[{"type":"background_agent","name":"lane-sub"},{"type":"turn","busy_ms":20000}]')" >/dev/null 2>&1 ||
     bad="$bad the scripted background turn was refused;"
   working="" last_state="<unread>"
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    last_state="$(pfm chat status "$CHAT" 2>/dev/null | awk -F '\t' 'NR == 1 { print $2 }')"
-    [ "$last_state" = working ] && { working=yes; break; }
-    sleep 2
-  done
-  [ -n "$working" ] || bad="$bad status never reported working while a background sub-agent ran (last state: $last_state);"
+  wait_for 20 "[ \"\$(pfm chat status '$CHAT' 2>/dev/null | awk -F '\t' 'NR == 1 { print \$2 }')\" = working ]" && working=yes || working_wait="$LANE_WAIT_WHY"
+  last_state="$(pfm chat status "$CHAT" 2>/dev/null | awk -F '\t' 'NR == 1 { print $2 }')"
+  [ -n "$working" ] || bad="$bad status never reported working while a background sub-agent ran (last state: $last_state); ${working_wait:-no wait reason recorded};"
   wait_for 300 "[ \"\$(pfm chat status '$CHAT' 2>/dev/null | awk -F '\t' 'NR == 1 { print \$2 }')\" = idle ]" || {
     last_state="$(pfm chat status "$CHAT" 2>/dev/null | awk -F '\t' 'NR == 1 { print $2 }')"
-    bad="$bad the chat never returned to idle after the sub-agent (last state: ${last_state:-<unread>});"
+    bad="$bad the chat never returned to idle after the sub-agent (last state: ${last_state:-<unread>}); ${LANE_WAIT_WHY:-no wait reason recorded};"
   }
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "base/--json/--summary/--ask/--engine/--model all answered; working under a live sub-agent, then idle"
@@ -482,15 +526,17 @@ if requires E1.01-open-seat1; then
   if [ ! -s "$excerpt" ]; then
     bad="$bad the chat's last answer was empty, so no excerpt could be written — the excerpt-file form was NOT asserted;"
   else
+    wait_for 30 "pfm chat find '$excerpt' 2>&1 | grep -F '$sid' >/dev/null" || find_wait="$LANE_WAIT_WHY"
     found="$(pfm chat find "$excerpt" 2>&1)"
     found_rc=$?
     [ "$found_rc" -eq 0 ] || bad="$bad chat find <excerpt-file> exited $found_rc ($(one_line "$found"));"
-    printf '%s' "$found" | grep -qF "$sid" ||
-      bad="$bad chat find matched a session other than the chat's own $sid: $(one_line "$found");"
+    [ -z "${find_wait:-}" ] || bad="$bad chat find never indexed session $sid: $find_wait;"
+    grep -qF "$sid" <<<"$found" ||
+      bad="$bad chat find matched a session other than the chat's own $sid: $(one_line "$found"); ${find_wait:-no wait reason recorded};"
     file_read="$(pfm chat read "$excerpt" 20 2>&1)"
     file_rc=$?
     [ "$file_rc" -eq 0 ] || bad="$bad chat read <excerpt-file> exited $file_rc ($(one_line "$file_read"));"
-    printf '%s' "$file_read" | grep -q 'Extracted ->' ||
+    grep -q 'Extracted ->' <<<"$file_read" ||
       bad="$bad chat read <excerpt-file> did not report the extracted file: $(one_line "$file_read");"
   fi
   stream_full="$(timeout 60 pfm chat stream "$CHAT" --from-start --no-follow 2>&1)"
@@ -508,13 +554,13 @@ fi
 beat E1.14-capture-keys
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.14-capture-keys; then
   cap="$(pfm chat capture "$CHAT" 2>&1)"
   rc=$?
   typed="LANE-KEYS-$$"
   keys_out="$(pfm chat keys --literal --capture "$CHAT" "$typed" 2>&1)"
   keys_rc=$?
-  sleep 2
+  wait_for 10 'grep -qF "$typed" <<<"$(pane "$CHAT")$keys_out"' || typed_wait="$LANE_WAIT_WHY"
   after="$(pane "$CHAT")"
   pfm chat keys "$CHAT" Escape >/dev/null 2>&1
   pfm chat keys "$CHAT" C-u >/dev/null 2>&1
@@ -522,8 +568,8 @@ if requires E1.01-open-seat1; then
     fail "capture exited $rc with $(printf '%s' "$cap" | wc -c | tr -d ' ') bytes: $(one_line "$cap")"
   elif [ "$keys_rc" -ne 0 ]; then
     fail "keys --literal --capture exited $keys_rc: $(one_line "$keys_out")"
-  elif ! grep -qF -- "$typed" <<<"$after$keys_out"; then
-    fail "the literal keys never appeared on the pane or in the capture: $(one_line "$after" | cut -c1-200)"
+  elif [ -n "${typed_wait:-}" ] || ! grep -qF -- "$typed" <<<"$after$keys_out"; then
+    fail "the literal keys never appeared on the pane or in the capture: $(one_line "$after" | cut -c1-200); ${typed_wait:-no wait reason recorded}"
   else
     pass "capture read $(printf '%s' "$cap" | wc -l | tr -d ' ') pane lines; keys typed '$typed' into the composer and Escape/C-u cleared it"
   fi
@@ -534,12 +580,12 @@ fi
 beat E1.15-ask
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.15-ask; then
   out="$(pfm chat ask --timeout 240 "$CHAT" "/lane ask $(mock_steps '{"type":"turn","reply":"ASK-OK"}')" 2>&1)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     fail "pfm chat ask exited $rc: $(one_line "$out")"
-  elif ! printf '%s' "$out" | grep -qF ASK-OK; then
+  elif ! grep -qF ASK-OK <<<"$out"; then
     fail "ask returned without the fresh answer: $(one_line "$out")"
   else
     pass "ask blocked until the fresh assistant turn and returned it"
@@ -551,7 +597,7 @@ fi
 beat E1.16-inject
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.16-inject; then
   bad=""
   pfm chat inject --allow-unsigned "$CHAT" "lane inject INJECT-OK" >/dev/null 2>&1 ||
     bad="$bad base inject was refused;"
@@ -569,7 +615,7 @@ if requires E1.01-open-seat1; then
   then_out="$(CHAT_THEN_IDLE_TRIES=30 pfm chat inject --allow-unsigned --then "/lane inject THEN-CHAIN" "$CHAT" \
     "/lane inject PRIMARY-OK $(mock_steps "$then_steps")" 2>&1)"
   then_rc=$?
-  then_log="$(printf '%s' "$then_out" | grep -oE '/tmp/chat-then-[^ )]+' | head -1)"
+  then_log="$(grep -oE '/tmp/chat-then-[^ )]+' <<<"$then_out" | head -1)"
   if [ "$then_rc" -ne 0 ] || [ -z "$then_log" ]; then
     bad="$bad --then was refused or named no waiter log (rc $then_rc): $(one_line "$then_out");"
   elif ! wait_for 30 "[ -s '$then_log' ]"; then
@@ -596,15 +642,27 @@ if requires E1.01-open-seat1; then
     "/lane menu $(mock_steps '{"type":"menu","options":["one","two"],"selected":1}')" >/dev/null 2>&1 ||
     bad="$bad scripted menu step was refused;"
   pfm chat keys --literal "$CHAT" "/" >/dev/null 2>&1
-  sleep 3
+  wait_for 10 'grep -qF "Enter to confirm · Esc to cancel" <<<"$(pane "$CHAT")"' ||
+    bad="$bad the selector menu did not open: ${LANE_WAIT_WHY:-no wait reason recorded};"
   menu="$(pfm chat inject --allow-unsigned "$CHAT" "this must not be typed into an open menu" 2>&1)"
   menu_rc=$?
   pfm chat keys "$CHAT" Escape >/dev/null 2>&1
   pfm chat keys "$CHAT" C-u >/dev/null 2>&1
   if [ "$menu_rc" -eq 0 ]; then
     bad="$bad an inject with the slash menu OPEN was accepted (want the named ABORT: OPEN selector menu refusal);"
-  elif ! printf '%s' "$menu" | grep -qi 'selector menu'; then
+  elif ! grep -qi 'selector menu' <<<"$menu"; then
     bad="$bad the menu-open inject failed but did not name the open selector menu: $(one_line "$menu");"
+  fi
+  # The mock's menu step returns without an assistant record; finish its turn
+  # after Escape so the next beat cannot inherit a still-working transcript.
+  close_out="$(pfm chat inject --allow-unsigned "$CHAT" "/lane menu closed $(mock_steps '{"type":"turn","reply":"menu closed"}')" 2>&1)"
+  close_rc=$?
+  if [ "$close_rc" -ne 0 ]; then
+    bad="$bad menu close turn was refused (exit $close_rc): $(one_line "$close_out");"
+  elif ! wait_prompt "$CHAT" 'lane menu closed' 120; then
+    bad="$bad menu close turn has no user record: ${LANE_WAIT_WHY:-no wait reason recorded};"
+  elif ! settle_chat "$CHAT"; then
+    bad="$bad the menu turn did not settle after Escape/C-u: ${LANE_WAIT_WHY:-no wait reason recorded};"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "base/--force-now/--file/--then delivered with proof; /compact refused by name; an open menu refused by name"
@@ -616,10 +674,11 @@ fi
 beat E1.17-watch
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.17-watch; then
   watch_file="$LANE_OUT_DIR/e1-watch.out"
   timeout 120 pfm chat watch "$CHAT" --idle-after 10 --once >"$watch_file" 2>&1 &
   watch_pid=$!
+  # WINDOW: watcher needs its first idle sample before the busy inject — the transition assertion needs it.
   sleep 1
   inject_out="$(pfm chat inject --allow-unsigned "$CHAT" "/lane watch $(mock_steps '{"type":"turn","reply":"WATCH-DONE","busy_ms":3000}')" 2>&1)"
   inject_rc=$?
@@ -646,25 +705,25 @@ fi
 beat E1.18-name
 spends "cc:$SEAT"
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.18-name; then
   grouped="$CHAT:lane"
   sock="$(live_field "$CHAT" 11)"
   out="$(pfm chat name "$CHAT" "$grouped" 2>&1)"
   rc=$?
-  sleep 3
+  LANE_ANCHOR="sock:$sock" wait_for 10 "[ \"\$(socket_field '$sock' 5)\" = '$grouped' ] && grep -qF '$CHAT' <<<\"\$(tmux -S '$(_lane_tmux_dir)/$sock' list-windows -F '#{window_name}' 2>/dev/null)\"" || grouped_wait="$LANE_WAIT_WHY"
   window="$(tmux -S "$(_lane_tmux_dir)/$sock" list-windows -F '#{window_name}' 2>/dev/null | head -1)"
   row_name="$(socket_field "$sock" 5)"
   back="$(pfm chat name "$grouped" "$CHAT" 2>&1)"
   back_rc=$?
-  sleep 3
+  LANE_ANCHOR="sock:$sock" wait_for 10 "[ \"\$(live_field '$CHAT' 11)\" = '$sock' ]" || back_wait="$LANE_WAIT_WHY"
   if [ "$rc" -ne 0 ]; then
     fail "pfm chat name exited $rc: $(one_line "$out")"
   elif [ "$row_name" != "$grouped" ]; then
-    fail "the row for socket $sock reports name '$row_name' after the rename to '$grouped'"
-  elif [ "${window#*"$CHAT"}" = "$window" ]; then
-    fail "the tmux window name '$window' never converged on the new label"
-  elif [ "$back_rc" -ne 0 ] || [ "$(live_field "$CHAT" 11)" != "$sock" ]; then
-    fail "the rename back to $CHAT failed (exit $back_rc): $(one_line "$back")"
+    fail "the row for socket $sock reports name '$row_name' after the rename to '$grouped': ${grouped_wait:-no wait reason recorded}"
+  elif [ "${window#*"$CHAT"}" = "$window" ] || [ -n "${grouped_wait:-}" ]; then
+    fail "the tmux window name '$window' never converged on the new label: ${grouped_wait:-no wait reason recorded}"
+  elif [ -n "${back_wait:-}" ] || [ "$back_rc" -ne 0 ] || [ "$(live_field "$CHAT" 11)" != "$sock" ]; then
+    fail "the rename back to $CHAT failed (exit $back_rc): $(one_line "$back"); ${back_wait:-no wait reason recorded}"
   else
     pass "'{name}:{group}' label converged in the row and the tmux window ('$window'), then renamed back"
   fi
@@ -690,19 +749,23 @@ if requires E1.01-open-seat1; then
     kill_rc=$?
     [ "$kill_rc" -eq 0 ] || bad="$bad kill exited $kill_rc: $(one_line "$kill_out");"
   fi
-  sleep 2
   if [ -n "$kill_id" ]; then
+    LANE_ANCHOR= wait_for 10 "[ \"\$(row_field '$kill_name' 10)\" = true ] && ! tmux -S '$(_lane_tmux_dir)/$kill_sock' list-sessions >/dev/null 2>&1" ||
+      kill_wait="$LANE_WAIT_WHY"
     [ "$(row_field "$kill_name" 10)" = true ] || bad="$bad the disposable row's killed column is '$(row_field "$kill_name" 10)' after kill;"
     if tmux -S "$(_lane_tmux_dir)/$kill_sock" list-sessions >/dev/null 2>&1; then
       bad="$bad killed chat's tmux server $kill_sock still answers;"
     fi
+    [ -z "${kill_wait:-}" ] || bad="$bad kill state did not converge: $kill_wait;"
     unkill_out="$(pfm chat unkill "$kill_name" 2>&1)"
     unkill_rc=$?
     [ "$unkill_rc" -eq 0 ] || bad="$bad unkill by name exited $unkill_rc: $(one_line "$unkill_out");"
   fi
-  sleep 2
   if [ -n "$kill_id" ]; then
+    LANE_ANCHOR= wait_for 10 "[ \"\$(row_field '$kill_name' 10)\" = false ]" ||
+      unkill_wait="$LANE_WAIT_WHY"
     [ "$(row_field "$kill_name" 10)" = false ] || bad="$bad the disposable row's killed column is '$(row_field "$kill_name" 10)' after unkill;"
+    [ -z "${unkill_wait:-}" ] || bad="$bad unkill state did not converge: $unkill_wait;"
     pfm chat kill "$kill_id" >/dev/null 2>&1
   fi
   live_chat "$CHAT" || bad="$bad $CHAT lost its live row during the disposable kill;"
@@ -754,6 +817,7 @@ if requires E1.01-open-seat1; then
     bad="branch returned but $fork_name has no live row: ${LANE_WAIT_WHY:-timeout};"
   else
     fork_id="$(live_field "$fork_name" 2)"
+    fork_sock="$(live_field "$fork_name" 11)"
     fork_read="$(pfm chat read "$fork_id" --json 2>&1)"; read_rc=$?
     if [ "$fork_id" = "$parent_id" ] || [ "$read_rc" -ne 0 ]; then
       bad="branch row $fork_id was not a readable new session (read rc $read_rc): $(one_line "$fork_read");"
@@ -763,6 +827,10 @@ if requires E1.01-open-seat1; then
     end_out="$(pfm chat end "$fork_name" 2>&1)"
     end_rc=$?
     [ "$end_rc" -eq 0 ] || bad="$bad fork end exited $end_rc: $(one_line "$end_out");"
+  fi
+  if [ -n "${fork_sock:-}" ]; then
+    LANE_ANCHOR= wait_for 10 "! tmux -S '$tmux_dir/$fork_sock' list-sessions >/dev/null 2>&1" ||
+      bad="$bad fork server $fork_sock was still present after end: ${LANE_WAIT_WHY:-no wait reason recorded};"
   fi
   after_sockets="$(find "$tmux_dir" -maxdepth 1 -type s -exec basename '{}' \; | sort)"
   while IFS= read -r fork_sock; do
@@ -787,7 +855,7 @@ if requires E1.01-open-seat1; then
   launcher="$HOME/.local/bin/claude"
   [ -e "$launcher" ] || bad="$bad no managed launcher at $launcher (pfm install stages it);"
   real="$(readlink -f "$launcher" 2>/dev/null)"
-  printf '%s' "$real" | grep -q 'pfm' || bad="$bad $launcher resolves to '${real:-<unresolvable>}', not a pfm shim;"
+  grep -q 'pfm' <<<"$real" || bad="$bad $launcher resolves to '${real:-<unresolvable>}', not a pfm shim;"
   # `pfm internal claude-version` (internal/hookentry/claude_version.go) prints
   # the newest MANAGED build under ~/.local/share/claude/versions and exits 127
   # with EMPTY stdout when that directory holds none — the contract its own Go
@@ -856,17 +924,19 @@ fi
 beat E1.25-end
 spends none
 target_live "$CHAT"
-if requires E1.01-open-seat1; then
+if requires E1.01-open-seat1 && beat_settle E1.25-end; then
   sock="$(live_field "$CHAT" 11)"
   out="$(pfm chat end "$CHAT" 2>&1)"
   rc=$?
-  sleep 3
+  LANE_ANCHOR= wait_for 10 "! live_chat '$CHAT' && ! tmux -S '$(_lane_tmux_dir)/$sock' list-sessions >/dev/null 2>&1" || end_wait="$LANE_WAIT_WHY"
   if [ "$rc" -ne 0 ]; then
     fail "pfm chat end exited $rc: $(one_line "$out")"
   elif live_chat "$CHAT"; then
-    fail "end exited 0 but $CHAT is still a live row: $(one_line "$(chat_row "$CHAT")")"
+    fail "end exited 0 but $CHAT is still a live row: $(one_line "$(chat_row "$CHAT")"); ${end_wait:-no wait reason recorded}"
   elif tmux -S "$(_lane_tmux_dir)/$sock" list-sessions >/dev/null 2>&1; then
-    fail "end exited 0 but the tmux server on $sock still answers list-sessions"
+    fail "end exited 0 but the tmux server on $sock still answers list-sessions: ${end_wait:-no wait reason recorded}"
+  elif [ -n "${end_wait:-}" ]; then
+    fail "end state did not converge inside 10s: $end_wait"
   else
     pass "the chat's whole tmux server is gone (socket $sock no longer answers)"
   fi

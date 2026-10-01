@@ -260,22 +260,6 @@ func publicIPs(
 	return ips, nil
 }
 
-// ChromeTransport reports the production transport identity for diagnostics
-// and tests without exposing the internal net/http wiring.
-func ChromeTransport(client *http.Client) bool {
-	if client == nil {
-		return false
-	}
-	if wrapped, ok := client.Transport.(*userAgentTransport); ok {
-		if !wrapped.chrome {
-			return false
-		}
-		_, ok := wrapped.base.(*chromeTransport)
-		return ok
-	}
-	return false
-}
-
 func configureProxy(client *http.Client, raw string) {
 	if client == nil || strings.TrimSpace(raw) == "" {
 		return
@@ -639,7 +623,7 @@ func classifyKind(source, contentType string, body []byte) string {
 	if len(body) >= 6 && string(body[:6]) == "7z\xbc\xaf\x27\x1c" {
 		return kind7Z
 	}
-	if len(body) >= 7 && string(body[:7]) == "Rar!\x1a\x07" {
+	if len(body) >= 6 && string(body[:6]) == "Rar!\x1a\x07" {
 		return kindRAR
 	}
 	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {

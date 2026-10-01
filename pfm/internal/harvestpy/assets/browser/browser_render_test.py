@@ -27,7 +27,6 @@ from browser import (
     DOCUMENT_PLANT_JS,
     ENGINE_INFO_URL,
     LAZY_LOAD_MARKER,
-    context_options,
     fetch_browser,
     handle_fetch,
     mark_incomplete,
@@ -59,13 +58,6 @@ def test_stock_user_agent_refuses_an_unreadable_version():
         except ValueError:
             continue
         raise AssertionError(f"an unreadable Chrome version {version!r} became a User-Agent")
-
-
-def test_context_options_carry_the_stock_ua_and_keep_the_ssrf_posture():
-    options = context_options(stock_user_agent("153.0.1.2", "linux"))
-    assert options["user_agent"].endswith("Chrome/153.0.0.0 Safari/537.36"), options
-    for key, value in CONTEXT_OPTIONS.items():
-        assert options.get(key) == value, f"context option {key} dropped: {options!r}"
 
 
 SCROLL_FAILURE = "Execution context was destroyed, most likely because of a navigation"

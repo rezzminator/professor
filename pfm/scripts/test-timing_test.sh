@@ -69,6 +69,7 @@ sample_yml() {
   cat <<'YML'
 # fixture budgets
 tolerance: 1.25
+fail_factor: 2
 suites:
   u:
     wall_s: 5
@@ -223,6 +224,7 @@ fi
 raise_yml="$T/raise.yml"
 cat > "$raise_yml" <<'YML'
 tolerance: 1.25
+fail_factor: 2
 suites:
   u:
     wall_s: 5
@@ -358,10 +360,7 @@ fi
 
 dockerfail="$T/dockerfail-bin"
 mkdir -p "$dockerfail"
-for tool in bash jq python3 awk sed sort date mktemp cat grep wc mv rm mkdir cut tr head tail xargs comm dirname basename; do
-  real="$(command -v "$tool" 2>/dev/null)" || continue
-  ln -sf "$real" "$dockerfail/$tool"
-done
+cp -a "$NODOCK/." "$dockerfail/"
 cat > "$dockerfail/docker" <<'SH'
 #!/usr/bin/env bash
 echo docker-daemon-unreachable >&2
@@ -387,6 +386,7 @@ fi
 absent_suite_yml="$T/16.yml"
 cat > "$absent_suite_yml" <<'YML'
 tolerance: 1.25
+fail_factor: 2
 suites:
   e2e:
     wall_s: 99
@@ -456,6 +456,7 @@ fi
 skip_yml="$T/19.yml"
 cat > "$skip_yml" <<'YML'
 tolerance: 1.25
+fail_factor: 2
 suites:
   u:
     wall_s: 1
@@ -490,5 +491,95 @@ else
     bad "skip-test: rc=$rc or skipped test was not named" "$(cat "$out")"
   fi
 fi
+
+over_budget_json >"$T/load.json"
+load_record() {
+  printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\t0\t0\t2\n1704067211\t%s\t0\t2\n' "$1" >"$T/load.load"
+}
+load_record 19.2
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'TIMING CORRECTED github.com/rezzminator/professor/pfm/internal/slow .*other-load=80% limit=12.500s' "$T/load.out" && grep -q 'TIMING CORRECTED SUITE(u).*other-load=80% limit=31.250s' "$T/load.out" && grep -q 'within the load-corrected limit' "$T/load.out"; then ok load-corrected; else bad "load-corrected: rc=$rc" "$(cat "$T/load.out")"; fi
+
+load_record 4.8
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING FAIL github.com/rezzminator/professor/pfm/internal/slow .*other-load=20% limit=3.125s' "$T/load.out"; then ok load-unexplained; else bad "load-unexplained: rc=$rc" "$(cat "$T/load.out")"; fi
+
+load_record 0
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING FAIL github.com/rezzminator/professor/pfm/internal/slow .*other-load=0% limit=2.500s' "$T/load.out"; then ok load-zero; else bad "load-zero: rc=$rc" "$(cat "$T/load.out")"; fi
+
+printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067201\t0\t0\t2\n1704067211\t16\t0\t2\n' >"$T/load.load"
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING FAIL github.com/rezzminator/professor/pfm/internal/slow .*other-load=unmeasured' "$T/load.out"; then ok load-uncovered; else bad "load-uncovered: rc=$rc" "$(cat "$T/load.out")"; fi
+
+printf 'epoch_s\tvm_busy_s\town_s\tcpus\nUNAVAILABLE\t/proc/stat: missing\n' >"$T/load.load"
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING: other load not measured — /proc/stat: missing; limits uncorrected' "$T/load.out"; then ok load-unavailable; else bad "load-unavailable: rc=$rc" "$(cat "$T/load.out")"; fi
+
+rm "$T/load.load"
+rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING: other load not measured — load record .*load.load missing; limits uncorrected' "$T/load.out"; then ok load-missing; else bad "load-missing: rc=$rc" "$(cat "$T/load.out")"; fi
+rc=0; over_budget_json | run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" - >"$T/load.out" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'TIMING: other load not measured — stream read from stdin; limits uncorrected' "$T/load.out"; then ok load-stdin; else bad "load-stdin: rc=$rc" "$(cat "$T/load.out")"; fi
+
+for case in header numeric time cpus; do
+  case "$case" in
+    header) printf 'bad\n1704067199\t0\t0\t2\n' >"$T/load.load" ;;
+    numeric) printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\tbad\t0\t2\n' >"$T/load.load" ;;
+    time) printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\t0\t0\t2\n1704067199\t1\t0\t2\n' >"$T/load.load" ;;
+    cpus) printf 'epoch_s\tvm_busy_s\town_s\tcpus\n1704067199\t0\t0\t0\n' >"$T/load.load" ;;
+  esac
+  rc=0; run_sut --check --yml "$yml" --suite u --out "$T/load.tsv" "$T/load.json" >"$T/load.out" 2>&1 || rc=$?
+  if [ "$rc" -eq 2 ] && grep -q "TIMING-UNREADABLE: load record $T/load.load:" "$T/load.out"; then ok "load-malformed-$case"; else bad "load-malformed-$case: rc=$rc" "$(cat "$T/load.out")"; fi
+done
+
+# The fail limit applies to each package and to the suite wall separately.
+timed_json() {
+  local wall="$1"
+  printf '{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK"}\n'
+  printf '{"Time":"2024-01-01T00:00:00.%09dZ","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK","Elapsed":%s}\n' "$2" "$wall"
+  printf '{"Time":"2024-01-01T00:00:00.%09dZ","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Elapsed":%s}\n' "$2" "$wall"
+}
+for scope in package suite; do
+  tier_yml="$T/$scope-tier.yml"
+  if [ "$scope" = package ]; then tier_suite=1; tier_pkg=0.1; tier_name='github.com/rezzminator/professor/pfm/internal/quick'
+  else tier_suite=0.1; tier_pkg=1; tier_name='SUITE(u)'; fi
+  cat > "$tier_yml" <<YML
+tolerance: 1.25
+fail_factor: 2
+suites:
+  u:
+    wall_s: $tier_suite
+    packages:
+      github.com/rezzminator/professor/pfm/internal/quick: $tier_pkg
+YML
+  for tier in warn fail; do
+    if [ "$tier" = warn ]; then wall=0.1875; nanos=187500000; expected_rc=0; expected_verdict=WARN
+    else wall=0.2625; nanos=262500000; expected_rc=1; expected_verdict=FAIL; fi
+    tier_out="$T/$scope-$tier.out"
+    rc=0; timed_json "$wall" "$nanos" | run_sut --check --yml "$tier_yml" --suite u --out "$T/$scope-$tier.tsv" > "$tier_out" 2>&1 || rc=$?
+    if [ "$rc" -eq "$expected_rc" ] && grep -q "^TIMING $expected_verdict $tier_name .*limit=0.125s fail-at=0.250s" "$tier_out"; then
+      if [ "$tier" = warn ] && grep -q "^GATE-WARN 1 timing warning(s): $tier_name" "$tier_out" && grep -q 'over budget within the fail limit (fail at x2)' "$tier_out"; then
+        ok "$scope warning stays green and names its fail limit"
+      elif [ "$tier" = fail ]; then
+        ok "$scope beyond the fail limit is an offender"
+      else bad "$scope warning summary or gate marker" "$(cat "$tier_out")"; fi
+    else bad "$scope $tier: rc=$rc" "$(cat "$tier_out")"; fi
+  done
+done
+
+missing_factor_yml="$T/missing-factor.yml"
+cat > "$missing_factor_yml" <<'YML'
+tolerance: 1.25
+suites:
+  u:
+    wall_s: 1
+    packages:
+      github.com/rezzminator/professor/pfm/internal/quick: 1
+YML
+rc=0; timed_json 0.1 100000000 | run_sut --check --yml "$missing_factor_yml" --suite u --out "$T/missing-factor.tsv" > "$T/missing-factor.out" 2>&1 || rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'TIMING-CONFIG-INVALID: .* is missing fail_factor' "$T/missing-factor.out"; then
+  ok 'missing fail_factor is a named configuration error'
+else bad "missing fail_factor: rc=$rc" "$(cat "$T/missing-factor.out")"; fi
 
 shtest_end

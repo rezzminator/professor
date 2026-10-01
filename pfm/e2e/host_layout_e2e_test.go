@@ -28,7 +28,7 @@ import (
 
 func TestHostLayoutMigratesLegacyHome(t *testing.T) {
 	requireE2EFence(t)
-	repo := sourceRepo(t)
+	repo := sharedSourceRepo(t)
 	h := &e2eHarness{t: t, repo: repo, goCache: requiredGoEnv(t, "GOCACHE"), goModCache: requiredGoEnv(t, "GOMODCACHE")}
 	bin := os.Getenv(e2eScriptBinaryEnv)
 	if bin == "" {

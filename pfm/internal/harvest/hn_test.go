@@ -143,6 +143,7 @@ func hnAssertTree(t *testing.T, content string, ids []string, depths []int) {
 // from the stated count, which reconciles — the artifact is complete, and a
 // second harvest is identical.
 func TestHNThreadRendersEveryCommentAndReconciles(t *testing.T) {
+	t.Parallel()
 	page := hnFixture(t)
 	site := &hnSite{pages: []string{page}}
 	h, pacing := site.harvester(t)
@@ -191,6 +192,7 @@ func TestHNThreadRendersEveryCommentAndReconciles(t *testing.T) {
 // "More" link has its second page followed at the loader pace, its comments
 // merged in after the first page's, and the count reconciles.
 func TestHNMorePagesAreFollowedAndMerged(t *testing.T) {
+	t.Parallel()
 	page := hnFixture(t)
 	first, second := hnSplit(page, 30)
 	site := &hnSite{pages: []string{first, second}}
@@ -216,6 +218,7 @@ func TestHNMorePagesAreFollowedAndMerged(t *testing.T) {
 // parse, stated comments the page does not serve, and a count the subline
 // does not state.
 func TestHNUnloadedCommentsFlagThePartial(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		pages func(page string) []string
@@ -294,6 +297,7 @@ func TestHNUnloadedCommentsFlagThePartial(t *testing.T) {
 // item page (here the fixture with its story row turned into a comment's, as
 // a comment's own page carries it) is not claimed.
 func TestHNNonThreadURLsTakeTheGenericPath(t *testing.T) {
+	t.Parallel()
 	page := strings.Replace(hnFixture(t), `class="athing submission"`, `class="athing comtr"`, 1)
 	doc, err := html.Parse(strings.NewReader(page))
 	if err != nil {

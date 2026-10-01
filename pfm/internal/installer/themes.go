@@ -22,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
@@ -104,7 +105,12 @@ func (installer *engine) installThemes(ctx context.Context) {
 		if cached, ok := loads[name]; ok {
 			return cached
 		}
-		content, err := loadThemeContent(ctx, installer.options.ThemeHTTPClient, sources[name])
+		content, err := loadThemeContent(
+			ctx,
+			installer.options.ThemeHTTPClient,
+			sources[name],
+			installer.options.ThemesOffline,
+		)
 		result := themeLoad{content: content, err: err}
 		loads[name] = result
 		return result
@@ -277,7 +283,7 @@ func (installer *engine) uninstallThemes() {
 // loadThemeContent returns a theme's palette bytes: a bundled palette from the
 // source clone is read from disk ("read failed: ..." names the path), anything
 // else is downloaded ("fetch failed: ..."); either way non-JSON is refused.
-func loadThemeContent(ctx context.Context, client *http.Client, source themeSource) ([]byte, error) {
+func loadThemeContent(ctx context.Context, client *http.Client, source themeSource, offline bool) ([]byte, error) {
 	var content []byte
 	if source.local != "" {
 		read, err := os.ReadFile(source.local)
@@ -286,6 +292,9 @@ func loadThemeContent(ctx context.Context, client *http.Client, source themeSour
 		}
 		content = read
 	} else {
+		if offline {
+			return nil, fmt.Errorf("fetch failed: fetch skipped: %s=1", paths.EnvThemesOffline)
+		}
 		fetched, err := fetchTheme(ctx, client, source.Raw)
 		if err != nil {
 			return nil, fmt.Errorf("fetch failed: %w", err)
@@ -386,6 +395,13 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 					localErr,
 				)
 			}
+			if options.ThemesOffline {
+				return nil, fmt.Errorf(
+					"local theme manifest unavailable: %v; fetch skipped: %s=1",
+					localErr,
+					paths.EnvThemesOffline,
+				)
+			}
 			content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 			if err != nil {
 				return nil, fmt.Errorf(
@@ -405,6 +421,9 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			return nil, errors.New(
 				"release manifest for an unpublished -alpha build; run pfm install from the source clone",
 			)
+		}
+		if options.ThemesOffline {
+			return nil, fmt.Errorf("fetch skipped: %s=1", paths.EnvThemesOffline)
 		}
 		content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 		if err != nil {

@@ -421,6 +421,7 @@ func TestDOIMirrorLookupSplitsRequestFailureFromResponseFailure(t *testing.T) {
 // reading "doi-mirror returned an empty response body" names the wrong
 // source.
 func TestReadDOIMirrorResponseErrorsAreSourceNeutral(t *testing.T) {
+	t.Parallel()
 	_, _, _, err := readDOIMirrorResponse(nil, 1024)
 	if err == nil || strings.Contains(err.Error(), "doi-mirror") {
 		t.Fatalf("readDOIMirrorResponse(nil) error = %v, must not name doi-mirror", err)

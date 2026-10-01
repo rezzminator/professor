@@ -14,6 +14,7 @@ import (
 // engine existed. One map, every registered engine, or a fourth engine lands
 // half-configured the same way.
 func TestEngineBinariesCoversEveryRegisteredEngine(t *testing.T) {
+	t.Parallel()
 	runtime := Runtime{
 		ClaudeBinary:   "/opt/bin/claude",
 		CodexBinary:    "/opt/bin/codex",

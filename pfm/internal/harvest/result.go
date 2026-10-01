@@ -130,8 +130,6 @@ func (h *Harvester) resultFromCache(source, kind, content string, meta map[strin
 	}
 }
 
-func rungsSummary(rungs []string) string { return strings.Join(rungs, ", ") }
-
 func rungsPhrase(rungs []string) string {
 	parts := make([]string, 0, len(rungs))
 	for index := 0; index < len(rungs); {

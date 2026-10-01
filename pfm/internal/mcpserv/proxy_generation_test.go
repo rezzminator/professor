@@ -39,6 +39,7 @@ func TestStdioProxyForwardsCallsThroughDaemon(t *testing.T) {
 }
 
 func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
+	t.Parallel()
 	const oldSession = "session-old"
 	const recoveredSession = "session-recovered"
 	oldStarted := make(chan struct{})
@@ -137,6 +138,7 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 }
 
 func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
+	t.Parallel()
 	const oldSession = "session-old"
 	const recoveredSession = "session-recovered"
 	var toolCalls atomic.Int32
@@ -205,6 +207,7 @@ func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
 }
 
 func TestStdioProxyStaleSuccessCannotReplaceNewSession(t *testing.T) {
+	t.Parallel()
 	oldStarted := make(chan struct{})
 	releaseOld := make(chan struct{})
 	transport := proxyTestTransport(func(request *http.Request) (*http.Response, error) {
@@ -269,6 +272,7 @@ func TestStdioProxyStaleSuccessCannotReplaceNewSession(t *testing.T) {
 }
 
 func TestStdioProxyCloseDoesNotClearNewerSession(t *testing.T) {
+	t.Parallel()
 	closeStarted := make(chan struct{})
 	releaseClose := make(chan struct{})
 	transport := proxyTestTransport(func(request *http.Request) (*http.Response, error) {

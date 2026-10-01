@@ -39,6 +39,7 @@ var substackWant = []string{
 // removed comments named apart from the stated count; the artifact is
 // complete, and a second harvest is identical.
 func TestSubstackPostLoadsEveryComment(t *testing.T) {
+	t.Parallel()
 	site := substackSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), substackURL, FetchOptions{Refresh: true})
@@ -82,6 +83,7 @@ func TestSubstackPostLoadsEveryComment(t *testing.T) {
 // TestSubstackUnservedCommentsFlagThePartial: a post stating more comments
 // than its tree serves renders what was served and names the rest.
 func TestSubstackUnservedCommentsFlagThePartial(t *testing.T) {
+	t.Parallel()
 	site := substackSite(t)
 	site.answers["www.example-pub.com/p/a-post"] = strings.Replace(site.answers["www.example-pub.com/p/a-post"],
 		`\"comment_count\":7`, `\"comment_count\":400`, 1)
@@ -100,6 +102,7 @@ func TestSubstackUnservedCommentsFlagThePartial(t *testing.T) {
 // one of another post, is never rendered: the post renders with its stated
 // comments named unread, never as a post with no comments.
 func TestSubstackCommentsNotLoadedNameTheGap(t *testing.T) {
+	t.Parallel()
 	for name, mutate := range map[string]func(site *socialSite){
 		"refused": func(site *socialSite) { site.status = map[string]int{substackCommentsAPI: http.StatusNotFound} },
 		"another post's": func(site *socialSite) {

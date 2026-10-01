@@ -119,7 +119,7 @@ type gatewayResponse struct {
 // looked and were walled, not that we failed to look.
 var errGatewayNoRung = errors.New("every gateway rung was exhausted")
 
-// retrieveGateway is Retrieve's PolicyGateway step: one request up the challenge
+// retrieveGateway is retrieveWith's PolicyGateway step: one request up the challenge
 // ladder. Only retrieve calls it; there is no second ladder entry.
 func (h *Harvester) retrieveGateway(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	if !req.trustedOrigin {
@@ -267,8 +267,8 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 //
 // Both clones are the harvester's http.out door (spec § Middleware): the
 // per-request copy is wrapped, so every attempt of every rung leaves one
-// record, while the shared client's Transport — the one configureProxy,
-// setUserAgent and IsPinnedClient inspect by type — is never touched.
+// record, while the shared client's Transport — the one configureProxy
+// and setUserAgent inspect by type — is never touched.
 func gatewayRequestClient(req gatewayRequest) *http.Client {
 	if req.trustedOrigin {
 		clone := *req.client

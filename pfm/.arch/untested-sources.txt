@@ -25,7 +25,7 @@ internal/action/termios_linux.go
 internal/action/types.go
 internal/archive/manifest.go
 internal/chat/inject_engine.go
-internal/chat/keys.go
+internal/claudelaunch/doc.go
 internal/codexgen/compiler.go
 internal/codexgen/config.go
 internal/codexgen/toml.go
@@ -40,7 +40,6 @@ internal/engine/claude/capabilities.go
 internal/engine/claude/match.go
 internal/engine/codex/capabilities.go
 internal/engine/codex/match.go
-internal/engine/match.go
 internal/engine/opencode/index.go
 internal/engine/opencode/match.go
 internal/fleet/killmanager.go
@@ -71,6 +70,7 @@ internal/hookentry/codex_launch.go
 internal/hookentry/doc.go
 internal/hookentry/launcher_repair.go
 internal/hookentry/prompt_block.go
+internal/hostfixture/doc.go
 internal/index/claude.go
 internal/index/codex.go
 internal/index/cxindex.go

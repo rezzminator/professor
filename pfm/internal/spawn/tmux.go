@@ -111,6 +111,9 @@ func (tmux TmuxSpawner) NewSession(
 		return errors.Join(fmt.Errorf("create chat server: %w", err), launch.Discard())
 	}
 	if output, err := command.CombinedOutput(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.Join(fmt.Errorf("create chat server: %w", ctxErr), launch.Discard())
+		}
 		return errors.Join(fmt.Errorf("create chat server: %w: %s", err, output), launch.Discard())
 	}
 	for _, options := range pfmconfig.ChatServerOptions(tmux.Titles) {
@@ -119,12 +122,15 @@ func (tmux TmuxSpawner) NewSession(
 			spec.Socket,
 			options...,
 		).CombinedOutput(); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("configure chat server: %w", ctxErr)
+			}
 			// A server that vanished between creation and configuration died
 			// with its only pane — name the pane command's SHAPE, because
 			// that is where the death almost always started. spec.Run can
 			// carry a prompt body (action.HeadlessRun appends it to the
 			// launch line), so the error names the binary and word count,
-			// never the command line itself.
+			// never the command line itself. Cancellation returns as itself.
 			return fmt.Errorf(
 				"configure chat server: %w: %s — the server died before it could be configured; its pane command likely exited at launch (%s)",
 				err,

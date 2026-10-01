@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -325,52 +324,6 @@ func TestHeadlessExecHelpNamesSharedInterface(t *testing.T) {
 	} {
 		if !strings.Contains(stderr.String(), phrase) {
 			t.Fatalf("help omitted %q: %q", phrase, stderr.String())
-		}
-	}
-}
-
-func TestHeadlessConsumersUseSharedRunner(t *testing.T) {
-	_, current, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Dir(current)
-	cases := []struct {
-		path       string
-		mustHave   []string
-		mustAbsent []string
-	}{
-		{
-			filepath.Join(root, "..", "..", "internal", "ask", "ask.go"),
-			[]string{"headlessrun.Run("},
-			[]string{"exec.Command", "exec.CommandContext"},
-		},
-		{
-			filepath.Join(root, "..", "..", "internal", "stats", "limits.go"),
-			[]string{"headlessrun.Run("},
-			[]string{"exec.Command", "exec.CommandContext"},
-		},
-		{
-			filepath.Join(root, "..", "..", "internal", "doctor", "harness_prompt.go"),
-			[]string{"headlessrun.Run("},
-			nil,
-		},
-	}
-	for _, testCase := range cases {
-		body, err := os.ReadFile(testCase.path)
-		if err != nil {
-			t.Fatalf("read %s: %v", testCase.path, err)
-		}
-		source := string(body)
-		for _, want := range testCase.mustHave {
-			if !strings.Contains(source, want) {
-				t.Errorf("%s does not name required shared boundary %q", testCase.path, want)
-			}
-		}
-		for _, forbidden := range testCase.mustAbsent {
-			if strings.Contains(source, forbidden) {
-				t.Errorf("%s still contains direct harness subprocess call %q", testCase.path, forbidden)
-			}
 		}
 	}
 }

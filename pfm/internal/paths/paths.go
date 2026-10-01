@@ -60,16 +60,22 @@ const (
 	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
 	// it so no test reaches a public repository.
 	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
+	// EnvThemesOffline=1 stops pfm install from fetching a release theme
+	// manifest or remote theme file; themes bundled in the source clone still install.
+	// The test harness sets it so no test fetches themes from a public repository.
+	EnvThemesOffline = "PFM_THEMES_OFFLINE"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
 	// test` is refused the real home rather than handed it silently.
-	EnvRealHome           = "PFM_TEST_REAL_HOME"
-	EnvProcRoot           = "PFM_PROC_ROOT"
-	EnvManagedSettingsDir = "PFM_MANAGED_SETTINGS_DIR"
-	EnvCgroupRoot         = "PFM_CGROUP_ROOT"
-	EnvDevRepoGitDir      = "PFM_DEV_REPO_GIT_DIR"
-	EnvDevRepoWorkTree    = "PFM_DEV_REPO_WORK_TREE"
+	EnvRealHome             = "PFM_TEST_REAL_HOME"
+	EnvTestPFMBinary        = "PFM_TEST_PFM_BINARY"
+	EnvTestMockEngineBinary = "PFM_TEST_MOCK_ENGINE_BINARY"
+	EnvProcRoot             = "PFM_PROC_ROOT"
+	EnvManagedSettingsDir   = "PFM_MANAGED_SETTINGS_DIR"
+	EnvCgroupRoot           = "PFM_CGROUP_ROOT"
+	EnvDevRepoGitDir        = "PFM_DEV_REPO_GIT_DIR"
+	EnvDevRepoWorkTree      = "PFM_DEV_REPO_WORK_TREE"
 	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
 	// the way a real chat runs — the server loads ~/.tmux.conf like every other
 	// terminal on the machine, because a chat IS a terminal the user lives in:
@@ -516,4 +522,25 @@ func SkillSourcesOffline() bool {
 // a caller was handed.
 func SkillSourcesOfflineIn(env Env) bool {
 	return env.Get(EnvSkillSourcesOffline) == "1"
+}
+
+// ThemesOffline reports EnvThemesOffline=1: pfm install reads bundled themes
+// from the source clone but skips remote theme fetches.
+func ThemesOffline() bool {
+	return ThemesOfflineIn(OSEnv{})
+}
+
+// ThemesOfflineIn is ThemesOffline read from env, the environment a caller was handed.
+func ThemesOfflineIn(env Env) bool {
+	return env.Get(EnvThemesOffline) == "1"
+}
+
+// PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.
+func PrebuiltPFMBinary() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestPFMBinary)
+}
+
+// PrebuiltMockEngineBinary is the mock-engine binary a unit run built once.
+func PrebuiltMockEngineBinary() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestMockEngineBinary)
 }

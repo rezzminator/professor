@@ -141,6 +141,7 @@ func mastoRendered(content string) []string {
 // (never raw HTML); the counts reconcile, the artifact is complete, and a
 // second harvest is identical.
 func TestMastodonStatusLoadsItsRepliesAsATree(t *testing.T) {
+	t.Parallel()
 	site := mastoSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), mastoURL, FetchOptions{Refresh: true})
@@ -196,6 +197,7 @@ func TestMastodonStatusLoadsItsRepliesAsATree(t *testing.T) {
 // TestMastodonUnservedRepliesFlagThePartial: a status stating more replies
 // than its context serves renders what was served and names the rest.
 func TestMastodonUnservedRepliesFlagThePartial(t *testing.T) {
+	t.Parallel()
 	site := mastoSite(t)
 	site.answers["social.example"+mastoAPI] = strings.Replace(site.answers["social.example"+mastoAPI],
 		`"replies_count": 7`, `"replies_count": 131`, 1)
@@ -216,6 +218,7 @@ func TestMastodonUnservedRepliesFlagThePartial(t *testing.T) {
 // TestMastodonReplyRendersItsAncestors: a nested reply's page renders the
 // statuses it answers above it, oldest first.
 func TestMastodonReplyRendersItsAncestors(t *testing.T) {
+	t.Parallel()
 	site := mastoSite(t)
 	result := site.harvester(t).FetchWithOptions(context.Background(),
 		"https://social.example/@user-3/"+mastoReplyID, FetchOptions{Refresh: true})
@@ -236,6 +239,7 @@ func TestMastodonReplyRendersItsAncestors(t *testing.T) {
 // would not answer is not claimed; the page goes the generic path with the
 // gap named, and its context is never requested.
 func TestMastodonRecordNotLoadedServesThePage(t *testing.T) {
+	t.Parallel()
 	site := mastoSite(t)
 	site.status = map[string]int{"social.example" + mastoAPI: http.StatusNotFound}
 	result := site.servingHarvester(t).FetchWithOptions(context.Background(), mastoURL, FetchOptions{Refresh: true})
@@ -251,6 +255,7 @@ func TestMastodonRecordNotLoadedServesThePage(t *testing.T) {
 // instance and a status address on a page that is not Mastodon's request
 // nothing from the API.
 func TestMastodonOtherPagesTakeTheGenericPath(t *testing.T) {
+	t.Parallel()
 	site := mastoSite(t)
 	site.answers["social.example/@user-0"] = site.answers["social.example"+mastoPath]
 	site.answers["blog.example/@writer/12345"] = "<html><head><title>A post</title></head><body><article><p>" +
@@ -269,6 +274,7 @@ func TestMastodonOtherPagesTakeTheGenericPath(t *testing.T) {
 // an account created on a current release (the form a replies collection
 // lists such an account's reply by) — and nothing else.
 func TestMastodonStatusIDReadsEveryURIForm(t *testing.T) {
+	t.Parallel()
 	accounts := "users" // the uri segment, spelled apart from the placeholder names
 	for path, want := range map[string]string{
 		"/@user-0/117117221397911074":                                           "117117221397911074",

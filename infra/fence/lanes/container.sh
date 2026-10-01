@@ -4,17 +4,18 @@
 # lanes run in are the same machine.
 #
 #   . "$HERE/container.sh"
-#   lane_base_image <hash>          # build the fence image and pin it privately
-#   lane_base_release <hash>        # drop that pin once the root build ends
-#   lane_run <name> <image> [network] # start a detached lane container from it
+#   lane_base_image <root> <pin-tag> # prepare the fence image and pin it privately
+#   lane_base_release <pin-tag>     # drop that pin once the root build ends
+#   lane_run <name> <image> [network] [docker-run args…] # detached container
 #
-# Why the private tag: the fence image `professor-pfm-dev` is rebuilt by every
-# `dev.sh iso` run on this host, and under docker's containerd image store a
+# Why the private tag: the fence image `professor-pfm-dev` is rebuilt on this
+# host whenever its build inputs change (infra/fence/image-key.sh), and under
+# docker's containerd image store a
 # rebuild re-points the tag and drops the old manifest's content — after which
 # `docker commit` of a container created from it fails with
 # `NotFound: content digest … not found` (observed 2026-09-17, mid-build, while
 # another session used the fence). Tagging the built image as
-# `pfm-lane-base:<hash>` gives that manifest a reference of our own, so a
+# `pfm-lane-base:<hash>-<suffix>` gives that manifest a reference of our own, so a
 # concurrent rebuild can never pull the floor out from under a root build.
 #
 # The mount and env contract is the fence's (infra/fence/docker-compose.yml),
@@ -27,37 +28,42 @@
 # BROKEN STATE: a failing build or run prints docker's own message and returns
 # non-zero; neither function ever falls back to a host-local execution.
 
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/image-key.sh"
+
 lane_fence_env() { # resolve PFM_DEV_* once, from the worktree root
   local root="$1"
   ROOT="$root" FENCE_CALLER="${FENCE_CALLER:-lanes}" . "$root/infra/fence/fence-env.sh"
 }
 
-lane_base_image() { # lane_base_image <root> <hash> — prints the pinned base tag
-  local root="$1" base="pfm-lane-base:$2"
-  docker compose -f "$root/infra/fence/docker-compose.yml" build pfm-dev >&2 || return 1
+lane_base_image() { # lane_base_image <root> <pin-tag> — prints the pinned base tag
+  local root="$1" base="$2"
+  fence_image_prepare "$root/infra/fence/docker-compose.yml" pfm-dev || return 1
+  if [ "${#FENCE_IMAGE_BUILD[@]}" -ne 0 ]; then
+    docker compose -f "$root/infra/fence/docker-compose.yml" build pfm-dev >&2 || return 1
+  fi
   docker tag professor-pfm-dev "$base" || return 1
   printf '%s\n' "$base"
 }
 
-lane_base_release() { # lane_base_release <hash> — drops the pin once the build window closes
+lane_base_release() { # lane_base_release <pin-tag> — drops the pin once the build window closes
   # The pin only guards the build container's lifetime; the committed root
   # image keeps the layers it needs. `rmi` without -f only untags a shared
   # image and refuses one a container still uses. Never fails the caller.
-  docker rmi "pfm-lane-base:$1" >/dev/null 2>&1 || true
+  docker rmi "$1" >/dev/null 2>&1 || true
 }
 
-lane_run() { # lane_run <name> <image> [network] — a detached fence container
-  local name="$1" image="$2"
-  if [ "${3:-}" = none ]; then set -- --network none -e GOPROXY=off
-  elif [ -n "${3:-}" ]; then set -- --network "$3"
-  else set --; fi
+lane_run() { # lane_run <name> <image> [network] [docker-run args…]
+  local name="$1" image="$2" network="${3:-}"
+  shift 2
+  [ $# -eq 0 ] || shift
+  if [ "$network" = none ]; then set -- --network none -e GOPROXY=off "$@"
+  elif [ -n "$network" ]; then set -- --network "$network" "$@"; fi
   docker run -d --init --name "$name" --label pfm.fence=1 \
     "$@" \
     -v "$PFM_DEV_WORKTREE:/worktree:ro" \
     -v "$PFM_DEV_GIT_COMMON:/pfm-git-common:ro" \
     -v pfm-dev-gocache:/root/.cache/go-build \
     -v pfm-dev-gomod:/root/go/pkg/mod \
-    -v pfm-dev-npm-cache:/root/.npm \
     -w /worktree \
     -e PFM_DEV_FENCE=1 -e IS_SANDBOX=1 -e LANG=C.UTF-8 -e GOFLAGS=-buildvcs=false \
     -e PFM_CONFIG=/root/.local/state/pfm/pfm.config.json \

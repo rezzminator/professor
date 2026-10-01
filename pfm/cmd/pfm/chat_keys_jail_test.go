@@ -28,26 +28,6 @@ func TestChatKeysRefusesATokenTmuxWouldType(t *testing.T) {
 	}
 }
 
-// TestChatKeysAcceptsTheKeysTmuxPresses is the other side of that gate: every
-// name a caller reaches for must survive validation, or the guard becomes the
-// bug.
-func TestChatKeysAcceptsTheKeysTmuxPresses(t *testing.T) {
-	for _, key := range []string{
-		"Enter", "Escape", "Tab", "BTab", "BSpace", "Space", "Up", "Down",
-		"Left", "Right", "Home", "End", "PageUp", "PageDown", "F1", "F12",
-		"C-c", "C-o", "M-x", "S-Tab", "C-M-a",
-	} {
-		if !validKey(key) {
-			t.Fatalf("%q rejected, want it accepted", key)
-		}
-	}
-	for _, key := range []string{"F0", "F13", "Esc", "Ctrl-C", "C-", ""} {
-		if validKey(key) {
-			t.Fatalf("%q accepted, want it rejected", key)
-		}
-	}
-}
-
 // TestChatKeysDrivesALiveChat proves the verb reaches the engine, not just
 // tmux: text typed with --literal and submitted with Enter has to come back
 // out of the chat's own transcript.

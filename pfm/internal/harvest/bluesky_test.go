@@ -67,6 +67,7 @@ func bskyThreadURIs(t *testing.T) []string {
 // the counts reconcile, the artifact is complete, and a second harvest is
 // identical.
 func TestBlueskyPostLoadsItsThreadFromThePublicAppView(t *testing.T) {
+	t.Parallel()
 	site := bskySite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), bskyTestURL, FetchOptions{Refresh: true})
@@ -112,6 +113,7 @@ func TestBlueskyPostLoadsItsThreadFromThePublicAppView(t *testing.T) {
 // TestBlueskyUnservedRepliesFlagThePartial: a post stating more replies than
 // the AppView serves renders what was served and names the rest.
 func TestBlueskyUnservedRepliesFlagThePartial(t *testing.T) {
+	t.Parallel()
 	site := bskySite(t)
 	site.answers[bskyTestThread] = strings.Replace(site.answers[bskyTestThread],
 		`"replyCount": 4`, `"replyCount": 1008`, 1)
@@ -130,6 +132,7 @@ func TestBlueskyUnservedRepliesFlagThePartial(t *testing.T) {
 // would not answer is not claimed; the page goes the generic path with the
 // gap named.
 func TestBlueskyThreadNotLoadedServesThePage(t *testing.T) {
+	t.Parallel()
 	site := bskySite(t)
 	site.status = map[string]int{bskyTestThread: http.StatusBadRequest}
 	h := site.servingHarvester(t)

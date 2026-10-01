@@ -12,13 +12,17 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/engine"
+)
+
+var (
+	// EngineClaude rows carry hit, w5m and w1h; EngineCodex rows carry cached.
+	EngineClaude = engine.MustLookup(engine.Claude).LongName
+	EngineCodex  = engine.MustLookup(engine.Codex).LongName
 )
 
 const (
-	// EngineClaude rows carry hit, w5m and w1h; EngineCodex rows carry cached.
-	EngineClaude = "claude"
-	EngineCodex  = "codex"
-
 	// SourceShipped marks a row of the embedded table, SourceOverride one that
 	// came from pfm.prices.json.
 	SourceShipped  = "shipped"

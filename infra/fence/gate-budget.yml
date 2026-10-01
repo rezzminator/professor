@@ -1,0 +1,13 @@
+# Gate wall budgets: maximum WALL of three eligible captures, rounded up and
+# doubled, the same rule as pfm/.testtiming.yml. All and pfm use iso gate all
+# r5/all-2, all-3, all-4 (1m host load 8.00-12.69); templates uses iso gate
+# templates r7/tmpl-1, tmpl-2, tmpl-3 (1m host load 3.25-6.75).
+# Evidence: $HOME/.local/state/pfm/flights/professor/fast-gate/measure/r5/
+# and $HOME/.local/state/pfm/flights/professor/fast-gate/measure/r7/.
+# Gate walls warn above tolerance through fail_factor × limit; beyond it they fail.
+tolerance: 1.25
+fail_factor: 2
+gate:
+  all: 198
+  pfm: 198
+  templates: 32

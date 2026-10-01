@@ -500,18 +500,23 @@ func isCredentialRejection(err error) bool {
 			return true
 		}
 	}
-	return hasAuthHTTPStatus(message)
+	return hasHTTPStatus(message, "401", "403")
 }
 
-func hasAuthHTTPStatus(message string) bool {
-	for _, marker := range []string{
-		"http 401", "http 403",
-		"returned 401", "returned 403",
-		"status 401", "status 403",
-		"401 unauthorized", "403 forbidden",
-	} {
-		if strings.Contains(message, marker) {
-			return true
+func hasHTTPStatus(message string, codes ...string) bool {
+	for _, code := range codes {
+		for _, prefix := range []string{"http ", "returned ", "status "} {
+			marker := prefix + code
+			for remaining := message; ; {
+				index := strings.Index(remaining, marker)
+				if index < 0 {
+					break
+				}
+				remaining = remaining[index+len(marker):]
+				if remaining == "" || remaining[0] < '0' || remaining[0] > '9' {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -538,7 +543,7 @@ func staleEligible(err error) bool {
 func rateLimitedStatus(err error) (status string, ok bool) {
 	message := err.Error()
 	lower := strings.ToLower(message)
-	if !strings.Contains(lower, "429") && !strings.Contains(lower, "too many requests") {
+	if !strings.Contains(lower, "too many requests") && !hasHTTPStatus(lower, "429") {
 		return "", false
 	}
 	if retry := strings.Index(message, "retry "); retry >= 0 {

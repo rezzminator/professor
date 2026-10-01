@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -219,15 +218,6 @@ func TestIssueReporterSeparatesAFailedIdentityLookupFromNoIdentity(t *testing.T)
 	}
 }
 
-// TestToolNamesHoldsServicedesk pins the roster entry directly, independent
-// of the jailed stdio protocol test.
-func TestToolNamesHoldsServicedesk(t *testing.T) {
-	names := ToolNames()
-	if !slices.Contains(names, "servicedesk") {
-		t.Fatalf("ToolNames() = %v, want it to hold %q", names, "servicedesk")
-	}
-}
-
 // TestServicedeskCallableByNameOverInMemorySession exercises the tool the
 // way a real client does: connected in-memory to the service's own server,
 // calling it by its registered name rather than the Go method directly.
@@ -314,6 +304,7 @@ func TestServicedeskCallMissingTitleOrDetailIsToolError(t *testing.T) {
 // changes at all, which is deliberate: any addition must be reviewed against
 // exactly this invariant before the list below is updated.
 func TestIssueInputCarriesNoReporterIdentityField(t *testing.T) {
+	t.Parallel()
 	fieldType := reflect.TypeOf(IssueInput{})
 	names := make([]string, 0, fieldType.NumField())
 	for index := 0; index < fieldType.NumField(); index++ {

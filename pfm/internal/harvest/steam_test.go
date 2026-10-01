@@ -38,6 +38,7 @@ func steamSite(t *testing.T) *socialSite {
 // BBCode as Markdown; the stated total is the API's own; the artifact is
 // complete, and a second harvest is identical.
 func TestSteamAppLoadsItsReviews(t *testing.T) {
+	t.Parallel()
 	site := steamSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), steamURL, FetchOptions{Refresh: true})
@@ -86,6 +87,7 @@ func TestSteamAppLoadsItsReviews(t *testing.T) {
 // the bounded page count reads renders the most recent pages and names the
 // rest, stated · loaded, in the partial marker.
 func TestSteamReviewsBeyondTheBoundAreNamed(t *testing.T) {
+	t.Parallel()
 	site := steamSite(t)
 	site.answers[fmt.Sprintf(steamReviews, "%2A")] = strings.Replace(site.answers[fmt.Sprintf(steamReviews, "%2A")],
 		`"total_reviews": 5`, `"total_reviews": 467071`, 1)
@@ -121,6 +123,7 @@ func TestSteamReviewsBeyondTheBoundAreNamed(t *testing.T) {
 // that is not its review list, is never rendered: the app renders with the
 // count its page states named unread, never as an app with no reviews.
 func TestSteamReviewsNotLoadedNameTheGap(t *testing.T) {
+	t.Parallel()
 	first := fmt.Sprintf(steamReviews, "%2A")
 	for name, mutate := range map[string]func(site *socialSite){
 		"refused":     func(site *socialSite) { site.status = map[string]int{first: http.StatusForbidden} },

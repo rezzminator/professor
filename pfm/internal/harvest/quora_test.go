@@ -40,6 +40,7 @@ func quoraHarvester(t *testing.T, reader string) *Harvester {
 }
 
 func TestQuoraReaderRendersServedAnswersAndNamesTheRest(t *testing.T) {
+	t.Parallel()
 	result := quoraHarvester(t, socialFixture(t, "quora/question.md")).
 		Fetch(context.Background(), quoraURL)
 	if result.Error != "" || result.Method != "jina" {
@@ -90,6 +91,7 @@ func TestQuoraReaderRendersServedAnswersAndNamesTheRest(t *testing.T) {
 }
 
 func TestQuoraReaderStatedCountMet(t *testing.T) {
+	t.Parallel()
 	page := strings.Replace(socialFixture(t, "quora/question.md"), "All related (100+)", "All related (3)", 1)
 	page = strings.Replace(page, "(more)\n", "", 1)
 	rendered := quoraReaderPage(quoraURL, page)
@@ -102,6 +104,7 @@ func TestQuoraReaderStatedCountMet(t *testing.T) {
 }
 
 func TestQuoraReaderNoStatedCountIsNamed(t *testing.T) {
+	t.Parallel()
 	page := strings.Replace(socialFixture(t, "quora/question.md"), "All related (100+)", "", 1)
 	reason := partialReason(quoraReaderPage(quoraURL, page))
 	if !strings.Contains(reason, "the page states no answer count · 3 loaded") {
@@ -110,6 +113,7 @@ func TestQuoraReaderNoStatedCountIsNamed(t *testing.T) {
 }
 
 func TestQuoraReaderUnknownShapeFallsThrough(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ source, page string }{
 		{"https://www.quora.com/profile/Placeholder-Author-1", socialFixture(t, "quora/question.md")},
 		{quoraURL, "# What is the meaning of life?\n\nSomething went wrong. Wait a moment and try again.\n"},

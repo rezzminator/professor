@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
@@ -22,6 +23,13 @@ func useRealDaemonReachability(t *testing.T) {
 	previous := DaemonReachabilityOverride
 	DaemonReachabilityOverride = nil
 	t.Cleanup(func() { DaemonReachabilityOverride = previous })
+}
+
+func shortenDoctorDaemonProbeTimeout(t *testing.T) {
+	t.Helper()
+	previous := mcpserv.DaemonProbeTimeoutOverride
+	mcpserv.DaemonProbeTimeoutOverride = 100 * time.Millisecond
+	t.Cleanup(func() { mcpserv.DaemonProbeTimeoutOverride = previous })
 }
 
 func runtimeForPort(port int) pfmconfig.Runtime {
@@ -248,6 +256,7 @@ func TestMCPDaemonDoctorWarnsOnVersionSkew(t *testing.T) {
 // daemon, never the "unreachable" row an absent one gets.
 func TestMCPDaemonDoctorNamesAnUnresponsiveDaemon(t *testing.T) {
 	useRealDaemonReachability(t)
+	shortenDoctorDaemonProbeTimeout(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

@@ -291,6 +291,7 @@ func TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf(t *testing.T) {
 }
 
 func TestChatFindOnTheSharedDaemonExcludesProxyClaudeCaller(t *testing.T) {
+	t.Parallel()
 	const callerID = "claude-session"
 	verbs := &fakeChatVerbs{
 		listed: chat.ListResult{Rows: []compose.Row{{
@@ -319,6 +320,7 @@ func TestChatFindOnTheSharedDaemonExcludesProxyClaudeCaller(t *testing.T) {
 }
 
 func TestChatFindIncludeSelfSkipsCallerResolution(t *testing.T) {
+	t.Parallel()
 	valid := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "cc-seat", "engine": "claude", "id": "claude-session",
 	}}
@@ -352,6 +354,7 @@ func TestChatFindIncludeSelfSkipsCallerResolution(t *testing.T) {
 }
 
 func TestChatFindNonClaudeCallerDoesNotExcludeClaudeCollision(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		engine string
@@ -425,6 +428,7 @@ func TestChatFindInvalidMetadataDoesNotFallBackToAmbientIdentity(t *testing.T) {
 }
 
 func TestChatFindCallerProbeFailureIsAToolError(t *testing.T) {
+	t.Parallel()
 	verbs := &fakeChatVerbs{err: errors.New("fleet database busy")}
 	service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
 	client := connectInMemory(t, service.Server())

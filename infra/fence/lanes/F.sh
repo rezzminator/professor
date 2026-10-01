@@ -149,13 +149,13 @@ tui_account() { tui_pane | sed -n 's/.*account \([0-9][0-9]*\) ·.*/\1/p' | head
 # tui_left — the picker has left the pane (exit or exec): 0 when the pane's
 # command is no longer pfm within <secs>.
 tui_left() {
-  local i=0
-  while [ "$i" -lt "$1" ]; do
+  local deadline=$(( $(_lane_now) + $1 ))
+  while [ "$(_lane_now)" -lt "$deadline" ]; do
     [ "$(tui_cmd)" != pfm ] && return 0
-    sleep 1
-    i=$((i + 1))
+    # POLL-STEP: the picker pane command changes from pfm.
+    sleep 0.2
   done
-  return 1
+  [ "$(tui_cmd)" != pfm ]
 }
 # golden_line <file> <n> — the n-th frame line of a golden .ansi (Go-quoted
 # strings, one per line), its escapes and colors stripped, trailing spaces cut.
@@ -202,18 +202,18 @@ bad=""
 # K8: --name is mandatory — no name, no launch, usage on stderr.
 out="$(pfm chat new 2>&1)"
 rc=$?
-[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'usage: pfm chat new' ||
+[ "$rc" -eq 2 ] && grep -q 'usage: pfm chat new' <<<"$out" ||
   bad="$bad K8 chat new without --name exited $rc (want 2 + usage): $(one_line "$out");"
 # K4: --engine is parsed by the registry — an unregistered spelling is refused
 # naming the accepted ones; the registered OpenCode id has no headless door in
 # this tree (action.PlannerFor) and says so by name instead of spawning nothing.
 out="$(pfm chat new --name F_NOPE --engine oc --cwd "$CWD" "x" 2>&1)"
 rc=$?
-[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'unknown engine "oc"' ||
+[ "$rc" -eq 2 ] && grep -q 'unknown engine "oc"' <<<"$out" ||
   bad="$bad K4 --engine oc exited $rc without naming the unknown engine: $(one_line "$out");"
 out="$(pfm chat new --name F_NOPE --engine ox --cwd "$CWD" "x" 2>&1)"
 rc=$?
-[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'OpenCode does not support headless chat' ||
+[ "$rc" -eq 2 ] && grep -q 'OpenCode does not support headless chat' <<<"$out" ||
   bad="$bad K4/oc --engine ox exited $rc without the named absence of the OpenCode door: $(one_line "$out");"
 # K5: no --engine → the calling chat's engine, else the machine default. Both
 # branches are driven with an account no roster holds, so the refusal NAMES the
@@ -221,16 +221,16 @@ rc=$?
 want="$(default_engine_word)"
 out="$(pfm chat new --name F_NOPE --account 999 --cwd "$CWD" "x" 2>&1)"
 rc=$?
-[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "$want account 999 is not in the configured roster" ||
+[ "$rc" -eq 2 ] && grep -q "$want account 999 is not in the configured roster" <<<"$out" ||
   bad="$bad K5 machine-default fallback: exited $rc, wanted the $want roster named: $(one_line "$out");"
 out="$(CLAUDE_CODE_SESSION_ID=lane-caller pfm chat new --name F_NOPE --account 999 --cwd "$CWD" "x" 2>&1)"
 rc=$?
-[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'Claude account 999 is not in the configured roster' ||
+[ "$rc" -eq 2 ] && grep -q 'Claude account 999 is not in the configured roster' <<<"$out" ||
   bad="$bad K5 caller-engine fallback (CLAUDE_CODE_SESSION_ID set): exited $rc, wanted the Claude roster named: $(one_line "$out");"
 # K6: engine.FromSocket — a socket prefix no engine owns is a named absence.
 out="$(pfm internal chat-server zz-1-2-3 /tmp true 2>&1)"
 rc=$?
-[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'not one bare socket name carrying an engine prefix' ||
+[ "$rc" -eq 2 ] && grep -q 'not one bare socket name carrying an engine prefix' <<<"$out" ||
   bad="$bad K6 an unknown socket prefix was not refused by name (exit $rc): $(one_line "$out");"
 # C9/C10/C11/C12 + K7: the real launch, on the seat this run spends.
 if live_chat "$CC"; then
@@ -249,7 +249,7 @@ if live_chat "$CC"; then
   [ "$(live_field "$CC" 1)" = live-claude ] || bad="$bad C11 $CC row kind is '$(live_field "$CC" 1)', want live-claude;"
   [ "$(live_field "$CC" 4)" = "$CWD" ] || bad="$bad C12 $CC row cwd is '$(live_field "$CC" 4)', want $CWD;"
   [ "$(live_field "$CC" 9)" = "$SEAT" ] || bad="$bad C9 $CC row account is '$(live_field "$CC" 9)', want the seat it was launched on ($SEAT);"
-  printf '%s' "$(sock_base "$CC")" | grep -Eq '^cc-[0-9]+-[0-9]+-[0-9]+$' ||
+  grep -Eq '^cc-[0-9]+-[0-9]+-[0-9]+$' <<<"$(sock_base "$CC")" ||
     bad="$bad K7 $CC socket '$(sock_base "$CC")' breaks the <prefix><epoch>-<pid>-<rand> law;"
 fi
 # K9: the unnamed sentinel is a display value, never an address.
@@ -273,7 +273,7 @@ if [ -n "$CX_HOME" ]; then
   fi
   if live_chat "$CX"; then
     [ "$(live_field "$CX" 1)" = live-codex ] || bad="$bad C11 $CX row kind is '$(live_field "$CX" 1)', want live-codex;"
-    printf '%s' "$(sock_base "$CX")" | grep -Eq '^cx-[0-9]+-[0-9]+-[0-9]+$' ||
+    grep -Eq '^cx-[0-9]+-[0-9]+-[0-9]+$' <<<"$(sock_base "$CX")" ||
       bad="$bad K7 $CX socket '$(sock_base "$CX")' breaks the socket law;"
   fi
 fi
@@ -302,7 +302,7 @@ printf 'F-PROMPT-FILE: reply with exactly one word: ready. Then wait and do exac
 # K21: a prompt file and an inline prompt never combine.
 out="$(pfm chat new --name F_NOPE --engine cc --account "$SEAT" --cwd "$CWD" --prompt-file /tmp/f-grp.prompt "inline too" 2>&1)"
 rc=$?
-[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'mutually exclusive' ||
+[ "$rc" -eq 2 ] && grep -q 'mutually exclusive' <<<"$out" ||
   bad="$bad K21 --prompt-file plus an inline prompt exited $rc without the named refusal: $(one_line "$out");"
 # The launch: the label grammar as the name, the role first, the prompt from a
 # file, --attach so F.04 can read the attach line this non-tty stdout received.
@@ -315,6 +315,7 @@ else
   [ "$rc" -eq 0 ] || bad="$bad chat new $GRP exited $rc: $(one_line "$(cat /tmp/f-grp.launch.out /tmp/f-grp.launch.err)");"
   grp_note="$GRP spawned"
 fi
+wait_for 30 "live_chat '$GRP'" || bad="$bad no live row for '$GRP' — ${LANE_WAIT_WHY};"
 if ! live_chat "$GRP"; then
   bad="$bad no live row for '$GRP' — nothing below could be asserted: $(one_line "$(pfm ls --plain)");"
 else
@@ -333,6 +334,8 @@ else
   elif ! grep -q 'F-ROLE-CONSTITUTION' "$role_prompt"; then
     bad="$bad K20 $role_prompt names f-role but does not carry its constitution;"
   fi
+  wait_for 30 "pfm chat read '$GRP' --tail 200 --json 2>/dev/null | jq -e 'any(.entries[]; .role == \"user\")'" ||
+    bad="$bad C18/C17 the transcript's first user record could not be read (pfm chat read --json): ${LANE_WAIT_WHY};"
   first_user="$(pfm chat read "$GRP" --tail 200 --json 2>/dev/null |
     jq -r '[.entries[] | select(.role == "user")][0].text // ""' | tr '\n' ' ')"
   if [ -z "$first_user" ]; then
@@ -340,33 +343,34 @@ else
   else
     prompt_at="$(printf '%s' "$first_user" | awk '{ print index($0, "F-PROMPT-FILE") }')"
     [ "$prompt_at" -gt 0 ] || bad="$bad C17 the prompt file's text never reached the first user record;"
-    printf '%s' "$first_user" | grep -q 'F-ROLE-CONSTITUTION' &&
+    grep -q 'F-ROLE-CONSTITUTION' <<<"$first_user" &&
       bad="$bad C18 the role constitution leaked into the first user record instead of staying in its prompt channel;"
   fi
   # K13: the name-based kill — a _KILL (or legacy _HIDE, case-insensitive) label
   # hides the chat with no store row; renaming it back is the unkill.
   for label in _KILL_F _hide_f; do
     out="$(pfm chat name "$GRP" "$label" 2>&1)" || bad="$bad K13 rename to $label failed: $(one_line "$out");"
-    sleep 2
+    wait_for 10 "! pfm ls --tsv 2>/dev/null | awk -F '\t' -v n='$label' 'NR > 1 && \$5 == n { found = 1 } END { exit !found }' && [ \"\$(all_field '$label' 10)\" = true ]" ||
+      bad="$bad K13 '$label' is still in the DEFAULT view or its -a killed column is not true: ${LANE_WAIT_WHY};"
     pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$label" 'NR > 1 && $5 == n { found = 1 } END { exit !found }' &&
       bad="$bad K13 '$label' is still in the DEFAULT view;"
     [ "$(all_field "$label" 10)" = true ] || bad="$bad K13 '$label' -a row killed column is '$(all_field "$label" 10)', want true;"
     out="$(pfm chat name "$label" "$GRP" 2>&1)" || bad="$bad K13 rename $label back to $GRP failed: $(one_line "$out");"
-    sleep 2
+    wait_for 10 "live_chat '$GRP'" || bad="$bad K13 after the renames '$GRP' has no live row in the default view: ${LANE_WAIT_WHY};"
   done
   live_chat "$GRP" || bad="$bad K13 after the renames '$GRP' has no live row in the default view;"
   # K14 uses a separate seat: store kill can end its server, while F.04 still
   # needs the original --attach chat live to judge its launch.
   pfm chat new --name F_STORE_KILL --engine cc --account "$SEAT" --cwd "$CWD" 'store kill probe' >/dev/null 2>&1 ||
     bad="$bad K14 could not start F_STORE_KILL;"
-  wait_for 20 'live_chat F_STORE_KILL' || bad="$bad K14 F_STORE_KILL has no live row;"
+  wait_for 20 'live_chat F_STORE_KILL' || bad="$bad K14 F_STORE_KILL has no live row: ${LANE_WAIT_WHY};"
   pfm chat kill F_STORE_KILL >/dev/null 2>&1 || bad="$bad K14 chat kill exited non-zero;"
-  sleep 2
+  wait_for 10 '[ "$(all_field F_STORE_KILL 10)" = true ]' || bad="$bad K14 after kill the -a row's killed column is not true: ${LANE_WAIT_WHY};"
   [ "$(all_field F_STORE_KILL 10)" = true ] || bad="$bad K14 after kill the -a row's killed column is '$(all_field F_STORE_KILL 10)', want true;"
   pfm ls --tsv 2>/dev/null | awk -F'\t' 'NR > 1 && $5 == "F_STORE_KILL" { found = 1 } END { exit !found }' &&
     bad="$bad K14 the killed row is still in the DEFAULT view;"
   pfm chat unkill F_STORE_KILL >/dev/null 2>&1 || bad="$bad K14 chat unkill exited non-zero;"
-  sleep 2
+  wait_for 10 '[ "$(all_field F_STORE_KILL 10)" = false ]' || bad="$bad K14 after unkill the killed column is not false: ${LANE_WAIT_WHY};"
   [ "$(all_field F_STORE_KILL 10)" = false ] || bad="$bad K14 after unkill the killed column is '$(all_field F_STORE_KILL 10)', want false;"
   pfm chat kill F_STORE_KILL >/dev/null 2>&1 || bad="$bad K14 could not hide F_STORE_KILL after the assertion;"
 fi
@@ -388,10 +392,10 @@ if requires; then
   # ShellCommand): the flags and the cache assignment are read back from tmux.
   start="$(tmux -S "$(socket_path "$sock")" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
   [ -n "$start" ] || bad="$bad the pane start command could not be read from $sock;"
-  printf '%s' "$start" | grep -q -- '--settings' || bad="$bad C14/K25 the launch carries no --settings payload;"
-  printf '%s' "$start" | grep -Fq -- "'--model' 'sonnet'" || bad="$bad C15/K28 the launch carries no '--model sonnet': $(one_line "$start" | cut -c1-200);"
-  printf '%s' "$start" | grep -Fq -- "'--effort' 'low'" || bad="$bad C16/K28 the launch carries no '--effort low';"
-  printf '%s' "$start" | sed 's/\\"/"/g' | grep -Fq '"CACHE_LIVE_CONTROL_MAIN_TTL":"1h"' ||
+  grep -q -- '--settings' <<<"$start" || bad="$bad C14/K25 the launch carries no --settings payload;"
+  grep -Fq -- "'--model' 'sonnet'" <<<"$start" || bad="$bad C15/K28 the launch carries no '--model sonnet': $(one_line "$start" | cut -c1-200);"
+  grep -Fq -- "'--effort' 'low'" <<<"$start" || bad="$bad C16/K28 the launch carries no '--effort low';"
+  grep -Fq '"CACHE_LIVE_CONTROL_MAIN_TTL":"1h"' <<<"$(printf '%s' "$start" | sed 's/\\"/"/g')" ||
     bad="$bad C14/K25 the --settings payload carries no \"CACHE_LIVE_CONTROL_MAIN_TTL\":\"1h\" (--cache 1h);"
   # C13: the row reports the seat asked for; K24: the seat's medal on the row; K25: the ⚡ badge.
   [ "$(live_field "$CC" 9)" = "$SEAT" ] || bad="$bad C13 row account is '$(live_field "$CC" 9)', want $SEAT;"
@@ -400,17 +404,17 @@ if requires; then
   if [ -z "$MEDAL" ]; then
     bad="$bad K24 the seat's medal could not be read from pfm config show (config accounts=…);"
   else
-    printf '%s' "$plain_row" | grep -qF "$MEDAL" || bad="$bad K24 the plain row lacks seat $SEAT's medal $MEDAL: $(one_line "$plain_row");"
+    grep -qF "$MEDAL" <<<"$plain_row" || bad="$bad K24 the plain row lacks seat $SEAT's medal $MEDAL: $(one_line "$plain_row");"
   fi
-  printf '%s' "$plain_row" | grep -qF '⚡' || bad="$bad K25 the plain row lacks the ⚡ 1h badge: $(one_line "$plain_row");"
+  grep -qF '⚡' <<<"$plain_row" || bad="$bad K25 the plain row lacks the ⚡ 1h badge: $(one_line "$plain_row");"
   # The refusals, by name, nothing spawned.
   out="$(pfm chat new --name F_NOPE --engine cc --account 999 --cwd "$CWD" "x" 2>&1)"
   rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'Claude account 999 is not in the configured roster' ||
+  [ "$rc" -eq 2 ] && grep -q 'Claude account 999 is not in the configured roster' <<<"$out" ||
     bad="$bad C13 --account 999 exited $rc without naming the roster: $(one_line "$out");"
   out="$(pfm chat new --name F_NOPE --engine cc --account "$SEAT" --effort bogus --cwd "$CWD" "x" 2>&1)"
   rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'unknown Claude effort "bogus"' ||
+  [ "$rc" -eq 2 ] && grep -q 'unknown Claude effort "bogus"' <<<"$out" ||
     bad="$bad C16 --effort bogus exited $rc without the named roster of efforts: $(one_line "$out");"
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "launch carries --model sonnet --effort low CACHE_LIVE_CONTROL_MAIN_TTL=1h; row account $SEAT with medal $MEDAL and ⚡; account 999 and effort bogus refused by name"
@@ -436,7 +440,7 @@ if requires; then
   fi
   out="$(pfm chat new --name F_NOPE --engine cc --account "$SEAT" --cwd "$CWD" --attach --await "x" 2>&1)"
   rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'usage: pfm chat new' ||
+  [ "$rc" -eq 2 ] && grep -q 'usage: pfm chat new' <<<"$out" ||
     bad="$bad --attach with --await exited $rc (want 2 + usage): $(one_line "$out");"
   # C20/K16: --attach on a non-tty stdout prints the attach line for the new server.
   if [ ! -f /tmp/f-grp.launch.out ]; then
@@ -459,10 +463,11 @@ if requires; then
   if live_chat "$GRP"; then
     GRP_ID="$(live_field "$GRP" 2)"
     out="$(pfm chat end "$GRP" 2>&1)" || bad="$bad pfm chat end '$GRP' failed: $(one_line "$out");"
-    sleep 3
+    LANE_ANCHOR= wait_for 10 "! live_chat '$GRP'" || bad="$bad '$GRP' still has a live row after end: ${LANE_WAIT_WHY};"
     live_chat "$GRP" && bad="$bad '$GRP' still has a live row after end;"
     out="$(pfm chat kill "$GRP_ID" 2>&1)" || bad="$bad pfm chat kill $GRP_ID (hide the resume row) failed: $(one_line "$out");"
-    sleep 2
+    LANE_ANCHOR= wait_for 10 "[ \"\$(all_field '$GRP' 1)\" = resume-claude ] && [ \"\$(all_field '$GRP' 10)\" = true ]" ||
+      bad="$bad the ended chat's resume row is not hidden: ${LANE_WAIT_WHY};"
     [ "$(all_field "$GRP" 1)" = resume-claude ] || bad="$bad the ended chat's -a row kind is '$(all_field "$GRP" 1)', want resume-claude;"
     [ "$(all_field "$GRP" 10)" = true ] || bad="$bad the ended chat's resume row is not hidden (killed=$(all_field "$GRP" 10));"
   fi
@@ -497,7 +502,7 @@ done
 for verb in storm idle; do
   out="$(pfm "$verb" 2>&1)"
   rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "unknown command \"$verb\"" ||
+  [ "$rc" -eq 2 ] && grep -q "unknown command \"$verb\"" <<<"$out" ||
     bad="$bad K19 pfm $verb exited $rc without 'unknown command' (it must not exist): $(one_line "$out" | cut -c1-120);"
 done
 if [ -n "$bad" ]; then
@@ -522,8 +527,8 @@ if requires; then
     bad="$bad C3 --tsv header is '$(one_line "$header")';"
   # C2: the plain twin groups by project and marks a live row ●.
   plain="$(pfm ls --plain 2>&1)"
-  printf '%s' "$plain" | grep -q '^\[orbit\]' || bad="$bad C2 --plain has no [orbit] group;"
-  printf '%s' "$plain" | grep -q "^● $CC " || bad="$bad C2 --plain has no '● $CC' row;"
+  grep -q '^\[orbit\]' <<<"$plain" || bad="$bad C2 --plain has no [orbit] group;"
+  grep -q "^● $CC " <<<"$plain" || bad="$bad C2 --plain has no '● $CC' row;"
   # C4/C5: the hidden row F.04 left is out of the default view, in -a, and in the killed ledger.
   if [ -z "$GRP_ID" ]; then
     bad="$bad C4/C5 no hidden row to assert against (F.04 left none);"
@@ -542,7 +547,7 @@ if requires; then
   # C8: `pfm ls <id>` opens the chat directly; off a tty the action line is printed.
   out="$(pfm ls "$cc_id" 2>&1)"
   rc=$?
-  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "tmux -L '$cc_sock' attach" ||
+  [ "$rc" -eq 0 ] && grep -q "tmux -L '$cc_sock' attach" <<<"$out" ||
     bad="$bad C8 pfm ls $cc_id exited $rc without the attach line for $cc_sock: $(one_line "$out");"
   pfm ls "$cc_id" --plain >/dev/null 2>&1
   rc=$?
@@ -550,28 +555,28 @@ if requires; then
   # C21: chat open by name resolves to the same action.
   out="$(pfm chat open "$CC" 2>&1)"
   rc=$?
-  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "tmux -L '$cc_sock' attach" ||
+  [ "$rc" -eq 0 ] && grep -q "tmux -L '$cc_sock' attach" <<<"$out" ||
     bad="$bad C21 pfm chat open $CC exited $rc without the attach line: $(one_line "$out");"
   # C60: the compatibility listing, this repo and everywhere.
   out="$(cd "$CWD" && pfm chat ls 2>&1)"
-  printf '%s' "$out" | grep -q 'live chats in this repo' || bad="$bad C60 chat ls has no 'live chats in this repo' header: $(one_line "$out" | cut -c1-120);"
-  printf '%s' "$out" | grep -q "$CC" || bad="$bad C60 chat ls (in $CWD) does not list $CC;"
+  grep -q 'live chats in this repo' <<<"$out" || bad="$bad C60 chat ls has no 'live chats in this repo' header: $(one_line "$out" | cut -c1-120);"
+  grep -q "$CC" <<<"$out" || bad="$bad C60 chat ls (in $CWD) does not list $CC;"
   out="$(cd "$CWD" && pfm chat ls --all 2>&1)"
-  printf '%s' "$out" | grep -q 'live chats everywhere' || bad="$bad C60 chat ls --all has no 'live chats everywhere' header;"
+  grep -q 'live chats everywhere' <<<"$out" || bad="$bad C60 chat ls --all has no 'live chats everywhere' header;"
   # C7: --safe validates, and 'on' names itself in the cosmos title.
   out="$(pfm ls --safe bogus --tsv 2>&1)"
   rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'must be auto, on, or off' ||
+  [ "$rc" -eq 2 ] && grep -q 'must be auto, on, or off' <<<"$out" ||
     bad="$bad C7 --safe bogus exited $rc without the named roster: $(one_line "$out");"
   # C1: the interactive picker entry, on a real tty inside tmux.
   if tui_open 100 30 ls; then
-    tui_has '╭─ fleet' || bad="$bad C1 the picker painted no fleet frame: $(one_line "$(tui_pane)" | cut -c1-200);"
+    tui_wait 10 '╭─ fleet' || bad="$bad C1 the picker painted no fleet frame: $(one_line "$(tui_pane)" | cut -c1-200);"
   else
     bad="$bad C1 $TUI_WHY;"
   fi
   if tui_open 100 30 ls --safe on; then
     tui_keys Tab; tui_keys Tab; tui_keys Tab
-    sleep 2
+    tui_wait 10 'cosmos · safe' || bad="$bad C7 --safe on: the cosmos panel title does not read 'cosmos · safe': ${LANE_WAIT_WHY:-timed out waiting for picker};"
     tui_has 'cosmos · safe' || bad="$bad C7 --safe on: the cosmos panel title does not read 'cosmos · safe': $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
   else
     bad="$bad C7 --safe on: $TUI_WHY;"
@@ -579,7 +584,7 @@ if requires; then
   # C6: --no-sky disables the animation clock, and the cosmos tab says so on `space`.
   if tui_open 100 30 ls --no-sky; then
     tui_keys Tab; tui_keys Tab; tui_keys Tab
-    sleep 3
+    tui_wait 10 'cosmos ·' || bad="$bad C6 --no-sky: cosmos tab did not paint before Space: ${LANE_WAIT_WHY:-timed out waiting for picker};"
     tui_keys Space
     tui_has 'this picker runs --no-sky' || bad="$bad C6 --no-sky: space on the cosmos tab did not name the disabled clock: $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
   else
@@ -601,10 +606,11 @@ if requires; then
   # An ended Codex chat leaves the resume-codex kind; F_CX has served F.01.
   if [ -n "$CX_HOME" ] && live_chat "$CX"; then
     out="$(pfm chat end "$CX" 2>&1)" || bad="$bad pfm chat end $CX failed: $(one_line "$out");"
-    sleep 3
+    LANE_ANCHOR= wait_for 10 "grep -qx resume-codex <<<\"\$(kinds_in_fleet)\" && ! live_chat '$CX'" ||
+      bad="$bad K34 no resume-codex row after ending $CX: ${LANE_WAIT_WHY};"
   fi
   kinds="$(kinds_in_fleet)"
-  has_kind() { printf '%s\n' "$kinds" | grep -qx "$1"; }
+  has_kind() { grep -qx "$1" <<<"$kinds"; }
   has_kind live-claude && held="$held K29" || bad="$bad K29 no live-claude row;"
   has_kind resume-claude && held="$held K33" || bad="$bad K33 no resume-claude row (F.04 ended '$GRP');"
   has_kind new-claude && held="$held K35" || bad="$bad K35 no new-claude row;"
@@ -707,54 +713,58 @@ if requires; then
     bad="$bad T1 $TUI_WHY;"
   else
     # T4: Chats is the default tab; T9: no literal fullscreen tab anywhere.
-    tui_has 'Chats · fuzzy search and all existing chat controls' || bad="$bad T4 the Chats hint is not on the default frame;"
+    tui_wait 10 'Chats · fuzzy search and all existing chat controls' || bad="$bad T4 the Chats hint is not on the default frame;"
     grep -qi 'fullscreen' <<<"$(tui_pane)" && bad="$bad T9 a 'fullscreen' view exists on the frame;"
     # T8: tab cycles Chats → Stats → Limits → cosmos → Chats; shift+tab reverses.
-    tui_keys Tab
-    tui_has 'CPU' && tui_has 'RAM' || bad="$bad T8 tab from Chats did not land on Stats (no CPU/RAM header): $(one_line "$(tui_pane | sed -n 1,4p)");"
-    tui_keys Tab
-    tui_has 'Limits · live usage windows across every account' || bad="$bad T8 second tab did not land on Limits;"
-    tui_keys Tab
-    tui_has 'cosmos ·' || bad="$bad T8 third tab did not land on cosmos;"
-    tui_keys Tab
-    tui_has 'Chats · fuzzy search' || bad="$bad T8 fourth tab did not wrap to Chats;"
-    tui_keys BTab
-    tui_has 'cosmos ·' || bad="$bad T8 shift+tab from Chats did not land on cosmos;"
+    tui_send Tab
+    wait_for 10 "tui_has 'CPU' && tui_has 'RAM'" || bad="$bad T8 tab from Chats did not land on Stats (no CPU/RAM header): $(one_line "$(tui_pane | sed -n 1,4p)") $LANE_WAIT_WHY;"
+    tui_send Tab
+    tui_wait 10 'Limits · live usage windows across every account' || bad="$bad T8 second tab did not land on Limits: $(one_line "$(tui_pane | sed -n 1,4p)");"
+    tui_send Tab
+    tui_wait 10 'cosmos ·' || bad="$bad T8 third tab did not land on cosmos: $(one_line "$(tui_pane | sed -n 1,4p)");"
+    tui_send Tab
+    tui_wait 10 'Chats · fuzzy search' || bad="$bad T8 fourth tab did not wrap to Chats: $(one_line "$(tui_pane | sed -n 1,4p)");"
+    tui_send BTab
+    tui_wait 10 'cosmos ·' || bad="$bad T8 shift+tab from Chats did not land on cosmos: $(one_line "$(tui_pane | sed -n 1,4p)");"
     tui_keys Tab
     # T18: the query editor — type, backspace/⌃H, ⌃W, ⌃U.
-    tui_type "$CC"
-    tui_has "find › $CC" || bad="$bad T18 typing did not reach the query line: $(one_line "$(tui_pane | grep -F 'find ›')");"
+    tui_send_text "$CC"
+    tui_wait 10 "find › $CC" || bad="$bad T18 typing did not reach the query line: $(one_line "$(tui_pane | grep -F 'find ›')");"
     tui_has "› ● $CC" || bad="$bad T18 the query '$CC' did not select the $CC row: $(one_line "$(tui_selected)");"
-    tui_keys BSpace
-    tui_has 'find › F_C ' || tui_has 'find › F_C' || bad="$bad T18 backspace did not delete one char: $(one_line "$(tui_pane | grep -F 'find ›')");"
+    tui_send BSpace
+    wait_for 10 "tui_has 'find › F_C' && ! tui_has 'find › $CC'" || bad="$bad T18 backspace did not delete one char: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
     tui_keys C-h
     tui_has 'find › F_' && ! tui_has 'find › F_C' || bad="$bad T18 ⌃H did not delete one char: $(one_line "$(tui_pane | grep -F 'find ›')");"
     tui_type "x y"
     tui_keys C-w
     tui_has 'find › F_x' && ! tui_has 'find › F_x y' || bad="$bad T18 ⌃W did not delete the last word (want 'F_x'): $(one_line "$(tui_pane | grep -F 'find ›')");"
-    tui_keys C-u
-    grep -Eq 'find › type project or name +[0-9]+/[0-9]+ visible' <<<"$(tui_pane)" || bad="$bad T18 ⌃U did not clear the query: $(one_line "$(tui_pane | grep -F 'find ›')");"
+    tui_send C-u
+    wait_for 10 "grep -Eq 'find › type project or name +[0-9]+/[0-9]+ visible' <<<\"\$(tui_pane)\"" || bad="$bad T18 ⌃U did not clear the query: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
     # T11: left/right walk the carousel on the selected live row.
-    tui_type "$CC"
-    tui_has '◖▶ open◗' || bad="$bad T11 the selected row shows no ◖▶ open◗ carousel: $(one_line "$(tui_selected)");"
-    tui_keys Right
-    tui_has '◖⚡ reboot◗' || bad="$bad T11 right did not move the carousel to reboot: $(one_line "$(tui_selected)");"
-    tui_keys Right
-    tui_has '◖🕐 1h◗' || bad="$bad T11 second right did not reach 1h: $(one_line "$(tui_selected)");"
+    tui_send_text "$CC"
+    wait_for 10 "tui_has 'find › $CC' && tui_has '◖▶ open◗'" || bad="$bad T11 the selected row shows no ◖▶ open◗ carousel: $(one_line "$(tui_selected)");"
+    tui_send Right
+    tui_wait 10 '◖⚡ reboot◗' || bad="$bad T11 right did not move the carousel to reboot: $(one_line "$(tui_selected)");"
+    tui_send Right
+    tui_wait 10 '◖🕐 1h◗' || bad="$bad T11 second right did not reach 1h: $(one_line "$(tui_selected)");"
     # T16: enter ACTS on the carousel index — index 2 toggles the cache mode in place.
     cache0="$(tui_cache)"
-    tui_keys Enter
+    tui_send Enter
+    wait_for 10 "[ -n \"\$(tui_cache)\" ] && [ \"\$(tui_cache)\" != '$cache0' ]" ||
+      bad="$bad T16 enter on the 1h action did not flip the header cache: $LANE_WAIT_WHY;"
     cache1="$(tui_cache)"
     [ -n "$cache0" ] && [ -n "$cache1" ] && [ "$cache0" != "$cache1" ] || bad="$bad T16 enter on the 1h action did not flip the header cache ('$cache0' → '$cache1');"
-    tui_keys Enter
+    tui_send Enter
+    wait_for 10 "[ \"\$(tui_cache)\" = '$cache0' ]" ||
+      bad="$bad T16 a second enter did not flip the cache back: $LANE_WAIT_WHY;"
     [ "$(tui_cache)" = "$cache0" ] || bad="$bad T16 a second enter did not flip the cache back;"
-    tui_keys Left; tui_keys Left
-    tui_has '◖▶ open◗' || bad="$bad T11 left did not return the carousel to open;"
+    tui_keys Left; tui_send Left
+    tui_wait 10 '◖▶ open◗' || bad="$bad T11 left did not return the carousel to open: $(one_line "$(tui_selected)");"
     # T13: ⌃E toggles the 1h cache from the Chats tab.
-    tui_keys C-e
-    [ "$(tui_cache)" != "$cache0" ] || bad="$bad T13 ⌃E did not flip the header cache ('$cache0');"
-    tui_keys C-e
-    [ "$(tui_cache)" = "$cache0" ] || bad="$bad T13 a second ⌃E did not flip it back;"
+    tui_send C-e
+    wait_for 10 "[ \"\$(tui_cache)\" != '$cache0' ]" || bad="$bad T13 ⌃E did not flip the header cache ('$cache0'): $LANE_WAIT_WHY;"
+    tui_send C-e
+    wait_for 10 "[ \"\$(tui_cache)\" = '$cache0' ]" || bad="$bad T13 a second ⌃E did not flip it back: $LANE_WAIT_WHY;"
     # T12: ⌃X kills the selected row NOW — receipt on the status line, store row
     # written. On a LIVE row the picker also sends /exit and kills the pane
     # (internal/kill finisher), so the key is driven on the ended '$GRP' resume
@@ -764,13 +774,17 @@ if requires; then
     else
       pfm chat unkill "$GRP_ID" >/dev/null 2>&1 || bad="$bad T12 pfm chat unkill $GRP_ID (making the resume row visible) exited non-zero;"
       tui_keys C-u
-      sleep 3
-      tui_type "F_GRP"
+      wait_for 10 "[ \"\$(all_field '$GRP' 10)\" = false ]" ||
+        bad="$bad T12 the unhidden resume row did not appear: $LANE_WAIT_WHY;"
+      tui_send_text "F_GRP"
+      wait_for 10 "grep -qF '↻ $GRP' <<<\"\$(tui_selected)\"" ||
+        bad="$bad T12 the query F_GRP did not select the resume row '$GRP': $LANE_WAIT_WHY;"
       # A GROUP:NAME row renders indented under its group panel: `›   ↻ F_GRP:lane`.
-      printf '%s' "$(tui_selected)" | grep -qF "↻ $GRP" || bad="$bad T12 the query F_GRP did not select the resume row '$GRP': $(one_line "$(tui_selected)");"
-      tui_keys C-x
-      tui_has "hidden — $GRP" || bad="$bad T12 ⌃X left no 'hidden — $GRP' receipt: $(one_line "$(tui_pane | grep -F 'find ›')");"
-      sleep 1
+      grep -qF "↻ $GRP" <<<"$(tui_selected)" || bad="$bad T12 the query F_GRP did not select the resume row '$GRP': $(one_line "$(tui_selected)");"
+      tui_send C-x
+      tui_wait 10 "hidden — $GRP" || bad="$bad T12 ⌃X left no 'hidden — $GRP' receipt: $(one_line "$(tui_pane | grep -F 'find ›')");"
+      wait_for 10 "[ \"\$(all_field '$GRP' 10)\" = true ]" ||
+        bad="$bad T12 after ⌃X the -a row's killed column is not true: $LANE_WAIT_WHY;"
       [ "$(all_field "$GRP" 10)" = true ] || bad="$bad T12 after ⌃X the -a row's killed column is '$(all_field "$GRP" 10)', want true;"
       tui_keys C-u
       tui_type "$CC"
@@ -778,50 +792,54 @@ if requires; then
     # T17: cursor moves over the whole list.
     tui_keys C-u
     tui_keys Home
-    sleep 2
+    wait_for 10 '[ -n "$(tui_selected)" ]' || bad="$bad T17 home left no selected row: $LANE_WAIT_WHY;"
     first="$(tui_selected)"
-    tui_keys Down
+    tui_send Down
+    wait_for 10 "[ -n \"\$(tui_selected)\" ] && [ \"\$(tui_selected)\" != '$first' ]" || bad="$bad T17 down did not move the cursor ('$first' → '$(tui_selected)'): $LANE_WAIT_WHY;"
     second="$(tui_selected)"
     [ -n "$second" ] && [ "$second" != "$first" ] || bad="$bad T17 down did not move the cursor ('$first' → '$second');"
-    tui_keys C-n; tui_keys C-p; tui_keys Up
-    [ "$(tui_selected)" = "$first" ] || bad="$bad T17 ⌃N ⌃P up did not return to the first row ('$(tui_selected)');"
-    tui_keys End
+    tui_keys C-n; tui_keys C-p; tui_send Up
+    wait_for 10 "[ \"\$(tui_selected)\" = '$first' ]" || bad="$bad T17 ⌃N ⌃P up did not return to the first row ('$(tui_selected)'): $LANE_WAIT_WHY;"
+    tui_send End
+    wait_for 10 "[ -n \"\$(tui_selected)\" ] && [ \"\$(tui_selected)\" != '$first' ]" || bad="$bad T17 end did not move to the last row: $LANE_WAIT_WHY;"
     last="$(tui_selected)"
     [ -n "$last" ] && [ "$last" != "$first" ] || bad="$bad T17 end did not move to the last row;"
-    tui_keys Home
-    [ "$(tui_selected)" = "$first" ] || bad="$bad T17 home did not return to the first row;"
+    tui_send Home
+    wait_for 10 "[ \"\$(tui_selected)\" = '$first' ]" || bad="$bad T17 home did not return to the first row: $LANE_WAIT_WHY;"
+    # A survival check is true before its key lands: settle, never a wait.
     tui_keys NPage; tui_keys PPage
     [ -n "$(tui_selected)" ] || bad="$bad T17 pgdown/pgup left no selected row;"
     # T19/T5: Stats — every live chat where expected, focus walk, c/m sorts.
-    tui_keys Tab
-    sleep 3
+    tui_send Tab
+    tui_wait 10 'CPU%' || bad="$bad T5 the Stats columns (NAME ENGINE CPU%) did not render;"
     tui_has 'NAME' && tui_has 'ENGINE' && tui_has 'CPU%' || bad="$bad T5 the Stats columns (NAME ENGINE CPU%) did not render;"
     tui_wait 8 "$CC" || bad="$bad T5 $CC never appeared in the Stats rows: $(one_line "$(tui_pane | sed -n 5,12p)");"
     tui_keys Down; tui_keys Down; tui_type c; tui_type m; tui_keys Up
     tui_has 'CPU%' && tui_has 'c CPU sort' || bad="$bad T19 after ↓↓ c m ↑ the Stats frame lost its header or footer;"
     # T20/T6: Limits — a card per seat, scroll keys survive.
-    tui_keys Tab
+    tui_send Tab
     tui_wait 20 "account $SEAT" || bad="$bad T6 no Limits card for 'account $SEAT' in 20s: $(one_line "$(tui_pane | sed -n 4,12p)");"
     tui_keys Down; tui_keys Up; tui_keys NPage; tui_keys PPage; tui_keys Home; tui_keys End
-    tui_has 'Limits · live usage windows' || bad="$bad T20 the Limits frame did not survive its scroll keys;"
+    tui_has 'Limits · live usage windows' || bad="$bad T20 the Limits frame did not survive its scroll keys: $(one_line "$(tui_pane | sed -n 1,4p)");"
     # T21-T27/T7: cosmos — selection, focus, classic sky, scrub, play, now.
-    tui_keys Tab
-    sleep 3
+    tui_send Tab
+    wait_for 10 "tui_has 'cosmos ·' && tui_has edges" ||
+      bad="$bad T7 the cosmos census line did not render: $LANE_WAIT_WHY;"
     tui_has 'cosmos ·' && tui_has 'edges' || bad="$bad T7 the cosmos census line did not render;"
-    tui_type j
-    tui_has 'cosmos  ▸ ' || bad="$bad T22 j did not select a star (no ▸ HUD): $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
+    tui_send_text j
+    tui_wait 10 'cosmos  ▸ ' || bad="$bad T22 j did not select a star (no ▸ HUD): $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
     tui_type k
-    tui_has 'cosmos  ▸ ' || bad="$bad T22 k lost the selection HUD;"
-    tui_type s
-    tui_has '⌖' || bad="$bad T24 s did not focus a system (no ⌖): $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
+    tui_has 'cosmos  ▸ ' || bad="$bad T22 k lost the selection HUD: $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
+    tui_send_text s
+    tui_wait 10 '⌖' || bad="$bad T24 s did not focus a system (no ⌖): $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
     tui_type o
-    tui_type s
-    tui_has 'the classic sky has no systems to focus' || bad="$bad T21 o (classic sky) then s did not name the classic sky: $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
+    tui_send_text s
+    tui_wait 10 'the classic sky has no systems to focus' || bad="$bad T21 o (classic sky) then s did not name the classic sky: $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
     tui_type o
-    tui_type '['
-    tui_has '⟲' && tui_has '5m' || bad="$bad T25 [ did not scrub 5 minutes back (no ⟲ … −5m chip): $(one_line "$(tui_pane | grep -F '⟲')");"
-    tui_type '{'
-    tui_has '⟲' && tui_has '1h' || bad="$bad T25 { did not scrub an hour back: $(one_line "$(tui_pane | grep -F '⟲')");"
+    tui_send_text '['
+    wait_for 10 "tui_has '⟲' && tui_has '5m'" || bad="$bad T25 [ did not scrub 5 minutes back (no ⟲ … −5m chip): $(one_line "$(tui_pane | grep -F '⟲')") $LANE_WAIT_WHY;"
+    tui_send_text '{'
+    wait_for 10 "grep -qE '⟲.*−1h' <<<\"\$(tui_pane)\"" || bad="$bad T25 { did not scrub an hour back: $(one_line "$(tui_pane | grep -F '⟲')") $LANE_WAIT_WHY;"
     # A paused playhead keeps its instant while now moves on, so ] } only land
     # back on the moment [ was pressed, seconds behind now (⟲ … −0m); space
     # there resumes a seconds-long replay that 60× plays out in ~70ms, faster
@@ -834,6 +852,7 @@ if requires; then
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
       space_frame="$(tui_pane)"
       if grep -qF '▸▸' <<<"$space_frame"; then played=1; break; fi
+      # POLL-STEP: replay paints the ▸▸ chip before it ends.
       sleep 0.1
     done
     if [ "$played" -ne 1 ]; then
@@ -841,15 +860,18 @@ if requires; then
       bad="$bad T26 space did not start replay (no ▸▸ chip): $(one_line "$(printf '%s' "$space_frame" | grep -F cosmos | head -3)");"
     fi
     tui_type n
-    sleep 1
+    wait_for 10 "! tui_has '▸▸' && ! tui_has '⟲'" ||
+      bad="$bad T27 n did not stop replay and return to now: $LANE_WAIT_WHY;"
     tui_has '▸▸' && bad="$bad T27 n did not stop the replay;"
     tui_has '⟲' && bad="$bad T27 n did not return to now (⟲ chip still shown);"
     # T23: enter opens the selected star — the picker leaves the pane to attach,
     # or refuses by name when the star is not a running chat. Either is the key's contract.
     tui_type j
     hud="$(tui_pane | grep -F 'cosmos  ▸' | head -1)"
-    tui_keys Enter
-    if tui_left 15; then
+    tui_send Enter
+    wait_for 15 '[ "$(tui_cmd)" != pfm ] || tui_has "enter needs a live chat" || tui_has "enter refused" || tui_has "nothing selected"' ||
+      bad="$bad T23 enter on the cosmos selection neither opened nor refused by name: $LANE_WAIT_WHY;"
+    if [ "$(tui_cmd)" != pfm ]; then
       t23="enter on '$(one_line "$hud" | cut -c1-60)' left the picker to open it"
     elif tui_has 'enter needs a live chat' || tui_has 'enter refused' || tui_has 'nothing selected'; then
       t23="enter refused by name: $(one_line "$(tui_pane | grep -F 'cosmos  ' | head -1)" | cut -c1-100)"
@@ -876,9 +898,11 @@ if requires; then
   if tui_open 100 30 ls; then
     tui_type "$CC"
     acct0="$(tui_account)"
-    tui_keys C-s
-    acct1="$(tui_account)"
+    tui_send C-s
     want="$(printf '%s\n' $ACCOUNT_IDS | awk -v cur="$acct0" 'NR == 1 { first = $1 } { if (hit) { print; printed = 1; exit } if ($1 == cur) hit = 1 } END { if (hit && !printed) print first }')"
+    wait_for 10 "[ \"\$(tui_account)\" = '$want' ]" ||
+      bad="$bad T14 ⌃S did not move the header account to $want: $LANE_WAIT_WHY;"
+    acct1="$(tui_account)"
     [ -n "$acct0" ] && [ "$acct1" = "$want" ] || bad="$bad T14 ⌃S moved the header account $acct0 → $acct1, want $want (roster: $ACCOUNT_IDS);"
     tui_keys Escape
     tui_left 10
@@ -893,12 +917,14 @@ if requires; then
     if ! tui_left 20; then
       bad="$bad T16 enter on '$CC' did not leave the picker;"
     else
-      sleep 2
+      wait_for 10 "[ -n \"\$(tmux -S '$cc_sock_path' list-clients 2>/dev/null)\" ]" ||
+        bad="$bad T16 enter left the picker but no client is attached to $CC's server $cc_sock_path: $LANE_WAIT_WHY;"
       clients="$(tmux -S "$cc_sock_path" list-clients 2>&1)"
       [ -n "$clients" ] || bad="$bad T16 enter left the picker but no client is attached to $CC's server $cc_sock_path;"
     fi
     tui_close
-    sleep 1
+    wait_for 10 "[ -z \"\$(tmux -S '$cc_sock_path' list-clients 2>/dev/null)\" ]" ||
+      bad="$bad T16 the attach client survived the picker server's teardown: $LANE_WAIT_WHY;"
     [ -z "$(tmux -S "$cc_sock_path" list-clients 2>/dev/null)" ] || bad="$bad T16 the attach client survived the picker server's teardown;"
     live_chat "$CC" || bad="$bad T16 $CC lost its live row across the attach/detach;"
   else
@@ -914,13 +940,13 @@ if requires; then
     # Polled by SESSION ID, in this beat's own loop: the reboot kills the old
     # server and the fresh one boots for some seconds with no live row under
     # the name — the library's waits would read that gap as a dead anchor.
-    sock1="" waited=0
-    while [ "$waited" -lt 240 ]; do
+    sock1="" deadline=$(( $(_lane_now) + 240 ))
+    while [ "$(_lane_now)" -lt "$deadline" ]; do
       sock1="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v id="$id0" 'NR > 1 && $1 ~ /^live-/ && $2 == id { print $11; exit }')"
       [ -n "$sock1" ] && [ "$sock1" != "$sock0" ] && break
       sock1=""
-      sleep 5
-      waited=$((waited + 5))
+      # POLL-STEP: the rebooted session ID appears on a fresh socket.
+      sleep 0.5
     done
     if [ -z "$sock1" ]; then
       bad="$bad T15 ⌃O: no live row for session $id0 on a fresh socket in 240s (rows for the id now: $(one_line "$(pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v id="$id0" 'NR > 1 && $2 == id { print $1 ":" $11 }')"));"
@@ -931,13 +957,14 @@ if requires; then
         # OBSERVATION, not a verdict: the reborn server's row carries '$name1'.
         # Renamed back so every later beat, which addresses the chat by name, resolves.
         pfm chat name "$id0" "$CC" >/dev/null 2>&1
-        sleep 2
+        LANE_ANCHOR="sock:$sock1" wait_for 10 "[ \"\$(socket_field '$sock1' 5)\" = '$CC' ]" ||
+          bad="$bad T15 the rebooted row could not be renamed back to $CC: $LANE_WAIT_WHY;"
         reboot_note="$reboot_note · observed: the resumed row was named '$name1', renamed back to $CC"
         [ "$(socket_field "$sock1" 5)" = "$CC" ] || bad="$bad T15 the rebooted row could not be renamed back to $CC (reads '$(socket_field "$sock1" 5)');"
       fi
     fi
     tui_close
-    sleep 2
+    wait_for 10 "live_chat '$CC'" || bad="$bad T15 $CC has no live row after the reboot: $LANE_WAIT_WHY;"
     live_chat "$CC" || bad="$bad T15 $CC has no live row after the reboot;"
   else
     bad="$bad T15 ⌃O: ${TUI_WHY:-$CC not live};"
@@ -963,9 +990,10 @@ if requires; then
     if ! tui_open 80 "$g_lines" ls; then
       fail "T30 $TUI_WHY"
     else
-      sleep 2
+      tui_wait 10 'Chats · fuzzy search and all existing chat controls' ||
+        bad="$bad T30 the golden frame's Chats hint did not paint;"
       frame="$(tui_pane)"
-      n_frame="$(printf '%s\n' "$frame" | grep -c '')"
+      n_frame="$(grep -c '' <<<"$frame")"
       # T28: the STATIC lines of the pinned frame, verbatim — tabs (up to the
       # sky widget), the Chats hint, both footer lines. The dynamic lines are
       # held to the golden's shape: header format, and three counts that agree.
@@ -980,7 +1008,7 @@ if requires; then
         l_foot="$(printf '%s\n' "$frame" | sed -n "${n}p" | sed 's/ *$//')"
         [ "$g_foot" = "$l_foot" ] || bad="$bad T28 footer line $n differs: golden '$g_foot' vs live '$l_foot';"
       done
-      printf '%s\n' "$frame" | sed -n 1p | grep -Eq ' pfm  .+ account [0-9]+ · (⚡ 1h|🪫 5m) · [0-9]+ rows · [0-9]+ hidden · [0-9]+ empty' ||
+      grep -Eq ' pfm  .+ account [0-9]+ · (⚡ 1h|🪫 5m) · [0-9]+ rows · [0-9]+ hidden · [0-9]+ empty' <<<"$(printf '%s\n' "$frame" | sed -n 1p)" ||
         bad="$bad T28 header line is not the pinned shape: '$(printf '%s\n' "$frame" | sed -n 1p)';"
       rows_hdr="$(printf '%s\n' "$frame" | sed -n 1p | sed -n 's/.* · \([0-9]*\) rows · .*/\1/p')"
       rows_fleet="$(printf '%s\n' "$frame" | sed -n 's/.*╭─ fleet \([0-9]*\) .*/\1/p' | head -1)"
@@ -1006,7 +1034,8 @@ if requires; then
         grep -qF "$def_sgr" <<<"$(tui_pane_e)" || bad="$bad T36 the default palette's header background $def_hex ($def_sgr) is not in the live escapes;"
         jq '.theme = "tokyo-night"' "$CONFIG" >/tmp/f-tokyo.json 2>/dev/null
         if tui_open 80 "$g_lines" --config /tmp/f-tokyo.json ls; then
-          sleep 2
+          wait_for 10 "grep -qF '$tok_sgr' <<<\"\$(tui_pane_e)\"" ||
+            bad="$bad T36 the tokyo-night header background $tok_hex ($tok_sgr) is not in the live escapes: $LANE_WAIT_WHY;"
           grep -qF "$tok_sgr" <<<"$(tui_pane_e)" || bad="$bad T36 the tokyo-night header background $tok_hex ($tok_sgr) is not in the live escapes under --config theme=tokyo-night;"
           grep -qF "$def_sgr" <<<"$(tui_pane_e)" && bad="$bad T36 the tokyo-night frame still paints the default header background $def_hex;"
         else
@@ -1039,6 +1068,7 @@ wait
 for i in 1 2 3; do
   rc="$(cat "/tmp/f-par.$i.rc" 2>/dev/null || echo missing)"
   [ "$rc" = 0 ] || bad="$bad F_PAR_$i exited $rc: $(one_line "$(cat "/tmp/f-par.$i.out" 2>/dev/null)");"
+  wait_for 30 "live_chat 'F_PAR_$i'" || bad="$bad no live row for F_PAR_$i: $LANE_WAIT_WHY;"
   live_chat "F_PAR_$i" || bad="$bad no live row for F_PAR_$i;"
 done
 socks="$(for i in 1 2 3; do live_field "F_PAR_$i" 11; done | grep -c .)"
@@ -1050,7 +1080,8 @@ for i in 1 2 3; do
   live_chat "F_PAR_$i" || continue
   id="$(live_field "F_PAR_$i" 2)"
   pfm chat end "F_PAR_$i" >/dev/null 2>&1 || bad="$bad pfm chat end F_PAR_$i failed;"
-  sleep 1
+  LANE_ANCHOR= wait_for 10 "pfm ls -a --tsv 2>/dev/null | awk -F '\t' -v id='$id' 'NR > 1 && \$2 == id && \$1 ~ /^resume-/ { found = 1 } END { exit !found }'" ||
+    bad="$bad F_PAR_$i has no resume row after end: $LANE_WAIT_WHY;"
   [ -n "$id" ] && pfm chat kill "$id" >/dev/null 2>&1
 done
 if [ -n "$bad" ]; then fail "$bad"; else
@@ -1073,17 +1104,20 @@ if requires; then
   # dead: the ended '$GRP' is a resumable row with no server.
   if [ -n "$GRP_ID" ]; then
     pfm chat unkill "$GRP_ID" >/dev/null 2>&1 # a hidden row is unhidden for the read, then hidden again
+    wait_for 10 "grep -q dead <<<\"\$(pfm chat status '$GRP_ID' 2>/dev/null || true)\"" ||
+      bad="$bad an ended chat's status did not report dead after unkill: $LANE_WAIT_WHY;"
     out="$(pfm chat status "$GRP_ID" 2>/dev/null)"
     rc=$?
     pfm chat kill "$GRP_ID" >/dev/null 2>&1
-    [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'dead' && held="$held dead" ||
+    [ "$rc" -eq 3 ] && grep -q 'dead' <<<"$out" && held="$held dead" ||
       bad="$bad an ended chat's status exited $rc / '$(one_line "$out")' (want 3 + dead);"
   fi
   # L4 idle: the newest record is the assistant's word; L6: idle_seconds counts only then.
   pfm chat inject --allow-unsigned "$CC" 'IDLE-PROBE' >/dev/null 2>&1 ||
     bad="$bad the idle-making inject was refused;"
   if wait_prompt "$CC" IDLE-PROBE 30; then
-    sleep 3
+    wait_for 10 "pfm chat status '$CC' --json 2>/dev/null | jq -e '.state == \"idle\" and .idle_seconds >= 1' >/dev/null" ||
+      bad="$bad L4/L6 after the assistant answered, state did not reach idle with idle_seconds ≥ 1: $LANE_WAIT_WHY;"
     json="$(pfm chat status "$CC" --json 2>/dev/null)"
     state="$(printf '%s' "$json" | jq -r .state 2>/dev/null)"
     idle_s="$(printf '%s' "$json" | jq -r .idle_seconds 2>/dev/null)"
@@ -1103,6 +1137,8 @@ if requires; then
     "F-HOLD-PROBE $(mock_steps "[{\"type\":\"hold\",\"until_gone\":\"$hold_gate\"}]")" >/dev/null 2>&1 ||
     bad="$bad the busy-making inject was refused;"
   wait_prompt "$CC" F-HOLD-PROBE 30 || bad="$bad the hold prompt was not read: ${LANE_WAIT_WHY:-unknown};"
+  wait_for 10 "pfm chat status '$CC' --json 2>/dev/null | jq -e '.state == \"working\" and .idle_seconds == 0' >/dev/null" ||
+    bad="$bad L4/L6 mid-turn status did not become working with idle_seconds 0: $LANE_WAIT_WHY;"
   json="$(pfm chat status "$CC" --json 2>/dev/null)"
   state="$(printf '%s' "$json" | jq -r .state 2>/dev/null)"
   idle_s="$(printf '%s' "$json" | jq -r .idle_seconds 2>/dev/null)"
@@ -1114,6 +1150,8 @@ if requires; then
   boot="$(boot_scenario)" || bad="$bad L2 could not write boot scenario;"
   if [ -n "$boot" ] && boot_start "$boot"; then
     if wait_for 30 "row_kind_socket booting '$BOOT_SOCK'"; then
+      wait_for 10 "pfm chat status '$BOOT_SOCK' --json 2>/dev/null | jq -e '.state == \"idle\" and .idle_seconds == 0' >/dev/null" ||
+        bad="$bad L2 booting $BOOT_SOCK status did not reach idle with idle_seconds 0: $LANE_WAIT_WHY;"
       json="$(pfm chat status "$BOOT_SOCK" --json 2>&1)"
       state="$(printf '%s' "$json" | jq -r .state 2>/dev/null)"
       idle_s="$(printf '%s' "$json" | jq -r .idle_seconds 2>/dev/null)"
@@ -1133,6 +1171,8 @@ if requires; then
   rc=$?
   notx_sock="$(printf '%s\n' "$out" | awk -F'\t' '$1 == "cc" {print $3; exit}')"
   if [ "$rc" -eq 0 ] && [ -n "$notx_sock" ] && wait_for 30 "row_kind_socket live-claude '$notx_sock'"; then
+    wait_for 10 "pfm chat status '$notx_sock' --json 2>/dev/null | jq -e '.state == \"idle\" and .idle_seconds == 0' >/dev/null" ||
+      bad="$bad L3 F_NOTX ($notx_sock) status did not reach idle with idle_seconds 0: $LANE_WAIT_WHY;"
     json="$(pfm chat status "$notx_sock" --json 2>&1)"
     state="$(printf '%s' "$json" | jq -r .state 2>/dev/null)"
     idle_s="$(printf '%s' "$json" | jq -r .idle_seconds 2>/dev/null)"
@@ -1161,14 +1201,7 @@ if requires; then
   pfm chat inject --allow-unsigned "$CC" \
     "F-SUBAGENT-PROBE $(mock_steps '[{"type":"background_agent","name":"lane-f"},{"type":"turn","busy_ms":30000}]')" >/dev/null 2>&1 ||
     bad="$bad the sub-agent stimulus could not be delivered;"
-  working=""
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    [ "$(pfm chat status "$CC" --json 2>/dev/null | jq -r .state 2>/dev/null)" = working ] && { working=yes; break; }
-    sleep 4
-  done
-  if [ -z "$working" ]; then
-    bad="$bad status never reported working after the sub-agent stimulus (L5 sidechain override unobserved);"
-  else
+  if wait_for 48 "pfm chat status '$CC' --json 2>/dev/null | jq -e '.state == \"working\"' >/dev/null"; then
     # pfm's own idle-down consumer: reap classifies the chat while its pane is
     # quiet and its sub-agent works — it must be SPARED, never in the reap group.
     report="$(pfm reap --json --horizon 1s --busy-recent 60 2>/dev/null)"
@@ -1179,6 +1212,8 @@ if requires; then
     elif [ "${in_spared:-0}" -eq 0 ]; then
       bad="$bad pfm reap classified $CC ($cc_sock) neither reaped nor spared — it did not judge the chat at all: $(one_line "$report" | cut -c1-200);"
     fi
+  else
+    bad="$bad status never reported working after the sub-agent stimulus (L5 sidechain override unobserved): $LANE_WAIT_WHY;"
   fi
   wait_for 50 "pfm chat status '$CC' --json 2>/dev/null | jq -e '.state == \"idle\"' >/dev/null" ||
     bad="$bad the chat never returned to idle after the sub-agent: ${LANE_WAIT_WHY:-no wait reason recorded};"
@@ -1200,26 +1235,24 @@ if requires; then
   window_name() { tmux -S "$sock" list-windows -F '#{window_name}' 2>/dev/null | head -1; }
   # L40: a drifted window is planned by the dry run (the default) and converged by --apply.
   drift || bad="$bad the drift rename-window failed on $sock;"
-  sleep 1
   plan="$(pfm name-sync 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad L40 pfm name-sync (dry run) exited $rc: $(one_line "$plan");"
-  printf '%s' "$plan" | grep -q "would rename ${sock##*/} .*LANE-DRIFT -> " || bad="$bad L40 the dry run did not plan the drifted window: $(one_line "$plan");"
-  printf '%s' "$plan" | grep -Eq 'windows planned: [1-9]' || bad="$bad L40 'windows planned' is not ≥ 1: $(one_line "$plan");"
+  grep -q "would rename ${sock##*/} .*LANE-DRIFT -> " <<<"$plan" || bad="$bad L40 the dry run did not plan the drifted window: $(one_line "$plan");"
+  grep -Eq 'windows planned: [1-9]' <<<"$plan" || bad="$bad L40 'windows planned' is not ≥ 1: $(one_line "$plan");"
   [ "$(window_name)" = LANE-DRIFT ] || bad="$bad L40 the dry run RENAMED the window (reads '$(window_name)');"
   dry="$(pfm name-sync --dry-run 2>&1)"
-  printf '%s' "$dry" | grep -q 'dry run is the default' || bad="$bad L40 --dry-run did not announce itself as the default alias;"
+  grep -q 'dry run is the default' <<<"$dry" || bad="$bad L40 --dry-run did not announce itself as the default alias;"
   applied="$(pfm name-sync --apply 2>&1)"
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad L41 pfm name-sync --apply exited $rc: $(one_line "$applied");"
-  printf '%s' "$applied" | grep -q "renamed ${sock##*/} .*LANE-DRIFT -> " || bad="$bad L41 --apply did not report the rename: $(one_line "$applied");"
-  printf '%s' "$applied" | grep -Eq 'windows converged: [1-9]' || bad="$bad L41 'windows converged' is not ≥ 1 (the rename was not re-verified): $(one_line "$applied");"
-  printf '%s' "$applied" | grep -q 'tmux options converged:' || bad="$bad L41 --apply did not report the tmux options pass;"
+  grep -q "renamed ${sock##*/} .*LANE-DRIFT -> " <<<"$applied" || bad="$bad L41 --apply did not report the rename: $(one_line "$applied");"
+  grep -Eq 'windows converged: [1-9]' <<<"$applied" || bad="$bad L41 'windows converged' is not ≥ 1 (the rename was not re-verified): $(one_line "$applied");"
+  grep -q 'tmux options converged:' <<<"$applied" || bad="$bad L41 --apply did not report the tmux options pass;"
   case "$(window_name)" in *"$CC"*) ;; *) bad="$bad L41 after --apply the window reads '$(window_name)', not the label;" ;; esac
   # L42: one writer by design — two --apply passes racing on one drift both
   # finish, the window converges once, and a third dry run has nothing left to plan.
   drift
-  sleep 1
   pfm name-sync --apply >/tmp/f-ns.a 2>&1 &
   pa=$!
   pfm name-sync --apply >/tmp/f-ns.b 2>&1 &
@@ -1229,7 +1262,7 @@ if requires; then
   [ "$ra" -eq 0 ] && [ "$rb" -eq 0 ] || bad="$bad L42 concurrent --apply passes exited $ra and $rb: $(one_line "$(cat /tmp/f-ns.a /tmp/f-ns.b)" | cut -c1-200);"
   case "$(window_name)" in *"$CC"*) ;; *) bad="$bad L42 after two racing passes the window reads '$(window_name)';" ;; esac
   after="$(pfm name-sync 2>&1)"
-  printf '%s' "$after" | grep -q 'windows planned: 0' || bad="$bad L42 a dry run after the race still plans work: $(one_line "$after");"
+  grep -q 'windows planned: 0' <<<"$after" || bad="$bad L42 a dry run after the race still plans work: $(one_line "$after");"
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "drift LANE-DRIFT planned by the dry run, converged and re-verified by --apply (window '$(window_name)'), two racing --apply passes left one converged name and nothing to plan"
   fi
@@ -1248,10 +1281,12 @@ else
   others_before="$(pfm ls --tsv 2>/dev/null | awk -F'\t' 'NR > 1 && $1 ~ /^live-/ && $5 !~ /^STORM_[0-9]+$/' | wc -l | tr -d ' ')"
   out="$(lane_storm_kill 2>&1)"
   rc=$?
-  closing="$(printf '%s\n' "$out" | grep '^kill-storm:' | tail -1)"
+  closing="$(grep '^kill-storm:' <<<"$out" | tail -1)"
   [ "$rc" -eq 0 ] || bad="$bad lane_storm_kill exited $rc: $(one_line "$out" | cut -c1-200);"
-  printf '%s' "$closing" | grep -q 'STORM rows left: 0' || bad="$bad the closing line does not read 'STORM rows left: 0': $(one_line "$closing");"
+  grep -q 'STORM rows left: 0' <<<"$closing" || bad="$bad the closing line does not read 'STORM rows left: 0': $(one_line "$closing");"
   [ "$(live_storm_rows | grep -c .)" -eq 0 ] || bad="$bad live STORM rows remain in pfm ls --tsv: $(one_line "$(live_storm_rows | cut -f5)");"
+  wait_for 10 "! pfm ls --tsv 2>/dev/null | awk -F '\t' 'NR > 1 && \$5 ~ /^STORM_[0-9]+$/ { f = 1 } END { exit(f ? 0 : 1) }'" ||
+    bad="$bad ended STORM rows are still visible in the default view (kill-storm hides them): $LANE_WAIT_WHY;"
   pfm ls --tsv 2>/dev/null | awk -F'\t' 'NR > 1 && $5 ~ /^STORM_[0-9]+$/ { f = 1 } END { exit(f ? 0 : 1) }' &&
     bad="$bad ended STORM rows are still visible in the default view (kill-storm hides them);"
   others_after="$(pfm ls --tsv 2>/dev/null | awk -F'\t' 'NR > 1 && $1 ~ /^live-/ && $5 !~ /^STORM_[0-9]+$/' | wc -l | tr -d ' ')"
@@ -1284,6 +1319,8 @@ if requires; then
   if [ ! -s "$excerpt" ]; then
     bad="$bad C58 the chat's last answer is empty, so no excerpt could be written;"
   else
+    wait_for 30 "pfm chat find '$excerpt' 2>/dev/null | awk -F '\t' -v id='$cc_id' '\$1 == id { found = 1 } END { exit !found }'" ||
+      bad="$bad C58 find did not match session $cc_id: $LANE_WAIT_WHY;"
     found="$(pfm chat find "$excerpt" 2>/dev/null)"
     rc=$?
     [ "$rc" -eq 0 ] || bad="$bad C58 chat find exited $rc;"
@@ -1295,18 +1332,18 @@ if requires; then
     rm -f /tmp/f-save.md
     out="$(cd "$CWD" && pfm chat save /tmp/f-save.md "$path" 2>&1)"
     rc=$?
-    [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'Appended transcript (.* user records) + env snapshot -> /tmp/f-save.md' ||
+    [ "$rc" -eq 0 ] && grep -q 'Appended transcript (.* user records) + env snapshot -> /tmp/f-save.md' <<<"$out" ||
       bad="$bad C59 chat save exited $rc: $(one_line "$out");"
     grep -q '# FULL TRANSCRIPT' /tmp/f-save.md 2>/dev/null || bad="$bad C59 the saved file carries no '# FULL TRANSCRIPT' section;"
     grep -q '# ENVIRONMENT SNAPSHOT' /tmp/f-save.md 2>/dev/null || bad="$bad C59 the saved file carries no environment snapshot;"
     # C62: history reads the transcript deep, by path and by sid prefix under the project slug.
     out="$(pfm chat history "$path" 5 2>&1)"
     rc=$?
-    [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "== $path · last 5 messages ==" || bad="$bad C62 history by path exited $rc: $(one_line "$out");"
+    [ "$rc" -eq 0 ] && grep -q "== $path · last 5 messages ==" <<<"$out" || bad="$bad C62 history by path exited $rc: $(one_line "$out");"
     slug="$(printf '%s' "$CWD" | tr / -)"
     out="$(pfm chat history "$(printf '%s' "$cc_id" | cut -c1-8)" 3 "$slug" 2>&1)"
     rc=$?
-    [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'last 3 messages ==' || bad="$bad C62 history by sid prefix under slug $slug exited $rc: $(one_line "$out");"
+    [ "$rc" -eq 0 ] && grep -q 'last 3 messages ==' <<<"$out" || bad="$bad C62 history by sid prefix under slug $slug exited $rc: $(one_line "$out");"
   else
     bad="$bad C59/C62 no transcript path from find ('$path') — save and history were NOT asserted;"
   fi
@@ -1316,7 +1353,7 @@ if requires; then
   [ "$rc" -eq 0 ] && [ "$out" = "modal denied on $cc_sock" ] || bad="$bad C63 modal deny 0 on $cc_sock exited $rc: $(one_line "$out");"
   out="$(pfm chat modal no-such-session-f deny 1 2>&1)"
   rc=$?
-  [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'no tmux socket for' || bad="$bad C63 modal on an unknown session exited $rc without naming the missing socket: $(one_line "$out");"
+  [ "$rc" -eq 1 ] && grep -q 'no tmux socket for' <<<"$out" || bad="$bad C63 modal on an unknown session exited $rc without naming the missing socket: $(one_line "$out");"
   # C64: resolve prints socket, session and id; an unknown name is exit 4.
   out="$(pfm chat resolve "$CC" 2>&1)"
   rc=$?
@@ -1342,18 +1379,19 @@ if requires; then
   # X18: the per-window pane opener validates its request before touching anything.
   out="$(pfm internal agent-open 2>&1)"
   rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'usage: pfm internal agent-open' || bad="$bad X18 agent-open without flags exited $rc (want 2 + usage): $(one_line "$out");"
+  [ "$rc" -eq 2 ] && grep -q 'usage: pfm internal agent-open' <<<"$out" || bad="$bad X18 agent-open without flags exited $rc (want 2 + usage): $(one_line "$out");"
   out="$(pfm internal agent-open --id 'lane/unsafe' --cwd "$CWD" 2>&1)"
   rc=$?
-  [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'agent open requires a safe session id' || bad="$bad X18 an unsafe id exited $rc without the named refusal: $(one_line "$out");"
+  [ "$rc" -eq 1 ] && grep -q 'agent open requires a safe session id' <<<"$out" || bad="$bad X18 an unsafe id exited $rc without the named refusal: $(one_line "$out");"
   # X19: the shim's session creator — refused for a relative cwd and a foreign
   # prefix, and a REAL server for a lawful socket name, its window named after
   # the engine, torn down as soon as it has been read.
   out="$(pfm internal chat-server cc-1-2-3 relative/dir true 2>&1)"
   rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'usage: pfm internal chat-server' || bad="$bad X19 a relative cwd exited $rc (want 2 + usage): $(one_line "$out");"
+  [ "$rc" -eq 2 ] && grep -q 'usage: pfm internal chat-server' <<<"$out" || bad="$bad X19 a relative cwd exited $rc (want 2 + usage): $(one_line "$out");"
   tmux_dir="$(_lane_tmux_dir)"
   lane_sock="cc-$(date +%s)-$$-77"
+  # PAYLOAD: the planted server stays alive for the X19 window assertion.
   out="$(pfm internal chat-server "$lane_sock" /tmp 'sleep 120' 2>&1)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -1388,8 +1426,12 @@ if requires; then
   if tui_open 100 30 ls; then
     c0="$(tui_cache)"
     tui_keys C-e
+    wait_for 10 "[ -n \"\$(tui_cache)\" ] && [ \"\$(tui_cache)\" != '$c0' ]" ||
+      bad="$bad K27 ⌃E did not toggle the header cache: $LANE_WAIT_WHY;"
     c1="$(tui_cache)"
     tui_keys C-e
+    wait_for 10 "[ \"\$(tui_cache)\" = '$c0' ]" ||
+      bad="$bad K27 ⌃E did not toggle the header cache back: $LANE_WAIT_WHY;"
     c2="$(tui_cache)"
     [ -n "$c0" ] && [ "$c0" != "$c1" ] && [ "$c2" = "$c0" ] || bad="$bad K27 ⌃E did not toggle the header cache ('$c0' → '$c1' → '$c2');"
     tui_keys Escape
@@ -1414,7 +1456,7 @@ if requires; then
     bad=""
     out="$(pfm chat status "$E1_CHAT" 2>&1)"
     rc=$?
-    [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qiE 'idle|working' || bad="$bad C22 status exited $rc / '$(one_line "$out")' after the storm;"
+    [ "$rc" -eq 0 ] && grep -qiE 'idle|working' <<<"$out" || bad="$bad C22 status exited $rc / '$(one_line "$out")' after the storm;"
     out="$(pfm chat last "$E1_CHAT" 2>&1)"
     rc=$?
     [ "$rc" -eq 0 ] && [ -n "$out" ] || bad="$bad C28 last exited $rc or printed nothing after the storm;"

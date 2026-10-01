@@ -21,6 +21,7 @@ import (
 )
 
 func TestChromeHeaderCaptureOracle(t *testing.T) {
+	t.Parallel()
 	req, err := http.NewRequest(http.MethodGet, "https://example.test/", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +53,7 @@ func TestChromeHeaderCaptureOracle(t *testing.T) {
 }
 
 func TestChromeHTTP2CaptureOracle(t *testing.T) {
+	t.Parallel()
 	p := profiles.Chrome_146
 	settings := p.GetSettings()
 	want := map[http2.SettingID]uint32{
@@ -74,6 +76,7 @@ func TestChromeHTTP2CaptureOracle(t *testing.T) {
 }
 
 func TestChromeAkamaiCaptureOracle(t *testing.T) {
+	t.Parallel()
 	p := profiles.Chrome_146
 	settings := p.GetSettings()
 	akamai := fmt.Sprintf(
@@ -90,6 +93,7 @@ func TestChromeAkamaiCaptureOracle(t *testing.T) {
 }
 
 func TestChromeClientHelloCaptureOracle(t *testing.T) {
+	t.Parallel()
 	client, server := net.Pipe()
 	done := make(chan []byte, 1)
 	go func() {
@@ -138,6 +142,7 @@ func TestChromeClientHelloCaptureOracle(t *testing.T) {
 }
 
 func TestChromeTransportUsesPinnedResolver(t *testing.T) {
+	t.Parallel()
 	target := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }),
 	)

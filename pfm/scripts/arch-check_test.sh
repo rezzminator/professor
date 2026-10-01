@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C23-bare-log ratchet: the check must
-# COUNT a bare log.Printf outside internal/obs and cmd/pfm, must NOT count one
-# inside them, and must refuse a count above the committed baseline. It runs
+# Self-test for scripts/arch-check.sh's C1, C9, C12 and C23 ratchets. It runs
 # arch-check.sh against a throwaway git fixture (PFM=<fixture>), never against
-# this repo, and asserts on the CHECK C23-bare-log line rather than the exit
+# this repo, and asserts on the relevant CHECK line rather than the exit
 # status — the fixture carries none of the other baselines, so every other
 # check legitimately reports ERROR there.
 #
@@ -38,6 +36,101 @@ c23_line() {
 c23_measure() {
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$1" bash "$SUT" --measure
 }
+
+check_line() {
+  local repo=$1 id=$2
+  env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$repo" bash "$SUT" </dev/null 2>&1 | grep "CHECK $id "
+}
+
+# ---- C9: every package needs a package doc ---------------------------------
+
+REPO_C9="$T/package-doc"
+if fixture "$REPO_C9"; then
+  : > "$REPO_C9/.arch/no-package-doc.txt"
+  for f in "$REPO_C9"/internal/{loud,obs}/*.go "$REPO_C9"/cmd/pfm/*.go; do
+    sed -i '1i// Package fixture documents this package.' "$f"
+  done
+  sed -i '1d' "$REPO_C9/internal/loud/loud.go"
+  line=$(check_line "$REPO_C9" C9-package-doc)
+  if [[ "$line" == *FAIL* && "$line" == *"new: internal/loud"* ]]; then
+    ok "C9: a package without a doc FAILs naming its directory"
+  else
+    bad "C9: expected FAIL for an undocumented package" "$line"
+  fi
+
+  sed -i '1i// Package loud documents this package.' "$REPO_C9/internal/loud/loud.go"
+  line=$(check_line "$REPO_C9" C9-package-doc)
+  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+    ok "C9: documented packages pass"
+  else
+    bad "C9: expected PASS for documented packages" "$line"
+  fi
+else
+  bad "C9: could not build the git fixture"
+fi
+
+REPO_C9_EMPTY="$T/empty-sources"
+if fixture "$REPO_C9_EMPTY"; then
+  find "$REPO_C9_EMPTY" -name '*.go' -delete
+  if output=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$REPO_C9_EMPTY" bash "$SUT" </dev/null 2>&1); then check_rc=0; else check_rc=$?; fi
+  if [ "$check_rc" -eq 2 ] && [[ "$output" == *"CHECK setup"* && "$output" == *"no Go sources listed"* ]]; then
+    ok "C9: an empty source list reports setup ERROR with rc 2"
+  else
+    bad "C9: expected rc 2 setup ERROR for an empty source list" "rc=$check_rc" "$output"
+  fi
+else
+  bad "C9: could not build the empty-source fixture"
+fi
+
+# ---- C12: a named knob needs a production read -----------------------------
+
+REPO_C12="$T/claude-pointers"
+if fixture "$REPO_C12"; then
+  : > "$REPO_C12/.arch/claude-dangling.txt"
+  printf 'PFM_NOT_READ\n' > "$REPO_C12/CLAUDE.md"
+  line=$(check_line "$REPO_C12" C12-claude-pointers)
+  if [[ "$line" == *FAIL* && "$line" == *PFM_NOT_READ* ]]; then
+    ok "C12: a named knob absent from production sources FAILs"
+  else
+    bad "C12: expected FAIL for an absent knob" "$line"
+  fi
+
+  printf 'package loud\nconst X = "PFM_X"\n' > "$REPO_C12/internal/loud/loud.go"
+  printf 'PFM_X\n' > "$REPO_C12/CLAUDE.md"
+  line=$(check_line "$REPO_C12" C12-claude-pointers)
+  if [[ "$line" == *FAIL* && "$line" == *PFM_X* ]]; then
+    ok "C12: a declaration without a use FAILs"
+  else
+    bad "C12: expected FAIL for a declaration without a use" "$line"
+  fi
+
+  printf 'var _ = X\n' >> "$REPO_C12/internal/loud/loud.go"
+  line=$(check_line "$REPO_C12" C12-claude-pointers)
+  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+    ok "C12: a declared constant used on another line passes"
+  else
+    bad "C12: expected PASS for a read constant" "$line"
+  fi
+else
+  bad "C12: could not build the git fixture"
+fi
+
+# ---- C1: an unbaselined file over the source ceiling FAILs ------------------
+
+REPO_C1="$T/ceiling-src"
+if fixture "$REPO_C1"; then
+  : > "$REPO_C1/.arch/ceiling-src.txt"
+  printf 'package loud\n' > "$REPO_C1/internal/loud/loud.go"
+  for _ in {1..10}; do printf '\n' >> "$REPO_C1/internal/loud/loud.go"; done
+  line=$(CEIL_SRC=10 check_line "$REPO_C1" C1-ceiling-src)
+  if [[ "$line" == *FAIL* && "$line" == *"internal/loud/loud.go (new 11)"* ]]; then
+    ok "C1: a new source file over the ceiling FAILs naming the file"
+  else
+    bad "C1: expected FAIL for an unbaselined over-ceiling source" "$line"
+  fi
+else
+  bad "C1: could not build the git fixture"
+fi
 
 # ---- 1: a bare log.Printf outside obs/cmd is counted, and a missing baseline
 # is an ERROR, never a PASS ---------------------------------------------------

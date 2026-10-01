@@ -13,6 +13,7 @@ import (
 // archive's copy — its method the wayback rung and its partial naming the
 // snapshot's date — never labelled as the live page the direct rung read.
 func TestWaybackCopyIsNamedAsTheArchive(t *testing.T) {
+	t.Parallel()
 	const source = "https://directory.example.test/people/avery-example"
 	const snapshot = "https://web.archive.org/web/20150928080310id_/" + source
 	page := "<html><body><h1>Avery Example</h1>" +

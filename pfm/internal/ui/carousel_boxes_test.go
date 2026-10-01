@@ -15,9 +15,6 @@ func TestCarouselBoxesShowsEveryActionAtOnce(t *testing.T) {
 			t.Fatalf("carouselBoxes(0) = %q, missing the %q action", boxes, label)
 		}
 	}
-	if strings.Contains(boxes, "reload") {
-		t.Fatalf("carouselBoxes(0) = %q, contains removed reload action", boxes)
-	}
 	if strings.Count(boxes, "[")+strings.Count(boxes, "◖") != len(carouselActions) {
 		t.Fatalf("carouselBoxes(0) = %q, want one box per action", boxes)
 	}

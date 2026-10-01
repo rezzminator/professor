@@ -252,6 +252,7 @@ func scanGatewayEgress(fset *token.FileSet, files []*ast.File) ([]gatewayEgressF
 // passing on an empty enumeration — "we could not look" must never render as
 // "there is nothing there".
 func TestEveryEgressGoesThroughTheGateway(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -308,6 +309,7 @@ func TestEveryEgressGoesThroughTheGateway(t *testing.T) {
 // matched only ".Do(" and "http.NewRequest", so a fixture call like
 // client.Get(...), http.Head(...), or rt.RoundTrip(...) passed it silently.
 func TestGatewayEgressEnumeratorCatchesEveryShape(t *testing.T) {
+	t.Parallel()
 	const fixture = `package fixture
 
 import "net/http"
@@ -364,6 +366,7 @@ func exercise() {
 // url.Values too, and a textual match would flag both as gateway bypasses.
 // scanGatewayEgress must resolve the receiver type and flag neither.
 func TestGatewayEgressEnumeratorIgnoresLookalikeMethods(t *testing.T) {
+	t.Parallel()
 	const fixture = `package fixture
 
 import (
@@ -394,6 +397,7 @@ func exercise(h http.Header, v url.Values) {
 // type-checked must never report zero offenders — that is indistinguishable
 // from a clean scan. scanGatewayEgress must return an error instead.
 func TestGatewayEgressEnumeratorFailsOnBrokenPackage(t *testing.T) {
+	t.Parallel()
 	const broken = `package fixture
 
 func exercise() {
@@ -411,6 +415,7 @@ func exercise() {
 }
 
 func TestGatewayExportLookupFailureIsCached(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("GATEWAY_EXPORT_TEST_CHILD") == "1" {
 		const fixture = "package fixture\nimport \"net/http\"\nvar _ = http.Get\n"
 		for range 2 {
@@ -463,6 +468,7 @@ exit 19
 }
 
 func TestGatewayExportLookupReportsMissingExport(t *testing.T) {
+	// Serial: deletes and restores gatewayExports.files["net/http"], a package map the parallel enumerator tests read.
 	file, err := gatewayExportLookup("net/http")
 	if err != nil {
 		t.Fatalf("load net/http export: %v", err)

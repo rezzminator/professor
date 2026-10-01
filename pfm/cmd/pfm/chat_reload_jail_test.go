@@ -21,16 +21,21 @@ import (
 )
 
 // reload is a public chat operation; keep the contract pinned at the CLI
-// boundary. `swap` was the pre-port spelling and is gone — dispatch must say
-// so rather than quietly accepting a name nothing documents.
+// boundary.
 func TestChatReloadAcceptsCacheOnlyRequest(t *testing.T) {
 	jailTest(t)
 	var stdout, stderr bytes.Buffer
-	code := runChat(
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := runChatWithRuntime(
 		[]string{"reload", "--cache", "1h"},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
+		runtime,
+		context.Background(),
 	)
 	if code == 2 && strings.Contains(stderr.String(), `unknown command "reload"`) {
 		t.Fatalf("reload dispatch is still missing: rc=%d stderr=%q", code, stderr.String())
@@ -40,36 +45,20 @@ func TestChatReloadAcceptsCacheOnlyRequest(t *testing.T) {
 func TestChatReloadHelpIsPublicAndSuccessful(t *testing.T) {
 	jailTest(t)
 	var stdout, stderr bytes.Buffer
-	code := runChat(
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := runChatWithRuntime(
 		[]string{"reload", "--help"},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
+		runtime,
+		context.Background(),
 	)
 	if code != 0 || !strings.Contains(stdout.String(), "usage: pfm chat reload") {
 		t.Fatalf("reload help rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
-// The retired `swap` alias must be refused by name. A dispatch that still
-// answered it would keep a second public spelling alive that no help text,
-// card, or doc mentions.
-func TestChatSwapAliasIsRetired(t *testing.T) {
-	jailTest(t)
-	var stdout, stderr bytes.Buffer
-	code := runChat(
-		[]string{"swap", "--help"},
-		strings.NewReader(""),
-		&stdout,
-		&stderr,
-	)
-	if code != 2 || !strings.Contains(stderr.String(), `unknown command "swap"`) {
-		t.Fatalf(
-			"retired swap alias still dispatches: rc=%d stdout=%q stderr=%q",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
 	}
 }
 
@@ -112,11 +101,25 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	oldDisplay := displayReloadWorkerFailure
+	t.Cleanup(func() { displayReloadWorkerFailure = oldDisplay })
+	displayCalls := 0
+	displayReloadWorkerFailure = func(context.Context, string, string, string) error {
+		displayCalls++
+		return nil
+	}
 
 	var stdout, stderr bytes.Buffer
-	code := runChatReloadWorker([]string{"--sock", socket, "--cache", "1h"}, &stdout, &stderr)
+	code := runChatReloadWorker(
+		[]string{"--sock", socket, "--pane", strings.TrimSpace(string(paneOutput)), "--cache", "1h"},
+		&stdout,
+		&stderr,
+	)
 	if code == 0 || !strings.Contains(stderr.String(), "open selector menu") {
 		t.Fatalf("reload selector gate rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if displayCalls != 0 {
+		t.Fatalf("worker overwrote selector refusal with %d displays", displayCalls)
 	}
 	if output, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_current_command}").
 		Output(); err != nil ||

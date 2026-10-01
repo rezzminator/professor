@@ -568,23 +568,3 @@ func NewDirectClient(
 	}
 	return client
 }
-
-// IsPinnedClient reports whether client's transport is harvest's own pinned
-// direct dialer — userAgentTransport wrapping a *http.Transport whose
-// DialContext is pinnedDialContext — rather than a bare, unpinned transport.
-// It lets an adapter package (harvestmcp) assert its client was built via
-// NewDirectClient without reaching into harvest's unexported transport types.
-func IsPinnedClient(client *http.Client) bool {
-	if client == nil {
-		return false
-	}
-	wrapped, ok := client.Transport.(*userAgentTransport)
-	if !ok || wrapped.chrome {
-		return false
-	}
-	transport, ok := wrapped.base.(*http.Transport)
-	if !ok {
-		return false
-	}
-	return transport.DialContext != nil
-}

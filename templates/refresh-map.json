@@ -85,6 +85,9 @@
     "global/commands/tokens/token-audit.test.mjs": {
       "curated": true
     },
+    "global/commands/ultimate.md": {
+      "curated": true
+    },
     "global/skills/sources.json": {
       "curated": true
     },

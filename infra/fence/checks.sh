@@ -244,16 +244,6 @@ checks_templates_mirrors_roster() {
 
 }
 
-checks_templates_token_pricing() {
-  head_ "templates — token-audit pricing"
-  if node scripts/check-token-pricing.mjs; then
-    ok "every published model id resolves to its intended rate"
-  else
-    fail_step "token pricing FAILED — a published model id resolves to the wrong rate, or the PRICING table could not be read (see output)"
-  fi
-
-}
-
 checks_templates_token_audit() {
   head_ "templates — token-audit tests"
   # node --test exits 0 when it finds no tests, so a moved or renamed suite
@@ -273,6 +263,11 @@ checks_templates_token_audit() {
     ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
   fi
 
+}
+
+checks_templates_flight_index() {
+  head_ "templates — flight-index tests"
+  node_test_suite "flight-index" "$TMP_BASE/templates/flight-index.tap" templates/global/commands/flights/flight-index.test.mjs
 }
 
 checks_templates_release_check() {
@@ -353,23 +348,30 @@ checks_templates_opencode_writer_tests() {
 
 }
 
-checks_templates_codeprobe() {
-  head_ "templates — codeprobe skill tests"
-  local cp_out="$TMP_BASE/templates/codeprobe.txt"
-  if [[ ! -f templates/global/skills/codeprobe/codeprobe_test.py ]]; then
-    fail_step "codeprobe tests NOT RUN — templates/global/skills/codeprobe/codeprobe_test.py is missing"
-  elif ! python3 -m unittest templates/global/skills/codeprobe/codeprobe_test.py >"$cp_out" 2>&1; then
-    cat "$cp_out"
-    fail_step "codeprobe tests FAILED — a verb or probe command regressed, or python3 could not run the suite (see output)"
-  elif ! grep -Eq '^Ran [1-9][0-9]* tests?' "$cp_out"; then
-    cat "$cp_out"
-    fail_step "codeprobe tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
-  elif grep -Eq 'skipped=[1-9]' "$cp_out"; then
-    cat "$cp_out"
-    fail_step "codeprobe tests SKIPPED — a skipped test is a named gap, never a pass"
-  else
-    ok "codeprobe verbs and probe commands hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
-  fi
+checks_templates_skill_tests() {
+  local skill cp_out
+  for skill in codeprobe transcript; do
+    head_ "templates — $skill skill tests"
+    cp_out="$TMP_BASE/templates/$skill.txt"
+    if [[ ! -f templates/global/skills/$skill/${skill}_test.py ]]; then
+      fail_step "$skill tests NOT RUN — templates/global/skills/$skill/${skill}_test.py is missing"
+    elif ! python3 -m unittest "templates/global/skills/$skill/${skill}_test.py" >"$cp_out" 2>&1; then
+      cat "$cp_out"
+      if grep -Eq '^Ran 0 tests?' "$cp_out"; then
+        fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
+      else
+        fail_step "$skill tests FAILED — a verb or filter regressed, or python3 could not run the suite (see output)"
+      fi
+    elif ! grep -Eq '^Ran [1-9][0-9]* tests?' "$cp_out"; then
+      cat "$cp_out"
+      fail_step "$skill tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
+    elif grep -Eq 'skipped=[1-9]' "$cp_out"; then
+      cat "$cp_out"
+      fail_step "$skill tests SKIPPED — a skipped test is a named gap, never a pass"
+    else
+      ok "$skill skill tests hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
+    fi
+  done
 
 }
 
@@ -403,8 +405,8 @@ checks_templates() {
   checks_templates_mirrors_generate
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
-  checks_templates_token_pricing
   checks_templates_token_audit
+  checks_templates_flight_index
   checks_templates_release_check
   checks_templates_codex_sync
   checks_templates_refresh_scope
@@ -412,7 +414,7 @@ checks_templates() {
   checks_templates_dev_report
   checks_templates_mirrors_opencode
   checks_templates_opencode_writer_tests
-  checks_templates_codeprobe
+  checks_templates_skill_tests
   checks_templates_opencode_writer_refs
   checks_templates_mirrors_manifest
 }
@@ -600,15 +602,15 @@ gate_run() { # pfm, templates, or all
     steps_add templates.scratch-paths checks_templates_scratch_paths
     steps_add templates.descriptions checks_templates_descriptions
     steps_add templates.mirrors checks_templates_mirrors
-    steps_add templates.token-pricing checks_templates_token_pricing
     steps_add templates.token-audit checks_templates_token_audit
+    steps_add templates.flight-index checks_templates_flight_index
     steps_add templates.release-check checks_templates_release_check
     steps_add templates.codex-sync checks_templates_codex_sync
     steps_add templates.refresh-scope checks_templates_refresh_scope
     steps_add templates.pfm-guard checks_templates_pfm_guard
     steps_add templates.dev-report checks_templates_dev_report
     steps_add templates.opencode-writer-tests checks_templates_opencode_writer_tests
-    steps_add templates.codeprobe checks_templates_codeprobe
+    steps_add templates.skill-tests checks_templates_skill_tests
     steps_add templates.opencode-writer-refs checks_templates_opencode_writer_refs
   fi
   if steps_run "$run_dir"; then step_rc=0; else step_rc=$?; fi

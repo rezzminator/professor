@@ -2,6 +2,8 @@
 # mcp_stdio_exchange <want-id> <bound-s> <frames> <command...> — hold the
 # server's stdin open until its wanted JSON-RPC response arrives.
 # MCP_STDIO_GRACE_SECS sets the end-wait grace; production defaults to 2 s.
+# MCP_STDIO_END names how a started server ended: eof (on its own), term or
+# kill (the exchange ended it); empty when no server started.
 
 mcp_stdio_ticks() {
   local seconds="$1" whole tenth=0
@@ -18,7 +20,7 @@ mcp_stdio_grace_ticks() {
 mcp_stdio_exchange() {
   local want="$1" bound="$2" frames="$3" dir fifo out pid rc pipe_trap i bound_ticks grace_ticks grace alive
   shift 3
-  MCP_STDIO_WHY=""
+  MCP_STDIO_WHY="" MCP_STDIO_END=""
   if ! mcp_stdio_ticks "$bound"; then
     MCP_STDIO_WHY="bad bound: $bound"
     return 3
@@ -90,7 +92,14 @@ mcp_stdio_exchange() {
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.1
   done
-  kill -KILL "$pid" 2>/dev/null || true
+  if kill -0 "$pid" 2>/dev/null; then
+    MCP_STDIO_END=kill
+    kill -KILL "$pid" 2>/dev/null || true
+  elif [ "$rc" -eq 2 ]; then
+    MCP_STDIO_END=term
+  else
+    MCP_STDIO_END=eof
+  fi
   wait "$pid" 2>/dev/null || true
   cat "$out"
   rm -rf -- "$dir"

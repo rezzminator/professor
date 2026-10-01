@@ -513,7 +513,7 @@ func hasHTTPStatus(message string, codes ...string) bool {
 					break
 				}
 				remaining = remaining[index+len(marker):]
-				if len(remaining) == 0 || remaining[0] < '0' || remaining[0] > '9' {
+				if remaining == "" || remaining[0] < '0' || remaining[0] > '9' {
 					return true
 				}
 			}

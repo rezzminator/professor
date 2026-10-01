@@ -88,8 +88,9 @@ else bad "a failed rmi returns 0 to the caller"; fi
 PFM_DEV_WORKTREE="$T" PFM_DEV_GIT_COMMON="$T" PFM_DEV_GIT_DIR_REL=. lane_run lane-x pfm-lane-root:cafe01
 if grep -q -- '^run -d .*--label pfm.fence=1 .*pfm-lane-root:cafe01 sleep infinity$' "$STUB_DOCKER_LOG"; then ok "lane_run labels the container pfm.fence=1"
 else bad "lane_run labels the container pfm.fence=1" "$(cat "$STUB_DOCKER_LOG")"; fi
-if ! grep -q 'pfm-lane-harvest-cache\|pfm-lane-uv-cache' "$STUB_DOCKER_LOG"; then ok "lane run has no root-build download caches"
-else bad "lane run mounted a root-build cache" "$(cat "$STUB_DOCKER_LOG")"; fi
+volumes="$(grep '^run -d ' "$STUB_DOCKER_LOG" | grep -oE -- '-v [a-z][a-z0-9-]*:' | sed -e 's/^-v //' -e 's/:$//' | LC_ALL=C sort | tr '\n' ' ')"
+if [ "$volumes" = 'pfm-dev-gocache pfm-dev-gomod ' ]; then ok "lane run mounts exactly the go build and module cache volumes"
+else bad "lane run named volumes" "got '$volumes'" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 # 4 — run containers can disable networking; root builds keep docker's default.
 : >"$STUB_DOCKER_LOG"

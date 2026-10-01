@@ -58,18 +58,21 @@ if [ "$RC" -eq 1 ] && [ "$WALL" -lt 1000 ] && [ -z "$OUT" ] && [ "$WHY" = 'exite
   ok "empty server exits unanswered at once"
 else bad "empty reply" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
+# Upper wall bounds sit below the 2 s production grace, never at a load-sensitive
+# few hundred ms: they prove the 0.3 s bound and grace were honoured, not the
+# servers' 30 s sleep or the default grace, and hold under a loaded gate.
 exchange 0.3 silent
-if [ "$RC" -eq 2 ] && [ "$WALL" -ge 300 ] && [ "$WALL" -le 800 ] && [ "$WHY" = 'no answer in 0.3s' ]; then
+if [ "$RC" -eq 2 ] && [ "$WALL" -ge 300 ] && [ "$WALL" -lt 1900 ] && [ "$WHY" = 'no answer in 0.3s' ]; then
   ok "silent server is stopped at the bound"
 else bad "bounded silence" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
 exchange 1 lingering 0.3
-if [ "$RC" -eq 0 ] && [ "$WALL" -ge 300 ] && [ "$WALL" -le 800 ] && grep -q '"id":2' <<<"$OUT"; then
+if [ "$RC" -eq 0 ] && [ "$WALL" -ge 300 ] && [ "$WALL" -lt 1900 ] && grep -q '"id":2' <<<"$OUT"; then
   ok "an answered server that never ends on EOF is stopped, its reply kept"
 else bad "server lingering after EOF" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 
 exchange 0.3 stubborn 0.3
-if [ "$RC" -eq 2 ] && [ "$WALL" -ge 600 ] && [ "$WALL" -le 1100 ] && [ "$WHY" = 'no answer in 0.3s' ]; then
+if [ "$RC" -eq 2 ] && [ "$WALL" -ge 600 ] && [ "$WALL" -lt 2200 ] && [ "$WHY" = 'no answer in 0.3s' ]; then
   ok "a silent server that ignores TERM is killed after the bound"
 else bad "TERM-ignoring server" "rc=$RC wall=$WALL why=$WHY out=$OUT"; fi
 

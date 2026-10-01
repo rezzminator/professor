@@ -63,7 +63,10 @@ case "$1 ${2:-}" in
           echo 'cred-scan: ✗ CREDENTIAL-REFUSED /root/.codex/auth.json — not a registered fixture'
           exit 1
         fi ;;
-      *'test -e '*egress.ready*) [ "${STUB_EGRESS_READY:-1}" = 1 ] || exit 1 ;;
+      *'test -e '*egress.ready*)
+        # A slow daemon: each readiness probe costs real wall time.
+        [ -z "${STUB_EGRESS_READY_DELAY:-}" ] || command -p sleep "$STUB_EGRESS_READY_DELAY"
+        [ "${STUB_EGRESS_READY:-1}" = 1 ] || exit 1 ;;
       *'grep -q '^EGRESS*) [ -n "${STUB_EGRESS_VERDICT-PASS}" ] || exit 1 ;;
     esac
     exit 0 ;;
@@ -106,6 +109,9 @@ export LANE_ROOT_SH="$T/root-stub.sh"
 export LANE_OUT_ROOT="$T/out"
 export STUB_DOCKER_LOG="$T/docker.log"
 export STUB_ROOT_LOG="$T/root.log"
+# The stubbed sleep returns at once, so the egress bounds are wall time spent
+# polling the stub; one second each keeps the red cases short.
+export LANE_EGRESS_READY_SECS=1 LANE_EGRESS_VERDICT_SECS=1
 
 run_sut() { OUT="$(bash "$RUN" "$@" 2>&1)"; RC=$?; }
 
@@ -388,10 +394,25 @@ else bad "capture order and PASS" "rc=$RC" "$OUT" "$(cat "$T/docker.log")"; fi
 : >"$T/docker.log"
 STUB_EGRESS_READY=0 STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
 if [ "$RC" -eq 1 ] &&
-  grep -qF 'egress: ✗ NOT RECORDED — the capture did not start in 10s' <<<"$OUT" &&
+  grep -qF 'egress: ✗ NOT RECORDED — the capture did not start in 1s' <<<"$OUT" &&
   grep -q '/lanes/E1.sh' "$T/docker.log"; then
   ok "capture readiness timeout names NOT RECORDED and still runs the lane"
 else bad "capture readiness timeout" "rc=$RC" "$OUT"; fi
+
+# ---- 21b: the readiness bound is wall time; a slow docker exec cannot stretch it.
+started="${EPOCHREALTIME/./}"
+STUB_EGRESS_READY=0 STUB_EGRESS_READY_DELAY=0.3 STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+wall_ms=$(( (${EPOCHREALTIME/./} - started) / 1000 ))
+if [ "$RC" -eq 1 ] && [ "$wall_ms" -lt 5000 ] &&
+  grep -qF 'egress: ✗ NOT RECORDED — the capture did not start in 1s' <<<"$OUT"; then
+  ok "a 1 s readiness bound holds against 0.3 s readiness probes"
+else bad "readiness bound under slow probes" "rc=$RC wall=${wall_ms}ms" "$OUT"; fi
+
+# ---- 21c: a bound that is not whole seconds is refused at entry.
+LANE_EGRESS_READY_SECS=1.5 run_sut --lanes E1
+if [ "$RC" -eq 2 ] && grep -qF "take whole seconds, not '1.5'" <<<"$OUT"; then
+  ok "a fractional egress bound is refused at entry"
+else bad "egress bound validation" "rc=$RC" "$OUT"; fi
 
 # ---- 22: capture FAIL carries its DNS detail and fails the run.
 fail_output=$'EGRESS FAIL 1 DNS queries, 0 outside destinations (fixture.pcap)\n  dns www.rfc-editor.org ×1 first 12:00:00Z'
@@ -411,7 +432,7 @@ else bad "capture NOT RECORDED" "rc=$RC" "$OUT"; fi
 # ---- 24: a capture that never writes a verdict is named and red.
 STUB_EGRESS_VERDICT='' STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
 if [ "$RC" -eq 1 ] &&
-  [ "$(tail -1 <<<"$OUT")" = 'egress: ✗ NOT RECORDED — no verdict from egress.sh in 30s' ]; then
+  [ "$(tail -1 <<<"$OUT")" = 'egress: ✗ NOT RECORDED — no verdict from egress.sh in 1s' ]; then
   ok "missing verdict is named and exits red"
 else bad "capture missing verdict" "rc=$RC" "$OUT"; fi
 

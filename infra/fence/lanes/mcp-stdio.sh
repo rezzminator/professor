@@ -84,7 +84,7 @@ mcp_stdio_exchange() {
   exec 3>&-
   if [ "$rc" -eq 2 ]; then kill "$pid" 2>/dev/null || true; fi
   # POLL-STEP: the server ends on EOF, or on the TERM above. One still running
-  # The configured grace later it is killed: the end wait stays bounded.
+  # the configured grace later is killed: the end wait stays bounded.
   for ((i=0; i<grace_ticks; i++)); do
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.1

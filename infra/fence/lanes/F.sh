@@ -732,7 +732,7 @@ if requires; then
     tui_wait 10 "find › $CC" || bad="$bad T18 typing did not reach the query line: $(one_line "$(tui_pane | grep -F 'find ›')");"
     tui_has "› ● $CC" || bad="$bad T18 the query '$CC' did not select the $CC row: $(one_line "$(tui_selected)");"
     tui_send BSpace
-    wait_for 10 "tui_has 'find › F_C ' || tui_has 'find › F_C'" || bad="$bad T18 backspace did not delete one char: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
+    wait_for 10 "tui_has 'find › F_C' && ! tui_has 'find › $CC'" || bad="$bad T18 backspace did not delete one char: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
     tui_keys C-h
     tui_has 'find › F_' && ! tui_has 'find › F_C' || bad="$bad T18 ⌃H did not delete one char: $(one_line "$(tui_pane | grep -F 'find ›')");"
     tui_type "x y"
@@ -742,7 +742,7 @@ if requires; then
     wait_for 10 "grep -Eq 'find › type project or name +[0-9]+/[0-9]+ visible' <<<\"\$(tui_pane)\"" || bad="$bad T18 ⌃U did not clear the query: $(one_line "$(tui_pane | grep -F 'find ›')") $LANE_WAIT_WHY;"
     # T11: left/right walk the carousel on the selected live row.
     tui_send_text "$CC"
-    tui_wait 10 '◖▶ open◗' || bad="$bad T11 the selected row shows no ◖▶ open◗ carousel: $(one_line "$(tui_selected)");"
+    wait_for 10 "tui_has 'find › $CC' && tui_has '◖▶ open◗'" || bad="$bad T11 the selected row shows no ◖▶ open◗ carousel: $(one_line "$(tui_selected)");"
     tui_send Right
     tui_wait 10 '◖⚡ reboot◗' || bad="$bad T11 right did not move the carousel to reboot: $(one_line "$(tui_selected)");"
     tui_send Right
@@ -806,20 +806,21 @@ if requires; then
     [ -n "$last" ] && [ "$last" != "$first" ] || bad="$bad T17 end did not move to the last row;"
     tui_send Home
     wait_for 10 "[ \"\$(tui_selected)\" = '$first' ]" || bad="$bad T17 home did not return to the first row: $LANE_WAIT_WHY;"
-    tui_keys NPage; tui_send PPage
-    wait_for 10 '[ -n "$(tui_selected)" ]' || bad="$bad T17 pgdown/pgup left no selected row: $LANE_WAIT_WHY;"
+    # A survival check is true before its key lands: settle, never a wait.
+    tui_keys NPage; tui_keys PPage
+    [ -n "$(tui_selected)" ] || bad="$bad T17 pgdown/pgup left no selected row;"
     # T19/T5: Stats — every live chat where expected, focus walk, c/m sorts.
     tui_send Tab
     tui_wait 10 'CPU%' || bad="$bad T5 the Stats columns (NAME ENGINE CPU%) did not render;"
     tui_has 'NAME' && tui_has 'ENGINE' && tui_has 'CPU%' || bad="$bad T5 the Stats columns (NAME ENGINE CPU%) did not render;"
     tui_wait 8 "$CC" || bad="$bad T5 $CC never appeared in the Stats rows: $(one_line "$(tui_pane | sed -n 5,12p)");"
-    tui_keys Down; tui_keys Down; tui_type c; tui_type m; tui_send Up
-    wait_for 10 "tui_has 'CPU%' && tui_has 'c CPU sort'" || bad="$bad T19 after ↓↓ c m ↑ the Stats frame lost its header or footer: $LANE_WAIT_WHY;"
+    tui_keys Down; tui_keys Down; tui_type c; tui_type m; tui_keys Up
+    tui_has 'CPU%' && tui_has 'c CPU sort' || bad="$bad T19 after ↓↓ c m ↑ the Stats frame lost its header or footer;"
     # T20/T6: Limits — a card per seat, scroll keys survive.
     tui_send Tab
     tui_wait 20 "account $SEAT" || bad="$bad T6 no Limits card for 'account $SEAT' in 20s: $(one_line "$(tui_pane | sed -n 4,12p)");"
-    tui_keys Down; tui_keys Up; tui_keys NPage; tui_keys PPage; tui_keys Home; tui_send End
-    tui_wait 10 'Limits · live usage windows' || bad="$bad T20 the Limits frame did not survive its scroll keys: $(one_line "$(tui_pane | sed -n 1,4p)");"
+    tui_keys Down; tui_keys Up; tui_keys NPage; tui_keys PPage; tui_keys Home; tui_keys End
+    tui_has 'Limits · live usage windows' || bad="$bad T20 the Limits frame did not survive its scroll keys: $(one_line "$(tui_pane | sed -n 1,4p)");"
     # T21-T27/T7: cosmos — selection, focus, classic sky, scrub, play, now.
     tui_send Tab
     wait_for 10 "tui_has 'cosmos ·' && tui_has edges" ||
@@ -827,8 +828,8 @@ if requires; then
     tui_has 'cosmos ·' && tui_has 'edges' || bad="$bad T7 the cosmos census line did not render;"
     tui_send_text j
     tui_wait 10 'cosmos  ▸ ' || bad="$bad T22 j did not select a star (no ▸ HUD): $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
-    tui_send_text k
-    tui_wait 10 'cosmos  ▸ ' || bad="$bad T22 k lost the selection HUD: $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
+    tui_type k
+    tui_has 'cosmos  ▸ ' || bad="$bad T22 k lost the selection HUD: $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
     tui_send_text s
     tui_wait 10 '⌖' || bad="$bad T24 s did not focus a system (no ⌖): $(one_line "$(tui_pane | grep -F cosmos | head -2)");"
     tui_type o
@@ -838,7 +839,7 @@ if requires; then
     tui_send_text '['
     wait_for 10 "tui_has '⟲' && tui_has '5m'" || bad="$bad T25 [ did not scrub 5 minutes back (no ⟲ … −5m chip): $(one_line "$(tui_pane | grep -F '⟲')") $LANE_WAIT_WHY;"
     tui_send_text '{'
-    wait_for 10 "tui_has '⟲' && tui_has '1h'" || bad="$bad T25 { did not scrub an hour back: $(one_line "$(tui_pane | grep -F '⟲')") $LANE_WAIT_WHY;"
+    wait_for 10 "grep -qE '⟲.*−1h' <<<\"\$(tui_pane)\"" || bad="$bad T25 { did not scrub an hour back: $(one_line "$(tui_pane | grep -F '⟲')") $LANE_WAIT_WHY;"
     # A paused playhead keeps its instant while now moves on, so ] } only land
     # back on the moment [ was pressed, seconds behind now (⟲ … −0m); space
     # there resumes a seconds-long replay that 60× plays out in ~70ms, faster

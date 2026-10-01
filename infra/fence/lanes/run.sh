@@ -59,6 +59,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$ROOT_MODE" in reuse|rebuild) ;; *) echo "run: --root takes reuse|rebuild, not '$ROOT_MODE'" >&2; exit 2 ;; esac
+# The egress capture's start and verdict bounds, in whole seconds of wall time
+# (a self-test shortens them); each is judged from $EPOCHREALTIME, so a slow
+# docker exec cannot stretch the named bound.
+EGRESS_READY_SECS="${LANE_EGRESS_READY_SECS:-10}" EGRESS_VERDICT_SECS="${LANE_EGRESS_VERDICT_SECS:-30}"
+for bound in "$EGRESS_READY_SECS" "$EGRESS_VERDICT_SECS"; do
+  [[ "$bound" =~ ^[0-9]+$ ]] || { echo "run: LANE_EGRESS_READY_SECS and LANE_EGRESS_VERDICT_SECS take whole seconds, not '$bound'" >&2; exit 2; }
+done
 
 root_sh() { bash "$ROOT_SH" "$@"; }
 
@@ -255,11 +262,14 @@ printf -v egress_command 'PFM_TEST_TIMING_DIR=%q bash /worktree/infra/fence/egre
 egress_ready=0
 if docker exec "$CNAME" mkdir -p "$CONT_OUT" &&
   docker exec -d "$CNAME" bash -c "$egress_command"; then
-  for ((i=0; i<50; i++)); do
+  deadline=$(( ${EPOCHREALTIME/./} + EGRESS_READY_SECS * 1000000 ))
+  while :; do
     if docker exec "$CNAME" test -e "$CONT_OUT/egress.ready"; then
       egress_ready=1
       break
     fi
+    [ "${EPOCHREALTIME/./}" -lt "$deadline" ] || break
+    # POLL-STEP: the capture's ready file.
     sleep 0.2
   done
 fi
@@ -285,8 +295,11 @@ done
 
 egress_stop_error="" egress_evidence_error="" egress_verdict=""
 docker exec "$CNAME" touch "$CONT_OUT/egress.stop" || egress_stop_error="egress: could not stop the capture"
-for ((i=0; i<150; i++)); do
+deadline=$(( ${EPOCHREALTIME/./} + EGRESS_VERDICT_SECS * 1000000 ))
+while :; do
   docker exec "$CNAME" grep -q '^EGRESS ' "$CONT_OUT/egress.out" && break
+  [ "${EPOCHREALTIME/./}" -lt "$deadline" ] || break
+  # POLL-STEP: the capture's verdict line.
   sleep 0.2
 done
 if docker cp "$CNAME:$CONT_OUT/egress.out" "$OUT/egress.out" >/dev/null 2>&1; then
@@ -394,14 +407,14 @@ status=0
 [ -n "$unmapped" ] && status=1
 [ -n "$log_absent" ] && status=1
 [ "$budget_reds" -gt 0 ] && { say "run: ✗ $budget_reds budget verdict(s) red"; status=1; }
-[ "$egress_ready" -eq 0 ] && { say 'egress: ✗ NOT RECORDED — the capture did not start in 10s'; status=1; }
+[ "$egress_ready" -eq 0 ] && { say "egress: ✗ NOT RECORDED — the capture did not start in ${EGRESS_READY_SECS}s"; status=1; }
 [ -n "$egress_stop_error" ] && { say "$egress_stop_error"; status=1; }
 [ -n "$egress_evidence_error" ] && say "$egress_evidence_error"
 if [ -n "$egress_verdict" ]; then
   case "$egress_verdict" in EGRESS\ PASS\ *) ;; *) status=1 ;; esac
   awk '/^EGRESS / { verdict=$0; next } { print } END { print verdict }' "$OUT/egress.out"
 else
-  say 'egress: ✗ NOT RECORDED — no verdict from egress.sh in 30s'
+  say "egress: ✗ NOT RECORDED — no verdict from egress.sh in ${EGRESS_VERDICT_SECS}s"
   status=1
 fi
 exit "$status"

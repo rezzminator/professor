@@ -268,7 +268,7 @@ else bad "empty fleet gate" "rc=$RC" "$OUT"; fi
 
 # 6 — the hash follows on-disk build content, never index or commit state.
 H="$T/hash-repo"
-mkdir -p "$H/infra/fence/lanes" "$H/pfm/internal/alpha/testdata" "$H/pfm/testdata" "$H/pfm/e2e" "$H/pfm/internal/harvestpy/assets"
+mkdir -p "$H/infra/fence/lanes" "$H/infra/fence/jscpd" "$H/pfm/internal/alpha/testdata" "$H/pfm/testdata" "$H/pfm/e2e" "$H/pfm/internal/harvestpy/assets"
 cp "$SUT" "$H/infra/fence/lanes/root.sh"
 cp "$LANES/container.sh" "$H/infra/fence/lanes/container.sh"
 cp "$LANES/../fence-env.sh" "$H/infra/fence/fence-env.sh"
@@ -276,6 +276,7 @@ cp "$R/infra/fence/housekeeping.sh" "$H/infra/fence/housekeeping.sh"
 for script in provision adopt cred-scan; do cp "$R/infra/fence/lanes/$script.sh" "$H/infra/fence/lanes/$script.sh"; done
 for file in E1.sh lib.sh beats.md; do printf 'fixture\n' >"$H/infra/fence/lanes/$file"; done
 printf 'module example.test/pfm\n' >"$H/pfm/go.mod"
+printf '{}\n' >"$H/infra/fence/jscpd/package-lock.json"
 printf 'test\n' >"$H/pfm/internal/alpha/x_test.go"
 printf 'fixture\n' >"$H/pfm/internal/alpha/testdata/input"
 printf 'fixture\n' >"$H/pfm/testdata/input"
@@ -283,11 +284,11 @@ printf 'e2e\n' >"$H/pfm/e2e/example.go"
 printf 'test\n' >"$H/pfm/internal/harvestpy/assets/example_test.py"
 (cd "$H" && git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture)
 base="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
-for file in infra/fence/lanes/E1.sh infra/fence/lanes/lib.sh infra/fence/lanes/beats.md infra/fence/lanes/Z.sh infra/fence/lanes/provision.sh pfm/go.mod pfm/internal/alpha/x_test.go pfm/internal/alpha/testdata/input pfm/testdata/input pfm/e2e/example.go pfm/internal/harvestpy/assets/example_test.py; do
+for file in infra/fence/lanes/E1.sh infra/fence/lanes/lib.sh infra/fence/lanes/beats.md infra/fence/lanes/Z.sh infra/fence/lanes/provision.sh infra/fence/jscpd/package-lock.json pfm/go.mod pfm/internal/alpha/x_test.go pfm/internal/alpha/testdata/input pfm/testdata/input pfm/e2e/example.go pfm/internal/harvestpy/assets/example_test.py; do
   printf 'edit\n' >>"$H/$file"
   changed="$(bash "$H/infra/fence/lanes/root.sh" --print-hash)"
   case "$file" in
-    infra/fence/lanes/provision.sh|pfm/go.mod) expected=different ;;
+    infra/fence/lanes/provision.sh|infra/fence/jscpd/package-lock.json|pfm/go.mod) expected=different ;;
     *) expected=equal ;;
   esac
   if { [ "$expected" = equal ] && [ "$changed" = "$base" ]; } ||

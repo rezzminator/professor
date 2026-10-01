@@ -217,7 +217,8 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 			}
 			got, continued, adopted, err := adoptHandoff(request, record, time.Unix(1, 0), dir)
 			if tc.wantRefuse {
-				if err == nil || !strings.Contains(err.Error(), "new Codex conversation whose id is not known yet") || adopted {
+				if err == nil || !strings.Contains(err.Error(), "new Codex conversation whose id is not known yet") ||
+					adopted {
 					t.Fatalf("refusal adopted=%t err=%v", adopted, err)
 				}
 				return

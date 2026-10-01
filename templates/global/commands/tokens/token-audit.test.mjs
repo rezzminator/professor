@@ -169,7 +169,9 @@ test("--flight: the long-context premium is a per-model PRICING rate, not a flat
   const f = flight("flight");
   const m = /this flight reads \$([\d.]+) \(([\d.]+)x the headline\)/.exec(f.md);
   assert.ok(m, `no cross-check ratio in:\n${f.md}`);
-  assert.ok(+m[2] > 1, `a run whose context passed 200K must lift the long-context number above 1.00x, got ${m[2]}x`);
+  // claude-sonnet-5 and gpt-5.6-sol bill their whole window at standard rates (PRICING 1/1),
+  // so a run past 200K reads 1.00x; a flat long-context constant would lift it above.
+  assert.equal(m[2], "1.00", `a 1/1 PRICING row must leave the long-context number at 1.00x, got ${m[2]}x`);
 });
 
 test("--flight: with no agents.tsv, run.md is the fallback and every row is marked window", () => {
@@ -277,7 +279,7 @@ const tlHeader = (out) => out.split("\n").find((l) => l.startsWith("TIMELINE "))
 
 test("--timeline: one row per distinct model call, however many assistant lines a call spans", () => {
   const lines = fs.readFileSync(TL_PRICED, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((o) => o.type === "assistant");
-  const calls = new Set(lines.map((o) => o.message.id + "|" + o.requestId)).size;
+  const calls = new Set(lines.map((o) => o.message.id)).size;
   assert.ok(lines.length > calls, "the fixture must split at least one call across several assistant lines");
   const r = runTl(["--timeline", TL_PRICED]);
   assert.equal(r.code, 0, r.err);
@@ -438,4 +440,94 @@ test("default report: a mixed run's 1-hour share clamps to 1..99, never 0% or 10
   assert.match(hi, /ttl 1h 99%/, `near-all-1h run rounds to 100% unclamped: ${JSON.stringify(hi)}`);
   assert.doesNotMatch(lo, /ttl 1h 0%/);
   assert.doesNotMatch(hi, /ttl 1h 100%/);
+});
+
+// ---------- pricing: every Claude token column at its published per-MTok rate
+// cost = input×In + output×Out + ephemeral_5m×W5m + ephemeral_1h×W1h + cache_read×Hit, ÷1e6,
+// once per message.id, at that response's own model. Each case is one synthetic root; the
+// --out JSON's usd/tok carry the five billing columns (in, out, cw5, cw1, cr) for the scan.
+function priceRoot(name, sessions) {
+  const root = fs.mkdtempSync(path.join(TMP, `price-${name}-`)), dir = path.join(root, "-tmp-price-proj");
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [sid, calls] of Object.entries(sessions)) {
+    const lines = [{ type: "custom-title", customTitle: `price ${sid}`, cwd: "/tmp/price-proj" }];
+    calls.forEach((c, i) => {
+      const blocks = c.blocks || [{ type: "text", text: "step" }], reqs = c.reqs || blocks.map(() => `req-${c.id}`);
+      blocks.forEach((b, k) => lines.push({ type: "assistant", timestamp: `2026-09-20T09:0${i}:00.000Z`, cwd: "/tmp/price-proj", requestId: reqs[k], effort: "medium",
+        message: { id: c.id, model: c.model, content: [b], usage: c.usage } }));
+    });
+    fs.writeFileSync(path.join(dir, `${sid}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  }
+  return root;
+}
+function priced(root) {
+  const js = path.join(TMP, `price-${Math.random().toString(36).slice(2)}.json`);
+  const r = run(["--since", "99999d", "--root", root, "--out", js]);
+  assert.equal(r.code, 0, r.err);
+  return { ...r, j: JSON.parse(fs.readFileSync(js, "utf8")) };
+}
+const near = (got, want, what) => assert.ok(Math.abs(got - want) < 1e-9, `${what}: got ${got}, want ${want}`);
+const cols = (j, want) => { for (const k of ["in", "out", "cw5", "cw1", "cr"]) near(j.usd[k], want[k] ?? 0, `usd.${k}`); near(j.total, Object.values(want).reduce((a, b) => a + b, 0), "total"); };
+
+test("pricing: an Opus 5.5 response writing both TTLs bills each column at its own rate, once per message.id", () => {
+  const { j } = priced(priceRoot("opus55", { s: [{ id: "msg-o55", model: "claude-opus-5-5", blocks: [{ type: "thinking", thinking: "" }, { type: "text", text: "done" }],
+    usage: { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 100000, cache_creation_input_tokens: 30000,
+      cache_creation: { ephemeral_5m_input_tokens: 10000, ephemeral_1h_input_tokens: 20000 } } }] }));
+  // 1000×$4 + 2000×$20 + 10000×$5 + 20000×$8 + 100000×$0.20 = $0.274, not doubled by the second block line
+  cols(j, { in: 0.004, out: 0.04, cw5: 0.05, cw1: 0.16, cr: 0.02 });
+  assert.equal(j.calls, 1);
+  assert.equal(j.tok.cw5, 10000);
+  assert.equal(j.tok.cw1, 20000);
+});
+
+test("pricing: a Fable 5.1 cache read bills $0.25/MTok, a Fable 5 read $1.00/MTok", () => {
+  const usage = { input_tokens: 100, output_tokens: 500, cache_read_input_tokens: 1000000, cache_creation_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 } };
+  cols(priced(priceRoot("fable51", { s: [{ id: "msg-f51", model: "claude-fable-5-1", usage }] })).j, { in: 0.001, out: 0.025, cr: 0.25 });
+  cols(priced(priceRoot("fable5", { s: [{ id: "msg-f5", model: "claude-fable-5", usage }] })).j, { in: 0.001, out: 0.025, cr: 1.0 });
+});
+
+test("pricing: a cache write with no 5m/1h breakdown bills as 5-minute and the gaps line says so", () => {
+  const { j, out } = priced(priceRoot("nosplit", { s: [{ id: "msg-h45", model: "claude-haiku-4-5-20251001",
+    usage: { input_tokens: 200, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 40000 } }] }));
+  // 200×$1 + 300×$5 + 40000×$1.25 = $0.0517
+  cols(j, { in: 0.0002, out: 0.0015, cw5: 0.05 });
+  assert.equal(j.tok.cw5, 40000);
+  assert.equal(j.tok.cw1, 0);
+  assert.match(out, /^data gaps:.*1 cache writes with no 5m\/1h split \(priced as 5m\)/m);
+});
+
+test("pricing: ephemeral_5m_input_tokens is read on its own, not derived from the total", () => {
+  const { j, out } = priced(priceRoot("b5only", { s: [{ id: "msg-s46", model: "claude-sonnet-4-6",
+    usage: { input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 8000, ephemeral_1h_input_tokens: 2000 } } }] }));
+  // 10×$3 + 10×$15 + 8000×$3.75 + 2000×$6 = $0.04218; total minus 1h would drop the 5m $0.03
+  cols(j, { in: 0.00003, out: 0.00015, cw5: 0.03, cw1: 0.012 });
+  assert.doesNotMatch(out, /no 5m\/1h split/);
+});
+
+test("pricing: a response with zero top-level counts is priced from usage.iterations, never dropped as synthetic", () => {
+  const { j, out } = priced(priceRoot("iters", { s: [{ id: "msg-it", model: "claude-opus-5-5",
+    usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1045 },
+      iterations: [{ type: "message", input_tokens: 2, output_tokens: 1098, cache_read_input_tokens: 453328, cache_creation_input_tokens: 1045, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1045 } }] } }] }));
+  // 2×$4 + 1098×$20 + 1045×$8 + 453328×$0.20 = $0.1209936
+  cols(j, { in: 0.000008, out: 0.02196, cw1: 0.00836, cr: 0.0906656 });
+  assert.doesNotMatch(out, /synthetic/);
+});
+
+test("pricing: a response copied into a forked session's transcript is billed once", () => {
+  const shared = { id: "msg-shared", model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } };
+  const own = (id, n) => ({ id, model: "claude-sonnet-5", usage: { input_tokens: n, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } });
+  const { j, out } = priced(priceRoot("fork", { "sess-a": [shared, own("msg-a", 2000)], "sess-b": [shared, own("msg-b", 3000)] }));
+  // (1000 + 2000 + 3000)×$2 + 100×$10 = $0.013; counting the copy again would read $0.016
+  cols(j, { in: 0.012, out: 0.001 });
+  assert.equal(j.calls, 3);
+  assert.match(out, /^data gaps:.*1 calls copied from another transcript/m);
+});
+
+test("pricing: content-block lines of one message.id are one call even when a line lacks its requestId", () => {
+  const { j } = priced(priceRoot("noreq", { s: [{ id: "msg-h35", model: "claude-3-5-haiku-20241022", blocks: [{ type: "thinking", thinking: "" }, { type: "text", text: "a" }, { type: "text", text: "b" }],
+    reqs: ["req-h35", "req-h35", undefined],
+    usage: { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 10000, cache_creation_input_tokens: 1000, cache_creation: { ephemeral_5m_input_tokens: 500, ephemeral_1h_input_tokens: 500 } } }] }));
+  // Haiku 3.5: 1000×$0.80 + 1000×$4 + 500×$1 + 500×$1.60 + 10000×$0.08 = $0.0069
+  cols(j, { in: 0.0008, out: 0.004, cw5: 0.0005, cw1: 0.0008, cr: 0.0008 });
+  assert.equal(j.calls, 1);
 });

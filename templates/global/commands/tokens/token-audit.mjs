@@ -41,37 +41,63 @@ if (TL) { if (FLIGHT || CODEX || PROJECT || argv.includes("--since")) die("--tim
 // Columns: [substring, input, output, cachedInput, longCtxInMult?, longCtxOutMult?]
 //   cachedInput  — Claude: the cache-READ rate. Codex: the cached_input rate (cached
 //                  input is a SUBSET of input there); Claude cache WRITES bill at
-//                  1.25x input (5-minute TTL) or 2x (1-hour TTL), computed below.
-//   longCtx*     — ESTIMATE, not a published per-model number: the multiplier applied
-//                  to a call whose context exceeds LONG_CTX_TOKENS. Claude publishes a
-//                  2x-input / 1.5x-output long-context tier; this table carries it per
-//                  model so a re-priced tier is a one-row edit. It feeds the CROSS-CHECK
-//                  line only — the headline totals never include it.
+//                  1.25x input (5-minute TTL) or 2x (1-hour TTL) on every Claude model,
+//                  derived in RATE as w5/w1 — never a column, so they cannot drift.
+//   longCtx*     — the multiplier applied to a call whose context exceeds
+//                  LONG_CTX_TOKENS. Claude bills 4.6 and later models across the full 1M
+//                  window at standard rates (1/1); older rows keep a 2x-input / 1.5x-output
+//                  ESTIMATE. Carried per model so a re-priced tier is a one-row edit. It
+//                  feeds the CROSS-CHECK line only — the headline totals never include it.
+// Rates as published 2026-09-30: platform.claude.com/docs/en/about-claude/pricing and
+// developers.openai.com/api/docs/pricing (standard tier).
 const PRICING = [
   ["opus-4-1", 15.0, 75.0, 1.5, 2, 1.5], // deprecated Opus 4.1-era tier
   ["opus-4-20", 15.0, 75.0, 1.5, 2, 1.5], // Opus 4.0 ids carry no minor digit: claude-opus-4-<date>
+  ["opus-4@", 15.0, 75.0, 1.5, 2, 1.5], // Opus 4.0 in Vertex form: claude-opus-4@<date>
   ["opus-5-5", 4.0, 20.0, 0.2, 1, 1], // cache reads 0.05x input; no long-context tier
-  ["opus", 5.0, 25.0, 0.5, 2, 1.5], // current tier: opus-5, opus-4-8 … opus-4-5
-  ["sonnet-4", 3.0, 15.0, 0.3, 2, 1.5],
+  ["opus", 5.0, 25.0, 0.5, 1, 1], // opus-5, opus-4-8 … opus-4-5; 4.6+ bill 1M at standard rates
+  ["sonnet-4-6", 3.0, 15.0, 0.3, 1, 1],
+  ["sonnet-4", 3.0, 15.0, 0.3, 2, 1.5], // sonnet-4-5, sonnet-4
   ["sonnet-5-5", 2.0, 10.0, 0.2, 1, 1], // no long-context tier
-  ["sonnet-5", 2.0, 10.0, 0.2, 2, 1.5],
+  ["sonnet-5", 2.0, 10.0, 0.2, 1, 1],
   ["sonnet", 3.0, 15.0, 0.3, 2, 1.5], // older sonnet catch-all (3.7 etc.)
   ["haiku-4-5", 1.0, 5.0, 0.1, 2, 1.5],
   ["haiku", 0.8, 4.0, 0.08, 2, 1.5], // haiku 3.5/3 catch-all
-  ["fable-5-1", 10.0, 50.0, 0.25, 2, 1.5], // 5.1 cache reads bill at 0.025x input, not 0.1x
-  ["mythos-5-1", 10.0, 50.0, 0.25, 2, 1.5],
-  ["fable", 10.0, 50.0, 1.0, 2, 1.5],
-  ["mythos", 10.0, 50.0, 1.0, 2, 1.5],
-  // Codex CLI. Published standard-tier rates; reasoning bills as output; cache-write is
-  // always 0. Fast mode (2x) and Batch/Flex (0.5x) are not modelled, and the long-context
+  ["fable-5-1", 10.0, 50.0, 0.25, 1, 1], // 5.1 cache reads bill at 0.025x input, not 0.1x
+  ["mythos-5-1", 10.0, 50.0, 0.25, 1, 1],
+  ["fable", 10.0, 50.0, 1.0, 1, 1],
+  ["mythos", 10.0, 50.0, 1.0, 1, 1],
+  // Codex CLI. Published standard-tier rates; reasoning bills as output. A rollout carries
+  // no cache-write count, so writes (billed 1.25x input on astra, sol and luna) price as
+  // plain input. Fast mode (2x) and Batch/Flex (0.5x) are not modelled, and the long-context
   // overage never applies while the Codex window stays under its 272K threshold — hence 1/1.
   ["gpt-6-astra", 10.0, 50.0, 1.0, 1, 1],
-  ["gpt-5.6-sol", 4.0, 20.0, 0.4, 1, 1], // promotional rate
+  ["gpt-6.1-sol", 2.0, 10.0, 0.1, 1, 1],
+  ["gpt-6-sol", 2.0, 10.0, 0.2, 1, 1],
+  ["gpt-5.6-sol", 4.0, 20.0, 0.4, 1, 1], // promotional rate, through at least 2026-11-21
   ["gpt-5.6-luna", 0.2, 1.2, 0.02, 1, 1],
+  ["gpt-5.6-terra", 2.0, 12.0, 0.2, 1, 1],
+  ["gpt-5.4", 2.5, 15.0, 0.25, 1, 1], // also catches gpt-5.4-mini/-nano/-pro, which price differently
+  ["gpt-5.3-codex", 1.75, 14.0, 0.175, 1, 1],
 ];
 const LONG_CTX_TOKENS = 200000;
 const RATE = (m) => { const id = String(m || "").toLowerCase(); const row = PRICING.find(([sub]) => id.includes(sub)); if (!row) return null;
   return { in: row[1], out: row[2], rd: row[3], w5: row[1] * 1.25, w1: row[1] * 2, lcIn: row[4], lcOut: row[5] }; };
+// One response's usage as billed. A response can carry zeros in every top-level count and its
+// real counts only in usage.iterations[] (seen on claude-opus-5-5, 2026-09); otherwise the top
+// level already equals the iterations' sum and is used as is.
+const TOP4 = (u) => (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+function usageOf(u) {
+  if (TOP4(u) || !Array.isArray(u.iterations) || !u.iterations.length) return u;
+  const s = { ...u, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 } };
+  for (const it of u.iterations) { s.input_tokens += it.input_tokens || 0; s.output_tokens += it.output_tokens || 0; s.cache_read_input_tokens += it.cache_read_input_tokens || 0;
+    s.cache_creation_input_tokens += it.cache_creation_input_tokens || 0; s.cache_creation.ephemeral_5m_input_tokens += it.cache_creation?.ephemeral_5m_input_tokens || 0; s.cache_creation.ephemeral_1h_input_tokens += it.cache_creation?.ephemeral_1h_input_tokens || 0; }
+  return s; }
+// Cache writes by TTL: ephemeral_5m and ephemeral_1h are read separately; any part of
+// cache_creation_input_tokens the breakdown does not cover (no cache_creation object, or a
+// short one) is the default 5-minute TTL. split=false: a write that carried no breakdown.
+function writesOf(u) { const all = u.cache_creation_input_tokens || 0, b5 = u.cache_creation?.ephemeral_5m_input_tokens || 0, b1 = u.cache_creation?.ephemeral_1h_input_tokens || 0;
+  return { cw5: b5 + Math.max(0, all - b5 - b1), cw1: b1, split: b5 + b1 > 0 }; }
 const shortModel = (m) => (m || "?").replace(/^claude-/, "").replace(/-\d{8}$/, "");
 
 // ---------- categories: what a carried token is made of
@@ -105,7 +131,7 @@ function roots() {
   if (!out.length) die("no transcript root found; pass --root DIR");
   return out;
 }
-const SCAN = { roots: [], files: 0, skippedOld: 0, dupFiles: 0, badLines: 0, noTimestamp: 0, unpricedCalls: 0, unpricedModels: {}, tierUnknownCalls: 0, syntheticCalls: 0, readErrors: [], notes: [] };
+const SCAN = { roots: [], files: 0, skippedOld: 0, dupFiles: 0, badLines: 0, noTimestamp: 0, unpricedCalls: 0, unpricedModels: {}, tierUnknownCalls: 0, syntheticCalls: 0, copiedCalls: 0, readErrors: [], notes: [] };
 // Every dropped, unpriced or unreadable thing reaches the reader on ONE line. A count
 // that exists only in --out JSON is a gap the text report claims not to have; the
 // synthetic-call drop used to be exactly that.
@@ -116,6 +142,7 @@ function gapsLine() {
   if (SCAN.syntheticCalls) loud.push(`${SCAN.syntheticCalls} synthetic/zero-usage calls (dropped: the harness billed nothing for them)`);
   if (SCAN.unpricedCalls) loud.push(`${SCAN.unpricedCalls} UNPRICED calls ${JSON.stringify(SCAN.unpricedModels)} — tokens counted, dollars "n/a"; add the model to PRICING`);
   if (SCAN.tierUnknownCalls) loud.push(`${SCAN.tierUnknownCalls} cache writes with no 5m/1h split (priced as 5m)`);
+  if (SCAN.copiedCalls) loud.push(`${SCAN.copiedCalls} calls copied from another transcript (forked/resumed session) — billed once, in the first transcript scanned`);
   if (SCAN.dupFiles) loud.push(`${SCAN.dupFiles} duplicate files skipped`);
   // notes are bounded: a per-row note on a 200-agent flight must not become the report
   for (const n of SCAN.notes.slice(0, 4)) loud.push(n);
@@ -150,6 +177,8 @@ const bump2 = (o, k, f, v) => { (o[k] ??= {})[f] = (o[k][f] || 0) + v; };
 const G = { usd: { in: 0, out: 0, cw5: 0, cw1: 0, cr: 0 }, tok: { in: 0, out: 0, cw5: 0, cw1: 0, cr: 0, think: 0 }, calls: 0,
   cats: new Float64Array(CATS.length), bands: {}, modelEffort: {}, hourly: {}, rewrites: {}, rewriteTool: {}, small: {}, poll: {}, callIdx: {}, tier: {}, tools: {}, bash: {}, attach: {}, repeats: {}, rereads: {}, landings: [] };
 const RUNS = [];
+// message.ids already billed by an earlier transcript in this scan (forked/resumed sessions copy them)
+const PRICED_IDS = new Set();
 
 function auditFile(file) {
   const isSub = file.includes(`${path.sep}subagents${path.sep}`);
@@ -173,10 +202,11 @@ function auditFile(file) {
     if (o.type === "cost-state") { if (typeof o.totalCostUSD === "number") harnessUsd = o.totalCostUSD; continue; }
     if (o.type === "system" && o.subtype === "compact_boundary") { seq.push({ compact: true }); continue; }
     if (o.type === "assistant" && o.message?.usage) {
-      const u = o.message.usage, mdl = o.message.model;
-      if (mdl === "<synthetic>" || !((u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0))) { SCAN.syntheticCalls++; continue; }
+      const u = usageOf(o.message.usage), mdl = o.message.model, wr = writesOf(u);
+      if (mdl === "<synthetic>" || !(TOP4(u) + wr.cw5 + wr.cw1)) { SCAN.syntheticCalls++; continue; }
       if (Number.isNaN(ts)) { SCAN.noTimestamp++; continue; }
-      const id = o.message.id + "|" + (o.requestId || "");
+      // one API response = one message.id, however many content-block lines repeat its usage
+      const id = o.message.id || o.uuid || `${file}:${nLines}`;
       if (!usage.has(id)) seq.push({ call: id });
       usage.set(id, { u, m: mdl, ts, effort: o.effort ?? o.perTurnEffort ?? "-" });
       for (const b of o.message.content || []) if (b.type === "tool_use") { toolUses.set(b.id, { name: b.name, input: b.input || {}, ts });
@@ -214,7 +244,7 @@ function auditFile(file) {
   const project = foldCwd(cwd0);
   if (PROJECT && !project.includes(PROJECT)) return null;
 
-  // ---------- replay: ordered segments; each call reads [0,cr) at 0.1x, writes [cr,cr+cw) at W, pays 1x for the rest
+  // ---------- replay: ordered segments; each call reads [0,cr) at the row's read rate, writes [cr,cr+cw) at W, pays 1x for the rest
   const R = { file, kind: isSub ? "agent" : "main", sid, project, engine: "claude", agentId: isSub ? path.basename(file, ".jsonl").replace(/^agent-/, "") : sid,
     tok: { in: 0, out: 0, cw5: 0, cw1: 0, cr: 0 }, contractReads: 0, failedCmds: 0, unpriced: false,
     title: isSub ? (meta.description || "") : (title || aiTitle || ""), agentType: meta.agentType || "", depth: meta.spawnDepth || 0,
@@ -240,7 +270,7 @@ function auditFile(file) {
     const { u, m, ts, effort } = usage.get(e.call), r = RATE(m);
     const tlPush = (usd) => { if (TL) tlRows.push({ n: R.calls, ts, gap: Number.isNaN(lastToolTs) ? null : ts - lastToolTs, ctx, out, usd, tools: tlIssued.get(e.call) || [] }); };
     if (R.firstTs === undefined) R.firstTs = ts;
-    const cc = u.cache_creation, cwAll = u.cache_creation_input_tokens || 0, cw1 = cc?.ephemeral_1h_input_tokens || 0, cw5 = Math.max(0, cwAll - cw1);
+    const { cw5, cw1, split } = writesOf(u), cwAll = cw5 + cw1;
     const cr = u.cache_read_input_tokens || 0, inp = u.input_tokens || 0, out = u.output_tokens || 0, ctx = inp + cr + cwAll;
     let reset = false;
     if (first) { const est = pending.map((p) => p.chars / 4), tot = est.reduce((a, b) => a + b, 0), f = tot > ctx * 0.8 ? ctx * 0.8 / tot : 1;
@@ -258,6 +288,10 @@ function auditFile(file) {
     const pendChars = pending.reduce((a, p) => a + p.chars, 0), onlyTools = pending.length > 0 && pending.every((p) => p.tool || p.att);
     pending = []; prevOut = out;
     if (ts < SINCE) { prev = { ctx, ts, m }; continue; }
+    // A forked or resumed session copies earlier responses, message.id and all, into a new
+    // transcript: the first transcript scanned bills the response, every copy counts nothing.
+    if (!TL && PRICED_IDS.has(e.call)) { SCAN.copiedCalls++; prev = { ctx, ts, m }; continue; }
+    if (!TL) PRICED_IDS.add(e.call);
     // An unpriced model is IGNORANCE, not a $0 spend: the call's tokens stay in every token
     // total and its run renders "n/a" in the $ column, exactly as the Codex side does.
     if (!r) { SCAN.unpricedCalls++; bump(SCAN.unpricedModels, m || "(none)", 1); R.unpriced = true;
@@ -266,9 +300,9 @@ function auditFile(file) {
       G.tok.in += inp; G.tok.out += out; G.tok.cw5 += cw5; G.tok.cw1 += cw1; G.tok.cr += cr;
       if (!R.t0) { R.t0 = ts; R.ctxFirst = ctx; } R.t1 = ts; R.ctxPeak = Math.max(R.ctxPeak, ctx); R.ctxSum += ctx;
       prev = { ctx, ts, m }; continue; }
-    if (cwAll && !cc) SCAN.tierUnknownCalls++;
-    const ri = r.in / 1e6, rm = r.rd / r.in, W = cwAll ? (cw5 * 1.25 + cw1 * 2) / cwAll : 1.25;
-    const parts = { in: inp * ri, out: out * r.out / 1e6, cw5: cw5 * 1.25 * ri, cw1: cw1 * 2 * ri, cr: cr * rm * ri }, usd = parts.in + parts.out + parts.cw5 + parts.cw1 + parts.cr;
+    if (cwAll && !split) SCAN.tierUnknownCalls++;
+    const ri = r.in / 1e6, rm = r.rd / r.in, W = cwAll ? (cw5 * r.w5 + cw1 * r.w1) / (cwAll * r.in) : r.w5 / r.in;
+    const parts = { in: inp * r.in / 1e6, out: out * r.out / 1e6, cw5: cw5 * r.w5 / 1e6, cw1: cw1 * r.w1 / 1e6, cr: cr * r.rd / 1e6 }, usd = parts.in + parts.out + parts.cw5 + parts.cw1 + parts.cr;
     // attribute: charge everything as a cache read, then correct the tail beyond cr
     const read0 = R.cats[C_READ1] + R.cats[C_READN] + R.cats[C_BREAD], inj0 = R.cats[C_HARNESS];
     for (let k = 0; k < CATS.length; k++) if (catTok[k]) { const v = catTok[k] * rm * ri; R.cats[k] += v; G.cats[k] += v; }
@@ -711,7 +745,7 @@ L(`scanned ${SCAN.roots.join(", ")} · ${SCAN.files} transcripts (${RUNS.filter(
 L(gapsLine());
 
 H(`1 · TOTAL ${$(total)} by billing class`);
-for (const [k, n] of [["cr", "re-reading cached context (0.1x)"], ["cw5", "writing context to the 5-minute cache (1.25x)"], ["cw1", "writing context to the 1-hour cache (2x)"], ["out", "output tokens"], ["in", "uncached input (1x)"]])
+for (const [k, n] of [["cr", "re-reading cached context (per-model read rate)"], ["cw5", "writing context to the 5-minute cache (1.25x)"], ["cw1", "writing context to the 1-hour cache (2x)"], ["out", "output tokens"], ["in", "uncached input (1x)"]])
   L(`  ${pad($(G.usd[k]), 9)} ${pad(pct(G.usd[k]), 6)}  ${n} · ${Mt(G.tok[k])} tok`);
 const mainUsd = RUNS.filter((r) => r.kind === "main").reduce((a, r) => a + r.usd, 0);
 L(`  main chat loops ${$(mainUsd)} (${pct(mainUsd)}) · sub-agents ${$(total - mainUsd)} (${pct(total - mainUsd)}) · thinking ${Mt(G.tok.think)} of ${Mt(G.tok.out)} output tok`);
@@ -800,7 +834,7 @@ H("CROSS-CHECK (this estimate vs the harness's own cost-state line, chats wholly
 if (!hc.length) L("  no chat qualifies — the estimate is UNCHECKED on this host");
 else { const mine = hc.reduce((a, x) => a + x.f.own + x.f.agents, 0), mineOwn = hc.reduce((a, x) => a + x.f.own, 0), theirs = hc.reduce((a, x) => a + x.r.harnessUsd, 0);
   const lc = hc.reduce((a, x) => a + x.r.usdLC + x.f.agentRuns.reduce((b, r) => b + r.usdLC, 0), 0);
-  L(`  if calls over 200K context were billed at the long-context premium (2x in, 1.5x out): ${$(lc)} (${(lc / theirs).toFixed(2)}x)`);
+  L(`  if calls over 200K context were billed at the long-context premium (per-model rate in PRICING — an estimate): ${$(lc)} (${(lc / theirs).toFixed(2)}x)`);
   L(`  ${hc.length} chats · harness says ${$(theirs)} · this audit says ${$(mine)} with agents (${(mine / theirs).toFixed(2)}x) / ${$(mineOwn)} main loops only (${(mineOwn / theirs).toFixed(2)}x)`); }
 
 if (OUT) { const slim = (r, i) => ({ ...r, i, file: path.relative(SCAN.roots[0], r.file), cats: Object.fromEntries(CATS.map((c, k) => [c, +r.cats[k].toFixed(4)]).filter((x) => x[1] > 0)), series: i < 25 ? r.series : undefined, tl: undefined, tlf: undefined, brief: undefined, land: undefined, usd: +r.usd.toFixed(4) });

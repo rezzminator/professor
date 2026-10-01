@@ -490,12 +490,13 @@ checks_pfm_test() {
 
 gate_budget_verdict() { # target, wall seconds, optional budget file
   local target="$1" wall="$2" budgets="${3:-$REPO_ROOT/infra/fence/gate-budget.yml}"
-  local tolerance value limit name="gate($target)"
+  local tolerance fail_factor value limit fail_limit name="gate($target)"
   if [[ ! -r "$budgets" ]]; then
     printf 'budget: ✗ %s — budget file unreadable: %s\n' "$name" "$budgets"
     return 1
   fi
   tolerance="$(awk '$1=="tolerance:" {print $2; exit}' "$budgets")"
+  fail_factor="$(awk '$1=="fail_factor:" {print $2; exit}' "$budgets")"
   value="$(awk -v want="$target" '$1=="gate:" {inside=1; next} /^[a-z]/ {inside=0} inside && $1==want ":" {print $2; exit}' "$budgets")"
   if [[ -z "$tolerance" ]]; then
     printf 'budget: ✗ %s — no tolerance in %s\n' "$name" "$budgets"
@@ -503,6 +504,14 @@ gate_budget_verdict() { # target, wall seconds, optional budget file
   fi
   if [[ ! "$tolerance" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     printf 'budget: ✗ %s — invalid tolerance %s in %s\n' "$name" "$tolerance" "$budgets"
+    return 1
+  fi
+  if [[ -z "$fail_factor" ]]; then
+    printf 'budget: ✗ %s — no fail_factor in %s\n' "$name" "$budgets"
+    return 1
+  fi
+  if [[ ! "$fail_factor" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! awk -v f="$fail_factor" 'BEGIN { exit !(f > 0) }'; then
+    printf 'budget: ✗ %s — invalid fail_factor %s in %s\n' "$name" "$fail_factor" "$budgets"
     return 1
   fi
   if [[ ! "$wall" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
@@ -523,9 +532,14 @@ gate_budget_verdict() { # target, wall seconds, optional budget file
     return 1
   fi
   limit="$(awk -v v="$value" -v t="$tolerance" 'BEGIN { printf "%d", v * t }')"
-  if (( wall > limit )); then
-    printf 'budget: ✗ %s — %ss over budget %ss ×%s = %ss\n' "$name" "$wall" "$value" "$tolerance" "$limit"
+  fail_limit="$(awk -v l="$limit" -v f="$fail_factor" 'BEGIN { printf "%d", l * f }')"
+  if (( wall > fail_limit )); then
+    printf 'budget: ✗ %s — %ss over the fail limit %ss (limit %ss ×%s)\n' "$name" "$wall" "$fail_limit" "$limit" "$fail_factor"
     return 1
+  fi
+  if (( wall > limit )); then
+    printf 'budget: ⚠ %s — %ss over limit %ss; fails past %ss (budget %ss ×%s ×%s)\n' "$name" "$wall" "$limit" "$fail_limit" "$value" "$tolerance" "$fail_factor"
+    return 0
   fi
   printf 'budget: ✓ %s — %ss within %ss (budget %ss ×%s)\n' "$name" "$wall" "$limit" "$value" "$tolerance"
 }

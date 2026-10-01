@@ -10,6 +10,7 @@ TMP_BASE="$T"
 FAILURES=0
 cat > "$T/budgets.yml" <<'YAML'
 tolerance: 1.25
+fail_factor: 2
 gate:
   all: unpinned
   pfm: 10
@@ -23,10 +24,14 @@ if ! out="$(gate_budget_verdict templates 2 "$T/budgets.yml")" &&
   [[ "$out" == *'UNBUDGETED'* ]]; then
   ok 'missing target budget is red'
 else bad 'missing budget' "$out"; fi
-if ! out="$(gate_budget_verdict pfm 12.1 "$T/budgets.yml")" &&
-  [[ "$out" == *'13s over budget 10s ×1.25 = 12s'* ]]; then
-  ok 'pinned budget rejects wall above tolerance'
-else bad 'pinned over budget' "$out"; fi
+if out="$(gate_budget_verdict pfm 18 "$T/budgets.yml")" &&
+  [[ "$out" == 'budget: ⚠ gate(pfm) — 18s over limit 12s; fails past 24s (budget 10s ×1.25 ×2)' ]]; then
+  ok 'wall at 1.5 times limit warns and passes'
+else bad 'warning tier' "$out"; fi
+if ! out="$(gate_budget_verdict pfm 25.2 "$T/budgets.yml")" &&
+  [[ "$out" == 'budget: ✗ gate(pfm) — 26s over the fail limit 24s (limit 12s ×2)' ]]; then
+  ok 'wall at 2.1 times limit fails after rounding up'
+else bad 'fail tier' "$out"; fi
 if out="$(gate_budget_verdict pfm 12 "$T/budgets.yml")" &&
   [[ "$out" == *'12s within 12s (budget 10s ×1.25)'* ]]; then
   ok 'pinned budget accepts wall at tolerance'
@@ -44,6 +49,16 @@ if ! out="$(gate_budget_verdict pfm 1 "$T/bad-tolerance.yml")" &&
   [[ "$out" == *"invalid tolerance abc in $T/bad-tolerance.yml"* ]]; then
   ok 'a non-numeric tolerance is named, never judged as a limit of 0'
 else bad 'invalid tolerance' "$out"; fi
+printf 'tolerance: 1.25\ngate:\n  pfm: 10\n' > "$T/no-fail-factor.yml"
+if ! out="$(gate_budget_verdict pfm 1 "$T/no-fail-factor.yml")" &&
+  [[ "$out" == *"✗ gate(pfm) — no fail_factor in $T/no-fail-factor.yml"* ]]; then
+  ok 'missing fail_factor is named and red'
+else bad 'missing fail_factor' "$out"; fi
+printf 'tolerance: 1.25\nfail_factor: abc\ngate:\n  pfm: 10\n' > "$T/bad-fail-factor.yml"
+if ! out="$(gate_budget_verdict pfm 1 "$T/bad-fail-factor.yml")" &&
+  [[ "$out" == *"✗ gate(pfm) — invalid fail_factor abc in $T/bad-fail-factor.yml"* ]]; then
+  ok 'invalid fail_factor is named and red'
+else bad 'invalid fail_factor' "$out"; fi
 
 need_tool() { return 0; }
 timing_run_dir() { mkdir -p "$1"; mktemp -d "$1/run.XXXXXX"; }
@@ -114,6 +129,7 @@ unset STUB_STEPS_RC
 
 cat > "$T/gate-budget.yml" <<'YAML'
 tolerance: 1.25
+fail_factor: 2
 gate:
   pfm: 0
 YAML

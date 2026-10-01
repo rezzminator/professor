@@ -44,7 +44,7 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 | --- | --- | --- |
 | `flights-speccer` | 1, 2, 3, 8, and the removal clause of 11 | The tier decides a task's `shares`; the test home and the registry rows are `Files` entries; a floor is a `Done when` row; a removal lists its retiring tests |
 | `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | all | Writing the covering tests in the project's pattern |
-| `general-mechanical-executor`, `general-precise-executor`, `general-smart-executor` | all, when the brief names the manual | Writing the covering test in the project's pattern |
+| `general-foreman`, `general-executor` | all, when the brief names the manual | Writing the covering test in the project's pattern |
 | `flights-lander` | all, 5 to 9 most | Running the gate, sweeping test validity, raising the project's bug classes |
 
 The speccer takes facts from the manual into the task file as `Decisions` and `Files` lines; it never puts the manual in a task's `reads`, since the manual would consume the task's 16,000-character budget.

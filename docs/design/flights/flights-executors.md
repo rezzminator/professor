@@ -25,13 +25,11 @@ A flight had a speccer and an orchestrator and no executor of its own. The execu
 
 ## Three tiers, one source
 
-This is the one tier table for both executor families: `general-*-executor` runs the same tiers as `flights-*-executor`, and a tier change lands in both in the same pass.
-
-| Rating | Flights agent | General agent | Claude | Codex role pin |
-| --- | --- | --- | --- | --- |
-| `mechanical` | `flights-mechanical-executor` | `general-mechanical-executor` | `claude-sonnet-5-5` at `high` | `gpt-6-sol` at `low` |
-| `precise` | `flights-precise-executor` | `general-precise-executor` | `claude-sonnet-5-5` at `xhigh` | `gpt-6-sol` at `high` |
-| `smart` | `flights-smart-executor` | `general-smart-executor` | `opus` at `high` | `gpt-6-sol` at `high` |
+| Rating | Agent | Claude | Codex role pin |
+| --- | --- | --- | --- |
+| `mechanical` | `flights-mechanical-executor` | `claude-sonnet-5-5` at `high` | `gpt-6-sol` at `low` |
+| `precise` | `flights-precise-executor` | `claude-sonnet-5-5` at `xhigh` | `gpt-6-sol` at `high` |
+| `smart` | `flights-smart-executor` | `opus` at `high` | `gpt-6-sol` at `high` |
 
 A seat under [`/flights:orchestrate-cross-harness`](../../../templates/global/commands/flights/orchestrate-cross-harness.md) sets its own Codex effort by rating on its launch line.
 

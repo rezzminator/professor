@@ -70,11 +70,11 @@ func TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes(t *testing.T) {
 	for _, variant := range variants {
 		all = append(all, source{variant.Path, string(variant.Content)})
 	}
-	// Every executor of both families carries a Codex role pin; every other
+	// Every executor, and general-foreman, carries a Codex role pin; every other
 	// role must render byte-identical to the pre-override compiler.
 	pinned := []string{
 		"flights-mechanical-executor", "flights-precise-executor", "flights-smart-executor",
-		"general-mechanical-executor", "general-precise-executor", "general-smart-executor",
+		"general-executor", "general-foreman",
 	}
 	var skipped []string
 	checked := 0

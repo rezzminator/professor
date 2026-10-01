@@ -511,6 +511,12 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// registered (a rollback, a stale binary on PATH) would erase every
 		// prompt or deny every tool call. An unknown name is a non-blocking
 		// error that says what happened and how to converge.
+		if installer.RetiredInternalHook(args[0]) {
+			// Install already stripped it; only a session's start-time hook
+			// snapshot still runs it, and no install can clear that. Silent
+			// success: hook stdout becomes prompt context, stderr a warning.
+			return 0
+		}
 		fmt.Fprintf(
 			stderr,
 			"pfm internal: unknown subcommand %q — registered by a different pfm version than this binary (%s); run `pfm install --yes` with the binary you intend to keep\n",

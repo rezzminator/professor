@@ -169,6 +169,19 @@ var retiredHookShimHints = []struct {
 	{Name: "dream-nudge", Hint: "dreamer-nudge.sh"},
 }
 
+// RetiredInternalHook reports whether name is a `pfm internal` subcommand an
+// older pfm registered as a hook and this one retired. Install strips it from
+// the account settings, but a Claude session keeps the hooks it read at start
+// and still runs it until that session restarts.
+func RetiredInternalHook(name string) bool {
+	for _, retired := range retiredHookCommands {
+		if retired.Subcommand == "internal "+name {
+			return true
+		}
+	}
+	return false
+}
+
 // retiredHookCommandName reports whether command matches a retired hook
 // table entry and, if so, the name to report it under.
 func retiredHookCommandName(command string) (string, bool) {

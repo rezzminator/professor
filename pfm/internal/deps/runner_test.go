@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -526,5 +527,60 @@ func TestRealRunnerRunReportsZeroExitCodeOnSuccess(t *testing.T) {
 	}
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0 on a successful run", result.ExitCode)
+	}
+}
+
+// pidGone polls up to five seconds for pid to disappear. The fence container
+// runs with an init that reaps orphans, so a killed process leaves no zombie.
+func pidGone(pid int) bool {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestRealRunnerProcessGroupDeadlineKillsBackgroundedDescendants(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	t.Cleanup(func() {
+		if raw, err := os.ReadFile(pidFile); err == nil {
+			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(raw))); convErr == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() {
+		_, err := RealRunner{}.Run(
+			ctx,
+			[]string{"sh", "-c", `sleep 300 & echo $! > "$1"; exec sleep 300`, "sh", pidFile},
+			// WaitDelay only bounds a broken run: with the group killed, nothing
+			// holds the pipes and Run returns at the deadline.
+			RunOptions{ProcessGroup: true, WaitDelay: 3 * time.Second},
+		)
+		finished <- err
+	}()
+	select {
+	case <-finished:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run did not return within 15s of its 500ms deadline")
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("the backgrounded child never recorded its pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("parse recorded pid %q: %v", raw, err)
+	}
+	if !pidGone(pid) {
+		t.Fatalf("backgrounded descendant %d survived the deadline", pid)
 	}
 }

@@ -35,6 +35,13 @@ var LaunchExec = syscall.Exec
 
 const launcherWaitTimeout = 7 * 24 * time.Hour
 
+// claudeLaunchPIDEnv carries the pid of the launcher that exec'd the real
+// Claude path. exec keeps the pid, so a launcher -> shim -> launcher exec chain
+// re-enters with its own pid in this marker and is refused, while a real
+// Claude's child `claude` run through the shim always has a different pid and
+// passes: no binary classification is needed.
+const claudeLaunchPIDEnv = "PFM_CLAUDE_LAUNCH_PID"
+
 var nonInteractiveClaudeSubcommands = map[string]bool{
 	"agents": true, "mcp": true, "update": true, "install": true,
 	"doctor": true, "setup-token": true, "plugin": true, "config": true,
@@ -103,6 +110,11 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		flags.Usage()
 		return 2
 	}
+	ownPID := strconv.Itoa(os.Getpid())
+	if env.Get(claudeLaunchPIDEnv) == ownPID {
+		fmt.Fprintf(stderr, "pfm claude launcher re-entered itself via %s; refusing to loop\n", *realBinary)
+		return 127
+	}
 	if launchPassThrough(arguments, env.Get("TMUX"), env.Get("PFM_LAUNCH_PASSTHROUGH") == "1") {
 		environment := os.Environ()
 		if launchStartsSession(arguments) {
@@ -130,6 +142,14 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			filtered = append(filtered, sessionEnv...)
 			environment = filtered
 		}
+		stamped := make([]string, 0, len(environment)+1)
+		for _, entry := range environment {
+			if !strings.HasPrefix(entry, claudeLaunchPIDEnv+"=") {
+				stamped = append(stamped, entry)
+			}
+		}
+		stamped = append(stamped, claudeLaunchPIDEnv+"="+ownPID)
+		environment = stamped
 		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), environment); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", err)
 			return 1

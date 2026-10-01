@@ -9,7 +9,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 ## Tiers
 
-- Unit: a package test beside its package, no real tmux server, no real engine process.
+- Unit: a package test beside its package, no real tmux server, no real engine process, no network: it injects its resolver and HTTP client (the harvest family's `harvest.StubPublicResolverForTest` in `TestMain`).
 - `JAIL`, `JAIL+tmux`, `JAIL+sh`, `LIVE-READ`, `UNPLAYED`: `pfm/TESTPLAN.md` § Legend. The boundary that decides: whether the test needs a real tmux server (a scratch socket inside the jail's `TMUX_TMPDIR`); a flow the fake engine cannot play is `UNPLAYED`, named in `TESTPLAN.md` § "Flows the fake engine does not yet play".
 - e2e: the tagged suite under `pfm/e2e/` (build tag `e2e`, `PFM_DEV_FENCE=1`; the host-layout migration rehearsal `TestHostLayoutMigratesLegacyHome` lives there) and the fence lanes (hermetic: mock engine, fixture seats, `--network none`); both run only inside the fence.
 
@@ -39,18 +39,19 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - Affected, an executor's only run (flight or general): `.claude/scripts/dev.sh iso run "go -C pfm test ./internal/<package>/ -run <Test> -count=1"` in the fence, `go -C pfm test ./internal/<package>/ -run <Test>` on the host — timeout 600 s.
 - Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh iso gate` (`iso gate pfm` for pfm alone) — the verify and test rows of pfm and templates as concurrent steps in one container, a `step · verdict · seconds` table in the run's `gate.tsv` under the timing dir, the wall judged against `infra/fence/gate-budget.yml` — in the fence only, a suite never runs on the host; timeout 600 s, background past that. `iso verify pfm` and `iso test pfm` still run their rows one after another.
-- Static: `.claude/scripts/dev.sh iso verify pfm` (vet, fmt-check, lint-new, the architecture ratchet, the gate scripts' self-tests). Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`.
+- Static: `.claude/scripts/dev.sh iso verify pfm` (vet, fmt-check, lint-new, the architecture ratchet, the gate scripts' self-tests). Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. `LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes <L>` writes `waits.tsv` (`lane · beat · helper · condition · elapsed_s · outcome`) and prints the top waits; a lane timing change is measured with it, before and after.
 
 ## Concurrency
 
-- Package and test concurrency is pinned by `TESTFLAGS` in `pfm/Makefile` (`make -s -C pfm testflags` prints it; the pick: `docs/dev/testing/concurrency-sweep.md`); callers may override it. A test that mutates process state (`t.Setenv`, `t.Chdir`, or a package variable) stays serial; a jail contained in a subprocess may use `t.Parallel` with `testjail.FleetEnv`. Isolation is the jail, one temp root per test. Timing budgets per package and per suite: `docs/dev/testing/timing.md`; an unbudgeted package fails.
-- Unit packages over the shard threshold run split by top-level test across concurrent `go test` processes (`pfm/scripts/test-shard.sh`; `docs/dev/testing/timing.md` § Sharded packages): a test never depends on another top-level test of its package having run in the same process, nor on a fixed port, path or name another process of that package could hold.
+- Package and test concurrency is pinned by `TESTFLAGS ?= -p 6 -parallel 4` in `pfm/Makefile` (`make -s -C pfm testflags` prints it; the pick: `docs/dev/testing/concurrency-sweep.md`); callers may override it. A test that mutates process state (`t.Setenv`, `t.Chdir`, or a package variable) stays serial; a jail contained in a subprocess may use `t.Parallel` with `testjail.FleetEnv`. Isolation is the jail, one temp root per test. Timing budgets per package and per suite: `docs/dev/testing/timing.md`; an unbudgeted package fails.
+- Packages pinned in `pfm/scripts/test-shard.sh`'s `SHARDS` table run split by top-level test across concurrent processes of one compiled test binary (`docs/dev/testing/timing.md` § Sharded packages): a test never depends on another top-level test of its package having run in the same process, nor on a fixed port, path or name another process of that package could hold.
 
 ## Gates and floors
 
 - Coverage `pfm/.testcoverage.yml`: total 77, package 52 (`make -C pfm cover`).
 - `make -C pfm gate` is ready-to-merge: fmt-check, lint-new, vet, arch, test, iso.
 - Every skip is a row in `pfm/scripts/known-skips.tsv` (`pfm/scripts/skip-check.sh`); an unlisted skip fails.
+- `iso gate` runs under `infra/fence/egress.sh`, and every non-dry lanes run ends with the verdict of a capture inside its lane container: `EGRESS PASS`, or red as `EGRESS FAIL` (each DNS name and destination listed) or NOT RECORDED; that verdict is the only network check.
 
 ## Bug classes
 
@@ -63,9 +64,12 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - A probe that launches an engine closes stdin (`</dev/null`) or it hangs.
 - The e2e harness refuses to run without `PFM_DEV_FENCE=1`: that red on a host is the fence law, not a defect.
 - `internal/harvest` (a `/private` symlink) and `internal/hookentry` (socket path length) are red on a macOS host and green in the fence.
+- A shell wait polls its own condition and counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never a fixed sleep or whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten (`MCP_STDIO_GRACE_SECS`).
+- A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.
 
 ## What not to test
 
 - A model's words: a beat asserts from pfm's own report or the pane.
 - A value one run printed about its data (a count, an id).
 - A removed command, flag or tool takes its tests, its beat and its map row with it, never inverted into an absence assertion.
+- That an event did not happen (a network call, a DNS query, a sleep, a fork): the egress verdict and the fenced measurements prove those.

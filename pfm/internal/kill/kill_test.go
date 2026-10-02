@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type fakeProc struct {
@@ -1041,12 +1042,11 @@ func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
 	root := t.TempDir()
 	argvPath := filepath.Join(root, "argv")
 	setsidPath := filepath.Join(root, "setsid")
-	writeTestFile(
-		t,
+	if err := testjail.WriteExecutable(
 		setsidPath,
-		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_SPAWN_ARGV\"\n",
-	)
-	if err := os.Chmod(setsidPath, 0o700); err != nil {
+		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_SPAWN_ARGV\"\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_SPAWN_ARGV", argvPath)

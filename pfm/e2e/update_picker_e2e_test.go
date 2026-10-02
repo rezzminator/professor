@@ -111,12 +111,12 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	fakeCodex := "#!/bin/sh\n" +
 		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
 		"sleep 2\n"
-	if err := writeExecutable(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, engine := range []string{"opencode"} {
 		stub := "#!/bin/sh\nprintf 'unexpected engine=" + engine + "\\n' > \"$PFM_UPDATE_LAUNCH_PROOF\"\nsleep 2\n"
-		if err := writeExecutable(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
+		if err := testjail.WriteExecutable(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

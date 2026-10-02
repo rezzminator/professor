@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type missingGitOutputRunner struct{}
@@ -142,7 +143,11 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 	if err := os.MkdirAll(hooks, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		filepath.Join(hooks, "pre-push"),
+		[]byte("#!/bin/sh\nexit 0\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer

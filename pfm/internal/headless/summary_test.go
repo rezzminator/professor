@@ -13,6 +13,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestSummarizeCachesCompleteExchangeAndBoundsAnswer(t *testing.T) {
@@ -193,7 +194,11 @@ func writeSummaryStub(t *testing.T, directory, name, body string) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, name), []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		filepath.Join(directory, name),
+		[]byte("#!/bin/sh\n"+body+"\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 }

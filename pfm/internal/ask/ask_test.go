@@ -11,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type fakeAskAdapter interface {
@@ -325,7 +326,11 @@ func validAskInput(engineName string) AskInput {
 
 func writeAskStub(t *testing.T, directory, name, body string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(directory, name), []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		filepath.Join(directory, name),
+		[]byte("#!/bin/sh\n"+body+"\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 }

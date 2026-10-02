@@ -11,6 +11,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
@@ -22,7 +23,7 @@ func TestDefaultAckUsesLeanSettingsAndInheritedEnvironment(t *testing.T) {
 	t.Setenv("PFM_ACK_ENV", envPath)
 	binary := filepath.Join(root, "claude")
 	body := "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > \"$PFM_ACK_ARGV\"\nprintenv CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT > \"$PFM_ACK_ENV\" || true\n"
-	if err := os.WriteFile(binary, []byte(body), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	account := LimitAccount{ID: 2, ClaudeBinary: binary, ConfigDir: filepath.Join(root, "config")}

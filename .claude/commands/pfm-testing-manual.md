@@ -68,6 +68,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - `internal/harvest` (a `/private` symlink) and `internal/hookentry` (socket path length) are red on a macOS host and green in the fence.
 - A shell wait polls its own condition and counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never a fixed sleep or whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten (`MCP_STDIO_GRACE_SECS`).
 - A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.
+- A file a test writes then runs goes through `testjail.WriteExecutable` (`C26-exec-write` fails a bare exec-mode `os.WriteFile`: a parallel test's fork mid-write makes it ETXTBSY); `internal/deps` and `internal/config`, which testjail imports, use their local `writeExecutableUnderForkLock`.
 - `PFM_TEST_PROFILE=cpu` kills a test's exec'd children (SIGPROF survives execve): never in a gate.
 - A test binary started by a profiled test inherits `PFM_TEST_PROFILE_PARENT` and is a helper (summary only); a test that re-execs its own binary to prove profiling removes it from the child's env.
 - A test that reads process-wide allocation or heap counters (`testing.AllocsPerRun`, `runtime.ReadMemStats`) is serial and calls `testjail.PauseFlightRecorder(t)` first: the always-on flight recorder allocates in its own goroutine.

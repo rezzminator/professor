@@ -4,25 +4,14 @@ package e2e
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
-)
 
-// writeExecutable writes a file this process or its children later execute.
-// The read side of syscall.ForkLock keeps every fork of this process out while
-// the file is open for writing: a child forked in that window inherits the
-// write descriptor until its own exec closes it, and executing the file then
-// fails with ETXTBSY ("text file busy"). Parallel tests fork constantly.
-func writeExecutable(path string, body []byte, mode os.FileMode) error {
-	syscall.ForkLock.RLock()
-	defer syscall.ForkLock.RUnlock()
-	return os.WriteFile(path, body, mode)
-}
+	"github.com/rezzminator/professor/pfm/internal/testjail"
+)
 
 // startForkLoad starts 4 goroutines forking and execing true until the returned
 // stop function is called; stop also waits for them.
@@ -57,7 +46,7 @@ func TestExecutableCopyRunsWhileOtherGoroutinesFork(t *testing.T) {
 	requireE2EFence(t)
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source")
-	if err := os.WriteFile(source, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(source, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	defer startForkLoad(t)()

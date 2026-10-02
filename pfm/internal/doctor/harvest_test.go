@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // writeProvisionedBrowserEnv materialises an environment directory whose
@@ -34,7 +35,7 @@ func writeProvisionedBrowserEnv(
 		t.Fatal(err)
 	}
 	interpreter := filepath.Join(env, "project", ".venv", "bin", "python")
-	if err := os.WriteFile(interpreter, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(interpreter, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
@@ -455,7 +456,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 	root = newRoot()
 	t.Run("gate on with a worker provisioned by an older pfm reports SOURCE STALE", func(t *testing.T) {
 		liveChrome := filepath.Join(t.TempDir(), "live-chrome")
-		if err := os.WriteFile(liveChrome, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(liveChrome, []byte("#!/bin/sh\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		restoreSmoke(func(_ context.Context, _, _ string) (map[string]any, error) {
@@ -534,7 +535,7 @@ func TestDoctorHarvestBrowserRowDistinguishesItsBrokenStates(t *testing.T) {
 	root = newRoot()
 	t.Run("the healthy verdict is earned by LIVE smoke, not the record", func(t *testing.T) {
 		liveChrome := filepath.Join(t.TempDir(), "live-chrome")
-		if err := os.WriteFile(liveChrome, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(liveChrome, []byte("#!/bin/sh\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		restoreSmoke(func(_ context.Context, _, _ string) (map[string]any, error) {

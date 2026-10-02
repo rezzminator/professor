@@ -24,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHostLayoutMigratesLegacyHome(t *testing.T) {
@@ -203,7 +204,7 @@ func plantLegacyHostLayout(t *testing.T, home, repo string) {
 		if name == "systemctl" {
 			quiet = strings.Replace(quiet, "case \"$*\" in\n", "case \"$*\" in\n  *stop*|*start*) exit 0 ;;\n", 1)
 		}
-		if err := writeExecutable(path, []byte(quiet), 0o700); err != nil {
+		if err := testjail.WriteExecutable(path, []byte(quiet), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

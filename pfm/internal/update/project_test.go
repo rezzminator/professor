@@ -16,6 +16,7 @@ import (
 	config "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestProjectUpdatesReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
@@ -1020,7 +1021,7 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(fixture.content), fixture.mode); err != nil {
+		if err := testjail.WriteExecutable(path, []byte(fixture.content), fixture.mode); err != nil {
 			t.Fatal(err)
 		}
 	}

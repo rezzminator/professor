@@ -383,7 +383,7 @@ func (h *e2eHarness) newHome(binary string) string {
 	if err := os.MkdirAll(filepath.Dir(native), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
-	if err := writeExecutable(native, []byte(body), 0o700); err != nil {
+	if err := testjail.WriteExecutable(native, []byte(body), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
 	if err := os.Symlink(native, filepath.Join(home, e2eCanonicalClaude)); err != nil {
@@ -397,7 +397,7 @@ if [ "${1-}" = doctor ] && [ "${2-}" = --help ]; then printf 'usage: codex docto
 if [ "${1-}" = doctor ]; then printf 'healthy\n'; exit 0; fi
 exit 2
 `
-	if err := writeExecutable(codex, []byte(codexBody), 0o700); err != nil {
+	if err := testjail.WriteExecutable(codex, []byte(codexBody), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
 	auth := filepath.Join(home, ".codex", "auth.json")
@@ -1049,7 +1049,7 @@ func copyFile(source, target string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return err
 	}
-	return writeExecutable(target, body, mode)
+	return testjail.WriteExecutable(target, body, mode)
 }
 
 func runTool(home, name string, args ...string) commandResult {

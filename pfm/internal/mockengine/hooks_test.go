@@ -17,6 +17,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -78,11 +79,11 @@ case "$event" in
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Explore is disabled"}}' ;;
 esac
 `
-	if err := os.WriteFile(recorder, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(recorder, []byte(script), 0o700); err != nil {
 		fix.t.Fatal(err)
 	}
 	statusScript := filepath.Join(fix.root, "statusline.sh")
-	if err := os.WriteFile(statusScript, []byte(`#!/bin/sh
+	if err := testjail.WriteExecutable(statusScript, []byte(`#!/bin/sh
 cat >> "`+fix.recordDir+`/statusline.jsonl"
 printf '\n' >> "`+fix.recordDir+`/statusline.jsonl"
 printf 'SL-FIXTURE\n'
@@ -521,10 +522,10 @@ func TestClaudePfmsRenderedSettingsRunPlayedHooks(t *testing.T) {
 	}
 	commands := filepath.Join(fix.recordDir, "pfm-commands")
 	script := "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"$(cat)\" >> \"" + commands + "\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "pfm"), []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(bin, "pfm"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		filepath.Join(bin, "pfm-statusline"),
 		[]byte("#!/bin/sh\nprintf 'rendered status\\n'\n"),
 		0o700,
@@ -871,7 +872,7 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 func (fix *fixture) installBrokenHook(event string) {
 	fix.t.Helper()
 	broken := filepath.Join(fix.root, "broken-hook.sh")
-	if err := os.WriteFile(broken, []byte("#!/bin/sh\nprintf '{not json'\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(broken, []byte("#!/bin/sh\nprintf '{not json'\n"), 0o700); err != nil {
 		fix.t.Fatal(err)
 	}
 	document := map[string]any{"hooks": map[string]any{

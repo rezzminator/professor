@@ -12,6 +12,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestHarvestAskRunsBothConfiguredAdapters is the issue-6 regression: the
@@ -71,7 +72,7 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 				"printf '\\n' >> \"$PFM_ASK_CAPTURE\"\n" +
 				"cat >> \"$PFM_ASK_CAPTURE\"\n" +
 				askJSONReply(testCase.engine, "fixture answer")
-			if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PFM_ASK_CAPTURE", capture)
@@ -134,7 +135,7 @@ case " $* " in
   *) printf 'fixture answer\n' ;;
 esac
 `
-			if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			machine := pfmconfig.Config{
@@ -174,7 +175,7 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 		"  cat \"$prepared\" >> \"$PFM_ASK_FILES\"\n" +
 		"done\n" +
 		askJSONReply(pfmengine.Codex, "receipt-aware answer")
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
@@ -285,7 +286,7 @@ func TestHarvestAskAcceptsFiftySourcesAndFlagsAfterPositionals(t *testing.T) {
 	promptCapture := filepath.Join(home, "prompt.txt")
 	binary := filepath.Join(home, "codex-fixture")
 	script := "#!/bin/sh\ncat > \"$PFM_ASK_PROMPT\"\n" + askJSONReply(pfmengine.Codex, "boundary answer")
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
@@ -324,7 +325,7 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(home, "codex-fixture")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		binary,
 		[]byte("#!/bin/sh\ncat >/dev/null\nprintf 'fixture failure\\n' >&2\nexit 7\n"),
 		0o700,

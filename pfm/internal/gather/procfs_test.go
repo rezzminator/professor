@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestNativeProcFSSmokeOwnProcessOnly drives whichever reader this platform
@@ -264,7 +266,7 @@ func TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime(t *testing.T)
 func TestRealProcFSImageIsTheExecutablesFileID(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "pfm")
-	if err := os.WriteFile(binary, []byte("image"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("image"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "proc", "7"), 0o700); err != nil {

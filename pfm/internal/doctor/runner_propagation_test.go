@@ -12,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type doctorTestWriteCloser struct{ io.Writer }
@@ -68,7 +69,7 @@ func TestAppendHarvestBrowserDoctorRowBindsTheProductionSmokeRunner(t *testing.T
 	digest.Digest = "browser-fixture"
 	interpreter := writeProvisionedBrowserEnv(t, root, platform, digest)
 	chrome := filepath.Join(root, "chrome")
-	if err := os.WriteFile(chrome, []byte("chrome"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(chrome, []byte("chrome"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	stdout := io.NopCloser(strings.NewReader(

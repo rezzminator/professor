@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // Both native manager names are intercepted before the host PATH. The Darwin
@@ -58,7 +60,11 @@ esac
 `,
 	}
 	for name, body := range scripts {
-		if err := writeExecutable(filepath.Join(home, ".local", "bin", name), []byte(body), 0o700); err != nil {
+		if err := testjail.WriteExecutable(
+			filepath.Join(home, ".local", "bin", name),
+			[]byte(body),
+			0o700,
+		); err != nil {
 			return fmt.Errorf("write scheduler fixture %s: %w", name, err)
 		}
 	}

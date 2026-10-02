@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (
@@ -58,7 +60,7 @@ func TestGitGuardMainChatWorktreeAddNamesTheRightWay(t *testing.T) {
 		}
 	}
 	script := filepath.Join(withScript, ".claude", "scripts", "worktree.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	without := t.TempDir()

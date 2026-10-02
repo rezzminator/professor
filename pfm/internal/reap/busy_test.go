@@ -10,6 +10,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeClaudeAgentsBinary writes a `claude` stand-in that plays `agents
@@ -25,7 +26,7 @@ func fakeClaudeAgentsBinary(t *testing.T, body string, fail bool) string {
 	} else {
 		script += "printf '%s' " + shQuote(body) + "\n"
 	}
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -122,7 +123,7 @@ func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
 		"  */3) printf '[{\"sessionId\":\"third\",\"status\":\"busy\"}]' ;;\n" +
 		"  *) printf '[]' ;;\n" +
 		"esac\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_TEST_QUERY_LOG", logPath)
@@ -167,7 +168,7 @@ func TestClaudeAgentsQueryUsesRegistryReadShape(t *testing.T) {
 	logPath := filepath.Join(home, "query.log")
 	binary := filepath.Join(home, "claude")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$PFM_TEST_QUERY_LOG\"\nprintf '[]'\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_TEST_QUERY_LOG", logPath)

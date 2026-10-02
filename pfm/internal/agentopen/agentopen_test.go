@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type fakeCommands struct {
@@ -234,7 +236,7 @@ func TestSocketForPIDSuppressesPerSocketProbeFailures(t *testing.T) {
 		}
 	}
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	var stderr bytes.Buffer

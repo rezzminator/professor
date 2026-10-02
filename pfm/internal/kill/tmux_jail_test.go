@@ -16,6 +16,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type killTmuxJail struct {
@@ -101,7 +102,7 @@ func (jail *killTmuxJail) startReader(
 			" >> " + shellQuote(transcriptPath) + "\n"
 	}
 	content += "exit 0\n"
-	if err := os.WriteFile(scriptPath, []byte(content), 0o700); err != nil {
+	if err := testjail.WriteExecutable(scriptPath, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	command := jail.command(

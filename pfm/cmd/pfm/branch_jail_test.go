@@ -17,6 +17,7 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller is the hard
@@ -46,7 +47,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	const branchSocket = "probe-branch-detached"
 	argsPath := filepath.Join(root, "claude.args")
 	fakeClaude := filepath.Join(binDir, "claude")
-	if err := os.WriteFile(fakeClaude, []byte(
+	if err := testjail.WriteExecutable(fakeClaude, []byte(
 		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_TEST_BRANCH_ARGS\"\n"+
 			// the fork's SID crumb, so the session-id wait resolves at once
 			"printf '/fork/f1000000-0000-4000-8000-000000000001.jsonl\\n' > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n"+

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
@@ -19,7 +21,7 @@ func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(binary), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -325,7 +327,7 @@ func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(managedClaudeLauncher(home)), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(managedClaudeLauncher(home), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(managedClaudeLauncher(home), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managedClaudeLauncher(home), canonical); err != nil {
@@ -335,7 +337,7 @@ func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(elsewhere), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(elsewhere, []byte("#!/bin/sh\nexit 127\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(elsewhere, []byte("#!/bin/sh\nexit 127\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -360,7 +362,7 @@ func TestLauncherInstallJournalRestoresLinkAndStateAndSkipsConverged(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(managed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(managed, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	old := filepath.Join(home, "native-claude")
@@ -440,7 +442,7 @@ func TestResolveClaudeBinaryNeverReturnsAnyHomesLauncherShim(t *testing.T) {
 		t.Fatal(err)
 	}
 	copied := filepath.Join(dirB, "claude")
-	if err := os.WriteFile(copied, shimBody, 0o755); err != nil {
+	if err := testjail.WriteExecutable(copied, shimBody, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	realClaude := filepath.Join(dirC, "claude")
@@ -465,7 +467,7 @@ func TestResolveClaudeBinaryAcceptsALargeBinaryMentioningTheShimMarker(t *testin
 	directory := t.TempDir()
 	body := "#!/bin/sh\n# internal claude-launch\n" + strings.Repeat("x", claudeShimMaxBytes) + "\n"
 	big := filepath.Join(directory, "claude")
-	if err := os.WriteFile(big, []byte(body), 0o755); err != nil {
+	if err := testjail.WriteExecutable(big, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	resolved, err := ResolveClaudeBinary(home, "", directory)

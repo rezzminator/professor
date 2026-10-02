@@ -553,7 +553,7 @@ func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		filepath.Join(repository, ".githooks", "pre-push"),
 		[]byte("#!/bin/sh\nexit 0\n"),
 		0o700,
@@ -653,7 +653,7 @@ func writeJailedCodexAuth(t *testing.T, root string) {
 func holdClaudeOpen(t *testing.T, root, socket string) func(format string) string {
 	t.Helper()
 	managed := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", "claude")
-	if err := os.WriteFile(managed, []byte("#!/bin/sh\nexec sleep 120\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(managed, []byte("#!/bin/sh\nexec sleep 120\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	socketPath := filepath.Join(root, "tmux", socket)
@@ -893,7 +893,7 @@ func TestInternalStaleAnswersWhileLegacyConfigWaits(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(bin, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	args := []string{"stale", "--binary", bin}

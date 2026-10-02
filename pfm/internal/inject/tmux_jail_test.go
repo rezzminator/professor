@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // injectTmuxJail runs real tmux servers on a scratch TMUX_TMPDIR so no test
@@ -184,7 +186,7 @@ func (jail *injectTmuxJail) startBusyPane(
 ) string {
 	t.Helper()
 	script := filepath.Join(jail.root, "ui.py")
-	if err := os.WriteFile(script, []byte(busyThenIdleUI), 0o700); err != nil {
+	if err := testjail.WriteExecutable(script, []byte(busyThenIdleUI), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	command := jail.command(
@@ -262,7 +264,7 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 ) string {
 	t.Helper()
 	script := filepath.Join(jail.root, "compact-ui.py")
-	if err := os.WriteFile(script, []byte(compactTranscriptUI), 0o700); err != nil {
+	if err := testjail.WriteExecutable(script, []byte(compactTranscriptUI), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	command := jail.command(

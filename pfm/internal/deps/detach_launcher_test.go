@@ -159,7 +159,7 @@ func TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence(t *testing.T
 
 func writeDetachTestScript(t *testing.T, path string) string {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := writeExecutableUnderForkLock(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

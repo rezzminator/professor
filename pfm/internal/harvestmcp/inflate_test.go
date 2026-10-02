@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // inflateWorker stands in for converter.py's inflate op: a body starting
@@ -40,7 +41,7 @@ func TestInflateHandsTheBodyToTheSidecarAndRemovesTheScratch(t *testing.T) {
 	dir := t.TempDir()
 	python := filepath.Join(dir, "fake-python")
 	launcher := "#!/bin/sh\nexec python3 -c '" + strings.ReplaceAll(inflateWorker, "'", "'\\''") + "'\n"
-	if err := os.WriteFile(python, []byte(launcher), 0o700); err != nil {
+	if err := testjail.WriteExecutable(python, []byte(launcher), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	script := filepath.Join(dir, "converter.py")

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // writeScript writes an executable shell fixture named name inside dir,
@@ -18,7 +19,7 @@ import (
 func writeScript(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write fixture script %s: %v", name, err)
 	}
 	return path

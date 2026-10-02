@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C9, C12, C23 and C25 ratchets and for
+# Self-test for scripts/arch-check.sh's C1, C9, C12, C23, C25 and C26 ratchets and for
 # how it folds its concurrent checks: print order, exit status, and a check job
 # that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
 # never against this repo, and asserts on the relevant CHECK line rather than the
@@ -315,9 +315,141 @@ else
   bad "C25: could not build the testjail fixture"
 fi
 
+# ---- C26: an executable test write goes through testjail.WriteExecutable ----
+
+c26_fixture() { # <dir> <file under the fixture> <Go source on stdin>; empty baseline
+  fixture "$1" || return 1
+  : > "$1/.arch/exec-writes.txt"
+  printf "package loud\n" > "$1/internal/loud/clean_test.go" || return 1
+  mkdir -p "$(dirname "$1/$2")" && cat > "$1/$2" || return 1
+  git -C "$1" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+}
+
+c26_case() { # <name> <file> <want: PASS|FAIL> <FAIL detail> <Go source on stdin>
+  local repo="$T/c26-$1" line
+  if ! c26_fixture "$repo" "$2"; then bad "C26 $1: could not build the fixture"; return; fi
+  line=$(check_line "$repo" C26-exec-write)
+  if [ "$3" = PASS ] && [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+    ok "C26 $1: passes"
+  elif [ "$3" = FAIL ] && [[ "$line" == *FAIL* && "$line" == *"new: $4"* ]]; then
+    ok "C26 $1: FAILs naming $4"
+  else
+    bad "C26 $1: expected $3 $4" "$line"
+  fi
+}
+
+c26_case exec-literal internal/loud/loud_test.go FAIL internal/loud/loud_test.go:6 <<'GO'
+package loud
+
+import "os"
+
+func writeStub(path string) error {
+	return os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700)
+}
+GO
+
+c26_case multi-line internal/loud/loud_test.go FAIL internal/loud/loud_test.go:6 <<'GO'
+package loud
+
+import "os"
+
+func writeStub(path string) error {
+	return os.WriteFile(
+		path,
+		[]byte("#!/bin/sh\nprintf '%s,(%s)\n' \"$1\", x"),
+		0755,
+	)
+}
+GO
+
+c26_case variable-mode internal/loud/loud_test.go FAIL internal/loud/loud_test.go:6 <<'GO'
+package loud
+
+import "os"
+
+func writeFixture(path string, mode os.FileMode) error {
+	return os.WriteFile(path, []byte(`raw ( "body", 0o600`), mode)
+}
+GO
+
+c26_case testjail-source internal/testjail/stub.go FAIL internal/testjail/stub.go:11 <<'GO'
+package testjail
+
+import (
+	"os"
+	"path/filepath"
+)
+
+// Stubs writes one stub per name into dir.
+func Stubs(dir string, names ...string) error {
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+GO
+
+c26_case plain-modes internal/loud/loud_test.go PASS "" <<'GO'
+package loud
+
+import "os"
+
+// os.WriteFile(path, body, 0o700) in a comment is not a call.
+func writeData(path string) error {
+	if err := os.WriteFile(path, []byte("0o700)"), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte("data"), 0644)
+}
+GO
+
+c26_case under-forklock internal/loud/loud_test.go PASS "" <<'GO'
+package loud
+
+import (
+	"os"
+	"syscall"
+)
+
+func writeExecutableUnderForkLock(path string, body []byte, mode os.FileMode) error {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	return os.WriteFile(path, body, mode)
+}
+GO
+
+c26_case lock-ends-with-its-func internal/loud/loud_test.go FAIL internal/loud/loud_test.go:13 <<'GO'
+package loud
+
+import (
+	"os"
+	"syscall"
+)
+
+func lock() {
+	syscall.ForkLock.RLock()
+}
+
+func writeStub(path string) error {
+	return os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755)
+}
+GO
+
+c26_case production-source internal/loud/stub.go PASS "" <<'GO'
+package loud
+
+import "os"
+
+func writeLauncher(path string) error {
+	return os.WriteFile(path, []byte("#!/bin/sh\n"), 0o700)
+}
+GO
+
 # ---- the concurrent checks: order, exit status, a job that dies ------------
 
-# green_fixture <dir>: a tree on which all 25 checks PASS — the fixture plus what
+# green_fixture <dir>: a tree on which all 26 checks PASS — the fixture plus what
 # C12, C14 and C15 parse, an internal/mcpserv package for C10, a jailed test file
 # for C21 and C25, and the C24 script arch-check.sh runs from $PFM/scripts, with
 # every baseline the --measure of that tree writes.
@@ -366,18 +498,18 @@ run_all() {
   out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
 }
 
-# Today's order: C1 … C23, then C25, then C24 (its own script, last).
-EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C24-unwrapped-door"
+# Today's order: C1 … C23, then C25, C26, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C24-unwrapped-door"
 
 REPO_GREEN="$T/green"
 if green_fixture "$REPO_GREEN"; then
   run_all "$REPO_GREEN"
   order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
-  if [ "$rc" -eq 0 ] && [ "$passes" -eq 25 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
-    ok "exit: a tree where all 25 checks PASS exits 0, one line per check in today's order"
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 26 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 26 checks PASS exits 0, one line per check in today's order"
   else
-    bad "exit: expected rc 0, 25 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+    bad "exit: expected rc 0, 26 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
   fi
 else
   bad "exit: could not build the green fixture"
@@ -388,7 +520,7 @@ if green_fixture "$REPO_FAIL"; then
   printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
   run_all "$REPO_FAIL"
   others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
-  if [ "$rc" -eq 1 ] && [ "$others" -eq 24 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 25 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
     ok "exit: one FAIL and no ERROR exits 1"
   else
     bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
@@ -421,7 +553,7 @@ if green_fixture "$REPO_KILL"; then
   passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
   lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
   line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
-  if [ "$rc" -eq 2 ] && [ "$lines" -eq 25 ] && [ "$passes" -eq 24 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 26 ] && [ "$passes" -eq 25 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
     ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 24 checks PASS"
   else
     bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"

@@ -10,6 +10,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestRegisteredDaemonSessionQueriesRosterConfigDirs(t *testing.T) {
@@ -27,7 +28,7 @@ func TestRegisteredDaemonSessionQueriesRosterConfigDirs(t *testing.T) {
 		"if [ \"$CLAUDE_CONFIG_DIR\" = \"$PFM_TEST_TARGET_DIR\" ]; then\n" +
 		"  printf '[{\"sessionId\":\"" + id + "\"}]'\n" +
 		"else printf '[]'; fi\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_TEST_QUERY_LOG", logPath)

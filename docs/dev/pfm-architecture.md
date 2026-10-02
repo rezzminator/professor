@@ -179,6 +179,7 @@ Each derived artifact names its source and the command that regenerates or verif
 | C12 | every package, `*.md` and `PFM_*` name that `pfm/CLAUDE.md` cites exists — a `PFM_*` name only when production code uses it beyond declaring it | `FAIL new: <names>` |
 | C13 | every source file has a same-stem `_test.go`, beyond `.arch/untested-sources.txt` | `FAIL new: <file>` |
 | C25 | every test package has a `TestMain` reaching `testjail.Run`, beyond `.arch/testmain-jail.txt` | `FAIL new: <dir>` |
+| C26 | no test writes an executable around `testjail.WriteExecutable`: an `os.WriteFile` in a `_test.go` or in `internal/testjail` whose mode is a literal with the owner-exec bit, or not a literal, outside a function that holds `syscall.ForkLock.RLock()` (the helper, and its twins in `internal/deps` and `internal/config`, which `testjail` imports) — a fork inside the write window makes the next exec fail with ETXTBSY; `.arch/exec-writes.txt` stays empty | `FAIL new: <file:line>` |
 | C14 | every dispatched top-level command appears in usage (structural once `command_table.go` lands) | `FAIL dispatched but not in usage: <cmd>` |
 | C15 | every `pfm internal` entry appears in its usage (structural once `hooks.Table` lands) | `FAIL N dispatched, missing from usage: <entries>` |
 | C16 | no `PFM_*` env read outside `internal/paths` beyond baseline — a literal `Getenv("PFM_…")` or one through a constant holding a `PFM_*` name | `FAIL <file> (new N)` |

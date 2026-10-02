@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func clearRetiredHarvesterEnv(t *testing.T) {
@@ -399,7 +400,7 @@ func writeExecutable(t *testing.T, path, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

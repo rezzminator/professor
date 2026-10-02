@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // appServerFixtureEnv marks the re-exec of this test binary that plays the
@@ -50,7 +52,7 @@ while IFS= read -r line; do
 done
 exit 2
 `
-	if err := os.WriteFile(codex, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(codex, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))

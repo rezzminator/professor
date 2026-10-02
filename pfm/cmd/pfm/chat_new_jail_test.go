@@ -25,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -99,7 +100,7 @@ func newRunJail(t *testing.T) *runJail {
 		}
 	}
 	write := func(name, body string) {
-		if err := os.WriteFile(
+		if err := testjail.WriteExecutable(
 			filepath.Join(jail.binDir, name),
 			[]byte(body),
 			0o700,

@@ -13,6 +13,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func headlessCLIJail(t *testing.T) {
@@ -26,7 +27,7 @@ func headlessCLIJail(t *testing.T) {
 func writeHeadlessCLIStub(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "engine")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nset -eu\n"+body+"\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nset -eu\n"+body+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/hostfixture"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fixture is a process table on disk — <root>/<pid>/{cmdline,exe} — the
@@ -49,7 +50,7 @@ func newFixture(t *testing.T) *fixture {
 		}
 		// Distinct files are distinct inodes: the install renamed a new file
 		// over the path, and the old image lives on only in its processes.
-		if err := os.WriteFile(path, []byte(path), 0o700); err != nil {
+		if err := testjail.WriteExecutable(path, []byte(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // lockedBuffer is a stderr the watcher goroutine and the test can share.
@@ -40,7 +41,7 @@ const watchTick = 10 * time.Millisecond
 
 func writeFakeBuild(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }

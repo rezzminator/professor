@@ -12,13 +12,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 	root := t.TempDir()
 	bin := filepath.Join(root, "claude")
 	argvPath := filepath.Join(root, "argv")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		bin,
 		[]byte(
 			"#!/bin/sh\nif [ \"$1\" = agents ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$AGENT_OPEN_ARGV\"\n",

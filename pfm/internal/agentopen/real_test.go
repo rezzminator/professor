@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
@@ -88,7 +89,7 @@ func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values) {
 	root := t.TempDir()
 	argvPath := filepath.Join(root, "argv")
 	binary := filepath.Join(root, "claude")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		binary,
 		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGENTOPEN_ARGV\"\nprintf '[]\\n'\n"),
 		0o700,
@@ -137,7 +138,7 @@ func fakeAgentopenTmuxBinary(t *testing.T, pid int) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
 	script := "#!/bin/sh\nprintf '" + strconv.Itoa(pid) + "\\n'\nexit 0\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary

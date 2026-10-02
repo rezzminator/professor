@@ -16,7 +16,7 @@
 # in review. With no baseline, --measure writes today's tree as the first one.
 #
 # The checks are independent, so they run as concurrent background jobs and print
-# in the order they always have: C1 … C23, C25, then C24 (its own script). A job
+# in the order they always have: C1 … C23, C25, C26, then C24 (its own script). A job
 # that ends without leaving its CHECK line is reported as ERROR for that check,
 # never read as PASS.
 set -uo pipefail
@@ -433,6 +433,68 @@ chk_C25() {
   ratchet C25-testmain-jail testmain-jail "$T/c25"
 }
 
+# C26 one executable writer in tests: a test that writes a file with an exec
+# bit and then runs it races every fork of its process — a child forked while
+# the file is open for writing keeps the write descriptor until its own exec
+# closes it, and the run fails with ETXTBSY ("text file busy"). Every such write
+# goes through testjail.WriteExecutable, which holds syscall.ForkLock's read
+# side. Judged: every _test.go and every file of internal/testjail. Flagged: an
+# os.WriteFile (a call spanning lines included) whose mode is a literal with the
+# owner-exec bit, or not a literal at all (a mode the caller passes may carry
+# one). Exempt: a write inside a function that takes syscall.ForkLock.RLock() —
+# the helper itself and its twins in the packages testjail imports (deps,
+# config), which cannot import it back.
+chk_C26() {
+  { cat "$L/test.list"; grep '^internal/testjail/' "$L/src.list"; } | sort -u > "$T/judged.list"
+  [ -s "$T/judged.list" ] || { say C26-exec-write ERROR "no test files listed — the enumerator did not run"; return; }
+  # A character scanner, not a line grep: it follows a call across lines and
+  # skips parentheses and commas inside strings, runes and raw strings.
+  # shellcheck disable=SC2016 # the awk program is single-quoted on purpose
+  if ! awk '
+    function judge(  m, d, v) {
+      m = arg; if (m !~ /[^ \t]/) m = last
+      gsub(/^[ \t]+|[ \t]+$/, "", m)
+      if (locked) return
+      if (m ~ /^0[oO]?[0-7_]+$/) { d = m; sub(/^0[oO]?/, "", d); gsub(/_/, "", d)
+        if (length(d) >= 3 && substr(d, length(d) - 2, 1) ~ /[1357]/) print FILENAME ":" start; return }
+      if (m ~ /^[1-9][0-9_]*$/) { v = m; gsub(/_/, "", v); if (int(v / 64) % 2 == 1) print FILENAME ":" start; return }
+      print FILENAME ":" start
+    }
+    FNR == 1 { incall = 0; inraw = 0; locked = 0 }
+    /^func / { locked = 0 }
+    {
+      line = $0; n = length(line); i = 1; instr = 0
+      if (!inraw && index(line, "syscall.ForkLock.RLock()")) locked = 1
+      while (i <= n) {
+        c = substr(line, i, 1)
+        if (inraw) { if (c == "`") inraw = 0; if (incall) arg = arg c; i++; continue }
+        if (instr) {
+          if (c == "\\") { if (incall) arg = arg substr(line, i, 2); i += 2; continue }
+          if (c == q) instr = 0
+          if (incall) arg = arg c; i++; continue
+        }
+        if (c == "/" && substr(line, i + 1, 1) == "/") break
+        if (c == "\"" || c == "\047") { instr = 1; q = c; if (incall) arg = arg c; i++; continue }
+        if (c == "`") { inraw = 1; if (incall) arg = arg c; i++; continue }
+        if (!incall) {
+          if (substr(line, i, 13) == "os.WriteFile(" && (i == 1 || substr(line, i - 1, 1) !~ /[A-Za-z0-9_.]/)) {
+            incall = 1; depth = 1; arg = ""; last = ""; start = FNR; i += 13; continue
+          }
+          i++; continue
+        }
+        if (c == "(" || c == "[" || c == "{") depth++
+        else if (c == ")" || c == "]" || c == "}") { depth--; if (depth == 0) { judge(); incall = 0; i++; continue } }
+        else if (c == "," && depth == 1) { if (arg ~ /[^ \t]/) last = arg; arg = ""; i++; continue }
+        arg = arg c; i++
+      }
+      if (incall) arg = arg " "
+    }
+  ' $(cat "$T/judged.list") > "$T/c26"; then
+    say C26-exec-write ERROR "awk could not read the test files"; return
+  fi
+  ratchet C26-exec-write exec-writes "$T/c26"
+}
+
 # C24 lives in its own script; its exit status (0 PASS · 1 FAIL · 2 ERROR) joins the
 # maximum below, and the status file is how the job hands it over.
 chk_C24() { bash "$PFM/scripts/arch-c24.sh" "$MODE"; echo $? > "$L/jobs/C24.status"; }
@@ -451,7 +513,7 @@ for id in C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux
   C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names \
   C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage \
   C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace \
-  C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C24-unwrapped-door; do
+  C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C26-exec-write C24-unwrapped-door; do
   job "$id"
 done
 

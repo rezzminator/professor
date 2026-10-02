@@ -16,6 +16,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // skillCommitMarker is the pfm-owned sibling recording the commit a store was
@@ -211,9 +212,13 @@ func TestRunSkillGitStripsOnlyRepositorySelection(t *testing.T) {
 	t.Setenv("GIT_SSL_CAINFO", "/user/ca.pem")
 	t.Setenv("GIT_DIR", "/elsewhere/.git")
 	script := filepath.Join(t.TempDir(), "git")
-	writeFixture(t, script,
-		"#!/bin/sh\nprintf 'askpass=[%s] ca=[%s] dir=[%s]' \"$SSH_ASKPASS\" \"$GIT_SSL_CAINFO\" \"${GIT_DIR-unset}\"\n")
-	if err := os.Chmod(script, 0o755); err != nil {
+	if err := testjail.WriteExecutable(
+		script,
+		[]byte(
+			"#!/bin/sh\nprintf 'askpass=[%s] ca=[%s] dir=[%s]' \"$SSH_ASKPASS\" \"$GIT_SSL_CAINFO\" \"${GIT_DIR-unset}\"\n",
+		),
+		0o755,
+	); err != nil {
 		t.Fatal(err)
 	}
 	got, err := runSkillGitWith(deps.RealRunner{}, 10*time.Second, skillGitWaitDelay, script, t.TempDir(), "ls-remote")

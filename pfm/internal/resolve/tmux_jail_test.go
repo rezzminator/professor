@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type resolveJail struct {
@@ -88,7 +90,7 @@ func (jail *resolveJail) script(t *testing.T, label string) string {
 	content := "#!/bin/sh\nprintf '%s\\n' " +
 		shellSingleQuote("🥇 │ 🔖 "+label+" │ status") +
 		"\nexec sleep 120\n"
-	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

@@ -468,7 +468,7 @@ func runAutoOpenShell(t *testing.T, zsh, shimPath, home, fakeBin, log string, en
 
 func writeShimFile(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

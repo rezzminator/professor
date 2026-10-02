@@ -415,14 +415,14 @@ func InstalledHome(t *testing.T) string {
 		t.Fatal(err)
 	}
 	canonical := filepath.Join(jailedHome, ".local", "bin", "pfm")
-	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(canonical, []byte("jailed-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := WriteExecutable(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managedClaude, filepath.Join(jailedHome, ".local", "bin", claudeBinary)); err != nil {
@@ -437,7 +437,7 @@ func InstalledHome(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := WriteExecutable(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(managedOverlay, filepath.Join(jailedHome, ".local", "bin", overlay)); err != nil {
@@ -577,17 +577,17 @@ func CleanHome(t *testing.T) config.Runtime {
 		}
 	}
 	canonical := filepath.Join(canonicalDir, "pfm")
-	if err := os.WriteFile(canonical, []byte("target-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(canonical, []byte("target-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := WriteExecutable(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managedClaude, filepath.Join(canonicalDir, claudeBinary)); err != nil {
@@ -602,7 +602,7 @@ func CleanHome(t *testing.T) config.Runtime {
 		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := WriteExecutable(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(managedOverlay, filepath.Join(canonicalDir, overlay)); err != nil {

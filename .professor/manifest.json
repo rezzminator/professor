@@ -98,7 +98,7 @@
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
     ".claude/commands/pcm.md": "4e6ae3439cd5133d82c5ef1898ed052b2b1a349d3d3b54eee909c017b0d802cb",
-    ".claude/commands/pfm-testing-manual.md": "326b62f600e2a04854c98a2ba1999015d7c11df56d5a23a5e8e5b9384e784df7",
+    ".claude/commands/pfm-testing-manual.md": "b6dba3345dd2912811795c27f037dc495f51c8f736ea130ec09e47fc098e5349",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
     ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
     ".claude/scripts/dev.sh": "cd636c78308948eef5e7b37ae65f158b697033b2e40458c1289063a8ae09df0a",
@@ -112,6 +112,6 @@
     "docs/commands/pcm/references/audit-scopes.md": "0eb093cd384472d0cab03d30fe4b562b8424a6d0d6310fe1d51bad7efb04398b",
     "docs/commands/pcm/references/refresh.md": "96297f0e4f285d62d3e7587a373a5553b39f1361eeda09370f63c601f73e0a93",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
-    "pfm/CLAUDE.md": "ca9e214bf71d9d6f0643ba5a8589fc0f0f13925ce4109d0a60f4cfa65ef61d01"
+    "pfm/CLAUDE.md": "70b1f54f3bdfe0adb662cf23ec20c4a7774f4205a83d4f2d844457559cc40f0a"
   }
 }

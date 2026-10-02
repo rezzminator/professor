@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // gatewayExemptFiles are the ONLY files allowed to perform HTTP egress without
@@ -440,7 +442,7 @@ printf 'call\n' >> "$GATEWAY_GO_LIST_COUNT"
 printf 'deliberate go list failure\n' >&2
 exit 19
 `
-	if err := os.WriteFile(goScript, []byte(failingGo), 0o755); err != nil {
+	if err := testjail.WriteExecutable(goScript, []byte(failingGo), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	exe, err := os.Executable()

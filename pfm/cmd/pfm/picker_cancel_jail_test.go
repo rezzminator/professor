@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch reproduces the
@@ -35,7 +37,7 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		shellQuote(jail.binary) + " ls\n" +
 		"echo RC=$? > " + shellQuote(marker) + "\n"
-	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 

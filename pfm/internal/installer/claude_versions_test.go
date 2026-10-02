@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeVersionsProcFS serves a hand-built process table with real
@@ -77,7 +78,7 @@ func goneSignal(int, syscall.Signal) error { return syscall.ESRCH }
 
 func writeExecutable(t *testing.T, path string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,11 +21,12 @@ import (
 func runHeadlessWatch(args []string, stdout, stderr io.Writer, runner deps.Runner, runtimes ...commandRuntime) int {
 	flags := cli.NewFlagSet(
 		"chat watch",
-		"usage: pfm chat watch <target|glob>... [--transitions] [--idle-after SECS] "+
+		"usage: pfm chat watch <target|glob>... [--transitions [--quiet-after SECS]] [--idle-after SECS] "+
 			"[--on-idle CMD] [--on-exit CMD] [--once] [--poll SECS]",
 		stderr,
 	)
 	transitions := flags.Bool("transitions", false, "announce every state change, after one SEEN snapshot per target")
+	quietAfter := flags.Int("quiet-after", 0, "with --transitions: seconds of unchanged transcript before QUIET")
 	idleAfter := flags.Int("idle-after", 0, "seconds of idle before IDLE is emitted")
 	onIdle := flags.String("on-idle", "", "shell command to run on IDLE")
 	onExit := flags.String("on-exit", "", "shell command to run on EXIT or DEAD")
@@ -34,7 +36,7 @@ func runHeadlessWatch(args []string, stdout, stderr io.Writer, runner deps.Runne
 	if !ok {
 		return code
 	}
-	if len(targets) == 0 || *idleAfter < 0 || *poll < 1 {
+	if len(targets) == 0 || *idleAfter < 0 || *poll < 1 || *quietAfter < 0 || (*quietAfter > 0 && !*transitions) {
 		flags.Usage()
 		return 2
 	}
@@ -87,6 +89,7 @@ func runHeadlessWatch(args []string, stdout, stderr io.Writer, runner deps.Runne
 		Poll:        time.Duration(*poll) * time.Second,
 		Once:        *once,
 		Transitions: *transitions,
+		QuietAfter:  time.Duration(*quietAfter) * time.Second,
 		OnIdle:      hookRunner(*onIdle, runner, stderr),
 		OnExit:      hookRunner(*onExit, runner, stderr),
 	}, stdout)
@@ -124,6 +127,8 @@ func hookRunner(
 			"CC_CHAT_ENGINE="+string(status.Engine),
 			"CC_CHAT_SOCKET="+status.Socket,
 			"CC_CHAT_SESSION_ID="+status.SessionID,
+			"CC_CHAT_ERROR="+status.Error,
+			"CC_CHAT_IDLE_SECONDS="+strconv.FormatInt(status.IdleSeconds, 10),
 		)
 		process, err := runner.Start(
 			context.Background(),

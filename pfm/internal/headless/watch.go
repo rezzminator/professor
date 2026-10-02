@@ -26,11 +26,16 @@ type WatchOptions struct {
 	// Once stops a target after its first IDLE line, instead of following the
 	// chat until it dies. A SEEN snapshot is not an IDLE line.
 	Once bool
-	// Transitions streams every state change — WORKING, BLOCKED, IDLE — after
+	// Transitions streams every state change — WORKING, BLOCKED, QUIET, IDLE — after
 	// one SEEN snapshot per target, so a monitor that expires and is re-armed
 	// never hears an event twice. Without it only IDLE, EXIT, DEAD and ERROR
 	// are written, exactly as before.
 	Transitions bool
+	// QuietAfter, under Transitions and when positive, announces a working
+	// seat whose transcript has sat unchanged that long as QUIET, once, and
+	// WORKING again when the transcript moves: a hung stream, a reconnect
+	// loop or an unseen dialog never ends a turn, so IDLE alone misses it.
+	QuietAfter time.Duration
 }
 
 // Watcher samples one chat. Resolve is re-run every tick rather than cached:
@@ -474,11 +479,26 @@ func (run *fleetRun) announceLegacy(seat *watchedSeat) error {
 	return nil
 }
 
+// stateQuiet is the transition key of a working seat silent for QuietAfter.
+// It is the watch's own judgment, never a Status.State.
+const stateQuiet = "quiet"
+
+// quiet is a working seat whose transcript has sat unchanged for QuietAfter.
+func (run *fleetRun) quiet(status Status) bool {
+	after := run.options.QuietAfter
+	return run.options.Transitions && after > 0 && status.State == StateWorking &&
+		time.Duration(status.QuietSeconds)*time.Second >= after
+}
+
 // stateKey is what a transition is announced as: a turn that ended is one
-// state per error kind, every other state is itself.
-func stateKey(status Status) string {
-	if endedTurn(status) {
+// state per error kind, a working seat silent for QuietAfter is quiet, every
+// other state is itself.
+func (run *fleetRun) stateKey(status Status) string {
+	switch {
+	case endedTurn(status):
 		return StateIdle + ":" + status.Error
+	case run.quiet(status):
+		return stateQuiet
 	}
 	return status.State
 }
@@ -495,6 +515,9 @@ func (run *fleetRun) snapshot(seat *watchedSeat) error {
 	if status.State == StateError {
 		line += " error=" + status.Error
 	}
+	if run.quiet(status) {
+		line += fmt.Sprintf(" quiet_seconds=%d", status.QuietSeconds)
+	}
 	if err := run.say("%s", line); err != nil {
 		return err
 	}
@@ -502,7 +525,7 @@ func (run *fleetRun) snapshot(seat *watchedSeat) error {
 		run.finish(seat)
 		return nil
 	}
-	seat.announced = stateKey(status)
+	seat.announced = run.stateKey(status)
 	seat.lastSeen = status.Last
 	return nil
 }
@@ -521,7 +544,7 @@ func (run *fleetRun) announceTransition(seat *watchedSeat) error {
 		}
 		seat.announced = StateWorking
 	}
-	key := stateKey(status)
+	key := run.stateKey(status)
 	if endedTurn(status) {
 		if !idleLongEnough(status, run.options.IdleAfter) || key == seat.announced {
 			return nil
@@ -533,5 +556,8 @@ func (run *fleetRun) announceTransition(seat *watchedSeat) error {
 		return nil
 	}
 	seat.announced = key
+	if key == stateQuiet {
+		return run.say("QUIET %s quiet_seconds=%d", seat.name, status.QuietSeconds)
+	}
 	return run.say("%s %s", strings.ToUpper(status.State), seat.name)
 }

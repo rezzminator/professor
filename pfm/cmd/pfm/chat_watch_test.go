@@ -34,7 +34,10 @@ func TestHookRunnerRunsThroughTheRunnerSeam(t *testing.T) {
 	if hook == nil {
 		t.Fatal("hookRunner(\"echo hi\") returned nil, want a hook")
 	}
-	status := headless.Status{Name: "chat-1", State: "idle", Socket: "/tmp/cc-1", SessionID: "sid-1"}
+	status := headless.Status{
+		Name: "chat-1", State: "error", Socket: "/tmp/cc-1", SessionID: "sid-1",
+		Error: "server_overloaded", IdleSeconds: 7,
+	}
 	if err := hook(status); err != nil {
 		t.Fatalf("hook() error = %v, want nil (errors are logged, never propagated)", err)
 	}
@@ -49,7 +52,9 @@ func TestHookRunnerRunsThroughTheRunnerSeam(t *testing.T) {
 	env := strings.Join(starts[0].Opts.Env, "\x00")
 	for _, want := range []string{
 		"CC_CHAT_NAME=chat-1",
-		"CC_CHAT_STATE=idle",
+		"CC_CHAT_STATE=error",
+		"CC_CHAT_ERROR=server_overloaded",
+		"CC_CHAT_IDLE_SECONDS=7",
 		"CC_CHAT_SOCKET=/tmp/cc-1",
 		"CC_CHAT_SESSION_ID=sid-1",
 	} {
@@ -91,6 +96,8 @@ func TestRunHeadlessWatchRefusesBadTargetsAsUsage(t *testing.T) {
 		{"no target", nil, "usage: pfm chat watch"},
 		{"no target with a flag", []string{"--transitions"}, "usage: pfm chat watch"},
 		{"malformed glob", []string{"fine", "["}, `"["`},
+		{"quiet-after without transitions", []string{"x", "--quiet-after", "600"}, "usage: pfm chat watch"},
+		{"negative quiet-after", []string{"x", "--transitions", "--quiet-after", "-1"}, "usage: pfm chat watch"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()

@@ -119,7 +119,7 @@ Every situation the manual answers, with who acts. The orchestrator fixes nothin
 
 ### Cross-harness seat liveness
 
-A seat stops without finishing on a model-server error, a hung turn, a brief never submitted, a dialog or a dead process. The seats Monitor's line names it and the cross-harness command's action table answers it: re-prompt, Enter once, capture and judge, answer, or re-dispatch. A model-server error writes `{id} COMA · {kind} · re-prompted · {time}`; a second coma of one seat within 10 minutes re-dispatches the task on another Codex model when one is configured, else on the Claude engine with the task's tier model, and writes `{id} COMA · {kind} · re-dispatched on {engine} {model} · {time}`.
+A seat stops without finishing on a model-server error, a hung turn, a brief never submitted, a dialog or a dead process. The seats Monitor's line names it and the cross-harness command's action table answers it: re-prompt, Enter once, capture and judge, answer, or re-dispatch. A model-server error writes `{id} COMA · {kind} · re-prompted · {time}`; a second coma of one seat within 10 minutes re-dispatches the task on the Claude engine at the task's tier model, and writes `{id} COMA · {kind} · re-dispatched on {engine} {model} · {time}`.
 
 ## Review
 

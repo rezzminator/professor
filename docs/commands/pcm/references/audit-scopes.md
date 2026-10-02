@@ -22,7 +22,7 @@ Files: `.claude/commands/**/*.md`
 - **Doc path references:** every `$CDOCS`, `$REFS`, `docs/` path → verify target exists on disk
 - **Subcommand structure:** if command defines subcommands via table/args, verify each is handled in the body
 - **Size limit:** no command file >35KB
-- **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`pcm.md § Authoring conventions — Descriptions`); `disable-model-invocation: true` only on user-triggered-by-design commands
+- **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`/quality:description`); `disable-model-invocation: true` only on user-triggered-by-design commands
 
 ## `skills` — Walk every SKILL.md
 
@@ -70,7 +70,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 
 Catches what no single-domain audit can see. Reads across ALL domains simultaneously.
 
-- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (rosters: `/quality:claude-md`)
+- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (where to `ls`, never a recalled count); root `CLAUDE.md` carries no agent roster — each agent's `description:` is its entry
 - **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry)
 - **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter
 - **Frontmatter validity:** every agent has non-empty `name`/`description`/`tools`; root agent `name` matches its `subagent_type` registry entry

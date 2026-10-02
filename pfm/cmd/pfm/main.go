@@ -365,7 +365,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	}
 	fmt.Fprintln(stdout, pfmchat.KillOutcome(
 		target.ID, target.SocketName, target.PaneID,
-		!pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName),
+		!kill.AddressOnly(target),
 	))
 	return 0
 }

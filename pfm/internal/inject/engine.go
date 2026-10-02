@@ -580,6 +580,9 @@ func (engine *Engine) injectResolved(
 		base.Message = "target pane is dead or unreadable"
 		return base, nil
 	}
+	if refused, held := refuseTrustDialog(base, target.Pane, capture); held {
+		return refused, nil
+	}
 	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
 	verifiedEngine := ""
 	if commandErr == nil {

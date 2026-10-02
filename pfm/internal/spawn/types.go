@@ -158,5 +158,10 @@ type Result struct {
 	Name     string
 	Named    bool
 	Prompted bool
-	Warnings []string
+	// TrustHeld is Claude Code's folder-trust dialog standing on the fresh
+	// pane. Run returned before renaming or typing anything: the dialog's
+	// default row is "No, exit", and trusting a folder is the human's call, so
+	// the session is left alive for them to answer.
+	TrustHeld bool
+	Warnings  []string
 }

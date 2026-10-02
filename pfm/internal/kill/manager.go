@@ -204,8 +204,13 @@ func (manager *Manager) Kill(
 		target, err = manager.IdentifySelf(ctx, request.Environment)
 	case request.ID != "":
 		target, err = manager.lookupTarget(ctx, request.ID, request.Engine, request.RolloutPath)
+	case request.SocketName != "" && request.PaneID != "":
+		// A live seat that resolved by name but carries no session id: the
+		// socket name stands in as the key, an address with no identity behind
+		// it (AddressOnly), so the pane closes and nothing is recorded.
+		target = Target{Engine: request.Engine, ID: request.SocketName}
 	default:
-		err = errors.New("kill requires --self or an id")
+		err = errors.New("kill requires --self, an id, or a resolved live address")
 	}
 	if err != nil {
 		return Target{}, err
@@ -226,12 +231,13 @@ func (manager *Manager) Kill(
 	}
 	live := target.SocketPath != "" && target.PaneID != ""
 
-	// A seat keyed on its own socket name has no identity to tombstone: the
-	// key names where the chat is, not which chat it is, and it stops meaning
-	// anything the moment the seat's session is pinned down. The composer
-	// already refuses to apply such a kill (compose.applyKill), so writing one
-	// only leaves a row nobody can unkill. The pane still closes below.
-	if !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName) {
+	// A seat with no id, or keyed on its own socket name, has no identity to
+	// tombstone: the key names where the chat is, not which chat it is, and it
+	// stops meaning anything the moment the seat's session is pinned down. The
+	// composer already refuses to apply such a kill (compose.applyKill), so
+	// writing one only leaves a row nobody can unkill. The pane still closes
+	// below.
+	if !AddressOnly(target) {
 		if err := manager.database.Kill(ctx, store.Killed{
 			ID:       target.ID,
 			Engine:   target.Engine,

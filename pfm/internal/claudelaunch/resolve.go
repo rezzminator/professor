@@ -45,9 +45,11 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 		case SourceAccount:
 			if accountIndex >= 0 {
 				selected := machine.Accounts[accountIndex]
-				if !selected.Implicit {
+				if knob.Name == knobNoFlicker {
+					row.Value, row.Won = noFlickerValue(selected.ConfigDir), accountWord
+				} else if !selected.Implicit {
 					row.Value = selected.ConfigDir
-					row.Won = "account"
+					row.Won = accountWord
 				}
 			}
 		case SourceConfig, SourceLaunchThenConfig:
@@ -55,7 +57,7 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 			key := "claude." + knob.Name
 			if accountIndex >= 0 &&
 				(overrides[knob.Name] || machine.Source(fmt.Sprintf("accounts[%d].claude.%s", accountIndex, knob.Name)) == pfmconfig.SourceFile) {
-				row.Won = "account"
+				row.Won = accountWord
 			} else if machine.Source(
 				key,
 			) == pfmconfig.SourceFile {

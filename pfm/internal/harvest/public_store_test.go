@@ -8,6 +8,7 @@ import (
 )
 
 func TestIsPathInsideAcceptsDescendantsAndRefusesSiblings(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cases := []struct {
 		name string
@@ -31,6 +32,7 @@ func TestIsPathInsideAcceptsDescendantsAndRefusesSiblings(t *testing.T) {
 }
 
 func TestReadBoundedFileEnforcesTheSizeLimit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	small := filepath.Join(dir, "small.txt")
@@ -64,6 +66,7 @@ func TestReadBoundedFileEnforcesTheSizeLimit(t *testing.T) {
 }
 
 func TestSymlinkBelowReportsASymlinkedComponent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "real", "sub"), 0o700); err != nil {
 		t.Fatal(err)
@@ -98,6 +101,7 @@ func TestSymlinkBelowReportsASymlinkedComponent(t *testing.T) {
 }
 
 func TestCanonicalPublicPathResolvesSymlinksAndTolerantOfMissingTail(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	realPath := filepath.Join(root, "real")
 	if err := os.Mkdir(realPath, 0o700); err != nil {

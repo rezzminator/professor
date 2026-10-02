@@ -26,6 +26,7 @@ func walledResult(rungs []string) Result {
 // the failure says a retry may pass and still names another copy; a ladder
 // whose browser never ran keeps the retry-is-futile wording.
 func TestChallengeMetByTheBrowserSaysARetryMayPass(t *testing.T) {
+	t.Parallel()
 	withBrowser := PublicFailureMessage(walledResult(
 		[]string{"direct", "chrome-impersonation", "jina", "defuddle", "browser", "wayback"}))
 	for _, want := range []string{"a retry later may pass", "another copy", "Rungs tried: direct, chrome-impersonation, jina, defuddle, browser, wayback"} {
@@ -47,6 +48,7 @@ func TestChallengeMetByTheBrowserSaysARetryMayPass(t *testing.T) {
 // nothing the site sent — headers, cookies, markup — reaches the public failure
 // text, so the text names no vendor: "an access challenge", never a guess.
 func TestChallengeVendorIsNeverReadFromTheHarvestersOwnText(t *testing.T) {
+	t.Parallel()
 	got := PublicFailureMessage(walledResult([]string{"direct", "browser"}))
 	if !strings.Contains(got, "The source is behind an access challenge;") {
 		t.Errorf("the challenge is not named as an access challenge:\n%s", got)

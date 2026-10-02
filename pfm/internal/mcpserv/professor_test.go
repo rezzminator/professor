@@ -117,8 +117,8 @@ func TestProfessorCombinedServesEveryFamily(t *testing.T) {
 	if got := sessionToolNames(t, session); !slices.Equal(got, want) {
 		t.Fatalf("combined tools/list = %v, want %v", got, want)
 	}
-	if len(want) != 21 || !slices.Contains(want, "servicedesk") {
-		t.Fatalf("combined roster = %v, want the 3 harvester tools and the 18 chat tools", want)
+	if len(want) != 20 || !slices.Contains(want, "servicedesk") {
+		t.Fatalf("combined roster = %v, want the 3 harvester tools and the 17 chat tools", want)
 	}
 	initialized := session.InitializeResult()
 	if initialized.ServerInfo.Name != "professor" {
@@ -195,6 +195,7 @@ func TestProfessorLeavesADisabledFamilyOut(t *testing.T) {
 }
 
 func TestProfessorRefusesWhenEveryFamilyIsDisabled(t *testing.T) {
+	t.Parallel()
 	professor, err := NewProfessor(ProfessorOptions{Version: "test"})
 	if err == nil || err.Error() != "pfm mcp: every family is disabled" || professor != nil {
 		t.Fatalf("NewProfessor() = %v, %v; want the every-family-disabled error", professor, err)
@@ -205,6 +206,7 @@ func TestProfessorRefusesWhenEveryFamilyIsDisabled(t *testing.T) {
 // each tool of the failed family stays listed and answers IsError with the
 // configuration error and a fix that names each engine's reconnect.
 func TestProfessorServesAFailedFamilyAlone(t *testing.T) {
+	t.Parallel()
 	professor, err := NewProfessor(ProfessorOptions{Version: "test", Failed: []FailedFamily{{
 		Family: pfmconfig.MCPServerChat, Tools: ToolNames(),
 		Err: errors.New("chat config broken"), ConfigPath: "/pfm/config.json",

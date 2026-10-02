@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -35,10 +36,13 @@ func parsedReloadShell(t *testing.T, run string) claudelaunch.Parsed {
 }
 
 type fakeReloadTmux struct {
-	dead     bool
-	literal  string
-	respawn  string
-	displays []string
+	dead       bool
+	literal    string
+	respawn    string
+	respawnCWD string
+	displays   []string
+	selector   bool
+	displayErr error
 }
 
 func (tmux *fakeReloadTmux) ListPanes(context.Context, string) ([]Pane, error) {
@@ -50,6 +54,9 @@ func (*fakeReloadTmux) PaneInMode(context.Context, string, string) (bool, error)
 }
 func (*fakeReloadTmux) CancelMode(context.Context, string, string) error { return nil }
 func (tmux *fakeReloadTmux) Capture(context.Context, string, string) (string, error) {
+	if tmux.selector {
+		return "Claude\n❯ \n❯ 1. choose", nil
+	}
 	if tmux.literal == "/exit" {
 		return "Claude\n❯ /exit", nil
 	}
@@ -72,15 +79,16 @@ func (tmux *fakeReloadTmux) SendLiteral(_ context.Context, _, _, value string) e
 	return nil
 }
 
-func (tmux *fakeReloadTmux) Respawn(_ context.Context, _, _, _, command string) error {
+func (tmux *fakeReloadTmux) Respawn(_ context.Context, _, _, cwd, command string) error {
 	tmux.respawn = command
+	tmux.respawnCWD = cwd
 	tmux.dead = false
 	return nil
 }
 
 func (tmux *fakeReloadTmux) Display(_ context.Context, _, _, message string) error {
 	tmux.displays = append(tmux.displays, message)
-	return nil
+	return tmux.displayErr
 }
 
 type fakeReloadProc struct {
@@ -334,11 +342,7 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := lock.Close(); err != nil {
-			t.Errorf("close lock: %v", err)
-		}
-	}()
+	t.Cleanup(func() { _ = lock.Close() })
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
@@ -351,13 +355,110 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 			Account:    2,
 			AccountIDs: []int{2},
 		},
-		Options{SIDDir: dir, Delay: -1},
+		Options{SIDDir: dir, Delay: -1, Poll: -1, IdleTries: 3},
 		nil,
 		nil,
 		nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "already in flight") {
 		t.Fatalf("overlap error = %v", err)
+	}
+}
+
+type releasePaneLockClock struct {
+	clock.Clock
+	lock         *os.File
+	polls        int
+	beforeUnlock func() error
+}
+
+func (clk *releasePaneLockClock) Sleep(ctx context.Context, _ time.Duration) error {
+	clk.polls++
+	if clk.polls == 2 {
+		if clk.beforeUnlock != nil {
+			if err := clk.beforeUnlock(); err != nil {
+				return err
+			}
+		}
+		if err := syscall.Flock(int(clk.lock.Fd()), syscall.LOCK_UN); err != nil {
+			return err
+		}
+	}
+	return clk.Clock.Sleep(ctx, 0)
+}
+
+type queuedThenTmux struct {
+	delayedThenTmux
+	submissions int
+}
+
+func (tmux *queuedThenTmux) SendKey(ctx context.Context, socket, pane, key string) error {
+	if key == "Enter" && tmux.literal == "S" && !tmux.submitted {
+		tmux.submissions++
+	}
+	return tmux.delayedThenTmux.SendKey(ctx, socket, pane, key)
+}
+
+func TestRunQueuesBehindAnOverlappingPaneReload(t *testing.T) {
+	dir := t.TempDir()
+	root, cwd := t.TempDir(), t.TempDir()
+	t.Setenv(paths.EnvHome, t.TempDir())
+	t.Setenv(paths.EnvClaudeRoots, root)
+	id := "22222222-2222-4222-8222-222222222222"
+	if err := os.WriteFile(filepath.Join(root, id+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(LockPath(dir, "probe-1", "%7"), os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	clk := &releasePaneLockClock{Clock: clock.Real, lock: lock}
+	clk.beforeUnlock = func() error {
+		return writeHandoff(lock, handoffRecord{
+			Engine: pfmengine.Claude, SessionID: id, Account: 2, Cache1H: true,
+			CWD: cwd, WrittenAt: clock.Real.Now(),
+		})
+	}
+	tmux := &queuedThenTmux{}
+	var stderr strings.Builder
+	result, err := Run(
+		context.Background(),
+		Request{
+			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
+			SessionID: "11111111-1111-4111-8111-111111111111",
+			CWD:       "/jail/project", Account: 1, AccountIDs: []int{1}, Then: "S",
+			Machine: reloadTestMachine("", dir),
+		},
+		Options{SIDDir: dir, Delay: -1, Poll: -1, IdleTries: 5, ExitTries: 2, ThenTries: 2, Clock: clk},
+		tmux, promptReadyProc{tmux: &tmux.delayedThenTmux}, &stderr,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clk.polls < 2 || tmux.respawn == "" || tmux.submissions != 1 {
+		t.Fatalf("polls=%d respawned=%t steer submissions=%d", clk.polls, tmux.respawn != "", tmux.submissions)
+	}
+	if parsedReloadShell(t, tmux.respawn).Resume != id || result.Account != 2 || !result.Cache1H ||
+		result.LeftBehind != id || tmux.respawnCWD != cwd || !strings.Contains(stderr.String(), "continuing from session "+id+" on account 2") {
+		t.Fatalf("queued result=%+v cwd=%q stderr=%q", result, tmux.respawnCWD, stderr.String())
+	}
+}
+
+func TestRunMarksSelectorRefusalOnlyWhenPaneWasTold(t *testing.T) {
+	for _, displayErr := range []error{nil, errors.New("display failed")} {
+		tmux := &fakeReloadTmux{selector: true, displayErr: displayErr}
+		_, err := Run(context.Background(), Request{
+			Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7",
+			SessionID: "11111111-1111-4111-8111-111111111111", Account: 1,
+			AccountIDs: []int{1}, Machine: reloadTestMachine("", t.TempDir()),
+		}, Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2}, tmux, nil, nil)
+		if err == nil || PaneTold(err) != (displayErr == nil) || len(tmux.displays) != 1 || tmux.literal != "" {
+			t.Fatalf("display=%v error=%v told=%t", displayErr, err, PaneTold(err))
+		}
 	}
 }
 
@@ -370,7 +471,7 @@ func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, variable := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "FORCE_PROMPT_CACHING_5M"} {
+	for _, variable := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROMPT_CACHE_TTL"} {
 		if !strings.Contains(run, variable) {
 			t.Fatalf("run %q does not mention %s", run, variable)
 		}
@@ -526,7 +627,7 @@ func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.OpenCode, SocketPath: "/tmp/ox-session", Pane: "%7",
-			PanePID: 700, Account: 1, AccountIDs: []int{1}, CWD: "/work",
+			Account: 1, AccountIDs: []int{1}, CWD: "/work",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
 		tmux, nil, nil,
@@ -563,7 +664,6 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 					Engine:     pfmengine.Claude,
 					SocketPath: "/tmp/tmux-1000/probe-reload",
 					Pane:       "%7",
-					PanePID:    700,
 					SessionID:  "11111111-1111-4111-8111-111111111111",
 					CWD:        "/jail/project",
 					Account:    2,
@@ -591,7 +691,7 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 			}
 			parsed := parsedReloadShell(t, tmux.respawn)
 			if parsed.Resume != "11111111-1111-4111-8111-111111111111" ||
-				parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" {
+				parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" {
 				t.Fatalf("respawn resume=%q settings=%#v", parsed.Resume, parsed.SettingsEnv)
 			}
 			values, err := pfmconfig.ResolvePaths()
@@ -624,7 +724,7 @@ func TestRunWaitsForExitTextToRenderBeforeSubmitting(t *testing.T) {
 		context.Background(),
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-reload-render", Pane: "%7",
-			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
+			SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
 			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
@@ -652,7 +752,7 @@ func TestRunRefusesBlindExitWhenTextNeverRenders(t *testing.T) {
 		ctx,
 		Request{
 			Engine: pfmengine.Codex, SocketPath: filepath.Join(t.TempDir(), "fake-codex-socket"), Pane: "%7",
-			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
+			SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
 			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
@@ -676,7 +776,6 @@ func TestRunWaitsForTheRebornPromptBeforeCheckingClaudeAndSubmittingThen(t *test
 			Engine:     pfmengine.Claude,
 			SocketPath: "/tmp/tmux-1000/probe-reload-then",
 			Pane:       "%7",
-			PanePID:    700,
 			SessionID:  "11111111-1111-4111-8111-111111111111",
 			CWD:        "/jail/project",
 			Account:    1,

@@ -39,7 +39,7 @@ import (
 // verbatim into the `/reload` slash command's own description — the picker
 // shows the human exactly the flags this package's Run understands, never a
 // hand-maintained restatement that can drift from them.
-const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
+const Usage = "usage: pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then \"prompt\"] [--sock socket]\n" +
 	"       with no --sock, the calling chat's own pane is detected automatically;\n" +
 	"       --hide (with --new) hides the conversation left behind from the picker"
 
@@ -74,20 +74,23 @@ type Process interface {
 }
 
 type Request struct {
-	Engine      pfmengine.ID
-	SocketPath  string
-	Pane        string
-	PanePID     int
-	SessionID   string
-	Transcript  string
-	CWD         string
-	Account     int
-	AccountIDs  []int
-	CodexHome   string
-	CodexBinary string
-	CodexYolo   bool
-	Cache1H     bool
-	Then        string
+	Engine       pfmengine.ID
+	SocketPath   string
+	Pane         string
+	New          bool
+	AccountGiven bool
+	CacheGiven   bool
+	LeftBehind   string
+	SessionID    string
+	Transcript   string
+	CWD          string
+	Account      int
+	AccountIDs   []int
+	CodexHome    string
+	CodexBinary  string
+	CodexYolo    bool
+	Cache1H      bool
+	Then         string
 	// Name is the display name the chat wore before a --new reboot; the
 	// reborn pane takes it over and the abandoned session is relabelled
 	// (followName). "" carries nothing — a chat named from its prompts.
@@ -128,8 +131,9 @@ type Options struct {
 }
 
 type Result struct {
-	Account int
-	Cache1H bool
+	Account    int
+	Cache1H    bool
+	LeftBehind string
 	// New reports whether the reborn seat started a brand-new session id
 	// (--new was requested, or no transcript existed yet to resume).
 	New bool
@@ -160,9 +164,7 @@ func (o *Options) defaults() {
 	}
 }
 
-// LockPath is the pane mutex Run holds for the whole reboot — from before the
-// old process is sent /exit until the reborn one is up. The file persists;
-// the flock on it is the signal.
+// LockPath is the persistent pane mutex; its flock spans the whole reboot.
 func LockPath(sidDir, socketName, pane string) string {
 	return filepath.Join(sidDir, "."+socketName+"."+pane+".reloadlock")
 }
@@ -187,14 +189,12 @@ func InFlight(sidDir, socketName, pane string) (inFlight bool, returnErr error) 
 			)
 		}
 	}()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	// A shared probe conflicts with Run's exclusive lock, never with another probe.
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return true, nil
 		}
 		return false, fmt.Errorf("probe reload lock: %w", err)
-	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		return false, fmt.Errorf("release reload lock probe: %w", err)
 	}
 	return false, nil
 }
@@ -214,30 +214,10 @@ func Run(
 	trail := obs.NewTrail(ctx, "reload", "requested")
 	defer func() { trail.End(err) }()
 	options.defaults()
-	if request.SocketPath == "" || request.Pane == "" {
-		return Result{}, errors.New("reload requires a socket and pane")
-	}
-	if !rosterContains(request.AccountIDs, request.Account) {
-		return Result{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
-	}
-	wasNew := request.SessionID == ""
-	if wasNew && request.Engine == pfmengine.Claude {
-		id, idErr := claudelaunch.NewSessionID()
-		if idErr != nil {
-			return Result{}, fmt.Errorf("new reload session id: %w", idErr)
-		}
-		request.SessionID = id
-		request.fresh = true
-	}
-	run, err := engineRun(request)
+	entry := options.Clock.Now()
+	request, run, wasNew, err := prepareReload(request)
 	if err != nil {
 		return Result{}, err
-	}
-	if run == "" {
-		if descriptor, lookupErr := pfmengine.Lookup(request.Engine); lookupErr == nil {
-			return Result{}, fmt.Errorf("%s does not support in-place reload", descriptor.Short)
-		}
-		return Result{}, fmt.Errorf("engine %q does not support in-place reload", request.Engine)
 	}
 	if stderr == nil {
 		stderr = io.Discard
@@ -246,7 +226,7 @@ func Run(
 	if err := os.MkdirAll(options.SIDDir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("create reload lock directory: %w", err)
 	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return Result{}, fmt.Errorf("open reload lock: %w", err)
 	}
@@ -255,21 +235,35 @@ func Run(
 			fmt.Fprintf(stderr, "pfm chat reload: close pane mutex: %v\n", err)
 		}
 	}()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+	for attempt := 0; ; attempt++ {
+		lockErr := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if lockErr == nil {
+			break
+		}
+		if !errors.Is(lockErr, syscall.EWOULDBLOCK) {
+			return Result{}, fmt.Errorf("lock reload pane: %w", lockErr)
+		}
+		if attempt+1 >= options.IdleTries {
 			return Result{}, errors.New("another reload of this pane is already in flight")
 		}
-		return Result{}, fmt.Errorf("lock reload pane: %w", err)
-	}
-	defer func() {
-		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: unlock pane mutex: %v\n", err)
+		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
+			return Result{}, err
 		}
-	}()
+	}
 	if tmux == nil {
 		return Result{}, errors.New("reload requires a tmux client")
 	}
 	trail.Reach("locked", "pane mutex held")
+	updated, continuedRun, leftBehind, continuedNew, err := continueFromHandoff(
+		lock, lockPath, request, entry, options.SIDDir, stderr,
+	)
+	if err != nil {
+		return Result{}, err
+	}
+	request = updated
+	if continuedRun != "" {
+		run, wasNew = continuedRun, continuedNew
+	}
 
 	if options.Delay > 0 {
 		if err := options.Clock.Sleep(ctx, options.Delay); err != nil {
@@ -307,7 +301,7 @@ func Run(
 		if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, abort); displayErr != nil {
 			return Result{}, errors.Join(cause, fmt.Errorf("display selector refusal: %w", displayErr))
 		}
-		return Result{}, cause
+		return Result{}, paneToldError{cause}
 	}
 	if err := stashDraft(ctx, request, options.Clock, tmux, capture, stderr); err != nil {
 		return Result{}, err
@@ -392,6 +386,12 @@ func Run(
 	if err := tmux.Respawn(ctx, request.SocketPath, request.Pane, request.CWD, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
+	if err := writeHandoff(lock, handoffRecord{
+		Engine: request.Engine, SessionID: request.SessionID, Account: request.Account,
+		LeftBehind: leftBehind, Cache1H: request.Cache1H, CWD: request.CWD, WrittenAt: options.Clock.Now(),
+	}); err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: record reload handoff: %v\n", err)
+	}
 	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, false); err != nil {
 		return Result{}, fmt.Errorf("clear pane remain-on-exit: %w", err)
 	}
@@ -406,14 +406,17 @@ func Run(
 			}
 		}
 		if err := deliverThen(ctx, request, options, tmux, proc, stderr); err != nil {
-			return Result{}, errors.Join(err, failThen(ctx, request, options.SIDDir, tmux, err.Error()))
+			if failErr := failThen(ctx, request, options.SIDDir, tmux, err.Error()); failErr != nil {
+				return Result{}, errors.Join(err, failErr)
+			}
+			return Result{}, paneToldError{err}
 		}
 		trail.Reach("then-delivered", "--then delivered")
 	}
 	if wasNew {
 		followName(ctx, request, options, tmux, proc, stderr)
 	}
-	return Result{Account: request.Account, Cache1H: request.Cache1H, New: wasNew}, nil
+	return Result{Account: request.Account, Cache1H: request.Cache1H, New: wasNew, LeftBehind: leftBehind}, nil
 }
 
 // waitCallerIdle holds the /exit until the pane's current turn has ended.
@@ -670,9 +673,11 @@ func deliverThen(
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload --then: capture input box (try %d): %v\n", i+1, err)
+		} else if pfmengine.ClaudeTrustDialog(capture) {
+			return trustDialogError(request.Pane)
 		} else {
 			trustPrompt := false
-			for _, needle := range []string{"Trust this directory?", "trust this folder", "trust these settings"} {
+			for _, needle := range []string{"Trust this directory?", "trust these settings"} {
 				if strings.Contains(capture, needle) {
 					if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 						return fmt.Errorf("reload --then: accept trust prompt: %w", err)

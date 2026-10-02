@@ -39,14 +39,20 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 		return 1
 	}
 	address := "127.0.0.1:" + strconv.Itoa(port)
-	// Three outcomes, three answers: pfm's own daemon is already up; the port
-	// is held by something that is not it (binding would either fail or, worse,
-	// look like it worked while clients keep reaching the squatter); or nothing
-	// is listening, which is the only case that goes on to bind.
+	// A healthy daemon, an unresponsive listener, and a foreign service all
+	// hold the port. Only an absent daemon lets this command try to bind it.
 	existing, probeErr := mcpserv.ProbeDaemon(address)
 	switch {
 	case probeErr == nil:
 		fmt.Fprintf(stderr, "pfm mcp serve: already running (pid %d, since %s)\n", existing.PID, existing.StartTime)
+		return 1
+	case errors.Is(probeErr, mcpserv.ErrDaemonUnresponsive):
+		fmt.Fprintf(
+			stderr,
+			"pfm mcp serve: port %d is held by a listener that did not answer pfm's status probe: %v\n",
+			port,
+			probeErr,
+		)
 		return 1
 	case !errors.Is(probeErr, mcpserv.ErrDaemonAbsent):
 		fmt.Fprintf(stderr, "pfm mcp serve: port %d is held by something that is not pfm: %v\n", port, probeErr)

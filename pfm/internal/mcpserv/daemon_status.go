@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -27,31 +28,55 @@ type DaemonStatus struct {
 	ChatRuntimeIdentity string              `json:"chatRuntimeIdentity,omitempty"`
 }
 
-// ErrDaemonAbsent means nothing answered on the probed address at all: the
-// only probe outcome that says the port is free for `pfm mcp serve` to bind.
-// A transport failure on loopback is a refused connection, so it is reported
-// as absence WITH its own cause attached; if something is in fact listening
-// and merely too slow for the probe's deadline, the bind that follows fails
-// with the kernel's own address-in-use refusal rather than silently
-// succeeding. Every other failure below means something IS holding the port
-// and did not identify itself as pfm's daemon.
+// ErrDaemonAbsent means the connection failed without timing out. It is the
+// only probe outcome that lets `pfm mcp serve` try to bind the port.
 var ErrDaemonAbsent = errors.New("no service answered")
 
+// ErrDaemonUnresponsive means a listener held the port but did not answer the
+// status probe before its deadline. Callers must not try to bind that port.
+var ErrDaemonUnresponsive = errors.New("no status answer within the probe deadline")
+
+const daemonProbeTimeout = 2 * time.Second
+
+// DaemonProbeTimeoutOverride replaces the production probe deadline under
+// test when positive. Zero leaves the production deadline in effect.
+var DaemonProbeTimeoutOverride time.Duration
+
 // ProbeDaemon reads a healthy loopback daemon's status document, and names
-// which way the probe failed when it did not: absent (nothing listening), a
-// non-200 answer, a body that is not the status document, or a document
-// carrying no pid. A caller deciding whether to bind the port must be able to
-// tell "nothing is there" from "something else is" — collapsing all four into
-// one false made a foreign service on pfm's port read as a free port.
+// which way the probe failed when it did not: absent (connection failed),
+// unresponsive (deadline reached), a non-200 answer, a body that is not the
+// status document, or a document carrying no pid.
 func ProbeDaemon(address string) (DaemonStatus, error) {
+	return probeDaemonContext(context.Background(), address)
+}
+
+// probeDaemonContext is ProbeDaemon under the caller's context: a cancelled or
+// expired caller returns its own context error, never absent or unresponsive.
+func probeDaemonContext(ctx context.Context, address string) (DaemonStatus, error) {
 	endpoint := "http://" + address + "/status"
-	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(
+		obs.Presence(ctx),
+		http.MethodGet,
+		endpoint,
+		http.NoBody,
+	)
 	if err != nil {
 		return DaemonStatus{}, fmt.Errorf("build daemon probe for %s: %w", endpoint, err)
 	}
-	client := obs.WrapClient(&http.Client{Timeout: 300 * time.Millisecond})
+	deadline := daemonProbeTimeout
+	if DaemonProbeTimeoutOverride > 0 {
+		deadline = DaemonProbeTimeoutOverride
+	}
+	client := obs.WrapClient(&http.Client{Timeout: deadline})
 	response, err := client.Do(request)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return DaemonStatus{}, fmt.Errorf("daemon probe at %s: %w", address, ctxErr)
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return DaemonStatus{}, fmt.Errorf("%w at %s within %s: %w", ErrDaemonUnresponsive, address, deadline, err)
+		}
 		return DaemonStatus{}, fmt.Errorf("%w at %s: %w", ErrDaemonAbsent, address, err)
 	}
 	defer func() {

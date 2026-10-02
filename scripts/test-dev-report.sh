@@ -85,6 +85,41 @@ else
   bad "a stream with no test event and only blank output aborted the report (rc $rc)" "${out:-<no output>}"
 fi
 
+# Case 6: a red stream holding both failure kinds reads to exactly this report: failing
+# tests sorted and deduplicated, a package that holds a failing test not listed again,
+# a package failing with no test listed with its own output.
+J6="$T/red-mixed.json"
+cat > "$J6" <<'EOF'
+{"Action":"run","Package":"p/a","Test":"TestTwo"}
+{"Action":"output","Package":"p/a","Test":"TestTwo","Output":"--- FAIL: TestTwo (0.00s)\n"}
+{"Action":"output","Package":"p/a","Test":"TestTwo","Output":"two broke\n"}
+{"Action":"fail","Package":"p/a","Test":"TestTwo","Elapsed":0}
+{"Action":"run","Package":"p/a","Test":"TestOne"}
+{"Action":"output","Package":"p/a","Test":"TestOne","Output":"boom\n"}
+{"Action":"fail","Package":"p/a","Test":"TestOne","Elapsed":0}
+{"Action":"fail","Package":"p/a","Test":"TestOne","Elapsed":0}
+{"Action":"fail","Package":"p/a","Elapsed":0}
+{"Action":"output","Package":"p/b","Output":"p/b/x.go:1: undefined: q\n"}
+{"Action":"output","Package":"p/b","Output":"FAIL\tp/b [build failed]\n"}
+{"Action":"fail","Package":"p/b","Elapsed":0}
+{"Action":"run","Package":"p/ok","Test":"TestFine"}
+{"Action":"pass","Package":"p/ok","Test":"TestFine","Elapsed":0}
+EOF
+want="  FAIL  p/a TestOne
+        boom
+  FAIL  p/a TestTwo
+        two broke
+  FAIL  p/b — the package failed with no failing test (build or setup error)
+        p/b/x.go:1: undefined: q
+info: 3 failing test(s)/package(s) summarised above, capped at 25 output line(s) each
+info: log: $(cd "$(dirname "$J6")" && pwd)/$(basename "$J6")"
+out=$(report "$J6"); rc=$?
+if [[ $rc -eq 0 && "$out" == "$want" ]]; then
+  ok "a red stream with failing tests and a failing package reads to the exact report"
+else
+  bad "a red stream with failing tests and a failing package read to a different report (rc $rc)" "$(diff <(printf '%s\n' "$want") <(printf '%s\n' "$out"))"
+fi
+
 # Case 5: timing_run_dir makes a run dir a non-root reader can open, even under
 # umask 077 (the fence runs as root; the host reads its timing TSVs), and an
 # uncreatable base fails naming the base with no path printed.

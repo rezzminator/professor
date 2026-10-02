@@ -149,7 +149,9 @@ var retiredHookCommands = []struct {
 }{
 	{Name: "bb", Subcommand: "bb"},
 	{Name: "bb", Subcommand: "chat bb"},
+	{Name: "callmeter", Subcommand: "internal callmeter"},
 	{Name: "clear-hide", Subcommand: "internal clear-hide"},
+	{Name: "compact-nudge", Subcommand: "internal compact-nudge"},
 	{Name: "dream-agent-inject", Subcommand: "dream hook agent-inject"},
 	{Name: "dream-nudge", Subcommand: "dream hook nudge"},
 	{Name: "dream-codex-subagent-inject", Subcommand: "dream hook codex-subagent-inject"},
@@ -166,6 +168,19 @@ var retiredHookShimHints = []struct {
 	{Name: "bb", Hint: "bb-hook.sh"},
 	{Name: "dream-agent-inject", Hint: "dreamer-agent-inject.sh"},
 	{Name: "dream-nudge", Hint: "dreamer-nudge.sh"},
+}
+
+// RetiredInternalHook reports whether name is a `pfm internal` subcommand an
+// older pfm registered as a hook and this one retired. Install strips it from
+// the account settings, but a Claude session keeps the hooks it read at start
+// and still runs it until that session restarts.
+func RetiredInternalHook(name string) bool {
+	for _, retired := range retiredHookCommands {
+		if retired.Subcommand == "internal "+name {
+			return true
+		}
+	}
+	return false
 }
 
 // retiredHookCommandName reports whether command matches a retired hook

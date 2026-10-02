@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
@@ -153,6 +154,11 @@ func Run(
 		return result, err
 	}
 	trace.step("booted | %s", screen(boot))
+	if pfmengine.ClaudeTrustDialog(boot) {
+		trace.step("held at the folder-trust dialog: nothing typed or pressed")
+		result.TrustHeld = true
+		return result, nil
+	}
 	// Nothing is typed until a composer is on screen and STAYS there. A
 	// startup overlay swallows every keystroke sent to it — that is how a
 	// chat ended up unnamed AND unprompted, with its "/rename" and its first

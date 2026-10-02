@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
@@ -55,6 +56,19 @@ var KeepAmbientIdentity bool
 // /tmp is the answer to both: it is short everywhere, and resolving it once
 // yields /private/tmp on macOS and /tmp on Linux — canonical on each.
 func Run(m *testing.M) int {
+	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
+	// `claude` launcher shim; a jailed test resolving a binary through PATH must
+	// never reach it. Scrub before anything below resolves a binary.
+	hostEnv := paths.OSEnv{}
+	operatorHome, homeErr := hostEnv.Home()
+	if homeErr != nil {
+		warnSetup("user home unknown, stripping only pfm install bin dirs from PATH: %v", homeErr)
+		operatorHome = ""
+	}
+	if err := os.Setenv("PATH", scrubOperatorPATH(hostEnv.Get("PATH"), operatorHome)); err != nil {
+		warnSetup("scrub PATH: %v", err)
+		return 1
+	}
 	// Installer tests must not inherit an operator account as an MCP write
 	// target. Packages that can install host state enter through this jail.
 	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {
@@ -81,6 +95,16 @@ func Run(m *testing.M) int {
 			}
 		}
 	}
+	// The gate's step profiler exports BASH_ENV with `set -E` and an ERR trap so
+	// every shell suite records its failures. Bash skips its exec-the-last-command
+	// step while an ERR trap is set, so a tmux pane launched as `bash -c '<launch>'`
+	// stays bash instead of becoming the launched program. Shell suites keep the
+	// tracer; a Go test process, and every child it starts, does not. Unset, not
+	// emptied, so no child sees the name at all.
+	if err := os.Unsetenv("BASH_ENV"); err != nil {
+		warnSetup("clear BASH_ENV: %v", err)
+		return 1
+	}
 	// Git fixtures must read only repository-local configuration. A developer's
 	// global identity, aliases, hooks, signing policy, or system configuration
 	// must never steer a test subprocess.
@@ -92,6 +116,16 @@ func Run(m *testing.M) int {
 			warnSetup("set %s to %s: %v", name, value, err)
 			return 1
 		}
+	}
+	// No test fetches a source-fetched global skill from its public repo: an
+	// install run in the jail skips the fetch and doctor reports OFFLINE.
+	if err := os.Setenv(paths.EnvSkillSourcesOffline, "1"); err != nil {
+		warnSetup("set %s: %v", paths.EnvSkillSourcesOffline, err)
+		return 1
+	}
+	if err := os.Setenv(paths.EnvThemesOffline, "1"); err != nil {
+		warnSetup("set %s: %v", paths.EnvThemesOffline, err)
+		return 1
 	}
 	// A `go` child (internal/update's rebuild, a `go run`) derives its cache and
 	// telemetry directories from HOME/XDG_CONFIG_HOME when they are unset, and
@@ -113,7 +147,7 @@ func Run(m *testing.M) int {
 		// whole package: on a platform where the default temp dir is already
 		// short and canonical, nothing here was needed in the first place.
 		defer jailHome(os.TempDir())()
-		return m.Run()
+		return runProfiled(m)
 	}
 	// No wrapper directory of our own: t.TempDir() already makes a unique path
 	// per test and removes it. An extra layer would only spend a dozen of the
@@ -124,7 +158,67 @@ func Run(m *testing.M) int {
 		return 1
 	}
 	defer jailHome(base)()
-	return m.Run()
+	return runProfiled(m)
+}
+
+// activeProfiler is the profiler of this process while runProfiled runs its
+// tests, nil when profiling is off; PauseFlightRecorder reaches it here.
+var activeProfiler atomic.Pointer[profiler]
+
+// runProfiled runs the package tests under the always-on profiler (profile.go).
+func runProfiled(m *testing.M) int {
+	p, off := startProfile()
+	activeProfiler.Store(p)
+	code := m.Run()
+	activeProfiler.Store(nil)
+	p.finish(code)
+	if off != "" && code != 0 {
+		warnSetup("profile off — %s; no diagnosis bundle for this red run", off)
+	}
+	return code
+}
+
+// pfmInstallBinSuffix is the tail of pfm's managed install bin dir, whichever
+// home owns it.
+var pfmInstallBinSuffix = filepath.Join(".local", "share", "pfm", "install", "bin")
+
+// scrubOperatorPATH drops every PATH entry that is <home>/.local/bin or a pfm
+// install bin dir (a path ending .local/share/pfm/install/bin, any home),
+// comparing after filepath.Clean and, where it resolves, EvalSymlinks. Order
+// and every other entry — empty ones included — are kept. An empty home matches
+// no ~/.local/bin, so only install bin dirs go.
+func scrubOperatorPATH(pathEnv, home string) string {
+	var homeBins []string
+	if home != "" {
+		bin := filepath.Join(home, ".local", "bin")
+		homeBins = append(homeBins, bin)
+		if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+			homeBins = append(homeBins, filepath.Clean(resolved))
+		}
+	}
+	isOperatorBin := func(candidate string) bool {
+		candidate = filepath.Clean(candidate)
+		for _, bin := range homeBins {
+			if candidate == bin {
+				return true
+			}
+		}
+		return candidate == pfmInstallBinSuffix ||
+			strings.HasSuffix(candidate, string(filepath.Separator)+pfmInstallBinSuffix)
+	}
+	var kept []string
+	for _, entry := range filepath.SplitList(pathEnv) {
+		if entry != "" {
+			if isOperatorBin(entry) {
+				continue
+			}
+			if resolved, err := filepath.EvalSymlinks(entry); err == nil && isOperatorBin(resolved) {
+				continue
+			}
+		}
+		kept = append(kept, entry)
+	}
+	return strings.Join(kept, string(os.PathListSeparator))
 }
 
 // warnSetup reports a testjail setup failure on stderr, in the "testjail:
@@ -183,6 +277,14 @@ func jailHome(base string) func() {
 	// Keep child tools' XDG files inside the package jail.
 	if err := os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")); err != nil {
 		warnSetup("set XDG_CONFIG_HOME under %s: %v", home, err)
+	}
+	if paths.EnvOr(paths.EnvSIDDir, "") == "" {
+		sidDir := filepath.Join(home, "sid")
+		if err := os.Mkdir(sidDir, 0o700); err != nil {
+			warnSetup("create %s under %s: %v", paths.EnvSIDDir, home, err)
+		} else if err := os.Setenv(paths.EnvSIDDir, sidDir); err != nil {
+			warnSetup("set %s to %s: %v", paths.EnvSIDDir, sidDir, err)
+		}
 	}
 	return func() {
 		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -313,14 +415,14 @@ func InstalledHome(t *testing.T) string {
 		t.Fatal(err)
 	}
 	canonical := filepath.Join(jailedHome, ".local", "bin", "pfm")
-	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(canonical, []byte("jailed-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := WriteExecutable(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managedClaude, filepath.Join(jailedHome, ".local", "bin", claudeBinary)); err != nil {
@@ -335,7 +437,7 @@ func InstalledHome(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := WriteExecutable(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(managedOverlay, filepath.Join(jailedHome, ".local", "bin", overlay)); err != nil {
@@ -475,17 +577,17 @@ func CleanHome(t *testing.T) config.Runtime {
 		}
 	}
 	canonical := filepath.Join(canonicalDir, "pfm")
-	if err := os.WriteFile(canonical, []byte("target-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(canonical, []byte("target-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
+	if err := WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := WriteExecutable(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managedClaude, filepath.Join(canonicalDir, claudeBinary)); err != nil {
@@ -500,7 +602,7 @@ func CleanHome(t *testing.T) config.Runtime {
 		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := WriteExecutable(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(managedOverlay, filepath.Join(canonicalDir, overlay)); err != nil {

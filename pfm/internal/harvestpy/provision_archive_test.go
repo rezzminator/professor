@@ -2,36 +2,12 @@ package harvestpy
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
-	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
-
-func TestTarFixtureHelperCompilesForArchiveSecurityTests(t *testing.T) {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(zw)
-	if err := tw.WriteHeader(&tar.Header{Name: "safe.txt", Mode: 0o600, Size: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write([]byte("x")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if len(buf.Bytes()) == 0 || runtime.GOOS == "" || io.EOF == nil {
-		t.Fatal("fixture helper did not produce bytes")
-	}
-}
 
 func TestPythonArchiveExtractionRetainsInterpreterLibrariesAndRejectsTraversal(t *testing.T) {
 	archivePath := filepath.Join(t.TempDir(), "python.tar.gz")

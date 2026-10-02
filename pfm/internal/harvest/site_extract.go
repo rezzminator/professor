@@ -232,6 +232,12 @@ var siteExtractors = []siteExtractor{
 		extract: extractBookingReviews,
 	},
 	{
+		name:    "linkedin-page",
+		hosts:   []string{linkedInHost},
+		paths:   isLinkedInPage,
+		extract: extractLinkedInPage,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,
@@ -660,18 +666,23 @@ func wrapInline(text, mark string) string {
 
 // rawText is node's text with its whitespace intact (code, preformatted).
 func rawText(node *html.Node) string {
-	var text strings.Builder
+	return strings.Join(textNodes(node), "")
+}
+
+// textNodes is every text node under node, in document order, untouched.
+func textNodes(node *html.Node) []string {
+	var parts []string
 	var walk func(*html.Node)
 	walk = func(current *html.Node) {
 		if current.Type == html.TextNode {
-			text.WriteString(current.Data)
+			parts = append(parts, current.Data)
 		}
 		for child := current.FirstChild; child != nil; child = child.NextSibling {
 			walk(child)
 		}
 	}
 	walk(node)
-	return text.String()
+	return parts
 }
 
 // prefixLines prefixes every line of text; blank lines get blankPrefix.

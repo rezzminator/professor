@@ -45,6 +45,7 @@ func assertNoServerPath(t *testing.T, what, body, cacheDir, dir string) {
 // localized image is linked relative to the page stored for the source, never
 // by the server's absolute cache path, and the link resolves from that page.
 func TestLocalizedImageLinkIsRelativeToTheStoredPage(t *testing.T) {
+	t.Parallel()
 	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64)
 	const pageURL = "https://example.test/article"
 	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {

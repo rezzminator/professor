@@ -148,11 +148,14 @@ func runAsk(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
 	if answer.Usage != nil {
 		fmt.Fprintf(
 			stderr,
-			"pfm harvest ask: usage input=%d cached_input=%d output=%d\n",
+			"pfm harvest ask: usage input=%d cached_input=%d cache_creation=%d output=%d\n",
 			answer.Usage.Input,
 			answer.Usage.CachedInput,
+			answer.Usage.CacheCreation,
 			answer.Usage.Output,
 		)
+	} else {
+		fmt.Fprintln(stderr, "pfm harvest ask: usage unknown: the engine reported no token counts")
 	}
 	return 0
 }

@@ -45,3 +45,26 @@ func TestInFlightTracksThePaneMutex(t *testing.T) {
 		t.Fatalf("lock released: inFlight=%v err=%v, want false/nil", inFlight, err)
 	}
 }
+
+// TestInFlightReadsAConcurrentProbeAsNotInFlight pins that the probe's own
+// lock is shared: the SessionEnd hook and the Codex pane reconcile probe the
+// same pane, and one probe mid-flight must never read as a reload to the other.
+func TestInFlightReadsAConcurrentProbeAsNotInFlight(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	probe, err := os.OpenFile(LockPath(dir, "cx-1-1-1", "%0"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := probe.Close(); err != nil {
+			t.Errorf("close probe lock: %v", err)
+		}
+	}()
+	if err := syscall.Flock(int(probe.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	if inFlight, err := InFlight(dir, "cx-1-1-1", "%0"); err != nil || inFlight {
+		t.Fatalf("another probe holds the lock: inFlight=%v err=%v, want false/nil", inFlight, err)
+	}
+}

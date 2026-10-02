@@ -10,6 +10,7 @@ import (
 )
 
 func TestChatNewCacheChoiceAndValidation(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	service := newService("test", &backend{dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
 		calls = append(calls, append([]string(nil), args...))
@@ -38,6 +39,7 @@ func TestChatNewCacheChoiceAndValidation(t *testing.T) {
 }
 
 func TestChatNewCacheSchemaEnum(t *testing.T) {
+	t.Parallel()
 	service := newService("test", &backend{})
 	protocol := connectInMemory(t, service.server)
 	listed, err := protocol.clientSession.ListTools(context.Background(), nil)

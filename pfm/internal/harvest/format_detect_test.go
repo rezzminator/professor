@@ -78,6 +78,7 @@ func formatLocal(t *testing.T, converter Converter, files map[string][]byte) (*H
 // bytes. Watched FAILING before format_detect.go: an .xlsx named .xls, a
 // .pptx served as octet-stream and an EPUB named .zip all came back "zip".
 func TestFormatMagicRoutesDocumentsNotExtensions(t *testing.T) {
+	t.Parallel()
 	xlsx := formatZip(
 		t,
 		"[Content_Types].xml",
@@ -130,6 +131,7 @@ func TestFormatMagicRoutesDocumentsNotExtensions(t *testing.T) {
 // fenced block with their language; plain text passes unfenced. Watched
 // FAILING before format_detect.go (plain text, the XML through HTML).
 func TestFormatConfigAndCodeAreFenced(t *testing.T) {
+	t.Parallel()
 	files := map[string][]byte{
 		"config.yaml":    []byte("name: fleet\nsize: 3\n"),
 		"pyproject.toml": []byte("[project]\nname = \"demo\"\n"),
@@ -212,6 +214,7 @@ var formatRestCases = []struct {
 // Watched FAILING before format_detect.go (a generic MIME type, a text read,
 // or no failure at all).
 func TestFormatNamedRestCarriesTheDetectedType(t *testing.T) {
+	t.Parallel()
 	files := map[string][]byte{}
 	for _, tc := range formatRestCases {
 		files[tc.name] = tc.body(t)
@@ -259,6 +262,7 @@ func TestFormatNamedRestCarriesTheDetectedType(t *testing.T) {
 // dispatch point in converter.py. Watched FAILING before format_detect.go
 // (html, txt or json).
 func TestFormatTextDocumentsReachTheConverterDispatch(t *testing.T) {
+	t.Parallel()
 	seen := map[string]string{}
 	recorder := legacyConverterFunc(func(_ context.Context, kind, source string, _ []byte) (string, error) {
 		seen[filepath.Base(source)] = kind
@@ -360,6 +364,7 @@ func formatOfficeCases(t *testing.T) map[string]struct {
 // Watched FAILING before FM3b: each ended in "detected, but the harvester
 // does not parse it yet".
 func TestFormatOfficeDocumentsReachTheConverterDispatch(t *testing.T) {
+	t.Parallel()
 	seen := map[string]string{}
 	recorder := legacyConverterFunc(func(_ context.Context, kind, source string, _ []byte) (string, error) {
 		seen[filepath.Base(source)] = kind

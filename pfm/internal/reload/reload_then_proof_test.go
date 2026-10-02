@@ -104,7 +104,7 @@ func TestDeliverThenAcceptsAComposerPastePlaceholderAsProofOfDelivery(t *testing
 		context.Background(),
 		Request{
 			Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-paste-then", Pane: "%7",
-			PanePID: 700, Then: then,
+			Then: then,
 		},
 		Options{ThenTries: 2},
 		tmux,
@@ -160,7 +160,7 @@ func TestDeliverThenRefusesAStalePlaceholderLeftInScrollback(t *testing.T) {
 			context.Background(),
 			Request{
 				Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-stale-scrollback", Pane: "%7",
-				PanePID: 700, Then: "continue the task",
+				Then: "continue the task",
 			},
 			Options{ThenTries: 2, Clock: fakeClk},
 			tmux,
@@ -249,7 +249,7 @@ func TestDeliverThenRequiresTheTailNeedleWhenTheBaselineCaptureFailed(t *testing
 					context.Background(),
 					Request{
 						Engine: pfmengine.Claude, SocketPath: "/tmp/tmux-1000/probe-baseline-fail", Pane: "%7",
-						PanePID: 700, Then: tmux.then,
+						Then: tmux.then,
 					},
 					Options{ThenTries: 2, Clock: fakeClk},
 					tmux,
@@ -323,7 +323,6 @@ func TestRunReturnsAnErrorAndSavesTheSentinelWhenSubmitIsNeverConfirmed(t *testi
 				Engine:     pfmengine.Claude,
 				SocketPath: socket,
 				Pane:       "%7",
-				PanePID:    700,
 				CWD:        "/jail/project",
 				Account:    1,
 				AccountIDs: []int{1},

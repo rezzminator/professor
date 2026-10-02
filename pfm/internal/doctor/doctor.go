@@ -154,6 +154,7 @@ func Run(
 	tally.failures += configFailures
 	tally.warnings += printHarvesterConfigDoctorWithEnv(stdout, runtime, dependencies.Env)
 	tally.warnings += printDuplicateSeatLogins(stdout, runtime, dependencies.Env)
+	tally.warnings += printPriceOverride(stdout, runtime)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
 	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	tally.warnings += PrintEngineCapabilities(stdout, dependencies)
@@ -263,11 +264,13 @@ func Run(
 	tally.warnings += overlayWarnings
 	tally.failures += overlayFailures
 	printClaudePluginsDoctor(stdout, runtime.Config, tally)
-	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalAgents(
+	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
+	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(
 		stdout,
 		resolved.Home,
 		runtime.Config.Accounts,
 		claudeAbsent,
+		dependencies.Env,
 		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings
@@ -1094,19 +1097,6 @@ func configuredHarvestDoctor() harvestDoctor {
 		return HarvestOverride
 	}
 	return pinnedHarvestDoctor{}
-}
-
-func printHarvestPythonDoctor(
-	ctx context.Context,
-	stdout io.Writer,
-	home string,
-	platform harvestpy.Platform,
-	doctor harvestDoctor,
-	browserGate bool,
-) int {
-	return printHarvestPythonDoctorWithRunner(
-		ctx, stdout, home, platform, doctor, browserGate, obs.Runner(deps.RealRunner{}),
-	)
 }
 
 func printHarvestPythonDoctorWithRunner(

@@ -26,6 +26,7 @@ func overlaid(page string) string {
 // thread's own markup so the site's extractor claims it — is never stored as
 // that thread's content.
 func TestAWallIsNeverStoredAsAMarkupExtractorsContent(t *testing.T) {
+	t.Parallel()
 	challenge := seFixture(t, "challenge.html")
 	redditURL := "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/"
 	redditPage := redditThreadHTML(2, []string{"first reply", "second reply"}, false)

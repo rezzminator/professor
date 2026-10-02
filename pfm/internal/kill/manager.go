@@ -204,8 +204,13 @@ func (manager *Manager) Kill(
 		target, err = manager.IdentifySelf(ctx, request.Environment)
 	case request.ID != "":
 		target, err = manager.lookupTarget(ctx, request.ID, request.Engine, request.RolloutPath)
+	case request.SocketName != "" && request.PaneID != "":
+		// A live seat that resolved by name but carries no session id: the
+		// socket name stands in as the key, an address with no identity behind
+		// it (AddressOnly), so the pane closes and nothing is recorded.
+		target = Target{Engine: request.Engine, ID: request.SocketName}
 	default:
-		err = errors.New("kill requires --self or an id")
+		err = errors.New("kill requires --self, an id, or a resolved live address")
 	}
 	if err != nil {
 		return Target{}, err
@@ -226,12 +231,13 @@ func (manager *Manager) Kill(
 	}
 	live := target.SocketPath != "" && target.PaneID != ""
 
-	// A seat keyed on its own socket name has no identity to tombstone: the
-	// key names where the chat is, not which chat it is, and it stops meaning
-	// anything the moment the seat's session is pinned down. The composer
-	// already refuses to apply such a kill (compose.applyKill), so writing one
-	// only leaves a row nobody can unkill. The pane still closes below.
-	if !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName) {
+	// A seat with no id, or keyed on its own socket name, has no identity to
+	// tombstone: the key names where the chat is, not which chat it is, and it
+	// stops meaning anything the moment the seat's session is pinned down. The
+	// composer already refuses to apply such a kill (compose.applyKill), so
+	// writing one only leaves a row nobody can unkill. The pane still closes
+	// below.
+	if !AddressOnly(target) {
 		if err := manager.database.Kill(ctx, store.Killed{
 			ID:       target.ID,
 			Engine:   target.Engine,
@@ -465,20 +471,19 @@ func codexPaneBindingKey(socket, pane string) (string, bool) {
 // only that key would leave a child-keyed kill standing: the row would come
 // right back killed (composer.killedMatch, store.codexLineageKilled both
 // check every member). So every id in the lineage is unkilled, root and
-// members alike; the shared store's Unkill is a safe no-op for an id that
-// carries no kill.
-func (manager *Manager) Unkill(ctx context.Context, id string) error {
+// members alike; the shared store reports whether each id carried a kill.
+func (manager *Manager) Unkill(ctx context.Context, id string) (bool, error) {
 	if id == "" {
-		return errors.New("unkill id is empty")
+		return false, errors.New("unkill id is empty")
 	}
 	if _, found, err := manager.database.Transcript(ctx, id); err != nil {
-		return err
+		return false, err
 	} else if !found {
 		if lineage, found, err := manager.database.CodexLineage(
 			ctx,
 			id,
 		); err != nil {
-			return err
+			return false, err
 		} else if found {
 			return manager.unkillLineage(ctx, lineage)
 		}
@@ -491,19 +496,22 @@ func (manager *Manager) Unkill(ctx context.Context, id string) error {
 func (manager *Manager) unkillLineage(
 	ctx context.Context,
 	lineage store.CodexLineage,
-) error {
-	if err := manager.database.Unkill(ctx, lineage.RootID); err != nil {
-		return err
+) (bool, error) {
+	removed, err := manager.database.Unkill(ctx, lineage.RootID)
+	if err != nil {
+		return false, err
 	}
 	for _, member := range lineage.MemberIDs {
 		if member == lineage.RootID {
 			continue
 		}
-		if err := manager.database.Unkill(ctx, member); err != nil {
-			return err
+		memberRemoved, err := manager.database.Unkill(ctx, member)
+		if err != nil {
+			return removed, err
 		}
+		removed = removed || memberRemoved
 	}
-	return nil
+	return removed, nil
 }
 
 // Killed returns every current kill in stable ID order.

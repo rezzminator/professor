@@ -2,13 +2,16 @@ package hookentry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // ReloadFront is the in-process reload command front injected by runInternal.
@@ -34,6 +37,7 @@ func ReloadIntercept(
 	}
 	words, err := action.SplitShellWords(strings.TrimPrefix(trimmed, "/reload"))
 	if err != nil {
+		recordReloadRefusal(trimmed, err.Error())
 		fmt.Fprintf(stderr, "reload: %v\n", err)
 		return 2
 	}
@@ -45,6 +49,18 @@ func ReloadIntercept(
 		)
 		return blockPrompt(stdout, reason)
 	}
+	recordReloadRefusal(trimmed, strings.TrimSpace(captured.String()))
 	fmt.Fprintf(stderr, "reload: %s", captured.String())
 	return 2
+}
+
+// recordReloadRefusal writes the refusal's reason to the activity log. The
+// hook's stderr reaches only the user's screen, so without this record a
+// refused /reload left nothing a later reader could diagnose it from.
+func recordReloadRefusal(prompt, reason string) {
+	ctx := obs.Component(context.Background(), "hooks")
+	obs.Logger(ctx).LogAttrs(ctx, slog.LevelWarn, "reload.refused",
+		slog.String("prompt", prompt),
+		slog.String(obs.FieldErr, reason),
+	)
 }

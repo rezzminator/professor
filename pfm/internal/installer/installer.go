@@ -296,8 +296,14 @@ func (installer *engine) install(ctx context.Context) error {
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
 	pluginErr := installer.ensureClaudePlugins(ctx)
+	if err := installer.clearFullscreenAutoDisable(); err != nil {
+		return errors.Join(err, pluginErr)
+	}
 	if err := installer.wireCodexHooks(); err != nil {
 		return err
+	}
+	if err := installer.removeRetiredNudgeState(); err != nil {
+		installer.warnRetiredNudge("retired compact-nudge state", err)
 	}
 	mcpErr := installer.wireMCP()
 	// A host build replaces the binary without changing the unit file, and MCP

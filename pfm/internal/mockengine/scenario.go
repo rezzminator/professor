@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -133,12 +134,16 @@ type Scenario struct {
 	SessionID string `json:"session_id,omitempty"`
 	Model     string `json:"model,omitempty"`
 	// Reply and BusyMS are the defaults a step or an exhausted list falls back to.
-	Reply  string     `json:"reply,omitempty"`
-	BusyMS *int       `json:"busy_ms,omitempty"`
-	Tokens Tokens     `json:"tokens"`
-	Steps  []Step     `json:"steps,omitempty"`
-	Pane   PaneShapes `json:"pane"`
-	Jail   Jail       `json:"jail"`
+	Reply        string     `json:"reply,omitempty"`
+	BusyMS       *int       `json:"busy_ms,omitempty"`
+	Tokens       Tokens     `json:"tokens"`
+	Steps        []Step     `json:"steps,omitempty"`
+	Pane         PaneShapes `json:"pane"`
+	Jail         Jail       `json:"jail"`
+	Quiet        bool       `json:"quiet,omitempty"`
+	NoTranscript bool       `json:"no_transcript,omitempty"`
+	// RateLimits is the account/rateLimits/read result supplied by the scenario.
+	RateLimits json.RawMessage `json:"rate_limits,omitempty"`
 	// RecordDir receives the mock's own telemetry — argv, prompts, hook
 	// answers, MCP tool lists — for a test to read. It is evidence of what the
 	// mock saw, never the judge of what pfm read.
@@ -149,7 +154,7 @@ type Scenario struct {
 // scenario; a path that does not exist or does not parse is an error the
 // caller reports as ExitUsage — a missing scenario is never silently the
 // default one.
-func LoadScenario(path string) (Scenario, error) {
+func LoadScenario(path, engine string) (Scenario, error) {
 	if strings.TrimSpace(path) == "" {
 		return Scenario{}, nil
 	}
@@ -168,7 +173,88 @@ func LoadScenario(path string) (Scenario, error) {
 			return Scenario{}, fmt.Errorf("scenario %s step %d: %w", path, index, err)
 		}
 	}
+	var fields map[string]json.RawMessage
+	if err := json.NewDecoder(strings.NewReader(string(content))).Decode(&fields); err != nil {
+		return Scenario{}, fmt.Errorf("decode scenario fields %s: %w", path, err)
+	}
+	if raw, present := fields["rate_limits"]; present && !strings.HasPrefix(strings.TrimSpace(string(raw)), "{") {
+		return Scenario{}, fmt.Errorf("scenario %s field rate_limits must be an object", path)
+	}
+	for _, door := range []struct {
+		name    string
+		enabled bool
+	}{
+		{"quiet", scenario.Quiet}, {"no_transcript", scenario.NoTranscript},
+	} {
+		if raw, present := fields[door.name]; present && strings.TrimSpace(string(raw)) == "null" {
+			return Scenario{}, fmt.Errorf("scenario %s field %s must be boolean", path, door.name)
+		}
+		if door.enabled && engine != engineClaude {
+			return Scenario{}, fmt.Errorf(
+				"scenario %s field %s is Claude-only, refused for %s",
+				path,
+				door.name,
+				engine,
+			)
+		}
+	}
 	return scenario, nil
+}
+
+// An inline directive may end with pfm's same-line delivery footer.
+const inlineMarker = "mock-engine: "
+
+func parseInlineSteps(prompt string) ([]Step, error) {
+	_, directive, found := strings.Cut(prompt, inlineMarker)
+	if !found {
+		return nil, nil
+	}
+	directive, _, _ = strings.Cut(directive, "\n")
+	directive = strings.TrimSpace(directive)
+	decoder := json.NewDecoder(strings.NewReader(directive))
+	decoder.DisallowUnknownFields()
+	steps := []Step{}
+	switch {
+	case strings.HasPrefix(directive, "{"):
+		var step Step
+		if err := decoder.Decode(&step); err != nil {
+			return nil, fmt.Errorf("decode step: %w", err)
+		}
+		steps = append(steps, step)
+	case strings.HasPrefix(directive, "["):
+		if err := decoder.Decode(&steps); err != nil {
+			return nil, fmt.Errorf("decode steps: %w", err)
+		}
+	default:
+		return nil, errors.New("expected a step object or array")
+	}
+	if !strings.HasPrefix(strings.TrimLeft(directive[decoder.InputOffset():], " "), "— ") {
+		var trailing any
+		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+			if err != nil {
+				return nil, fmt.Errorf("decode trailing input: %w", err)
+			}
+			return nil, errors.New("unexpected JSON after inline steps")
+		}
+	}
+	for index := range steps {
+		if err := steps[index].validate(); err != nil {
+			return nil, fmt.Errorf("step %d: %w", index, err)
+		}
+	}
+	return steps, nil
+}
+
+func (running *script) forPrompt(prompt string) *script {
+	steps, err := parseInlineSteps(prompt)
+	if err != nil {
+		steps = []Step{{Type: StepTurn, Reply: "mock-engine: inline steps refused — " + err.Error()}}
+	} else if steps == nil {
+		return running
+	}
+	local := *running
+	local.Steps, local.position, local.cursor = steps, 0, ""
+	return &local
 }
 
 // Write serialises the scenario for a test to hand to a mock process.

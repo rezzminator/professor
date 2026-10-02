@@ -15,6 +15,7 @@ import (
 )
 
 func TestLegacyTokenEstimatorAllTenBehaviors(t *testing.T) {
+	t.Parallel()
 	code := strings.Repeat("a=[1];b={k:v};c=(x)+y*z/w;", 40)
 	cjkSymbols := strings.Repeat("中{}[]", 50)
 	tests := []struct {
@@ -57,7 +58,7 @@ func TestLegacyTokenEstimatorAllTenBehaviors(t *testing.T) {
 
 // TestCacheRootIsConfiguredDirOrTheOneDefault pins the single cache-root
 // rule: the configured dir (harvester.config.json cache.dir) when set, else
-// <home>/.professor/.cache — never the working directory, and never the
+// <home>/.professor/.harvester-cache — never the working directory, and never the
 // retired WEBFETCH_DIR / HARVESTER_CACHE_DIR variables.
 func TestCacheRootIsConfiguredDirOrTheOneDefault(t *testing.T) {
 	root := t.TempDir()
@@ -66,7 +67,7 @@ func TestCacheRootIsConfiguredDirOrTheOneDefault(t *testing.T) {
 	t.Setenv("HARVESTER_CACHE_DIR", ".harvest-cache")
 	jailHome := filepath.Join(root, "home")
 	t.Setenv(paths.EnvHome, jailHome)
-	if got, err := CacheRoot(""); err != nil || got != filepath.Join(jailHome, ".professor", ".cache") {
+	if got, err := CacheRoot(""); err != nil || got != filepath.Join(jailHome, ".professor", ".harvester-cache") {
 		t.Fatalf("default cache root=%q err=%v; the retired env variables must be ignored", got, err)
 	}
 	t.Setenv(paths.EnvHome, "")
@@ -80,6 +81,7 @@ func TestCacheRootIsConfiguredDirOrTheOneDefault(t *testing.T) {
 }
 
 func TestResolveTTLDefaultsZeroAndHonorsExplicitZero(t *testing.T) {
+	t.Parallel()
 	if got := resolveTTL(0, time.Hour); got != time.Hour {
 		t.Fatalf("zero TTL = %s, want the default", got)
 	}
@@ -92,6 +94,7 @@ func TestResolveTTLDefaultsZeroAndHonorsExplicitZero(t *testing.T) {
 }
 
 func TestLegacyCacheFreshnessAllKindsAndFrontmatterWins(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cache := newCache(root, 24*time.Hour)
 	now := time.Now().UTC()
@@ -142,6 +145,7 @@ func TestLegacyCacheFreshnessAllKindsAndFrontmatterWins(t *testing.T) {
 }
 
 func TestLegacyRefreshBypassesNegativeCache(t *testing.T) {
+	t.Parallel()
 	var calls int
 	transport := roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		calls++
@@ -177,6 +181,7 @@ func TestLegacyRefreshBypassesNegativeCache(t *testing.T) {
 }
 
 func TestLegacyDOIISBNMetaAndMirrorPureCases(t *testing.T) {
+	t.Parallel()
 	doiCases := map[string]string{
 		"10.1073/pnas.2302738120":                                      "10.1073/pnas.2302738120",
 		"https://pnas.org/doi/10.1073/pnas.2302738120":                 "10.1073/pnas.2302738120",
@@ -225,14 +230,10 @@ func TestLegacyDOIISBNMetaAndMirrorPureCases(t *testing.T) {
 	if got := PMCArticleURL("PMC1"); got != "https://pmc.ncbi.nlm.nih.gov/articles/PMC1/" {
 		t.Fatalf("PMC URL=%q", got)
 	}
-	if got := EuropePMCFiguresURL(
-		"PMC42",
-	); got != "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC42/supplementaryFiles" {
-		t.Fatalf("Europe PMC figures URL=%q", got)
-	}
 }
 
 func TestLegacyWaybackAndPMCIDResponses(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Host {
 		case "archive.org":
@@ -250,9 +251,9 @@ func TestLegacyWaybackAndPMCIDResponses(t *testing.T) {
 	if err != nil || wayback != "https://web.archive.org/web/20230601123456id_/https://public.example.test/article" {
 		t.Fatalf("WaybackRawURL()=%q err=%v", wayback, err)
 	}
-	pmcid, err := DOIToPMCID(context.Background(), client, "10.1234/example")
+	pmcid, err := idToPMCID(context.Background(), client, "10.1234/example", nil)
 	if err != nil || pmcid != "PMC10450651" {
-		t.Fatalf("DOIToPMCID()=%q err=%v", pmcid, err)
+		t.Fatalf("idToPMCID()=%q err=%v", pmcid, err)
 	}
 }
 

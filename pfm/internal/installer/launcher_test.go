@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
@@ -19,7 +21,7 @@ func TestClaudeLauncherInstallDisplacementAndRepair(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(binary), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -325,7 +327,7 @@ func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(managedClaudeLauncher(home)), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(managedClaudeLauncher(home), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(managedClaudeLauncher(home), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(managedClaudeLauncher(home), canonical); err != nil {
@@ -335,7 +337,7 @@ func TestClaudeAbsentIdentifiesOnlyPfmsLauncherAtExit127(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(elsewhere), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(elsewhere, []byte("#!/bin/sh\nexit 127\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(elsewhere, []byte("#!/bin/sh\nexit 127\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -360,7 +362,7 @@ func TestLauncherInstallJournalRestoresLinkAndStateAndSkipsConverged(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(managed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(managed, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	old := filepath.Join(home, "native-claude")
@@ -420,5 +422,56 @@ func TestClaudeVersionPruneInstallJournalRestoresRemovedBuild(t *testing.T) {
 	rollbackInstallJournal(t, env, journal)
 	if _, err := os.Stat(removed); err != nil {
 		t.Fatalf("removed version not restored: %v", err)
+	}
+}
+
+func TestResolveClaudeBinaryNeverReturnsAnyHomesLauncherShim(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir() // owns no launcher: rejection cannot lean on this home
+	shimBody, err := readAsset("bin/claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := managedClaudeLauncher(filepath.Join(t.TempDir(), "other-home"))
+	if err := os.MkdirAll(filepath.Dir(foreign), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, foreign)
+	dirA, dirB, dirC := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.Symlink(foreign, filepath.Join(dirA, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	copied := filepath.Join(dirB, "claude")
+	if err := testjail.WriteExecutable(copied, shimBody, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realClaude := filepath.Join(dirC, "claude")
+	writeExecutable(t, realClaude)
+
+	join := func(directories ...string) string { return strings.Join(directories, string(os.PathListSeparator)) }
+	resolved, err := ResolveClaudeBinary(home, "", join(dirA, dirB, dirC))
+	if err != nil || resolved != realClaude {
+		t.Fatalf("resolution=%q err=%v, want the real binary %q past both shims", resolved, err, realClaude)
+	}
+	if resolved, err := ResolveClaudeBinary(home, "", join(dirA, dirB)); !errors.Is(err, ErrClaudeBinaryNotFound) {
+		t.Fatalf("shims only: resolution=%q err=%v, want ErrClaudeBinaryNotFound", resolved, err)
+	}
+	if resolved, err := ResolveClaudeBinary(home, copied, join(dirA, dirB)); err == nil && resolved == copied {
+		t.Fatalf("configured shim copy %q was returned", copied)
+	}
+}
+
+func TestResolveClaudeBinaryAcceptsALargeBinaryMentioningTheShimMarker(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	directory := t.TempDir()
+	body := "#!/bin/sh\n# internal claude-launch\n" + strings.Repeat("x", claudeShimMaxBytes) + "\n"
+	big := filepath.Join(directory, "claude")
+	if err := testjail.WriteExecutable(big, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveClaudeBinary(home, "", directory)
+	if err != nil || resolved != big {
+		t.Fatalf("resolution=%q err=%v, want the oversized binary %q accepted", resolved, err, big)
 	}
 }

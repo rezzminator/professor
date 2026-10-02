@@ -147,10 +147,6 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	fmt.Fprintln(stdout, "  claude.permissionMode: bypass or prompted; account values override this default")
 	fmt.Fprintln(
 		stdout,
-		"  claude.compactNudge: the milestone self-compact reminder — enabled, start %, step % (main Claude chat only; a reminder, never an order); account values override",
-	)
-	fmt.Fprintln(
-		stdout,
 		"  codex.yolo: whether Codex launches with approval bypass; account values override this default",
 	)
 	fmt.Fprintln(
@@ -183,7 +179,7 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout — handed to the pinned Python converter")
 	fmt.Fprintln(
 		stdout,
-		"  cache: dir (default ~/.professor/.cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)",
+		"  cache: dir (default ~/.professor/.harvester-cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)",
 	)
 	fmt.Fprintln(stdout, "  output: maxInlineChars")
 	return 0
@@ -223,9 +219,6 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	printClaude("tmuxTruecolor", config.Claude.TmuxTruecolor)
 	printClaude("cleanupPeriodDays", config.Claude.CleanupPeriodDays)
 	printClaude("requireManagedCleanup", config.Claude.RequireManagedCleanup)
-	printClaude("compactNudge.enabled", config.Claude.CompactNudge.Enabled)
-	printClaude("compactNudge.start", config.Claude.CompactNudge.Start)
-	printClaude("compactNudge.step", config.Claude.CompactNudge.Step)
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

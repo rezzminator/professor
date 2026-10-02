@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 )
 
-// Download retrieves a source's bytes, unparsed, through Retrieve's file
+// Download retrieves a source's bytes, unparsed, through retrieveWith's file
 // policy — the download_file tool's path, for a file of any kind (a PDF, a zip, an
 // image, audio), capped at harvest.maxDownloadBytes. It never converts.
 func (h *Harvester) Download(ctx context.Context, source string) Result {
@@ -67,21 +66,6 @@ func isImageKind(kind string) bool {
 		return true
 	}
 	return false
-}
-
-func (h *Harvester) binaryCachePath(source string) (string, string) {
-	for _, kind := range []string{kindJPG, kindPNG, kindGIF, kindWebP, kindBMP, kindTIFF, kindSVG, kindImage, kindZIP, kindTAR, kind7Z, kindRAR} {
-		path := filepath.Join(h.options.CacheDir, CacheKey(source, kind))
-		ext := filepath.Ext(path)
-		bin := strings.TrimSuffix(path, ext)
-		for _, candidateExt := range []string{extensionJPG, extensionPNG, extensionGIF, extensionWebP, extensionBMP, extensionTIFF, extensionSVG, extensionZIP, extensionTAR, extension7Z, extensionRAR} {
-			candidate := bin + candidateExt
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate, kind
-			}
-		}
-	}
-	return "", ""
 }
 
 // binaryPath is where the binary cache keeps source's bytes of kind.

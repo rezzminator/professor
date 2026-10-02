@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // lockedBuffer is a stderr the watcher goroutine and the test can share.
@@ -38,7 +41,7 @@ const watchTick = 10 * time.Millisecond
 
 func writeFakeBuild(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -62,7 +65,7 @@ func TestWatchExecutableSeesAnAtomicInstall(t *testing.T) {
 	writeFakeBuild(t, binary, "old build")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{})
+	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{}, clock.Real)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +89,7 @@ func TestWatchExecutableSeesACopyOverTheSamePath(t *testing.T) {
 	writeFakeBuild(t, binary, "old build")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{})
+	replaced, err := watch(ctx, binary, watchTick, &bytes.Buffer{}, clock.Real)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +107,7 @@ func TestWatchExecutableNeverRestartsOntoAMissingBinary(t *testing.T) {
 	writeFakeBuild(t, binary, "build")
 	stderr := &lockedBuffer{}
 	ctx, cancel := context.WithCancel(context.Background())
-	replaced, err := watch(ctx, binary, watchTick, stderr)
+	replaced, err := watch(ctx, binary, watchTick, stderr, clock.Real)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +130,7 @@ func TestWatchExecutableRefusesAnUnreadableStart(t *testing.T) {
 		filepath.Join(t.TempDir(), "absent"),
 		watchTick,
 		&bytes.Buffer{},
+		clock.Real,
 	); err == nil {
 		t.Fatal("watching an absent executable returned no error")
 	}

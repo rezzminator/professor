@@ -19,6 +19,7 @@ import (
 )
 
 func TestLegacyParityBinaryArchiveIsNotCachedAsText(t *testing.T) {
+	t.Parallel()
 	var zipBytes bytes.Buffer
 	zw := zip.NewWriter(&zipBytes)
 	w, err := zw.Create("book.txt")

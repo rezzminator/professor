@@ -12,13 +12,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 	root := t.TempDir()
 	bin := filepath.Join(root, "claude")
 	argvPath := filepath.Join(root, "argv")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		bin,
 		[]byte(
 			"#!/bin/sh\nif [ \"$1\" = agents ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$AGENT_OPEN_ARGV\"\n",
@@ -70,12 +71,12 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 			if parsed.Resume != scenario.id {
 				t.Fatalf("resume=%q, want %q", parsed.Resume, scenario.id)
 			}
-			cacheName := "FORCE_PROMPT_CACHING_5M"
+			cacheTTL := "5m"
 			if scenario.cache1H {
-				cacheName = "ENABLE_PROMPT_CACHING_1H"
+				cacheTTL = "1h"
 			}
-			if parsed.SettingsEnv[cacheName] != "1" {
-				t.Fatalf("cache settings=%#v, want %s", parsed.SettingsEnv, cacheName)
+			if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != cacheTTL {
+				t.Fatalf("cache settings=%#v, want main chat %s", parsed.SettingsEnv, cacheTTL)
 			}
 			launches, err := fleetdb.OpenLaunches(context.Background(), values)
 			if err != nil {

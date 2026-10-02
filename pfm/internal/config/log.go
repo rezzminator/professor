@@ -103,10 +103,9 @@ type rawLog struct {
 	KeepDays   *int              `json:"keepDays,omitempty"`
 }
 
-// applyLog overlays the log keys the file actually set onto result, the way
-// applyCompactNudge overlays its own: a bad value is a refused config, never a
-// silently substituted default, because a log nobody can size is a log nobody
-// reads.
+// applyLog overlays the log keys the file actually set onto result. A bad
+// value is a refused config, never a substituted default; a log nobody can
+// size is a log nobody reads.
 func applyLog(result *Config, raw *rawLog) error {
 	if raw == nil {
 		return nil

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestStageOCRModelsWarmOrOfflineNeverDownloads: a warm model root answers
@@ -71,7 +73,7 @@ for line in sys.stdin:
 	if err := os.WriteFile(script, []byte("# fake"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(python, fake, 0o700); err != nil {
+	if err := testjail.WriteExecutable(python, fake, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	announced := 0

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -113,8 +114,10 @@ func TestLaunchPassthroughSessionEnvironment(t *testing.T) {
 				t.Fatalf("Launch code=%d stderr=%q", code, stderr.String())
 			}
 			if !test.session {
-				if !reflect.DeepEqual(got, inherited) {
-					t.Fatalf("non-session env changed: got=%q want=%q", got, inherited)
+				// Only the re-entry marker joins an otherwise untouched environment.
+				want := append(append([]string(nil), inherited...), "PFM_CLAUDE_LAUNCH_PID="+strconv.Itoa(os.Getpid()))
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("non-session env changed: got=%q want=%q", got, want)
 				}
 				return
 			}
@@ -157,5 +160,17 @@ func TestReadLaunchStatusRejectsMissingAndInvalidFiles(t *testing.T) {
 	_, err = readLaunchStatus(path)
 	if err == nil || !strings.Contains(err.Error(), "launcher status file invalid") {
 		t.Fatalf("readLaunchStatus invalid error=%v", err)
+	}
+}
+
+func TestAttachArgumentsBindNestedSeatToItsPane(t *testing.T) {
+	t.Parallel()
+	base := []string{"tmux", "-S", "/s/cc-1", "wait-for", "-S", "start", ";", "attach-session", "-t", "cc-1"}
+	if got := attachArguments("/s/cc-1", "start", "cc-1", false); !reflect.DeepEqual(got, base) {
+		t.Fatalf("plain terminal: attachArguments = %q, want %q", got, base)
+	}
+	nested := append(append([]string{}, base...), ";", "set-option", "-t", "cc-1", "destroy-unattached", "on")
+	if got := attachArguments("/s/cc-1", "start", "cc-1", true); !reflect.DeepEqual(got, nested) {
+		t.Fatalf("nested tmux: attachArguments = %q, want %q", got, nested)
 	}
 }

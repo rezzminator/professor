@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/stale"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type mcpServeProcTable struct {
@@ -104,7 +105,7 @@ func writeExecutable(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte("fixture"), 0o700)
+	return testjail.WriteExecutable(path, []byte("fixture"), 0o700)
 }
 
 func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {

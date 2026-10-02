@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""codeprobe — the computed half of `collector`, `tracer` and `mapper`.
+"""codeprobe — the computed half of `collector`.
 
 Every line it prints from a file is that file's text, numbered by the script. Every
 list it computes is complete or says what it left out. Every check names its own
 failure. Python 3 standard library only; it reads the repo and writes only under
 /tmp/{project}/codeprobe/.
 
+  verbs                             the extraction verbs and the collect syntax, from SKILL.md
   collect ROOT [DIR] --expect IDS   orders on stdin -> verbatim text in DIR/return.md, a manifest printed
-  init ROOT [--map TARGET]    asks on stdin -> DIR, file classes, computed lists
-  refs DIR NAME... [-C N] [--class C] [--path P]   every line naming NAME, with context
-  absent DIR NAME [--in PATH]  a checked zero -> an [A#] row
-  rows DIR [--replace]        rows on stdin -> appended, verified, return rendered
-  render DIR                  render the return from the verified rows
 """
 import difflib
 import json
@@ -28,10 +24,6 @@ def probe_base(root):
     return os.path.join("/tmp", project, "codeprobe")
 MAX_BYTES = 2_000_000
 BLOCK_LINES = 3000
-RETURN_BYTES = 150_000
-LIST_LINES = 150
-RANGE_LINES = 12
-ANCHOR_CHARS = 90
 PART_CHARS = 50_000  # the Read tool refuses over 25,000 tokens; code runs ~2.8 chars/token
 DATA_EXT = {".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".dump", ".gz", ".parquet", ".sqlite", ".db", ".xlsx", ".pkl"}
 RECORD_EXT = DATA_EXT | {".html", ".htm", ".xml", ".txt", ".eml", ".pdf"}
@@ -46,15 +38,6 @@ TEST_RE = re.compile(r"(^|/)(tests?|__tests__|e2e|spec|fixtures?|testdata)/|\.(t
 GEN_RE = re.compile(r"(^|/)(generated|__generated__|gen|artifacts)/|\.generated\.|\.pb\.go$|_pb2\.py$|\.min\.js$|(^|/)[^/]*\.lock$|-lock\.|(^|/)go\.sum$")
 SKIP_DIRS = {".git", "node_modules", "dist", "build", "vendor", ".next", "coverage", ".venv", "venv", "__pycache__",
              ".worktrees", "target", ".cache", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
-HEDGE_RE = re.compile(r"\b(probably|likely|unlikely|seems?|seemingly|appears? to|apparently|presumably|perhaps|possibly|"
-                      r"maybe|might|i think|i believe|not sure|unclear|actually)\b", re.I)
-EACH_RE = re.compile(r"\b(what|how)\b.{0,40}\beach\b|\beach\b.{0,40}\b(does|do|uses?|means?|with)\b|\bwhat (it|they) (does|do)\b|"
-                     r"\bclassif\w*|\bwhich (kind|field|of them|of these)\b|\bwhether (it|each)\b", re.I)
-FULL_RE = re.compile(r"\b(in full|whole|entire|verbatim|full (text|definition|file|body))\b", re.I)
-PRINT_RE = re.compile(r"(print|Print|Fprint|Sprintf|Errorf|log\.|logger\.|slog\.|console\.|echo\b|warn\(|error\(|info\(|write\(|Write\(|raise\b|throw\b|panic\(|fmt\.|errors\.New)")
-NOTE_IDENT_RE = re.compile(r"\b(?:[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+|[a-z]+[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)\b")
-UNIVERSAL_RE = re.compile(r"\b(single|sole|solely|exclusively|nowhere|no other|none|nothing|never|unused|no callers?|no tests?|"
-                          r"not (?:used|called|imported|referenced|tested)|(?<![-\w])only(?!-))\b", re.I)
 VERBS = ("lines", "file", "def", "sig", "defs", "grep", "block", "consts")
 
 
@@ -144,23 +127,6 @@ def resolve_path(root, path):
     full = path if os.path.isabs(path) else os.path.join(root, path)
     full = os.path.normpath(full)
     return os.path.relpath(full, root), full
-
-
-def variants(term):
-    parts = [p for p in re.split(r"[_\-\s]+|(?<=[a-z0-9])(?=[A-Z])", term) if p]
-    if len(parts) < 2:
-        return [term]
-    low = [p.lower() for p in parts]
-    forms = [term, "_".join(low), "-".join(low), "_".join(low).upper(),
-             low[0] + "".join(p.capitalize() for p in low[1:]), "".join(p.capitalize() for p in low)]
-    return list(dict.fromkeys(forms))
-
-
-def name_regex(spec, flags=0):
-    """A census spec: a plain name is word-matched; /regex/ is used as written."""
-    if len(spec) > 2 and spec.startswith("/") and spec.endswith("/"):
-        return re.compile(spec[1:-1], flags)
-    return re.compile(r"(?<![\w$])" + re.escape(spec) + r"(?![\w]|\$(?!\{))", flags)
 
 
 def scan(root, files, rx, classes=None):
@@ -565,21 +531,25 @@ def numbered(lines, a, b, mark=None):
 
 def bre_or_re(pattern):
     """A caller's grep pattern may be BRE (`a\\|b`, `f(`); read it the way grep would. -> (regex, how)."""
-    if "\\|" in pattern or "\\(" in pattern:
-        out, i = [], 0
-        while i < len(pattern):
-            c = pattern[i]
-            if c == "\\" and i + 1 < len(pattern):
-                nxt = pattern[i + 1]
-                out.append({"|": "|", "(": "(", ")": ")", "{": "{", "}": "}", "+": "+", "?": "?"}.get(nxt, "\\" + nxt))
-                i += 2
-                continue
-            out.append("\\" + c if c in "()|{}+?" else c)
-            i += 1
+    if "\\|" not in pattern and "\\(" not in pattern:
         try:
-            return re.compile("".join(out)), "read as grep BRE"
+            return re.compile(pattern), None
         except re.error:
             pass
+    out, i = [], 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\" and i + 1 < len(pattern):
+            nxt = pattern[i + 1]
+            out.append({"|": "|", "(": "(", ")": ")", "{": "{", "}": "}", "+": "+", "?": "?"}.get(nxt, "\\" + nxt))
+            i += 2
+            continue
+        out.append("\\" + c if c in "()|{}+?" else c)
+        i += 1
+    try:
+        return re.compile("".join(out)), "read as grep BRE"
+    except re.error:
+        pass
     try:
         return re.compile(pattern), None
     except re.error:
@@ -647,9 +617,10 @@ def run_verb(root, files, verb, args):
             pos.append(a)
             k += 1
     if verb == "grep":
-        header, body = grep_block(root, files, pos, opts)
+        header, body, how = grep_block(root, files, pos, opts)
         if " · 0 hits " in header and not body:
-            raise Miss(f"no line matches /{pos[0]}/ in {' '.join(pos[1:]) or 'the whole repo'} (searched)")
+            read = f", {how}" if how else ""
+            raise Miss(f"no line matches /{pos[0]}/ in {' '.join(pos[1:]) or 'the whole repo'} (searched{read})")
         return [(header, body)]
     if verb == "consts":
         return [consts_block(root, files, pos)]
@@ -842,7 +813,7 @@ def grep_block(root, files, pos, opts):
         body.append(f"UNREAD {b}")
     note = f" · {how}" if how else ""
     ctx = f" · ±{opts['C']} lines, hits marked *" if opts["C"] else ""
-    return (f"@ grep /{rx.pattern}/ in {' '.join(pos[1:]) or 'the whole repo'} · {n} hits in {len(hits)} files{ctx}{note}", body)
+    return (f"@ grep /{rx.pattern}/ in {' '.join(pos[1:]) or 'the whole repo'} · {n} hits in {len(hits)} files{ctx}{note}", body, how)
 
 
 def merge_windows(nums, c, total):
@@ -1029,7 +1000,7 @@ def expand_ids(spec):
     return [x for x in out if x]
 
 
-# ---------------------------------------------------------------- probe state
+# ---------------------------------------------------------------- run directory
 
 
 def new_dir(label, root):
@@ -1039,792 +1010,6 @@ def new_dir(label, root):
     return d
 
 
-def load(d):
-    try:
-        with open(os.path.join(d, "state.json")) as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as err:
-        die(f"no probe state in {d} ({err}); run init first")
-
-
-def save(d, state):
-    with open(os.path.join(d, "state.json"), "w") as fh:
-        json.dump(state, fh)
-
-
-MAP_ASKS = [
-    ("M1", "DEFINITION — what defines it: declaration, schema and migrations, keys, constraints, indexes", ""),
-    ("M2", "WRITERS — every writer, and what triggers each write", "census"),
-    ("M3", "READERS — every reader, and where each read ends (returned, served, rendered, stored, sent)", "census"),
-    ("M4", "TIMING — what runs on a clock, expires or retries it", ""),
-    ("M5", "CONTROL — guards, validation, configuration and registries around it", ""),
-    ("M6", "NEIGHBOURS — the entities it links to, or that change or are removed together with it", ""),
-    ("M7", "TESTS — every test and fixture naming it", "tests"),
-    ("M8", "CHECK — the check commands, a scoped variant, and whether two copies can run at once on one worktree", "checks"),
-]
-
-
-DIRECTIVES = ("census", "tests", "mentions", "checks")
-
-
-def parse_asks(text):
-    asks, cur = [], None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        m = re.match(r"^=\s*([A-Z]?\d+[a-z]?\d*)[.:]?\s+(.+)$", line)
-        if m:
-            cur = {"id": m.group(1), "text": m.group(2).strip(), "dirs": [], "cmds": []}
-            asks.append(cur)
-            continue
-        if cur is None:
-            die(f"an ask opens with `= ID the caller's question`, its commands on the lines under it; got: {line}")
-        w = line.split(None, 1)
-        if w[0] in DIRECTIVES:
-            names = [n.strip() for n in re.split(r"[,\s]+", w[1])] if len(w) > 1 else []
-            cur["dirs"].append({"kind": w[0], "names": [n for n in names if n]})
-        elif w[0] in VERBS:
-            cur["cmds"].append(line)
-        else:
-            die(f"`{w[0]}` under {cur['id']} is no command: the lines under an ask are census NAME…, tests NAME…, "
-                f"mentions NAME…, checks, or an extraction verb ({', '.join(VERBS)})")
-    return asks
-
-
-def run_cmd(state, cmd):
-    """One extraction command of an ask: [(header, body)] or [("MISS", why)]."""
-    try:
-        parts = shlex.split(cmd)
-        return run_verb(state["root"], state["files"], parts[0], parts[1:])
-    except Miss as err:
-        return [("MISS", str(err))]
-    except (ValueError, IndexError) as err:
-        return [("MISS", f"bad arguments ({err})")]
-
-
-def cmd_init(args):
-    target, expect = None, None
-    if "--map" in args:
-        k = args.index("--map")
-        if k + 1 >= len(args):
-            die("--map needs the target name")
-        target = args[k + 1]
-        args = args[:k] + args[k + 2:]
-    budget = None
-    if "--budget" in args:
-        k = args.index("--budget")
-        if k + 1 >= len(args) or not args[k + 1].isdigit():
-            die("--budget needs the brief's word limit, e.g. 2500")
-        budget = int(args[k + 1])
-        args = args[:k] + args[k + 2:]
-    if "--expect" in args:
-        k = args.index("--expect")
-        if k + 1 >= len(args):
-            die("--expect needs the caller's question numbers, e.g. 1-7")
-        expect = expand_ids(args[k + 1])
-        args = args[:k] + args[k + 2:]
-    if not args:
-        die("usage: init ROOT [--map TARGET] [--expect 1-7] <<'EOF' = Q1a the caller's question ⏎ census NAME ⏎ def PATH NAME … EOF")
-    root = os.path.abspath(args[0])
-    if not os.path.isdir(root):
-        die(f"no directory {root}")
-    files, source = list_files(root)
-    if not files:
-        die(f"{source} listed no file under {root}")
-    text = "" if sys.stdin.isatty() else sys.stdin.read()
-    asks = parse_asks(text)
-    if target:
-        spell = []
-        for v in variants(target):
-            h, dt, _ = scan(root, files, name_regex(v))
-            if h or dt:
-                spell.append(v)
-        spell = spell or [target]
-        pre = [{"id": i, "text": t, "dirs": [{"kind": k, "names": spell}] if k else [], "cmds": []} for i, t, k in MAP_ASKS]
-        pre[-1]["dirs"] = [{"kind": "checks", "names": []}]
-        asks = pre + asks
-    if not asks:
-        die("no ask on stdin; each ask opens with `= Q1a the caller's question`, its commands on the lines under it")
-    ids = [a["id"] for a in asks]
-    dup = sorted({i for i in ids if ids.count(i) > 1})
-    if dup:
-        die(f"ask ids repeat: {', '.join(dup)}")
-    if expect:
-        num = lambda i: re.match(r"[A-Z]?(\d+)", i).group(1)
-        lost = [e for e in expect if not any(num(i) == num(e) for i in ids)]
-        if lost:
-            die(f"the caller's questions {', '.join(expect)} include {', '.join(lost)}, and no ask carries "
-                f"{'that number' if len(lost) == 1 else 'those numbers'}: split every question into asks under its own number and run again")
-    d = new_dir(target or asks[0]["text"], root)
-    state = {"root": root, "files": files, "asks": asks, "absent": [], "target": target, "source": source, "budget": budget}
-    save(d, state)
-    counts = {}
-    for _, cls in files:
-        counts[cls] = counts.get(cls, 0) + 1
-    print(f"DIR {d}")
-    print(f"FILES {len(files)} via {source}: " + " · ".join(f"{c} {n}" for c, n in sorted(counts.items())))
-    print("ASKS " + " · ".join(a["id"] + ("[" + ", ".join(dv["kind"] + (" " + ",".join(dv["names"]) if dv["names"] else "")
-                                                            for dv in a["dirs"]) + "]" if a["dirs"] else "") for a in asks))
-    names = []
-    for a in asks:
-        for dv in a["dirs"]:
-            if dv["kind"] == "census":
-                names += [n for n in dv["names"] if n not in names]
-    wants = [("census", r"\b(every|all|each)\b.*\b(callers?|call sites?|readers?|writers?|uses?|consumers?)\b|\bwho (calls|reads|writes)\b"),
-             ("tests", r"\btests?\b|\bfixtures?\b|\basserted\b"),
-             ("mentions", r"\b(renam\w*|remov\w*|delet\w*|drop\w*)\b"),
-             ("checks", r"\b(command|make\b|check|lint|run the tests|how .* run)")]
-    held = {dv["kind"] for a in asks for dv in a["dirs"]}
-    for a in asks:
-        for kind, rx in wants:
-            if kind not in held and re.search(rx, a["text"], re.I):
-                print(f"NOTE {a['id']} asks what `{kind}` computes, and no ask carries it: add it with the name, "
-                      f"re-running init with the corrected asks")
-                held.add(kind)
-    for a in asks:
-        parts = len(re.findall(r",|/|;| or ", re.sub(r"`[^`]*`|\([^)]*\)", "", a["text"]))) + 1
-        if parts >= 4 and not a["id"].startswith("M"):
-            print(f"NOTE {a['id']} names {parts} things in one ask: one fact per ask gives each its own status — split it and re-run init")
-    for n in names:
-        print_refs(state, n, 2, {"CODE"}, None, budget=260)
-    tnames = []
-    for a in asks:
-        for dv in a["dirs"]:
-            if dv["kind"] == "tests":
-                tnames += [n for n in dv["names"] if n not in tnames]
-    for n in tnames:
-        hits = scan(root, files, name_regex(n), {"TEST"})[0]
-        body = test_hits(root, hits)
-        print(f"\nTESTS {n} — {sum(len(v) for v in hits.values())} lines in {len(hits)} test files, by test:")
-        print("\n".join(body[:200]) + (f"\n(+{len(body) - 200} more; the return carries them all)" if len(body) > 200 else ""))
-    for a in asks:
-        for cmd in a.get("cmds", []):
-            print(f"\nTEXT {a['id']} `{cmd}`")
-            for header, body in run_cmd(state, cmd):
-                if header == "MISS":
-                    print(f"MISS {a['id']} `{cmd}`: {body}")
-                    continue
-                print(header)
-                print("\n".join(body[:400]) + (f"\n(+{len(body) - 400} lines; the return carries them all)" if len(body) > 400 else ""))
-    if any(dv["kind"] == "checks" for a in asks for dv in a["dirs"]):
-        lines = check_lines(state)
-        print("\n".join(lines[:200]) + (f"\n(+{len(lines) - 200} more check lines; the return carries them all)" if len(lines) > 200 else ""))
-
-
-def print_refs(state, spec, c, classes, path, budget=400):
-    root = state["root"]
-    files = [f for f in state["files"] if not path or f[0] == path or f[0].startswith(path.rstrip("/") + "/")]
-    hits, data, bad = scan(root, files, name_regex(spec), classes)
-    if classes == {"CODE"}:
-        hits = code_only(root, hits, imports=True)
-    n = sum(len(v) for v in hits.values())
-    by = {}
-    for rel in hits:
-        cls = dict(state["files"]).get(rel, "?")
-        by.setdefault(cls, [0, 0])
-        by[cls][0] += len(hits[rel])
-        by[cls][1] += 1
-    summary = " · ".join(f"{k} {v[0]} lines/{v[1]} files" for k, v in sorted(by.items())) or "none"
-    print(f"\nREFS {spec} ({'/'.join(sorted(classes)) if classes else 'every class'}{', under ' + path if path else ''}) — {n} lines: {summary}"
-          + (f" · DATA files naming it (never opened): {len(data)}" if data else "") + (f" · UNREAD: {'; '.join(bad)}" if bad else ""))
-    out = []
-    for rel in sorted(hits):
-        lines, _ = read_lines(os.path.join(root, rel))
-        out.append(f"== {rel} ({dict(state['files']).get(rel)} · {len(hits[rel])})")
-        for w, (a, b) in enumerate(merge_windows(hits[rel], c, len(lines))):
-            if w:
-                out.append("  --")
-            for k in range(a, b + 1):
-                out.append(f"{k}{':' if k in hits[rel] else '-'}{lines[k - 1]}")
-    if len(out) > budget:
-        print(f"(excerpts are {len(out)} lines, over {budget}: files and hit lines only — run refs with --path for excerpts)")
-        for rel in sorted(hits):
-            print(f"== {rel}: {', '.join(map(str, hits[rel]))}")
-    else:
-        print("\n".join(out))
-
-
-def cmd_refs(args):
-    if len(args) < 2:
-        die("usage: refs DIR NAME... [-C N] [--class CODE,TEST] [--path PREFIX]")
-    state = load(args[0])
-    c, classes, path, names, k = 2, None, None, [], 1
-    while k < len(args):
-        if args[k] == "-C":
-            c, k = int(args[k + 1]), k + 2
-        elif args[k] == "--class":
-            classes, k = set(args[k + 1].upper().split(",")), k + 2
-        elif args[k] == "--path":
-            path, k = args[k + 1], k + 2
-        else:
-            names.append(args[k])
-            k += 1
-    for n in names:
-        print_refs(state, n, c, classes, path)
-
-
-CHECK_FILE_RE = re.compile(r"(^|/)(makefile|gnumakefile|[^/]+\.mk|package\.json|pyproject\.toml|tox\.ini|noxfile\.py|justfile|"
-                           r"taskfile\.ya?ml|setup\.cfg|pytest\.ini|\.pre-commit-config\.yaml|[^/]*(dev|test|check|lint|ci|verify)[\w-]*\.sh)$", re.I)
-WORKFLOW_RE = re.compile(r"(^|/)\.github/workflows/[^/]+\.ya?ml$|(^|/)\.gitlab-ci\.yml$")
-RUN_RE = re.compile(r"\b(go (?:test|vet|build)|golangci-lint|pytest|py\.test|ruff|mypy|pyright|uv run|tox|nox|npm (?:run|test)|pnpm|yarn|"
-                    r"vitest|jest|playwright|tsc|eslint|cargo (?:test|clippy|build)|make\b|bats|shellcheck|rumdl|markdownlint)")
-HINT_RE = re.compile(r"(?<![\w.])(?:port\s*[=:]\s*\d{4,5}|:\d{4,5}\b|localhost:\d+|/tmp/[\w./${}-]+|-coverprofile[= ]\S+|--junitxml\S*|"
-                     r"DATABASE_URL|TEST_DB\w*|createdb|dropdb|postgres(?:ql)?://\S+|flock|\.lock\b|lockfile|xdist|-n\s+auto|"
-                     r"t\.Parallel\(\)|-parallel\b|-p\s+\d+|--runInBand|--maxWorkers|COMPOSE_PROJECT_NAME|container_name)", re.I)
-
-
-def check_lines(state):
-    """The repo's own check commands, verbatim, plus lines that decide whether two copies can run at once."""
-    root, out = state["root"], ["CHECKS — the repo's own check commands, copied by script (path:LINE<TAB>text)"]
-    hints = []
-
-    def rank(rel):
-        base = os.path.basename(rel.lower())
-        if WORKFLOW_RE.search(rel.lower()):
-            return 3
-        if base.endswith(".sh"):
-            return 2
-        return 1 if base not in ("setup.cfg", ".pre-commit-config.yaml") else 2
-    chosen = [(rel, cls) for rel, cls in state["files"] if rel.count("/") <= 3 and cls != "DATA"
-              and (CHECK_FILE_RE.search(rel.lower()) or WORKFLOW_RE.search(rel.lower()))]
-    for rel, cls in sorted(chosen, key=lambda f: (rank(f[0]), f[0].count("/"), f[0])):
-        low = rel.lower()
-        lines, _ = read_lines(os.path.join(root, rel))
-        if not lines:
-            continue
-        base = os.path.basename(low)
-        keep = []
-        if base in ("makefile", "gnumakefile") or low.endswith(".mk"):
-            recipe = 0
-            for i, line in enumerate(lines):
-                if re.match(r"^[A-Za-z0-9_.%/-]+\s*:(?!=)", line) and not line.startswith("."):
-                    keep.append(i)
-                    recipe = 0
-                elif line.startswith("\t") and keep and (keep[-1] == i - 1 or lines[i - 1].startswith("\t")):
-                    recipe += 1
-                    if recipe <= 1 and not line.strip().startswith(("@#", "#")):
-                        keep.append(i)
-        elif base == "package.json":
-            s = next((i for i, line in enumerate(lines) if re.match(r'^\s*"scripts"\s*:', line)), None)
-            if s is not None:
-                e = block_end(lines, s, rel) or s
-                keep = list(range(s, e + 1))
-        elif base == "pyproject.toml":
-            on = False
-            for i, line in enumerate(lines):
-                if line.startswith("["):
-                    on = bool(re.match(r"\[(tool\.(pytest|ruff|mypy|pyright|coverage|poe|hatch|tox|uv|pdm\.scripts)|project\.scripts)", line))
-                if on and line.strip():
-                    keep.append(i)
-        else:
-            for i, line in enumerate(lines):
-                if line.lstrip().startswith("#"):
-                    continue
-                if RUN_RE.search(line) or re.match(r"^\s*-?\s*run\s*:", line):
-                    keep.append(i)
-        if keep:
-            out.append(f"@ {rel}")
-            out += [f"{i + 1}\t{lines[i][:200]}" for i in keep[:30]]
-            if len(keep) > 30:
-                out.append(f"(+{len(keep) - 30} more check lines in {rel})")
-    for rel, cls in state["files"]:
-        low = rel.lower()
-        if cls == "DATA" or rel.count("/") > 4:
-            continue
-        if not (CHECK_FILE_RE.search(low) or WORKFLOW_RE.search(low) or re.search(r"(^|/)(conftest\.py|docker-compose[^/]*\.ya?ml|compose\.ya?ml|main_test\.go|setup_test\.go|jest\.config\.\w+|vitest\.config\.\w+|playwright\.config\.\w+)$", low)):
-            continue
-        lines, _ = read_lines(os.path.join(root, rel))
-        for i, line in enumerate(lines or []):
-            if HINT_RE.search(line):
-                hints.append(f"{rel}:{i + 1}\t{line.strip()[:200]}")
-    if len(out) == 1:
-        out.append("(no Makefile, package.json scripts, pyproject tool section, CI workflow or dev/test script within 3 directories of the root)")
-    out.append("CONCURRENCY LINES — fixed ports, fixed paths, shared databases, locks and parallelism flags in the check and test setup files:")
-    out += hints[:30] or ["(none of those patterns in the check and test setup files)"]
-    if len(hints) > 30:
-        out.append(f"(+{len(hints) - 30} more)")
-    return out
-
-
-def cmd_absent(args):
-    if len(args) < 2:
-        die("usage: absent DIR NAME [--in PATH]")
-    d, name = args[0], args[1]
-    state = load(d)
-    path = args[args.index("--in") + 1] if "--in" in args else None
-    files = [f for f in state["files"] if not path or f[0] == path.rstrip("/") or f[0].startswith(path.rstrip("/") + "/")]
-    if not files:
-        die(f"no file under {path}: the zero would prove nothing")
-    hits, data, bad = scan(state["root"], files, name_regex(name))
-    n = sum(len(v) for v in hits.values())
-    scope = path or "the whole repo"
-    if n or data:
-        print(f"NOT ABSENT — {name} is named {n} times in {scope}; no [A#] row was made:")
-        for rel in sorted(hits):
-            lines, _ = read_lines(os.path.join(state["root"], rel))
-            for h in hits[rel][:20]:
-                print(f"{rel}:{h}\t{lines[h - 1].strip()[:200]}")
-        for rel, c in data.items():
-            print(f"{rel} — {c} matches in a data file")
-        return
-    read = len(files) - len(bad)
-    if read == 0:
-        die(f"none of the {len(files)} files under {scope} could be read: {'; '.join(bad)}")
-    aid = f"A{len(state['absent']) + 1}"
-    row = {"id": aid, "name": name, "scope": scope, "files": read, "unread": bad}
-    state["absent"].append(row)
-    save(d, state)
-    print(f"{aid} — `{name}`: 0 lines in {scope} ({read} files read" + (f"; UNREAD: {'; '.join(bad)}" if bad else "") + ")")
-
-
-# ---------------------------------------------------------------- rows
-
-
-def norm(s):
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def parse_row(line):
-    parts = [p.strip() for p in line.split("|", 3)]
-    if len(parts) < 4:
-        return None, "a row is `ASK | path:LINE | the verbatim line | what it means` (four fields)"
-    return {"ask": parts[0], "loc": parts[1], "anchor": parts[2], "note": parts[3]}, None
-
-
-def stems(state):
-    if "_stems" not in state:
-        state["_stems"] = {os.path.splitext(os.path.basename(f))[0] for f, _ in state["files"]}
-    return state["_stems"]
-
-
-def verify_row(state, row, cache):
-    asks = {a["id"] for a in state["asks"]}
-    if row["ask"] not in asks:
-        return f"ask `{row['ask']}` is not one of {', '.join(sorted(asks))}"
-    if HEDGE_RE.search(row["note"]):
-        return f"hedged (`{HEDGE_RE.search(row['note']).group(0)}`): state what the code shows, or write an UNANSWERED row saying what is not settled"
-    loc = row["loc"]
-    if loc.upper() == "UNANSWERED":
-        row["kind"] = "unanswered"
-        return None
-    if re.fullmatch(r"A\d+", loc):
-        if loc not in {a["id"] for a in state["absent"]}:
-            return f"{loc} is no absence row; run absent first"
-        row["kind"] = "absent"
-        return None
-    first = loc.split()[0] if loc.split() else ""
-    if first in ("def", "sig", "lines", "block", "defs"):
-        try:
-            blocks = run_verb(state["root"], state["files"], first, shlex.split(loc)[1:])
-        except (Miss, ValueError, IndexError) as err:
-            return f"extraction `{loc}` failed: {err}"
-        missed = [b for h, b in blocks if h == "MISS"]
-        if missed:
-            return f"extraction `{loc}` failed: {missed[0]}"
-        row["kind"], row["blocks"] = "extract", blocks
-        return None
-    star = re.fullmatch(r"(.+?):\*", loc)
-    if star:
-        rel, full = resolve_path(state["root"], star.group(1))
-        if not os.path.isfile(full):
-            same = [f for f, _ in state["files"] if f.endswith("/" + rel.lstrip("./"))]
-            if len(same) != 1:
-                return f"no file {rel}"
-            rel = same[0]
-        row["kind"], row["rel"], row["line"] = "file", rel, 0
-        return None
-    m = re.fullmatch(r"(.+?):(\d+)(?:[-,](\d+))?", loc)
-    if not m:
-        return f"location `{loc}` is not path:LINE, path:*, A#, UNANSWERED or an extraction (def/sig/lines/block PATH …)"
-    rel, full = resolve_path(state["root"], m.group(1))
-    if not os.path.isfile(full):
-        tail = "/" + rel.lstrip("./")
-        same = [f for f, _ in state["files"] if f.endswith(tail)]
-        if len(same) == 1:
-            rel, full = same[0], os.path.join(state["root"], same[0])
-    if rel not in cache:
-        cache[rel] = read_lines(full)[0] if os.path.isfile(full) else None
-    lines = cache[rel]
-    if lines is None:
-        return f"no readable file {rel}"
-    want = norm(row["anchor"].strip("`"))
-    if len(want) < 8:
-        return "the anchor is empty or too short to check; copy a piece of the line, a name or a call on it, 10 to 40 characters"
-    if "…" in want or "..." in want and "..." not in "".join(lines):
-        return "the anchor holds an ellipsis; copy the line whole, or a contiguous piece of it"
-    num = int(m.group(2))
-    if m.group(3):
-        end = int(m.group(3))
-        if end < num or end > len(lines):
-            return f"range {num}-{end} is not inside {rel} ({len(lines)} lines)"
-        if end - num + 1 > RANGE_LINES:
-            return f"a range over {RANGE_LINES} lines is an extraction row: `lines {rel} {num} {end}`, anchor -"
-        if not any(want in norm(x) for x in lines[num - 1:end]):
-            return f"the anchor is not a line of {rel}:{num}-{end}; copy a piece of one of those lines"
-        row["rel"], row["line"], row["end"], row["kind"], row["moved"] = rel, num, end, "range", False
-        return None
-    cands = [i + 1 for i, line in enumerate(lines) if want in norm(line)]
-    if not cands:
-        near = difflib.get_close_matches(want, [norm(x) for x in lines[max(0, num - 40):num + 40]], n=1, cutoff=0.5)
-        return f"the anchor is not a line of {rel}" + (f"; the nearest line near {num} reads: {near[0][:160]}" if near else "")
-    at = min(cands, key=lambda c: abs(c - num))
-    row["rel"], row["line"], row["moved"] = rel, at, at != num
-    row["kind"] = "row"
-    enc = enclosing_def(lines, rel, at - 1)
-    lo, hi = max(0, at - 41), at + 40
-    if enc:
-        lo, hi = min(lo, max(0, enc[1] - 40)), max(hi, enc[2] + 41)
-    near = "\n".join(lines[lo:hi])
-    allowed = " ".join(a["text"] for a in state["asks"]) + " " + (state.get("target") or "")
-    low_near = near.lower().replace("_", "")
-    plain = re.sub(r"\S+:\d+|[\w./-]+\.[A-Za-z]{1,5}\b", "", row["note"])
-    for tok in NOTE_IDENT_RE.findall(plain):
-        if tok.lower().replace("_", "") not in low_near and tok not in allowed and not (enc and tok == enc[0]) and tok not in stems(state):
-            row.setdefault("suspect", []).append(tok)
-    if "withheld" not in row:
-        for num_tok in re.findall(r"(?<![\w.:/-])(\d{2,})(?![\w.])", re.sub(r"\S+:\d+|\blines? \d+(?:-\d+)?", "", plain)):
-            if num_tok not in near and num_tok not in rel and num_tok.startswith("0"):
-                row["withheld"] = f"it states {num_tok}, which {rel} does not show within 40 lines of line {at}"
-                break
-    bare = re.sub(r"`[^`]*`|\"[^\"]*\"|\bNone\b", "", row["note"])
-    if UNIVERSAL_RE.search(bare) and not re.search(r"\bA\d+\b", row["note"]):
-        row["unchecked"] = UNIVERSAL_RE.search(bare).group(0)
-    return None
-
-
-def cmd_rows(args):
-    if not args:
-        die("usage: rows DIR [--replace] <<'EOF' ASK | path:LINE | verbatim line | meaning … EOF")
-    d = args[0]
-    load(d)
-    text = "" if sys.stdin.isatty() else sys.stdin.read()
-    mode = "w" if "--replace" in args else "a"
-    with open(os.path.join(d, "rows.txt"), mode) as fh:
-        fh.write(f"#batch {time.time()}\n" + (text if text.endswith("\n") or not text else text + "\n"))
-    render(d, verbose=True)
-
-
-def cmd_render(args):
-    if not args:
-        die("usage: render DIR")
-    render(args[0], verbose=True)
-
-
-def render(d, verbose):
-    state = load(d)
-    path = os.path.join(d, "rows.txt")
-    raw = open(path).read().splitlines() if os.path.isfile(path) else []
-    root = state["root"]
-    cache, good, bad, batch = {}, [], [], 0
-    for line in raw:
-        if line.startswith("#batch"):
-            batch += 1
-            continue
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        row, why = parse_row(line)
-        if row:
-            row["batch"] = batch
-            why = verify_row(state, row, cache)
-        if why:
-            bad.append((line, why, row))
-        else:
-            good.append(row)
-    others = {}
-    for r in good:
-        if r.get("suspect"):
-            files_seen = {g.get("rel") for g in good if g.get("rel") and g.get("rel") != r["rel"]}
-            for tok in r["suspect"]:
-                key = tok.lower().replace("_", "")
-                held_elsewhere = False
-                for f in files_seen:
-                    if f not in others:
-                        others[f] = "\n".join(cache.get(f) or read_lines(os.path.join(root, f))[0] or []).lower().replace("_", "")
-                    if key in others[f]:
-                        held_elsewhere = True
-                        break
-                if not held_elsewhere:
-                    r["withheld"] = (f"it names `{tok}`, which {r['rel']} does not show within 40 lines of line {r['line']} "
-                                     "and no other file this probe anchored holds")
-                    break
-    last = {}
-    for r in good:
-        last[(r["ask"], r.get("rel"), r.get("line"), r["loc"] if r["kind"] not in ("row", "file", "range") else "")] = r
-    rows = [r for r in good if last.get((r["ask"], r.get("rel"), r.get("line"), r["loc"] if r["kind"] not in ("row", "file", "range") else "")) is r]
-    def superseded(r):
-        if not r:
-            return False
-        rel = resolve_path(state["root"], r["loc"].split(":")[0])[0]
-        return any(g["ask"] == r["ask"] and g.get("rel", rel) == rel and g["batch"] > r["batch"] for g in rows)
-    quota, used, kept = max(RANGE_LINES * 2, (state.get("budget") or 2500) // 60), 0, []
-    for r in rows:
-        if r["kind"] == "range":
-            n = r["end"] - r["line"] + 1
-            if used + n > quota:
-                bad.append((f"{r['ask']} | {r['loc']} | {r['anchor']} | {r['note']}",
-                            f"the return's {quota} quoted range lines are spent; cite the line that matters as a path:LINE row", r))
-                continue
-            used += n
-        kept.append(r)
-    rows = kept
-    bad = [(ln, why, r) for ln, why, r in bad if not superseded(r)]
-    covered = {}
-    for r in rows:
-        if r["kind"] == "row":
-            covered.setdefault(r["rel"], set()).update(range(r["line"] - 3, r["line"] + 4))
-        elif r["kind"] == "range":
-            covered.setdefault(r["rel"], set()).update(range(r["line"] - 3, r["end"] + 4))
-        elif r["kind"] == "file":
-            covered.setdefault(r["rel"], set()).update(range(0, 10 ** 6))
-        elif r["kind"] == "extract":
-            for header, _ in r["blocks"]:
-                m = re.match(r"@ (\S+?):(\d+)-(\d+)", header)
-                if m:
-                    lines = cache.get(m.group(1)) or read_lines(os.path.join(root, m.group(1)))[0] or []
-                    a = leading_start(lines, int(m.group(2)) - 1) + 1 if lines else int(m.group(2))
-                    covered.setdefault(m.group(1), set()).update(range(a, int(m.group(3)) + 1))
-    out, status, listed, census_open, blocks = [], {}, {}, {}, {}
-    for a in state["asks"]:
-        for dv in a["dirs"]:
-            if dv["kind"] == "census":
-                for spec in dv["names"]:
-                    if spec not in census_open:
-                        h = code_only(root, scan(root, state["files"], name_regex(spec), {"CODE"})[0])
-                        census_open[spec] = sum(1 for rel in h for n in h[rel] if n not in covered.get(rel, set()))
-                        if code_only(root, scan(root, state["files"], name_regex(spec), {"TEST"})[0]):
-                            census_open[spec] = census_open[spec] or -1
-    for a in state["asks"]:
-        mine = [r for r in rows if r["ask"] == a["id"]]
-        lines_out, computed, open_refs = [], False, 0
-        each = EACH_RE.search(a["text"]) is not None
-        backed = any(dv["kind"] == "census" and all(census_open.get(n, 1) == 0 for n in dv["names"]) for dv in a["dirs"])
-        prev = None
-        for r in mine:
-            if r["kind"] in ("row", "range"):
-                mark = f" [unchecked `{r['unchecked']}`: no absence row]" if r.get("unchecked") and not backed else ""
-                note = f"(note withheld: {r['withheld']})" if r.get("withheld") else r["note"] + mark
-                if r["rel"] != prev:
-                    lines_out.append(f"{r['rel']}")
-                prev = r["rel"]
-                if r["kind"] == "row":
-                    anchor = norm(cache[r["rel"]][r["line"] - 1])
-                    lines_out.append(f"  :{r['line']} `{anchor[:ANCHOR_CHARS]}{'…' if len(anchor) > ANCHOR_CHARS else ''}` — {note}")
-                else:
-                    lines_out.append(f"  :{r['line']}-{r['end']} — {note}")
-                    lines_out += [f"    {k}\t{cache[r['rel']][k - 1]}" for k in range(r["line"], r["end"] + 1)]
-                continue
-            prev = None
-            if r["kind"] == "file":
-                lines_out.append(f"- {r['rel']} (every line of it naming the target) — {r['note']}")
-            elif r["kind"] == "extract":
-                lines_out.append(f"- {r['note']}")
-                for header, body in r["blocks"]:
-                    lines_out.append("  " + header)
-                    lines_out += body
-            elif r["kind"] == "absent":
-                ab = next(x for x in state["absent"] if x["id"] == r["loc"])
-                lines_out.append(f"- ABSENT {ab['id']}: `{ab['name']}` — 0 lines in {ab['scope']} ({ab['files']} files read) — {r['note']}")
-        for dv in a["dirs"]:
-            if dv["kind"] == "checks":
-                continue
-            classes = {"census": {"CODE"}, "tests": {"TEST", "DATA"}, "mentions": None}[dv["kind"]]
-            for spec in dv["names"]:
-                if (dv["kind"], spec) in listed:
-                    first = listed[(dv["kind"], spec)]
-                    open_refs += max(census_open.get(spec, 0), 0) if dv["kind"] == "census" else 0
-                    computed = computed or dv["kind"] != "census"
-                    lines_out.append(f"{dv['kind']} `{spec}`: listed under {first}")
-                    continue
-                listed[(dv["kind"], spec)] = a["id"]
-                hits, data, badf = scan(root, state["files"], name_regex(spec), classes)
-                n = sum(len(v) for v in hits.values())
-                if dv["kind"] == "census":
-                    hits = code_only(root, hits)
-                    n = sum(len(v) for v in hits.values())
-                    loose = [(rel, h) for rel in sorted(hits) for h in hits[rel] if h not in covered.get(rel, set())]
-                    open_refs += len(loose)
-                    lines_out.append(f"census `{spec}` (code lines; comments and imports left out): {n} lines in {len(hits)} files — {n - len(loose)} beside a row above, "
-                                     + (f"{len(loose)} unclassified" if each else f"{len(loose)} listed") + (":" if loose else ""))
-                    lines_out += list_hits(root, loose, "UNCLASSIFIED " if each else "")
-                    thits = code_only(root, scan(root, state["files"], name_regex(spec), {"TEST"})[0])
-                    tested = next((b["id"] for b in state["asks"] for x in b["dirs"] if x["kind"] == "tests" and spec in x["names"]), None)
-                    if thits and tested:
-                        lines_out.append(f"census `{spec}` in tests: under `tests {spec}` in {tested}")
-                    elif thits:
-                        lines_out.append(f"census `{spec}` in tests: {sum(len(v) for v in thits.values())} lines in {len(thits)} test files, by test:")
-                        lines_out += test_hits(root, thits)
-                else:
-                    label = "tests and fixtures" if dv["kind"] == "tests" else "every file"
-                    computed = True
-                    lines_out.append(f"{dv['kind']} `{spec}` ({label}): {n} lines in {len(hits)} files"
-                                     + (f", and {len(data)} data or fixture-record files (never opened)" if data else "") + ":")
-                    if dv["kind"] == "tests":
-                        lines_out += test_hits(root, hits)
-                    else:
-                        lines_out += list_hits(root, [(rel, h) for rel in sorted(hits) for h in hits[rel]], "")
-                    lines_out += [f"{rel} — {c} matches, not opened" for rel, c in sorted(data.items())]
-                lines_out += [f"UNREAD {b}" for b in badf]
-        unanswered = [r for r in mine if r["kind"] == "unanswered"]
-        answered = [r for r in mine if r["kind"] != "unanswered"]
-        if answered and re.search(r"\b(prints?|printed|logs?|logged|outputs?|emits?|shows?|displays?|says)\b", a["text"], re.I) and not any(
-                r["kind"] in ("row", "range") and any(PRINT_RE.search(cache[r["rel"]][k - 1]) for k in range(r["line"], r.get("end", r["line"]) + 1))
-                for r in answered):
-            unanswered.append({"kind": "unanswered", "note": "the ask is about what is printed or logged, and no row anchors a line that prints, logs or formats a message"})
-        if answered and FULL_RE.search(a["text"]) and not any(r["kind"] in ("extract", "range") for r in answered):
-            unanswered.append({"kind": "unanswered", "note": "the ask wants text in full, and no extraction or range row carries it"})
-        if not answered and not computed:
-            status[a["id"]] = "not answered"
-        elif unanswered or (open_refs and each):
-            status[a["id"]] = "partial"
-        else:
-            status[a["id"]] = "with rows"
-        blocks[a["id"]] = lines_out
-        dirs = ", ".join(dv["kind"] + (" " + ",".join(dv["names"]) if dv["names"] else "") for dv in a["dirs"])
-        out.append(f"\n## {a['id']} — {a['text'][:100]}{'…' if len(a['text']) > 100 else ''}" + (f"  [{dirs}]" if dirs else "") + f"  · {status[a['id']].upper()}")
-        out += lines_out
-        for r in unanswered:
-            out.append(f"- NOT SETTLED: {r['note']}")
-    na = [a for a in state["asks"] if status[a["id"]] != "with rows"]
-    out.append("\n## NOT ANSWERED")
-    if not na:
-        out.append("- none: every ask has rows, and every census code line sits beside one")
-    for a in na:
-        why = "; ".join(r["note"] for r in rows if r["ask"] == a["id"] and r["kind"] == "unanswered")
-        if status[a["id"]] == "not answered":
-            out.append(f"- {a['id']} — no row" + (f": {why}" if why else ""))
-        else:
-            out.append(f"- {a['id']} — partial" + (f": {why}" if why else ": census lines left unclassified, listed above"))
-    if bad:
-        out.append(f"\n## REJECTED ROWS — {len(bad)}, not shown above")
-        out += [f"- {ln.strip()[:200]}  ⟶ {why}" for ln, why, _ in bad]
-    counts = {k: sum(1 for v in status.values() if v == k) for k in ("with rows", "partial", "not answered")}
-    head = (f"PROBE {len(state['asks'])} asks — {counts['with rows']} with rows, {counts['partial']} partial, "
-            f"{counts['not answered']} not answered · {len(rows)} rows, {len(bad)} rejected · root {root} · file {os.path.join(d, 'return.md')}\n"
-            "Rows are `path:LINE `the line, re-read from the file by script` — meaning`; computed lists are complete for the name searched.")
-    text = head + "\n" + "\n".join(out) + f"\n\nEND {len(state['asks'])} asks\n"
-    with open(os.path.join(d, "return.md"), "w") as fh:
-        fh.write(text)
-    if verbose and bad:
-        print(f"{len(bad)} ROWS REJECTED — fix each once (rows DIR with only the corrected rows), or leave it: it stays listed as rejected.")
-        for ln, why, _ in bad:
-            print(f"  {ln.strip()[:160]}\n    ⟶ {why}")
-    held = [r for r in rows if r.get("withheld")]
-    if verbose and held:
-        print(f"{len(held)} NOTES WITHHELD — each names something the code near its anchor does not show; resend the row once "
-              "with a note the lines show, or leave it withheld:")
-        for r in held:
-            print(f"  {r['ask']} | {r['rel']}:{r['line']} ⟶ {r['withheld']}")
-    moved = [r for r in rows if r.get("moved")]
-    if verbose and moved:
-        print(f"{len(moved)} rows re-addressed to the line carrying their anchor.")
-    ret = os.path.join(d, "return.md")
-    size, words, budget = len(text.encode()), len(text.split()), state.get("budget")
-    man = [f"PROBE {len(state['asks'])} asks — {counts['with rows']} with rows, {counts['partial']} partial, "
-           f"{counts['not answered']} not answered · {len(rows)} rows, {len(bad)} rejected · {words} words"
-           + (f" of the {budget} asked" if budget else "") + f" · {size // 1024 + 1} KB",
-           f"Read {ret} — the answers under the caller's question numbers: each fact a path:LINE with its line re-read from "
-           "the file by script, the computed caller and test lists, and the verbatim text of every quote asked."]
-    for a in na:
-        why = "; ".join(r["note"] for r in rows if r["ask"] == a["id"] and r["kind"] == "unanswered")
-        man.append(f"{status[a['id']].upper()} {a['id']} — {a['text'][:100]}" + (f": {why[:200]}" if why else ""))
-    man.append(f"END {len(state['asks'])} asks")
-    with open(os.path.join(d, "manifest.txt"), "w") as fh:
-        fh.write("\n".join(man) + "\n")
-    if verbose and budget and words > budget:
-        per = sorted(((len("\n".join(b).split()), i) for i, b in blocks.items()), reverse=True)[:4]
-        print(f"OVER BUDGET — {words} words, the brief asks for {budget}. Largest asks: "
-              + ", ".join(f"{i} {n} words" for n, i in per) + ". A quote of several lines is one range row "
-              "(path:A-B); a row that restates another row's fact goes; a computed list needs a row per line only where the ask is what each line does.")
-    if verbose:
-        print(f"\nThe return is written: {ret} ({size} bytes). YOUR FINAL MESSAGE, when you are done, is the manifest below, "
-              "from PROBE to END, copied whole — the caller reads the file it names.\n")
-        print("\n".join(man))
-    else:
-        print(text, end="")
-
-
-COMMENT_START = ("//", "#", "*", "/*", "--", "<!--")
-IMPORT_RE = re.compile(r"^\s*(import\b|from\s+\S+\s+import\b|export\s+(\*|\{[^}]*\})\s+from\b|(const|let|var)\s+\{?[\w\s,]*\}?\s*=\s*require\(|use\s+[\w:]+|#include\b)")
-
-
-TRIPLE_OPEN_RE = re.compile(r"""\s*[rRbBuUfF]{0,2}(\"\"\"|''')""")
-
-
-def prose_lines(rel, lines):
-    """Python lines inside a docstring or another string standing alone as a statement: prose, not code."""
-    if not rel.endswith((".py", ".pyi")):
-        return set()
-    out, sc, alone = set(), Scanner(rel), False
-    for i, line in enumerate(lines, 1):
-        inside = sc.string in ('"""', "'''")
-        if inside and alone:
-            out.add(i)
-        code = sc.feed(line)
-        opens = TRIPLE_OPEN_RE.match(line) is not None
-        if not inside and sc.string in ('"""', "'''"):
-            alone = opens
-        if not inside and opens and (alone or code.strip() == "s"):
-            out.add(i)
-    return out
-
-
-def code_only(root, hits, imports=False):
-    """Census lines: comments, docstrings and (unless imports) import lines left out — a use, not a reference."""
-    out = {}
-    for rel, nums in hits.items():
-        lines = read_lines(os.path.join(root, rel))[0] or []
-        prose = prose_lines(rel, lines)
-        keep = [h for h in nums if h <= len(lines) and h not in prose and not lines[h - 1].lstrip().startswith(COMMENT_START)
-                and (imports or not IMPORT_RE.match(lines[h - 1])) and not re.match(r"^\s*[\w$]+,?\s*$", lines[h - 1])]
-        if keep:
-            out[rel] = keep
-    return out
-
-
-def def_spans(lines, rel):
-    spans = []
-    for i, name, _ in all_defs(lines, rel):
-        end = block_end(lines, i, rel)
-        if end is not None:
-            spans.append((i + 1, end + 1, name))
-    return spans
-
-
-def test_hits(root, hits):
-    """Each test file's lines naming the target, grouped under the innermost definition holding them."""
-    out = []
-    for rel in sorted(hits):
-        lines = read_lines(os.path.join(root, rel))[0] or []
-        spans = def_spans(lines, rel)
-        groups = {}
-        for h in hits[rel]:
-            inner = [sp for sp in spans if sp[0] <= h <= sp[1]]
-            key = max(inner, key=lambda sp: sp[0]) if inner else (0, 0, "(top level)")
-            groups.setdefault(key, []).append(h)
-        parts = []
-        for (a, b, name), hs in sorted(groups.items()):
-            where = f"{name} {a}-{b}" if a else name
-            parts.append(f"{where}: lines {', '.join(map(str, hs))}")
-        out.append(f"{rel} — " + " · ".join(parts))
-    return out
-
-
-def list_hits(root, pairs, prefix):
-    if len(pairs) > LIST_LINES:
-        by = {}
-        for rel, h in pairs:
-            by.setdefault(rel, []).append(h)
-        return [f"{prefix}{rel}: lines {', '.join(map(str, hs))}" for rel, hs in by.items()]
-    out, cache = [], {}
-    for rel, h in pairs:
-        if rel not in cache:
-            cache[rel] = read_lines(os.path.join(root, rel))[0] or []
-        text = cache[rel][h - 1].strip() if h <= len(cache[rel]) else ""
-        out.append(f"{prefix}{rel}:{h}\t{text[:90]}{'…' if len(text) > 90 else ''}")
-    return out
-
-
 def cmd_verbs(args):
     """Print SKILL.md's extraction verbs and collect sections: one source for the syntax."""
     path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "SKILL.md")
@@ -1832,15 +1017,14 @@ def cmd_verbs(args):
         text = open(path).read()
     except OSError as err:
         die(f"cannot read {path}: {err}")
-    m = re.search(r"^## Extraction verbs$.*?(?=^## Probe commands)", text, re.S | re.M)
-    if not m:
-        die(f"{path} has no § Extraction verbs followed by § Probe commands")
+    m = re.search(r"^## Extraction verbs$.*", text, re.S | re.M)
+    if not m or not re.search(r"^## collect\b", m.group(0), re.M):
+        die(f"{path} has no § Extraction verbs followed by § collect")
     print(m.group(0).rstrip())
 
 
 def main():
-    cmds = {"verbs": cmd_verbs, "collect": cmd_collect, "init": cmd_init, "refs": cmd_refs, "absent": cmd_absent,
-            "rows": cmd_rows, "render": cmd_render}
+    cmds = {"verbs": cmd_verbs, "collect": cmd_collect}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         die("usage: codeprobe.py {" + "|".join(cmds) + "} … — " + (__doc__ or "").split("\n\n")[2].strip().replace("\n", " ; "))
     cmds[sys.argv[1]](sys.argv[2:])

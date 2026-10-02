@@ -4,6 +4,7 @@ package usagehook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,9 +45,13 @@ type Options struct {
 	Client      *http.Client
 	Endpoint    string
 	Log         io.Writer
-	// Version is the running pfm's version; every usage request names itself
-	// `pfm/{Version}`, never a borrowed client identity.
+	// Version is the running pfm's version, named in a usage request's
+	// User-Agent as `pfm/{Version}` only when the account's Claude Code
+	// version is unknown (Options.userAgent).
 	Version string
+	// ClaudeBinary is the account's Claude Code binary, asked for its version
+	// (claudeCodeVersion) when a request is about to go out; empty means `claude`.
+	ClaudeBinary string
 	// BypassBackoff, when set, is a caller's one authorized live retry: a
 	// fresh cache no longer answers, and neither does an active backoff whose
 	// replayed error it accepts (a credential failure the caller just repaired).
@@ -185,14 +190,14 @@ func (usage Usage) fableWindow(now time.Time) (Window, bool) {
 	return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true
 }
 
-type (
-	usage       = Usage
-	usageWindow = Window
-)
+type usageWindow = Window
 
 type credentials struct {
 	OAuth struct {
 		AccessToken string `json:"accessToken"`
+		// ExpiresAt is the access token's expiry, Unix milliseconds; 0 when
+		// the credential carries none.
+		ExpiresAt int64 `json:"expiresAt"`
 	} `json:"claudeAiOauth"`
 }
 
@@ -422,6 +427,15 @@ func DefaultCacheDir() string {
 	return cacheDirForEnv(paths.OSEnv{})
 }
 
+// CacheDirFor is DefaultCacheDir under env, a caller's host-environment seam
+// (nil is the real process environment).
+func CacheDirFor(env paths.Env) string {
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	return cacheDirForEnv(env)
+}
+
 func cacheDirForEnv(env paths.Env) string {
 	return UsageCacheDir(tempBase(env.Get(paths.EnvHome)), os.Getuid())
 }
@@ -490,10 +504,27 @@ func CachedFableWindow(base string, uid, account int, configDir string, now time
 // reader of the shared cache — this hook, and every `pfm ls` Limits tab —
 // skips its own request until RetryAfter instead of each picker process
 // rediscovering the same failure independently.
+//
+// Credential is the fingerprint of the credential the failure was recorded
+// against (CredentialFingerprint), so a changed credential lifts it; Refusal
+// keeps a 401 or 403 typed, so a replay classifies exactly like the live
+// answer.
 type CacheBackoff struct {
-	Message    string    `json:"message"`
-	RetryAfter time.Time `json:"retry_after"`
-	RecordedAt time.Time `json:"recorded_at"`
+	Message    string       `json:"message"`
+	RetryAfter time.Time    `json:"retry_after"`
+	RecordedAt time.Time    `json:"recorded_at"`
+	Credential string       `json:"credential,omitempty"`
+	Refusal    *StatusError `json:"refusal,omitempty"`
+}
+
+// replay is the failure the backoff recorded: the typed refusal when it kept
+// one, the message otherwise.
+func (backoff *CacheBackoff) replay() error {
+	if backoff.Refusal != nil {
+		refusal := *backoff.Refusal
+		return &refusal
+	}
+	return errors.New(backoff.Message)
 }
 
 // CacheRecord binds shared usage and backoff to a config directory. Legacy
@@ -503,6 +534,30 @@ type CacheRecord struct {
 	ConfigDir string        `json:"config_dir,omitempty"`
 	FetchedAt *time.Time    `json:"fetched_at,omitempty"`
 	Backoff   *CacheBackoff `json:"backoff,omitempty"`
+	// Unchanged counts the fetches in a row that read exactly what the one
+	// before them read; it stretches the record's freshness (FreshFor).
+	Unchanged int `json:"unchanged,omitempty"`
+}
+
+// adaptiveCeiling bounds how far an idle account's freshness stretches: the
+// careful pollers keep 90-300 s between requests and slow down when idle
+// (RR claude-oauth-usage-429-pollers § 5.5), so an account whose readings stop
+// moving is asked at most every five minutes, and the first changed reading
+// brings the caller's own interval back.
+const adaptiveCeiling = 5 * time.Minute
+
+// FreshFor is how long the record answers without a request for a caller
+// whose interval is ttl: ttl doubled per unchanged fetch in a row, up to
+// adaptiveCeiling, never below ttl.
+func (record CacheRecord) FreshFor(ttl time.Duration) time.Duration {
+	fresh := ttl
+	for range min(record.Unchanged, 8) {
+		if fresh >= adaptiveCeiling {
+			break
+		}
+		fresh *= 2
+	}
+	return max(ttl, min(fresh, adaptiveCeiling))
 }
 
 // MatchesConfigDir rejects legacy unbound records and reused account numbers.
@@ -545,6 +600,9 @@ func WriteCacheRecord(path string, record CacheRecord) error {
 // server sent none or an unparseable value — callers apply their own floor.
 type RateLimitError struct {
 	RetryAfter time.Duration
+	// ErrorType is the body's error type ("rate_limit_error"), empty when
+	// the body named none.
+	ErrorType string
 }
 
 func (err *RateLimitError) Error() string {

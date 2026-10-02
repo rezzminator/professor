@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestApplyMigratesOwnedMemoryHelpersAndTheirExactHooks(t *testing.T) {
@@ -239,7 +240,7 @@ func TestMemoryHelperMigrationConflictsRefuseBeforeAnyMutation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(
+				if err := testjail.WriteExecutable(
 					oldConsolidate,
 					append(content, []byte("# operator customization\n")...),
 					0o700,
@@ -623,7 +624,7 @@ func writeMemoryHelperFixture(t *testing.T, path string, content []byte, mode os
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, content, mode); err != nil {
+	if err := testjail.WriteExecutable(path, content, mode); err != nil {
 		t.Fatal(err)
 	}
 }

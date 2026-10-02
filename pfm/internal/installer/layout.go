@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ const (
 	layoutRowManagedCleanup  = "managed-cleanup"
 	layoutRowConfig          = "config"
 	layoutRowHarvesterConfig = "harvester-config"
+	layoutRowHarvesterCache  = "harvester-cache"
 	layoutRowStateDB         = "state-db"
 	layoutRowCacheDB         = "cache-db"
 	layoutRowSessionStore    = "session-store"
@@ -97,7 +99,13 @@ func NewInstallLayoutEnv(runtime pfmconfig.Runtime, env paths.Env, installClone 
 		return LayoutEnv{}, fmt.Errorf("read source repo marker: %w", err)
 	}
 	if errors.Is(err, paths.ErrNoSourceRepoMarker) {
-		clone = installClone
+		if installClone != "" {
+			abs, absErr := filepath.Abs(installClone)
+			if absErr != nil {
+				return LayoutEnv{}, fmt.Errorf("resolve install clone %q: %w", installClone, absErr)
+			}
+			clone = paths.PhysicalPath(abs)
+		}
 	}
 	legacyDir := pfmconfig.LegacyConfigDir(env, home)
 	configPath := runtime.Config.Path
@@ -233,6 +241,7 @@ var HostLayout = []LayoutRow{
 	{layoutRowManagedCleanup, "{ManagedDir}/pfm.json at configured cleanupPeriodDays", "absent or wrong value"},
 	{layoutRowConfig, "{ConfigPath} regular file", "{LegacyConfigDir}/pfm.config.json or config.json"},
 	{layoutRowHarvesterConfig, "beside ConfigPath, regular file or absent", "{LegacyConfigDir}/harvester.config.json"},
+	{layoutRowHarvesterCache, "{home}/.professor/.harvester-cache directory or absent", "{home}/.professor/.cache"},
 	{layoutRowStateDB, "{StateDB}, no legacy database", "{home}/.cc/legacy database and siblings"},
 	{layoutRowCacheDB, "{CacheDB}, no legacy database", "{home}/.local/state/pfm/legacy database and siblings"},
 	{
@@ -262,6 +271,8 @@ func ClassifyLayout(env LayoutEnv) []LayoutFinding {
 			findings = append(findings, classifyConfig(env))
 		case layoutRowHarvesterConfig:
 			findings = append(findings, classifyHarvesterConfig(env))
+		case layoutRowHarvesterCache:
+			findings = append(findings, classifyHarvesterCache(env))
 		case layoutRowStateDB:
 			findings = append(
 				findings,
@@ -321,6 +332,58 @@ func layoutLstat(row, path string) (LayoutFinding, fs.FileInfo, bool) {
 	return finding, info, true
 }
 
+// classifyManagedCleanup plans the managed cleanup drop-in row, the one row
+// ApplyLayout treats as advisory.
+func classifyManagedCleanup(env LayoutEnv) LayoutFinding {
+	path := filepath.Join(env.ManagedDir, "pfm.json")
+	finding, info, exists := layoutLstat(layoutRowManagedCleanup, path)
+	if !env.Config.Claude.RequireManagedCleanup {
+		finding.Detail = "check off by config"
+		return finding
+	}
+	if !filepath.IsAbs(env.ManagedDir) {
+		// The row is advisory: refused, it writes nothing and fails nothing.
+		finding.Err = nil
+		finding.Verdict = VerdictRefuse
+		finding.Detail = fmt.Sprintf("managed settings dir %q is not absolute — nothing written", env.ManagedDir)
+		return finding
+	}
+	if finding.Err != nil {
+		return finding
+	}
+	if !exists {
+		finding.Verdict = VerdictCreate
+		return finding
+	}
+	if !info.Mode().IsRegular() {
+		finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
+		return finding
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		finding.Err = err
+		return finding
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		finding.Err = err
+		return finding
+	}
+	var value int
+	if err := json.Unmarshal(document["cleanupPeriodDays"], &value); err != nil {
+		finding.Err = fmt.Errorf("cleanupPeriodDays: %w", err)
+		return finding
+	}
+	if value != env.Config.Claude.CleanupPeriodDays {
+		finding.Verdict, finding.Detail = VerdictRepoint, fmt.Sprintf(
+			"cleanupPeriodDays=%d, want %d",
+			value,
+			env.Config.Claude.CleanupPeriodDays,
+		)
+	}
+	return finding
+}
+
 func classifyConfig(env LayoutEnv) LayoutFinding {
 	return classifyMovedFile(layoutRowConfig, env.ConfigPath, []string{
 		filepath.Join(env.LegacyConfigDir, pfmconfig.FileName),
@@ -335,6 +398,45 @@ func classifyHarvesterConfig(env LayoutEnv) LayoutFinding {
 		[]string{filepath.Join(env.LegacyConfigDir, "harvester.config.json")},
 		false,
 	)
+}
+
+// classifyHarvesterCache judges the pre-rename harvester cache directory
+// {home}/.professor/.cache against its target {home}/.professor/.harvester-cache.
+// An explicitly configured cache.dir owns the location, so nothing is read. A
+// cache present at both paths is refused, never merged: two caches hold
+// different handles and the host's owner keeps one by hand.
+func classifyHarvesterCache(env LayoutEnv) LayoutFinding {
+	target := paths.HarvesterCacheDir(env.Home)
+	legacy := paths.LegacyHarvesterCacheDir(env.Home)
+	finding := LayoutFinding{Row: layoutRowHarvesterCache, Verdict: VerdictOK, Path: target}
+	if strings.TrimSpace(env.Config.Harvester.Cache.Dir) != "" {
+		finding.Detail = "cache.dir configured; untouched"
+		return finding
+	}
+	targetFinding, _, targetExists := layoutLstat(layoutRowHarvesterCache, target)
+	if targetFinding.Err != nil {
+		finding.Err = targetFinding.Err
+		return finding
+	}
+	legacyFinding, legacyInfo, legacyExists := layoutLstat(layoutRowHarvesterCache, legacy)
+	if legacyFinding.Err != nil {
+		finding.Err = legacyFinding.Err
+		return finding
+	}
+	if !legacyExists {
+		return finding
+	}
+	finding.Source = legacy
+	switch {
+	case !legacyInfo.IsDir():
+		finding.Verdict, finding.Detail = VerdictRefuse, "legacy cache path is not a directory"
+	case targetExists:
+		finding.Verdict, finding.Detail = VerdictRefuse,
+			"both .cache and .harvester-cache exist; never merged — keep one by hand"
+	default:
+		finding.Verdict = VerdictMove
+	}
+	return finding
 }
 
 func classifyMovedFile(row, target string, legacy []string, createWhenAbsent bool) LayoutFinding {
@@ -455,84 +557,6 @@ func accountDirs(env LayoutEnv) []string {
 		}
 	}
 	return dirs
-}
-
-func classifySessionStore(env LayoutEnv) []LayoutFinding {
-	store := filepath.Join(env.Home, ".claude")
-	findings := []LayoutFinding{}
-	for _, dir := range accountDirs(env) {
-		if physicalSettingsPath(dir) == physicalSettingsPath(store) {
-			continue
-		}
-		var live []string
-		var liveErr error
-		scanned := false
-		for _, entry := range SessionPaths {
-			path := filepath.Join(dir, entry)
-			want := filepath.Join(store, entry)
-			finding, info, exists := layoutLstat(layoutRowSessionStore, path)
-			if finding.Err == nil {
-				switch {
-				case !exists:
-					finding.Verdict = VerdictCreate
-				case info.Mode()&os.ModeSymlink != 0:
-					target, err := os.Readlink(path)
-					if err != nil {
-						finding.Err = err
-						break
-					}
-					if !filepath.IsAbs(target) {
-						target = filepath.Join(dir, target)
-					}
-					target = filepath.Clean(target)
-					finding.Source = target
-					if target == want {
-						break
-					}
-					if physicalSettingsPath(target) == physicalSettingsPath(want) &&
-						accountLinkTarget(target, entry, accountDirs(env)) {
-						finding.Verdict = VerdictRepoint
-					} else {
-						finding.Verdict = VerdictRefuse
-					}
-					finding.Detail = target
-				case info.IsDir():
-					children, err := os.ReadDir(path)
-					if err != nil {
-						finding.Err = err
-						break
-					}
-					finding.Verdict = VerdictMerge
-					finding.Detail = fmt.Sprintf("%d entries", len(children))
-					judgeSessionOwnership(env, &finding, path)
-				default:
-					finding.Verdict, finding.Detail = VerdictRefuse, "not a directory or link"
-				}
-			}
-			if finding.Verdict != VerdictOK {
-				if !scanned {
-					live, liveErr = liveChatPIDs(env.ProcRoot, dir)
-					scanned = true
-				}
-				if liveErr != nil {
-					finding.Err = liveErr
-				} else if len(live) > 0 {
-					finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
-				}
-			}
-			findings = append(findings, finding)
-		}
-	}
-	return findings
-}
-
-func accountLinkTarget(target, entry string, dirs []string) bool {
-	for _, dir := range dirs {
-		if target == filepath.Join(dir, entry) {
-			return true
-		}
-	}
-	return false
 }
 
 func classifyMemoryHelpers(env LayoutEnv) []LayoutFinding {

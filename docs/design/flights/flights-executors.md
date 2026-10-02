@@ -1,13 +1,13 @@
 # The flight executors
 
-`flights-mechanical-executor` and `flights-smart-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body, two tiers. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
+`flights-mechanical-executor`, `flights-precise-executor` and `flights-smart-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body, three tiers. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
 
 Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-mechanical-executor.md`](../../../templates/global/agents/flights-mechanical-executor.md).
 
 ## Contents
 
 - [Why it exists](#why-it-exists)
-- [Two tiers, one source](#two-tiers-one-source)
+- [Three tiers, one source](#three-tiers-one-source)
 - [What it holds](#what-it-holds)
 - [Tests](#tests)
 - [Layout laws at write time](#layout-laws-at-write-time)
@@ -23,14 +23,23 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 A flight had a speccer and an orchestrator and no executor of its own. The executor was whatever agent type the project had, and the instructions of a developer travelled in the spec: a measured 4.3 KB of generic instruction per executor in one flight and 12.3 KB in another, rewritten on every revising round. The orchestrator's brief also had to override the project's agent card ("write the covering tests yourself, whatever your agent card says"). One global body ends both: the generic instructions live once, in the agent, and a task file holds only the task.
 
-## Two tiers, one source
+## Three tiers, one source
 
-| Agent | Model | Effort | Runs |
+| Rating | Agent | Claude | Codex role pin |
 | --- | --- | --- | --- |
-| `flights-mechanical-executor` | `sonnet` | `medium` | a task rated `mechanical` |
-| `flights-smart-executor` | `opus` | `medium` | a task rated `smart` |
+| `mechanical` | `flights-mechanical-executor` | `claude-sonnet-5-5` at `high` | `gpt-6-sol` at `low` |
+| `precise` | `flights-precise-executor` | `claude-sonnet-5-5` at `xhigh` | `gpt-6-sol` at `high` |
+| `smart` | `flights-smart-executor` | `opus` at `high` | `gpt-6-sol` at `high` |
 
-The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-smart-executor` as a variant `from` it, overriding `model` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
+A seat under [`/flights:orchestrate-cross-harness`](../../../templates/global/commands/flights/orchestrate-cross-harness.md) sets its own Codex effort by rating on its launch line.
+
+The Sonnet tiers pin the full model ID: the `sonnet` alias resolved to different models on different accounts of one host. Each Claude pick was measured against its neighbours on real landed tasks, two seats per configuration, blind-judged:
+
+- `mechanical`: Sonnet 5.5 at `high` scored 83.5 against `medium`'s 74.5.
+- `precise` is a lateral tier, not a cheaper one. On two pinned-but-hard tasks (concurrency and failure paths; a bounded retry with many stop rows), Sonnet 5.5 at `xhigh` averaged 92.5 against Opus 5.5 at `high`'s 84 and Sonnet 5.5 at `high`'s 78.5, whose seats ranged from 64 to 95.
+- `smart`: Opus 5.5 at `high` scored 75 against `medium`'s 65. On a goal-only task that left the design open, Opus at `high` scored 88 against Sonnet 5.5 at `xhigh`'s 66. So the spec's pinning, not the task's size, decides between `precise` and `smart`.
+
+The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-precise-executor` and `flights-smart-executor` as variants `from` it, overriding `model`, `effort`, `codex-model`, `codex-effort` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
 
 ## What it holds
 
@@ -38,7 +47,7 @@ Everything that is true for every task of every flight:
 
 - the first move: open the task file and its `reads` together, in one message;
 - the Goal wins over a detail; a premise that does not hold returns `SPEC-DRIFT` with nothing changed; a decision it cannot make is asked for;
-- a red it did not foresee is read until its cause is named — the line, the value, the code path — and returned as `FAILED` or `SPEC-DRIFT` with that cause, or with what was read and "cause unknown"; a rerun and a fix outside the spec are forbidden, reading never is;
+- a red it did not foresee is read until its cause is named — the line, the value, the code path; a cause inside its `Files` it fixes and reruns; a cause outside is edited nowhere and stops nothing early: what can still run past it runs, and every outside cause returns at once as `FAILED` or `SPEC-DRIFT`, or what was read and "cause unknown"; a rerun with nothing changed is refused, reading never is. The earlier wording, "a rerun and a fix outside the spec are forbidden", was read as a ban on fixing its own test, fixture or lint line and on looking past the first foreign red: in hermetic-fence, 26 red returns, one executor citing the rule for leaving its own reds, two tasks finding one layer of a broken foundation per round; the ten briefs that carried "fix every red of your own, an outside cause is never a reason to stop early" left no red of their own;
 - read discipline: find the lines with a search, read that range; never a whole file to find a place, never again a file still in context; a log through `tail` or a search, never whole; the project contract is already in context and is never read;
 - waiting is one call sized to the command's duration, never a poll chain;
 - it stays inside the task's `Files`; git is read-only;

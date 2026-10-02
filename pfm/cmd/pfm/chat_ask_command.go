@@ -26,6 +26,10 @@ const (
 	busyRetry = 5 * time.Second
 )
 
+// askAwaitTimings is zero in production, so Await uses its live poll and the
+// settle requested by --settle. Tests can shorten both without changing flags.
+var askAwaitTimings struct{ Poll, Settle time.Duration }
+
 // runHeadlessAsk is the two-way verb: say something to a running chat and come
 // back with what it said. It is `inject` plus the wait every caller of inject
 // was writing by hand — a poll loop over `last` that cannot tell a new answer
@@ -128,17 +132,24 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, ru
 	if *progress {
 		progressOut = stderr
 	}
+	options := headless.AwaitOptions{
+		Offset:   frontier,
+		Timeout:  remaining,
+		Settle:   time.Duration(*settle) * time.Second,
+		Progress: progressOut,
+	}
+	if askAwaitTimings.Poll != 0 {
+		options.Poll = askAwaitTimings.Poll
+	}
+	if askAwaitTimings.Settle != 0 {
+		options.Settle = askAwaitTimings.Settle
+	}
 	return awaitAnswer(
 		ctx,
 		askAction,
 		chat.Name,
 		chatHandle(chat.Socket, chat.Name),
-		headless.AwaitOptions{
-			Offset:   frontier,
-			Timeout:  remaining,
-			Settle:   time.Duration(*settle) * time.Second,
-			Progress: progressOut,
-		},
+		options,
 		*asJSON,
 		stdout,
 		stderr,

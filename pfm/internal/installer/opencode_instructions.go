@@ -36,7 +36,20 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 		installer.skip("no OpenCode config path configured — prompt wiring has nothing to write")
 		return nil
 	}
-	composed, err := paths.ComposedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
+
+	// The clone being installed wins: a first install records the marker
+	// only later in this same run, as at wireShell.
+	var composed string
+	var err error
+	if repo := strings.TrimSpace(installer.options.SourceRepo); repo != "" {
+		var content []byte
+		content, err = paths.SourceRepoMarkerContent(repo)
+		if err == nil {
+			composed = paths.ComposedHarnessPromptIn(strings.TrimSpace(string(content)), pfmengine.OpenCode)
+		}
+	} else {
+		composed, err = paths.ComposedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
+	}
 	if errors.Is(err, paths.ErrNoSourceRepoMarker) {
 		installer.skip("skip opencode instructions: no source repo recorded")
 		return nil

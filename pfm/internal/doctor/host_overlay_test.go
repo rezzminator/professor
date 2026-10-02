@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // stageHostOverlayManagedCopies writes both contracted overlay scripts into
@@ -21,7 +22,11 @@ func stageHostOverlayManagedCopies(t *testing.T, home string) string {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"pfm-statusline", "tmux-title-renudge"} {
-		if err := os.WriteFile(filepath.Join(managed, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		if err := testjail.WriteExecutable(
+			filepath.Join(managed, name),
+			[]byte("#!/bin/sh\nexit 0\n"),
+			0o755,
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -76,7 +81,7 @@ func TestHostOverlayDoctorDisplacedSymlinkIsAFailure(t *testing.T) {
 	if err := os.MkdirAll(canonical, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		filepath.Join(canonical, "pfm-statusline"),
 		[]byte("stale copy, never a link\n"),
 		0o755,

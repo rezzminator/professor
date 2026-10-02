@@ -48,9 +48,9 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 
 ## Reading the output
 
-- The `data gaps:` line is the report's own honesty: malformed lines, dropped synthetic calls, unpriced calls, cache writes with no 5m/1h split, duplicate files, read errors. `data gaps: none` means the scan was clean, not that nothing was checked. A read error exits non-zero.
-- A model with no `PRICING` row renders **`n/a`**, never `$0`: its tokens stay in every token total, its dollars stay out of every dollar total, and the gaps line names it.
-- Costs are list-price estimates from the editable `PRICING` table atop `token-audit.mjs`. Trust the ranking; verify absolute dollars against the provider's billing; update the rates when prices change. `scripts/check-token-pricing.mjs` resolves published model ids against that table.
-- `CROSS-CHECK` compares the estimate to the harness's own `cost-state` line for chats wholly inside the window, and prints a second number at the >200K long-context premium (a per-model rate in `PRICING`, and an estimate).
+- The `data gaps:` line is the report's own honesty: malformed lines, dropped synthetic calls, unpriced calls, cache writes with no 5m/1h split, calls copied from another transcript, duplicate files, read errors. `data gaps: none` means the scan was clean, not that nothing was checked. A read error exits non-zero.
+- A model with no row in pfm's price table (`pfm price`) renders **`n/a`**, never `$0`: its tokens stay in every token total, its dollars stay out of every dollar total, and the gaps line names it.
+- Costs are list-price estimates from pfm's price table (`pfm price`). Trust the ranking; verify absolute dollars against the provider's billing; when prices change, put the new rates in `pfm.prices.json`. The published-rates fixture is checked by pfm's Go test and `pricing.test.mjs`.
+- `CROSS-CHECK` compares the estimate to the harness's own `cost-state` line for chats wholly inside the window, and prints a second number at the >200K long-context premium (a per-model rate in pfm's price table, and an estimate).
 - Codex counts differently: `total_token_usage` is cumulative and **resets on resume and compaction**, so each segment's peak is summed. Cached input is a subset of input, billed at the cached rate; output already includes reasoning.
 - Transcript content can carry sensitive prompt text — read the report, never pipe or retain transcript bodies.

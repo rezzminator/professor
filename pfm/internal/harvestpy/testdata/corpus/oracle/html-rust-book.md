@@ -1,5 +1,4 @@
 **Title:** Keyboard shortcuts
-**Published:** 2025-09-18
 
 ---
 

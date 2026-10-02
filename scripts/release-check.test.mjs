@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -59,9 +60,16 @@ const write = (root, files) => {
     }
   }
 };
+let emptyRepo;
 const repo = async () => {
+  emptyRepo ??= (async () => {
+    const d = tmp();
+    await git(d, "init", "-q", "-b", "main");
+    return d;
+  })();
+  const seed = await emptyRepo;
   const d = tmp();
-  await git(d, "init", "-q", "-b", "main");
+  cpSync(join(seed, ".git"), join(d, ".git"), { recursive: true });
   return d;
 };
 const commit = async (root, files, msg = "change") => {

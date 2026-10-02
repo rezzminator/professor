@@ -28,6 +28,7 @@ const (
 	knobFork                       = "fork"
 	knobName                       = "name"
 	defaultWord                    = "default"
+	accountWord                    = "account"
 	productionMode                 = "production"
 	unsetWord                      = "unset"
 	commandWord                    = "command"
@@ -39,6 +40,10 @@ const (
 	envProjectDir                  = "CLAUDE_PROJECT_DIR"
 	envCache1H                     = "ENABLE_PROMPT_CACHING_1H"
 	envCache5M                     = "FORCE_PROMPT_CACHING_5M"
+	envPromptCacheTTL              = "CLAUDE_CODE_PROMPT_CACHE_TTL"
+	envSubagentPromptCacheTTL      = "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"
+	envCacheLiveControlMainTTL     = "CACHE_LIVE_CONTROL_MAIN_TTL"
+	envCacheLiveControlAgentsTTL   = "CACHE_LIVE_CONTROL_AGENTS_TTL"
 	envSimplePrompt                = "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"
 	envAnthropicBaseURL            = "ANTHROPIC_BASE_URL"
 	envAnthropicAuthToken          = "ANTHROPIC_AUTH_TOKEN"
@@ -117,7 +122,8 @@ type Knob struct {
 
 var hygiene = []string{
 	envSessionID, envClaudeCode, envChildSession, configDirEnv,
-	envProjectDir, envCache1H, envCache5M,
+	envProjectDir, envCache1H, envCache5M, envPromptCacheTTL, envSubagentPromptCacheTTL,
+	envCacheLiveControlMainTTL, envCacheLiveControlAgentsTTL,
 	envSimplePrompt, envAnthropicBaseURL, envAnthropicAuthToken,
 	envAnthropicAPIKey, envAnthropicModel, envAnthropicSmallFastModel,
 	envAutoCompactWindow, envDisableNonessentialTraffic,
@@ -150,10 +156,10 @@ var Knobs = func() []Knob {
 		Knob{
 			knobCache1H,
 			WireSettings,
-			"env." + envCache1H + "|env." + envCache5M,
+			"env." + envCacheLiveControlMainTTL,
 			SourceLaunchThenConfig,
 			true,
-			"Choose one prompt cache lifetime.",
+			"Hand the main chat's starting prompt-cache TTL to the cache-live-control plugin, which owns every TTL from then on.",
 		},
 		Knob{
 			knobSystemPrompt,
@@ -212,6 +218,14 @@ var Knobs = func() []Knob {
 			"Preserve color under tmux.",
 		},
 		Knob{
+			knobNoFlicker,
+			WireSettings,
+			"env." + envNoFlicker,
+			SourceAccount,
+			nil,
+			"Keep a fullscreen seat's renderer past Claude's boot canary.",
+		},
+		Knob{
 			"agentTeams",
 			WireSettings,
 			"env." + envAgentTeams,
@@ -244,7 +258,7 @@ var Knobs = func() []Knob {
 			36500,
 			"Keep managed transcripts.",
 		},
-		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "18 registrations", "Attach the fleet hook set."},
+		Knob{knobHooks, WireSettings, knobHooks, SourceConstant, "10 registrations", "Attach the fleet hook set."},
 		Knob{knobStatusLine, WireSettings, knobStatusLine, SourceConstant, "pfm-statusline", "Show fleet status."},
 		Knob{
 			knobSubagentStatusLine,

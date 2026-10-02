@@ -12,6 +12,7 @@ import (
 )
 
 func TestChatRuntimeIdentityCanonicalInputs(t *testing.T) {
+	t.Parallel()
 	base := Runtime{
 		Paths: paths.Values{Home: "/home/test", CacheDB: "/db", Roots: map[pfmengine.ID][]string{
 			pfmengine.Codex: {"/c"}, pfmengine.Claude: {"/a", "/b"},

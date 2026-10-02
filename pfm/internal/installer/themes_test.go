@@ -98,6 +98,61 @@ func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *
 	}
 }
 
+func TestOfflineThemesSkipRemoteAndInstallBundled(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sourceRepo := t.TempDir()
+	recordFixtureSourceRepo(t, home, sourceRepo)
+	writeFixture(t, filepath.Join(sourceRepo, themeManifestRelative), `{
+  "source_fetched": {"remote": {"repo": "https://example.invalid", "raw": "https://example.invalid/remote.json", "target": "~/.claude/themes/remote.json"}},
+  "bundled": {"local": {"file": "local.json", "target": "~/.claude/themes/local.json"}}
+}`)
+	palette := `{"name":"Local","base":"dark","overrides":{"claude":"#ffd60a"}}`
+	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "local.json"), palette)
+	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
+	})}
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: sourceRepo,
+		Stdout: &output, Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{},
+		InstallThemes: true, ThemesOffline: true, ThemeHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("offline theme install: %v\n%s", err, output.String())
+	}
+	if got := readFixture(t, filepath.Join(home, ".claude", "themes", "local.json")); got != palette {
+		t.Fatalf("bundled palette = %q, want %q", got, palette)
+	}
+	if !strings.Contains(output.String(), "theme remote fetch failed: fetch skipped: PFM_THEMES_OFFLINE=1") ||
+		!strings.Contains(output.String(), "write theme local") {
+		t.Fatalf("offline theme report lacks the named skip or bundled write:\n%s", output.String())
+	}
+}
+
+func TestOfflineThemesWithoutLocalManifestNameSkip(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sourceRepo := t.TempDir()
+	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
+	})}
+	var output bytes.Buffer
+	_, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: sourceRepo,
+		ThemeManifestURL: "https://example.invalid/templates/themes/sources.json",
+		Stdout:           &output, Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{},
+		InstallThemes: true, ThemesOffline: true, ThemeHTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("offline install without local manifest: %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "themes NOT installed: load "+themeManifestRelative) ||
+		!strings.Contains(output.String(), "fetch skipped: PFM_THEMES_OFFLINE=1") {
+		t.Fatalf("offline manifest report lacks the named skip:\n%s", output.String())
+	}
+}
+
 func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing.T) {
 	t.Parallel()
 	load := func(manifest string) error {
@@ -330,6 +385,90 @@ func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "fetch theme sonar-gold") {
 		t.Fatalf("preview output still labels the bundled palette as fetched:\n%s", output.String())
+	}
+}
+
+func TestThemeOverlayLoadsBaseOncePerInstall(t *testing.T) {
+	for _, status := range []int{0, http.StatusServiceUnavailable, -1} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			ctx, recorder := obs.Test(t)
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests++
+				if status == http.StatusServiceUnavailable {
+					http.Error(w, "unavailable", status)
+					return
+				}
+				_, _ = io.WriteString(w, `{"name":"Tokyo Night","base":"dark","overrides":{"claude":"#123456"}}`)
+			}))
+			url := server.URL + "/tokyo-night.json"
+			if status == -1 {
+				server.Close()
+			} else {
+				defer server.Close()
+			}
+			sourceRepo := t.TempDir()
+			writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), fmt.Sprintf(`{
+ "source_fetched":{"tokyo-night":{"repo":%q,"raw":%q,"target":"~/.claude/themes/tokyo-night.json"}},
+ "bundled":{
+  "first":{"file":"first.json","base":"tokyo-night","target":"~/.claude/themes/first.json"},
+  "second":{"file":"second.json","base":"tokyo-night","target":"~/.claude/themes/second.json"}
+ }
+}`, server.URL, url))
+			for _, name := range []string{"first", "second"} {
+				writeFixture(
+					t, filepath.Join(sourceRepo, "templates", "themes", name+".json"),
+					fmt.Sprintf(`{"name":%q,"overrides":{"promptBorder":"#abcdef"}}`, name),
+				)
+			}
+			home := t.TempDir()
+			var output bytes.Buffer
+			_, err := Run(ctx, Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home, SourceRepo: sourceRepo,
+				Stdout: &output, Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: []string{},
+				InstallThemes: true,
+			})
+			if err != nil {
+				t.Fatalf("Run: %v\n%s", err, output.String())
+			}
+			records := []obs.Record{}
+			for _, record := range recorder.Records() {
+				if record.Message == "http.out.request" {
+					records = append(records, record)
+				}
+			}
+			if len(records) != 1 {
+				t.Fatalf("records=%d, want 1: %s", len(records), recorder.Raw())
+			}
+			switch status {
+			case -1:
+				if records[0].Level != "WARN" {
+					t.Fatalf("level=%s, want WARN", records[0].Level)
+				}
+				if got, _ := records[0].Field(obs.FieldErr); got == nil || got == "" {
+					t.Fatalf("missing err: %v", records[0].Fields)
+				}
+				for _, name := range []string{"tokyo-night", "first", "second"} {
+					if !strings.Contains(output.String(), "theme "+name+" ") ||
+						!strings.Contains(output.String(), "fetch failed") {
+						t.Fatalf("missing skip %s: %s", name, output.String())
+					}
+				}
+			case http.StatusServiceUnavailable:
+				if records[0].Level != "WARN" || !strings.Contains(output.String(), "503") {
+					t.Fatalf("status result: %s %s", recorder.Raw(), output.String())
+				}
+			default:
+				if requests != 1 {
+					t.Fatalf("requests=%d, want 1", requests)
+				}
+				for _, name := range []string{"first", "second"} {
+					if _, err := os.Stat(filepath.Join(home, ".claude", "themes", name+".json")); err != nil {
+						t.Fatalf("overlay %s: %v", name, err)
+					}
+				}
+			}
+		})
 	}
 }
 

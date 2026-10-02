@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // The reaper KILLS things, so its fixtures run against real tmux servers on
@@ -66,7 +67,7 @@ func reapJail(t *testing.T) string {
 	// answer the sweep fails closed and would kill nothing — which would make
 	// this fixture pass for the wrong reason.
 	stub := filepath.Join(root, "bin", "claude")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho '[]'\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(stub, []byte("#!/bin/sh\necho '[]'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Join(root, "bin")+":"+os.Getenv("PATH"))

@@ -56,8 +56,8 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 	// own — the seat historically stayed blank until someone sent it a prompt
 	// by hand, which is what made its CLI mint a token and publish a snapshot.
 	// Spend the same hidden one-turn Haiku probe the credential-rejection path
-	// below already uses (tryAck is headless and fires at most once per account
-	// per sampler), then re-read BOTH sources: the probe may write the
+	// below already uses (tryAck is headless and fires at most once per
+	// credential across every pfm process), then re-read BOTH sources: the probe may write the
 	// credential file, and its session may publish the snapshot.
 	// A SIGNED-OUT account is the one shape the probe cannot repair: its
 	// refresh token is empty or expired, so the headless turn can only fail
@@ -91,6 +91,22 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 		if sampler.tryAck(ctx, account) == nil {
 			usage, confirmedAt, fetchErr = sampler.fetchClaudeAfterCredentialRefresh(ctx, account)
 		}
+	} else if fetchErr != nil && !usagehook.IsCredentialUnavailable(fetchErr) {
+		// An expired access token can come back as a 429 instead of a 401, its
+		// Retry-After renewed at every expiry, so waiting never repairs it: the
+		// local expiresAt sends it through the same gated probe, and the
+		// refreshed token lifts the recorded backoff (usagehook cacheView.answer).
+		expired, expiryErr := usagehook.CredentialExpired(ctx, account.ConfigDir, now)
+		switch {
+		case expiryErr != nil:
+			fetchErr = fmt.Errorf("%w; read credential expiry: %v", fetchErr, expiryErr)
+		case expired:
+			if sampler.tryAck(ctx, account) == nil {
+				usage, confirmedAt, fetchErr = sampler.fetchClaudeAfterCredentialRefresh(ctx, account)
+			} else if reason := sampler.probeFailure(account); reason != "" {
+				fetchErr = fmt.Errorf("%w; access token expired, credential probe failed: %s", fetchErr, reason)
+			}
+		}
 	}
 	if fetchErr != nil {
 		windows := usageWindows(usage, now)
@@ -103,12 +119,29 @@ func FetchClaude(ctx context.Context, account LimitAccount) (AccountLimits, erro
 				label, confirmedAt.Format(time.RFC3339), fetchErr,
 			)
 		}
+		if refusal, refused := accountRefusal(fetchErr); refused {
+			detail := refusal.Status
+			if refusal.ErrorType != "" {
+				detail = refusal.ErrorType + ", " + detail
+			}
+			if refusal.Message != "" {
+				detail = refusal.Message + " (" + detail + ")"
+			}
+			result.Status = fmt.Sprintf("account %d refused by the provider: %s", account.ID, detail)
+			return result, nil
+		}
 		if isCredentialRejection(fetchErr) {
 			result.Status = fmt.Sprintf("skipped %s: credentials rejected", label)
+			if reason := sampler.probeFailure(account); reason != "" {
+				result.Status += "; credential probe failed: " + reason
+			}
 			return result, nil
 		}
 		if status, ok := rateLimitedStatus(fetchErr); ok {
 			result.Status = fmt.Sprintf("account %d %s; limits unavailable", account.ID, status)
+			if reason := sampler.probeFailure(account); reason != "" {
+				result.Status += "; credential probe failed: " + reason
+			}
 			return result, fmt.Errorf("account %d limits unavailable: %w", account.ID, fetchErr)
 		}
 		result.Status = fmt.Sprintf("account %d limits unavailable: %v", account.ID, fetchErr)

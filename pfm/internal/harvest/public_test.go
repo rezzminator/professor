@@ -208,6 +208,7 @@ func TestPublicResultDoesNotAcceptNonHarvesterProvenanceArtifact(t *testing.T) {
 // storing rung from fields, never from the markdown marker; the embedded
 // result's own `method` and `partial` keys never render beside them.
 func TestJSONResultsCarriesGapsAndVia(t *testing.T) {
+	t.Parallel()
 	complete := Result{
 		Source: "https://fixture.example/a", Kind: "html", Method: "browser-chrome",
 		CacheStatus: "hit", HTTPStatus: 200,

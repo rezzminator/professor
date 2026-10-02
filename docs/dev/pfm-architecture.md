@@ -33,7 +33,7 @@ Co-change evidence is the number of commits since 2026-06-01, releases excluded,
 | Unit | Concepts it owns | Directory (target) | Co-change evidence |
 | --- | --- | --- | --- |
 | CLI shell | argv → typed request → exit code; global `--config`; usage | `cmd/pfm/` (dispatch only) | touched by 67% of commits today; target ≤ 25% |
-| Chat verbs | the 27 `pfm chat` verbs (new, open, read, last, status, stream, inject, self-compact, goal, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, whoami, find, save, branch, history, ls, modal, resolve), target resolution, caller identity | `internal/chat/` **new** | cmd/pfm+mcpserv 38 · cmd/pfm+inject 32 · inject+mcpserv 26 |
+| Chat verbs | the 26 `pfm chat` verbs (new, open, read, last, status, stream, inject, goal, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, whoami, find, save, branch, history, ls, modal, resolve), target resolution, caller identity | `internal/chat/` **new** | cmd/pfm+mcpserv 38 · cmd/pfm+inject 32 · inject+mcpserv 26 |
 | MCP chat family (professor server) | tool schemas, caller identity, JSON adaptation over `internal/chat` | `internal/mcpserv/` | the 38 above collapse into chat+mcpserv |
 | Hooks and internal entries | every `pfm internal <entry>` body, its harness event, and its installer wiring | `internal/hooks/` **new** | cmd/pfm+installer 45 (the top pair) |
 | Doctor | probes and verdict lines | `internal/doctor/` **new** | `cmd/pfm/doctor.go` is the hottest file (35 commits) |
@@ -78,7 +78,7 @@ pfm/
     hooks/                          # NEW. Harness hook bodies with no other domain home.
       README.md
       table.go                      # THE entry table {Entry, Event, Matcher, Engines, Summary}; installer reads it
-      explore_deny.go epic_inject.go reload_intercept.go exit_intercept.go exit_close.go compact_nudge.go …
+      explore_deny.go epic_inject.go reload_intercept.go exit_intercept.go exit_close.go …
       <entry>_test.go
     doctor/                         # NEW. From cmd/pfm/doctor.go + *_doctor.go.
       README.md doctor.go           # probe runner; three distinct verdicts: healthy / broken / could-not-look
@@ -178,6 +178,8 @@ Each derived artifact names its source and the command that regenerates or verif
 | C11 | `"fleet.db"` is spelled at most once in Go source | `FAIL "fleet.db" spelled N times` |
 | C12 | every package, `*.md` and `PFM_*` name that `pfm/CLAUDE.md` cites exists — a `PFM_*` name only when production code uses it beyond declaring it | `FAIL new: <names>` |
 | C13 | every source file has a same-stem `_test.go`, beyond `.arch/untested-sources.txt` | `FAIL new: <file>` |
+| C25 | every test package has a `TestMain` reaching `testjail.Run`, beyond `.arch/testmain-jail.txt` | `FAIL new: <dir>` |
+| C26 | no test writes an executable around `testjail.WriteExecutable`: an `os.WriteFile` in a `_test.go` or in `internal/testjail` whose mode is a literal with the owner-exec bit, or not a literal, outside a function that holds `syscall.ForkLock.RLock()` (the helper, and its twins in `internal/deps` and `internal/config`, which `testjail` imports) — a fork inside the write window makes the next exec fail with ETXTBSY; `.arch/exec-writes.txt` stays empty | `FAIL new: <file:line>` |
 | C14 | every dispatched top-level command appears in usage (structural once `command_table.go` lands) | `FAIL dispatched but not in usage: <cmd>` |
 | C15 | every `pfm internal` entry appears in its usage (structural once `hooks.Table` lands) | `FAIL N dispatched, missing from usage: <entries>` |
 | C16 | no `PFM_*` env read outside `internal/paths` beyond baseline — a literal `Getenv("PFM_…")` or one through a constant holding a `PFM_*` name | `FAIL <file> (new N)` |
@@ -325,7 +327,7 @@ The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 3. **Registries.** `cmd/pfm/command_table.go` becomes the one table. It is a new file, because today's `commands.go` holds picker code that leaves in step 6. `internal/hooks/table.go` feeds both `pfm internal` dispatch and `installer/expected_hooks.go`, and the domainless hook bodies move into `internal/hooks/`. *Moves:* C14 and C15 become structural, the cmd/pfm+installer pair shrinks, and three twin lists in `main.go` die.
 4. **Chat verbs, in four batches.** Each verb's logic moves from `cmd/pfm` to `internal/chat/<verb>.go` with typed Request/Result. Its CLI adapter shrinks to parse-and-render, its MCP tool calls the typed function, and its logic tests move with it.
    - (a) read-only verbs MCP calls today (`last`, `status`, `read`, `find`, `capture`, `whoami`, `resolve`, `ls`)
-   - (b) mutating verbs MCP calls (`new`, `open`, `name`, `kill`, `unkill`, `reload`, `save`, `keys`, `goal`, `self-compact`, `inject`)
+   - (b) mutating verbs MCP calls (`new`, `open`, `name`, `kill`, `unkill`, `reload`, `save`, `keys`, `goal`, `inject`)
    - (c) CLI-only verbs (`stream`, `watch`, `modal`, `history`, `recover`, `end`, `branch`, `ask`)
    - (d) delete `mcpserv.Dispatch`, `cliAction`/`cliTargetAction`, `runChatSatellite` and `mcpSharedOperations`
 

@@ -88,8 +88,15 @@ func TestComposeWritesIdempotentlyAndNamesMissingPart(t *testing.T) {
 	}
 }
 
-func TestFirstDifferentLineNamesAppendedLine(t *testing.T) {
-	if got := firstDifferentLine([]byte("first"), []byte("first\nsecond")); got != 2 {
-		t.Fatalf("first different line = %d, want 2", got)
+func firstDifferentLine(left, right []byte) int {
+	a, b := bytes.Split(left, []byte("\n")), bytes.Split(right, []byte("\n"))
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if !bytes.Equal(a[i], b[i]) {
+			return i + 1
+		}
 	}
+	if len(a) < len(b) {
+		return len(a) + 1
+	}
+	return len(b) + 1
 }

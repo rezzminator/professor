@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func clearRetiredHarvesterEnv(t *testing.T) {
@@ -180,7 +181,7 @@ exit 3
 	for _, want := range []string{
 		"tmux=" + socket,
 		"argv=--resume fixture-id --dangerously-skip-permissions --settings {",
-		`"ENABLE_PROMPT_CACHING_1H":"1"`,
+		`"CACHE_LIVE_CONTROL_MAIN_TTL":"1h"`,
 		"config=" + filepath.Join(root, "caller-config"),
 		"force=unset", "sid=unset", "child=unset", "endpoint=unset",
 	} {
@@ -399,7 +400,7 @@ func writeExecutable(t *testing.T, path, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

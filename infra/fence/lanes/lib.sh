@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# lib.sh — the Tier B beat library: sourced by every lane (`lanes/<id>.sh`) and,
-# later, by infra/demo/verify.sh, so the demo deck is a subset VIEW of the lanes
-# and never a second implementation.
+# lib.sh — the Tier B beat library, sourced by every lane (`lanes/<id>.sh`).
 #
 #   . "$(dirname "$0")/lib.sh"
 #   lane_begin E1
@@ -37,16 +35,14 @@
 # ledger can never rot into a coincidence detector. An `arch:`-scoped entry is a
 # gap only on that architecture; anywhere else the beat must assert for real.
 #
-# Activity log (Wave 6, docs/dev/trains/testing-foundation/waves/6-activity-log):
-# each beat snapshots the byte offset of <pfm home>/log/pfm.jsonl and, at its
-# verdict, fails on any error-level record (`"level":"ERROR"`, any case) in its own slice that no
-# `expect-log <pattern>` declared — the slice is attached to the lane log. Wave 6
-# has not landed: when the file is absent the lane footer and the run summary
-# each say so BY NAME (`activity log: ABSENT (Wave 6 not landed) — log
-# assertions not enforced`); absence is never rendered as a clean log.
+# Activity log: each beat snapshots the byte offset of <pfm home>/log/pfm.jsonl
+# and fails on any undeclared error-level record in its own slice. An absent log
+# at lane start is a named red at lane_begin (PRELUDE-LOG) and lane_end (ABSENT);
+# the lane fails, and <lane>.logstate records ABSENT.
 #
 # Artifacts, all under $LANE_OUT_DIR (run.sh copies them out of the container):
 #   <lane>.log  <lane>.timeline.tsv  <lane>.row.tsv  <lane>.logstate  <lane>.seats
+#   <lane>.waits.tsv when LANE_PROFILE=1
 #
 # BROKEN STATE: `lane_begin` without a writable $LANE_OUT_DIR exits 2 by name; a
 # verdict called with no open beat prints `lane: <verb> with no open beat` and
@@ -342,6 +338,11 @@ lane_begin() { # lane_begin <lane-id>
   LANE_LOG="$LANE_OUT_DIR/$LANE_ID.log"
   LANE_TIMELINE="$LANE_OUT_DIR/$LANE_ID.timeline.tsv"
   : >"$LANE_LOG" || { echo "lane: OUT-DIR-UNWRITABLE — cannot write $LANE_LOG" >&2; exit 2; }
+  LANE_PROFILE_WARNED=0
+  if [ "${LANE_PROFILE:-}" = 1 ]; then
+    { printf 'lane\tbeat\thelper\tcondition\telapsed_s\toutcome\n' >"$LANE_OUT_DIR/$LANE_ID.waits.tsv"; } 2>/dev/null ||
+      _lane_profile_warn
+  fi
   printf 'lane\tbeat\tt_plus_s\tverdict\tdur_s\tseat\tdetail\n' >"$LANE_TIMELINE"
   : >"$LANE_OUT_DIR/$LANE_ID.seats"
   LANE_T0="$(_lane_now)"
@@ -359,6 +360,24 @@ lane_begin() { # lane_begin <lane-id>
   # zero-beat lane from lane_end's own ZERO-BEATS guard below).
   [ "$LANE_LOG_STATE" = ABSENT ] &&
     _lane_say "$LANE_ID ✗ PRELUDE-LOG — activity log ABSENT at lane start ($LANE_PFM_LOG); the root image already ran pfm before it was committed, so this is a broken state, not an excused gap — log assertions could not be enforced for this whole lane"
+}
+
+_lane_profile_warn() {
+  [ "${LANE_PROFILE_WARNED:-0}" = 0 ] || return 0
+  LANE_PROFILE_WARNED=1
+  _lane_log_only "LANE_PROFILE: cannot append to $LANE_OUT_DIR/$LANE_ID.waits.tsv"
+}
+
+_lane_wait_rec() { # <helper> <condition> <epoch start> <outcome>
+  local condition="$2" start="${3/./}" end="${EPOCHREALTIME/./}" us ms elapsed
+  condition="${condition//$'\t'/ }"
+  condition="${condition//$'\n'/ }"
+  condition="${condition:0:160}"
+  us=$((10#$end - 10#$start))
+  ms=$(((us + 500) / 1000))
+  printf -v elapsed '%d.%03d' "$((ms / 1000))" "$((ms % 1000))"
+  { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$LANE_ID" "${LANE_CUR:--}" "$1" "$condition" "$elapsed" "$4" >>"$LANE_OUT_DIR/$LANE_ID.waits.tsv"; } 2>/dev/null ||
+    _lane_profile_warn
 }
 
 lane_abort() { # lane_abort <why> — a prelude that could not build its preconditions
@@ -512,7 +531,7 @@ _lane_anchor_label() {
 
 _lane_mark_alive() { # remember which beat last saw this anchor alive
   [ -n "$LANE_ANCHOR" ] || return 0
-  LANE_ALIVE_SEEN="$(printf '%s\n' "$LANE_ALIVE_SEEN" | grep -v "^$LANE_ANCHOR	" || true)
+  LANE_ALIVE_SEEN="$(printf '%s' "$LANE_ALIVE_SEEN" | grep -v "^$LANE_ANCHOR	" || true)
 $LANE_ANCHOR	$LANE_CUR"
 }
 
@@ -577,7 +596,7 @@ _lane_fleet_dump() {
 }
 
 _lane_raw_dump() { # the failed beat's pane, escapes included (zellij's rule)
-  local sock
+  local dir sock
   if [ -z "$LANE_TARGET" ]; then
     _lane_log_only "   raw-dump: no pane target declared for this beat (target <chat> declares one)"
     return 0
@@ -589,6 +608,11 @@ _lane_raw_dump() { # the failed beat's pane, escapes included (zellij's rule)
     _lane_fleet_dump
     return 0
   fi
+  if ! dir="$(_lane_tmux_dir)"; then
+    _lane_fleet_dump
+    return 0
+  fi
+  sock="$dir/$sock"
   _lane_log_only "   raw-dump: tmux -S $sock capture-pane -e -p -S - ($LANE_TARGET)"
   if ! tmux -S "$sock" capture-pane -e -p -S - >>"$LANE_LOG" 2>&1; then
     _lane_log_only "   raw-dump: capture-pane FAILED on $sock (the server may be gone) — the fleet listing and every tmux socket follow"
@@ -613,14 +637,14 @@ _lane_log_slice() {
   fi
   [ -n "$slice" ] || return 0
   # pfm's slog JSON handler writes "ERROR"; a lower-case "error" counts too.
-  errors="$(printf '%s\n' "$slice" | grep -iE '"level": *"error"' || true)"
+  errors="$(printf '%s' "$slice" | grep -iE '"level": *"error"' || true)"
   [ -n "$errors" ] || return 0
   kept="$errors"
   # A here-doc, not a pipe: the loop must run in THIS shell or the filtered
   # result dies with the subshell (and every beat would read as clean).
   while IFS= read -r pattern; do
     [ -n "$pattern" ] || continue
-    kept="$(printf '%s\n' "$kept" | grep -v -- "$pattern" || true)"
+    kept="$(printf '%s' "$kept" | grep -v -- "$pattern" || true)"
   done <<EOF
 $LANE_CUR_EXPECT
 EOF
@@ -782,8 +806,8 @@ assert_opencode_mcp_registered() {
       bad="$bad M36: $oc_cfg mcp.professor is not the local stdio shape {type local, command [$bin mcp serve --stdio], enabled true}: $(one_line "$(_strip_jsonc "$oc_cfg" | jq -c '.mcp.professor' 2>&1)");"
   fi
   oc_doctor_out="$(pfm doctor 2>&1)"
-  oc_row="$(printf '%s\n' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
-  printf '%s\n' "$oc_row" | grep -qE 'professor=pfm$' ||
+  oc_row="$(printf '%s' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
+  grep -qE 'professor=pfm$' <<<"$oc_row" ||
     bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
   if [ -n "$bad" ]; then
     fail "$bad"
@@ -802,16 +826,49 @@ assert_opencode_mcp_registered() {
 TUI_WHY=""
 tui_close() { tmux -S "$TUI_SOCK" kill-server >/dev/null 2>&1; rm -f "$TUI_SOCK"; }
 tui_pane() { tmux -S "$TUI_SOCK" capture-pane -p -t tui 2>&1; }
-tui_keys() { tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; sleep 1; }
-tui_type() { tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; sleep 1; }
-tui_has() { tui_pane | grep -qF -- "$1"; }
-tui_wait() { # tui_wait <secs> <needle> — 0 once the pane shows the literal needle
-  local i=0
-  while [ "$i" -lt "$1" ]; do
-    tui_has "$2" && return 0
-    sleep 1
-    i=$((i + 1))
+# _tui_settle <pane before the keys> — returns once the keystroke has landed: the
+# pane moved and then held still for 0.25 s, or never moved in 0.5 s (a key with
+# nothing to draw). 1 s at most, the fixed pause it replaces, so a pane that never
+# holds still (a live counter, a spinner) costs what it always did.
+_tui_settle() {
+  local before="$1" now prev="" moved=0 still=0 i t0="${EPOCHREALTIME:-}"
+  for ((i = 1; i <= 20; i++)); do
+    sleep 0.05
+    now="$(tui_pane)"
+    [ "$now" = "$before" ] || moved=1
+    if [ "$now" = "$prev" ]; then still=$((still + 1)); else still=0; fi
+    prev="$now"
+    if [ "$moved" = 1 ] && [ "$still" -ge 5 ]; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec settle "$2" "$t0" moved
+      return 0
+    fi
+    if [ "$moved" = 0 ] && [ "$i" -ge 10 ]; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec settle "$2" "$t0" static
+      return 0
+    fi
   done
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec settle "$2" "$t0" cap
+  return 0
+}
+tui_keys() { local b; b="$(tui_pane)"; tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; _tui_settle "$b" "keys $*"; }
+tui_type() { local b; b="$(tui_pane)"; tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; _tui_settle "$b" "type $1"; }
+tui_send() { tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; }
+tui_send_text() { tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; }
+tui_has() { grep -qF -- "$1" <<<"$(tui_pane)"; }
+tui_wait() { # tui_wait <secs> <needle> — 0 once the pane shows the literal needle
+  local deadline=$(( $(_lane_now) + $1 )) t0="${EPOCHREALTIME:-}"
+  while [ "$(_lane_now)" -lt "$deadline" ]; do
+    if tui_has "$2"; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec tui_wait "$2" "$t0" ok
+      return 0
+    fi
+    sleep 0.2
+  done
+  if tui_has "$2"; then
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec tui_wait "$2" "$t0" ok
+    return 0
+  fi
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec tui_wait "$2" "$t0" timeout
   return 1
 }
 # tui_open <cols> <rows> <pfm args…> — the picker in its own tmux server on a
@@ -819,27 +876,32 @@ tui_wait() { # tui_wait <secs> <needle> — 0 once the pane shows the literal ne
 # truecolor negotiated so a palette assertion has bytes to read. 0 once the
 # tabs line has painted; 1 with TUI_WHY naming which of the two steps failed.
 tui_open() {
-  local cols="$1" rows="$2" out
+  local cols="$1" rows="$2" out t0="${EPOCHREALTIME:-}"
   shift 2
   tui_close
   TUI_WHY=""
   out="$(tmux -S "$TUI_SOCK" new-session -d -s tui -x "$cols" -y "$rows" -c "$CWD" \
     "env TERM=xterm-256color COLORTERM=truecolor pfm $*" 2>&1)" || {
     TUI_WHY="tmux new-session for the picker failed: $(one_line "$out")"
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec tui_open "pfm $*" "$t0" fail
     return 1
   }
-  tui_wait 25 ' tabs ' && return 0
+  if tui_wait 25 ' tabs '; then
+    [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec tui_open "pfm $*" "$t0" ok
+    return 0
+  fi
   TUI_WHY="the picker (pfm $*) never painted its tabs line in 25s; pane: $(one_line "$(tui_pane)")"
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec tui_open "pfm $*" "$t0" fail
   return 1
 }
 # tui_selected — the selected row's marker and name (`● F_CC`): the columns
 # after the name (badges, prompts, size, AGE) are cut, because the age ticks
 # between two captures and would make an unmoved cursor read as moved.
-tui_selected() { tui_pane | grep -F '› ' | head -1 | sed -e 's/^.*› *//' -e 's/  .*//'; }
+tui_selected() { tui_pane | grep -E '^[[:space:]│┃]*› ' | head -1 | sed -e 's/^.*› *//' -e 's/  .*//'; }
 
 # ─── shared assertions every lane uses ──────────────────────────────────────
 
-live_chat() { pfm ls --plain 2>/dev/null | grep -q "^● $1 "; }
+live_chat() { grep -q "^● $1 " <<<"$(pfm ls --plain 2>/dev/null)"; }
 
 _rows_named() { # every row carrying this name, header dropped. Reads `pfm ls
   # -a --tsv`, never the default `--tsv` view: a killed row drops out of the
@@ -901,15 +963,23 @@ _lane_wait_dead() {
 # — each with its own LANE_WAIT_WHY, because "it never answered" and "there was
 # nothing left to answer" are different findings.
 wait_last() {
-  local deadline=$(( $(_lane_now) + $3 ))
+  local deadline=$(( $(_lane_now) + $3 )) t0="${EPOCHREALTIME:-}"
   LANE_WAIT_WHY="" LANE_WAIT_MISSES=0
   while [ "$(_lane_now)" -lt "$deadline" ]; do
-    _lane_wait_dead && return 2
-    pfm chat last "$1" 2>/dev/null | grep -qF -- "$2" && return 0
-    # Default 5 seconds; self-tests shorten the wait_last poll interval.
-    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" 5)"
+    if _lane_wait_dead; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_last "$1 $2" "$t0" dead
+      return 2
+    fi
+    if grep -qF -- "$2" <<<"$(pfm chat last "$1" 2>/dev/null)"; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_last "$1 $2" "$t0" ok
+      return 0
+    fi
+    # Default half a second: the mock engine answers in milliseconds, so a
+    # coarser poll is pure idle; self-tests shorten it further.
+    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" 0.5)"
   done
   LANE_WAIT_WHY="timed out after $3s waiting for '$2' from $1"
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_last "$1 $2" "$t0" timeout
   return 1
 }
 
@@ -917,17 +987,159 @@ wait_last() {
 # beat's anchored chat died first (never a silent pass: the caller names what it
 # was waiting for, and LANE_WAIT_WHY names which of the two happened).
 wait_for() {
-  local secs="$1" deadline=$(( $(_lane_now) + $1 ))
+  local secs="$1" deadline=$(( $(_lane_now) + $1 )) t0="${EPOCHREALTIME:-}"
   shift
   LANE_WAIT_WHY="" LANE_WAIT_MISSES=0
   while [ "$(_lane_now)" -lt "$deadline" ]; do
-    _lane_wait_dead && return 2
+    if _lane_wait_dead; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_for "$*" "$t0" dead
+      return 2
+    fi
     # shellcheck disable=SC2294 # the condition arrives as a shell string, by design
-    eval "$@" >/dev/null 2>&1 && return 0
-    # Default 3 seconds; self-tests shorten the wait_for poll interval.
-    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 3)"
+    if eval "$@" >/dev/null 2>&1; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_for "$*" "$t0" ok
+      return 0
+    fi
+    # Default 0.2 seconds; self-tests shorten it further.
+    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.2)"
   done
   # shellcheck disable=SC2034 # read by the lanes, which name the reason in their verdict
   LANE_WAIT_WHY="timed out after ${secs}s waiting for: $*"
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_for "$*" "$t0" timeout
   return 1
+}
+
+mock_steps() {
+  local steps
+  steps="$(jq -c . <<<"$1")" || return 1
+  printf 'mock-engine: %s\n' "$steps"
+}
+
+wait_prompt() { # wait_prompt <chat> <needle> <secs> — user transcript records
+  local deadline=$(( $(_lane_now) + $3 )) records t0="${EPOCHREALTIME:-}"
+  LANE_WAIT_WHY="" LANE_WAIT_MISSES=0
+  while [ "$(_lane_now)" -lt "$deadline" ]; do
+    if _lane_wait_dead; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_prompt "$1 $2" "$t0" dead
+      return 2
+    fi
+    if records="$(pfm chat read "$1" --json --tail 40 2>/dev/null)" &&
+      jq -e --arg needle "$2" 'any(.entries[]; .role == "user" and ((.text // "") | contains($needle)))' <<<"$records" >/dev/null 2>&1; then
+      [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_prompt "$1 $2" "$t0" ok
+      return 0
+    fi
+    sleep "$(_lane_poll_secs "${LANE_WAIT_LAST_EVERY_SECS-}" 0.5)"
+  done
+  LANE_WAIT_WHY="timed out after $3s waiting for '$2' from $1"
+  [ "${LANE_PROFILE:-}" = 1 ] && _lane_wait_rec wait_prompt "$1 $2" "$t0" timeout
+  return 1
+}
+
+lane_daemon_up() {
+  local port="${PORT:-18377}" log=/tmp/pfm-mcp.log stale pid code i
+  stale="$(pgrep -f 'pfm mc[p] serve$' | head -1 || true)"
+  if [ -n "$stale" ] && grep -q ' (deleted)$' <<<"$(readlink "/proc/$stale/exe" 2>/dev/null)"; then
+    echo "daemon: pfm mcp serve (pid $stale) runs a replaced binary — restarting it"
+    kill "$stale" || { echo "daemon: cannot stop replaced pid $stale" >&2; return 1; }
+    for i in {1..10}; do
+      code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+      [ "$code" = 000 ] && break
+      sleep 0.5
+    done
+  fi
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+  if [ -n "$code" ] && [ "$code" != 000 ]; then echo "daemon: pfm mcp serve already answering on :$port"; return 0; fi
+  nohup pfm mcp serve >"$log" 2>&1 </dev/null &
+  pid=$!
+  disown "$pid"
+  for i in {1..20}; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$port/mcp/professor" || true)"
+    if [ -n "$code" ] && [ "$code" != 000 ]; then echo "daemon: pfm mcp serve up on :$port (pid $pid, log $log)"; return 0; fi
+    sleep 0.5
+  done
+  echo "daemon: pfm mcp serve never answered on :$port — log tail:" >&2
+  tail -20 "$log" >&2
+  return 1
+}
+
+lane_storm_start() { # lane_storm_start <n> [sends]
+  local n="$1" sends="${2:-30}" i me project engine rows sock sid pair missing wait_secs deadline
+  local LANE_ANCHOR=
+  local projects=(atlas lumen orbit) engines posture
+  read -r -a engines <<<"${STORM_ENGINES:-cc cx}"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] && [[ "$sends" =~ ^[1-9][0-9]*$ ]] && [ "${#engines[@]}" -gt 0 ] ||
+    { echo 'storm: n and sends must be positive integers; engines must be nonempty' >&2; return 1; }
+  lane_daemon_up || return 1
+  for ((i=1; i<=n; i++)); do
+    me="STORM_$i"; project="${projects[$(( (i - 1) % ${#projects[@]} ))]}"
+    engine="${engines[$(( (i - 1) % ${#engines[@]} ))]}"
+    rows="$(pfm ls --tsv)" || { echo 'storm: fleet enumeration failed' >&2; return 1; }
+    if awk -F'\t' -v name="$me" '$1 ~ /^live-/ && $5 == name {found=1} END {exit !found}' <<<"$rows"; then echo "kept $me (live)"; continue; fi
+    case "$engine" in
+      cc) posture=(--account "${STORM_CC_ACCOUNT:-${SEAT:-1}}" --model "${STORM_CC_MODEL:-sonnet}" --effort "${STORM_CC_EFFORT:-low}") ;;
+      cx) posture=(--model "${STORM_GPT_MODEL:-lane-fixture}" --effort "${STORM_GPT_EFFORT:-medium}") ;;
+      ox) posture=(--model "openai/${STORM_GPT_MODEL:-lane-fixture}" --effort "${STORM_GPT_EFFORT:-medium}") ;;
+      *) echo "storm: unsupported engine $engine" >&2; return 1 ;;
+    esac
+    pfm chat new --name "$me" --engine "$engine" "${posture[@]}" --cwd "/work/$project" "lane storm fixture $me ($sends sends)" >/dev/null ||
+      { echo "storm: spawn $me failed" >&2; return 1; }
+    echo "spawned $me ($engine · $project)"
+  done
+  wait_secs="${LANE_STORM_WAIT_SECS:-60}"
+  [[ "$wait_secs" =~ ^[1-9][0-9]*$ ]] || wait_secs=60
+  deadline=$(( $(_lane_now) + wait_secs ))
+  while :; do
+    rows="$(pfm ls --tsv)" || { echo 'storm: fleet enumeration failed before seeds' >&2; return 1; }
+    missing=""
+    for ((i=1; i<=n; i++)); do
+      if ! awk -F'\t' -v name="STORM_$i" '$1 ~ /^live-/ && $5 == name {found=1} END {exit !found}' <<<"$rows"; then
+        missing="$i"
+        break
+      fi
+    done
+    [ -z "$missing" ] && break
+    if [ "$(_lane_now)" -ge "$deadline" ]; then
+      echo "storm: STORM_$missing has no live row" >&2
+      return 1
+    fi
+    # POLL-STEP: wait for the next fleet read, paced like wait_for.
+    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.5)"
+  done
+  for pair in 'STORM_1 STORM_2' 'STORM_3 STORM_4' 'STORM_5 STORM_6'; do
+    read -r me engine <<<"$pair"
+    [ "${engine#STORM_}" -le "$n" ] || continue
+    sock="$(awk -F'\t' -v name="$engine" '$1 ~ /^live-/ && $5 == name {print $11; exit}' <<<"$rows")"
+    sid="$(awk -F'\t' -v name="$engine" '$1 ~ /^live-/ && $5 == name {print $2; exit}' <<<"$rows")"
+    CHAT_SENDER_LABEL="$engine" CHAT_SENDER_SESSION="$sock" CHAT_SENDER_SID="$sid" \
+      pfm chat inject "$me" 'lane storm seed' >/dev/null || { echo "storm: seed $engine → $me failed" >&2; return 1; }
+    echo "seeded $engine → $me"
+  done
+}
+
+lane_storm_kill() {
+  local rows before after failed=0 n id left wait_secs deadline
+  local LANE_ANCHOR=
+  rows="$(pfm ls --tsv)" || { echo 'kill-storm: initial fleet enumeration failed' >&2; return 1; }
+  before="$(awk -F'\t' '$1 ~ /^live-/ && $5 !~ /^STORM_[0-9]+$/ {n++} END {print n+0}' <<<"$rows")"
+  for n in $(awk -F'\t' '$1 ~ /^live-/ && $5 ~ /^STORM_[0-9]+$/ {print $5}' <<<"$rows"); do
+    if pfm chat end "$n" >/dev/null; then echo "ended $n"; else echo "kill-storm: pfm chat end $n failed (see above)" >&2; failed=1; fi
+  done
+  wait_secs="${LANE_STORM_WAIT_SECS:-60}"
+  [[ "$wait_secs" =~ ^[1-9][0-9]*$ ]] || wait_secs=60
+  deadline=$(( $(_lane_now) + wait_secs ))
+  while :; do
+    rows="$(pfm ls --tsv)" || { echo 'kill-storm: resume fleet enumeration failed' >&2; return 1; }
+    if ! awk -F'\t' '$1 ~ /^live-/ && $5 ~ /^STORM_[0-9]+$/ {found=1} END {exit !found}' <<<"$rows"; then break; fi
+    [ "$(_lane_now)" -ge "$deadline" ] && break
+    # POLL-STEP: wait for the next fleet read, paced like wait_for.
+    sleep "$(_lane_poll_secs "${LANE_WAIT_FOR_EVERY_SECS-}" 0.5)"
+  done
+  for id in $(awk -F'\t' '$1 ~ /^resume-/ && $5 ~ /^STORM_[0-9]+$/ {print $2}' <<<"$rows"); do
+    if pfm chat kill "$id" >/dev/null; then echo "hid $id"; else echo "kill-storm: pfm chat kill $id failed (see above)" >&2; failed=1; fi
+  done
+  rows="$(pfm ls --tsv)" || { echo 'kill-storm: final fleet enumeration failed' >&2; return 1; }
+  left="$(awk -F'\t' '$5 ~ /^STORM_[0-9]+$/ {n++} END {print n+0}' <<<"$rows")"
+  after="$(awk -F'\t' '$1 ~ /^live-/ && $5 !~ /^STORM_[0-9]+$/ {n++} END {print n+0}' <<<"$rows")"
+  echo "kill-storm: STORM rows left: $left · other live rows: $before → $after"
+  [ "$failed" -eq 0 ] && [ "$left" -eq 0 ] && [ "$before" = "$after" ]
 }

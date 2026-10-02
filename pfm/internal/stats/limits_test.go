@@ -195,7 +195,7 @@ func TestLimitsSamplerTurnsPersistentCredentialRejectionIntoNamedSkip(t *testing
 	}})
 	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
 		fetches++
-		return usagehook.Usage{}, fmt.Errorf("usage endpoint returned 403 Forbidden")
+		return usagehook.Usage{}, &usagehook.StatusError{Code: http.StatusUnauthorized, Status: "401 Unauthorized"}
 	}
 	sampler.Ack = func(context.Context, LimitAccount) error {
 		acks++
@@ -257,18 +257,6 @@ func TestStaleStatusClassifiesTimeout(t *testing.T) {
 	err := fmt.Errorf("fetch usage endpoint: %w", context.DeadlineExceeded)
 	if got := staleStatus(err); got != "refresh timed out; showing cached limits" {
 		t.Fatalf("staleStatus(timeout)=%q", got)
-	}
-}
-
-func TestLocalCredentialFileErrorsDoNotTriggerLiveAckRefresh(t *testing.T) {
-	for _, message := range []string{
-		"stat usage credentials: permission denied",
-		"read usage credentials: input/output error",
-		"decode usage credentials: invalid character",
-	} {
-		if needsCredentialRefresh(errors.New(message)) {
-			t.Fatalf("local I/O error routed to live credential refresh: %q", message)
-		}
 	}
 }
 

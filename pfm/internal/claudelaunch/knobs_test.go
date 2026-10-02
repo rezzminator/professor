@@ -3,6 +3,8 @@ package claudelaunch
 import (
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -35,6 +37,10 @@ func TestKnobsInventory(t *testing.T) {
 		"CLAUDE_PROJECT_DIR",
 		"ENABLE_PROMPT_CACHING_1H",
 		"FORCE_PROMPT_CACHING_5M",
+		"CLAUDE_CODE_PROMPT_CACHE_TTL",
+		"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+		"CACHE_LIVE_CONTROL_MAIN_TTL",
+		"CACHE_LIVE_CONTROL_AGENTS_TTL",
 		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
 		"ANTHROPIC_BASE_URL",
 		"ANTHROPIC_AUTH_TOKEN",
@@ -59,15 +65,42 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("duplicate knob %s", knob.Name)
 		}
 		seen[knob.Name] = true
+		if knob.Name == "cache1h" &&
+			knob.Target != "env.CACHE_LIVE_CONTROL_MAIN_TTL" {
+			t.Errorf("cache1h target=%q", knob.Target)
+		}
 	}
 	for _, name := range Hygiene() {
 		if !seen[name] {
 			t.Errorf("hygiene row %s missing", name)
 		}
 	}
-	for _, name := range []string{"configDir", "binary", "cache1h", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "tmuxTruecolor", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
+	for _, name := range []string{"configDir", "binary", "cache1h", "systemPrompt", "nativeCursor", "maxSubagentSpawnDepth", "maxConcurrentSubagents", "webSearchesPerSession", "autoCompactWindow", "tmuxTruecolor", "noFlicker", "agentTeams", "functionHooks", "outputStyle", "theme", "cleanupPeriodDays", "hooks", "statusLine", "subagentStatusLine", "mcp", "permissionMode", "model", "effort", "sessionID", "resume", "fork", "name"} {
 		if !seen[name] {
 			t.Errorf("knob %s missing", name)
 		}
 	}
+}
+
+// TestKnobHooksCountMatchesRegistry pins the hooks knob's "N registrations"
+// default to the registry it describes, so the two cannot drift apart.
+func TestKnobHooksCountMatchesRegistry(t *testing.T) {
+	for _, knob := range Knobs {
+		if knob.Name != knobHooks {
+			continue
+		}
+		text, ok := knob.Default.(string)
+		if !ok {
+			t.Fatalf("hooks knob default %v (%T), want a string leading with a count", knob.Default, knob.Default)
+		}
+		count, err := strconv.Atoi(strings.Fields(text)[0])
+		if err != nil {
+			t.Fatalf("hooks knob default %q does not lead with a count: %v", text, err)
+		}
+		if want := len(HookTemplates(t.TempDir())); count != want {
+			t.Fatalf("hooks knob default %q, but HookTemplates returns %d", text, want)
+		}
+		return
+	}
+	t.Fatal("no hooks knob in Knobs")
 }

@@ -32,7 +32,7 @@ How `pfm install` moves a host from any older layout onto the one in [pfm-home.m
 | `harvester.config.json` | regular file `{clone}/harvester.config.json` | `~/.config/pfm/harvester.config.json` |
 | `state.db` | `~/.local/state/pfm/pfm.db` (or the config path) | `~/.cc/fleet.db` (+ `-wal`, `-shm`) |
 | `state.cacheDb` | `~/.local/state/pfm/pfm-cache.db` (or the config path) | `~/.local/state/pfm/fleet.db` (+ `-wal`, `-shm`) |
-| session store, per account × `SessionPaths` entry | symlink `{config dir}/{entry} → ~/.claude/{entry}` | a real dir; a link to another account's dir; absent |
+| session store, per account × `SessionPaths` entry | symlink `{config dir}/{entry} → ~/.claude/{entry}` | a real dir; a link to another account's dir; a link to an absent store entry; absent |
 | managed cleanup | `managed-settings.d/pfm.json` in Claude Code's system directory ([claude-config-dir.md](claude-config-dir.md#managed-settings)) with `claude.cleanupPeriodDays` | absent; another value |
 | memory helpers | `scripts/memory-wire.sh` / `scripts/memory-consolidate.sh`, named by the operator's own hooks | the fingerprint-matched `scripts/cc-memory-wire.sh` / `scripts/cc-memory-consolidate.sh` in any account dir: renamed once, and the operator hook paths that name them in `settings.json` / `settings.local.json` rewritten once (`migrateMemoryHelpers`) |
 | account `settings.json`, or the regular file inside HOME it links to (judged once per physical file) | no pfm-owned `hooks`, `statusLine`, `subagentStatusLine` | entries recorded in `settings-hook-ownership.json`; any hook whose command is a `claudeHookTemplates` command or matches pfm's retired-hook table (`pfm/internal/installer/settings.go`) — pfm-owned by command shape, so installs older than the ledger are cleaned too; the overlay `statusLine`; the `--subagents` line |
@@ -105,14 +105,14 @@ A journal with pending records blocks the next `pfm install --yes` before any ch
 
 `pfm doctor` prints `install journals: {count} in {root}, {bytes} bytes` and names pending or unreadable journals.
 
-`pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. Scope, live-chat and drift checks run before replay; a rollback with a database or config record stops the running fleet units before checking for remaining holders, and restarts them only when this pfm accepts the restored config, verifying each is active after 3 s:
+`pfm install --rollback {timestamp} [--force]` replays the journal backwards: links removed, moves reversed, backups restored. A session store the install created is kept and named with a `keep` line when it holds anything; only a store that is still empty is removed. Scope, live-chat and drift checks run before replay; a rollback with a database or config record stops the running fleet units before checking for remaining holders, and restarts them only when this pfm accepts the restored config, verifying each is active after 3 s:
 
 - a journal already rolled back refuses: `rollback {id} refused: already rolled back at {time}`;
 - a journal without `scope.json` refuses: `rollback {id} refused: journal {dir} has no scope.json`;
 - an unreadable or invalid scope refuses: `rollback {id} refused: journal scope {path}: {reason}`;
 - a run that moved state databases or the config stops the running fleet units before replay and restarts those same units afterward, unless the replay restored a legacy config (a config moves at the state-db row, journaled even when that row then refuses); it refuses if any database holder remains;
 - a session-store record refuses while a chat is live on its account (§ Guards);
-- a destination whose fingerprint no longer matches its last applied record — newer work since the install — refuses the whole rollback, naming every drifted path: `rollback {id} refused: drift at {path}[, {path}…] — rerun with --force to overwrite them`. A record without a fingerprint counts as drift. Pending records, the cache database and `-wal`/`-shm` siblings are not checked. `--force` overrides only this check.
+- a destination whose fingerprint no longer matches its last applied record — newer work since the install — refuses the whole rollback, naming every drifted path: `rollback {id} refused: drift at {path}[, {path}…] — rerun with --force to overwrite them`. A record without a fingerprint counts as drift. Pending records, an install-created session store, the cache database and `-wal`/`-shm` siblings are not checked. `--force` overrides only this check.
 
 When the replay restores a legacy config this pfm refuses (`config.LegacyConfigWaiting`), the rollback restarts no unit and prints, after its `rollback layout …` lines, the order that finishes it:
 

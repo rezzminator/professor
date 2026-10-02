@@ -71,7 +71,7 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	}
 	parsed := parsedShell(t, plan.Run)
 	if parsed.SessionID == "" || parsed.PromptFile != mustProfessorPromptPath(t, home) ||
-		parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" || plan.Record == nil ||
+		parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" || plan.Record == nil ||
 		plan.Record.SessionID != parsed.SessionID || plan.Record.Account != 42 {
 		t.Fatalf("fresh launch id=%q prompt=%q record=%#v", parsed.SessionID, parsed.PromptFile, plan.Record)
 	}
@@ -83,11 +83,6 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	}
 	if plan.ChatServer == nil || plan.ChatServer.Run != plan.Run || plan.ChatServer.CWD != request.Row.CWD {
 		t.Fatalf("native fresh server = %#v, want the plan's run in the row's cwd", plan.ChatServer)
-	}
-	for _, retired := range []string{" cc42", "_cc_run"} {
-		if strings.Contains(plan.Line, retired) || strings.Contains(plan.Run, retired) {
-			t.Fatalf("native fresh action retained retired shell surface %q: %#v", retired, plan)
-		}
 	}
 }
 
@@ -140,7 +135,7 @@ func TestNewClaudeNativeSpawnPreservesBypassLeanAndCachePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed := parsedShell(t, plan.Run)
-	if parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"] != "1" ||
+	if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" ||
 		parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "1" || !parsed.Autonomy {
 		t.Fatalf("native fresh settings=%#v autonomy=%t", parsed.SettingsEnv, parsed.Autonomy)
 	}

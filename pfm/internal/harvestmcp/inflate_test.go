@@ -5,11 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // inflateWorker stands in for converter.py's inflate op: a body starting
@@ -40,7 +42,7 @@ func TestInflateHandsTheBodyToTheSidecarAndRemovesTheScratch(t *testing.T) {
 	dir := t.TempDir()
 	python := filepath.Join(dir, "fake-python")
 	launcher := "#!/bin/sh\nexec python3 -c '" + strings.ReplaceAll(inflateWorker, "'", "'\\''") + "'\n"
-	if err := os.WriteFile(python, []byte(launcher), 0o700); err != nil {
+	if err := testjail.WriteExecutable(python, []byte(launcher), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	script := filepath.Join(dir, "converter.py")
@@ -59,7 +61,11 @@ func TestInflateHandsTheBodyToTheSidecarAndRemovesTheScratch(t *testing.T) {
 	if !errors.Is(err, harvest.ErrDecompressionBomb) || !strings.Contains(err.Error(), "more than 4096 bytes") {
 		t.Errorf("bomb: err = %v, want harvest.ErrDecompressionBomb naming the sidecar's cap", err)
 	}
-	if left, err := os.ReadDir(scratch); err != nil || len(left) != 0 {
+	// pfm-pycache is the sidecar's fixed bytecode home under TMPDIR
+	// (harvestpy withPythonBytecodeHome), not inflate scratch.
+	left, err := os.ReadDir(scratch)
+	left = slices.DeleteFunc(left, func(entry os.DirEntry) bool { return entry.Name() == "pfm-pycache" })
+	if err != nil || len(left) != 0 {
 		t.Errorf("scratch left behind: %v, %v; want none", left, err)
 	}
 }

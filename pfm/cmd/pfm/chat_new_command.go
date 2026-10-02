@@ -253,6 +253,11 @@ func runRun(
 	printRunResult(summary, engineName, result)
 	if !result.Named {
 		pfmchat.RecordVerb(context.Background(), "new", 1)
+		if result.TrustHeld {
+			seatStateWritten = false // the live chat keeps its seat prompt state
+			fmt.Fprintf(stderr, "pfm chat new: %s\n", result.TrustRefusal(*name, directory))
+			return codeUndelivered
+		}
 		return 1
 	}
 	seatStateWritten = false
@@ -459,7 +464,12 @@ func awaitLaunch(
 	if turn.Delivered {
 		return 0
 	}
-	if rescueLaunchPrompt(ctx, handle, stderr, clk, runtimes...) {
+	outcome := retryLaunchPrompt(ctx, handle, stderr, clk, runtimes...)
+	if outcome == inject.RescueTrustHeld {
+		fmt.Fprintf(stderr, "pfm chat new: %s\n", result.TrustRefusal(name, ""))
+		return codeUndelivered
+	}
+	if outcome == inject.RescueKeysPressed {
 		rescued, _ := headless.Await(
 			ctx,
 			chatResolver(handle, runtimes...),
@@ -511,39 +521,30 @@ func deliveryProofOptions(options headless.AwaitOptions, timeout time.Duration) 
 	return proof
 }
 
-// rescueLaunchPrompt presses the keys a human presses when a launch prompt is
-// sitting typed-but-unsent: Escape to clear the startup overlay that swallowed
-// the submit, then Enter. It reports whether the keys were delivered, not
-// whether the model answered — the caller re-proves that against the engine's
-// own transcript, because a keypress that reached tmux still proves nothing
-// about the model having been asked.
-func rescueLaunchPrompt(
+// retryLaunchPrompt retries a launch prompt sitting typed-but-unsent
+// (inject.RescueLaunchPrompt) and reports what it did, not whether the model
+// answered — the caller re-proves that against the engine's own transcript.
+func retryLaunchPrompt(
 	ctx context.Context,
 	handle string,
-	_ io.Writer,
+	stderr io.Writer,
 	clk clock.Clock,
 	runtimes ...commandRuntime,
-) bool {
+) inject.RescueOutcome {
 	chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
 	if err != nil || !found || !chat.Live {
-		return false
+		return inject.RescueNotSent
 	}
 	socketPath, err := chatSocketPath(chat.Socket)
 	if err != nil {
-		return false
+		return inject.RescueNotSent
 	}
 	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
-	tmux := inject.TmuxInjector{}
-	if err := tmux.SendKey(ctx, socketPath, pane, "Escape"); err != nil {
-		return false
+	outcome, err := inject.RescueLaunchPrompt(ctx, inject.TmuxInjector{}, socketPath, pane, clk, launchRescueSettle)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %s: dismiss-and-Enter retry: %v\n", handle, err)
 	}
-	if err := clk.Sleep(ctx, launchRescueSettle); err != nil {
-		return false
-	}
-	if err := tmux.SendKey(ctx, socketPath, pane, "Enter"); err != nil {
-		return false
-	}
-	return true
+	return outcome
 }
 
 // runPrompt takes the launch prompt from a file or from the command line,

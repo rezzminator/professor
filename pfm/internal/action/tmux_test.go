@@ -1,18 +1,18 @@
 package action
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeActionTmuxBinary plays tmux: exits 0 and prints nothing.
 func fakeActionTmuxBinary(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary

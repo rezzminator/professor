@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestJailPinsClaudeConfigDir(t *testing.T) {
@@ -107,6 +108,7 @@ func TestMCPWireFailureStillRefreshesRunningLinuxDaemon(t *testing.T) {
 			Mode: ModeApply, Home: home, ConfigDir: filepath.Join(home, ".claude"),
 			MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377,
 			MCPConfigPath: configPath, Runner: runner, Stdout: io.Discard,
+			Sleep: func(time.Duration) {},
 		},
 		apply: true, managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"), stamp: "fixture",
 	}

@@ -15,6 +15,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInstallYesRefusesLiveSessionMergeBeforeAnyChange(t *testing.T) {
@@ -213,7 +214,7 @@ exit 0
 		scheduler = []string{"com.professor.pfm.name-sync"}
 	}
 	for _, name := range []string{"systemctl", "launchctl"} {
-		if err := os.WriteFile(filepath.Join(fake, name), []byte(script), 0o755); err != nil {
+		if err := testjail.WriteExecutable(filepath.Join(fake, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -299,7 +300,7 @@ case "${0##*/} $1" in
 esac
 exit 0
 `, fake, afterStop)
-	if err := os.WriteFile(filepath.Join(fake, "systemctl"), []byte(script), 0o755); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(fake, "systemctl"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	scheduler := []string{"pfm-name-sync.path", "pfm-name-sync.timer"}

@@ -14,6 +14,7 @@ import (
 // that fails and no Wayback copy — the public result reports the target's
 // 429 and the target's wait, never a reader's status or a reader's wait.
 func TestRateLimitThroughTheLadderKeepsTheTargetsStatus(t *testing.T) {
+	t.Parallel()
 	const source = "https://slow.example/429"
 	web := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host {

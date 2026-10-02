@@ -61,6 +61,8 @@ QUIET_MAX_WAITS="${SWEEP_QUIET_MAX_WAITS:-5}"
 LOAD_LOG=""
 SNAPSHOT_RAW=""
 SNAPSHOT_LOAD=""
+PARSED_LOAD=""
+TIMING_FILE=""
 
 nproc_online() {
   if command -v nproc >/dev/null 2>&1; then nproc
@@ -147,26 +149,56 @@ load_average() {
   else
     return 2
   fi
-  printf '%s\n' "$raw" | parse_load_average
+  parse_load_average "$raw" || return 1
+  printf '%s\n' "$PARSED_LOAD"
 }
 
 parse_load_average() {
-  awk -F'load average[s]*: *' '
-    BEGIN { found=0 }
-    NF > 1 {
-      value=$2
-      gsub(/^[[:space:]]+/, "", value)
-      split(value, fields, "[,[:space:]]+")
-      if (fields[1] != "") { print fields[1]; found++ }
-    }
-    END { if (found != 1) exit 1 }
-  '
+  local line found=0
+  PARSED_LOAD=""
+  while IFS= read -r line; do
+    if [[ $line =~ load[[:space:]]average[s]*:[[:space:]]*([^,[:space:]]+) ]]; then
+      PARSED_LOAD=${BASH_REMATCH[1]}
+      found=$((found + 1))
+    fi
+  done <<< "$1"
+  [ "$found" -eq 1 ]
 }
 
 valid_load() {
-  awk -v host_load="$1" 'BEGIN {
-    if (host_load !~ /^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/ || host_load + 0 != host_load + 0 || host_load + 0 < 0) exit 1
-  }'
+  [[ $1 =~ ^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$ ]]
+}
+
+load_below_four() {
+  local value="$1" mantissa exponent=0 digits whole leading=0 position
+  local exponent_digits exponent_value
+  if [[ $value == *[eE]* ]]; then
+    mantissa=${value%%[eE]*}
+    exponent=${value##*[eE]}
+  else
+    mantissa=$value
+  fi
+  whole=${mantissa%%.*}
+  digits=${mantissa//./}
+  while [[ $digits == 0* ]]; do
+    digits=${digits#0}
+    leading=$((leading + 1))
+  done
+  [ -n "$digits" ] || return 0
+  exponent_digits=${exponent#[-+]}
+  while [[ ${#exponent_digits} -gt 1 && $exponent_digits == 0* ]]; do
+    exponent_digits=${exponent_digits#0}
+  done
+  if [ "${#exponent_digits}" -gt 6 ]; then
+    [[ $exponent == -* ]]
+    return $?
+  fi
+  exponent_value=$((10#$exponent_digits))
+  [[ $exponent == -* ]] && exponent_value=$((-exponent_value))
+  position=$((${#whole} - leading + exponent_value))
+  (( position <= 0 )) && return 0
+  (( position >= 2 )) && return 1
+  [[ ${digits:0:1} < 4 ]]
 }
 
 uptime_snapshot() {
@@ -188,10 +220,11 @@ take_load_snapshot() {
   if ! SNAPSHOT_RAW="$(uptime_snapshot)"; then
     return 2
   fi
-  if ! SNAPSHOT_LOAD="$(load_average "$SNAPSHOT_RAW")"; then
+  if ! parse_load_average "$SNAPSHOT_RAW"; then
     echo "SWEEP-ERROR: --wait-quiet uptime output has no single load average" >&2
     return 2
   fi
+  SNAPSHOT_LOAD=$PARSED_LOAD
   if ! valid_load "$SNAPSHOT_LOAD"; then
     echo "SWEEP-ERROR: --wait-quiet uptime reported an invalid load average [$SNAPSHOT_LOAD]" >&2
     return 2
@@ -204,11 +237,13 @@ record_load_snapshot() {
     echo "SWEEP-ERROR: --wait-quiet requires date to timestamp load evidence" >&2
     return 2
   fi
-  if ! timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || [ -z "$timestamp" ]; then
+  if ! TZ=UTC0 printf -v timestamp '%(%Y-%m-%dT%H:%M:%SZ)T' -1 || [ -z "$timestamp" ]; then
     echo "SWEEP-ERROR: --wait-quiet could not timestamp load evidence" >&2
     return 2
   fi
-  uptime_line="$(printf '%s' "$SNAPSHOT_RAW" | tr '\t\r\n' '   ')"
+  uptime_line=${SNAPSHOT_RAW//$'\t'/ }
+  uptime_line=${uptime_line//$'\r'/ }
+  uptime_line=${uptime_line//$'\n'/ }
   if ! printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$timestamp" "$edge" "$phase" "$p" "$parallel" "$rep" "$SNAPSHOT_LOAD" "$uptime_line" >> "$LOAD_LOG"; then
     echo "SWEEP-ERROR: --wait-quiet could not append load evidence to $LOAD_LOG" >&2
@@ -221,7 +256,7 @@ wait_quiet_before() {
   local phase="$1" p="$2" parallel="$3" rep="$4" waits=0
   while :; do
     take_load_snapshot || return 2
-    if awk -v host_load="$SNAPSHOT_LOAD" 'BEGIN { exit !(host_load + 0 < 4) }'; then
+    if load_below_four "$SNAPSHOT_LOAD"; then
       record_load_snapshot before "$phase" "$p" "$parallel" "$rep" || return 2
       return 0
     fi
@@ -297,7 +332,7 @@ if [ "$MODE" = preflight ]; then
     echo "SWEEP-ERROR: host load average is unreadable [$load]" >&2
     exit 2
   fi
-  if ! awk -v host_load="$load" 'BEGIN { exit !(host_load + 0 < 4) }'; then
+  if ! load_below_four "$load"; then
     echo "SWEEP-ERROR: host load average is $load (must be below 4 before a fence run)" >&2
     exit 1
   fi
@@ -309,7 +344,7 @@ fi
 # using bash's own `time` builtin (real/user/sys — CPU-seconds = user+sys).
 time_cmd() {
   local phase="$1" p="$2" parallel="$3" rep="$4"; shift 4
-  local tfile status=PASS rc real="" user="" sys="" cpu
+  local status=PASS rc real="" user="" sys="" cpu=""
   if [ "${1:-}" = "--" ]; then shift; fi
   if [ "$#" -eq 0 ]; then
     echo "SWEEP-ERROR: $phase p=$p parallel=$parallel rep=$rep has no command" >&2
@@ -318,14 +353,17 @@ time_cmd() {
   if ! wait_quiet_before "$phase" "$p" "$parallel" "$rep"; then
     return 2
   fi
-  if ! tfile="$(mktemp "${TMPDIR:-/tmp}/pfm-sweep-time.XXXXXX")"; then
-    echo "SWEEP-ERROR: could not create a timing capture for $phase p=$p parallel=$parallel rep=$rep" >&2
-    return 1
+  if [ -z "$TIMING_FILE" ]; then
+    if ! TIMING_FILE="$(mktemp "${TMPDIR:-/tmp}/pfm-sweep-time.XXXXXX")"; then
+      echo "SWEEP-ERROR: could not create a timing capture for $phase p=$p parallel=$parallel rep=$rep" >&2
+      return 1
+    fi
+    trap 'rm -f -- "$TIMING_FILE"' EXIT
   fi
   (
     TIMEFORMAT='%R %U %S'
     time "$@" 2>&3
-  ) 3>&2 2>"$tfile"
+  ) 3>&2 2>"$TIMING_FILE"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     status=FAIL
@@ -333,23 +371,28 @@ time_cmd() {
   if ! record_load_after "$phase" "$p" "$parallel" "$rep"; then
     status=ERROR
   fi
-  if ! read -r real user sys < "$tfile"; then
+  if ! read -r real user sys < "$TIMING_FILE"; then
     echo "SWEEP-ERROR: $phase p=$p parallel=$parallel rep=$rep produced no timing record" >&2
     status=ERROR
-  elif ! awk -v r="$real" -v u="$user" -v s="$sys" 'BEGIN {
+    real=0; user=0; sys=0
+    cpu=0.000
+  elif [ -z "${real:-}" ] || [ -z "${user:-}" ] || [ -z "${sys:-}" ]; then
+    echo "SWEEP-ERROR: $phase p=$p parallel=$parallel rep=$rep produced invalid timing data" >&2
+    status=ERROR
+    real=0; user=0; sys=0
+    cpu=0.000
+  elif ! cpu="$(awk -v r="$real" -v u="$user" -v s="$sys" 'BEGIN {
+      valid=1
       for (i = 1; i <= 3; i++) {
         value = (i == 1 ? r : (i == 2 ? u : s))
-        if (value !~ /^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/ || value + 0 < 0) exit 1
+        if (value !~ /^[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/ || value + 0 < 0) valid=0
       }
-    }' </dev/null; then
+      printf "%.3f", u+s
+      if (!valid) exit 1
+    }' </dev/null)"; then
     echo "SWEEP-ERROR: $phase p=$p parallel=$parallel rep=$rep produced invalid timing data" >&2
     status=ERROR
   fi
-  rm -f "$tfile"
-  if [ -z "${real:-}" ] || [ -z "${user:-}" ] || [ -z "${sys:-}" ]; then
-    real=0; user=0; sys=0
-  fi
-  cpu="$(awk -v u="$user" -v s="$sys" 'BEGIN{printf "%.3f", u+s}')"
   if ! printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$phase" "$p" "$parallel" "$rep" "$real" "$cpu" "$status" >> "$ROWFILE"; then
     echo "SWEEP-ERROR: could not append $phase p=$p parallel=$parallel rep=$rep to $ROWFILE" >&2
     return 1

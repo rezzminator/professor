@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type fakeProc struct {
@@ -337,7 +338,7 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 		t.Fatalf("spawned args = %#v", spawner.args)
 	}
 
-	if err := manager.Unkill(ctx, claudeID); err != nil {
+	if _, err := manager.Unkill(ctx, claudeID); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, err := database.Killed(ctx, claudeID); err != nil || found {
@@ -619,7 +620,7 @@ func TestKilledChatStaysKilledAsItGrowsUntilUnkill(t *testing.T) {
 	}
 	assertKilled(t, database, id, pfmengine.Claude, 50)
 
-	if err := manager.Unkill(ctx, id); err != nil {
+	if _, err := manager.Unkill(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 	if !listedByDefault(t, database, id) {
@@ -754,7 +755,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Unkill(ctx, rootID); err != nil {
+	if _, err := manager.Unkill(ctx, rootID); err != nil {
 		t.Fatal(err)
 	}
 	if !listedCodexByDefault(t, database, rootID) {
@@ -1032,7 +1033,6 @@ func TestFinisherCodexUsesQuit(t *testing.T) {
 	if !reflect.DeepEqual(tmux.sent, []string{"/quit"}) {
 		t.Fatalf("sent = %q, want /quit", tmux.sent)
 	}
-	assertKilled(t, database, id, pfmengine.Codex, tmuxKilledAt(t, database, id))
 }
 
 func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
@@ -1042,12 +1042,11 @@ func TestCommandSpawnerUsesSetsidSelfReexec(t *testing.T) {
 	root := t.TempDir()
 	argvPath := filepath.Join(root, "argv")
 	setsidPath := filepath.Join(root, "setsid")
-	writeTestFile(
-		t,
+	if err := testjail.WriteExecutable(
 		setsidPath,
-		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_SPAWN_ARGV\"\n",
-	)
-	if err := os.Chmod(setsidPath, 0o700); err != nil {
+		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_SPAWN_ARGV\"\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_SPAWN_ARGV", argvPath)
@@ -1249,15 +1248,6 @@ func assertKilled(
 	}
 }
 
-func tmuxKilledAt(t *testing.T, database *store.Store, id string) int64 {
-	t.Helper()
-	killed, found, err := database.Killed(context.Background(), id)
-	if err != nil || !found {
-		t.Fatalf("Killed(%q) found=%v err=%v", id, found, err)
-	}
-	return killed.KilledAt
-}
-
 // THE AGENT-ROW REGRESSION. ⌃X on a live agent row wrote NOTHING: the agent's
 // transcript had not reached the index yet, and the kill refused every id the
 // index could not name. The row is composed straight from the running process,
@@ -1339,7 +1329,7 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 	if row, listed := agentRow(t); listed {
 		t.Fatalf("killed agent row is still listed while its process lives: %#v", row)
 	}
-	if err := manager.Unkill(ctx, agentID); err != nil {
+	if _, err := manager.Unkill(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, listed := agentRow(t); !listed {

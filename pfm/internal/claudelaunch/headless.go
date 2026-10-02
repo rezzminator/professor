@@ -126,11 +126,7 @@ func RenderHeadless(settings map[string]any) (string, error) {
 		}
 		switch key {
 		case knobCache1H:
-			if value.(bool) {
-				env[envCache1H] = "1"
-			} else {
-				env[envCache5M] = "1"
-			}
+			env[envCacheLiveControlMainTTL] = promptCacheTTL(value.(bool))
 		case knobSystemPrompt:
 			switch value.(string) {
 			case productionMode:

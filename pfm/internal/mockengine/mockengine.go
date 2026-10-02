@@ -1,7 +1,7 @@
 // Package mockengine is the scripted stand-in for the three engines pfm drives
 // — Claude Code, Codex and OpenCode — selected by argv[0]'s basename. It speaks
 // only the protocol doors pfm consumes: the TUI pane shapes internal/inject
-// matches, the hooks and statusline settings.json registers, the transcript
+// matches, the hooks and statusline from settings.json and --settings, the transcript
 // and rollout files internal/transcript and internal/index read, the OpenCode
 // session store, and the MCP-over-HTTP handshake. Behaviour comes from a JSON
 // scenario (MOCK_ENGINE_SCENARIO); a shape pfm has not pinned is refused by
@@ -88,7 +88,7 @@ func Main(
 			return ExitUsage
 		}
 	}
-	scenario, err := LoadScenario(env(EnvScenario))
+	scenario, err := LoadScenario(env(EnvScenario), engine)
 	if err != nil {
 		fmt.Fprintf(stderr, "mock-engine: %v\n", err)
 		return ExitUsage
@@ -111,9 +111,14 @@ func Main(
 		fmt.Fprintf(stderr, "mock-engine: %v\n", err)
 		return ExitUsage
 	}
-	if len(args) == 1 && args[0] == "--version" {
-		fmt.Fprintln(stdout, proc.script.Version)
-		return 0
+	for _, arg := range args {
+		if arg == "--version" {
+			fmt.Fprintln(stdout, proc.script.Version)
+			return 0
+		}
+	}
+	if code, answered := answerCLI(proc); answered {
+		return code
 	}
 	switch engine {
 	case engineClaude:

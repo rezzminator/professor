@@ -6,7 +6,7 @@
 #   infra/demo/up.sh [--name NAME] [--accounts 1,2,3] [--login] [--no-fleet] [--no-verify] [--fresh]
 #
 # The last step is verify.sh — the deck exercised end to end inside the
-# container (inject round trip, /reload, self-compact, storm, idle, headless,
+# container (inject round trip, /reload, storm, idle, headless,
 # the Express install's Codex mirror) and judged from what pfm reports. That is
 # the integration gate this fence exists for: a green up.sh is a container that
 # carries the whole deck. --no-verify skips it (and --no-fleet implies it).

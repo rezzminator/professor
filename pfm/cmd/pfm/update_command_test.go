@@ -10,6 +10,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
@@ -21,7 +22,7 @@ func TestUpdateBuildsSelectedTagIntoOwnedBinaryAndSkipsHarvestProvisioning(t *te
 		t.Fatal(err)
 	}
 	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -74,7 +75,7 @@ func TestUpdateRunsPostBuildActionsThroughTheSelectedCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	canonical := filepath.Join(runtime.Paths.Home, ".local", "bin", "pfm")
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {

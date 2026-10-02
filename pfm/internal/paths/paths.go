@@ -54,16 +54,43 @@ const (
 	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
 	EnvTmuxDir      = "PFM_TMUX_DIR"
 	EnvHome         = "PFM_HOME"
+	// EnvSkillSourcesOffline=1 stops pfm install from fetching the
+	// source-fetched global skills (templates/global/skills/sources.json):
+	// an existing store copy is still linked, and pfm doctor reports an
+	// unfetched skill as OFFLINE rather than a warning. The e2e harness sets
+	// it so no test reaches a public repository.
+	EnvSkillSourcesOffline = "PFM_SKILL_SOURCES_OFFLINE"
+	// EnvThemesOffline=1 stops pfm install from fetching a release theme
+	// manifest or remote theme file; themes bundled in the source clone still install.
+	// The test harness sets it so no test fetches themes from a public repository.
+	EnvThemesOffline = "PFM_THEMES_OFFLINE"
 	// EnvRealHome lets the rare test that MUST see the operator's own
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
 	// test` is refused the real home rather than handed it silently.
-	EnvRealHome           = "PFM_TEST_REAL_HOME"
-	EnvProcRoot           = "PFM_PROC_ROOT"
-	EnvManagedSettingsDir = "PFM_MANAGED_SETTINGS_DIR"
-	EnvCgroupRoot         = "PFM_CGROUP_ROOT"
-	EnvDevRepoGitDir      = "PFM_DEV_REPO_GIT_DIR"
-	EnvDevRepoWorkTree    = "PFM_DEV_REPO_WORK_TREE"
+	EnvRealHome             = "PFM_TEST_REAL_HOME"
+	EnvTestPFMBinary        = "PFM_TEST_PFM_BINARY"
+	EnvTestMockEngineBinary = "PFM_TEST_MOCK_ENGINE_BINARY"
+	EnvProcRoot             = "PFM_PROC_ROOT"
+	EnvManagedSettingsDir   = "PFM_MANAGED_SETTINGS_DIR"
+	EnvCgroupRoot           = "PFM_CGROUP_ROOT"
+	EnvDevRepoGitDir        = "PFM_DEV_REPO_GIT_DIR"
+	EnvDevRepoWorkTree      = "PFM_DEV_REPO_WORK_TREE"
+	// EnvTestArtifactDir names the directory every Go test process writes its
+	// profile under (internal/testjail); unset, profiling writes nothing and a
+	// red run says so once on stderr. EnvTestProfile=0 turns profiling off;
+	// EnvTestProfile=cpu adds a CPU profile, opt-in only: its SIGPROF interval
+	// timer survives execve, so a test whose child execs another program (zsh, a
+	// re-exec'd pfm) sees that child killed by "profiling timer expired".
+	// EnvTestProfileParent is exported by the first profiled process: a test
+	// binary inheriting it is a helper, recorded but never a failure bundle,
+	// since helpers exit non-zero on purpose. EnvTestDeadlineEpoch is the step
+	// deadline in decimal epoch seconds, which the profiler's watchdog fires
+	// before.
+	EnvTestArtifactDir   = "PFM_TEST_ARTIFACT_DIR"
+	EnvTestProfile       = "PFM_TEST_PROFILE"
+	EnvTestProfileParent = "PFM_TEST_PROFILE_PARENT"
+	EnvTestDeadlineEpoch = "PFM_TEST_DEADLINE_EPOCH"
 	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
 	// the way a real chat runs — the server loads ~/.tmux.conf like every other
 	// terminal on the machine, because a chat IS a terminal the user lives in:
@@ -168,7 +195,12 @@ func ComposedHarnessPrompt(home string, id pfmengine.ID) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve composed harness prompt: %w", err)
 	}
-	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md"), nil
+	return ComposedHarnessPromptIn(repo, id), nil
+}
+
+// ComposedHarnessPromptIn locates the engine prompt in the given clone.
+func ComposedHarnessPromptIn(repo string, id pfmengine.ID) string {
+	return filepath.Join(repo, "pfm", "harness-prompts", "composed", pfmengine.MustLookup(id).LongName+".md")
 }
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,
@@ -243,6 +275,12 @@ func EnvOrFrom(env Env, name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// SIDDirFrom is the SID directory resolved over an injected Env: PFM_SID_DIR,
+// else /tmp/cc-sid. Resolve and every caller holding its own Env share it.
+func SIDDirFrom(env Env) string {
+	return EnvOrFrom(env, EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid"))
 }
 
 // DevRepoGitDir returns the fence-mounted git directory when root is the
@@ -347,6 +385,20 @@ func LegacyStateDB(home string) string {
 	return filepath.Join(home, ".cc", legacyDBName)
 }
 
+// HarvesterCacheDir is the harvester's one default cache directory (used when
+// harvester.config.json sets no cache.dir): <home>/.professor/.harvester-cache.
+// It holds persistent harvester_read handles, so it lives under the home, never
+// a temp directory.
+func HarvesterCacheDir(home string) string {
+	return filepath.Join(home, ".professor", ".harvester-cache")
+}
+
+// LegacyHarvesterCacheDir is the pre-rename default cache directory the host
+// layout moves to HarvesterCacheDir on `pfm install`.
+func LegacyHarvesterCacheDir(home string) string {
+	return filepath.Join(home, ".professor", ".cache")
+}
+
 // LegacyCacheDB is where the derived cache database lived before the host
 // layout moved it to DefaultCacheDB.
 func LegacyCacheDB(home string) string {
@@ -405,7 +457,7 @@ func Resolve() (Values, error) {
 	return Values{
 		CacheDB:            EnvOr(EnvCacheDB, DefaultCacheDB(home)),
 		StateDB:            EnvOr(EnvStateDB, DefaultStateDB(home)),
-		SIDDir:             EnvOr(EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid")),
+		SIDDir:             SIDDirFrom(OSEnv{}),
 		Roots:              roots,
 		TmuxDir:            EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
 		Home:               home,
@@ -491,4 +543,59 @@ func (values Values) FirstRoot(id pfmengine.ID) string {
 		return roots[0]
 	}
 	return ""
+}
+
+// SkillSourcesOffline reports EnvSkillSourcesOffline=1: pfm install fetches no
+// source-fetched global skill and pfm doctor reports an unfetched one OFFLINE.
+func SkillSourcesOffline() bool {
+	return SkillSourcesOfflineIn(OSEnv{})
+}
+
+// SkillSourcesOfflineIn is SkillSourcesOffline read from env, the environment
+// a caller was handed.
+func SkillSourcesOfflineIn(env Env) bool {
+	return env.Get(EnvSkillSourcesOffline) == "1"
+}
+
+// ThemesOffline reports EnvThemesOffline=1: pfm install reads bundled themes
+// from the source clone but skips remote theme fetches.
+func ThemesOffline() bool {
+	return ThemesOfflineIn(OSEnv{})
+}
+
+// ThemesOfflineIn is ThemesOffline read from env, the environment a caller was handed.
+func ThemesOfflineIn(env Env) bool {
+	return env.Get(EnvThemesOffline) == "1"
+}
+
+// PrebuiltPFMBinary is the pfm binary a unit run built once for every package that runs one.
+func PrebuiltPFMBinary() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestPFMBinary)
+}
+
+// PrebuiltMockEngineBinary is the mock-engine binary a unit run built once.
+func PrebuiltMockEngineBinary() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestMockEngineBinary)
+}
+
+// TestArtifactDir is the profile root of this Go test process, when one is set.
+func TestArtifactDir() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestArtifactDir)
+}
+
+// TestProfileMode is the profiling mode of this Go test process: "" (the
+// default), "0" (off) or "cpu" (adds a CPU profile).
+func TestProfileMode() string {
+	return OSEnv{}.Get(EnvTestProfile)
+}
+
+// TestProfileParent is the pid of the profiled process that started this one,
+// when this one is its helper.
+func TestProfileParent() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestProfileParent)
+}
+
+// TestDeadlineEpoch is the step deadline in decimal epoch seconds, when one is set.
+func TestDeadlineEpoch() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestDeadlineEpoch)
 }

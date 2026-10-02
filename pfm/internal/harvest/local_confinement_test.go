@@ -12,6 +12,7 @@ import (
 // resolved list — which reads as UNCONFINED: an external gateway whose cache
 // root was missing could read anywhere a local caller could.
 func TestDenyLocalPathFailsClosedWhenNoRootResolves(t *testing.T) {
+	t.Parallel()
 	outside := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(outside, []byte("private"), 0o600); err != nil {
 		t.Fatal(err)

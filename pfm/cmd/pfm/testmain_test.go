@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,9 +17,11 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -85,19 +88,23 @@ func noNetworkHarvestDigest() harvestpy.EnvironmentDigest {
 // TestMain gives this package a short, canonical TMPDIR before any test builds
 // a path from it. See internal/testjail for why both properties matter.
 func TestMain(m *testing.M) {
+	flag.Parse()
+	restorePublicResolver := harvest.StubPublicResolverForTest(harvest.RefusePublicLookupsForTest)
 	binaryDir := ""
-	if os.Getenv(attachHelperEnv) != "1" {
+	// This daemon test exercises its in-process handler and never starts the
+	// shared CLI binary. Its one-test run need not pay for a Go build.
+	if flag.Lookup("test.list").Value.String() == "" && os.Getenv(attachHelperEnv) != "1" &&
+		!runningOnlyMCPDaemonMountedTest() {
 		var err error
 		binaryDir, err = os.MkdirTemp("", "pfm-cmd-test-binary-")
 		if err != nil {
 			_, _ = os.Stderr.WriteString("create shared pfm test binary directory: " + err.Error() + "\n")
 			os.Exit(1)
 		}
-		testPFMBinary = filepath.Join(binaryDir, "pfm")
-		build := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", testPFMBinary, ".")
-		if output, buildErr := build.CombinedOutput(); buildErr != nil {
+		testPFMBinary, err = testjail.PFMBinary(filepath.Join("..", ".."), binaryDir)
+		if err != nil {
 			_, _ = os.Stderr.WriteString(
-				"build shared pfm test binary: " + buildErr.Error() + ": " + string(output) + "\n",
+				"build shared pfm test binary: " + err.Error() + "\n",
 			)
 			_ = os.RemoveAll(binaryDir)
 			os.Exit(1)
@@ -142,7 +149,7 @@ func TestMain(m *testing.M) {
 	}
 	installer.HookProbeOverride = func(string, pfmconfig.Config) []installer.HookProbeResult { return nil }
 	// No jail has a real `claude` to spawn — captureHarnessPrompt's own doc
-	// comment marks that REAL-SESSION. This stub stands in for every test;
+	// comment marks that flow UNPLAYED. This stub stands in for every test;
 	// whether a doctor fixture reads as matches/DRIFT/CHECK-FAILED still
 	// depends only on what baseline (if any) the fixture stages, via
 	// stageHarnessPromptBaseline in main_test.go.
@@ -156,6 +163,7 @@ func TestMain(m *testing.M) {
 	}
 	testjail.KeepAmbientIdentity = os.Getenv(attachHelperEnv) == "1"
 	code := testjail.Run(m)
+	restorePublicResolver()
 	if binaryDir != "" {
 		if err := os.RemoveAll(binaryDir); err != nil && code == 0 {
 			_, _ = os.Stderr.WriteString("remove shared pfm test binary directory: " + err.Error() + "\n")
@@ -163,4 +171,52 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Exit(code)
+}
+
+func runningOnlyMCPDaemonMountedTest() bool {
+	const pattern = "^TestMCPDaemonMountedServersNeedNoAuthAndServeTools$"
+	for index, arg := range os.Args {
+		if arg == "-test.run="+pattern || arg == "-test.run" && index+1 < len(os.Args) && os.Args[index+1] == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTestMainUsesPrebuiltPFMBinary(t *testing.T) {
+	if want := os.Getenv("TEST_EXPECT_PFM_BINARY"); want != "" {
+		if testPFMBinary != want {
+			t.Fatalf("testPFMBinary = %q, want prebuilt %q", testPFMBinary, want)
+		}
+		return
+	}
+	goDir := t.TempDir()
+	if err := testjail.WriteExecutable(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 41\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prebuilt := filepath.Join(t.TempDir(), "pfm")
+	if err := testjail.WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestTestMainUsesPrebuiltPFMBinary$")
+	command.Env = append(os.Environ(),
+		"PATH="+goDir, paths.EnvTestPFMBinary+"="+prebuilt, "TEST_EXPECT_PFM_BINARY="+prebuilt,
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("run with prebuilt pfm: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(prebuilt); err != nil {
+		t.Fatalf("TestMain removed prebuilt binary %q: %v", prebuilt, err)
+	}
+}
+
+func TestTestMainRejectsBrokenPrebuiltPFMBinary(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-pfm")
+	command := exec.Command(os.Args[0], "-test.run=^TestTestMainRejectsBrokenPrebuiltPFMBinary$")
+	command.Env = append(os.Environ(), paths.EnvTestPFMBinary+"="+missing)
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), paths.EnvTestPFMBinary) ||
+		!strings.Contains(string(output), missing) {
+		t.Fatalf("TestMain broken prebuilt = %v, %q; want named failure", err, output)
+	}
 }

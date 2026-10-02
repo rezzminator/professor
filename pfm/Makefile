@@ -29,7 +29,8 @@ REPO    := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..)
 TMP_BASE := /tmp/$(patsubst .%,%,$(notdir $(REPO)))
 DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
-LOCAL   := pfm.dev
+# The local build artifact lives in the repo's gitignored tmp/, never in the tree.
+LOCAL   := $(REPO)/tmp/bin/pfm.dev
 UNIT    := pfm-mcp.service
 # The macOS twin of UNIT: the launch agent pfm install wires for the daemon.
 AGENT   := com.professor.pfm.mcp
@@ -55,7 +56,7 @@ COVER_DIR ?= $(REPO)/tmp/cover
 LINT_BASE ?= origin/main
 # The fenced unit captures in docs/dev/testing/concurrency-sweep.md pin these flags.
 # The tagged e2e suite keeps its own -p 1 in dev.sh.
-TESTFLAGS ?= -p 4 -parallel 4
+TESTFLAGS ?= -p 6 -parallel 4
 
 .PHONY: help build prompts tools fmt fmt-check lint lint-new vet arch cover testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
@@ -71,8 +72,10 @@ help: ## List every target
 
 # ---------------------------------------------------------------- build ----
 
-build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
+build: ## Compile to tmp/bin/pfm.dev (a local artifact, never the shipped path); its absolute path is the last line
+	@mkdir -p $(dir $(LOCAL))
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
+	@echo "built: $(LOCAL)"
 
 # The composer runs here, so it builds for the host even when a cross build
 # exports GOOS/GOARCH (else: "exec format error").
@@ -88,20 +91,18 @@ define need-tool
 	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/fence/tools.env)" >&2; exit 1; }
 endef
 
-fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt), both kernels
+fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt)
 	$(call need-tool,LINT)
-	@# Build-tagged files load only for the current GOOS, so each supported
-	@# kernel is formatted in turn; golines splits a long line and gofumpt
-	@# regroups the result, so a pass can leave a file the next pass still
-	@# changes: run until a pass is a no-op.
+	@# golangci-lint fmt sees files for both kernels in one pass, including
+	@# build-tagged files. Golines and gofumpt can need another pass to settle.
 	@for pass in 1 2 3; do \
-	  for goos in linux darwin; do GOOS=$$goos $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; done; \
-	  if [ -z "$$(GOOS=linux $(LINT) fmt --diff ./... 2>/dev/null)$$(GOOS=darwin $(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
+	  $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; \
+	  if [ -z "$$($(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
 	done; echo "fmt: did not converge in 3 passes — a formatter fight; run 'make fmt-check' to see the files" >&2; exit 1
 
-fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
+fmt-check: ## Fail if anything is unformatted, naming the files
 	$(call need-tool,LINT)
-	@diff="$$(for goos in linux darwin; do GOOS=$$goos $(LINT) fmt --diff ./... 2>&1 || true; done)"; \
+	@diff="$$($(LINT) fmt --diff ./... 2>&1)" || true; \
 	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||' | sort -u || true)"; \
 	if [ -n "$$files" ]; then \
 	  echo "UNFORMATTED — $$(echo "$$files" | wc -l | tr -d ' ') file(s), run 'make fmt' (first 20):"; \
@@ -109,7 +110,7 @@ fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
 	elif [ -n "$$diff" ]; then \
 	  echo "fmt-check: golangci-lint fmt did not run cleanly — NO file was checked:"; echo "$$diff" | tail -5; exit 2; \
 	fi; \
-	echo "fmt: clean (linux + darwin)"
+	echo "fmt: clean"
 
 lint: ## Every finding in the module — the burn-down view
 	$(call need-tool,LINT)
@@ -120,9 +121,12 @@ lint: ## Every finding in the module — the burn-down view
 # `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
 # fence-wide it hijacks every `git init` the test suite runs.
 FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
+# GOMEMLIMIT: a change to a widely imported package (testjail, deps) leaves the
+# lint cache cold for its importers; golangci-lint then peaked at 1752 MiB and
+# was OOM-killed in the 2 GiB fence. Capped at 1000MiB it peaked at 1289 MiB.
 lint-new: ## Findings on lines changed since LINT_BASE (origin/main) — the gate view
 	$(call need-tool,LINT)
-	$(FENCE_GIT) $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
+	$(FENCE_GIT) GOMEMLIMIT=1000MiB $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 
 vet: ## go vet the whole module
 	go vet ./...

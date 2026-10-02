@@ -79,10 +79,46 @@
     "global/commands/tokens/SKILL.md": {
       "curated": true
     },
+    "global/commands/tokens/fake-pfm.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/claude.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/codex.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/flight.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/format.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/options.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/pricing.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/report.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/scan.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/lib/timeline.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/pricing.test.mjs": {
+      "curated": true
+    },
     "global/commands/tokens/token-audit.mjs": {
       "curated": true
     },
     "global/commands/tokens/token-audit.test.mjs": {
+      "curated": true
+    },
+    "global/commands/ultimate.md": {
       "curated": true
     },
     "global/skills/sources.json": {

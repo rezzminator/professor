@@ -81,3 +81,23 @@ func TestProbeSearchWithoutAClientWritesAnHTTPOutRecord(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeSearchOfflineRecordsWarn(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	server := httptest.NewServer(http.NotFoundHandler())
+	url := server.URL
+	server.Close()
+	probe := ProbeSearch(ctx, SearchOptions{SearXNGURL: url}, nil)
+	if probe.State != SearchProbeUnreachable || !probe.Warning {
+		t.Fatalf("probe=%+v", probe)
+	}
+	records := httpOutRecords(t, recorder)
+	if len(records) == 0 {
+		t.Fatalf("no requests: %s", recorder.Raw())
+	}
+	for _, record := range records {
+		if record.Level != "WARN" {
+			t.Fatalf("record=%+v", record)
+		}
+	}
+}

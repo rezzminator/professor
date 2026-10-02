@@ -1,6 +1,7 @@
-# General design
+# General — index
 
 | Topic | File | Covers |
 | --- | --- | --- |
-| general-orchestrator | [general-orchestrator.md](general-orchestrator.md) | The family and its manual: why it exists, the boundary against a flight and against one agent, what the caller hands it, the run (survey, cut, dispatch, verify, react, close), the brief, reactions, the 45-call law and the batch size it sets, what it does not do, the return |
-| general-executors | [general-executors.md](general-executors.md) | The two hands, one body: what the inline brief carries, what the body holds, tests, the cap and the handoff, the return, the two tiers from one source |
+| general-orchestrator | [general-orchestrator.md](general-orchestrator.md) | The family, the boundary, input, the run, the brief, reactions, the 45-call law and the batch size, what it does not do, the return, the descriptions, the bench, surfaces, evidence |
+| general-foreman | [general-foreman.md](general-foreman.md) | One problem worked out live: goal, dig, decide, build or brief, prove; the executor's brief and reactions; tier and concurrency; the bench; surfaces; evidence |
+| general-executor | [general-executor.md](general-executor.md) | The family's one hand: why one tier, what the inline brief carries, what the body holds, tests, the cap and the handoff, the return |

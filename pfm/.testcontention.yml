@@ -1,0 +1,37 @@
+# Thresholds of the contention judge (scripts/test-contention.sh): each signal
+# crosses at its value; any measured signal over its line makes a window
+# CONTENTION, none makes it CODE. Flat `key: value`, read by that script alone.
+#
+# Calibrated 2026-10-02 (task 6-a) from five `iso gate all` captures, whole-gate
+# window, evidence in
+# $HOME/.local/state/pfm/flights/professor/test-profiling/measure/6-a/
+# (captures.tsv, signals.tsv, verdict.txt): quiet run.7ajWi0, run.zHEX9G,
+# run.IQUjRu; host-loaded (20 `yes` on the host) run.Eg1cPq, run.T67dRl.
+#
+# tick_deficit_max: (Δvm_busy − Δown) ÷ (Δt × cpus), from the unit.load of
+# gates run on a quiet and on a loaded host: quiet run.VTFyAw -0.8 %,
+# run.gslWAT +0.4 %, run.9rkeil +1.7 %, run.k9ZoeY +2.5 %; host-loaded
+# run.vHOMER -15.5 % (unit suite 123.7 s) and run.ScGbOD -18.1 % (208.9 s)
+# against 38.8 s quiet. The cgroup counts the vCPU time the host withheld,
+# /proc/stat ticks do not; steal time is blind in this VM and is not used.
+# 6-a, whole gate: quiet +1.1, +2.9, +3.0 %; loaded -1.6, -1.2 % (their unit
+# step -3.3, -2.7 %): today's 20-`yes` load no longer reaches -5 %, so it does
+# not mark these loaded gates on its own — spin does. Kept: the midpoints
+# (-0.05 % over 6-a, -1.0 % with run.VTFyAw) are crossed by quiet windows on
+# record (run.VTFyAw -0.8 %, step pfm.vet-darwin of run.7ajWi0 -2.0 %).
+tick_deficit_max: -0.05
+# cpu_psi_share_min: Δcg_psi_cpu_some ÷ Δt. Does not separate host load
+# (quiet 23.7, 15.7, 16.6 %, loaded 7.0, 6.6 %): host load lowers it, the
+# gate's own parallelism raises it. Set to the quiet max 23.7 % × 1.5.
+cpu_psi_share_min: 0.36
+# spin_ratio_min: median spin_us ÷ the least quiet spin_us (10774 µs,
+# run.zHEX9G). Separates: quiet max ×1.52 (run.7ajWi0; ×1.23, ×1.20 the
+# others), loaded min ×1.69 (run.T67dRl; ×1.79 run.Eg1cPq); geometric
+# midpoint ×1.60. Weak: the gap is 11 %, the line 5 % from either side.
+spin_ratio_min: 1.6
+# run_delay_ratio_min: Σ run_delay_s ÷ Σ (user_s + sys_s) of the non-helper
+# test processes. Does not separate host load (quiet 0.96, 0.75, 0.82, loaded
+# 0.80, 0.80). Set to the quiet max 0.96 × 1.5.
+run_delay_ratio_min: 1.4
+# Rows a signal needs inside a window before it is measured.
+min_samples: 4

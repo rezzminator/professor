@@ -8,6 +8,7 @@ import (
 )
 
 func TestWavePlosNberOfflineDeterministic(t *testing.T) {
+	t.Parallel()
 	plos := plosCandidates("10.1371/journal.pcbi.1003285")
 	if len(plos) != 1 ||
 		plos[0].URL != "https://journals.plos.org/pcbi/article/file?id=10.1371%2Fjournal.pcbi.1003285&type=printable" &&
@@ -27,6 +28,7 @@ func TestWavePlosNberOfflineDeterministic(t *testing.T) {
 }
 
 func TestWaveUnpaywallSkipsKeylessRuns(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
@@ -40,6 +42,7 @@ func TestWaveUnpaywallSkipsKeylessRuns(t *testing.T) {
 }
 
 func TestWaveZenodoOnlyMatchingRecordDocumentFiles(t *testing.T) {
+	t.Parallel()
 	payload := `{"hits":{"hits":[
 		{"doi":"10.5281/zenodo.13235113","files":[
 			{"key":"article.pdf","links":{"self":"https://zenodo.org/api/records/13235113/files/article.pdf/content"}},
@@ -57,6 +60,7 @@ func TestWaveZenodoOnlyMatchingRecordDocumentFiles(t *testing.T) {
 }
 
 func TestLegacyOAProviderEdgeShapes(t *testing.T) {
+	t.Parallel()
 	t.Run("Unpaywall keeps alternate OA locations", func(t *testing.T) {
 		client := legacyOAClient(t, func(*http.Request) string {
 			return `{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"https://public.example.test/best.pdf","version":"publishedVersion"},"oa_locations":[{"url_for_pdf":"https://public.example.test/alternate.pdf","version":"acceptedVersion"}]}`

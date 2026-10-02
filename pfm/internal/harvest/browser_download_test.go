@@ -85,6 +85,7 @@ func leftovers(t *testing.T, cache string) []string {
 // the binary cache under the browser-download method. Watched FAILING before
 // the rung (PolicyFile stopped at Wayback: "no rung served the file").
 func TestRetrieveFileBrowserDownloadIsTheLastRung(t *testing.T) {
+	t.Parallel()
 	browser := &downloadingBrowser{body: "%PDF-1.7\nbrowser bytes", contentType: "application/pdf"}
 	h, cache := walledHarvester(t, browser, 0)
 	got := h.Download(context.Background(), "https://203.0.113.10/paper.pdf")
@@ -121,6 +122,7 @@ func TestRetrieveFileBrowserDownloadIsTheLastRung(t *testing.T) {
 // file is a named failure, never an empty success, from its one headless
 // call. Watched FAILING before the rung (the browser was never called).
 func TestRetrieveFileBrowserFailureIsNamed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		err       error
@@ -162,6 +164,7 @@ func TestRetrieveFileBrowserFailureIsNamed(t *testing.T) {
 // whether the worker names the overrun or writes past the cap. Watched FAILING
 // before the rung.
 func TestRetrieveFileBrowserCapHolds(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		browser *downloadingBrowser
@@ -171,7 +174,10 @@ func TestRetrieveFileBrowserCapHolds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, cache := walledHarvester(t, tc.browser, 16)
-			got, err := h.Retrieve(context.Background(), "https://203.0.113.10/big.bin", WantFile, PolicyFile)
+			got, err := h.retrieveWith(
+				context.Background(),
+				retrieveRequest{target: "https://203.0.113.10/big.bin", want: WantFile, policy: PolicyFile},
+			)
 			if !errors.Is(err, errDownloadTooLarge) || !strings.Contains(err.Error(), "16-byte cap") {
 				t.Fatalf("over-cap browser download: err=%v, want errDownloadTooLarge naming the 16-byte cap", err)
 			}

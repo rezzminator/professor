@@ -39,6 +39,7 @@ func (fake *cappedProxyChat) List(_ context.Context, request chat.ListRequest) (
 // from a de-listing. The state names the contradiction instead of collapsing
 // it into either half.
 func TestChatRowStateNamesTheKilledButLiveContradiction(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []compose.Kind{
 		compose.LiveClaude,
 		compose.LiveCodex,
@@ -62,6 +63,7 @@ func TestChatRowStateNamesTheKilledButLiveContradiction(t *testing.T) {
 // a resumable row stays resumable, and a killed row that is NOT live is an
 // ordinary de-listed row with nothing to contradict.
 func TestChatRowStateKeepsEveryOtherVerdict(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		row  compose.Row
@@ -89,6 +91,7 @@ func TestChatRowStateKeepsEveryOtherVerdict(t *testing.T) {
 }
 
 func TestListProjectedKeepsDistinctPrivateTranscriptPaths(t *testing.T) {
+	t.Parallel()
 	rows := []compose.Row{
 		{ID: "first", Path: "/transcripts/first.jsonl", Kind: compose.LiveClaude},
 		{ID: "second", Path: "/transcripts/second.jsonl", Kind: compose.LiveClaude},
@@ -105,6 +108,7 @@ func TestListProjectedKeepsDistinctPrivateTranscriptPaths(t *testing.T) {
 }
 
 func TestCallerForRequestResolvesProxyIdentity(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
@@ -130,6 +134,7 @@ func TestCallerForRequestResolvesProxyIdentity(t *testing.T) {
 }
 
 func TestCallerForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy",
 		Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
@@ -177,6 +182,7 @@ func TestCallerForRequestRejectsConflictingSingleProxySeat(t *testing.T) {
 }
 
 func TestCallerForRequestRejectsConflictingProxySocketPair(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", Kind: compose.LiveClaude,
 		Socket: "cc-seat", PaneID: "%7",
@@ -222,6 +228,7 @@ func TestCallerForRequestRejectsConflictingProxySocketPair(t *testing.T) {
 }
 
 func TestReviewProxySocketPathRejectsForeignNamespace(t *testing.T) {
+	t.Parallel()
 	const socket = "ox-shared"
 	row := compose.Row{
 		SessionName: "shared-session", ID: "opencode-id", Kind: compose.LiveOpenCode,
@@ -341,6 +348,7 @@ func TestCallerForRequestSessionFallbackReachesResolvedSelf(t *testing.T) {
 }
 
 func TestCallerForRequestRejectsInvalidFallbackSocket(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{
 		SessionName: "oc-seat", ID: "opencode-id", Kind: compose.LiveOpenCode,
 		Socket: "../outside", PaneID: "%7",
@@ -359,6 +367,7 @@ func TestCallerForRequestRejectsInvalidFallbackSocket(t *testing.T) {
 }
 
 func TestCallerForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
+	t.Parallel()
 	rows := []compose.Row{
 		{
 			SessionName: "shared-session", Socket: "ox-seat", PaneID: "%1",
@@ -382,6 +391,7 @@ func TestCallerForRequestDisambiguatesSharedSessionByPane(t *testing.T) {
 }
 
 func TestCallerForRequestRejectsSplitProxyConflicts(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{Kind: compose.LiveSplit, Socket: "cc-split"}
 	tests := []struct {
 		name       string
@@ -684,6 +694,7 @@ func TestSplitCallerRequiresReadableExactPaneBinding(t *testing.T) {
 }
 
 func TestCallerForRequestUsesProxyPaneToDisambiguateSession(t *testing.T) {
+	t.Parallel()
 	rows := []compose.Row{
 		{
 			SessionName: "stale-session", Socket: "oc-seat", PaneID: "%1",
@@ -791,6 +802,7 @@ func TestCallerForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
 }
 
 func TestCallerForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		rows   []compose.Row
@@ -827,6 +839,7 @@ func TestCallerForRequestNamesProxyNoMatchAndAmbiguity(t *testing.T) {
 }
 
 func TestCallerForRequestReturnsProxyVersionAndListingErrors(t *testing.T) {
+	t.Parallel()
 	current := &backend{chat: &fakeChatVerbs{err: errors.New("fleet database busy")}}
 	_, err := current.callerForRequest(context.Background(), mcp.Meta{
 		"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "cc-seat"},
@@ -849,6 +862,7 @@ func TestCallerForRequestReturnsProxyVersionAndListingErrors(t *testing.T) {
 }
 
 func TestCallerForRequestMarksMalformedProxyPresent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  any
@@ -896,6 +910,7 @@ func TestCallerForRequestKeepsThreadIDPrecedenceAndEmptyMetadata(t *testing.T) {
 }
 
 func TestProxyIdentityReachesCallerBoundTools(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",

@@ -25,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
@@ -140,7 +141,7 @@ func writeManagerFakes(t *testing.T, systemctlBody, launchctlBody string) (binDi
 	logPath = filepath.Join(t.TempDir(), "manager-calls.log")
 	write := func(name, body string) {
 		script := "#!/bin/sh\necho \"" + name + " $*\" >> " + logPath + "\n" + body
-		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
+		if err := testjail.WriteExecutable(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -251,28 +252,19 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	})
 }
 
-func TestInstallUsesOnlyTheNewSurface(t *testing.T) {
-	for _, retired := range []string{"-" + "-apply", "-" + "-uninstall", "-" + "-dry-run"} {
-		t.Run(retired, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
-			var stdout, stderr bytes.Buffer
-			if code := runInstall([]string{retired}, &stdout, &stderr); code != 2 {
-				t.Fatalf(
-					"runInstall(%q) code=%d stdout=%q stderr=%q, want unknown-flag usage",
-					retired,
-					code,
-					stdout.String(),
-					stderr.String(),
-				)
-			}
-			if !strings.Contains(
-				stderr.String(),
-				"usage: pfm install [--yes] [--check] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
-			) {
-				t.Fatalf("runInstall(%q) stderr=%q, want new usage", retired, stderr.String())
-			}
-		})
+func TestInstallUnknownFlagPrintsTheUsage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var stdout, stderr bytes.Buffer
+	if code := runInstall([]string{"--no-such-flag"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("runInstall() code=%d stdout=%q stderr=%q, want unknown-flag usage", code,
+			stdout.String(), stderr.String())
+	}
+	if !strings.Contains(
+		stderr.String(),
+		"usage: pfm install [--yes] [--check] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+	) {
+		t.Fatalf("runInstall() stderr=%q, want usage", stderr.String())
 	}
 }
 

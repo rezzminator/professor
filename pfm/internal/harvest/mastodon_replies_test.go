@@ -13,6 +13,7 @@ import (
 // served counts as loaded, and one it never served is named "remote, not
 // fetched" — another instance is never asked.
 func TestMastodonRepliesCollectionReachesPastTheContext(t *testing.T) {
+	t.Parallel()
 	site := mastoSite(t)
 	collection := "social.example/@user-0/" + mastoID + "/replies"
 	local := "social.example/api/v1/statuses/117117378316307585"

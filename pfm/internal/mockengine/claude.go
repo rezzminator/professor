@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -30,10 +34,13 @@ type claudeInvocation struct {
 	outputFormat         string
 	model, effort        string
 	settings             string
+	mcpConfig            string
 	systemPrompt         string
 	systemPromptFile     string
 	sessionID            string
+	resumeID             string
 	resumed              bool
+	fork                 bool
 	name                 string
 	jsonSchema           string
 	noSessionPersistence bool
@@ -41,12 +48,18 @@ type claudeInvocation struct {
 	subcommand           string
 }
 
+const (
+	flagMCPConfig   = "--mcp-config"
+	flagSettings    = "--settings"
+	flagForkSession = "--fork-session"
+)
+
 var (
 	claudeValueFlags = map[string]bool{
-		"--settings": true, flagModel: true, "--effort": true, "--system-prompt-file": true, "--system-prompt": true,
+		flagSettings: true, flagModel: true, "--effort": true, "--system-prompt-file": true, "--system-prompt": true,
 		"--append-system-prompt": true, "--session-id": true, "--name": true, "--output-format": true,
 		"--json-schema": true, "--tools": true, "--setting-sources": true, "--permission-mode": true,
-		"--add-dir": true, "--mcp-config": true, "--agent": true, "--input-format": true,
+		"--add-dir": true, flagMCPConfig: true, "--agent": true, "--input-format": true,
 	}
 	claudeResumeFlags = map[string]bool{"--resume": true, "-r": true}
 )
@@ -87,8 +100,10 @@ func parseClaudeArgs(args []string) claudeInvocation {
 			call.model = value
 		case "--effort":
 			call.effort = value
-		case "--settings":
+		case flagSettings:
 			call.settings = value
+		case flagMCPConfig:
+			call.mcpConfig = value
 		case "--system-prompt":
 			call.systemPrompt = value
 		case "--system-prompt-file":
@@ -98,8 +113,10 @@ func parseClaudeArgs(args []string) claudeInvocation {
 		case "--resume", "-r":
 			call.resumed = true
 			if value != "" {
-				call.sessionID = strings.TrimSuffix(filepath.Base(value), ".jsonl")
+				call.resumeID = strings.TrimSuffix(filepath.Base(value), ".jsonl")
 			}
+		case flagForkSession:
+			call.fork = true
 		case "--name":
 			call.name = value
 		case "--json-schema":
@@ -130,22 +147,41 @@ type claudeSession struct {
 }
 
 func newClaudeSession(proc *process, call claudeInvocation) (*claudeSession, error) {
-	configDir := proc.env("CLAUDE_CONFIG_DIR")
-	if configDir == "" {
-		configDir = filepath.Join(proc.env("HOME"), ".claude")
-	}
-	hooks, statusCmd, err := loadHookDocument(filepath.Join(configDir, "settings.json"))
+	configDir := claudeConfigDir(proc)
+	hooks, statusCmd, err := loadClaudeHooks(configDir, proc.cwd, call.settings)
 	if err != nil {
 		return nil, err
 	}
 	session := &claudeSession{
 		proc: proc, call: call, configDir: configDir, hooks: hooks, statusCmd: statusCmd,
-		model: proc.script.Model, title: call.name, environ: os.Environ(),
+		model: proc.script.Model, title: call.name, environ: append(os.Environ(), "CLAUDE_PROJECT_DIR="+proc.cwd),
+	}
+	if call.resumed {
+		parentID := call.resumeID
+		if parentID == "" {
+			parentID = call.sessionID
+		}
+		if !call.fork && parentID != "" {
+			session.call.sessionID = parentID
+			call.sessionID = parentID
+		}
+		if parentID != "" && !proc.script.NoTranscript {
+			parent := filepath.Join(configDir, "projects", claudeProjectSlug(proc.cwd), parentID+".jsonl")
+			if session.title == "" {
+				session.title, err = claudeTranscriptTitle(parent)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	if call.model != "" {
 		session.model = call.model
 	}
 	session.sessionID = call.sessionID
+	if call.resumed && call.fork && session.sessionID == "" {
+		session.sessionID = newUUID()
+	}
 	if session.sessionID == "" {
 		session.sessionID = proc.script.SessionID
 	}
@@ -153,6 +189,18 @@ func newClaudeSession(proc *process, call claudeInvocation) (*claudeSession, err
 		session.sessionID = newUUID()
 	}
 	session.transcript = filepath.Join(configDir, "projects", claudeProjectSlug(proc.cwd), session.sessionID+".jsonl")
+	if call.resumed && call.fork && !proc.script.NoTranscript {
+		parentID := call.resumeID
+		if parentID == "" {
+			parentID = call.sessionID
+		}
+		if parentID != "" {
+			parent := filepath.Join(configDir, "projects", claudeProjectSlug(proc.cwd), parentID+".jsonl")
+			if err := seedClaudeFork(parent, session.transcript, session.sessionID); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return session, nil
 }
 
@@ -173,33 +221,6 @@ func serveClaude(proc *process) int {
 		return session.headless()
 	}
 	return runPane(proc, session, call.prompt, call.resumed)
-}
-
-// hookPayload is the envelope every Claude Code hook receives, with the
-// per-event fields the handler table reads (map § 2a): prompt, tool_name and
-// tool_input, source, reason.
-type hookPayload struct {
-	SessionID      string          `json:"session_id"`
-	TranscriptPath string          `json:"transcript_path"`
-	CWD            string          `json:"cwd"`
-	PermissionMode string          `json:"permission_mode"`
-	Event          string          `json:"hook_event_name"`
-	Source         string          `json:"source,omitempty"`
-	Reason         string          `json:"reason,omitempty"`
-	Prompt         string          `json:"prompt,omitempty"`
-	ToolName       string          `json:"tool_name,omitempty"`
-	ToolInput      json.RawMessage `json:"tool_input,omitempty"`
-}
-
-func (session *claudeSession) payload(event string) hookPayload {
-	return hookPayload{
-		SessionID: session.sessionID, TranscriptPath: session.transcript, CWD: session.proc.cwd,
-		PermissionMode: "bypassPermissions", Event: event,
-	}
-}
-
-func (session *claudeSession) fire(event, subject string, payload hookPayload) ([]hookAnswer, error) {
-	return session.hooks.fire(session.proc.ctx, event, subject, payload, session.proc.cwd, session.environ)
 }
 
 func (session *claudeSession) composerGlyph() string { return "❯" }
@@ -225,17 +246,19 @@ func (session *claudeSession) start(resumed bool) error {
 // begin opens (or reopens) the session: the seat bindings, the title record,
 // then SessionStart with its additionalContext folded into the transcript.
 func (session *claudeSession) begin(source string) error {
-	if err := touchFile(session.transcript); err != nil {
-		return err
+	if !session.proc.script.NoTranscript {
+		if err := touchFile(session.transcript); err != nil {
+			return err
+		}
 	}
 	seat, err := bindSeat(session.proc, engineClaude, session.transcript)
 	if err != nil {
 		return err
 	}
 	session.seat = seat
-	if session.title != "" && source == sourceStartup {
+	if session.title != "" && (source == sourceStartup || session.call.fork) {
 		if err := session.write(
-			claudeRecord{Type: "custom-title", CustomTitle: session.title, SessionID: session.sessionID},
+			claudeRecord{Type: claudeCustomTitle, CustomTitle: session.title, SessionID: session.sessionID},
 		); err != nil {
 			return err
 		}
@@ -254,35 +277,6 @@ func (session *claudeSession) begin(source string) error {
 	return nil
 }
 
-// foldContext writes a hook's additionalContext the way Claude Code carries
-// it: a meta user record every reader skips (internal/transcript/meta.go:150,
-// internal/naming.IsJunkPrompt on the <system-reminder> prefix).
-func (session *claudeSession) foldContext(answer *hookAnswer) error {
-	context := answer.Specific.AdditionalContext
-	if context == "" {
-		return nil
-	}
-	return session.write(session.userRecord("<system-reminder>\n"+context+"\n</system-reminder>", true))
-}
-
-func (session *claudeSession) prompt(text string) (string, error) {
-	payload := session.payload(hookUserPromptSubmit)
-	payload.Prompt = text
-	answers, err := session.fire(hookUserPromptSubmit, "", payload)
-	if err != nil {
-		return "", err
-	}
-	for index := range answers {
-		if blocked, reason := answers[index].blocks(); blocked {
-			return reason, nil
-		}
-		if err := session.foldContext(&answers[index]); err != nil {
-			return "", err
-		}
-	}
-	return "", nil
-}
-
 func (session *claudeSession) recordUser(text string) error {
 	return session.write(session.userRecord(text, false))
 }
@@ -299,11 +293,13 @@ func (session *claudeSession) tool(step Step) (string, error) {
 	}
 	payload := session.payload(hookPreToolUse)
 	payload.ToolName, payload.ToolInput = step.Tool, input
+	use := contentPart{Type: "tool_use", ID: "toolu_" + newUUID()[:8], Name: step.Tool, Input: input}
+	payload.ToolUseID = use.ID
 	answers, err := session.fire(hookPreToolUse, step.Tool, payload)
 	if err != nil {
 		return "", err
 	}
-	use := contentPart{Type: "tool_use", ID: "toolu_" + newUUID()[:8], Name: step.Tool, Input: input}
+	preReturned := time.Now()
 	if err := session.write(
 		session.assistantRecord([]contentPart{use}, session.proc.script.Tokens, false),
 	); err != nil {
@@ -311,10 +307,17 @@ func (session *claudeSession) tool(step Step) (string, error) {
 	}
 	result := contentPart{Type: "tool_result", ToolUseID: use.ID, Content: "done"}
 	denied := ""
+	deniedFound := false
 	for index := range answers {
-		if refused, reason := answers[index].denies(); refused {
+		if refused, reason := answers[index].denies(); refused && !deniedFound {
+			deniedFound = true
 			denied = reason
 			result.Content, result.IsError = reason, true
+		}
+	}
+	if !deniedFound {
+		if err := session.postToolUse(step.Tool, input, use.ID, time.Since(preReturned)); err != nil {
+			return "", err
 		}
 	}
 	record := claudeRecord{
@@ -353,7 +356,7 @@ func (session *claudeSession) compact(step Step) error {
 
 func (session *claudeSession) rename(name string) error {
 	session.title = name
-	return session.write(claudeRecord{Type: "custom-title", CustomTitle: name, SessionID: session.sessionID})
+	return session.write(claudeRecord{Type: claudeCustomTitle, CustomTitle: name, SessionID: session.sessionID})
 }
 
 // background starts a sidechain. Its records carry isSidechain and live in
@@ -376,8 +379,10 @@ func (session *claudeSession) background(step Step) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("encode sidechain record: %w", err)
 		}
-		if err := appendLine(sidechain, encoded); err != nil {
-			return "", err
+		if !session.proc.script.NoTranscript {
+			if err := appendLine(sidechain, encoded); err != nil {
+				return "", err
+			}
 		}
 	}
 	status := step.Status
@@ -387,9 +392,93 @@ func (session *claudeSession) background(step Step) (string, error) {
 	return "❯ ● " + step.Name + "  " + status + " (background)", nil
 }
 
-func (session *claudeSession) mcp(Step) error {
-	return fmt.Errorf("claude MCP client calls are not scripted here: pfm registers its servers for Claude " +
-		"through the launch registry (internal/claudelaunch/render.go) and no pfm reader consumes the handshake")
+func (session *claudeSession) mcp(step Step) error {
+	if step.Tool == "" {
+		return fmt.Errorf("claude MCP client calls are not scripted here: pfm registers its servers for Claude " +
+			"through the launch registry (internal/claudelaunch/render.go) and no pfm reader consumes the handshake")
+	}
+	input := step.Input
+	if len(input) == 0 {
+		input = json.RawMessage(`{}`)
+	}
+	use := contentPart{Type: "tool_use", ID: "toolu_" + newUUID()[:8], Name: step.Tool, Input: input}
+	if err := session.write(
+		session.assistantRecord([]contentPart{use}, session.proc.script.Tokens, false),
+	); err != nil {
+		return err
+	}
+	answer, callErr := session.callMCP(step, input)
+	if callErr != nil {
+		answer = &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: callErr.Error()}}}
+	}
+	encoded, err := json.Marshal(answer)
+	if err != nil {
+		return fmt.Errorf("encode MCP %s result: %w", step.Tool, err)
+	}
+	if err := session.proc.recorder.write("mcp-call-"+step.Tool+".json", string(encoded)+"\n"); err != nil {
+		return err
+	}
+	result := contentPart{Type: "tool_result", ToolUseID: use.ID, Content: string(encoded), IsError: answer.IsError}
+	return session.write(claudeRecord{
+		Type: roleUser, SessionID: session.sessionID, Timestamp: stamp(time.Now()), CWD: session.proc.cwd,
+		Message: &claudeMessage{Role: roleUser, Content: []contentPart{result}},
+	})
+}
+
+func (session *claudeSession) callMCP(step Step, input json.RawMessage) (*mcp.CallToolResult, error) {
+	name := step.Server
+	if name == "" {
+		name = pfmconfig.MCPServerProfessor
+	}
+	config := session.call.mcpConfig
+	content := []byte(config)
+	if !strings.HasPrefix(strings.TrimSpace(config), "{") {
+		path := config
+		if !filepath.IsAbs(path) && path != "" {
+			path = filepath.Join(session.proc.cwd, path)
+		}
+		var err error
+		content, err = os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s %q: %w", flagMCPConfig, path, err)
+		}
+	}
+	var document struct {
+		Servers map[string]struct {
+			Type    string   `json:"type"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(content, &document); err != nil {
+		return nil, fmt.Errorf("decode %s %q: %w", flagMCPConfig, config, err)
+	}
+	server, present := document.Servers[name]
+	if !present || server.Command == "" || (server.Type != "" && server.Type != "stdio") {
+		return nil, fmt.Errorf("%s %q has no stdio mcpServers.%s command", flagMCPConfig, config, name)
+	}
+	bounded, cancel := mcpBoundedContext(session.proc.ctx)
+	defer cancel()
+	command := exec.CommandContext(bounded, server.Command, server.Args...)
+	command.Dir = session.proc.cwd
+	command.Env = append(append([]string(nil), session.environ...),
+		"TMUX="+session.proc.env("TMUX"), "TMUX_PANE="+session.proc.env("TMUX_PANE"),
+		"CLAUDE_CODE_SESSION_ID="+session.sessionID)
+	client := mcp.NewClient(&mcp.Implementation{Name: "mock-engine", Version: session.proc.script.Version}, nil)
+	connection, err := client.Connect(bounded, &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("initialize MCP %s with %s: %w", name, server.Command, err)
+	}
+	defer func() {
+		if err := connection.Close(); err != nil {
+			warn(session.proc.stderr, "close MCP %s session: %v", name, err)
+		}
+	}()
+	answer, err := connection.CallTool(bounded, &mcp.CallToolParams{Name: step.Tool, Arguments: input})
+	if err != nil {
+		return nil, fmt.Errorf("tools/call %s on MCP %s: %w", step.Tool, name, err)
+	}
+	return answer, nil
 }
 
 func (session *claudeSession) clear() error {
@@ -420,6 +509,9 @@ func (session *claudeSession) finish(reason string) error {
 // statusLine feeds the statusLine command the struct
 // internal/statusline/render.go:41-84 decodes.
 func (session *claudeSession) statusLine(usage Tokens) (string, error) {
+	if session.proc.script.Quiet {
+		return "", nil
+	}
 	window := usage.ContextWindow
 	if window == 0 {
 		window = session.proc.script.Tokens.ContextWindow
@@ -514,18 +606,19 @@ func (session *claudeSession) headless() int {
 		prompt = strings.TrimSpace(string(content))
 	}
 	started := time.Now()
-	step := proc.script.next()
+	running := proc.script.forPrompt(prompt)
+	step := running.next()
 	for !step.terminal() {
 		if step.sideEffecting() {
 			warn(proc.stderr, "-p fast-forwards past the scripted %s step — no hook fires, nothing is recorded "+
 				"for it in headless mode", step.Type)
 		}
-		step = proc.script.next()
+		step = running.next()
 	}
 	if step.Type == StepCrash {
 		return step.ExitCode
 	}
-	reply, busyMS, usage := proc.script.turnReply(step)
+	reply, busyMS, usage := running.turnReply(step)
 	if !sleepOrCancel(proc.ctx, time.Duration(busyMS)*time.Millisecond) {
 		return ExitUsage
 	}
@@ -537,6 +630,11 @@ func (session *claudeSession) headless() int {
 		if err := session.recordAssistant(reply, usage); err != nil {
 			warn(proc.stderr, "%v", err)
 			return ExitUsage
+		}
+	}
+	if step.Type == StepTurn {
+		if err := session.stop(); err != nil {
+			warn(proc.stderr, "Stop: %v", err)
 		}
 	}
 	if session.call.outputFormat != "json" {
@@ -561,7 +659,7 @@ func (session *claudeSession) headless() int {
 			Input: usage.Input, Output: usage.Output, CacheRead: usage.CacheRead, CacheCreation: usage.CacheCreation,
 		}},
 	}
-	if session.call.jsonSchema != "" && len(step.Structured) > 0 {
+	if len(step.Structured) > 0 && (session.call.jsonSchema != "" || running != proc.script) {
 		envelope.StructuredOutput = step.Structured
 	}
 	encoded, err := json.Marshal(envelope)
@@ -678,6 +776,9 @@ func (session *claudeSession) assistantRecord(parts []contentPart, usage Tokens,
 }
 
 func (session *claudeSession) write(record claudeRecord) error {
+	if session.proc.script.NoTranscript {
+		return nil
+	}
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode transcript record: %w", err)

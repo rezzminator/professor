@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -48,6 +49,8 @@ var startReloadWorker = func(argv []string, opts deps.StartOptions) error {
 	return process.Release()
 }
 
+var displayReloadWorkerFailure = reloadCommandTmux{}.Display
+
 func runChatReloadWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,
@@ -55,6 +58,7 @@ func runChatReloadWithRuntime(
 	env paths.Env,
 ) int {
 	env = defaultEnv(env)
+	args = normalizeReloadArgs(args)
 	if len(args) == 1 && (args[0] == helpFlag || args[0] == "-h") {
 		fmt.Fprintln(stdout, reload.Usage)
 		return 0
@@ -124,13 +128,57 @@ func runChatReloadWorker(args []string, stdout, stderr io.Writer) int {
 	return runChatReloadWorkerWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
 }
 
+func announceReloadWorkerFailure(
+	args []string,
+	workerLog string,
+	display func(context.Context, string, string, string) error,
+	stderr io.Writer,
+) {
+	sock, pane := reloadSocketArgument(args), reloadPaneArgument(args)
+	if sock == "" || pane == "" {
+		fmt.Fprintln(stderr, "pfm chat reload: cannot announce worker failure: socket or pane missing")
+		return
+	}
+	socketPath, err := paths.SocketPath(sock)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: resolve worker failure pane: %v\n", err)
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(workerLog), "\n")
+	message := lines[len(lines)-1]
+	if err := display(context.Background(), socketPath, pane, message); err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: display worker failure on %s %s: %v\n", sock, pane, err)
+	}
+}
+
+func reloadWorkerConfigFailure(args []string, err error, stderr io.Writer) int {
+	line := fmt.Sprintf("pfm: config: %v", err)
+	fmt.Fprintln(stderr, line)
+	announceReloadWorkerFailure(normalizeReloadArgs(args), line, displayReloadWorkerFailure, stderr)
+	return 1
+}
+
 func runChatReloadWorkerWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 	env paths.Env,
-) int {
+) (code int) {
+	var workerLog bytes.Buffer
+	paneTold := false
+	workerStderr := io.MultiWriter(stderr, &workerLog)
+	stderr = workerStderr
+	defer func() {
+		if code == 0 || paneTold {
+			return
+		}
+		if workerLog.Len() == 0 {
+			fmt.Fprintf(workerStderr, "pfm chat reload: detached worker failed (exit %d)\n", code)
+		}
+		announceReloadWorkerFailure(args, workerLog.String(), displayReloadWorkerFailure, stderr)
+	}()
 	env = defaultEnv(env)
+	args = normalizeReloadArgs(args)
 	if err := validateReloadArgs(args); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
@@ -193,7 +241,7 @@ func runChatReloadWorkerWithRuntime(
 				return 2
 			}
 			index++
-			if _, valid := positiveAccount(args[index]); !valid {
+			if !positiveAccount(args[index]) {
 				fmt.Fprintf(stderr, "pfm chat reload: --account takes an account NUMBER, not %q\n", args[index])
 				return 2
 			}
@@ -203,7 +251,7 @@ func runChatReloadWorkerWithRuntime(
 			}
 			account = args[index]
 		default:
-			if _, valid := positiveAccount(args[index]); !valid {
+			if !positiveAccount(args[index]) {
 				fmt.Fprintf(stderr, "pfm chat reload: %s\n", reloadArgumentHint(args[index]))
 				return 2
 			}
@@ -290,7 +338,8 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	if account == "" {
+	kept := account == ""
+	if kept {
 		account = strconv.Itoa(birthAccount)
 		fmt.Fprintf(stdout, "pfm chat reload: no account given — keeping the chat's current account %s\n", account)
 	}
@@ -331,7 +380,10 @@ func runChatReloadWorkerWithRuntime(
 			Engine:        engine,
 			SocketPath:    socketPath,
 			Pane:          pane,
-			PanePID:       paneState.PID,
+			New:           newSeat,
+			AccountGiven:  !kept,
+			CacheGiven:    cacheOverride != "",
+			LeftBehind:    leftBehind,
 			SessionID:     id,
 			Transcript:    transcript,
 			CWD:           cwd,
@@ -355,17 +407,14 @@ func runChatReloadWorkerWithRuntime(
 		stderr,
 	)
 	if err != nil {
+		paneTold = reload.PaneTold(err)
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
+	leftBehind = result.LeftBehind
 	if result.New {
 		if newSeat {
-			fmt.Fprintf(
-				stdout,
-				"pfm chat reload: rebooted FRESH as requested: %s %s\n",
-				filepath.Base(socketPath),
-				pane,
-			)
+			fmt.Fprintln(stdout, "pfm chat reload: rebooted FRESH as requested:", filepath.Base(socketPath), pane)
 		} else {
 			fmt.Fprintln(stdout, "pfm chat reload: no transcript yet — rebooted FRESH")
 		}
@@ -373,15 +422,20 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stdout, "pfm chat reload: respawned in place: %s %s\n", filepath.Base(socketPath), pane)
 	}
 	if newSeat && hide {
-		// Only now: the old chat has /exited and the reborn one owns the
-		// pane. A reload that failed returned above, so a live chat is never
-		// hidden by the command that failed to replace it.
+		// Hide the session Run says this pane left behind.
 		if leftBehind == "" {
 			fmt.Fprintln(
 				stdout,
 				"pfm chat reload: --hide — nothing to hide, the conversation left behind had no transcript yet",
 			)
 			return 0
+		}
+		if engine == pfmengine.Codex {
+			transcript, err = reload.SessionTranscript(resolved, runtime.Config, engine, leftBehind)
+			if err != nil {
+				fmt.Fprintf(stderr, "pfm chat reload: find conversation to hide: %v\n", err)
+				return 1
+			}
 		}
 		hidden, err := hideReloadedConversation(context.Background(), runtime, engine, leftBehind, transcript, stderr)
 		if err != nil {
@@ -422,68 +476,6 @@ func reloadPaneArgument(args []string) string {
 	return ""
 }
 
-func validateReloadArgs(args []string) error {
-	account := false
-	newSeat := false
-	hide := false
-	for index := 0; index < len(args); index++ {
-		switch args[index] {
-		case reloadNewFlag:
-			if newSeat {
-				return errors.New("new specified twice")
-			}
-			newSeat = true
-		case reloadHideFlag:
-			if hide {
-				return errors.New("hide specified twice")
-			}
-			hide = true
-		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadModelFlag, reloadEffortFlag:
-			// --pane is worker-only plumbing (see reloadTarget): accepted here
-			// because this same validator runs on the worker's expanded argv,
-			// but it is deliberately absent from reload.Usage and
-			// reloadArgumentHint — no caller-facing doc ever tells a human or
-			// a model to pass it.
-			if index+1 >= len(args) {
-				return fmt.Errorf("%s needs a value", args[index])
-			}
-			index++
-		case reloadAccountFlag:
-			if index+1 >= len(args) {
-				return errors.New("--account needs an account number, as in --account 2")
-			}
-			if _, valid := positiveAccount(args[index+1]); !valid {
-				return fmt.Errorf(
-					"--account takes an account NUMBER, not %q — see `pfm config show` for the configured accounts",
-					args[index+1],
-				)
-			}
-			if account {
-				return errors.New("account specified twice")
-			}
-			account = true
-			index++
-		case reloadCacheFlag:
-			if index+1 >= len(args) || (args[index+1] != "1h" && args[index+1] != "5m") {
-				return errors.New("--cache must be 1h|5m")
-			}
-			index++
-		default:
-			if _, valid := positiveAccount(args[index]); !valid {
-				return errors.New(reloadArgumentHint(args[index]))
-			}
-			if account {
-				return errors.New("account specified twice")
-			}
-			account = true
-		}
-	}
-	if hide && !newSeat {
-		return errors.New("--hide needs --new — a reload that resumes the same conversation cannot hide it")
-	}
-	return nil
-}
-
 // flattenThenLine collapses embedded newlines to spaces. deliverThen types
 // request.Then into the reborn pane with a single literal tmux send-keys -l
 // call (reload.go); a raw newline byte in that stream lands in the pane
@@ -494,68 +486,9 @@ func flattenThenLine(text string) string {
 	return strings.NewReplacer("\n", " ", "\r", " ").Replace(text)
 }
 
-// reloadArgumentHint turns a rejected word into an error the CALLER can act on
-// without re-reading the usage line and guessing again.
-//
-// The usage string alone was not enough: a caller told "reload the cache off"
-// sent `reload cache off`, got the bare usage back, and had to work out on its
-// own that "cache" meant --cache. An error that only restates the grammar makes
-// the reader do the mapping the command already knows how to do.
-func reloadArgumentHint(argument string) string {
-	suggestion := ""
-	switch strings.ToLower(strings.TrimPrefix(argument, "--")) {
-	case "cache", "1h", "ttl", "prompt-cache":
-		suggestion = "did you mean --cache 1h|5m?"
-	case "account", "acct", "seat", "profile":
-		suggestion = "did you mean --account N?"
-	case "fresh", newAction, "restart", "reset":
-		suggestion = "did you mean --new?"
-	case "hide", "kill", "close", "forget":
-		suggestion = "did you mean --hide? (beside --new: hides the conversation left behind)"
-	case thenAction, "prompt", "continue":
-		suggestion = "did you mean --then \"prompt\"?"
-	case "sock", "socket", chatCommand, "target":
-		suggestion = "did you mean --sock socket? (omit it and the calling chat is detected automatically)"
-	case "model":
-		suggestion = "did you mean --model NAME?"
-	case "effort", "level", "reasoning", "thinking":
-		suggestion = "did you mean --effort LEVEL?"
-	}
-	if suggestion == "" {
-		suggestion = "an account is passed as --account N, and every other setting has its own flag"
-	}
-	return fmt.Sprintf("%q is not a reload argument — %s\n%s", argument, suggestion, reload.Usage)
-}
-
-func positiveAccount(value string) (int, bool) {
+func positiveAccount(value string) bool {
 	account, err := strconv.Atoi(value)
-	return account, err == nil && account > 0
-}
-
-func reloadRequestedAccount(args []string) int {
-	for index := 0; index < len(args); index++ {
-		switch args[index] {
-		case reloadNewFlag, reloadHideFlag:
-			continue
-		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadCacheFlag, reloadModelFlag, reloadEffortFlag:
-			index++
-			continue
-		case reloadAccountFlag:
-			if index+1 < len(args) {
-				if account, valid := positiveAccount(args[index+1]); valid {
-					return account
-				}
-			}
-			index++
-			continue
-		}
-		// The bare positional stays accepted for callers already using it;
-		// only the documented spelling changed.
-		if account, valid := positiveAccount(args[index]); valid {
-			return account
-		}
-	}
-	return 0
+	return err == nil && account > 0
 }
 
 func reloadDurationEnv(name string, fallbackMS int, env paths.Env) time.Duration {

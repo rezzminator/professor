@@ -10,7 +10,7 @@ One deliverable, written by `flights-speccer` and never by you: `$HOME/.local/st
 
 ## S1 — Walk the code
 
-Read the child `CLAUDE.md` of every project the tasks touch (the root one you already hold): the specs must stay inside their rules, and S2 must not re-ask what they settle. Then one message of probes, one per area the tasks touch: `Agent(subagent_type: "tracer")` for a question (who feeds X, where Y ends), `Agent(subagent_type: "mapper")` for a whole area. Each returns a map of about one page with no file content quoted: where the area lives, who writes and reads it, which files would change, where the codebase already solves a similar problem, how the area is checked, and every referent the tasks name that does not exist. End your message after spawning; the maps arrive on their own. Probes retrieve; you judge and ask.
+Read the child `CLAUDE.md` of every project the tasks touch (the root one you already hold): the specs must stay inside their rules, and S2 must not re-ask what they settle. Then one message of probes, one per area the tasks touch: `Agent(subagent_type: "tracer")`, its numbered questions covering the area (who feeds X, where Y ends). Each returns a map of about one page with no file content quoted: where the area lives, who writes and reads it, which files would change, where the codebase already solves a similar problem, how the area is checked, and every referent the tasks name that does not exist. End your message after spawning; the maps arrive on their own. Probes retrieve; you judge and ask.
 
 A referent that does not exist, an edit two tasks would both make to one target, or a dependency nobody can order is a question for S2, never a silent fix.
 
@@ -33,7 +33,7 @@ Recommended: {your answer and the one reason}
 
 Each answer reshapes the tree: settled decisions push the frontier outward. Recompute it and ask the next round. A task the user drops or defers is a ruling like any other.
 
-Facts are yours to find, never the user's: a question that needs a fact from the code goes to a probe (`tracer` for a question, `mapper` for a whole area), and only the questions downstream of a running probe wait for it. Decisions are the user's: put each one and wait.
+Facts are yours to find, never the user's: a question that needs a fact from the code goes to a `tracer` probe, and only the questions downstream of a running probe wait for it. Decisions are the user's: put each one and wait.
 
 The grill ends when the frontier is empty: every branch visited, nothing silently assumed. Restate the rulings as one numbered list and hand off only once the user confirms it is the shared understanding.
 

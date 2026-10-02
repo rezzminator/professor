@@ -14,6 +14,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestUpdateRefusesDirtyWorktree(t *testing.T) {
@@ -90,7 +91,7 @@ func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -105,7 +106,7 @@ func stubUpdatePipeline(t *testing.T, runtime pfmconfig.Runtime) {
 		updateRunDoctor = oldDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -240,10 +241,10 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(unowned, []byte("unowned\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(unowned, []byte("unowned\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -268,7 +269,7 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		if version != "v0.10.0" {
 			t.Fatalf("build version=%q, want selected release v0.10.0", version)
 		}
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	installCalls, doctorCalls := 0, 0
 	updateApplyInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ pfmconfig.Runtime, skipHarvest bool, _, _ io.Writer) error {
@@ -368,7 +369,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -388,7 +389,7 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		updateRollbackDoctor = oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	managedMutation := filepath.Join(runtime.Paths.Home, ".local", "share", "pfm", "install", "new-asset")
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
@@ -478,7 +479,7 @@ func updateRollbackTestRuntime(t *testing.T) (runtime pfmconfig.Runtime, repo st
 	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(canonical, []byte("old\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("old\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := installer.RecordCanonicalBinary(runtime.Paths.Home); err != nil {
@@ -506,7 +507,7 @@ func TestUpdateProceedsWhenTheCandidateDoctorHasOnlyStandingWarnings(t *testing.
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -559,7 +560,7 @@ func TestUpdateRollsBackWhenTheCandidateDoctorReportsAFailure(t *testing.T) {
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -599,7 +600,7 @@ func TestUpdateNamesNewWarningRowsIntroducedByTheCandidate(t *testing.T) {
 		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
@@ -646,7 +647,7 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")
@@ -700,7 +701,7 @@ func TestUpdateRollbackDoctorFromAnOlderBinaryIsNamedNotClaimedAsResidue(t *test
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return errors.New("injected install failure")

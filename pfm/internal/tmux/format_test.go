@@ -67,12 +67,3 @@ func TestFormatSplitDegenerateRecordsAndSplitCapAreStable(t *testing.T) {
 		})
 	}
 }
-
-func TestFormatJoinRoundTripsThroughFormatSplit(t *testing.T) {
-	want := []string{"#{session_name}", "#{pane_id}", "#{pane_current_path}", "#{pane_pid}"}
-	line := FormatJoin(want...)
-
-	if got := FormatSplit(line, len(want)); !reflect.DeepEqual(got, want) {
-		t.Fatalf("FormatSplit(FormatJoin(fields...), %d) = %#v, want %#v", len(want), got, want)
-	}
-}

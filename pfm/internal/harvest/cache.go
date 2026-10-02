@@ -35,8 +35,9 @@ func newCache(root string, ttl time.Duration, clocks ...clock.Clock) *Cache {
 }
 
 func defaultHarvestCacheDir() (string, error) {
-	// The default cache lives in exactly ONE place: <home>/.professor/.cache
-	// (beside pfm's other home state such as ~/.professor/agents). It must
+	// The default cache lives in exactly ONE place: paths.HarvesterCacheDir,
+	// <home>/.professor/.harvester-cache (beside pfm's other home state such as
+	// ~/.professor/agents; `pfm install` moves a pre-rename .cache there). It must
 	// never follow the process's working directory — the cwd-walking default
 	// this replaces grew a stray .cache in whatever project a chat happened
 	// to fetch from. A home that cannot be resolved is an error, never a
@@ -45,12 +46,12 @@ func defaultHarvestCacheDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve harvester cache home: %w", err)
 	}
-	return filepath.Join(home, ".professor", ".cache"), nil
+	return paths.HarvesterCacheDir(home), nil
 }
 
 // CacheRoot is the cache directory New uses: the configured dir
 // (harvester.config.json cache.dir) when set, else the one default
-// <home>/.professor/.cache. Doctor and the MCP adapter resolve through it so
+// <home>/.professor/.harvester-cache. Doctor and the MCP adapter resolve through it so
 // every consumer agrees on one directory.
 func CacheRoot(configured string) (string, error) {
 	if strings.TrimSpace(configured) != "" {

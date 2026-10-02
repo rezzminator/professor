@@ -4,7 +4,7 @@
 # restart on a replaced binary), the one stdio verb `pfm mcp serve --stdio`, the
 # `pfm mcp` CLI, then every tool of both families driven by a DIRECT MCP client
 # (JSON-RPC over stdio and over the daemon's streamable HTTP) against real
-# targets — this lane's own live chat and a small public document — and last
+# targets — this lane's own live chat and a local document — and last
 # one chat-driven call per family.
 # Runs INSIDE a lane container (run.sh), never on a host.
 #
@@ -15,14 +15,14 @@
 # the daemon's /status document, the JSON-RPC frame a server answered, a file
 # pfm wrote) or from the pane, never from a model's prose: where a chat is the
 # STIMULUS (M.14, M.15) the evidence is the fleet's own record of what the tool
-# did (a rename in `pfm ls --tsv`, a document in the harvester's cache), and the
-# model's word is only the needle a wait ends on. Beat ids are the contract in
+# did (a rename in `pfm ls --tsv`, a document in the harvester's cache).
+# Beat ids are the contract in
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
 # Cost: one Claude seat for the lane's own chat plus one `chat_new` spawn and
 # one `chat_open`, one Codex home for the stdio wiring proof, and — cross-lane —
 # E1's chat and E2's chat, opened here when the sequence did not leave them
-# alive. Roughly 8 short model turns; the rest is direct JSON-RPC.
+# alive. The mock engine plays scripted turns; the rest is direct JSON-RPC.
 #
 # BROKEN STATE: the prelude aborts the lane by name when the seat it was told
 # to spend is not configured, the daemon never answers, or the lane's own chat
@@ -52,16 +52,18 @@ lane_seat_and_port "$CONFIG"
 MCP_PROTO=2025-06-18
 INIT_FRAME='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"lane-M","version":"0"}}}'
 INITIALIZED_FRAME='{"jsonrpc":"2.0","method":"notifications/initialized"}'
-# Small, stable public documents: one per chat-driven fetch so the cache can
-# prove WHICH chat's call landed. The query string is ignored by the server and
-# makes each run's URL its own cache key, so a re-run never reads a stale hit.
-RFC_BASE="https://www.rfc-editor.org/rfc"
-RFC_DIRECT="$RFC_BASE/rfc2324.txt"
-RFC_CLAUDE="$RFC_BASE/rfc7168.txt?lane=M-$LANE_STAMP"
-RFC_CODEX="$RFC_BASE/rfc1149.txt?lane=M-$LANE_STAMP"
-RFC_E1="$RFC_BASE/rfc2549.txt?lane=M-$LANE_STAMP"
-RFC_E2="$RFC_BASE/rfc6214.txt?lane=M-$LANE_STAMP"
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/lane-m.XXXXXX")"
+RFC_DIRECT="$SCRATCH/coffee.txt"
+RFC_CLAUDE="$SCRATCH/claude.txt"
+RFC_CODEX="$SCRATCH/codex.txt"
+RFC_E1="$SCRATCH/e1.txt"
+RFC_E2="$SCRATCH/e2.txt"
+RFC_PUBLIC="https://www.rfc-editor.org/rfc/rfc2324.txt"
+printf 'coffee from lane M\n' >"$RFC_DIRECT"
+printf 'coffee from M_MAIN\n' >"$RFC_CLAUDE"
+printf 'coffee from E2_MAIN\n' >"$RFC_CODEX"
+printf 'coffee from E1_MAIN\n' >"$RFC_E1"
+printf 'coffee from E2_MAIN after restart\n' >"$RFC_E2"
 HARVEST_CACHE="$HOME/.cache/lane-m-harvester/$LANE_STAMP"
 
 lane_begin M
@@ -82,18 +84,18 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   lane_abort "no working directory for the chats to live in ($CWD)"
 need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it (M.01, M.02)"
-# The harvester's default cache is <home>/.professor/.cache, and here
+# The harvester's default cache is <home>/.professor/.harvester-cache, and here
 # <home>/.professor is the blueprint clone, mounted read-only: every stored
 # result would fail with "read-only file system". The lane configures its own
 # writable cache.dir under $HOME BEFORE the daemon starts, so the HTTP daemon
 # (M.11, M.12, M.14) and every server started later read the same directory.
-need "a writable harvester cache.dir $HARVEST_CACHE in $HARVESTER_CFG" \
-  "[ \"\$(jq -r '.cache.dir // empty' '$HARVESTER_CFG' 2>/dev/null)\" = '$HARVEST_CACHE' ] && [ -d '$HARVEST_CACHE' ] && [ -w '$HARVEST_CACHE' ]" \
-  "mkdir -p '$HARVEST_CACHE' && { if [ -f '$HARVESTER_CFG' ]; then jq --arg d '$HARVEST_CACHE' '.cache = ((.cache // {}) + {dir: \$d})' '$HARVESTER_CFG'; else jq -n --arg d '$HARVEST_CACHE' '{cache: {dir: \$d}}'; fi; } >'$SCRATCH/harvester.config.json' && mv -f '$SCRATCH/harvester.config.json' '$HARVESTER_CFG'" ||
+need "a writable harvester cache.dir $HARVEST_CACHE and loopback search in $HARVESTER_CFG" \
+  "[ \"\$(jq -r '.cache.dir // empty' '$HARVESTER_CFG' 2>/dev/null)\" = '$HARVEST_CACHE' ] && [ \"\$(jq -r '.search.searxngURL // empty' '$HARVESTER_CFG' 2>/dev/null)\" = 'http://127.0.0.1:9' ] && [ -d '$HARVEST_CACHE' ] && [ -w '$HARVEST_CACHE' ]" \
+  "mkdir -p '$HARVEST_CACHE' && { if [ -f '$HARVESTER_CFG' ]; then jq --arg d '$HARVEST_CACHE' '.cache = ((.cache // {}) + {dir: \$d}) | .search = ((.search // {}) + {enabled: true, searxngURL: \"http://127.0.0.1:9\"})' '$HARVESTER_CFG'; else jq -n --arg d '$HARVEST_CACHE' '{cache: {dir: \$d}, search: {enabled: true, searxngURL: \"http://127.0.0.1:9\"}}'; fi; } >'$SCRATCH/harvester.config.json' && mv -f '$SCRATCH/harvester.config.json' '$HARVESTER_CFG'" ||
   lane_abort "no writable harvester cache — every stored harvester result would fail against the read-only blueprint mount"
 need "the professor MCP daemon on :$PORT" \
   "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
-  "bash /worktree/infra/demo/daemon.sh" ||
+  "lane_daemon_up" ||
   lane_abort "the professor MCP daemon never answered on :$PORT — nothing in this lane can be driven"
 
 # open_main — the lane's own chat, opened the one way (the library's single
@@ -223,7 +225,8 @@ mcp_stdio() {
   while ! grep -q '"id":3' "$out" 2>/dev/null; do
     [ $(( $(date +%s) - t0 )) -ge "$limit" ] && break
     kill -0 "$pid" 2>/dev/null || break
-    sleep 1
+    # POLL-STEP: the id-3 reply or the server's exit.
+    sleep 0.1
   done
   exec 3>&-
   wait "$pid" 2>/dev/null
@@ -298,8 +301,8 @@ daemon_restart() {
     kill "$pid" 2>/dev/null
     wait_for 30 daemon_down || { DAEMON_WHY="the daemon (pid $pid) still answers on :$PORT 30s after SIGTERM"; return 1; }
   fi
-  out="$(bash /worktree/infra/demo/daemon.sh 2>&1)" || { DAEMON_WHY="daemon.sh could not bring the daemon back: $(one_line "$out")"; return 1; }
-  wait_for 20 daemon_up || { DAEMON_WHY="daemon.sh exited 0 but :$PORT never answered"; return 1; }
+  out="$(lane_daemon_up 2>&1)" || { DAEMON_WHY="lane_daemon_up could not bring the daemon back: $(one_line "$out")"; return 1; }
+  wait_for 20 daemon_up || { DAEMON_WHY="lane_daemon_up exited 0 but :$PORT never answered"; return 1; }
   return 0
 }
 
@@ -329,21 +332,21 @@ INSTALL_OUT=""
 beat M.01-register-claude
 spends none
 bad=""
-sock="$(live_field "$CHAT" 11)"
+sock="$(_lane_tmux_dir)/$(live_field "$CHAT" 11)"
 start="$(tmux -S "$sock" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
 [ -n "$start" ] || bad="$bad the live pane has no start command at $sock;"
-printf '%s' "$start" | grep -Fq -- '--mcp-config' || bad="$bad M31: the Claude launch has no --mcp-config payload;"
-printf '%s' "$start" | grep -Fq 'mcpServers' || bad="$bad M31: --mcp-config has no mcpServers object;"
-printf '%s' "$start" | grep -Fq 'professor' || bad="$bad M31: --mcp-config names no professor server;"
-printf '%s' "$start" | grep -Eq 'mcp[^[:alnum:]]+serve[^[:alnum:]]+--stdio' || bad="$bad M31: --mcp-config has no professor stdio server (pfm mcp serve --stdio);"
+grep -Fq -- '--mcp-config' <<<"$start" || bad="$bad M31: the Claude launch has no --mcp-config payload;"
+grep -Fq 'mcpServers' <<<"$start" || bad="$bad M31: --mcp-config has no mcpServers object;"
+grep -Fq 'professor' <<<"$start" || bad="$bad M31: --mcp-config names no professor server;"
+grep -Eq 'mcp[^[:alnum:]]+serve[^[:alnum:]]+--stdio' <<<"$start" || bad="$bad M31: --mcp-config has no professor stdio server (pfm mcp serve --stdio);"
 # M30: with no mcp.servers key and no harvester file, BOTH servers read
 # disabled from the default layer — a probe over a config copy, never the real one.
 if defaults_cfg="$(tmp_config defaults 'del(.mcp.servers)' ABSENT)"; then
   ls_default="$(pfm --config "$defaults_cfg" mcp ls 2>&1)"
   ls_rc=$?
   [ "$ls_rc" -eq 0 ] || bad="$bad M30: pfm --config <copy without mcp.servers> mcp ls exited $ls_rc: $(one_line "$ls_default");"
-  printf '%s\n' "$ls_default" | grep -qE '^chat	false	' || bad="$bad M30: chat is not default-disabled: $(one_line "$ls_default");"
-  printf '%s\n' "$ls_default" | grep -qE '^harvester	false	' || bad="$bad M30: harvester is not default-disabled: $(one_line "$ls_default");"
+  grep -qE '^chat	false	' <<<"$ls_default" || bad="$bad M30: chat is not default-disabled: $(one_line "$ls_default");"
+  grep -qE '^harvester	false	' <<<"$ls_default" || bad="$bad M30: harvester is not default-disabled: $(one_line "$ls_default");"
 else
   bad="$bad M30: could not write the config copy for the default-layer probe;"
 fi
@@ -388,10 +391,10 @@ else
   foreign_rc=$?
   fence_after="$(fence_of "$TOML")"
   [ "$foreign_rc" -eq 0 ] || bad="$bad M35: pfm install --yes with a foreign professor entry exited $foreign_rc: $(one_line "$(printf '%s\n' "$foreign_out" | tail -3)");"
-  printf '%s\n' "$foreign_out" | grep -qF "preserve conflicting manual MCP client professor" ||
+  grep -qF "preserve conflicting manual MCP client professor" <<<"$foreign_out" ||
     bad="$bad M35: the install did not name the preserved conflict ('preserve conflicting manual MCP client professor'): $(one_line "$(printf '%s\n' "$foreign_out" | grep -i professor | head -3)");"
   grep -qxF 'url = "http://127.0.0.1:1/lane-m-foreign"' "$TOML" || bad="$bad M35: the foreign url line was rewritten or dropped;"
-  printf '%s\n' "$fence_after" | grep -qxF '[mcp_servers.professor]' && bad="$bad M35: the fence STILL declares [mcp_servers.professor] beside the foreign one (a duplicate table Codex cannot parse);"
+  grep -qxF '[mcp_servers.professor]' <<<"$fence_after" && bad="$bad M35: the fence STILL declares [mcp_servers.professor] beside the foreign one (a duplicate table Codex cannot parse);"
   cp "$SCRATCH/config.toml.orig" "$TOML"
   [ "$(fence_of "$TOML")" = "$FENCE_WANT" ] || bad="$bad restore: $TOML was not put back (the fence is not the professor stdio entry);"
   if [ -n "$bad" ]; then fail "$bad"; else
@@ -423,12 +426,12 @@ cp "$TOML" "$SCRATCH/config.toml.m04"
 printf '\n[mcp_servers.harvester]\nurl = "http://127.0.0.1:1/lane-m-foreign"\n' >>"$TOML"
 codex_row="$(pfm doctor 2>&1 | grep -F 'client=codex' | head -1)"
 cp "$SCRATCH/config.toml.m04" "$TOML"
-printf '%s' "$codex_row" | grep -q 'harvester=foreign-registration warning=consumer cutover incomplete' ||
+grep -q 'harvester=foreign-registration warning=consumer cutover incomplete' <<<"$codex_row" ||
   bad="$bad M38 codex foreign: with a foreign harvester in $TOML doctor printed: $(one_line "${codex_row:-no client=codex row}");"
 printf '\n[mcp_servers.harvester]\nurl = "http://127.0.0.1:%s/mcp/harvester"\n' "$PORT" >>"$TOML"
 codex_row="$(pfm doctor 2>&1 | grep -F 'client=codex' | head -1)"
 cp "$SCRATCH/config.toml.m04" "$TOML"
-printf '%s' "$codex_row" | grep -q "harvester=legacy-pfm remediation=run pfm install --yes path=$TOML" ||
+grep -q "harvester=legacy-pfm remediation=run pfm install --yes path=$TOML" <<<"$codex_row" ||
   bad="$bad M38 codex legacy-pfm: with pfm's legacy harvester table in $TOML doctor printed: $(one_line "${codex_row:-no client=codex row}");"
 if [ -e "$HOME/.mcp.json" ]; then
   bad="$bad M38 project-scope: $HOME/.mcp.json already exists — the standalone-harvester probe would clobber it, so it was NOT provoked;"
@@ -436,21 +439,21 @@ else
   printf '{"mcpServers":{"harvester":{"command":"uvx","args":["harvester-mcp"]}}}\n' >"$HOME/.mcp.json"
   proj_row="$(pfm doctor 2>&1 | grep -F "path=$HOME/.mcp.json" | head -1)"
   rm -f "$HOME/.mcp.json"
-  printf '%s' "$proj_row" | grep -q 'harvester=legacy-standalone warning=consumer cutover incomplete' ||
+  grep -q 'harvester=legacy-standalone warning=consumer cutover incomplete' <<<"$proj_row" ||
     bad="$bad M38 project-scope: with a uvx harvester in $HOME/.mcp.json doctor printed: $(one_line "${proj_row:-no row naming that path}");"
 fi
-printf '%s\n' "$doctor_out" | grep -qF 'doctor: mcp client-cutover=complete' ||
-  bad="$bad M38: on the clean install doctor does not print 'mcp client-cutover=complete': $(one_line "$(printf '%s\n' "$doctor_out" | grep -F 'client=' | grep -v 'client=claude' || echo none)");"
+grep -qF 'doctor: mcp client-cutover=complete' <<<"$doctor_out" ||
+  bad="$bad M38: on the clean install doctor does not print 'mcp client-cutover=complete': $(one_line "$(printf '%s' "$doctor_out" | grep -F 'client=' | grep -v 'client=claude' || echo none)");"
 # M39: the live probe, both faces — running (pid + endpoint) and unreachable
 # (the daemon told to stop answering for a moment).
-printf '%s\n' "$doctor_out" | grep -qE "^doctor: mcp daemon=running pid=[0-9]+ since=.* endpoint=http://127.0.0.1:$PORT" ||
-  bad="$bad M39: doctor does not report 'mcp daemon=running pid=… endpoint=http://127.0.0.1:$PORT': $(one_line "$(printf '%s\n' "$doctor_out" | grep -F 'daemon=' || echo none)");"
-printf '%s\n' "$doctor_out" | grep -q 'daemon=version-skew' &&
-  bad="$bad M39: doctor reports version-skew on a daemon built from this tree: $(one_line "$(printf '%s\n' "$doctor_out" | grep -F 'version-skew')");"
+grep -qE "^doctor: mcp daemon=running pid=[0-9]+ since=.* endpoint=http://127.0.0.1:$PORT" <<<"$doctor_out" ||
+  bad="$bad M39: doctor does not report 'mcp daemon=running pid=… endpoint=http://127.0.0.1:$PORT': $(one_line "$(printf '%s' "$doctor_out" | grep -F 'daemon=' || echo none)");"
+grep -q 'daemon=version-skew' <<<"$doctor_out" &&
+  bad="$bad M39: doctor reports version-skew on a daemon built from this tree: $(one_line "$(printf '%s' "$doctor_out" | grep -F 'version-skew')");"
 if skew_cfg="$(tmp_config skewport '.mcp.http.port = 1')"; then
   unreachable="$(pfm --config "$skew_cfg" doctor 2>&1 | grep -F 'mcp daemon=' | head -1)"
-  printf '%s' "$unreachable" | grep -q 'daemon=unreachable error=unreachable at http://127.0.0.1:1/status' ||
-    bad="$bad M39: with the port pointed at :1 doctor printed '$(one_line "${unreachable:-no daemon row}")' (want daemon=unreachable naming the URL);"
+  grep -qF 'daemon=unreachable error=no service answered at 127.0.0.1:1:' <<<"$unreachable" ||
+    bad="$bad M39: with the port pointed at :1 doctor printed '$(one_line "${unreachable:-no daemon row}")' (want daemon=unreachable naming the refused address);"
 fi
 if [ -n "$bad" ]; then fail "$bad (doctor exit $doctor_rc)"; else
   pass "doctor exit $doctor_rc · cutover rows codex foreign-registration + legacy-pfm, project-scope legacy-standalone · daemon=running on :$PORT, =unreachable when pointed at :1"
@@ -492,7 +495,7 @@ else
       bad="$bad M41: /mcp/$route tools/list: $MCP_WHY;"
     fi
   done
-  curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:$PORT/mcp/nope" 2>/dev/null | grep -q '^404$' || bad="$bad M41: an unknown route did not answer 404;"
+  grep -q '^404$' <<<"$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:$PORT/mcp/nope" 2>/dev/null)" || bad="$bad M41: an unknown route did not answer 404;"
   # M41 — loopback only: the container's own non-loopback address must refuse
   ip="$(hostname -I 2>/dev/null | awk '{ print $1 }')"
   [ -n "$ip" ] || ip="$(ip -4 -o addr show scope global 2>/dev/null | awk '{ print $4 }' | cut -d/ -f1 | head -1)"
@@ -507,26 +510,27 @@ else
   # M43 — any Origin header is refused before routing
   origin="$(curl -s -m 5 -w '\n%{http_code}' -H 'Origin: http://evil.example' "http://127.0.0.1:$PORT/status" 2>/dev/null)"
   [ "${origin##*$'\n'}" = 403 ] || bad="$bad M43: GET /status with an Origin header answered HTTP ${origin##*$'\n'} (want 403);"
-  printf '%s' "$origin" | grep -q 'browser-origin requests are forbidden' || bad="$bad M43: the Origin refusal does not name browser-origin: $(one_line "$origin");"
+  grep -q 'browser-origin requests are forbidden' <<<"$origin" || bad="$bad M43: the Origin refusal does not name browser-origin: $(one_line "$origin");"
   # M40 — the entry point's three refusals, each by name
   dup="$(pfm mcp serve </dev/null 2>&1)"
   dup_rc=$?
   [ "$dup_rc" -eq 1 ] || bad="$bad M40: a second pfm mcp serve exited $dup_rc (want 1): $(one_line "$dup");"
-  printf '%s' "$dup" | grep -q "already running (pid $pid0" || bad="$bad M40: the second serve did not name the running pid $pid0: $(one_line "$dup");"
+  grep -q "already running (pid $pid0" <<<"$dup" || bad="$bad M40: the second serve did not name the running pid $pid0: $(one_line "$dup");"
   if port_cfg="$(tmp_config badport '.mcp.http.port = 70000')"; then
     badport="$(pfm --config "$port_cfg" mcp serve </dev/null 2>&1)"
     badport_rc=$?
-    [ "$badport_rc" -eq 2 ] && printf '%s' "$badport" | grep -q 'outside 1..65535' ||
-      bad="$bad M40: port 70000 exited $badport_rc '$(one_line "$badport")' (want 2 naming 1..65535);"
+    [ "$badport_rc" -eq 1 ] && grep -q 'mcp.http.port must be between 1 and 65535' <<<"$badport" ||
+      bad="$bad M40: port 70000 exited $badport_rc '$(one_line "$badport")' (want 1 naming the valid range);"
   fi
   if off_cfg="$(tmp_config alloff '.mcp.servers.chat.enabled = false' '.enabled = false')"; then
     alloff="$(pfm --config "$off_cfg" mcp serve </dev/null 2>&1)"
     alloff_rc=$?
-    [ "$alloff_rc" -eq 1 ] && printf '%s' "$alloff" | grep -q 'every registered server is disabled' ||
+    [ "$alloff_rc" -eq 1 ] && grep -q 'every registered server is disabled' <<<"$alloff" ||
       bad="$bad M40: with both servers disabled serve exited $alloff_rc '$(one_line "$alloff")' (want 1 naming every server disabled);"
   fi
   # M42 — a disabled family view on a SECOND daemon (chat off, another port, no
   # external gateway to collide with the first daemon's): 503 + remedy
+  expect-log '"route":"mcp-daemon".*"path":"/mcp/professor/chat".*"status":503'
   ALT_PORT=$((PORT + 11))
   if alt_cfg="$(tmp_config disabledroute ".mcp.http.port = $ALT_PORT | .mcp.servers.chat.enabled = false" 'if .external then .external.enabled = false else . end')"; then
     pfm --config "$alt_cfg" mcp serve >"$SCRATCH/alt-daemon.log" 2>&1 </dev/null &
@@ -535,7 +539,7 @@ else
       disabled="$(curl -s -m 5 -w '\n%{http_code}' -X POST "http://127.0.0.1:$ALT_PORT/mcp/professor/chat" \
         -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data "$INIT_FRAME" 2>/dev/null)"
       [ "${disabled##*$'\n'}" = 503 ] || bad="$bad M42: the disabled chat view /mcp/professor/chat answered HTTP ${disabled##*$'\n'} (want 503, never a bare 404);"
-      printf '%s' "$disabled" | grep -q 'pfm mcp: chat is disabled by config; enable it with: pfm mcp chat enable' ||
+      grep -q 'pfm mcp: chat is disabled by config; enable it with: pfm mcp chat enable' <<<"$disabled" ||
         bad="$bad M42: the 503 body does not name chat and its remedy: $(one_line "$disabled");"
       printf '%s' "$(curl -s -m 5 "http://127.0.0.1:$ALT_PORT/status")" | jq -e '.servers | (has("chat") | not) and has("harvester")' >/dev/null 2>&1 ||
         bad="$bad M42: /status on the chat-disabled daemon does not hold the harvester roster alone: $(one_line "$(curl -s -m 5 "http://127.0.0.1:$ALT_PORT/status" | jq -c '.servers | keys' 2>&1)");"
@@ -547,7 +551,7 @@ else
   fi
   # M44 — the daemon's chat is HTTP-only and never ambient: whoami cannot name a caller
   if mcp_call http professor chat_whoami '{}'; then
-    [ "$(sfield .status)" = not_found ] && printf '%s' "$(sfield .message)" | grep -q 'shared HTTP daemon' ||
+    [ "$(sfield .status)" = not_found ] && grep -q 'shared HTTP daemon' <<<"$(sfield .message)" ||
       bad="$bad M44: chat_whoami over the daemon answered status '$(sfield .status)' message '$(one_line "$(sfield .message)")' (want not_found naming the shared HTTP daemon);"
   else
     bad="$bad M44: chat_whoami over HTTP: $MCP_WHY;"
@@ -577,7 +581,7 @@ else
       if mcp_call http professor chat_ls '{}'; then
         bad="$bad M1/M46: with no daemon on :$PORT chat_ls still answered a frame ($(one_line "$MCP_OUT")) — a dead daemon must be an error, never a list;"
       else
-        printf '%s' "$MCP_WHY" | grep -q 'curl exited 7' || bad="$bad M46: the dead-daemon call failed for another reason than connection refused: $MCP_WHY;"
+        grep -q 'curl exited 7' <<<"$MCP_WHY" || bad="$bad M46: the dead-daemon call failed for another reason than connection refused: $MCP_WHY;"
       fi
       pfm mcp serve >"$SCRATCH/own-daemon.log" 2>&1 </dev/null &
       own_pid=$!
@@ -595,10 +599,7 @@ else
           bad="$bad M46: go build exited 0 but $PFM_BIN is unchanged (inode $inode_before) — nothing was replaced;"
         else
           exited=0
-          for _ in $(seq 1 60); do
-            kill -0 "$own_pid" 2>/dev/null || { exited=1; break; }
-            sleep 1
-          done
+          if wait_for 60 "! kill -0 '$own_pid'"; then exited=1; fi
           if [ "$exited" -eq 0 ]; then
             bad="$bad M46: the daemon (pid $own_pid) still runs 60s after its binary changed (inode $inode_before → $inode_after) — binwatch did not fire;"
             kill "$own_pid" 2>/dev/null
@@ -617,7 +618,7 @@ else
         status1="$(daemon_status)"
         pid1="$(printf '%s' "$status1" | jq -r '.pid // empty')"
         [ -n "$pid1" ] && [ "$pid1" != "$pid0" ] && [ "$pid1" != "${own_pid:-x}" ] || bad="$bad M46: after the restart /status reports pid '${pid1:-<none>}' (old $pid0, own ${own_pid:-<none>});"
-        readlink "/proc/$pid1/exe" 2>/dev/null | grep -q ' (deleted)$' && bad="$bad M46: the restarted daemon (pid $pid1) still runs a deleted binary;"
+        grep -q ' (deleted)$' <<<"$(readlink "/proc/$pid1/exe" 2>/dev/null)" && bad="$bad M46: the restarted daemon (pid $pid1) still runs a deleted binary;"
         client_version="$(pfm version 2>/dev/null | awk '{ print $2 }')"
         [ "$(printf '%s' "$status1" | jq -r '.pfmVersion')" = "$client_version" ] ||
           bad="$bad M46: the restarted daemon reports pfmVersion '$(printf '%s' "$status1" | jq -r '.pfmVersion')' while pfm version says '$client_version' (skew);"
@@ -627,7 +628,7 @@ else
     fi
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "/status pid $pid0 on http://127.0.0.1:$PORT (/mcp/professor serves the /status union of $n_status_all tools, /mcp/professor/chat its $n_status_chat, /mcp/professor/harvester the rest; $loopback_note) · Origin → 403 · serve refuses: running/port/all-disabled by name · chat-disabled /mcp/professor/chat 503 + remedy · whoami not_found (HTTP-only) · external=$ext · rebuilt pfm under the daemon → exit 75 in place, daemon.sh brought pid $pid1 back on the new inode, no version skew"
+    pass "/status pid $pid0 on http://127.0.0.1:$PORT (/mcp/professor serves the /status union of $n_status_all tools, /mcp/professor/chat its $n_status_chat, /mcp/professor/harvester the rest; $loopback_note) · Origin → 403 · serve refuses: running/port/all-disabled by name · chat-disabled /mcp/professor/chat 503 + remedy · whoami not_found (HTTP-only) · external=$ext · rebuilt pfm under the daemon → exit 75 in place, lane_daemon_up brought pid $pid1 back on the new inode, no version skew"
   fi
 fi
 
@@ -654,7 +655,7 @@ fi
 # The advisory, from pfm's own reports: the installer names the absent manager
 # by name when it stages the units (M.01's re-install output) …
 if [ -n "$INSTALL_OUT" ]; then
-  printf '%s\n' "$INSTALL_OUT" | grep -qF 'systemd --user unavailable; units are staged and enabled for next login but not started now' ||
+  grep -qF 'systemd --user unavailable; units are staged and enabled for next login but not started now' <<<"$INSTALL_OUT" ||
     bad="$bad M47: pfm install --yes did not name the absent user manager ('systemd --user unavailable; units are staged …'): $(one_line "$(printf '%s\n' "$INSTALL_OUT" | grep -i systemd | head -3 || echo none)");"
 else
   bad="$bad M47: no pfm install --yes output to read the installer's advisory from (M.01 did not run it);"
@@ -662,7 +663,7 @@ fi
 # … and doctor must name it too, never fall silent — a container with no
 # systemd/launchd is the state the row exists for.
 doctor_units="$(pfm doctor 2>&1)"
-printf '%s\n' "$doctor_units" | grep -qiE 'systemd|launchd|service manager' ||
+grep -qiE 'systemd|launchd|service manager' <<<"$doctor_units" ||
   bad="$bad M47/M48: pfm doctor says nothing about the absent service manager — in a container that row must be a NAMED advisory, not silence ($(printf '%s\n' "$doctor_units" | grep -c .) rows);"
 # M48: the launchd plist is never staged on Linux by design (installer
 # schedulerAsset) — its absence is the expected state here, and the embedded
@@ -670,7 +671,7 @@ printf '%s\n' "$doctor_units" | grep -qiE 'systemd|launchd|service manager' ||
 [ -e "$MANAGED/launchd/com.professor.pfm.mcp.plist" ] && bad="$bad M48: a launchd plist is staged on a Linux host ($MANAGED/launchd/com.professor.pfm.mcp.plist) — schedulerAsset should have skipped it;"
 PLIST_SRC=/worktree/pfm/internal/installer/assets/launchd/com.professor.pfm.mcp.plist
 if [ -f "$PLIST_SRC" ]; then
-  grep -A1 '<key>KeepAlive</key>' "$PLIST_SRC" | grep -q '<true/>' || bad="$bad M48: the embedded plist $PLIST_SRC does not set KeepAlive true;"
+  grep -q '<true/>' <<<"$(grep -A1 '<key>KeepAlive</key>' "$PLIST_SRC")" || bad="$bad M48: the embedded plist $PLIST_SRC does not set KeepAlive true;"
 else
   bad="$bad M48: the embedded launchd asset $PLIST_SRC is not in the mounted tree — KeepAlive could not be read;"
 fi
@@ -712,7 +713,7 @@ fi
 # M56 — identity: launched from inside the lane's own chat pane (its tmux
 # socket and pane in the environment, as the engine's child inherits them),
 # chat_whoami answers with that chat's own identity.
-who_sock="$(live_field "$CHAT" 11)"
+who_sock="$(_lane_tmux_dir)/$(live_field "$CHAT" 11)"
 who_id="$(live_field "$CHAT" 2)"
 who_pane="$(tmux -S "$who_sock" display -p '#{pane_id}' 2>/dev/null)"
 if [ -z "$who_sock" ] || [ -z "$who_pane" ]; then
@@ -725,7 +726,7 @@ else
 fi
 # M51 — a malformed frame is answered -32700 and the connection lives on
 if MCP_PREFRAME='{"jsonrpc":"2.0","id":9,"method":' mcp_stdio professor tools/list '{}' 30; then
-  printf '%s\n' "$MCP_FRAMES" | grep -q '"code":-32700' || bad="$bad M51: no -32700 parse-error frame after a malformed line: $(one_line "$MCP_FRAMES");"
+  grep -q '"code":-32700' <<<"$MCP_FRAMES" || bad="$bad M51: no -32700 parse-error frame after a malformed line: $(one_line "$MCP_FRAMES");"
   [ "$(printf '%s' "$MCP_OUT" | jq -r '.result.tools | length')" -eq "$n_status_all" ] || bad="$bad M51: after the malformed frame tools/list did not answer the full roster ($n_status_all);"
 else
   bad="$bad M51: the connection did not survive a malformed frame: $MCP_WHY;"
@@ -744,40 +745,40 @@ ls_out="$(pfm mcp ls 2>&1)"
 ls_rc=$?
 [ "$ls_rc" -eq 0 ] || bad="$bad M53: pfm mcp ls exited $ls_rc: $(one_line "$ls_out");"
 [ "$(printf '%s\n' "$ls_out" | grep -c .)" -eq 2 ] || bad="$bad M53: pfm mcp ls printed $(printf '%s\n' "$ls_out" | grep -c .) rows (want 2);"
-printf '%s\n' "$ls_out" | grep -qE '^chat	(true|false)	(file|default|legacy)$' || bad="$bad M53: no 'chat<TAB>bool<TAB>source' row: $(one_line "$ls_out");"
-printf '%s\n' "$ls_out" | grep -qE '^harvester	(true|false)	(file|default|legacy)$' || bad="$bad M53: no 'harvester<TAB>bool<TAB>source' row: $(one_line "$ls_out");"
+grep -qE '^chat	(true|false)	(file|default|legacy)$' <<<"$ls_out" || bad="$bad M53: no 'chat<TAB>bool<TAB>source' row: $(one_line "$ls_out");"
+grep -qE '^harvester	(true|false)	(file|default|legacy)$' <<<"$ls_out" || bad="$bad M53: no 'harvester<TAB>bool<TAB>source' row: $(one_line "$ls_out");"
 harvester_was="$(printf '%s\n' "$ls_out" | awk -F'\t' '$1 == "harvester" { print $2 }')"
 # M54 — enable/disable flip the file and ls reads them; restored to what it was
 dis="$(pfm mcp harvester disable 2>&1)"
 dis_rc=$?
 [ "$dis_rc" -eq 0 ] || bad="$bad M54: pfm mcp harvester disable exited $dis_rc: $(one_line "$dis");"
 case "$harvester_was" in
-  true) printf '%s' "$dis" | grep -qx 'harvester	disabled	updated' || bad="$bad M54: disable on an enabled server printed '$(one_line "$dis")' (want harvester<TAB>disabled<TAB>updated);" ;;
-  false) printf '%s' "$dis" | grep -qx 'harvester	disabled	unchanged' || bad="$bad M54: disable on an already-disabled server printed '$(one_line "$dis")' (want …unchanged);" ;;
+  true) grep -qx 'harvester	disabled	updated' <<<"$dis" || bad="$bad M54: disable on an enabled server printed '$(one_line "$dis")' (want harvester<TAB>disabled<TAB>updated);" ;;
+  false) grep -qx 'harvester	disabled	unchanged' <<<"$dis" || bad="$bad M54: disable on an already-disabled server printed '$(one_line "$dis")' (want …unchanged);" ;;
 esac
-pfm mcp ls 2>/dev/null | grep -qE '^harvester	false	' || bad="$bad M54: after disable, pfm mcp ls does not read harvester false;"
+grep -qE '^harvester	false	' <<<"$(pfm mcp ls 2>/dev/null)" || bad="$bad M54: after disable, pfm mcp ls does not read harvester false;"
 en="$(pfm mcp harvester enable 2>&1)"
 en_rc=$?
-[ "$en_rc" -eq 0 ] && printf '%s' "$en" | grep -qx 'harvester	enabled	updated' || bad="$bad M54: enable exited $en_rc '$(one_line "$en")' (want 0, harvester<TAB>enabled<TAB>updated);"
-pfm mcp ls 2>/dev/null | grep -qE '^harvester	true	' || bad="$bad M54: after enable, pfm mcp ls does not read harvester true;"
+[ "$en_rc" -eq 0 ] && grep -qx 'harvester	enabled	updated' <<<"$en" || bad="$bad M54: enable exited $en_rc '$(one_line "$en")' (want 0, harvester<TAB>enabled<TAB>updated);"
+grep -qE '^harvester	true	' <<<"$(pfm mcp ls 2>/dev/null)" || bad="$bad M54: after enable, pfm mcp ls does not read harvester true;"
 if [ "$harvester_was" = false ]; then
   pfm mcp harvester disable >/dev/null 2>&1 || bad="$bad M54 restore: could not put harvester back to disabled;"
 fi
 unknown="$(pfm mcp nosuch enable 2>&1)"
 unknown_rc=$?
-[ "$unknown_rc" -eq 2 ] && printf '%s' "$unknown" | grep -q 'unknown server "nosuch"' || bad="$bad M54: an unknown server exited $unknown_rc '$(one_line "$unknown")' (want 2 naming it);"
+[ "$unknown_rc" -eq 2 ] && grep -q 'unknown server "nosuch"' <<<"$unknown" || bad="$bad M54: an unknown server exited $unknown_rc '$(one_line "$unknown")' (want 2 naming it);"
 MCP_USAGE='usage: pfm mcp ls | pfm mcp serve [--stdio] | pfm mcp <server> enable|disable'
 usage="$(pfm mcp </dev/null 2>&1)"
 usage_rc=$?
-[ "$usage_rc" -eq 2 ] && printf '%s\n' "$usage" | grep -qxF "$MCP_USAGE" || bad="$bad M54: pfm mcp with no arguments exited $usage_rc '$(one_line "$usage")' (want 2 with '$MCP_USAGE');"
+[ "$usage_rc" -eq 2 ] && grep -qxF "$MCP_USAGE" <<<"$usage" || bad="$bad M54: pfm mcp with no arguments exited $usage_rc '$(one_line "$usage")' (want 2 with '$MCP_USAGE');"
 usage="$(pfm mcp chat </dev/null 2>&1)"
 usage_rc=$?
-[ "$usage_rc" -eq 2 ] && printf '%s\n' "$usage" | grep -qxF "$MCP_USAGE" || bad="$bad M54: a bare server name exited $usage_rc '$(one_line "$usage")' (want 2 with '$MCP_USAGE');"
+[ "$usage_rc" -eq 2 ] && grep -qxF "$MCP_USAGE" <<<"$usage" || bad="$bad M54: a bare server name exited $usage_rc '$(one_line "$usage")' (want 2 with '$MCP_USAGE');"
 # M55 — exactly `pfm mcp serve` is the daemon dispatch: with one running it refuses by pid
 running_pid="$(daemon_status | jq -r '.pid // empty')"
 serve="$(pfm mcp serve </dev/null 2>&1)"
 serve_rc=$?
-[ "$serve_rc" -eq 1 ] && printf '%s' "$serve" | grep -q "already running (pid ${running_pid:-?}" || bad="$bad M55: pfm mcp serve beside the daemon exited $serve_rc '$(one_line "$serve")' (want 1 naming pid ${running_pid:-<none>});"
+[ "$serve_rc" -eq 1 ] && grep -q "already running (pid ${running_pid:-?}" <<<"$serve" || bad="$bad M55: pfm mcp serve beside the daemon exited $serve_rc '$(one_line "$serve")' (want 1 naming pid ${running_pid:-<none>});"
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "ls: 2 rows (harvester was $harvester_was); disable/enable flip the file and ls reads them, restored; unknown server exit 2; pfm mcp alone and a bare server name exit 2 with the usage line; pfm mcp serve refuses beside pid $running_pid"
 fi
@@ -797,10 +798,15 @@ expect-log 'name is required'
 expect-log 'must be a non-empty thread id'
 expect-log 'limit must be between 1 and 50'
 expect-log 'tail_lines must be between 1 and 1000'
-expect-log 'focus must be one non-empty line'
 expect-log 'is not a tmux key'
 expect-log 'has no live Codex tmux seat'
 expect-log 'engine and model require summary=true or ask=true'
+expect-log '"tool":"chat_keys".*"target":"NO_SUCH_CHAT_LANE_M"'
+expect-log '"tool":"chat_keys".*"err":"send.*Escape'
+expect-log '"tool":"chat_read".*no chat named.*lane-m-no-such-transcript-id'
+expect-log '"tool":"chat_last".*no chat named.*NO_SUCH_CHAT_LANE_M'
+expect-log '"tool":"chat_status".*no chat named.*NO_SUCH_CHAT_LANE_M'
+expect-log '"tool":"chat_new".*account 99 is not in the configured roster'
 if requires; then
   bad=""
   notes=""
@@ -823,8 +829,8 @@ if requires; then
   fi
   # M2 chat_resolve — ok/not_found/ambiguous are results; a bad kind is a tool error
   if mcp_call http professor chat_resolve "$(jq -cn --arg n "$CHAT" '{kind: "label", name: $n}')"; then
-    [ "$(sfield .status)" = ok ] && [ "$(sfield .code)" = 0 ] && [ "$(sfield .socket_path)" = "$sock" ] ||
-      bad="$bad M2: chat_resolve $CHAT answered status $(sfield .status) code $(sfield .code) socket '$(sfield .socket_path)' (want ok/0/$sock);"
+    [ "$(sfield .status)" = ok ] && [ "$(sfield .code)" = 0 ] && [ "$(sfield .socket_path)" = "$(_lane_tmux_dir)/$sock" ] ||
+      bad="$bad M2: chat_resolve $CHAT answered status $(sfield .status) code $(sfield .code) socket '$(sfield .socket_path)' (want ok/0/$(_lane_tmux_dir)/$sock);"
   else
     bad="$bad M2: chat_resolve: $MCP_WHY;"
   fi
@@ -835,7 +841,7 @@ if requires; then
     bad="$bad M2: chat_resolve missing: $MCP_WHY;"
   fi
   if mcp_call http professor chat_resolve '{"kind":"bogus","name":"x"}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'kind must be label, session, or cxwin' ||
+    [ "$MCP_ISERR" = true ] && grep -q 'kind must be label, session, or cxwin' <<<"$MCP_TEXT" ||
       bad="$bad M2: a bogus kind did not raise the named tool error: isError=$MCP_ISERR $(one_line "$MCP_TEXT");"
   else
     bad="$bad M2: chat_resolve bogus kind: $MCP_WHY;"
@@ -847,7 +853,7 @@ if requires; then
   # (code 4, the unknown-target code) and never a Go error.
   if mcp_call http professor chat_inject "$(jq -cn --arg t "$CHAT" '{target: $t, message: "lane M: this must not be typed unsigned"}')"; then
     [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = refused ] && [ "$(sfield .code)" = 6 ] &&
-      printf '%s' "$(sfield .message)" | grep -q 'UNSIGNED' && printf '%s' "$(sfield .message)" | grep -q 'shared HTTP daemon' ||
+      grep -q 'UNSIGNED' <<<"$(sfield .message)" && grep -q 'shared HTTP daemon' <<<"$(sfield .message)" ||
       bad="$bad M3: an identity-less inject over the daemon answered isError=$MCP_ISERR status $(sfield .status) code $(sfield .code) '$(one_line "$(sfield .message)" | cut -c1-120)' (want refused/6 naming UNSIGNED and the shared HTTP daemon);"
     [ "$(sfield .typed)" != true ] || bad="$bad M3: the unsigned refusal still reports typed=true;"
   else
@@ -861,12 +867,12 @@ if requires; then
       *) bad="$bad M3: a signed inject over stdio answered status '$(sfield .status)' code $(sfield .code): $(one_line "$(sfield .message)");" ;;
     esac
     [ "$(sfield .typed)" = true ] || bad="$bad M3: the stdio inject reports typed=$(sfield .typed);"
-    wait_last "$CHAT" "$needle" 240 || bad="$bad M3: the delivered inject never produced its needle: ${LANE_WAIT_WHY:-no wait reason recorded};"
+    wait_prompt "$CHAT" "$needle" 240 || bad="$bad M3: the delivered inject never left a user record: ${LANE_WAIT_WHY:-no wait reason recorded};"
   else
     bad="$bad M3: chat_inject over stdio: $MCP_WHY;"
   fi
   if mcp_call http professor chat_inject '{"target":"NO_SUCH_CHAT_LANE_M","message":"x"}'; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .code)" = 4 ] && printf '%s' "$(sfield .message)" | grep -q 'NO_SUCH_CHAT_LANE_M' ||
+    [ "$MCP_ISERR" = false ] && [ "$(sfield .code)" = 4 ] && grep -q 'NO_SUCH_CHAT_LANE_M' <<<"$(sfield .message)" ||
       bad="$bad M3: inject on a missing chat answered isError=$MCP_ISERR status $(sfield .status) code $(sfield .code) '$(one_line "$(sfield .message)")' (want a non-error result, code 4, naming the target);"
     case "$(sfield .status)" in
       not_found) ;;
@@ -877,23 +883,10 @@ if requires; then
     bad="$bad M3: chat_inject missing target: $MCP_WHY;"
   fi
   if mcp_call http professor chat_inject '{"target":"self","message":"x"}'; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = not_found ] && [ "$(sfield .code)" = 4 ] && printf '%s' "$(sfield .message)" | grep -q 'shared HTTP daemon' ||
+    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = not_found ] && [ "$(sfield .code)" = 4 ] && grep -q 'shared HTTP daemon' <<<"$(sfield .message)" ||
       bad="$bad M4: self over the daemon answered isError=$MCP_ISERR status $(sfield .status) code $(sfield .code) (want not_found/4 as a RESULT naming the shared HTTP daemon);"
   else
     bad="$bad M4: chat_inject self: $MCP_WHY;"
-  fi
-  # M5 chat_self_compact — the requesting seat only: over the daemon it refuses
-  # by name with ITS OWN remedy (the CLI twin), and a bad focus is a tool error
-  if mcp_call http professor chat_self_compact '{"focus":"lane M","then":"reply with exactly one word: NEVER"}'; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = not_found ] && printf '%s' "$(sfield .message)" | grep -q 'pfm chat self-compact' ||
-      bad="$bad M5: self-compact over the daemon answered isError=$MCP_ISERR status $(sfield .status) '$(one_line "$(sfield .message)" | cut -c1-120)' (want not_found naming pfm chat self-compact);"
-  else
-    bad="$bad M5: chat_self_compact: $MCP_WHY;"
-  fi
-  if mcp_call http professor chat_self_compact '{"focus":"","then":"x"}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'focus must be one non-empty line' || bad="$bad M5: an empty focus did not raise the named tool error: $(one_line "$MCP_TEXT");"
-  else
-    bad="$bad M5: chat_self_compact empty focus: $MCP_WHY;"
   fi
   # M6/M7 chat_keys — a real key lands; an unknown key name is a tool error
   # listing the valid ones; a missing target is a tool error naming it
@@ -904,17 +897,38 @@ if requires; then
     bad="$bad M6: chat_keys: $MCP_WHY;"
   fi
   if mcp_call http professor chat_keys "$(jq -cn --arg t "$CHAT" '{target: $t, keys: ["NotAKeyLaneM"]}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'is not a tmux key' || bad="$bad M6: an unknown key did not raise the named tool error: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'is not a tmux key' <<<"$MCP_TEXT" || bad="$bad M6: an unknown key did not raise the named tool error: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M6: chat_keys bad key: $MCP_WHY;"
   fi
   if mcp_call http professor chat_keys '{"target":"NO_SUCH_CHAT_LANE_M","keys":["Escape"]}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'NO_SUCH_CHAT_LANE_M' ||
+    [ "$MCP_ISERR" = true ] && grep -q 'NO_SUCH_CHAT_LANE_M' <<<"$MCP_TEXT" ||
       bad="$bad M6: chat_keys on a missing chat answered isError=$MCP_ISERR '$(one_line "$MCP_TEXT")' (want a tool error naming the target);"
   else
     bad="$bad M6: chat_keys missing: $MCP_WHY;"
   fi
-  notes="$notes M7 (mixed KeysOutput+error on a pane dying mid-sequence) not provoked — needs the Wave 7 mock engine;"
+  # M7: resolve a live throwaway, type a crash prompt, then make the next key
+  # arrive after the mock's 150 ms crash. The result must retain the partial
+  # KeysOutput even though the final send failed.
+  keys_chat="M_KEYS_$$"
+  keys_out="$(pfm chat new --name "$keys_chat" --engine cc --account "$SEAT" --cwd "$CWD" --await --timeout 300 'ready' 2>&1)"
+  if [ "$?" -ne 0 ] || ! live_chat "$keys_chat"; then
+    bad="$bad M7: throwaway $keys_chat did not start: $(one_line "$keys_out");"
+  else
+    crash_prompt="$(mock_steps '[{"type":"crash","exit_code":1}]')"
+    if mcp_call http professor chat_keys "$(jq -cn --arg t "$keys_chat" --arg p "$crash_prompt" '{target:$t,keys:[$p],literal:true}')"; then
+      [ "$MCP_ISERR" = false ] && [ "$(sfield .count)" = 1 ] || bad="$bad M7: literal crash prompt was not typed: $(one_line "$MCP_TEXT");"
+    else
+      bad="$bad M7: typing crash prompt: $MCP_WHY;"
+    fi
+    if mcp_call http professor chat_keys "$(jq -cn --arg t "$keys_chat" '{target:$t,keys:["Enter","Escape","Escape"],delay_ms:800}')"; then
+      [ "$MCP_ISERR" = true ] && [ "$(sfield .status)" = dead ] && [ "$(sfield .code)" = 3 ] && [ "$(sfield .count)" -lt 3 ] 2>/dev/null ||
+        bad="$bad M7: dying pane answered isError=$MCP_ISERR status=$(sfield .status) code=$(sfield .code) count=$(sfield .count), want dead/3/partial: $(one_line "$MCP_TEXT");"
+    else
+      bad="$bad M7: dying-pane sequence: $MCP_WHY;"
+    fi
+    wait_for 20 "! live_chat '$keys_chat'" || bad="$bad M7: throwaway $keys_chat still has a live row after its crash;"
+  fi
   # M8 chat_capture — screen text with bounds; a missing chat is a not_found RESULT
   if mcp_call http professor chat_capture "$(jq -cn --arg t "$CHAT" '{target: $t, tail_lines: 20}')"; then
     [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = ok ] && [ "$(sfield .bytes)" -gt 0 ] 2>/dev/null ||
@@ -924,25 +938,25 @@ if requires; then
     bad="$bad M8: chat_capture: $MCP_WHY;"
   fi
   if mcp_call http professor chat_capture '{"target":"NO_SUCH_CHAT_LANE_M"}'; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = not_found ] && [ "$(sfield .code)" = 4 ] && printf '%s' "$(sfield .message)" | grep -q 'NO_SUCH_CHAT_LANE_M' ||
+    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = not_found ] && [ "$(sfield .code)" = 4 ] && grep -q 'NO_SUCH_CHAT_LANE_M' <<<"$(sfield .message)" ||
       bad="$bad M8: capture of a missing chat answered isError=$MCP_ISERR status $(sfield .status) code $(sfield .code) (want not_found/4 naming it, no error);"
   else
     bad="$bad M8: chat_capture missing: $MCP_WHY;"
   fi
   if mcp_call http professor chat_capture "$(jq -cn --arg t "$CHAT" '{target: $t, tail_lines: 5000}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'tail_lines must be between 1 and 1000' || bad="$bad M8: tail_lines 5000 did not raise the bound error: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'tail_lines must be between 1 and 1000' <<<"$MCP_TEXT" || bad="$bad M8: tail_lines 5000 did not raise the bound error: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M8: chat_capture bound: $MCP_WHY;"
   fi
   # M9 chat_whoami — the Codex _meta.threadId path, valid and invalid, over the daemon
   if mcp_call http professor chat_whoami '{}' '{"threadId":"lane-m-no-such-thread"}'; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = not_found ] && printf '%s' "$(sfield .message)" | grep -q 'has no live Codex tmux seat' ||
+    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = not_found ] && grep -q 'has no live Codex tmux seat' <<<"$(sfield .message)" ||
       bad="$bad M9: an unknown _meta.threadId answered isError=$MCP_ISERR status $(sfield .status) '$(one_line "$(sfield .message)")' (want not_found naming no live Codex seat);"
   else
     bad="$bad M9: chat_whoami with a bogus threadId: $MCP_WHY;"
   fi
   if mcp_call http professor chat_whoami '{}' '{"threadId":" "}'; then
-    [ "$(sfield .status)" = not_found ] && printf '%s' "$(sfield .message)" | grep -q 'must be a non-empty thread id' || bad="$bad M9: a blank threadId was not refused by name: $(one_line "$(sfield .message)");"
+    [ "$(sfield .status)" = not_found ] && grep -q 'must be a non-empty thread id' <<<"$(sfield .message)" || bad="$bad M9: a blank threadId was not refused by name: $(one_line "$(sfield .message)");"
   else
     bad="$bad M9: chat_whoami blank threadId: $MCP_WHY;"
   fi
@@ -961,7 +975,7 @@ if requires; then
   find_needle="LANE-M-FIND-$$-$(date +%s)"
   if CHAT_SENDER_SESSION=lane-M CHAT_SENDER_LABEL=lane-M MCP_STDIO_CONFIG="$INPROC_CFG" \
     mcp_call stdio professor chat_inject "$(jq -cn --arg t "$CHAT" --arg m "reply with exactly one word: $find_needle" '{target: $t, message: $m}')" &&
-    wait_last "$CHAT" "$find_needle" 240; then
+    wait_prompt "$CHAT" "$find_needle" 240; then
     if wait_for 90 "mcp_call http professor chat_find \"\$(jq -cn --arg e '$find_needle' '{excerpt: \$e}')\" && [ \"\$(sfield .count)\" -ge 1 ]"; then
       printf '%s' "$MCP_STRUCT" | jq -e --arg id "$sid" '.candidates[] | select(.id == $id)' >/dev/null 2>&1 ||
         bad="$bad M10: chat_find matched $(sfield .count) candidate(s) but none is this chat's session $sid: $(one_line "$(sfield '[.candidates[].id] | join(",")')");"
@@ -980,7 +994,7 @@ if requires; then
     bad="$bad M10: chat_find miss: $MCP_WHY;"
   fi
   if mcp_call http professor chat_find '{"excerpt":"x","limit":500}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'limit must be between 1 and 50' || bad="$bad M10: limit 500 did not raise the bound error: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'limit must be between 1 and 50' <<<"$MCP_TEXT" || bad="$bad M10: limit 500 did not raise the bound error: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M10: chat_find bound: $MCP_WHY;"
   fi
@@ -990,6 +1004,8 @@ if requires; then
       bad="$bad M11: chat_read $sid answered isError=$MCP_ISERR id '$(sfield .id)' count $(sfield .count) (want ≤ 5 turns of this session);"
     TRANSCRIPT="$(sfield .path)"
     [ -f "$TRANSCRIPT" ] || bad="$bad M11: chat_read's path '$TRANSCRIPT' is not a file;"
+    printf '%s' "$MCP_STRUCT" | jq -e --arg n "$find_needle" 'any(.turns[]?; .role == "user" and ((.text // "") | contains($n)))' >/dev/null 2>&1 ||
+      bad="$bad M11: chat_read carries no user record for $find_needle;"
   else
     bad="$bad M11: chat_read: $MCP_WHY;"
   fi
@@ -998,15 +1014,15 @@ if requires; then
   else
     bad="$bad M11: chat_read unknown: $MCP_WHY;"
   fi
-  # M12 chat_last — the newest answer (the needle just planted); unknown target is a tool error naming resolution
+  # M12 chat_last — the newest answer; the needle belongs to the user record above.
   if mcp_call http professor chat_last "$(jq -cn --arg t "$CHAT" '{target: $t}')"; then
-    [ "$MCP_ISERR" = false ] && printf '%s' "$(sfield .text)" | grep -qF "$find_needle" ||
-      bad="$bad M12: chat_last answered isError=$MCP_ISERR text '$(one_line "$(sfield .text)" | cut -c1-80)' (want the newest answer carrying $find_needle);"
+    [ "$MCP_ISERR" = false ] && [ -n "$(sfield .text)" ] ||
+      bad="$bad M12: chat_last answered isError=$MCP_ISERR with no newest answer: $(one_line "$MCP_TEXT" | cut -c1-80);"
   else
     bad="$bad M12: chat_last: $MCP_WHY;"
   fi
   if mcp_call http professor chat_last '{"target":"NO_SUCH_CHAT_LANE_M"}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'chat_last' || bad="$bad M12: chat_last on a missing chat answered isError=$MCP_ISERR '$(one_line "$MCP_TEXT")' (want a tool error naming the resolve failure);"
+    [ "$MCP_ISERR" = true ] && grep -q 'chat_last' <<<"$MCP_TEXT" || bad="$bad M12: chat_last on a missing chat answered isError=$MCP_ISERR '$(one_line "$MCP_TEXT")' (want a tool error naming the resolve failure);"
   else
     bad="$bad M12: chat_last missing: $MCP_WHY;"
   fi
@@ -1020,7 +1036,7 @@ if requires; then
     bad="$bad M13: chat_status: $MCP_WHY;"
   fi
   if mcp_call http professor chat_status "$(jq -cn --arg t "$CHAT" '{target: $t, engine: "claude"}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'engine and model require summary=true or ask=true' || bad="$bad M13: engine without summary did not raise the named tool error: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'engine and model require summary=true or ask=true' <<<"$MCP_TEXT" || bad="$bad M13: engine without summary did not raise the named tool error: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M13: chat_status engine: $MCP_WHY;"
   fi
@@ -1031,12 +1047,12 @@ if requires; then
   fi
   # M14 chat_new — a real spawn on this seat (ended in M.10), and two refusals that spawn nothing
   if mcp_call http professor chat_new '{"name":""}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'name is required' || bad="$bad M14: an empty name did not raise the named tool error: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'name is required' <<<"$MCP_TEXT" || bad="$bad M14: an empty name did not raise the named tool error: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M14: chat_new empty name: $MCP_WHY;"
   fi
   if mcp_call http professor chat_new "$(jq -cn --arg c "$CWD" '{name: "M_NEVER_SPAWNED", engine: "cc", account: 99, cwd: $c, effort: "lane-bogus"}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'account 99 is not in the configured roster' ||
+    [ "$MCP_ISERR" = true ] && grep -q 'account 99 is not in the configured roster' <<<"$MCP_TEXT" ||
       bad="$bad M14: account 99 did not refuse by name: isError=$MCP_ISERR $(one_line "$MCP_TEXT");"
     live_chat M_NEVER_SPAWNED && bad="$bad M14: a refused chat_new still spawned M_NEVER_SPAWNED;"
   else
@@ -1053,7 +1069,7 @@ if requires; then
     bad="$bad M14: chat_new $NEW_CHAT: $MCP_WHY;"
   fi
   if [ -n "$bad" ]; then fail "$bad${notes:+ · notes:$notes}"; else
-    pass "ls/resolve/inject/self_compact/keys/capture/whoami/find/read/last/status/new each asserted for result AND refusal shape over the daemon (inject delivered over signed stdio); $NEW_CHAT spawned on cc:$SEAT${notes:+ · notes:$notes}"
+    pass "ls/resolve/inject/keys/capture/whoami/find/read/last/status/new each asserted for result AND refusal shape over the daemon (inject delivered over signed stdio); $NEW_CHAT spawned on cc:$SEAT${notes:+ · notes:$notes}"
   fi
 fi
 
@@ -1069,6 +1085,15 @@ expect-log 'is not a file path'
 expect-log 'name must be one non-empty line'
 expect-log 'severity must be'
 expect-log 'title is required'
+expect-log 'chat unkill exited 4'
+expect-log 'chat unkill exited 1'
+expect-log 'is not killed; nothing was unkilled'
+expect-log 'chat kill exited 1'
+expect-log '--exit requires a live --self tmux pane'
+expect-log 'pfm chat unkill NO_SUCH_CHAT_LANE_M exited 4'
+expect-log 'MCP request has no _meta.threadId'
+expect-log 'chat_open: no chat named'
+expect-log 'pfm chat name NO_SUCH_CHAT_LANE_M x exited 4'
 bad=""
 notes=""
 if ! live_chat "$NEW_CHAT"; then
@@ -1094,7 +1119,7 @@ else
     bad="$bad M16: chat_name: $MCP_WHY;"
   fi
   if mcp_call http professor chat_name "$(jq -cn --arg t "$NEW_CHAT" '{target: $t, name: "two\nlines"}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'name must be one non-empty line' || bad="$bad M16: a two-line name did not raise the named tool error: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'name must be one non-empty line' <<<"$MCP_TEXT" || bad="$bad M16: a two-line name did not raise the named tool error: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M16: chat_name bad name: $MCP_WHY;"
   fi
@@ -1103,14 +1128,21 @@ else
   else
     bad="$bad M16: chat_name missing: $MCP_WHY;"
   fi
-  # M17 chat_kill — hide (killed=true, row still live: chat_ls says so as a contradiction, never smoothed),
-  # M18 chat_unkill restores; then kill with exit ends the pane; unkill leaves a resume row
+  # M17 chat_kill hides and ends the live pane; M18 chat_unkill restores the resume row.
+  m17_resumable() {
+    mcp_call http professor chat_ls '{"all":true}' &&
+      printf '%s' "$MCP_STRUCT" | jq -e --arg n "$1" '.rows[] | select(.name == $n and .killed == true and .state == "resumable")' >/dev/null 2>&1
+  }
   if mcp_call http professor chat_kill "$(jq -cn --arg t "$NEW_CHAT" '{target: $t}')"; then
     [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = ok ] || bad="$bad M17: chat_kill answered isError=$MCP_ISERR status $(sfield .status): $(one_line "$MCP_TEXT");"
     wait_for 20 "[ \"\$(row_field '$NEW_CHAT' 10)\" = true ]" || bad="$bad M17: the row's killed column reads '$(row_field "$NEW_CHAT" 10)' after chat_kill;"
+    m17_wait_why=""
+    wait_for 20 "m17_resumable '$NEW_CHAT'" || m17_wait_why=" ($LANE_WAIT_WHY)"
     if mcp_call http professor chat_ls '{"all":true}'; then
-      printf '%s' "$MCP_STRUCT" | jq -e --arg n "$NEW_CHAT" '.rows[] | select(.name == $n and .killed == true and .state == "killed-but-live")' >/dev/null 2>&1 ||
-        bad="$bad M17: chat_ls{all} does not report $NEW_CHAT as killed-but-live after a kill that closed no pane: $(one_line "$(printf '%s' "$MCP_STRUCT" | jq -c --arg n "$NEW_CHAT" '[.rows[] | select(.name == $n) | {kind, state, killed}]')");"
+      printf '%s' "$MCP_STRUCT" | jq -e --arg n "$NEW_CHAT" '.rows[] | select(.name == $n and .killed == true and .state == "resumable")' >/dev/null 2>&1 ||
+        bad="$bad M17: chat_ls{all} does not report $NEW_CHAT as killed and resumable after the hide: $(one_line "$(printf '%s' "$MCP_STRUCT" | jq -c --arg n "$NEW_CHAT" '[.rows[] | select(.name == $n) | {kind, state, killed}]')")$m17_wait_why;"
+    else
+      bad="$bad M17: chat_ls{all} does not report $NEW_CHAT as killed and resumable after the hide: $(one_line "$MCP_WHY")$m17_wait_why;"
     fi
   else
     bad="$bad M17: chat_kill: $MCP_WHY;"
@@ -1127,14 +1159,18 @@ else
     bad="$bad M18: chat_unkill missing: $MCP_WHY;"
   fi
   if MCP_HTTP_TIMEOUT=180 mcp_call http professor chat_kill "$(jq -cn --arg t "$NEW_CHAT" '{target: $t, exit: true}')"; then
-    [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = ok ] || bad="$bad M17: chat_kill{exit} answered isError=$MCP_ISERR status $(sfield .status): $(one_line "$MCP_TEXT");"
-    wait_for 90 "! live_chat '$NEW_CHAT'" || bad="$bad M17: $NEW_CHAT still has a live row 90s after chat_kill{exit:true};"
+    [ "$MCP_ISERR" = true ] && grep -qF -- '--exit requires a live --self tmux pane' <<<"$MCP_TEXT" ||
+      bad="$bad M17: chat_kill{exit} over shared HTTP did not refuse the missing self pane: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M17: chat_kill exit: $MCP_WHY;"
   fi
+  wait_for 20 "! live_chat '$NEW_CHAT'" || bad="$bad M17: $NEW_CHAT still has a live row after chat_kill{exit:true};"
   if mcp_call http professor chat_unkill "$(jq -cn --arg t "$NEW_CHAT" '{target: $t}')"; then
+    [ "$MCP_ISERR" = true ] && [ "$(sfield .status)" = error ] && [ "$(sfield .code)" = 1 ] &&
+      grep -qF 'is not killed; nothing was unkilled' <<<"$MCP_TEXT" ||
+      bad="$bad M18: unkill after refused exit-kill answered isError=$MCP_ISERR status $(sfield .status) code $(sfield .code): $(one_line "$MCP_TEXT");"
     wait_for 20 "[ -n \"\$(chat_row '$NEW_CHAT')\" ] && [ \"\$(row_field '$NEW_CHAT' 10)\" = false ]" ||
-      bad="$bad M18: after the exit-kill, chat_unkill left no resume row for $NEW_CHAT with killed=false: $(one_line "$(chat_row "$NEW_CHAT")");"
+      bad="$bad M18: after the refused exit-kill, the resume row for $NEW_CHAT does not read killed=false: $(one_line "$(chat_row "$NEW_CHAT")");"
   else
     bad="$bad M18: chat_unkill after exit: $MCP_WHY;"
   fi
@@ -1143,7 +1179,7 @@ else
   if MCP_HTTP_TIMEOUT=180 mcp_call http professor chat_open "$(jq -cn --arg t "$NEW_CHAT" '{target: $t}')"; then
     [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = ok ] || bad="$bad M15: chat_open answered isError=$MCP_ISERR status $(sfield .status): $(one_line "$MCP_TEXT");"
     if ! wait_for 90 "live_chat '$NEW_CHAT'"; then
-      bad="$bad M15: chat_open returned ok with message '$(one_line "$(sfield .message)" | cut -c1-160)' but no live row for $NEW_CHAT appeared in 90s — the action line was printed, not executed (action.Dispatch prints when stdout is not a terminal);"
+      bad="$bad M15: chat_open returned ok but no live row for $NEW_CHAT appeared in 90s; the resume row's killed column reads '$(row_field "$NEW_CHAT" 10)' (message: $(one_line "$(sfield .message)" | cut -c1-160));"
     fi
   else
     bad="$bad M15: chat_open: $MCP_WHY;"
@@ -1159,7 +1195,7 @@ else
   fi
   # M19 chat_save — a bare word is refused; a path appends the transcript
   if mcp_call http professor chat_save '{"target":"lane-m-notes"}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'is not a file path' || bad="$bad M19: a bare-word target was not refused by name: isError=$MCP_ISERR $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'is not a file path' <<<"$MCP_TEXT" || bad="$bad M19: a bare-word target was not refused by name: isError=$MCP_ISERR $(one_line "$MCP_TEXT");"
   else
     bad="$bad M19: chat_save bare word: $MCP_WHY;"
   fi
@@ -1176,14 +1212,14 @@ else
     bad="$bad M19: no transcript path for $CHAT (M.09's chat_read did not yield one) — the path form was NOT asserted;"
   fi
   if mcp_call http professor chat_save "$(jq -cn --arg t "$SCRATCH/save/no-caller.md" '{target: $t}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'CLAUDE_CODE_SESSION_ID is not set' ||
+    [ "$MCP_ISERR" = true ] && grep -qF 'MCP request has no _meta.threadId' <<<"$MCP_TEXT" ||
       bad="$bad M19: chat_save with no transcript over the daemon did not refuse by name (no calling chat): isError=$MCP_ISERR $(one_line "$MCP_TEXT");"
   else
     bad="$bad M19: chat_save no transcript: $MCP_WHY;"
   fi
   # M20 servicedesk — filed under UNIDENTIFIED from the daemon, read back from pfm issues
   issue_title="lane M issue $$ $(date +%s)"
-  if mcp_call http professor servicedesk "$(jq -cn --arg t "$issue_title" '{title: $t, detail: "filed by the Tier B lane M direct client; safe to close", severity: "low", area: "lanes/M"}')"; then
+  if mcp_call http professor servicedesk "$(jq -cn --arg t "$issue_title" '{title: $t, detail: "filed by the lane M direct client; safe to close", severity: "low", area: "lanes/M"}')"; then
     issue_id="$(sfield .id)"
     [ "$MCP_ISERR" = false ] && [ "$(sfield .status)" = ok ] && [ "${issue_id:-0}" -gt 0 ] 2>/dev/null || bad="$bad M20: servicedesk answered isError=$MCP_ISERR status $(sfield .status) id '$issue_id';"
     issues="$(pfm issues --json 2>&1)"
@@ -1193,17 +1229,17 @@ else
     bad="$bad M20: servicedesk: $MCP_WHY;"
   fi
   if mcp_call http professor servicedesk '{"title":"","detail":"x"}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'title is required' || bad="$bad M20: an empty title was not refused by name: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'title is required' <<<"$MCP_TEXT" || bad="$bad M20: an empty title was not refused by name: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M20: servicedesk empty title: $MCP_WHY;"
   fi
   if mcp_call http professor servicedesk '{"title":"x","detail":"y","severity":"urgent"}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'severity must be' || bad="$bad M20: an unknown severity was not refused by name: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'severity must be' <<<"$MCP_TEXT" || bad="$bad M20: an unknown severity was not refused by name: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M20: servicedesk bad severity: $MCP_WHY;"
   fi
   if [ -n "$bad" ]; then fail "$bad${notes:+ · notes:$notes}"; else
-    pass "name → row renamed and back · kill → killed=true (killed-but-live in chat_ls), unkill → false, kill{exit} → pane gone, unkill → resume row · open → live row · save refuses a bare word, writes $save_file · issue $issue_id filed as UNIDENTIFIED and read back from pfm issues${notes:+ · notes:$notes}"
+    pass "name → row renamed and back · kill → killed=true and resumable, unkill → false, kill{exit} refuses without a self pane, unkill of an unkilled chat refused · open → live row · save refuses a bare word, writes $save_file · issue $issue_id filed as UNIDENTIFIED and read back from pfm issues${notes:+ · notes:$notes}"
   fi
 fi
 
@@ -1211,112 +1247,119 @@ fi
 
 beat M.11-harvester-tools
 spends none
+expect-log '"msg":"http.out.request".*network is unreachable'
+expect-log '"msg":"http.out.request".*127.0.0.1:9: connect: connection refused'
+expect-log 'read needs at least one item in urls, files or publications'
+expect-log 'read takes at most 50 items in total'
+expect-log 'publications takes at most 20 items'
+expect-log 'work discovery failed: every source failed'
+expect-log 'query must not be empty'
+expect-log 'type must be any, paper or book'
+expect-log 'limit must be between 1 and 20'
+expect-log 'caller header refused: Host'
 bad=""
 notes=""
 RFC_PATH=""
 NOTE="$SCRATCH/lane-m-note.md"
 printf '# lane M local note\n\nSENTINEL-LANE-M-%s\n' "$$" >"$NOTE"
-if ! pfm mcp ls 2>/dev/null | grep -qE '^harvester	true	'; then
-  bad="$bad the harvester is disabled in this root (pfm mcp ls) — infra/demo/setup.sh install fell back to --skip-harvest, so no harvester tool can be driven;"
+if ! grep -qE '^harvester	true	' <<<"$(pfm mcp ls 2>/dev/null)"; then
+  bad="$bad the harvester is disabled in this lane root (pfm mcp ls); no harvester tool can be driven;"
 fi
 # item <group> <n> <jq-path> — one field of the n-th typed item of a group:
 # read answers {urls, files, publications}, each in its input's order;
 # harvester_download_file answers items
 item() { printf '%s' "$MCP_STRUCT" | jq -r ".$1[$2]$3 | if . == null then empty else . end" 2>/dev/null; } # false stays false
-# M21 read {urls} — a real page: the typed item carries the path of the cached
-# artifact and the body; a second read is `cached`; include_content false
-# drops the body and keeps chars and path; one url per item, order kept, a
-# failing item beside a good one never makes the call isError
+offline_error() {
+  case "$1" in
+    *"DNS lookup failed"*|*"DNS resolution failed"*|*"The connection failed"*|*"network is unreachable"*|*"No open copy of this work could be retrieved"*|*"source failed"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+# M21 read {files} — a local document backs the content and cache assertions.
 if [ -z "$bad" ]; then
-  if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u]}')"; then
+  if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f]}')"; then
     if [ "$MCP_ISERR" != false ] || [ -z "$MCP_STRUCT" ]; then
       bad="$bad M21: read $RFC_DIRECT isError=$MCP_ISERR or no structuredContent: $(one_line "$MCP_TEXT" | cut -c1-200);"
-    elif [ -n "$(item urls 0 .error)" ]; then
-      bad="$bad M21: read $RFC_DIRECT failed: $(one_line "$(item urls 0 .error)" | cut -c1-200) (network or policy — the item says which);"
+    elif [ -n "$(item files 0 .error)" ]; then
+      bad="$bad M21: read $RFC_DIRECT failed: $(one_line "$(item files 0 .error)" | cut -c1-200);"
     else
-      RFC_PATH="$(item urls 0 .path)"
-      [ "$(item urls 0 .source)" = "$RFC_DIRECT" ] || bad="$bad M21: the item's source is '$(item urls 0 .source)', not $RFC_DIRECT;"
+      RFC_PATH="$(item files 0 .path)"
+      [ "$(item files 0 .source)" = "$RFC_DIRECT" ] || bad="$bad M21: the item's source is '$(item files 0 .source)', not $RFC_DIRECT;"
       [ -f "$RFC_PATH" ] || bad="$bad M21: the item's path '$RFC_PATH' is not a file on disk;"
-      item urls 0 .content | grep -qi 'coffee' || bad="$bad M21: the content of RFC 2324 does not mention coffee — not the document;"
-      [ "$(item urls 0 '.gaps | type')" = array ] || bad="$bad M21: the item's gaps is not a list: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      [ -n "$(item urls 0 .via)" ] || bad="$bad M21: the item names no via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      [ "$(sfield '[keys[] | select(. != "urls")] | length')" = 0 ] || bad="$bad M21: a urls-only read answered other groups: $(sfield 'keys | join(",")');"
-      printf '%s\n' "$MCP_TEXT" | sed -n 's/^#\{1,\} //p' | grep -qxF "$RFC_DIRECT" || bad="$bad M21: the readable text carries no heading for $RFC_DIRECT: $(one_line "$MCP_TEXT" | cut -c1-160);"
-      [ "$(text_line 1)" = '## urls (1)' ] || bad="$bad M21: the readable text does not open with its group heading '## urls (1)': $(one_line "$(text_line 1)");"
+      grep -qi 'coffee' <<<"$(item files 0 .content)" || bad="$bad M21: the local content does not mention coffee;"
+      [ "$(item files 0 '.gaps | type')" = array ] || bad="$bad M21: the item's gaps is not a list: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ "$(item files 0 .via)" = local ] || bad="$bad M21: the item names no local via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ "$(sfield '[keys[] | select(. != "files")] | length')" = 0 ] || bad="$bad M21: a files-only read answered other groups: $(sfield 'keys | join(",")');"
+      grep -qxF "$RFC_DIRECT" <<<"$(printf '%s\n' "$MCP_TEXT" | sed -n 's/^#\{1,\} //p')" || bad="$bad M21: the readable text carries no heading for $RFC_DIRECT: $(one_line "$MCP_TEXT" | cut -c1-160);"
+      [ "$(text_line 1)" = '## files (1)' ] || bad="$bad M21: the readable text does not open with its group heading '## files (1)': $(one_line "$(text_line 1)");"
     fi
   else
     bad="$bad M21: read: $MCP_WHY;"
   fi
   if [ -n "$RFC_PATH" ]; then
-    if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u]}')"; then
-      [ "$(item urls 0 .cached)" = true ] || bad="$bad M21: the second read of the same URL is not cached: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f]}')"; then
+      [ "$(item files 0 .cached)" = true ] || bad="$bad M21: the second read of the same file is not cached: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     else
       bad="$bad M21: second read: $MCP_WHY;"
     fi
-    if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u], include_content: false}')"; then
-      [ -z "$(item urls 0 .content)" ] && [ "$(item urls 0 .chars)" -gt 0 ] 2>/dev/null && [ "$(item urls 0 .path)" = "$RFC_PATH" ] ||
+    if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f], include_content: false}')"; then
+      [ -z "$(item files 0 .content)" ] && [ "$(item files 0 .chars)" -gt 0 ] 2>/dev/null && [ "$(item files 0 .path)" = "$RFC_PATH" ] ||
         bad="$bad M21: include_content false did not answer an item with chars and path and no content: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     else
       bad="$bad M21: include_content false: $MCP_WHY;"
     fi
   fi
   if mcp_call http professor harvester_read '{"urls":[]}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'read needs at least one item in urls, files or publications' || bad="$bad M21: a read with no item was not refused by name: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
+    [ "$MCP_ISERR" = true ] && grep -qF 'read needs at least one item in urls, files or publications' <<<"$MCP_TEXT" || bad="$bad M21: a read with no item was not refused by name: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
   else
     bad="$bad M21: read empty: $MCP_WHY;"
   fi
   # M21 batch limits — 50 items in total, 20 of them publications, each refused by name before any fetch
   if mcp_call http professor harvester_read "$(jq -cn '{urls: [range(51) | "https://example.invalid/\(.)"]}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'read takes at most 50 items in total across urls, files and publications; this call sent 51' || bad="$bad M21: 51 items were not refused by the total limit: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
+    [ "$MCP_ISERR" = true ] && grep -qF 'read takes at most 50 items in total across urls, files and publications; this call sent 51' <<<"$MCP_TEXT" || bad="$bad M21: 51 items were not refused by the total limit: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
   else
     bad="$bad M21: read 51 items: $MCP_WHY;"
   fi
   if mcp_call http professor harvester_read "$(jq -cn '{publications: [range(21) | "10.1000/lane-m.\(.)"]}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'publications takes at most 20 items; this call sent 21' || bad="$bad M21: 21 publications were not refused by the publications limit: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
+    [ "$MCP_ISERR" = true ] && grep -qF 'publications takes at most 20 items; this call sent 21' <<<"$MCP_TEXT" || bad="$bad M21: 21 publications were not refused by the publications limit: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
   else
     bad="$bad M21: read 21 publications: $MCP_WHY;"
   fi
-  # M29 misplaced input — a per-item error that names the right field, beside
-  # a good item (M21's isolation and order ride on the same call)
-  if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_DIRECT" --arg p "$SCRATCH/no-such-document.md" '{urls: [$u, $p, "10.1038/nphys1170"]}')"; then
+  # The public URL is an offline failure. A local file in the same call proves
+  # that one failed item does not erase another group's successful item.
+  if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_PUBLIC" --arg f "$RFC_DIRECT" --arg p "$SCRATCH/no-such-document.md" '{urls: [$u, $p, "10.1038/nphys1170"], files: [$f]}')"; then
     [ "$MCP_ISERR" = false ] || bad="$bad M21: failing items made the whole call isError;"
     [ "$(sfield '.urls | length')" = 3 ] || bad="$bad M21: three urls answered $(sfield '.urls | length') item(s), not one per url;"
-    [ "$(item urls 0 .source)" = "$RFC_DIRECT" ] && [ -z "$(item urls 0 .error)" ] || bad="$bad M21: item order not kept or the good item failed beside the bad ones: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    [ "$(item urls 0 .source)" = "$RFC_PUBLIC" ] && offline_error "$(item urls 0 .error)" ||
+      bad="$bad M21: the public URL did not produce its own offline error: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    [ "$(item files 0 .source)" = "$RFC_DIRECT" ] && [ -z "$(item files 0 .error)" ] ||
+      bad="$bad M21: the local file failed beside the public error: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     [ "$(item urls 1 .error)" = 'this is a local path; put it in files.' ] || bad="$bad M29: a local path given in urls does not say 'this is a local path; put it in files.': $(one_line "$(item urls 1 .error)");"
     [ "$(item urls 2 .error)" = 'this is a DOI; put it in publications.' ] || bad="$bad M29: a DOI given in urls does not say 'this is a DOI; put it in publications.': $(one_line "$(item urls 2 .error)");"
     [ "$(text_line 1)" = '## urls (3)' ] || bad="$bad M21: three urls do not open the text with '## urls (3)': $(one_line "$(text_line 1)");"
   else
     bad="$bad M29: read misplaced items: $MCP_WHY;"
   fi
-  # M22 harvester_search_literature — either typed candidates, each with a handle, or the named empty answer
+  # M22 harvester_search_literature — every discovery source fails offline.
   if MCP_HTTP_TIMEOUT=120 mcp_call http professor harvester_search_literature '{"query":"Attention Is All You Need","limit":3,"type":"paper"}'; then
-    if [ "$MCP_ISERR" != false ]; then
-      bad="$bad M22: harvester_search_literature isError (discovery failed): $(one_line "$MCP_TEXT" | cut -c1-160);"
-    elif [ "$(sfield '.candidates | length')" -gt 0 ] 2>/dev/null; then
-      [ "$(sfield '[.candidates[] | select((.handle // "") == "")] | length')" = 0 ] || bad="$bad M22: a candidate carries no handle: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      printf '%s' "$(text_line 1)" | grep -qE '^[0-9]+ candidate work\(s\) for "Attention Is All You Need"' || bad="$bad M22: the readable text does not count the candidates: $(one_line "$(text_line 1)");"
-      find_note="candidates"
-    elif [ "$(sfield '.candidates | length')" = 0 ] && printf '%s' "$(text_line 1)" | grep -q '^No candidate works found for "Attention Is All You Need"'; then
-      find_note="none found (named)"
-    else
-      bad="$bad M22: harvester_search_literature answered neither typed candidates nor the named empty answer: $(one_line "$MCP_TEXT" | cut -c1-160);"
-    fi
+    [ "$MCP_ISERR" = true ] && grep -qF 'work discovery failed: every source failed' <<<"$MCP_TEXT" ||
+      bad="$bad M22: offline discovery did not name every failed source: $(one_line "$MCP_TEXT" | cut -c1-160);"
+    find_note="offline sources failed by name"
   else
     bad="$bad M22: harvester_search_literature: $MCP_WHY;"
   fi
   if mcp_call http professor harvester_search_literature '{"query":"   "}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'query must not be empty' || bad="$bad M22: a blank query was not refused by name: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -q 'query must not be empty' <<<"$MCP_TEXT" || bad="$bad M22: a blank query was not refused by name: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M22: harvester_search_literature blank: $MCP_WHY;"
   fi
   if mcp_call http professor harvester_search_literature '{"query":"x","type":"article"}'; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'type must be any, paper or book, got "article"' || bad="$bad M22: an unknown type was not refused by name: $(one_line "$MCP_TEXT");"
+    [ "$MCP_ISERR" = true ] && grep -qF 'type must be any, paper or book, got "article"' <<<"$MCP_TEXT" || bad="$bad M22: an unknown type was not refused by name: $(one_line "$MCP_TEXT");"
   else
     bad="$bad M22: harvester_search_literature type: $MCP_WHY;"
   fi
-  # M23/M24 harvester_search_web — served only when configured; unconfigured it is hidden
-  # from tools/list and a call is the protocol's unknown-tool error; configured,
-  # a backend failure is an isError RESULT (data), never a Go error
+  # M23/M24 harvester_search_web — the loopback-only backend is configured;
+  # its unreachable endpoint must be an isError result, never empty success.
   search_cfg=false
   if [ -f "$HARVESTER_CFG" ]; then
     search_cfg="$(jq -r '((.search.enabled // true) and (((.search.searxngURL // "") != "") or ((.search.braveApiKey // "") != ""))) | tostring' "$HARVESTER_CFG" 2>/dev/null || echo false)"
@@ -1324,24 +1367,21 @@ if [ -z "$bad" ]; then
   if mcp_tools http professor/harvester; then
     harv_tools="$MCP_TOOLS"
     search_served=false
-    printf '%s\n' "$harv_tools" | grep -qx harvester_search_web && search_served=true
+    grep -qx harvester_search_web <<<"$harv_tools" && search_served=true
     [ "$search_served" = "$search_cfg" ] || bad="$bad M23: harvester_search_web served=$search_served while harvester.config.json says configured=$search_cfg;"
     if mcp_call http professor harvester_search_web '{"query":"HTCPCP teapot"}'; then
       if [ "$search_cfg" = true ]; then
         [ -z "$MCP_RPCERR" ] || bad="$bad M23: a configured harvester_search_web answered a protocol error: $MCP_RPCERR;"
-        if [ "$MCP_ISERR" = true ]; then
-          printf '%s' "$MCP_TEXT" | grep -q '^Web search failed' || bad="$bad M24: the harvester_search_web failure is isError but not the named 'Web search failed' rendering: $(one_line "$MCP_TEXT");"
-          search_note="configured, backend failed as data (isError, no protocol error)"
-        else
-          search_note="configured, answered results"
-        fi
+        [ "$MCP_ISERR" = true ] && grep -q '^Web search failed' <<<"$MCP_TEXT" ||
+          bad="$bad M24: offline web search did not name its backend failure: $(one_line "$MCP_TEXT");"
+        search_note="loopback backend failed by name"
         if mcp_call http professor harvester_search_web '{"query":"x","limit":21}'; then
-          [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'limit must be between 1 and 20' || bad="$bad M23: harvester_search_web limit 21 was not refused by name: $(one_line "$MCP_TEXT");"
+          [ "$MCP_ISERR" = true ] && grep -qF 'limit must be between 1 and 20' <<<"$MCP_TEXT" || bad="$bad M23: harvester_search_web limit 21 was not refused by name: $(one_line "$MCP_TEXT");"
         else
           bad="$bad M23: harvester_search_web limit: $MCP_WHY;"
         fi
       else
-        printf '%s' "$MCP_RPCERR" | grep -q 'unknown tool "harvester_search_web"' || bad="$bad M23: with harvester_search_web unconfigured a call answered '$MCP_RPCERR' / isError=$MCP_ISERR (want the protocol's unknown tool \"harvester_search_web\");"
+        grep -q 'unknown tool "harvester_search_web"' <<<"$MCP_RPCERR" || bad="$bad M23: with harvester_search_web unconfigured a call answered '$MCP_RPCERR' / isError=$MCP_ISERR (want the protocol's unknown tool \"harvester_search_web\");"
         search_note="unconfigured, hidden and unknown to tools/call"
       fi
     else
@@ -1350,39 +1390,28 @@ if [ -z "$bad" ]; then
   else
     bad="$bad M23: harvester tools/list: $MCP_WHY;"
   fi
-  # M25 harvester_download_file — a real file lands in the binary cache: path, kind, type,
-  # bytes and sha256 agree with the file on disk; a local path is its own
-  # error item naming read's files (M29)
-  if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_download_file "$(jq -cn --arg u "$RFC_DIRECT" --arg p "$NOTE" '{urls: [$u, $p]}')"; then
-    [ "$MCP_ISERR" = false ] || bad="$bad M25: harvester_download_file isError: $(one_line "$MCP_TEXT" | cut -c1-160);"
-    dl_path="$(item items 0 .path)"
-    if [ -n "$(item items 0 .error)" ] || [ ! -f "$dl_path" ]; then
-      bad="$bad M25: harvester_download_file $RFC_DIRECT left no file on disk: $(one_line "$MCP_STRUCT" | cut -c1-200);"
-    else
-      [ "$(item items 0 .bytes)" = "$(wc -c <"$dl_path" | tr -d ' ')" ] || bad="$bad M25: bytes $(item items 0 .bytes) differs from the file's size;"
-      [ "$(item items 0 .sha256)" = "$(sha256sum "$dl_path" | cut -d' ' -f1)" ] || bad="$bad M25: sha256 differs from the file's own hash;"
-      [ -n "$(item items 0 .kind)" ] && [ -n "$(item items 0 .content_type)" ] || bad="$bad M25: the item names no kind or content_type: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      [ -n "$(item items 0 .via)" ] || bad="$bad M25: the item names no via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    fi
+  # M25: download_file accepts HTTP URLs only; public fetches fail offline and
+  # a local path tells the caller to use harvester_read(files).
+  if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_download_file "$(jq -cn --arg u "$RFC_PUBLIC" --arg p "$NOTE" '{urls: [$u, $p]}')"; then
+    [ "$MCP_ISERR" = true ] && offline_error "$(item items 0 .error)" ||
+      bad="$bad M25: the public download did not name an offline item error: $(one_line "$MCP_TEXT" | cut -c1-160);"
     [ "$(item items 1 .error)" = 'this is a local path; harvester_download_file takes URLs — read a local document with `harvester_read` (files).' ] || bad="$bad M29: a local path given to harvester_download_file does not name harvester_read's files: $(one_line "$(item items 1 .error)");"
   else
     bad="$bad M25: harvester_download_file: $MCP_WHY;"
   fi
-  # H13 `pfm harvest download-file` — the CLI face of the same download: a JSON
-  # receipt per item; a refused header exits 2 before any request
-  dl_json="$(pfm harvest download-file --json "$RFC_DIRECT" 2>"$SCRATCH/dl.err")"
+  # H13: the CLI reports the same offline item failure as JSON.
+  dl_json="$(pfm harvest download-file --json "$RFC_PUBLIC" 2>"$SCRATCH/dl.err")"
   dl_rc=$?
-  cli_path="$(printf '%s' "$dl_json" | jq -r '.[0].path // empty' 2>/dev/null)"
-  [ "$dl_rc" -eq 0 ] && [ -f "$cli_path" ] && [ "$(printf '%s' "$dl_json" | jq -r '.[0].bytes')" = "$(wc -c <"$cli_path" | tr -d ' ')" ] ||
-    bad="$bad H13: pfm harvest download-file --json exited $dl_rc with '$(one_line "$dl_json" | cut -c1-160)' $(one_line "$(cat "$SCRATCH/dl.err")" | cut -c1-120) (want exit 0 and a path whose size is bytes);"
-  pfm harvest download-file --header 'Host: example.org' "$RFC_DIRECT" >/dev/null 2>"$SCRATCH/dl.err"
+  [ "$dl_rc" -eq 1 ] && offline_error "$(jq -r '.[0].error // empty' <<<"$dl_json" 2>/dev/null)" ||
+    bad="$bad H13: pfm harvest download-file --json exited $dl_rc with no offline error item: $(one_line "$dl_json" | cut -c1-160);"
+  pfm harvest download-file --header 'Host: example.org' "$RFC_PUBLIC" >/dev/null 2>"$SCRATCH/dl.err"
   dl_rc=$?
   [ "$dl_rc" -eq 2 ] && grep -q 'caller header refused' "$SCRATCH/dl.err" || bad="$bad H13: --header 'Host: …' exited $dl_rc '$(one_line "$(cat "$SCRATCH/dl.err")")' (want 2 naming the refused header);"
   # M26 read {files} — a local file is read via local; a missing one is its
   # own error item; a URL names urls (M29)
-  if mcp_call http professor harvester_read "$(jq -cn --arg n "$NOTE" --arg m "$SCRATCH/no-such-document.md" --arg u "$RFC_DIRECT" '{files: [$n, $m, $u]}')"; then
+  if mcp_call http professor harvester_read "$(jq -cn --arg n "$NOTE" --arg m "$SCRATCH/no-such-document.md" --arg u "$RFC_PUBLIC" '{files: [$n, $m, $u]}')"; then
     [ "$MCP_ISERR" = false ] || bad="$bad M26: read files isError: $(one_line "$MCP_TEXT" | cut -c1-160);"
-    item files 0 .content | grep -qF "SENTINEL-LANE-M-$$" || bad="$bad M26: the local note did not come back with its sentinel: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    grep -qF "SENTINEL-LANE-M-$$" <<<"$(item files 0 .content)" || bad="$bad M26: the local note did not come back with its sentinel: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     [ "$(item files 0 .via)" = local ] || bad="$bad M26: the local item's via is '$(item files 0 .via)', not local;"
     [ -n "$(item files 1 .error)" ] || bad="$bad M26: the missing local path is not an error item;"
     [ "$(item files 2 .error)" = 'this is a URL; put it in urls.' ] || bad="$bad M29: a URL given in files does not say 'this is a URL; put it in urls.': $(one_line "$(item files 2 .error)");"
@@ -1390,14 +1419,11 @@ if [ -z "$bad" ]; then
   else
     bad="$bad M26: read files: $MCP_WHY;"
   fi
-  # M27 read {publications} — an arXiv id resolves to a cached work with its ids and via
+  # M27 read {publications} — an arXiv lookup fails by name offline.
   if MCP_HTTP_TIMEOUT=240 mcp_call http professor harvester_read '{"publications":["arXiv:1706.03762"],"include_content":false}'; then
-    if [ "$MCP_ISERR" != false ] || [ -n "$(item publications 0 .error)" ]; then
-      bad="$bad M27: read publications arXiv:1706.03762 failed: $(one_line "$MCP_TEXT" | cut -c1-200);"
-    else
-      [ "$(item publications 0 .ids.arxiv)" = 1706.03762 ] || bad="$bad M27: the item's ids do not name arxiv 1706.03762: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      [ -f "$(item publications 0 .path)" ] && [ "$(item publications 0 .chars)" -gt 0 ] 2>/dev/null && [ -n "$(item publications 0 .via)" ] || bad="$bad M27: the work item carries no path, chars or via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    fi
+    [ "$MCP_ISERR" = true ] && offline_error "$(item publications 0 .error)" &&
+      [ "$(item publications 0 .ids.arxiv)" = 1706.03762 ] ||
+      bad="$bad M27: arXiv:1706.03762 did not carry its id and offline lookup error: $(one_line "$MCP_TEXT" | cut -c1-200);"
   else
     bad="$bad M27: read publications: $MCP_WHY;"
   fi
@@ -1414,25 +1440,28 @@ if [ -z "$bad" ]; then
   else
     bad="$bad M28: harvester tools/list: $MCP_WHY;"
   fi
-  if mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u], headers: {Host: "example.org"}}')"; then
-    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'caller header refused: Host' || bad="$bad M28: a Host header was not refused by name: $(one_line "$MCP_TEXT" | cut -c1-160);"
+  if mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_PUBLIC" '{urls: [$u], headers: {Host: "example.org"}}')"; then
+    [ "$MCP_ISERR" = true ] && grep -q 'caller header refused: Host' <<<"$MCP_TEXT" || bad="$bad M28: a Host header was not refused by name: $(one_line "$MCP_TEXT" | cut -c1-160);"
   else
     bad="$bad M28: read Host header: $MCP_WHY;"
   fi
   if mcp_call http professor harvester_read '{"publications":["arXiv:1706.03762"],"headers":{"X-Lane-M":"1"}}'; then
-    [ "$MCP_ISERR" = false ] && item publications 0 .error | grep -q 'pass the landing URL' || bad="$bad M28: a bare identifier with headers is not the per-item 'pass the landing URL' error: $(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160);"
+    [ "$MCP_ISERR" = true ] && offline_error "$(item publications 0 .error)" &&
+      ! grep -qF 'lane-m-secret' <<<"$MCP_OUT" ||
+      bad="$bad M28: a headered identifier did not report its own offline lookup failure: $(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160);"
   else
     bad="$bad M28: read publications with headers: $MCP_WHY;"
   fi
-  if [ -n "$RFC_PATH" ] && MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_DIRECT" --arg v "lane-m-secret-$$" '{urls: [$u], include_content: false, headers: {"X-Lane-M": $v}}')"; then
-    [ -z "$(item urls 0 .error)" ] && [ "$(item urls 0 .cached)" = false ] || bad="$bad M28: a headered read of a page cached without headers was served from that cache (or failed): $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    printf '%s' "$MCP_OUT" | grep -qF "lane-m-secret-$$" && bad="$bad M28: the header value came back in the result;"
-  elif [ -n "$RFC_PATH" ]; then
+  if MCP_HTTP_TIMEOUT=180 mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_PUBLIC" --arg v "lane-m-secret-$$" '{urls: [$u], include_content: false, headers: {"X-Lane-M": $v}}')"; then
+    offline_error "$(item urls 0 .error)" && [ "$(item urls 0 .cached)" = false ] ||
+      bad="$bad M28: a headered public read did not report its own offline failure: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    grep -qF "lane-m-secret-$$" <<<"$MCP_OUT" && bad="$bad M28: the header value came back in the result;"
+  else
     bad="$bad M28: headered read: $MCP_WHY;"
   fi
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "read urls $RFC_DIRECT (typed item + body, via, gaps list, cached on re-read, include_content false, per-item errors beside a good item) · harvester_search_literature: ${find_note:-?} · harvester_search_web: ${search_note:-?} · harvester_download_file path/bytes/sha256 + pfm harvest download-file · read files via local · read publications arXiv ids + via · caller headers refused by name, partitioned, never echoed · misplaced items name the right field"
+  pass "read local $RFC_DIRECT (typed content, via local, cached on re-read); public URL, literature, web, download and arXiv report named offline failures; caller headers and misplaced items refused by name"
 fi
 
 # ─── M.12 — the cache and the search gate back the tools ────────────────────
@@ -1445,8 +1474,8 @@ if requires M.11-harvester-tools; then
   [ -n "$RFC_PATH" ] && [ -f "$RFC_PATH" ] || bad="$bad H10: no cached artifact path from M.11 ($RFC_PATH);"
   case "$RFC_PATH" in "$HOME"/*) ;; *) bad="$bad H10: the cache artifact $RFC_PATH lives outside \$HOME — not the local cache;" ;; esac
   grep -qi 'coffee' "$RFC_PATH" 2>/dev/null || bad="$bad H10: the cached markdown $RFC_PATH does not carry the document;"
-  if mcp_call http professor harvester_read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u], include_content: false}')"; then
-    [ "$(item urls 0 .cached)" = true ] && [ "$(item urls 0 .path)" = "$RFC_PATH" ] || bad="$bad H10: an include_content false re-read is not the cached artifact $RFC_PATH: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+  if mcp_call http professor harvester_read "$(jq -cn --arg f "$RFC_DIRECT" '{files: [$f], include_content: false}')"; then
+    [ "$(item files 0 .cached)" = true ] && [ "$(item files 0 .path)" = "$RFC_PATH" ] || bad="$bad H10: an include_content false re-read is not the cached artifact $RFC_PATH: $(one_line "$MCP_STRUCT" | cut -c1-160);"
   else
     bad="$bad H10: read include_content false: $MCP_WHY;"
   fi
@@ -1460,11 +1489,11 @@ if requires M.11-harvester-tools; then
     [ "$served" = "$search_cfg" ] || bad="$bad H11: tools/list serves harvester_search_web=$served while the config gate says $search_cfg;"
     instr="$(printf '%s' "$MCP_INIT" | jq -r '.result.instructions // empty')"
     if [ "$search_cfg" = true ]; then
-      printf '%s' "$instr" | grep -qF 'search the web for a topic → harvester_search_web' || bad="$bad H11: search is configured but the instructions do not route a web search to harvester_search_web: $(one_line "$instr" | cut -c1-160);"
+      grep -qF 'search the web for a topic → harvester_search_web' <<<"$instr" || bad="$bad H11: search is configured but the instructions do not route a web search to harvester_search_web: $(one_line "$instr" | cut -c1-160);"
     else
-      printf '%s' "$instr" | grep -q 'harvester_search_web' && bad="$bad H11: search is unconfigured but the instructions still route to harvester_search_web: $(one_line "$instr" | cut -c1-160);"
+      grep -q 'harvester_search_web' <<<"$instr" && bad="$bad H11: search is unconfigured but the instructions still route to harvester_search_web: $(one_line "$instr" | cut -c1-160);"
     fi
-    printf '%s' "$instr" | grep -qF 'a local document → harvester_read with its path in files' && printf '%s' "$instr" | grep -qF "save a file's bytes unparsed → harvester_download_file" ||
+    grep -qF 'a local document → harvester_read with its path in files' <<<"$instr" && grep -qF "save a file's bytes unparsed → harvester_download_file" <<<"$instr" ||
       bad="$bad H11: the family view's instructions do not route a local document to harvester_read's files and unparsed bytes to harvester_download_file: $(one_line "$instr" | cut -c1-160);"
     status_has_search=false
     daemon_status | jq -e '.servers.harvester[]? | select(. == "harvester_search_web")' >/dev/null 2>&1 && status_has_search=true
@@ -1497,8 +1526,8 @@ else
       printf 'transport: %s' "$MCP_WHY"
       return 0
     fi
-    if printf '%s' "$MCP_TEXT" | grep -q "account $SPARE is not in the configured roster"; then printf 'dropped'
-    elif printf '%s' "$MCP_TEXT" | grep -q 'unknown Claude effort'; then printf 'offered'
+    if grep -q "account $SPARE is not in the configured roster" <<<"$MCP_TEXT"; then printf 'dropped'
+    elif grep -q 'unknown Claude effort' <<<"$MCP_TEXT"; then printf 'offered'
     else printf 'other: isError=%s %s' "$MCP_ISERR" "$(one_line "$MCP_TEXT" | cut -c1-120)"
     fi
   }
@@ -1542,51 +1571,49 @@ fi
 
 # ─── M.14 — one chat-driven call per family, both engines ───────────────────
 
-# e2e_drive <chat> <url> <needle> <rename> — the stimulus: the chat is asked to
-# call chat_status on itself, rename itself (a chat_* call whose effect the
-# fleet records), fetch one URL through the harvester (a call the cache
-# records), then say the needle. Waits BY SESSION ID — the name changes under
-# the wait. Returns 1 with E2E_WHY.
+# e2e_drive <chat> <file> <needle> <rename> — the mock chat calls the tools
+# through its own stdio server, then gives a deterministic turn receipt.
 E2E_WHY=""
+scripted_reply() {
+  local records
+  records="$(pfm chat read "$1" --json --tail 20 2>/dev/null)" || return 1
+  jq -e --arg needle "$2" 'any(.entries[]; .role == "assistant" and ((.text // "") | contains($needle)))' <<<"$records" >/dev/null 2>&1
+}
 e2e_drive() {
-  local chat="$1" url="$2" needle="$3" rename="$4" sid out
+  local chat="$1" file="$2" needle="$3" rename="$4" sid out steps
   E2E_WHY=""
   sid="$(live_field "$chat" 2)"
   [ -n "$sid" ] || { E2E_WHY="$chat has no live row to drive"; return 1; }
-  cat >"$SCRATCH/stimulus-$chat.txt" <<EOF
-Do exactly these steps in order, using tools only, and say nothing until the last step: (1) call the chat_status tool with target "self"; (2) call the chat_name tool with target "self" and name "$rename"; (3) call the harvester_read tool with urls ["$url"]; (4) reply with exactly one word: $needle
-EOF
-  out="$(pfm chat inject --allow-unsigned --file "$SCRATCH/stimulus-$chat.txt" "$chat" 2>&1)" || {
+  steps="$(jq -cn --arg name "$rename" --arg file "$file" --arg reply "$needle" '[{type:"mcp",tool:"chat_name",input:{target:"self",name:$name}},{type:"mcp",tool:"harvester_read",input:{files:[$file]}},{type:"turn",reply:$reply}]')"
+  mock_steps "$steps" >"$SCRATCH/stimulus-$chat.txt"
+  out="$(CHAT_SENDER_SESSION=lane-M CHAT_SENDER_LABEL=lane-M pfm chat inject --file "$SCRATCH/stimulus-$chat.txt" "$chat" 2>&1)" || {
     E2E_WHY="pfm chat inject into $chat refused the stimulus: $(one_line "$out")"
     return 1
   }
-  wait_last "$sid" "$needle" 420
-  case $? in
-    0) return 0 ;;
-    2) E2E_WHY="$LANE_WAIT_WHY (waiting for $needle from $chat)"; return 1 ;;
-    *) E2E_WHY="no $needle from $chat in 420s; its last: $(one_line "$(pfm chat last "$sid" 2>&1)" | cut -c1-160)"; return 1 ;;
-  esac
+  if wait_for 60 "scripted_reply '$sid' '$needle'"; then
+    return 0
+  fi
+  E2E_WHY="no scripted $needle assistant record from $chat in 60s; its last: $(one_line "$(pfm chat last "$sid" 2>&1)" | cut -c1-160)"
+  return 1
 }
-# cache_lists <url> — 0 when an include_content false read of that exact URL reports
-# `cached`. The URL carries this run's stamp, so no earlier run cached it; the
-# probe itself reads and caches a miss, so it is asked ONCE, after the chat's
-# own call, never polled and never before the stimulus.
+# cache_lists <file> — a pfm-owned cache hit after the chat's own read.
 cache_lists() {
-  mcp_call http professor harvester_read "$(jq -cn --arg u "$1" '{urls: [$u], include_content: false}')" || return 1
-  [ "$(item urls 0 .cached)" = true ]
+  mcp_call http professor harvester_read "$(jq -cn --arg f "$1" '{files: [$f], include_content: false}')" || return 1
+  [ "$(item files 0 .cached)" = true ] && [ "$(item files 0 .source)" = "$1" ]
 }
-# e2e_evidence <chat> <sid> <sock> <url> <rename> — the fleet's and the cache's
+# e2e_evidence <chat> <sid> <sock> <file> <rename> — the fleet's and the cache's
 # own records of the two calls; renames the chat back. Appends to $bad.
 e2e_evidence() {
-  local chat="$1" sid="$2" sock="$3" url="$4" rename="$5" back
+  local chat="$1" sid="$2" sock="$3" file="$4" rename="$5" back label_wait_why="" back_wait_why=""
+  LANE_ANCHOR="sock:$sock" wait_for 30 "[ \"\$(socket_field '$sock' 5)\" = '$rename' ]" || label_wait_why=" ($LANE_WAIT_WHY)"
   [ "$(socket_field "$sock" 5)" = "$rename" ] ||
-    bad="$bad $chat: the fleet row on $sock reads '$(socket_field "$sock" 5)', not '$rename' — its chat_name self call left no record;"
-  if ! cache_lists "$url"; then
-    bad="$bad $chat: the harvester cache carries no page for $url after the chat's read (read include_content false: ${MCP_WHY:-$(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160)});"
+    bad="$bad $chat: the fleet row on $sock reads '$(socket_field "$sock" 5)', not '$rename' — its chat_name self call left no record;$label_wait_why"
+  if ! cache_lists "$file"; then
+    bad="$bad $chat: the harvester cache carries no local read for $file after the chat's call (read include_content false: ${MCP_WHY:-$(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160)});"
   fi
   back="$(pfm chat name "$sid" "$chat" 2>&1)" || bad="$bad $chat: could not be renamed back (pfm chat name exited non-zero: $(one_line "$back"));"
-  sleep 2
-  live_chat "$chat" || bad="$bad $chat: no live row under its own name after the rename back;"
+  LANE_ANCHOR="sock:$sock" wait_for 10 "live_chat '$chat'" || back_wait_why=" ($LANE_WAIT_WHY)"
+  live_chat "$chat" || bad="$bad $chat: no live row under its own name after the rename back;$back_wait_why"
 }
 
 beat M.14-end-to-end
@@ -1614,7 +1641,7 @@ if requires; then
     bad="$bad Codex: $E2_CHAT has no live row (${E2_WHY:-it died after the prelude}) — the Codex stdio wiring was NOT proven;"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "$CHAT (Claude) and $E2_CHAT (Codex) each renamed themselves through chat_name self (recorded in pfm ls) and fetched their RFC through the daemon (recorded in the harvester cache); renamed back"
+    pass "$CHAT (Claude) and $E2_CHAT (Codex) each renamed themselves through chat_name self (recorded in pfm ls) and read a local file through the harvester (recorded in its cache); renamed back"
   fi
 fi
 

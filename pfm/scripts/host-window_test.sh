@@ -26,6 +26,8 @@ STUBS="$T/stubs"
 STATE="$T/state"
 CALLS="$T/calls"
 mkdir -p "$STUBS" "$STATE"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUBS/sleep"
+chmod 755 "$STUBS/sleep"
 
 UNMIGRATED_LINE='pfm config show: configuration error: config not migrated: run pfm install (legacy present)'
 # shellcheck disable=SC2016 # the backticks are literal text

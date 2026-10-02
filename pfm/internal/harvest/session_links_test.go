@@ -11,6 +11,7 @@ import (
 // the query, before a fragment or a link title. A sid that is not a 32-hex
 // session id is kept: Slashdot's comments.pl?sid=<digits> names a story.
 func TestStoredLinksLoseTheirSessionID(t *testing.T) {
+	t.Parallel()
 	const sid = "0123456789abcdef0123456789abcdef"
 	// the lines of a stored Linux Mint forums thread (phpBB 3), usernames and ids replaced
 	stored := strings.Join([]string{

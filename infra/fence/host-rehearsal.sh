@@ -56,12 +56,14 @@ set -uo pipefail
 # kept whole and stderr says so. PFM_REHEARSAL_KEEP_SCRATCH=1 keeps it on PASS
 # too. Fence housekeeping (infra/fence/housekeeping.sh) runs before the image
 # build, and the container carries --label pfm.fence=1.
+# PFM_REHEARSAL_SOURCE_TREE, when set, supplies the tracked candidate files
+# from a fixture git tree; the normal rehearsal copies this repository.
 #
 # compare BACKUP HOME JOURNAL: the manifest check alone — every sessions.sha256
 # hash present in HOME/.claude/{projects,file-history,tasks,session-env} or in
 # JOURNAL/backup/conflicts; every db.txt table count equal in HOME's database
 # (.cc/fleet.db → .local/state/pfm/pfm.db, .local/state/pfm/fleet.db →
-# .local/state/pfm/pfm-cache.db, callmeter.db → itself) except swap_event and
+# .local/state/pfm/pfm-cache.db) except swap_event and
 # hidden, each counted from a temp copy with its -wal/-shm.
 #
 # BROKEN STATE: wrong arguments (a third one other than --stress) print usage, exit 2. A backup lacking home= in
@@ -79,10 +81,13 @@ set -uo pipefail
 IMAGE=professor-pfm-dev
 NAME="${PFM_REHEARSAL_NAME:-pfm-host-rehearsal}"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+SOURCE_TREE="${PFM_REHEARSAL_SOURCE_TREE:-}"
 # The tracked tree. Inside the fence a linked worktree's .git names a host
 # path; the fence hands the active gitdir in as PFM_DEV_REPO_GIT_DIR.
 repo_ls_files() {
-  if [ -n "${PFM_DEV_REPO_GIT_DIR:-}" ]; then
+  if [ -n "$SOURCE_TREE" ]; then
+    git -C "$SOURCE_TREE" ls-files -z
+  elif [ -n "${PFM_DEV_REPO_GIT_DIR:-}" ]; then
     GIT_DIR="$PFM_DEV_REPO_GIT_DIR" GIT_WORK_TREE="$REPO_ROOT" git -c safe.directory='*' ls-files -z
   else
     git -C "$REPO_ROOT" ls-files -z
@@ -103,7 +108,9 @@ FLEET_UNITS="pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer"
 HOLDER_PID=424242
 MCP_MAIN_PID=4242
 C_GOMOD=/pfm-gomod
-DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db" ".local/state/pfm/callmeter.db .local/state/pfm/callmeter.db")
+DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db")
+# Databases pfm no longer owns: an older backup still lists them, so they are named and skipped, never refused.
+RETIRED_DBS=(.local/state/pfm/callmeter.db)
 
 die() { echo "host-rehearsal: $*" >&2; exit 1; }
 usage() {
@@ -121,7 +128,7 @@ unreadable() { echo "manifest: UNREADABLE — $*"; exit 2; }
 # count_tables DB OUT — "{table} {count}" per table of DB, read from a temp copy.
 count_tables() {
   local db=$1 out=$2 c t n
-  c="$TMP/count-$(basename "$db")"
+  c="$TMP/count-${db##*/}"
   rm -f "$c" "$c-wal" "$c-shm"
   cp "$db" "$c" || return 1
   for s in -wal -shm; do [ -f "$db$s" ] && { cp "$db$s" "$c$s" || return 1; }; done
@@ -149,7 +156,8 @@ cmd_compare() {
   done
   : >"$TMP/have"
   if [ ${#dirs[@]} -gt 0 ]; then
-    find -H "${dirs[@]}" -type f -print0 | xargs -0 -r sha256sum | sed 's/^\\//' | cut -c1-64 | sort -u >"$TMP/have" ||
+    find -H "${dirs[@]}" -type f -print0 | xargs -0 -r sha256sum |
+      awk '{ print substr($0, 1 + (substr($0, 1, 1) == "\\"), 64) }' >"$TMP/have" ||
       unreadable "hashing the store under $home failed"
   fi
   awk 'NR == FNR { have[$1] = 1; next }
@@ -167,6 +175,12 @@ cmd_compare() {
     "== "*" ABSENT") skip=1; continue ;;
     "== "*)
       src=${line#== }; skip=0; target=""
+      for entry in "${RETIRED_DBS[@]}"; do
+        if [ "$entry" = "$src" ]; then target=retired; fi
+      done
+      if [ "$target" = retired ]; then
+        echo "retired database, not rehearsed: $src"; skip=1; continue
+      fi
       for entry in "${DB_MAP[@]}"; do [ "${entry%% *}" = "$src" ] && target=${entry#* }; done
       [ -n "$target" ] || unreadable "db.txt names $src, which has no mapped database"
       [ -r "$home/$target" ] || unreadable "$home/$target unreadable (backup lists $src)"
@@ -177,7 +191,10 @@ cmd_compare() {
     [ "$skip" = 0 ] || continue
     table=${line% *}; count=${line##* }
     case $table in swap_event | hidden) continue ;; esac
-    now=$(awk -v t="$table" '$1 == t { print $2 }' "$TMP/now")
+    now=""
+    while read -r name value; do
+      [ "$name" = "$table" ] && now=$value
+    done <"$TMP/now"
     if [ -z "$now" ]; then reasons+=("$target table $table missing (backup $src had $count)")
     elif [ "$now" != "$count" ]; then reasons+=("$target table $table: backup $count, now $now"); fi
   done <"$dbtxt"
@@ -194,10 +211,10 @@ cmd_compare() {
 # tree_hash DIR OUT — one sorted line per path: path, type, mode, target or sha256.
 tree_hash() {
   local dir=$1 out=$2
-  (cd "$dir" && find . \( -path ./.local/state/pfm/migrations -o -path ./.config/go -o -name '*.db-wal' -o -name '*.db-shm' \) -prune -o -type f -print0 | xargs -0 -r sha256sum) \
-    >"$out.sha" || return 1
-  (cd "$dir" && find . \( -path ./.local/state/pfm/migrations -o -path ./.config/go -o -name '*.db-wal' -o -name '*.db-shm' \) -prune -o ! -path . -printf '%P\t%y\t%m\t%l\n') \
-    >"$out.meta" || return 1
+  (cd "$dir" && : >"$out.meta" &&
+    find . \( -path ./.local/state/pfm/migrations -o -path ./.config/go -o -name '*.db-wal' -o -name '*.db-shm' \) -prune -o \
+      ! -path . -fprintf "$out.meta" '%P\t%y\t%m\t%l\n' -type f -print0 |
+      xargs -0 -r sha256sum) >"$out.sha" || return 1
   awk -F'\t' 'NR == FNR { o = (substr($0, 1, 1) == "\\") ? 1 : 0; sha[substr($0, 69 + o)] = substr($0, 1 + o, 64); next }
     { v = ($2 == "f") ? sha[$1] : ($2 == "l" ? $4 : "-"); print $1 "\t" $2 "\t" $3 "\t" v }' \
     "$out.sha" "$out.meta" | LC_ALL=C sort >"$out"
@@ -228,7 +245,10 @@ inside() { docker exec "$NAME" bash -lc "export PATH=$C_REHEARSAL/stubs:\$PATH; 
 cmd_rehearse() {
   local backup=$1 scratch=$2 stress=$3 home f tool
   [ -r "$backup/meta" ] || die "meta missing in $backup"
-  home=$(sed -n 's/^home=//p' "$backup/meta" | head -1)
+  home=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in home=*) home=${line#home=}; break ;; esac
+  done <"$backup/meta"
   [ -n "$home" ] || die "home= line in meta missing in $backup"
   for f in manifest/sessions.sha256 manifest/db.txt; do [ -f "$backup/$f" ] || die "$f missing in $backup"; done
   [ -d "$backup/home" ] || die "home/ missing in $backup"
@@ -260,7 +280,7 @@ cmd_rehearse() {
   mkdir -p "$scratch/etc/claude-code" || fail copy "create $scratch/etc/claude-code failed"
   local marker=.local/share/pfm/install/source-repo clone
   [ -f "$H/$marker" ] || fail copy "clone marker $marker missing in the copied home"
-  clone=$(head -1 "$H/$marker")
+  IFS= read -r clone <"$H/$marker"
   case $clone in
   "$home"/?*) ;;
   *) fail copy "clone marker names '$clone', outside home $home" ;;
@@ -270,12 +290,14 @@ cmd_rehearse() {
   gitvals=$(ROOT="$REPO_ROOT" FENCE_CALLER=host-rehearsal bash -c \
     'source "$1" && printf "%s\n%s\n" "$PFM_DEV_GIT_COMMON" "$PFM_DEV_GIT_DIR_REL"' _ "$REPO_ROOT/infra/fence/fence-env.sh" 2>&1) ||
     fail copy "resolve the git dir of $REPO_ROOT: $gitvals"
-  git_common=$(sed -n 1p <<<"$gitvals"); git_rel=$(sed -n 2p <<<"$gitvals")
+  local git_lines=()
+  mapfile -t git_lines <<<"$gitvals"
+  git_common=${git_lines[0]:-}; git_rel=${git_lines[1]:-}
   local crel=${clone#"$home"/}
   local cand="$H/$crel" cf
   { rm -rf -- "$cand" && mkdir -p "$cand"; } || fail copy "clear $cand failed"
-  repo_ls_files | rsync -a --from0 --files-from=- --ignore-missing-args "$REPO_ROOT/" "$cand/" >>"$R/copy.log" 2>&1 ||
-    fail copy "placing the candidate tree from $REPO_ROOT failed (see copy.log)"
+  repo_ls_files | rsync -a --from0 --files-from=- --ignore-missing-args "${SOURCE_TREE:-$REPO_ROOT}/" "$cand/" >>"$R/copy.log" 2>&1 ||
+    fail copy "placing the candidate tree from ${SOURCE_TREE:-$REPO_ROOT} failed (see copy.log)"
   # The container runs as the host uid, so git's ownership check passes and
   # the build stamps vcs.revision from the read-only common dir.
   printf 'gitdir: %s\n' "$C_GIT/$git_rel" >"$cand/.git" || fail copy "write $cand/.git failed"
@@ -308,9 +330,9 @@ cmd_rehearse() {
     printf 'stress=%q fleet=%q holder=%q mainpid=%q\n' "$stress" "$FLEET_UNITS" "$HOLDER_PID" "$MCP_MAIN_PID"
     cat <<'EOF'
 # The rehearsal dir ($C_REHEARSAL in the container): the parent of stubs/.
-D=$(dirname "$(dirname "$0")")
+D=${0%/*}; D=${D%/*}
 printf '%s\n' "$*" >>"$D/systemctl.log"
-mkdir -p "$D/units"
+[ -d "$D/units" ] || mkdir -p "$D/units"
 state() {
   if [ -f "$D/units/$1" ]; then cat "$D/units/$1"; return; fi
   case " $fleet " in *" $1 "*) echo active ;; *) echo inactive ;; esac
@@ -353,7 +375,7 @@ EOF
     cat <<'EOF'
 # /etc/claude-code is mounted read-only, as the host's root-owned /etc is to its
 # user; this sudo writes the read-write mount of the same directory.
-D=$(dirname "$(dirname "$0")")
+D=${0%/*}; D=${D%/*}
 printf '%s\n' "$*" >>"$D/sudo.log"
 etc=${PFM_REHEARSAL_ETC:?sudo stub: PFM_REHEARSAL_ETC unset}
 [ "${1:-}" = -n ] && shift
@@ -390,9 +412,9 @@ EOF
     -e "PFM_DEV_REPO_GIT_DIR=$C_GIT/$git_rel" \
     -e "PFM_DEV_REPO_WORK_TREE=$clone" \
     "$IMAGE" sleep infinity >>"$R/build.log" 2>&1 || fail build "docker run of $IMAGE failed (see build.log)"
-  local qclone qpfm
-  qclone=$(printf '%q' "$clone")
-  qpfm=$(printf '%q' "$home/.local/bin/pfm")
+  local qclone qpfm qjid
+  printf -v qclone '%q' "$clone"
+  printf -v qpfm '%q' "$home/.local/bin/pfm"
   # The host's own environment: an XDG_CONFIG_HOME override hides the legacy
   # config that host-install's smoke test meets on a real crossing.
   inside "make -C $qclone/pfm host-install" >>"$R/build.log" 2>&1
@@ -406,7 +428,10 @@ EOF
   head_sha=$(repo_head 2>&1) || fail build "reading HEAD of $REPO_ROOT failed: $head_sha"
   vcs=$(inside "go version -m $qpfm" 2>&1)
   printf '%s\n' "$vcs" >>"$R/build.log"
-  stamp=$(sed -n 's/^[[:space:]]*build[[:space:]]\{1,\}vcs\.revision=//p' <<<"$vcs" | head -1)
+  stamp=""
+  while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*build[[:space:]]+vcs\.revision=(.*)$ ]]; then stamp=${BASH_REMATCH[1]}; break; fi
+  done <<<"$vcs"
   { [ -n "$stamp" ] && [ "$stamp" = "$head_sha" ]; } || fail build "pfm carries no VCS stamp of HEAD $head_sha"
   pass build
 
@@ -425,7 +450,10 @@ EOF
   inside "$qpfm install --yes --skip-harvest" >"$R/apply.log" 2>&1
   rc=$?
   local jdir jid
-  jdir=$(sed -n 's/^install journal: //p' "$R/apply.log" | tail -1)
+  jdir=""
+  while IFS= read -r line; do
+    case $line in 'install journal: '*) jdir=${line#install journal: } ;; esac
+  done <"$R/apply.log"
   [ $rc -eq 0 ] || fail apply "pfm install --yes exit $rc: $(tail -1 "$R/apply.log")"
   [ -n "$jdir" ] || fail apply "pfm install --yes printed no 'install journal:' line"
   case $jdir in "$home"/?*) ;; *) fail apply "journal $jdir is outside home $home" ;; esac
@@ -441,8 +469,13 @@ EOF
   rc=$?
   echo "(doctor exit $rc; only layout findings are judged)" >>"$R/doctor.log"
   local finding
-  finding=$(grep -E '^(session-store|managed-cleanup|legacy|state|layout): ' "$R/doctor.log" |
-    grep -vx 'managed-cleanup: check off by config' | head -1)
+  finding=""
+  while IFS= read -r line; do
+    case $line in
+    'session-store: '* | 'managed-cleanup: '* | 'legacy: '* | 'state: '* | 'layout: '*)
+      [ "$line" = 'managed-cleanup: check off by config' ] || { finding=$line; break; } ;;
+    esac
+  done <"$R/doctor.log"
   [ -z "$finding" ] || fail doctor "$finding"
   pass doctor
 
@@ -450,29 +483,43 @@ EOF
   rc=$?
   [ $rc -eq 0 ] || fail apply-again "pfm install --yes exit $rc: $(tail -1 "$R/apply-again.log")"
   local again
-  again=$(grep '^install journal: ' "$R/apply-again.log" | tail -1)
+  again=""
+  while IFS= read -r line; do
+    case $line in 'install journal: '*) again=$line ;; esac
+  done <"$R/apply-again.log"
   [ -z "$again" ] || fail apply-again "the second apply recorded changes: $again"
   pass apply-again
 
   local verdict
-  verdict=$(bash "$0" compare "$backup" "$H" "$H/${jdir#"$home"/}" 2>&1 | tee "$R/manifest.log" | tail -1)
+  bash "$0" compare "$backup" "$H" "$H/${jdir#"$home"/}" >"$R/manifest.log" 2>&1
+  verdict=""
+  while IFS= read -r line || [ -n "$line" ]; do verdict=$line; done <"$R/manifest.log"
   [ "$verdict" = "manifest: ok" ] || fail manifest "${verdict#manifest: }"
   pass manifest
 
   # Units the rollback leaves stopped are judged from the log lines it adds.
   local logged=0
-  [ -f "$R/systemctl.log" ] && logged=$(wc -l <"$R/systemctl.log")
-  inside "$qpfm install --rollback $(printf '%q' "$jid")" >"$R/rollback.log" 2>&1
+  if [ -f "$R/systemctl.log" ]; then
+    while IFS= read -r line; do ((logged += 1)); done <"$R/systemctl.log"
+  fi
+  printf -v qjid '%q' "$jid"
+  inside "$qpfm install --rollback $qjid" >"$R/rollback.log" 2>&1
   rc=$?
   [ $rc -eq 0 ] || fail rollback "pfm install --rollback $jid exit $rc: $(tail -1 "$R/rollback.log")"
   if [ -n "$legacy" ]; then
     local refuse stopped="" line w x u verb
-    refuse=$(grep -m1 '^  next    this pfm refuses the restored legacy config' "$R/rollback.log")
+    refuse=""
+    while IFS= read -r line; do
+      case $line in '  next    this pfm refuses the restored legacy config'*) refuse=$line; break ;; esac
+    done <"$R/rollback.log"
     [ -n "$refuse" ] || fail rollback "no next step printed for the restored legacy config"
     case $refuse in *"fleet units left stopped: "*) stopped=${refuse##*fleet units left stopped: } ;; esac
     [ "$stopped" = none ] && stopped=""
     if [ -n "$stopped" ] && [ -f "$R/systemctl.log" ]; then
+      local idx=0
       while IFS= read -r line; do
+        ((idx += 1))
+        [ "$idx" -le "$logged" ] && continue
         read -ra w <<<"$line"
         verb=""
         for x in "${w[@]}"; do case $x in -*) ;; *) verb=$x; break ;; esac; done
@@ -482,7 +529,7 @@ EOF
             [ "$x" = "$u" ] && fail rollback "fleet unit $u restarted on a binary that refuses the legacy config"
           done
         done
-      done < <(tail -n +$((logged + 1)) "$R/systemctl.log")
+      done <"$R/systemctl.log"
     fi
   fi
   if [ "$stress" = 1 ] && [ -e "$dropin" ]; then
@@ -496,8 +543,14 @@ EOF
   pass hash-after
 
   # pair: the rollback's own next steps, then the restored binary answers.
-  local cmds=() c
-  while IFS= read -r c; do cmds+=("$c"); done < <(sed -n 's/^  next    [0-9][0-9]*\. //p' "$R/rollback.log")
+  local cmds=() c rest number
+  while IFS= read -r c; do
+    case $c in
+    '  next    '[0-9]*'. '*)
+      rest=${c#'  next    '}; number=${rest%%.*}
+      [[ $number =~ ^[0-9]+$ ]] && cmds+=("${rest#"$number. "}") ;;
+    esac
+  done <"$R/rollback.log"
   [ ${#cmds[@]} -gt 0 ] || cmds=("make -C $qclone/pfm rollback")
   cmds+=("$qpfm chat ls") # non-interactive: the ls picker needs a terminal
   : >"$R/pair.log"

@@ -11,6 +11,17 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
+type paneToldError struct{ cause error }
+
+func (failure paneToldError) Error() string { return failure.cause.Error() }
+func (failure paneToldError) Unwrap() error { return failure.cause }
+
+// PaneTold reports that Run already displayed this failure on the pane.
+func PaneTold(err error) bool {
+	var told paneToldError
+	return errors.As(err, &told)
+}
+
 // This file types /exit into the composer being rebooted: clear the composer
 // first, prove the typed /exit rendered before Enter, and take it back out
 // when the proof never comes. The pane READER it relies on is composer.go.
@@ -69,7 +80,7 @@ func stashDraft(
 	if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, abort); displayErr != nil {
 		return errors.Join(cause, fmt.Errorf("display stash refusal: %w", displayErr))
 	}
-	return cause
+	return paneToldError{cause}
 }
 
 // composerEmpty reports whether the composer holds no draft — no text after

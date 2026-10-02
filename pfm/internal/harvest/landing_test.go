@@ -61,6 +61,7 @@ func redirectingOrigin(hops map[string]string) roundTripFunc {
 // after an id — is the page, stored with no note; the rung's final address is
 // classified, never assumed.
 func TestSamePageRedirectsPassSilently(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range []struct{ requested, final string }{
 		{"http://lobste.rs/s/mroowi", "https://lobste.rs/s/mroowi"},
@@ -87,6 +88,7 @@ func TestSamePageRedirectsPassSilently(t *testing.T) {
 // of its pages (a dead hotel slug to the city's search results) is stored
 // naming both addresses, never silently under the requested one.
 func TestRedirectToAnotherPageIsNamed(t *testing.T) {
+	t.Parallel()
 	const requested = "https://hotels.example.com/hotel/fr/ritz-paris.html"
 	h := landingHarvester(t, redirectingOrigin(map[string]string{
 		requested: "https://hotels.example.com/searchresults.html?dest_id=-1456928;dest_type=city",
@@ -103,6 +105,7 @@ func TestRedirectToAnotherPageIsNamed(t *testing.T) {
 // (or the site's home) is no page: the fetch fails naming the redirect, and no
 // reader or archive copy stands in for it.
 func TestRedirectToLoginIsANamedFailure(t *testing.T) {
+	t.Parallel()
 	const requested = "https://hotels.example.com/hotel/fr/ritz-paris.html"
 	for _, tc := range []struct{ landing, want string }{
 		{"https://account.hotels.example.com/auth/oauth2?client_id=placeholder", "— a login page"},
@@ -120,12 +123,39 @@ func TestRedirectToLoginIsANamedFailure(t *testing.T) {
 	}
 }
 
+// TestRedirectToLoginIsClassifiedAsLogin: a fetch refused because the site
+// redirected to a login page carries the login kind, never the unclassified
+// one, and its public text says the page needs a signed-in visitor.
+func TestRedirectToLoginIsClassifiedAsLogin(t *testing.T) {
+	t.Parallel()
+	const requested = "https://members.example.com/events/7031141634369056768"
+	const landing = "https://members.example.com/uas/login?session_redirect=https%3A%2F%2Fmembers.example.com%2Fevents%2F7031141634369056768"
+	h := landingHarvester(t, redirectingOrigin(map[string]string{requested: landing}), nil)
+	result := h.FetchWithOptions(context.Background(), requested, FetchOptions{Refresh: true})
+	if result.Error == "" || result.Path != "" {
+		t.Fatalf("a redirect to %s was stored (partial %q)", landing, result.Partial)
+	}
+	if result.ErrorKind != errorKindLogin {
+		t.Fatalf("the login redirect's kind is %q, want %q: %q", result.ErrorKind, errorKindLogin, result.Error)
+	}
+	public := PublicFailureMessage(result)
+	if strings.Contains(public, "could not classify") {
+		t.Fatalf("the public message calls the login redirect unclassified: %q", public)
+	}
+	for _, want := range []string{"sign-in", "never signs in"} {
+		if !strings.Contains(public, want) {
+			t.Fatalf("the public message lacks %q: %q", want, public)
+		}
+	}
+}
+
 // TestReaderReportedRedirectIsNamed: a reader follows the site's redirect on
 // its own side and reports only the address it was asked for; the page's
 // canonical address in the reader's HTML (og:url, captured from the reader's
 // answer for a dead hotel slug) names where it landed. A page naming no
 // canonical address leaves the redirect unknown, and that is named.
 func TestReaderReportedRedirectIsNamed(t *testing.T) {
+	t.Parallel()
 	const requested = "https://hotels.example.com/hotel/fr/ritz-paris.html"
 	markdown := "Title: Help! Which property is best?\n\nURL Source: " + requested +
 		"\n\nMarkdown Content:\n" + landingArticle
@@ -159,6 +189,7 @@ func TestReaderReportedRedirectIsNamed(t *testing.T) {
 // TestReaderLandingOnTheSamePageIsSilent: a canonical address naming the
 // requested page names nothing.
 func TestReaderLandingOnTheSamePageIsSilent(t *testing.T) {
+	t.Parallel()
 	doc, err := html.Parse(strings.NewReader(
 		`<html><head><link rel="canonical" href="/2024/Dec/31/llms-in-2024/"></head></html>`))
 	if err != nil {

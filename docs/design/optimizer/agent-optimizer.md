@@ -53,7 +53,7 @@ One report per agent type. A lead and its diggers are two audits: the lead's rep
 
 A transcript can run to megabytes; it is never read whole. One call to `token-audit.mjs --timeline` (repeatable, one flag per transcript) turns every run into a timeline:
 
-- A header per run: agent type, model, effort, calls, wall time first to last record, peak context, output tokens, tool errors, results over 20 KB, and USD from the same replay and price table as `token-audit`'s default report.
+- A header per run: agent type, model, effort, calls, wall time first to last record, peak context, output tokens, tool errors, results over 20 KB, and USD from the same replay and pfm's price table (`pfm price --json`) as `token-audit`'s default report.
 - One row per model call (several `assistant` records sharing one `requestId` are one call): clock, seconds since the previous tool result, context (`input + cache read + cache write`), output, USD, and each tool the call issued with its target, result size, `ERR` and wait.
 - `UNREADABLE — {path}: {error}` or `NO CALLS — {path}` for a run it cannot digest, a mark the report carries rather than an estimate.
 

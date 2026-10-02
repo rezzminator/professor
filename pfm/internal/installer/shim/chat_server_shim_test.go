@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // `cx` creates its server through pfm's one chat-server creator, never a zsh
@@ -32,10 +34,14 @@ func runCxServer(t *testing.T, pfmScript string) (pfmCalls, tmuxCalls, stderr st
 	recorder := func(log, tail string) []byte {
 		return []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + log + "\n" + tail)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "pfm"), recorder(pfmLog, pfmScript), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(binDir, "pfm"), recorder(pfmLog, pfmScript), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(fakeBin, "tmux"), recorder(tmuxLog, "exit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		filepath.Join(fakeBin, "tmux"),
+		recorder(tmuxLog, "exit 0\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	script := "source " + quoteZsh(shimPath) + "\n_cx_server cx-probe-shim-sock /tmp 'sleep 1'\n"

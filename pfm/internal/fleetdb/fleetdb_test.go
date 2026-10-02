@@ -92,19 +92,42 @@ ORDER BY name`)
 	}
 }
 
-func TestKillDoesNotRecreateTheRetiredCarrier(t *testing.T) {
+func TestUnkillReportsDeletedRow(t *testing.T) {
 	t.Parallel()
-	state, values := openTestStore(t)
-	legacyCarrier := filepath.Join(
-		values.Home,
-		".claude",
-		".cc-ls-hidden",
-	)
-	if err := state.Kill(context.Background(), "database-only", 42); err != nil {
+	state, _ := openTestStore(t)
+	ctx := context.Background()
+	const id = "shared-unkill"
+	if err := state.Kill(ctx, id, 42); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(legacyCarrier); !os.IsNotExist(err) {
-		t.Fatalf("Kill recreated retired carrier %s: %v", legacyCarrier, err)
+	if removed, err := state.Unkill(ctx, id); err != nil || !removed {
+		t.Fatalf("first Unkill() = %v, %v; want true, nil", removed, err)
+	}
+	if removed, err := state.Unkill(ctx, id); err != nil || removed {
+		t.Fatalf("second Unkill() = %v, %v; want false, nil", removed, err)
+	}
+}
+
+func TestReassertKillKeepsOriginalTimeAndMakesClearPermanent(t *testing.T) {
+	t.Parallel()
+	state, _ := openTestStore(t)
+	ctx := context.Background()
+	const id = "shared-reassert"
+	if reasserted, err := state.ReassertKill(ctx, id); err != nil || reasserted {
+		t.Fatalf("missing ReassertKill() = %v, %v; want false, nil", reasserted, err)
+	}
+	if err := state.KillUntilPrompt(ctx, id, 42, 3); err != nil {
+		t.Fatal(err)
+	}
+	if reasserted, err := state.ReassertKill(ctx, id); err != nil || !reasserted {
+		t.Fatalf("standing ReassertKill() = %v, %v; want true, nil", reasserted, err)
+	}
+	records, err := state.KilledRecords(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := records[id]; got.KilledAt != 42 || got.AtPayload != nil {
+		t.Fatalf("reasserted kill = %#v; want original time and permanent payload", got)
 	}
 }
 

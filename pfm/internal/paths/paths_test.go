@@ -396,3 +396,30 @@ func TestResolveRefusesARelativeManagedSettingsDir(t *testing.T) {
 		t.Fatalf("Resolve() err = %v, want the relative %s refused", err, EnvManagedSettingsDir)
 	}
 }
+
+func TestTestProfileAccessorsReadTheirOwnVariable(t *testing.T) {
+	lookups := []struct {
+		env string
+		get func() (string, bool)
+	}{
+		{EnvTestArtifactDir, TestArtifactDir},
+		{EnvTestProfileParent, TestProfileParent},
+		{EnvTestDeadlineEpoch, TestDeadlineEpoch},
+		{EnvTestProfile, func() (string, bool) { return TestProfileMode(), TestProfileMode() != "" }},
+	}
+	for _, lookup := range lookups {
+		t.Run(lookup.env, func(t *testing.T) {
+			t.Setenv(lookup.env, "")
+			if err := os.Unsetenv(lookup.env); err != nil {
+				t.Fatalf("unset %s: %v", lookup.env, err)
+			}
+			if got, ok := lookup.get(); ok || got != "" {
+				t.Fatalf("%s unset: got (%q, %v), want (\"\", false)", lookup.env, got, ok)
+			}
+			t.Setenv(lookup.env, "value-"+lookup.env)
+			if got, ok := lookup.get(); !ok || got != "value-"+lookup.env {
+				t.Fatalf("%s set: got (%q, %v), want (%q, true)", lookup.env, got, ok, "value-"+lookup.env)
+			}
+		})
+	}
+}

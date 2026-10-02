@@ -251,19 +251,40 @@ ON CONFLICT(uuid) DO UPDATE SET
 	return nil
 }
 
-// Unkill deletes one kill row.
-func (s *Store) Unkill(ctx context.Context, id string) error {
+// Unkill deletes one kill row and reports whether it existed.
+func (s *Store) Unkill(ctx context.Context, id string) (bool, error) {
 	if s.db == nil {
-		return fmt.Errorf("remove shared kill %q: %w", id, s.degraded)
+		return false, fmt.Errorf("remove shared kill %q: %w", id, s.degraded)
 	}
-	if _, err := s.exec(
+	result, err := s.exec(
 		ctx,
 		"DELETE FROM hidden WHERE uuid=?",
 		id,
-	); err != nil {
-		return fmt.Errorf("remove shared kill %q: %w", id, err)
+	)
+	if err != nil {
+		return false, fmt.Errorf("remove shared kill %q: %w", id, err)
 	}
-	return nil
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count removed shared kill %q: %w", id, err)
+	}
+	return removed == 1, nil
+}
+
+// ReassertKill makes an existing kill permanent without changing its time.
+func (s *Store) ReassertKill(ctx context.Context, id string) (bool, error) {
+	if s.db == nil {
+		return false, fmt.Errorf("reassert shared kill %q: %w", id, s.degraded)
+	}
+	result, err := s.exec(ctx, "UPDATE hidden SET at_payload=NULL WHERE uuid=?", id)
+	if err != nil {
+		return false, fmt.Errorf("reassert shared kill %q: %w", id, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count reasserted shared kill %q: %w", id, err)
+	}
+	return updated == 1, nil
 }
 
 // UnkillIfPayload expires only the clear-kill version the caller observed.
@@ -646,13 +667,16 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool, error) {
 	}()
 	var value string
 	const primaryQuery = "SELECT val FROM meta WHERE key=?"
-	// The query error still reaches the db activity log unconditionally (obs
-	// is this package's designated door for that, C23) AND is now returned:
-	// sql.ErrNoRows is the legitimate "nothing set yet" absence, everything
-	// else is this lookup failing to look.
+	// Absence is a successful statement: sql.ErrNoRows means nothing is set
+	// yet. Every other scan error is this lookup failing to look and reaches
+	// both the activity record and the caller.
 	read := obs.SQL(ctx, kind, primaryQuery)
 	err = db.QueryRowContext(ctx, primaryQuery, PrimaryAccountKey).Scan(&value)
-	read.End(-1, err)
+	if errors.Is(err, sql.ErrNoRows) {
+		read.End(-1, nil)
+	} else {
+		read.End(-1, err)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, false, nil

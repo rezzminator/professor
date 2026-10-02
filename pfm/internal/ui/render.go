@@ -803,14 +803,6 @@ func (model Model) projectOrdinal(project string) int {
 	return 0
 }
 
-func (model Model) renderRow(
-	row compose.Row,
-	selected bool,
-	width int,
-) string {
-	return model.renderGroupedRow(row, selected, width, false)
-}
-
 func (model Model) renderGroupedRow(
 	row compose.Row,
 	selected bool,

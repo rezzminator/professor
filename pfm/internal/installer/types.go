@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -82,6 +83,9 @@ type Options struct {
 	// the historical single ~/.codex target for direct legacy callers; an
 	// explicitly empty roster installs no Codex hook.
 	CodexHomes []string
+	// ClaudeAccounts is the configured Claude account roster whose registries
+	// (ClaudeUserRegistries) the fullscreen canary clear visits; nil visits none.
+	ClaudeAccounts []pfmconfig.Account
 	// CodexBinary enables native hook trust registration for command callers.
 	CodexBinary string
 	Clock       clock.Clock
@@ -135,10 +139,13 @@ type Options struct {
 	// ProvisionHarvest makes install/uninstall own the pinned conversion
 	// environment. The command sets this for real user actions; existing
 	// installer unit tests leave it false and inject no network-capable worker.
-	ProvisionHarvest   bool
-	HarvestProvisioner HarvestProvisioner
-	HarvestPlatform    harvestpy.Platform
-	HarvestOffline     bool
+	ProvisionHarvest bool
+	// SkillSourcesOffline skips fetching the source-fetched global skills
+	// (paths.EnvSkillSourcesOffline); an existing store copy is still linked.
+	SkillSourcesOffline bool
+	HarvestProvisioner  HarvestProvisioner
+	HarvestPlatform     harvestpy.Platform
+	HarvestOffline      bool
 
 	// ProcRoot is the process table pruneClaudeVersions reads to tell a
 	// version a live chat is executing from one it is safe to remove. Empty
@@ -151,6 +158,9 @@ type Options struct {
 	// Command callers set it by default; unit callers opt in explicitly so a
 	// test can never acquire network access by accident.
 	InstallThemes bool
+	// ThemesOffline skips remote theme manifests and palettes while allowing
+	// bundled palettes from SourceRepo to install.
+	ThemesOffline bool
 	// ThemeManifestURL is the release-matched fallback used when SourceRepo is
 	// unavailable (for example, the checksum-verified binary install path).
 	ThemeManifestURL string
@@ -215,6 +225,9 @@ func (installer *engine) processRunner() deps.Runner {
 }
 
 func (runner execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
+	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+		return fmt.Errorf("run %q: %w", name, lookErr)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		ctx, append([]string{name}, args...), deps.RunOptions{ProcessGroup: runner.processGroup},
 	)
@@ -228,6 +241,9 @@ func (runner execCommandRunner) Run(ctx context.Context, name string, args ...st
 }
 
 func (runner execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if _, lookErr := obs.Runner(deps.RealRunner{}).LookPath(name); lookErr != nil {
+		return nil, fmt.Errorf("run %q: %w", name, lookErr)
+	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
 		ctx, append([]string{name}, args...), deps.RunOptions{ProcessGroup: runner.processGroup},
 	)
@@ -241,6 +257,13 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 }
 
 func normalizeInstallerOptions(options Options) (Options, error) {
+	if options.SourceRepo != "" {
+		abs, err := filepath.Abs(options.SourceRepo)
+		if err != nil {
+			return options, fmt.Errorf("resolve source repository %q: %w", options.SourceRepo, err)
+		}
+		options.SourceRepo = paths.PhysicalPath(abs)
+	}
 	if options.Clock == nil {
 		options.Clock = clock.Real
 	}

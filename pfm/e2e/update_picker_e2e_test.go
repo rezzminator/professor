@@ -17,9 +17,11 @@ import (
 	"time"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
+	t.Parallel()
 	requireE2EFence(t)
 	for _, binary := range []string{"go", "tmux", "zsh"} {
 		if _, err := exec.LookPath(binary); err != nil {
@@ -101,26 +103,20 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 	}
 	moduleRoot := filepath.Dir(packageDir)
 	oldPFM := filepath.Join(binDir, "pfm")
-	build := exec.Command(
-		"go", "-C", moduleRoot, "build",
-		"-ldflags", "-X main.version=v0.61.1",
-		"-o", oldPFM, "./cmd/pfm",
-	)
-	build.Env = replaceUpdateE2EEnv(os.Environ(), map[string]string{"GOFLAGS": "-buildvcs=false"})
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build older pfm: %v: %s", err, output)
+	if err := testjail.GoBuild(moduleRoot, oldPFM, "./cmd/pfm", "-ldflags", "-X main.version=v0.61.1"); err != nil {
+		t.Fatalf("build older pfm: %v", err)
 	}
 
 	proof := filepath.Join(root, "engine-proof")
 	fakeCodex := "#!/bin/sh\n" +
 		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
 		"sleep 2\n"
-	if err := os.WriteFile(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, engine := range []string{"opencode"} {
 		stub := "#!/bin/sh\nprintf 'unexpected engine=" + engine + "\\n' > \"$PFM_UPDATE_LAUNCH_PROOF\"\nsleep 2\n"
-		if err := os.WriteFile(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
+		if err := testjail.WriteExecutable(filepath.Join(binDir, engine), []byte(stub), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

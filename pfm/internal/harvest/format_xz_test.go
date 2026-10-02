@@ -30,6 +30,7 @@ func (c *inflatingConverter) Inflate(_ context.Context, codec string, _ []byte, 
 // document cap and the inner BYTES pick the route (a PDF named .xz is a PDF);
 // a bomb, a file-only inner body and a converter without xz are named.
 func TestXZDocumentInflatedByTheConverterAndRoutedByInnerBytes(t *testing.T) {
+	t.Parallel()
 	xz := []byte("\xfd7zXZ\x00\x00\x04\xe6\xd6\xb4\x46")
 	inflating := &Harvester{options: Options{Converter: &inflatingConverter{inner: []byte("%PDF-1.7\n")}}}
 	if found := resolveFormat("notes.xz", xz, inflating.inflater(context.Background())); found.class == formatRefused {

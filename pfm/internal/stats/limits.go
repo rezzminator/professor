@@ -16,9 +16,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/statusline"
@@ -62,22 +60,17 @@ type LimitsSampler struct {
 	FetchCodex    func(context.Context, LimitAccount) (codexUsage, error)
 	Ack           func(context.Context, LimitAccount) error
 
-	mu           sync.Mutex
-	cache        map[string]cachedLimits
-	ackAttempted map[string]bool
-	// ackFailure remembers WHY an account's one credential probe failed, so a
-	// later refresh — which the once-per-account guard stops from probing
-	// again — can still say it rather than decaying to the bare "credentials
-	// file missing" that sends the reader hunting for a file a keychain host
-	// is never supposed to have.
+	mu    sync.Mutex
+	cache map[string]cachedLimits
+	// ackFailure remembers WHY an account's credential probe failed — this
+	// process's own, or the one the cross-process gate (usagehook.ClaimProbe)
+	// recorded — so a later refresh the gate stops from probing again can
+	// still say it rather than decaying to the bare "credentials file
+	// missing" that sends the reader hunting for a file a keychain host is
+	// never supposed to have.
 	ackFailure map[string]string
 	flights    map[string]struct{}
 }
-
-// errAckAlreadyAttempted marks the guard's refusal, which is bookkeeping
-// rather than a diagnosis: it must never be reported as the reason an account
-// is blank.
-var errAckAlreadyAttempted = errors.New("credential refresh already attempted")
 
 type cachedLimits struct {
 	limits   AccountLimits
@@ -112,11 +105,10 @@ const CodexLiveLimitsTTL = 90 * time.Second
 func NewLimitsSampler(accounts []LimitAccount) *LimitsSampler {
 	copyAccounts := append([]LimitAccount(nil), accounts...)
 	sampler := &LimitsSampler{
-		Accounts:     copyAccounts,
-		TTL:          defaultLimitsTTL,
-		cache:        make(map[string]cachedLimits),
-		ackAttempted: make(map[string]bool),
-		flights:      make(map[string]struct{}),
+		Accounts: copyAccounts,
+		TTL:      defaultLimitsTTL,
+		cache:    make(map[string]cachedLimits),
+		flights:  make(map[string]struct{}),
 	}
 	// Nil Fetch/FetchCodex selects the shared on-disk cache path. Tests may
 	// override either seam directly; an override intentionally bypasses that
@@ -218,6 +210,7 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 		Now: sampler.now, Env: sampler.Env, ConfigDir: account.ConfigDir,
 		CacheDir: usagehook.DefaultCacheDir(), TTL: sampler.ttl(),
 		Client: sampler.client(), Endpoint: sampler.Endpoint, Version: sampler.Version,
+		ClaudeBinary: account.ClaudeBinary,
 	}
 	if bypassCredentialBackoff {
 		options.BypassBackoff = needsCredentialRefresh
@@ -490,35 +483,77 @@ func cloneAccountLimits(limits AccountLimits) AccountLimits {
 	return limits
 }
 
+// isCredentialRejection reports a refusal of the credential itself, the one
+// refusal a credential probe can repair: StatusError.CredentialInvalid for
+// the door's typed answer. An untyped message (an injected Fetch) counts a 401
+// or "unauthorized", and a 403 only when it says the token is dead; every
+// other 403 is the account's state (accountRefusal), which no probe repairs.
 func isCredentialRejection(err error) bool {
 	if err == nil {
 		return false
 	}
+	var status *usagehook.StatusError
+	if errors.As(err, &status) {
+		return status.CredentialInvalid()
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{"unauthorized", "access token rejected", "credential rejected"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	if hasHTTPStatus(message, "401") {
+		return true
+	}
+	return (strings.Contains(message, "forbidden") || hasHTTPStatus(message, "403")) &&
+		usagehook.NamesDeadCredential(message)
+}
+
+// isRefusal reports any refusal of the request, the credential's or the
+// account's, on either engine: a refused account's cached quota is never shown
+// as stale (staleEligible).
+func isRefusal(err error) bool {
 	message := strings.ToLower(err.Error())
 	for _, marker := range []string{"unauthorized", "forbidden", "access token rejected", "credential rejected"} {
 		if strings.Contains(message, marker) {
 			return true
 		}
 	}
-	return hasAuthHTTPStatus(message)
+	return hasHTTPStatus(message, "401", "403")
 }
 
-func hasAuthHTTPStatus(message string) bool {
-	for _, marker := range []string{
-		"http 401", "http 403",
-		"returned 401", "returned 403",
-		"status 401", "status 403",
-		"401 unauthorized", "403 forbidden",
-	} {
-		if strings.Contains(message, marker) {
-			return true
+// accountRefusal is the 403 in err that is the account's state — a disabled
+// subscription or organization, a scope or permission the token lacks: the
+// card names it, never as stale, and no credential probe runs for it.
+func accountRefusal(err error) (*usagehook.StatusError, bool) {
+	var status *usagehook.StatusError
+	if errors.As(err, &status) && status.AccountRefused() {
+		return status, true
+	}
+	return nil, false
+}
+
+func hasHTTPStatus(message string, codes ...string) bool {
+	for _, code := range codes {
+		for _, prefix := range []string{"http ", "returned ", "status "} {
+			marker := prefix + code
+			for remaining := message; ; {
+				index := strings.Index(remaining, marker)
+				if index < 0 {
+					break
+				}
+				remaining = remaining[index+len(marker):]
+				if remaining == "" || remaining[0] < '0' || remaining[0] > '9' {
+					return true
+				}
+			}
 		}
 	}
 	return false
 }
 
 func staleEligible(err error) bool {
-	if err == nil || needsCredentialRefresh(err) {
+	if err == nil || needsCredentialRefresh(err) || isRefusal(err) {
 		return false
 	}
 	message := strings.ToLower(err.Error())
@@ -538,7 +573,7 @@ func staleEligible(err error) bool {
 func rateLimitedStatus(err error) (status string, ok bool) {
 	message := err.Error()
 	lower := strings.ToLower(message)
-	if !strings.Contains(lower, "429") && !strings.Contains(lower, "too many requests") {
+	if !strings.Contains(lower, "too many requests") && !hasHTTPStatus(lower, "429") {
 		return "", false
 	}
 	if retry := strings.Index(message, "retry "); retry >= 0 {
@@ -578,84 +613,8 @@ func staleStatus(err error) string {
 	return "refresh failed; showing cached limits"
 }
 
-func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	key := account.cacheKey()
-	sampler.mu.Lock()
-	if sampler.ackAttempted == nil {
-		sampler.ackAttempted = make(map[string]bool)
-	}
-	if sampler.ackAttempted[key] {
-		sampler.mu.Unlock()
-		return fmt.Errorf("%w for account %d", errAckAlreadyAttempted, account.ID)
-	}
-	sampler.ackAttempted[key] = true
-	sampler.mu.Unlock()
-	if sampler.Ack == nil {
-		return fmt.Errorf("credential refresh unavailable for account %d", account.ID)
-	}
-	err := sampler.Ack(ctx, account)
-	switch {
-	case ctx.Err() != nil:
-		sampler.mu.Lock()
-		delete(sampler.ackAttempted, key)
-		sampler.mu.Unlock()
-	case err != nil:
-		sampler.mu.Lock()
-		if sampler.ackFailure == nil {
-			sampler.ackFailure = make(map[string]string)
-		}
-		// The probe's combined output can carry the account's own hook chatter,
-		// newlines included, and this string lands in a single TUI row. Collapse
-		// every whitespace run so the card stays one line without discarding
-		// any of the reason.
-		sampler.ackFailure[key] = strings.Join(strings.Fields(err.Error()), " ")
-		sampler.mu.Unlock()
-	}
-	return err
-}
-
-// probeFailure is the remembered reason this account's credential probe
-// failed, or "" if one never ran or ran successfully.
-func (sampler *LimitsSampler) probeFailure(account LimitAccount) string {
-	sampler.mu.Lock()
-	defer sampler.mu.Unlock()
-	return sampler.ackFailure[account.cacheKey()]
-}
-
 func (account LimitAccount) cacheKey() string {
 	return fmt.Sprintf("%s:%d:%s:%s", account.Engine, account.ID, account.ConfigDir, account.CodexAuthPath)
-}
-
-func needsCredentialRefresh(err error) bool {
-	return isCredentialRejection(err)
-}
-
-func defaultAck(ctx context.Context, account LimitAccount) error {
-	result, err := headlessrun.Run(ctx, headlessrun.Request{
-		Engine: pfmengine.Claude, Account: account.ID,
-		Model: "claude-haiku-4-5", Prompt: "ACK", Native: true,
-		Args:     []string{"--max-turns", "1"},
-		Settings: map[string]any{"systemPrompt": "lean"},
-		Config: pfmconfig.Config{
-			Claude:   pfmconfig.ClaudePrefs{Binary: account.ClaudeBinary},
-			Accounts: []pfmconfig.Account{{ID: account.ID, ConfigDir: account.ConfigDir}},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf(
-			"refresh account %d OAuth token: %w (%s)",
-			account.ID,
-			err,
-			strings.TrimSpace(result.Stdout+result.Stderr),
-		)
-	}
-	return nil
 }
 
 func usageWindows(usage usagehook.Usage, now time.Time) []Window {
@@ -796,7 +755,7 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	if endpoint == "" {
 		endpoint = defaultCodexUsageEndpoint
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)
 	}

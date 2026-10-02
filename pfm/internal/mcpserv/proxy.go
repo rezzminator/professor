@@ -16,7 +16,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -261,6 +260,9 @@ func (professor *Professor) runStdioTransport(
 	if errors.Is(probeErr, ErrDaemonAbsent) {
 		return inProcess(fmt.Sprintf("daemon absent at %s (%v)", address, probeErr))
 	}
+	if errors.Is(probeErr, ErrDaemonUnresponsive) {
+		return inProcess(fmt.Sprintf("daemon unresponsive at %s (%v)", address, probeErr))
+	}
 	if probeErr != nil {
 		return inProcess(fmt.Sprintf("foreign service at %s (%v)", address, probeErr))
 	}
@@ -310,7 +312,7 @@ func probeProfessorRoute(ctx context.Context, address string) error {
 	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	endpoint := "http://" + address + pfmconfig.MCPPathProfessor
-	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(probeCtx), http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build route probe for %s: %w", endpoint, err)
 	}
@@ -477,7 +479,7 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isHand
 		// its chat runtime is not the one this proxy was selected for; every
 		// other frame replays. The original send goes unprobed.
 		if attempt > 0 && proxy.expectedRuntimeIdentity != "" {
-			status, probeErr := ProbeDaemon(proxy.address)
+			status, probeErr := probeDaemonContext(ctx, proxy.address)
 			if probeErr != nil {
 				err = fmt.Errorf("verify daemon runtime before replay: %w", probeErr)
 			} else if (status.ChatRuntimeIdentity == "" ||
@@ -570,13 +572,6 @@ func (proxy *stdioProxy) handshakeSnapshot() ([]byte, []byte) {
 	return append([]byte(nil), proxy.initialize...), append([]byte(nil), proxy.initialized...)
 }
 
-func (proxy *stdioProxy) reinitialize(ctx context.Context) error {
-	proxy.reinitMutex.Lock()
-	defer proxy.reinitMutex.Unlock()
-	_, err := proxy.reinitializeLocked(ctx)
-	return err
-}
-
 func (proxy *stdioProxy) reinitializeLocked(ctx context.Context) (uint64, error) {
 	initialize, initialized := proxy.handshakeSnapshot()
 	if len(initialize) == 0 {
@@ -664,9 +659,10 @@ func (proxy *stdioProxy) post(ctx context.Context, frame []byte) (proxyPostResul
 	return result, nil
 }
 
+// retryableConnectionFailure reports a failure to connect: a dial error means no request byte was written, so a retry cannot deliver the request twice.
 func retryableConnectionFailure(err error) bool {
 	var network *net.OpError
-	return errors.As(err, &network) && errors.Is(network.Err, syscall.ECONNREFUSED)
+	return errors.As(err, &network) && network.Op == "dial"
 }
 
 func (proxy *stdioProxy) closeSession() {
@@ -676,7 +672,7 @@ func (proxy *stdioProxy) closeSession() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), proxyCloseTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, proxy.endpoint, http.NoBody)
+	request, err := http.NewRequestWithContext(obs.Presence(ctx), http.MethodDelete, proxy.endpoint, http.NoBody)
 	if err != nil {
 		proxy.warn("build daemon session close: %v", err)
 		return

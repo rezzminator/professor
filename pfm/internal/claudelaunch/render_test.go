@@ -43,7 +43,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 		Request{Purpose: PurposeInteractive, Home: home, Account: 2, SessionID: "S"},
 		machine,
 	)
-	if !reflect.DeepEqual(launch.Unset, Hygiene()) || len(launch.Unset) != 18 {
+	if !reflect.DeepEqual(launch.Unset, Hygiene()) || len(launch.Unset) != 22 {
 		t.Errorf("unset=%q", launch.Unset)
 	}
 	if !reflect.DeepEqual(launch.Env, []string{"CLAUDE_CONFIG_DIR=" + machine.Accounts[1].ConfigDir}) {
@@ -59,7 +59,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 		t.Errorf("settings=%#v", parsed.Settings)
 	}
 	for name, want := range map[string]string{
-		"ENABLE_PROMPT_CACHING_1H": "1", "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "8",
+		"CACHE_LIVE_CONTROL_MAIN_TTL": "1h", "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "8",
 		"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "9007199254740991", "CLAUDE_CODE_TMUX_TRUECOLOR": "1",
 		"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
 		"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":    "1", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
@@ -68,7 +68,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 			t.Errorf("env %s=%q, want %q", name, got, want)
 		}
 	}
-	if len(parsed.Hooks) != 18 {
+	if len(parsed.Hooks) != 10 {
 		t.Errorf("hooks=%d", len(parsed.Hooks))
 	}
 	if parsed.Settings["statusLine"] == nil || parsed.Settings["subagentStatusLine"] == nil {
@@ -133,15 +133,41 @@ func TestRenderImplicitAccount(t *testing.T) {
 	}
 }
 
-func TestRenderCacheChoice(t *testing.T) {
-	home, machine := renderMachine(t)
-	falseValue := false
-	launch, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Cache1H: &falseValue}, machine)
-	if launch.Cache1H || parsed.SettingsEnv["FORCE_PROMPT_CACHING_5M"] != "1" {
-		t.Errorf("cache=%#v env=%#v", launch, parsed.SettingsEnv)
+// cacheEnv keeps only the prompt-cache keys of a --settings env, so a test
+// pins the whole cache surface by map equality: an extra or missing key fails.
+func cacheEnv(env map[string]string) map[string]string {
+	result := map[string]string{}
+	for _, name := range []string{
+		"CACHE_LIVE_CONTROL_MAIN_TTL", "CACHE_LIVE_CONTROL_AGENTS_TTL",
+		"CLAUDE_CODE_PROMPT_CACHE_TTL", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+		"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M",
+	} {
+		if value, ok := env[name]; ok {
+			result[name] = value
+		}
 	}
-	if _, ok := parsed.SettingsEnv["ENABLE_PROMPT_CACHING_1H"]; ok {
-		t.Error("both cache modes set")
+	return result
+}
+
+// The cache knob hands only the main chat's starting lifetime to the
+// cache-live-control plugin; pfm sets no Claude Code TTL, main or sub-agent.
+func TestRenderCacheLifetimeMainChatOnly(t *testing.T) {
+	home, machine := renderMachine(t)
+	for _, entry := range []struct {
+		cache1h bool
+		want    map[string]string
+	}{
+		{true, map[string]string{"CACHE_LIVE_CONTROL_MAIN_TTL": "1h"}},
+		{false, map[string]string{"CACHE_LIVE_CONTROL_MAIN_TTL": "5m"}},
+	} {
+		value := entry.cache1h
+		launch, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Cache1H: &value}, machine)
+		if launch.Cache1H != entry.cache1h {
+			t.Errorf("cache1h=%t: launch.Cache1H=%t", entry.cache1h, launch.Cache1H)
+		}
+		if got := cacheEnv(parsed.SettingsEnv); !reflect.DeepEqual(got, entry.want) {
+			t.Errorf("cache1h=%t: settings cache env=%#v, want %#v", entry.cache1h, got, entry.want)
+		}
 	}
 }
 
@@ -208,7 +234,7 @@ func TestRenderQuery(t *testing.T) {
 		Request{Purpose: PurposeQuery, Home: home, Args: []string{"agents", "--json"}},
 		machine,
 	)
-	if len(launch.Unset) != 18 || parsed.Settings["outputStyle"] != "default" ||
+	if len(launch.Unset) != 22 || parsed.Settings["outputStyle"] != "default" ||
 		parsed.Settings["cleanupPeriodDays"] == nil ||
 		parsed.Settings["env"] == nil {
 		t.Errorf("query settings=%#v", parsed.Settings)

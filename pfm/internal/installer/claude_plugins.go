@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -20,6 +21,18 @@ import (
 // claudeConfigDirEnv is the variable that points a claude process at one
 // account's config directory.
 const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
+// claudePluginCommandTimeout bounds each `claude plugin` command: a plugin
+// command that hangs (a network wait, a prompt) must not stall pfm install.
+const claudePluginCommandTimeout = 2 * time.Minute
+
+// claudePluginWaitDelay bounds the wait for a command's output pipes after it
+// is killed, so a grandchild still holding them cannot stall Run.
+const claudePluginWaitDelay = 5 * time.Second
+
+// claudePluginTimeout is the per-command deadline in force. It is a variable
+// only as a test seam: a test shortens it and restores it in t.Cleanup.
+var claudePluginTimeout = claudePluginCommandTimeout
 
 // claudePlugin is one Claude Code plugin pfm install ensures on every account:
 // Source is the marketplace `plugin marketplace add` takes, ID the
@@ -33,6 +46,7 @@ type claudePlugin struct {
 var claudePlugins = []claudePlugin{
 	{Source: "rezzminator/cache-live-control", ID: "cache-live-control@cache-live-control"},
 	{Source: "rezzminator/sub-agent-compact", ID: "sub-agent-compact@sub-agent-compact"},
+	{Source: "rezzminator/agent-effort", ID: "agent-effort@agent-effort"},
 }
 
 // ErrClaudeSettingsAbsent is ClaudePluginGaps' answer for an account with no
@@ -235,7 +249,19 @@ func (installer *engine) installClaudePlugin(ctx context.Context, binary, dir st
 }
 
 func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []string, options deps.RunOptions) error {
-	result, err := runner.Run(ctx, argv, options)
+	cmdCtx, cancel := context.WithTimeout(ctx, claudePluginTimeout)
+	defer cancel()
+	options.ProcessGroup = true
+	options.WaitDelay = claudePluginWaitDelay
+	result, err := runner.Run(cmdCtx, argv, options)
+	if cmdCtx.Err() != nil && (err != nil || result.ExitCode != 0) {
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s: cancelled: %w", strings.Join(argv[1:], " "), ctx.Err())
+		}
+		return fmt.Errorf(
+			"%s: timed out after %s: %w", strings.Join(argv[1:], " "), claudePluginTimeout, cmdCtx.Err(),
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", strings.Join(argv[1:], " "), err)
 	}

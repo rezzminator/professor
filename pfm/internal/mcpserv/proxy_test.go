@@ -1,7 +1,6 @@
 package mcpserv
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -24,18 +23,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const proxyTestInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"proxy-test","version":"test"}}}`
-
-type proxyTestHarness struct {
-	input  *io.PipeWriter
-	output *bufio.Reader
-	cancel context.CancelFunc
-	done   chan error
-}
 
 type proxyTestTransport func(*http.Request) (*http.Response, error)
 
@@ -58,65 +51,6 @@ func (buffer *proxyTestBuffer) String() string {
 	buffer.mutex.Lock()
 	defer buffer.mutex.Unlock()
 	return buffer.Buffer.String()
-}
-
-func startProxyTestHarness(t *testing.T, proxy *stdioProxy) *proxyTestHarness {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	input, inputWriter := io.Pipe()
-	output, outputWriter := io.Pipe()
-	done := make(chan error, 1)
-	go func() {
-		done <- proxy.run(ctx, input, outputWriter)
-		_ = outputWriter.Close()
-	}()
-	harness := &proxyTestHarness{
-		input: inputWriter, output: bufio.NewReader(output), cancel: cancel, done: done,
-	}
-	t.Cleanup(func() {
-		cancel()
-		_ = inputWriter.Close()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Error("stdio proxy did not stop after cancellation")
-		}
-	})
-	return harness
-}
-
-func (harness *proxyTestHarness) write(t *testing.T, frame string) {
-	t.Helper()
-	if _, err := io.WriteString(harness.input, frame+"\n"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func (harness *proxyTestHarness) read(t *testing.T) map[string]any {
-	t.Helper()
-	result := make(chan []byte, 1)
-	errors := make(chan error, 1)
-	go func() {
-		line, err := harness.output.ReadBytes('\n')
-		if err != nil {
-			errors <- err
-			return
-		}
-		result <- line
-	}()
-	select {
-	case line := <-result:
-		var frame map[string]any
-		if err := json.Unmarshal(line, &frame); err != nil {
-			t.Fatalf("decode proxy response %s: %v", line, err)
-		}
-		return frame
-	case err := <-errors:
-		t.Fatal(err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for proxy response")
-	}
-	return nil
 }
 
 func proxyTestAddress(server *httptest.Server) string {
@@ -169,6 +103,7 @@ func proxyTestStructured(t *testing.T, frame map[string]any) map[string]any {
 }
 
 func TestStdioProxyReinitializesAfterDaemonReplacement(t *testing.T) {
+	t.Parallel()
 	var oldCalls, newCalls [][]string
 	oldService := proxyTestService("old", nil, &oldCalls)
 	newService := proxyTestService("new", nil, &newCalls)
@@ -203,6 +138,7 @@ func TestStdioProxyReinitializesAfterDaemonReplacement(t *testing.T) {
 }
 
 func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
+	t.Parallel()
 	const oldSession = "session-old"
 	const recoveredSession = "session-recovered"
 	firstCallsReady := make(chan struct{})
@@ -278,6 +214,7 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 }
 
 func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
+	t.Parallel()
 	initialize := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"padding":"` +
 		strings.Repeat("a", 64<<10) + `"}}`)
 	initialized := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{"padding":"` +
@@ -339,11 +276,11 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 	proxy.forward(cancelled, initialize, io.Discard)
 	proxy.forward(cancelled, initialized, io.Discard)
 
-	reinitialized := make(chan error, 2)
+	restored := make(chan error, 2)
 	for range 2 {
 		go func() {
-			err := proxy.reinitialize(context.Background())
-			reinitialized <- err
+			_, err := proxy.restoreSession(context.Background())
+			restored <- err
 		}()
 	}
 	for index := range started {
@@ -368,8 +305,8 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 		<-writerDone
 	}
 	for range 2 {
-		if err := <-reinitialized; err != nil {
-			t.Fatalf("reinitialize: %v", err)
+		if err := <-restored; err != nil {
+			t.Fatalf("restoreSession: %v", err)
 		}
 	}
 	for index, want := range [][]byte{initialize, initialized} {
@@ -380,13 +317,27 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 	proxy.handshakeMutex.Lock()
 	proxy.initialized = nil
 	proxy.handshakeMutex.Unlock()
+	session := proxy.session()
+	if session.sessionID == "" && session.protocol == "" {
+		t.Fatal("restoreSession replay left no held session")
+	}
 	before := calls.Load()
-	if err := proxy.reinitialize(context.Background()); err != nil || calls.Load() != before+1 {
-		t.Fatalf("initialize-only replay: calls=%d err=%v", calls.Load()-before, err)
+	generation, err := proxy.restoreSession(context.Background())
+	if err != nil || calls.Load() != before || generation != session.generation {
+		t.Fatalf(
+			"restoreSession with held session: calls=%d generation=%d want=%d err=%v",
+			calls.Load()-before, generation, session.generation, err,
+		)
+	}
+	proxy.clearSession(proxy.session().generation)
+	before = calls.Load()
+	if _, err := proxy.restoreSession(context.Background()); err != nil || calls.Load() != before+1 {
+		t.Fatalf("restoreSession initialize-only replay: calls=%d err=%v", calls.Load()-before, err)
 	}
 }
 
 func TestStdioProxyBoundsUnavailableDaemonPerRequest(t *testing.T) {
+	// Serial: expects its closed port to refuse; a parallel test's fork would keep the listener accepting until exec.
 	var calls [][]string
 	service := proxyTestService("initial", nil, &calls)
 	server := httptest.NewServer(proxyTestDaemon(service))
@@ -421,6 +372,7 @@ func TestStdioProxyBoundsUnavailableDaemonPerRequest(t *testing.T) {
 }
 
 func TestStdioProxyDoesNotReplayMutationAfterResponseEOF(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -450,6 +402,7 @@ func TestStdioProxyDoesNotReplayMutationAfterResponseEOF(t *testing.T) {
 }
 
 func TestStdioProxyDoesNotReplayMutationAfterInvalidSuccessResponse(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		contentType string
@@ -487,6 +440,7 @@ func TestStdioProxyDoesNotReplayMutationAfterInvalidSuccessResponse(t *testing.T
 }
 
 func TestStdioProxyAllowsHealthyCallsPastRetryWindow(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		<-time.After(100 * time.Millisecond)
 		writer.Header().Set("Content-Type", "application/json")
@@ -508,6 +462,7 @@ func TestStdioProxyAllowsHealthyCallsPastRetryWindow(t *testing.T) {
 }
 
 func TestStdioProxyAllowsExistingMaximumCaptureResponse(t *testing.T) {
+	t.Parallel()
 	service := newService("test", &backend{chat: &fakeChatVerbs{
 		last: chat.LastResult{Text: strings.Repeat("x", maxCaptureBytes)},
 	}})
@@ -532,6 +487,7 @@ func TestStdioProxyAllowsExistingMaximumCaptureResponse(t *testing.T) {
 }
 
 func TestStdioProxyAllowsEscapedMaximumCaptureResponse(t *testing.T) {
+	t.Parallel()
 	service := newService("test", &backend{chat: &fakeChatVerbs{
 		last: chat.LastResult{Text: strings.Repeat("<", maxCaptureBytes)},
 	}})
@@ -608,6 +564,7 @@ func TestStdioProxyEnrichesSplitCallerWithoutExportedID(t *testing.T) {
 // is answered. The runtime is probed before a replay, never before the
 // original send.
 func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
+	t.Parallel()
 	for _, row := range []struct {
 		name       string
 		call       string
@@ -685,6 +642,7 @@ func TestStdioProxyReplaysOnlyNonChatCallsIntoDifferentRuntime(t *testing.T) {
 }
 
 func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	service := proxyTestService("initial", nil, &calls)
 	server := httptest.NewServer(proxyTestDaemon(service))
@@ -711,6 +669,7 @@ func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {
 }
 
 func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{
 		SessionName: "cc-seat", ID: "session-id", CWD: "/work/proxy", Project: "proxy",
 		Name: "Proxy Claude", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
@@ -753,6 +712,7 @@ func TestStdioProxyCarriesCallerIdentityEndToEnd(t *testing.T) {
 // the crumb directory not absolute it still forwards the identity resolved at
 // start, where a chat call is refused.
 func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
+	t.Parallel()
 	var received []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		var frame map[string]any
@@ -858,6 +818,7 @@ func TestStdioProxyRefreshesClaudeConversationForEveryChatCall(t *testing.T) {
 }
 
 func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	service := proxyTestService("daemon", nil, &calls)
 	server := httptest.NewServer(proxyTestDaemon(service))
@@ -878,6 +839,7 @@ func TestStdioProxyLeavesUnresolvedIdentityForDaemonToRefuse(t *testing.T) {
 }
 
 func TestStdioProxyClosesDaemonSessionAtEOF(t *testing.T) {
+	t.Parallel()
 	var calls [][]string
 	daemon := proxyTestDaemon(proxyTestService("daemon", nil, &calls))
 	var deletes atomic.Int32
@@ -903,6 +865,7 @@ func TestStdioProxyClosesDaemonSessionAtEOF(t *testing.T) {
 }
 
 func TestStdioProxyCancelsOutstandingCallAtEOF(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -949,4 +912,53 @@ func TestStdioProxyCancelsOutstandingCallAtEOF(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("daemon request context survived proxy EOF")
 	}
+}
+
+func TestOptionalProxyRequestsRecordWarn(t *testing.T) {
+	// Its subtests replace the process logger through obs.Test.
+	server := httptest.NewServer(http.NotFoundHandler())
+	address := strings.TrimPrefix(server.URL, "http://")
+	server.Close()
+	foreign := httptest.NewServer(http.NotFoundHandler())
+	foreignAddress := strings.TrimPrefix(foreign.URL, "http://")
+	foreign.Close()
+	assertOwnWarn := func(t *testing.T, recorder *obs.Recorder) {
+		t.Helper()
+		var own []obs.Record
+		for _, record := range recorder.Records() {
+			if host, ok := record.Field("host"); ok && host == address {
+				own = append(own, record)
+			}
+		}
+		if len(own) != 1 || own[0].Level != "WARN" {
+			t.Fatalf("own-host records=%v; all records=%s", own, recorder.Raw())
+		}
+	}
+	t.Run("route", func(t *testing.T) {
+		_, recorder := obs.Test(t)
+		if err := probeProfessorRoute(context.Background(), foreignAddress); err == nil {
+			t.Fatal("foreign route unexpectedly succeeded")
+		}
+		if err := probeProfessorRoute(context.Background(), address); err == nil ||
+			!strings.Contains(err.Error(), "probe ") {
+			t.Fatalf("route error=%v", err)
+		}
+		assertOwnWarn(t, recorder)
+	})
+	t.Run("close", func(t *testing.T) {
+		_, recorder := obs.Test(t)
+		if err := probeProfessorRoute(context.Background(), foreignAddress); err == nil {
+			t.Fatal("foreign route unexpectedly succeeded")
+		}
+		var warnings bytes.Buffer
+		proxy := &stdioProxy{
+			endpoint: server.URL, client: obs.WrapClient(&http.Client{}),
+			warnings: &warnings, sessionID: "session",
+		}
+		proxy.closeSession()
+		if !strings.Contains(warnings.String(), "close daemon session") {
+			t.Fatalf("warning=%s", warnings.String())
+		}
+		assertOwnWarn(t, recorder)
+	})
 }

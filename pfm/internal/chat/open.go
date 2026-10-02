@@ -46,7 +46,7 @@ func KillResolved(
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 		return 1
 	}
-	recorded := !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName)
+	recorded := !kill.AddressOnly(target)
 	if exit && target.SocketName != "" && target.PaneID != "" {
 		if err := manager.ConfirmExit(ctx, target); err != nil {
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)

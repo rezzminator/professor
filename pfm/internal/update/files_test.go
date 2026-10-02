@@ -11,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // updateConfigMigrationTestRuntime is updateRollbackTestRuntime, plus a
@@ -49,7 +50,7 @@ func TestUpdateCandidateDoctorReceivesTheMigratedConfigPath(t *testing.T) {
 		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		// Simulates the candidate's install migrating the pre-split config.

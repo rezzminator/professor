@@ -41,6 +41,7 @@ func bookingHarvester(t *testing.T, reader string) *Harvester {
 // states against the none loaded; with no count in the stored page the gap
 // says the count was not read. Another Booking page is not named.
 func TestBookingReviewsUnreadNamedWithStatedCount(t *testing.T) {
+	t.Parallel()
 	reader := socialFixture(t, "booking/reader.txt")
 	uncounted := strings.NewReplacer("Guest reviews (1,389)", "Guest reviews",
 		"Excellent·1,389 reviews", "Excellent").Replace(reader)

@@ -170,18 +170,6 @@ func TestProviderSearchParsersPreserveBibliographicFields(t *testing.T) {
 		strings.Contains(candidates[0].Title, "caller query") {
 		t.Fatalf("MD5Catalog parsed candidate = %#v err=%v", candidates, err)
 	}
-
-	scholar := parseGoogleScholar(
-		[]byte(
-			`<div class="gs_ri"><h3 class="gs_rt"><a href="https://doi.org/10.1234/provider.fixture">Fixture article</a></h3><div class="gs_a">A Author - Journal, 2020 - repository.example</div><div class="gs_or_ggsm"><a href="https://repository.example/article.pdf">[PDF]</a></div></div>`,
-		),
-		4,
-	)
-	if len(scholar) != 1 || scholar[0].Title != "Fixture article" || scholar[0].Authors != "A Author" ||
-		scholar[0].Year != 2020 ||
-		strings.Contains(scholar[0].Authors, "repository.example") {
-		t.Fatalf("Scholar parsed candidate = %#v; provider location leaked into authors", scholar)
-	}
 }
 
 func TestProviderSearchCleanMissAndOutageRemainDistinct(t *testing.T) {

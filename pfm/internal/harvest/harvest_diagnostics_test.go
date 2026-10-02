@@ -7,6 +7,7 @@ import (
 )
 
 func TestTitleGuessResultEchoesGivenValue(t *testing.T) {
+	t.Parallel()
 	got := titleGuessResult("title:Some Book", "Some Book")
 	if got.Source != "title:Some Book" {
 		t.Fatalf("Source = %q, want the original source", got.Source)
@@ -17,6 +18,7 @@ func TestTitleGuessResultEchoesGivenValue(t *testing.T) {
 }
 
 func TestNoteRungOutcomeOnErrorNamesItsKind(t *testing.T) {
+	t.Parallel()
 	err := errors.New("connection refused")
 	gotKind, gotErr := noteRungOutcome(err, nil, "")
 	if gotErr != err {
@@ -28,6 +30,7 @@ func TestNoteRungOutcomeOnErrorNamesItsKind(t *testing.T) {
 }
 
 func TestNoteRungOutcomeOnAnswerKeepsPriorErr(t *testing.T) {
+	t.Parallel()
 	priorErr := errors.New("earlier failure")
 	gotKind, gotErr := noteRungOutcome(nil, priorErr, "connect")
 	if gotErr != priorErr || gotKind != "connect" {
@@ -36,6 +39,7 @@ func TestNoteRungOutcomeOnAnswerKeepsPriorErr(t *testing.T) {
 }
 
 func TestConvertOutageNoteAppendsOnlyWhenNothingMoreSpecificClaimedIt(t *testing.T) {
+	t.Parallel()
 	base := "base message"
 	msg, kind := convertOutageNote(base, "", true, false, false, false)
 	if msg == base {

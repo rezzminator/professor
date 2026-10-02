@@ -125,7 +125,7 @@
       ],
       "raw_bytes": 19434,
       "raw_sha256": "b71c7f4477d3b986f8bd13b48938faff7e0efb034b463af757f3cbd7daab6873",
-      "oracle_sha256": "a50138ae9d76bf7a6bb09a11a7bce8e7e60d0bc6d3006db1a1e5ede9d50ffafc",
+      "oracle_sha256": "e8ea19e3c118c8bd0aa1058bbe5f738d6380069777a2be61f11851928deda7a1",
       "raw_sha256s": [
         "b71c7f4477d3b986f8bd13b48938faff7e0efb034b463af757f3cbd7daab6873"
       ]
@@ -197,7 +197,7 @@
       ],
       "raw_bytes": 22496,
       "raw_sha256": "6ff39e5bf94129a072b74e34765d7e0508240096cec474a8e74a7de2eca6b84d",
-      "oracle_sha256": "e0c2b7e1417fc5a6c03826d47e3d354f8c09855fb6c6891999fe9c6a98a97de5",
+      "oracle_sha256": "9caf46822b7b951034fcc0af023889bacb0bdc5a840e782fccebc5726785feff",
       "raw_sha256s": [
         "6ff39e5bf94129a072b74e34765d7e0508240096cec474a8e74a7de2eca6b84d"
       ]
@@ -313,7 +313,7 @@
       ],
       "raw_bytes": 77733,
       "raw_sha256": "ab09d01bc5e7be5f5dbc34f3cb568918d911d9113dd2fd59309fae78d975d09f",
-      "oracle_sha256": "382dda6b1fdc1b6d97d65e8e1f89179e35d17d360f8d5a981032aab4d669ce6d",
+      "oracle_sha256": "de211acde69c4bce3ba65cbee2318aceda2c0007043ec12cb2130df091dc175d",
       "raw_sha256s": [
         "ab09d01bc5e7be5f5dbc34f3cb568918d911d9113dd2fd59309fae78d975d09f"
       ]
@@ -385,7 +385,7 @@
       "raw_path": "raw/binary/scholar-arxiv-attention.pdf",
       "raw_bytes": 2215244,
       "raw_sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
-      "oracle_sha256": "c7890519fd8cb5f8c715d03d625e2eb15a3281ec674a076c81985046c64241f7",
+      "oracle_sha256": "7da5b3646bde796099b5092059c77960d870c5c43c20c11144f0664bbf9b0ff1",
       "raw_sha256s": [
         "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697"
       ]
@@ -723,7 +723,7 @@
       ],
       "raw_bytes": 1040954,
       "raw_sha256": "78d0eefbe60cfe7345ffdafede7294f055b04e53bd520360ff699b24f81e2b4b",
-      "oracle_sha256": "6da76131f60bca6f6ff7de4bbb0c6aebcad56d46ab30794a1f59f6af4b638871",
+      "oracle_sha256": "844f7ff8ee2d793325e39008fd007b0f8d7c8e1dc42389a349cb2d4041278dc2",
       "raw_sha256s": [
         "78d0eefbe60cfe7345ffdafede7294f055b04e53bd520360ff699b24f81e2b4b"
       ]
@@ -747,7 +747,7 @@
       ],
       "raw_bytes": 22046,
       "raw_sha256": "f26f106918539b83ad6e7339ba62fac92a344ed8338d91386c504875fe848388",
-      "oracle_sha256": "9a7c9d67f9912ae7566b824e257c3618c920f8730b8916ecba52b2e0a81e2ab4",
+      "oracle_sha256": "9a292477438133f1fe37d6d78efe5657d6862a9b171797fbc1c334466d945e6d",
       "raw_sha256s": [
         "f26f106918539b83ad6e7339ba62fac92a344ed8338d91386c504875fe848388"
       ]
@@ -771,7 +771,7 @@
       ],
       "raw_bytes": 20299,
       "raw_sha256": "99859c285333b1a2cab55a1f05a2c68828dd9cb473c9c6143e74e92fb0e1e03d",
-      "oracle_sha256": "9010b1ba81f6ba6ebca2e013f4382bfee121983be10f84072257accb87b6f93e",
+      "oracle_sha256": "8807a26327696d4179080cfdfbd7e739e28cc056069d8ec8ad516cf45dcbe11b",
       "raw_sha256s": [
         "99859c285333b1a2cab55a1f05a2c68828dd9cb473c9c6143e74e92fb0e1e03d"
       ]

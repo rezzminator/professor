@@ -18,16 +18,13 @@ func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
 // TestBuiltBinaryAnswersByTheNameItIsInstalledUnder builds the real binary and
 // runs it through symlinks named after each engine — the door every jail uses.
 func TestBuiltBinaryAnswersByTheNameItIsInstalledUnder(t *testing.T) {
-	goBinary, err := exec.LookPath("go")
-	if err != nil {
+	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("TOOLCHAIN-MISSING go: cannot build cmd/mock-engine")
 	}
 	root := t.TempDir()
-	binary := filepath.Join(root, "mock-engine")
-	build := exec.Command(goBinary, "build", "-o", binary, ".")
-	build.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOTELEMETRY=off")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, output)
+	binary, err := testjail.MockEngineBinary("../..", root)
+	if err != nil {
+		t.Fatalf("go build: %v", err)
 	}
 	scenario := filepath.Join(root, "scenario.json")
 	if err := (mockengine.Scenario{Version: "9.9.9 (Fixture)"}).Write(scenario); err != nil {

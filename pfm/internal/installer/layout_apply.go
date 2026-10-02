@@ -150,6 +150,11 @@ func ApplyLayout(
 			if current.Err != nil {
 				detail = current.Err.Error()
 			}
+			if layoutWarnOnly(current) {
+				// Two caches are the host owner's to reconcile: a warning, never a failed install.
+				fmt.Fprintf(stdout, "  warn    layout %s %s — %s\n", current.Row, current.Path, detail)
+				continue
+			}
 			fmt.Fprintf(stdout, "  refuse  layout %s %s — %s\n", current.Row, current.Path, detail)
 			if apply && current.Row != layoutRowManagedCleanup {
 				independentFailures = append(independentFailures,
@@ -288,13 +293,25 @@ func layoutFindingByPath(findings []LayoutFinding, row, path string) LayoutFindi
 // does not exist before the move, so it has nothing to copy.
 func layoutSnapshotPaths(env LayoutEnv, finding LayoutFinding) ([]string, error) {
 	switch finding.Row {
-	case layoutRowConfig, layoutRowHarvesterConfig:
+	case layoutRowConfig, layoutRowHarvesterConfig, layoutRowHarvesterCache:
 		if finding.Verdict == VerdictMove {
 			return []string{finding.Source, finding.Path}, nil
 		}
 	case layoutRowSessionStore:
-		if finding.Verdict == VerdictMerge {
-			return []string{finding.Path, layoutSessionStore(env, finding)}, nil
+		store := layoutSessionStore(env, finding)
+		switch finding.Verdict {
+		case VerdictMerge:
+			return []string{finding.Path, store}, nil
+		case VerdictCreate, VerdictRepoint:
+			// These change only the seat's link. A store other seats already
+			// hold is journaled by none of them, so neither the journal nor the
+			// space preflight copies its transcripts; one this row creates is.
+			if _, err := os.Lstat(store); err == nil {
+				return []string{finding.Path}, nil
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("stat session store %s: %w", store, err)
+			}
+			return []string{finding.Path, store}, nil
 		}
 	case layoutRowMemoryHelpers:
 		planner := &engine{options: Options{Home: env.Home, ConfigDirs: accountDirs(env), Stdout: io.Discard}}
@@ -401,6 +418,19 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 				if err := os.MkdirAll(filepath.Dir(finding.Path), 0o700); err != nil {
 					return err
 				}
+				if err := os.MkdirAll(store, 0o700); err != nil {
+					return fmt.Errorf("create store entry %s: %w", store, err)
+				}
+				if target, err := os.Readlink(finding.Path); err == nil {
+					if !filepath.IsAbs(target) {
+						target = filepath.Join(filepath.Dir(finding.Path), target)
+					}
+					if filepath.Clean(target) == store {
+						return nil
+					}
+				} else if !errors.Is(err, fs.ErrNotExist) {
+					return fmt.Errorf("read session-store link %s: %w", finding.Path, err)
+				}
 				if finding.Verdict == VerdictRepoint {
 					if err := os.Remove(finding.Path); err != nil {
 						return err
@@ -421,6 +451,10 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 			return err
 		}
 		return journal.mutate(finding, paths, installer.migrateMemoryHelpers)
+	case layoutRowHarvesterCache:
+		if finding.Verdict == VerdictMove {
+			return journal.mutate(finding, paths, func() error { return os.Rename(finding.Source, finding.Path) })
+		}
 	case layoutRowAccountSettings, layoutRowAccountMCP:
 		return applyLayoutAccount(journal, finding, paths)
 	case layoutRowHomeMCP:
@@ -743,56 +777,4 @@ func shellCommandLine(words ...string) string {
 // shellSafeRune reports whether r needs no shell quoting.
 func shellSafeRune(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_@%+=:,./-", r)
-}
-
-// classifyManagedCleanup plans the managed cleanup drop-in row, the one row
-// ApplyLayout treats as advisory.
-func classifyManagedCleanup(env LayoutEnv) LayoutFinding {
-	path := filepath.Join(env.ManagedDir, "pfm.json")
-	finding, info, exists := layoutLstat(layoutRowManagedCleanup, path)
-	if !env.Config.Claude.RequireManagedCleanup {
-		finding.Detail = "check off by config"
-		return finding
-	}
-	if !filepath.IsAbs(env.ManagedDir) {
-		// The row is advisory: refused, it writes nothing and fails nothing.
-		finding.Err = nil
-		finding.Verdict = VerdictRefuse
-		finding.Detail = fmt.Sprintf("managed settings dir %q is not absolute — nothing written", env.ManagedDir)
-		return finding
-	}
-	if finding.Err != nil {
-		return finding
-	}
-	if !exists {
-		finding.Verdict = VerdictCreate
-		return finding
-	}
-	if !info.Mode().IsRegular() {
-		finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
-		return finding
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		finding.Err = err
-		return finding
-	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &document); err != nil {
-		finding.Err = err
-		return finding
-	}
-	var value int
-	if err := json.Unmarshal(document["cleanupPeriodDays"], &value); err != nil {
-		finding.Err = fmt.Errorf("cleanupPeriodDays: %w", err)
-		return finding
-	}
-	if value != env.Config.Claude.CleanupPeriodDays {
-		finding.Verdict, finding.Detail = VerdictRepoint, fmt.Sprintf(
-			"cleanupPeriodDays=%d, want %d",
-			value,
-			env.Config.Claude.CleanupPeriodDays,
-		)
-	}
-	return finding
 }

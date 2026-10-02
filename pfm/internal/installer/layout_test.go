@@ -414,6 +414,43 @@ func layoutTreeSnapshot(t *testing.T, root string) map[string]string {
 	return result
 }
 
+func TestInstallLayoutEnvUsesPhysicalCloneWithoutMarker(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	alias := filepath.Join(t.TempDir(), "clone-alias")
+	if err := os.Symlink(clone, alias); err != nil {
+		t.Fatal(err)
+	}
+	runtime := pfmconfig.Runtime{Config: pfmconfig.Defaults(home, nil, ""), Paths: paths.Values{Home: home}}
+	layout, err := NewInstallLayoutEnv(runtime, &paths.MapEnv{}, alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.Clone != want {
+		t.Fatalf("Clone=%q, want physical %q", layout.Clone, want)
+	}
+}
+
+func TestInstallLayoutEnvKeepsRecordedCloneOverInstallAlias(t *testing.T) {
+	home, clone := t.TempDir(), t.TempDir()
+	alias := filepath.Join(t.TempDir(), "clone-alias")
+	if err := os.Symlink(clone, alias); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, paths.SourceRepoPath(home), alias+"\n")
+	runtime := pfmconfig.Runtime{Config: pfmconfig.Defaults(home, nil, ""), Paths: paths.Values{Home: home}}
+	layout, err := NewInstallLayoutEnv(runtime, &paths.MapEnv{}, alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.Clone != alias {
+		t.Fatalf("Clone=%q, want marker %q", layout.Clone, alias)
+	}
+}
+
 func TestLayoutEnvLoadsLegacyConfigWhenTargetMissing(t *testing.T) {
 	home := t.TempDir()
 	clone := filepath.Join(home, "clone")

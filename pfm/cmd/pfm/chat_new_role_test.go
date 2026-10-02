@@ -16,13 +16,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
-func TestChatNewRejectsRetiredRoleFlagAndNamesAgentRole(t *testing.T) {
+func TestChatNewUnknownFlagUsageNamesAgentRole(t *testing.T) {
+	jailTest(t)
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"chat", "new", "--role", "worker"}, &stdout, &stderr)
+	code := run([]string{"chat", "new", "--no-such-flag"}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("run() exit=%d, want 2", code)
 	}
-	if !strings.Contains(stderr.String(), "flag provided but not defined: -role") ||
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -no-such-flag") ||
 		!strings.Contains(stderr.String(), "--agent-role ROLE") {
 		t.Fatalf("run() stderr=%q", stderr.String())
 	}

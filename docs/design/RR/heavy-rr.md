@@ -24,7 +24,7 @@
 | Writes | the one RR document, into the directory on its `RR-DIR:` line; an existing file of the same name is overwritten (§ Read, and the name guard it gives up) |
 | Start hook | `rr-dir`, matcher `rr\|super-rr\|heavy-rr` |
 
-Description, verbatim: `Exhaustive rr — delegate for "heavy rr", "heavy-rr X" when the map must settle whatever the cost; lighter → super-rr. Returns the saved RR path, then the cited map.`
+Description, verbatim: `Maps a query exhaustively — tier 3, the ultimate: super-rr → here. Delegate for "heavy rr", "heavy-rr X", when every sub-area must settle whatever the cost. Returns the saved RR path, then the cited map.`
 
 ## How the variant is built
 

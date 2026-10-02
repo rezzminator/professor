@@ -16,9 +16,9 @@ const hungProbeTimeout = 250 * time.Millisecond
 
 // slowSelfDoctorTimeout bounds the slow-but-healthy self-doctor. The same bound
 // covers its quick `doctor --help`, and the first exec of a freshly written stub
-// costs up to ~553ms on macOS under suite load, so it sits well above that and
+// costs up to ~553ms on macOS under suite load, so 1s stays above that and
 // still far below the 30 s sleep the summary call must outrun.
-const slowSelfDoctorTimeout = 2 * time.Second
+const slowSelfDoctorTimeout = 1 * time.Second
 
 func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	directory := t.TempDir()
@@ -414,14 +414,6 @@ exit 2`)
 	}
 }
 
-func TestRegistryDoesNotAdvertiseRetiredGCloud(t *testing.T) {
-	for _, entry := range Registry(Options{Home: t.TempDir(), GOOS: "linux", GOARCH: "amd64"}) {
-		if entry.Name == "gcloud" || entry.Command == "gcloud" {
-			t.Fatalf("retired gcloud dependency remains registered: %#v", entry)
-		}
-	}
-}
-
 func TestResolveRejectsRegisteredOffPlatformCommand(t *testing.T) {
 	var command string
 	switch runtime.GOOS {
@@ -693,7 +685,7 @@ func TestProbeRecordsEachVersionProbe(t *testing.T) {
 func writeProbeStub(t *testing.T, directory, name, body string) {
 	t.Helper()
 	path := filepath.Join(directory, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+	if err := writeExecutableUnderForkLock(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -3,7 +3,6 @@ package tmux
 import (
 	"context"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeTmux writes a shell script that plays tmux: it prints its arguments
@@ -21,7 +21,7 @@ func fakeTmux(t *testing.T, exit int) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux-fake")
 	script := "#!/bin/sh\nprintf '%s ' \"$@\"\nexit " + strconv.Itoa(exit) + "\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary

@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeBrowserWorker is an in-memory stand-in for the Patchright worker: the
@@ -44,7 +45,7 @@ func newFakeBrowserWorker(t *testing.T) (pythonConverter, *fakeBrowserWorker) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{python, script} {
-		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(path, []byte("fixture"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

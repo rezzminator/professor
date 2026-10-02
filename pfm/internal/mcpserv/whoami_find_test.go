@@ -153,9 +153,7 @@ func TestChatFindRanksByNeedleVotesAndExcludesSelf(t *testing.T) {
 
 // TestChatInjectCarriesTheThenArgument proves the steer chain reaches the
 // engine through the MCP schema, that a /compact PRIMARY is refused outright
-// on chat_inject regardless of a then steer (Task C: compaction is
-// chat_self_compact / `pfm chat self-compact` only, never a live chat_inject
-// /compact), and that a /compact STEER is still refused by checkSteerChain
+// on chat_inject regardless of a then steer, and that a /compact STEER is still refused by checkSteerChain
 // even when the primary is ordinary. Renamed cases from
 // steerless/recursive/unresolved "/compact hold…" primaries: the steerless
 // and legal-steer cases used to differ only in whether `then` carried a
@@ -293,6 +291,7 @@ func TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf(t *testing.T) {
 }
 
 func TestChatFindOnTheSharedDaemonExcludesProxyClaudeCaller(t *testing.T) {
+	t.Parallel()
 	const callerID = "claude-session"
 	verbs := &fakeChatVerbs{
 		listed: chat.ListResult{Rows: []compose.Row{{
@@ -321,6 +320,7 @@ func TestChatFindOnTheSharedDaemonExcludesProxyClaudeCaller(t *testing.T) {
 }
 
 func TestChatFindIncludeSelfSkipsCallerResolution(t *testing.T) {
+	t.Parallel()
 	valid := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "cc-seat", "engine": "claude", "id": "claude-session",
 	}}
@@ -354,6 +354,7 @@ func TestChatFindIncludeSelfSkipsCallerResolution(t *testing.T) {
 }
 
 func TestChatFindNonClaudeCallerDoesNotExcludeClaudeCollision(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		engine string
@@ -427,6 +428,7 @@ func TestChatFindInvalidMetadataDoesNotFallBackToAmbientIdentity(t *testing.T) {
 }
 
 func TestChatFindCallerProbeFailureIsAToolError(t *testing.T) {
+	t.Parallel()
 	verbs := &fakeChatVerbs{err: errors.New("fleet database busy")}
 	service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
 	client := connectInMemory(t, service.Server())

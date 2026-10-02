@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 
-	callmetercmd "github.com/rezzminator/professor/pfm/internal/callmeter/command"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -23,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
+	pricecmd "github.com/rezzminator/professor/pfm/internal/pricing/command"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stale"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -47,7 +47,7 @@ const (
 	doctorCommand     = "doctor"
 	checkAction       = "check"
 	statuslineCommand = "statusline"
-	callmeterCommand  = "callmeter"
+	staleCommand      = "stale"
 )
 
 var version = config.DevelopmentVersion
@@ -58,16 +58,17 @@ var topLevelSubcommands = []string{
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
-	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log", callmeterCommand,
+	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
+	"price",
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
-	"agent-open", callmeterCommand, "chat-server", "claude-launch", "claude-version", "clear-kill",
-	"codex-launch", "compact-nudge", "epic-inject",
+	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
+	"codex-launch", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
 	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "rr-dir",
-	reloadRunCommand, "stale", statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
+	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
 }
 
 func main() {
@@ -100,8 +101,11 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 			return runVersion(args[1:], stdout, stderr)
 		}
 		// make install sweeps with stale in that same window: it reads no config.
-		if len(args) > 1 && args[0] == internalCommand && args[1] == "stale" {
+		if len(args) > 1 && args[0] == internalCommand && args[1] == staleCommand {
 			return stale.Run(args[2:], stdout, stderr)
+		}
+		if len(args) > 1 && args[0] == internalCommand && args[1] == reloadRunCommand {
+			return reloadWorkerConfigFailure(args[2:], err, stderr)
 		}
 		if !diagnosticCommand(args) {
 			fmt.Fprintf(stderr, "pfm: config: %v\n", err)
@@ -137,8 +141,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runIndex(args[1:], stdout, stderr, runtime, clock.Real)
 	case "log":
 		return runLog(args[1:], stdout, stderr, runtime)
-	case "callmeter":
-		return callmetercmd.CLI(args[1:], stdout, stderr, runtime)
+	case "price":
+		return pricecmd.Price(args[1:], stdout, stderr, runtime)
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -211,7 +215,7 @@ func printUsage(w io.Writer) {
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
-		"  callmeter report which files, commands and calls filled agent contexts",
+		"  price     print the model price table pfm owns: --json --check",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
 		"  statusline render the native Claude status line",
@@ -361,7 +365,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	}
 	fmt.Fprintln(stdout, pfmchat.KillOutcome(
 		target.ID, target.SocketName, target.PaneID,
-		!pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName),
+		!kill.AddressOnly(target),
 	))
 	return 0
 }
@@ -380,8 +384,13 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		return code
 	}
 	defer func() { cli.CloseResource(database, "pfm chat unkill: close database", stderr, &exitCode) }()
-	if err := manager.Unkill(context.Background(), flags.Arg(0)); err != nil {
+	removed, err := manager.Unkill(context.Background(), flags.Arg(0))
+	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
+		return 1
+	}
+	if !removed {
+		fmt.Fprintf(stderr, "pfm chat unkill: %s is not killed; nothing was unkilled\n", flags.Arg(0))
 		return 1
 	}
 	fmt.Fprintf(stdout, "unkilled %s\n", flags.Arg(0))
@@ -421,9 +430,6 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "orchestrator-wait" {
 		return hookentry.OrchestratorWait(os.Stdin, stdout, stderr)
 	}
-	if len(args) != 0 && args[0] == "callmeter" {
-		return hookentry.Callmeter(os.Stdin, stderr, paths.OSEnv{})
-	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
 	}
@@ -441,9 +447,6 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	}
 	if len(args) != 0 && args[0] == "exit-close" {
 		return hookentry.ExitClose(os.Stdin, stderr)
-	}
-	if len(args) != 0 && args[0] == "compact-nudge" {
-		return hookentry.CompactNudge(os.Stdin, stdout, stderr, runtime, nil)
 	}
 	if len(args) != 0 && args[0] == "reload-run" {
 		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime, paths.OSEnv{})
@@ -499,7 +502,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|callmeter|chat-server|claude-launch|claude-version|clear-kill|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}
@@ -509,6 +512,12 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// registered (a rollback, a stale binary on PATH) would erase every
 		// prompt or deny every tool call. An unknown name is a non-blocking
 		// error that says what happened and how to converge.
+		if installer.RetiredInternalHook(args[0]) {
+			// Install already stripped it; only a session's start-time hook
+			// snapshot still runs it, and no install can clear that. Silent
+			// success: hook stdout becomes prompt context, stderr a warning.
+			return 0
+		}
 		fmt.Fprintf(
 			stderr,
 			"pfm internal: unknown subcommand %q — registered by a different pfm version than this binary (%s); run `pfm install --yes` with the binary you intend to keep\n",

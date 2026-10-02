@@ -105,7 +105,7 @@ type HarvesterConvert struct {
 }
 
 // HarvesterCache: an empty Dir resolves to harvest's single default,
-// <home>/.professor/.cache. A zero TTL is meaningful: TTL 0 never expires a
+// <home>/.professor/.harvester-cache. A zero TTL is meaningful: TTL 0 never expires a
 // cached document; NegativeTTL / NegativeTransientTTL 0 never cache failures.
 type HarvesterCache struct {
 	Dir                  string

@@ -31,3 +31,20 @@ func TestRunInternalUnknownSubcommandIsANonBlockingHookError(t *testing.T) {
 		t.Fatalf("bare `pfm internal` = %d, stderr=%q; want the usage and 2", code, stderr.String())
 	}
 }
+
+// TestRunInternalRetiredHookIsASilentNoOp pins what a Claude session started
+// before an install sees when it runs a hook that install retired: Claude Code
+// keeps the hooks it read at start, so the stripped `internal compact-nudge`
+// still fires on every prompt until the session restarts. It must exit 0 and
+// print nothing — a UserPromptSubmit hook's stdout becomes prompt context, and
+// its stderr is a warning on every prompt that no install can clear.
+func TestRunInternalRetiredHookIsASilentNoOp(t *testing.T) {
+	for _, name := range []string{"compact-nudge", "clear-hide", "callmeter"} {
+		var stdout, stderr bytes.Buffer
+		if code := runInternal([]string{name}, &stdout, &stderr, commandRuntime{}); code != 0 ||
+			stdout.Len() != 0 || stderr.Len() != 0 {
+			t.Fatalf("retired hook %q: exit %d stdout=%q stderr=%q; want 0 and no output",
+				name, code, stdout.String(), stderr.String())
+		}
+	}
+}

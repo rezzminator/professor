@@ -10,8 +10,10 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -181,6 +183,30 @@ func ReconcileCodexPanesWith(
 				"codex pane %s %s: %s",
 				action.Socket, action.PaneID, action.Skip,
 			))
+		}
+		if action.ClearKill != "" {
+			inFlight, probeErr := reload.InFlight(runtime.Paths.SIDDir, filepath.Base(action.Socket), action.PaneID)
+			if probeErr != nil {
+				warn(fmt.Sprintf(
+					"codex pane %s %s: probe reload lock (binding retained for retry): %v",
+					action.Socket, action.PaneID, probeErr,
+				))
+				continue
+			}
+			if inFlight {
+				continue
+			}
+			capture, captureErr := renamer.Capture(ctx, action.Socket, action.PaneID)
+			if captureErr != nil {
+				warn(fmt.Sprintf(
+					"codex pane %s %s: capture pane before re-applying the chat name (binding retained for retry): %v",
+					action.Socket, action.PaneID, captureErr,
+				))
+				continue
+			}
+			if inject.IsFooterBusy(pfmengine.Codex, capture) {
+				continue
+			}
 		}
 		var target kill.Target
 		if action.ClearKill != "" {

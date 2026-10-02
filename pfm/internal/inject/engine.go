@@ -453,178 +453,15 @@ func (engine *Engine) Capture(
 	return target, capture, 0, "", nil
 }
 
-// ScheduleAfterCurrentTurn arms a detached steer chain without typing into
-// the current composer. Slash commands queued while a Codex model turn is
-// running become ordinary model input rather than TUI commands; the detached
-// waiter must therefore wait for idle before it types the primary command.
-func (engine *Engine) ScheduleAfterCurrentTurn(
-	ctx context.Context,
-	request Request,
-) (Result, error) {
-	ctx = withSender(ctx, engine.sender(ctx))
-	if request.Message == "" {
-		return refused(CodeUndelivered, "refusing to schedule an empty message"), nil
-	}
-	if result, ok := engine.checkSteerChain(request); !ok {
-		return result, nil
-	}
-	target, code, detail, err := engine.Resolve(ctx, request.Target)
-	if err != nil {
-		return Result{}, err
-	}
-	if code != 0 {
-		return refused(code, detail), nil
-	}
-	if _, captureErr := engine.capture(ctx, target, 0); captureErr != nil {
-		return refused(CodeDead, "target pane is dead or unreadable"), nil
-	}
-	then := request.Then
-	steers := make([]string, 0, len(then)+1)
-	steers = append(steers, request.Message)
-	steers = append(steers, then...)
-	logPath := engine.steerLogPath(target)
-	// The check and the arming are ONE step, under the pane's own inject lock.
-	// refuseIfArmed only READS the armed record; the matching write happens
-	// later, inside spawner.Spawn (armRecord), so two schedules whose reads
-	// both landed before either write both saw an unarmed pane and both
-	// spawned a waiter — armRecord's "leave a live arming alone" branch
-	// suppresses the second RECORD, never the second PROCESS, and two waiters
-	// then race one pane and one O_TRUNC log. The lock is the same one a live
-	// inject holds while it types (lockTarget), and it is released as soon as
-	// the record is down and the waiter is running.
-	lock, lockRefusal := engine.lockTarget(ctx, target)
-	if lockRefusal != "" {
-		return refused(CodeUndelivered, lockRefusal), nil
-	}
-	defer lock.release()
-	if result, ok := engine.refuseIfArmed(target, request, logPath); !ok {
-		return result, nil
-	}
-	// Only the ORIGINAL self-compaction needs the caller's turn ridden
-	// out. A chained re-arm is typed into a pane this waiter already
-	// watched settle, so its next busy is the steer's own turn.
-	selfTarget := !request.Chain && isSelfTarget(request.Target)
-	if err := engine.spawner.Spawn(ctx, SteerSpawn{
-		SocketPath: target.SocketPath,
-		Target:     target.Pane,
-		Engine:     target.Engine,
-		Steers:     steers,
-		LogPath:    logPath,
-		Append:     request.Chain,
-		Sender:     engine.sender(ctx),
-		SelfTarget: selfTarget,
-	}); err != nil {
-		return refused(
-			CodeUndelivered,
-			fmt.Sprintf("could not schedule command after the current turn: %v", err),
-		), nil
-	}
-	engine.announceArmed(ctx, target, request, selfTarget)
-	message := fmt.Sprintf(
-		"scheduled COMMAND into %q after the current turn settles — %d post-command steer(s) armed (log: %s)",
-		target.Pane,
-		len(then),
-		logPath,
-	)
-	if isSelfCompactRequest(request) {
-		message += SelfCompactStopNotice
-	}
-	return Result{
-		Status:     "scheduled",
-		Code:       0,
-		Message:    message,
-		SocketPath: target.SocketPath,
-		Pane:       target.Pane,
-		Steers:     len(then),
-		SteerLog:   logPath,
-	}, nil
-}
-
-// ScheduleSelfCompact composes and schedules a self-compaction the ONE way,
-// shared by every caller — the chat_self_compact MCP tool and
-// `pfm chat self-compact` alike. Nobody else composes "/compact ".
-func (engine *Engine) ScheduleSelfCompact(
-	ctx context.Context,
-	focus string,
-	then []string,
-) (result Result, err error) {
-	states := trail(ctx, "self-compact")
-	defer func() { outcome(states, result, err) }()
-	focus = strings.TrimSpace(focus)
-	// The full control-character class, not just \r\n\x00: ESC, BEL, and
-	// the rest of C0/DEL are the same threat class (an injected control
-	// byte typed as a real keypress) this diff's own typist/mash guards
-	// exist to police elsewhere, and unicode.IsControl is what makes this
-	// check match its own doc comment below (and SelfCompactInput's, in
-	// mcpserv/types.go) word for word: non-empty, single line, no control
-	// characters — one canonical rule, stated once, enforced here.
-	if focus == "" || strings.ContainsFunc(focus, unicode.IsControl) {
-		return refused(CodeUndelivered, "focus must be one non-empty line"), nil
-	}
-	target, code, detail, err := engine.Resolve(ctx, "self")
-	if err != nil {
-		return Result{}, err
-	}
-	if code != 0 {
-		return refused(code, detail), nil
-	}
-	// focus is validated above (single line, non-empty, no control characters),
-	// which is exactly what makes it safe to concatenate onto the slash
-	// command. isHarnessCommand only checks for a leading "/", so the composed
-	// string still routes through the paced-literal command transport.
-	//
-	// Codex is the exception, and it is an ASSUMPTION HELD, not one disproved:
-	// an earlier investigation recorded that Codex accepts no inline arguments
-	// on /compact. Nothing in this repo re-tests that — TESTPLAN's /compact
-	// rows are all Claude jail tests — so the claim stands until a real Codex
-	// composer says otherwise, and the focus is composed only where the target
-	// is NOT known to be Codex.
-	message := "/compact " + focus
-	if target.Engine == string(pfmengine.Codex) {
-		message = "/compact"
-	}
-	return engine.ScheduleAfterCurrentTurn(ctx, Request{
-		Target:  "self",
-		Message: message,
-		Then:    then,
-	})
-}
-
-// isSelfCompactRequest is true for the one shape the stop rule applies to: a
-// chat compacting ITSELF. For any other target the waiter is watching somebody
-// else's pane, so what this caller does next cannot blur the turn boundary.
-func isSelfCompactRequest(request Request) bool {
-	return isCompactCommand(request.Message) && isSelfTarget(request.Target)
-}
-
-// isSelfTarget reports the one target spelling that names the calling chat's
-// own pane.
-func isSelfTarget(target string) bool {
-	return strings.EqualFold(strings.TrimSpace(target), "self")
-}
-
-// SelfCompactStopNotice rides on the SUCCESS result of a self-compaction,
-// where it is read in the same breath as the decision it governs. The --then
-// waiter recognises the compaction turn by watching this pane yield and then go
-// busy again (waitForSettledTurn); a caller that keeps working after queueing
-// the compaction merges its own turn into the compaction's and leaves the
-// waiter no boundary to find.
-const SelfCompactStopNotice = " — STOP NOW: end this turn without running " +
-	"another tool. Say only that compaction is queued with its steer to " +
-	"follow. Any further work here competes with the compaction the waiter " +
-	"is watching for, and the steer will land beside it instead of after it."
-
 // Inject performs the delivery and records a successful direct send without
 // making the recipient pay for a ledger failure.
 //
 // A /compact primary is refused here, before checkSteerChain or any resolve
 // step runs: /compact ends a turn at an idle prompt with none fired, so
 // typing it live races whatever the target's operator is doing right now
-// (the 2026-09-03 self-compact that ate an operator's live draft) — compaction belongs to
-// chat_self_compact / `pfm chat self-compact`, both of which wait for the
-// target's own turn to end first. The internal inject() this delegates to
-// still accepts a /compact primary when Chain is true — that is how
-// ScheduleAfterCurrentTurn's detached waiter (DeliverThen) delivers one.
+// (the 2026-09-03 compaction that ate an operator's live draft).
+// The internal inject() still accepts a /compact primary when Chain is true — that is how
+// DeliverThen's chained waiter delivers one.
 func (engine *Engine) Inject(ctx context.Context, request Request) (result Result, err error) {
 	return engine.injectRequest(ctx, request, nil)
 }
@@ -651,10 +488,9 @@ func (engine *Engine) injectRequest(
 	if isCompactCommand(request.Message) {
 		return refused(
 			CodeUndelivered,
-			"ABORT: /compact is never injected — compaction is chat_self_compact "+
-				"(MCP) or `pfm chat self-compact --then '<steer>' '<focus>'` (CLI); "+
-				"both wait for the target's own turn to end and never type over a "+
-				"human. Nothing was typed.",
+			"ABORT: /compact is never injected — pfm never types a compaction: "+
+				"Claude compacts through the sub-agent-compact plugin, Codex and OpenCode "+
+				"through their own auto-compaction. Nothing was typed.",
 		), nil
 	}
 	if resolved == nil {
@@ -743,6 +579,9 @@ func (engine *Engine) injectResolved(
 		base.Code = CodeDead
 		base.Message = "target pane is dead or unreadable"
 		return base, nil
+	}
+	if refused, held := refuseTrustDialog(base, target.Pane, capture); held {
+		return refused, nil
 	}
 	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
 	verifiedEngine := ""
@@ -833,7 +672,7 @@ func (engine *Engine) injectResolved(
 	// below protects a PARKED draft, never a live keystroke, and the second
 	// Enter this engine used to send is exactly what let an operator's next
 	// keystroke land as a submitted message once the first Enter had already
-	// cleared the composer (the 2026-09-03 self-compact that ate an operator's live draft). ForceNow
+	// cleared the composer (the 2026-09-03 compaction that ate an operator's live draft). ForceNow
 	// alone bypasses this — the same override that allows the Escape
 	// interrupt above.
 	if !request.ForceNow {
@@ -939,10 +778,11 @@ func (engine *Engine) injectResolved(
 	// Idle panes take the ordinary C-s mash guard. A busy pane with an empty
 	// composer is already a safe queue surface and receives no control key;
 	// only an actual busy draft is stashed before the new turn is queued.
-	// The "stashed and restored on submit" semantics this guard leans on are
-	// not documented by Claude Code — they are pinned empirically, against a
-	// real process, by the PINNED OBSERVATIONS comment atop
-	// claude_stash_real_test.go's TestRealClaudeStashSemantics.
+	// C-s on a non-empty composer parks the draft in Claude Code's single
+	// stash slot; a later stash overwrites it. C-s on an empty composer pops
+	// it back. The next confirmed submit of any kind restores it. Claude Code
+	// does not document these semantics; pfm/TESTPLAN.md item 28c names them
+	// as an UNPLAYED flow the fake engine does not yet play.
 	needsStashGuard := !queueing
 	if queueing && hasDraft(lastComposerLine(capture)) {
 		styled, _ := engine.tmux.Capture(
@@ -1436,7 +1276,7 @@ func (engine *Engine) checkSteerChain(request Request) (Result, bool) {
 		if isCompactCommand(steer) {
 			return refused(
 				CodeUndelivered,
-				"ERROR: a then steer must not itself start with /compact — compact-steering-into-compact recurses and loses the thread",
+				"ERROR: a then steer must not itself start with /compact — compact-steering-into-compact recurses and loses the thread. pfm never types a compaction: Claude compacts through the sub-agent-compact plugin, Codex and OpenCode through their own auto-compaction. Nothing was typed.",
 			), false
 		}
 	}
@@ -1449,7 +1289,7 @@ func (engine *Engine) checkSteerChain(request Request) (Result, bool) {
 	if len(request.Then) == 0 {
 		return refused(
 			6,
-			"ABORT: a /compact inject requires exactly one then steer — compaction ends at an idle prompt with no turn fired, stranding the target. Use chat_self_compact{focus, then:'<post-compact steer>'} or `pfm chat self-compact --then '<steer>' '<focus>'` instead. Nothing was typed.",
+			"ABORT: a /compact inject requires exactly one then steer — compaction ends at an idle prompt with no turn fired, stranding the target. pfm never types a compaction: Claude compacts through the sub-agent-compact plugin, Codex and OpenCode through their own auto-compaction. Nothing was typed.",
 		), false
 	}
 	return Result{}, true
@@ -1545,25 +1385,6 @@ func signatureParts(sender Sender) []string {
 		)
 	}
 	return parts
-}
-
-// unquoteTarget strips one layer of surrounding double quotes from a target.
-//
-// It is the read side of the reply hint's write side: a label containing
-// spaces is advertised as chat_inject "Delivery Trust" <message>, because the
-// CLI form needs the shell quoting to see one argument. A recipient reaching
-// for the MCP tool instead passes the target as a JSON string, where those
-// quotes are just two extra characters that would make the label match
-// nothing. Accepting both spellings costs one trim; refusing one of them
-// would make the hint wrong for whichever caller read it the other way.
-func unquoteTarget(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if len(trimmed) >= 2 &&
-		strings.HasPrefix(trimmed, `"`) &&
-		strings.HasSuffix(trimmed, `"`) {
-		return strings.TrimSpace(trimmed[1 : len(trimmed)-1])
-	}
-	return trimmed
 }
 
 // replyAddress is the one string a recipient can pass straight back to
@@ -1737,10 +1558,6 @@ func (engine *Engine) senderLabel(
 		return ""
 	}
 	return strings.TrimSpace(window)
-}
-
-func targetFromParts(socketPath, pane string) Target {
-	return targetFromSeat(resolve.SeatFromParts(socketPath, pane, paths.OSEnv{}))
 }
 
 func refused(code int, message string) Result {

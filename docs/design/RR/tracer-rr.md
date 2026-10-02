@@ -23,7 +23,7 @@
 | --- | --- |
 | Kind | original agent, `templates/global/agents/tracer-rr.md`, linked by `pfm install` |
 | Class | `RR-ONLY` |
-| Model, effort | `opus`, `medium` — `tracer`'s pin: following a call chain through unfamiliar code is judgment, not extraction |
+| Model, effort | `opus`, `medium` — `tracer-pro-max`'s pin: following a call chain through unfamiliar code is judgment, not extraction |
 | Tools | `Bash, Read, Grep, Glob` — no `Write`: the result file is written by `Bash` (§ The result file) |
 | Budget | 30 tool calls |
 | Spawns | nothing — it holds no `Agent` |

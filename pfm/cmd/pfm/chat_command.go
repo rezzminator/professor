@@ -167,6 +167,16 @@ func runChatKillContext(
 	case !fleet.ChatIDPattern.MatchString(target):
 		return renderNoSuchChat(target, stdout, stderr, false)
 	}
+	if id == "" {
+		// A chat found by name with no session id and no live address has
+		// nothing to tombstone and nothing to close; never hand runKill "".
+		fmt.Fprintf(
+			stderr,
+			"pfm chat kill: %s resolved to a chat with no session id and no live pane — nothing to close or hide\n",
+			target,
+		)
+		return 1
+	}
 	killArgs := make([]string, 0, 2)
 	if *exit {
 		killArgs = append(killArgs, "--exit")
@@ -180,15 +190,6 @@ func runChatKillContext(
 		return codeUnknownChat
 	}
 	return code
-}
-
-func runResolvedChatKill(
-	chat headless.Chat,
-	exit bool,
-	stdout, stderr io.Writer,
-	runtimes ...commandRuntime,
-) (exitCode int) {
-	return pfmchat.KillResolved(context.Background(), chat, exit, stdout, stderr, firstRuntime(runtimes))
 }
 
 func runResolvedChatKillContext(
@@ -229,6 +230,15 @@ func runChatUnkillContext(
 		}
 		if !found {
 			return renderNoSuchChat(target, stdout, stderr, false)
+		}
+		if chat.ID == "" {
+			fmt.Fprintf(
+				stderr,
+				"pfm chat unkill: %s carries no session id — no kill was recorded against it, "+
+					"so there is none to lift\n",
+				target,
+			)
+			return 1
 		}
 		target = chat.ID
 	}
@@ -351,10 +361,6 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 		filepath.Join(codexHome, "recovered-"+result.ThreadID, "brief.md"),
 	)
 	return 0
-}
-
-func runChatName(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	return runChatNameContext(context.Background(), args, stdout, stderr, runtimes...)
 }
 
 func runChatNameContext(

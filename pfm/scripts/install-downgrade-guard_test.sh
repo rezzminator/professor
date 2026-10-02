@@ -19,9 +19,7 @@ SHTEST_TAG=pfm-install-downgrade-guard-test
 # shellcheck source=/dev/null
 source "$ROOT/../scripts/shtest.sh"
 
-GOCACHE_DIR="$T/gocache"
-mkdir -p "$GOCACHE_DIR"
-GOENV=(GOCACHE="$GOCACHE_DIR" GOTOOLCHAIN=local CGO_ENABLED=0)
+GOENV=(GOCACHE="$(go env GOCACHE)" GOTOOLCHAIN=local CGO_ENABLED=0)
 
 gitc() { git -C "$1" -c user.email=t@example.invalid -c user.name=t "${@:2}"; }
 

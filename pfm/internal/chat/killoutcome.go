@@ -12,9 +12,9 @@ import "fmt"
 //   - a live address AND a recorded kill: the pane is being closed;
 //   - a recorded kill with no live address: the row was de-listed, nothing
 //     was closed;
-//   - a live address with NO record: an OpenCode seat keyed on its own socket
-//     name, which is an address and never an identity (engine.SocketKeyedID),
-//     so its pane closes and the kill ledger stays clean.
+//   - a live address with NO record: a seat with no session id or keyed on
+//     its own socket name, which is an address and never an identity
+//     (kill.AddressOnly), so its pane closes and the kill ledger stays clean.
 func KillOutcome(id, socket, pane string, recorded bool) string {
 	if socket == "" || pane == "" {
 		return fmt.Sprintf("killed %s\tde-listed only, no live pane closed", id)

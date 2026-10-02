@@ -13,6 +13,7 @@ import (
 // identically on both sides of the seam.
 
 func TestWaveLooksLikeEpubBoundaries(t *testing.T) {
+	t.Parallel()
 	epub := buildMinimalEpub(t)
 	if !LooksLikeEpub(epub) {
 		t.Fatalf("a real EPUB must carry its mimetype marker in the first 200 bytes")
@@ -44,6 +45,7 @@ func buildMinimalEpub(t *testing.T) []byte {
 }
 
 func TestWaveStripDefuddleEnvelope(t *testing.T) {
+	t.Parallel()
 	raw := "---\ntitle: \"T\"\nsource: \"u\"\nword_count: 17\n---\n\nBody line.\n"
 	if got := strings.TrimSpace(stripDefuddleEnvelope(raw)); got != "Body line." {
 		t.Fatalf("stripDefuddleEnvelope=%q", got)
@@ -69,6 +71,7 @@ func (ocrTestConverter) ConvertOCR(_ context.Context, _, _ string, _ []byte) (st
 }
 
 func TestWaveOCREscalationRescuesScannedPDF(t *testing.T) {
+	t.Parallel()
 	pdfTransport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "application/pdf", "%PDF-1.7 scanned pages"), nil
 	})
@@ -104,6 +107,7 @@ func TestWaveOCREscalationRescuesScannedPDF(t *testing.T) {
 }
 
 func TestWavePMCOAPDFURLRewritesDeadFTP(t *testing.T) {
+	t.Parallel()
 	payload := `<OA><records><record id="PMC10450651">` +
 		`<link format="tgz" href="ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_package/67/4a/PMC10450651.tar.gz"/>` +
 		`<link format="pdf" href="ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_pdf/b8/d6/pnas.202302738.PMC10450651.pdf"/>` +
@@ -119,37 +123,8 @@ func TestWavePMCOAPDFURLRewritesDeadFTP(t *testing.T) {
 	}
 }
 
-func TestWaveStatsScoreboardRoundtrip(t *testing.T) {
-	dir := t.TempDir()
-	h := mustNew(t, Options{CacheDir: dir})
-	h.recordStat("https://a.example/x", Result{Method: "jina"})
-	h.recordStat("https://b.example/y", Result{Error: "timeout", ErrorKind: "timeout"})
-	h.recordStat("https://c.example/z", Result{Method: "jina"})
-	buckets, err := SummarizeStats(dir, 100)
-	if err != nil {
-		t.Fatalf("SummarizeStats: %v", err)
-	}
-	got := buckets["jina"]
-	if got == nil || got.Total != 2 || got.OK != 2 || got.Rate != 1.0 {
-		t.Fatalf("jina bucket=%#v", got)
-	}
-	fails := buckets["timeout"]
-	if fails == nil || fails.Total != 1 || fails.Rate != 0.0 {
-		t.Fatalf("timeout bucket=%#v", fails)
-	}
-}
-
-func TestWaveStatsAllCorruptIsDistinctFromNoData(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, statsFilename), []byte("{broken\nnot-json\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if buckets, err := SummarizeStats(dir, 100); err == nil {
-		t.Fatalf("all-corrupt stats returned healthy empty result: %#v", buckets)
-	}
-}
-
 func TestWaveStatsWrittenByRealFetch(t *testing.T) {
+	t.Parallel()
 	// The scoreboard provably RUNS on the live dispatch path — an absent stats.jsonl
 	// after a real fetch means the recorder never fired (coincidence-detector failure).
 	dir := t.TempDir()

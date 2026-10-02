@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
@@ -18,10 +20,10 @@ func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
 	}
 	canonical := filepath.Join(canonicalDir, "pfm")
 	shadow := filepath.Join(shadowDir, "pfm")
-	if err := os.WriteFile(canonical, []byte("production-candidate"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(canonical, []byte("production-candidate"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(shadow, []byte("stale-shadow"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(shadow, []byte("stale-shadow"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -33,7 +35,7 @@ func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
 		t.Fatalf("warnings = %q, want resolution and hash mismatch for shadow", joined)
 	}
 
-	if err := os.WriteFile(shadow, []byte("production-candidate"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(shadow, []byte("production-candidate"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	warnings = pfmPathWarnings(home, canonicalDir+string(os.PathListSeparator)+shadowDir)

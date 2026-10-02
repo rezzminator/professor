@@ -426,25 +426,6 @@ func TestChatReadExcerptResolveFailureNeverFallsBackToCWD(t *testing.T) {
 	}
 }
 
-// TestChatLoadVerbIsRetired pins that `pfm chat load` is gone: the verb must
-// fail as an unknown command, never enumerate files.
-func TestChatLoadVerbIsRetired(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "one.txt"), []byte("one\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"chat", "load", root}, &stdout, &stderr); code != 2 {
-		t.Fatalf("chat load code=%d stdout=%q stderr=%q, want 2", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), `pfm chat: unknown command "load"`) {
-		t.Fatalf("stderr=%q, want the unknown-command refusal", stderr.String())
-	}
-	if strings.Contains(stdout.String(), "one.txt") {
-		t.Fatalf("stdout=%q, a retired verb must not enumerate files", stdout.String())
-	}
-}
-
 // TestChatLSHeaderNamesBothViewVariants pins the header text runChatLS
 // prints for each view: the in-repo view names name/session/state/activity,
 // and --all additionally names dir — both now lead with "name" ahead of

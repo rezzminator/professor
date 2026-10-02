@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestHarvestAskRunsBothConfiguredAdapters is the issue-6 regression: the
@@ -32,7 +34,7 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 			model:    "claude-fixture-model",
 			effort:   "low",
 			homeEnv:  "CLAUDE_CONFIG_DIR",
-			wantArgs: "-p|--model|claude-fixture-model|--effort|low|--output-format|text|",
+			wantArgs: "-p|--model|claude-fixture-model|--effort|low|--output-format|json|",
 			configure: func(machine *pfmconfig.Config, binary, accountHome string) {
 				machine.Claude = pfmconfig.Claude{Binary: binary}
 				machine.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: accountHome}}
@@ -44,7 +46,7 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 			model:    "codex-fixture-model",
 			effort:   "high",
 			homeEnv:  "CODEX_HOME",
-			wantArgs: "exec|--model|codex-fixture-model|-c|model_reasoning_effort=\"high\"|--ephemeral|--skip-git-repo-check|--color|never|-|",
+			wantArgs: "exec|--model|codex-fixture-model|-c|model_reasoning_effort=\"high\"|--json|--ephemeral|--skip-git-repo-check|--color|never|",
 			configure: func(machine *pfmconfig.Config, binary, accountHome string) {
 				machine.Codex = pfmconfig.Codex{Binary: binary}
 				machine.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: accountHome}}
@@ -69,8 +71,8 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 				"printf '%s|' \"$@\" >> \"$PFM_ASK_CAPTURE\"\n" +
 				"printf '\\n' >> \"$PFM_ASK_CAPTURE\"\n" +
 				"cat >> \"$PFM_ASK_CAPTURE\"\n" +
-				"printf 'fixture answer\\n'\n"
-			if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+				askJSONReply(testCase.engine, "fixture answer")
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PFM_ASK_CAPTURE", capture)
@@ -115,6 +117,43 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 	}
 }
 
+func TestHarvestAskReportsJSONUsage(t *testing.T) {
+	for _, test := range []struct{ name, usage, want string }{
+		{"known", `,"usage":{"input_tokens":100,"output_tokens":20}`, "pfm harvest ask: usage input=100 cached_input=0 cache_creation=0 output=20\n"},
+		{"unknown", "", "pfm harvest ask: usage unknown: the engine reported no token counts\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			source := filepath.Join(home, "source.txt")
+			if err := os.WriteFile(source, []byte("fixture source\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(home, "claude-fixture")
+			script := `#!/bin/sh
+case " $* " in
+  *" --output-format json "*) printf '%s\n' '{"result":"fixture answer","is_error":false` + test.usage + `}' ;;
+  *) printf 'fixture answer\n' ;;
+esac
+`
+			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			machine := pfmconfig.Config{
+				Harvester: askHarvester(home), Claude: pfmconfig.Claude{Binary: binary},
+				Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, "account")}},
+				Ask:      pfmconfig.AskConfig{Engine: pfmengine.Claude},
+			}
+			var stdout, stderr bytes.Buffer
+			code := Harvest([]string{"ask", "--engine", "claude", "-p", "Q", source}, &stdout, &stderr,
+				pfmconfig.Runtime{Config: machine, Paths: paths.Values{Home: home}})
+			if code != 0 || stdout.String() != "fixture answer\n" ||
+				stderr.String() != test.want {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 	home := t.TempDir()
 	accountHome := filepath.Join(home, "codex-home")
@@ -135,8 +174,8 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 		"  printf '%s\\n' \"--- $prepared\" >> \"$PFM_ASK_FILES\"\n" +
 		"  cat \"$prepared\" >> \"$PFM_ASK_FILES\"\n" +
 		"done\n" +
-		"printf 'receipt-aware answer\\n'\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		askJSONReply(pfmengine.Codex, "receipt-aware answer")
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
@@ -246,8 +285,8 @@ func TestHarvestAskAcceptsFiftySourcesAndFlagsAfterPositionals(t *testing.T) {
 	}
 	promptCapture := filepath.Join(home, "prompt.txt")
 	binary := filepath.Join(home, "codex-fixture")
-	script := "#!/bin/sh\ncat > \"$PFM_ASK_PROMPT\"\nprintf 'boundary answer\\n'\n"
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	script := "#!/bin/sh\ncat > \"$PFM_ASK_PROMPT\"\n" + askJSONReply(pfmengine.Codex, "boundary answer")
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
@@ -286,7 +325,7 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(home, "codex-fixture")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		binary,
 		[]byte("#!/bin/sh\ncat >/dev/null\nprintf 'fixture failure\\n' >&2\nexit 7\n"),
 		0o700,
@@ -355,6 +394,15 @@ func TestHarvestAskReceiptDoesNotExposePrivateHarvestDetails(t *testing.T) {
 		strings.Contains(text, `"rungs"`) {
 		t.Fatalf("ask receipt leaked private harvest details: %s", text)
 	}
+}
+
+func askJSONReply(engine pfmengine.ID, answer string) string {
+	if engine == pfmengine.Claude {
+		return "printf '%s\\n' '{\"result\":" + strconv.Quote(answer) + "}'\n"
+	}
+	return "printf '%s\\n' '{\"type\":\"thread.started\"}' '{\"type\":\"turn.started\"}' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":" + strconv.Quote(
+		answer,
+	) + "}}' '{\"type\":\"turn.completed\"}'\n"
 }
 
 func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {

@@ -24,8 +24,6 @@ const chatKeysDefaultDelay = 120 * time.Millisecond
 // chatKeysSettle lets the pane finish redrawing before --capture reads it.
 const chatKeysSettle = 400 * time.Millisecond
 
-func validKey(key string) bool { return pfmchat.KeyValid(key) }
-
 func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
 	clk = defaultClock(clk)
 	flags := cli.NewFlagSet("chat keys", chatKeysUsage, stderr)

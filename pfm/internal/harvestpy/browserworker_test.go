@@ -424,6 +424,7 @@ func TestBrowserRouteGuardPythonSeam(t *testing.T) {
 	script := filepath.Join("assets", "browser", "browser_route_guard_test.py")
 	command := exec.Command(python, script)
 	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser route-guard seam failed: %v\n%s", err, output)
@@ -442,6 +443,7 @@ func TestBrowserRenderPythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_render_test.py"))
 	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser render seam failed: %v\n%s", err, output)
@@ -449,9 +451,8 @@ func TestBrowserRenderPythonSeam(t *testing.T) {
 }
 
 // TestBrowserConsentPythonSeam runs the consent seam's pure cases with NO
-// browser and NO patchright: only a privacy-preserving label is ever pressed,
-// and a scroll that did not move is unblocked once, then stopped "blocked" and
-// stamped incomplete — never "stable".
+// browser and NO patchright: a scroll that did not move is unblocked once,
+// then stopped "blocked" and stamped incomplete — never "stable".
 func TestBrowserConsentPythonSeam(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
@@ -459,10 +460,26 @@ func TestBrowserConsentPythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_consent_test.py"))
 	command.Dir = assetDirForTest()
-	command.Env = append(os.Environ(), "BROWSER_LIVE=0")
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=0"))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser consent seam failed: %v\n%s", err, output)
+	}
+}
+
+// TestBrowserRoutePythonSeam runs the hash-route seam's pure cases with NO
+// browser and NO patchright: the route waits for its view or reaches its cap.
+func TestBrowserRoutePythonSeam(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("named gap: python3 is unavailable on this host; the browser route seam test did not run")
+	}
+	command := exec.Command(python, filepath.Join("assets", "browser", "browser_route_test.py"))
+	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=0"))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("browser route seam failed: %v\n%s", err, output)
 	}
 }
 

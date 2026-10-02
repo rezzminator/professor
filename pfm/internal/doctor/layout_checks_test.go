@@ -164,6 +164,15 @@ func TestLayoutDoctorSessionLinesAndFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "missing — run pfm install"},
+		{"dangling", func(t *testing.T, path string) {
+			store, err := os.Readlink(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(store); err != nil {
+				t.Fatal(err)
+			}
+		}, "links to {store}, which is missing — run pfm install"},
 		{"real-dir", func(t *testing.T, path string) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
@@ -188,7 +197,12 @@ func TestLayoutDoctorSessionLinesAndFailures(t *testing.T) {
 			path := filepath.Join(runtime.Paths.Home, ".cc", "2", "projects")
 			testCase.change(t, path)
 			output, _, failures := layoutDoctorOutput(t, runtime)
-			if failures < 1 || !strings.Contains(output, "session-store: "+path+" "+testCase.want) {
+			want := strings.ReplaceAll(
+				testCase.want,
+				"{store}",
+				filepath.Join(runtime.Paths.Home, ".claude", "projects"),
+			)
+			if failures < 1 || !strings.Contains(output, "session-store: "+path+" "+want) {
 				t.Fatalf("failures=%d output=%q", failures, output)
 			}
 		})
@@ -307,6 +321,25 @@ func TestLayoutDoctorStateAndOtherRows(t *testing.T) {
 	if warnings < 2 || !strings.Contains(output, "state: legacy "+legacy+" still present — run pfm install") ||
 		!strings.Contains(output, "layout: staged-prompts remove "+staged) {
 		t.Fatalf("warnings=%d output=%q", warnings, output)
+	}
+}
+
+func TestLayoutDoctorHarvesterCacheWarnsNeverFails(t *testing.T) {
+	runtime := testjail.CleanHome(t)
+	home := runtime.Paths.Home
+	legacy := paths.LegacyHarvesterCacheDir(home)
+	target := paths.HarvesterCacheDir(home)
+	doctorLayoutWrite(t, filepath.Join(legacy, "h1"), "handle")
+	output, warnings, failures := layoutDoctorOutput(t, runtime)
+	want := "layout: harvester-cache move " + legacy + " -> " + target + " — run pfm install\n"
+	if warnings != 1 || failures != 0 || !strings.Contains(output, want) {
+		t.Fatalf("legacy only: warnings=%d failures=%d output=%q", warnings, failures, output)
+	}
+	doctorLayoutWrite(t, filepath.Join(target, "h2"), "handle")
+	output, warnings, failures = layoutDoctorOutput(t, runtime)
+	want = "layout: harvester-cache refuse " + target + " — both .cache and .harvester-cache exist"
+	if warnings != 1 || failures != 0 || !strings.Contains(output, want) {
+		t.Fatalf("both present: warnings=%d failures=%d output=%q", warnings, failures, output)
 	}
 }
 

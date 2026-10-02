@@ -12,7 +12,6 @@ chat_open	M	M.10-chat-tools-gap
 chat_read	M	M.09-chat-tools
 chat_resolve	M	M.09-chat-tools
 chat_save	M	M.10-chat-tools-gap
-chat_self_compact	M	M.09-chat-tools
 chat_status	M	M.09-chat-tools
 chat_unkill	M	M.10-chat-tools-gap
 chat_whoami	M	M.09-chat-tools
@@ -21,7 +20,6 @@ harvester_read	M	M.11-harvester-tools
 harvester_search_literature	M	M.11-harvester-tools
 harvester_search_web	M	M.11-harvester-tools
 pfm archive	O2	O2.02-archive
-pfm callmeter report	O2	O2.05c-callmeter
 pfm chat ask	E1	E1.15-ask
 pfm chat ask	E2	E2.07-inject-ask-watch
 pfm chat branch	E1	E1.22-handoff
@@ -57,7 +55,6 @@ pfm chat reload	E1	E1.08-reload-sock
 pfm chat reload	E1	E1.11-role-reload
 pfm chat resolve	F	F.15-addressing
 pfm chat save	F	F.15-addressing
-pfm chat self-compact	E1	E1.20-self-compact
 pfm chat status	E1	E1.12-status
 pfm chat status	F	F.18-e1-chat-survives-storm
 pfm chat stream	E1	E1.13-last-read-stream
@@ -85,13 +82,11 @@ pfm install	F	F.10-concurrent-new
 pfm install	O1	O1.01-install-idempotent
 pfm install	O1	O1.02a-session-store
 pfm internal agent-open	F	F.16-picker-plumbing
-pfm internal callmeter	O2	O2.05c-callmeter
 pfm internal chat-server	F	F.16-picker-plumbing
-pfm internal claude-launch	E1	E1.23-launcher
+pfm internal claude-launch	E1	E1.01-open-seat1
 pfm internal claude-version	O2	O2.05-internal-plumbing
 pfm internal clear-kill	O2	O2.05-internal-plumbing
 pfm internal codex-launch	E2	E2.10-codex-launch
-pfm internal compact-nudge	E1	E1.21-exit-close
 pfm internal epic-inject	O2	O2.05-internal-plumbing
 pfm internal exit-close	E1	E1.21-exit-close
 pfm internal exit-intercept	E1	E1.19-kill-unkill
@@ -121,6 +116,7 @@ pfm mcp serve	M	M.07-stdio-transports
 pfm mcp serve	M	M.08-mcp-cli
 pfm name-sync	F	F.13-name-sync
 pfm opencode	A	A.13-opencode-layer
+pfm price	O1	O1.14-price
 pfm reap	O2	O2.01-reap
 pfm statusline	E1	E1.02-statusline-theme
 pfm statusline	E2	E2.02-statusline

@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -125,6 +126,56 @@ func TestLimitsSamplerStaleRateLimitStatusPreservesRetryTime(t *testing.T) {
 			}
 			if len(warnings) != 1 || !strings.Contains(warnings[0], "15:04") {
 				t.Fatalf("rate-limit warnings=%v, want retry time preserved", warnings)
+			}
+		})
+	}
+}
+
+func TestHTTPStatusClassifiersMatchAStatusCodeNotADigitRun(t *testing.T) {
+	const missingCredentials = "account 2 limits unavailable: read usage credentials: no /tmp/Sample1451742939/001/403/.cc/2/.credentials.json"
+	for _, test := range []struct {
+		name       string
+		message    string
+		auth       bool
+		wantStatus string
+		wantOK     bool
+	}{
+		{name: "429 in path", message: missingCredentials},
+		{name: "429 in port", message: "dial tcp 127.0.0.1:44297: connect: connection refused"},
+		{name: "429 in longer status", message: "status 4290"},
+		{name: "current backoff", message: "rate-limited — retry 15:04 (429 Too Many Requests)", wantStatus: "rate-limited — retry 15:04", wantOK: true},
+		{name: "older backoff", message: "limits unavailable: 429 Too Many Requests — retry at 15:04", wantStatus: "rate-limited — retry 15:04", wantOK: true},
+		{name: "returned 429", message: "usage endpoint returned 429 Too Many Requests", wantStatus: "provider rate-limited", wantOK: true},
+		{name: "http 429", message: "fetch Codex usage failed: HTTP 429", wantStatus: "provider rate-limited", wantOK: true},
+		{name: "phrase only", message: "too many requests", wantStatus: "provider rate-limited", wantOK: true},
+		{name: "returned 401", message: "usage endpoint returned 401", auth: true, wantOK: true},
+		{name: "status 403", message: "status 403", auth: true},
+		{name: "status 403 dead token", message: "status 403: OAuth token has expired", auth: true, wantOK: true},
+		{name: "403 in path", message: missingCredentials, auth: true},
+		{name: "403 in longer status", message: "status 4031", auth: true},
+		{name: "401 unauthorized", message: "401 Unauthorized", auth: true, wantOK: true},
+		{name: "403 forbidden", message: "403 Forbidden", auth: true},
+		{name: "later valid 429", message: "status 4290, then status 429", wantStatus: "provider rate-limited", wantOK: true},
+		{name: "later valid 401", message: "status 4011, then returned 401", auth: true, wantOK: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := errors.New(test.message)
+			if test.auth {
+				if got := isCredentialRejection(err); got != test.wantOK {
+					t.Errorf("isCredentialRejection(%q) = %t, want %t", test.message, got, test.wantOK)
+				}
+				return
+			}
+			status, ok := rateLimitedStatus(err)
+			if status != test.wantStatus || ok != test.wantOK {
+				t.Errorf(
+					"rateLimitedStatus(%q) = (%q, %t), want (%q, %t)",
+					test.message,
+					status,
+					ok,
+					test.wantStatus,
+					test.wantOK,
+				)
 			}
 		})
 	}

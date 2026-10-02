@@ -2,19 +2,23 @@ package spawn
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeTmuxBinary plays tmux: exits 0 and prints nothing.
 func fakeTmuxBinary(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -35,7 +39,45 @@ done
 echo "server gone" >&2
 exit 1
 `
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return binary
+}
+
+func fakeTmuxBinaryCreateFails(t *testing.T) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "tmux")
+	if err := testjail.WriteExecutable(
+		binary,
+		[]byte("#!/bin/sh\necho create failed >&2\nexit 1\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	return binary
+}
+
+func fakeTmuxBinaryBlocks(t *testing.T, block, marker string) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "tmux")
+	script := fmt.Sprintf(`#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "new-session" ]; then
+    if [ %q = "new-session" ]; then
+      : > %q
+      exec sleep 30
+    fi
+    exit 0
+  fi
+done
+if [ %q = "configure" ]; then
+  : > %q
+  exec sleep 30
+fi
+exit 0
+`, block, marker, block, marker)
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -112,5 +154,84 @@ func TestNewSessionConfigureErrorOmitsTheCommandLine(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "claude argc=4") {
 		t.Fatalf("error = %v, want it to name the argv shape (claude argc=4)", err)
+	}
+	if !strings.Contains(err.Error(), "the server died before it could be configured") {
+		t.Fatalf("error = %v, want the live-context server death message", err)
+	}
+}
+
+func TestNewSessionCreateFailurePreservesOutput(t *testing.T) {
+	dir := t.TempDir()
+	tmux := TmuxSpawner{Binary: fakeTmuxBinaryCreateFails(t), TmuxDir: dir}
+	err := tmux.NewSession(context.Background(), SessionSpec{
+		Socket:  "create-fails",
+		Session: "create-fails",
+		Window:  "w",
+		CWD:     dir,
+		Run:     "echo ready",
+	})
+	if err == nil || err.Error() != "create chat server: exit status 1: create failed\n" {
+		t.Fatalf("NewSession error = %v, want original create error with output", err)
+	}
+}
+
+func newSessionCancelledWhileBlocked(t *testing.T, block string) error {
+	t.Helper()
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "blocking")
+	tmux := TmuxSpawner{Binary: fakeTmuxBinaryBlocks(t, block, marker), TmuxDir: dir}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		result <- tmux.NewSession(ctx, SessionSpec{
+			Socket:  "cancelled",
+			Session: "cancelled",
+			Window:  "w",
+			CWD:     dir,
+			Run:     "echo ready",
+			Width:   80,
+			Height:  24,
+		})
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat blocking marker: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("tmux command did not reach blocking arm")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("NewSession did not return after cancellation")
+		return nil
+	}
+}
+
+func TestNewSessionReturnsCancellationDuringConfigure(t *testing.T) {
+	err := newSessionCancelledWhileBlocked(t, "configure")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("NewSession error = %v, want context cancellation", err)
+	}
+	if !strings.HasPrefix(err.Error(), "configure chat server:") || strings.Contains(err.Error(), "the server died") {
+		t.Fatalf("NewSession error = %v, want configure cancellation without server death", err)
+	}
+}
+
+func TestNewSessionReturnsCancellationDuringCreate(t *testing.T) {
+	err := newSessionCancelledWhileBlocked(t, "new-session")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("NewSession error = %v, want context cancellation", err)
+	}
+	if !strings.HasPrefix(err.Error(), "create chat server:") {
+		t.Fatalf("NewSession error = %v, want create cancellation", err)
 	}
 }

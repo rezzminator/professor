@@ -14,6 +14,7 @@ import (
 // unwraps it, and every ip.IsXxx call privateIP makes does the same
 // internally; kept here as a regression guard, not a new fix).
 func TestPrivateIPJudgesNAT64And6to4ByEmbeddedIPv4(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		ip   string
@@ -43,6 +44,7 @@ func TestPrivateIPJudgesNAT64And6to4ByEmbeddedIPv4(t *testing.T) {
 }
 
 func TestEmbeddedIPv4ReturnsNilForARealIPv4Address(t *testing.T) {
+	t.Parallel()
 	if got := embeddedIPv4(net.ParseIP("203.0.113.10")); got != nil {
 		t.Fatalf("embeddedIPv4(real IPv4) = %v, want nil", got)
 	}

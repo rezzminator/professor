@@ -136,6 +136,7 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 }
 
 func TestCallerScopedSelfIsolatedAcrossRequests(t *testing.T) {
+	t.Parallel()
 	rows := []compose.Row{
 		{Kind: compose.LiveCodex, ID: "thread-a", Name: "a", Socket: "cx-a", SessionName: "renamed-a", PaneID: "%1"},
 		{Kind: compose.LiveCodex, ID: "thread-b", Name: "b", Socket: "cx-b", SessionName: "renamed-b", PaneID: "%2"},
@@ -166,6 +167,7 @@ func TestCallerScopedSelfIsolatedAcrossRequests(t *testing.T) {
 }
 
 func TestCallerScopedSelfReachesMutationDispatchWithoutRedirectingExplicitTargets(t *testing.T) {
+	t.Parallel()
 	rows := []compose.Row{
 		{
 			Kind:        compose.LiveClaude,
@@ -360,6 +362,7 @@ func TestReviewScopedSelfKeepsUnindexedTranscript(t *testing.T) {
 }
 
 func TestChatNewDefaultsEngineFromValidatedCaller(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		kind   compose.Kind
@@ -406,6 +409,7 @@ func TestChatNewDefaultsEngineFromValidatedCaller(t *testing.T) {
 }
 
 func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
+	t.Parallel()
 	row := compose.Row{
 		Kind: compose.LiveClaude, ID: "caller-id", CWD: "/caller",
 		SessionName: "caller-seat", Socket: "caller-socket", PaneID: "%1",
@@ -496,6 +500,7 @@ func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
 }
 
 func TestChatNewRefusesPresentInvalidCallerMetadata(t *testing.T) {
+	t.Parallel()
 	var calls int
 	service := newService("test", &backend{
 		chat: &fakeChatVerbs{listed: chat.ListResult{}},
@@ -595,6 +600,7 @@ func TestResolvedSelfPathFallbacksAndIndexedPrecedence(t *testing.T) {
 // end over the protocol: the engine name parses to its ID, the model rides
 // along, and the verb's summary comes back in the structured output.
 func TestChatStatusSummaryReachesTheVerbAndReturnsField(t *testing.T) {
+	t.Parallel()
 	verbs := &fakeChatVerbs{status: headless.Status{
 		Name: "seat", State: headless.StateIdle, IdleSeconds: 2, Engine: pfmengine.Claude,
 		Summary: "done", SummaryCached: true,
@@ -614,6 +620,7 @@ func TestChatStatusSummaryReachesTheVerbAndReturnsField(t *testing.T) {
 
 // TestChatStatusAskReachesTheVerbAndReturnsField is the same pin for ask=true.
 func TestChatStatusAskReachesTheVerbAndReturnsField(t *testing.T) {
+	t.Parallel()
 	const answer = "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): steady state"
 	verbs := &fakeChatVerbs{status: headless.Status{
 		Name: "seat", State: headless.StateIdle, IdleSeconds: 2, Engine: pfmengine.Claude, Ask: answer,
@@ -635,6 +642,7 @@ func TestChatStatusAskReachesTheVerbAndReturnsField(t *testing.T) {
 // the verb's own error reaches the MCP caller with its kind intact — no rc,
 // no decode noise — so a caller can still tell a target failure apart.
 func TestChatLastAndStatusReportTheVerbsFailureWithItsKind(t *testing.T) {
+	t.Parallel()
 	verbs := &fakeChatVerbs{err: &chat.TargetError{
 		Name: "duplicate", Err: errors.New(`"duplicate" matches 2 chats`),
 	}}
@@ -654,6 +662,7 @@ func TestChatLastAndStatusReportTheVerbsFailureWithItsKind(t *testing.T) {
 // answer: a server built without its verb layer says so, and an engine name
 // the registry does not know is refused before any verb runs.
 func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
+	t.Parallel()
 	unwired := newService("test", &backend{})
 	if _, _, err := unwired.chatLast(context.Background(), nil, LastInput{Target: "seat"}); err == nil ||
 		!strings.Contains(err.Error(), "chat_last verb is not configured") {
@@ -738,6 +747,7 @@ func TestChatOpenResolvesATargetByName(t *testing.T) {
 // repository-scoped listing reports that repository as its scope, and only
 // an unscoped one reports every repository.
 func TestListProjectedScopeNamesTheRepoItWasGiven(t *testing.T) {
+	t.Parallel()
 	current := &backend{chat: &fakeChatVerbs{}}
 	for repo, want := range map[string]string{"/work/one": "/work/one", "": "all repos"} {
 		output, err := current.listProjected(context.Background(), LSInput{}, true, repo)

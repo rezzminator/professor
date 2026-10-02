@@ -12,6 +12,7 @@ import (
 // OpenAlex answers; the candidates stay, Semantic Scholar is named failed
 // with its status, and a source that answered with nothing is named answered.
 func TestFindWorksNamesAFailedSource(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host {
 		case "api.semanticscholar.org":
@@ -47,6 +48,7 @@ func TestFindWorksNamesAFailedSource(t *testing.T) {
 // TestFindWorksEverySourceFailedIsAnError: no source answered, so the answer
 // is an error naming each source, never an empty list.
 func TestFindWorksEverySourceFailedIsAnError(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusServiceUnavailable, "application/json", `{}`), nil
 	})}
@@ -67,6 +69,7 @@ func TestFindWorksEverySourceFailedIsAnError(t *testing.T) {
 // and names Semantic Scholar timed_out with the time it was given — a source
 // still running is never silently dropped.
 func TestFindWorksAnswersWithinItsDeadline(t *testing.T) {
+	t.Parallel()
 	const deadline = 300 * time.Millisecond
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host {
@@ -145,15 +148,17 @@ func slowGutendexClient(slowHost string) *http.Client {
 // grace, not at the 20 s deadline, and names Gutendex timed_out with the
 // early-finish text, apart from the deadline's.
 func TestFindWorksFinishesEarlyOnceTheCoreAnswered(t *testing.T) {
+	t.Parallel()
+	const grace = 200 * time.Millisecond
 	start := time.Now()
-	found, err := (&Resolver{Client: slowGutendexClient("")}).FindWorksReportFor(
-		context.Background(), "Deep learning", 1, "")
+	found, err := (&Resolver{Client: slowGutendexClient("")}).searchLiteratureWithin(
+		context.Background(), "Deep learning", 1, "", searchLiteratureTimeout, grace)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed > searchLiteratureGrace+500*time.Millisecond {
-		t.Fatalf("search_literature took %s, want the core's time plus the %s grace", elapsed, searchLiteratureGrace)
+	if elapsed > grace+500*time.Millisecond {
+		t.Fatalf("search_literature took %s, want the core's time plus the %s grace", elapsed, grace)
 	}
 	got := sourceNamed(found, "Gutendex")
 	if got.Status != SourceTimedOut || got.Error != searchLiteratureNotWaitedText {
@@ -166,7 +171,8 @@ func TestFindWorksFinishesEarlyOnceTheCoreAnswered(t *testing.T) {
 // core source, or an "any" call short of limit candidates, holds the call to
 // the deadline.
 func TestFindWorksEarlyFinishFollowsTheKind(t *testing.T) {
-	const deadline, grace = 1500 * time.Millisecond, 200 * time.Millisecond
+	t.Parallel()
+	const deadline, grace = 1000 * time.Millisecond, 200 * time.Millisecond
 	for _, tc := range []struct {
 		name, kind, slowHost, slowSource, wantError string
 		limit                                       int
@@ -178,6 +184,7 @@ func TestFindWorksEarlyFinishFollowsTheKind(t *testing.T) {
 		{"any, fewer than limit", "", "", "Gutendex", "deadline", 5, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			start := time.Now()
 			found, err := (&Resolver{Client: slowGutendexClient(tc.slowHost)}).searchLiteratureWithin(
 				context.Background(), "Deep learning", tc.limit, tc.kind, deadline, grace)

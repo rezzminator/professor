@@ -45,6 +45,7 @@ Every command, agent, and rule sorts into one of three tiers:
 - **/flights:audit** — the skeptic over a flight, running or landed: every claim checked against its artifact — `run.md`, git, the executor transcripts, the checks' own output — and an artifact it cannot read is a finding, never an absence.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
+- **/ultimate** — one piece of work made with the running model's own imagination at full stretch: past its first idea to one that surprises it, the most capable medium, built by its own hand around its boldest element, and raised on the delivered output until a whole look finds only polish.
 - **/quality:doc** / **/quality:prompt** / **/quality:description** / **/quality:claude-md** / **/quality:md-forlint** — the quality gates: reference-doc shape, prompt prose, the `description:` routing field, the orientation file's (CLAUDE.md, AGENTS.md) spine and admission, and markdown lint/format mechanics.
 - **/quality:llm-codebase** — source-tree layout designed for agent maintainers: one directory per unit of change, a fixed file anatomy, grep-true names, façades for the cross-cutting calls, and the brief anchors a build hand reads; greenfield designs a tree, brownfield measures the existing one and writes the migration.
 - **/quality:integration-suite** — a project's whole test suite designed, every tier's validity law and the live tier's lanes over one shared state: landscape derived from code, a research pass over neighbour projects and literature, crossings asserted from two sides, a machine-derived map gate, and the harness contract.
@@ -52,9 +53,11 @@ Every command, agent, and rule sorts into one of three tiers:
 
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones):**
 
-- **codeprobe** — in-tree skill under `templates/global/skills/codeprobe/`: the extraction and probe script `collector` and `mapper` run.
+- **codeprobe** — in-tree skill under `templates/global/skills/codeprobe/`: the extraction script `collector` runs.
+- **transcript** — in-tree skill under `templates/global/skills/transcript/`: digests one Claude or Codex session into one line per event; the revising `flights-speccer` and `agent-optimizer` read runs through it.
+- **close-out** — in-tree skill under `templates/global/skills/close-out/`: the user's `/close-out` sweeps the whole chat for open threads, unfinished or unverified work, uncommitted changes and running agents, finishes what needs no ruling, asks for the rest, and ends with one closing report.
 - **ghostwriter** — captures a writer's mechanical fingerprint and generates in that voice.
-- **vision-factory** — forge, validate, and stress-test a startup vision.
+- **god-speed** — say "god speed" and the agent finishes the request unattended, reporting every decision it took at the end.
 
 **Bundled skills (ship with the blueprint):**
 
@@ -68,7 +71,7 @@ Every command, agent, and rule sorts into one of three tiers:
 
 ### The plumbing (Tier C — invisible)
 
-- `gitter` — root agent; `tracer` (prose answers for a spec writer), `mapper` and `collector` (the two over the `codeprobe` skill's script), `flights-speccer` (writes a flight's task files), `flights-orchestrator` (runs them), `flights-mechanical-executor` (one task file each), `flights-lander` (gates the landing, one per project), `general-orchestrator` (cuts a batch of clear tasks and runs them), `general-mechanical-executor` (one task each), `reviewer`, `rr`, `sub-rr` (the digger the `rr` leads spawn), `tracer-rr` (the repository digger only `super-rr` and `heavy-rr` spawn: clones a public repository and answers from its code), `collector-rr` (fetches named web sources verbatim, no diggers), and `agent-optimizer` (audits one agent's run against its prompt and design) are machine-global originals under `templates/global/agents/`, linked by `pfm install`; `variants.json` beside them declares agents rendered from an original with overridden frontmatter and, under `replace`, body text swapped (`flights-smart-executor` = `flights-mechanical-executor` on opus, `general-smart-executor` = `general-mechanical-executor` on opus, `super-rr` = `rr` at medium effort with 6 diggers a round, 5 rounds and the repository lane, `heavy-rr` = `rr` at medium effort with 8 diggers a round, no round ceiling, the repository lane and `Read` added to its tools), which `pfm install` writes to its own generated directory and links the same way. Role-defined, not character-defined.
+- `gitter` — root agent; `tracer` (prose answers for a spec writer, on sonnet at high effort), `collector` (exact code text, over the `codeprobe` skill's script), `flights-speccer` (writes a flight's task files), `flights-orchestrator` (runs them), `flights-mechanical-executor` (one task file each), `flights-lander` (gates the landing, one per project), `general-orchestrator` (cuts a batch of problems and runs one `general-foreman` per problem, or a `general-executor` per change its caller already decided), `general-foreman` (works one problem out live: digs to the cause, decides, builds it or briefs `general-executor`, proves it), `general-executor` (the family's hand: one decided change each, for a foreman or the orchestrator), `reviewer`, `rr`, `sub-rr` (the digger the `rr` leads spawn), `tracer-rr` (the repository digger only `super-rr` and `heavy-rr` spawn: clones a public repository and answers from its code), and `agent-optimizer` (audits one agent's run against its prompt and design) are machine-global originals under `templates/global/agents/`, linked by `pfm install`; `variants.json` beside them declares agents rendered from an original with overridden frontmatter and, under `replace`, body text swapped (`flights-precise-executor` = `flights-mechanical-executor` on Sonnet 5.5 at xhigh effort, `flights-smart-executor` = `flights-mechanical-executor` on opus at high effort, `tracer-pro` = `tracer` at xhigh effort, `tracer-pro-max` = `tracer` on opus at medium effort, `super-rr` = `rr` at medium effort with 6 diggers a round, 5 rounds and the repository lane, `heavy-rr` = `rr` at medium effort with 8 diggers a round, no round ceiling, the repository lane and `Read` added to its tools), which `pfm install` writes to its own generated directory and links the same way. Role-defined, not character-defined.
 - `worktree.sh`, `alloc-ports.sh`, `dev.sh` — scripts.
 - `pfm statusline` — native status bar with model, fleet counts, context, git, cost, spend, and rate limits. Wired in the host settings by `pfm install`.
 - `.rumdl.toml` — the markdown policy: one config whose `[per-file-ignores]` table decides which rules each path category obeys (prompt, doc, public; generated and record paths excluded). Read by `/quality:md-forlint` and by the `format-md.sh` hook.
@@ -184,7 +187,7 @@ Work takes the lowest rung that fits (the fleet prompt's § Orchestration): dire
                          artifacts, never a report
 ```
 
-The executor is `flights-mechanical-executor` or `flights-smart-executor`, picked by the task's rating, or a seat on another engine; it writes the code and its covering tests in the pattern of the project's testing manual, and one `flights-lander` per project closes the flight — checks, one review of the whole diff, adversarial tests, its own fixes. Specifying and running are two decisions: approving an index never starts a run, and the user picks the container.
+The executor is `flights-mechanical-executor`, `flights-precise-executor` or `flights-smart-executor`, picked by the task's rating, or a seat on another engine; it writes the code and its covering tests in the pattern of the project's testing manual, and one `flights-lander` per project closes the flight — checks, one review of the whole diff, adversarial tests, its own fixes. Specifying and running are two decisions: approving an index never starts a run, and the user picks the container.
 
 Meta path: `/pcm {request}` → edits the agent definitions at the source.
 
@@ -203,7 +206,7 @@ your-project/
 │   └── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 ├── .claude/
 │   ├── agents/                        ← root agents (gitter; tracer and the whole flights cast are machine-global)
-│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /context-meter, /quality:*, /tokens, /h:gh — `pfm install` installs them host-level)
+│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /context-meter, /quality:*, /tokens, /h:gh, /ultimate — `pfm install` installs them host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, format-md.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
 │   └── settings.json                  ← permissions, project hooks (pfm-guard, guard-stamp, format-md, codex-sync)

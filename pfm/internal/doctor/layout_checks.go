@@ -80,7 +80,16 @@ func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment pat
 			}
 			switch finding.Verdict {
 			case installer.VerdictCreate:
-				fmt.Fprintf(stdout, "session-store: %s missing — run pfm install\n", finding.Path)
+				if finding.Source != "" {
+					fmt.Fprintf(
+						stdout,
+						"session-store: %s links to %s, which is missing — run pfm install\n",
+						finding.Path,
+						finding.Source,
+					)
+				} else {
+					fmt.Fprintf(stdout, "session-store: %s missing — run pfm install\n", finding.Path)
+				}
 			case installer.VerdictMerge:
 				fmt.Fprintf(
 					stdout,
@@ -153,6 +162,21 @@ func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment pat
 					finding.Detail,
 				)
 				failures++
+			}
+		case "harvester-cache":
+			switch finding.Verdict {
+			case installer.VerdictOK:
+			case installer.VerdictMove:
+				fmt.Fprintf(
+					stdout,
+					"layout: harvester-cache move %s -> %s — run pfm install\n",
+					finding.Source,
+					finding.Path,
+				)
+				warnings++
+			default:
+				printOtherLayoutFinding(stdout, finding)
+				warnings++
 			}
 		case "state-db", "cache-db":
 			if finding.Source != "" {

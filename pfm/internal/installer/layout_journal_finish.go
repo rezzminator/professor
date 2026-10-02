@@ -47,11 +47,11 @@ func (journal *Journal) MigrationBackups() ([]string, error) {
 	if err := journal.Interrupted(); err != nil {
 		return nil, err
 	}
-	return journal.migrationBackups()
+	return journal.listMigrationBackups()
 }
 
-// migrationBackups is MigrationBackups past its interrupt check.
-func (journal *Journal) migrationBackups() ([]string, error) {
+// listMigrationBackups is MigrationBackups past its interrupt check.
+func (journal *Journal) listMigrationBackups() ([]string, error) {
 	backups := []string{}
 	for _, database := range []string{journal.env.StateDB, journal.env.CacheDB} {
 		matches, err := filepath.Glob(database + ".bak-before-v*")
@@ -72,7 +72,7 @@ func (journal *Journal) JournalMigrationBackups(before []string) error {
 	if journal == nil || journal.dryRun || journal.dir == "" {
 		return nil
 	}
-	after, err := journal.migrationBackups()
+	after, err := journal.listMigrationBackups()
 	if err != nil {
 		return err
 	}

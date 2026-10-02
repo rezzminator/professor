@@ -8,14 +8,54 @@
 #
 #   bash infra/fence/lanes/tests/host-rehearsal_test.sh
 #   HOST_REHEARSAL_SUT=/tmp/mutated.sh bash …/host-rehearsal_test.sh   # red-first
-# BROKEN STATE: a harness that cannot start exits 2 (scripts/shtest.sh); every
-# failed case prints FAIL with the run's output and the suite exits 1.
+#   HOST_REHEARSAL_TEST_GROUP=1..4 bash …/host-rehearsal_test.sh # one group's jail
+# Groups are contiguous: refusals and happy path; early step failures; late
+# step failures; no-legacy, stress, cleanup and compare. The parent prints their
+# PASS lines in case order. Exit 0 is green, 1 is a red or dead group, and 2
+# means a child cannot run. Each child has its own fixtures, stubs and jail.
 set -uo pipefail
 
 SUT="${HOST_REHEARSAL_SUT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)/host-rehearsal.sh}"
 export SHTEST_TAG=host-rehearsal-test
 # shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
+if [ -z "${HOST_REHEARSAL_TEST_GROUP:-}" ]; then
+  pids=()
+  for n in 1 2 3 4; do
+    HOST_REHEARSAL_TEST_GROUP=$n HOST_REHEARSAL_SUT="$SUT" \
+      bash "${BASH_SOURCE[0]}" >"$T/group-$n.out" 2>"$T/group-$n.err" &
+    pids+=("$!")
+  done
+  for n in 1 2 3 4; do
+    wait "${pids[n-1]}"; rc=$?
+    if [ "$rc" -eq 2 ] && grep -q 'CANNOT RUN' "$T/group-$n.err"; then
+      for ((j=n+1; j<=4; j++)); do wait "${pids[j-1]}" || :; done
+      cat "$T/group-$n.err" >&2
+      exit 2
+    fi
+    mapfile -t lines <"$T/group-$n.out"
+    last=$((${#lines[@]} - 1))
+    if [ "$last" -lt 1 ] || [ -n "${lines[last-1]}" ] ||
+       ! [[ ${lines[last]} =~ ^([0-9]+)[[:space:]]passed,[[:space:]]([0-9]+)[[:space:]]failed$ ]]; then
+      bad "group $n: ended without its verdict (exit $rc)" \
+        "$(cat "$T/group-$n.out")" "$(cat "$T/group-$n.err")"
+      continue
+    fi
+    passed=${BASH_REMATCH[1]} failed=${BASH_REMATCH[2]}
+    for ((i=0; i<last-1; i++)); do printf '%s\n' "${lines[i]}"; done
+    cat "$T/group-$n.err" >&2
+    PASS=$((PASS + passed)); FAIL=$((FAIL + failed))
+    if { [ "$rc" -ne 0 ] && [ "$failed" -eq 0 ]; } ||
+       { [ "$rc" -eq 0 ] && [ "$failed" -ne 0 ]; }; then
+      bad "group $n: verdict contradicts exit $rc"
+    fi
+  done
+  shtest_end
+  exit $?
+fi
+case $HOST_REHEARSAL_TEST_GROUP in 1|2|3|4) ;; *)
+  echo "host-rehearsal_test: CANNOT RUN — unknown group $HOST_REHEARSAL_TEST_GROUP" >&2; exit 2 ;;
+esac
 [ -f "$SUT" ] || { echo "host-rehearsal_test: no host-rehearsal.sh at $SUT" >&2; exit 2; }
 # host-rehearsal.sh needs sqlite3, rsync and sha256sum (the pfm-dev image
 # carries all three). A test that cannot run is never a pass: exit 2, named.
@@ -94,6 +134,15 @@ else
 fi
 [ -n "$HEAD_SHA" ] || { echo "host-rehearsal_test: CANNOT RUN — no HEAD of the SUT's repository" >&2; exit 2; }
 
+# The SUT still supplies its real git dir for the VCS stamp. Only the candidate
+# file copy uses this small tracked tree; the make stub needs its Makefile.
+SOURCE_FIXTURE="$T/source-tree"
+mkdir -p "$SOURCE_FIXTURE/pfm"
+printf '# host-rehearsal fixture\n' > "$SOURCE_FIXTURE/pfm/Makefile"
+git -C "$SOURCE_FIXTURE" init -q && git -C "$SOURCE_FIXTURE" add pfm/Makefile ||
+  { echo "host-rehearsal_test: CANNOT RUN — could not stage the candidate fixture" >&2; exit 2; }
+export PFM_REHEARSAL_SOURCE_TREE="$SOURCE_FIXTURE"
+
 # ---- stubs ------------------------------------------------------------------
 # pfm, per 0-install-journal B and 0-update-window; $T/mode picks the defect a case plants.
 # apply stops the fleet (releasing a live holder), writes an absent managed
@@ -102,7 +151,7 @@ fi
 {
   printf '#!/usr/bin/env bash\nT=%q\n' "$T"
   cat <<'STUB'
-mode=$(cat "$T/mode")
+IFS= read -r mode <"$T/mode"
 J="$HOME/.local/state/pfm/migrations/20260101T000000Z"
 UNITS="pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer"
 DROPIN=/etc/claude-code/managed-settings.d/pfm.json
@@ -180,7 +229,7 @@ chmod +x "$T/pfm-stub"
   printf '#!/usr/bin/env bash\nT=%q\n' "$T"
   cat <<'STUB'
 printf '%s\n' "$*" >>"$T/make.log"
-mode=$(cat "$T/mode")
+IFS= read -r mode <"$T/mode"
 [ "$1" = -C ] && [ -f "$2/Makefile" ] || { echo "make stub: bad call $* (no candidate Makefile)" >&2; exit 2; }
 case $3 in
 host-install)
@@ -204,7 +253,8 @@ STUB
   cat <<'STUB'
 [ "$1 $2" = "version -m" ] || { echo "go stub: unexpected $*" >&2; exit 9; }
 echo "$3: go1.99"
-[ "$(cat "$T/mode")" = no-vcs ] || printf '\tbuild\tvcs.revision=%s\n' "$HEAD_SHA"
+IFS= read -r mode <"$T/mode"
+[ "$mode" = no-vcs ] || printf '\tbuild\tvcs.revision=%s\n' "$HEAD_SHA"
 STUB
 } >"$BIN/go"
 
@@ -236,6 +286,7 @@ run)
     *) break ;;
     esac
   done
+  awk -F'\t' '{ print length($1) "\t" $0 }' "$T/docker.rewrite" | sort -t "$(printf '\t')" -k1,1nr | cut -f2- >"$T/docker.sorted"
   echo fixture-container; exit 0 ;;
 exec)
   [ "$3 $4" = "bash -lc" ] || { echo "docker stub: exec wants bash -lc, got $*" >&2; exit 2; }
@@ -243,8 +294,7 @@ exec)
   while IFS= read -r e; do envs+=("$e"); done <"$T/docker.env"
   # Longest target first, each to a placeholder, then each placeholder to its
   # source: a target prefixing another (/rehearsal, /rehearsal/proc) rewrites once.
-  while IFS=$'\t' read -r dst src; do dsts+=("$dst"); srcs+=("$src"); done < <(
-    awk -F'\t' '{ print length($1) "\t" $0 }' "$T/docker.rewrite" | sort -t "$(printf '\t')" -k1,1nr | cut -f2-)
+  while IFS=$'\t' read -r dst src; do dsts+=("$dst"); srcs+=("$src"); done <"$T/docker.sorted"
   for i in "${!dsts[@]}"; do
     cmd=${cmd//"${dsts[i]}"/"@@mount$i@@"}
     for j in "${!envs[@]}"; do envs[j]=${envs[j]//"${dsts[i]}"/"@@mount$i@@"}; done
@@ -276,7 +326,9 @@ rehearse() {
   rm -rf "$FH"
 }
 verdict() { head -1 "$1/rehearsal/verdict.txt" 2>/dev/null; }
+want_steps=$'step copy ok\nstep build ok\nstep hash-before ok\nstep preview ok\nstep apply ok\nstep doctor ok\nstep apply-again ok\nstep manifest ok\nstep rollback ok\nstep hash-after ok\nstep pair ok'
 
+if [ "$HOST_REHEARSAL_TEST_GROUP" = 1 ]; then
 # ---- usage ------------------------------------------------------------------
 OUT="$(PATH="$HOSTPATH" bash "$SUT" 2>&1 >/dev/null)"; RC=$?
 OUT3="$(PATH="$HOSTPATH" bash "$SUT" a b c 2>&1 >/dev/null)"; RC3=$?
@@ -338,14 +390,14 @@ marker_case outside "echo /opt/elsewhere >\"\$b/home/.local/share/pfm/install/so
 S="$T/s-happy"
 rehearse happy "$S"
 R="$S/rehearsal"
-want_steps=$'step copy ok\nstep build ok\nstep hash-before ok\nstep preview ok\nstep apply ok\nstep doctor ok\nstep apply-again ok\nstep manifest ok\nstep rollback ok\nstep hash-after ok\nstep pair ok'
 plan_want=$'pfm install: plan\n  change  layout .cc/2/projects -> .claude/projects'
 if [ "$RC" -eq 0 ] && [ "$(verdict "$S")" = "REHEARSAL PASS" ] && [ "$(tail -n +2 "$R/verdict.txt")" = "$want_steps" ] &&
   [ "$(cat "$R/plan.txt")" = "$plan_want" ] && [ "$(tail -1 <<<"$OUT")" = "$R/verdict.txt" ] &&
   [ -f "$S/home/.professor/pfm/Makefile" ] && [ -s "$R/hash-before.txt" ] && cmp -s "$R/hash-before.txt" "$R/hash-after.txt"; then
   ok "happy path: REHEARSAL PASS, one ok line per step, plan.txt = preview stdout, exit 0"
 else bad "happy path" "rc=$RC" "$(cat "$R/verdict.txt" 2>/dev/null)" "$OUT"; fi
-if [ -f "$S/home/.professor/pfm.config.json" ] && [ -f "$S/home/.professor/harvester.config.json" ] && [ -f "$S/home/.professor/pfm/Makefile" ]; then
+if [ -f "$S/home/.professor/pfm.config.json" ] && [ -f "$S/home/.professor/harvester.config.json" ] &&
+   cmp -s "$SOURCE_FIXTURE/pfm/Makefile" "$S/home/.professor/pfm/Makefile"; then
   ok "clone configs: pfm.config.json and harvester.config.json from the backup beside the tracked tree"
 else bad "clone configs" "$(ls -A "$S/home/.professor" 2>/dev/null)"; fi
 pair_want="\$ make -C $FH/.professor/pfm rollback
@@ -394,6 +446,7 @@ if [ "$SRC1" -eq 0 ] && [ "$SRC2" -eq 0 ] && [ "$wrote" = yes ] && [ ! -e "$SE/m
   grep -qxF -- "rm -f /etc/claude-code/managed-settings.d/pfm.json" "$FS/sudo.log"; then
   ok "stubs: sudo writes and removes /etc/claude-code on its read-write mount, argv logged"
 else bad "sudo stub" "rc=$SRC1/$SRC2 wrote=$wrote" "$(cat "$FS/sudo.log" 2>/dev/null)"; fi
+fi
 
 # ---- step failures ----------------------------------------------------------
 fail_case() { # MODE EXPECTED-VERDICT-PREFIX ABSENT-LOG LABEL
@@ -402,6 +455,7 @@ fail_case() { # MODE EXPECTED-VERDICT-PREFIX ABSENT-LOG LABEL
   if [ "$RC" -eq 1 ] && [[ "$(verdict "$s")" == "$2"* ]] && { [ -z "$3" ] || [ ! -e "$s/rehearsal/$3.log" ]; }; then ok "$4"
   else bad "$4" "rc=$RC" "$(cat "$s/rehearsal/verdict.txt" 2>/dev/null)" "$OUT"; fi
 }
+if [ "$HOST_REHEARSAL_TEST_GROUP" = 2 ]; then
 fail_case preview-writes "REHEARSAL FAIL preview: tree changed at .local/state/pfm/preview-wrote" apply "preview writes: FAIL preview naming the path, later steps not run"
 fail_case doctor-finding "REHEARSAL FAIL doctor: legacy: ~/.cc/fleet.db still present" apply-again "layout finding after apply: FAIL doctor naming the line"
 fail_case apply-again-records "REHEARSAL FAIL apply-again: " manifest "second apply records: FAIL apply-again"
@@ -413,6 +467,8 @@ else bad "db sidecars" "rc=$RC" "$(cat "$T/s-db-sidecars/rehearsal/verdict.txt" 
 rehearse go-telemetry "$T/s-go-telemetry"
 if [ "$RC" -eq 0 ] && [ "$(verdict "$T/s-go-telemetry")" = "REHEARSAL PASS" ]; then ok "go telemetry: the Go toolchain's own counters under .config/go never fail the tree hash"
 else bad "go telemetry" "rc=$RC" "$(cat "$T/s-go-telemetry/rehearsal/verdict.txt" 2>/dev/null)"; fi
+fi
+if [ "$HOST_REHEARSAL_TEST_GROUP" = 3 ]; then
 fail_case rollback-incomplete "REHEARSAL FAIL hash-after: " "" "rollback incomplete: FAIL hash-after"
 if grep -q 'REHEARSAL FAIL hash-after: \.cc/2/projects/p1, ' "$T/s-rollback-incomplete/rehearsal/verdict.txt" 2>/dev/null; then ok "rollback incomplete: names the differing paths"; else bad "hash-after names path" "$(cat "$T/s-rollback-incomplete/rehearsal/verdict.txt" 2>/dev/null)"; fi
 
@@ -421,7 +477,9 @@ fail_case no-vcs "REHEARSAL FAIL build: pfm carries no VCS stamp of HEAD $HEAD_S
 fail_case rollback-restarts "REHEARSAL FAIL rollback: fleet unit pfm-mcp.service restarted on a binary that refuses the legacy config" pair "rollback: a listed unit started after the rollback began fails rollback"
 fail_case no-next "REHEARSAL FAIL rollback: no next step printed for the restored legacy config" pair "rollback: no next block over a legacy config fails rollback"
 fail_case pair-refused "REHEARSAL FAIL pair: make -C $FH/.professor/pfm rollback exit 1: rollback: REFUSED — fixture" "" "pair: a failing next command fails pair, naming command, exit and last line"
+fi
 
+if [ "$HOST_REHEARSAL_TEST_GROUP" = 4 ]; then
 S="$T/s-nolegacy"
 rehearse happy "$S" "$BKN"
 if [ "$RC" -eq 0 ] && [ "$(verdict "$S")" = "REHEARSAL PASS" ] && [ "$(tail -n +2 "$S/rehearsal/verdict.txt")" = "$want_steps" ] &&
@@ -470,6 +528,10 @@ export PFM_REHEARSAL_KEEP_SCRATCH=1
 
 # ---- compare ----------------------------------------------------------------
 # A migrated home: sessions in the one store, the state DB at its new name.
+# The host-tool loop belongs to group 1; this slice rebuilds the one PATH it uses.
+mkdir -p "$T/limited-sqlite3"
+ln -s "$(command -v bash)" "$T/limited-sqlite3/bash"
+ln -s "$(command -v dirname)" "$T/limited-sqlite3/dirname"
 MH="$T/migrated"
 mk_migrated() {
   rm -rf "$MH" "$T/journal"
@@ -502,5 +564,14 @@ if [ "$RC" -eq 2 ] && [[ "$OUT" == "manifest: UNREADABLE — "*pfm.db* ]]; then 
 
 mk_migrated; echo garbage >"$MH/.local/state/pfm/pfm.db"; compare
 if [ "$RC" -eq 2 ] && [[ "$OUT" == "manifest: UNREADABLE — "*pfm.db* ]]; then ok "compare: unreadable DB → UNREADABLE, exit 2"; else bad "compare garbage db" "rc=$RC" "$OUT"; fi
+
+# A backup taken before callmeter was retired lists its database: the rehearsal
+# names it as retired and skips it, never refuses it as unreadable.
+mk_migrated
+BKR="$T/backup-retired"; rm -rf "$BKR"; cp -a "$BK" "$BKR"
+printf '== .local/state/pfm/callmeter.db\nok\ncall 7\n' >>"$BKR/manifest/db.txt"
+OUT="$(bash "$SUT" compare "$BKR" "$MH" "$T/journal" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] && grep -qxF 'retired database, not rehearsed: .local/state/pfm/callmeter.db' <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "manifest: ok" ]; then ok "compare: a retired callmeter.db is named and skipped"; else bad "compare retired db" "rc=$RC" "$OUT"; fi
+fi
 
 shtest_end

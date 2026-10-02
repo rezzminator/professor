@@ -6,9 +6,12 @@
 # a real Google Chrome and a display) and `pfm-dev` (build, test, e2e). pfm-dev
 # is the LAST stage, so an untargeted `docker build` of this file
 # (release-rehearsal.sh) still produces pfm-dev, never the Chrome image.
-FROM ubuntu:24.04 AS pfm-base
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS pfm-base
+# The converter sidecar's OCR stack (OpenCV) loads these system libraries on
+# import, and `pfm install` stages its models on any fence image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 \
+    ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils rsync sqlite3 tcpdump \
+    libgl1 libglib2.0-0 libxcb1 \
  && rm -rf /var/lib/apt/lists/*
 # Go pinned to pfm/go.mod — bump both together or the fence tests a different compiler.
 ARG GO_VERSION=1.27.1
@@ -32,6 +35,7 @@ ENV HOME=/root \
 # Pinned developer tools (infra/fence/tools.env) — the same versions `make tools`
 # installs on the host, so a lint verdict is the same on both sides of the fence.
 COPY tools.env tools.sh /opt/pfm-tools/
+COPY jscpd/ /opt/pfm-tools/jscpd/
 RUN TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
 # Every image built from this file, by any builder (compose, the rehearsals'
@@ -44,14 +48,13 @@ LABEL pfm.fence=1
 # desktop brings to live traffic — Google Chrome (patchright's `chrome` channel
 # launches only Google Chrome; Chromium reports MISSING by design) and real
 # fonts so pages render as they do for a person; the browser runs headless
-# only, so the image carries no display. libgl1 and libglib2.0-0 are the
-# converter sidecar's OCR stack (OpenCV loads libGL.so.1 on import). `dev.sh iso sim`
+# only, so the image carries no display. `dev.sh iso sim`
 # is the entry point. Google's apt repo serves amd64 and arm64 and keeps only
 # the current release, so Chrome is the one unpinned tool here: the image
 # prints its version at build time and every sim run prints it in the proof line.
 FROM pfm-base AS pfm-sim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 fonts-liberation fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
+    fonts-liberation fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
  && install -d -m 0755 /etc/apt/keyrings \
  && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc \
  && echo "deb [signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" \

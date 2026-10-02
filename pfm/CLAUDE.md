@@ -12,7 +12,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - eval protocol (K1): the binary prints one shell line on stdout for the shim to `eval`, never execing the final tmux attach itself
 - K3: one implementation per rule — naming precedence, the kill ratchet, row classification, run-string synthesis — each in exactly one package with table-driven tests
 - façades: the one door per cross-cutting primitive — `atomicfile.Write` (whole-file replace), `sqlitedb` (every SQLite open), `tmux.Exec` and `tmux.Socket` over it (every tmux call on a chat socket), `internal/chat/` (the chat verbs a surface calls typed) · `internal/atomicfile/`, `internal/sqlitedb/`, `internal/tmux/`
-- architecture ratchet: C1–C21 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
+- architecture ratchet: C1–C26 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
 - lint law: gofumpt + gci + golines at 120, plus dupl, goconst, gocritic, revive, staticcheck; coverage thresholds · `.golangci.yml`, `.testcoverage.yml`, tools pinned in `infra/fence/tools.env`
 - shim: the thin zsh wrapper that `eval`s the eval-protocol line, sourced in place from the clone · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
 - installer: stages every host asset embedded from `internal/installer/assets/`; the fleet prompts and the shim are read from the clone instead · `internal/installer/`
@@ -23,19 +23,19 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - config: account identity, emoji, theme and permission posture · `internal/config/`
 - lineage: folds a Codex subagent thread into its parent seat · `internal/store/lineage.go`
 - migrations: additive, numbered `migration_v{N}.sql` files, each with its `go:embed` · `internal/store/schema.sql`
-- `pfm.dev`: the local build artifact, never the shipped path; the host mirror build is `make host-install` (root § Host), which stamps `-X main.version` from `VERSION`
+- `tmp/bin/pfm.dev`: the local build `make -C pfm build` writes into the repo's gitignored `tmp/`, printing `built: {absolute path}` as its last line; never the shipped path; the host mirror build is `make host-install` (root § Host), which stamps `-X main.version` from `VERSION`
 
 # Runtime
 
 ## Fence
 
-- `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since origin/develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone.
+- `iso verify pfm` runs vet, fmt-check, lint-new (lines changed since the Makefile's `LINT_BASE`, origin/main: a develop base judges nothing on a push to develop), the architecture ratchet and the gate scripts' own `scripts/*_test.sh`; `iso test pfm` runs unit plus tagged e2e, each against its timing budget; `iso e2e` the tagged tier alone; `iso gate pfm` — the gate — runs all of these as concurrent steps in one container, the unit suite sharded by `scripts/test-shard.sh`, and prints a per-step table.
 - One package or probe: `.claude/scripts/dev.sh iso run 'go -C pfm test -count=1 ./internal/{pkg}/'`; the lint burn-down view: `iso run 'make -C pfm lint'`.
 - The fence mounts the worktree read-only: formatting rewrites the tree, so `make -C pfm fmt` runs on the host in the worktree, after `make -C pfm tools` installs the pinned tools; `make -C pfm prompts` likewise runs on the host.
 
 ## Environment Variables
 
-- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF`.
+- Test-jail overrides, not a config system (`internal/paths/paths.go`): `PFM_HOME` · `PFM_STATE_DB` · `PFM_CACHE_DB` · `PFM_CONFIG` · `PFM_MANAGED_SETTINGS_DIR` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF` · `PFM_SKILL_SOURCES_OFFLINE` (install fetches no source-fetched skill; doctor reports OFFLINE).
 - `PFM_TMUX_CONF` unset: a chat's tmux server loads the user's own `~/.tmux.conf`, since a chat is a terminal the user lives in; a jail sets it to `/dev/null` so a real machine config never steers a fixture.
 - Test knobs outside `internal/paths/`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`), `PFM_TEST_FRESH_SOCKET` (`internal/spawn/socket.go`).
 
@@ -45,7 +45,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 
 - **Tests NEVER touch a live `cc-*` / `cx-*` socket or the real `/tmp/cc-sid`:** every test sets `TMUX_TMPDIR = t.TempDir()`.
 - **Destructive commands default to a dry run, and the dry run IS the apply's preview:** `reap`, `archive` and `heal` classify identically with and without `--apply`; every unknown — an unanswerable busy query, a silent socket, a chat writing its transcript right now — resolves toward keeping what exists.
-- **A `REAL-SESSION` flow is scheduled deliberately, NEVER incidentally:** one that cannot be jailed is named in `TESTPLAN.md` § Flows that CANNOT be jailed, never left quietly uncovered.
+- **No suite runs a real engine or a real credential:** a flow the fake engine cannot play is named `UNPLAYED` in `TESTPLAN.md` § Flows the fake engine does not yet play, never run against a real engine and never left quietly uncovered.
 
 ## Code Standards
 

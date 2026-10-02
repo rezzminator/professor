@@ -61,7 +61,7 @@ The brief carries, and nothing more:
 - the standing rules, and the worktree when one exists;
 - the path of the testing manual of the project the task changes.
 
-Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, the open hand, the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor` (`sonnet`), `smart` → `flights-smart-executor` (`opus`); the spawn carries no model override.
+Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, the open hand, the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor`, `precise` → `flights-precise-executor`, `smart` → `flights-smart-executor`; the spawn carries no model override, so each tier runs the model and effort of the [tier table](flights-executors.md#three-tiers-one-source).
 
 ## Verdicts are evidence, not truth
 
@@ -90,6 +90,7 @@ Every situation the manual answers, with who acts. The orchestrator fixes nothin
 | A third red of the same id | `{id} BLOCKED · {the executor's cause line}`; no third revising call. The question travels in the return like any `BLOCKED`; the flight lands without the task |
 | `BLOCKED` with a question only the user can answer | record `BLOCKED`; every other task continues; the question travels in the return. The ruling comes back as a revising `flights-speccer` call: the live container makes it on the answer; the nested container's caller makes it after the return, then resumes the run naming the revised ids |
 | A question from an executor the index or the brief can answer | answer it by message to the same executor |
+| A `main-chat` task whose needs are done | no executor: its files are the main chat's alone, and the guard denies every sub-agent. The main chat as orchestrator claims and applies it under `/pcm`, verified like any `DONE`; a sub-agent orchestrator records `MAIN-CHAT`, holds its dependents and returns it for its caller to apply before re-running it |
 | A question from an executor nobody but the user can answer | `BLOCKED` for that task, as above |
 | The concurrency cap is reached | never reported by the harness: the count of in-flight executors is the only guard. Hold the task; dispatch it as the next return lands |
 | An executor never returns | seen only when something wakes the loop (a sibling's return; in the live and cross-harness containers, the user): a `CLAIMED` line older than 60 minutes with no verdict. Named in `DISPATCHED` as a missing return; its task stays `CLAIMED`; the flight lands without it and the return says so. When it was the last executor, nothing wakes a nested orchestrator: the user re-runs the container, and the resume rule treats the task as not started |
@@ -111,7 +112,7 @@ Executors run no review. The flight is reviewed once, over its whole diff, by [`
 
 ## `run.md`
 
-One file, `{flight directory}/run.md`. A header line on creation — `flight {directory} · baseline {sha} · {date}` — then one line per event: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`, `gate {project} {CLAIMED|PASS|FIXED|FAIL} · {one line}` per lander, and `{id} RETRO · {lesson}` for a lesson a return carried ([Retro lines](#retro-lines)); the cross-harness container adds `STALE` as a substitution, and the manual never names it. A `CLAIMED` line names the executor and the time; a `DONE` line names what the executor adapted, or `as specified`, and is what downstream briefs carry; a `FAILED` or `SPEC-DRIFT` line names the round for that id, the cause the executor gave and the executor's transcript, so the revising call and the audit can read how it got where it got. The file is the resume point and the ledger an audit reads.
+One file, `{flight directory}/run.md`. A header line on creation — `flight {directory} · baseline {sha} · {date}` — then one line per event: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED|MAIN-CHAT} · {one line}`, `gate {project} {CLAIMED|PASS|FIXED|FAIL} · {one line}` per lander, and `{id} RETRO · {lesson}` for a lesson a return carried ([Retro lines](#retro-lines)); the cross-harness container adds `STALE` as a substitution, and the manual never names it. A `CLAIMED` line names the executor and the time; a `DONE` line names what the executor adapted, or `as specified`, and is what downstream briefs carry; a `FAILED` or `SPEC-DRIFT` line names the round for that id, the cause the executor gave and the executor's transcript, so the revising call and the audit can read how it got where it got. The file is the resume point and the ledger an audit reads.
 
 Beside it, `{flight directory}/agents.tsv`: one tab-separated row per spawn, appended the moment the spawn returns its agent id — task id (or `gate-{project}`, or `spec`), agent type, agent id, round, ISO time, engine (`claude`, `codex`, `seat`) — for every executor, lander and speccer. It is append-only and the orchestrator never reads it back, so it costs the orchestrator's context nothing; `run.md` is re-read on resume and pasted into briefs, which is why the ids stay out of it. The ledger is what lets the metrics script and the audit open exactly a flight's transcripts instead of guessing them from a time window. The id is whatever the spawn returned, verbatim: an agent id on Claude; on Codex the agent path (`/root/{name}`), which the rollout's `session_meta.agent_path` repeats — a Codex orchestrator never sees a thread id, and the first two measured Codex flights matched 0 of 10 rows while the design assumed one. The time is printed by `date -u` inside the appending command, never typed: a measured ledger carried `19:00:00` for a spawn at 18:49, and a clockless date opens a match window at midnight. A voided claim keeps its row, because the agent ran and its spend is the flight's.
 
@@ -134,6 +135,7 @@ COMMIT {sha} | none
 DISPATCHED {n} executors, {g} landers, {m} returns, {k} revising rounds
 COST {calls} calls · {tokens} · {price} · worst {agent}: {price}, {calls} calls | failed: {error}
 BLOCKED {id}: {question} | none
+MAIN-CHAT {id}: {task file} | none
 RETRO {id}: {lesson} [MANUAL] | none
 NOTES {up to five lines} | none
 ```

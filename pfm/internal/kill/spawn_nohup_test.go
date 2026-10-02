@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestCommandSpawnerUsesNohupWhenSetsidIsAbsent pins the branch the fix
@@ -28,12 +29,11 @@ func TestCommandSpawnerUsesNohupWhenSetsidIsAbsent(t *testing.T) {
 	argvPath := filepath.Join(root, "argv")
 	donePath := filepath.Join(root, "done")
 	nohupPath := filepath.Join(root, "nohup")
-	writeTestFile(
-		t,
+	if err := testjail.WriteExecutable(
 		nohupPath,
-		"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_SPAWN_ARGV\"\nsleep 1\ntouch \"$PFM_SPAWN_DONE\"\n",
-	)
-	if err := os.Chmod(nohupPath, 0o700); err != nil {
+		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PFM_SPAWN_ARGV\"\nsleep 1\ntouch \"$PFM_SPAWN_DONE\"\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_SPAWN_ARGV", argvPath)

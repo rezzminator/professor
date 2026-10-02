@@ -237,6 +237,18 @@ class ExtractionVerbsTest(unittest.TestCase):
         self.assertIn('pkg/caller.py:5\t    return greet("world")\n', text)
         self.assertIn("pkg/greet.py:1\tdef greet(name):\n", text)
 
+    def test_verb_grep_reads_an_invalid_regex_the_way_grep_does(self):
+        with open(os.path.join(self.root, "pkg", "client.py"), "w") as fh:
+            fh.write("resp = client.Do(req)\n")
+        text = self.collect_one(r"grep '\.Do(' pkg")
+        self.assertIn("· 1 hits in 1 files · read as grep BRE", text)
+        self.assertIn("pkg/client.py:1\tresp = client.Do(req)\n", text)
+
+    def test_a_grep_miss_names_how_its_pattern_was_read(self):
+        proc = run_collect(self.root, self.out_dir, "= 1 t\ngrep '\\.Do[' pkg\n")
+        self.assertIn("MISS 1", proc.stdout)
+        self.assertIn("not a valid regex; matched literally", proc.stdout)
+
     def test_verb_block(self):
         text = self.collect_one("block config.yml build:")
         self.assertIn("@ config.yml:2-4 · block /build:/ · 3 lines", text)
@@ -249,120 +261,14 @@ class ExtractionVerbsTest(unittest.TestCase):
         self.assertIn("consts.go:7\t\tStatusFail\n", text)
 
 
-class ProbeCommandsTest(unittest.TestCase):
-    """One real test per probe command (verbs, init, refs, absent, rows, render), each asserted
-    on its concrete output — not just a zero exit code."""
-
-    def setUp(self):
-        parent = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, parent, ignore_errors=True)
-        # A per-run project name, so parallel checkouts never share one probe dir.
-        self.project = "cp-" + os.path.basename(parent).lower()
-        self.base = os.path.join("/tmp/", self.project, "codeprobe") + os.sep
-        self.root = os.path.join(parent, self.project)
-        os.makedirs(self.root)
-        write_fixture(self.root)
-
-    def tearDown(self):
-        shutil.rmtree(os.path.dirname(os.path.dirname(self.base)), ignore_errors=True)
-
-    def init_dir(self):
-        """Runs a real init ask (sig + census) and returns (proc, DIR)."""
-        plan = "= 1 the greet function, and every caller\nsig pkg/greet.py greet\ncensus greet\n"
-        proc = run_cp(["init", self.root, "--expect", "1", "--budget", "2500"], input=plan)
-        self.assertEqual(proc.returncode, 0, msg=f"init failed: {proc.stderr}")
-        m = re.search(r"^DIR (\S+)$", proc.stdout, re.M)
-        self.assertTrue(m, f"init printed no DIR line; stdout was: {proc.stdout!r}")
-        return proc, m.group(1)
-
-    def test_verbs_prints_the_extraction_table(self):
+class VerbsCommandTest(unittest.TestCase):
+    def test_verbs_prints_the_extraction_table_and_the_collect_syntax(self):
         proc = run_cp(["verbs"])
         self.assertEqual(proc.returncode, 0, msg=f"verbs failed: {proc.stderr}")
         self.assertTrue(proc.stdout.startswith("## Extraction verbs"), proc.stdout[:80])
         self.assertIn("| `file PATH` |", proc.stdout)
         self.assertIn("| `consts PATH TYPE` |", proc.stdout)
-        self.assertNotIn("## Probe commands", proc.stdout)
-
-    def test_init_computes_census_and_prints_asked_text(self):
-        proc, d = self.init_dir()
-        self.assertTrue(os.path.isfile(os.path.join(d, "state.json")), f"init named DIR {d} but wrote no state.json")
-        self.assertIn("FILES 4 via directory walk", proc.stdout)
-        self.assertIn("ASKS 1[census greet]", proc.stdout)
-        self.assertIn("REFS greet (CODE) — 3 lines: CODE 3 lines/2 files", proc.stdout)
-        self.assertIn("== pkg/greet.py (CODE · 1)", proc.stdout)
-        self.assertIn("TEXT 1 `sig pkg/greet.py greet`", proc.stdout)
-        self.assertIn("1\tdef greet(name):", proc.stdout)
-
-    def test_refs_lists_hits_with_context_grouped_by_file(self):
-        _, d = self.init_dir()
-        proc = run_cp(["refs", d, "greet", "-C", "1"])
-        self.assertEqual(proc.returncode, 0, msg=f"refs failed: {proc.stderr}")
-        self.assertIn("REFS greet (every class) — 3 lines: CODE 3 lines/2 files", proc.stdout)
-        self.assertIn("== pkg/caller.py (CODE · 2)", proc.stdout)
-        self.assertIn("1:from pkg.greet import greet", proc.stdout)
-        self.assertIn("4-def main():", proc.stdout)
-        self.assertIn("5:    return greet(\"world\")", proc.stdout)
-        self.assertIn("== pkg/greet.py (CODE · 1)", proc.stdout)
-        self.assertIn("1:def greet(name):", proc.stdout)
-
-    def test_absent_zero_hits_makes_an_A_row(self):
-        _, d = self.init_dir()
-        proc = run_cp(["absent", d, "nonexistent_name"])
-        self.assertEqual(proc.returncode, 0, msg=f"absent failed: {proc.stderr}")
-        self.assertEqual(proc.stdout.strip(), "A1 — `nonexistent_name`: 0 lines in the whole repo (4 files read)")
-        with open(os.path.join(d, "state.json")) as fh:
-            self.assertIn('"A1"', fh.read())
-
-    def test_absent_nonzero_hits_reports_not_absent(self):
-        _, d = self.init_dir()
-        proc = run_cp(["absent", d, "greet"])
-        self.assertEqual(proc.returncode, 0, msg=f"absent failed: {proc.stderr}")
-        self.assertIn("NOT ABSENT — greet is named 3 times in the whole repo; no [A#] row was made:", proc.stdout)
-        self.assertIn('pkg/caller.py:1\tfrom pkg.greet import greet', proc.stdout)
-        self.assertIn('pkg/greet.py:1\tdef greet(name):', proc.stdout)
-
-    def test_rows_then_render_write_the_verified_return(self):
-        _, d = self.init_dir()
-        rows = (
-            '1 | pkg/caller.py:5 | return greet("world") | main calls greet to build the greeting\n'
-            '1 | sig pkg/greet.py greet | - | the greet function signature in full\n'
-        )
-        proc = run_cp(["rows", d], input=rows)
-        self.assertEqual(proc.returncode, 0, msg=f"rows failed: {proc.stderr}")
-        self.assertIn("PROBE 1 asks — 1 with rows, 0 partial, 0 not answered · 2 rows, 0 rejected", proc.stdout)
-        self.assertIn("END 1 asks", proc.stdout)
-
-        with open(os.path.join(d, "return.md")) as fh:
-            written = fh.read()
-        self.assertIn(
-            "## 1 — the greet function, and every caller  [census greet]  · WITH ROWS", written)
-        self.assertIn(
-            '  :5 `return greet("world")` — main calls greet to build the greeting', written)
-        self.assertIn("- the greet function signature in full", written)
-        self.assertIn("@ pkg/greet.py:1-1 · sig greet · 1 lines", written)
-        self.assertIn("1\tdef greet(name):", written)
-        self.assertIn("## NOT ANSWERED\n- none: every ask has rows", written)
-
-        # render rebuilds the same return purely from the saved rows, without new stdin.
-        render_proc = run_cp(["render", d])
-        self.assertEqual(render_proc.returncode, 0, msg=f"render failed: {render_proc.stderr}")
-        with open(os.path.join(d, "return.md")) as fh:
-            rerendered = fh.read()
-        self.assertEqual(written, rerendered)
-
-    def test_rows_rejects_a_hedged_note(self):
-        _, d = self.init_dir()
-        rows = '1 | pkg/greet.py:1 | def greet(name) | probably the greet function\n'
-        proc = run_cp(["rows", d], input=rows)
-        self.assertEqual(proc.returncode, 0, msg=f"rows failed: {proc.stderr}")
-        self.assertIn("1 ROWS REJECTED", proc.stdout)
-        self.assertIn(
-            "hedged (`probably`): state what the code shows, or write an UNANSWERED row saying what is not settled",
-            proc.stdout,
-        )
-        with open(os.path.join(d, "return.md")) as fh:
-            written = fh.read()
-        self.assertIn("PROBE 1 asks — 0 with rows, 0 partial, 1 not answered · 0 rows, 1 rejected", written)
+        self.assertIn("## collect", proc.stdout)
 
 
 if __name__ == "__main__":

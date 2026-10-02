@@ -77,6 +77,7 @@ func socialRendered(content string) []string {
 // out of the count the API states; the artifact is complete, and a second
 // harvest is identical.
 func TestDevtoArticleLoadsEveryComment(t *testing.T) {
+	t.Parallel()
 	site := devtoSite(t)
 	h := site.harvester(t)
 	result := h.FetchWithOptions(context.Background(), devtoURL, FetchOptions{Refresh: true})
@@ -118,6 +119,7 @@ func TestDevtoArticleLoadsEveryComment(t *testing.T) {
 // TestDevtoUnservedCommentsFlagThePartial: an article stating more comments
 // than its tree serves renders what was served and names the rest.
 func TestDevtoUnservedCommentsFlagThePartial(t *testing.T) {
+	t.Parallel()
 	site := devtoSite(t)
 	site.answers[devtoArticleAPI] = strings.Replace(site.answers[devtoArticleAPI],
 		`"comments_count": 12`, `"comments_count": 20`, 1)
@@ -138,6 +140,7 @@ func TestDevtoUnservedCommentsFlagThePartial(t *testing.T) {
 // would not answer is not claimed; the page goes the generic path, the gap
 // named, and its comments are never requested.
 func TestDevtoRecordNotLoadedServesThePage(t *testing.T) {
+	t.Parallel()
 	site := devtoSite(t)
 	site.status = map[string]int{devtoArticleAPI: http.StatusNotFound}
 	result := site.servingHarvester(t).FetchWithOptions(context.Background(), devtoURL, FetchOptions{Refresh: true})

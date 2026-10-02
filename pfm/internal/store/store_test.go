@@ -264,7 +264,7 @@ func TestCacheV9AdoptsBeforeDroppingHiddenAndBacksUp(t *testing.T) {
 }
 
 // TestConcurrentOpensUpgradeOnce is the post-upgrade stampede: the statusline,
-// the async callmeter hooks and the picker all open a v7 cache at once. Each
+// the picker and every other opener reach a v7 cache at once. Each
 // must see the version the previous migrator left, never re-apply v8's ALTER
 // TABLE or adopt from a hidden table another opener already dropped.
 func TestConcurrentOpensUpgradeOnce(t *testing.T) {

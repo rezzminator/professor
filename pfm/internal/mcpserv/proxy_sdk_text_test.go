@@ -19,6 +19,7 @@ import (
 // never a lost session — recovery (re-initialize and retry) keys off the
 // go-sdk's own session-loss texts only.
 func TestProxySessionLostIsOnlyTheSDKSessionText(t *testing.T) {
+	t.Parallel()
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
 	for _, test := range []struct {
 		body string
@@ -42,6 +43,7 @@ func TestProxySessionLostIsOnlyTheSDKSessionText(t *testing.T) {
 // recovery reads two go-sdk texts, and this test drives the real sdk so a
 // changed text fails here, not silently in a proxy that stops recovering.
 func TestProxyRecoveryTextsMatchTheGoSDK(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := mcp.NewServer(&mcp.Implementation{Name: "pin", Version: "test"}, nil)
 

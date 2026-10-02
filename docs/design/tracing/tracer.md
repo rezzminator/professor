@@ -1,11 +1,11 @@
 # tracer
 
-`tracer` answers a spec writer's numbered questions about a codebase from its code, in prose, each fact a `path:line` with the line quoted. It is a `general-purpose` reader made specific to that caller: the prompt keeps what an open-hand agent does well and fixes what it did wrong or wasted, measured against an independent key. It uses no script and writes no file; the final message is the answer. Exact text only goes to `collector`, a whole area to `mapper`.
+`tracer` answers a spec writer's numbered questions about a codebase from its code, in prose, each fact a `path:line` with the line quoted. It is a `general-purpose` reader made specific to that caller: the prompt keeps what an open-hand agent does well and fixes what it did wrong or wasted, measured against an independent key. It uses no script and writes no file; the final message is the answer. Exact text only goes to `collector`. It ships in three tiers of one body: `tracer` → `tracer-pro` → `tracer-pro-max`.
 
 ## Contents
 
 - [The prompt](#the-prompt)
-- [Measured](#measured)
+- [Tiers](#tiers)
 - [Open items](#open-items)
 
 ## The prompt
@@ -20,22 +20,25 @@
 | No preamble, side-effect notes, restated question or summary | Output padding |
 | Always carry test homes, the scoped check command from the Makefile, anchors, and fenced verbatim lines to paste | The spec writer's recurring asks, so its brief can shrink to the questions |
 
-Model `opus`, effort `medium`, 25 calls.
+Budget 25 calls, every tier.
 
-## Measured
+## Tiers
 
-One real spec-writer brief from an `opus` open-hand speccer replay: 4 questions on a Python repo. An independent `opus` judge built a 30-facet key from the code before any return existed and scored every return; DELIVERED 1, PARTIAL 0.5; a declared NOT READ scores partial, never wrong. Cost at assumed list rates. The baseline is the speccer's own `general-purpose` collector, inheriting `opus` at effort `high`.
+Price, accuracy and clean blocks are each tier's measured share of `tracer-pro-max`'s, from [tracer-bench.md](tracer-bench.md).
 
-| Run | Accuracy /30 | Wrong | Cost (USD) | Requests | Seconds | Return (KB) | Sub-asks half-answered | Fenced lines exact |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline `general-purpose` | 29.5 | 3 | 2.26 | 25 | 164 | 17.9 | 0 | all |
-| 1: `medium` | 27.0 | 2 | 1.09 | 15 | 133 | 16.5 | 2 | 73/77 |
-| 1: `high` | 28.0 | 3 | 1.32 | 13 | 196 | 21.3 | 0 | 79/85 |
-| 2: `medium`, read every listed item, fences with indentation | 28.0 | 2 | 1.17 | 15 | 158 | 19.5 | 2 | 89/89 |
+| Agent | Kind | Model, effort | Price · accuracy · clean blocks | Pick it when |
+| --- | --- | --- | --- | --- |
+| `tracer` | original, `templates/global/agents/tracer.md` | `sonnet`, `high` | 43% · 98% · 58% | The default: the answer is the facts, and a quote is re-read before it is pasted |
+| `tracer-pro` | variant, `templates/global/agents/variants.json` | `sonnet`, `xhigh` | 79% · 101% · 92% | Its quoted lines go into task files |
+| `tracer-pro-max` | variant, `templates/global/agents/variants.json` | `opus`, `medium` | 100% · 100% · 100% | Every quoted line must paste exactly, at a steadier cost and latency |
 
-- Run 2 wins on wrong statements, cost, requests, latency and verbatim fidelity, and loses on accuracy by 1.5 points, on size by 9% and on completeness.
-- Its lost points: a list of 12 catch sites it declared NOT READ instead of reading, a traceback claim its own NOT READ contradicted, and the URL scheme missing from a cache key, which every run missed.
+- A variant overrides `name`, `description`, `model` and `effort` only; it carries no `replace`, so the three bodies are one text.
+- The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
+- Codex: only the executors carry a Codex pin (`TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes`), so the tiers compile through the alias map: `tracer` and `tracer-pro` to `gpt-5.6-luna` at `high` and `xhigh`, `tracer-pro-max` to `gpt-5.6-sol` at `medium`. The Codex tiers are unmeasured.
+- A caller spawns `tracer` unless its prompt names a tier: `flights-speccer`, `/flights:spec` and `reviewer` name none.
 
 ## Open items
 
-- Reading every item of a list the brief asks to classify: the rule is in the prompt, and run 2 still stopped at the grep hits.
+- Reading every item of a list the brief asks to classify: the rule is in the prompt, and the opus run still stopped at the grep hits.
+- `flights-speccer` pastes a tracer's fenced lines as task-file shapes and spawns tier 1, whose blocks were clean 58% of the time; spawning `tracer-pro` for shape questions is a `flights-speccer` prompt change.
+- The tier numbers rest on one run per setup, two for Sonnet at `xhigh`.

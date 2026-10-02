@@ -20,6 +20,7 @@ import (
 // the tool's payload contract, and projects the answer onto the wire — no
 // callback into package main, no second implementation of the verb.
 func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
+	t.Parallel()
 	verbs := &fakeChatVerbs{
 		listed: chat.ListResult{
 			Rows: []compose.Row{
@@ -102,6 +103,7 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 // contradictory or out-of-range input is refused without reaching the verb,
 // and a server built without its verb layer says so instead of answering empty.
 func TestChatLSFindReadRefuseBadInputBeforeTheVerb(t *testing.T) {
+	t.Parallel()
 	verbs := &fakeChatVerbs{}
 	service := newService("test", &backend{chat: verbs})
 	ctx := context.Background()

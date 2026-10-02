@@ -21,7 +21,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/store"
-	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 // installHarvestProvisioner is nil in production and resolves to the real
@@ -151,7 +150,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	withFlags := func(options installer.Options) installer.Options {
 		options.VSCode = *vscode
 		options.InstallThemes = !*skipThemes
-		options.ThemeManifestURL = professorThemeManifestURL(version)
+		options.ThemeManifestURL = installer.ThemeManifestURL(version)
 		options.ThemeHTTPClient = installThemeHTTPClientOverride
 		if skipCodex {
 			options.CodexHomes = []string{}
@@ -167,18 +166,13 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			ClaudeBinary: runtime.Config.Claude.Binary,
 			CodexBinary:  runtime.Config.Codex.Binary,
 		})
-		_, failures, _ := doctor.PrintDependencies(
-			context.Background(),
-			w,
-			runtime.Paths.Home,
-			entries,
-			deps.ProbeOptions{
-				SkipHarvest:  *skipHarvest,
-				SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
-				Provisioning: true,
-				Runner:       obs.Runner(deps.RealRunner{}),
-			},
-		)
+		probe := deps.ProbeOptions{
+			SkipHarvest:  *skipHarvest,
+			SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
+			Provisioning: true,
+			Runner:       obs.Runner(deps.RealRunner{}),
+		}
+		_, failures, _ := doctor.PrintDependencies(context.Background(), w, runtime.Paths.Home, entries, probe)
 		return failures
 	}
 	layoutFindings := installer.ClassifyLayout(layoutEnv)
@@ -397,14 +391,6 @@ func configMigrationPaths(migration pfmconfig.Migration) []string {
 	return changed
 }
 
-func professorThemeManifestURL(currentVersion string) string {
-	reference := strings.TrimSpace(currentVersion)
-	if reference == "" || reference == pfmconfig.DevelopmentVersion {
-		reference = "main"
-	}
-	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"
-}
-
 func newInstallerOptions(
 	mode installer.Mode,
 	configDir string,
@@ -413,11 +399,13 @@ func newInstallerOptions(
 	runtimes ...commandRuntime,
 ) installer.Options {
 	options := installer.Options{
-		Mode:               mode,
-		ConfigDir:          configDir,
-		Stdout:             stdout,
-		ProvisionHarvest:   !skipHarvest,
-		HarvestProvisioner: installHarvestProvisioner(),
+		Mode:                mode,
+		ConfigDir:           configDir,
+		Stdout:              stdout,
+		ProvisionHarvest:    !skipHarvest,
+		SkillSourcesOffline: paths.SkillSourcesOffline(),
+		ThemesOffline:       paths.ThemesOffline(),
+		HarvestProvisioner:  installHarvestProvisioner(),
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]
@@ -445,6 +433,7 @@ func newInstallerOptions(
 			for _, account := range runtime.Config.Accounts {
 				options.ConfigDirs = append(options.ConfigDirs, account.ConfigDir)
 			}
+			options.ClaudeAccounts = runtime.Config.Accounts
 
 		}
 	}

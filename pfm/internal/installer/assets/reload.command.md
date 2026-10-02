@@ -3,12 +3,12 @@ name: reload
 description: 'USER-ONLY — the user types /reload; never run this without the user''s permission. {{RELOAD_USAGE}}'
 ---
 
-# `/reload [--account N] [--model M] [--effort E] [--cache 1h|5m] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
+# `/reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--new [--hide]] [--then "<prompt>"]` — reboot this chat in place
 
 Run this ONCE via the Bash tool — and make it your LAST action, the chat is about to exit:
 
 ```
-~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m] [--then "<prompt>"]
+~/.local/bin/pfm chat reload [--account N] [--model M] [--effort E] [--cache 1h|5m (or --1h, --5m, --cache on|off)] [--then "<prompt>"]
 ```
 
 **Every setting has a flag. There are no positional arguments.** Whatever words the request
@@ -52,8 +52,9 @@ sub-agents, background shells, and session crons die with the reboot.
 
 ## Cache-only reboot — `/reload --cache 1h|5m`
 
-For Claude, `--cache` selects the reborn chat's prompt-cache TTL: `1h` sets
-`ENABLE_PROMPT_CACHING_1H=1`; `5m` sets `FORCE_PROMPT_CACHING_5M=1`.
+For Claude, `--cache` selects the reborn chat's starting prompt-cache TTL,
+handed to the cache-live-control plugin as `CACHE_LIVE_CONTROL_MAIN_TTL=1h|5m`;
+the plugin owns every TTL from then on, main chat and sub-agents alike.
 With no `--account`, `/reload --cache 5m` keeps the current account.
 With no `--cache`, reload carries the chat's recorded cache choice. A chat
 without a launch record uses its selected account's configured cache.

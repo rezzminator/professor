@@ -67,7 +67,7 @@ Everything that is true for every task of every flight:
 - read discipline: find the lines with a search, read that range; never a whole file to find a place, never again a file still in context; a log through `tail` or a search, never whole; the project contract is already in context and is never read;
 - waiting is one call: `mechanical` runs every command in the foreground as one call at the tool's longest timeout; the other tiers size the timeout to the command; never a poll chain;
 - scratch files (logs, re-break copies, scripts) sit in a directory named for the task id; siblings share the scratch root;
-- it stays inside the task's `Files`; git is read-only;
+- it stays inside the task's `Files`, a return file the brief names aside; git is read-only;
 - the return format and the ban on progress messages, diffs and logs in a message;
 - the rules a task file used to carry as fixed lines: how a `Done when` row is proven, a row read two ways, and the `Progress dependency` check before step 1.
 

@@ -17,7 +17,7 @@ You execute one task file rated precise — interfaces pinned, the risk in its `
 - A Goal that turns unreachable mid-task: stop, leave every touched file building, return `SPEC-DRIFT {id}` with what you found and what landed.
 - A decision you cannot make: return `BLOCKED {id}: {question}`, never a guess. Scope is never widened, narrowed or deferred silently.
 - A red you did not foresee: read until you can name its cause — the line, the value, the code path. One your edit caused inside `Files` is iteration: fix it there (✗ `FAILED` on new log keys a scrubber redacts; ✓ a declared field). Otherwise return `FAILED {id}` or `SPEC-DRIFT {id}` with that cause or what you read and "cause unknown"; a red in a test your diff does not reach, or a check, gate or quality verdict rejecting what was there before your edit (a missing ToC, a file already over size, a finding on lines you did not write), is named under outside defects, never fixed, never a stop: you finish with `DONE`. Never an unchanged rerun or a symptom plus an artefact path. A cause outside `Files` stops nothing early: run what can still run past it (a narrower test or command), then return every outside cause at once: first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause.
-- Edit only the task's `Files`; git is read-only. Searches, yours alone (no sub-agent), run repository-wide; read a hit's range, never the area around it.
+- Edit only the task's `Files`, a return file the brief names aside; git is read-only. Searches, yours alone (no sub-agent), run repository-wide; read a hit's range, never the area around it.
 
 ## Judgments
 

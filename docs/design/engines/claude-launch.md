@@ -58,7 +58,7 @@ type Knob struct {
 | Wire | Reaches Claude as | Rows |
 | --- | --- | --- |
 | `WireSettings` | a key in the single `--settings` JSON (`env.*`, `hooks`, `statusLine`, …) | most |
-| `WireEnv` | a process environment assignment | `CLAUDE_CONFIG_DIR` only |
+| `WireEnv` | a process environment assignment | `CLAUDE_CONFIG_DIR`, `CACHE_LIVE_CONTROL_MAIN_TTL`, `CLAUDE_CODE_SHELL` |
 | `WireUnset` | `env -u NAME` before exec | the hygiene list |
 | `WireFlag` | a command-line flag | the prompt file, MCP config, autonomy pair, model, effort, session verbs |
 
@@ -69,6 +69,7 @@ type Knob struct {
 | `configDir` | env `CLAUDE_CONFIG_DIR` | account | the account's `configDir` (omitted for the implicit account) |
 | hygiene | unset `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR`, `ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `CACHE_LIVE_CONTROL_MAIN_TTL`, `CACHE_LIVE_CONTROL_AGENTS_TTL`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `CODEX_THREAD_ID` | constant | — |
 | `cache1h` | env `CACHE_LIVE_CONTROL_MAIN_TTL=1h`, or `=5m`, in the launch's process environment beside `CLAUDE_CONFIG_DIR`, never the settings `env` block (Claude Code re-applies that block on every settings-file reload and would re-hand the plugin a handoff it already consumed): the main chat's starting TTL handed to the cache-live-control plugin, which sets Claude Code's own TTL variables and owns every TTL (main chat and sub-agents) from then on; pfm sets no Claude Code TTL variable, and never `CACHE_LIVE_CONTROL_AGENTS_TTL`. The hygiene unset of the Claude Code TTL names stays, so a parent chat's value cannot outrank the plugin. A headless run keeps it in its settings `env` | launch → config | `true` |
+| `shell` | env `CLAUDE_CODE_SHELL={absolute bash}` in the launch's process environment, so the Bash tool of the chat and, by inheritance, of its sub-agents runs under bash, not the login shell (zsh does not word-split an unquoted `$VAR` the bash idioms agents write rely on); every door carries it: `Render`, the passthrough launcher (`SessionEnv`), a headless run's environment. An inherited value Claude Code would accept (absolute, executable, its path naming bash or zsh) is kept and nothing is added; a refused one is warned and replaced. No bash on `PATH`: nothing is added, the launch goes ahead, the activity log warns, `pfm config claude` shows the reason and `pfm doctor` fails its required `bash` | host | `bash` on `PATH` |
 | `systemPrompt` | `professor`: flag `--system-prompt-file`; `lean`: settings `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`; `production`: nothing | config | `production` |
 | `nativeCursor` | settings `env.CLAUDE_CODE_NATIVE_CURSOR=1` | config | `false` |
 | `maxSubagentSpawnDepth` | settings `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | config | `8` |
@@ -100,9 +101,10 @@ type Knob struct {
 - **launch → config** — a choice made for this one launch (the picker's cache toggle, `pfm chat new --cache 1h|5m`, `pfm chat reload --cache`); absent a choice, the config value.
 - **launch** — only a per-launch choice; unset means the flag is omitted.
 - **constant** — fixed in the registry; changing it is a code change.
+- **host** — the launch's own environment, else the host's `PATH` (`shell`): `pfm config claude` shows `source=env` for a kept inherited value, `source=PATH` otherwise.
 - **account / door** — the chosen account's roster entry, or for `noFlicker` its `settings.json` (`WantsFullscreen`: absent file off; an unreadable one logged and launched without the knob, and shown as its error by `pfm config`); the verb that launched.
 
-No inherited environment variable decides a value: the unset list clears them first.
+No inherited environment variable decides a value but `CLAUDE_CODE_SHELL` (the `shell` row): the unset list clears them first.
 
 ## The launch record
 

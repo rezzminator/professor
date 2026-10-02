@@ -61,6 +61,15 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 				if !slices.Contains(launch.Env, "CACHE_LIVE_CONTROL_MAIN_TTL=1h") {
 					t.Error("cache missing")
 				}
+			case "shell":
+				// The jail pins a usable CLAUDE_CODE_SHELL (or none without a
+				// bash), so the launch keeps it and adds nothing; shell_test.go
+				// covers the assignment itself.
+				for _, entry := range launch.Env {
+					if strings.HasPrefix(entry, "CLAUDE_CODE_SHELL=") {
+						t.Errorf("inherited shell overridden by %q", entry)
+					}
+				}
 			case "systemPrompt":
 				if parsed.PromptFile != prompt {
 					t.Errorf("prompt=%q", parsed.PromptFile)

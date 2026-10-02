@@ -4,12 +4,14 @@ import (
 	"strconv"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// SessionEnv returns the plugin values for a passthrough Claude session.
+// SessionEnv returns the plugin values and the launch shell (ShellEnv) for a
+// passthrough Claude session.
 func SessionEnv(prefs pfmconfig.ClaudePrefs) []string {
-	return []string{
+	return append([]string{
 		envFunctionHooks + "=1",
 		envAutoCompactWindow + "=" + strconv.FormatInt(prefs.AutoCompactWindow, 10),
-	}
+	}, ShellEnv(paths.OSEnv{}.Lookup)...)
 }

@@ -77,6 +77,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		settingsDir = account.ConfigDir
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
+	result.Env = append(result.Env, ShellEnv(paths.OSEnv{}.Lookup)...)
 	if request.SessionID != "" {
 		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
 	}

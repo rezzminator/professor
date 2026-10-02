@@ -69,6 +69,21 @@ func Run(m *testing.M) int {
 		warnSetup("scrub PATH: %v", err)
 		return 1
 	}
+	// A Claude launch adds CLAUDE_CODE_SHELL, bash resolved on the host's PATH,
+	// unless the launch environment already carries a usable one
+	// (claudelaunch.ShellEnv). Pinning this host's bash keeps every emitted
+	// launch line host-blind and golden-testable; without a bash the launch adds
+	// nothing either. A test of the resolution itself sets or clears it.
+	const launchShellEnv = "CLAUDE_CODE_SHELL"
+	if bash, err := deps.Resolve("bash"); err == nil {
+		if err := os.Setenv(launchShellEnv, bash); err != nil {
+			warnSetup("pin %s: %v", launchShellEnv, err)
+			return 1
+		}
+	} else if err := os.Unsetenv(launchShellEnv); err != nil {
+		warnSetup("clear %s: %v", launchShellEnv, err)
+		return 1
+	}
 	// Installer tests must not inherit an operator account as an MCP write
 	// target. Packages that can install host state enter through this jail.
 	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {

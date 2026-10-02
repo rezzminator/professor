@@ -742,6 +742,9 @@ func setEnvironment(
 		}
 		filtered = append(filtered, value)
 	}
+	if id == pfmengine.Claude {
+		filtered = withLaunchShell(filtered)
+	}
 	if configDir != "" && name != "" {
 		filtered = append(filtered, name+"="+configDir)
 	}

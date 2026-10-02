@@ -109,6 +109,7 @@ const (
 	SourceAccount
 	SourceDoor
 	SourceMachineConfig
+	SourceHost
 )
 
 type Knob struct {
@@ -160,6 +161,14 @@ var Knobs = func() []Knob {
 			SourceLaunchThenConfig,
 			true,
 			"Hand the main chat's starting prompt-cache TTL to the cache-live-control plugin in the process environment; the plugin owns every TTL from then on.",
+		},
+		Knob{
+			knobShell,
+			WireEnv,
+			envShell,
+			SourceHost,
+			shellBash,
+			"Run the Bash tool under bash, not the login shell; a usable inherited value is kept.",
 		},
 		Knob{
 			knobSystemPrompt,

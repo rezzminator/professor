@@ -97,7 +97,7 @@
     ".claude/codex-build.json": "a25e19df556db6fa67cfe410101c9de7816003ba1ef3271e2d70d3ce67adfea7",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
-    ".claude/commands/pcm.md": "4e6ae3439cd5133d82c5ef1898ed052b2b1a349d3d3b54eee909c017b0d802cb",
+    ".claude/commands/pcm.md": "daccaff45704176078693803c3865b17f577156907d935dc35778c7f6e3d56d2",
     ".claude/commands/pfm-testing-manual.md": "9551db22d02763098cd3db18e4cf0247e3527aade271d356290f3740188db80d",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
     ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
@@ -109,7 +109,7 @@
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "333d7b9833b8f4c7acb40cf1293ad669c0581a075d89e723062a56d59b14c475",
     "CLAUDE.md": "823e367f01626c30a289b23d83896c8d11f021cc0275fe442cb24cb0c8ecf11c",
-    "docs/commands/pcm/references/audit-scopes.md": "0eb093cd384472d0cab03d30fe4b562b8424a6d0d6310fe1d51bad7efb04398b",
+    "docs/commands/pcm/references/audit-scopes.md": "70e2d0e0163a033a3ab4db46d33006a151b9f07bb3dde932e500386f3ab3ddd3",
     "docs/commands/pcm/references/refresh.md": "96297f0e4f285d62d3e7587a373a5553b39f1361eeda09370f63c601f73e0a93",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
     "pfm/CLAUDE.md": "7cea32af81cfe244203470f589e2fba5cc54d52c0f432cf3ecf2ee98f23e73ef"

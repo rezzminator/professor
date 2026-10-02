@@ -1,7 +1,7 @@
 ---
 name: pcm
 description: MANDATORY — route every change to CLAUDE.md, .claude/**, the .codex/ mirror or templates/** here. `/pcm {change request}` applies it; `/pcm audit [scope|all]` reports framework consistency, read-only; `/pcm retro` folds the .professor/retro.md inbox. Publishing the blueprint → /pfm:release; the pfm CLI itself → /pfm; context budget → /context-meter.
-argument-hint: [change request|audit]
+argument-hint: "[change request|audit [scope|all]|retro]"
 ---
 
 # PCM — Professor Change Manager

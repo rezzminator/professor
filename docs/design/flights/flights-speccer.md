@@ -54,7 +54,7 @@ Three consequences shape everything below.
 3. `flights-speccer` writes the flight directory and returns the path and the index.
 4. A directory holding a single task the sub-agent executes itself; one holding several it hands to `flights-orchestrator`, which dispatches one fresh executor per task file by the [ready rule](#the-ready-rule) and executes none itself.
 
-Ordering between flights belongs to the main chat that runs them, one after another. `flights-speccer` sees one flight and nothing beside it. Never two calls run on one directory at once, except a planner's [children](#nesting-a-large-flight-is-written-by-child-speccers); the agent's `description` says so.
+Ordering between flights belongs to the main chat that runs them, one after another. `flights-speccer` sees one flight and nothing beside it. Never two calls run on one directory at once, except a planner's [children](#nesting-a-large-flight-is-written-by-child-speccers); the agent body's § Input says so.
 
 ## Input
 

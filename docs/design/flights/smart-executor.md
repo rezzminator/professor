@@ -42,7 +42,7 @@ Friction: one flight's task drifted over three rounds on consumers outside `File
 
 ### Tests: one red run per task
 
-Every row's test is written first, the names the task creates stubbed so they compile; all the new tests run once against the unfixed tree, each failing on its assertion, the log kept, then once green after the fix. A row the tree already met before that red run gets no red proof: the return marks it `pre-existing, no red proof`, and the lander's adversarial pass covers it; no executor re-breaks, stashes, reverts or mutates finished or landed code. Every build and test runs where the brief's standing rules say from the first run. A row with no behaviour change (a rename, a move, a deletion, the doc references one carries) is proven by its check line; a row a written deliverable meets, by the project's check for that file kind plus the quoted line that meets it. A budget or ratchet its diff pushes over is its to bring back under, a split first when the design allows it.
+Every row's test is written first, the names the task creates stubbed so they compile; all the new tests run once against the unfixed tree, each failing on its assertion (a build error proves nothing), the log kept, then once green after the fix. A row whose behaviour was in the tree before that red run gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log and the commit or `run.md` line that landed the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or landed code. Every build and test runs where the brief's standing rules say from the first run. A row with no behaviour change (a rename, a move, a deletion, the doc references one carries) is proven by its check line; a row a written deliverable meets, by the project's check for that file kind plus the quoted line that meets it. A budget or ratchet its diff pushes over is its to bring back under, a split first when the design allows it.
 
 Friction: the losing benchmark seat returned `DONE` with three tests never watched failing and one row with no new test, and ran a test on the host once before rereading the fence rule.
 
@@ -66,7 +66,7 @@ Friction: 6 of 158 transcripts ran past 80 calls, and only one of them named the
 
 ### `DONE` is defined, and the first line holds only the token
 
-`DONE` means every `Done when` row is met in full and has its test (red in the one red log, or `pre-existing, no red proof`) or its check; a row not reached returns `FAILED`, a row the design cannot meet as written `SPEC-DRIFT`. The first line holds only the token, the id and its clause, and no `**Verdict:**` line follows `RETRO`.
+`DONE` means every `Done when` row is met in full and has its test (red in the red log, or `pre-existing, no red proof` with its citation) or its check; a row not reached returns `FAILED`, a row the design cannot meet as written `SPEC-DRIFT`. The first line holds only the token, the id and its clause, and no `**Verdict:**` line follows `RETRO`.
 
 Friction: a return opened "DONE 1-a, with two gaps", another carried a round note on its first line, and Codex seats ended their return with the main chat's Verdict line.
 
@@ -77,7 +77,7 @@ Friction: a return opened "DONE 1-a, with two gaps", another carried a round not
 | A `Progress dependency` whose failure changes the change | Change nothing; `SPEC-DRIFT {id}: {what it found}` |
 | Spec and code disagree on a detail | Reach the Goal; say what it changed |
 | A consumer outside `Files` its design would break | Pick a design that keeps it working, or `SPEC-DRIFT {id}` naming each, nothing changed |
-| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red outside `Files` it does not list stays `SPEC-DRIFT` |
+| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red its change causes outside `Files` that the list does not name stays `SPEC-DRIFT` |
 | An open judgment | The candidate every row and Goal example holds under on live data; between equals, the smaller diff |
 | A row that reads two ways | The reading the Goal's example and today's code support, named in the return; neither settles it: `SPEC-DRIFT {id}` |
 | The estimate passes the cap | `SPEC-DRIFT {id}: too large` with the split, nothing changed; recorded as `TOO-LARGE`, no red |

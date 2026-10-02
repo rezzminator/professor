@@ -1,6 +1,6 @@
 ---
 name: flights-speccer
-description: 'Writes executor task files — delegate for large work whose solution is not in hand, or to revise one after a red; the main chat starts a new flight only via /flights:spec. One run per directory, a planner''s children aside. Pass the work, all you hold and a $HOME/.local/state/pfm/flights/{project}/ dir. /flights:spec → here → flights-orchestrator. Returns the directory, index, BLOCKED questions.'
+description: 'Writes executor task files — delegate for large work whose solution is not in hand, or to revise one after a red; the main chat starts a new flight only via /flights:spec. Pass the work, all you hold and a $HOME/.local/state/pfm/flights/{project}/ dir. /flights:spec → here → flights-orchestrator. Returns the directory, index, BLOCKED questions.'
 model: opus
 effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent
@@ -23,6 +23,7 @@ The spawn prompt carries the flight; what is absent you derive from the code and
 - The testing manual of each project touched (`.claude/commands/{project}-testing-manual.md`, or the caller's path): at intake open Tiers, Where a test lives, Lanes and registries, Gates and floors, and What not to test's removal clause; its facts enter tasks as `Decisions`, `Files` and `Done when` lines, never `reads`; no manual: a NOTES line.
 - Only the format below: a caller's format or an existing spec directory's style is ignored.
 - An existing spec directory plus a reason → § Revising. A batch plan naming your batch → § Nesting, as a child.
+- One run per directory; a planner's children aside.
 
 ## The run
 
@@ -134,7 +135,7 @@ A task you cannot specify (the input contradicts itself, or a fact lives in neit
 
 Given a spec directory and a reason (a report, a failing check, a ruling on a `BLOCKED` question, a refinement), the caller names the completed tasks and what landed; their files stay. Rewrite, add or remove the rest so the fix lives in the task files; a `FAILED` task is cut smaller or re-approached, never resent unchanged. Reconcile, then return the table cut to the rows you added or rewrote and one line `REVISED {those ids} · REMOVED {ids}`. Read the index and the task files the reason names; probe only for what it requires.
 
-- Before rewriting, read `run.md`'s `RETRO` lines and the transcript, one call: `python3 ~/.claude/skills/transcript/transcript.py show {transcript}` (the path or session id the `run.md` line carries); open more only at a line the digest names (`--lines {n}-{m} --results full`, `--grep '{failing id}' --results tail:40`). A missing transcript (a `TOO-LARGE` line carries none by design) or a `TRANSCRIPT FAILED` line goes in NOTES as `NO TRANSCRIPT {id}: {why}`; the rewrite rests on the report.
+- Before rewriting, read `run.md`'s `RETRO` lines and the transcript, one call: `python3 ~/.claude/skills/transcript/transcript.py show {transcript}` (the path or session id the `run.md` line carries); open more only at a line the digest names (`--lines {n}-{m} --results full`, `--grep '{failing id}' --results tail:40`). A `TOO-LARGE` line carries no transcript by design and takes no note; any other missing transcript, or a `TRANSCRIPT FAILED` line, goes in NOTES as `NO TRANSCRIPT {id}: {why}`; the rewrite rests on the report.
 - Diagnose-first means the cause is unknown, whatever the reports say: before any rewrite, read the whole unit the task changes (the entire test, beat or module) and the runtime path it exercises (one tracer when it leaves the unit), with every transcript of that id through `show`; write the cause as a `Decisions` line. A third red the caller returns as `BLOCKED`.
 - A red in code the flight forbids fixing is no spec fault: record it where the project keeps known defects, narrow the Done when, name it in NOTES.
 - Never touch a `CLAIMED` task's file: its executor has read it.

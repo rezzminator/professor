@@ -138,6 +138,10 @@ const (
 	claudeTrustPane = "Accessing workspace\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n"
 	claudePermPane  = "Bash command\n  go test ./...\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n"
 	claudeBusyPane  = "running\n· 4s · esc to interrupt\n"
+	// A request the model server refused, retrying with no spinner arm
+	// IsBusyFor knows — under an empty composer. Nothing holds it for a human.
+	claudeRetryPane = "  ⎿  Compaction armed.\n✻ Waiting for API response · will retry in 2m 21s · check your network\n" +
+		"────────\n❯ \n────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
 )
 
 // pendingToolChat writes a Claude transcript whose newest record is a tool
@@ -188,6 +192,7 @@ func TestInspectSeatReadsTheScreenOfASilentPendingToolCall(t *testing.T) {
 	}{
 		{"a dialog on screen", claudePermPane, headless.StateBlocked},
 		{"a tool still running", claudeBusyPane, headless.StateWorking},
+		{"a retrying request at an empty composer", claudeRetryPane, headless.StateWorking},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			chat := pendingToolChat(t, claudeToolCall, 90*time.Second)

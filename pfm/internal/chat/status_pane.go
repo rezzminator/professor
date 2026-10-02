@@ -54,17 +54,28 @@ func awaitsPane(chat headless.Chat, status headless.Status) bool {
 		status.PendingTool != "" && status.QuietSeconds >= blockedQuietSeconds
 }
 
-// paneState is the pane-evidence verdict: a Claude trust dialog holds the seat
-// for its human, otherwise the engine's own running-turn footer, read by that
-// engine's own rule.
+// paneState is the pane-evidence verdict: a dialog (heldByDialog) holds the
+// seat for its human, otherwise the engine's own running-turn footer, read by
+// that engine's own rule.
 func paneState(engine pfmengine.ID, capture string) string {
-	if pfmengine.ClaudeTrustDialog(capture) {
+	if heldByDialog(capture) {
 		return headless.StateBlocked
 	}
 	if inject.IsBusyFor(engine, capture) {
 		return headless.StateWorking
 	}
 	return headless.StateIdle
+}
+
+// heldByDialog is the positive evidence a screen waits on its human: an open
+// numbered selector at the active composer row (inject.SelectorLine — a
+// permission dialog, a question, a modal menu) or Claude's folder-trust
+// dialog. The absence of a running-turn footer is NOT that evidence: a
+// request the model server refused retries with no spinner arm IsBusyFor
+// knows, under an empty composer, and read as blocked it sent a seat nobody
+// needed to answer to its human.
+func heldByDialog(screen string) bool {
+	return inject.SelectorLine(screen) != "" || pfmengine.ClaudeTrustDialog(screen)
 }
 
 // readPane captures one live chat's screen through the capture seam (nil is
@@ -118,9 +129,8 @@ func statusFromPane(
 }
 
 // blockedFromPane confirms a silent pending tool call against the screen: a
-// pane showing the engine's running-turn footer is a tool still running, so the
-// chat stays working; any other screen is a dialog or question holding it for
-// its human, so it is blocked.
+// dialog on it (heldByDialog) holds the chat for its human, so it is blocked;
+// any other screen — a tool still running, a request retrying — stays working.
 func blockedFromPane(
 	ctx context.Context,
 	chat headless.Chat,
@@ -132,7 +142,7 @@ func blockedFromPane(
 	if err != nil {
 		return status, err
 	}
-	if inject.IsBusyFor(chat.Engine, screen) {
+	if !heldByDialog(screen) {
 		return status, nil
 	}
 	status.State = headless.StateBlocked

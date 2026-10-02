@@ -8,6 +8,6 @@ internal/index/index_test.go 1016
 internal/inject/engine_test.go 1690
 internal/installer/installer_test.go 1541
 internal/kill/kill_test.go 1372
-internal/stats/limits_test.go 1883
+internal/stats/limits_test.go 1871
 internal/ui/chronoscope_test.go 1444
 internal/update/project_test.go 1033

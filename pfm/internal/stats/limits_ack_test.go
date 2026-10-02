@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,5 +68,17 @@ func TestLimitsSamplerACKFallbackIsAtMostOncePerAccount(t *testing.T) {
 	_, warnings = sampler.Sample(context.Background())
 	if acks != 1 || fetches != 2 || len(warnings) != 0 {
 		t.Fatalf("expired sample fetches=%d acks=%d warnings=%v", fetches, acks, warnings)
+	}
+}
+
+func TestLocalCredentialFileErrorsDoNotTriggerLiveAckRefresh(t *testing.T) {
+	for _, message := range []string{
+		"stat usage credentials: permission denied",
+		"read usage credentials: input/output error",
+		"decode usage credentials: invalid character",
+	} {
+		if needsCredentialRefresh(errors.New(message)) {
+			t.Fatalf("local I/O error routed to live credential refresh: %q", message)
+		}
 	}
 }

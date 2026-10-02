@@ -58,7 +58,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Errorf("binary=%q", launch.Binary)
 				}
 			case "cache1h":
-				if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" {
+				if !slices.Contains(launch.Env, "CACHE_LIVE_CONTROL_MAIN_TTL=1h") {
 					t.Error("cache missing")
 				}
 			case "systemPrompt":

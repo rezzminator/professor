@@ -10,7 +10,7 @@ Read the `flights-orchestrator` agent body from the registry (`~/.claude/agents/
 
 | In the manual | Here |
 | --- | --- |
-| A question only the user can answer → `BLOCKED` in the return | `AskUserQuestion` now; the task continues on the answer, the executor re-briefed by `SendMessage`; a ruling that changes the spec goes to `flights-speccer` as a revising call first, on `model: "opus"` like every revising round |
+| A question only the user can answer → `BLOCKED` in the return | `AskUserQuestion` now; the task continues on the answer, the executor re-briefed by `SendMessage`, closing with "continue, then return once more in the return shape"; a ruling that changes the spec goes to `flights-speccer` as a revising call first, on `model: "opus"` like every revising round |
 | The caller hears from you once | The user is the caller: the return at the end, and nothing between the `CLAIMED` lines and the return except the user's own questions |
 | Something wakes you | The user is the wake-up: an executor that never returns is seen when the user asks, and the manual's missing-return rule applies |
 

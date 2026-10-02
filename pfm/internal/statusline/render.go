@@ -861,7 +861,7 @@ func codexSegment(
 	replacement := ""
 	window := int64(0)
 	baseModel := strings.TrimSuffix(model, "-fast")
-	if strings.HasPrefix(baseModel, "gpt-5.6-") {
+	if strings.HasPrefix(baseModel, "gpt-5.6-") || strings.HasPrefix(baseModel, "gpt-6") {
 		window = 272_000
 	} else {
 		window, _ = strconv.ParseInt(runtime.getenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 10, 64)

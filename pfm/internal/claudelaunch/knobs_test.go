@@ -65,9 +65,8 @@ func TestKnobsInventory(t *testing.T) {
 			t.Errorf("duplicate knob %s", knob.Name)
 		}
 		seen[knob.Name] = true
-		if knob.Name == "cache1h" &&
-			knob.Target != "env.CACHE_LIVE_CONTROL_MAIN_TTL" {
-			t.Errorf("cache1h target=%q", knob.Target)
+		if knob.Name == "cache1h" && (knob.Wire != WireEnv || knob.Target != "CACHE_LIVE_CONTROL_MAIN_TTL") {
+			t.Errorf("cache1h wire=%s target=%q, want the process environment", knob.Wire, knob.Target)
 		}
 	}
 	for _, name := range Hygiene() {

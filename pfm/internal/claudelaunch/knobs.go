@@ -155,11 +155,11 @@ var Knobs = func() []Knob {
 		},
 		Knob{
 			knobCache1H,
-			WireSettings,
-			"env." + envCacheLiveControlMainTTL,
+			WireEnv,
+			envCacheLiveControlMainTTL,
 			SourceLaunchThenConfig,
 			true,
-			"Hand the main chat's starting prompt-cache TTL to the cache-live-control plugin, which owns every TTL from then on.",
+			"Hand the main chat's starting prompt-cache TTL to the cache-live-control plugin in the process environment; the plugin owns every TTL from then on.",
 		},
 		Knob{
 			knobSystemPrompt,

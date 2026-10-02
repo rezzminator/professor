@@ -3,8 +3,8 @@ name: general-executor
 description: 'GENERAL-ONLY builds one decided change — the code and its covering test, from its caller''s inline brief. general-foreman, general-orchestrator → here. Returns DONE, FAILED, SPEC-DRIFT or BLOCKED, files changed, the check line. Not for a main chat''s change → general-foreman.'
 model: claude-sonnet-5-5
 effort: high
-codex-model: gpt-6-sol
-codex-effort: low
+codex-model: gpt-6-luna
+codex-effort: xhigh
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

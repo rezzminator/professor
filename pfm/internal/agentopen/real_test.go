@@ -91,7 +91,8 @@ func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values) {
 	binary := filepath.Join(root, "claude")
 	if err := testjail.WriteExecutable(
 		binary,
-		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGENTOPEN_ARGV\"\nprintf '[]\\n'\n"),
+		[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AGENTOPEN_ARGV\"\n"+
+			"printf '%s\\n' \"${CACHE_LIVE_CONTROL_MAIN_TTL-unset}\" > \"$AGENTOPEN_ARGV.ttl\"\nprintf '[]\\n'\n"),
 		0o700,
 	); err != nil {
 		t.Fatal(err)
@@ -126,9 +127,13 @@ func assertAgentLaunch(t *testing.T, argvPath string, leading ...string) claudel
 			t.Fatalf("argv=%q lacks %q", argv, value)
 		}
 	}
+	ttl, err := os.ReadFile(argvPath + ".ttl")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if parsed.Settings["outputStyle"] != "default" ||
-		parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" && parsed.Resume != "" {
-		t.Fatalf("rendered argv=%q parsed=%+v", argv, parsed)
+		strings.TrimSpace(string(ttl)) != "1h" && parsed.Resume != "" {
+		t.Fatalf("rendered argv=%q parsed=%+v process CACHE_LIVE_CONTROL_MAIN_TTL=%q", argv, parsed, ttl)
 	}
 	return parsed
 }

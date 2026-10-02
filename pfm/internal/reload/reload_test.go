@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -20,20 +19,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
-
-func parsedReloadShell(t *testing.T, run string) claudelaunch.Parsed {
-	t.Helper()
-	output, err := exec.Command("sh", "-c", "set -- "+run+"; printf '%s\\000' \"$@\"").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	words := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
-	parsed, err := claudelaunch.Parse(append([]string{"claude"}, words...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return parsed
-}
 
 type fakeReloadTmux struct {
 	dead       bool
@@ -471,7 +456,7 @@ func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, variable := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROMPT_CACHE_TTL"} {
+	for _, variable := range []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CACHE_LIVE_CONTROL_MAIN_TTL"} {
 		if !strings.Contains(run, variable) {
 			t.Fatalf("run %q does not mention %s", run, variable)
 		}
@@ -691,8 +676,8 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 			}
 			parsed := parsedReloadShell(t, tmux.respawn)
 			if parsed.Resume != "11111111-1111-4111-8111-111111111111" ||
-				parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" {
-				t.Fatalf("respawn resume=%q settings=%#v", parsed.Resume, parsed.SettingsEnv)
+				respawnEnv(t, tmux.respawn)["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" {
+				t.Fatalf("respawn resume=%q env=%#v", parsed.Resume, respawnEnv(t, tmux.respawn))
 			}
 			values, err := pfmconfig.ResolvePaths()
 			if err != nil {

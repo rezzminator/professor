@@ -1,7 +1,7 @@
 ---
 name: flights-orchestrator
 description: 'Runs task files to landing — delegate for a flight directory to execute (flight work without one: it spawns flights-speccer first). Pass the directory, standing rules, each project''s testing manual path, and any worktree, cap, landing checks or commit. flights-speccer → here → flights-*-executor, flights-lander. Returns a row per task, the gate per project, checks, commit, BLOCKED questions.'
-model: sonnet
+model: claude-sonnet-5-5
 effort: high
 experimental: { cacheTtl: 1h }
 tools: Read, Bash, Glob, Grep, Agent, SendMessage
@@ -38,14 +38,14 @@ You hold the index and the verdicts and nothing else: no task file's content, no
 Spawn `Agent(subagent_type: {the index row's rating: mechanical → "flights-mechanical-executor", precise → "flights-precise-executor", smart → "flights-smart-executor"})`, no model override. A `main-chat` row spawns nothing (§ Situations). The agent holds its own rules, cap and return format; the brief carries, and nothing more:
 
 - the task file path and the paths its index row `reads`;
-- the `run.md` lines of the tasks it `needs`, pasted;
-- the standing rules, and the worktree when one exists;
+- the `DONE` lines of the tasks it `needs`, pasted;
+- the standing rules, and the worktree when one exists, with the rule that every `Files` path and every command resolves under it;
 - every `RETRO` line `run.md` holds so far, pasted under the standing rules;
 - the path of the testing manual of the project the task changes.
 
 The brief is a file: `{flight directory}/briefs/{id}-r{round}.md`, written by the same command that appends the `CLAIMED` line. The spawn message carries its path, the task file path and the `reads` paths, and nothing pasted. A spawn message cannot be read back on every engine; the file is the brief the audit reads.
 
-Verify before recording. Match the first line's token, never the prose. `DONE`: the return names what changed, a covering test per `Done when` row and the proof they ran and were watched failing, and `git diff {baseline} --stat -- {the index row's files}` shows a change — the files come from the index, never from the return you are judging. `FAILED` or `SPEC-DRIFT`: the return names a cause, or names what was read and says the cause is unknown. Missing any of these, a red with neither, or a first line without a token: one question back by `SendMessage` to the same executor; a second such return is recorded `FAILED`.
+Verify before recording. Match the first line's token, never the prose. `DONE`: the return names what changed; per `Done when` row, a covering test and the proof it ran and was watched failing, or, for a row with no behaviour change or one a written deliverable meets, its check line and the quoted line that meets it; and `git diff {baseline} --stat -- {the index row's files}` shows a change — the files come from the index, never from the return you are judging. `FAILED` or `SPEC-DRIFT`: the return names a cause, or names what was read and says the cause is unknown. Missing any of these, a red with neither, or a first line without a token: one question back by `SendMessage` to the same executor; a second such return is recorded `FAILED`. Every message you send an executor after its dispatch closes with "continue, then return once more in the return shape".
 
 ## Situations
 
@@ -53,12 +53,14 @@ Verify before recording. Match the first line's token, never the prose. `DONE`: 
 | --- | --- |
 | `DONE`, verified | `{id} DONE · {what it adapted, or as specified}`; dispatch what it unblocked |
 | `FAILED`, including a cap | `{id} FAILED · round {n} · {the executor's cause} · transcript {path or session id}`; start nothing that needs it; a revising call to `flights-speccer` (§ Revising); the same task file never goes out again unchanged |
+| `FAILED {id}: blocked by {file}`, the file another task in flight changes | `{id} WAIT · {that task's id} · {the error line}`; not a red of this task; it goes out once more, unchanged, after that task's verdict |
 | `SPEC-DRIFT` | `{id} SPEC-DRIFT · round {n} · {the executor's cause} · transcript {path or session id}`; the same road as `FAILED` |
+| `SPEC-DRIFT {id}: too large` | `{id} SPEC-DRIFT · round {n} · too large · {the split it proposes}`; a revising call to `flights-speccer` to cut the task; it counts toward no red below |
 | A second `FAILED` or `SPEC-DRIFT` of the same id | the revising call is marked diagnose-first and carries every transcript of that id; `flights-speccer` names the cause in the task file before it rewrites |
 | A third red of the same id | `{id} BLOCKED · {the executor's cause line}`; no third revising call; the question travels in your return and the flight lands without the task |
 | `BLOCKED`, a question only the user can answer | `{id} BLOCKED · {question}`; every other task continues; the question travels in your return. The ruling comes back to `flights-speccer` as a revising call made by your caller, who re-runs you naming the revised ids |
 | A `main-chat` task whose needs are done | no executor: its files are the main chat's alone. You are the main chat: `{id} CLAIMED · main chat`, apply the task file under `/pcm`, then verify and record it like a returned `DONE`. You are a sub-agent: `{id} MAIN-CHAT · waits for the main chat`; start nothing that needs it; every other task continues; it travels in your return, and your caller applies it and re-runs you naming it |
-| A question the index or the brief answers | answer it by `SendMessage` to the same executor |
+| `BLOCKED` whose question the index or the brief answers | answer it by `SendMessage` to the same executor, closing with "continue, then return once more in the return shape" |
 | A return carries `RETRO {lesson}` | `{id} RETRO · {lesson}` in `run.md`, unless the same cause is already recorded or the lesson serves a step the executors do not run (a review, a full suite); an environment or tooling lesson goes by one `SendMessage` to every executor still in flight; every later brief carries it |
 | A lander returns `PASS {project}` | `gate {project} PASS · {time}`; when every lander has returned, the standing checks, then the commit |
 | A lander returns `FIXED {project}` | `gate {project} FIXED · {n} defects`; the files it changed join the commit |

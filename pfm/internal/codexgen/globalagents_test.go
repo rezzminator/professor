@@ -179,7 +179,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		"; do not edit — edit the source, then re-run: pfm codex build\n" +
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
-		"model = \"gpt-5.6-sol\"\n" +
+		"model = \"gpt-6.1-sol\"\n" +
 		"model_reasoning_effort = \"high\"\n" +
 		"sandbox_mode = \"read-only\"\n" +
 		"developer_instructions = \"\"\"\n"

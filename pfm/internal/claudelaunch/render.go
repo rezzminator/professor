@@ -76,6 +76,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	} else if found {
 		settingsDir = account.ConfigDir
 	}
+	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
 	if request.SessionID != "" {
 		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
 	}
@@ -89,7 +90,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		result.Argv = append(result.Argv, flagName, request.Name)
 	}
 	result.Argv = append(result.Argv, request.Args...)
-	settings := settingsFor(request, prefs, result.Cache1H, noFlicker(request, settingsDir))
+	settings := settingsFor(request, prefs, noFlicker(request, settingsDir))
 	payload, err := json.Marshal(settings)
 	if err != nil {
 		return Launch{}, fmt.Errorf("render --settings: %w", err)
@@ -156,7 +157,11 @@ const (
 // promptCacheTTL is the main chat's starting prompt-cache TTL word, handed to
 // the cache-live-control plugin as CACHE_LIVE_CONTROL_MAIN_TTL. The plugin sets
 // Claude Code's own TTL variables and owns every TTL, main chat and sub-agents,
-// from then on; pfm writes no Claude Code TTL variable itself.
+// from then on; pfm writes no Claude Code TTL variable itself. Render carries
+// the handoff in the process environment, never the settings env block: Claude
+// Code re-applies that block on every settings-file reload, which would re-hand
+// the plugin a handoff it already consumed. RenderHeadless keeps it in its
+// settings, since a -p run takes no /cache.
 func promptCacheTTL(cache1h bool) string {
 	if cache1h {
 		return cacheTTL1H
@@ -164,7 +169,7 @@ func promptCacheTTL(cache1h bool) string {
 	return cacheTTL5M
 }
 
-func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h, fullscreen bool) map[string]any {
+func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, fullscreen bool) map[string]any {
 	settings := map[string]any{knobOutputStyle: defaultWord, knobCleanupPeriodDays: prefs.CleanupPeriodDays}
 	env := map[string]string{
 		envWebSearches:       strconv.FormatInt(prefs.WebSearchesPerSession, 10),
@@ -189,7 +194,6 @@ func settingsFor(request Request, prefs pfmconfig.ClaudePrefs, cache1h, fullscre
 	if fullscreen {
 		env[envNoFlicker] = "1"
 	}
-	env[envCacheLiveControlMainTTL] = promptCacheTTL(cache1h)
 	if request.Purpose != PurposeQuery && prefs.SystemPrompt == pfmconfig.SystemPromptLean {
 		env[envSimplePrompt] = "1"
 	}

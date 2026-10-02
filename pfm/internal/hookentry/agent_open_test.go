@@ -22,7 +22,8 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 	if err := testjail.WriteExecutable(
 		bin,
 		[]byte(
-			"#!/bin/sh\nif [ \"$1\" = agents ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$AGENT_OPEN_ARGV\"\n",
+			"#!/bin/sh\nif [ \"$1\" = agents ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$AGENT_OPEN_ARGV\"\n"+
+				"printf '%s\\n' \"${CACHE_LIVE_CONTROL_MAIN_TTL-unset}\" > \"$AGENT_OPEN_ARGV.ttl\"\n",
 		),
 		0o700,
 	); err != nil {
@@ -71,12 +72,16 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 			if parsed.Resume != scenario.id {
 				t.Fatalf("resume=%q, want %q", parsed.Resume, scenario.id)
 			}
-			cacheTTL := "5m"
+			wantTTL := "5m"
 			if scenario.cache1H {
-				cacheTTL = "1h"
+				wantTTL = "1h"
 			}
-			if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != cacheTTL {
-				t.Fatalf("cache settings=%#v, want main chat %s", parsed.SettingsEnv, cacheTTL)
+			ttl, err := os.ReadFile(argvPath + ".ttl")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(string(ttl)); got != wantTTL {
+				t.Fatalf("process CACHE_LIVE_CONTROL_MAIN_TTL=%q, want %s", got, wantTTL)
 			}
 			launches, err := fleetdb.OpenLaunches(context.Background(), values)
 			if err != nil {

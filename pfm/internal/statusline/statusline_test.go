@@ -574,27 +574,30 @@ func TestCodexEngineOwnsCodexUsageIndependentOfAccountID(t *testing.T) {
   "context_window":{"used_percentage":10,"current_usage":{"input_tokens":136000}},
   "cost":{"total_cost_usd":99,"total_duration_ms":1000}
 }`)
-	got, err := Render(context.Background(), input, Runtime{
-		Now:       func() time.Time { return time.Unix(1_786_838_400, 0) },
-		Home:      root,
-		ConfigDir: filepath.Join(root, ".cc", "2"),
-		CacheDir:  filepath.Join(root, "cache"),
-		TmuxDir:   filepath.Join(root, "tmux"),
-		ProcRoot:  filepath.Join(root, "proc"),
-		Columns:   120,
-		UID:       1000,
-		Engine:    pfmengine.Codex,
-		Env:       map[string]string{"ANTHROPIC_MODEL": "gpt-5.6-sol[1m]"},
-		Command:   quietRunner{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "🥈 ") ||
-		!strings.Contains(got, "🍀 gpt-5.6-sol") ||
-		!strings.Contains(got, "50%") ||
-		strings.Contains(got, "💰$99.00") {
-		t.Fatalf("Codex-engine rendering drifted:\n%q", got)
+	// Every model family the Codex proxy serves has a 272K window: 136K used is 50%.
+	for _, model := range []string{"gpt-5.6-sol[1m]", "gpt-6.1-sol[1m]", "gpt-6-luna"} {
+		got, err := Render(context.Background(), input, Runtime{
+			Now:       func() time.Time { return time.Unix(1_786_838_400, 0) },
+			Home:      root,
+			ConfigDir: filepath.Join(root, ".cc", "2"),
+			CacheDir:  filepath.Join(root, "cache"),
+			TmuxDir:   filepath.Join(root, "tmux"),
+			ProcRoot:  filepath.Join(root, "proc"),
+			Columns:   120,
+			UID:       1000,
+			Engine:    pfmengine.Codex,
+			Env:       map[string]string{"ANTHROPIC_MODEL": model},
+			Command:   quietRunner{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, "🥈 ") ||
+			!strings.Contains(got, "🍀 "+strings.TrimSuffix(model, "[1m]")) ||
+			!strings.Contains(got, "50%") ||
+			strings.Contains(got, "💰$99.00") {
+			t.Fatalf("Codex-engine rendering drifted for %s:\n%q", model, got)
+		}
 	}
 }
 

@@ -85,6 +85,14 @@ func runChatReloadWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: OpenCode chats cannot be reloaded yet (%s)\n", filepath.Base(socketPath))
 		return 2
 	}
+	// Also refused here: a roster miss found only by the worker lands in its
+	// log while the caller has already been told "scheduled".
+	if account := reloadRequestedAccount(args); account != 0 {
+		if _, err := reload.ValidateAccount(runtime.Config, reload.EngineOf(socketPath), account); err != nil {
+			fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
+			return 2
+		}
+	}
 	if err := os.MkdirAll(resolved.SIDDir, 0o700); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: create worker log directory: %v\n", err)
 		return 1

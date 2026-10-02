@@ -1,20 +1,4 @@
 {
-  "flights-precise-executor": {
-    "from": "flights-mechanical-executor",
-    "description": "FLIGHTS-ONLY — spawned by flights-orchestrator, one fresh executor per task file rated precise: its code and covering tests. Pass the brief file, the task file and its reads paths. flights-orchestrator → here → flights-lander. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the watched-failing test per Done when row, adaptations, RETRO.",
-    "codex-model": "gpt-6-sol",
-    "codex-effort": "high",
-    "model": "claude-sonnet-5-5",
-    "effort": "xhigh"
-  },
-  "flights-smart-executor": {
-    "from": "flights-mechanical-executor",
-    "description": "FLIGHTS-ONLY — spawned by flights-orchestrator, one fresh executor per task file rated smart: its code and covering tests. Pass the brief file, the task file and its reads paths. flights-orchestrator → here → flights-lander. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the watched-failing test per Done when row, adaptations, RETRO.",
-    "codex-model": "gpt-6-sol",
-    "codex-effort": "high",
-    "model": "opus",
-    "effort": "high"
-  },
   "heavy-rr": {
     "from": "rr",
     "description": "Maps a query exhaustively — tier 3, the ultimate: super-rr → here. Delegate for \"heavy rr\", \"heavy-rr X\", when every sub-area must settle whatever the cost. Returns the saved RR path, then the cited map.",

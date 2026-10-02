@@ -26,7 +26,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 ## Why one manual, held by a sub-agent
 
-A main chat outlives every agent, so its context is the dearest in the family. The orchestration of a flight is a loop of dispatch, wait, verify, react, dispatch that runs for the whole flight; run in the main chat it re-sends the chat's entire history on every step. The loop therefore lives in a sub-agent at the mechanical tier (`sonnet`) that holds only the index and the verdicts, and the main chat hears from it once.
+A main chat outlives every agent, so its context is the dearest in the family. The orchestration of a flight is a loop of dispatch, wait, verify, react, dispatch that runs for the whole flight; run in the main chat it re-sends the chat's entire history on every step. The loop therefore lives in a sub-agent on `claude-sonnet-5-5` at effort `high`, the full model ID pinned in its frontmatter because the alias resolves differently per account, that holds only the index and the verdicts, and the main chat hears from it once.
 
 The same body is the only description of the protocol. A second copy for the live or cross-harness container would drift; the commands for those containers substitute the transport (how an executor is spawned, briefed, waited for, questioned, stopped) and read everything else from the agent file.
 
@@ -56,21 +56,24 @@ The orchestrator never opens a task file and never reads a repository file to ju
 
 The brief carries, and nothing more:
 
-- the task file path and the paths its index row `reads`, with the instruction to open them together in the first message;
-- the `run.md` lines of the tasks it `needs`, pasted, so an upstream adaptation reaches it without a spec rewrite;
-- the standing rules, and the worktree when one exists;
+- the task file path and the paths its index row `reads`; the executor opens them together with the brief file in its first message;
+- the `DONE` lines of the tasks it `needs`, pasted from `run.md`, so an upstream adaptation reaches it without a spec rewrite;
+- the standing rules, and the worktree when one exists, stating that every `Files` path and every command resolves under it;
+- every `RETRO` line `run.md` holds so far, pasted under the standing rules;
 - the path of the testing manual of the project the task changes.
 
-Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, the open hand, the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor`, `precise` → `flights-precise-executor`, `smart` → `flights-smart-executor`; the spawn carries no model override, so each tier runs the model and effort of the [tier table](flights-executors.md#three-tiers-one-source).
+Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, its hand (open inside `Files` on `precise` and `smart`, the listed adaptations only on `mechanical`), the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor`, `precise` → `flights-precise-executor`, `smart` → `flights-smart-executor`; the spawn carries no model override, so each tier runs the model and effort of the [tier table](flights-executors.md#the-tiers).
 
 ## Verdicts are evidence, not truth
 
 An executor's return is a claim. The orchestrator matches the first line's token and then verifies:
 
-- `DONE`: the return names what changed, a covering test per `Done when` row and the proof they ran and were watched failing, and `git diff {baseline} --stat -- {the index's files}` shows a change: the files come from the index row, never from the return, so the judge is never the judged. A return that claims done with no proof, or with nothing changed, gets one question back to the same executor; a second such return is recorded `FAILED`.
+- `DONE`: the return names what changed; per `Done when` row, a covering test and the proof it ran and was watched failing, or, for a row with no behaviour change (a rename, a move, a deletion, a doc) or one a written deliverable meets, its check line and the quoted line that meets it; and `git diff {baseline} --stat -- {the index's files}` shows a change: the files come from the index row, never from the return, so the judge is never the judged. A return that claims done with no proof, or with nothing changed, gets one question back to the same executor; a second such return is recorded `FAILED`.
 - `FAILED`, `SPEC-DRIFT`: the return names a cause, or names what was read and says the cause is unknown; a red with neither is shapeless. Recorded as returned with the executor's transcript named on the line; the reaction is in [Situations](#situations).
 - `BLOCKED`: recorded as returned; the reaction is in [Situations](#situations).
 - No token on the first line, or a red with no cause and no reading named: one question back asking for the return in shape; a second shapeless return is `FAILED`.
+
+Every message the orchestrator sends an executor after its dispatch — a question back, a re-brief, a malformed-return bounce — closes with "continue, then return once more in the return shape", so the executor's next message is again a return.
 
 The baseline is the commit recorded in the `run.md` header, so a resumed flight judges against the same tree the flight started from.
 
@@ -83,14 +86,16 @@ Every situation the manual answers, with who acts. The orchestrator fixes nothin
 | `DONE`, verified | `run.md` line names what was adapted or `as specified`; dispatch what it unblocked |
 | `DONE` without proof or without a change in git | one question back to the same executor; a second such return → `FAILED` |
 | `FAILED` (including a cap) | start nothing that needs it; send `flights-speccer` the report, what already landed, the completed ids and the executor's transcript — nested and live: the sub-agent transcript path (`$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl`, the id from the spawn's task id); cross-harness: the seat's name and its transcript id; its rewritten index cuts the task smaller or re-approaches it; dispatch from the new index. The same task file is never re-run unchanged |
+| `FAILED {id}: blocked by {file}: …`, the file another task in flight changes | `{id} WAIT · {that task's id} · {the error line}`; not a red of this task and never sent to the speccer; the task waits for that sibling's verdict and goes out once more, unchanged |
 | `SPEC-DRIFT` | the same road as `FAILED`, with the drift report as the reason |
+| `SPEC-DRIFT {id}: too large` (a `smart` executor's estimate, nothing changed) | a revising `flights-speccer` call to cut the task, carrying the split the executor proposes; it counts toward neither diagnose-first nor the third-red `BLOCKED` |
 | Any revising round | the speccer is pinned at `opus`; every revising round — a red, a failed landing check, a lander residual, the diagnose-first round included — is a fresh `Agent(subagent_type: "flights-speccer", model: "opus")` handed the directory and the reason, since a `SendMessage` keeps the running speccer's model; only a speccer already on `opus` is revised by `SendMessage` |
 | A return carries `RETRO {lesson}` | [Retro lines](#retro-lines) |
 | A second `FAILED` or `SPEC-DRIFT` of the same id | the revising call is marked diagnose-first and carries every transcript of that id; `flights-speccer` names the cause in the task file before rewriting (its § Drift). The `run.md` line carries the round: `{id} SPEC-DRIFT · round 2 · …` |
 | A third red of the same id | `{id} BLOCKED · {the executor's cause line}`; no third revising call. The question travels in the return like any `BLOCKED`; the flight lands without the task |
 | `BLOCKED` with a question only the user can answer | record `BLOCKED`; every other task continues; the question travels in the return. The ruling comes back as a revising `flights-speccer` call: the live container makes it on the answer; the nested container's caller makes it after the return, then resumes the run naming the revised ids |
-| A question from an executor the index or the brief can answer | answer it by message to the same executor |
 | A `main-chat` task whose needs are done | no executor: its files are the main chat's alone, and the guard denies every sub-agent. The main chat as orchestrator claims and applies it under `/pcm`, verified like any `DONE`; a sub-agent orchestrator records `MAIN-CHAT`, holds its dependents and returns it for its caller to apply before re-running it |
+| `BLOCKED {id}: {question}` the index or the brief answers | answer it by message to the same executor; an executor's question always arrives as this return, never as a token-less failure |
 | A question from an executor nobody but the user can answer | `BLOCKED` for that task, as above |
 | The concurrency cap is reached | never reported by the harness: the count of in-flight executors is the only guard. Hold the task; dispatch it as the next return lands |
 | An executor never returns | seen only when something wakes the loop (a sibling's return; in the live and cross-harness containers, the user): a `CLAIMED` line older than 60 minutes with no verdict. Named in `DISPATCHED` as a missing return; its task stays `CLAIMED`; the flight lands without it and the return says so. When it was the last executor, nothing wakes a nested orchestrator: the user re-runs the container, and the resume rule treats the task as not started |
@@ -204,7 +209,7 @@ The rulings above rest on measured results, collected in the runtime research of
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs at mechanical (`sonnet`), effort `high` |
+| The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs on `claude-sonnet-5-5`, effort `high` |
 | The wait guard | `pfm internal orchestrator-wait`, attached in the agent's frontmatter | A Bash call that only waits (`echo`, `printf`, `true`, `:`, `sleep N`) is denied; design in [hooks.md](../hooks/hooks.md#agent-attached-hooks-not-machine-global) |
 | The containers | `templates/global/commands/flights/orchestrate-{nested,live,cross-harness}.md` | The substitutions, nothing of the manual restated; the nested command's road for a `BLOCKED` ruling |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The ladder's third rung ends here; the universal laws; the lander as the only review |

@@ -45,7 +45,7 @@ func TestConfigClaude(t *testing.T) {
 	if code := runConfig([]string{"claude"}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("machine code=%d stderr=%s", code, stderr.String())
 	}
-	for _, want := range []string{"cache1h wire=settings", "source=constant", "source=default"} {
+	for _, want := range []string{"cache1h wire=env", "source=constant", "source=default"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("machine output lacks %q", want)
 		}

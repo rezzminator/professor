@@ -250,7 +250,7 @@ if requires E1.01-open-seat1 && beat_settle E1.05-reload-1h; then
       fail "--cache 5m: $REPLY_WHY (the 1h reboot had already landed)"
     else
       off_start="$(tmux -S "$(_lane_tmux_dir)/$sock" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
-      if [[ "$on_start" != *'CACHE_LIVE_CONTROL_MAIN_TTL\":\"1h'* || "$off_start" != *'CACHE_LIVE_CONTROL_MAIN_TTL\":\"5m'* ]]; then
+      if [[ "$on_start" != *"CACHE_LIVE_CONTROL_MAIN_TTL='1h'"* || "$off_start" != *"CACHE_LIVE_CONTROL_MAIN_TTL='5m'"* ]]; then
         fail "cache launch did not carry 1h then 5m: $(one_line "$on_start" | cut -c1-200) → $(one_line "$off_start" | cut -c1-200)"
       else
         pass "the cache launch toggled 1h → 5m; each steer is a user record"

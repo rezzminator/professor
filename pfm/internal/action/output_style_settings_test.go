@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -52,13 +53,11 @@ func TestClaudeSpawnRendersRegistryPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" {
-		t.Fatalf("settings env = %#v", parsed.SettingsEnv)
+	if !slices.Contains(command.Env, "CACHE_LIVE_CONTROL_MAIN_TTL=5m") {
+		t.Fatalf("process env lacks CACHE_LIVE_CONTROL_MAIN_TTL=5m: %q", command.Env)
 	}
-	for _, entry := range command.Env {
-		if strings.HasPrefix(entry, "CACHE_LIVE_CONTROL_MAIN_TTL=") {
-			t.Fatalf("cache escaped settings into process env: %q", entry)
-		}
+	if value, ok := parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"]; ok {
+		t.Fatalf("settings env carries CACHE_LIVE_CONTROL_MAIN_TTL=%q; a settings reload would undo /cache", value)
 	}
 }
 
@@ -200,19 +199,45 @@ func containsFlagPair(args []string, key, value string) bool {
 	return false
 }
 
-func parsedShell(t *testing.T, run string) claudelaunch.Parsed {
+func shellWords(t *testing.T, run string) []string {
 	t.Helper()
 	run, _, _ = strings.Cut(run, " || ")
 	output, err := exec.Command("sh", "-c", "set -- "+run+"; printf '%s\\000' \"$@\"").Output()
 	if err != nil {
 		t.Fatalf("parse shell launch: %v", err)
 	}
-	words := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
-	parsed, err := claudelaunch.Parse(append([]string{"claude"}, words...))
+	return strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+}
+
+func parsedShell(t *testing.T, run string) claudelaunch.Parsed {
+	t.Helper()
+	parsed, err := claudelaunch.Parse(append([]string{"claude"}, shellWords(t, run)...))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return parsed
+}
+
+// launchEnv is the environment a launch line assigns its Claude process: the
+// NAME=value operands of the leading env word, up to the binary.
+func launchEnv(t *testing.T, run string) map[string]string {
+	t.Helper()
+	env := map[string]string{}
+	words := shellWords(t, run)
+	for index := 0; index < len(words); index++ {
+		switch word := words[index]; {
+		case index == 0 && word == "env":
+		case word == "-u":
+			index++
+		default:
+			name, value, found := strings.Cut(word, "=")
+			if !found || name == "" || strings.Contains(name, "/") {
+				return env
+			}
+			env[name] = value
+		}
+	}
+	return env
 }
 
 func parsedSpawn(t *testing.T, spawn ClaudeSpawn) claudelaunch.Parsed {

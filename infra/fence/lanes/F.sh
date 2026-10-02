@@ -395,8 +395,8 @@ if requires; then
   grep -q -- '--settings' <<<"$start" || bad="$bad C14/K25 the launch carries no --settings payload;"
   grep -Fq -- "'--model' 'sonnet'" <<<"$start" || bad="$bad C15/K28 the launch carries no '--model sonnet': $(one_line "$start" | cut -c1-200);"
   grep -Fq -- "'--effort' 'low'" <<<"$start" || bad="$bad C16/K28 the launch carries no '--effort low';"
-  grep -Fq '"CACHE_LIVE_CONTROL_MAIN_TTL":"1h"' <<<"$(printf '%s' "$start" | sed 's/\\"/"/g')" ||
-    bad="$bad C14/K25 the --settings payload carries no \"CACHE_LIVE_CONTROL_MAIN_TTL\":\"1h\" (--cache 1h);"
+  grep -Fq "CACHE_LIVE_CONTROL_MAIN_TTL='1h'" <<<"$start" ||
+    bad="$bad C14/K25 the launch's process environment carries no CACHE_LIVE_CONTROL_MAIN_TTL='1h' (--cache 1h);"
   # C13: the row reports the seat asked for; K24: the seat's medal on the row; K25: the ⚡ badge.
   [ "$(live_field "$CC" 9)" = "$SEAT" ] || bad="$bad C13 row account is '$(live_field "$CC" 9)', want $SEAT;"
   plain_row="$(pfm ls --plain 2>/dev/null | grep -F "● $CC " | head -1)"

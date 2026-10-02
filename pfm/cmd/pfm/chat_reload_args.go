@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -68,6 +69,31 @@ func validateReloadArgs(args []string) error {
 		return errors.New("--hide needs --new — a reload that resumes the same conversation cannot hide it")
 	}
 	return nil
+}
+
+// reloadRequestedAccount returns the account number a validated reload argv
+// asks for, through --account N or a bare positive number, or 0 when it names
+// none. The front checks it against the roster before scheduling the worker.
+func reloadRequestedAccount(args []string) int {
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case reloadNewFlag, reloadHideFlag:
+		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadModelFlag, reloadEffortFlag, reloadCacheFlag:
+			index++
+		case reloadAccountFlag:
+			if index+1 < len(args) {
+				if account, err := strconv.Atoi(args[index+1]); err == nil && account > 0 {
+					return account
+				}
+			}
+			index++
+		default:
+			if account, err := strconv.Atoi(args[index]); err == nil && account > 0 {
+				return account
+			}
+		}
+	}
+	return 0
 }
 
 // normalizeReloadArgs maps every cache spelling a person reaches for onto the

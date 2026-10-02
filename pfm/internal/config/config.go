@@ -88,9 +88,10 @@ type ClaudePrefs struct {
 	// SystemPromptProduction.
 	SystemPrompt string
 	// Cache1H is the main chat's starting prompt-cache TTL: true hands 1h,
-	// false 5m, to the cache-live-control plugin as CACHE_LIVE_CONTROL_MAIN_TTL;
-	// the plugin owns the TTL from then on, and sub-agents are the plugin's (and
-	// their frontmatter's) to decide. Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
+	// false 5m, to the cache-live-control plugin as CACHE_LIVE_CONTROL_MAIN_TTL
+	// in the launch's process environment; the plugin owns the TTL from then on,
+	// and sub-agents are the plugin's (and their frontmatter's) to decide.
+	// Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
 	Cache1H      bool
 	NativeCursor bool
 	// MaxSubagentSpawnDepth and MaxConcurrentSubagents lift Claude Code's

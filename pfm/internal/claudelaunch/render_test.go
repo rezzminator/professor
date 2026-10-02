@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -46,7 +47,9 @@ func TestRenderFreshInteractive(t *testing.T) {
 	if !reflect.DeepEqual(launch.Unset, Hygiene()) || len(launch.Unset) != 22 {
 		t.Errorf("unset=%q", launch.Unset)
 	}
-	if !reflect.DeepEqual(launch.Env, []string{"CLAUDE_CONFIG_DIR=" + machine.Accounts[1].ConfigDir}) {
+	if !reflect.DeepEqual(launch.Env, []string{
+		"CLAUDE_CONFIG_DIR=" + machine.Accounts[1].ConfigDir, "CACHE_LIVE_CONTROL_MAIN_TTL=1h",
+	}) {
 		t.Errorf("env=%q", launch.Env)
 	}
 	if len(launch.Argv) < 2 || launch.Argv[0] != "--session-id" || launch.Argv[1] != "S" {
@@ -59,7 +62,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 		t.Errorf("settings=%#v", parsed.Settings)
 	}
 	for name, want := range map[string]string{
-		"CACHE_LIVE_CONTROL_MAIN_TTL": "1h", "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "8",
+		"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH":     "8",
 		"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "9007199254740991", "CLAUDE_CODE_TMUX_TRUECOLOR": "1",
 		"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0",
 		"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS":    "1", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
@@ -128,8 +131,8 @@ func TestRenderPluginEnvEveryPurposeAndAccount(t *testing.T) {
 func TestRenderImplicitAccount(t *testing.T) {
 	home, machine := renderMachine(t)
 	launch, _ := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Account: 1}, machine)
-	if len(launch.Env) != 0 {
-		t.Errorf("implicit env=%q", launch.Env)
+	if !reflect.DeepEqual(launch.Env, []string{"CACHE_LIVE_CONTROL_MAIN_TTL=1h"}) {
+		t.Errorf("implicit env=%q, want the cache TTL and no CLAUDE_CONFIG_DIR", launch.Env)
 	}
 }
 
@@ -137,11 +140,7 @@ func TestRenderImplicitAccount(t *testing.T) {
 // pins the whole cache surface by map equality: an extra or missing key fails.
 func cacheEnv(env map[string]string) map[string]string {
 	result := map[string]string{}
-	for _, name := range []string{
-		"CACHE_LIVE_CONTROL_MAIN_TTL", "CACHE_LIVE_CONTROL_AGENTS_TTL",
-		"CLAUDE_CODE_PROMPT_CACHE_TTL", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
-		"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M",
-	} {
+	for _, name := range cacheEnvNames {
 		if value, ok := env[name]; ok {
 			result[name] = value
 		}
@@ -149,24 +148,52 @@ func cacheEnv(env map[string]string) map[string]string {
 	return result
 }
 
+// cacheEntries keeps only the prompt-cache assignments of a launch's process
+// environment, in order.
+func cacheEntries(env []string) []string {
+	var result []string
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if slices.Contains(cacheEnvNames, name) {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+var cacheEnvNames = []string{
+	"CACHE_LIVE_CONTROL_MAIN_TTL", "CACHE_LIVE_CONTROL_AGENTS_TTL",
+	"CLAUDE_CODE_PROMPT_CACHE_TTL", "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
+	"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M",
+}
+
 // The cache knob hands only the main chat's starting lifetime to the
-// cache-live-control plugin; pfm sets no Claude Code TTL, main or sub-agent.
+// cache-live-control plugin, in the launch's process environment and never the
+// --settings env: Claude Code re-applies that block on every settings-file
+// reload, which would re-hand the plugin a handoff it already consumed. pfm sets
+// no Claude Code TTL, main or sub-agent.
 func TestRenderCacheLifetimeMainChatOnly(t *testing.T) {
 	home, machine := renderMachine(t)
 	for _, entry := range []struct {
 		cache1h bool
-		want    map[string]string
+		want    []string
 	}{
-		{true, map[string]string{"CACHE_LIVE_CONTROL_MAIN_TTL": "1h"}},
-		{false, map[string]string{"CACHE_LIVE_CONTROL_MAIN_TTL": "5m"}},
+		{true, []string{"CACHE_LIVE_CONTROL_MAIN_TTL=1h"}},
+		{false, []string{"CACHE_LIVE_CONTROL_MAIN_TTL=5m"}},
 	} {
 		value := entry.cache1h
 		launch, parsed := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Cache1H: &value}, machine)
 		if launch.Cache1H != entry.cache1h {
 			t.Errorf("cache1h=%t: launch.Cache1H=%t", entry.cache1h, launch.Cache1H)
 		}
-		if got := cacheEnv(parsed.SettingsEnv); !reflect.DeepEqual(got, entry.want) {
-			t.Errorf("cache1h=%t: settings cache env=%#v, want %#v", entry.cache1h, got, entry.want)
+		if got := cacheEntries(launch.Env); !reflect.DeepEqual(got, entry.want) {
+			t.Errorf("cache1h=%t: process cache env=%q, want %q", entry.cache1h, got, entry.want)
+		}
+		if got := cacheEnv(parsed.SettingsEnv); len(got) != 0 {
+			t.Errorf(
+				"cache1h=%t: settings env carries %#v; a settings reload would re-hand a consumed handoff",
+				entry.cache1h, got,
+			)
 		}
 	}
 }

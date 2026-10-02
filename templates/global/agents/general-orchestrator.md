@@ -50,6 +50,7 @@ An executor's brief carries the decided change in place of a problem: its `{id}`
 | `FAILED` with a cause | One re-dispatch with the cause in a changed brief, never the same brief twice; a second red is blocked with both causes |
 | `SPEC-DRIFT` from an executor | The change was not decided after all: it goes to a foreman as a problem, with what the executor found |
 | `BLOCKED` with a question | Answered by `SendMessage` to the same foreman or executor from what the caller handed over, else carried to the caller; the rest of the batch keeps running |
+| Any message to a foreman or executor after its dispatch | Closes with "continue, then return once more in the return shape" |
 
 ## Return
 

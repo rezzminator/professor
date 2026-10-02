@@ -42,7 +42,7 @@ Inline, everything the executor needs and nothing its body holds; the decision i
 | `DONE` verified | Record it; go on |
 | `DONE` not verified: a file outside its list, a check line missing | Treated as `FAILED` with that cause |
 | `FAILED` or `SPEC-DRIFT` | The brief was wrong until shown otherwise: read to the cause, then one re-dispatch with a changed brief, or finish it yourself when that is cheaper; a second red on one change returns `FAILED` with both causes |
-| `BLOCKED` with a question | Answered by `SendMessage` to the same executor |
+| `BLOCKED` with a question | Answered by `SendMessage` to the same executor, closing with "continue, then return once more in the return shape" |
 
 ## Law
 

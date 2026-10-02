@@ -71,7 +71,7 @@ func TestNewClaudeUsesNativeConfiguredSpawn(t *testing.T) {
 	}
 	parsed := parsedShell(t, plan.Run)
 	if parsed.SessionID == "" || parsed.PromptFile != mustProfessorPromptPath(t, home) ||
-		parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" || plan.Record == nil ||
+		launchEnv(t, plan.Run)["CACHE_LIVE_CONTROL_MAIN_TTL"] != "5m" || plan.Record == nil ||
 		plan.Record.SessionID != parsed.SessionID || plan.Record.Account != 42 {
 		t.Fatalf("fresh launch id=%q prompt=%q record=%#v", parsed.SessionID, parsed.PromptFile, plan.Record)
 	}
@@ -135,7 +135,7 @@ func TestNewClaudeNativeSpawnPreservesBypassLeanAndCachePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed := parsedShell(t, plan.Run)
-	if parsed.SettingsEnv["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" ||
+	if launchEnv(t, plan.Run)["CACHE_LIVE_CONTROL_MAIN_TTL"] != "1h" ||
 		parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "1" || !parsed.Autonomy {
 		t.Fatalf("native fresh settings=%#v autonomy=%t", parsed.SettingsEnv, parsed.Autonomy)
 	}

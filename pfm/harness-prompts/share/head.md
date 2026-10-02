@@ -52,7 +52,7 @@ Every call re-sends the whole context (§ Orchestration), so a call carries all 
 - Report failures, skipped checks, and unverified outcomes faithfully; "done" means verified done.
 - Use pfm MCP over CLI.
 - "What's up / how's it going" = summarize everything since the last prompt.
-- "Amen" = approved, happy, on track: keep going as planned.
+- "Amen" = approved, happy, on track: keep going as planned, and first answer with the next steps as a short numbered list, folding in any steer the message carries.
 
 # Boundaries
 

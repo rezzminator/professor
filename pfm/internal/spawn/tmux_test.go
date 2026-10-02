@@ -113,7 +113,8 @@ func requireTmuxRecord(t *testing.T, recorder *obs.Recorder, index int, subcmd, 
 }
 
 // TestTmuxSpawnerRecordsEveryInvocation: the spawn façade terminates
-// through the observed tmux command — SendKey and Capture each one record.
+// through the observed tmux command — SendKey and Capture each one record,
+// SendPaste two (its buffer load, then the paste into the pane).
 func TestTmuxSpawnerRecordsEveryInvocation(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	tmux := TmuxSpawner{Binary: fakeTmuxBinary(t), TmuxDir: t.TempDir()}
@@ -123,8 +124,13 @@ func TestTmuxSpawnerRecordsEveryInvocation(t *testing.T) {
 	if _, err := tmux.Capture(ctx, "cc-1-2-3", "%1"); err != nil {
 		t.Fatal(err)
 	}
+	if err := tmux.SendPaste(ctx, "cc-1-2-3", "%1", "line one\nline two"); err != nil {
+		t.Fatal(err)
+	}
 	requireTmuxRecord(t, recorder, 0, "send-keys", "%1")
 	requireTmuxRecord(t, recorder, 1, "capture-pane", "%1")
+	requireTmuxRecord(t, recorder, 2, "load-buffer", "")
+	requireTmuxRecord(t, recorder, 3, "paste-buffer", "%1")
 	_ = context.Background
 }
 

@@ -52,12 +52,29 @@ type fakeCodex struct {
 	// tests drive the real proof reader.
 	ledger string
 
+	// typedBurst is Codex 0.159 reading multi-line text typed as keys: it
+	// takes the burst for a paste of its own and turns every Enter that
+	// follows into a newline, so the draft never submits. pasted is the size
+	// of a bracketed paste over the composer's inline edge, drawn as the
+	// placeholder the real composer collapses it into.
+	typedBurst bool
+	pasted     int
+
 	sessions []SessionSpec
 	keys     []string
 	composer string
 	stage    string
 	name     string
 }
+
+// fakeComposerRows is how many draft lines fit on the fake's screen; a taller
+// draft scrolls its first line — and the composer glyph — off the top, as a
+// typed brief did in the real pane.
+const fakeComposerRows = 20
+
+// fakePasteEdge is the composer's inline edge: a longer bracketed paste is
+// drawn as a placeholder (inject.CodexInlineMax sits 10% below it).
+const fakePasteEdge = 1001
 
 // fakeStatusLine is the idle-composer status row, whose token meter is the
 // half of readiness a modal cannot fake.
@@ -123,7 +140,14 @@ func (fake *fakeCodex) Capture(_ context.Context, _, _ string) (string, error) {
 		if fake.name != "" && !fake.silentRename {
 			header = "• Session renamed to " + fake.name + ".\ncodex · " + fake.name
 		}
-		return header + "\n› " + fake.composer + "\n" + fakeStatusLine, nil
+		if fake.pasted > 0 {
+			return fmt.Sprintf("%s\n› [Pasted Content %d chars]\n%s", header, fake.pasted, fakeStatusLine), nil
+		}
+		draft := "› " + fake.composer
+		if lines := strings.Split(draft, "\n"); len(lines) > fakeComposerRows {
+			draft = "  " + strings.Join(lines[len(lines)-fakeComposerRows:], "\n  ")
+		}
+		return header + "\n" + draft + "\n" + fakeStatusLine, nil
 	}
 }
 
@@ -132,10 +156,24 @@ func (fake *fakeCodex) SendLiteral(_ context.Context, _, _, text string) error {
 	defer fake.mutex.Unlock()
 	fake.keys = append(fake.keys, "literal:"+text)
 	fake.composer += text
+	if strings.Contains(text, "\n") {
+		fake.typedBurst = true
+	}
 	if fake.stage == "composer" &&
 		fake.offersRename &&
 		strings.HasPrefix(fake.composer, codexRenameCommand) {
 		fake.stage = "offered"
+	}
+	return nil
+}
+
+func (fake *fakeCodex) SendPaste(_ context.Context, _, _, text string) error {
+	fake.mutex.Lock()
+	defer fake.mutex.Unlock()
+	fake.keys = append(fake.keys, "paste:"+text)
+	fake.composer += text
+	if size := len([]rune(text)); size >= fakePasteEdge {
+		fake.pasted = size
 	}
 	return nil
 }
@@ -156,6 +194,10 @@ func (fake *fakeCodex) SendKey(_ context.Context, _, _, key string) error {
 	}
 	switch key {
 	case "Enter":
+		if fake.stage == "composer" && fake.typedBurst {
+			fake.composer += "\n"
+			return nil
+		}
 		if fake.stage == "composer" && fake.name != "" &&
 			(fake.deafComposer || fake.dropsEnters > 0) {
 			// A busy engine reading its input in bursts drops the newline that
@@ -187,6 +229,7 @@ func (fake *fakeCodex) SendKey(_ context.Context, _, _, key string) error {
 			fake.stage = "composer"
 		default:
 			fake.composer = ""
+			fake.pasted = 0
 		}
 	case "BSpace":
 		runes := []rune(fake.composer)
@@ -278,7 +321,7 @@ func TestCodexThreadIsRenamedThenPrompted(t *testing.T) {
 		"clear",
 		"literal:_KILL codex worker",
 		"key:Enter",
-		"literal:read the incident report",
+		"paste:read the incident report",
 		"key:Enter",
 	}
 	if got := collapseClears(fake.keys); strings.Join(got, "|") != strings.Join(want, "|") {
@@ -572,6 +615,61 @@ func TestCodexPromptIsResentUntilItLeavesTheComposer(t *testing.T) {
 	}
 	if fake.composer != "" {
 		t.Fatalf("composer still holds %q", fake.composer)
+	}
+}
+
+// TestCodexLongMultiLineLaunchPromptIsPastedAndSubmitted is the regression
+// for the account-sync seats born with their brief typed but never sent
+// (Codex 0.159): a multi-line prompt typed as keys was read as a burst whose
+// Enters became newlines, and its tall draft pushed the composer row off the
+// screen, which the old submit check read as "left the composer". The prompt
+// must travel as one bracketed paste and the submit must be proven by an idle
+// composer row on screen.
+func TestCodexLongMultiLineLaunchPromptIsPastedAndSubmitted(t *testing.T) {
+	var brief strings.Builder
+	brief.WriteString("# Brief — task 4-a, round 1\n\n")
+	for line := 1; line <= 60; line++ {
+		fmt.Fprintf(&brief, "- standing rule %d: read the task file, then build it\n", line)
+	}
+	brief.WriteString("\nReply with the single word ok.")
+	request := codexRequest()
+	request.Prompt = brief.String()
+	fake := newFakeCodex()
+	result, err := Run(context.Background(), fake, request)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !result.Prompted || len(result.Warnings) != 0 {
+		t.Fatalf("result = %#v, want a delivered prompt and no warning", result)
+	}
+	if fake.composer != "" || fake.pasted != 0 {
+		t.Fatalf("composer still holds the brief (%d runes, pasted %d)", len([]rune(fake.composer)), fake.pasted)
+	}
+	if countKey(fake.keys, "paste:"+request.Prompt) != 1 {
+		t.Fatalf("keys = %q, want the brief pasted exactly once", fake.keys)
+	}
+}
+
+// TestComposerReleasedNeedsAnIdleComposerRow pins the submit proof: a screen
+// with no composer row (a draft taller than the pane) or a composer holding
+// the prompt or its paste placeholder is not a submitted prompt.
+func TestComposerReleasedNeedsAnIdleComposerRow(t *testing.T) {
+	needle := composerNeedle("# Brief — task 4-a\nbody")
+	for _, test := range []struct {
+		name    string
+		capture string
+		want    bool
+	}{
+		{"idle composer row", "› # Brief — task 4-a\n• Working (2s • esc to interrupt)\n› Ask Codex to do anything\n" + fakeStatusLine, true},
+		{"draft taller than the pane", "  - line 59\n  - line 60\n  Reply ok.\n" + fakeStatusLine, false},
+		{"paste placeholder", "› [Pasted Content 9387 chars]\n" + fakeStatusLine, false},
+		{"fingerprint in the composer", "› # Brief — task 4-a\n" + fakeStatusLine, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := composerReleased(test.capture, needle); got != test.want {
+				t.Fatalf("composerReleased() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

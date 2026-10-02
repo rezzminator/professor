@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -203,6 +204,34 @@ func (tmux TmuxSpawner) SendLiteral(
 		"send-keys", "-t", target, "-l", "--", text,
 	).Run()
 }
+
+// SendPaste loads text into a private one-shot tmux buffer and pastes it
+// with -p, so an engine that enables bracketed paste receives it as a single
+// paste event; -d deletes the buffer once pasted.
+func (tmux TmuxSpawner) SendPaste(
+	ctx context.Context,
+	socket, target, text string,
+) error {
+	buffer := fmt.Sprintf("pfm-spawn-%d-%d", os.Getpid(), pasteSequence.Add(1))
+	load := tmux.command(ctx, socket, "load-buffer", "-b", buffer, "-")
+	load.Stdin = strings.NewReader(text)
+	if err := load.Run(); err != nil {
+		return fmt.Errorf("load the prompt into tmux buffer %s: %w", buffer, err)
+	}
+	if err := tmux.command(
+		ctx, socket, "paste-buffer", "-d", "-p", "-b", buffer, "-t", target,
+	).Run(); err != nil {
+		if deleteErr := tmux.command(ctx, socket, "delete-buffer", "-b", buffer).Run(); deleteErr != nil {
+			return fmt.Errorf("paste tmux buffer %s: %w (delete it: %v)", buffer, err, deleteErr)
+		}
+		return fmt.Errorf("paste tmux buffer %s: %w", buffer, err)
+	}
+	return nil
+}
+
+// pasteSequence keeps concurrent spawns in one process off each other's
+// paste buffers.
+var pasteSequence atomic.Uint64
 
 func (tmux TmuxSpawner) SendKey(
 	ctx context.Context,

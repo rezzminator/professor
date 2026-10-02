@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
@@ -596,14 +597,21 @@ func confirmWait(timings Timings) time.Duration {
 	return wait
 }
 
-// submitPrompt types the launch prompt and PROVES it left the composer.
+// submitPrompt pastes the launch prompt and PROVES it left the composer.
 //
-// The pause between the text and the Enter is what keeps a TUI from receiving
-// the newline before it has processed the text — the same gap chat.sh leaves
-// when it injects. The re-sends after it are what keep a dropped newline from
-// passing as a delivery: an engine still finishing its MCP boot reads its
-// input in bursts, and the burst that carries a lone Enter is the one it
-// misses.
+// The prompt travels as ONE bracketed paste, never as typed keystrokes: Codex
+// (0.159) reads a typed burst as a paste of its own, holds the burst's tail
+// until the next key arrives and turns every Enter inside that window into a
+// newline, so a typed brief sat in the composer however many Enters followed
+// it. A bracketed paste reaches the composer whole, as text or as its
+// "[Pasted Content N chars]" placeholder, and the next Enter submits it.
+//
+// The pause between the paste and the Enter is what keeps a TUI from
+// receiving the newline before it has processed the text — the same gap
+// chat.sh leaves when it injects. The re-sends after it are what keep a
+// dropped newline from passing as a delivery: an engine still finishing its
+// MCP boot reads its input in bursts, and the burst that carries a lone Enter
+// is the one it misses.
 func submitPrompt(
 	ctx context.Context,
 	tmux Tmux,
@@ -611,7 +619,7 @@ func submitPrompt(
 	timings Timings,
 	trace tracer,
 ) error {
-	if err := tmux.SendLiteral(ctx, socket, target, text); err != nil {
+	if err := tmux.SendPaste(ctx, socket, target, text); err != nil {
 		return err
 	}
 	needle := composerNeedle(text)
@@ -633,7 +641,7 @@ func submitPrompt(
 			return err
 		}
 		if pollCapture(ctx, tmux, socket, target, step, func(capture string) bool {
-			return !composerHolds(capture, needle)
+			return composerReleased(capture, needle)
 		}) {
 			trace.step("prompt left the composer on press %d", press+1)
 			return nil
@@ -658,27 +666,28 @@ func composerNeedle(text string) string {
 	return naming.ClipRunes(flattenComposerText(first), composerNeedleMax)
 }
 
-// composerHolds reports whether the composer — the LAST marker line, below
-// every submitted turn Codex keeps on screen — still carries the fingerprint.
+// composerHolds reports whether the composer — the LAST line starting with
+// the composer glyph, below every submitted turn Codex keeps on screen — still
+// carries the prompt: its fingerprint, or the placeholder a long paste
+// collapses into.
 func composerHolds(capture, needle string) bool {
 	if needle == "" {
 		return false
 	}
-	line := lastLineContaining(capture, codexComposer)
+	line := inject.LastComposerLine(capture)
 	if line == "" {
 		return false
 	}
-	return strings.Contains(flattenComposerText(line), needle)
+	return strings.Contains(flattenComposerText(line), needle) ||
+		inject.HasPastePlaceholder(line)
 }
 
-func lastLineContaining(capture, marker string) string {
-	last := ""
-	for _, line := range strings.Split(capture, "\n") {
-		if strings.Contains(line, marker) {
-			last = line
-		}
-	}
-	return last
+// composerReleased is the submit proof: an idle composer row is on screen
+// and it no longer holds the prompt. A screen with no composer row proves
+// nothing — a draft taller than the pane pushes the row off the top, and
+// reading that as "submitted" is what let a typed-but-unsent brief pass.
+func composerReleased(capture, needle string) bool {
+	return inject.LastComposerLine(capture) != "" && !composerHolds(capture, needle)
 }
 
 func flattenComposerText(value string) string {

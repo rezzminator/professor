@@ -35,6 +35,10 @@ type Tmux interface {
 	NewSession(ctx context.Context, spec SessionSpec) error
 	Capture(ctx context.Context, socket, target string) (string, error)
 	SendLiteral(ctx context.Context, socket, target, text string) error
+	// SendPaste delivers text as one bracketed paste (tmux paste-buffer -p),
+	// the transport for a launch prompt: byte-safe at any size and length,
+	// and never read by the engine as a burst of typed keys.
+	SendPaste(ctx context.Context, socket, target, text string) error
 	SendKey(ctx context.Context, socket, target, key string) error
 }
 

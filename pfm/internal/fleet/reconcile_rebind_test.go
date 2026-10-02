@@ -36,6 +36,7 @@ func (noopCodexRenamer) Capture(context.Context, string, string) (string, error)
 	return "", nil
 }
 func (noopCodexRenamer) SendLiteral(context.Context, string, string, string) error { return nil }
+func (noopCodexRenamer) SendPaste(context.Context, string, string, string) error   { return nil }
 func (noopCodexRenamer) SendKey(context.Context, string, string, string) error     { return nil }
 
 // TestReconcileCodexPanesRecordsARebind: ReconcileCodexPanesWith walks the
@@ -168,6 +169,11 @@ func (renamer *recordingCodexRenamer) SendLiteral(_ context.Context, _, _, value
 	} else {
 		renamer.stage = 3
 	}
+	return nil
+}
+
+func (renamer *recordingCodexRenamer) SendPaste(_ context.Context, _, _, value string) error {
+	renamer.literals = append(renamer.literals, value)
 	return nil
 }
 

@@ -44,6 +44,9 @@ run_sut() { # run_sut <args...>: OUT, ERR and RC of one call
   OUT=$(sut "$@" 2> "$T/stderr")
   RC=$?
   ERR=$(< "$T/stderr")
+  # Outside the script's exit contract (0, 2, 64) only the interpreter can have answered:
+  # keep what it said in the step log, since every case's own check sees only OUT and ERR.
+  case $RC in 0 | 2 | 64) ;; *) printf 'run_sut: profile-report.sh %s exited %s (outside 0/2/64); stdout %s bytes; stderr:\n%s\n' "$*" "$RC" "${#OUT}" "${ERR:-<empty>}" ;; esac
 }
 line_with() { grep -F -- "$2" <<< "$1" | head -n 1; } # the first line of <text> containing <needle>
 cell() { # cell <profile.tsv> <step> <column>

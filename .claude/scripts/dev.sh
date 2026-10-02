@@ -84,6 +84,10 @@ source "$REPO_ROOT/pfm/scripts/repo-git.sh" || { echo "dev.sh: cannot source pfm
 source "$REPO_ROOT/infra/fence/steps.sh" || { echo "dev.sh: cannot source infra/fence/steps.sh" >&2; exit 2; }
 # shellcheck source=../../infra/fence/checks.sh
 source "$REPO_ROOT/infra/fence/checks.sh" || { echo "dev.sh: cannot source infra/fence/checks.sh" >&2; exit 2; }
+# The last line of every run that made a timing run dir is `RUN DIR: <absolute host path>`
+# (timing_run_report in infra/fence/checks.sh) — printed on exit, after the footer and, under
+# iso, after the host's own lines (the gate-history ingest).
+trap timing_run_report EXIT
 
 # skip_gate <label> <go-test.json>: every skipped test must be named in
 # pfm/scripts/known-skips.tsv (scripts/skip-check.sh). An unlisted skip is a
@@ -348,6 +352,7 @@ act_pfm() {
       if ! timing_run="$(timing_run_dir "$timing_base")"; then
         fail_step "pfm: timing run directory could not be created under $timing_base"; return
       fi
+      timing_run_note "$timing_run"
       pfm_e2e_rows "$d" "$timing_run" ;;
     # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
     # by pfm/.testcoverage.yml (a ratchet: measured, raised, never lowered).
@@ -423,8 +428,13 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   # The worktree mount is read-only; coverage profiles land in container HOME.
   extra+=(-e COVER_DIR=/root/cover)
   # Only generated timing artifacts are writable; the source mount stays read-only.
+  # PFM_TEST_TIMING_HOST maps a fence run dir back to its host path; the fence writes that path
+  # to the note PFM_TEST_RUN_NOTE, and this script's EXIT trap prints it as the last line.
   mkdir -p "$TMP_BASE/timing"
-  extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
+  TIMING_RUN_NOTE="$(mktemp "$TMP_BASE/timing/.run-note.XXXXXX")" \
+    || { fail_step "iso: the run-dir note could not be created under $TMP_BASE/timing"; exit 1; }
+  extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing
+    -e "PFM_TEST_TIMING_HOST=$TMP_BASE/timing" -e "PFM_TEST_RUN_NOTE=/pfm-timing/${TIMING_RUN_NOTE##*/}")
   if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
   # Profiling and step-scheduling knobs reach the fence when the caller set them.
   local knob

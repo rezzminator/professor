@@ -64,7 +64,9 @@ case "$1 ${2:-}" in
           exit 1
         fi ;;
       *'test -e '*egress.ready*)
-        # A slow daemon: each readiness probe costs real wall time.
+        # A slow daemon: each readiness probe costs real wall time; STUB_PROBE_LOG
+        # records when each probe starts.
+        [ -z "${STUB_PROBE_LOG:-}" ] || echo "${EPOCHREALTIME/./}" >>"$STUB_PROBE_LOG"
         [ -z "${STUB_EGRESS_READY_DELAY:-}" ] || command -p sleep "$STUB_EGRESS_READY_DELAY"
         [ "${STUB_EGRESS_READY:-1}" = 1 ] || exit 1 ;;
       *'grep -q '^EGRESS*) [ -n "${STUB_EGRESS_VERDICT-PASS}" ] || exit 1 ;;
@@ -400,13 +402,17 @@ if [ "$RC" -eq 1 ] &&
 else bad "capture readiness timeout" "rc=$RC" "$OUT"; fi
 
 # ---- 21b: the readiness bound is wall time; a slow docker exec cannot stretch it.
-started="${EPOCHREALTIME/./}"
-STUB_EGRESS_READY=0 STUB_EGRESS_READY_DELAY=0.3 STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
-wall_ms=$(( (${EPOCHREALTIME/./} - started) / 1000 ))
-if [ "$RC" -eq 1 ] && [ "$wall_ms" -lt 5000 ] &&
+# Judged on the probes' own start times, never the whole run's wall, so a loaded
+# host cannot fail it: a 1 s bound with 0.6 s probes starts its last probe by
+# ~0.6 s; a bound that counted five probes instead would start its last at ~2.4 s.
+: >"$T/probes.log"
+STUB_PROBE_LOG="$T/probes.log" STUB_EGRESS_READY=0 STUB_EGRESS_READY_DELAY=0.6 \
+  STUB_ROW_FIXTURE="$T/row.fixture.tsv" run_sut --lanes E1
+span_ms=$(( ($(tail -1 "$T/probes.log") - $(head -1 "$T/probes.log")) / 1000 ))
+if [ "$RC" -eq 1 ] && [ "$span_ms" -lt 2000 ] &&
   grep -qF 'egress: ✗ NOT RECORDED — the capture did not start in 1s' <<<"$OUT"; then
-  ok "a 1 s readiness bound holds against 0.3 s readiness probes"
-else bad "readiness bound under slow probes" "rc=$RC wall=${wall_ms}ms" "$OUT"; fi
+  ok "a 1 s readiness bound holds against 0.6 s readiness probes"
+else bad "readiness bound under slow probes" "rc=$RC probe span=${span_ms}ms (want < 2000)" "$(cat "$T/probes.log")" "$OUT"; fi
 
 # ---- 21c: a bound that is not whole seconds is refused at entry.
 LANE_EGRESS_READY_SECS=1.5 run_sut --lanes E1

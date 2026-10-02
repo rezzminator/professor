@@ -321,8 +321,10 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		LastN:    2,
 		MaxBytes: 1000,
 	})
+	// The human's interrupt is a turn end, kept in the record the way a
+	// model-server error is (transcript.interruptedTurn).
 	wantTurns := []Turn{
-		{Role: "assistant", Text: "Assistant visible"},
+		{Role: "assistant", Text: "[turn aborted: interrupted]"},
 		{Role: "user", Text: "Final prompt"},
 	}
 	if !reflect.DeepEqual(read.Turns, wantTurns) ||

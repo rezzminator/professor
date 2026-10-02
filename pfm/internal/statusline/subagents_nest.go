@@ -27,13 +27,15 @@ type agentNesting struct {
 // agentTree is one scan of the session's subagents directory: every agent's
 // parent from its meta file's parentAgentId, which Claude Code writes for an
 // agent spawned by another agent (a main-loop spawn carries none). open caches
-// each agent's own turn state for the render.
+// each agent's own turn state for the render, spent each agent's billing.
 type agentTree struct {
 	dir      string
 	children map[string][]string
 	err      error
 	warnings []string
 	open     map[string]turnState
+	spent    map[string]agentSpend
+	ids      []string
 }
 
 type turnState int
@@ -54,7 +56,7 @@ const tailWindow = 64 << 10
 // file that cannot be read, sets err: the parent of that agent is unknown, so
 // no row may claim a count it cannot vouch for.
 func scanAgentTree(sessionTranscript string) *agentTree {
-	tree := &agentTree{children: map[string][]string{}, open: map[string]turnState{}}
+	tree := &agentTree{children: map[string][]string{}, open: map[string]turnState{}, spent: map[string]agentSpend{}}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		tree.err = errors.New("payload names no session transcript")
 		return tree
@@ -72,6 +74,7 @@ func scanAgentTree(sessionTranscript string) *agentTree {
 			continue
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".meta.json")
+		tree.ids = append(tree.ids, id)
 		path := filepath.Join(tree.dir, name)
 		raw, err := os.ReadFile(path)
 		if err == nil {
@@ -213,7 +216,7 @@ func messageTurnOpen(line []byte) (open, ok bool) {
 	}
 	if json.Unmarshal(entry.Message.Content, &blocks) == nil {
 		for _, block := range blocks {
-			if block.Type == "tool_use" {
+			if block.Type == blockToolUse {
 				return true, true
 			}
 		}

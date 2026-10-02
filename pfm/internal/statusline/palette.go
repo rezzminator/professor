@@ -20,6 +20,7 @@ const (
 	cCompleted  = "\x1b[38;5;117m"
 	cFailed     = "\x1b[1;38;5;203m"
 	cElapsed    = "\x1b[38;5;215m"
+	cCost       = "\x1b[38;5;222m"
 	cTools      = "\x1b[38;5;87m"
 	cCompaction = "\x1b[38;5;177m"
 	cDelegating = "\x1b[38;5;171m"

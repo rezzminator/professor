@@ -547,6 +547,44 @@ checks_pfm_e2e() {
   checks_pfm_profile_pointers "$run_dir/e2e.json" "$run_dir/profile" "$before"
 }
 
+# The RUN DIR line: a test run's caller reads the run dir it made from the output's last line,
+# `RUN DIR: <absolute host path>`, never by guessing the newest run.* (a gate from another tree
+# writes under another base). Each timing_run_dir caller records its run dir with timing_run_note;
+# dev.sh's EXIT trap prints it with timing_run_report, after every other line.
+timing_run_note() { TIMING_RUN_LAST="$1"; }
+
+# timing_run_host_path <run dir>: the run dir's host path. Inside the fence the base
+# PFM_TEST_TIMING_DIR (/pfm-timing) is the bind of PFM_TEST_TIMING_HOST (dev.sh iso); with that
+# unset, or a run dir outside the base, the path is already the host's and is printed as is.
+timing_run_host_path() {
+  local run="$1"
+  if [[ -n "${PFM_TEST_TIMING_HOST:-}" && -n "${PFM_TEST_TIMING_DIR:-}" && "$run" == "$PFM_TEST_TIMING_DIR"/* ]]; then
+    printf '%s/%s\n' "$PFM_TEST_TIMING_HOST" "${run#"$PFM_TEST_TIMING_DIR"/}"
+  else
+    printf '%s\n' "$run"
+  fi
+}
+
+# timing_run_report: dev.sh's EXIT trap. A run that made a run dir prints `RUN DIR: <host path>`;
+# under dev.sh iso (PFM_TEST_RUN_NOTE set) it writes the host path to that note instead, and the host
+# dev.sh — whose own lines (the gate-history ingest, its footer) come after the container's — prints
+# the note it handed in (TIMING_RUN_NOTE) and removes it. No run dir made, no line. BROKEN STATE: a
+# note that cannot be written is a stderr line naming it, and the fence prints the line itself.
+timing_run_report() {
+  local path=""
+  if [[ -n "${TIMING_RUN_LAST:-}" ]]; then
+    path="$(timing_run_host_path "$TIMING_RUN_LAST")"
+    if [[ -n "${PFM_TEST_RUN_NOTE:-}" ]]; then
+      if printf '%s\n' "$path" 2>/dev/null > "$PFM_TEST_RUN_NOTE"; then return 0; fi
+      echo "timing_run_report: the run-dir note $PFM_TEST_RUN_NOTE could not be written — the host cannot repeat the RUN DIR line" >&2
+    fi
+  elif [[ -n "${TIMING_RUN_NOTE:-}" ]]; then
+    [[ ! -s "$TIMING_RUN_NOTE" ]] || path="$(head -n 1 "$TIMING_RUN_NOTE")"
+    rm -f "$TIMING_RUN_NOTE"
+  fi
+  [[ -z "$path" ]] || printf 'RUN DIR: %s\n' "$path"
+}
+
 checks_pfm_test() {
   local d="$1" flags_text timing_base timing_run
   # -count=1 is not optional: without it a package whose inputs are unchanged
@@ -561,6 +599,7 @@ checks_pfm_test() {
   if ! timing_run="$(timing_run_dir "$timing_base")"; then
     fail_step "pfm: timing run directory could not be created under $timing_base"; return
   fi
+  timing_run_note "$timing_run"
   checks_pfm_unit "$d" "$timing_run" "$flags_text"
   checks_pfm_e2e "$d" "$timing_run"
 }
@@ -773,6 +812,7 @@ gate_run() { # pfm, templates, or all
     fail_step "gate: timing run directory could not be created under $base"
     return 1
   fi
+  timing_run_note "$run_dir"
   steps_reset
   if [[ "$target" == pfm || "$target" == all ]]; then
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir"

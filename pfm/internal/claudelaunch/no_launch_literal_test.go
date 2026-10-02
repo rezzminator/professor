@@ -69,7 +69,8 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 	"internal/statusline/render.go": {"reads engine telemetry", []string{
 		"ANTHROPIC_MODEL", "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
 	}},
-	"internal/testjail/testjail.go": {"sets fixture identity", []string{"CLAUDE_CODE_SESSION_ID"}},
+	"internal/testjail/launch_shell.go": {"pins the launch shell", []string{"CLAUDE_CODE_SHELL"}},
+	"internal/testjail/testjail.go":     {"sets fixture identity", []string{"CLAUDE_CODE_SESSION_ID"}},
 }
 
 var launchEnvFamily = regexp.MustCompile(

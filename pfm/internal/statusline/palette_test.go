@@ -21,7 +21,6 @@ func TestMainLineWearsTheSubagentPalette(t *testing.T) {
 		{"model", l1, cModel + "◆ Opus 4"},
 		{"effort", l1, cEffort + "🏎️ high"},
 		{"label", l1, cLabel + "🔖 BUILDER:1"},
-		{"tokens", l2, cTokens + "🧮10.3K"},
 		{"elapsed", l2, cElapsed + "⏳ 5m32s"},
 	} {
 		if !strings.Contains(want.line, want.text) {

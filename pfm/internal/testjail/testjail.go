@@ -51,6 +51,10 @@ func Run(m *testing.M) int {
 		warnSetup("scrub PATH: %v", err)
 		return 1
 	}
+	if err := pinLaunchShell(deps.Resolve); err != nil {
+		warnSetup("%v", err)
+		return 1
+	}
 	// Installer tests must not inherit an operator account as an MCP write
 	// target. Packages that can install host state enter through this jail.
 	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {
@@ -101,13 +105,11 @@ func Run(m *testing.M) int {
 	}
 	// No test fetches a source-fetched global skill from its public repo: an
 	// install run in the jail skips the fetch and doctor reports OFFLINE.
-	if err := os.Setenv(paths.EnvSkillSourcesOffline, "1"); err != nil {
-		warnSetup("set %s: %v", paths.EnvSkillSourcesOffline, err)
-		return 1
-	}
-	if err := os.Setenv(paths.EnvThemesOffline, "1"); err != nil {
-		warnSetup("set %s: %v", paths.EnvThemesOffline, err)
-		return 1
+	for _, name := range []string{paths.EnvSkillSourcesOffline, paths.EnvThemesOffline} {
+		if err := os.Setenv(name, "1"); err != nil {
+			warnSetup("set %s: %v", name, err)
+			return 1
+		}
 	}
 	// A `go` child (internal/update's rebuild, a `go run`) derives its cache and
 	// telemetry directories from HOME/XDG_CONFIG_HOME when they are unset, and

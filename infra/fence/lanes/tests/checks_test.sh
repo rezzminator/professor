@@ -211,6 +211,9 @@ if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then
     ok 'templates.mirrors is registered with <run>/bin/pfm, same position and light; check-map and pfm.unit keep their arguments'
   else bad 'kept pfm registration' "$(grep -E '^(pfm.unit|templates.check-map|templates.mirrors) ' "$T/registered.args")"; fi
 else bad 'gate_run all (kept pfm registration)' "$(cat "$T/reuse.out")"; fi
+if [ -n "${reuse_run:-}" ] && [ "${TIMING_RUN_LAST:-}" = "$reuse_run" ]; then
+  ok 'gate_run records the run dir it made for the RUN DIR line'
+else bad 'gate_run run-dir record' "recorded: ${TIMING_RUN_LAST:-<none>}" "made: ${reuse_run:-<none>}"; fi
 
 STUB_STEPS_RC=1
 if ! gate_run all >"$T/red.out"; then
@@ -573,6 +576,9 @@ if grep -Fq "$serial_run/profile pfm: go test -- bash $T/fx/pfm/scripts/test-sha
   grep -Fxq "rows $T/fx/pfm $serial_run $serial_run/profile" "$STUB_EVENTS"; then
   ok 'iso test pfm profiles its unit and e2e rows into its run dir'
 else bad 'serial test rows' "$(cat "$T/unit.calls")" "$(cat "$STUB_EVENTS")"; fi
+if [ "${TIMING_RUN_LAST:-}" = "$serial_run" ]; then
+  ok 'checks_pfm_test records the run dir it made for the RUN DIR line'
+else bad 'checks_pfm_test run-dir record' "recorded: ${TIMING_RUN_LAST:-<none>}" "made: $serial_run"; fi
 
 # checks_gate_check_map: the pfm pfm.unit kept in <run>/bin when it is there, a build of its own when it is not.
 head_() { :; }
@@ -636,5 +642,42 @@ done
 if [ "$(cat "$T/mirrors-args.out")" = "$(printf 'opencode-arg [%s]\nopencode-arg []' "$T/some-pfm")" ]; then
   ok 'checks_templates_mirrors passes its pfm argument to the opencode check, and none when called bare'
 else bad 'mirrors argument' "$(cat "$T/mirrors-args.out")"; fi
+
+# The RUN DIR line (dev.sh's EXIT trap, so it is the output's last line): the run dir this invocation
+# made, by its HOST path — inside the fence /pfm-timing is the bind of PFM_TEST_TIMING_HOST.
+run_report() { # run_report <TIMING_RUN_LAST> <PFM_TEST_TIMING_HOST> <PFM_TEST_RUN_NOTE> <TIMING_RUN_NOTE>
+  TIMING_RUN_LAST="$1" PFM_TEST_TIMING_DIR=/pfm-timing PFM_TEST_TIMING_HOST="$2" PFM_TEST_RUN_NOTE="$3" TIMING_RUN_NOTE="$4" \
+    timing_run_report 2>&1
+}
+out="$(run_report /pfm-timing/run.abc123 /tmp/gate-tip/timing '' '')"
+if [ "$out" = 'RUN DIR: /tmp/gate-tip/timing/run.abc123' ]; then
+  ok 'RUN DIR names the host path when PFM_TEST_TIMING_HOST is set'
+else bad 'RUN DIR host path' "$out"; fi
+out="$(run_report /pfm-timing/run.abc123 '' '' '')"
+if [ "$out" = 'RUN DIR: /pfm-timing/run.abc123' ]; then
+  ok 'RUN DIR names the run dir as made when PFM_TEST_TIMING_HOST is unset (a host run)'
+else bad 'RUN DIR without host' "$out"; fi
+out="$(run_report '' /tmp/gate-tip/timing '' '')"
+if [ -z "$out" ]; then
+  ok 'no run dir made, no RUN DIR line'
+else bad 'RUN DIR with no run dir' "$out"; fi
+rm -f "$T/run-note"
+out="$(run_report /pfm-timing/run.abc123 /tmp/gate-tip/timing "$T/run-note" '')"
+if [ -z "$out" ] && [ "$(cat "$T/run-note" 2>/dev/null)" = /tmp/gate-tip/timing/run.abc123 ]; then
+  ok 'under dev.sh iso the fence hands the host path to the note and leaves the line to the host'
+else bad 'RUN DIR note write' "stdout: $out" "note: $(cat "$T/run-note" 2>&1)"; fi
+out="$(run_report '' '' '' "$T/run-note")"
+if [ "$out" = 'RUN DIR: /tmp/gate-tip/timing/run.abc123' ] && [ ! -e "$T/run-note" ]; then
+  ok 'the host prints the note it was handed as the RUN DIR line and removes the note'
+else bad 'RUN DIR note read' "$out" "$(ls -l "$T/run-note" 2>&1)"; fi
+: > "$T/run-note"
+out="$(run_report '' '' '' "$T/run-note")"
+if [ -z "$out" ] && [ ! -e "$T/run-note" ]; then
+  ok 'an empty note (the fence made no run dir) prints nothing and is removed'
+else bad 'RUN DIR empty note' "$out" "$(ls -l "$T/run-note" 2>&1)"; fi
+out="$(run_report /pfm-timing/run.abc123 /tmp/gate-tip/timing "$T/no-such-dir/run-note" '')"
+if [ "$(printf '%s\n' "$out" | tail -1)" = 'RUN DIR: /tmp/gate-tip/timing/run.abc123' ] && [[ "$out" == *"$T/no-such-dir/run-note could not be written"* ]]; then
+  ok 'a note that cannot be written is named and the fence prints the line itself'
+else bad 'RUN DIR unwritable note' "$out"; fi
 
 shtest_end

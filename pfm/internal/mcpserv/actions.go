@@ -84,7 +84,19 @@ func (service *Service) chatStatus(
 	if err != nil {
 		return nil, StatusOutput{}, fmt.Errorf("chat_status: %w", err)
 	}
-	return nil, StatusOutput(status), nil
+	return nil, statusOutput(status), nil
+}
+
+// statusOutput copies the JSON contract of a status field by field: headless.Status
+// also carries json:"-" evidence (PendingTool, QuietSeconds) the tool never returns.
+func statusOutput(status headless.Status) StatusOutput {
+	return StatusOutput{
+		Name: status.Name, State: status.State, IdleSeconds: status.IdleSeconds,
+		Engine: status.Engine, Model: status.Model, CWD: status.CWD,
+		SessionID: status.SessionID, Socket: status.Socket, ContextPct: status.ContextPct,
+		Last: status.Last, Error: status.Error, Summary: status.Summary,
+		SummaryCached: status.SummaryCached, Ask: status.Ask,
+	}
 }
 
 func (service *Service) chatNew(

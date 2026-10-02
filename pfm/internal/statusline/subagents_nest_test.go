@@ -125,11 +125,11 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			session := nestedSession(t, tc.transcripts, tc.parents)
 			got, warned := renderOneSubagent(t, session, parentTask)
-			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M │ "
+			wantStart := "▱▱▱▱▱▱▱▱ 0% 1.0K/1.0M $0.01/2.0K/35"
 			if tc.nested != "" {
-				wantStart = tc.nested + " │ " + wantStart
+				wantStart = tc.nested + "│" + wantStart
 			}
-			if !strings.HasPrefix(got, wantStart) || !strings.Contains(got, " │ "+tc.status+" │ ") {
+			if !strings.HasPrefix(got, wantStart) || !strings.Contains(got, "│"+tc.status+"│") {
 				t.Fatalf("content =\n  %q\nwant it to start with %q and carry %q", got, wantStart, tc.status)
 			}
 			if tc.warn == "" && warned != "" || !strings.Contains(warned, tc.warn) {
@@ -151,12 +151,12 @@ func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "solo │ ▱") {
+	if !strings.HasPrefix(got, "solo│▱") {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := renderOneSubagent(t, session,
 		`{"id":"a","type":"local_agent","status":"running","tokenCount":10}`)
-	if !strings.HasPrefix(aRow, "0/1 │ ") {
+	if !strings.HasPrefix(aRow, "0/1│") {
 		t.Fatalf("cycle row = %q, want 0/1", aRow)
 	}
 }
@@ -169,7 +169,7 @@ func TestRenderSubagentsNestedLongTail(t *testing.T) {
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
 	got, warned := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "0/1 │ ") || !strings.Contains(got, "│ completed 1m:30s │") || warned != "" {
+	if !strings.HasPrefix(got, "0/1│") || !strings.Contains(got, "│completed 1m:30s│") || warned != "" {
 		t.Fatalf("content = %q warn = %q, want 0/1 and completed", got, warned)
 	}
 }
@@ -184,7 +184,7 @@ func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, warned := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "?/? │ ▱") ||
+	if !strings.HasPrefix(got, "?/?│▱") ||
 		!strings.Contains(warned, "row p: nested agents: read sub-agent meta") {
 		t.Fatalf("content = %q warn = %q, want ?/? and the cause", got, warned)
 	}
@@ -194,7 +194,7 @@ func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
 func renderRawSubagent(t *testing.T, session, task string, now time.Time) string {
 	t.Helper()
 	payload := `{"transcript_path":` + jsonText(session) + `,"cwd":"/work/repo","tasks":[` + task + `]}`
-	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), &bytes.Buffer{})
+	got, err := RenderSubagents([]byte(payload), now, t.TempDir(), testPrices(t), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,9 +221,9 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			`"contextWindowSize":1000,"tokenCount":10,"label":"map it"}`
 	}
 	const (
-		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K │ scout·general-purpose │ opus │ "
-		fullTail   = " 1m:30s │ 2 tools │ 1 error │ 💾5m✓3m:8s 94% │ ⟲1 │ map it"
-		parentTail = " 3m:30s │ 2 tools │ 1 error │ 💾5m✓1m:38s 94% │ ⟲1 │ map it"
+		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K $0.01/2.0K/35/2│scout·general-purpose│opus│"
+		fullTail   = " 1m:30s│1 error│💾5m✓3m:8s 94%│⟲1│map it"
+		parentTail = " 3m:30s│1 error│💾5m✓1m:38s 94%│⟲1│map it"
 	)
 	mutedWhole := func(raw string) bool {
 		return strings.HasPrefix(raw, cMuted) && strings.Count(raw, "\x1b[") == 2 && strings.HasSuffix(raw, reset)
@@ -242,35 +242,35 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "completed, first minute: the whole line muted, Claude Code's faint left on",
 			task:      row("a1", "completed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: "solo │ " + fullRow + "completed" + fullTail,
+			wantPlain: "solo│" + fullRow + "completed" + fullTail,
 			check:     mutedWhole,
 		},
 		{
 			name:      "completed, after a minute: collapsed",
 			task:      row("a1", "completed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "completed 2m0s ago │ scout·general-purpose │ map it",
+			wantPlain: "completed 2m0s ago│$0.01/2.0K/35/2│scout·general-purpose│map it",
 			check:     mutedCollapsed,
 		},
 		{
 			name:      "failed, first minute: full colour, it is an alert",
 			task:      row("a1", "failed"),
 			now:       ended.Add(30 * time.Second),
-			wantPlain: "solo │ " + fullRow + "failed" + fullTail,
+			wantPlain: "solo│" + fullRow + "failed" + fullTail,
 			check:     bright,
 		},
 		{
 			name:      "failed, after a minute: collapsed, the status still red",
 			task:      row("a1", "failed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "failed 2m0s ago │ scout·general-purpose │ map it",
+			wantPlain: "failed 2m0s ago│$0.01/2.0K/35/2│scout·general-purpose│map it",
 			check:     redStatus,
 		},
 		{
 			name:      "completed with a child still working: delegating, not finished",
 			task:      row("p", "completed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "1/1 │ " + fullRow + "delegating" + parentTail,
+			wantPlain: "1/1│" + strings.Replace(fullRow, "35/2", "35/3", 1) + "delegating" + parentTail,
 			check:     bright,
 		},
 	}

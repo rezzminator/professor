@@ -63,6 +63,8 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 			) == pfmconfig.SourceFile {
 				row.Won = "config"
 			}
+		case SourceHost:
+			row.Value, row.Won = shellValue()
 		case SourceMachineConfig:
 			row.Value = configValue(knob.Name, prefs, machine)
 			if machine.MCPServerSource(pfmconfig.MCPServerChat) != pfmconfig.SourceDefault ||

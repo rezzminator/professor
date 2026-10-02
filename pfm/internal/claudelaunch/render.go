@@ -106,6 +106,7 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 		return Launch{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
+	result.Env = append(result.Env, ShellEnv(paths.OSEnv{}.Lookup)...)
 	if request.SessionID != "" {
 		result.Argv = append(result.Argv, flagSessionID, request.SessionID)
 	}

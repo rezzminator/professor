@@ -20,11 +20,11 @@ services:
     # proc-jailer stress reads "still exists" for a process that is
     # already dead. tini closes that gap.
     init: true
-    # A hard memory ceiling: RAM and swap together never exceed 2 GB, so one
+    # A hard memory ceiling: RAM and swap together never exceed 3 GB, so one
     # fence cannot starve the host or the containers beside it. pfm-sim
     # inherits it through extends.
-    mem_limit: 2g
-    memswap_limit: 2g
+    mem_limit: 3g
+    memswap_limit: 3g
     # Fence housekeeping (infra/fence/housekeeping.sh) removes only containers
     # carrying this label: exited ones, and running ones past their age limit
     # unless `iso shell` or the demo also set pfm.fence.long-lived=1.

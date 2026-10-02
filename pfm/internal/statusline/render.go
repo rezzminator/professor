@@ -241,15 +241,6 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	l1 += sep + sky.SnapshotCounts(fleetCounts(runtime))
 
 	gauge, l2, contextTokens := renderContextLine(runtime, data, directory, now)
-	if data.Cost.TotalCostUSD > 0 && runtime.Engine != pfmengine.Codex {
-		color := dim
-		if data.Cost.TotalCostUSD >= 10 {
-			color = red
-		} else if data.Cost.TotalCostUSD >= 2 {
-			color = yellow
-		}
-		l2 += sep + color + "💰" + fmt.Sprintf("$%.2f", data.Cost.TotalCostUSD) + reset
-	}
 	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
 	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
 	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.

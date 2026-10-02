@@ -1117,6 +1117,10 @@ func (renamer fakeCodexRenamer) SendLiteral(context.Context, string, string, str
 	return nil
 }
 
+func (renamer fakeCodexRenamer) SendPaste(context.Context, string, string, string) error {
+	return nil
+}
+
 func (renamer fakeCodexRenamer) SendKey(context.Context, string, string, string) error { return nil }
 
 // After a clear, pfm re-applies the chat's name to the NEW thread and must

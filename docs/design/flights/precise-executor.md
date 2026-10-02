@@ -55,7 +55,7 @@ Friction: the Sonnet-at-`high` seat that scored 77 against its twin's 95 left a 
 
 ### Its own checks, the formatter included
 
-The affected tests plus the type check, lint and formatter of its own files, and the static check the testing manual names, its architecture ratchet included; a ratchet its diff pushes over is its to bring back under. A split's new file beside a `Files` entry, in the same unit, is in scope; a split needing an existing file outside `Files` returns `SPEC-DRIFT {id}` naming it.
+The affected tests as it goes; the type check, lint and formatter of its own files and the static check the testing manual names, its architecture ratchet included, once, after its last edit, as one command, a red there fixed and only that check rerun; a ratchet its diff pushes over is its to bring back under. A split's new file beside a `Files` entry, in the same unit, is in scope; a split needing an existing file outside `Files` returns `SPEC-DRIFT {id}` naming it.
 
 Friction: a lander formatted the two Codex precise seats' files after the flight, as it did every flight: "the format sweep belongs to the gate" was read as "never format".
 
@@ -75,6 +75,7 @@ The layout laws bind this tier through its body: a deletion leaves nothing behin
 | --- | --- |
 | A `Progress dependency` whose failure changes the change | Change nothing; `SPEC-DRIFT {id}: {what it found}` |
 | A build, test or caller outside `Files` the change would break | Change nothing; `SPEC-DRIFT {id}`, every hit at once |
+| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red its change causes outside `Files` that the list does not name stays `SPEC-DRIFT` |
 | A stale comment or doc, an older defect | A defect line in the return; finish |
 | Spec and code disagree on a detail | Reach the Goal; say what it changed |
 | The Goal turns unreachable mid-task | Stop, every touched file building; `SPEC-DRIFT {id}` with what it found and what landed |

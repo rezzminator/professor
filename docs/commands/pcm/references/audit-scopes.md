@@ -1,6 +1,6 @@
-# PTM audit — per-scope deep checks
+# PCM audit — per-scope deep checks
 
-Loaded by `/pfm audit`: PTM reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in `pcm.md § Execution model`). Read-only checks — report `PASS/FAIL/WARN`, never fix.
+Loaded by `/pcm audit`: PCM reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in `pcm.md § Execution model`). Read-only checks — report `PASS/FAIL/WARN`, never fix.
 
 ## `agents` — Walk every agent file
 
@@ -22,7 +22,7 @@ Files: `.claude/commands/**/*.md`
 - **Doc path references:** every `$CDOCS`, `$REFS`, `docs/` path → verify target exists on disk
 - **Subcommand structure:** if command defines subcommands via table/args, verify each is handled in the body
 - **Size limit:** no command file >35KB
-- **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`pcm.md § Authoring conventions — Descriptions`); `disable-model-invocation: true` only on user-triggered-by-design commands
+- **Registry coverage:** every command carries `name:` + `description:` frontmatter — the routing signal the harness injects — and the `description:` matches what the command body actually handles and names every subcommand/mode/flag the body defines (`/quality:description`); `disable-model-invocation: true` only on user-triggered-by-design commands
 
 ## `skills` — Walk every SKILL.md
 
@@ -38,6 +38,7 @@ Files: `templates/**`, `docs/{BLUEPRINT,SETUP,PLACEHOLDERS,RELEASE}.md`, `templa
 This is the scope with adopters downstream of it — a FAIL here ships.
 
 - **Internal reference resolution:** every template referencing another template, agent, command, script, or reference card → the target exists under `templates/` (a pointer that only resolves in the source project is a broken install)
+- **Verdict tokens ↔ their writers:** every token a `/flights:*` command (`templates/global/commands/flights/`) cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `TOO-LARGE`, `WAIT`, `BLOCKED`, `MAIN-CHAT`, `COMA`, `REVISED`) is one `flights-orchestrator`, `flights-speccer` or a `/flights:orchestrate-*` command writes
 - **Placeholder integrity:** every `{TOKEN}` in a template is registered in `PLACEHOLDERS.md`; every registered token is used or knowingly retired; no template carries a source-project value where a token belongs
 - **SETUP coverage:** every file under `templates/` has a write step in `SETUP.md`; every path `SETUP.md` writes has a template
 - **Cast consistency:** `README.md` and `BLUEPRINT.md` agent/command/skill lists match a live `ls` of `templates/project/agents/` and `templates/project/commands/`
@@ -69,7 +70,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 
 Catches what no single-domain audit can see. Reads across ALL domains simultaneously.
 
-- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (rosters: `/quality:claude-md`)
+- **Agent counts ↔ reality:** a live `ls` of every agents dir → matches `pcm.md § Inventory`'s derivation rules (where to `ls`, never a recalled count); root `CLAUDE.md` carries no agent roster — each agent's `description:` is its entry
 - **Command count ↔ reality:** every `.claude/commands/*.md` carries `name:` + `description:` frontmatter (the harness registry)
 - **Skill count ↔ reality:** every dir in `ls .claude/skills/` has valid SKILL.md frontmatter
 - **Frontmatter validity:** every agent has non-empty `name`/`description`/`tools`; root agent `name` matches its `subagent_type` registry entry

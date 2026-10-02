@@ -251,7 +251,7 @@ Files: `~/.claude/commands/flights/*.md` (machine-global: spec, orchestrate-nest
 - **Reference resolution:** every "Read and follow" path → target file exists
 - **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, or `~/.claude/agents/`
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
-- **Verdict tokens ↔ the manual:** every token a command cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `STALE`) is one `flights-orchestrator` writes
+- **Verdict tokens ↔ their writers:** every token a command cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `TOO-LARGE`, `WAIT`, `BLOCKED`, `MAIN-CHAT`, `COMA`, `REVISED`) is one `flights-orchestrator`, `flights-speccer` or a `/flights:orchestrate-*` command writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
 - **Flow integrity:** spec → orchestrate → land across commands; executor → `flights-lander` → gitter within a flight — no step references an agent from a later phase
 

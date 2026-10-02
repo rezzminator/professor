@@ -293,8 +293,6 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				candidateA,
-				nil,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -308,26 +306,6 @@ func updateRepository(
 		replacements[index].replaced = true
 	}
 
-	journalsBefore, err := listUpdateInstallJournals(runtime.Paths.Home)
-	if err != nil {
-		return updateFailure(
-			fmt.Errorf("before install --yes: %w", err),
-			rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				candidateA,
-				nil,
-				runtime,
-				skipHarvest,
-				stdout,
-				stderr,
-			),
-		)
-	}
 	installErr := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr)
 	if installErr != nil {
 		return updateFailure(
@@ -339,43 +317,18 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				candidateA,
-				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
 				stderr,
 			),
 		)
-	}
-	candidateConfigPath, candidateConfigNote, configPathErr := updateConfigPathAfterInstall(runtime)
-	if configPathErr != nil {
-		return updateFailure(
-			fmt.Errorf("locate config after update: %w", configPathErr),
-			rollbackUpdateState(
-				ctx,
-				repo,
-				installSourceRepo,
-				previousRef,
-				sourceAdvanced,
-				replacements,
-				candidateA,
-				journalsBefore,
-				runtime,
-				skipHarvest,
-				stdout,
-				stderr,
-			),
-		)
-	}
-	if candidateConfigNote != "" {
-		fmt.Fprintln(stdout, candidateConfigNote)
 	}
 	candidateOutcome, doctorErr := updateRunDoctor(
 		ctx,
 		candidateA,
 		runtime,
-		candidateConfigPath,
+		runtime.Config.Path,
 		skipHarvest,
 		stdout,
 		stderr,
@@ -390,8 +343,6 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				candidateA,
-				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -410,8 +361,6 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				candidateA,
-				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -448,8 +397,6 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
-				candidateA,
-				journalsBefore,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -640,9 +587,7 @@ func updateInstallConfigPath(runtime config.Runtime) string {
 // not a Go error — runUpdateCandidateCommand hands it back as a
 // *doctorExitError precisely so this seam can read it as one; only a genuine
 // spawn failure (candidate never ran at all) returns a non-nil error here.
-// configPath is the caller's explicit choice (updateConfigPathAfterInstall's
-// re-resolved path for the post-install candidate doctor, runtime.Config.Path
-// otherwise) — never derived from runtime here.
+// configPath is the caller's explicit choice — never derived from runtime here.
 func runUpdateDoctor(
 	ctx context.Context,
 	candidate string,

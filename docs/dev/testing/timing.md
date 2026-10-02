@@ -156,9 +156,8 @@ pfm.unit	PASS	31.3
 pfm.e2e	PASS	30.0
 pfm.self.arch-c24	PASS	0.5
 pfm.self.arch-check	PASS	3.2
-pfm.self.host-window	PASS	2.2
+pfm.self.mcp-restart	PASS	0.4
 pfm.self.install-downgrade-guard	PASS	0.8
-pfm.self.rollback-guard	PASS	0.3
 pfm.self.skip-check	PASS	0.2
 pfm.self.test-contention	PASS	2.4
 pfm.self.test-shard	PASS	4.9
@@ -170,8 +169,6 @@ templates.lanes.container	PASS	0.3
 templates.lanes.cred-scan	PASS	0.2
 templates.lanes.egress	PASS	2.1
 templates.lanes.gate-history	PASS	1.9
-templates.lanes.host-backup	PASS	0.8
-templates.lanes.host-rehearsal	PASS	2.5
 templates.lanes.housekeeping	PASS	1.7
 templates.lanes.image-key	PASS	1.2
 templates.lanes.iso-housekeeping	PASS	1.7

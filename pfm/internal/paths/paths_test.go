@@ -345,7 +345,7 @@ func TestCheckLegacyPending(t *testing.T) {
 		{name: "fresh home", target: absent, legacy: filepath.Join(root, "absent-legacy.db")},
 		{
 			name: "legacy waits", target: absent, legacy: present, pending: true,
-			wantText: []string{absent, present, "run pfm install"},
+			wantText: []string{absent, present, "run pfm doctor for the fix"},
 		},
 		{name: "legacy unreadable", target: absent, legacy: unreadable, wantText: []string{"inspect " + unreadable}},
 		{name: "target unreadable", target: unreadable, legacy: present, wantText: []string{"inspect " + unreadable}},
@@ -365,6 +365,12 @@ func TestCheckLegacyPending(t *testing.T) {
 			}
 			if errors.Is(err, ErrLegacyPending) != test.pending {
 				t.Fatalf("errors.Is(%v, ErrLegacyPending) = %v, want %v", err, !test.pending, test.pending)
+			}
+			if test.pending {
+				want := ErrLegacyPending.Error() + ": " + test.target + " not created while legacy " + test.legacy + " still exists — run pfm doctor for the fix"
+				if err.Error() != want {
+					t.Fatalf("error=%q, want %q", err, want)
+				}
 			}
 			for _, want := range test.wantText {
 				if !strings.Contains(err.Error(), want) {

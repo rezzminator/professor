@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
-	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
@@ -194,68 +193,6 @@ func TestMCPDaemonStatusReportsHarvesterExternalState(t *testing.T) {
 	}
 	if status.HarvesterExternal != failed {
 		t.Fatalf("status harvesterExternal = %q, want %q", status.HarvesterExternal, failed)
-	}
-}
-
-// pfm install migrates a pre-split machine BEFORE it wires clients: the
-// preview wires the migrated port and changes nothing on disk; the apply
-// renames, splits, moves the port, and reloads.
-func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
-	jailTest(t)
-	home := os.Getenv("PFM_HOME")
-	dir := filepath.Join(home, "clone")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	legacy := filepath.Join(dir, config.LegacyFileName)
-	if err := os.WriteFile(
-		legacy,
-		[]byte(
-			`{"version":2,"mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`,
-		),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	runtime, err := config.LoadRuntime(legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	preview, code := migrateMachineConfig(installer.ModeDryRun, nil, "", &stdout, &stderr, runtime)
-	if code != 0 || preview.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
-		!strings.Contains(stdout.String(), "change  rename") {
-		t.Fatalf(
-			"preview code=%d port=%d stdout=%q stderr=%q",
-			code,
-			preview.Config.MCP.HTTP.Port,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	if _, err := os.Stat(legacy); err != nil {
-		t.Fatalf("preview touched the pre-split file: %v", err)
-	}
-	applied, code := migrateMachineConfig(installer.ModeApply, nil, "", &stdout, &stderr, runtime)
-	if code != 0 {
-		t.Fatalf("apply code=%d stderr=%q", code, stderr.String())
-	}
-	if applied.Config.Path != filepath.Join(dir, config.FileName) ||
-		applied.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
-		!applied.Config.Harvester.Enabled ||
-		applied.Config.MCPServerSource("harvester") != config.SourceFile {
-		t.Fatalf("applied path=%q port=%d harvester=%t source=%q", applied.Config.Path, applied.Config.MCP.HTTP.Port,
-			applied.Config.Harvester.Enabled, applied.Config.MCPServerSource("harvester"))
-	}
-	if options := newInstallerOptions(
-		installer.ModeApply,
-		"",
-		true,
-		io.Discard,
-		io.Discard,
-		applied,
-	); options.MCPPort != config.DefaultMCPPort {
-		t.Fatalf("installer would wire port %d, want %d", options.MCPPort, config.DefaultMCPPort)
 	}
 }
 

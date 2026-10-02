@@ -281,7 +281,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	previewReport, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeDryRun, Home: home, Now: now, Stdout: &preview, Runner: runner,
-		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	})
 	if err != nil || previewReport.Changed == 0 {
 		t.Fatalf("dry run report=%#v err=%v", previewReport, err)
@@ -298,7 +297,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	report, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Now: now, Stdout: &applied, Runner: runner,
-		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	})
 	if err != nil || report.Changed == 0 {
 		t.Fatalf("apply report=%#v err=%v\n%s", report, err, applied.String())
@@ -475,7 +473,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	secondReport, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeApply, Home: home, Now: now, Stdout: &second, Runner: runner,
-		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	})
 	if err != nil || secondReport.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", secondReport, err, second.String())
@@ -485,7 +482,6 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if _, err := Run(context.Background(), Options{
 		MCPConfigPath: testConfigPath(t),
 		Mode:          ModeUninstall, Home: home, Now: now, Stdout: &removed, Runner: runner,
-		ConfigDirs: []string{config, filepath.Join(home, ".cc", "2")},
 	}); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, removed.String())
 	}
@@ -1445,98 +1441,44 @@ func TestMigrateLegacyCarrierUsesConfiguredStateDB(t *testing.T) {
 	}
 }
 
-func TestInstallJournalRecordsStagedAssetAndNothingWhenIdentical(t *testing.T) {
-	home := t.TempDir()
-	installer, journal, env := journaledEngine(t, home, true)
-	target := filepath.Join(installer.managedRoot, "handoff.skill.md")
-	writeFile(t, target, "operator bytes\n", 0o600)
-	assets := []assetFile{{path: "handoff.skill.md", mode: 0o644}}
-	if _, err := installer.stageAssets(assets); err != nil {
-		t.Fatal(err)
-	}
-	if got := installRecordDestinations(t, journal); len(got) != 1 || got[0] != target {
-		t.Fatalf("records=%v, want the staged asset", got)
-	}
-	converged, second, _ := journaledEngine(t, home, true)
-	if _, err := converged.stageAssets(assets); err != nil {
-		t.Fatal(err)
-	}
-	if second.Dir() != "" || len(second.records) != 0 {
-		t.Fatalf("identical rewrite recorded %v in %q", second.records, second.Dir())
-	}
-	rollbackInstallJournal(t, env, journal)
-	info, err := os.Stat(target)
-	if err != nil || info.Mode().Perm() != 0o600 || readFile(t, target) != "operator bytes\n" {
-		t.Fatalf("rollback left %s info=%v err=%v", target, info, err)
-	}
-}
-
-func TestInstallJournalRecordsLinksSidecarsAncestorsAndRemovals(t *testing.T) {
-	home := t.TempDir()
-	installer, journal, env := journaledEngine(t, home, true)
-	units := filepath.Join(home, ".config", "systemd", "user")
-	repointed, old := filepath.Join(units, "timers.target.wants", "pfm.timer"), filepath.Join(home, "old.timer")
-	if err := os.MkdirAll(filepath.Dir(repointed), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(old, repointed); err != nil {
-		t.Fatal(err)
-	}
-	displaced := filepath.Join(home, ".claude", "commands", "x.md")
-	writeFile(t, displaced, "operator command\n", 0o600)
-	fresh := filepath.Join(home, ".claude", "skills", "deep", "skill")
-	retired := filepath.Join(home, ".claude", "bin", "cx-kill.sh")
-	writeFile(t, retired, "retired\n", 0o700)
-	for _, target := range []string{repointed, displaced, fresh} {
-		if _, err := installer.ensureLink(filepath.Join(home, "new"), target); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := installer.retire(retired, "test"); err != nil {
-		t.Fatal(err)
-	}
-	sidecar := displaced + ".pre-professor-test"
-	want := []string{repointed, displaced, sidecar, filepath.Join(home, ".claude", "skills"), retired}
-	if got := installRecordDestinations(t, journal); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("records=%v, want %v", got, want)
-	}
-	output := rollbackInstallJournal(t, env, journal)
-	if target, err := os.Readlink(repointed); err != nil || target != old {
-		t.Fatalf("repointed link=%q err=%v, want %q", target, err, old)
-	}
-	if readFile(t, displaced) != "operator command\n" || readFile(t, retired) != "retired\n" {
-		t.Fatal("rollback did not restore the displaced or retired file")
-	}
-	for _, gone := range []string{sidecar, filepath.Join(home, ".claude", "skills")} {
-		if _, err := os.Lstat(gone); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("%s survived rollback: %v", gone, err)
-		}
-	}
-	if !strings.HasSuffix(output, "  note    run: systemctl --user daemon-reload\n") {
-		t.Fatalf("rollback output=%q, want the daemon-reload note last", output)
-	}
-}
-
-func TestInstallJournalRecordsShellAndCodexHooksWithSidecars(t *testing.T) {
-	home, clone := t.TempDir(), t.TempDir()
-	installer, journal, _ := journaledEngine(t, home, true)
-	installer.options.SourceRepo = clone
-	installer.options.CodexHomes = []string{filepath.Join(home, ".codex")}
-	zshrc, hooks := filepath.Join(home, ".zshrc"), filepath.Join(home, ".codex", "hooks.json")
-	writeFile(t, zshrc, "export A=1\n", 0o600)
-	writeFile(t, hooks, `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"`+
-		filepath.Join(home, ".local", "bin", "cc-fleet")+` hook stop"}]}]}}`+"\n", 0o600)
-	if err := installer.wireShell(false); err != nil {
-		t.Fatal(err)
-	}
-	if err := installer.wireCodexHooks(); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{zshrc, zshrc + ".pre-professor-test", hooks, hooks + ".pre-professor-test"}
-	if _, err := os.Lstat(settingsHookOwnershipPath(installer.managedRoot)); err == nil {
-		want = append(want, filepath.Dir(installer.managedRoot))
-	}
-	if got := installRecordDestinations(t, journal); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("records=%v, want %v", got, want)
+func TestInstallerChangeWritesAndReports(t *testing.T) {
+	failure := errors.New("write failed")
+	for _, test := range []struct {
+		name  string
+		apply bool
+		err   error
+	}{
+		{name: "apply", apply: true},
+		{name: "action error", apply: true, err: failure},
+		{name: "preview"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "asset")
+			writeFixture(t, path, "original\n")
+			var output bytes.Buffer
+			installer := &engine{options: Options{Stdout: &output}, apply: test.apply}
+			err := installer.change("write "+path, func() error {
+				if err := os.WriteFile(path, []byte("installed\n"), 0o600); err != nil {
+					return err
+				}
+				return test.err
+			})
+			if !errors.Is(err, test.err) {
+				t.Fatalf("change error=%v, want %v", err, test.err)
+			}
+			if got, want := output.String(), "  change  write "+path+"\n"; got != want {
+				t.Fatalf("output=%q, want %q", got, want)
+			}
+			want := "original\n"
+			if test.apply {
+				want = "installed\n"
+			}
+			if got := readFixture(t, path); got != want {
+				t.Fatalf("asset=%q, want %q", got, want)
+			}
+			if installer.report.Changed != 1 {
+				t.Fatalf("changed=%d, want one change", installer.report.Changed)
+			}
+		})
 	}
 }

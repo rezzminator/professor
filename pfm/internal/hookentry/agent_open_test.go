@@ -43,7 +43,10 @@ func TestAgentOpenCacheFlagDefaultsToConfigAndAllowsOverride(t *testing.T) {
 	}
 	machine := config.Config{
 		Claude:   config.ClaudePrefs{Binary: bin, Cache1H: true},
-		Accounts: []config.Account{{ID: 1, Implicit: true}},
+		Accounts: []config.Account{{ID: 1, ConfigDir: config.DefaultAccountDir(root, 1)}},
+	}
+	if err := os.MkdirAll(machine.Accounts[0].ConfigDir, 0o700); err != nil {
+		t.Fatal(err)
 	}
 	runtime := config.Runtime{Config: machine, Paths: values}
 	for _, scenario := range []struct {

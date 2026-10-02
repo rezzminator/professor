@@ -3,7 +3,6 @@ package installer
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,30 +40,6 @@ func TestUnmarshalKeepingNumbersIsAsStrictAsUnmarshal(t *testing.T) {
 	}
 }
 
-func TestAccountMCPStripKeepsIntegersBeyondFloat64(t *testing.T) {
-	home := t.TempDir()
-	raw := []byte(`{"counter":` + beyondFloat64 + `,"mcpServers":{"chat":{"command":"` +
-		filepath.Join(home, ".local", "bin", "pfm") + `"},"foreign":{"type":"stdio","command":"foreign"}}}`)
-	updated, removed, err := stripAccountMCP(raw, []string{"chat"}, nil)
-	if err != nil || len(removed) != 1 || removed[0] != "mcpServers.chat" {
-		t.Fatalf("stripAccountMCP removed=%v err=%v", removed, err)
-	}
-	requireKeepsBeyondFloat64(t, "stripAccountMCP", updated)
-	if strings.Contains(string(updated), `"chat"`) || !strings.Contains(string(updated), `"foreign"`) {
-		t.Fatalf("stripAccountMCP changed foreign servers or kept chat: %s", updated)
-	}
-}
-
-func TestAccountSettingsStripKeepsIntegersBeyondFloat64(t *testing.T) {
-	home := t.TempDir()
-	raw := []byte(`{"counter":` + beyondFloat64 + `,"statusLine":{"command":"` + home + `/.local/bin/pfm statusline"}}`)
-	updated, removed, err := stripAccountSettings(raw, home, nil)
-	if err != nil || len(removed) != 1 {
-		t.Fatalf("stripAccountSettings removed=%v err=%v", removed, err)
-	}
-	requireKeepsBeyondFloat64(t, "stripAccountSettings", updated)
-}
-
 func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 	t.Parallel()
 	// The Codex hook file is rewritten only to take something away now, so
@@ -78,26 +53,6 @@ func TestCodexHooksRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 		t.Fatalf("updateCodexHooks changed=%v err=%v; want a rewrite", changed, err)
 	}
 	requireKeepsBeyondFloat64(t, "updateCodexHooks", updated)
-}
-
-func TestMemoryHelperHookRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	oldPath := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
-	newPath := filepath.Join(home, ".claude", "scripts", "memory-wire.sh")
-	raw := fmt.Sprintf(
-		`{"counter":%s,"hooks":{"Stop":[{"hooks":[{"type":"command","command":%q}]}]}}`,
-		beyondFloat64,
-		oldPath,
-	)
-	updated, changed, err := rewriteMemoryHelperHookPaths([]byte(raw), map[string]string{oldPath: newPath}, home)
-	if err != nil || !changed {
-		t.Fatalf("rewriteMemoryHelperHookPaths changed=%v err=%v; want a rewrite", changed, err)
-	}
-	if !strings.Contains(string(updated), newPath) {
-		t.Fatalf("hook command not rewritten: %s", updated)
-	}
-	requireKeepsBeyondFloat64(t, "rewriteMemoryHelperHookPaths", updated)
 }
 
 func TestJSONNumberIsMatchesEitherDecodedForm(t *testing.T) {

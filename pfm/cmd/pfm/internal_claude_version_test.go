@@ -17,7 +17,8 @@ import (
 // the higher version, so a regression back to mtime selection fails this
 // test the same way it fails the shim's own launcher_test.go fixture.
 func TestInternalClaudeVersionPrintsNewestOrExits127(t *testing.T) {
-	runtime := testjail.CleanHome(t)
+	dirs, files := storeLayout()
+	runtime := testjail.CleanHome(t, dirs, files)
 	home := runtime.Paths.Home
 	versions := filepath.Join(home, ".local", "share", "claude", "versions")
 	if err := os.MkdirAll(versions, 0o700); err != nil {

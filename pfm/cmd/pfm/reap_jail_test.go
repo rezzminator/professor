@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -38,6 +39,7 @@ func reapJail(t *testing.T) string {
 		socketDir,
 		filepath.Join(root, "sid"),
 		accountRoot,
+		pfmconfig.DefaultAccountDir(filepath.Join(root, "home"), 1),
 		filepath.Join(root, "codex"),
 		filepath.Join(root, "bin"),
 	} {

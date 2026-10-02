@@ -1019,9 +1019,11 @@ FOREIGN_HOOK="echo lane-foreign-hook"
 own_cmd="$SEAT_DIR/commands/lane-own.md"
 # Plant BEFORE the last install: a hook pfm did not write, and an operator's own
 # command file — then re-install so the ownership ledger is written with both present.
+settings_tmp="$(mktemp)"
 jq --arg c "$FOREIGN_HOOK" '.hooks = (.hooks // {}) | .hooks.Stop = ((.hooks.Stop // []) + [{"hooks": [{"type": "command", "command": $c}]}])' \
-  "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tmp" && mv "$SEAT_DIR/settings.json.tmp" "$SEAT_DIR/settings.json" ||
+  "$SEAT_DIR/settings.json" >"$settings_tmp" && cat "$settings_tmp" >"$SEAT_DIR/settings.json" ||
   bad="$bad could not plant the foreign hook into $SEAT_DIR/settings.json;"
+rm -f "$settings_tmp"
 printf -- '---\ndescription: an operator-owned command the lane planted\n---\nSay hello.\n' >"$own_cmd"
 pre="$(install_again)"
 pre_rc=$?

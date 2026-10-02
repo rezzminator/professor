@@ -38,7 +38,7 @@ The status lines are one row of the launch registry `claudelaunch.Knobs` (`pfm/i
 }
 ```
 
-The command is rendered with `~` expanded to the home directory. `~/.local/bin/pfm-statusline` is the overlay over `pfm statusline` that `pfm install` places. `pfm install` writes no `statusLine` or `subagentStatusLine` into any account `settings.json`; one an older install left there is removed by the host-migration `strip` verdict, and `pfm doctor` reports it as `legacy: {file} still carries pfm statusLine — run pfm install` (or `subagentStatusLine`) until then. A `claude` run the managed launcher passes through, and a `pfm headless exec` run, carry no status line. Spawn-audit reads the payload from each live chat's argv.
+The command is rendered with `~` expanded to the home directory. `~/.local/bin/pfm-statusline` overlays `pfm statusline`. Installation writes no `statusLine` or `subagentStatusLine` into an account `settings.json`; an old pfm value there produces the `pfm-settings` host check’s BLOCK row because it would run beside the launch payload. Doctor prints the keys and the operator’s removal fix, and installation refuses until resolved. A Claude run passed through by the launcher and a headless run carry no status line. Spawn-audit reads each live chat’s argv.
 
 ## The sub-agent row
 
@@ -125,6 +125,6 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 | The command | `pfm/cmd/pfm/statusline_command.go` | `pfm statusline --subagents` (combining it with `--refresh-gpt` is a usage error, exit 2) |
 | The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the status-lines row: `statusLine` and `subagentStatusLine` in every launch's `--settings` payload |
 | The launch record | `fleetdb.LaunchFor` over `pfm.db` table `launch` | the cache window per `session_id` |
-| The account-file reconciler | `pfm/internal/installer/layout.go` | `strip` of a pfm `statusLine` or `subagentStatusLine` an older install left, and the `legacy` doctor row |
+| The account-file host check | `pfm/internal/hostcheck/owned.go` | `pfm-settings` BLOCK row for old pfm status lines, with the operator’s fix |
 | The goldens | `pfm/internal/statusline/testdata/render-*.golden` | the main line byte for byte |
 | The lane map | `infra/fence/lanes/` | its beat and its map row |

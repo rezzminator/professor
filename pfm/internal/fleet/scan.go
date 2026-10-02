@@ -273,7 +273,7 @@ func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) c
 		OpenCodeSessions: data.OpenCodeSessions,
 		CxNames:          data.CxNames,
 		Killed:           data.Killed,
-		ClaudeSeats:      claudeSeats(env.Config.Accounts, env.Paths.Home),
+		ClaudeSeats:      claudeSeats(env.Config.Accounts),
 		CodexHomes:       codexAccountRoots(env.Config.CodexAccounts),
 		Launches:         launches,
 		LaunchError:      launchErr,

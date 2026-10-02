@@ -85,8 +85,8 @@ func OptionalRuntime(runtimes []Runtime) (Runtime, error) {
 }
 
 // ErrNotMigrated marks a default config load refused because a legacy
-// {LegacyConfigDir} config still waits for pfm install to move it into the clone.
-var ErrNotMigrated = errors.New("config not migrated: run pfm install")
+// config still waits for the operator to apply pfm doctor's fix.
+var ErrNotMigrated = errors.New("config not migrated: run pfm doctor for the fix")
 
 // LoadRuntime resolves paths, loads the config at configPath (the default
 // location when empty), and keeps Claude's resolved transcript roots.
@@ -104,7 +104,7 @@ func LoadRuntime(configPath string) (Runtime, error) {
 }
 
 // LoadInstallRuntime is LoadRuntime without the ErrNotMigrated refusal: the
-// installer is the command that migrates the legacy config.
+// install gate names the pending legacy config and points at pfm doctor's fix.
 func LoadInstallRuntime(configPath string) (Runtime, error) {
 	resolved, err := paths.Resolve()
 	if err != nil {
@@ -138,14 +138,6 @@ func configPathIsExplicit(configPath, home string) (bool, error) {
 	named, err := filepath.Abs(configPath)
 	if err != nil {
 		return false, fmt.Errorf("resolve --config path %q: %w", configPath, err)
-	}
-	// An older pfm update runs its candidate as `pfm --config <its default>
-	// install --yes`; that default is the legacy config directory, which the
-	// HostLayout reconciler migrates into the clone. Naming it is not explicit.
-	if filepath.Dir(named) == LegacyConfigDir(paths.OSEnv{}, home) {
-		if base := filepath.Base(named); base == FileName || base == LegacyFileName {
-			return false, nil
-		}
 	}
 	defaultPath, resolveErr := ResolvePath(home)
 	if resolveErr != nil {
@@ -185,8 +177,8 @@ func checkLegacyConfig(configPath, home string, loaded Config) error {
 
 // LegacyConfigWaiting returns the legacy pfm.config.json or config.json in
 // legacyDir when one exists while target does not ("" counts as absent), else
-// "". It ignores PFM_CONFIG and --config: the fleet units run a default load,
-// so a rollback asks it whether the restored layout is one pfm refuses.
+// "". It ignores PFM_CONFIG and --config: the default-load refusal stands
+// until the operator applies pfm doctor's fix.
 func LegacyConfigWaiting(legacyDir, target string) (string, error) {
 	if target != "" {
 		_, err := os.Lstat(target)

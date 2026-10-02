@@ -128,14 +128,6 @@ temp home; symlink/regular/frontmatter fixtures; Run(ModeApply, fakeRunner); Lst
 
 U — installer runner is fake and all paths are temporary local files.
 
-### TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks
-
-**Source:** [pfm/internal/installer/global_command_retire_test.go](../../../pfm/internal/installer/global_command_retire_test.go) line 20 · **Observed:** 1.73s · **Class:** filesystem/fake runner
-
-temp blueprint/home; symlink and regular-file fixtures; Run(..., fakeRunner); Lstat/link checks.
-
-U — no external command or network; retirement is isolated in temp registries.
-
 ### TestWaveStatsWrittenByRealFetch
 
 **Source:** [pfm/internal/harvest/wave_parity_test.go](../../../pfm/internal/harvest/wave_parity_test.go) line 152 · **Observed:** 0.01s · **Class:** HTTP mock/filesystem

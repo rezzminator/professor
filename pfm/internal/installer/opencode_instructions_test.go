@@ -147,52 +147,6 @@ func decodeOpenCodeFixture(t *testing.T, raw string) map[string]any {
 	return document
 }
 
-func TestOpenCodeInstructionsJournalRecordsTheConfigAndRollsBack(t *testing.T) {
-	home := t.TempDir()
-	if err := paths.WriteSourceRepoMarker(home, t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	config := OpenCodeConfigPath(home)
-	original := "{\"instructions\": [\"./house-rules.md\"]}\n"
-	writeFixture(t, config, original)
-	changed := []string{config, config + ".pre-professor-test"}
-
-	preview, planned, _ := journaledEngine(t, home, false)
-	preview.options.OpenCodeConfigPath = config
-	if err := preview.wireOpenCodeInstructions(); err != nil {
-		t.Fatal(err)
-	}
-	requireJournalPaths(t, planned.Planned(), changed...)
-
-	installer, journal, env := journaledEngine(t, home, true)
-	installer.options.OpenCodeConfigPath = config
-	if err := installer.wireOpenCodeInstructions(); err != nil {
-		t.Fatal(err)
-	}
-	requireJournalPaths(t, installRecordDestinations(t, journal), changed...)
-	rollbackInstallJournal(t, env, journal)
-	if got := readFixture(t, config); got != original {
-		t.Fatalf("rollback left %s = %q", config, got)
-	}
-	if _, err := os.Lstat(changed[1]); !os.IsNotExist(err) {
-		t.Fatalf("rollback kept the sidecar: %v", err)
-	}
-
-	options := Options{Home: home, OpenCodeConfigPath: config, Stdout: io.Discard}
-	converge := &engine{options: options, apply: true, stamp: "test"}
-	if err := converge.wireOpenCodeInstructions(); err != nil {
-		t.Fatal(err)
-	}
-	again, idle, _ := journaledEngine(t, home, true)
-	again.options.OpenCodeConfigPath = config
-	if err := again.wireOpenCodeInstructions(); err != nil {
-		t.Fatal(err)
-	}
-	if idle.Dir() != "" {
-		t.Fatalf("converged OpenCode wiring journaled %v", idle.records)
-	}
-}
-
 func TestFirstInstallWiresOpenCodeInstructions(t *testing.T) {
 	for _, alias := range []bool{false, true} {
 		name := "clone"

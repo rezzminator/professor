@@ -13,6 +13,7 @@ Shortest path first.
 
 - [Runtime prerequisites](#runtime-prerequisites-for-the-pfm-install-paths)
 - [Binary install](#1-binary-install--pfm-only-2-minutes)
+- [First install after using Claude](#first-install-on-a-host-that-already-used-claude)
 - [Build from source](#2-build-from-source--pfm-only)
 - [Full Professor adoption](#3-full-professor-adoption--the-discipline-layer)
 - [What gets written where](#what-gets-written-where)
@@ -88,24 +89,61 @@ pfm install --yes --vscode
 `pfm install --yes` manages eight surfaces, all under `$HOME`; `--vscode` adds a ninth:
 
 1. Staged assets — `~/.local/share/pfm/install/`, including the `claude` launcher; since that launcher disables Claude Code's own version cleanup, pfm also owns retention under `~/.local/share/claude/versions/` — `pfm doctor` reports count, bytes, and prunable size, and `pfm install` previews and applies the prune (`pfm/TESTPLAN.md` § claude-versions)
-2. Command symlinks — `~/.claude/commands/` (`/reload`); skill symlinks — `~/.claude/skills/` (`/handoff`); source-fetched skills — each repo `templates/global/skills/sources.json` registers is shallow-cloned into `~/.local/share/pfm/install/skills/{name}/`, fetched to its latest default-branch head on every install, and linked into every account's `skills/` and into `~/.agents/skills/` (read by Codex and OpenCode). A failed fetch is reported and keeps the last fetched copy linked; a real directory at a link path is reported as a conflict and never overwritten; a skill dropped from the registry loses its links and its store. `pfm doctor` reports one `skill-source` row per registered skill
+2. Command and skill registries are written once into `~/.claude/commands/`, `~/.claude/skills/` and `~/.claude/agents/`. Every account links the shared entries to that store. Each repo in `templates/global/skills/sources.json` is fetched into `~/.local/share/pfm/install/skills/{name}/` and linked into `~/.claude/skills/` and `~/.agents/skills/`; a failed fetch keeps the last copy, and a real destination is a conflict. Doctor reports one `skill-source` row per registered skill.
 3. The `pfm-name-sync` scheduler — three systemd user units (Linux) or one launchd agent (macOS)
-4. Claude launch settings — hooks, status line, and MCP servers ride each launch; `pfm install` strips pfm-owned legacy entries from account `settings.json` and `.claude.json` files while preserving unrelated settings, and manages `cleanupPeriodDays` through Claude managed settings with sudo when required
+4. Claude launch settings — hooks, status line and MCP ride each launch. Host checks refuse pfm-owned leftovers in account files and print the edits through `pfm doctor`. Installation manages `cleanupPeriodDays` through Claude managed settings, using sudo when required.
 5. `~/.codex/prompts/`, `~/.codex/skills/`, and `~/.codex/agents/` — Codex mirrors generated from the installed global Claude commands and host-global agent sources; a role lands in `agents/` as a REGULAR FILE, because Codex opens a role with `O_NOFOLLOW` and rejects a symlink as "agent type is currently not available". Only marker-owned outputs are replaced or retired, while unmarked conflicts survive and stop the install by name
 6. `~/.codex/hooks.json` — migrates surviving binary paths and removes retired clear-kill and Dream/STM hooks; it installs no automatic Codex hook
 7. One source line appended to `~/.zshrc` — restart your shell (or `source ~/.zshrc`) for it to take effect
 8. `~/.claude/themes/` — the themes declared by `templates/themes/sources.json`, source-fetched and bundled; a failed cosmetic fetch or an unreadable bundled file is reported and skipped without aborting the other surfaces
 9. **Opt-in:** VS Code — links the Professor extension (Professor's assistant in VS Code) into `extensions/professor` of every VS Code product present (`~/.vscode`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.vscode-server`, `~/.vscode-server-insiders`, a portable install) and registers it in that product's own `extensions/extensions.json` — the file modern VS Code actually scans user extensions from, so a link alone is never loaded — and in the user or remote-machine `settings.json` adds a `PFM` terminal profile (icon `mortar-board`, colour magenta) and selects it as the platform default (the extension's own `Professor` profile stays in the + dropdown — a default an extension contributes would make every window reload drop the open terminals). After a reload, the extension is visible as **Professor** in the Extensions view and a **Professor** entry in the terminal `+` dropdown. Press Ctrl+Shift+Alt+T (macOS: Cmd+Shift+Alt+T), run **Professor: New Chat Terminal**, or pick **Professor** from the terminal `+` dropdown — all three give the next icon and colour; the default `+` terminal is `PFM`. A PFM terminal opens a login zsh, then the installed shim opens the PFM picker at the shell's first prompt; each tab carries its chat's live name. PFM edits JSONC surgically, so comments and unrelated profiles survive; later installs retain ownership, and uninstall removes only the links (and the index entries they registered) still pointing at PFM's copy, restoring the prior default unless the operator changed it after installation. Reload the VS Code window once to load a newly linked extension. `pfm doctor` reports one row per product (link, index registration, version) and per owned settings file.
 
-Every rewritten file is backed up before it is touched. `pfm install` classifies the HostLayout and migrates the clone config, both databases, the shared Claude session store, and legacy account files with recovery receipts. `pfm install --rollback ID` reverses the named journaled migration.
+`pfm install` runs read-only host checks before any write. A BLOCK row refuses preview, apply and `--check` with exit 4 and prints, under each blocking row, the same fix `pfm doctor` prints for it, so the fixes reach you even after `pfm update` rolls back to a binary whose doctor has no host checks; warnings are counted and installation continues. After the checks pass, installation creates missing shared entries in `~/.claude`, creates real account directories and links every shared entry from each account. Existing store data and real account entries are preserved; a wrong link is repointed without touching its old target.
 
 Run `pfm` for the interactive picker. Its colors are enabled independently of inherited `NO_COLOR` or `CLICOLOR=0`; `pfm ls --plain` and `pfm ls --tsv` remain uncolored. The managed terminal profile uses `PFM_AUTO_OPEN=pfm` to open the picker once at the first prompt.
 
-The Professor `cc*` shell commands are retired. Use `pfm`, `pfm chat open <target>`, and the picker's account selector. Installation removes the named legacy launch/account scripts, backing up regular files outside `PATH` under `~/.local/state/pfm/retired-commands/`; source the updated shim or start a new shell to unload old functions and aliases. Account credentials, transcripts, live chat socket names, and the system C compiler are preserved.
+Use `pfm`, `pfm chat open <target>` and the picker’s account selector. Reload your shell after installing the clone-sourced shim. Credentials and per-account state stay in each account directory; transcripts and the other shared entries live in `~/.claude`.
 
-Optional `cc-memory-wire.sh` and `cc-memory-consolidate.sh` helpers become `memory-wire.sh` and `memory-consolidate.sh`. Installation migrates recognized historical copies and exact hook paths without executing either helper or changing memory data. Customized helpers, conflicting destinations, and unsupported hook commands stop migration with an error; hosts without these helpers remain opted out.
+Optional memory helpers use `memory-wire.sh` and `memory-consolidate.sh`. The `memory-helpers` host check refuses recognized copies under their old names and prints the moves and hook edits; run those fixes before installation. Helpers are never executed by the check.
 
-**Known gate — read before you run it.** A mutating install refuses with exit 97 only while PFM's name-sync job is actively running, so it cannot replace the job or binary mid-execution. It asks before its first change and again just before the installer's own writes; the name-sync units the install stops start again only after those writes, so the install never fires the job itself. Only an install with layout changes to make stops the units, before its first change, and asks again once they are down, so a job already running refuses before any change, with exit 97 too; the managed-settings drop-in alone is no such change. From before that stop until the units are back, an interrupt (Ctrl-C, SIGTERM, SIGHUP, or SIGPIPE from a stdout or stderr whose reader died) finishes the current step, runs no later one, starts the units it stopped, then exits 128 + the signal's number; a signal ignored at launch (`nohup`) stays ignored. A Ctrl-C during the installer's own run also stops the installer step in flight: that run reports failure, and the stopped units still start. A migrated host's routine install stops no unit: a job its schedule starts between the two asks refuses at the second, before the installer's own writes; rerun once it finished. `pfm install --check` answers the first ask's refusal with exit 4. Two refusals come only after the stop, races the preview cannot answer: a name-sync job its schedule started between the two asks (exit 97), and on macOS a launch agent still tearing down 25 s after its bootout (exit 1). On Linux, wait or run `systemctl --user stop pfm-name-sync.service`; on macOS, wait or run `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync`. The preview remains read-only.
+**Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` also checks required dependencies and the name-sync scheduler without writing: a BLOCK row or a running scheduler exits 4, and another preflight failure exits 1. A mutating install checks the scheduler before its writes and refuses an actively running name-sync job with exit 97. Wait for it to finish or stop `pfm-name-sync.service` on Linux / `com.professor.pfm.name-sync` on macOS, then rerun. Installation does not move legacy config or databases; `pfm doctor` prints those fixes.
+
+### First install on a host that already used Claude
+
+A default Claude installation stores identity alongside shared data in `~/.claude` and may also have `~/.claude.json`. `pfm install` refuses that shape: account 1 must be a real directory at `~/.cc/1`, and identity belongs there. Run `pfm doctor` first; its `account-is-store` and `store-identity` rows print the exact moves. If a destination already exists, compare it and follow the row's keep/remove instruction instead of overwriting it.
+
+On Linux, close every chat, including background Claude sessions, then run the following for the default account-1 path. The per-account list below is `installer.AccountEntries`; shared entries stay in the store. For `state`, the host check identifies only `state/mcp-discover-verdicts.json`; this first-install block moves the whole per-account `state` directory.
+
+```bash
+# Close every chat before moving account identity.
+if [ -L "$HOME/.cc/1" ] && [ "$HOME/.cc/1" -ef "$HOME/.claude" ]; then
+  rm "$HOME/.cc/1" || exit 1
+fi
+mkdir -m 700 -p "$HOME/.cc/1" || exit 1
+for entry in .credentials.json .claude.json .claude.json.backup backups \
+  sessions daemon daemon.log daemon-auth-status.json daemon-auth-cooldown \
+  jobs cache state mcp-needs-auth-cache.json telemetry feedback; do
+  if [ -e "$HOME/.claude/$entry" ] || [ -L "$HOME/.claude/$entry" ]; then
+    if [ -e "$HOME/.cc/1/$entry" ] || [ -L "$HOME/.cc/1/$entry" ]; then
+      echo "destination exists: $HOME/.cc/1/$entry; follow pfm doctor" >&2
+      exit 1
+    fi
+    mv "$HOME/.claude/$entry" "$HOME/.cc/1/$entry" || exit 1
+  fi
+done
+if [ -e "$HOME/.claude.json" ]; then
+  if [ -e "$HOME/.cc/1/.claude.json" ]; then
+    echo "destination exists: $HOME/.cc/1/.claude.json; compare it as pfm doctor directs" >&2
+    exit 1
+  fi
+  mv "$HOME/.claude.json" "$HOME/.cc/1/.claude.json" || exit 1
+fi
+pfm install --yes
+```
+
+The symlink check compares physical targets, so it also handles a relative link to the store; `rm` removes that link only. Resolve any other BLOCK rows doctor names before the final install.
+
+On macOS, make the same filesystem moves, then log in once on account 1 with `CLAUDE_CONFIG_DIR="$HOME/.cc/1" claude /login`. Claude stores the login in the keychain under a config-dir-derived name: `Claude Code-credentials` for the default directory, or `Claude Code-credentials-{first 8 hex of sha256(dir)}` for a custom directory. Moving files does not transfer that keychain identity.
 
 ---
 
@@ -169,13 +207,13 @@ One writer per surface — the law that keeps the two installers from fighting o
 | --------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Host fleet wiring | `pfm install` — the only writer | `{clone}/pfm.config.json`, `~/.local/share/pfm/install/`, `~/.claude/commands/`, `~/.claude/skills/`, `~/.agents/skills/`, the systemd/launchd scheduler units, `~/.codex/{prompts,skills,agents,hooks.json}`, one `~/.zshrc` line, and the opt-in VS Code user/remote `settings.json`; Claude hooks, status line and MCP ride every launch |
 | Claude managed cleanup | `pfm install` | `/etc/claude-code/managed-settings.d/pfm.json` on Linux, `/Library/Application Support/ClaudeCode/managed-settings.d/pfm.json` on macOS; uses `sudo -n` when direct write is unavailable. Without cached credentials, install warns and prints the command to run. |
-| State and cache database moves | `pfm install` | `~/.cc/fleet.db` → `~/.local/state/pfm/pfm.db`; `~/.local/state/pfm/fleet.db` → `~/.local/state/pfm/pfm-cache.db`, including WAL/SHM siblings. |
-| Install migration journal | `pfm install` | `~/.local/state/pfm/migrations/<id>/` records changed paths and their backups for rollback. |
-| Claude plugin door | `pfm install` through `claude plugin install` | Each account's `{config dir}/plugins/**` and `enabledPlugins` in its `settings.json` are journaled; a plugin write is skipped while a chat is live on that settings file, including a sharing account. |
+| State and cache databases | The operator, using `pfm doctor` fixes | `~/.local/state/pfm/pfm.db` and `pfm-cache.db` beside it; close chats and stop services before moving an old database and its WAL/SHM siblings. |
+| Claude shared store and account links | `pfm install` | Missing store entries are created in `~/.claude`; each account links every shared entry there. Existing contents are kept. |
+| Claude plugins | `pfm install` through `claude plugin install` | Installed once through the selected primary account; `settings.json` and `plugins/installed_plugins.json` resolve to the shared store. Live-chat checks cover every account; a failed plugin command keeps its writes and reports the failure. |
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, source-fetched and bundled (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json`, `~/.claude/themes/professor-{gold,silver,bronze}.json`, and any other target declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
-| MCP client registration (the one `professor` server) | Claude: each managed launch's `--mcp-config`; Codex and OpenCode: `pfm install` — the only writer | registered while either family is enabled (`mcp.servers.chat.enabled`, `harvester.enabled`), removed when both are off; every engine runs the same stdio command `~/.local/bin/pfm mcp serve --stdio` (absolute path), which forwards to the daemon's `/mcp/professor`. Claude: rendered into every pfm-launched Claude's `--mcp-config`; `pfm install` writes no key into an account `.claude.json` and strips pfm-owned legacy entries from it, leaving manual entries. Codex: one installer-owned `[mcp_servers.professor]` fence (`command`, `args`) at the end of every Codex home's `config.toml`. OpenCode: key `mcp.professor` of type `local` in `opencode.jsonc` |
+| MCP client registration (the one `professor` server) | Claude: each managed launch; Codex and OpenCode: `pfm install` | Claude receives `professor` and `mcp.thirdParty` through `--mcp-config`; host checks refuse pfm-owned legacy registrations for the operator to remove. Codex receives an owned `[mcp_servers.professor]` fence in `config.toml`; OpenCode receives `mcp.professor` in `opencode.jsonc`. The pfm server is present while either family is enabled. |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 
@@ -210,63 +248,11 @@ A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.
 
 **Read every release you skipped before you update.** `pfm version` names the installed release; each later `releases/vX.Y.Z.md` up to the target is one release's changes, and its `#### → For:` lines are what that release asks of you, each marked `before update`, `after update` or `per project` (the grammar is `docs/RELEASE.md` § Release notes). A release whose note carries `#### → Stop:` is a required stop: update to it first, finish its actions, then continue. Read all of them first — five versions behind is five files — and merge their actions into one list, a later release's action superseding an earlier one on the same surface. Then run `pfm update` and work through the list; `pfm update` prints the release-notes files it moved past once the source has advanced.
 
-### Crossing from v0.76–v0.78
+### Building and restoring the host binary
 
-Before the first migration, run `infra/fence/host-backup.sh <backup> live` from the clone, then rehearse with `infra/fence/host-rehearsal.sh <backup> <scratch>`. Close every chat before crossing. If an older `pfm update` reaches the layout migration, its candidate install prints this refusal:
+`make -C pfm host-install` builds and smoke-tests the new binary, then runs its `pfm install --check` before the atomic swap. Any refusing check keeps the installed binary untouched. A host-check refusal prints each blocking row's fix; for any other refusal, build with `make -C pfm build` and run the built binary's doctor for the fixes. Then retry. `SKIP_INSTALL_CHECK=1` explicitly skips this check; `FORCE=1` controls only the downgrade guard.
 
-```text
-  refuse  updater — this install migrates the host layout, and the pfm update running it predates the install journal
-cross by hand:
-  1. close every chat, the one running this command included
-  2. from a plain shell outside tmux, run:
-     git -C <clone> pull --ff-only
-     make -C <clone>/pfm host-install
-     pfm install --yes
-```
-
-The older `pfm update` rolls itself back first, so nothing changed. Run the crossing commands from a plain shell outside tmux after it exits.
-
-Between `make host-install` and `pfm install --yes`, the new binary sees a config it has not migrated yet. These refuse with `config not migrated: run pfm install` until the migration: `pfm-mcp.service` and the name-sync units (the launch agents on macOS); the Claude hooks (a non-blocking error in every chat); a `claude` launch through the shim; `pfm mcp serve --stdio`; `pfm update`. These still answer: `pfm --version`, `pfm doctor`, the statusline, `pfm config show|validate`, `make stale`, `make mcp-status` and `make sweep-stale`.
-
-Before the swap, `make host-install` asks the new binary `pfm install --check`. It runs every refusal `pfm install --yes` makes before its first change, in the apply's order: a `--config` that does not exist, the space preflight, the install gate (which refuses a live chat, a legacy database held by any process other than pfm's own services, and session-store entries pfm cannot move as you), then the config migration's plan (which refuses a stray pre-split `config.json` beside the config), the paths the moved databases will resolve to, the required dependency preflight and a running name-sync job. It moves nothing and writes nothing but pfm's own activity log. It exits 0 when all would pass, 4 when the gate would refuse or the name-sync job is running now, and 1 when another refusal fires or the check cannot read what it needs. What no check can preview is a write that fails mid-flight (a checkpoint, a move, a service restart): the journal records each change as it lands, and `pfm install --rollback <id>` reverses what landed. When the new binary would refuse this host's config (a migration is pending), a non-zero answer keeps the installed `pfm`, so the window never opens on a host whose migration would itself refuse:
-
-```text
-install check: blocked — close what it names, then rerun make -C <clone>/pfm host-install
-host-install: the new binary's install gate refuses this host — ~/.local/bin/pfm untouched; close or resolve what it names above, then rerun (a live chat includes Claude's daemon and bg-spare sessions: claude daemon stop --any)
-```
-
-The gate counts a chat as live from its `{account}/sessions/{pid}.json` file. Claude Code's background daemon and its `bg-spare` sessions write those files too, so they count; `claude daemon stop --any` ends them. On a host already migrated, the same answer prints as a `host-install: WARNING` and the swap goes ahead, because the new binary reads that config. `SKIP_INSTALL_CHECK=1 make host-install` skips the check with a SKIPPED line; `FORCE=1` passes only the downgrade guard.
-
-Once the check passes, `make host-install` swaps the binary, names the window and exits 0:
-
-```text
-host-install: binary swapped; pfm refuses until `pfm install --yes` migrates this host — run it now
-```
-
-`make install` stops there, restarting and rolling back nothing:
-
-```text
-install: stopped after host-install; nothing restarted or rolled back — run pfm install --yes now, then make -C <clone>/pfm sweep-stale
-```
-
-Close every chat first, and run `pfm install --yes` at once.
-
-For a journal listed under `~/.local/state/pfm/migrations/`, run `pfm install --rollback <id>` to reverse that install; `pfm install --rollback <id> --force` overrides destination drift when you intend to overwrite newer changes. A pending journal from a crashed or failed install blocks the next install until it is rolled back. After an install seals its journal, pruning keeps the newest three sealed journals and any younger than 14 days. Undo a crossing in this order:
-
-1. `pfm install --rollback <id>` with the new binary first. When the restored config is a legacy one this pfm refuses, it leaves the fleet units stopped and prints its numbered `next` lines:
-
-   ```text
-     next    this pfm refuses the restored legacy config {legacy}; fleet units left stopped: {units}
-     next    1. systemctl --user daemon-reload
-     next    2. make -C <clone>/pfm rollback
-     next    3. systemctl --user start {units}
-   ```
-
-   The `daemon-reload` line appears only when the rollback restored a systemd unit file, and comes first so that `make rollback`'s MCP restart runs the restored unit; on macOS each start line is a `launchctl bootstrap` of one launch agent.
-2. `make -C <clone>/pfm rollback`, after the printed `daemon-reload` when there is one.
-3. The printed unit restart.
-
-`make rollback` refuses a `pfm.prev` installed before a layout migration that is not rolled back yet, printing this order (`rollback: REFUSED — …`); `FORCE=1 make rollback` overrides it. A failed `make mcp-restart` prints the unit's last log lines after its `MCP-RESTART-FAILED` line.
+The swap keeps the previous binary as `pfm.prev`. `make -C pfm rollback` restores it atomically, reruns that restored binary's `install --yes`, then restarts the MCP daemon. It reports a failed install or restart with the next command to inspect. `make install` restarts the daemon and sweeps stale processes after the swap; a failed restart restores the previous binary before the sweep.
 
 The project flow is deliberately non-destructive:
 
@@ -281,6 +267,6 @@ No update regenerates scaffolded project files, replays the interview, or perfor
 
 ## Uninstall
 
-**`pfm`:** `pfm uninstall` — removes installer-owned links and theme files, the source-fetched skill store `~/.local/share/pfm/install/skills/` with its links in every account's `skills/` and in `~/.agents/skills/`, and restores the pre-install backups, per `pfm uninstall --help`. Locally modified theme files are preserved and reported rather than removed.
+**`pfm`:** `pfm uninstall` removes installer-owned links and theme files, the source-fetched skill store `~/.local/share/pfm/install/skills/` and its links in `~/.claude/skills/` and `~/.agents/skills/`, and restores pre-install backups. Locally modified themes are preserved and reported. See `pfm uninstall --help`.
 
 **The discipline layer:** no uninstall command exists anywhere in `templates/` or the shipped commands. Removing it is a manual `git` operation on your side — revert the install commit, or delete the written paths from the ownership table above.

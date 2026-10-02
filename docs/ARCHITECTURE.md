@@ -82,7 +82,7 @@ go -C ~/.professor/pfm build -o ~/.local/bin/pfm ./cmd/pfm
 pfm install --yes             # idempotent; applies the exact binary assets
 ```
 
-`pfm install` previews by default; `--yes` applies and `--rollback ID` reverses a named journaled HostLayout migration. It sources the shim from `{clone}/pfm/internal/installer/assets/shim/pfm.zsh` through one `~/.zshrc` line. The clone owns `pfm.config.json` and the composed prompts. Operator state is `~/.local/state/pfm/pfm.db`; the rebuildable cache is `pfm-cache.db` beside it. Claude hooks, status line and MCP ride each launch, while HostLayout strips pfm-owned legacy account-file entries. The shared Claude session store resolves through `~/.claude` for every configured account.
+`pfm install` runs read-only host checks first: a BLOCK row refuses with exit 4, and `pfm doctor` prints its fix. With no blockers, the installer performs a lossless build: creates missing shared entries in `~/.claude`, creates real account directories and links every shared entry from every account to the store. Existing contents survive, and wrong links are repointed without touching their targets. Registries are written once into the store; hooks, status line and MCP ride launches. The clone owns `pfm.config.json` and composed prompts; operator state is `~/.local/state/pfm/pfm.db` and the cache is `pfm-cache.db` beside it. Legacy config and database moves are operator fixes. `~/.zshrc` sources `{clone}/pfm/internal/installer/assets/shim/pfm.zsh`.
 
 ## Origin flow — the maintainer's repo is an adopter
 

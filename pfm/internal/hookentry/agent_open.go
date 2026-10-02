@@ -44,11 +44,7 @@ func AgentOpen(args []string, stderr io.Writer, runtime config.Runtime) int {
 	}
 	accounts := make([]agentopen.Account, 0, len(runtime.Config.Accounts))
 	for _, account := range runtime.Config.Accounts {
-		configDir := account.ConfigDir
-		if account.Implicit {
-			configDir = ""
-		}
-		accounts = append(accounts, agentopen.Account{ID: account.ID, ConfigDir: configDir})
+		accounts = append(accounts, agentopen.Account{ID: account.ID, ConfigDir: account.ConfigDir})
 	}
 	opener := agentopen.New(agentopen.Dependencies{
 		SIDDir:       resolved.SIDDir,

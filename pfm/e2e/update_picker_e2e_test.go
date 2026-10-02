@@ -109,7 +109,10 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 
 	proof := filepath.Join(root, "engine-proof")
 	fakeCodex := "#!/bin/sh\n" +
-		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
+		// The proof lands whole (temp file, then rename): the test polls for a
+		// non-empty file and must never read it between the two writes.
+		"{ printf 'cwd=%s\\n' \"$PWD\"; printf 'args=%s\\n' \"$*\"; } > \"$PFM_UPDATE_LAUNCH_PROOF.tmp\"\n" +
+		"mv \"$PFM_UPDATE_LAUNCH_PROOF.tmp\" \"$PFM_UPDATE_LAUNCH_PROOF\"\n" +
 		"sleep 2\n"
 	if err := testjail.WriteExecutable(filepath.Join(binDir, "cx"), []byte(fakeCodex), 0o700); err != nil {
 		t.Fatal(err)

@@ -2,6 +2,7 @@ package installer
 
 import (
 	"context"
+	"errors"
 )
 
 // nameSyncServiceRunning reports whether the Linux name-sync service is
@@ -23,4 +24,39 @@ func nameSyncServiceRunning(ctx context.Context, runner CommandRunner) (running,
 		return false, false
 	}
 	return unitStateRunning(state)
+}
+
+func CheckScheduler(ctx context.Context, runner CommandRunner) error {
+	if runner == nil {
+		runner = execCommandRunner{}
+	}
+	_, err := schedulerGate(ctx, runner)
+	return err
+}
+
+func schedulerGate(ctx context.Context, runner CommandRunner) (probed bool, err error) {
+	if schedulerIsLaunchd {
+		running, answered := launchAgentRunning(ctx, runner)
+		if running {
+			return true, ErrLaunchAgentRunning
+		}
+		return answered, nil
+	}
+	running, answered := nameSyncServiceRunning(ctx, runner)
+	if running {
+		return true, ErrNameSyncRunning
+	}
+	return answered, nil
+}
+
+func SchedulerRefusal(command string, err error) string {
+	switch {
+	case errors.Is(err, ErrNameSyncRunning):
+		return "pfm " + command +
+			": the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop pfm-name-sync.service`, then retry"
+	case errors.Is(err, ErrLaunchAgentRunning):
+		return "pfm " + command +
+			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first"
+	}
+	return ""
 }

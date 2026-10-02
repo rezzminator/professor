@@ -10,6 +10,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type failedThenDisplayTmux struct {
@@ -200,6 +201,6 @@ func reloadIdleWaitRequest(socket string) Request {
 	return Request{
 		Engine: pfmengine.Claude, SocketPath: socket, Pane: "%7",
 		SessionID: "11111111-1111-4111-8111-111111111111", CWD: "/jail/project",
-		Account: 2, AccountIDs: []int{2}, Machine: reloadTestMachine("", "/jail/home"),
+		Account: 2, AccountIDs: []int{2}, Machine: reloadTestMachine("", os.Getenv(paths.EnvHome)),
 	}
 }

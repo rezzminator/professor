@@ -7,13 +7,15 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestHeadlessClaudeAssignsSessionAndLaunchRecord(t *testing.T) {
+	home := t.TempDir()
 	request := HeadlessRequest{
 		Engine: pfmengine.Claude, Name: "worker", CWD: "/work/alpha",
-		Home: "/home/tester", PrimaryAccount: 2,
+		Home: home, PrimaryAccount: 2,
 	}
 	plan, err := headlessWithTestConfig(request)
 	if err != nil {
@@ -28,9 +30,10 @@ func TestHeadlessClaudeAssignsSessionAndLaunchRecord(t *testing.T) {
 }
 
 func TestHeadlessClaudeDefaultsCacheFromAccount(t *testing.T) {
+	home := t.TempDir()
 	request := HeadlessRequest{
 		Engine: pfmengine.Claude, Name: "worker", CWD: "/work/alpha",
-		Home: "/home/tester", PrimaryAccount: 2,
+		Home: home, PrimaryAccount: 2,
 	}
 	machine := testMachineConfig(request.Home)
 	machine.Accounts[1].Claude = &machine.Claude
@@ -63,12 +66,13 @@ func TestCodexDeveloperInstructionsArgKeepsOneCompleteTripleQuotedValue(t *testi
 // name, and both autonomy flags — a headless chat has nobody awake to answer a
 // permission prompt.
 func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
+	home := t.TempDir()
 	plan, err := headlessWithTestConfig(HeadlessRequest{
 		Engine:         "cc",
 		Name:           "_KILL worker 3",
 		CWD:            "/work/alpha",
 		Prompt:         "audit the firewall rules",
-		Home:           "/home/tester",
+		Home:           home,
 		PrimaryAccount: 2,
 	})
 	if err != nil {
@@ -119,10 +123,11 @@ func TestHeadlessClaudeUsesRolePromptFileAndKeepsCallerPromptAlone(t *testing.T)
 }
 
 func TestHeadlessCodexCarriesWholeRoleAsDeveloperInstructions(t *testing.T) {
+	home := t.TempDir()
 	constitution := strings.Repeat("0123456789abcdef", 820) + ` a triple quote """ and slash \\ survive`
 	plan, err := headlessWithTestConfig(HeadlessRequest{
 		Engine: pfmengine.Codex, Name: "worker", CWD: "/work/alpha",
-		Prompt: "caller prompt", PromptChannel: constitution, Home: "/home/tester",
+		Prompt: "caller prompt", PromptChannel: constitution, Home: home,
 		PrimaryAccount: 1,
 	})
 	if err != nil {
@@ -144,7 +149,8 @@ func TestHeadlessCodexCarriesWholeRoleAsDeveloperInstructions(t *testing.T) {
 }
 
 func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
-	machine := testMachineConfig("/home/tester")
+	home := t.TempDir()
+	machine := testMachineConfig(home)
 	cache1H := true
 	machine.Claude.Cache1H = false
 	if machine.Accounts[0].Claude != nil {
@@ -154,7 +160,7 @@ func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
 		Engine:         "cc",
 		Name:           "worker",
 		CWD:            "/work/alpha",
-		Home:           "/home/tester",
+		Home:           home,
 		PrimaryAccount: 1,
 		Cache1H:        &cache1H,
 		Config:         machine,
@@ -162,8 +168,8 @@ func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadlessRun() error = %v", err)
 	}
-	if strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR=/home") {
-		t.Fatalf("account 1 must keep the default config dir: %s", plan.Run)
+	if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+Quote(pfmconfig.DefaultAccountDir(home, 1))) {
+		t.Fatalf("account 1 must use its config dir %s: %s", pfmconfig.DefaultAccountDir(home, 1), plan.Run)
 	}
 	// Match the assignments themselves, never "…=1 claude": launch-env words
 	// sit between the cache assignment and the binary, so an adjacency check
@@ -181,12 +187,13 @@ func TestHeadlessClaudeAccountOneAndCacheArmed(t *testing.T) {
 // into its rename UI, and a prompt on the command line would start a turn
 // before that can happen.
 func TestHeadlessCodexTakesNeitherNameNorPrompt(t *testing.T) {
+	home := t.TempDir()
 	plan, err := headlessWithTestConfig(HeadlessRequest{
 		Engine:         pfmengine.Codex,
 		Name:           "_KILL codex worker",
 		CWD:            "/work/alpha",
 		Prompt:         "read the incident report",
-		Home:           "/home/tester",
+		Home:           home,
 		PrimaryAccount: 1,
 	})
 	if err != nil {
@@ -215,7 +222,6 @@ func TestHeadlessRunRefusals(t *testing.T) {
 		Engine:         "cc",
 		Name:           "worker",
 		CWD:            "/work/alpha",
-		Home:           "/home/tester",
 		PrimaryAccount: 1,
 	}
 	for _, testCase := range []struct {
@@ -231,6 +237,7 @@ func TestHeadlessRunRefusals(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			request := base
+			request.Home = t.TempDir()
 			testCase.mutate(&request)
 			_, err := headlessWithTestConfig(request)
 			if err == nil {

@@ -39,10 +39,9 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFixture(t, filepath.Join(conflict, "SKILL.md"), "# own\n")
-	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
 
 	states := map[string]SkillSourceStatus{}
-	for _, status := range InspectSkillSources(home, accounts, false) {
+	for _, status := range InspectSkillSources(home, false) {
 		states[status.Name] = status
 	}
 	for name, want := range map[string]SkillSourceState{
@@ -59,13 +58,13 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	if got := states["conflict"].Conflicts; len(got) != 1 || got[0] != conflict {
 		t.Fatalf("CONFLICT row does not name %s: %v", conflict, got)
 	}
-	for _, status := range InspectSkillSources(home, accounts, true) {
+	for _, status := range InspectSkillSources(home, true) {
 		if status.Name == "unfetched" && status.State != SkillSourceOffline {
 			t.Fatalf("offline unfetched state=%s want OFFLINE", status.State)
 		}
 	}
 	var report bytes.Buffer
-	warnings, failures := ReportSkillSources(&report, home, accounts, false)
+	warnings, failures := ReportSkillSources(&report, home, false)
 	if warnings != 3 || failures != 1 {
 		t.Fatalf(
 			"warnings=%d failures=%d, want 3 (conflict, unfetched, odd) and 1 (missing)\n%s",
@@ -76,7 +75,7 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	}
 
 	writeFixture(t, registry, "{broken")
-	statuses := InspectSkillSources(home, accounts, false)
+	statuses := InspectSkillSources(home, false)
 	if len(statuses) != 1 || statuses[0].State != SkillSourceCheckFailed ||
 		!strings.Contains(statuses[0].Error, registry) {
 		t.Fatalf("an unreadable registry did not report CHECK-FAILED naming %s: %+v", registry, statuses)
@@ -84,7 +83,7 @@ func TestInspectSkillSourcesNamesEveryState(t *testing.T) {
 	if err := os.Remove(registry); err != nil {
 		t.Fatal(err)
 	}
-	if statuses := InspectSkillSources(home, accounts, false); len(statuses) != 1 ||
+	if statuses := InspectSkillSources(home, false); len(statuses) != 1 ||
 		statuses[0].State != SkillSourceNoRegistry {
 		t.Fatalf("an absent registry state=%+v, want NO-REGISTRY", statuses)
 	}
@@ -117,7 +116,7 @@ func TestInspectSkillSourcesRecordedCloneGoneIsAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	var report bytes.Buffer
-	warnings, failures := ReportSkillSources(&report, home, nil, false)
+	warnings, failures := ReportSkillSources(&report, home, false)
 	if failures != 1 || warnings != 0 || !strings.Contains(report.String(), "state=CHECK-FAILED") ||
 		!strings.Contains(report.String(), gone) {
 		t.Fatalf("a recorded clone that is gone: warnings=%d failures=%d\n%s", warnings, failures, report.String())
@@ -135,7 +134,7 @@ func TestInspectSkillSourcesResolvesTheOwnerLikeInstall(t *testing.T) {
 		home,
 		skillRegistryJSON(map[string]string{"god-speed": "https://github.com/{GH_USER}/god-speed"}),
 	)
-	statuses := InspectSkillSources(home, nil, false)
+	statuses := InspectSkillSources(home, false)
 	if len(statuses) != 1 || statuses[0].Name != "god-speed" || statuses[0].State != SkillSourceNotFetched {
 		t.Fatalf("doctor did not resolve {GH_USER} the way install does: %+v", statuses)
 	}
@@ -147,13 +146,13 @@ func TestReportGlobalRegistriesReadsOfflineFromTheInjectedEnv(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file:///nowhere/god-speed"}))
-	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
+
 	for want, env := range map[SkillSourceState]*paths.MapEnv{
 		SkillSourceNotFetched: {},
 		SkillSourceOffline:    {Values: map[string]string{paths.EnvSkillSourcesOffline: "1"}},
 	} {
 		var report bytes.Buffer
-		ReportGlobalRegistries(&report, home, accounts, false, env)
+		ReportGlobalRegistries(&report, home, false, env)
 		if row := skillSourceRow(t, report.String(), "god-speed"); !strings.Contains(row, "state="+string(want)+" ") &&
 			!strings.HasSuffix(row, "state="+string(want)) {
 			t.Fatalf("env %v: row %q, want state=%s", env.Values, row, want)
@@ -161,10 +160,8 @@ func TestReportGlobalRegistriesReadsOfflineFromTheInjectedEnv(t *testing.T) {
 	}
 }
 
-// TestReportGlobalRegistriesChecksAccountLinksWithoutClaude pins F15: doctor
-// checks every link install writes, the account links included, even when no
-// Claude Code binary is installed.
-func TestReportGlobalRegistriesChecksAccountLinksWithoutClaude(t *testing.T) {
+// TestReportGlobalRegistriesChecksStoreLinksWithoutClaude checks store skill links even when Claude is absent.
+func TestReportGlobalRegistriesChecksStoreLinksWithoutClaude(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
@@ -174,9 +171,9 @@ func TestReportGlobalRegistriesChecksAccountLinksWithoutClaude(t *testing.T) {
 	if err := os.Remove(link); err != nil {
 		t.Fatal(err)
 	}
-	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
+
 	var report bytes.Buffer
-	ReportGlobalRegistries(&report, home, accounts, true, &paths.MapEnv{})
+	ReportGlobalRegistries(&report, home, true, &paths.MapEnv{})
 	if row := skillSourceRow(t, report.String(), "god-speed"); !strings.Contains(row, "state=MISSING missing="+link) {
 		t.Fatalf("a missing account link was not checked with Claude absent: %q", row)
 	}
@@ -191,7 +188,7 @@ func TestInspectSkillSourcesNonDirectoryStoreNamesTheRemedy(t *testing.T) {
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file:///nowhere/god-speed"}))
 	store := filepath.Join(skillStoreRoot(home), "god-speed")
 	writeFixture(t, store, "stray\n")
-	statuses := InspectSkillSources(home, nil, false)
+	statuses := InspectSkillSources(home, false)
 	if len(statuses) != 1 || statuses[0].State != SkillSourceConflict ||
 		len(statuses[0].Conflicts) != 1 || statuses[0].Conflicts[0] != store {
 		t.Fatalf("a non-directory store: %+v", statuses)
@@ -215,9 +212,8 @@ func TestInspectSkillSourcesRefuseASymlinkedStoreRoot(t *testing.T) {
 	if err := os.Symlink(moved, storeRoot); err != nil {
 		t.Fatal(err)
 	}
-	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
 
-	statuses := InspectSkillSources(home, accounts, false)
+	statuses := InspectSkillSources(home, false)
 
 	if len(statuses) != 1 || statuses[0].State != SkillSourceConflict ||
 		len(statuses[0].Conflicts) != 1 || statuses[0].Conflicts[0] != storeRoot {
@@ -246,31 +242,34 @@ func TestSkillFileStatesReadApartOnBothSurfaces(t *testing.T) {
 	if strings.Contains(output, "SKILL-SOURCE-MISSING gs") || !strings.Contains(output, "SKILL-SOURCE-INVALID gs: ") {
 		t.Fatalf("an unusable SKILL.md did not read as SKILL-SOURCE-INVALID on install:\n%s", output)
 	}
-	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}
+
 	var report bytes.Buffer
-	warnings, failures := ReportSkillSources(&report, home, accounts, false)
+	warnings, failures := ReportSkillSources(&report, home, false)
 	if row := skillSourceRow(t, report.String(), "gs"); !strings.Contains(row, "state=SKIPPED ") ||
 		strings.Contains(row, "hint=") || warnings != 1 || failures != 0 {
 		t.Fatalf("doctor: warnings=%d failures=%d row %q, want one SKIPPED warning", warnings, failures, row)
 	}
 }
 
-// TestInspectSkillSourcesChecksTheDefaultAccountInstallWrites pins F29: with
-// accounts that omit ~/.claude, doctor still checks the link install writes
-// there.
-func TestInspectSkillSourcesChecksTheDefaultAccountInstallWrites(t *testing.T) {
+// TestInspectSkillSourcesChecksTheStoreInstallWrites checks the store link regardless of account roster.
+func TestInspectSkillSourcesChecksTheStoreInstallWrites(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
 	second := filepath.Join(home, ".cc", "2")
-	runSkillInstall(t, home, ModeApply, func(options *Options) { options.ConfigDirs = []string{second} })
+	runSkillInstall(
+		t,
+		home,
+		ModeApply,
+		func(options *Options) { options.ClaudeAccounts = []pfmconfig.Account{{ID: 2, ConfigDir: second}} },
+	)
 	link := filepath.Join(home, ".claude", "skills", "god-speed")
 	if err := os.Remove(link); err != nil {
 		t.Fatal(err)
 	}
 
-	statuses := InspectSkillSources(home, []pfmconfig.Account{{ID: 2, ConfigDir: second}}, false)
+	statuses := InspectSkillSources(home, false)
 
 	if len(statuses) != 1 || statuses[0].State != SkillSourceMissing ||
 		len(statuses[0].Missing) != 1 || statuses[0].Missing[0] != link {

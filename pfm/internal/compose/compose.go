@@ -397,11 +397,6 @@ func newAccountMatcher(roots []AccountRoot) accountMatcher {
 // accountForConfigDir keeps live process attribution tied to its own seat.
 func (current *composer) accountForConfigDir(dir string) int {
 	if dir == "" {
-		for _, seat := range current.claudeAccounts {
-			if seat.Implicit {
-				return seat.Account
-			}
-		}
 		return 0
 	}
 	normalized := absoluteCleanPath(dir)
@@ -576,17 +571,12 @@ func (current *composer) liveClaudeRow(
 			row.Account = current.accountForConfigDir(process.ConfigDir)
 		}
 	}
-	matchedAgent := false
 	for _, agent := range current.input.Snapshot.Agents {
 		if agent.SessionID == transcript.UUID {
 			row.ConfigDir = agent.ConfigDir
 			row.Account = current.accountForConfigDir(agent.ConfigDir)
-			matchedAgent = true
 			break
 		}
-	}
-	if !matchedAgent && !matchedProcess && row.Account == 0 {
-		row.Account = current.accountForConfigDir("")
 	}
 	row.Socket = socket
 	row.PaneID = pane.PaneID

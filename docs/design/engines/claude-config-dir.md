@@ -1,14 +1,19 @@
 # Claude config dir
 
-What pfm places on disk for Claude Code: one shared session store every account reads, the per-account dirs that keep only identity, the one managed setting in Claude Code's system directory, and the registry links. Launch-time values are not files — they ride the command line ([claude-launch.md](claude-launch.md)). Moving an older host onto this layout is [host-migration.md](host-migration.md).
+`~/.claude` is the only shared store. Each account has its own identity directory and a link to the store for every shared entry. pfm installs registry items once into the store and supplies launch values through the command line ([claude-launch.md](claude-launch.md)).
 
-`{config dir}` is one account's `configDir` from `pfm.config.json`; the implicit account's is `~/.claude`.
+`{config dir}` means one account's `configDir` from `pfm.config.json`, `~/.cc/{id}` by default. It never means `~/.claude`. `{store}` means `~/.claude`; `{clone}` means the recorded framework clone.
 
 ## Contents
 
 - [Decisions](#decisions)
-- [The session store](#the-session-store)
+- [How Claude finds its files](#how-claude-finds-its-files)
+- [The store](#the-store)
 - [Account dirs](#account-dirs)
+- [Settings](#settings)
+- [MCP servers](#mcp-servers)
+- [Launches outside pfm](#launches-outside-pfm)
+- [Install build](#install-build)
 - [Managed settings](#managed-settings)
 - [What pfm does not write](#what-pfm-does-not-write)
 - [Registries](#registries)
@@ -19,96 +24,178 @@ What pfm places on disk for Claude Code: one shared session store every account 
 
 ## Decisions
 
-- **Accounts are separate; sessions are one.** Each account keeps its own login and Claude state, so claude.ai connectors and Remote Control work per account. Everything keyed by a session id lives once, in `~/.claude`, and every other account dir links to it — a chat reloaded onto another account resumes with its transcript, rewind history and task list intact.
-- **pfm owns the links.** `pfm install` creates them and `pfm doctor` fails when one is missing or points elsewhere. Code that reads sessions reads one root, `~/.claude/projects`.
-- **Launch settings are flags, not files.** Hooks, status lines, MCP servers, `outputStyle` and the env block ride each launch. `pfm install` writes plugin state in account `settings.json`; the one-time move off an older layout also rewrites memory-helper paths and strips pfm-owned entries ([host-migration.md](host-migration.md#the-layout-table)). It writes no account `settings.local.json` or `.claude.json`.
-- **One value is machine-wide.** `cleanupPeriodDays` is also a managed setting, because a Claude process started any way at all — passthrough, the VS Code extension, a direct binary path — must never run the 30-day transcript sweep.
-- **Whatever install writes, doctor checks.**
+- **One store, separate identities.** Every account shares transcripts, rewind history, tasks, plans, pasted content and prompt history. Reloading onto another account resumes the same session through that account's links.
+- **The store holds no login.** Every account, including account 1, has its own directory. The directory may be a symlink when it resolves outside the store. An account resolving to the store, or into it, is a blocking host check, and a dangling account link is an inspection error. `claudelaunch.InspectConfigDir` is the one rule that launch, install, the host checks and doctor apply.
+- **pfm owns every shared link.** Install creates missing links and repoints drifted ones without touching their old targets. Doctor checks the store and every account's links.
+- **Unknown entries stay where they are.** A name on neither list reports `UNCLASSIFIED`; pfm does not share or delete it. `EntryClass` also recognises ignored entries: `ide`, `.cc-new-children`, `.cc-pane-children`, `settings.local.json`.
+- **Settings are shared by link.** Claude layers the shared user settings under project files, launch settings and managed policy. Per-account launch overrides live in `pfm.config.json`.
+- **MCP definitions ride the launch.** `mcp.thirdParty` supplies operator servers beside pfm's `professor` entry. Trust, onboarding and login remain Claude's per-account state.
+- **Retention applies outside pfm too.** The managed `cleanupPeriodDays` protects launches through other paths.
 
-## The session store
+## How Claude finds its files
 
-`SessionPaths` (`pfm/internal/installer/session_store.go`) names the entries keyed by session id:
+The config directory is `$CLAUDE_CONFIG_DIR`, falling back to `~/.claude` when unset. User memory, registries, plugins, rules, themes and user settings are read under that directory. pfm's account launches always set `CLAUDE_CONFIG_DIR`; shared entries reach them through their links.
 
-| Entry | Holds |
-| --- | --- |
-| `projects/` | transcripts, `projects/{cwd slug}/{session id}.jsonl` |
-| `file-history/` | rewind checkpoints, `file-history/{session id}/` |
-| `tasks/` | task lists, `tasks/{session id}/` |
-| `session-env/` | per-session environment captures, `session-env/{session id}/` |
+Claude's state file is `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`. With the variable unset it is `~/.claude.json`, outside the store. `settings.local.json` is a project file, `{project}/.claude/settings.local.json`, rather than an account settings file. Claude also checks `~/.claude/ide` for IDE locks. Claude writes user `settings.json` through its symlink, preserving the link.
 
-- The store is `~/.claude`. For every account whose `configDir` is not `~/.claude`, `pfm install` creates each absent store entry as a directory (0700) and links the account to it: `{config dir}/projects → ~/.claude/projects`, and so on. An existing link to an absent store entry is healed by creating the directory.
-- An account whose whole `configDir` is a symlink to `~/.claude` (the implicit account's usual `~/.cc/1`) already satisfies every row.
-- A transcript's path no longer names its account; the [launch record](claude-launch.md#the-launch-record) does.
-- Transcript roots collapse to `~/.claude/projects` (`engine.claudeDefaultRoots`); no reader resolves symlinks to de-duplicate, and `PFM_CLAUDE_ROOTS` is a test-jail override only.
+## The store
+
+`ClaudeStore`, `StoreEntries`, `AccountEntries` and `IgnoredEntries` live in `pfm/internal/installer/claude_store.go`. `StoreEntries`, in source order:
+
+| Entry | Type | Holds |
+| --- | --- | --- |
+| `agents` | directory | user agents and pfm registry items |
+| `commands` | directory | user commands and pfm registry items |
+| `skills` | directory | user skills and pfm registry items |
+| `rules` | directory | user rules |
+| `plugins` | directory | the shared plugin installation |
+| `themes` | directory | custom palettes |
+| `projects` | directory | transcripts: `{cwd slug}/{session id}.jsonl` |
+| `file-history` | directory | rewind checkpoints by session id |
+| `tasks` | directory | task lists by session id |
+| `session-env` | directory | per-session environment captures |
+| `plans` | directory | plan files |
+| `paste-cache` | directory | pasted content by content hash |
+| `shell-snapshots` | directory | shell environment snapshots |
+| `uploads` | directory | attached files |
+| `downloads` | directory | fetched files |
+| `teams` | directory | agent team state |
+| `settings.json` | file | shared user settings; seed `{}\n` |
+| `CLAUDE.md` | file | user memory; empty seed |
+| `history.jsonl` | file | prompt history; empty seed |
+| `stats-cache.json` | file | statistics cache; empty seed |
+| `.last-cleanup` | file | cleanup marker; empty seed |
+| `.last-update-result.json` | file | update result; empty seed |
+| `gh-pr-status-cache.json` | file | pull-request status cache; empty seed |
+
+Every missing entry is created empty (apart from the `settings.json` seed). Existing entries are left intact. Transcript readers use `~/.claude/projects` (`engine.claudeDefaultRoots`); `PFM_CLAUDE_ROOTS` is a jail override. The transcript path does not identify its account; the [launch record](claude-launch.md#the-launch-record) does.
 
 ## Account dirs
 
-Per account, owned by Claude Code: `.credentials.json`, `.claude.json` (login, onboarding, trust, the account's own MCP servers), `settings.json`, `sessions/` (live-process pid files), `history.jsonl`, `shell-snapshots/`, `paste-cache/`, `stats-cache.json`, `daemon*`, `telemetry/`, `plugins/`, `cache/`, `backups/`. `pfm install` runs Claude's plugin commands, which write `settings.json` and `plugins/`; the one-time host migration can also rewrite account settings.
+`AccountEntries`, in source order, are never linked to the store:
+
+| Entry | Holds |
+| --- | --- |
+| `.credentials.json` | login token |
+| `.claude.json` | account identity, folder trust, onboarding and flags |
+| `.claude.json.backup` | Claude state backup |
+| `backups` | Claude state backups |
+| `sessions` | live-process registry and process tokens |
+| `daemon` | account daemon state |
+| `daemon.log` | daemon log |
+| `daemon-auth-status.json` | daemon authentication state |
+| `daemon-auth-cooldown` | daemon authentication cooldown |
+| `jobs` | daemon background jobs |
+| `cache` | account model catalog |
+| `state` | account state, including `mcp-discover-verdicts.json` |
+| `mcp-needs-auth-cache.json` | MCP servers awaiting account OAuth |
+| `telemetry` | queued account telemetry |
+| `feedback` | queued account feedback |
+
+`sessions/{pid}.json` describes a live process, rather than the conversation transcript. On reload, the new process registers in the selected account's directory. For `state` inside the store, `store-identity` checks only `state/mcp-discover-verdicts.json`. Unknown names in either the store or an account report `UNCLASSIFIED` and remain untouched.
+
+## Settings
+
+Claude's effective layers, highest first:
+
+1. Managed settings, including pfm's retention drop-in.
+2. Command-line flags and pfm's `--settings` payload.
+3. The project's `.claude/settings.local.json`.
+4. The project's `.claude/settings.json`.
+5. The account's `settings.json` link to `~/.claude/settings.json`.
+
+A settings `env` value overrides the shell's value; a flag overrides its settings key. Hooks merge across layers. `/config` writes shared user settings through the account link, so every account sees the change. An account-specific launch value belongs in that account's `claude` block in `pfm.config.json`. With `$HOME` as the working directory, the store's `settings.json` is also read as that project's `.claude/settings.json`.
+
+## MCP servers
+
+`--mcp-config` carries every `mcp.thirdParty` entry, plus pfm's `professor` server when `chat` or `harvester` is enabled. Third-party entries remain present when both families are off. The key is a map from server name to a JSON object in Claude's `mcpServers` shape; validation reserves `professor` for pfm.
+
+The intended account `.claude.json` contains no `mcpServers`. Install does not import or strip definitions. A pfm-owned definition outside the launch is a blocking `pfm-mcp` check; another user-level entry is a `third-party-mcp` warning with the edit that puts it in `mcp.thirdParty` and removes it from the state file. The warning covers each account's state file and `~/.claude.json`.
+
+## Launches outside pfm
+
+- The terminal's `claude()` shell function calls pfm's managed launcher (`pfm/internal/installer/assets/shim/pfm.zsh`). Its rendered account launch chooses the ambient account directory or the primary account and sets `CLAUDE_CONFIG_DIR`. Passthrough preserves the ambient environment and supplies only the session plugin values; it does not choose an account.
+- `pfm install --yes --vscode` sets `claudeCode.environmentVariables` in owned VS Code settings to include `CLAUDE_CONFIG_DIR` for the primary account. `vscode-ownership.json` records the prior value. Other environment entries are preserved; an operator edit to pfm's value relinquishes ownership. Uninstall restores the prior value only while pfm's value is still present.
+- A bare binary launched without `CLAUDE_CONFIG_DIR` reads shared files from the store and state from `~/.claude.json`. Doctor warns about that home state file and blocks on identity entries inside the store. A bare binary needs an explicit account directory to use that account's identity.
+
+## Install build
+
+The [host checks](host-checks.md) run before any install write in preview, apply and `--check`. A blocking finding refuses the install; its fix is an operator action printed by doctor. Warnings allow install to continue.
+
+After the gate, `wireClaudeStore` builds the shared entries and links:
+
+1. Create missing store directories with mode `0700`; create missing files with mode `0600` and their `Seed`. Leave existing entries intact.
+2. Create each missing account directory as a real directory with mode `0700`.
+3. Create an absent shared-entry link to the store; replace a link pointing elsewhere; report a correct link as `ok`. Leave every real file or directory untouched: the host gate already refused that shape.
+
+The install transcript uses `change  create {path}`, `change  link {config dir}/{entry} -> {store}/{entry}`, `change  repoint {config dir}/{entry} -> {store}/{entry} (was {old})`, and `ok      {config dir}/{entry}`.
 
 ## Managed settings
 
-`pfm install` writes `pfm.json` into Claude Code's `managed-settings.d/` — `/etc/claude-code/managed-settings.d/` on Linux, `/Library/Application Support/ClaudeCode/managed-settings.d/` on macOS, the only managed location Claude reads there (`PFM_MANAGED_SETTINGS_DIR` overrides it in a test jail):
+`pfm install` writes `pfm.json` in `/etc/claude-code/managed-settings.d/` on Linux or `/Library/Application Support/ClaudeCode/managed-settings.d/` on macOS (`PFM_MANAGED_SETTINGS_DIR` overrides the directory in a jail):
 
 ```json
 { "cleanupPeriodDays": 36500 }
 ```
 
-- It is a drop-in: pfm owns only its own file in `managed-settings.d/` and never touches `managed-settings.json` or another file there.
-- Writing it needs root; `pfm install` runs that one step through `sudo`, printing the exact command first, and continues without it when refused — doctor then warns. Linux runs `install -D`; BSD `install` has no `-D`, so macOS runs `mkdir -p` then `install`. The macOS path holds a space: every printed command quotes it.
-- The value comes from `claude.cleanupPeriodDays`; the launch `--settings` carries the same value.
-- Claude reads managed settings for every account and every launch path, and nothing below them overrides the value.
+The value comes from `claude.cleanupPeriodDays` and also rides launch `--settings`. pfm owns only its drop-in. It attempts a direct write, then `sudo -n` when needed, printing the command; a refusal is advisory and doctor warns. Linux uses `install -D`; macOS uses `mkdir -p` and `install`, quoting the path's space. Managed policy applies through every launch path and outranks the other settings layers.
 
 ## What pfm does not write
 
-- No launch setting or env key in any account `settings.json`. Hooks, `statusLine`, `subagentStatusLine` and `cleanupPeriodDays` ride `--settings` at launch.
-- No entry in any `.claude.json`. The one `professor` stdio server (`pfm mcp serve --stdio`, serving every enabled family) rides `--mcp-config` at launch, beside the account's own servers.
-- No `output-styles/`, `keybindings.json` or `CLAUDE.md`.
-- The exception is Claude plugin state: `pfm install` runs `claude plugin marketplace add` and `claude plugin install` per account for `cache-live-control`, `sub-agent-compact` and `agent-effort`. Claude writes `{config dir}/plugins/**` and `enabledPlugins` in the account's physical `settings.json`. Both paths are journaled and restored at once if a command fails. A live chat on any account sharing that settings file skips the plugin step until the chat closes.
+pfm writes no launch setting or env key into user settings, no account `.claude.json` content, no `settings.local.json`, `output-styles/` or `keybindings.json`, and no user `CLAUDE.md` content. It creates the shared `CLAUDE.md` empty when absent. Account trust, onboarding and identity are Claude's.
+
+The plugin step runs once through the primary account for `cache-live-control`, `sub-agent-compact` and `agent-effort`. Claude's plugin commands write shared `plugins/**` and `enabledPlugins` in shared `settings.json` through that account's links. An already installed and enabled plugin needs no command. A live chat on any account defers needed plugin commands; an unreadable live-process probe or a failed command returns an error.
 
 ## Registries
 
-| Path under `{config dir}` | Symlink to |
+Each item is written once under the store. Every account sees the same agents, commands and skills through its shared-entry links.
+
+| Path under `{store}` | Target or content |
 | --- | --- |
 | `commands/reload.md` | `~/.local/share/pfm/install/reload.command.md` |
 | `commands/*` | `{clone}/templates/global/commands/` entries |
 | `skills/handoff/SKILL.md` | `~/.local/share/pfm/install/handoff.skill.md` |
-| `skills/deep-rr` | `{clone}/workflows/deep-rr` |
-| `skills/*` | `{clone}/templates/global/skills/` dirs holding a `SKILL.md` |
-| `skills/{name}` (also `~/.agents/skills/{name}`) | `~/.local/share/pfm/install/skills/{name}/`, the shallow clone of a repo `templates/global/skills/sources.json` registers |
-| `agents/*.md` | `{clone}/templates/global/agents/`, or a rendered variant under `~/.local/state/pfm/generated/claude-agents` |
-| `themes/*` (`~/.claude` only) | regular files from `templates/themes/sources.json`, tracked in `theme-ownership.json` |
+| `skills/*` | `{clone}/templates/global/skills/` dirs with a `SKILL.md` |
+| `skills/{name}` | `~/.local/share/pfm/install/skills/{name}/` source clone |
+| `agents/*.md` | clone sources or generated variants under `~/.local/state/pfm/generated/claude-agents` |
+| `themes/*` | manifest-selected files; `theme-ownership.json` records ownership |
 
-A link in the way is replaced, a regular file is backed up first, a foreign target is refused as a conflict; an orphan whose pfm target is gone is removed; uninstall removes what points at pfm's paths.
+Source-fetched skills also link under `~/.agents/skills/{name}`. `templates/global/skills/sources.json` registers their repos; `templates/global/agents/` supplies agents; `templates/themes/sources.json` supplies themes.
+
+A regular file in the way is backed up before replacement; an existing link can be replaced. Global registry inspection reports foreign targets as conflicts. `InspectDeadRegistryLinks` checks store `agents`, `commands`, `skills` and `~/.agents/skills` without following directory links: a dangling link is retired only when its resolved target belongs to a recorded clone, the managed install root or generated Claude agents. Foreign links remain. Unreadable paths return errors. Install and uninstall use this rule; doctor reports its findings. A retired path already absent prints nothing.
 
 ## Runtime writes
 
-- `pfm archive` prunes archived sessions out of `~/.claude/history.jsonl` after a backup to the archive's `_sidecar-backups`.
-- Kill's finisher removes `~/.claude/.cc-new-children/{id}` and `~/.claude/.cc-pane-children/{id}`.
+`pfm archive` prunes archived sessions from `~/.claude/history.jsonl` after a backup to the archive's `_sidecar-backups`. Kill's finisher removes `~/.claude/.cc-new-children/{id}` and `~/.claude/.cc-pane-children/{id}`.
 
 ## Reads pfm depends on
 
-`{config dir}/.credentials.json` (account discovery, the usage hook's `api/oauth/usage` call), `{config dir}/sessions/{pid}.json` (which live process runs which session), `{config dir}/plugins/installed_plugins.json` and `settings.json` `enabledPlugins` (the plugin check), `~/.claude/projects/` (picker, `chat find`, archive), `.claude.json` `oauthAccount.emailAddress` (the duplicate-login check).
+Account discovery and the usage hook read `{config dir}/.credentials.json`. Live-session lookup reads `{config dir}/sessions/{pid}.json`. Duplicate-login checks read `.claude.json` `oauthAccount.emailAddress`. Plugin checks read the store's `plugins/installed_plugins.json` and `settings.json` `enabledPlugins` once. Picker, find and archive read the shared `projects` root.
 
 ## pfm doctor checks
 
-| Thing | Broken state reports |
-| --- | --- |
-| session store, per account and entry | `session-store: {config dir}/{entry} missing — run pfm install`, `… links to ~/.claude/{entry}, which is missing — run pfm install`, `… is a real dir ({n} entries) — run pfm install`, `… points at {target}, want ~/.claude/{entry}` |
-| managed cleanup | `managed-cleanup: … missing`, `… cleanupPeriodDays={v}, want {config value}` |
-| legacy account writes | `legacy: {file} still carries pfm {key} — run pfm install`; `legacy: {file} UNREADABLE error={cause}` |
-| every other `HostLayout` row | `layout: {row} {verdict} {path}` for each row not `ok` — the same `ClassifyLayout` verdicts install acts on |
-| registries | `agents/`, `commands/`, `skills/`: `state=missing\|conflict\|unreadable hint="run pfm install"` |
-| Claude plugins, per account | `doctor: claude_plugins claude[{n}] plugin {id} not enabled\|not installed in {dir} — run pfm install --yes` |
-| launcher | `launcher: missing`, `launcher: DISPLACED by {target}`, `launcher: unreadable error=…` — each with `run pfm install` |
+The authoritative detector list, severities, problems and operator fixes are in [host-checks.md](host-checks.md). Doctor prints `host-check: {severity} {check} {path} — {problem}` and a separate `host-check:   fix: {fix}` line. A `BLOCK` counts a failure; a `WARN` counts a warning. It separately checks the targets built by install:
 
-### managed-cleanup
+| State | Output | Tally |
+| --- | --- | --- |
+| store entry missing | `store: {store}/{entry} missing — run pfm install` | failure |
+| store entry unreadable | `store: {store}/{entry} UNREADABLE error={cause}` | failure |
+| account directory missing | `account: {id} {config dir} missing — run pfm install` | failure |
+| account directory unreadable | `account: {id} {config dir} UNREADABLE error={cause}` | failure |
+| shared link missing | `account-link: {config dir}/{entry} missing — run pfm install` | failure |
+| shared link elsewhere | `account-link: {config dir}/{entry} points at {target}, want {store}/{entry} — run pfm install` | failure |
+| shared link unreadable | `account-link: {config dir}/{entry} UNREADABLE error={cause}` | failure |
+| real shared entry | host-check `account-entry-real`; no duplicate target row | failure via host check |
+| all targets clean | `account-links: ok ({a} accounts × {e} entries)` | none |
 
-The missing-file line names the platform's `managed-settings.d/pfm.json` and warns that any Claude launch outside pfm can delete transcripts older than 30 days. `claude.requireManagedCleanup: false` silences the check; doctor prints `managed-cleanup: check off by config`.
+Managed retention reports `managed-cleanup: {path} missing` with the transcript-deletion warning, `cleanupPeriodDays={v}, want {config value}`, or `UNREADABLE error={cause}`. `claude.requireManagedCleanup: false` prints `managed-cleanup: check off by config`.
 
-### legacy
+Registry checks cover `agents`, `commands` and `skills` with `state=missing|conflict|unreadable` and `hint="run pfm install"`, plus dead pfm links. Plugin checks run once on the store: `doctor: claude_plugins ok`, or `doctor: claude_plugins plugin {id} not enabled in {store}/settings.json — run pfm install --yes` / `doctor: claude_plugins plugin {id} not installed in {store} — run pfm install --yes`. Missing store settings print a skipped row; read errors count failures.
 
-The account key is one of `hooks`, `statusLine`, `subagentStatusLine`, `mcpServers.chat`, `mcpServers.harvester` or `mcpServers.professor`; it would run twice beside the launch payload. An MCP entry is pfm's when `mcp-ownership.json` records it or, under `chat`, `harvester` or `professor`, when it matches an exact pfm shape ([host-migration.md](host-migration.md)). The `home-mcp` row reports `legacy: {home}/.mcp.json still carries pfm mcpServers.{name} — run pfm install` and `legacy: {ManagedRoot}/mcp-ownership.json still carries pfm clients — run pfm install`; an unparseable `~/.mcp.json` reports `layout: home-mcp UNREADABLE {path} error={cause}`. Memory helpers report `legacy: {file} names cc-memory-{wire|consolidate}.sh — run pfm install`.
+VS Code prints `doctor: vscode not managed (pfm install --vscode never ran)` when unmanaged. Owned settings with no account environment report `doctor: vscode settings={path} CLAUDE_CONFIG_DIR missing — run pfm install --yes --vscode`; a wrong value reports `CLAUDE_CONFIG_DIR={value}, want {primary dir}` with the same fix. Launcher checks report `doctor: launcher: missing`, `DISPLACED by {target}` or `unreadable error={cause}`, each with `run pfm install`.
 
 ## Provisioned seats
 
-The lane root builds fixture seats with `infra/fence/lanes/provision.sh`: it writes the machine config at `PFM_CONFIG`, stages registered fixture credentials mode 0600, then runs `pfm install --yes`, which creates the session-store directories and their links. The separate presentation demo builds real seats with `infra/demo/setup.sh`; its demo-only keys include onboarding, trust, permission-prompt skips, `tui`, `effortLevel` and `attribution`. `IS_SANDBOX=1` is exported where a root container launches with the bypass flags.
+`infra/fence/lanes/provision.sh` writes a roster of separate fixture account directories at `PFM_CONFIG`, stages invented fixture credentials mode `0600` and per-account onboarding/trust state, then runs `pfm install --yes`. Install creates the store and every shared-entry link. The lane script then writes its presentation settings once to the store's `settings.json`.
+
+`infra/demo/setup.sh` provisions the separate presentation demo. Demo settings include onboarding, trust, permission-prompt skips, `tui`, `effortLevel` and `attribution`. `IS_SANDBOX=1` is exported where a root container launches with bypass flags.

@@ -240,7 +240,8 @@ func Run(
 			fmt.Fprintf(stdout, "doctor: launcher: unknown state=%s — run pfm install\n", launcher.State)
 		}
 	}
-	tally.warnings += printVSCodeDoctor(stdout, resolved.Home, runtime.Config)
+	primary, _ := runtime.Config.AccountByID(primaryAccount)
+	tally.warnings += printVSCodeDoctor(stdout, resolved.Home, primary.ConfigDir)
 	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(
 		stdout,
 		resolved.Home,
@@ -263,12 +264,11 @@ func Run(
 	overlayWarnings, overlayFailures := printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
 	tally.warnings += overlayWarnings
 	tally.failures += overlayFailures
-	printClaudePluginsDoctor(stdout, runtime.Config, tally)
+	printClaudePluginsDoctor(stdout, installer.ClaudeStore(resolved.Home), tally)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(
 		stdout,
 		resolved.Home,
-		runtime.Config.Accounts,
 		claudeAbsent,
 		dependencies.Env,
 		runtime.Config.CodexHomes()...,
@@ -278,9 +278,12 @@ func Run(
 	hookWarnings, hookFailures := installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
 	tally.warnings += hookWarnings
 	tally.failures += hookFailures
-	layoutWarnings, layoutFailures := printLayoutChecks(stdout, runtime, dependencies.Env)
-	tally.warnings += layoutWarnings
-	tally.failures += layoutFailures
+	hostWarnings, hostFailures := printHostChecks(stdout, runtime, dependencies.Clock.Now())
+	tally.warnings += hostWarnings
+	tally.failures += hostFailures + printClaudeStoreChecks(stdout, runtime)
+	cleanupWarnings, cleanupFailures := printManagedCleanupChecks(stdout, runtime)
+	tally.warnings += cleanupWarnings
+	tally.failures += cleanupFailures
 
 	version, err := database.UserVersion(ctx)
 	if err != nil {

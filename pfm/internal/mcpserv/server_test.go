@@ -277,7 +277,7 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Dir:     "/work/fixture",
 		Project: "fixture",
 		Name:    "Fixture Chat",
-		Account: 1,
+		Account: 0,
 		Kind:    "live-claude",
 		Socket:  jail.socket,
 		Pane:    jail.pane,

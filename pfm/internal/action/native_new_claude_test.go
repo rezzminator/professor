@@ -148,11 +148,12 @@ func TestNewClaudeNativeSpawnPreservesBypassLeanAndCachePolicy(t *testing.T) {
 }
 
 func TestNewClaudeRequiresFreshSocket(t *testing.T) {
+	home := t.TempDir()
 	_, err := Synthesize(Request{
 		Row:            compose.Row{Kind: compose.NewClaude, CWD: "/work/project"},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
-		Config:         testMachineConfig("/home/test"),
+		Home:           home,
+		Config:         testMachineConfig(home),
 	})
 	if err == nil || !strings.Contains(err.Error(), "fresh socket") {
 		t.Fatalf("missing fresh socket error = %v", err)

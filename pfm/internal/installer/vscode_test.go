@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -643,49 +644,172 @@ func TestVSCodeMergePreservesExistingSettingsMode(t *testing.T) {
 	}
 }
 
-func TestVSCodeInstallJournalRestoresSettingsSidecarOwnershipAndIndex(t *testing.T) {
+func TestVSCodeClaudeEnvironmentOwnership(t *testing.T) {
+	for _, initial := range []string{`{}`, `{"claudeCode.environmentVariables":[]}`, `{"claudeCode.environmentVariables":[{"name":"OTHER","value":"kept"},{"name":"CLAUDE_CONFIG_DIR","value":"previous"},{"name":"LAST","value":"last"}]}`} {
+		t.Run(initial, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "User", "settings.json")
+			machine := filepath.Join(home, "Machine", "settings.json")
+			inst := newVSCodeExtensionEngine(home, nil, true)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+			inst.options.vscodeSettingsPaths = []string{settings, machine}
+			for _, path := range inst.options.vscodeSettingsPaths {
+				writeFixture(t, path, initial)
+			}
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range inst.options.vscodeSettingsPaths {
+				doc, err := decodeJSONCObject([]byte(readFixture(t, path)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				env, ok := doc["claudeCode.environmentVariables"].([]any)
+				if !ok {
+					t.Fatalf("environment missing: %v", doc)
+				}
+				if len(env) == 0 {
+					t.Fatalf("environment empty: %v", doc)
+				}
+				index := 0
+				if strings.Contains(initial, "OTHER") {
+					index = 1
+					if env[0].(map[string]any)["value"] != "kept" || env[2].(map[string]any)["value"] != "last" {
+						t.Fatalf("order changed: %v", env)
+					}
+				}
+				if env[index].(map[string]any)["value"] != inst.options.PrimaryConfigDir {
+					t.Fatalf("env=%v", env)
+				}
+			}
+			ledger := readVSCodeLedgerFixture(t, inst.managedRoot)
+			if len(ledger.Files) != 2 || !ledger.Files[0].EnvOwned {
+				t.Fatalf("ownership=%+v", ledger)
+			}
+			inst.options.PrimaryConfigDir = filepath.Join(home, "next")
+			inst.options.VSCode = false
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(readFixture(t, settings), inst.options.PrimaryConfigDir) {
+				t.Fatal("primary not updated")
+			}
+			inst.options.Mode = ModeUninstall
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{settings, machine} {
+				got, err := decodeJSONCObject([]byte(readFixture(t, path)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want, _ := decodeJSONCObject([]byte(initial))
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("restored=%v want %v", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentOperatorEdit(t *testing.T) {
+	for _, edit := range []string{`[{"name":"CLAUDE_CONFIG_DIR","value":"operator"}]`, `[]`} {
+		t.Run(edit, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			inst := newVSCodeExtensionEngine(home, nil, true)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+			inst.options.vscodeSettingsPaths = []string{settings}
+			writeFixture(t, settings, `{}`)
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := setJSONCProperty(
+				[]byte(readFixture(t, settings)),
+				0,
+				"claudeCode.environmentVariables",
+				[]byte(edit),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFixture(t, settings, string(raw))
+			inst.options.PrimaryConfigDir = filepath.Join(home, "next")
+			for i := 0; i < 2; i++ {
+				if err := inst.wireVSCode(); err != nil {
+					t.Fatal(err)
+				}
+				doc, _ := decodeJSONCObject([]byte(readFixture(t, settings)))
+				var want any
+				if err := json.Unmarshal([]byte(edit), &want); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(doc["claudeCode.environmentVariables"], want) {
+					t.Fatalf("operator edit lost: %v", doc)
+				}
+				ledger := readVSCodeLedgerFixture(t, inst.managedRoot)
+				for _, record := range ledger.Files {
+					if record.EnvOwned {
+						t.Fatalf("ownership not dropped: %+v", record)
+					}
+				}
+			}
+			inst.options.Mode = ModeUninstall
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			doc, _ := decodeJSONCObject([]byte(readFixture(t, settings)))
+			var want any
+			_ = json.Unmarshal([]byte(edit), &want)
+			if !reflect.DeepEqual(doc["claudeCode.environmentVariables"], want) {
+				t.Fatal(doc)
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentMalformed(t *testing.T) {
+	for _, env := range []string{`{}`, `null`, `[1]`, `[{"name":"OTHER"}]`, `[{"name":3,"value":"x"}]`, `[{"name":"OTHER","value":3}]`} {
+		t.Run(env, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			initial := `{"claudeCode.environmentVariables":` + env + `}`
+			writeFixture(t, settings, initial)
+			inst := newVSCodeExtensionEngine(home, nil, true)
+			inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+			inst.options.vscodeSettingsPaths = []string{settings}
+			if err := inst.wireVSCode(); err != nil {
+				t.Fatal(err)
+			}
+			if readFixture(t, settings) != initial {
+				t.Fatal("malformed settings rewritten")
+			}
+			reason := "claudeCode.environmentVariables must be an array"
+			switch env {
+			case `[1]`:
+				reason = "claudeCode.environmentVariables element 0 must be an object"
+			case `[{"name":"OTHER"}]`, `[{"name":3,"value":"x"}]`, `[{"name":"OTHER","value":3}]`:
+				reason = "claudeCode.environmentVariables element 0 requires string name and value"
+			}
+			line := "  skip    VS Code settings skipped " + settings + ": malformed VS Code settings: " + reason + "\n"
+			if !strings.Contains(inst.options.Stdout.(*bytes.Buffer).String(), line) {
+				t.Fatalf("missing %q: %s", line, inst.options.Stdout)
+			}
+		})
+	}
+}
+
+func TestVSCodeClaudeEnvironmentRequiresOptInOrOwnership(t *testing.T) {
 	home := t.TempDir()
-	root := filepath.Join(home, "product")
 	settings := filepath.Join(home, "settings.json")
-	original := []byte("{}\n")
-	if err := os.WriteFile(settings, original, 0o600); err != nil {
+	writeFixture(t, settings, `{"editor.fontSize":17}`)
+	inst := newVSCodeExtensionEngine(home, nil, false)
+	inst.options.PrimaryConfigDir = filepath.Join(home, "primary")
+	inst.options.vscodeSettingsPaths = []string{settings}
+	if err := inst.wireVSCode(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(managedRootForHome(home), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	installer := newVSCodeExtensionEngine(home, []string{root}, true)
-	installer.options.vscodeSettingsPaths = []string{settings}
-	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
-	installer.options.Journal = journal
-	if err := installer.wireVSCode(); err != nil {
-		t.Fatal(err)
-	}
-	index := filepath.Join(root, "extensions", vscodeExtensionIndexName)
-	ownership := filepath.Join(installer.managedRoot, vscodeOwnershipName)
-	backup := settings + ".pre-professor-" + installer.stamp
-	requireJournalPaths(t, installRecordDestinations(t, journal), settings, backup, ownership, index)
-	idle := newVSCodeExtensionEngine(home, []string{root}, true)
-	idle.options.vscodeSettingsPaths = []string{settings}
-	idleJournal := NewJournal(context.Background(), LayoutEnv{Home: home})
-	idle.options.Journal = idleJournal
-	if err := idle.wireVSCode(); err != nil {
-		t.Fatal(err)
-	}
-	if idleJournal.Dir() != "" {
-		t.Fatalf("converged VS Code journaled %v", idleJournal.records)
-	}
-	rollbackInstallJournal(t, LayoutEnv{Home: home}, journal)
-	got, err := os.ReadFile(settings)
-	if err != nil || !bytes.Equal(got, original) {
-		t.Fatalf("restored settings=%q err=%v", got, err)
-	}
-	for _, path := range []string{backup, ownership, index} {
-		if _, err := os.Lstat(path); !os.IsNotExist(err) {
-			t.Fatalf("rollback left %s: %v", path, err)
-		}
+	if readFixture(t, settings) != `{"editor.fontSize":17}` {
+		t.Fatal("unmanaged settings rewritten")
 	}
 }

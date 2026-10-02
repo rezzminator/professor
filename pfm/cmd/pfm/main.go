@@ -91,16 +91,15 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	}
 	load := config.LoadRuntime
 	if len(args) > 0 && args[0] == installCommand {
-		load = config.LoadInstallRuntime // install is the command that migrates a legacy config
+		load = config.LoadInstallRuntime // the install gate names the legacy config and doctor's fix
 	}
 	runtime, err := load(configPath)
 	if err != nil {
 		if len(args) > 0 && (args[0] == versionCommand || args[0] == "--version") {
-			// make host-install smoke-tests a new binary with --version before
-			// pfm install migrates a legacy config: the version needs no config.
+			// Version needs no config while the operator applies doctor's fix.
 			return runVersion(args[1:], stdout, stderr)
 		}
-		// make install sweeps with stale in that same window: it reads no config.
+		// Stale reads no config while the operator applies doctor's fix.
 		if len(args) > 1 && args[0] == internalCommand && args[1] == staleCommand {
 			return stale.Run(args[2:], stdout, stderr)
 		}
@@ -513,7 +512,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// prompt or deny every tool call. An unknown name is a non-blocking
 		// error that says what happened and how to converge.
 		if installer.RetiredInternalHook(args[0]) {
-			// Install already stripped it; only a session's start-time hook
+			// Install refuses while account settings carry it (host check pfm-settings); a session's start-time hook
 			// snapshot still runs it, and no install can clear that. Silent
 			// success: hook stdout becomes prompt context, stderr a warning.
 			return 0

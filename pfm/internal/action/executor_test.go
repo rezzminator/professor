@@ -480,6 +480,7 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
 			jailAction(t)
 			id := "77777777-7777-4777-8777-777777777777"
 			processes := &fakeProcesses{processes: []Process{
@@ -503,7 +504,7 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 					CWD:  "/work/resume",
 				},
 				PrimaryAccount: 1,
-				Home:           "/home/test",
+				Home:           home,
 				FreshSocket:    "cc-902-1-1",
 			})
 			if err != nil {
@@ -527,6 +528,7 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 // internal/obs (spec § Middleware, `state`) — requested to opened on a
 // successful open, comp=state, never the pane content it opened.
 func TestOpenRecordsATransition(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	ctx, recorder := obs.Test(t)
 	id := "88888888-8888-4888-8888-888888888888"
@@ -547,7 +549,7 @@ func TestOpenRecordsATransition(t *testing.T) {
 			CWD:  "/work/agent",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-950-1-1",
 	})
 	if err != nil {
@@ -574,6 +576,7 @@ func TestOpenRecordsATransition(t *testing.T) {
 }
 
 func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{
 		alive: map[string]bool{"cc-100-1-1": true},
@@ -609,7 +612,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 		},
 		PrimaryAccount: 1,
 		Cache1H:        true,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-900-1-1",
 	}
 	line, err := openWithTestConfig(executor, context.Background(), request)
@@ -661,7 +664,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 			CWD:  "/work/codex",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cx-901-1-1",
 	}
 	line, err = openWithTestConfig(executor, context.Background(), codexRequest)
@@ -678,6 +681,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 }
 
 func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{
 		alive: map[string]bool{
@@ -717,7 +721,7 @@ func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
 		},
 		PrimaryAccount: 1,
 		FreshSocket:    "cx-fresh",
-		Home:           "/home/test",
+		Home:           home,
 	}
 	line, err := openWithTestConfig(executor, context.Background(), request)
 	if err != nil {
@@ -827,6 +831,7 @@ func TestSelfSwitchLogsAListPanesFailure(t *testing.T) {
 // Open must hard error instead of reaching the demotion code beneath the
 // id check.
 func TestOpenDeadLiveSplitWithNoResumableIDHardErrors(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{alive: map[string]bool{}}
 	var stderr bytes.Buffer
@@ -847,7 +852,7 @@ func TestOpenDeadLiveSplitWithNoResumableIDHardErrors(t *testing.T) {
 			Socket: "cc-dead-split-1-1-1",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-900-1-1",
 	}
 	line, err := openWithTestConfig(executor, context.Background(), request)

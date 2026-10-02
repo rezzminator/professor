@@ -7,11 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -75,13 +73,9 @@ func (status SkillSourceStatus) Describe() string {
 	}
 }
 
-// InspectSkillSources classifies every skill the recorded clone's
-// templates/global/skills/sources.json registers — its {GH_USER} resolved as
-// pfm install resolves it — its store root, its store and its links in the
-// default ~/.claude and every account's skills/ and in ~/.agents/skills/: the
-// targets install writes (its default config dir plus every account) whether
-// or not a Claude Code binary is installed.
-func InspectSkillSources(home string, accounts []pfmconfig.Account, offline bool) []SkillSourceStatus {
+// InspectSkillSources classifies each registered skill once against its managed
+// storage, the store skills registry, and ~/.agents/skills.
+func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
 		return []SkillSourceStatus{{Path: home, State: SkillSourceCheckFailed, Error: err.Error()}}
@@ -100,12 +94,7 @@ func InspectSkillSources(home string, accounts []pfmconfig.Account, offline bool
 		return []SkillSourceStatus{{Path: registry, State: SkillSourceNoRegistry}}
 	}
 	storeRoot := skillStoreRoot(home)
-	configDirs := []string{filepath.Join(home, ".claude")}
-	for _, account := range accounts {
-		if dir := filepath.Clean(account.ConfigDir); !slices.Contains(configDirs, dir) {
-			configDirs = append(configDirs, dir)
-		}
-	}
+	configDirs := []string{ClaudeStore(home)}
 	statuses := make([]SkillSourceStatus, 0, len(sources))
 	for _, source := range sources {
 		store := filepath.Join(storeRoot, source.Name)
@@ -175,21 +164,39 @@ func inspectSkillSource(
 	return status
 }
 
-// ReportGlobalRegistries is doctor's machine-global registry check: the
-// global agents per account (ReportGlobalAgents), then one row per
-// source-fetched skill (ReportSkillSources, offline per env — doctor's own
-// injected environment).
+// ReportGlobalRegistries reports store agents, Codex agents, source-fetched skills,
+// and dead pfm links using the same predicate as install.
 func ReportGlobalRegistries(
 	w io.Writer,
 	home string,
-	accounts []pfmconfig.Account,
 	claudeAbsent bool,
 	env paths.Env,
 	codexHomes ...string,
 ) (warnings, failures int) {
-	warnings, failures = ReportGlobalAgents(w, home, accounts, claudeAbsent, codexHomes...)
-	skillWarnings, skillFailures := ReportSkillSources(w, home, accounts, paths.SkillSourcesOfflineIn(env))
-	return warnings + skillWarnings, failures + skillFailures
+	warnings, failures = ReportGlobalAgents(w, home, claudeAbsent, codexHomes...)
+	skillWarnings, skillFailures := ReportSkillSources(w, home, paths.SkillSourcesOfflineIn(env))
+	warnings += skillWarnings
+	failures += skillFailures
+	repo, err := GlobalSourceRepo(home)
+	if err != nil {
+		fmt.Fprintf(w, "doctor: registry dead-link check failed: %s\n", err)
+		return warnings, failures + 1
+	}
+	repos := []string{repo}
+	fallback := filepath.Join(home, ".professor")
+	if repo != fallback {
+		repos = append(repos, fallback)
+	}
+	dead, err := InspectDeadRegistryLinks(home, ClaudeStore(home), repos)
+	if err != nil {
+		fmt.Fprintf(w, "doctor: registry dead-link check failed: %s\n", err)
+		return warnings, failures + 1
+	}
+	for _, link := range dead {
+		fmt.Fprintf(w, "doctor: registry dead link %s -> %s — run pfm install --yes\n", link.Path, link.Target)
+		warnings++
+	}
+	return warnings, failures
 }
 
 // ReportSkillSources prints one "doctor: skill-source" line per registered
@@ -200,10 +207,9 @@ func ReportGlobalRegistries(
 func ReportSkillSources(
 	w io.Writer,
 	home string,
-	accounts []pfmconfig.Account,
 	offline bool,
 ) (warnings, failures int) {
-	for _, status := range InspectSkillSources(home, accounts, offline) {
+	for _, status := range InspectSkillSources(home, offline) {
 		fmt.Fprintf(w, "doctor: skill-source %s\n", status.Describe())
 		switch status.State {
 		case SkillSourceLinked, SkillSourceOffline, SkillSourceNoClone, SkillSourceNoRegistry:

@@ -260,7 +260,7 @@ func registeredDaemonSession(
 	machine pfmconfig.Config,
 	id string,
 ) (string, bool, error) {
-	configs := machine.ClaudeConfigDirs(resolved.Home)
+	configs := machine.ClaudeConfigDirs()
 	if len(configs) == 0 {
 		return "", false, nil
 	}

@@ -41,27 +41,28 @@ func TestMCPWiresCodexAndOpenCodeWithoutClaudeRegistry(t *testing.T) {
 func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	ambient := filepath.Join(home, ".cc", "1")
-	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: ambient, Implicit: true}}
-
-	registries := ClaudeUserRegistries(home, accounts, ambient)
-
-	if len(registries) != 2 {
-		t.Fatalf("registries=%#v, want exactly 2 (implicit account + ambient)", registries)
-	}
-	implicitPath := filepath.Join(home, ".claude.json")
-	if registries[0].Path != implicitPath {
-		t.Fatalf("registries[0].Path=%s, want the implicit account's %s", registries[0].Path, implicitPath)
-	}
-	if registries[0].Reason != "account 1 (pfm spawns it without CLAUDE_CONFIG_DIR)" {
-		t.Fatalf("registries[0].Reason=%q, want the implicit-account reason", registries[0].Reason)
-	}
-	ambientPath := filepath.Join(ambient, ".claude.json")
-	if registries[1].Path != ambientPath {
-		t.Fatalf("registries[1].Path=%s, want the ambient CLAUDE_CONFIG_DIR file %s", registries[1].Path, ambientPath)
-	}
-	wantReason := "ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)"
-	if registries[1].Reason != wantReason {
-		t.Fatalf("registries[1].Reason=%q, want %q", registries[1].Reason, wantReason)
+	accountDir := pfmconfig.DefaultAccountDir(home, 1)
+	accounts := []pfmconfig.Account{{ID: 1, ConfigDir: accountDir}}
+	for _, ambient := range []string{accountDir, filepath.Join(home, "ambient")} {
+		registries := ClaudeUserRegistries(home, accounts, ambient)
+		count := 1
+		if ambient != accountDir {
+			count = 2
+		}
+		if len(registries) != count {
+			t.Fatalf("registries=%#v, want %d", registries, count)
+		}
+		wantPath := filepath.Join(accountDir, ".claude.json")
+		wantReason := "account 1 (CLAUDE_CONFIG_DIR=" + accountDir + " when pfm spawns it)"
+		if registries[0].Path != wantPath || registries[0].Reason != wantReason || registries[0].Account != 1 {
+			t.Fatalf("account registry=%#v, want path=%s reason=%q account=1", registries[0], wantPath, wantReason)
+		}
+		if ambient != accountDir {
+			wantReason = "ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)"
+			if registries[1].Path != filepath.Join(ambient, ".claude.json") || registries[1].Reason != wantReason ||
+				registries[1].Account != 0 {
+				t.Fatalf("ambient registry=%#v, want dir=%s reason=%q account=0", registries[1], ambient, wantReason)
+			}
+		}
 	}
 }

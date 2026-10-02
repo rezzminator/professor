@@ -2,12 +2,15 @@ package claudelaunch
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -21,6 +24,11 @@ func renderMachine(t *testing.T) (string, pfmconfig.Config) {
 		[]string{filepath.Join(home, ".claude", "projects", "one"), filepath.Join(home, ".cc", "2", "projects", "two")},
 	)
 	machine.MCPServers["chat"] = pfmconfig.MCPServer{Enabled: true}
+	for _, account := range machine.Accounts {
+		if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return home, machine
 }
 
@@ -78,7 +86,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 		t.Errorf("status lines=%#v", parsed.Settings)
 	}
 	var mcp map[string]any
-	if err := json.Unmarshal([]byte(parsed.MCPConfig), &mcp); err != nil {
+	if err := json.Unmarshal([]byte(mcpPayload(t, parsed.MCPConfig)), &mcp); err != nil {
 		t.Fatal(err)
 	}
 	assertProfessorMCP(t, home, parsed.MCPConfig)
@@ -100,9 +108,20 @@ func TestRenderFreshInteractive(t *testing.T) {
 		index("--allow-dangerously-skip-permissions") < index("--mcp-config") {
 		t.Errorf("flag order=%q", launch.Argv)
 	}
+	// Each launch gets its own MCP file, so only that path may differ; the
+	// two files carry the same bytes.
 	again, err := Render(Request{Purpose: PurposeInteractive, Home: home, Account: 2, SessionID: "S"}, machine)
-	if err != nil || !reflect.DeepEqual(launch, again) {
-		t.Errorf("render is not byte-stable: second=%#v err=%v", again, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := index("--mcp-config") + 1
+	if at == 0 || at >= len(again.Argv) || again.Argv[at] == launch.Argv[at] ||
+		mcpPayload(t, again.Argv[at]) != mcpPayload(t, launch.Argv[at]) {
+		t.Fatalf("second render's mcp file = %q, want a fresh file with the first's bytes", again.Argv)
+	}
+	again.Argv[at] = launch.Argv[at]
+	if !reflect.DeepEqual(launch, again) {
+		t.Errorf("render is not byte-stable beyond the mcp file: second=%#v", again)
 	}
 }
 
@@ -125,14 +144,6 @@ func TestRenderPluginEnvEveryPurposeAndAccount(t *testing.T) {
 				t.Errorf("purpose %d account %d function hooks=%q", purpose, tc.account, got)
 			}
 		}
-	}
-}
-
-func TestRenderImplicitAccount(t *testing.T) {
-	home, machine := renderMachine(t)
-	launch, _ := renderParsed(t, Request{Purpose: PurposeInteractive, Home: home, Account: 1}, machine)
-	if !reflect.DeepEqual(launch.Env, []string{"CACHE_LIVE_CONTROL_MAIN_TTL=1h"}) {
-		t.Errorf("implicit env=%q, want the cache TTL and no CLAUDE_CONFIG_DIR", launch.Env)
 	}
 }
 
@@ -279,11 +290,12 @@ func TestRenderQuery(t *testing.T) {
 	}
 }
 
-// assertProfessorMCP holds a --mcp-config payload to develop's one professor
+// assertProfessorMCP holds the --mcp-config file's payload to develop's one professor
 // registration: exactly {type: stdio, command: <home>/.local/bin/pfm,
 // args: [mcp serve --stdio]} under mcpServers.professor, and nothing else.
-func assertProfessorMCP(t *testing.T, home, payload string) {
+func assertProfessorMCP(t *testing.T, home, word string) {
 	t.Helper()
+	payload := mcpPayload(t, word)
 	var mcp map[string]map[string]any
 	if err := json.Unmarshal([]byte(payload), &mcp); err != nil {
 		t.Fatalf("mcp=%q: %v", payload, err)
@@ -321,5 +333,198 @@ func TestRenderMCPIsOneProfessorServer(t *testing.T) {
 			}
 			assertProfessorMCP(t, home, parsed.MCPConfig)
 		})
+	}
+}
+
+func TestRenderAccountOneConfigDir(t *testing.T) {
+	home, machine := renderMachine(t)
+	if err := os.MkdirAll(filepath.Join(home, "override"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
+		for _, override := range []string{"", filepath.Join(home, "override")} {
+			t.Run(fmt.Sprintf("purpose=%d/override=%t", purpose, override != ""), func(t *testing.T) {
+				launch, _ := renderParsed(
+					t,
+					Request{Purpose: purpose, Home: home, Account: 1, ConfigDir: override},
+					machine,
+				)
+				dir := machine.Accounts[0].ConfigDir
+				if override != "" {
+					dir = override
+				}
+				want := []string{"CLAUDE_CONFIG_DIR=" + dir, "CACHE_LIVE_CONTROL_MAIN_TTL=1h"}
+				if !reflect.DeepEqual(launch.Env, want) {
+					t.Fatalf("Env=%q, want %q", launch.Env, want)
+				}
+			})
+		}
+	}
+}
+
+func TestRenderThirdPartyMCP(t *testing.T) {
+	for _, tc := range []struct {
+		name                        string
+		purpose                     Purpose
+		chat, harvester, thirdParty bool
+	}{
+		{"third party only", PurposeInteractive, false, false, true},
+		{"beside professor", PurposeInteractive, true, false, true},
+		{"beside harvester", PurposeInteractive, false, true, true},
+		{"resume", PurposeResume, false, false, true},
+		{"launcher", PurposeLauncher, false, false, true},
+		{"none", PurposeInteractive, false, false, false},
+		{"query", PurposeQuery, true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, machine := renderMachine(t)
+			machine.MCPServers[pfmconfig.MCPServerChat] = pfmconfig.MCPServer{Enabled: tc.chat}
+			machine.MCPServers[pfmconfig.MCPServerHarvester] = pfmconfig.MCPServer{Enabled: tc.harvester}
+			browser := json.RawMessage(
+				`{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}}`,
+			)
+			remote := json.RawMessage(
+				`{"type":"http","url":"https://example.invalid/mcp","headers":{"X-Example":"value"}}`,
+			)
+			if tc.thirdParty {
+				machine.MCP.ThirdParty = map[string]json.RawMessage{"browser": browser, "remote": remote}
+			}
+			_, parsed := renderParsed(t, Request{Purpose: tc.purpose, Home: home, Account: 1}, machine)
+			if tc.purpose == PurposeQuery || (!tc.chat && !tc.harvester && !tc.thirdParty) {
+				if parsed.MCPConfig != "" {
+					t.Fatalf("mcp-config = %q, want none", parsed.MCPConfig)
+				}
+				return
+			}
+			want := map[string]json.RawMessage{"browser": browser, "remote": remote}
+			if tc.chat || tc.harvester {
+				want[pfmconfig.MCPServerProfessor] = json.RawMessage(
+					fmt.Sprintf(
+						`{"args":["mcp","serve","--stdio"],"command":%q,"type":"stdio"}`,
+						filepath.Join(home, ".local", "bin", "pfm"),
+					),
+				)
+			}
+			encoded, err := json.Marshal(map[string]any{"mcpServers": want})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if payload := mcpPayload(t, parsed.MCPConfig); payload != string(encoded) {
+				t.Fatalf("mcp-config = %s, want %s", payload, encoded)
+			}
+		})
+	}
+}
+
+func TestRenderConfigDirValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		account               int
+		emptyRoster, explicit bool
+		state, suffix         string
+	}{
+		{name: "absent account", account: 2, state: "absent", suffix: " does not exist — run pfm install"},
+		{name: "symlink account", account: 1, state: "symlink", suffix: " resolves to the Claude store — run pfm doctor"},
+		{name: "file account", account: 1, state: "file", suffix: " is not a real directory — run pfm doctor"},
+		{name: "uninspectable account", account: 2, state: "uninspectable"},
+		{name: "absent explicit dir", explicit: true, state: "absent", suffix: " does not exist — run pfm install"},
+		{name: "symlink explicit dir", explicit: true, state: "symlink", suffix: " resolves to the Claude store — run pfm doctor"},
+		{name: "uninspectable explicit dir", explicit: true, state: "uninspectable"},
+		{name: "no dir"},
+		{name: "unknown account", account: 9},
+		{name: "no roster", account: 1, emptyRoster: true},
+		{name: "existing account", account: 2, state: "directory"},
+		{name: "existing explicit dir", explicit: true, state: "directory"},
+		{name: "absent override", account: 1, explicit: true, state: "absent", suffix: " does not exist — run pfm install"},
+	} {
+		for _, purpose := range []Purpose{PurposeInteractive, PurposeResume, PurposeLauncher, PurposeQuery} {
+			t.Run(fmt.Sprintf("%s/purpose=%d", tc.name, purpose), func(t *testing.T) {
+				home, machine := renderMachine(t)
+				request := Request{Account: tc.account, Purpose: purpose, Home: home}
+				dir := ""
+				if account, found := machine.AccountByID(tc.account); found && !tc.emptyRoster {
+					dir = account.ConfigDir
+				}
+				if tc.emptyRoster {
+					machine.Accounts = nil
+				}
+				if tc.explicit {
+					dir = filepath.Join(home, "override")
+					request.ConfigDir = dir
+				}
+				if tc.state != "" {
+					if err := os.RemoveAll(dir); err != nil {
+						t.Fatal(err)
+					}
+				}
+				switch tc.state {
+				case "directory":
+					if err := os.MkdirAll(dir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				case "symlink":
+					target := jailStore(t)
+					if err := os.MkdirAll(target, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(target, dir); err != nil {
+						t.Fatal(err)
+					}
+				case "file", "uninspectable":
+					if err := os.WriteFile(dir, nil, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if tc.state == "uninspectable" {
+						dir = filepath.Join(dir, "child")
+						if tc.explicit {
+							request.ConfigDir = dir
+						} else {
+							machine.Accounts[tc.account-1].ConfigDir = dir
+						}
+					}
+				}
+				prefix := ""
+				if tc.account > 0 {
+					prefix = fmt.Sprintf("account %d: ", tc.account)
+				}
+				want := ""
+				if tc.suffix != "" {
+					want = prefix + dir + tc.suffix
+				}
+				if tc.state == "uninspectable" {
+					_, cause := os.Lstat(dir)
+					if !errors.Is(cause, syscall.ENOTDIR) {
+						t.Fatalf("fixture Lstat: %v", cause)
+					}
+					want = fmt.Sprintf("%sinspect %s: %v", prefix, dir, cause)
+				}
+				if tc.account == 9 {
+					want = "account 9 is not in the configured roster"
+				}
+				launch, err := Render(request, machine)
+				if want != "" {
+					if err == nil || err.Error() != want {
+						t.Fatalf("Render error = %v, want %q", err, want)
+					}
+					if tc.state == "uninspectable" && !errors.Is(err, syscall.ENOTDIR) {
+						t.Fatalf("inspection cause not wrapped: %v", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := slices.Contains(launch.Env, configDirEnv+"="+dir); got != (dir != "") {
+					t.Fatalf("Env=%q, want config dir %q", launch.Env, dir)
+				}
+				if dir == "" {
+					for _, entry := range launch.Env {
+						if strings.HasPrefix(entry, configDirEnv+"=") {
+							t.Fatalf("Env=%q, want no config dir", launch.Env)
+						}
+					}
+				}
+			})
+		}
 	}
 }

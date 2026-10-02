@@ -3,15 +3,16 @@ package installer
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goRuntime "runtime"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -117,7 +118,7 @@ func TestSourceFetchedSkillsCloneAndLinkIntoEveryRegistry(t *testing.T) {
 	second := filepath.Join(home, ".cc", "2")
 
 	output := runSkillInstall(t, home, ModeApply, func(options *Options) {
-		options.ConfigDirs = []string{second}
+		options.ClaudeAccounts = []pfmconfig.Account{{ID: 2, ConfigDir: second}}
 	})
 
 	store := filepath.Join(skillStoreRoot(home), "god-speed")
@@ -125,7 +126,6 @@ func TestSourceFetchedSkillsCloneAndLinkIntoEveryRegistry(t *testing.T) {
 		t.Fatalf("store SKILL.md = %q\n%s", got, output)
 	}
 	assertLink(t, filepath.Join(home, ".claude", "skills", "god-speed"), store)
-	assertLink(t, filepath.Join(second, "skills", "god-speed"), store)
 	assertLink(t, filepath.Join(home, ".agents", "skills", "god-speed"), store)
 }
 
@@ -135,13 +135,13 @@ func TestSourceFetchedSkillsReinstallFetchesTheNewCommit(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "ghost-writer"), map[string]string{"SKILL.md": "# v1\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"ghostwriter": "file://" + repo}))
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo}))
 	runSkillInstall(t, home, ModeApply)
 
 	skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# v2\n"})
 	output := runSkillInstall(t, home, ModeApply)
 
-	store := filepath.Join(skillStoreRoot(home), "ghostwriter")
+	store := filepath.Join(skillStoreRoot(home), "quill")
 	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v2\n" {
 		t.Fatalf("re-install left the store at %q, want the new commit\n%s", got, output)
 	}
@@ -159,18 +159,18 @@ func TestSourceFetchedSkillsReinstallFetchesTheNewCommit(t *testing.T) {
 func TestSourceFetchedSkillsDryRunWritesNothing(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "vision-factory"), map[string]string{"SKILL.md": "# vf\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"vision-factory": "file://" + repo}))
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "atlas"), map[string]string{"SKILL.md": "# vf\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"atlas": "file://" + repo}))
 
 	output := runSkillInstall(t, home, ModeDryRun)
 
-	store := filepath.Join(skillStoreRoot(home), "vision-factory")
+	store := filepath.Join(skillStoreRoot(home), "atlas")
 	requireNoPath(t, store, "dry run cloned")
-	requireNoPath(t, filepath.Join(home, ".agents", "skills", "vision-factory"), "dry run linked")
-	requireNoPath(t, filepath.Join(home, ".claude", "skills", "vision-factory"), "dry run linked")
+	requireNoPath(t, filepath.Join(home, ".agents", "skills", "atlas"), "dry run linked")
+	requireNoPath(t, filepath.Join(home, ".claude", "skills", "atlas"), "dry run linked")
 	for _, want := range []string{
 		"change  fetch file://" + repo + " -> " + store,
-		"change  link " + filepath.Join(home, ".agents", "skills", "vision-factory") + " -> " + store,
+		"change  link " + filepath.Join(home, ".agents", "skills", "atlas") + " -> " + store,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("dry run omitted %q:\n%s", want, output)
@@ -185,18 +185,18 @@ func TestSourceFetchedSkillsFetchFailureKeepsTheStoreCopy(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "ghost-writer"), map[string]string{"SKILL.md": "# kept\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"ghostwriter": "file://" + repo}))
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo}))
 	runSkillInstall(t, home, ModeApply)
 
 	gone := filepath.Join(t.TempDir(), "no-such-repo")
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{
-		"ghostwriter": "file://" + gone,
-		"fresh":       "file://" + gone,
+		"quill": "file://" + gone,
+		"fresh": "file://" + gone,
 	}))
 	output := runSkillInstall(t, home, ModeApply)
 
-	store := filepath.Join(skillStoreRoot(home), "ghostwriter")
-	for _, want := range []string{"SKILL-FETCH-FAILED ghostwriter: ", "SKILL-FETCH-FAILED fresh: "} {
+	store := filepath.Join(skillStoreRoot(home), "quill")
+	for _, want := range []string{"SKILL-FETCH-FAILED quill: ", "SKILL-FETCH-FAILED fresh: "} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("fetch failure not reported as %q:\n%s", want, output)
 		}
@@ -207,7 +207,7 @@ func TestSourceFetchedSkillsFetchFailureKeepsTheStoreCopy(t *testing.T) {
 	if strings.Contains(output, "<nil>") {
 		t.Fatalf("a git failure rendered a nil error:\n%s", output)
 	}
-	assertLink(t, filepath.Join(home, ".agents", "skills", "ghostwriter"), store)
+	assertLink(t, filepath.Join(home, ".agents", "skills", "quill"), store)
 	requireNoPath(t, filepath.Join(skillStoreRoot(home), "fresh"), "a failed first fetch left a store")
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "fresh"), "a failed first fetch linked")
 	entries, err := os.ReadDir(skillStoreRoot(home))
@@ -215,7 +215,7 @@ func TestSourceFetchedSkillsFetchFailureKeepsTheStoreCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if entry.Name() != "ghostwriter" && entry.Name() != ".ghostwriter.commit" {
+		if entry.Name() != "quill" && entry.Name() != ".quill.commit" {
 			t.Fatalf("a failed fetch left %s in the store root (a staging directory or a record temp)", entry.Name())
 		}
 	}
@@ -307,8 +307,8 @@ func TestSourceFetchedSkillsNeverOverwriteARealDirectory(t *testing.T) {
 		filepath.Join(t.TempDir(), "ghost-writer"),
 		map[string]string{"SKILL.md": "# upstream\n"},
 	)
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"ghostwriter": "file://" + repo}))
-	own := filepath.Join(home, ".claude", "skills", "ghostwriter")
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo}))
+	own := filepath.Join(home, ".claude", "skills", "quill")
 	writeFixture(t, filepath.Join(own, "SKILL.md"), "# hand-copied\n")
 
 	output := runSkillInstall(t, home, ModeApply)
@@ -321,8 +321,8 @@ func TestSourceFetchedSkillsNeverOverwriteARealDirectory(t *testing.T) {
 	}
 	assertLink(
 		t,
-		filepath.Join(home, ".agents", "skills", "ghostwriter"),
-		filepath.Join(skillStoreRoot(home), "ghostwriter"),
+		filepath.Join(home, ".agents", "skills", "quill"),
+		filepath.Join(skillStoreRoot(home), "quill"),
 	)
 }
 
@@ -434,21 +434,21 @@ func TestSourceFetchedSkillsKeepTheOldStoreWhenTheNewTreeHasNoSKILLMd(t *testing
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "ghost-writer"), map[string]string{"SKILL.md": "# v1\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"ghostwriter": "file://" + repo}))
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"quill": "file://" + repo}))
 	runSkillInstall(t, home, ModeApply)
 	skillFixtureGit(t, repo, "rm", "--quiet", "SKILL.md")
 	skillFixtureCommit(t, repo, map[string]string{"README.md": "# moved\n"})
 
 	output := runSkillInstall(t, home, ModeApply)
 
-	store := filepath.Join(skillStoreRoot(home), "ghostwriter")
-	if !strings.Contains(output, "SKILL-SOURCE-MISSING ghostwriter (") {
+	store := filepath.Join(skillStoreRoot(home), "quill")
+	if !strings.Contains(output, "SKILL-SOURCE-MISSING quill (") {
 		t.Fatalf("a new tree without SKILL.md was not reported:\n%s", output)
 	}
 	if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
 		t.Fatalf("the old store copy was replaced: %q\n%s", got, output)
 	}
-	assertLink(t, filepath.Join(home, ".agents", "skills", "ghostwriter"), store)
+	assertLink(t, filepath.Join(home, ".agents", "skills", "quill"), store)
 }
 
 // TestSourceFetchedSkillsStoreThatIsNotADirectoryIsOneSkip pins F3: a stray
@@ -457,19 +457,19 @@ func TestSourceFetchedSkillsStoreThatIsNotADirectoryIsOneSkip(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "vf"), map[string]string{"SKILL.md": "# vf\n"})
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"vision-factory": "file://" + repo}))
-	store := filepath.Join(skillStoreRoot(home), "vision-factory")
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"atlas": "file://" + repo}))
+	store := filepath.Join(skillStoreRoot(home), "atlas")
 	writeFixture(t, store, "stray\n")
 
 	output := runSkillInstall(t, home, ModeApply)
 
-	if !strings.Contains(output, "SKILL-FETCH-FAILED vision-factory: store "+store+" is not a directory") {
+	if !strings.Contains(output, "SKILL-FETCH-FAILED atlas: store "+store+" is not a directory") {
 		t.Fatalf("a non-directory store was not one named skip:\n%s", output)
 	}
 	if got := readSkillFile(t, store); got != "stray\n" {
 		t.Fatalf("the stray file was changed: %q", got)
 	}
-	requireNoPath(t, filepath.Join(home, ".agents", "skills", "vision-factory"), "a non-directory store was linked")
+	requireNoPath(t, filepath.Join(home, ".agents", "skills", "atlas"), "a non-directory store was linked")
 }
 
 // TestSourceFetchedSkillsRefuseASymlinkedStoreRoot pins F6: a store root that
@@ -559,33 +559,6 @@ func TestSourceFetchedSkillsNewClashLinksTheTemplateInOneInstall(t *testing.T) {
 	}
 	assertLink(t, filepath.Join(home, ".claude", "skills", "shared"), template)
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "shared"), "the clashing store link survived")
-}
-
-// TestSourceFetchedSkillsRollbackRemovesTheStoreRoot pins F12 and the F18
-// rollback gap: a rollback of a first install removes the store, the store
-// root it created and every store link.
-func TestSourceFetchedSkillsRollbackRemovesTheStoreRoot(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# gs\n"})
-	registry := writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-	if err := os.Remove(registry); err != nil {
-		t.Fatal(err)
-	}
-	runSkillInstall(t, home, ModeApply)
-	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
-	journal := NewJournal(context.Background(), LayoutEnv{Home: home})
-
-	output := runSkillInstall(t, home, ModeApply, func(options *Options) { options.Journal = journal })
-	if err := RollbackLayout(
-		context.Background(), LayoutEnv{Home: home}, filepath.Base(journal.Dir()), false, io.Discard,
-	); err != nil {
-		t.Fatalf("rollback: %v\n%s", err, output)
-	}
-
-	requireNoPath(t, skillStoreRoot(home), "rollback left the store root")
-	requireNoPath(t, filepath.Join(home, ".agents", "skills", "god-speed"), "rollback left the .agents link")
-	requireNoPath(t, filepath.Join(home, ".claude", "skills", "god-speed"), "rollback left the account link")
 }
 
 // TestSourceFetchedSkillsBusyStoreIsLeftAlone pins F13: while another install
@@ -712,5 +685,26 @@ func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "timed out") ||
 		!strings.Contains(err.Error(), "fatal: slow remote") {
 		t.Fatalf("timeout error does not carry git's stderr tail: %v", err)
+	}
+}
+
+// TestShippedSkillSourcesRegistryLoads loads the clone's real
+// templates/global/skills/sources.json the way pfm install does: a registry
+// that does not parse, or an entry without a usable repo, would pass every
+// fixture-driven test here and then fail pfm install on every host.
+func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
+	_, source, _, ok := goRuntime.Caller(0)
+	if !ok {
+		t.Fatal("find test source")
+	}
+	repo := filepath.Join(filepath.Dir(source), "..", "..", "..")
+	sources, present, err := loadSkillSources(repo, ThemeManifestURL(""))
+	if err != nil || !present || len(sources) == 0 {
+		t.Fatalf("load %s: present=%t sources=%d err=%v", skillSourcesRelative, present, len(sources), err)
+	}
+	for _, entry := range sources {
+		if !strings.HasPrefix(entry.Repo, "https://") || entry.Problem != "" {
+			t.Fatalf("entry %s: repo=%q problem=%q", entry.Name, entry.Repo, entry.Problem)
+		}
 	}
 }

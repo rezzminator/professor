@@ -1,10 +1,8 @@
 package installer
 
 import (
-	"bytes"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -43,44 +41,12 @@ func TestAccountSettingsLeftovers(t *testing.T) {
 	}
 }
 
-func TestStripAccountSettings(t *testing.T) {
-	home := t.TempDir()
-	raw, owned := accountSettingsFixture(home)
-	updated, removed, err := stripAccountSettings(raw, home, owned)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"hooks", "statusLine", "subagentStatusLine"}; !reflect.DeepEqual(removed, want) {
-		t.Fatalf("removed=%v want=%v", removed, want)
-	}
-	for _, want := range []string{`"command": "operator-hook"`, `"cleanupPeriodDays": 36500`, `9007199254740993`} {
-		if !strings.Contains(string(updated), want) {
-			t.Errorf("strip lost %s: %s", want, updated)
-		}
-	}
-	if leftovers, err := accountSettingsLeftovers(updated, home, nil, true); err != nil || len(leftovers) != 0 {
-		t.Fatalf("strip left %v err=%v: %s", leftovers, err, updated)
-	}
-	if stripped, _, err := stripAccountSettings(
-		[]byte(`{"hooks":{"Stop":[{"hooks":[{"command":"pfm internal clear-hide"}]}]}}`),
-		home,
-		nil,
-	); err != nil ||
-		strings.Contains(string(stripped), `"hooks"`) {
-		t.Fatalf("empty hooks survived: %s err=%v", stripped, err)
-	}
-}
-
 func TestCustomStatusLinePreserved(t *testing.T) {
 	home := t.TempDir()
 	raw := []byte(`{"statusLine":{"command":"operator-status"}}`)
 	leftovers, err := accountSettingsLeftovers(raw, home, nil, true)
 	if err != nil || len(leftovers) != 0 {
 		t.Fatalf("custom status reported: %v err=%v", leftovers, err)
-	}
-	updated, removed, err := stripAccountSettings(raw, home, nil)
-	if err != nil || len(removed) != 0 || !bytes.Equal(updated, raw) {
-		t.Fatalf("custom status changed: %s removed=%v err=%v", updated, removed, err)
 	}
 }
 
@@ -104,17 +70,11 @@ func TestAccountSettingsUnreadableLedger(t *testing.T) {
 	}
 }
 
-func TestAccountMCPLeftoversAndStrip(t *testing.T) {
+func TestAccountMCPLeftovers(t *testing.T) {
 	raw := []byte(`{"counter":9007199254740993,"mcpServers":{"chat":{"command":"pfm"},"other":{"command":"operator"}}}`)
 	got, err := accountMCPLeftovers(raw, []string{"chat"}, nil)
 	if err != nil || !reflect.DeepEqual(got, []string{"mcpServers.chat"}) {
 		t.Fatalf("leftovers=%v err=%v", got, err)
-	}
-	updated, removed, err := stripAccountMCP(raw, []string{"chat"}, nil)
-	if err != nil || !reflect.DeepEqual(removed, got) || strings.Contains(string(updated), `"chat"`) ||
-		!strings.Contains(string(updated), `"other"`) ||
-		!strings.Contains(string(updated), `9007199254740993`) {
-		t.Fatalf("updated=%s removed=%v err=%v", updated, removed, err)
 	}
 	for _, malformed := range []string{`{`, `[]`, `{"mcpServers":[]}`} {
 		if _, err := accountMCPLeftovers([]byte(malformed), []string{"chat"}, nil); err == nil {

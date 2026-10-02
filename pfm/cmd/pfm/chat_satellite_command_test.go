@@ -37,7 +37,7 @@ func TestHistoryPoolsUsesOnlySharedClaudeRoot(t *testing.T) {
 	}
 }
 
-func TestChatSaveUsesConfiguredImplicitAccountRoot(t *testing.T) {
+func TestChatSaveWithoutConfigDirUsesTheConfiguredRoot(t *testing.T) {
 	root := t.TempDir()
 	projects := filepath.Join(root, "account", "projects")
 	cwd, err := os.Getwd()

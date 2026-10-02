@@ -234,6 +234,16 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	fmt.Fprintf(stdout, "config codex.yolo=%t (%s)\n", config.Codex.Yolo, config.Source("codex.yolo"))
 	fmt.Fprintf(stdout, "config codex.binary=%s (%s)\n", config.Codex.Binary, config.Source("codex.binary"))
 	fmt.Fprintf(stdout, "config mcp.http.port=%d (%s)\n", config.MCP.HTTP.Port, config.Source("mcp.http.port"))
+	thirdParty := make([]string, 0, len(config.MCP.ThirdParty))
+	for name := range config.MCP.ThirdParty {
+		thirdParty = append(thirdParty, name)
+	}
+	sort.Strings(thirdParty)
+	names, source := strings.Join(thirdParty, ","), config.Source("mcp.thirdParty")
+	if len(thirdParty) == 0 {
+		names, source = "none", pfmconfig.SourceDefault
+	}
+	fmt.Fprintf(stdout, "config mcp.thirdParty=%s (%s)\n", names, source)
 	for _, name := range pfmconfig.RegisteredMCPServers() {
 		fmt.Fprintf(
 			stdout,

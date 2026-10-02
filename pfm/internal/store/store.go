@@ -118,7 +118,7 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve store paths: %w", err)
 	}
-	// Neither database is created while its legacy file waits for pfm install:
+	// Neither database is created while its legacy file waits for pfm doctor's fix:
 	// the cache pair first, then the state pair, before anything opens.
 	if resolved.Home != "" {
 		if err := paths.CheckLegacyPending(resolved.CacheDB, paths.LegacyCacheDB(resolved.Home)); err != nil {

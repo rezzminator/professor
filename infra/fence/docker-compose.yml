@@ -77,7 +77,7 @@ services:
 # they are external, and dev.sh iso and infra/demo/up.sh create them first
 # (fence_volumes_ensure, infra/fence/housekeeping.sh). Bare-name mounters:
 #   pfm-dev-gocache    lanes/container.sh, release-rehearsal.sh
-#   pfm-dev-gomod      lanes/container.sh, release-rehearsal.sh, host-rehearsal.sh (read-only)
+#   pfm-dev-gomod      lanes/container.sh, release-rehearsal.sh
 #   pfm-dev-lintcache  docker-compose.yml (pfm-dev, pfm-sim by extends)
 #   pfm-lane-harvest-cache  lanes/root.sh (via lanes/container.sh)
 #   pfm-lane-uv-cache       lanes/root.sh (via lanes/container.sh)

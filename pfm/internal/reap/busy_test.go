@@ -109,7 +109,11 @@ func TestClaudeAgentsBusySessionsRefusesWithNoConfigDirs(t *testing.T) {
 
 func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
 	home := t.TempDir()
-	dirs := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2"), filepath.Join(home, ".cc", "3")}
+	dirs := []string{
+		pfmconfig.DefaultAccountDir(home, 1),
+		filepath.Join(home, ".cc", "2"),
+		filepath.Join(home, ".cc", "3"),
+	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -130,7 +134,7 @@ func TestClaudeAgentsQueriesConfiguredDirsAndUnionsBusyRows(t *testing.T) {
 	machine := pfmconfig.Config{
 		Claude: pfmconfig.Claude{Binary: binary},
 		Accounts: []pfmconfig.Account{
-			{ID: 1, ConfigDir: filepath.Join(home, "wrong-implicit"), Implicit: true},
+			{ID: 1, ConfigDir: dirs[0]},
 			{ID: 2, ConfigDir: dirs[1]},
 			{ID: 3, ConfigDir: dirs[2]},
 			{ID: 4, ConfigDir: dirs[2]},

@@ -82,6 +82,12 @@ func Parse(argv []string) (Parsed, error) {
 					return Parsed{}, fmt.Errorf("--settings hooks: %w", err)
 				}
 			case flagMCPConfig:
+				// Render passes a file path; inline JSON is still Claude's
+				// other accepted form and is validated as an object.
+				if !strings.HasPrefix(strings.TrimSpace(word), "{") {
+					parsed.MCPConfig = word
+					continue
+				}
 				var object map[string]any
 				if err := json.Unmarshal([]byte(word), &object); err != nil {
 					return Parsed{}, fmt.Errorf("--mcp-config: %w", err)

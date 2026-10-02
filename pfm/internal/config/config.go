@@ -55,12 +55,9 @@ const (
 )
 
 // Account is one Claude account. ConfigDir is the directory handed to Claude at launch.
-// Implicit is true only for the default account whose current launch shape
-// deliberately leaves CLAUDE_CONFIG_DIR unset.
 type Account struct {
 	ID        int
 	ConfigDir string
-	Implicit  bool
 	Emoji     string
 	Claude    *ClaudePrefs
 	Codex     *CodexPrefs
@@ -172,8 +169,9 @@ type MCPHTTP struct {
 }
 
 type MCPConfig struct {
-	Servers map[string]MCPServer
-	HTTP    MCPHTTP
+	Servers    map[string]MCPServer
+	HTTP       MCPHTTP
+	ThirdParty map[string]json.RawMessage
 }
 
 type EnginePrefs struct {
@@ -313,9 +311,10 @@ type rawCodexPrefs struct {
 }
 
 type rawMCP struct {
-	Servers   map[string]rawMCPServer `json:"servers,omitempty"`
-	HTTP      *rawMCPHTTP             `json:"http,omitempty"`
-	AuthToken *string                 `json:"authToken,omitempty"`
+	ThirdParty map[string]json.RawMessage `json:"thirdParty,omitempty"`
+	Servers    map[string]rawMCPServer    `json:"servers,omitempty"`
+	HTTP       *rawMCPHTTP                `json:"http,omitempty"`
+	AuthToken  *string                    `json:"authToken,omitempty"`
 }
 
 type rawMCPServer struct {
@@ -383,17 +382,22 @@ func defaultsWithMCPServers(
 ) Config {
 	accounts := make([]Account, 0, len(projectRoots))
 	var accountSkips []AccountSkip
-	for index, projectRoot := range projectRoots {
-		configDir := filepath.Dir(projectRoot)
-		accounts = append(accounts, Account{
-			ID:        index + 1,
-			ConfigDir: filepath.Clean(configDir),
-			Implicit:  index == 0,
-			Emoji:     DefaultEmoji(index + 1),
-		})
-	}
-	if len(accounts) == 0 {
-		accounts, accountSkips = discoverAccounts(home)
+	if len(projectRoots) == 0 ||
+		(len(projectRoots) == 1 && projectRoots[0] == filepath.Join(home, ".claude", "projects")) {
+		accounts = append(accounts, Account{ID: 1, ConfigDir: DefaultAccountDir(home, 1), Emoji: DefaultEmoji(1)})
+		discovered, skips := discoverAccounts(home)
+		accounts, accountSkips = append(accounts, discovered...), skips
+	} else {
+		for index, projectRoot := range projectRoots {
+			accounts = append(
+				accounts,
+				Account{
+					ID:        index + 1,
+					ConfigDir: filepath.Clean(filepath.Dir(projectRoot)),
+					Emoji:     DefaultEmoji(index + 1),
+				},
+			)
+		}
 	}
 	codexHome := pfmengine.MustLookup(pfmengine.Codex).DefaultRoots(home)[0]
 	if len(codexHomes) != 0 && strings.TrimSpace(codexHomes[0]) != "" {
@@ -566,7 +570,7 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 	candidates := make([]candidate, 0, len(entries))
 	for _, entry := range entries {
 		id, parseErr := strconv.Atoi(entry.Name())
-		if parseErr != nil || id < 1 {
+		if parseErr != nil || id < 2 {
 			continue
 		}
 		configDir := filepath.Join(root, entry.Name())
@@ -584,7 +588,7 @@ func discoverAccounts(home string) ([]Account, []AccountSkip) {
 		}
 		accounts = append(accounts, Account{
 			ID: candidate.id, ConfigDir: candidate.path,
-			Implicit: candidate.id == 1, Emoji: DefaultEmoji(candidate.id),
+			Emoji: DefaultEmoji(candidate.id),
 		})
 	}
 	return accounts, skips
@@ -834,6 +838,13 @@ func loadWithMCPServers(
 
 	var legacyHarvesterEnabled *bool
 	if raw.MCP != nil {
+		if err := validateThirdParty(result.Path, raw.MCP.ThirdParty); err != nil {
+			return Config{}, err
+		}
+		result.MCP.ThirdParty = raw.MCP.ThirdParty
+		if raw.MCP.ThirdParty != nil {
+			result.Sources["mcp.thirdParty"] = SourceFile
+		}
 		for name, server := range raw.MCP.Servers {
 			if _, known := registered[name]; !known {
 				return Config{}, fmt.Errorf("config %s: unknown key %q", result.Path, "mcp.servers."+name)
@@ -847,7 +858,7 @@ func loadWithMCPServers(
 			}
 			if name == MCPServerHarvester {
 				// Pre-split layout: the flag now lives in harvester.config.json.
-				// Honored until `pfm install` migrates it (PlanMigration).
+				// Honored until the operator moves it (host check pre-split-config).
 				enabled := *server.Enabled
 				legacyHarvesterEnabled = &enabled
 				continue
@@ -1040,30 +1051,6 @@ func applyEnginePrefs(target *EnginePrefs, raw rawEngine) {
 	if raw.Effort != nil {
 		target.Effort = *raw.Effort
 	}
-}
-
-func validateAccounts(values []rawAccount, home string) ([]Account, error) {
-	seen := make(map[int]bool, len(values))
-	accounts := make([]Account, 0, len(values))
-	for index, value := range values {
-		if value.ID < 1 {
-			return nil, fmt.Errorf("entry %d id must be positive", index+1)
-		}
-		if seen[value.ID] {
-			return nil, fmt.Errorf("duplicate id %d", value.ID)
-		}
-		seen[value.ID] = true
-		configDir, err := expandHomePath(value.ConfigDir, home)
-		if err != nil {
-			return nil, fmt.Errorf("entry %d configDir: %w", index+1, err)
-		}
-		accounts = append(accounts, Account{
-			ID:        value.ID,
-			ConfigDir: configDir,
-			Emoji:     DefaultEmoji(value.ID),
-		})
-	}
-	return accounts, nil
 }
 
 func validateCodexHomes(
@@ -1460,6 +1447,9 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		},
 		"ask": askValue,
 		"log": MarshalLog(config.Log),
+	}
+	if len(config.MCP.ThirdParty) != 0 {
+		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

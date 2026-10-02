@@ -44,6 +44,31 @@ type Launch struct {
 	SessionID  string
 }
 
+// CheckConfigDir refuses an account dir Claude would create itself or one
+// InspectConfigDir does not accept; a link resolving outside the store passes.
+func CheckConfigDir(account int, dir string) error {
+	prefix := ""
+	if account > 0 {
+		prefix = fmt.Sprintf("account %d: ", account)
+	}
+	home, err := paths.Home()
+	if err != nil {
+		return fmt.Errorf("%sinspect %s: %w", prefix, dir, err)
+	}
+	inspected := InspectConfigDir(ClaudeStore(home), dir)
+	switch inspected.State {
+	case ConfigDirMissing:
+		return fmt.Errorf("%s%s does not exist — run pfm install", prefix, dir)
+	case ConfigDirUnreadable:
+		return fmt.Errorf("%sinspect %s: %w", prefix, dir, inspected.Err)
+	case ConfigDirNotDir:
+		return fmt.Errorf("%s%s is not a real directory — run pfm doctor", prefix, dir)
+	case ConfigDirStore:
+		return fmt.Errorf("%s%s resolves to the Claude store — run pfm doctor", prefix, dir)
+	}
+	return nil
+}
+
 func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	prefs := machine.EffectiveClaude(request.Account)
 	result := Launch{Unset: Hygiene(), Binary: prefs.Binary, Cache1H: prefs.Cache1H, SessionID: request.SessionID}
@@ -61,20 +86,24 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	}
 	// settingsDir is the store whose settings.json the launched Claude reads.
 	settingsDir := ""
-	if account, found := machine.AccountByID(request.Account); found && !account.Implicit {
+	if account, found := machine.AccountByID(request.Account); found {
 		dir := account.ConfigDir
 		if request.ConfigDir != "" {
 			dir = request.ConfigDir
 		}
-		if dir != "" {
-			result.Env = []string{configDirEnv + "=" + dir}
+		if err := CheckConfigDir(request.Account, dir); err != nil {
+			return Launch{}, err
 		}
+		result.Env = []string{configDirEnv + "=" + dir}
 		settingsDir = dir
 	} else if request.Account == 0 && request.ConfigDir != "" {
+		if err := CheckConfigDir(request.Account, request.ConfigDir); err != nil {
+			return Launch{}, err
+		}
 		result.Env = []string{configDirEnv + "=" + request.ConfigDir}
 		settingsDir = request.ConfigDir
-	} else if found {
-		settingsDir = account.ConfigDir
+	} else if request.Account != 0 && len(machine.Accounts) > 0 {
+		return Launch{}, fmt.Errorf("account %d is not in the configured roster", request.Account)
 	}
 	result.Env = append(result.Env, envCacheLiveControlMainTTL+"="+promptCacheTTL(result.Cache1H))
 	if request.SessionID != "" {
@@ -103,7 +132,13 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 			if err != nil {
 				return Launch{}, fmt.Errorf("render --mcp-config: %w", err)
 			}
-			result.Argv = append(result.Argv, flagMCPConfig, string(encoded))
+			// The payload rides a private file, never argv: a third-party
+			// entry's env and headers would show in ps and /proc/{pid}/cmdline.
+			path, err := writeMCPFile(request.Home, encoded)
+			if err != nil {
+				return Launch{}, fmt.Errorf("render --mcp-config: %w", err)
+			}
+			result.Argv = append(result.Argv, flagMCPConfig, path)
 		}
 		if request.Model != "" {
 			result.Argv = append(result.Argv, flagModel, request.Model)
@@ -251,19 +286,25 @@ func hookSettings(templates []Hook) map[string]any {
 	return events
 }
 
-// mcpConfig is develop's one professor registration, the shape every engine
-// installs: {type: stdio, command: <home>/.local/bin/pfm, args: [mcp serve
-// --stdio]}, present when the chat or the harvester family is enabled. The
-// stdio server serves every enabled family itself.
+// mcpConfig combines third-party entries with the professor registration
+// when the chat or harvester family is enabled.
 func mcpConfig(home string, machine pfmconfig.Config) map[string]any {
+	servers := make(map[string]any, len(machine.MCP.ThirdParty)+1)
+	for name, entry := range machine.MCP.ThirdParty {
+		servers[name] = entry
+	}
 	if !machine.MCPServers[pfmconfig.MCPServerChat].Enabled &&
 		!machine.MCPServers[pfmconfig.MCPServerHarvester].Enabled {
+		if len(servers) != 0 {
+			return servers
+		}
 		return nil
 	}
-	return map[string]any{pfmconfig.MCPServerProfessor: map[string]any{
+	servers[pfmconfig.MCPServerProfessor] = map[string]any{
 		typeWord: "stdio", commandWord: filepath.Join(home, ".local", "bin", "pfm"),
 		"args": []string{knobMCP, "serve", "--stdio"},
-	}}
+	}
+	return servers
 }
 
 func PromptFile(home string) (string, error) {

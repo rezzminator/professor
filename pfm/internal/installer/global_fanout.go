@@ -12,28 +12,8 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
-
-// This file holds the machine-global wiring that fans out across EVERY
-// configured Claude account — skills here, plus the shared source-repo
-// resolution and the registry inspection pfm doctor reports per account.
-// The rule they all serve: a registry the installer would retire a stale
-// link from is a registry it must install into, so a second account can
-// never end up with none of the global agents, commands, or skills.
-
-// claudeRegistries renders the <name> registry of every configured Claude
-// account for a transcript header. A header naming one directory while the
-// step below it writes N is a message that lies about its own work.
-func (installer *engine) claudeRegistries(name string) string {
-	dirs := installer.claudeConfigDirs()
-	rendered := make([]string, 0, len(dirs))
-	for _, config := range dirs {
-		rendered = append(rendered, filepath.Join(config, name))
-	}
-	return strings.Join(rendered, ", ")
-}
 
 // GlobalSourceRepo resolves the clone every global agent/command/skill link
 // is anchored on for a caller that has no installer options at all — pfm
@@ -54,7 +34,7 @@ func GlobalSourceRepo(home string) (string, error) {
 	return filepath.Clean(repo), nil
 }
 
-// GlobalAgentsState is what one account's agents/ registry holds, measured
+// GlobalAgentsState is what the store agents/ registry holds, measured
 // against the agent sources the recorded clone ships. UNREADABLE is its own
 // state on purpose: a registry that could not be read is "we failed to
 // look", never the "nothing there" of MISSING.
@@ -67,14 +47,14 @@ const (
 	GlobalAgentsUnreadable GlobalAgentsState = "UNREADABLE"
 	GlobalAgentsNoSources  GlobalAgentsState = "NO-SOURCES"
 	// GlobalAgentsUnresolved: the clone itself could not be resolved, so no
-	// account could be checked against anything.
+	// registry could be checked against anything.
 	GlobalAgentsUnresolved GlobalAgentsState = "UNRESOLVED"
 	// GlobalAgentsNoClone: pfm installs without the blueprint clone, so a HOME
 	// with no Professor clone recorded AND none at the default path has no
 	// global agents to be missing — this is not a warning, but it is also not
 	// a clean bill: nothing was checked, and Describe says why.
 	GlobalAgentsNoClone GlobalAgentsState = "NO-CLONE"
-	// GlobalAgentsNoClaude: the installer never wires an account's agents/
+	// GlobalAgentsNoClaude: the installer never wires the store agents/
 	// registry on a host with no Claude Code binary (ClaudeAbsent), so
 	// finding it unlinked there is not a defect either — named, not warned.
 	GlobalAgentsNoClaude GlobalAgentsState = "NO-CLAUDE"
@@ -95,17 +75,14 @@ const (
 	GlobalAgentsMismatch GlobalAgentsState = "MISMATCH"
 )
 
-// GlobalAgentsStatus is one reported line's worth of facts: either one
-// account's registry (Account/Dir set) or the roster-wide failure that
-// stopped every account from being checked at all (Account 0, Dir naming the
-// agent source directory).
+// GlobalAgentsStatus describes the store, a Codex registry, or a source failure.
 type GlobalAgentsStatus struct {
-	Account int
-	Dir     string
-	State   GlobalAgentsState
+	Store bool
+	Dir   string
+	State GlobalAgentsState
 	// Names are the agents in the reported state; Missing carries the
 	// not-linked ones when conflicts and absences coexist, so a CONFLICT
-	// line never hides the agents the account also lacks.
+	// line never hides the agents the store also lacks.
 	Names   []string
 	Missing []string
 	// Conflicts carries the foreign-link bucket when it coexists with a
@@ -120,9 +97,9 @@ type GlobalAgentsStatus struct {
 // status, so doctor and any future surface can never word the same drift
 // two ways. Every non-linked state carries the remediation.
 func (status GlobalAgentsStatus) Describe() string {
-	scope := fmt.Sprintf("account=%d dir=%s", status.Account, status.Dir)
-	if status.Account == 0 {
-		scope = "source=" + status.Dir
+	scope := "source=" + status.Dir
+	if status.Store {
+		scope = "store dir=" + status.Dir
 	}
 	line := fmt.Sprintf("%s state=%s", scope, status.State)
 	if len(status.Names) != 0 {
@@ -146,41 +123,21 @@ func (status GlobalAgentsStatus) Describe() string {
 	case GlobalAgentsNoClone:
 		return line + ` note="no Professor clone recorded or at the default path — global agents install from a clone (INSTALL.md § Build from source)"`
 	case GlobalAgentsNoClaude:
-		return line + ` note="no Claude Code binary installed — the installer never wires this account's agents"`
+		return line + ` note="no Claude Code binary installed — the installer never wires the store's agents"`
 	default:
 		return line + ` hint="run pfm install"`
 	}
 }
 
-// InspectGlobalAgents classifies, per configured Claude account, whether
-// every machine-global agent the recorded clone ships is linked into that
-// account's agents/ registry. wireCodexAgents fans those links across every
-// account, so an inspection that read the primary alone would certify a host
-// whose other accounts have no global agents at all.
-//
-// An empty source roster is NO-SOURCES, never a clean bill: with nothing to
-// enumerate, every account would trivially "have them all". A HOME with no
-// source-repo marker AND nothing at the default clone path is NO-CLONE,
-// reported by name rather than folded into NO-SOURCES: pfm installs without
-// the blueprint clone, so there is nothing here to have gone missing, and the
-// status says why nothing was checked instead of quietly certifying a host
-// that was never a Professor clone to begin with. Any other Lstat failure on
-// either path is UNRESOLVED with its error — a failed look is never absence.
+// InspectGlobalAgents classifies the store agents registry and each Codex registry
+// against the recorded clone. Source failures remain distinct from absence.
 func InspectGlobalAgents(
 	home string,
-	accounts []pfmconfig.Account,
 	claudeAbsent bool,
 	codexHomes ...string,
 ) []GlobalAgentsStatus {
 	if claudeAbsent {
-		statuses := make([]GlobalAgentsStatus, 0, len(accounts))
-		for _, account := range accounts {
-			statuses = append(
-				statuses,
-				GlobalAgentsStatus{Account: account.ID, Dir: account.ConfigDir, State: GlobalAgentsNoClaude},
-			)
-		}
-		return statuses
+		return []GlobalAgentsStatus{{Store: true, Dir: ClaudeStore(home), State: GlobalAgentsNoClaude}}
 	}
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
@@ -213,7 +170,7 @@ func InspectGlobalAgents(
 		return []GlobalAgentsStatus{{Dir: agentsDir, State: GlobalAgentsNoSources}}
 	}
 	sort.Strings(sources)
-	// A declared variant is an agent the install owes every account exactly
+	// A declared variant is an agent the install owes the store exactly
 	// like an original; its link source is the rendered file in the pfm-owned
 	// generated directory. A declaration that cannot be read or rendered is
 	// UNREADABLE with its error — never a roster quietly short of variants.
@@ -225,10 +182,7 @@ func InspectGlobalAgents(
 		sources = append(sources, variant.Path)
 	}
 
-	statuses := make([]GlobalAgentsStatus, 0, len(accounts)+len(codexHomes)+1)
-	for _, account := range accounts {
-		statuses = append(statuses, inspectAccountGlobalAgents(account, repo, sources))
-	}
+	statuses := []GlobalAgentsStatus{inspectStoreGlobalAgents(ClaudeStore(home), repo, sources)}
 	// One row per Codex home, against the bytes this binary compiles. A
 	// compile failure is UNREADABLE for the whole check rather than a per-home
 	// verdict: with nothing to compare against, no registry can be judged at
@@ -304,27 +258,15 @@ func inspectCodexRoleRegistry(registry string, roles []codexgen.GlobalRole) Glob
 	return status
 }
 
-// ReportGlobalAgents reports one line per configured Claude account naming
-// whether the machine-global agents the recorded clone ships are linked into
-// that account's agents/ registry — the check that would have caught `pfm
-// install` wiring the primary account only. Linked, NoClone and NoClaude
-// count neither: NoClone means pfm was never given a clone to check agents
-// against, and NoClaude means the account has no Claude Code binary to wire
-// agents for at all — neither is a defect. Missing, Unreadable, Symlink and
-// Mismatch are a state `pfm install --yes` owns and did not produce, so they
-// are FAILURES — Symlink most of all: it is the shape that makes every spawn
-// of that role fail while the registry looks full. Conflict, NoSources and
-// Unresolved are advisory and stay warnings. The classification and its
-// wording live in InspectGlobalAgents / Describe, so the checker can never
-// drift from the installer it checks.
+// ReportGlobalAgents reports the store and Codex states. Missing, unreadable,
+// symlinked and mismatched registries fail; source and conflict states warn.
 func ReportGlobalAgents(
 	w io.Writer,
 	home string,
-	accounts []pfmconfig.Account,
 	claudeAbsent bool,
 	codexHomes ...string,
 ) (warnings, failures int) {
-	statuses := InspectGlobalAgents(home, accounts, claudeAbsent, codexHomes...)
+	statuses := InspectGlobalAgents(home, claudeAbsent, codexHomes...)
 	for index := range statuses {
 		status := &statuses[index]
 		fmt.Fprintf(w, "doctor: global-agents %s\n", status.Describe())
@@ -339,9 +281,9 @@ func ReportGlobalAgents(
 	return warnings, failures
 }
 
-func inspectAccountGlobalAgents(account pfmconfig.Account, repo string, sources []string) GlobalAgentsStatus {
-	status := GlobalAgentsStatus{Account: account.ID, Dir: account.ConfigDir, State: GlobalAgentsLinked}
-	registry := filepath.Join(account.ConfigDir, "agents")
+func inspectStoreGlobalAgents(store, repo string, sources []string) GlobalAgentsStatus {
+	status := GlobalAgentsStatus{Store: true, Dir: store, State: GlobalAgentsLinked}
+	registry := filepath.Join(store, "agents")
 	var conflicting, missing []string
 	for _, source := range sources {
 		name := strings.TrimSuffix(filepath.Base(source), ".md")
@@ -360,7 +302,7 @@ func inspectAccountGlobalAgents(account pfmconfig.Account, repo string, sources 
 		default:
 			// Missing, a copy where a link belongs, and a stale in-repo link
 			// are three ways of not having this agent — none is what the
-			// account should be reading, and one rerun fixes all three.
+			// store should hold, and one rerun fixes all three.
 			missing = append(missing, name)
 		}
 	}
@@ -376,20 +318,11 @@ func inspectAccountGlobalAgents(account pfmconfig.Account, repo string, sources 
 	return status
 }
 
-// wireGlobalSkills first prunes every retired skill's leftover link
-// (retireRetiredGlobalSkills), then fetches and links every source-fetched
-// skill templates/global/skills/sources.json registers (wireSourceFetchedSkills,
-// skill_sources.go — pfm install is that registry's one owner), then links
-// every machine-global skill — each skill directory shipped under
-// templates/global/skills/ — into the skills/ registry of every configured
-// Claude account.
+// wireGlobalSkills fetches source skills, then links template skills into the store.
 func (installer *engine) wireGlobalSkills() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
 		return fmt.Errorf("resolve global skills source repository: %w", err)
-	}
-	if err := installer.retireRetiredGlobalSkills(); err != nil {
-		return err
 	}
 	// Source-fetched skills first: their retirement frees a name that newly
 	// clashes with a template skill before wireTemplateSkills links it.
@@ -399,15 +332,8 @@ func (installer *engine) wireGlobalSkills() error {
 	return installer.wireTemplateSkills(sourceRepo)
 }
 
-// wireTemplateSkills links every top-level DIRECTORY of
-// <sourceRepo>/templates/global/skills/ into every configured account's
-// skills/ registry: one
-// whole-directory link per entry, the same idiom wireGlobalCommands uses for
-// its directory entries. The registry file that sits beside them
-// (sources.json, naming the skills fetched from their own public repos) is
-// not itself a skill and is never linked. An absent or empty source
-// directory is reported and never an error — the same carve-out the global
-// commands source gets.
+// wireTemplateSkills links clone skill directories into the store skills registry.
+// sources.json is a registry, not a skill; an absent or empty source is reported.
 func (installer *engine) wireTemplateSkills(sourceRepo string) error {
 	source := filepath.Join(sourceRepo, "templates", "global", "skills")
 	entries, err := os.ReadDir(source)
@@ -439,11 +365,7 @@ func (installer *engine) wireTemplateSkills(sourceRepo string) error {
 	return nil
 }
 
-// wireGlobalSkill links one skill source directory to
-// {ConfigDir}/skills/{name} for every configured Claude account. A source
-// without a SKILL.md is not a skill
-// any engine can load: it is reported as SKILL-SOURCE-MISSING and no link is
-// ever created for it.
+// wireGlobalSkill links one clone skill directory at {store}/skills/{name}.
 func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error {
 	if _, err := os.Stat(filepath.Join(source, "SKILL.md")); errors.Is(err, fs.ErrNotExist) {
 		installer.skip("SKILL-SOURCE-MISSING " + name + " (" + filepath.Join(source, "SKILL.md") + " absent)")
@@ -451,16 +373,16 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 	} else if err != nil {
 		return fmt.Errorf("inspect %s skill source: %w", name, err)
 	}
-	for _, config := range installer.claudeConfigDirs() {
-		if err := installer.wireGlobalLink(
-			source,
-			filepath.Join(config, "skills", name),
-			sourceRepo,
-			true,
-		); err != nil {
-			return err
-		}
+	config := installer.options.ConfigDir
+	if err := installer.wireGlobalLink(
+		source,
+		filepath.Join(config, "skills", name),
+		sourceRepo,
+		true,
+	); err != nil {
+		return err
 	}
+
 	return nil
 }
 
@@ -498,7 +420,7 @@ func (installer *engine) unwireGeneratedCodexAgents() error {
 	} else if err != nil {
 		return fmt.Errorf("inspect generated Codex agents directory %s: %w", generated, err)
 	}
-	return installer.changePaths("remove "+generated, []string{generated}, func() error {
+	return installer.change("remove "+generated, func() error {
 		if err := os.RemoveAll(generated); err != nil {
 			return fmt.Errorf("remove generated Codex agents directory %s: %w", generated, err)
 		}
@@ -613,7 +535,7 @@ func (installer *engine) unwireGeneratedClaudeAgents() error {
 	} else if err != nil {
 		return fmt.Errorf("inspect generated Claude agents directory %s: %w", generated, err)
 	}
-	return installer.changePaths("remove "+generated, []string{generated}, func() error {
+	return installer.change("remove "+generated, func() error {
 		if err := os.RemoveAll(generated); err != nil {
 			return fmt.Errorf("remove generated Claude agents directory %s: %w", generated, err)
 		}

@@ -31,7 +31,7 @@ printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"it
 	t.Setenv("PATH", bin)
 	t.Setenv("ASK_COUNTER", counter)
 	options := SummaryOptions{
-		Config: summaryMachine("codex"), Database: database,
+		Config: summaryMachine(t, "codex"), Database: database,
 		TempDir: filepath.Join(root, "tmp", "chat-status"),
 	}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath}
@@ -70,7 +70,11 @@ func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 	)
 	t.Setenv("PATH", bin)
 	t.Setenv("ASK_COUNTER", counter)
-	options := SummaryOptions{Config: summaryMachine("claude"), Database: database, TempDir: filepath.Join(root, "tmp")}
+	options := SummaryOptions{
+		Config:   summaryMachine(t, "claude"),
+		Database: database,
+		TempDir:  filepath.Join(root, "tmp"),
+	}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath}
 	for iteration := 0; iteration < 2; iteration++ {
 		result := Summarize(context.Background(), chat, options)
@@ -103,7 +107,7 @@ printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"it
 	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
 
 	result := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
-		Config: summaryMachine("codex"), Database: database, TempDir: tempDir,
+		Config: summaryMachine(t, "codex"), Database: database, TempDir: tempDir,
 	})
 	if result.Text != "cleanup-resistant summary" || strings.HasPrefix(result.Text, "failed (") {
 		t.Fatalf("summary lost its computed answer after cleanup failure: %+v", result)
@@ -113,7 +117,7 @@ printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"it
 	}
 
 	cached := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
-		Config: summaryMachine("codex"), Database: database, TempDir: tempDir,
+		Config: summaryMachine(t, "codex"), Database: database, TempDir: tempDir,
 	})
 	if cached.Text != result.Text || !cached.Cached || cached.Warning != nil {
 		t.Fatalf("summary was not cached after cleanup warning: first=%+v cached=%+v", result, cached)
@@ -132,7 +136,7 @@ func TestSummarizeDistinguishesMissingEngineFromRunnerFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
-	machine := summaryMachine("codex")
+	machine := summaryMachine(t, "codex")
 	machine.Codex.Binary = "absent-codex"
 	missing := Summarize(context.Background(), Chat{Engine: "cc", Path: transcriptPath}, SummaryOptions{
 		Config: machine, Database: database, TempDir: filepath.Join(root, "tmp"),
@@ -143,7 +147,7 @@ func TestSummarizeDistinguishesMissingEngineFromRunnerFailure(t *testing.T) {
 
 	writeSummaryStub(t, bin, "codex", "printf 'provider crashed\\n' >&2\nexit 9")
 	failed := Summarize(context.Background(), Chat{Engine: "cc", Path: transcriptPath}, SummaryOptions{
-		Config: summaryMachine("codex"), Database: database, TempDir: filepath.Join(root, "tmp"),
+		Config: summaryMachine(t, "codex"), Database: database, TempDir: filepath.Join(root, "tmp"),
 	})
 	if !strings.HasPrefix(failed.Text, "failed (") || !strings.Contains(failed.Text, "provider crashed") {
 		t.Fatalf("failed summary=%+v", failed)
@@ -166,13 +170,14 @@ func summaryTestStore(t *testing.T) (string, *store.Store) {
 	return root, database
 }
 
-func summaryMachine(engineName string) pfmconfig.Config {
+func summaryMachine(t *testing.T, engineName string) pfmconfig.Config {
+	t.Helper()
 	id, err := pfmengine.Parse(engineName)
 	if err != nil {
 		panic(err)
 	}
 	return pfmconfig.Config{
-		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: "/fixture/claude"}},
+		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: t.TempDir()}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: "/fixture/codex"}},
 		Claude:        pfmconfig.Claude{Binary: "claude"},
 		Codex:         pfmconfig.Codex{Binary: "codex"},

@@ -47,7 +47,7 @@ func TestComposeNonLiveAccountUsesLaunchRecord(t *testing.T) {
 	}
 }
 
-func TestLiveClaudeAccountUsesImplicitSeatUnlessAgentNamesUnknownConfig(t *testing.T) {
+func TestLiveClaudeAccountUsesConfiguredSeat(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		agents    []gather.Agent
@@ -55,7 +55,8 @@ func TestLiveClaudeAccountUsesImplicitSeatUnlessAgentNamesUnknownConfig(t *testi
 		launch    []fleetdb.Launch
 		want      int
 	}{
-		{name: "default process config", want: 1},
+		{name: "empty process config", want: 0},
+		{name: "configured process config", processes: []gather.ClaudeProcess{{Socket: "cc-S", PaneID: "%1", ConfigDir: "/fixture/account/1"}}, want: 1},
 		{
 			// A failed environ read is no evidence against the launch record.
 			name:      "unreadable live process config keeps its launch record",
@@ -66,7 +67,7 @@ func TestLiveClaudeAccountUsesImplicitSeatUnlessAgentNamesUnknownConfig(t *testi
 		{
 			name: "two Claude processes in one pane keep the launch record",
 			processes: []gather.ClaudeProcess{
-				{Socket: "cc-S", PaneID: "%1", ConfigDir: "/home/.claude"},
+				{Socket: "cc-S", PaneID: "%1", ConfigDir: "/fixture/account/1"},
 				{Socket: "cc-S", PaneID: "%1", ConfigDir: "/unknown"},
 			},
 			launch: []fleetdb.Launch{{SessionID: "S", Engine: pfmengine.Claude, Account: 2}},
@@ -86,7 +87,7 @@ func TestLiveClaudeAccountUsesImplicitSeatUnlessAgentNamesUnknownConfig(t *testi
 					Agents:          test.agents,
 					ClaudeProcesses: test.processes,
 				},
-				ClaudeSeats: []ClaudeSeat{{Account: 1, ConfigDir: "/home/.claude", Implicit: true}},
+				ClaudeSeats: []ClaudeSeat{{Account: 1, ConfigDir: "/fixture/account/1"}},
 				Launches:    composeLaunches(t, test.launch...),
 				Options:     Options{View: AllView},
 			}

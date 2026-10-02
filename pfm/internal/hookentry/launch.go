@@ -176,7 +176,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 	}
 	configDir := config.AmbientClaudeConfigDir()
 	if configDir == "" {
-		if account, found := runtime.Config.AccountByID(primary); found && !account.Implicit {
+		if account, found := runtime.Config.AccountByID(primary); found {
 			configDir = account.ConfigDir
 		}
 	}
@@ -199,7 +199,13 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		identity = freshID
 	}
 	realRun, err := action.LauncherRun(
-		*realBinary, arguments, configDir, runtime.Paths.Home, runtime.Config.EffectiveClaude(accountID), freshID,
+		*realBinary,
+		arguments,
+		configDir,
+		runtime.Paths.Home,
+		runtime.Config,
+		runtime.Config.EffectiveClaude(accountID),
+		freshID,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)

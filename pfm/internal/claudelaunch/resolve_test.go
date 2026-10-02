@@ -50,6 +50,9 @@ func TestResolveSources(t *testing.T) {
 	if row := get(2, "theme"); row.Value != "light" || row.Won != "account" {
 		t.Errorf("account theme=%#v", row)
 	}
+	if row := get(1, "configDir"); row.Won != "account" || row.Value != machine.Accounts[0].ConfigDir {
+		t.Errorf("account one config dir=%#v", row)
+	}
 	if row := get(2, "configDir"); row.Won != "account" || row.Value != machine.Accounts[1].ConfigDir {
 		t.Errorf("config dir=%#v", row)
 	}

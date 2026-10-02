@@ -57,13 +57,8 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		SourceRepo:    sourceRepo,
 		MCPConfigPath: configPath,
 		CodexHomes:    []string{},
-		ConfigDirs: []string{
-			filepath.Join(home, ".claude"),
-			filepath.Join(home, ".cc", "4"),
-			filepath.Join(home, ".cc", "5"),
-		},
-		Now:    now,
-		Runner: runner,
+		Now:           now,
+		Runner:        runner,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -96,14 +91,9 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		SourceRepo:    sourceRepo,
 		MCPConfigPath: configPath,
 		CodexHomes:    []string{},
-		ConfigDirs: []string{
-			filepath.Join(home, ".claude"),
-			filepath.Join(home, ".cc", "4"),
-			filepath.Join(home, ".cc", "5"),
-		},
-		Now:    now,
-		Stdout: &second,
-		Runner: &fakeRunner{},
+		Now:           now,
+		Stdout:        &second,
+		Runner:        &fakeRunner{},
 	})
 	if err != nil || report.Changed != 0 {
 		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())
@@ -113,14 +103,9 @@ func TestInstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 		Home:          home,
 		SourceRepo:    sourceRepo,
 		MCPConfigPath: configPath,
-		ConfigDirs: []string{
-			filepath.Join(home, ".claude"),
-			filepath.Join(home, ".cc", "4"),
-			filepath.Join(home, ".cc", "5"),
-		},
-		CodexHomes: []string{},
-		Runner:     &fakeRunner{},
-		Now:        now,
+		CodexHomes:    []string{},
+		Runner:        &fakeRunner{},
+		Now:           now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +137,7 @@ func TestUninstallLeavesClaudeAccountFilesUnchanged(t *testing.T) {
 	writeFixture(t, registry, registryRaw)
 	_, err := Run(context.Background(), Options{
 		Mode: ModeUninstall, Home: home, SourceRepo: sourceRepo,
-		MCPConfigPath: configPath, ConfigDirs: []string{configDir}, CodexHomes: []string{},
+		MCPConfigPath: configPath, CodexHomes: []string{},
 		Runner: &fakeRunner{nameSyncIdle: true},
 	})
 	if err != nil {
@@ -206,27 +191,6 @@ func TestRetiredHookCommandMatchingRecognizesAllDreamAliases(t *testing.T) {
 		if name, retired := retiredHookCommandName(command); retired {
 			t.Fatalf("near-miss command %q classified as retired %q", command, name)
 		}
-	}
-}
-
-func TestRetiredCompactNudgeHookStrippedFromAccountSettings(t *testing.T) {
-	home := t.TempDir()
-	retired := filepath.Join(home, ".local", "bin", "pfm") + " internal compact-nudge"
-	personal := "personal-hook"
-	raw := fmt.Sprintf(`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[`+
-		`{"type":"command","command":%q},{"type":"command","command":%q}]}]}}`, retired, personal)
-	updated, removed, err := stripAccountSettings([]byte(raw), home, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(removed) != 1 || removed[0] != "hooks" {
-		t.Fatalf("removed=%v, want hooks", removed)
-	}
-	if got := hookCommandCount(t, string(updated), "UserPromptSubmit", retired); got != 0 {
-		t.Errorf("retired command remains in account settings: %s", updated)
-	}
-	if got := hookCommandCount(t, string(updated), "UserPromptSubmit", personal); got != 1 {
-		t.Errorf("personal hook changed in account settings: %s", updated)
 	}
 }
 

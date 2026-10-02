@@ -9,6 +9,7 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 - [The registry](#the-registry)
 - [Wires](#wires)
 - [Knobs](#knobs)
+- [CheckConfigDir](#checkconfigdir)
 - [Sources](#sources)
 - [The launch record](#the-launch-record)
 - [Config keys](#config-keys)
@@ -35,7 +36,7 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 
 Claude Code's own precedence, highest first: managed settings (`/etc/claude-code/` on Linux, `/Library/Application Support/ClaudeCode/` on macOS) → command line (`--settings`, flags) → `.claude/settings.local.json` → `.claude/settings.json` → the account's `settings.json`. A settings `env` entry overwrites the same variable exported in the shell. A flag beats its settings key (`--model` over `model`). Hooks merge across every layer rather than replacing each other.
 
-pfm writes at two layers only: managed settings for the one value that must survive any launch path ([claude-config-dir.md](claude-config-dir.md#managed-settings)), and the command line for everything else.
+pfm supplies launch values at two layers: managed settings for retention through every launch path, and the command line for the other launch values. Claude's plugin commands also write shared user plugin state through the primary account ([claude-config-dir.md](claude-config-dir.md#what-pfm-does-not-write)).
 
 ## The registry
 
@@ -58,7 +59,7 @@ type Knob struct {
 | Wire | Reaches Claude as | Rows |
 | --- | --- | --- |
 | `WireSettings` | a key in the single `--settings` JSON (`env.*`, `hooks`, `statusLine`, …) | most |
-| `WireEnv` | a process environment assignment | `CLAUDE_CONFIG_DIR` only |
+| `WireEnv` | a process environment assignment | `CLAUDE_CONFIG_DIR`, cache handoff |
 | `WireUnset` | `env -u NAME` before exec | the hygiene list |
 | `WireFlag` | a command-line flag | the prompt file, MCP config, autonomy pair, model, effort, session verbs |
 
@@ -66,9 +67,9 @@ type Knob struct {
 
 | Knob | Wire → target | Source | Default |
 | --- | --- | --- | --- |
-| `configDir` | env `CLAUDE_CONFIG_DIR` | account | the account's `configDir` (omitted for the implicit account) |
+| `configDir` | env `CLAUDE_CONFIG_DIR` | account | the account's own `configDir`, `~/.cc/{id}` by default; set on every account launch |
 | hygiene | unset `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR`, `ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `CACHE_LIVE_CONTROL_MAIN_TTL`, `CACHE_LIVE_CONTROL_AGENTS_TTL`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `CODEX_THREAD_ID` | constant | — |
-| `cache1h` | env `CACHE_LIVE_CONTROL_MAIN_TTL=1h`, or `=5m`, in the launch's process environment beside `CLAUDE_CONFIG_DIR`, never the settings `env` block (Claude Code re-applies that block on every settings-file reload and would re-hand the plugin a handoff it already consumed): the main chat's starting TTL handed to the cache-live-control plugin, which sets Claude Code's own TTL variables and owns every TTL (main chat and sub-agents) from then on; pfm sets no Claude Code TTL variable, and never `CACHE_LIVE_CONTROL_AGENTS_TTL`. The hygiene unset of the Claude Code TTL names stays, so a parent chat's value cannot outrank the plugin. A headless run keeps it in its settings `env` | launch → config | `true` |
+| `cache1h` | process env `CACHE_LIVE_CONTROL_MAIN_TTL=1h` or `5m` | launch → config | `true` |
 | `systemPrompt` | `professor`: flag `--system-prompt-file`; `lean`: settings `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`; `production`: nothing | config | `production` |
 | `nativeCursor` | settings `env.CLAUDE_CODE_NATIVE_CURSOR=1` | config | `false` |
 | `maxSubagentSpawnDepth` | settings `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | config | `8` |
@@ -84,19 +85,32 @@ type Knob struct {
 | `cleanupPeriodDays` | settings `cleanupPeriodDays` | config | `36500` |
 | hooks | settings `hooks` — the pfm hook set, `docs/design/hooks/hooks.md` | constant | — |
 | status lines | settings `statusLine`, `subagentStatusLine` — `docs/design/context/statusline.md` | constant | — |
-| MCP | flag `--mcp-config '{"mcpServers":{"professor":{…}}}'` — one `professor` entry, `{type: stdio, command: ~/.local/bin/pfm, args: [mcp, serve, --stdio]}` (the shape `pfm install` registers for Codex and OpenCode), present when `chat` or `harvester` is enabled in `mcp`, absent when both are off | config | — |
+| MCP | flag `--mcp-config {file}` — a per-launch 0600 file holding `professor` and third-party entries | config | — |
 | `permissionMode` | flags `--allow-dangerously-skip-permissions --dangerously-skip-permissions` on `bypass` | config | `bypass` |
 | model | flag `--model` | launch | unset |
 | effort | flag `--effort` (`low\|medium\|high\|xhigh\|max`) | launch | unset |
 | session id | flag `--session-id {uuid}` on a fresh chat — pfm assigns the id so the launch record exists before Claude starts | door | — |
 | session verbs | flags `--resume`, `--fork-session`, `--name` | door | — |
 
-`--mcp-config` adds to the account's own MCP servers; it never replaces them.
+`--mcp-config` names a per-launch file carrying every `mcp.thirdParty` entry and, when `chat` or `harvester` is enabled, one `professor` entry: `{type: stdio, command: ~/.local/bin/pfm, args: [mcp, serve, --stdio]}`. When both families are off, third-party entries still ride the file; with no entries neither file nor flag exists. The payload never sits on argv, where `ps` and `/proc/{pid}/cmdline` would show a third-party `env` value or `Authorization` header to every local user: Render writes `{"mcpServers":{…}}` atomically (scratch file, then rename) to `~/.local/state/pfm/mcp-config/claude-mcp-{random}.json`, mode 0600 in a 0700 directory it refuses when that path is a symlink, and passes the path. Claude reads the file once at startup; each write first prunes the directory's launch files older than seven days. Account `.claude.json` files are intended to contain no MCP definitions; doctor warns on outside third-party entries. Config validation reserves the name `professor` and requires each third-party value to be a JSON object.
+
+The interactive cache handoff stays in process environment beside `CLAUDE_CONFIG_DIR`, outside the settings `env` block. Claude re-applies that block on a settings reload; putting the handoff there would hand the plugin a value it already consumed. The cache-live-control plugin owns subsequent main and sub-agent TTL changes. pfm sets no Claude TTL variable and never `CACHE_LIVE_CONTROL_AGENTS_TTL`; hygiene clears inherited values. Headless keeps the handoff in its settings `env`.
+
+### CheckConfigDir
+
+Before rendering an account launch, `CheckConfigDir` (`pfm/internal/claudelaunch/render.go`) requires that account's directory to exist and never creates it. It classifies the directory with `InspectConfigDir` (`pfm/internal/claudelaunch/configdir.go`). Install's store wiring, the `account-is-store` and `account-entry-real` host checks and doctor's account rows use the same predicate, so a directory launch refuses is one doctor names. A symlinked directory is followed: it launches when its resolved real path is a directory that is neither the store nor inside it, and `CLAUDE_CONFIG_DIR` keeps the literal path. Refusals:
+
+- Missing: `account {id}: {config dir} does not exist — run pfm install`.
+- Not a directory: `account {id}: {config dir} is not a real directory — run pfm doctor`.
+- Resolves to the store or into it: `account {id}: {config dir} resolves to the Claude store — run pfm doctor`.
+- Inspection error, including a dangling link: `account {id}: inspect {config dir}: {cause}`.
+
+`Render` refuses an unknown nonzero account in a configured roster with `account {id} is not in the configured roster`. `CLAUDE_CONFIG_DIR` is set for every configured account, including account 1. An explicit directory-only request receives the same check without the account prefix. Headless account requests also call `CheckConfigDir`.
 
 ## Sources
 
 - **config** — `pfm.config.json`'s `claude` block, overridden by the launching account's own `claude` block.
-- **machine config** — the `mcp` block's enabled servers; they live outside `claude` and decide whether the `--mcp-config` row carries the `professor` entry. The HTTP port plays no part: the entry is stdio.
+- **machine config** — the `mcp` block's enabled families decide whether `--mcp-config` carries `professor`; `mcp.thirdParty` supplies every other entry. The HTTP port plays no part in pfm's stdio entry.
 - **launch → config** — a choice made for this one launch (the picker's cache toggle, `pfm chat new --cache 1h|5m`, `pfm chat reload --cache`); absent a choice, the config value.
 - **launch** — only a per-launch choice; unset means the flag is omitted.
 - **constant** — fixed in the registry; changing it is a code change.
@@ -108,8 +122,8 @@ No inherited environment variable decides a value: the unset list clears them fi
 
 pfm remembers what it launched in `pfm.db`, table `launch` — one row per session: `session_id`, `engine`, `account`, `cache1h`, `launched_at`, `updated_at`. It is the source every later reader uses; nothing reads a launch value back out of a running process's environment.
 
-- **One writer.** `fleetdb.RecordLaunch(ctx, fleetdb.Launch{…})` is the only code that inserts or updates a row. Every door calls it before exec: a fresh chat with the id it passes as `--session-id`; a resume or reload with the resumed id, updating `account` and `cache1h`; a fork once its new session id resolves.
-- **One reader.** `fleetdb.LaunchFor(ctx, sessionID)` returns the row, `ErrNoLaunch` for a session pfm never launched, or the read error.
+- **One writer.** `fleetdb.RecordLaunch(ctx, values, launch, at)` inserts or updates a row. Every door calls it before exec: a fresh chat with the id it passes as `--session-id`; a resume or reload with the resumed id, updating `account` and `cache1h`; a fork once its new session id resolves.
+- **One reader.** `(*fleetdb.Launches).LaunchFor(ctx, sessionID)` returns the row, `ErrNoLaunch` for a session pfm never launched, or the read error.
 - **Readers:** the picker's ⚡1h badge; `pfm chat reload`, which carries the chat's account and cache into the respawn unless overridden; the statusline's cache window, keyed by the `session_id` in the statusline payload; account attribution of rows that are not live (compose), which is how a transcript in the shared store is tied to the account it ran on.
 - **No record** — a chat pfm did not launch — shows no badge and no medal. **A failed read** renders as an error marker (`⚠`), never as a 5-minute cache or a missing account.
 - Spawn-audit does not read the record: it audits what actually runs, through `claudelaunch.Parse` over the live argv with the binary first.
@@ -138,9 +152,9 @@ The `claude` block of `pfm.config.json`; each key also takes a per-account overr
 ## The rendered launch
 
 ```text
-env -u {hygiene…} [CLAUDE_CONFIG_DIR={config dir}] CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} {binary} {door verbs} \
+env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={1h|5m} {binary} {door verbs} \
   --settings '{"outputStyle":"default","cleanupPeriodDays":36500,"env":{…},"hooks":{…},"statusLine":{…},"subagentStatusLine":{…}[,"theme":…]}' \
-  [--mcp-config '{"mcpServers":{"professor":{"type":"stdio","command":"{home}/.local/bin/pfm","args":["mcp","serve","--stdio"]}}}'] \
+  [--mcp-config ~/.local/state/pfm/mcp-config/claude-mcp-{random}.json] \
   [--model M] [--effort E] [--system-prompt-file F] [--allow-dangerously-skip-permissions --dangerously-skip-permissions]
 ```
 
@@ -181,7 +195,7 @@ A `claude` typed at a shell, through [the managed launcher](#the-managed-launche
 
 ### PurposeQuery
 
-`claude agents --json` for the reaper, inject-resume and agent-open listings: only the `--settings` payload and the hygiene list.
+`claude agents --json` for the reaper, inject-resume and agent-open listings: the `--settings` payload, hygiene and account environment; no session-start flags.
 
 ### Every door that starts a Claude session
 
@@ -194,7 +208,7 @@ Query-purpose `agents --json` and the exempt subcommands start no session.
 
 ### Doors pfm does not own
 
-The VS Code Claude extension's panel is not a pfm launch door. pfm never launches it and writes none of its settings, so it carries no pfm launch value.
+The VS Code Claude extension's panel is not a pfm launch door. pfm never launches it. With `pfm install --yes --vscode`, pfm writes `claudeCode.environmentVariables` in owned VS Code settings to supply the primary account's `CLAUDE_CONFIG_DIR`. The panel reads the shared files through that account's links and does not receive pfm's rendered flags.
 
 ## The managed launcher
 
@@ -227,6 +241,8 @@ Reads each live `cc-` chat's Claude argv from `/proc`, decodes it with `claudela
 | `VIOLATION` | a fresh launch without the registry payload — a spawn site bypassed `Render` |
 | `PREDATES-LAYER` | the process started before the current registry; reload to carry it |
 | `ROLE-OK` / `ROLE-MISMATCH` / `ROLE-CHECK-FAILED` | a seat prompt file against its role |
+
+Account attribution matches the process environment's `CLAUDE_CONFIG_DIR` exactly to a roster entry before grading against that account's effective settings. A missing or unmatched value is graded against the primary account with `account unmatched; graded against primary`. An unreadable environment reports `account environment unreadable; graded against primary`. No account is attributed to the store.
 
 Values set through the `--settings` `env` block are read from argv, never from `/proc/{pid}/environ`: Claude writes them into its environment after exec. A probe that cannot run reports `CHECK FAILED to run … — live chats unaudited`, never "no chats".
 

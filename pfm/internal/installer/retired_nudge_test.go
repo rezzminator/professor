@@ -105,7 +105,7 @@ func TestInstallRetiresNudgeStateOnce(t *testing.T) {
 	var output bytes.Buffer
 	options := Options{
 		Mode: ModeApply, Home: home, SourceRepo: sourceRepo, MCPConfigPath: configPath,
-		ConfigDirs: []string{}, CodexHomes: []string{}, Runner: &fakeRunner{nameSyncIdle: true},
+		CodexHomes: []string{}, Runner: &fakeRunner{nameSyncIdle: true},
 		Env:    &paths.MapEnv{HomeDir: home, Values: map[string]string{paths.EnvSIDDir: sidDir}},
 		Now:    func() time.Time { return time.Date(2031, 2, 3, 4, 5, 6, 0, time.UTC) },
 		Stdout: &output,

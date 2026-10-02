@@ -131,6 +131,11 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 
 func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 	root := jailTest(t)
+	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	configPath := writeConfigFixture(t, root, `{
   "version": 1,
   "accounts": [
@@ -191,6 +196,11 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 // bg-spare-served chat hit in production).
 func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	root := jailTest(t)
+	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	configPath := writeConfigFixture(t, root, `{
   "version": 1,
   "accounts": [
@@ -259,6 +269,11 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 // its own, which would leave two --pane flags in the worker's argv.
 func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	root := jailTest(t)
+	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	configPath := writeConfigFixture(t, root, `{
   "version": 1,
   "accounts": [
@@ -379,6 +394,9 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	}
 	targetCWD := t.TempDir()
 
+	if err := os.MkdirAll(filepath.Join(root, "account-1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	configPath := writeConfigFixture(t, root, `{
   "version": 1,
   "accounts": [

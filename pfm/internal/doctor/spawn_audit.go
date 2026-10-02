@@ -338,7 +338,7 @@ func spawnAccount(machine config.Config, primary int, observation spawnObservati
 	}
 	dir := observation.Environ["CLAUDE_CONFIG_DIR"]
 	for _, account := range machine.Accounts {
-		if account.ConfigDir == dir || (dir == "" && account.Implicit) {
+		if account.ConfigDir == dir {
 			return account.ID, ""
 		}
 	}

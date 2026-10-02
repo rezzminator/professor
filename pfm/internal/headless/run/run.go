@@ -206,6 +206,11 @@ func Resolve(request Request) (Request, error) {
 	} else if !rosterPresent {
 		return Request{}, fmt.Errorf("%s account roster is empty; configure an account", request.Engine)
 	}
+	if request.Engine == pfmengine.Claude && request.ConfigDir != "" {
+		if err := claudelaunch.CheckConfigDir(request.Account, request.ConfigDir); err != nil {
+			return Request{}, err
+		}
+	}
 	binaryPath, err := obs.Runner(deps.RealRunner{}).LookPath(binary)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {

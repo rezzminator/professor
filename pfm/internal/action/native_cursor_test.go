@@ -8,7 +8,14 @@ import (
 
 func TestLauncherRunNativeCursorFollowsConfig(t *testing.T) {
 	for _, want := range []bool{false, true} {
-		run, err := LauncherRun("/bin/claude", nil, "", "/home/test", pfmconfig.ClaudePrefs{NativeCursor: want})
+		run, err := LauncherRun(
+			"/bin/claude",
+			nil,
+			"",
+			"/home/test",
+			pfmconfig.Config{},
+			pfmconfig.ClaudePrefs{NativeCursor: want},
+		)
 		if err != nil {
 			t.Fatalf("LauncherRun(nativeCursor=%v) error = %v", want, err)
 		}

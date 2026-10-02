@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -78,11 +79,6 @@ func (config Config) AccountForConfigDir(configDir string) int {
 		return 1
 	}
 	if configDir == "" {
-		for _, account := range config.Accounts {
-			if account.Implicit {
-				return account.ID
-			}
-		}
 		return config.Accounts[0].ID
 	}
 	if resolved, err := filepath.EvalSymlinks(configDir); err == nil {
@@ -116,4 +112,42 @@ func (config Config) PrimaryOpenCodeAccount() int {
 		return 0
 	}
 	return config.OpenCodeAccounts[0].ID
+}
+
+func validateAccounts(values []rawAccount, home string) ([]Account, error) {
+	seen := make(map[int]bool, len(values))
+	seenDirs := make(map[string]int, len(values))
+	accounts := make([]Account, 0, len(values))
+	for index, value := range values {
+		if value.ID < 1 {
+			return nil, fmt.Errorf("entry %d id must be positive", index+1)
+		}
+		if seen[value.ID] {
+			return nil, fmt.Errorf("duplicate id %d", value.ID)
+		}
+		seen[value.ID] = true
+		configDir, err := expandHomePath(value.ConfigDir, home)
+		if err != nil {
+			return nil, fmt.Errorf("entry %d configDir: %w", index+1, err)
+		}
+		configDir = filepath.Clean(configDir)
+		if configDir == filepath.Join(home, ".claude") {
+			return nil, fmt.Errorf(
+				"entry %d configDir %s is the Claude store; an account needs its own dir (default %s)",
+				index+1,
+				configDir,
+				DefaultAccountDir(home, value.ID),
+			)
+		}
+		if earlier, found := seenDirs[configDir]; found {
+			return nil, fmt.Errorf("entry %d configDir %s duplicates entry %d", index+1, configDir, earlier)
+		}
+		seenDirs[configDir] = index + 1
+		accounts = append(accounts, Account{
+			ID:        value.ID,
+			ConfigDir: configDir,
+			Emoji:     DefaultEmoji(value.ID),
+		})
+	}
+	return accounts, nil
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -126,8 +127,8 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 		{
 			ID:        1,
 			ConfigDir: filepath.Join(home, ".cc", "one"),
-			Implicit:  true,
-			Emoji:     "🥇",
+
+			Emoji: "🥇",
 		},
 		{
 			ID:        2,
@@ -169,20 +170,6 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 	}
 }
 
-func TestDefaultsRegisterHarvesterDisabledByDefault(t *testing.T) {
-	got := Defaults(filepath.Join(t.TempDir(), "home"), nil)
-	server, ok := got.MCPServers["harvester"]
-	if !ok {
-		t.Fatal("harvester MCP server is not registered")
-	}
-	if server.Enabled {
-		t.Fatal("harvester MCP server is enabled by default")
-	}
-	if got.Source("mcp.servers.harvester.enabled") != SourceDefault {
-		t.Fatalf("harvester source = %q, want default", got.Source("mcp.servers.harvester.enabled"))
-	}
-}
-
 func TestDefaultEmojiOwnsTheConventionalBadgeRoster(t *testing.T) {
 	for _, testCase := range []struct {
 		id   int
@@ -207,7 +194,7 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 		if err := os.MkdirAll(configDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if account == 4 {
+		if account == 1 || account == 4 {
 			continue
 		}
 		credentials := `{"claudeAiOauth":{"accessToken":"fixture","refreshToken":"fixture"}}`
@@ -220,8 +207,8 @@ func TestDefaultsWithoutDiscoveryRootsDiscoversCredentialedAccountsAndNamesSkips
 		{
 			ID:        1,
 			ConfigDir: filepath.Join(home, ".cc", "1"),
-			Implicit:  true,
-			Emoji:     "🥇",
+
+			Emoji: "🥇",
 		},
 		{
 			ID:        2,
@@ -573,41 +560,6 @@ func TestLoadRejectsInvalidAccountRoster(t *testing.T) {
 	}
 }
 
-func TestLoadMCPServersHaveIndependentDefaultsAndSources(t *testing.T) {
-	registered := map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
-	}
-	home := filepath.Join(t.TempDir(), "home")
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(
-		path,
-		[]byte(`{"version":1,"mcp":{"servers":{"harvester":{"enabled":true}}}}`),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := loadWithMCPServers(path, home, nil, registered)
-	if err != nil {
-		t.Fatalf("Load(mcp) error = %v", err)
-	}
-	if got.MCPServers["chat"].Enabled {
-		t.Fatal("chat became enabled when only harvester was configured")
-	}
-	if !got.MCPServers["harvester"].Enabled {
-		t.Fatal("harvester did not take its configured enabled value")
-	}
-	if got.Source("mcp.servers.chat.enabled") != SourceDefault {
-		t.Fatalf("chat source = %q, want default", got.Source("mcp.servers.chat.enabled"))
-	}
-	// A pre-split file's mcp.servers.harvester is honored, but reported as
-	// legacy so `pfm config show` / doctor point at the migration.
-	if got.MCPServerSource("harvester") != SourceLegacy {
-		t.Fatalf("harvester source = %q, want %q", got.MCPServerSource("harvester"), SourceLegacy)
-	}
-}
-
 func TestLoadRejectsMissingVersionAndWrongVersion(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	for _, tc := range []struct {
@@ -857,6 +809,191 @@ func TestLoadRejectsInvalidStateDB(t *testing.T) {
 			_, err := Load(path, home, nil)
 			if err == nil || !strings.Contains(err.Error(), "state.db") || !strings.Contains(err.Error(), path) {
 				t.Fatalf("Load error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDefaultsKeepPrimaryAccountWithoutCredentials(t *testing.T) {
+	for _, roots := range []string{"empty", "default"} {
+		for _, configured := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/configured=%t", roots, configured), func(t *testing.T) {
+				home := filepath.Join(t.TempDir(), "home")
+				var projects []string
+				if roots == "default" {
+					projects = []string{filepath.Join(home, ".claude", "projects")}
+				}
+				path := filepath.Join(t.TempDir(), "config.json")
+				if configured {
+					if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				got, err := Load(path, home, projects)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := []Account{{ID: 1, ConfigDir: DefaultAccountDir(home, 1), Emoji: DefaultEmoji(1)}}
+				if !reflect.DeepEqual(got.Accounts, want) || len(got.AccountSkips) != 0 {
+					t.Fatalf("accounts=%#v skips=%#v, want %#v and no skips", got.Accounts, got.AccountSkips, want)
+				}
+			})
+		}
+	}
+}
+
+func TestDefaultsDiscoversSeatsWithDefaultRoots(t *testing.T) {
+	home := t.TempDir()
+	for _, id := range []int{1, 2, 3} {
+		dir := DefaultAccountDir(home, id)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if id == 2 {
+			if err := os.WriteFile(
+				filepath.Join(dir, ".credentials.json"),
+				[]byte(`{"claudeAiOauth":{"accessToken":"fixture"}}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, roots := range [][]string{nil, {filepath.Join(home, ".claude", "projects")}} {
+		got := Defaults(home, roots)
+		want := []Account{
+			{ID: 1, ConfigDir: DefaultAccountDir(home, 1), Emoji: DefaultEmoji(1)},
+			{ID: 2, ConfigDir: DefaultAccountDir(home, 2), Emoji: DefaultEmoji(2)},
+		}
+		skips := []AccountSkip{{ID: 3, ConfigDir: DefaultAccountDir(home, 3), Reason: "no valid credentials"}}
+		if !reflect.DeepEqual(got.Accounts, want) || !reflect.DeepEqual(got.AccountSkips, skips) {
+			t.Fatalf(
+				"roots=%v accounts=%#v skips=%#v, want %#v/%#v",
+				roots,
+				got.Accounts,
+				got.AccountSkips,
+				want,
+				skips,
+			)
+		}
+	}
+}
+
+func TestLoadRejectsStoreAndDuplicateAccountDirs(t *testing.T) {
+	home := t.TempDir()
+	store := filepath.Join(home, ".claude")
+	dir := DefaultAccountDir(home, 2)
+	for _, tc := range []struct{ name, json, want string }{
+		{"store", `{"version":2,"accounts":[{"id":1,"configDir":"~/.claude"}]}`, fmt.Sprintf("entry 1 configDir %s is the Claude store; an account needs its own dir (default %s)", store, DefaultAccountDir(home, 1))},
+		{"cleaned store", fmt.Sprintf(`{"version":2,"accounts":[{"id":7,"configDir":%q}]}`, store+"/projects/.."), fmt.Sprintf("entry 1 configDir %s is the Claude store; an account needs its own dir (default %s)", store, DefaultAccountDir(home, 7))},
+		{"duplicate", fmt.Sprintf(`{"version":2,"accounts":[{"id":2,"configDir":%q},{"id":7,"configDir":%q}]}`, dir, dir+"/projects/.."), fmt.Sprintf("entry 2 configDir %s duplicates entry 1", dir)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path, home, nil)
+			want := "config " + path + ": accounts: " + tc.want
+			if err == nil || err.Error() != want {
+				t.Fatalf("Load error=%v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestLoadThirdParty(t *testing.T) {
+	for _, tc := range []struct {
+		name, mcp, wantError string
+		want                 map[string]json.RawMessage
+		file                 bool
+	}{
+		{"absent", `{}`, "", nil, false},
+		{"empty", `{"thirdParty":{}}`, "", map[string]json.RawMessage{}, true},
+		{"entries", `{"thirdParty":{"browser":{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}},"remote":{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"invented-token"}}}}`, "", map[string]json.RawMessage{
+			"browser": json.RawMessage(`{"type":"stdio","command":"x","args":["--flag"],"env":{"EXAMPLE":"value"},"custom":{"future":true}}`),
+			"remote":  json.RawMessage(`{"type":"http","url":"https://example.invalid/mcp","headers":{"Authorization":"invented-token"}}`),
+		}, true},
+		{"professor", `{"thirdParty":{"professor":{"type":"stdio","command":"x"}}}`, "mcp.thirdParty.professor: the name professor is pfm's own server", nil, false},
+		{"string", `{"thirdParty":{"x":"y"}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"null", `{"thirdParty":{"x":null}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"array", `{"thirdParty":{"x":[]}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"number", `{"thirdParty":{"x":1}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+		{"boolean", `{"thirdParty":{"x":false}}`, "mcp.thirdParty.x must be a JSON object (a Claude mcpServers entry)", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, FileName)
+			if err := os.WriteFile(path, []byte(`{"version":2,"mcp":`+tc.mcp+`}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load(path, home, nil)
+			if tc.wantError != "" {
+				want := "config " + path + ": " + tc.wantError
+				if err == nil || err.Error() != want {
+					t.Fatalf("Load error = %v, want %q", err, want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.MCP.ThirdParty, tc.want) {
+				t.Fatalf("thirdParty = %s, want %s", got.MCP.ThirdParty, tc.want)
+			}
+			wantSource := SourceDefault
+			if tc.file {
+				wantSource = SourceFile
+			}
+			if got.Source("mcp.thirdParty") != wantSource {
+				t.Fatalf("source = %s, want %s", got.Source("mcp.thirdParty"), wantSource)
+			}
+		})
+	}
+}
+
+func TestMarshalThirdParty(t *testing.T) {
+	home := t.TempDir()
+	machine := Defaults(home, nil)
+	machine.MCP.ThirdParty = map[string]json.RawMessage{
+		"browser": json.RawMessage(
+			`{"type":"stdio","command":"x","args":["--flag"],"env":{"API_TOKEN":"invented-secret","PLAIN":"value"},"custom":{"future":true}}`,
+		),
+		"remote": json.RawMessage(
+			`{"type":"http","url":"https://example.invalid/mcp","headers":{"X-Example":"value"}}`,
+		),
+	}
+	for _, redact := range []bool{false, true} {
+		t.Run(strconv.FormatBool(redact), func(t *testing.T) {
+			content, err := Marshal(machine, redact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), FileName)
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := Load(path, home, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(loaded.MCP.ThirdParty) != len(machine.MCP.ThirdParty) {
+				t.Fatalf("round trip entries = %s", loaded.MCP.ThirdParty)
+			}
+			for name, raw := range machine.MCP.ThirdParty {
+				var want, got any
+				if redact {
+					raw = RedactSecrets(raw)
+				}
+				if err := json.Unmarshal(raw, &want); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(loaded.MCP.ThirdParty[name], &got); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("round trip %s = %#v, want %#v", name, got, want)
+				}
 			}
 		})
 	}

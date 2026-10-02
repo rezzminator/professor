@@ -64,6 +64,9 @@ func TestInternalLaunchNoTTYCreatesListedSessionAndPropagatesExit(t *testing.T) 
 	t.Setenv("CLAUDECODE", "poison-parent")
 	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "poison-parent")
 	t.Setenv("ANTHROPIC_BASE_URL", "https://poison.invalid")
+	if err := os.MkdirAll(filepath.Join(root, "caller-config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "caller-config"))
 
 	ready := filepath.Join(root, "ready")

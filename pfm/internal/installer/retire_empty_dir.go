@@ -14,16 +14,10 @@ import (
 // pfm owns end to end is removed only once it is empty, and anything left in
 // it is an operator file this installer must not delete.
 //
-// The refusal is computed in EVERY mode, dry run included. It used to run
-// only under installer.apply, and preflight plans with apply=false — so a
-// stray file under the managed chat/ or codex-skills/ tree let preflight
-// report a clean plan, and the real pass then staged assets, launchers,
-// overlays and migrations before hitting the same refusal and aborting,
-// leaving the machine half-converged and naming only the directory. A dry
-// pass has removed nothing yet, so it discounts what the pass itself
-// retires (removedPaths) before deciding: the question is whether the
-// directory would be empty by the time the removal runs, not whether it is
-// empty right now.
+// Uninstall removes the managed skill store root after retiring its entries.
+// The refusal is computed in every mode, including the dry preflight. That
+// pass has removed nothing yet, so it discounts entries marked removed this
+// pass before deciding whether the store root would be empty on apply.
 
 // markRemoved records a path this pass has removed (apply) or planned to
 // remove (dry run) so a later emptiness question can discount it.
@@ -94,5 +88,5 @@ func (installer *engine) retireEmptyDir(path string) error {
 		return nil
 	}
 	installer.markRemoved(path)
-	return installer.changePaths("remove empty "+path, []string{path}, func() error { return os.Remove(path) })
+	return installer.change("remove empty "+path, func() error { return os.Remove(path) })
 }

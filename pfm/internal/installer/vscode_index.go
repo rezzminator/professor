@@ -184,7 +184,7 @@ func (installer *engine) registerVSCodeExtension(extensionsDir string) (bool, er
 	encoded = append(encoded, '\n')
 
 	description := "register " + manifest.ID + " in " + indexPath + " (product loads it on next start)"
-	return true, installer.changePaths(description, []string{indexPath}, func() error {
+	return true, installer.change(description, func() error {
 		if err := atomicfile.Write(indexPath, encoded, 0o644); err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func (installer *engine) unregisterVSCodeExtension(indexPath string) error {
 		return err
 	}
 	encoded = append(encoded, '\n')
-	return installer.changePaths("remove professor.professor from "+indexPath, []string{indexPath}, func() error {
+	return installer.change("remove professor.professor from "+indexPath, func() error {
 		return atomicfile.Write(indexPath, encoded, 0o644)
 	})
 }
@@ -259,7 +259,8 @@ type VSCodeProductStatus struct {
 
 // VSCodeSettingsStatus is doctor's one row per owned settings file.
 type VSCodeSettingsStatus struct {
-	Path string
+	ClaudeConfigDir string
+	Path            string
 	// Profile is one of "owned", "relinquished", "missing", "unreadable".
 	Profile string
 	Default string
@@ -361,6 +362,15 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 				status.Error = decodeErr.Error()
 				break
 			}
+			entries, index, envErr := readVSCodeClaudeEnvironment(document)
+			if envErr != nil {
+				status.Profile = MCPClientUnreadable
+				status.Error = envErr.Error()
+				break
+			}
+			if index >= 0 {
+				status.ClaudeConfigDir = entries[index].(map[string]any)["value"].(string)
+			}
 			profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 			profiles, _ := document[profileKey].(map[string]any)
 			_, hasProfile := profiles[vscodeProfileName]
@@ -382,4 +392,127 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 		report.Settings = append(report.Settings, status)
 	}
 	return report, nil
+}
+
+const vscodeEnvironmentKey = "claudeCode.environmentVariables"
+
+func readVSCodeClaudeEnvironment(document map[string]any) ([]any, int, error) {
+	value, exists := document[vscodeEnvironmentKey]
+	if !exists {
+		return []any{}, -1, nil
+	}
+	entries, ok := value.([]any)
+	if !ok {
+		return nil, -1, fmt.Errorf("%w: %s must be an array", errMalformedVSCodeSettings, vscodeEnvironmentKey)
+	}
+	index := -1
+	for i, entry := range entries {
+		object, ok := entry.(map[string]any)
+		if !ok {
+			return nil, -1, fmt.Errorf(
+				"%w: %s element %d must be an object",
+				errMalformedVSCodeSettings,
+				vscodeEnvironmentKey,
+				i,
+			)
+		}
+		name, nameOK := object["name"].(string)
+		_, valueOK := object["value"].(string)
+		if !nameOK || !valueOK {
+			return nil, -1, fmt.Errorf(
+				"%w: %s element %d requires string name and value",
+				errMalformedVSCodeSettings,
+				vscodeEnvironmentKey,
+				i,
+			)
+		}
+		if name == claudeConfigDirEnv && index < 0 {
+			index = i
+		}
+	}
+	return entries, index, nil
+}
+
+func (installer *engine) mergeVSCodeClaudeEnvironment(
+	document map[string]any,
+	record vscodeOwnershipRecord,
+) ([]any, vscodeOwnershipRecord, bool, error) {
+	entries, index, err := readVSCodeClaudeEnvironment(document)
+	if err != nil {
+		return nil, record, false, err
+	}
+	value := ""
+	if index >= 0 {
+		value = entries[index].(map[string]any)["value"].(string)
+	}
+	if record.EnvOwned && (index < 0 || value != record.EnvValue) {
+		record.EnvOwned = false
+		record.HadEnv = false
+		record.PreviousEnv = ""
+		record.EnvKeyAdded = false
+		// Keep the last written value as the relinquishment marker on later installs.
+		return entries, record, false, nil
+	}
+	want := installer.options.PrimaryConfigDir
+	if want == "" {
+		return entries, record, false, nil
+	}
+	if !record.EnvOwned {
+		if !installer.options.VSCode || record.EnvValue != "" {
+			return entries, record, false, nil
+		}
+		record.EnvOwned = true
+		record.HadEnv = index >= 0
+		record.PreviousEnv = value
+		_, hasKey := document[vscodeEnvironmentKey]
+		record.EnvKeyAdded = !hasKey
+	}
+	record.EnvValue = want
+	if index >= 0 && value == want {
+		return entries, record, false, nil
+	}
+	updated := append([]any{}, entries...)
+	if index < 0 {
+		updated = append(updated, map[string]any{"name": claudeConfigDirEnv, "value": want})
+	} else {
+		entry := map[string]any{}
+		for key, value := range entries[index].(map[string]any) {
+			entry[key] = value
+		}
+		entry["value"] = want
+		updated[index] = entry
+	}
+	return updated, record, true, nil
+}
+
+func restoreVSCodeClaudeEnvironment(
+	raw []byte,
+	document map[string]any,
+	record vscodeOwnershipRecord,
+) ([]byte, bool, error) {
+	if !record.EnvOwned {
+		return raw, false, nil
+	}
+	entries, index, err := readVSCodeClaudeEnvironment(document)
+	if err != nil {
+		return nil, false, err
+	}
+	if index < 0 || entries[index].(map[string]any)["value"] != record.EnvValue {
+		return raw, false, nil
+	}
+	if record.HadEnv {
+		entries[index].(map[string]any)["value"] = record.PreviousEnv
+	} else {
+		entries = append(entries[:index], entries[index+1:]...)
+	}
+	if len(entries) == 0 && record.EnvKeyAdded {
+		updated, err := removeJSONCProperty(raw, 0, vscodeEnvironmentKey)
+		return updated, true, err
+	}
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		return nil, false, fmt.Errorf("restore VS Code Claude environment: %w", err)
+	}
+	updated, err := setJSONCProperty(raw, 0, vscodeEnvironmentKey, encoded)
+	return updated, true, err
 }

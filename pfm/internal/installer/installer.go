@@ -21,22 +21,17 @@ import (
 )
 
 type engine struct {
-	options       Options
-	layoutJournal *Journal
-	report        Report
-	apply         bool
-	stamp         string
-	managedRoot   string
-	outputErr     error
-	planErrors    []error
+	options     Options
+	report      Report
+	apply       bool
+	stamp       string
+	managedRoot string
+	outputErr   error
+	planErrors  []error
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).
 	removedPaths map[string]bool
-	// reportedConfigDirs remembers the account config dirs whose physical
-	// path could not be resolved, so the one diagnostic is reported once per
-	// run instead of once per claudeConfigDirs() call (account_migrations.go).
-	reportedConfigDirs map[string]bool
 }
 
 type pinnedHarvestProvisioner struct{}
@@ -67,10 +62,6 @@ func NewHarvestProvisioner() HarvestProvisioner { return pinnedHarvestProvisione
 func Run(ctx context.Context, options Options) (report Report, err error) {
 	endRun := runSpan(ctx, options.Mode)
 	defer func() { endRun(err) }()
-	// An install interrupted during its layout makes no write of its own.
-	if err := options.Journal.Interrupted(); err != nil {
-		return Report{}, err
-	}
 	options, err = normalizeInstallerOptions(options)
 	if err != nil {
 		return Report{}, fmt.Errorf("resolve installer options: %w", err)
@@ -79,8 +70,7 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		return Report{}, fmt.Errorf("unknown installer mode %d", options.Mode)
 	}
 	if options.Mode != ModeDryRun {
-		// A job running now refuses; `pfm install` starts the name-sync units
-		// its layout stopped only after Run (Journal.RestartSchedulerUnits).
+		// A job running now refuses before the installer writes.
 		probed, gateErr := schedulerGate(ctx, options.Runner)
 		if gateErr != nil {
 			return Report{}, gateErr
@@ -97,9 +87,6 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		apply:       options.Mode != ModeDryRun,
 		stamp:       options.Now().Format("20060102-150405"),
 		managedRoot: managedRootForHome(options.Home),
-	}
-	if options.Journal != nil {
-		options.Journal.dryRun = !installer.apply
 	}
 	installer.say("pfm install: home=%s config=%s", options.Home, options.ConfigDir)
 	switch options.Mode {
@@ -125,11 +112,6 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	if len(installer.planErrors) != 0 {
 		err = errors.Join(append([]error{err}, installer.planErrors...)...)
 	}
-	if installer.apply {
-		if sealErr := options.Journal.Seal(options.Stdout); sealErr != nil {
-			err = errors.Join(err, fmt.Errorf("seal install journal: %w", sealErr))
-		}
-	}
 	installer.say("")
 	installer.say("summary changed=%d ok=%d skipped=%d", installer.report.Changed,
 		installer.report.OK, installer.report.Skipped)
@@ -146,7 +128,6 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 	options := installer.options
 	options.Stdout = io.Discard
-	options.Journal = nil
 	preview := &engine{
 		options: options, apply: false, stamp: installer.stamp, managedRoot: installer.managedRoot,
 	}
@@ -194,6 +175,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := installer.installManagedCleanup(ctx); err != nil {
+		return err
+	}
 	if err := installer.wireClaudeLauncher(); err != nil {
 		return err
 	}
@@ -209,16 +193,13 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.migrateLegacyCarrier(ctx); err != nil {
 		return err
 	}
+	if err := installer.wireClaudeStore(); err != nil {
+		return err
+	}
 	if err := installer.retirePredecessors(); err != nil {
 		return err
 	}
 	if err := installer.retireRenamedGlobalAgents(); err != nil {
-		return err
-	}
-	if err := installer.retireBBInstall(); err != nil {
-		return err
-	}
-	if err := installer.retireChatCommands(); err != nil {
 		return err
 	}
 	if err := installer.wireCommands(assets); err != nil {
@@ -230,7 +211,7 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.wireGlobalCommands(); err != nil {
 		return err
 	}
-	if err := installer.retireOrphanGlobalCommands(); err != nil {
+	if err := installer.retireDeadRegistryLinks(); err != nil {
 		return err
 	}
 	if err := installer.wireGlobalSkills(); err != nil {
@@ -339,7 +320,7 @@ func (installer *engine) install(ctx context.Context) error {
 
 // wireCodexAgents runs on every install: it serves the Claude agent
 // registries (links, orphaned-link and undeclared-variant retirement) whatever
-// the Codex roster, and compiles, writes and retires Codex roles only in the
+// the codex roster, and compiles, writes and retires Codex roles only in the
 // Codex homes configured — an empty roster plans none.
 func (installer *engine) wireCodexAgents() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
@@ -356,7 +337,7 @@ func (installer *engine) wireCodexAgents() error {
 	plan, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
 		Home:             installer.options.Home,
 		SourceRepo:       sourceRepo,
-		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		ClaudeConfigDirs: []string{installer.options.ConfigDir},
 		CodexHomes:       installer.codexHomes(),
 		Mode:             codexgen.ModeCheck,
 	})
@@ -368,7 +349,6 @@ func (installer *engine) wireCodexAgents() error {
 		if action.Target != "" {
 			message += " -> " + action.Target
 		}
-		installer.planJournal(action.Path)
 		if err := installer.change(message, nil); err != nil {
 			return err
 		}
@@ -390,16 +370,12 @@ func (installer *engine) wireCodexAgents() error {
 	result, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
 		Home:             installer.options.Home,
 		SourceRepo:       sourceRepo,
-		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		ClaudeConfigDirs: []string{installer.options.ConfigDir},
 		CodexHomes:       installer.codexHomes(),
 		Mode:             codexgen.ModeBuild,
-		BeforeWrite:      installer.journalBeforeWrite(),
 	})
 	if err != nil {
 		return fmt.Errorf("run pfm codex agents: %w", err)
-	}
-	if err := installer.options.Journal.markApplied(); err != nil {
-		return fmt.Errorf("journal Codex global agents: %w", err)
 	}
 	installer.ok(fmt.Sprintf("Codex global agents compiled=%d linked=%d", len(result.Compiled), len(result.Installed)))
 	return nil
@@ -443,17 +419,8 @@ func (installer *engine) retireOrphanCodexAgents() error {
 	return nil
 }
 
-// wireGlobalCommands links every top-level entry of
-// <sourceRepo>/templates/global/commands/ into the commands/ registry of
-// EVERY configured Claude account (claudeConfigDirs — the same roster
-// retireOrphanGlobalCommands prunes from; a registry this installer would
-// retire from is a registry it must install into): one
-// file link per file entry, one whole-directory link per directory entry
-// (wave/, quality/, h/, rnd/, tokens/). An absent or empty source directory is
-// reported and never an error — populating it is a parallel lane's job. The
-// pfm-owned chat/* and reload.md links belong to a different owner and are
-// never touched here. This links what the source HOLDS; retiring the link of
-// a command the source no longer ships is retireOrphanGlobalCommands' job.
+// wireGlobalCommands links each top-level clone command into the store commands registry.
+// Dead links are pruned separately by retireDeadRegistryLinks.
 func (installer *engine) wireGlobalCommands() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
@@ -472,97 +439,19 @@ func (installer *engine) wireGlobalCommands() error {
 		installer.skip("global commands source empty at " + source + " (0 entries)")
 		return nil
 	}
-	for _, config := range installer.claudeConfigDirs() {
-		target := filepath.Join(config, "commands")
-		for _, entry := range entries {
-			if err := installer.wireGlobalLink(
-				filepath.Join(source, entry.Name()),
-				filepath.Join(target, entry.Name()),
-				sourceRepo,
-				entry.IsDir(),
-			); err != nil {
-				return err
-			}
+	config := installer.options.ConfigDir
+	target := filepath.Join(config, "commands")
+	for _, entry := range entries {
+		if err := installer.wireGlobalLink(
+			filepath.Join(source, entry.Name()),
+			filepath.Join(target, entry.Name()),
+			sourceRepo,
+			entry.IsDir(),
+		); err != nil {
+			return err
 		}
 	}
-	return nil
-}
 
-// retireOrphanGlobalCommands prunes the registry links wireGlobalCommands
-// itself created for templates that no longer ship. Wiring links every entry
-// the source directory HOLDS and forms no opinion about entries it has
-// stopped holding, so a command retired upstream otherwise leaves a dangling
-// ~/.claude/commands/<name> in every registry forever. The Codex mirror has
-// prevented exactly this since codexgen grew orphan reconciliation; this is
-// the Claude-side half of the same rule.
-//
-// Ownership is decided by the link's TARGET, never by its name: a symlink is
-// retired only when it points at <recorded professor repo>/templates/global/
-// commands/<its own name> AND that target no longer exists. An operator's own
-// command is untouched — a regular file, a link that resolves elsewhere, and a
-// link whose target still exists all fall through, and a dangling personal
-// link pointing outside the blueprint survives, matching the preservation rule
-// retireRenamedGlobalAgents holds to.
-//
-// Its own broken states are distinguishable at the surface: a registry that
-// cannot be read, a link that cannot be resolved, and a source that cannot be
-// stat'd each return a wrapped error naming the path, so a failed look never
-// renders as the silent no-op of a registry that simply had no orphan.
-func (installer *engine) retireOrphanGlobalCommands() error {
-	repos, err := installer.recordedProfessorSourceRepos()
-	if err != nil {
-		return err
-	}
-	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
-	for _, config := range installer.claudeConfigDirs() {
-		registry := filepath.Join(config, "commands")
-		entries, err := os.ReadDir(registry)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("inspect global command registry %s: %w", registry, err)
-		}
-		for _, entry := range entries {
-			path := filepath.Join(registry, entry.Name())
-			info, err := os.Lstat(path)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return fmt.Errorf("inspect global command %s: %w", path, err)
-			}
-			if info.Mode()&os.ModeSymlink == 0 {
-				continue
-			}
-			target, err := os.Readlink(path)
-			if err != nil {
-				return fmt.Errorf("read global command link %s: %w", path, err)
-			}
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(filepath.Dir(path), target)
-			}
-			target = filepath.Clean(target)
-			owned := false
-			for _, repo := range repos {
-				if target == filepath.Join(repo, "templates", "global", "commands", entry.Name()) {
-					owned = true
-					break
-				}
-			}
-			if !owned {
-				continue
-			}
-			if _, err := os.Stat(target); err == nil {
-				continue
-			} else if !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("inspect global command source %s: %w", target, err)
-			}
-			if err := installer.retire(path, "retired global command — "+target+" no longer ships"); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -591,7 +480,7 @@ func (installer *engine) wireGlobalLink(source, target, sourceRepoRoot string, i
 		installer.skip(message)
 		return nil
 	}
-	return installer.changePaths(message, []string{target}, func() error {
+	return installer.change(message, func() error {
 		return codexgen.ApplyGlobalLink(target, source, state)
 	})
 }
@@ -606,7 +495,6 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 		if action.Target != "" {
 			message += " -> " + action.Target
 		}
-		installer.planJournal(action.Path)
 		if err := installer.change(message, nil); err != nil {
 			return err
 		}
@@ -648,19 +536,15 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 		sourceHome = empty
 	}
 	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home:        installer.options.Home,
-		SourceHome:  sourceHome,
-		Mode:        codexgen.ModeBuild,
-		BeforeWrite: installer.journalBeforeWrite(),
+		Home:       installer.options.Home,
+		SourceHome: sourceHome,
+		Mode:       codexgen.ModeBuild,
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile Codex global commands: %w", err)
 	}
 	if !result.OK {
 		return fmt.Errorf("reconcile Codex global commands: %s", strings.Join(result.Problems, "; "))
-	}
-	if err := installer.options.Journal.markApplied(); err != nil {
-		return fmt.Errorf("journal Codex global commands: %w", err)
 	}
 	installer.ok(fmt.Sprintf(
 		"Codex global commands wrote=%d unchanged=%d deleted=%d",
@@ -669,23 +553,6 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 		result.Deleted,
 	))
 	return nil
-}
-
-// journalBeforeWrite is the codexgen BeforeWrite hook of this run: the
-// journal's pending snapshot of each path a build writes, nil without a journal.
-func (installer *engine) journalBeforeWrite() func(path string) error {
-	if installer.options.Journal == nil {
-		return nil
-	}
-	return installer.options.Journal.before
-}
-
-// planJournal adds a path a codexgen check plan reports as changing to a
-// preview's journal plan; an applying run records it through the build's hook.
-func (installer *engine) planJournal(path string) {
-	if journal := installer.options.Journal; journal != nil && !installer.apply {
-		journal.plan([]string{path})
-	}
 }
 
 func codexPlanBlockers(problems []string) []string {
@@ -868,16 +735,13 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.unwireGlobalRegistries(); err != nil {
 		return err
 	}
+	if err := installer.retireDeadRegistryLinks(); err != nil {
+		return err
+	}
 	if err := installer.reconcileCodexCommands(nil); err != nil {
 		return err
 	}
 	if err := installer.unwireGeneratedCodexAgents(); err != nil {
-		return err
-	}
-	if err := installer.retireBBInstall(); err != nil {
-		return err
-	}
-	if err := installer.retireChatCommands(); err != nil {
 		return err
 	}
 	if schedulerIsLaunchd {
@@ -887,7 +751,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	managerAvailable := installer.userManagerAvailable(ctx)
 	if managerAvailable && installer.apply {
-		installer.runSystemctl(ctx, "disable", "--now", "pfm-name-sync.path", nameSyncTimerUnit, mcpUnitName)
+		installer.runSystemctl(ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, mcpUnitName)
 	}
 	if _, err := installer.retireUnitEnablements(
 		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
@@ -1014,9 +878,6 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 	} else {
 		installer.say("harvestpy Check reported an unhealthy environment; provisioning")
 	}
-	if err := installer.options.Journal.before(root); err != nil {
-		return fmt.Errorf("journal harvestpy root %s: %w", root, err)
-	}
 	result, provisionErr := provider.Provision(ctx, harvestpy.ProvisionOptions{
 		Root:     root,
 		Cache:    filepath.Join(root, "cache"),
@@ -1034,9 +895,6 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 			)
 		}
 		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
-	}
-	if err := installer.options.Journal.markApplied(); err != nil {
-		return err
 	}
 	installer.ok("harvestpy environment provisioned digest=" + result.Digest)
 	return installer.stageHarvestModels(ctx, provider, root, platform)
@@ -1163,7 +1021,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		if strings.HasPrefix(asset.path, "systemd/") {
 			systemdChanged = true
 		}
-		if err := installer.changePaths("write "+target, []string{target}, func() error {
+		if err := installer.change("write "+target, func() error {
 			return atomicfile.Write(target, content, asset.mode)
 		}); err != nil {
 			return false, err
@@ -1178,7 +1036,7 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 					mcpAsset,
 					installer.options.MCPConfigPath,
 				)
-				if err := installer.changePaths(message, []string{mcpAsset}, func() error {
+				if err := installer.change(message, func() error {
 					return os.Remove(mcpAsset)
 				}); err != nil {
 					return false, err
@@ -1248,13 +1106,11 @@ func (installer *engine) ensureLink(source, target string) (bool, error) {
 		return false, err
 	}
 	description := "link " + target + " -> " + source
-	changed := []string{target}
 	backup := ""
 	if info != nil && info.Mode()&os.ModeSymlink == 0 {
 		backup = availableBackup(target, installer.stamp)
-		changed = append(changed, backup)
 	}
-	return true, installer.changePaths(description, changed, func() error {
+	return true, installer.change(description, func() error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}
@@ -1281,10 +1137,10 @@ func (installer *engine) unlinkOne(target string) error {
 	}
 	backup := newestBackup(target)
 	if backup == "" {
-		return installer.changePaths("remove "+target, []string{target}, func() error { return os.Remove(target) })
+		return installer.change("remove "+target, func() error { return os.Remove(target) })
 	}
 	message := "restore " + target + " from " + filepath.Base(backup)
-	return installer.changePaths(message, []string{target, backup}, func() error {
+	return installer.change(message, func() error {
 		if err := os.Remove(target); err != nil {
 			return err
 		}
@@ -1304,7 +1160,7 @@ func (installer *engine) retire(path, reason string) error {
 		return fmt.Errorf("refuse to retire directory %s", path)
 	}
 	installer.markRemoved(path)
-	return installer.changePaths("retire "+path+" ("+reason+")", []string{path}, func() error {
+	return installer.change("retire "+path+" ("+reason+")", func() error {
 		return os.Remove(path)
 	})
 }
@@ -1362,7 +1218,7 @@ type HostOverlayStatus struct {
 
 // InspectHostOverlays reports the canonical ~/.local/bin/NAME symlink state
 // of every installer-owned host overlay script, in the OK/missing/displaced
-// vocabulary InspectClaudeLauncher uses: an absent link is missing; a link
+// vocabulary inspectClaudeLauncher uses: an absent link is missing; a link
 // (or a non-symlink file) that does not resolve to the managed copy is
 // displaced; only a link that resolves to exactly the managed copy is ok.
 func InspectHostOverlays(home string) []HostOverlayStatus {
@@ -1417,41 +1273,38 @@ func (installer *engine) unwireHostOverlays() error {
 	return nil
 }
 
-// wireCommands links pfm's own commands (/reload) into EVERY configured Claude
-// seat's commands/, the way the global registries are wired — a seat whose
-// commands/ is a real directory rather than a symlink to the primary's would
-// otherwise have no /reload at all.
+// wireCommands links pfm commands into the store commands registry.
 func (installer *engine) wireCommands(assets []assetFile) error {
-	for _, config := range installer.claudeConfigDirs() {
-		installer.say("commands -> %s", filepath.Join(config, "commands"))
-		for _, asset := range assets {
-			target, found := installer.commandTargetIn(config, asset.path)
-			if !found {
-				continue
-			}
-			source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
-			if _, err := installer.ensureLink(source, target); err != nil {
-				return err
-			}
+	config := installer.options.ConfigDir
+	installer.say("commands -> %s", filepath.Join(config, "commands"))
+	for _, asset := range assets {
+		target, found := installer.commandTargetIn(config, asset.path)
+		if !found {
+			continue
+		}
+		source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
+		if _, err := installer.ensureLink(source, target); err != nil {
+			return err
 		}
 	}
+
 	installer.say("")
 	return nil
 }
 
 func (installer *engine) unwireCommands(assets []assetFile) error {
-	for _, config := range installer.claudeConfigDirs() {
-		installer.say("commands -> %s", filepath.Join(config, "commands"))
-		for _, asset := range assets {
-			target, found := installer.commandTargetIn(config, asset.path)
-			if !found {
-				continue
-			}
-			if err := installer.unlinkOne(target); err != nil {
-				return err
-			}
+	config := installer.options.ConfigDir
+	installer.say("commands -> %s", filepath.Join(config, "commands"))
+	for _, asset := range assets {
+		target, found := installer.commandTargetIn(config, asset.path)
+		if !found {
+			continue
+		}
+		if err := installer.unlinkOne(target); err != nil {
+			return err
 		}
 	}
+
 	if err := installer.retireLegacySwapCommand(); err != nil {
 		return err
 	}
@@ -1472,49 +1325,47 @@ func (installer *engine) commandTargetIn(config, asset string) (string, bool) {
 }
 
 func (installer *engine) wireSkills(assets []assetFile) error {
-	installer.say("skills -> %s", installer.claudeRegistries("skills"))
-	for _, config := range installer.claudeConfigDirs() {
-		for _, asset := range assets {
-			target, found := installer.skillTarget(config, asset.path)
-			if !found {
-				continue
-			}
-			source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
-			if _, err := installer.ensureLink(source, target); err != nil {
-				return err
-			}
+	installer.say("skills -> %s", filepath.Join(installer.options.ConfigDir, "skills"))
+	config := installer.options.ConfigDir
+	for _, asset := range assets {
+		target, found := installer.skillTarget(config, asset.path)
+		if !found {
+			continue
+		}
+		source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
+		if _, err := installer.ensureLink(source, target); err != nil {
+			return err
 		}
 	}
+
 	installer.say("")
 	return nil
 }
 
 func (installer *engine) unwireSkills(assets []assetFile) error {
-	installer.say("skills -> %s", installer.claudeRegistries("skills"))
-	for _, config := range installer.claudeConfigDirs() {
-		for _, asset := range assets {
-			target, found := installer.skillTarget(config, asset.path)
-			if !found {
-				continue
-			}
-			if err := installer.unlinkOne(target); err != nil {
-				return err
-			}
-			// The skill's own directory (e.g. skills/handoff/) is created by
-			// ensureLink's MkdirAll on link; remove it here once its one link is
-			// gone, tolerantly — an operator file left beside it must survive.
-			if err := installer.retireEmptyDirTolerant(filepath.Dir(target)); err != nil {
-				return err
-			}
+	installer.say("skills -> %s", filepath.Join(installer.options.ConfigDir, "skills"))
+	config := installer.options.ConfigDir
+	for _, asset := range assets {
+		target, found := installer.skillTarget(config, asset.path)
+		if !found {
+			continue
+		}
+		if err := installer.unlinkOne(target); err != nil {
+			return err
+		}
+		// The skill's own directory (e.g. skills/handoff/) is created by
+		// ensureLink's MkdirAll on link; remove it here once its one link is
+		// gone, tolerantly — an operator file left beside it must survive.
+		if err := installer.retireEmptyDirTolerant(filepath.Dir(target)); err != nil {
+			return err
 		}
 	}
+
 	installer.say("")
 	return nil
 }
 
-// skillTarget names where one embedded skill asset installs inside ONE
-// Claude config dir; its callers walk claudeConfigDirs so every configured
-// account gets the skill, never the primary alone.
+// skillTarget names an embedded skill asset in the store skills registry.
 func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
 	skills := filepath.Join(configDir, "skills")
 	if asset == "handoff.skill.md" {
@@ -1524,165 +1375,16 @@ func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
 }
 
 func (installer *engine) retireLegacySwapCommand() error {
-	for _, configDir := range installer.claudeConfigDirs() {
-		path := filepath.Join(configDir, "commands", "swap.md")
-		if target, linked := resolvedLink(
-			path,
-		); !linked ||
-			target != filepath.Join(installer.managedRoot, "swap.command.md") {
-			continue
-		}
+	path := filepath.Join(installer.options.ConfigDir, "commands", "swap.md")
+	if target, linked := resolvedLink(
+		path,
+	); linked &&
+		target == filepath.Join(installer.managedRoot, "swap.command.md") {
 		if err := installer.unlinkOne(path); err != nil {
 			return err
 		}
 	}
 	return installer.retire(filepath.Join(installer.managedRoot, "swap.command.md"), "retired swap command")
-}
-
-func (installer *engine) retireBBInstall() error {
-	installer.say("retired /bb surfaces")
-	sourceRepos, err := installer.recordedProfessorSourceRepos()
-	if err != nil {
-		return err
-	}
-	for _, link := range []struct {
-		target         string
-		managedSource  string
-		legacyRelative string
-	}{
-		// frozen historical paths — pre-rename installs' /bb symlinks point here; never rename with the repo
-		{
-			target:         filepath.Join(installer.options.ConfigDir, "commands", "bb.md"),
-			managedSource:  filepath.Join(installer.managedRoot, "bb.command.md"),
-			legacyRelative: filepath.Join("blueprint", "templates", "host-swap", "bb.command.md"),
-		},
-		{
-			target:         filepath.Join(installer.options.Home, ".agents", "skills", "bb"),
-			managedSource:  filepath.Join(installer.managedRoot, "codex-skills", "bb"),
-			legacyRelative: filepath.Join("blueprint", "templates", "host-swap", "codex-skills", "bb"),
-		},
-	} {
-		current, linked := resolvedLink(link.target)
-		owned := linked && current == filepath.Clean(link.managedSource)
-		for _, repo := range sourceRepos {
-			if linked && current == filepath.Join(repo, link.legacyRelative) {
-				owned = true
-				break
-			}
-		}
-		if !owned {
-			installer.skip(link.target + " is not an installed /bb link")
-			continue
-		}
-		if err := installer.unlinkOne(link.target); err != nil {
-			return err
-		}
-	}
-	for _, relative := range []string{
-		"bb.command.md",
-		"codex-skills/bb/SKILL.md",
-		"codex-skills/bb/agents/openai.yaml",
-	} {
-		if err := installer.retire(
-			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
-			"retired /bb surface",
-		); err != nil {
-			return err
-		}
-	}
-	for _, relative := range []string{"codex-skills/bb/agents", "codex-skills/bb", "codex-skills"} {
-		if err := installer.retireEmptyDir(
-			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
-		); err != nil {
-			return err
-		}
-	}
-	installer.say("")
-	return nil
-}
-
-// retireChatCommands retires the 19 /chat:* Claude slash commands and the
-// chat.sh/history.sh compatibility scripts they shared a directory with —
-// every one of them superseded by the chat MCP tools, with history.sh's
-// behavior ported natively into `pfm chat history`. Same discipline as
-// retireBBInstall: only a link this installer's own managed root actually
-// owns gets unlinked, never a path the operator happens to have there.
-func (installer *engine) retireChatCommands() error {
-	installer.say("retired /chat: slash commands")
-	commands := filepath.Join(installer.options.ConfigDir, "commands")
-	for _, link := range []struct {
-		target        string
-		managedSource string
-	}{
-		{filepath.Join(commands, "chat", "branch.md"), filepath.Join(installer.managedRoot, "chat", "branch.command.md")},
-		{filepath.Join(commands, "chat", "capture.md"), filepath.Join(installer.managedRoot, "chat", "capture.command.md")},
-		{filepath.Join(commands, "chat", "find.md"), filepath.Join(installer.managedRoot, "chat", "find.command.md")},
-		{filepath.Join(commands, "chat", "goal.md"), filepath.Join(installer.managedRoot, "chat", "goal.command.md")},
-		{filepath.Join(commands, "chat", "inject.md"), filepath.Join(installer.managedRoot, "chat", "inject.command.md")},
-		{filepath.Join(commands, "chat", "interrogate.md"), filepath.Join(installer.managedRoot, "chat", "interrogate.command.md")},
-		{filepath.Join(commands, "chat", "load.md"), filepath.Join(installer.managedRoot, "chat", "load.command.md")},
-		{filepath.Join(commands, "chat", "ls.md"), filepath.Join(installer.managedRoot, "chat", "ls.command.md")},
-		{filepath.Join(commands, "chat", "new.md"), filepath.Join(installer.managedRoot, "chat", "new.command.md")},
-		{filepath.Join(commands, "chat", "read.md"), filepath.Join(installer.managedRoot, "chat", "read.command.md")},
-		{filepath.Join(commands, "chat", "save.md"), filepath.Join(installer.managedRoot, "chat", "save.command.md")},
-		{filepath.Join(commands, "chat", "whoami.md"), filepath.Join(installer.managedRoot, "chat", "whoami.command.md")},
-		{filepath.Join(commands, "chat", "group", "create.md"), filepath.Join(installer.managedRoot, "chat", "group", "create.command.md")},
-		{filepath.Join(commands, "chat", "group", "invite.md"), filepath.Join(installer.managedRoot, "chat", "group", "invite.command.md")},
-		{filepath.Join(commands, "chat", "group", "ls.md"), filepath.Join(installer.managedRoot, "chat", "group", "ls.command.md")},
-		{filepath.Join(commands, "chat", "group", "read.md"), filepath.Join(installer.managedRoot, "chat", "group", "read.command.md")},
-		{filepath.Join(commands, "chat", "group", "send.md"), filepath.Join(installer.managedRoot, "chat", "group", "send.command.md")},
-		{filepath.Join(commands, "chat", "group", "subscribe.md"), filepath.Join(installer.managedRoot, "chat", "group", "subscribe.command.md")},
-		{filepath.Join(commands, "chat", "self", "compact.md"), filepath.Join(installer.managedRoot, "chat", "self", "compact.command.md")},
-		{filepath.Join(commands, "chat", "chat.sh"), filepath.Join(installer.managedRoot, "chat", "chat.sh")},
-		{filepath.Join(commands, "chat", "history.sh"), filepath.Join(installer.managedRoot, "chat", "history.sh")},
-	} {
-		current, linked := resolvedLink(link.target)
-		if !linked || current != filepath.Clean(link.managedSource) {
-			installer.skip(link.target + " is not an installed /chat: link")
-			continue
-		}
-		if err := installer.unlinkOne(link.target); err != nil {
-			return err
-		}
-	}
-	for _, relative := range []string{
-		"chat/branch.command.md", "chat/capture.command.md", "chat/find.command.md",
-		"chat/goal.command.md", "chat/inject.command.md", "chat/interrogate.command.md",
-		"chat/load.command.md", "chat/ls.command.md", "chat/new.command.md",
-		"chat/read.command.md", "chat/save.command.md", "chat/whoami.command.md",
-		"chat/group/create.command.md", "chat/group/invite.command.md", "chat/group/ls.command.md",
-		"chat/group/read.command.md", "chat/group/send.command.md", "chat/group/subscribe.command.md",
-		"chat/self/compact.command.md", "chat/chat.sh", "chat/history.sh",
-	} {
-		if err := installer.retire(
-			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
-			"retired /chat: slash command — superseded by the chat MCP tools",
-		); err != nil {
-			return err
-		}
-	}
-	for _, relative := range []string{"chat/group", "chat/self", chatName} {
-		if err := installer.retireEmptyDir(
-			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
-		); err != nil {
-			return err
-		}
-	}
-	// The host side is never unconditionally empty the way managedRoot is: an
-	// operator's own file, or one of the links above skipped as unowned,
-	// legitimately survives here. retireEmptyDir's hard failure on a
-	// non-empty directory is right for managedRoot's fully pfm-owned tree; it
-	// would wrongly abort every future install for an operator with one
-	// leftover file, so the host cleanup is best-effort instead.
-	for _, relative := range []string{"chat/group", "chat/self", chatName} {
-		if err := installer.retireEmptyDirTolerant(
-			filepath.Join(commands, filepath.FromSlash(relative)),
-		); err != nil {
-			return err
-		}
-	}
-	installer.say("")
-	return nil
 }
 
 func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
@@ -1700,11 +1402,11 @@ func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
 	if _, err := os.Lstat(marker); errors.Is(err, fs.ErrNotExist) {
 		return repos, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("inspect source repository marker for /bb retirement: %w", err)
+		return nil, fmt.Errorf("inspect source repository marker for registry dead-link check: %w", err)
 	}
 	repo, err := paths.ReadSourceRepoMarker(installer.options.Home)
 	if err != nil {
-		return nil, fmt.Errorf("read source repository marker for /bb retirement: %w", err)
+		return nil, fmt.Errorf("read source repository marker for registry dead-link check: %w", err)
 	}
 	add(repo)
 	return repos, nil
@@ -1720,11 +1422,6 @@ func (installer *engine) retireEmptyDirTolerant(path string) error {
 	if !installer.apply {
 		return nil
 	}
-	if entries, err := os.ReadDir(path); err == nil && len(entries) == 0 {
-		if err := installer.options.Journal.before(path); err != nil {
-			return err
-		}
-	}
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -1732,15 +1429,12 @@ func (installer *engine) retireEmptyDirTolerant(path string) error {
 		installer.skip("leave non-empty directory " + path + ": " + err.Error())
 		return nil
 	}
-	if err := installer.options.Journal.markApplied(); err != nil {
-		return err
-	}
 	installer.ok("removed empty " + path)
 	return nil
 }
 
 var unitNames = []string{
-	"pfm-name-sync.path",
+	nameSyncPathUnit,
 	"pfm-name-sync.service",
 	nameSyncTimerUnit,
 }
@@ -1761,7 +1455,7 @@ var unitEnablements = []struct {
 	unit  string
 	wants string
 }{
-	{unit: "pfm-name-sync.path", wants: systemdDefaultWants},
+	{unit: nameSyncPathUnit, wants: systemdDefaultWants},
 	{unit: nameSyncTimerUnit, wants: "timers.target.wants"},
 	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
@@ -1841,7 +1535,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 				installer.skip("unexpected non-symlink MCP enablement left untouched: " + target)
 				continue
 			}
-			if err := installer.changePaths("remove "+target, []string{target}, func() error {
+			if err := installer.change("remove "+target, func() error {
 				return os.Remove(target)
 			}); err != nil {
 				return false, err
@@ -1892,7 +1586,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		return
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
-	installer.runSystemctl(ctx, "enable", "--now", "pfm-name-sync.path", nameSyncTimerUnit)
+	installer.runSystemctl(ctx, "enable", "--now", nameSyncPathUnit, nameSyncTimerUnit)
 	if installer.mcpAnyEnabled() {
 		installer.runSystemctl(ctx, "enable", "--now", mcpUnitName)
 	}
@@ -1906,7 +1600,7 @@ func (installer *engine) userManagerAvailable(ctx context.Context) bool {
 // came back active; a restart that fails or does not come back is an error,
 // reported at once, never a skip.
 func (installer *engine) restartMCPUnit(ctx context.Context) error {
-	err := layoutSystemctl(ctx, installer.options.Runner, "restart", mcpUnitName)
+	err := userSystemctl(ctx, installer.options.Runner, "restart", mcpUnitName)
 	if err != nil {
 		err = fmt.Errorf("systemctl --user restart %s: %w", mcpUnitName, err)
 	} else {
@@ -1947,7 +1641,7 @@ func (installer *engine) writeSettingsHookOwnership(
 			installer.ok(path)
 			return nil
 		}
-		return installer.changePaths("remove "+path, []string{path}, func() error { return os.Remove(path) })
+		return installer.change("remove "+path, func() error { return os.Remove(path) })
 	}
 	same, encoded, err := sameSettingsHookOwnership(existing, ownership)
 	if err != nil {
@@ -1957,7 +1651,7 @@ func (installer *engine) writeSettingsHookOwnership(
 		installer.ok(path)
 		return nil
 	}
-	return installer.changePaths("write "+path, []string{path}, func() error {
+	return installer.change("write "+path, func() error {
 		return atomicfile.Write(path, encoded, 0o600)
 	})
 }
@@ -2004,12 +1698,11 @@ func (installer *engine) wireShell(uninstall bool) error {
 	if len(raw) == 0 {
 		description = "create " + zshrc
 	}
-	shellPaths, backup := []string{zshrc}, ""
+	backup := ""
 	if len(raw) > 0 {
 		backup = availableBackup(zshrc, installer.stamp)
-		shellPaths = append(shellPaths, backup)
 	}
-	return installer.changePaths(description, shellPaths, func() error {
+	return installer.change(description, func() error {
 		if len(raw) > 0 {
 			if err := copyBackup(zshrc, backup); err != nil {
 				return err
@@ -2049,7 +1742,7 @@ func (installer *engine) migrateOldState() error {
 	oldInfo, oldErr := os.Stat(oldState)
 	_, stateErr := os.Stat(state)
 	if oldErr == nil && oldInfo.IsDir() && errors.Is(stateErr, fs.ErrNotExist) {
-		return installer.changePaths("migrate "+oldState+" -> "+state, []string{oldState, state}, func() error {
+		return installer.change("migrate "+oldState+" -> "+state, func() error {
 			if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
 				return err
 			}
@@ -2090,13 +1783,8 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr er
 		return fmt.Errorf("scan retired kill carrier: %w", err)
 	}
 	sort.Strings(ids)
-	return installer.changePaths(
+	return installer.change(
 		fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)),
-		[]string{
-			installer.options.StateDB,
-			installer.options.StateDB + layoutDBWAL,
-			installer.options.StateDB + layoutDBSHM,
-		},
 		func() (returnErr error) {
 			values := paths.Values{
 				Home:    installer.options.Home,
@@ -2135,44 +1823,44 @@ func (installer *engine) retirePredecessors() error {
 	if err := installer.retireLegacyCommands(); err != nil {
 		return err
 	}
-	for _, config := range installer.claudeConfigDirs() {
-		for _, name := range []string{
-			"cx-kill.sh", "bb-hook.sh", "cx-heal.sh", "cx-recover.sh",
-		} {
-			if err := installer.retire(filepath.Join(config, "bin", name), "native pfm command"); err != nil {
-				return err
-			}
+	config := installer.options.ConfigDir
+	for _, name := range []string{
+		"cx-kill.sh", "bb-hook.sh", "cx-heal.sh", "cx-recover.sh",
+	} {
+		if err := installer.retire(filepath.Join(config, "bin", name), "native pfm command"); err != nil {
+			return err
 		}
-		if err := installer.retireGlob(
-			filepath.Join(config, "bin", "cx-recover.sh.pre-professor-*"),
-			"retired recovery artifact",
+	}
+	if err := installer.retireGlob(
+		filepath.Join(config, "bin", "cx-recover.sh.pre-professor-*"),
+		"retired recovery artifact",
+	); err != nil {
+		return err
+	}
+	for _, name := range []string{
+		"statusline-command.sh",
+		"statusline/segments.d/10-vertex-spend.sh",
+		"statusline/segments.d/40-gpt-account.sh",
+		"statusline/vertex-spend-refresh.py",
+		"statusline/gpt-usage.py",
+		"statusline/vertex_daily_tokens.py",
+	} {
+		if err := installer.retire(
+			filepath.Join(config, filepath.FromSlash(name)),
+			"native pfm statusline",
 		); err != nil {
 			return err
 		}
-		for _, name := range []string{
-			"statusline-command.sh",
-			"statusline/segments.d/10-vertex-spend.sh",
-			"statusline/segments.d/40-gpt-account.sh",
-			"statusline/vertex-spend-refresh.py",
-			"statusline/gpt-usage.py",
-			"statusline/vertex_daily_tokens.py",
-		} {
-			if err := installer.retire(
-				filepath.Join(config, filepath.FromSlash(name)),
-				"native pfm statusline",
-			); err != nil {
-				return err
-			}
-		}
-		for _, name := range []string{"dump.md", "chat-ops.sh", "group.sh"} {
-			if err := installer.retire(
-				filepath.Join(config, "commands", "chat", name),
-				"native pfm chat command",
-			); err != nil {
-				return err
-			}
+	}
+	for _, name := range []string{"dump.md", "chat-ops.sh", "group.sh"} {
+		if err := installer.retire(
+			filepath.Join(config, "commands", "chat", name),
+			"native pfm chat command",
+		); err != nil {
+			return err
 		}
 	}
+
 	// The per-engine harness-prompts tree replaced the flat staged prompts/
 	// directory; a host installed before the move still carries its files.
 	if err := installer.retireGlob(
@@ -2203,9 +1891,9 @@ func (installer *engine) retireLegacyCommands() error {
 			return err
 		}
 	}
-	configDirs := installer.options.ConfigDirs
-	if configDirs == nil {
-		configDirs = []string{installer.options.ConfigDir}
+	configDirs := []string{installer.options.ConfigDir}
+	for _, account := range installer.options.ClaudeAccounts {
+		configDirs = append(configDirs, account.ConfigDir)
 	}
 	for _, configDir := range configDirs {
 		if strings.TrimSpace(configDir) == "" {
@@ -2245,7 +1933,7 @@ func (installer *engine) retireLegacyCommand(path string) error {
 		filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-commands", filepath.Base(path)),
 		installer.stamp,
 	)
-	return installer.changePaths("retire "+path+" (backup: "+backup+")", []string{path, backup}, func() error {
+	return installer.change("retire "+path+" (backup: "+backup+")", func() error {
 		if err := copyBackup(path, backup); err != nil {
 			return fmt.Errorf("backup retired command %s: %w", path, err)
 		}
@@ -2258,7 +1946,7 @@ func (installer *engine) retireLegacyCommand(path string) error {
 
 // retiredGlobalAgents names every global Claude agent identity a template
 // rename has retired: the OLD name, left behind as {config}/agents/OLD.md
-// once RunGlobalAgents stops visiting it (it walks the CURRENT source
+// once runGlobalAgents stops visiting it (it walks the CURRENT source
 // roster, so a renamed-away identity is simply never revisited, never
 // cleaned up on its own). frr -> rr (3976b53, "/ptm→/pfm, frr→rr, /rr→/deep-rr")
 // is the only rename `git log -- templates/global/agents` holds; a future
@@ -2266,7 +1954,7 @@ func (installer *engine) retireLegacyCommand(path string) error {
 var retiredGlobalAgents = []string{"frr", "rr-super"}
 
 // retireRenamedGlobalAgents deletes a stale pre-rename identity from the
-// global Claude agent registry — but only when the file is unambiguously
+// global claude agent registry — but only when the file is unambiguously
 // the installer's own leftover, never a user's own agent that happens to
 // reuse the retired filename:
 //   - a symlink retires only when it targets a known Professor source;
@@ -2282,51 +1970,51 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 		return err
 	}
 	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
-	for _, config := range installer.claudeConfigDirs() {
-		for _, retired := range retiredGlobalAgents {
-			path := filepath.Join(config, "agents", retired+".md")
-			info, err := os.Lstat(path)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
+	config := installer.options.ConfigDir
+	for _, retired := range retiredGlobalAgents {
+		path := filepath.Join(config, "agents", retired+".md")
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect retired global agent %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
 			if err != nil {
-				return fmt.Errorf("inspect retired global agent %s: %w", path, err)
-			}
-			if info.Mode()&os.ModeSymlink != 0 {
-				target, err := os.Readlink(path)
-				if err != nil {
-					return err
-				}
-				if !filepath.IsAbs(target) {
-					target = filepath.Join(filepath.Dir(path), target)
-				}
-				owned := false
-				for _, repo := range repos {
-					if filepath.Clean(target) == filepath.Join(repo, "templates", "global", "agents", retired+".md") {
-						owned = true
-					}
-				}
-				if !owned {
-					installer.skip(path + " is an unrelated personal agent link — left alone")
-					continue
-				}
-			} else {
-				frontmatterName, readErr := agentFrontmatterName(path)
-				if readErr != nil {
-					return fmt.Errorf("read retired global agent %s: %w", path, readErr)
-				}
-				if frontmatterName != retired {
-					installer.skip(
-						path + " is not the retired " + retired + " agent (frontmatter name=" + frontmatterName + ") — left alone",
-					)
-					continue
-				}
-			}
-			if err := installer.retire(path, "renamed global agent ("+retired+" -> current roster)"); err != nil {
 				return err
 			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			owned := false
+			for _, repo := range repos {
+				if filepath.Clean(target) == filepath.Join(repo, "templates", "global", "agents", retired+".md") {
+					owned = true
+				}
+			}
+			if !owned {
+				installer.skip(path + " is an unrelated personal agent link — left alone")
+				continue
+			}
+		} else {
+			frontmatterName, readErr := agentFrontmatterName(path)
+			if readErr != nil {
+				return fmt.Errorf("read retired global agent %s: %w", path, readErr)
+			}
+			if frontmatterName != retired {
+				installer.skip(
+					path + " is not the retired " + retired + " agent (frontmatter name=" + frontmatterName + ") — left alone",
+				)
+				continue
+			}
+		}
+		if err := installer.retire(path, "renamed global agent ("+retired+" -> current roster)"); err != nil {
+			return err
 		}
 	}
+
 	return installer.retireRenamedCodexAgents()
 }
 

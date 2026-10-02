@@ -284,11 +284,7 @@ func (installer *engine) wireClaudeLauncher() error {
 	) + " -> " + managedClaudeLauncher(
 		installer.options.Home,
 	)
-	changedPaths := []string{canonicalClaudeLauncher(installer.options.Home)}
-	if status.State == LauncherDisplaced {
-		changedPaths = append(changedPaths, claudeLauncherStatePath(installer.options.Home))
-	}
-	return installer.changePaths(description, changedPaths, func() error {
+	return installer.change(description, func() error {
 		_, err := RepairClaudeLauncher(installer.options.Home)
 		return err
 	})
@@ -324,7 +320,7 @@ func (installer *engine) pruneClaudeVersions() error {
 			filepath.Base(version.Path),
 			FormatClaudeVersionBytes(version.Bytes),
 		)
-		if err := installer.changePaths(description, []string{version.Path}, func() error {
+		if err := installer.change(description, func() error {
 			return os.Remove(version.Path)
 		}); err != nil {
 			return fmt.Errorf("prune Claude version %s: %w", version.Path, err)

@@ -4,7 +4,6 @@
 # .claude/scripts/dev.sh (the iso actions that build and test: install build
 # typecheck verify test e2e cover all — never status, run, shell, sim),
 # infra/fence/lanes/root.sh (before a root build, with its own hash),
-# infra/fence/host-rehearsal.sh (every rehearsal) and
 # infra/fence/release-rehearsal.sh (`up`). dev.sh and infra/demo/up.sh also
 # call fence_volumes_ensure before every compose run.
 #
@@ -19,7 +18,7 @@
 #
 #   containers      labelled, exited: removed; labelled, running and created
 #                   more than PFM_FENCE_CONTAINER_MAX_HOURS (default 6) ago: forced
-#                   out (a leaked lane or root build, a forgotten host rehearsal).
+#                   out (a leaked lane or root build).
 #                   A running container also labelled pfm.fence.long-lived=1 — an
 #                   `iso shell`, the live demo, a release rehearsal mid-release —
 #                   is never age-reaped: someone is using it, and another

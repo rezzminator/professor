@@ -68,17 +68,16 @@ type OutputRunner interface {
 }
 
 type Options struct {
-	Mode Mode
-	// Journal is the install run's journal (NewJournal); every write the
-	// installer makes records its prior state there first. nil: no journaling.
-	Journal   *Journal
-	Home      string
-	StateDB   string
-	ConfigDir string
-	// ConfigDirs is the config-driven settings fanout. A nil value retains
-	// the historical discovery of existing .cc account settings for callers
-	// that construct Options directly.
-	ConfigDirs []string
+	Mode                  Mode
+	ManagedSettingsDir    string
+	CleanupPeriodDays     int
+	RequireManagedCleanup bool
+	// writeManaged is the atomic managed-drop-in writer; nil uses atomicfile.Write.
+	writeManaged     func(string, []byte) error
+	Home             string
+	StateDB          string
+	ConfigDir        string
+	PrimaryConfigDir string
 	// CodexHomes is the config-driven hooks.json fanout. A nil value retains
 	// the historical single ~/.codex target for direct legacy callers; an
 	// explicitly empty roster installs no Codex hook.

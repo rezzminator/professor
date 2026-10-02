@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
@@ -20,7 +19,7 @@ const missingState = "missing"
 // plus one row per owned settings file. installer.InspectVSCode is the same
 // reader `pfm install --vscode` itself uses, so doctor can never assert a
 // state the installer did not derive the same way.
-func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
+func printVSCodeDoctor(stdout io.Writer, home, primaryDir string) int {
 	report, err := installer.InspectVSCode(home)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: vscode unreadable error=%v — run pfm install --yes\n", err)
@@ -93,6 +92,26 @@ func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
 			settings.Profile,
 			settings.Default,
 		)
+		if settings.Error == "" && primaryDir != "" {
+			switch {
+			case settings.ClaudeConfigDir == "":
+				warnings++
+				fmt.Fprintf(
+					stdout,
+					"doctor: vscode settings=%s CLAUDE_CONFIG_DIR missing — run pfm install --yes --vscode\n",
+					settings.Path,
+				)
+			case settings.ClaudeConfigDir != primaryDir:
+				warnings++
+				fmt.Fprintf(
+					stdout,
+					"doctor: vscode settings=%s CLAUDE_CONFIG_DIR=%s, want %s — run pfm install --yes --vscode\n",
+					settings.Path,
+					settings.ClaudeConfigDir,
+					primaryDir,
+				)
+			}
+		}
 		if settings.Error != "" {
 			fmt.Fprintf(stdout, "doctor: vscode settings=%s error=%s\n", settings.Path, settings.Error)
 		}

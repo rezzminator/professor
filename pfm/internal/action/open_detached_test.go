@@ -10,6 +10,7 @@ import (
 )
 
 func TestOpenDetachedResumableSpawnsThroughTheSpawnDoor(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{alive: map[string]bool{}}
 	executor, err := New(Dependencies{
@@ -30,9 +31,9 @@ func TestOpenDetachedResumableSpawnsThroughTheSpawnDoor(t *testing.T) {
 			Name: "resumable chat",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-905-1-1",
-		Config:         testMachineConfig("/home/test"),
+		Config:         testMachineConfig(home),
 	}
 	result, err := executor.OpenDetached(context.Background(), request)
 	if err != nil {
@@ -50,6 +51,7 @@ func TestOpenDetachedResumableSpawnsThroughTheSpawnDoor(t *testing.T) {
 }
 
 func TestOpenDetachedLiveSpawnsNothing(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	tmux := &fakeActionTmux{alive: map[string]bool{"cc-100-1-1": true}}
 	executor, err := New(Dependencies{
@@ -70,9 +72,9 @@ func TestOpenDetachedLiveSpawnsNothing(t *testing.T) {
 			Name:        "live chat",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-900-1-1",
-		Config:         testMachineConfig("/home/test"),
+		Config:         testMachineConfig(home),
 	}
 	result, err := executor.OpenDetached(context.Background(), request)
 	if err != nil {
@@ -92,6 +94,7 @@ func TestOpenDetachedLiveSpawnsNothing(t *testing.T) {
 // log, and the only chats with a recorded birth are the ones opened from a
 // terminal.
 func TestOpenDetachedRecordsItsTrail(t *testing.T) {
+	home := t.TempDir()
 	jailAction(t)
 	ctx, recorder := obs.Test(t)
 	executor, err := New(Dependencies{
@@ -112,9 +115,9 @@ func TestOpenDetachedRecordsItsTrail(t *testing.T) {
 			Name: "trailed chat",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-906-1-1",
-		Config:         testMachineConfig("/home/test"),
+		Config:         testMachineConfig(home),
 	}); err != nil {
 		t.Fatal(err)
 	}

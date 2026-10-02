@@ -1,6 +1,8 @@
 package action
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +14,9 @@ import (
 
 func configuredMachinePolicy(home string) pfmconfig.Config {
 	configDir := filepath.Join(home, "profiles", "account 42")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		panic(fmt.Sprintf("fixture account dir %s: %v", configDir, err))
+	}
 	return pfmconfig.Config{
 		Version: pfmconfig.Version,
 		Accounts: []pfmconfig.Account{{
@@ -166,4 +171,35 @@ func TestSynthesizePickerNewRowsUseNativeClaudeAndShellCodexLaunches(t *testing.
 	if strings.Contains(codexPlan.Line, machine.Codex.Binary) {
 		t.Fatalf("new Codex picker line names the configured binary instead of calling cx: %q", codexPlan.Line)
 	}
+}
+
+func TestConfiguredMachinePolicyCreatesAccountDir(t *testing.T) {
+	home := t.TempDir()
+	machine := configuredMachinePolicy(home)
+	dir := filepath.Join(home, "profiles", "account 42")
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("fixture account dir %s: %v", dir, err)
+	}
+	if machine.Accounts[0].ConfigDir != dir || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("configured dir = %q, mode = %v; want %s (0700)", machine.Accounts[0].ConfigDir, info.Mode(), dir)
+	}
+}
+
+func TestConfiguredMachinePolicyAccountDirFailure(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "profiles", "account 42")
+	if err := os.WriteFile(filepath.Dir(dir), []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := os.MkdirAll(dir, 0o700)
+	if wantErr == nil {
+		t.Fatal("blocked parent accepted as an account directory")
+	}
+	defer func() {
+		if got, want := fmt.Sprint(recover()), fmt.Sprintf("fixture account dir %s: %v", dir, wantErr); got != want {
+			t.Fatalf("fixture panic = %q, want %q", got, want)
+		}
+	}()
+	configuredMachinePolicy(home)
 }

@@ -49,10 +49,12 @@ func envStripWords(names []string) string {
 // launches, but intentionally adds no autonomy or resume flags of its own.
 // home and claude carry the systemPrompt choice; the launcher re-decides it
 // every spawn (hygiene strips any inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).
+// machine supplies only its MCP servers and mcp.thirdParty, never its roster.
 func LauncherRun(
 	realBinary string,
 	args []string,
 	configDir, home string,
+	machine pfmconfig.Config,
 	claude pfmconfig.ClaudePrefs,
 	sessionID ...string,
 ) (string, error) {
@@ -66,9 +68,10 @@ func LauncherRun(
 	// The launcher states its own binary and config dir — it has already
 	// resolved the real Claude behind the shim, and its config dir came from
 	// the environment rather than from an account row — so it hands the door a
-	// single implicit account carrying only the prompt policy. Account 0 is
-	// deliberately absent from that roster: the CLAUDE_CONFIG_DIR assignment
-	// below is the launcher's, not an account's.
+	// machine config with no roster, carrying the prompt policy and the
+	// machine's MCP servers (no account's .claude.json carries them; they ride
+	// --mcp-config). The CLAUDE_CONFIG_DIR assignment below is the launcher's
+	// own dir.
 	id := ""
 	explicit, _, continuing := LauncherIdentity(args)
 	if len(sessionID) != 0 {
@@ -85,7 +88,7 @@ func LauncherRun(
 		Home:              home,
 		Args:              args,
 		SessionID:         id,
-		Machine:           pfmconfig.Config{Claude: claude},
+		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
 		explicitConfigDir: configDir,
 		binary:            realBinary,
 	}.ShellCommand()

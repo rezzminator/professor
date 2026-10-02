@@ -118,18 +118,20 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 		},
 	}
 	for _, test := range []struct {
-		dir      string
-		want     int
-		fallback bool
+		dir    string
+		want   int
+		reason string
 	}{
-		{"/accounts/2", 2, false}, {"/unknown", 1, true},
+		{"/accounts/2", 2, ""},
+		{"/unknown", 1, "account unmatched; graded against primary"},
+		{"", 1, "account unmatched; graded against primary"},
 	} {
 		got, reason := spawnAccount(
 			machine,
 			1,
 			spawnObservation{Environ: map[string]string{"CLAUDE_CONFIG_DIR": test.dir}},
 		)
-		if got != test.want || (reason != "") != test.fallback {
+		if got != test.want || reason != test.reason {
 			t.Fatalf("dir %s: account=%d reason=%q", test.dir, got, reason)
 		}
 	}

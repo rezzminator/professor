@@ -13,19 +13,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
-func (installer *engine) vscodeSettingsWritePaths(path string) ([]string, error) {
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		return []string{path}, nil
-	} else if err != nil {
-		return nil, err
-	}
-	physical, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return nil, fmt.Errorf("resolve VS Code settings %s: %w", path, err)
-	}
-	return []string{physical, availableBackup(physical, installer.stamp)}, nil
-}
-
 // writeVSCodeSettings backs up and atomically rewrites a VS Code settings file
 // THROUGH any symlink, as writeMCPFile does for a linked MCP registry. Dotfile
 // managers link settings.json into a repository; renaming over the link would
@@ -59,7 +46,7 @@ func (installer *engine) writeVSCodeOwnership(
 		if len(existing) == 0 {
 			return nil
 		}
-		return installer.changePaths("remove "+path, []string{path}, func() error { return os.Remove(path) })
+		return installer.change("remove "+path, func() error { return os.Remove(path) })
 	}
 	document := vscodeOwnershipDocument{Version: vscodeOwnershipVersion}
 	for _, record := range ownership {
@@ -83,7 +70,7 @@ func (installer *engine) writeVSCodeOwnership(
 		installer.ok(path)
 		return nil
 	}
-	return installer.changePaths("write "+path, []string{path}, func() error {
+	return installer.change("write "+path, func() error {
 		return atomicfile.Write(path, encoded, 0o600)
 	})
 }

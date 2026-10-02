@@ -39,6 +39,9 @@ func writeEngineStub(t *testing.T, body string) string {
 }
 
 func claudeMachine(binary, configDir string) pfmconfig.Config {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		panic(fmt.Sprintf("fixture account dir %s: %v", configDir, err))
+	}
 	return pfmconfig.Config{
 		Claude:   pfmconfig.ClaudePrefs{Binary: binary},
 		Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: configDir}},
@@ -46,6 +49,11 @@ func claudeMachine(binary, configDir string) pfmconfig.Config {
 }
 
 func multiClaudeMachine(topBinary, accountBinary, firstDir, secondDir string) pfmconfig.Config {
+	for _, dir := range []string{firstDir, secondDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			panic(fmt.Sprintf("fixture account dir %s: %v", dir, err))
+		}
+	}
 	return pfmconfig.Config{
 		Claude: pfmconfig.ClaudePrefs{Binary: topBinary},
 		Accounts: []pfmconfig.Account{
@@ -247,18 +255,19 @@ printf '%s\n' '{"result":"ok"}'`,
 }
 
 func TestResolveWithoutAccountUsesExplicitEngineHome(t *testing.T) {
+	configDir := t.TempDir()
 	headlessJail(t)
 	binary := writeEngineStub(t, "printf '%s\\n' '{\"result\":\"ok\"}'")
 	resolved, err := Resolve(Request{
 		Config:         pfmconfig.Config{Claude: pfmconfig.ClaudePrefs{Binary: binary}},
 		Engine:         pfmengine.Claude,
 		WithoutAccount: true,
-		Env:            testEnv(t.TempDir(), "CLAUDE_CONFIG_DIR=explicit-config"),
+		Env:            testEnv(t.TempDir(), "CLAUDE_CONFIG_DIR="+configDir),
 	})
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	if resolved.ConfigDir != "explicit-config" {
+	if resolved.ConfigDir != configDir {
 		t.Fatalf("config dir = %q, want explicit engine home", resolved.ConfigDir)
 	}
 }
@@ -927,4 +936,52 @@ func insideTempBase(t *testing.T, pwd, base string) bool {
 		}
 	}
 	return false
+}
+
+func TestClaudeMachineAccountDirs(t *testing.T) {
+	for _, multiple := range []bool{false, true} {
+		t.Run(fmt.Sprint(multiple), func(t *testing.T) {
+			first, second := filepath.Join(t.TempDir(), "first"), filepath.Join(t.TempDir(), "second")
+			machine := claudeMachine("claude", first)
+			if multiple {
+				machine = multiClaudeMachine("claude", "claude", first, second)
+			}
+			for _, account := range machine.Accounts {
+				info, err := os.Stat(account.ConfigDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !info.IsDir() || info.Mode().Perm() != 0o700 {
+					t.Fatalf("account dir %s: mode %v", account.ConfigDir, info.Mode())
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeMachineAccountDirFailure(t *testing.T) {
+	for index, makeMachine := range []func(string) pfmconfig.Config{
+		func(dir string) pfmconfig.Config { return claudeMachine("claude", dir) },
+		func(dir string) pfmconfig.Config { return multiClaudeMachine("claude", "claude", t.TempDir(), dir) },
+	} {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			blocked := filepath.Join(t.TempDir(), "blocked")
+			if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			wantErr := os.MkdirAll(blocked, 0o700)
+			defer func() {
+				if got, want := fmt.Sprint(
+					recover(),
+				), fmt.Sprintf(
+					"fixture account dir %s: %v",
+					blocked,
+					wantErr,
+				); got != want {
+					t.Fatalf("fixture panic = %q, want %q", got, want)
+				}
+			}()
+			makeMachine(blocked)
+		})
+	}
 }

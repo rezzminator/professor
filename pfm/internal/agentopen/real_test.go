@@ -19,16 +19,16 @@ import (
 )
 
 func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
-	commands, argvPath, values := testExecCommands(t)
+	commands, argvPath, values, accountDir := testExecCommands(t)
 	ctx := context.Background()
-	if output, err := commands.QueryAgents(ctx, "/account/2"); err != nil || string(output) != "[]\n" {
+	if output, err := commands.QueryAgents(ctx, accountDir); err != nil || string(output) != "[]\n" {
 		t.Fatalf("query output=%q error=%v", output, err)
 	}
 	query := assertAgentLaunch(t, argvPath, "agents", "--json")
 	if len(query.Hooks) != 0 || query.MCPConfig != "" || query.Autonomy {
 		t.Fatalf("query carried session-only settings: %+v", query)
 	}
-	if err := commands.View(ctx, "/account/2", "/project"); err != nil {
+	if err := commands.View(ctx, accountDir, "/project"); err != nil {
 		t.Fatal(err)
 	}
 	view := assertAgentLaunch(t, argvPath, "agents", "--cwd", "/project")
@@ -47,7 +47,7 @@ func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
 			name = "config key"
 		}
 		t.Run(name, func(t *testing.T) {
-			commands, argvPath, values := testExecCommands(t)
+			commands, argvPath, values, accountDir := testExecCommands(t)
 			if configKey {
 				configPath := filepath.Join(values.Home, "pfm.config.json")
 				content := []byte(`{"version":2,"state":{"db":"` + values.StateDB + `"}}`)
@@ -60,7 +60,7 @@ func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
 			}
 			ctx := context.Background()
 			const id = "33333333-3333-4333-8333-333333333333"
-			if err := commands.Resume(ctx, "/account/2", t.TempDir(), id, true); err != nil {
+			if err := commands.Resume(ctx, accountDir, t.TempDir(), id, true); err != nil {
 				t.Fatal(err)
 			}
 			assertAgentLaunch(t, argvPath, "--resume", id)
@@ -84,9 +84,13 @@ func TestExecCommandsResumeRecordsDirectLaunch(t *testing.T) {
 	}
 }
 
-func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values) {
+func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values, string) {
 	t.Helper()
 	root := t.TempDir()
+	accountDir := filepath.Join(root, "account", "2")
+	if err := os.MkdirAll(accountDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	argvPath := filepath.Join(root, "argv")
 	binary := filepath.Join(root, "claude")
 	if err := testjail.WriteExecutable(
@@ -106,9 +110,9 @@ func testExecCommands(t *testing.T) (ExecCommands, string, paths.Values) {
 	}
 	machine := config.Config{
 		Claude:   config.ClaudePrefs{Binary: binary},
-		Accounts: []config.Account{{ID: 2, ConfigDir: "/account/2"}},
+		Accounts: []config.Account{{ID: 2, ConfigDir: accountDir}},
 	}
-	return ExecCommands{Home: root, Machine: machine}, argvPath, values
+	return ExecCommands{Home: root, Machine: machine}, argvPath, values, accountDir
 }
 
 func assertAgentLaunch(t *testing.T, argvPath string, leading ...string) claudelaunch.Parsed {

@@ -441,35 +441,6 @@ func TestInstallSkipsArmingInsideTheFenceWhenTheGateIsUnarmed(t *testing.T) {
 	}
 }
 
-func TestUpdateMetadataInstallJournalRestoresMarkerAndOwnership(t *testing.T) {
-	home := t.TempDir()
-	repo := t.TempDir()
-	if err := os.MkdirAll(managedRootForHome(home), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	installer, journal, env := journaledEngine(t, home, true)
-	installer.options.SourceRepo = repo
-	if err := installer.writeUpdateMetadata(); err != nil {
-		t.Fatal(err)
-	}
-	marker, ownership := paths.SourceRepoPath(home), binaryOwnershipPath(home)
-	requireJournalPaths(t, installRecordDestinations(t, journal), marker, ownership)
-	idle, idleJournal, _ := journaledEngine(t, home, true)
-	idle.options.SourceRepo = repo
-	if err := idle.writeUpdateMetadata(); err != nil {
-		t.Fatal(err)
-	}
-	if idleJournal.Dir() != "" {
-		t.Fatalf("converged metadata journaled %v", idleJournal.records)
-	}
-	rollbackInstallJournal(t, env, journal)
-	for _, path := range []string{marker, ownership} {
-		if _, err := os.Lstat(path); !os.IsNotExist(err) {
-			t.Fatalf("rollback left %s: %v", path, err)
-		}
-	}
-}
-
 func TestUpdateMetadataResolvesAliasOnce(t *testing.T) {
 	home, root := t.TempDir(), t.TempDir()
 	repo := filepath.Join(root, "repo")
@@ -486,7 +457,12 @@ func TestUpdateMetadataResolvesAliasOnce(t *testing.T) {
 	if err := os.WriteFile(paths.SourceRepoPath(home), []byte(alias+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	installer, journal, _ := journaledEngine(t, home, true)
+	installer := &engine{
+		options:     Options{Home: home, Stdout: &bytes.Buffer{}},
+		apply:       true,
+		stamp:       "test",
+		managedRoot: managedRootForHome(home),
+	}
 	installer.options.SourceRepo = alias
 	if err := installer.writeUpdateMetadata(); err != nil {
 		t.Fatal(err)
@@ -495,14 +471,15 @@ func TestUpdateMetadataResolvesAliasOnce(t *testing.T) {
 	if err != nil || string(content) != repo+"\n" {
 		t.Fatalf("marker=%q err=%v", content, err)
 	}
-	requireJournalPaths(t, installRecordDestinations(t, journal), paths.SourceRepoPath(home))
-	idle, idleJournal, _ := journaledEngine(t, home, true)
+	idle := &engine{
+		options:     Options{Home: home, Stdout: &bytes.Buffer{}},
+		apply:       true,
+		stamp:       "test",
+		managedRoot: managedRootForHome(home),
+	}
 	idle.options.SourceRepo = alias
 	if err := idle.writeUpdateMetadata(); err != nil {
 		t.Fatal(err)
-	}
-	if idleJournal.Dir() != "" {
-		t.Fatalf("second write journaled %v", idleJournal.records)
 	}
 	repos, err := installer.recordedProfessorSourceRepos()
 	if err != nil || len(repos) != 1 || repos[0] != repo {

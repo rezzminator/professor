@@ -26,12 +26,16 @@ type fakeRunner struct {
 	// mcpState is pfm-mcp.service's ActiveState after its restart ("" is
 	// active).
 	mcpState string
+	failSudo bool
 	calls    []string
 }
 
 func (runner *fakeRunner) Run(_ context.Context, name string, args ...string) error {
 	call := name + " " + strings.Join(args, " ")
 	runner.calls = append(runner.calls, call)
+	if name == "sudo" && runner.failSudo {
+		return os.ErrPermission
+	}
 	if call == "systemctl --user show-environment" && runner.manager {
 		return nil
 	}
@@ -286,5 +290,28 @@ func TestLaunchAgentRunningClassifiesProbeAnswers(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestSchedulerRefusalNamesOnlyARunningJob(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{
+			ErrNameSyncRunning,
+			"pfm install: the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop pfm-name-sync.service`, then retry",
+		},
+		{
+			fmt.Errorf("gate: %w", ErrLaunchAgentRunning),
+			"pfm install: the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first",
+		},
+		{errors.New("other"), ""},
+		{nil, ""},
+	}
+	for _, tc := range cases {
+		if got := SchedulerRefusal("install", tc.err); got != tc.want {
+			t.Fatalf("SchedulerRefusal(%v) = %q, want %q", tc.err, got, tc.want)
+		}
 	}
 }

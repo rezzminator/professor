@@ -5,59 +5,10 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
-
-func TestUpdateCandidateChildrenCarryInstallMark(t *testing.T) {
-	t.Setenv(paths.EnvUpdateInstall, "0")
-	for _, tc := range []struct {
-		name string
-		run  func() error
-	}{
-		{name: "install", run: func() error {
-			return applyUpdateInstall(
-				context.Background(), "/candidate", "/repo", "/source", config.Runtime{}, true, io.Discard, io.Discard,
-			)
-		}},
-		{name: "rollback", run: func() error {
-			return runUpdateCandidateCommand(
-				context.Background(), "/candidate", "", "/repo", "/source", io.Discard, io.Discard,
-				"install", "--rollback", "journal",
-			)
-		}},
-		{name: "doctor", run: func() error {
-			return runUpdateCandidateCommand(
-				context.Background(), "/candidate", "", "/repo", "/source", io.Discard, io.Discard, "doctor",
-			)
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var captured []string
-			t.Cleanup(StubRunnerForTest(scriptedUpdateRunner{startEnv: &captured}))
-			if err := tc.run(); err != nil {
-				t.Fatal(err)
-			}
-			got := map[string][]string{}
-			for _, entry := range captured {
-				key, value, ok := strings.Cut(entry, "=")
-				if ok && (key == "PFM_SOURCE_REPO" || key == paths.EnvUpdateInstall) {
-					got[key] = append(got[key], value)
-				}
-			}
-			if values := got["PFM_SOURCE_REPO"]; len(values) != 1 || values[0] != "/source" {
-				t.Fatalf("source env=%v", values)
-			}
-			if values := got[paths.EnvUpdateInstall]; len(values) != 1 || values[0] != "1" {
-				t.Fatalf("install mark=%v", values)
-			}
-		})
-	}
-}
 
 type scriptedUpdateProcess struct{ waitErr error }
 

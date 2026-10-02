@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"debug/buildinfo"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/rogpeppe/go-internal/testscript"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/mockengine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -97,10 +99,11 @@ func TestMain(m *testing.M) {
 		}
 	}
 	testscript.Main(jailedTestMain{m}, map[string]func(){
-		"jail-pfm":    runPFMCommand,
-		"jail-tmux":   runTmuxCommand,
-		"jail-until":  runSleepUntilCommand,
-		"jail-pfm-rc": runPFMRCCommand,
+		"jail-pfm":      runPFMCommand,
+		"jail-tmux":     runTmuxCommand,
+		"jail-until":    runSleepUntilCommand,
+		"jail-ls-lacks": runLSLacksCommand,
+		"jail-pfm-rc":   runPFMRCCommand,
 	})
 }
 
@@ -318,22 +321,23 @@ func setupScriptJail(env *testscript.Env, source string) error {
 	home := filepath.Join(root, "home")
 	tmuxBase := filepath.Join(root, "t")
 	tmuxDir := filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))
-	// The spawn strips CLAUDE_CONFIG_DIR (internal/action/synth.go:31) and an
-	// implicit account sets none back, so the engine files its transcript
-	// under HOME/.claude/projects — the primary root of a real host
-	// (internal/engine/builtin.go:61) — and that is where the index looks.
+	// Account 1 writes beneath its own config dir. Its projects link points
+	// at HOME/.claude/projects so the mock engine transcript reaches the index.
 	claudeRoot := filepath.Join(home, ".claude", "projects")
 	codexRoot := filepath.Join(root, "codex")
 	binDir := filepath.Join(root, "bin")
 	for _, directory := range []string{
 		claudeRoot, filepath.Join(home, ".local", "bin"),
-		filepath.Join(home, ".cc"),
+		pfmconfig.DefaultAccountDir(home, 1),
 		codexRoot, filepath.Join(root, "sid"), filepath.Join(root, "proc"),
 		tmuxDir, filepath.Join(root, "state"), filepath.Join(root, "tmp"), binDir,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return fmt.Errorf("create jail directory %s: %w", directory, err)
 		}
+	}
+	if err := os.Symlink(claudeRoot, filepath.Join(pfmconfig.DefaultAccountDir(home, 1), "projects")); err != nil {
+		return fmt.Errorf("link account 1 projects to the indexed root: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(home, ".claude-primary"), []byte("2\n"), 0o600); err != nil {
 		return fmt.Errorf("write primary account fixture: %w", err)
@@ -512,4 +516,39 @@ func runSleepUntilCommand() {
 	}
 	fmt.Fprintf(os.Stderr, "sleep-until: timeout pattern=%q error=%v capture=%q\n", os.Args[3], lastErr, last)
 	os.Exit(1)
+}
+
+func runLSLacksCommand() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: ls-lacks <name>")
+		os.Exit(2)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	var last []byte
+	var lastErr error
+	for time.Now().Before(deadline) {
+		command := exec.Command(os.Getenv(e2eScriptBinaryEnv), "chat", "ls", "--all")
+		last, lastErr = command.Output()
+		if lastErr == nil && !strings.Contains(string(last), os.Args[1]) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	fmt.Fprintf(os.Stderr, "ls-lacks: timeout name=%q error=%v stdout=%q\n", os.Args[1], lastErr, last)
+	os.Exit(1)
+}
+
+func TestLSLacksUsage(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{nil, {"worker", "extra"}} {
+		command := exec.Command(os.Args[0], args...)
+		command.Args[0] = "jail-ls-lacks"
+		var stderr bytes.Buffer
+		command.Stderr = &stderr
+		err := command.Run()
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 || stderr.String() != "usage: ls-lacks <name>\n" {
+			t.Fatalf("ls-lacks %q: error=%v stderr=%q, want exit 2 and usage", args, err, stderr.String())
+		}
+	}
 }

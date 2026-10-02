@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // claudeConfigDirEnv is the variable that points a claude process at one
@@ -34,7 +33,8 @@ const claudePluginWaitDelay = 5 * time.Second
 // only as a test seam: a test shortens it and restores it in t.Cleanup.
 var claudePluginTimeout = claudePluginCommandTimeout
 
-// claudePlugin is one Claude Code plugin pfm install ensures on every account:
+// claudePlugin is one Claude Code plugin pfm install ensures once, through the
+// primary account, in the store every account links:
 // Source is the marketplace `plugin marketplace add` takes, ID the
 // `name@marketplace` key settings.json's enabledPlugins carries once installed.
 type claudePlugin struct {
@@ -42,20 +42,19 @@ type claudePlugin struct {
 	ID     string
 }
 
-// claudePlugins is the single table of plugins every Claude account gets.
+// claudePlugins is the single table of plugins the shared store carries.
 var claudePlugins = []claudePlugin{
 	{Source: "rezzminator/cache-live-control", ID: "cache-live-control@cache-live-control"},
 	{Source: "rezzminator/sub-agent-compact", ID: "sub-agent-compact@sub-agent-compact"},
 	{Source: "rezzminator/agent-effort", ID: "agent-effort@agent-effort"},
 }
 
-// ErrClaudeSettingsAbsent is ClaudePluginGaps' answer for an account with no
-// settings.json: an account never set up, not one missing its plugins.
+// ErrClaudeSettingsAbsent is ClaudePluginGaps' answer for a store with no
+// settings.json: a store never set up, not one missing its plugins.
 var ErrClaudeSettingsAbsent = errors.New("no settings.json")
 
-// ClaudePluginGaps reads one account's settings.json and names every plugin
-// id not enabled. A missing file
-// returns ErrClaudeSettingsAbsent; a file that cannot be read or parsed
+// ClaudePluginGaps reads the store's settings.json and names every plugin id
+// not enabled. A missing file returns ErrClaudeSettingsAbsent; a file that cannot be read or parsed
 // returns its error, never an answer, because its real state is unknown.
 func ClaudePluginGaps(path string) ([]string, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
@@ -135,92 +134,87 @@ func pluginEnabled(document map[string]any, id string) bool {
 	return enabled[id] == true
 }
 
-// ensureClaudePlugins installs every claudePlugins entry on every Claude
-// account where it is not both enabled in settings.json and recorded as
-// installed in that account's own config dir, running the real
-// claude binary with CLAUDE_CONFIG_DIR pointed at that account. A failed
-// account is reported and joined into the returned error; the other accounts
-// still run. A settings file it cannot read is skipped by name, the way
-// wireSettings skips it.
+// ensureClaudePlugins installs the shared plugins through the primary account.
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
-	var env paths.Env = paths.OSEnv{}
-	if installer.options.Env != nil {
-		env = installer.options.Env
+	dir := installer.options.PrimaryConfigDir
+	if dir == "" {
+		dir = installer.options.ConfigDir
 	}
-	pathEnv := env.Get("PATH")
-	binary, resolveErr := ResolveClaudeBinary(installer.options.Home, installer.options.ClaudeBinary, pathEnv)
-	dirs := installer.claudeConfigDirs()
-	sharers := map[string][]string{}
-	for _, dir := range dirs {
-		physical := physicalSettingsPath(filepath.Join(dir, "settings.json"))
-		sharers[physical] = append(sharers[physical], dir)
+	document, err := readClaudeSettingsDocument(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		installer.skip("claude plugins in " + dir + ": settings unreadable, state unknown: " + err.Error())
+		return nil
 	}
+	missing, err := ClaudePluginsNotInstalled(dir)
+	if err != nil {
+		installer.skip("claude plugins in " + dir + ": install record unreadable, state unknown: " + err.Error())
+		return nil
+	}
+	binary, resolveErr := ResolveClaudeBinary(
+		installer.options.Home,
+		installer.options.ClaudeBinary,
+		installer.env().Get("PATH"),
+	)
 	var failures []error
-	for _, dir := range dirs {
-		settingsPath := filepath.Join(dir, "settings.json")
-		physical := physicalSettingsPath(settingsPath)
-		document, err := readClaudeSettingsDocument(settingsPath)
-		if err != nil {
-			installer.skip("claude plugins in " + dir + ": settings unreadable, state unknown: " + err.Error())
+	guarded := false
+	for _, plugin := range claudePlugins {
+		if pluginEnabled(document, plugin.ID) && !slices.Contains(missing, plugin.ID) {
+			installer.ok("claude plugin " + plugin.ID + " installed and enabled in " + dir)
 			continue
 		}
-		missing, err := ClaudePluginsNotInstalled(dir)
-		if err != nil {
-			installer.skip("claude plugins in " + dir + ": install record unreadable, state unknown: " + err.Error())
+		if resolveErr != nil {
+			installer.skip(
+				fmt.Sprintf("claude plugin %s in %s: real claude binary not resolved: %v", plugin.ID, dir, resolveErr),
+			)
 			continue
 		}
-		guarded := false
-		for _, plugin := range claudePlugins {
-			if pluginEnabled(document, plugin.ID) && !slices.Contains(missing, plugin.ID) {
-				installer.ok("claude plugin " + plugin.ID + " installed and enabled in " + dir)
-				continue
+		if !guarded {
+			guarded = true
+			dirs := []string{dir}
+			for _, account := range installer.options.ClaudeAccounts {
+				dirs = append(dirs, account.ConfigDir)
 			}
-			if resolveErr != nil {
-				installer.skip(fmt.Sprintf(
-					"claude plugin %s in %s: real claude binary not resolved: %v", plugin.ID, dir, resolveErr,
-				))
-				continue
-			}
-			if !guarded {
-				guarded = true
-				pids := map[int]bool{}
-				var guardErr error
-				for _, sharer := range sharers[physical] {
-					live, err := liveChatPIDs(installer.options.ProcRoot, sharer)
-					if err != nil {
-						guardErr = fmt.Errorf("read live chats in %s: %w", sharer, err)
-						break
-					}
-					for _, pid := range live {
-						id, _ := strconv.Atoi(pid)
-						pids[id] = true
-					}
+			pids := map[int]bool{}
+			liveDirs := []string{}
+			for _, accountDir := range cleanUniquePaths(dirs) {
+				live, err := liveChatPIDs(installer.options.ProcRoot, accountDir)
+				if err != nil {
+					return installer.pluginFailure(
+						dir,
+						plugin.ID,
+						fmt.Errorf("read live chats in %s: %w", accountDir, err),
+					)
 				}
-				if guardErr != nil {
-					failures = append(failures, installer.pluginFailure(dir, plugin.ID, guardErr))
-					break
+				if len(live) > 0 {
+					liveDirs = append(liveDirs, accountDir)
 				}
-				if len(pids) > 0 {
-					ordered := make([]int, 0, len(pids))
-					for pid := range pids {
-						ordered = append(ordered, pid)
-					}
-					sort.Ints(ordered)
-					names := make([]string, 0, len(ordered))
-					for _, pid := range ordered {
-						names = append(names, strconv.Itoa(pid))
-					}
-					installer.skip(fmt.Sprintf(
-						"claude plugins in %s: live chats %s on %s — close them and rerun pfm install --yes",
-						dir, strings.Join(names, ","), physical,
-					))
-					break
+				for _, pid := range live {
+					id, _ := strconv.Atoi(pid)
+					pids[id] = true
 				}
 			}
-			if err := installer.installClaudePlugin(ctx, binary, dir, plugin); err != nil {
-				failures = append(failures, installer.pluginFailure(dir, plugin.ID, err))
-				break
+			if len(pids) > 0 {
+				ordered := make([]int, 0, len(pids))
+				for pid := range pids {
+					ordered = append(ordered, pid)
+				}
+				sort.Ints(ordered)
+				names := make([]string, 0, len(ordered))
+				for _, pid := range ordered {
+					names = append(names, strconv.Itoa(pid))
+				}
+				installer.skip(
+					fmt.Sprintf(
+						"claude plugins: live chats %s on %s — close them and rerun pfm install --yes",
+						strings.Join(names, ","),
+						strings.Join(liveDirs, ","),
+					),
+				)
+				return nil
 			}
+		}
+		if err := installer.installClaudePlugin(ctx, binary, dir, plugin); err != nil {
+			failures = append(failures, installer.pluginFailure(dir, plugin.ID, err))
 		}
 	}
 	return errors.Join(failures...)
@@ -232,8 +226,7 @@ func (installer *engine) installClaudePlugin(ctx context.Context, binary, dir st
 	message := fmt.Sprintf(
 		"run %s=%s %s && %s", claudeConfigDirEnv, dir, strings.Join(add, " "), strings.Join(install, " "),
 	)
-	targets := []string{physicalSettingsPath(filepath.Join(dir, "settings.json")), filepath.Join(dir, "plugins")}
-	return installer.changePathsOrRestore(message, targets, func() error {
+	return installer.change(message, func() error {
 		options := deps.RunOptions{Env: deps.EnvironmentWith(claudeConfigDirEnv, dir)}
 		// An already-added marketplace exits non-zero; the install that
 		// follows is the judge, so its failure carries this answer too.

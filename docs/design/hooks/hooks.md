@@ -27,7 +27,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 - **Hooks ride the launch, never a file.** `pfm install` writes no key into any account `settings.json`: no `hooks`, no `statusLine`, no `subagentStatusLine`. A chat carries the hook set it was launched with; a changed set reaches a running chat at its next reload (`pfm chat reload`) or relaunch.
 - **pfm never writes a project's `.claude/settings.json`.** The project tier is scaffolded once by `pfm init` (`pfm/internal/professor/scaffold.go:29`) and is the adopter's file from then on. Its hooks merge with the launch's; neither layer replaces the other.
 - **Every pfm hook command is the installed binary.** Each command is `$HOME/.local/bin/pfm` plus a subcommand (`pfm/internal/claudelaunch/hooks.go`). No pfm hook runs a shell script.
-- **An ownership ledger records what pfm wrote into a file.** It lives at `$HOME/.local/share/pfm/install/settings-hook-ownership.json` (`pfm/internal/installer/update_metadata.go:42-43`, `pfm/internal/installer/settings_ownership.go:13`), keyed by physical file, event, matcher and command (`pfm/internal/installer/settings_ownership.go:21-27`). Two readers use it: the Codex `hooks.json` writer, and the host-migration reconciler (`HostLayout`, verdict `strip`), which removes from each account `settings.json` the pfm hooks, `statusLine` and `subagentStatusLine` an older install left there — the ledger's entries plus every hook pfm owns by command shape ([The ownership rule](#the-ownership-rule)) — and keeps every other key.
+- **An ownership ledger records hooks pfm wrote into a file.** `$HOME/.local/share/pfm/install/settings-hook-ownership.json` is keyed by physical file, event, matcher and command (`pfm/internal/installer/settings_ownership.go`). Its readers are the Codex `hooks.json` writer and the `pfm-settings` host check. That check combines ledger entries with pfm command shapes to name hooks and status lines an old install left in `settings.json`. It returns BLOCK rows with edits for the operator; it never strips the file.
 - **A retired hook is removed by the installer and reported by doctor.** One table names the retired subcommands (`pfm/internal/installer/settings.go:319-343`); the Codex writer strips them from every `hooks.json` event, and doctor flags any left behind as STALE.
 - **pfm hooks fail open.** A pfm hook that cannot do its job writes one stderr line and lets the chat continue. Only the two intercepts exit 2, and only for the prompt they were built to stop; `git-guard` alone also denies a git command it cannot read ([git-guard.md](git-guard.md#how-it-fails)).
 
@@ -45,7 +45,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 `claudelaunch.Render` (`pfm/internal/claudelaunch/render.go`) turns `claudelaunch.HookTemplates` into the `hooks` object of the launch `--settings` JSON: one entry per (event, matcher) pair, each registration once. Every interactive door renders it — `pfm chat new`, the picker and `pfm chat open`, `pfm chat branch`, `pfm chat reload`, `pfm internal agent-open`, a `claude` typed at a shell through the managed launcher ([claude-launch.md](../engines/claude-launch.md#doors)). Three runs carry no pfm hook: a launcher passthrough (`-p`, `--version`, the Claude subcommands, `PFM_LAUNCH_PASSTHROUGH=1`), which execs the real binary untouched; the `claude agents --json` query; and `pfm headless exec`, which is config-free by design. Each command below is `$HOME/.local/bin/pfm …`.
 
-Placement holds by construction: the renderer emits each registration once under its own pair, so a launch cannot carry a duplicate, a moved or a mis-typed pfm hook. The only place such a copy can still sit is an account `settings.json` an older install wrote, which the [legacy row](#account-files-the-legacy-row) names and `pfm install` strips.
+Placement holds by construction: the renderer emits each registration once under its own pair, so a launch cannot carry a duplicate, a moved or a mis-typed pfm hook. The only place such a copy can still sit is an account `settings.json` an older install wrote, which the [pfm-settings row](#account-files-pfm-settings) names for the operator to fix.
 
 | Name | Event | Matcher | Command | Defined | Body | Does | On failure |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -142,17 +142,11 @@ A probe that cannot read `/proc` or decode an argv reports `CHECK FAILED to run 
 
 The same check stats the first word of every template command, following a symlink, and reports `DRIFT what=executable want=$HOME/.local/bin/pfm got={absent|not-executable|not-regular-file|stat-failed(…)} — run pfm install` (`executableVerdict`, `pfm/internal/installer/hook_probe.go:308`), since every rendered hook would fail to start.
 
-### Account files: the legacy row
+### Account files: pfm-settings
 
-For every Claude config dir the machine config names, de-duplicated by physical path, doctor reads `{claude config dir}/settings.json` against the ownership ledger and pfm's command shapes with the same classifier the `strip` verdict uses (`ClassifyLayout`, [host-migration.md](../engines/host-migration.md#classification)).
+`pfm-settings` reads each physical `settings.json` in the store and configured account dirs once, against the ownership ledger and pfm command shapes. Doctor prints `host-check: BLOCK pfm-settings {file} — carries pfm {keys} — they ride --settings at launch and would run twice`, followed by `host-check:   fix: remove {keys} from {file} (pfm's hook commands only; keep every other key)`. Install refuses until the operator fixes the file.
 
-| State | Reports | Tally |
-| --- | --- | --- |
-| clean | no pfm-owned `hooks`, `statusLine` or `subagentStatusLine`; the file is absent | nothing |
-| leftover | `legacy: {file} still carries pfm hooks — run pfm install` (or `statusLine`, `subagentStatusLine`): each would double-fire beside the launch payload | failure |
-| unreadable file | `legacy: {file} UNREADABLE error={cause}` — a read or parse failure, a dangling symlink, or a `hooks` value of the wrong shape; never judged clean | failure |
-| unreadable ledger | `legacy: ownership ledger UNREADABLE error={cause} — ledger entries unjudged`; the command-shape rows still print, because they need no ledger | failure |
-| no Claude account | `doctor: hook claude none — no Claude config dir is configured in the machine config` | warning |
+An absent file or a file without pfm-owned keys produces no row. An unreadable file or ownership ledger produces a BLOCK `UNREADABLE` row with its cause and remedy; failed inspection is never clean. A custom status line and unrelated hook commands remain the operator's settings.
 
 ### Codex hooks.json
 
@@ -192,7 +186,7 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 | Installer adapter and probe | `pfm/internal/installer/expected_hooks.go`, `hook_probe.go` | `claudeHookTemplates`, `ExpectedHook`, `ProbeExpectedHooks` |
 | The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the `hooks` knob, `Render` |
 | Spawn-audit | `claudelaunch.Parse`, the doctor spawn-audit | the per-chat hook-set verdicts |
-| The account-file reconciler | `pfm/internal/installer/layout.go` | `HostLayout`'s account `settings.json` row, `strip`, the `legacy` doctor row |
+| The account-file host check | `pfm/internal/hostcheck/owned.go` | `pfm-settings` BLOCK rows with the operator’s fix |
 | The Codex probe and printer | `pfm/internal/installer/hook_probe.go` | `probeCodexHooks`, `ReportHooks`, `executableVerdict`, the states |
 | The retired table | `pfm/internal/installer/settings.go` | the retired names, the unknown-subcommand rule |
 | The Codex writer | `pfm/internal/installer/codex_hooks.go` | Codex retirement |

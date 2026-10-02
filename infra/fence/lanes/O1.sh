@@ -98,38 +98,34 @@ if [ -n "$missing" ]; then fail "$missing"; else
   pass "every contracted overlay, per-seat card, marker and registry is staged (searched: $ROOTS)"
 fi
 
-# ─── O1.02a — install owns every session-store link ────────────────────────
+# ─── O1.02a — install owns every account link ──────────────────────────────
 
-beat O1.02a-session-store
+beat O1.02a-account-links
 spends none
-if [ "$(jq '.accounts | length' "$CONFIG")" -lt 2 ]; then
-  blocked "seats $LANE_SEATS" "needs --seats cc:1,cc:2 to prove non-primary session-store links"
+account_count="$(jq '.accounts | length' "$CONFIG")"
+if [ "$account_count" -eq 0 ]; then
+  blocked "seats $LANE_SEATS" "needs a configured Claude account"
 else
 bad=""
-primary="$HOME/.claude"
 while IFS=$'\t' read -r id dir; do
   [ -n "$id" ] || continue
   case "$dir" in "~"*) dir="$HOME${dir#\~}" ;; esac
-  [ "$(readlink -f "$dir" 2>/dev/null)" = "$(readlink -f "$primary" 2>/dev/null)" ] && continue
-  for entry in projects file-history tasks session-env; do
-    link="$dir/$entry"
-    want="$primary/$entry"
-    if [ ! -L "$link" ]; then
-      if [ -d "$link" ]; then state="real dir"; elif [ -e "$link" ]; then state="non-link file"; else state="missing"; fi
-      bad="$bad seat $id $entry: $link is $state, want a symlink to $want;"
-    elif [ ! -d "$want" ]; then
-      bad="$bad seat $id $entry: $link is a symlink but target $want is missing;"
-    elif [ "$(readlink -f "$link" 2>/dev/null)" != "$(readlink -f "$want" 2>/dev/null)" ]; then
-      bad="$bad seat $id $entry: $link points at $(readlink "$link"), want $want;"
-    fi
-  done
+  link="$dir/projects"
+  want="$HOME/.claude/projects"
+  if [ ! -L "$link" ] || [ "$(readlink -f "$link" 2>/dev/null)" != "$(readlink -f "$want" 2>/dev/null)" ]; then
+    bad="seat $id projects: $link must link to $want"
+    break
+  fi
 done < <(jq -r '.accounts[] | "\(.id)\t\(.configDir)"' "$CONFIG")
 doctor_store="$(pfm doctor 2>&1)"
 doctor_rc=$?
-[ "$doctor_rc" -le 1 ] || bad="$bad pfm doctor exited $doctor_rc, so its session-store enumeration cannot be trusted;"
-grep -q '^session-store:' <<<"$doctor_store" && bad="$bad pfm doctor still reports session-store: $(one_line "$(grep '^session-store:' <<<"$doctor_store" | head -1)");"
+first_bad="$(grep -E '^(account-link:|store:|account:)' <<<"$doctor_store" | head -1)"
+[ -z "$bad" ] && [ -n "$first_bad" ] && bad="$first_bad"
+[ -n "$bad" ] || [ "$doctor_rc" -le 1 ] || bad="pfm doctor exited $doctor_rc: $(one_line "$doctor_store")"
+[ -n "$bad" ] || grep -qxF "account-links: ok ($account_count accounts × 23 entries)" <<<"$doctor_store" ||
+  bad="pfm doctor did not report account-links: ok ($account_count accounts × 23 entries)"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "pfm install linked projects, file-history, tasks and session-env for every non-primary seat; doctor has no session-store finding"
+  pass "pfm install linked every shared entry for $account_count accounts; doctor reports account-links: ok"
 fi
 fi
 
@@ -377,15 +373,19 @@ fi
 beat O1.12-doc-vs-code
 spends none
 bad=""
-jq '. + {laneForeignKey: "keep-me"}' "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tmp" &&
-  mv "$SEAT_DIR/settings.json.tmp" "$SEAT_DIR/settings.json"
+settings_tmp="$(mktemp)"
+jq '. + {laneForeignKey: "keep-me"}' "$SEAT_DIR/settings.json" >"$settings_tmp" &&
+  cat "$settings_tmp" >"$SEAT_DIR/settings.json" || bad="$bad could not plant the foreign settings key;"
+rm -f "$settings_tmp"
 merge_out="$(install_again)"
 merge_rc=$?
 [ "$merge_rc" -eq 0 ] || bad="$bad the merge install exited $merge_rc ($(one_line "$merge_out"));"
 [ "$(jq -r '.laneForeignKey // ""' "$SEAT_DIR/settings.json")" = keep-me ] ||
   bad="$bad pfm install overwrote a foreign settings.json key instead of merging;"
-jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tmp" &&
-  mv "$SEAT_DIR/settings.json.tmp" "$SEAT_DIR/settings.json"
+settings_tmp="$(mktemp)"
+jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$settings_tmp" &&
+  cat "$settings_tmp" >"$SEAT_DIR/settings.json" || bad="$bad could not remove the foreign settings key;"
+rm -f "$settings_tmp"
 [ -n "$(find "$HOME/.claude/themes" -maxdepth 1 -name 'professor-*.json' 2>/dev/null | head -1)" ] ||
   bad="$bad no professor-*.json theme under $HOME/.claude/themes;"
 mcp_list="$(pfm mcp ls 2>&1)"

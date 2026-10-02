@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
@@ -36,7 +37,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	claudeRoot := filepath.Join(root, "home", ".claude", "projects")
 	binDir := filepath.Join(root, "bin")
-	for _, directory := range []string{tmuxDir, claudeRoot, binDir, filepath.Join(root, "sid")} {
+	for _, directory := range []string{tmuxDir, claudeRoot, binDir, filepath.Join(root, "sid"), pfmconfig.DefaultAccountDir(filepath.Join(root, "home"), 1)} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}

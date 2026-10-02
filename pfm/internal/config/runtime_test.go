@@ -262,45 +262,6 @@ func TestLoadRuntimeDefaultUnderAConfigOverrideIsNotExplicit(t *testing.T) {
 	}
 }
 
-// TestLoadRuntimeLegacyDefaultIsNotExplicit pins a4d89776 across the move of
-// the config into the clone: an older pfm update names its own default, the
-// legacy config directory, and that spelling is not explicit — under an
-// XDG_CONFIG_HOME override too — while another file there is.
-func TestLoadRuntimeLegacyDefaultIsNotExplicit(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv(paths.EnvHome, home)
-	t.Setenv(paths.EnvConfig, "")
-	xdg := filepath.Join(t.TempDir(), "xdg")
-	for _, tc := range []struct {
-		name, xdg, dir string
-	}{
-		{"home", "", filepath.Join(home, ".config", "pfm")},
-		{"xdg", xdg, filepath.Join(xdg, "pfm")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", tc.xdg)
-			for _, name := range []string{FileName, LegacyFileName} {
-				legacy := filepath.Join(tc.dir, name)
-				runtime, err := LoadRuntime(legacy)
-				if err != nil {
-					t.Fatalf("LoadRuntime(%q) = %v", legacy, err)
-				}
-				if runtime.ConfigExplicit {
-					t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the legacy default", legacy)
-				}
-			}
-			other := filepath.Join(tc.dir, "other.json")
-			runtime, err := LoadRuntime(other)
-			if err != nil {
-				t.Fatalf("LoadRuntime(%q) = %v", other, err)
-			}
-			if !runtime.ConfigExplicit {
-				t.Fatalf("LoadRuntime(%q).ConfigExplicit = false, want true", other)
-			}
-		})
-	}
-}
-
 // A jailed override is writable, while a home without a marker has no default writer target.
 func TestConfigInitWritesInsideTheJailAndRefusesMissingSourceRepo(t *testing.T) {
 	home := t.TempDir()
@@ -504,13 +465,16 @@ func TestLoadRuntimeRefusesDefaultsWhileLegacyConfigWaits(t *testing.T) {
 				if !errors.Is(err, ErrNotMigrated) {
 					t.Fatalf("LoadRuntime(\"\") = %v, want ErrNotMigrated", err)
 				}
-				if !strings.HasPrefix(err.Error(), "config not migrated: run pfm install") {
+				if !strings.HasPrefix(err.Error(), "config not migrated: run pfm doctor for the fix") {
 					t.Fatalf("error %q does not begin with the remedy", err)
 				}
-				for _, want := range []string{legacy, target} {
-					if !strings.Contains(err.Error(), want) {
-						t.Fatalf("error %q lacks %q", err, want)
-					}
+				want := fmt.Sprintf(
+					"config not migrated: run pfm doctor for the fix (%s present, %s absent)",
+					legacy,
+					target,
+				)
+				if err.Error() != want {
+					t.Fatalf("error=%q, want %q", err, want)
 				}
 				runtime, err := LoadDiagnosticRuntime("")
 				if err != nil {
@@ -611,4 +575,23 @@ func TestLegacyConfigWaiting(t *testing.T) {
 			t.Fatalf("error %q does not name the legacy path", err)
 		}
 	})
+}
+
+func TestLoadInstallRuntimeMissingNamedLegacyConfigIsExplicit(t *testing.T) {
+	_, legacyDir, _ := legacyConfigHome(t, true)
+	for _, name := range []string{FileName, LegacyFileName} {
+		t.Run(name, func(t *testing.T) {
+			runtime, err := LoadInstallRuntime(filepath.Join(legacyDir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !runtime.ConfigExplicit || runtime.Config.Exists {
+				t.Fatalf(
+					"explicit=%v exists=%v, want explicit missing config",
+					runtime.ConfigExplicit,
+					runtime.Config.Exists,
+				)
+			}
+		})
+	}
 }

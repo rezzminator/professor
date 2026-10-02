@@ -110,7 +110,7 @@ func TestHostOverlayDoctorDisplacedSymlinkIsAFailure(t *testing.T) {
 }
 
 // The overlay check judges the two managed links even when account settings
-// cannot be parsed; HostLayout reports account file problems separately.
+// cannot be parsed; host checks report account file problems separately.
 func TestHostOverlayDoctorChecksLinksWithUnreadableAccountSettings(t *testing.T) {
 	home := t.TempDir()
 	managed := stageHostOverlayManagedCopies(t, home)

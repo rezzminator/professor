@@ -19,7 +19,8 @@ import (
 )
 
 func TestDoctorJailRecordsCheckoutForPromptReaders(t *testing.T) {
-	runtime := testjail.CleanHome(t)
+	dirs, files := storeLayout()
+	runtime := testjail.CleanHome(t, dirs, files)
 	clone, err := paths.ReadSourceRepoMarker(runtime.Paths.Home)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +49,9 @@ func TestDoctorJailRecordsCheckoutForPromptReaders(t *testing.T) {
 func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Helper()
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
-	runtime := testjail.CleanHome(t)
+	dirs, files := storeLayout()
+	runtime := testjail.CleanHome(t, dirs, files)
+	stageStorePlugins(t, runtime.Paths.Home)
 	return runtime
 }
 
@@ -58,7 +61,13 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("fresh target HOME doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "doctor: clean") {
+	// claude_plugins ok proves doctor judged the store the plugins live in
+	// (installer.ClaudeStore), not a dir with no settings.json that only
+	// ever prints the skipped line.
+	if !strings.Contains(stdout.String(), "doctor: clean") ||
+		!strings.Contains(stdout.String(), "doctor: claude_plugins ok\n") ||
+		!strings.Contains(stdout.String(), "host-check: ok (21 checks)") ||
+		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 23 entries)") {
 		t.Fatalf("fresh target HOME doctor output=%q", stdout.String())
 	}
 }

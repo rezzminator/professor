@@ -29,8 +29,8 @@ func TestJailPinsClaudeConfigDir(t *testing.T) {
 		if _, err := Run(context.Background(), Options{
 			Mode: ModeApply, Home: home, ConfigDir: canonical,
 			SourceRepo: t.TempDir(), MCPConfigPath: configPath,
-			ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
-			MCPPort: 8377, Runner: &fakeRunner{}, Stdout: io.Discard,
+			MCPEnabled: map[string]bool{"chat": true},
+			MCPPort:    8377, Runner: &fakeRunner{}, Stdout: io.Discard,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -362,8 +362,8 @@ func applyChatMCP(t *testing.T, home string) string {
 	var applied strings.Builder
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, ConfigDir: canonical,
-		ConfigDirs: []string{canonical}, MCPEnabled: map[string]bool{"chat": true},
-		MCPPort: 8377, Runner: &fakeRunner{}, Stdout: &applied, MCPConfigPath: testConfigPath(t),
+		MCPEnabled: map[string]bool{"chat": true},
+		MCPPort:    8377, Runner: &fakeRunner{}, Stdout: &applied, MCPConfigPath: testConfigPath(t),
 	}); err != nil {
 		t.Fatalf("apply: %v\n%s", err, applied.String())
 	}
@@ -447,100 +447,6 @@ func TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine(t *testing.T) {
 	}
 	if !strings.HasSuffix(changeLine, " — remove pfm's legacy MCP clients chat") {
 		t.Fatalf("OpenCode change line %q does not end naming the removed legacy chat:\n%s", changeLine, out.String())
-	}
-}
-
-// requireJournalPaths fails unless every want path is among got — the
-// destinations an install journal recorded or the paths a preview planned.
-func requireJournalPaths(t *testing.T, got []string, want ...string) {
-	t.Helper()
-	for _, path := range want {
-		found := false
-		for _, candidate := range got {
-			found = found || candidate == path
-		}
-		if !found {
-			t.Fatalf("journal paths %v never name %s", got, path)
-		}
-	}
-}
-
-// legacyMCPJournalFixture is the legacy-auth host of
-// TestMCPInstallRemovesLegacyAuthOutsideClaudeAccountFiles plus an existing
-// OpenCode config: every MCP registration site has a file to change.
-func legacyMCPJournalFixture(t *testing.T, home string, installer *engine) map[string]string {
-	t.Helper()
-	legacyToken := strings.Repeat("a", 64)
-	files := map[string]string{
-		filepath.Join(home, "pfm.config.json"): `{"version":2,"mcp":{"servers":{"chat":{"enabled":true}},"authToken":"` +
-			legacyToken + `"}}`,
-		filepath.Join(managedRootForHome(home), mcpCredentialName): legacyToken + "\n",
-		filepath.Join(home, ".codex", "config.toml"): mcpFenceBegin + "\n[mcp_servers.chat]\nurl = \"http://127.0.0.1:8377/mcp/chat\"\n" +
-			"[mcp_servers.chat.headers]\nAuthorization = \"Bearer " + legacyToken + "\"\n" + mcpFenceEnd + "\n",
-		// No "mcp" object yet: install creates it.
-		OpenCodeConfigPath(home): "{\n  \"theme\": \"opencode\"\n}\n",
-	}
-	for path, content := range files {
-		writeFixture(t, path, content)
-	}
-	installer.options.MCPConfigPath = filepath.Join(home, "pfm.config.json")
-	installer.options.OpenCodeConfigPath = OpenCodeConfigPath(home)
-	installer.options.CodexHomes = []string{filepath.Join(home, ".codex")}
-	installer.options.MCPEnabled = map[string]bool{"chat": true}
-	installer.options.MCPPort = 8377
-	installer.stamp = "fixture"
-	return files
-}
-
-func TestMCPInstallJournalRecordsEveryChangedFileAndRollsBack(t *testing.T) {
-	home := t.TempDir()
-	preview, planned, _ := journaledEngine(t, home, false)
-	files := legacyMCPJournalFixture(t, home, preview)
-	codexConfig := filepath.Join(home, ".codex", "config.toml")
-	openCode := OpenCodeConfigPath(home)
-	changed := []string{
-		filepath.Join(home, "pfm.config.json"), filepath.Join(managedRootForHome(home), mcpCredentialName),
-		codexConfig, codexConfig + ".pre-professor-fixture", openCode, openCode + ".pre-professor-fixture",
-	}
-	if err := preview.wireMCP(); err != nil {
-		t.Fatal(err)
-	}
-	requireJournalPaths(t, planned.Planned(), changed...)
-
-	installer, journal, env := journaledEngine(t, home, true)
-	legacyMCPJournalFixture(t, home, installer)
-	if err := installer.wireMCP(); err != nil {
-		t.Fatal(err)
-	}
-	requireJournalPaths(t, installRecordDestinations(t, journal), append(changed, installer.mcpOwnershipPath())...)
-
-	rollbackInstallJournal(t, env, journal)
-	for path, content := range files {
-		if got := readFixture(t, path); got != content {
-			t.Fatalf("rollback left %s = %q, want %q", path, got, content)
-		}
-	}
-	for _, path := range []string{
-		codexConfig + ".pre-professor-fixture", openCode + ".pre-professor-fixture", installer.mcpOwnershipPath(),
-	} {
-		if _, err := os.Lstat(path); !os.IsNotExist(err) {
-			t.Fatalf("rollback kept %s: %v", path, err)
-		}
-	}
-
-	converge := engine{options: installer.options, managedRoot: installer.managedRoot, apply: true, stamp: "fixture"}
-	converge.options.Journal = nil
-	if err := converge.wireMCP(); err != nil {
-		t.Fatal(err)
-	}
-	again, idle, _ := journaledEngine(t, home, true)
-	again.options = converge.options
-	again.options.Journal = idle
-	if err := again.wireMCP(); err != nil {
-		t.Fatal(err)
-	}
-	if idle.Dir() != "" {
-		t.Fatalf("converged MCP wiring journaled %v", idle.records)
 	}
 }
 

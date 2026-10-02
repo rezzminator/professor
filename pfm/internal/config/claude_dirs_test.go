@@ -7,23 +7,23 @@ import (
 )
 
 // TestClaudeConfigDirsFollowsTheRosterOnce pins the query roster: roster order,
-// the implicit account at {home}/.claude whatever its ConfigDir says, an
+// every account using its own ConfigDir, an
 // account without a directory skipped, and a directory named twice kept once.
 func TestClaudeConfigDirsFollowsTheRosterOnce(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
-	implicit := filepath.Join(home, ".claude")
+	first := DefaultAccountDir(home, 1)
 	second := filepath.Join(home, ".cc", "2")
 	third := filepath.Join(home, ".cc", "3")
 	machine := Config{Accounts: []Account{
 		{ID: 2, ConfigDir: second},
-		{ID: 1, ConfigDir: filepath.Join(home, "ignored"), Implicit: true},
+		{ID: 1, ConfigDir: first},
 		{ID: 4},
 		{ID: 5, ConfigDir: second},
-		{ID: 6, ConfigDir: implicit},
+		{ID: 6, ConfigDir: first},
 		{ID: 3, ConfigDir: third},
 	}}
-	want := []string{second, implicit, third}
-	if got := machine.ClaudeConfigDirs(home); !reflect.DeepEqual(got, want) {
+	want := []string{second, first, third}
+	if got := machine.ClaudeConfigDirs(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ClaudeConfigDirs() = %v, want %v", got, want)
 	}
 }
@@ -31,7 +31,7 @@ func TestClaudeConfigDirsFollowsTheRosterOnce(t *testing.T) {
 // TestClaudeConfigDirsEmptyRosterIsEmpty pins that no accounts yield no
 // directories, never a guessed default home.
 func TestClaudeConfigDirsEmptyRosterIsEmpty(t *testing.T) {
-	if got := (Config{}).ClaudeConfigDirs(t.TempDir()); len(got) != 0 {
+	if got := (Config{}).ClaudeConfigDirs(); len(got) != 0 {
 		t.Fatalf("ClaudeConfigDirs() = %v, want none", got)
 	}
 }

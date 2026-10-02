@@ -16,7 +16,7 @@ type ConfigDirFixture struct {
 
 // SymlinkedConfigDir jails a fleet whose ~/.claude is a symlink to a
 // physical directory elsewhere in the jail — the state
-// installer.claudeConfigDirs, paths.DevRepoGitDir and professor.storeSHA
+// paths.DevRepoGitDir and professor.storeSHA
 // must resolve THROUGH (os.Stat, not os.Lstat, follows it) rather than
 // silently treat as though .claude were the physical directory itself.
 func SymlinkedConfigDir(t *testing.T) ConfigDirFixture {

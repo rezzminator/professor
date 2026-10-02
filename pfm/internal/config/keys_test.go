@@ -110,3 +110,15 @@ func TestExampleConfigHasOnlyHomeRelativePathsAndNoRoster(t *testing.T) {
 		}
 	}
 }
+
+func TestThirdPartyKeyDefault(t *testing.T) {
+	for _, key := range Keys() {
+		if key.Key == "mcp.thirdParty" {
+			if !reflect.DeepEqual(key.Default, map[string]any{}) {
+				t.Fatalf("default = %#v, want empty object", key.Default)
+			}
+			return
+		}
+	}
+	t.Fatal("mcp.thirdParty missing from Keys")
+}

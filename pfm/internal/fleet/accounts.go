@@ -74,15 +74,11 @@ func CurrentSocketFrom(env paths.Env) string {
 	return filepath.Base(value)
 }
 
-func claudeSeats(accounts []pfmconfig.Account, home string) []compose.ClaudeSeat {
+func claudeSeats(accounts []pfmconfig.Account) []compose.ClaudeSeat {
 	seats := make([]compose.ClaudeSeat, 0, len(accounts))
 	for _, account := range accounts {
-		configDir := account.ConfigDir
-		if account.Implicit {
-			configDir = filepath.Join(home, ".claude")
-		}
 		seats = append(seats, compose.ClaudeSeat{
-			Account: account.ID, ConfigDir: configDir, Implicit: account.Implicit,
+			Account: account.ID, ConfigDir: account.ConfigDir,
 		})
 	}
 	return seats

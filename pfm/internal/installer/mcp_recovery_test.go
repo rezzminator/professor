@@ -267,7 +267,7 @@ func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
 // pfm takes its registrations back — every family disabled, and uninstall:
 // the owned professor and every legacy shape leave Codex and OpenCode, the
 // fence and orphan markers included, and nothing else moves. Claude has no
-// install-time registration to take back (docs/design/engines/host-migration.md).
+// install-time registration to take back (docs/design/engines/claude-config-dir.md § MCP servers).
 func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 	for name, mode := range map[string]Mode{"both disabled": ModeApply, "uninstall": ModeUninstall} {
 		t.Run(name, func(t *testing.T) {
@@ -277,9 +277,15 @@ func TestMCPRemovalClearsProfessorAndPFMLegacyEntriesEverywhere(t *testing.T) {
 			writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
 			openCodePath := OpenCodeConfigPath(home)
 			options := Options{
-				Mode: ModeApply, Home: home, ConfigDir: canonical, ConfigDirs: []string{canonical},
-				OpenCodeConfigPath: openCodePath, MCPEnabled: map[string]bool{"chat": true}, MCPPort: 18377,
-				Runner: &fakeRunner{}, Stdout: io.Discard, MCPConfigPath: testConfigPath(t),
+				Mode:               ModeApply,
+				Home:               home,
+				ConfigDir:          canonical,
+				OpenCodeConfigPath: openCodePath,
+				MCPEnabled:         map[string]bool{"chat": true},
+				MCPPort:            18377,
+				Runner:             &fakeRunner{},
+				Stdout:             io.Discard,
+				MCPConfigPath:      testConfigPath(t),
 			}
 			if _, err := Run(context.Background(), options); err != nil {
 				t.Fatal(err)
@@ -327,7 +333,7 @@ func TestRetirementPreservesSecondaryPersonalAgentLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := engine{
-		options: Options{Home: home, ConfigDirs: []string{second}, CodexHomes: []string{}, Stdout: io.Discard},
+		options: Options{Home: home, CodexHomes: []string{}, Stdout: io.Discard},
 		apply:   true,
 	}
 	if err := e.retireRenamedGlobalAgents(); err != nil {

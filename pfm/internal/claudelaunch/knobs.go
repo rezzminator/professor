@@ -75,6 +75,11 @@ const (
 	flagBypass                     = "--dangerously-skip-permissions"
 )
 
+const (
+	SettingsFlag  = flagSettings
+	MCPConfigFlag = flagMCPConfig
+)
+
 type Wire int
 
 const (

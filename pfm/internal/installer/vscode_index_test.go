@@ -317,3 +317,26 @@ func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t
 		)
 	}
 }
+
+func TestInspectVSCodeClaudeEnvironment(t *testing.T) {
+	for _, value := range []string{"", "primary"} {
+		t.Run(value, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			writeFixture(
+				t,
+				settings,
+				`{"claudeCode.environmentVariables":[{"name":"CLAUDE_CONFIG_DIR","value":"`+value+`"}]}`,
+			)
+			writeVSCodeOwnershipFixture(
+				t,
+				home,
+				vscodeOwnershipRecord{Path: settings, Platform: "linux", EnvOwned: true, EnvValue: value},
+			)
+			report, err := InspectVSCode(home)
+			if err != nil || len(report.Settings) != 1 || report.Settings[0].ClaudeConfigDir != value {
+				t.Fatalf("report=%+v err=%v", report, err)
+			}
+		})
+	}
+}

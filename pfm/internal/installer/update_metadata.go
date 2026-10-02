@@ -254,7 +254,7 @@ func (installer *engine) writeUpdateMetadata() error {
 		}
 		path := paths.SourceRepoPath(installer.options.Home)
 		if !sameFile(path, content, 0o600) {
-			if err := installer.changePaths("write "+path, []string{path}, func() error {
+			if err := installer.change("write "+path, func() error {
 				return paths.WriteSourceRepoMarker(installer.options.Home, installer.options.SourceRepo)
 			}); err != nil {
 				return err
@@ -285,7 +285,7 @@ func (installer *engine) writeUpdateMetadata() error {
 	}
 	path := binaryOwnershipPath(installer.options.Home)
 	if !sameFile(path, content, 0o600) {
-		if err := installer.changePaths("write "+path, []string{path}, func() error {
+		if err := installer.change("write "+path, func() error {
 			return RecordCanonicalBinary(installer.options.Home)
 		}); err != nil {
 			return err

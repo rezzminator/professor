@@ -41,6 +41,11 @@ func reloadWorkerAccountFixture(t *testing.T) (string, string, string) {
 	if err := testjail.WriteExecutable(fixtureClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	for _, directory := range []string{filepath.Join(root, "account-1"), filepath.Join(root, "account-2")} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	configPath := writeConfigFixture(t, root, `{
   "version": 1,
   "accounts": [
@@ -498,6 +503,9 @@ func TestChatReloadWorkerHidesTheSessionItContinuedFrom(t *testing.T) {
 
 func TestChatReloadWorkerRefusesTheAccountTwice(t *testing.T) {
 	root := jailTest(t)
+	if err := os.MkdirAll(filepath.Join(root, "account-1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	configPath := writeConfigFixture(
 		t,
 		root,

@@ -110,7 +110,7 @@ type Store struct {
 }
 
 // CheckLegacyState refuses a state database create while the legacy
-// {home}/.cc database still waits for pfm install (paths.ErrLegacyPending).
+// database still waits for the operator to apply pfm doctor's fix (paths.ErrLegacyPending).
 // Hand-built values with no Home skip the check.
 func CheckLegacyState(values paths.Values) error {
 	if values.Home == "" {
@@ -619,7 +619,7 @@ func SetClaudePrimaryAccount(
 		}
 	}()
 	// An unopenable database degrades to the mirror below, but a create refused
-	// while legacy state waits is the operator's to fix: never silently degraded.
+	// while legacy state waits for pfm doctor's fix is never silently degraded.
 	if err := state.Degraded(); errors.Is(err, paths.ErrLegacyPending) {
 		return err
 	}

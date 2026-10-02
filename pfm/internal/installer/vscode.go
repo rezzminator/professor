@@ -73,6 +73,11 @@ type vscodeOwnershipDocument struct {
 type vscodeOwnershipRecord struct {
 	Path                  string          `json:"path"`
 	Platform              string          `json:"platform"`
+	EnvValue              string          `json:"envValue,omitempty"`
+	PreviousEnv           string          `json:"previousEnv,omitempty"`
+	EnvOwned              bool            `json:"envOwned,omitempty"`
+	HadEnv                bool            `json:"hadEnv,omitempty"`
+	EnvKeyAdded           bool            `json:"envKeyAdded,omitempty"`
 	FileAdded             bool            `json:"fileAdded,omitempty"`
 	ProfileOwned          bool            `json:"profileOwned,omitempty"`
 	ProfilesPropertyAdded bool            `json:"profilesPropertyAdded,omitempty"`
@@ -139,7 +144,8 @@ func (installer *engine) wireVSCode() error {
 			}
 			return err
 		}
-		if next.ProfileOwned || next.DefaultOwned || len(next.ScalarOwned) != 0 {
+		if next.ProfileOwned || next.DefaultOwned || len(next.ScalarOwned) != 0 || next.EnvOwned ||
+			next.EnvValue != "" {
 			ownership[path] = next
 		} else {
 			delete(ownership, path)
@@ -148,11 +154,7 @@ func (installer *engine) wireVSCode() error {
 			installer.ok("VS Code PFM terminal profile " + path)
 			continue
 		}
-		changedPaths, err := installer.vscodeSettingsWritePaths(path)
-		if err != nil {
-			return err
-		}
-		if err := installer.changePaths("merge VS Code PFM terminal profile "+path, changedPaths, func() error {
+		if err := installer.change("merge VS Code PFM terminal profile "+path, func() error {
 			return installer.writeVSCodeSettings(path, updated)
 		}); err != nil {
 			return err
@@ -235,7 +237,7 @@ func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error
 			continue
 		}
 		if info, err := os.Stat(extensionsDir); err != nil || !info.IsDir() {
-			if err := installer.changePaths("create "+extensionsDir, []string{extensionsDir}, func() error {
+			if err := installer.change("create "+extensionsDir, func() error {
 				return os.MkdirAll(extensionsDir, 0o755)
 			}); err != nil {
 				return nil, fmt.Errorf("link VS Code extension %s: %w", target, err)
@@ -246,9 +248,6 @@ func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error
 		}
 		if _, err := installer.registerVSCodeExtension(extensionsDir); err != nil {
 			return nil, fmt.Errorf("register VS Code extension %s: %w", target, err)
-		}
-		if err := installer.options.Journal.Refingerprint(extensionsDir); err != nil {
-			return nil, fmt.Errorf("fingerprint VS Code extension directory %s: %w", extensionsDir, err)
 		}
 		kept = append(kept, target)
 	}
@@ -353,6 +352,11 @@ func (installer *engine) mergeVSCodeSettings(
 		}
 	}
 
+	envEntries, next, envChanged, err := installer.mergeVSCodeClaudeEnvironment(document, record)
+	if err != nil {
+		return nil, record, false, err
+	}
+	record = next
 	for _, key := range vscodeScalarKeys {
 		want := vscodeScalarValue(key)
 		existing, hasExisting := document[key]
@@ -438,6 +442,17 @@ func (installer *engine) mergeVSCodeSettings(
 		}
 		changed = true
 	}
+	if envChanged {
+		encoded, marshalErr := json.Marshal(envEntries)
+		if marshalErr != nil {
+			return nil, record, false, fmt.Errorf("encode VS Code Claude environment: %w", marshalErr)
+		}
+		updated, err = setJSONCProperty(updated, 0, vscodeEnvironmentKey, encoded)
+		if err != nil {
+			return nil, record, false, err
+		}
+		changed = true
+	}
 	return updated, record, changed, nil
 }
 
@@ -469,6 +484,12 @@ func (installer *engine) unwireVSCode(
 					Error(),
 			)
 			continue
+		}
+		if record.EnvOwned {
+			if _, _, envErr := readVSCodeClaudeEnvironment(document); envErr != nil {
+				installer.skip("VS Code settings skipped " + settings + ": " + envErr.Error())
+				continue
+			}
 		}
 		profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 		updated := append([]byte(nil), raw...)
@@ -505,6 +526,16 @@ func (installer *engine) unwireVSCode(
 			delete(record.HadScalar, key)
 			delete(record.PreviousScalar, key)
 		}
+		updated, envChanged, envErr := restoreVSCodeClaudeEnvironment(updated, document, record)
+		if envErr != nil {
+			return envErr
+		}
+		changed = changed || envChanged
+		record.EnvOwned = false
+		record.EnvValue = ""
+		record.HadEnv = false
+		record.PreviousEnv = ""
+		record.EnvKeyAdded = false
 		profileRetained := false
 		if record.ProfileOwned {
 			// Re-decode after the root edit because byte offsets have changed.

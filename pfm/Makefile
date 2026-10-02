@@ -174,14 +174,6 @@ gate: fmt-check lint-new vet arch iso ## Everything a change must pass before it
 
 install: ## Swap in a new build, restart the daemon, sweep obsolete processes, and keep compatible stdio proxies
 	@$(MAKE) --no-print-directory host-install
-	@rc=0; bash "$(REPO)/pfm/scripts/host-migration-probe.sh" "$(BIN)" >/dev/null 2>&1 || rc=$$?; \
-	if [ $$rc -eq 3 ]; then \
-	  echo "install: stopped after host-install; nothing restarted or rolled back — run pfm install --yes now, then make -C $(REPO)/pfm sweep-stale" >&2; \
-	  exit 1; fi
-	@# Exit 3 only: host-install already printed why — the swapped binary
-	@# refuses this host until pfm install migrates it, so a restart would fail
-	@# and roll back. A probe that could not ask (exit 2, also printed by
-	@# host-install) is no migration: the restart below judges the binary.
 	@if ! $(MAKE) --no-print-directory mcp-restart; then \
 	  echo "install: FAILED at the MCP restart — rolling back to $(BIN).prev; no process was touched" >&2; \
 	  $(MAKE) --no-print-directory rollback; \
@@ -196,7 +188,7 @@ install: ## Swap in a new build, restart the daemon, sweep obsolete processes, a
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refused check on an unmigrated host unless SKIP_INSTALL_CHECK=1
+host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview its install (pfm install --check), then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1, and a refusing check unless SKIP_INSTALL_CHECK=1
 	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
 	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
 	@# build even starts — $(BIN) is never touched. FORCE=1 in the
@@ -215,30 +207,15 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview i
 	  checkrc=0; checked="$$("$$tmp" install --check 2>&1)" || checkrc=$$?; \
 	  if [ $$checkrc -eq 0 ]; then echo "$$checked"; else \
 	    printf '%s\n' "$$checked" >&2; \
-	    probe=0; bash "$(REPO)/pfm/scripts/host-migration-probe.sh" "$$tmp" >/dev/null 2>&1 || probe=$$?; \
-	    if [ $$probe -eq 0 ]; then \
-	      echo "host-install: WARNING — the new binary's install check refuses (exit $$checkrc), but this host is migrated, so the new binary reads its config; swapping — resolve the above before the next pfm install --yes" >&2; \
-	    elif [ $$checkrc -eq 4 ]; then \
-	      echo "host-install: the new binary's install check refuses this host — $(BIN) untouched; close or resolve what it names above, then rerun (a live chat includes Claude's daemon and bg-spare sessions: claude daemon stop --any)" >&2; \
-	      exit 1; \
-	    else \
-	      echo "host-install: the new binary's install check FAILED (exit $$checkrc) — $(BIN) untouched; fix the error above and rerun" >&2; \
-	      exit 1; \
-	    fi; \
+	    echo "host-install: the new binary's install check refuses this host (exit $$checkrc) — $(BIN) untouched; build it with make -C $(REPO)/pfm build and run its doctor for the fixes, or swap anyway with SKIP_INSTALL_CHECK=1" >&2; \
+	    exit 1; \
 	  fi; \
 	fi; \
 	kept=""; if [ -x "$(BIN)" ]; then cp -f "$(BIN)" "$(BIN).prev" && kept="; previous kept at $(BIN).prev"; fi; \
 	mv -f "$$tmp" "$(BIN)"; \
-	echo "installed: $(BIN) ($$reported$$kept)"; \
-	bash "$(REPO)/pfm/scripts/host-migration-probe.sh" "$(BIN)" || true
-	@# The new binary answers `pfm install --check` BEFORE the swap: every
-	@# refusal `pfm install --yes` makes before its first change. On a host
-	@# whose config waits for that install (host-migration-probe.sh asked of the
-	@# new binary: not 0), a refusal keeps $(BIN): the new binary would refuse
-	@# the old config everywhere, the shim's `claude` included, and the install
-	@# that migrates it would refuse too. Exit 4 is the gate's refusal; any other
-	@# non-zero is a refusal before the gate or a check that could not answer. On
-	@# a migrated host a refusal is a WARNING and the swap goes ahead.
+	echo "installed: $(BIN) ($$reported$$kept)"
+	@# The new binary answers `pfm install --check` before the swap. Any
+	@# refusal keeps $(BIN) untouched and prints the check's own answer.
 	@# SKIP_INSTALL_CHECK=1 skips the check; FORCE=1 is the downgrade guard's.
 	@# Never write onto the running path directly: an executing binary gives
 	@# ETXTBSY. The build lands BESIDE the target — same directory, same
@@ -246,13 +223,14 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview i
 	@# copy-over-the-running-image. Processes already running keep their own
 	@# image, which is exactly why the sweep below has to exist.
 
-rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically and restart the daemon on it; refuses a pfm.prev older than a layout migration unless FORCE=1
-	@bash "$(REPO)/pfm/scripts/rollback-guard.sh" "$(BIN)" "$(REPO)"
+rollback: ## Restore ~/.local/bin/pfm from pfm.prev atomically, rerun its pfm install --yes, and restart the daemon on it
 	@[ -x "$(BIN).prev" ] || { echo "rollback: no $(BIN).prev to restore — $(BIN) left as is" >&2; exit 1; }
 	@tmp="$$(mktemp "$(BIN).rollback.XXXXXX")"; \
 	cp -f "$(BIN).prev" "$$tmp" && chmod 755 "$$tmp" && mv -f "$$tmp" "$(BIN)" \
 	  || { rm -f "$$tmp"; echo "rollback: FAILED to restore $(BIN) from $(BIN).prev" >&2; exit 1; }; \
 	echo "rollback: restored $(BIN) from $(BIN).prev"
+	@"$(BIN)" install --yes \
+	  || echo "rollback: the restored binary's pfm install --yes failed — run pfm doctor" >&2
 	@$(MAKE) --no-print-directory mcp-restart \
 	  || echo "rollback: the daemon did not come back on the restored binary either — make mcp-status" >&2
 

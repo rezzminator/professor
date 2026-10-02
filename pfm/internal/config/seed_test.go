@@ -53,7 +53,7 @@ func TestLoadSeedNamesAMissingExample(t *testing.T) {
 
 // pfm install seeds the tracked example on every home, and the example holds
 // ask.engine at its default (codex). A home with no Codex account must still
-// load that seed; the empty roster surfaces where the engine is resolved.
+// load that seed; a home with no roster still has account 1, so it resolves to Claude.
 func TestSeededExampleLoadsWithoutACodexAccount(t *testing.T) {
 	example := examplePath(t)
 	t.Run("claude-only", func(t *testing.T) {
@@ -84,12 +84,17 @@ func TestSeededExampleLoadsWithoutACodexAccount(t *testing.T) {
 		}
 	})
 	t.Run("no-roster", func(t *testing.T) {
-		seed, err := LoadSeed(example, filepath.Join(t.TempDir(), FileName), t.TempDir(), nil)
+		home := t.TempDir()
+		seed, err := LoadSeed(example, filepath.Join(t.TempDir(), FileName), home, nil)
 		if err != nil {
 			t.Fatalf("LoadSeed(example, empty home) error=%v, want nil", err)
 		}
-		if _, err := seed.DefaultEngine(); err == nil || !strings.Contains(err.Error(), "no engines configured") {
-			t.Fatalf("DefaultEngine() error=%v, want the empty rosters named", err)
+		if engine, err := seed.DefaultEngine(); err != nil || engine != pfmengine.Claude {
+			t.Fatalf("DefaultEngine()=(%q,%v), want (%q,nil)", engine, err, pfmengine.Claude)
+		}
+		want := []Account{{ID: 1, ConfigDir: DefaultAccountDir(home, 1), Emoji: DefaultEmoji(1)}}
+		if !reflect.DeepEqual(seed.Accounts, want) {
+			t.Fatalf("seed.Accounts=%#v, want %#v", seed.Accounts, want)
 		}
 	})
 }

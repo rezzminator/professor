@@ -27,6 +27,9 @@ func TestDefaultAckUsesLeanSettingsAndInheritedEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	account := LimitAccount{ID: 2, ClaudeBinary: binary, ConfigDir: filepath.Join(root, "config")}
+	if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := defaultAck(context.Background(), account); err != nil {
 		t.Fatal(err)
 	}

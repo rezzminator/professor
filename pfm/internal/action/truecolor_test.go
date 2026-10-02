@@ -23,7 +23,10 @@ func TestClaudeSpawnCarriesTmuxTruecolor(t *testing.T) {
 		if got := parsedShell(t, shell).SettingsEnv[truecolorName]; got != "1" {
 			t.Fatalf("%v settings truecolor = %q", purpose, got)
 		}
-		environment := spawn.Environment([]string{"PATH=/usr/bin"})
+		environment, err := spawn.Environment([]string{"PATH=/usr/bin"})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if got := lastEnvironmentValue(environment, truecolorName); got != "" {
 			t.Fatalf("%v process environment truecolor = %q", purpose, got)
 		}

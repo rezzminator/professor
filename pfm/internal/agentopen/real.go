@@ -38,13 +38,7 @@ type ExecCommands struct {
 // seat's policy under another seat's config dir.
 func (commands ExecCommands) accountFor(configDir string) (int, error) {
 	for _, account := range commands.Machine.Accounts {
-		if account.Implicit {
-			if configDir == "" || filepath.Clean(configDir) == filepath.Clean(account.ConfigDir) {
-				return account.ID, nil
-			}
-			continue
-		}
-		if filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
+		if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
 			return account.ID, nil
 		}
 	}

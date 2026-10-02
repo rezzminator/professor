@@ -109,7 +109,7 @@ func (installer *engine) removeLegacyMCPCredential() error {
 	} else if err != nil {
 		return fmt.Errorf("inspect retired MCP credential %s: %w", path, err)
 	}
-	return installer.changePaths("remove retired "+path, []string{path}, func() error { return os.Remove(path) })
+	return installer.change("remove retired "+path, func() error { return os.Remove(path) })
 }
 
 func isHex(value string) bool {
@@ -713,7 +713,7 @@ func (installer *engine) removeLegacyMCPConfigAuth() error {
 		return nil
 	}
 	message := "remove retired MCP authToken from " + installer.options.MCPConfigPath
-	return installer.changePaths(message, []string{effective.Path}, func() error {
+	return installer.change(message, func() error {
 		_, err := pfmconfig.RemoveMCPAuthToken(effective)
 		return err
 	})

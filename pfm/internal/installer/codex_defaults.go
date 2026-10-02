@@ -172,7 +172,7 @@ func (installer *engine) writeCodexConfig(
 		installer.ok(edit.settled)
 		return nil
 	}
-	return installer.changePaths(edit.change, installer.backedUpWritePaths(path, existed), func() error {
+	return installer.change(edit.change, func() error {
 		latest, readErr := os.ReadFile(path)
 		if (existed && (readErr != nil || !bytes.Equal(latest, raw))) ||
 			(!existed && !errors.Is(readErr, fs.ErrNotExist)) {

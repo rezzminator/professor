@@ -79,7 +79,6 @@ internal/index/sync_sources.go
 internal/index/walk.go
 internal/inject/body.go
 internal/inject/types.go
-internal/installer/account_migrations.go
 internal/installer/assets.go
 internal/installer/codex_hooks.go
 internal/installer/files.go

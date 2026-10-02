@@ -3,6 +3,7 @@ package reload
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -450,7 +451,7 @@ func TestRunMarksSelectorRefusalOnlyWhenPaneWasTold(t *testing.T) {
 func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 	run, err := claudeRun(Request{
 		Account:   2,
-		Machine:   reloadTestMachine("", ""),
+		Machine:   reloadTestMachine("", t.TempDir()),
 		SessionID: "11111111-1111-4111-8111-111111111111",
 	})
 	if err != nil {
@@ -467,11 +468,17 @@ func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 }
 
 func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
+	for _, id := range []int{1, 2} {
+		dir := pfmconfig.DefaultAccountDir(home, id)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			panic(fmt.Sprintf("fixture account dir %s: %v", dir, err))
+		}
+	}
 	return pfmconfig.Config{
 		Claude: pfmconfig.ClaudePrefs{PermissionMode: pfmconfig.PermissionBypass, SystemPrompt: systemPrompt},
 		Accounts: []pfmconfig.Account{
-			{ID: 1, ConfigDir: filepath.Join(home, ".claude"), Implicit: true},
-			{ID: 2, ConfigDir: filepath.Join(home, ".cc", "2")},
+			{ID: 1, ConfigDir: pfmconfig.DefaultAccountDir(home, 1)},
+			{ID: 2, ConfigDir: pfmconfig.DefaultAccountDir(home, 2)},
 		},
 	}
 }
@@ -653,7 +660,7 @@ func TestRunGracefullyExitsThenRespawnsTheSamePane(t *testing.T) {
 					CWD:        "/jail/project",
 					Account:    2,
 					AccountIDs: []int{2},
-					Machine:    reloadTestMachine("", "/jail/home"),
+					Machine:    reloadTestMachine("", t.TempDir()),
 					Cache1H:    false,
 				},
 				Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},

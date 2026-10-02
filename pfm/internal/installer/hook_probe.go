@@ -50,7 +50,7 @@ type HookProbeResult struct {
 }
 
 // ProbeExpectedHooks checks the launch hook binary once and keeps Codex hook
-// residue checks. Claude account settings are classified by HostLayout.
+// residue checks. Claude account settings are inspected by the pfm-settings host check.
 func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult {
 	results := []HookProbeResult{}
 	if len(config.Accounts) == 0 {

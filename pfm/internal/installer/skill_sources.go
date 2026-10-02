@@ -135,15 +135,8 @@ func loadSkillSources(sourceRepo, manifestURL string) ([]skillSource, bool, erro
 	return sources, true, nil
 }
 
-// wireSourceFetchedSkills fetches every registered source-fetched skill into
-// its store and links it into every Claude account's skills/ and into
-// ~/.agents/skills/. A registry that cannot be read, or a store root that is
-// not a real directory, is a named SKILL-SOURCES-FAILED line (as a theme
-// manifest failure is): the rest of the install continues and pfm doctor
-// reports it. A fetch failure is a named skip that keeps an existing store
-// copy linked. The store lock is held for the whole pass, the root's creation
-// included, so two installs never retire each other's staging directory, race
-// one swap or journal each other's root.
+// wireSourceFetchedSkills fetches registered skills into managed storage and links
+// them into the store skills registry and ~/.agents/skills.
 func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 	registry := filepath.Join(sourceRepo, filepath.FromSlash(skillSourcesRelative))
 	sources, present, err := loadSkillSources(sourceRepo, installer.options.ThemeManifestURL)
@@ -183,7 +176,7 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 		fetch = fetch || source.Problem == ""
 	}
 	if !rootExists && fetch && installer.apply && !installer.options.SkillSourcesOffline {
-		if err := installer.changePaths("create "+storeRoot, []string{storeRoot}, func() error {
+		if err := installer.change("create "+storeRoot, func() error {
 			return os.Mkdir(storeRoot, 0o755)
 		}); err != nil {
 			return err
@@ -293,9 +286,8 @@ func (installer *engine) wireSkillSourceLink(store, target, storeRoot string) er
 		installer.skip(codexgen.DescribeGlobalLinkState(state, target, store, found) + "; preserved")
 		return nil
 	}
-	return installer.changePaths(
+	return installer.change(
 		codexgen.DescribeGlobalLinkState(state, target, store, found),
-		[]string{target},
 		func() error {
 			return codexgen.ApplyGlobalLink(target, store, state)
 		},
@@ -303,16 +295,9 @@ func (installer *engine) wireSkillSourceLink(store, target, storeRoot string) er
 }
 
 // fetchSkillSource brings the store to the registry repo's default-branch
-// head without ever running git inside it: git ls-remote reads the head, and
-// unless the store is linkable and its commit record (skillCommitPath, beside
-// the store, out of the fetched tree's reach) names that head, a fresh shallow
-// clone in a staging directory beside it is swapped into place, the record
-// rewritten in the same journaled write. Of a fetched tree pfm inspects only
-// its root SKILL.md (checkSkillFile). A dry run reads no remote, and plans the
-// store and its record as the apply may snapshot and replace them. Every
-// failure is one named skip naming the tree left at the store; the returned
-// error is reserved for a store the swap lost or its restore left partial.
-// linkable reports a store holding a usable root SKILL.md.
+// head without running git inside it. A fresh shallow clone is swapped into
+// place and its sibling commit record rewritten. A dry run reads no remote.
+// Each fetch failure reports the usable tree left at the store.
 func (installer *engine) fetchSkillSource(source skillSource, store string) (linkable bool, err error) {
 	info, err := os.Lstat(store)
 	exists := err == nil
@@ -337,15 +322,13 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	}
 	if !installer.apply {
 		if exists {
-			installer.planJournal(store)
-			installer.planJournal(skillCommitPath(store))
+
 			installer.say("check   %s against %s (a dry run reads no remote; the apply replaces it if the head moved)",
 				store, source.Repo)
 			return installer.linkableStore(source.Name, store), nil
 		}
-		return true, installer.changePaths(
+		return true, installer.change(
 			"fetch "+source.Repo+" -> "+store,
-			[]string{store},
 			func() error { return nil },
 		)
 	}
@@ -400,20 +383,7 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	if err != nil {
 		return fail(err.Error())
 	}
-	// The clone stays open until its identity check below: a journal restore
-	// deletes it and recreates the store, and a filesystem that reuses a freed
-	// inode number (ext4, overlayfs) would hand the restored copy the clone's,
-	// so os.SameFile would name the old store the new clone.
-	cloneDir, err := os.Open(staging)
-	if err != nil {
-		return fail("open the fresh clone: " + err.Error())
-	}
-	defer func() {
-		if closeErr := cloneDir.Close(); closeErr != nil {
-			installer.skip("close the fresh clone " + staging + ": " + closeErr.Error())
-		}
-	}()
-	clone, err := cloneDir.Stat()
+	clone, err := os.Stat(staging)
 	if err != nil {
 		return fail("inspect the fresh clone: " + err.Error())
 	}
@@ -424,24 +394,17 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 		}
 		message = "update " + store + " " + shortCommit(was) + " -> " + shortCommit(cloned) + " from " + source.Repo
 	}
-	err = installer.changePathsOrRestore(message, []string{store, record}, func() error {
+	err = installer.change(message, func() error {
 		if err := swapSkillStore(staging, trash, store, exists); err != nil {
 			return err
 		}
 		return atomicfile.Write(record, []byte(cloned+"\n"), 0o644)
 	})
 	current, statErr := os.Lstat(store)
-	if err != nil && exists && (statErr != nil || installer.options.Journal.leftUnrestored(store)) {
-		return false, fmt.Errorf("replace skill store %s (pfm install --rollback restores it; an old copy the swap "+
-			"moved aside is at %s): %w", store, trash, err)
-	}
 	if removeErr := os.RemoveAll(trash); removeErr != nil {
 		installer.skip("leave the old skill store copy " + trash + ": " + removeErr.Error())
 	}
-	// A journal restore removes the clone and copies the old store into a fresh
-	// directory, which can reuse the clone's inode: only a store the journal did
-	// not restore is compared by identity.
-	if err != nil && statErr == nil && !installer.options.Journal.restored(store) && os.SameFile(current, clone) {
+	if err != nil && statErr == nil && os.SameFile(current, clone) {
 		installer.skip("SKILL-FETCH-FAILED " + source.Name + ": " + err.Error() + " (" + store +
 			" holds the new clone at " + shortCommit(cloned) + ")")
 		return installer.linkableStore(source.Name, store), nil
@@ -600,14 +563,12 @@ func shortCommit(commit string) string {
 	return commit
 }
 
-// skillSourceLinkDirs are the registries a source-fetched skill is linked
-// into: every Claude account's skills/ and ~/.agents/skills/.
+// skillSourceLinkDirs names the store skills registry and ~/.agents/skills.
 func (installer *engine) skillSourceLinkDirs() []string {
-	dirs := make([]string, 0, len(installer.claudeConfigDirs())+1)
-	for _, config := range installer.claudeConfigDirs() {
-		dirs = append(dirs, filepath.Join(config, "skills"))
+	return []string{
+		filepath.Join(installer.options.ConfigDir, "skills"),
+		filepath.Join(installer.options.Home, ".agents", "skills"),
 	}
-	return append(dirs, filepath.Join(installer.options.Home, ".agents", "skills"))
 }
 
 // retireSkillSources removes every link resolving into the skill store whose
@@ -661,9 +622,8 @@ func (installer *engine) retireSkillSources(active map[string]bool) error {
 		}
 		path := filepath.Join(storeRoot, entry.Name())
 		installer.markRemoved(path)
-		if err := installer.changePaths(
+		if err := installer.change(
 			"retire "+path+" (unregistered source-fetched skill store)",
-			[]string{path},
 			func() error { return os.RemoveAll(path) },
 		); err != nil {
 			return err

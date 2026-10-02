@@ -47,7 +47,7 @@ func Resolve(machine pfmconfig.Config, account int) []Resolved {
 				selected := machine.Accounts[accountIndex]
 				if knob.Name == knobNoFlicker {
 					row.Value, row.Won = noFlickerValue(selected.ConfigDir), accountWord
-				} else if !selected.Implicit {
+				} else {
 					row.Value = selected.ConfigDir
 					row.Won = accountWord
 				}

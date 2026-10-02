@@ -80,7 +80,7 @@ pfm index	O2	O2.03-index
 pfm init	A	A.01-scaffold
 pfm install	F	F.10-concurrent-new
 pfm install	O1	O1.01-install-idempotent
-pfm install	O1	O1.02a-session-store
+pfm install	O1	O1.02a-account-links
 pfm internal agent-open	F	F.16-picker-plumbing
 pfm internal chat-server	F	F.16-picker-plumbing
 pfm internal claude-launch	E1	E1.01-open-seat1

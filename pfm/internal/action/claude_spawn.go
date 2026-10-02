@@ -150,12 +150,12 @@ func (command *ProcessCommand) Output() ([]byte, error) {
 	return output.Bytes(), nil
 }
 
-func (spawn ClaudeSpawn) Environment(environ []string) []string {
+func (spawn ClaudeSpawn) Environment(environ []string) ([]string, error) {
 	launch, err := spawn.render()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return launchEnvironment(environ, launch)
+	return launchEnvironment(environ, launch), nil
 }
 
 func launchEnvironment(environ []string, launch claudelaunch.Launch) []string {

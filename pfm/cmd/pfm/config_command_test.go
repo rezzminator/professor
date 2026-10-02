@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,5 +71,35 @@ func TestConfigClaude(t *testing.T) {
 	}
 	if got := stderr.String(); got != "pfm config claude: account 99 is not configured (configured: 1,2,3)\n" {
 		t.Errorf("unknown account stderr=%q", got)
+	}
+}
+
+func TestConfigShowThirdPartyMCP(t *testing.T) {
+	for _, tc := range []struct{ name, mcp, want string }{
+		{"two from file", `{"thirdParty":{"b":{"type":"stdio","command":"b"},"a":{"type":"stdio","command":"a"}}}`, "config mcp.thirdParty=a,b (file)\n"},
+		{"absent", `{}`, "config mcp.thirdParty=none (default)\n"},
+		{"empty from file", `{"thirdParty":{}}`, "config mcp.thirdParty=none (default)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, pfmconfig.FileName)
+			if err := os.WriteFile(path, []byte(`{"version":2,"mcp":`+tc.mcp+`}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			machine, err := pfmconfig.Load(path, home, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			printResolvedConfig(&stdout, commandRuntime{Config: machine, Paths: paths.Values{Home: home}})
+			portLine := fmt.Sprintf(
+				"config mcp.http.port=%d (%s)\n",
+				machine.MCP.HTTP.Port,
+				machine.Source("mcp.http.port"),
+			)
+			if !strings.Contains(stdout.String(), portLine+tc.want) {
+				t.Fatalf("config show lacks consecutive lines %q:\n%s", portLine+tc.want, stdout.String())
+			}
+		})
 	}
 }

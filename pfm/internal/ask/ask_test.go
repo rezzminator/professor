@@ -94,7 +94,7 @@ func TestEvidenceStaysContentAgnosticForTranscriptAndHarvesterAdapters(t *testin
 	}
 	for name, adapter := range adapters {
 		input, evidence := adapter.Prepare()
-		resolved, err := ResolveInput(input, askMachine("codex"))
+		resolved, err := ResolveInput(input, askMachine(t, "codex"))
 		if err != nil {
 			t.Fatalf("%s adapter ResolveInput(): %v", name, err)
 		}
@@ -128,8 +128,12 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 	t.Setenv("PATH", directory)
 	t.Setenv("ASK_CAPTURE", capture)
 
+	configDir := filepath.Join(directory, "claude-2")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	machine := pfmconfig.Config{
-		Accounts:      []pfmconfig.Account{{ID: 2, ConfigDir: "/fixture/claude-2"}},
+		Accounts:      []pfmconfig.Account{{ID: 2, ConfigDir: configDir}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 4, Home: "/fixture/codex-4"}},
 		Claude:        pfmconfig.Claude{Binary: "claude"},
 		Codex:         pfmconfig.Codex{Binary: "codex"},
@@ -161,7 +165,7 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 		{
 			name:       "claude",
 			input:      AskInput{Engine: pfmengine.Claude, Model: "cc-model", Effort: "medium"},
-			wantHome:   "/fixture/claude-2",
+			wantHome:   configDir,
 			wantArgs:   []string{"-p", "--model cc-model", "--effort medium", "--output-format json"},
 			wantAnswer: "claude answer",
 			wantUsage:  TokenUsage{Input: 7, CachedInput: 2, CacheCreation: 6, Output: 4},
@@ -213,7 +217,7 @@ func TestProcessEngineUsageIsNilWhenAbsent(t *testing.T) {
 		`printf '%s\n' '{"type":"thread.started"}' '{"type":"turn.started"}' '{"type":"item.completed","item":{"type":"agent_message","text":"answer only"}}' '{"type":"turn.completed"}'`,
 	)
 	t.Setenv("PATH", directory)
-	engine, err := ResolveEngine(pfmengine.Codex, askMachine("codex"))
+	engine, err := ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +246,7 @@ func TestProcessEngineTakesAnswerAndErrorsFromJSON(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			engine, err := ResolveEngine(id, askMachine(test.engine))
+			engine, err := ResolveEngine(id, askMachine(t, test.engine))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -263,7 +267,7 @@ func TestProcessEngineTakesAnswerAndErrorsFromJSON(t *testing.T) {
 func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("PATH", directory)
-	machine := askMachine("codex")
+	machine := askMachine(t, "codex")
 	machine.Codex.Binary = "missing-codex"
 	_, err := ResolveEngine(pfmengine.Codex, machine)
 	var missing *BinaryMissingError
@@ -272,7 +276,7 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	}
 
 	writeAskStub(t, directory, "codex", "printf 'first error\\nfatal tail\\n' >&2\nexit 7")
-	engine, err := ResolveEngine(pfmengine.Codex, askMachine("codex"))
+	engine, err := ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +287,7 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	}
 
 	writeAskStub(t, directory, "codex", "/bin/sleep 5")
-	engine, err = ResolveEngine(pfmengine.Codex, askMachine("codex"))
+	engine, err = ResolveEngine(pfmengine.Codex, askMachine(t, "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,13 +303,18 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 	}
 }
 
-func askMachine(engineName string) pfmconfig.Config {
+func askMachine(t *testing.T, engineName string) pfmconfig.Config {
+	t.Helper()
+	configDir := filepath.Join(t.TempDir(), "claude")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	id, err := pfmengine.Parse(engineName)
 	if err != nil {
 		panic(err)
 	}
 	return pfmconfig.Config{
-		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: "/fixture/claude"}},
+		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: configDir}},
 		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: "/fixture/codex"}},
 		Claude:        pfmconfig.Claude{Binary: "claude"},
 		Codex:         pfmconfig.Codex{Binary: "codex"},

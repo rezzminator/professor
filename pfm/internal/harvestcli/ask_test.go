@@ -138,9 +138,13 @@ esac
 			if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 				t.Fatal(err)
 			}
+			accountHome := filepath.Join(home, "account")
+			if err := os.MkdirAll(accountHome, 0o700); err != nil {
+				t.Fatal(err)
+			}
 			machine := pfmconfig.Config{
 				Harvester: askHarvester(home), Claude: pfmconfig.Claude{Binary: binary},
-				Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, "account")}},
+				Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: accountHome}},
 				Ask:      pfmconfig.AskConfig{Engine: pfmengine.Claude},
 			}
 			var stdout, stderr bytes.Buffer

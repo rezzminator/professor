@@ -124,9 +124,9 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 
 - `O1.01-install-idempotent` · a second `pfm install --yes` is idempotent (changed=0) · spends none
 - `O1.02-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, themes, harness baseline) · spends none
-- `O1.02a-session-store` · every non-primary seat has four installer-created session-store links and doctor has no `session-store:` finding · spends none
+- `O1.02a-account-links` · every account links all 23 shared entries; doctor reports `account-links: ok` without a store, account or link finding · spends none
 - `O1.03-hooks-installed` · hooks are installed correctly per engine · spends none
-- `O1.04-seats` · seats configuration: implicit + explicit accounts, fanout, Codex homes, OpenCode home absence · spends none
+- `O1.04-seats` · seats configuration: configured accounts, fanout, Codex homes, OpenCode home absence · spends none
 - `O1.06-dropped-seat` · a dropped spare seat loses exactly its owned hooks and ledger rows (P10.2), then is restored · spends none
 - `O1.07-symlinked-home` · a Claude home reached through a symlink, and a blueprint reached through one (P10.1 class) · spends none
 - `O1.08-duplicate-seat-login` · two seats' registries recording one OAuth login (planted `oauthAccount.emailAddress`) → `pfm doctor` advises by name (`duplicate-seat-login email=… seats=…`) · spends none

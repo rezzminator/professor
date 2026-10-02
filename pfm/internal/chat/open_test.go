@@ -161,6 +161,11 @@ func TestOpenDetachedIDResumesUnderRecordedClaudeAccount(t *testing.T) {
 		filepath.Join(home, ".cc", "2", "projects"),
 		filepath.Join(home, ".cc", "3", "projects"),
 	})
+	for _, account := range runtime.Config.Accounts {
+		if err := os.MkdirAll(account.ConfigDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := fleet.SetPrimaryAccount(runtime.Paths, runtime.Config, 2); err != nil {
 		t.Fatal(err)
 	}

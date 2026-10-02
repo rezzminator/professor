@@ -89,6 +89,7 @@ func newRunJail(t *testing.T) *runJail {
 		jail.tmuxDir,
 		jail.binDir,
 		filepath.Join(root, "home"),
+		pfmconfig.DefaultAccountDir(filepath.Join(root, "home"), 1),
 		filepath.Join(root, "claude"),
 		filepath.Join(root, "codex"),
 		filepath.Join(root, "sid"),
@@ -436,6 +437,11 @@ func TestChatNewRecordsAssignedSessionAndAccountCache(t *testing.T) {
 			if testCase.ambient != "" {
 				t.Setenv("CC_ARM_1H", testCase.ambient)
 			}
+			for _, directory := range []string{filepath.Join(jail.root, "account1"), filepath.Join(jail.root, "account2")} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			config := fmt.Sprintf(`{"version":1,"accounts":[{"id":1,"configDir":%q},`+
 				`{"id":2,"configDir":%q,"claude":{"cache1h":%s}}]}`,
 				filepath.Join(jail.root, "account1"), filepath.Join(jail.root, "account2"), testCase.configCache)
@@ -551,6 +557,11 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 			t.Setenv("CX_STUB_ARGV", filepath.Join(jail.root, "cx-argv"))
 
 			configPath := filepath.Join(jail.root, "config.json")
+			for _, account := range []string{"1", "2", "3"} {
+				if err := os.MkdirAll(filepath.Join(jail.root, "accounts", account), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			content, err := json.Marshal(map[string]any{
 				"version": 1,
 				"accounts": []map[string]any{

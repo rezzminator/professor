@@ -1,14 +1,8 @@
 package installer
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
@@ -28,48 +22,6 @@ func accountSettingsLeftovers(
 	}
 	leftovers := settingsLeftovers(document, home, owned, ledgerReadable)
 	return leftovers, nil
-}
-
-func stripAccountSettings(raw []byte, home string, owned settingsHookCounts) ([]byte, []string, error) {
-	document, err := parseAccountDocument(raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := validateAccountHooks(document); err != nil {
-		return nil, nil, err
-	}
-	removed := settingsLeftovers(document, home, owned, true)
-	if len(removed) == 0 {
-		return raw, nil, nil
-	}
-	commands := map[string]bool{}
-	for _, hook := range claudeHookTemplates(home) {
-		commands[hook.Command] = true
-	}
-	counts := settingsHookCounts{}
-	for key, count := range countSettingsHookCommands(document) {
-		if commands[key.Command] {
-			counts[key] = count
-		} else if owned[key] > 0 {
-			counts[key] = owned[key]
-		}
-	}
-	dropMisplacedTemplateHooks(document, claudeHookTemplates(home), home+"/.local/bin/pfm")
-	removeOwnedSettingsHooks(document, counts)
-	removeRetiredHookCommands(document, home+"/.local/bin/pfm")
-	pruneAccountHooks(document)
-	if status, ok := document["statusLine"].(map[string]any); ok && ownedStatusCommand(home, status[configCommandKey]) {
-		delete(document, "statusLine")
-	}
-	if status, ok := document[subagentStatusLineKey].(map[string]any); ok &&
-		status[configCommandKey] == claudelaunch.SubagentStatusLineCommand(home) {
-		delete(document, subagentStatusLineKey)
-	}
-	updated, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return nil, nil, fmt.Errorf("encode account settings: %w", err)
-	}
-	return append(updated, '\n'), removed, nil
 }
 
 func settingsLeftovers(document map[string]any, home string, owned settingsHookCounts, ledgerReadable bool) []string {
@@ -144,22 +96,6 @@ func validateAccountHooks(document map[string]any) error {
 	return nil
 }
 
-func pruneAccountHooks(document map[string]any) {
-	events, ok := document["hooks"].(map[string]any)
-	if !ok {
-		return
-	}
-	for event, value := range events {
-		entries := value.([]any)
-		if len(entries) == 0 {
-			delete(events, event)
-		}
-	}
-	if len(events) == 0 {
-		delete(document, "hooks")
-	}
-}
-
 // mcpShaped reports whether a registration under name is in a pfm shape; nil
 // judges by the ledger alone.
 type mcpShaped func(name string, registration map[string]any) bool
@@ -176,32 +112,6 @@ func accountMCPLeftovers(raw []byte, owned []string, shaped mcpShaped) ([]string
 		return nil, err
 	}
 	return ownedMCPNames(servers, owned, shaped), nil
-}
-
-func stripAccountMCP(raw []byte, owned []string, shaped mcpShaped) ([]byte, []string, error) {
-	document, err := parseAccountDocument(raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	servers, err := accountMCPServers(document)
-	if err != nil {
-		return nil, nil, err
-	}
-	removed := ownedMCPNames(servers, owned, shaped)
-	if len(removed) == 0 {
-		return raw, nil, nil
-	}
-	for _, name := range removed {
-		delete(servers, strings.TrimPrefix(name, "mcpServers."))
-	}
-	if len(servers) == 0 {
-		delete(document, "mcpServers")
-	}
-	updated, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return nil, nil, fmt.Errorf("encode account MCP registry: %w", err)
-	}
-	return append(updated, '\n'), removed, nil
 }
 
 func accountMCPServers(document map[string]any) (map[string]any, error) {
@@ -261,110 +171,4 @@ func ownedMCPNames(servers map[string]any, owned []string, shaped mcpShaped) []s
 	}
 	sort.Strings(result)
 	return result
-}
-
-// classifyAccountSettings judges each physical settings file once: accounts
-// whose settings.json resolves to one file share it, the first carries the
-// verdict for that file and the others report ok, shared. A settings.json link
-// is shared settings only when it resolves to a regular file inside HOME.
-func classifyAccountSettings(env LayoutEnv) []LayoutFinding {
-	dirs := accountDirs(env)
-	ledgerPath := settingsHookOwnershipPath(env.ManagedRoot)
-	ownership, _, ledgerErr := readSettingsHookOwnership(ledgerPath)
-	sharers := map[string][]string{}
-	for _, dir := range dirs {
-		physical := physicalSettingsPath(filepath.Join(dir, "settings.json"))
-		sharers[physical] = append(sharers[physical], dir)
-	}
-	findings := make([]LayoutFinding, 0, len(dirs))
-	for _, dir := range dirs {
-		path := filepath.Join(dir, "settings.json")
-		physical := physicalSettingsPath(path)
-		if first := sharers[physical][0]; first != dir {
-			findings = append(findings, LayoutFinding{
-				Row: layoutRowAccountSettings, Verdict: VerdictOK, Path: path, Source: physical,
-				Detail: "shared with " + filepath.Join(first, "settings.json"),
-			})
-			continue
-		}
-		finding, info, exists := layoutLstat(layoutRowAccountSettings, path)
-		if ledgerErr != nil {
-			finding.Err, finding.Source, finding.Detail = ledgerErr, ledgerPath, layoutOwnershipLedger
-		} else if finding.Err == nil && exists {
-			judgeAccountSettings(env, &finding, info, ownership[physical])
-		}
-		if finding.Verdict != VerdictOK {
-			live := []string{}
-			for _, sharer := range sharers[physical] {
-				pids, err := liveChatPIDs(env.ProcRoot, sharer)
-				if err != nil {
-					finding.Err = err
-					break
-				}
-				live = append(live, pids...)
-			}
-			if finding.Err == nil && len(live) > 0 {
-				finding.Verdict, finding.Detail = VerdictRefuse, "live chats: "+strings.Join(live, ",")
-			}
-		}
-		findings = append(findings, finding)
-	}
-	return findings
-}
-
-// judgeAccountSettings marks an existing account settings.json strip when it
-// carries pfm-owned entries, reading through a link to its shared target.
-func judgeAccountSettings(env LayoutEnv, finding *LayoutFinding, info fs.FileInfo, owned settingsHookCounts) {
-	if info.Mode()&os.ModeSymlink != 0 {
-		target, refusal, err := accountSettingsLink(env, finding.Path)
-		finding.Source = target
-		if err != nil || refusal != "" {
-			finding.Err = err
-			if refusal != "" {
-				finding.Verdict, finding.Detail = VerdictRefuse, refusal
-			}
-			return
-		}
-	} else if !info.Mode().IsRegular() {
-		finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
-		return
-	}
-	raw, err := os.ReadFile(finding.Path)
-	if err != nil {
-		finding.Err = err
-		return
-	}
-	leftovers, err := accountSettingsLeftovers(raw, env.Home, owned, true)
-	if err != nil {
-		finding.Err = err
-	} else if len(leftovers) > 0 {
-		finding.Verdict, finding.Detail = VerdictStrip, strings.Join(leftovers, ",")
-	}
-}
-
-// accountSettingsLink resolves an account settings.json link: its target when
-// that is a regular file inside HOME, otherwise the reason it is refused.
-func accountSettingsLink(env LayoutEnv, path string) (target, refusal string, err error) {
-	target, err = filepath.EvalSymlinks(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", "dangling link", nil
-	}
-	if err != nil {
-		return "", "", err
-	}
-	inside := false
-	for _, home := range layoutHomes(env) {
-		inside = inside || pathWithin(target, home)
-	}
-	if !inside {
-		return target, "link outside HOME: " + target, nil
-	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return target, "", err
-	}
-	if !info.Mode().IsRegular() {
-		return target, layoutNotRegular, nil
-	}
-	return target, "", nil
 }

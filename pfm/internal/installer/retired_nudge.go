@@ -47,7 +47,7 @@ func (installer *engine) removeRetiredNudgeStateWith(
 		return nil
 	}
 	message := "remove retired compact-nudge state from " + sidDir
-	return installer.changePaths(message, targets, func() error {
+	return installer.change(message, func() error {
 		for _, path := range targets {
 			if err := remove(path); err != nil {
 				installer.warnRetiredNudge(path, err)

@@ -210,14 +210,13 @@ func (installer *engine) wireCodexHooks() error {
 			ownership[physical] = nextOwned
 		}
 
-		hookPaths, backup := []string{physical}, ""
+		backup := ""
 		if existed {
 			backup = availableBackup(path, installer.stamp)
-			hookPaths = append(hookPaths, backup)
 		}
 		if !changed {
 			installer.ok(path + " wiring")
-		} else if err := installer.changePaths(changeDescription(path, existed), hookPaths, func() error {
+		} else if err := installer.change(changeDescription(path, existed), func() error {
 			if existed {
 				if err := copyBackup(path, backup); err != nil {
 					return fmt.Errorf("backup %s: %w", path, err)
@@ -256,13 +255,8 @@ func (installer *engine) wireCodexHooks() error {
 		if !codexappendix.TrustRecorded(account) {
 			continue
 		}
-		if err := installer.changePaths(
+		if err := installer.change(
 			"remove retired appendix hook trust "+account,
-			// codexappendix.Unregister rewrites config.toml and removes its trust receipt.
-			[]string{
-				filepath.Join(account, "config.toml"),
-				filepath.Join(account, ".professor-appendix-trust.json"),
-			},
 			func() error { return codexappendix.Unregister(account) },
 		); err != nil {
 			return err

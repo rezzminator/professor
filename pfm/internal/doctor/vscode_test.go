@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // TestDoctorReportsEachVSCodeProductLinkAndIndexState pins issue #24 9b: no
@@ -68,7 +66,7 @@ func TestDoctorReportsEachVSCodeProductLinkAndIndexState(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	warnings := printVSCodeDoctor(&out, home, config.Config{})
+	warnings := printVSCodeDoctor(&out, home, "")
 	output := out.String()
 	rows := 0
 	for _, line := range strings.Split(output, "\n") {
@@ -90,11 +88,54 @@ func TestDoctorReportsEachVSCodeProductLinkAndIndexState(t *testing.T) {
 	}
 
 	var absent bytes.Buffer
-	absentWarnings := printVSCodeDoctor(&absent, t.TempDir(), config.Config{})
+	absentWarnings := printVSCodeDoctor(&absent, t.TempDir(), "")
 	if !strings.Contains(absent.String(), "doctor: vscode not managed (pfm install --vscode never ran)") {
 		t.Fatalf("ledger-absent host did not report not-managed:\n%s", absent.String())
 	}
 	if absentWarnings != 0 {
 		t.Fatalf("ledger-absent host warnings = %d, want 0", absentWarnings)
+	}
+}
+
+func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
+	for _, value := range []string{"", "other", "primary"} {
+		t.Run(value, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			raw := `{"claudeCode.environmentVariables":[{"name":"CLAUDE_CONFIG_DIR","value":"` + value + `"}]}`
+			if err := os.WriteFile(settings, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			root := filepath.Join(home, ".local", "share", "pfm", "install")
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			ledger, _ := json.Marshal(
+				map[string]any{
+					"version": 1,
+					"files": []map[string]any{
+						{"path": settings, "platform": "linux", "envOwned": true, "envValue": value},
+					},
+				},
+			)
+			if err := os.WriteFile(filepath.Join(root, "vscode-ownership.json"), ledger, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			warnings := printVSCodeDoctor(&out, home, "primary")
+			want := 0
+			line := ""
+			switch value {
+			case "":
+				want = 1
+				line = "doctor: vscode settings=" + settings + " CLAUDE_CONFIG_DIR missing — run pfm install --yes --vscode\n"
+			case "other":
+				want = 1
+				line = "doctor: vscode settings=" + settings + " CLAUDE_CONFIG_DIR=other, want primary — run pfm install --yes --vscode\n"
+			}
+			if warnings != want || (line != "" && !strings.Contains(out.String(), line)) {
+				t.Fatalf("warnings=%d got %q want %q", warnings, out.String(), line)
+			}
+		})
 	}
 }

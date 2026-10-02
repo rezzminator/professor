@@ -115,9 +115,8 @@ func (installer *engine) clearFullscreenAutoDisable() error {
 			return fmt.Errorf("clear claude fullscreen auto-disable: stat %s: %w", physical, err)
 		}
 		mode := info.Mode().Perm()
-		if err := installer.changePaths(
+		if err := installer.change(
 			"clear Claude's fullscreen auto-disable in "+physical,
-			[]string{physical},
 			func() error { return atomicfile.Write(physical, cleared, mode) },
 		); err != nil {
 			return fmt.Errorf("clear claude fullscreen auto-disable in %s: %w", physical, err)

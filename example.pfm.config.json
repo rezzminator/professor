@@ -39,14 +39,12 @@
     "servers": {
       "chat": {
         "enabled": false
-      },
-      "harvester": {
-        "enabled": false
       }
     },
     "http": {
       "port": 18377
     },
+    "thirdParty": {},
     "authToken": null
   },
   "ask": {

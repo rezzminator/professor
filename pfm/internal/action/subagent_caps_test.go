@@ -62,9 +62,9 @@ func TestLauncherRunCarriesSubagentCaps(t *testing.T) {
 	run, err := LauncherRun(
 		"/opt/claude/claude",
 		[]string{"--resume", "abc"},
-		"/cfg",
 		t.TempDir(),
-		pfmconfig.ClaudePrefs{MaxSubagentSpawnDepth: 12, MaxConcurrentSubagents: 40},
+		t.TempDir(),
+		pfmconfig.Config{}, pfmconfig.ClaudePrefs{MaxSubagentSpawnDepth: 12, MaxConcurrentSubagents: 40},
 	)
 	if err != nil {
 		t.Fatalf("LauncherRun: %v", err)

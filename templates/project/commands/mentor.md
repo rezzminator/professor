@@ -52,10 +52,6 @@ Lead with the recommendation. Then: what to do, as concrete steps carrying the c
 
 Derive the journey from the references, never from this file: the stage table in `docs/business/startup-strategy.md` sets the phases (months, revenue, milestones, raise size), `docs/business/founder-formation-tracker.md` sets where the founder actually stands now, `docs/business/company-formation.md` carries the formation, trademark, and R&D-incentive steps, and `docs/epics/legal/manifest.md` carries the certification sequence. Give each step its cost, its owner, and the dependency that gates it.
 
-## Ghostwriter
-
-External-facing deliverables — one-pagers, pitch decks, investor updates, grant narratives, partnership proposals, conference submissions — get drafted normally, then run through `~/.claude/skills/ghostwriter/SKILL.md` Mode B on the `mentor` profile (`~/.claude/skills/ghostwriter/profiles/mentor/profile.md`), which carries the voice rules. General startup or investor essays where an essayistic tone fits use the `paul-graham` profile instead. Internal strategy analysis, quick answers, and reference-doc updates skip it.
-
 ## Rules
 
 - Never invent a tax rate, legal requirement, or funding amount — cite a reference document or say you don't know

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
@@ -15,6 +17,7 @@ func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
 	configDirs := []string{
 		filepath.Join(home, ".claude"),
 		filepath.Join(home, ".cc", "4"),
+		filepath.Join(home, ".cc", "7"),
 	}
 	publicCommands := []string{
 		"cc-fleet", "cc-ls", "cc-open", "cc-swap", "cc-revive", "cc-clean",
@@ -46,8 +49,11 @@ func TestApplyRetiresLegacyCCCommandsAcrossConfiguredAccounts(t *testing.T) {
 	writeFixture(t, accountData, "keep\n")
 
 	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, ConfigDirs: configDirs, Runner: &fakeRunner{},
+		MCPConfigPath:  testConfigPath(t),
+		Mode:           ModeApply,
+		Home:           home,
+		ClaudeAccounts: []pfmconfig.Account{{ID: 4, ConfigDir: configDirs[1]}, {ID: 7, ConfigDir: configDirs[2]}},
+		Runner:         &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +92,11 @@ func TestApplyQuarantinesExactNamedOperatorFilesBeforeRetirement(t *testing.T) {
 	}
 
 	if _, err := Run(context.Background(), Options{
-		MCPConfigPath: testConfigPath(t),
-		Mode:          ModeApply, Home: home, ConfigDirs: []string{config}, Runner: &fakeRunner{},
+		MCPConfigPath:  testConfigPath(t),
+		Mode:           ModeApply,
+		Home:           home,
+		ClaudeAccounts: []pfmconfig.Account{{ID: 4, ConfigDir: config}},
+		Runner:         &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}

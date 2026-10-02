@@ -1,8 +1,6 @@
 package installer
 
 import (
-	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -39,110 +37,9 @@ func rewriteCommandFields(value any, rewrite func(string) string) bool {
 	return changed
 }
 
-// rewriteMemoryHelperHookPaths changes only complete, no-argument shell
-// command forms for a memory-wire helper whose old file was independently
-// proven installer-owned and paired with a ready destination. It deliberately
-// does not use rewriteCommandFields: command-looking values outside hooks and
-// compound shell commands are operator content.
-func rewriteMemoryHelperHookPaths(raw []byte, paths map[string]string, home string) ([]byte, bool, error) {
-	var document map[string]any
-	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
-		return nil, false, err
-	}
-	if document == nil {
-		return nil, false, fmt.Errorf("settings must be an object")
-	}
-	commands := make(map[string]string)
-	for oldPath, newPath := range paths {
-		addMemoryHelperCommandForms(commands, oldPath, newPath)
-		defaultOld := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
-		if filepath.Clean(oldPath) == filepath.Clean(defaultOld) {
-			addMemoryHelperCommandForms(
-				commands,
-				"$HOME/.claude/scripts/cc-memory-wire.sh",
-				"$HOME/.claude/scripts/memory-wire.sh",
-			)
-		}
-	}
-
-	changed := false
-	events, ok := document["hooks"].(map[string]any)
-	if _, present := document["hooks"]; present && !ok {
-		return nil, false, fmt.Errorf("settings hooks must be an object")
-	}
-	for _, eventValue := range events {
-		entries, ok := eventValue.([]any)
-		if !ok {
-			return nil, false, fmt.Errorf("settings hook event must be an array")
-		}
-		for _, entryValue := range entries {
-			entry, ok := entryValue.(map[string]any)
-			if !ok {
-				return nil, false, fmt.Errorf("settings hook entry must be an object")
-			}
-			hooks, ok := entry["hooks"].([]any)
-			if !ok {
-				return nil, false, fmt.Errorf("settings hook entry hooks must be an array")
-			}
-			for _, hookValue := range hooks {
-				hook, ok := hookValue.(map[string]any)
-				if !ok {
-					return nil, false, fmt.Errorf("settings hook must be an object")
-				}
-				command, _ := hook[configCommandKey].(string)
-				if replacement, ok := commands[command]; ok && hook[configTypeKey] == commandType {
-					hook[configCommandKey] = replacement
-					changed = true
-				} else {
-					// Refusal is intentionally more conservative than rewriting:
-					// split quotes and alternate HOME spellings still reference the
-					// same owned helper, even though we do not parse shell programs.
-					unquoted := strings.NewReplacer(`"`, "", "'", "").Replace(command)
-					for oldPath := range paths {
-						referencesOld := strings.Contains(unquoted, oldPath)
-						if relative, err := filepath.Rel(
-							home,
-							oldPath,
-						); err == nil && relative != ".." &&
-							!strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-							for _, prefix := range []string{"$HOME/", "${HOME}/", "~/"} {
-								referencesOld = referencesOld ||
-									strings.Contains(unquoted, prefix+filepath.ToSlash(relative))
-							}
-						}
-						if referencesOld {
-							return nil, false, fmt.Errorf(
-								"memory helper hook requires manual migration before retiring %s: %q",
-								oldPath,
-								command,
-							)
-						}
-					}
-				}
-			}
-		}
-	}
-	if !changed {
-		return raw, false, nil
-	}
-	updated, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return nil, false, fmt.Errorf("encode settings: %w", err)
-	}
-	return append(updated, '\n'), true, nil
-}
-
-func addMemoryHelperCommandForms(commands map[string]string, oldPath, newPath string) {
-	for _, shell := range []string{"", "sh ", "bash "} {
-		for _, quote := range []string{"", `"`, `'`} {
-			commands[shell+quote+oldPath+quote] = shell + quote + newPath + quote
-		}
-	}
-}
-
 // retiredHookCommands is the shared table of subcommands old account settings
-// or Codex hooks may carry. The account stripper and Codex hook writer remove
-// them; the Codex doctor probe reports them as STALE.
+// or Codex hooks may carry. The pfm-settings host check reports them in account settings;
+// the Codex hook writer removes them and the Codex doctor probe reports them as STALE.
 var retiredHookCommands = []struct {
 	Name       string
 	Subcommand string
@@ -171,8 +68,8 @@ var retiredHookShimHints = []struct {
 }
 
 // RetiredInternalHook reports whether name is a `pfm internal` subcommand an
-// older pfm registered as a hook and this one retired. Install strips it from
-// the account settings, but a Claude session keeps the hooks it read at start
+// older pfm registered as a hook and this one retired. Install refuses while account settings carry it (host check pfm-settings),
+// but a Claude session keeps the hooks it read at start
 // and still runs it until that session restarts.
 func RetiredInternalHook(name string) bool {
 	for _, retired := range retiredHookCommands {

@@ -1,6 +1,7 @@
 package run
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -94,5 +95,59 @@ func TestResolveUnknownClaudeAccountNamesRosterError(t *testing.T) {
 	_, err := Resolve(Request{Config: machine, Engine: pfmengine.Claude, Account: 99})
 	if err == nil || !strings.Contains(err.Error(), "account 99 is not in the configured roster") {
 		t.Fatalf("Resolve unknown account error = %v", err)
+	}
+}
+
+func TestResolveChecksOnlyClaudeConfigDir(t *testing.T) {
+	for _, engine := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode} {
+		for _, withoutAccount := range []bool{false, true} {
+			name := string(engine) + "/roster"
+			if withoutAccount {
+				name = string(engine) + "/without-account"
+			}
+			t.Run(name, func(t *testing.T) {
+				binary := writeEngineStub(t, "exit 0")
+				dir := filepath.Join(t.TempDir(), string(engine))
+				if engine == pfmengine.OpenCode {
+					dir = filepath.Join(filepath.Dir(dir), "opencode")
+				}
+				machine := pfmconfig.Config{
+					Claude:   pfmconfig.ClaudePrefs{Binary: binary},
+					Codex:    pfmconfig.CodexPrefs{Binary: binary},
+					OpenCode: pfmconfig.OpenCodePrefs{Binary: binary},
+				}
+				request := Request{Config: machine, Engine: engine, Native: true, Model: "test-model"}
+				if withoutAccount {
+					request.WithoutAccount = true
+					name := pfmengine.MustLookup(engine).HomeEnv
+					if engine == pfmengine.OpenCode {
+						request.Env = []string{"XDG_DATA_HOME=" + filepath.Dir(dir)}
+					} else {
+						request.Env = []string{name + "=" + dir}
+					}
+				} else {
+					request.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: dir}}
+					request.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: dir}}
+					request.Config.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: dir}}
+				}
+				resolved, err := Resolve(request)
+				if engine == pfmengine.Claude {
+					want := dir + " does not exist — run pfm install"
+					if !withoutAccount {
+						want = "account 1: " + want
+					}
+					if err == nil || err.Error() != want {
+						t.Fatalf("Resolve error=%v, want %q", err, want)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resolved.ConfigDir != dir {
+					t.Fatalf("ConfigDir=%q, want %q", resolved.ConfigDir, dir)
+				}
+			})
+		}
 	}
 }

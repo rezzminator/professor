@@ -3,6 +3,7 @@ package action
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +44,7 @@ func TestQuoteRoundTripsHostileWords(t *testing.T) {
 }
 
 func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
+	home := t.TempDir()
 	id := "11111111-1111-4111-8111-111111111111"
 	request := Request{
 		Row: compose.Row{
@@ -53,7 +55,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		PrimaryAccount: 2,
 		Cache1H:        true,
 		Bunker:         true,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-1700000000-123-456",
 	}
 	plan, err := synthesizeWithTestConfig(request)
@@ -125,9 +127,10 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 }
 
 func TestAgentRouteCarriesCacheFlag(t *testing.T) {
+	home := t.TempDir()
 	plan, err := synthesizeWithTestConfig(Request{
 		Row:            compose.Row{Kind: compose.Agent, ID: "22222222-2222-4222-8222-222222222222", CWD: "/work"},
-		PrimaryAccount: 2, Cache1H: true, Home: "/home/test", FreshSocket: "cc-agent-cache",
+		PrimaryAccount: 2, Cache1H: true, Home: home, FreshSocket: "cc-agent-cache",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +155,8 @@ func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
 		{"agent fallback", compose.Agent, 3, 3},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			machine := testMachineConfig("/home/test")
+			home := t.TempDir()
+			machine := testMachineConfig(home)
 			machine.Accounts[2].Claude = &pfmconfig.ClaudePrefs{Binary: "/bin/claude-three"}
 			plan, err := synthesizeWithTestConfig(Request{
 				Row: compose.Row{
@@ -162,14 +166,14 @@ func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
 					Account: scenario.rowAccount,
 				},
 				PrimaryAccount: 2,
-				Home:           "/home/test",
+				Home:           home,
 				FreshSocket:    "cc-account-test",
 				Config:         machine,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantDir := pfmconfig.DefaultAccountDir("/home/test", scenario.want)
+			wantDir := pfmconfig.DefaultAccountDir(home, scenario.want)
 			if !strings.Contains(plan.Run, "CLAUDE_CONFIG_DIR="+Quote(wantDir)) || plan.Record == nil ||
 				plan.Record.Account != scenario.want {
 				t.Fatalf("run = %q, record = %+v; want account %d", plan.Run, plan.Record, scenario.want)
@@ -182,6 +186,7 @@ func TestDeadClaudeResumeUsesRecordedAccount(t *testing.T) {
 }
 
 func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
+	home := t.TempDir()
 	// An account outside the launcher's two-seat roster must never reach a
 	// command line.
 	for _, account := range []int{0, 4, 9} {
@@ -191,7 +196,7 @@ func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 				CWD:  "/work/project",
 			},
 			PrimaryAccount: account,
-			Home:           "/home/test",
+			Home:           home,
 			FreshSocket:    "cc-roster-test",
 		})
 		if err == nil || !strings.Contains(err.Error(), "requested Claude account") {
@@ -205,7 +210,7 @@ func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 				CWD:  "/work/project",
 			},
 			PrimaryAccount: account,
-			Home:           "/home/test",
+			Home:           home,
 			FreshSocket:    "cc-roster-test",
 		}); err != nil {
 			t.Fatalf("account %d rejected: %v", account, err)
@@ -214,6 +219,7 @@ func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 }
 
 func TestAgentRouteUsesKilledInternalWiring(t *testing.T) {
+	home := t.TempDir()
 	plan, err := synthesizeWithTestConfig(Request{
 		Row: compose.Row{
 			Kind: compose.Agent,
@@ -221,7 +227,7 @@ func TestAgentRouteUsesKilledInternalWiring(t *testing.T) {
 			CWD:  "/work/project",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-1700000001-123-456",
 	})
 	if err != nil {
@@ -234,6 +240,7 @@ func TestAgentRouteUsesKilledInternalWiring(t *testing.T) {
 }
 
 func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
+	home := t.TempDir()
 	row := compose.Row{
 		Kind:        compose.LiveCodex,
 		Socket:      "cx-1700000000-123-456",
@@ -243,7 +250,7 @@ func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
 	plan, err := synthesizeWithTestConfig(Request{
 		Row:            row,
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +263,7 @@ func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
 	plan, err = synthesizeWithTestConfig(Request{
 		Row:            row,
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -271,6 +278,7 @@ func TestCodexLiveUsesOnlyVerifiedWindow(t *testing.T) {
 // "existing Live attach synthesis" the fix promises, with no other operation
 // reachable through this row's Kind.
 func TestBootingRowAttachesLikeAnOrdinaryLiveRow(t *testing.T) {
+	home := t.TempDir()
 	bootingLine, err := synthesizeWithTestConfig(Request{
 		Row: compose.Row{
 			Kind:        compose.Booting,
@@ -279,7 +287,7 @@ func TestBootingRowAttachesLikeAnOrdinaryLiveRow(t *testing.T) {
 			SessionName: "cc-new-fixture-1",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +299,7 @@ func TestBootingRowAttachesLikeAnOrdinaryLiveRow(t *testing.T) {
 			SessionName: "cc-new-fixture-1",
 		},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -317,13 +325,14 @@ func TestBootingRowAttachesLikeAnOrdinaryLiveRow(t *testing.T) {
 	if _, err := synthesizeWithTestConfig(Request{
 		Row:            compose.Row{Kind: compose.Booting},
 		PrimaryAccount: 1,
-		Home:           "/home/test",
+		Home:           home,
 	}); err == nil {
 		t.Fatal("socket-less booting row synthesized a plan instead of erroring")
 	}
 }
 
 func TestAgentFailureNetFallsBackToSanitizedResume(t *testing.T) {
+	home := t.TempDir()
 	root := t.TempDir()
 	pfmScript := filepath.Join(root, "pfm")
 	claudeScript := filepath.Join(root, "claude")
@@ -352,11 +361,11 @@ exit 2
 			Kind:      compose.Agent,
 			ID:        id,
 			CWD:       "/work/agent",
-			ConfigDir: "/home/test/.cc/2",
+			ConfigDir: pfmconfig.DefaultAccountDir(home, 2),
 		},
 		PrimaryAccount: 2,
 		Cache1H:        true,
-		Home:           "/home/test",
+		Home:           home,
 		FreshSocket:    "cc-1700000001-123-456",
 	})
 	if err != nil {
@@ -386,7 +395,7 @@ exit 2
 	line := string(content)
 	if !strings.HasPrefix(line, "argv=--resume "+id+" --settings ") ||
 		!strings.Contains(line, "\nsid=unset\n") || !strings.Contains(line, "\ncode=unset\n") ||
-		!strings.Contains(line, "\ncfg=/home/test/.cc/2\n") ||
+		!strings.Contains(line, "\ncfg="+pfmconfig.DefaultAccountDir(home, 2)+"\n") ||
 		!strings.Contains(line, "\nenable=unset\n") || !strings.Contains(line, "\nforce=unset\n") ||
 		!strings.Contains(line, "\nbase=unset\n") || !strings.Contains(line, "\ntoken=unset\n") ||
 		!strings.Contains(line, "\ngateway=unset\n") {
@@ -398,11 +407,13 @@ exit 2
 }
 
 func TestSynthesizeRejectsNUL(t *testing.T) {
+	home := t.TempDir()
 	_, err := synthesizeWithTestConfig(Request{
 		Row: compose.Row{
 			Kind: compose.NewClaude,
 			CWD:  "/work/a\x00b",
 		},
+		Home:           home,
 		PrimaryAccount: 1,
 	})
 	if err == nil || !strings.Contains(err.Error(), "NUL") {
@@ -412,8 +423,6 @@ func TestSynthesizeRejectsNUL(t *testing.T) {
 
 func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 	prompt := "Explain v0.61.2, ask for approval, then run pfm update."
-	machine := testMachineConfig("/home/test")
-	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/home/test/.local/share/opencode"}}
 
 	tests := []struct {
 		name string
@@ -438,8 +447,13 @@ func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{
+				{ID: 1, Home: filepath.Join(home, ".local", "share", "opencode")},
+			}
 			plan, err := Synthesize(Request{
-				Row: test.row, PrimaryAccount: 1, Home: "/home/test",
+				Row: test.row, PrimaryAccount: 1, Home: home,
 				FreshSocket: "engine-update-fixture", Config: machine,
 				Prompt: prompt,
 			})
@@ -457,12 +471,13 @@ func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 }
 
 func TestPickerLaunchPromptCannotLeakIntoResumeOrLiveRoutes(t *testing.T) {
+	home := t.TempDir()
 	for _, row := range []compose.Row{
 		{Kind: compose.ResumeClaude, ID: "11111111-1111-4111-8111-111111111111", CWD: "/work/project"},
 		{Kind: compose.LiveClaude, ID: "11111111-1111-4111-8111-111111111111", Socket: "cc-live"},
 	} {
 		_, err := synthesizeWithTestConfig(Request{
-			Row: row, PrimaryAccount: 1, Home: "/home/test",
+			Row: row, PrimaryAccount: 1, Home: home,
 			FreshSocket: "cc-new", Prompt: "must not disappear",
 		})
 		if err == nil || !strings.Contains(err.Error(), "initial prompt is not valid") {
@@ -519,7 +534,7 @@ func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T)
 		ResumeCodex: pfmengine.Codex,
 	}
 	seen := make(map[Route]bool, len(engineFor))
-	for _, request := range stressRequests() {
+	for _, request := range stressRequests(t.TempDir()) {
 		plan, err := Synthesize(request)
 		if err != nil {
 			t.Fatal(err)
@@ -602,7 +617,14 @@ func TestLauncherIdentity(t *testing.T) {
 				t.Fatalf("LauncherIdentity(%q) = %q, continuing %t; want %q, %t",
 					scenario.args, identity, continuing, scenario.identity, scenario.continuing)
 			}
-			run, err := LauncherRun("/bin/claude", scenario.args, "", t.TempDir(), pfmconfig.ClaudePrefs{})
+			run, err := LauncherRun(
+				"/bin/claude",
+				scenario.args,
+				"",
+				t.TempDir(),
+				pfmconfig.Config{},
+				pfmconfig.ClaudePrefs{},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -618,5 +640,39 @@ func TestLauncherIdentity(t *testing.T) {
 				t.Fatalf("pfm-added --session-id count %d (fresh=%t): %q", added, fresh, run)
 			}
 		})
+	}
+}
+
+// TestLauncherRunCarriesTheMachineMCP pins that a plain `claude` typed in a
+// shell (shim → pfm internal launch → LauncherRun) gets the same MCP servers
+// as a pfm-rendered launch: no account's .claude.json carries them any more,
+// so a launcher that drops the machine's MCP leaves the session without
+// pfm's professor server and every mcp.thirdParty entry.
+func TestLauncherRunCarriesTheMachineMCP(t *testing.T) {
+	machine := pfmconfig.Config{
+		MCPServers: map[string]pfmconfig.MCPServer{pfmconfig.MCPServerChat: {Enabled: true}},
+		MCP: pfmconfig.MCPConfig{
+			ThirdParty: map[string]json.RawMessage{"browser": json.RawMessage(`{"command":"browser-mcp"}`)},
+		},
+	}
+	run, err := LauncherRun("/bin/claude", nil, t.TempDir(), t.TempDir(), machine, pfmconfig.ClaudePrefs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var servers struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	payload, err := os.ReadFile(parsedShell(t, run).MCPConfig)
+	if err != nil {
+		t.Fatalf("launcher mcp-config file unreadable: %v in %q", err, run)
+	}
+	if err := json.Unmarshal(payload, &servers); err != nil {
+		t.Fatalf("launcher mcp-config unreadable: %v in %q", err, run)
+	}
+	if _, found := servers.MCPServers[pfmconfig.MCPServerProfessor]; !found {
+		t.Fatalf("launcher drops pfm's professor server: %q", run)
+	}
+	if string(servers.MCPServers["browser"]) != `{"command":"browser-mcp"}` {
+		t.Fatalf("launcher drops mcp.thirdParty browser: %q", run)
 	}
 }

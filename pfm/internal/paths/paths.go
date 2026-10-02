@@ -42,13 +42,12 @@ const (
 func SIDScratchDirs() []string { return []string{SIDScratchDoctor, SIDScratchChatLoads} }
 
 const (
-	EnvConfig        = "PFM_CONFIG"
-	EnvUpdateInstall = "PFM_UPDATE_INSTALL"
-	EnvCacheDB       = "PFM_CACHE_DB"
-	EnvStateDB       = "PFM_STATE_DB"
-	EnvSIDDir        = "PFM_SID_DIR"
-	EnvClaudeRoots   = "PFM_CLAUDE_ROOTS"
-	EnvCodexHome     = "PFM_CODEX_ROOT"
+	EnvConfig      = "PFM_CONFIG"
+	EnvCacheDB     = "PFM_CACHE_DB"
+	EnvStateDB     = "PFM_STATE_DB"
+	EnvSIDDir      = "PFM_SID_DIR"
+	EnvClaudeRoots = "PFM_CLAUDE_ROOTS"
+	EnvCodexHome   = "PFM_CODEX_ROOT"
 	// EnvOpenCodeRoot jails OpenCode's data home (~/.local/share/opencode),
 	// the directory holding its SQLite session store opencode.db.
 	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
@@ -376,11 +375,11 @@ func DefaultCacheDB(home string) string {
 const legacyDBName = "fleet.db"
 
 // ErrLegacyPending marks a database create refused because the legacy
-// database it replaces has not been migrated by pfm install yet.
+// database it replaces still waits for the operator to apply pfm doctor's fix.
 var ErrLegacyPending = errors.New("legacy database not migrated")
 
-// LegacyStateDB is where the authoritative state database lived before the
-// host layout moved it to DefaultStateDB.
+// LegacyStateDB names the old state database; pfm doctor gives the fix for
+// moving it to DefaultStateDB.
 func LegacyStateDB(home string) string {
 	return filepath.Join(home, ".cc", legacyDBName)
 }
@@ -393,20 +392,20 @@ func HarvesterCacheDir(home string) string {
 	return filepath.Join(home, ".professor", ".harvester-cache")
 }
 
-// LegacyHarvesterCacheDir is the pre-rename default cache directory the host
-// layout moves to HarvesterCacheDir on `pfm install`.
+// LegacyHarvesterCacheDir names the pre-rename default cache directory;
+// pfm doctor gives the fix for moving it to HarvesterCacheDir.
 func LegacyHarvesterCacheDir(home string) string {
 	return filepath.Join(home, ".professor", ".cache")
 }
 
-// LegacyCacheDB is where the derived cache database lived before the host
-// layout moved it to DefaultCacheDB.
+// LegacyCacheDB names the old cache database; pfm doctor gives the fix for
+// moving it to DefaultCacheDB.
 func LegacyCacheDB(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", legacyDBName)
 }
 
 // CheckLegacyPending refuses to let a caller create target while legacy still
-// waits for pfm install to move it: a fresh target beside unmigrated legacy
+// waits for the operator to apply pfm doctor's fix: a fresh target beside legacy
 // data forks the state. An existing target, or no legacy file, is nil. A stat
 // that fails for any reason but not-exist is an error, never read as absence.
 func CheckLegacyPending(target, legacy string) error {
@@ -425,7 +424,7 @@ func CheckLegacyPending(target, legacy string) error {
 		return fmt.Errorf("inspect %s: %w", legacy, err)
 	}
 	return fmt.Errorf(
-		"%w: %s not created while legacy %s still exists — run pfm install",
+		"%w: %s not created while legacy %s still exists — run pfm doctor for the fix",
 		ErrLegacyPending,
 		target,
 		legacy,
@@ -487,6 +486,13 @@ func LegacyGeneratedCodexAgentsDir(home string) string {
 // link points into this directory, and uninstall removes it with those links.
 func GeneratedClaudeAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
+}
+
+// ClaudeMCPConfigDir is the private (0700) directory holding each Claude
+// launch's --mcp-config file (claudelaunch.Render): third-party MCP entries
+// carry env values and headers that must never reach argv.
+func ClaudeMCPConfigDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "mcp-config")
 }
 
 // LegacyHarnessPromptsDir identifies the former managed prompt directory.

@@ -13,7 +13,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/obs"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 var updateRunner deps.Runner = obs.Runner(deps.RealRunner{})
@@ -196,12 +195,5 @@ func runUpdateCandidateCommand(
 }
 
 func updateSourceRepoEnv(sourceRepo string) []string {
-	environment := deps.EnvironmentWith("PFM_SOURCE_REPO", sourceRepo)
-	marked := environment[:0]
-	for _, entry := range environment {
-		if !strings.HasPrefix(entry, paths.EnvUpdateInstall+"=") {
-			marked = append(marked, entry)
-		}
-	}
-	return append(marked, paths.EnvUpdateInstall+"=1")
+	return deps.EnvironmentWith("PFM_SOURCE_REPO", sourceRepo)
 }

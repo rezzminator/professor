@@ -3,12 +3,12 @@ package doctor
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 var doctorPluginIDs = []string{
@@ -36,71 +36,83 @@ func writeDoctorInstalledPlugins(t *testing.T, dir string, ids ...string) {
 	}
 }
 
-func TestClaudePluginsDoctorNamesEachGapPerAccount(t *testing.T) {
-	home := t.TempDir()
-	complete := filepath.Join(home, ".claude")
-	partial := filepath.Join(home, ".cc", "2")
-	broken := filepath.Join(home, ".cc", "3")
-	fresh := filepath.Join(home, ".cc", "4")
-	shared := filepath.Join(home, ".cc", "5")
-	for _, dir := range []string{complete, partial, broken, fresh, shared} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeSettings := func(dir, content string) {
-		if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeSettings(complete, `{"enabledPlugins":{"cache-live-control@cache-live-control":true,`+
-		`"sub-agent-compact@sub-agent-compact":true,"agent-effort@agent-effort":true}}`)
-	writeDoctorInstalledPlugins(t, complete, doctorPluginIDs...)
-	writeSettings(partial, `{"enabledPlugins":{"cache-live-control@cache-live-control":true,`+
-		`"sub-agent-compact@sub-agent-compact":false,"agent-effort@agent-effort":true}}`)
-	writeDoctorInstalledPlugins(t, partial, doctorPluginIDs...)
-	// A directory where the file belongs fails the read for any uid.
-	if err := os.MkdirAll(filepath.Join(broken, "settings.json"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// Account 5 shares account 1's settings.json, as a symlinked seat does,
-	// but its own config dir installed only one plugin.
-	if err := os.Symlink(filepath.Join(complete, "settings.json"), filepath.Join(shared, "settings.json")); err != nil {
-		t.Fatal(err)
-	}
-	writeDoctorInstalledPlugins(t, shared, doctorPluginIDs[0])
-	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{
-		{ID: 1, ConfigDir: complete},
-		{ID: 2, ConfigDir: partial},
-		{ID: 3, ConfigDir: broken},
-		{ID: 4, ConfigDir: fresh},
-		{ID: 5, ConfigDir: shared},
-	}}
-	var output bytes.Buffer
-	tally := &doctorTally{}
-	printClaudePluginsDoctor(&output, machine, tally)
-	// The unreadable file is a failure; each missing plugin is a warning.
-	if tally.failures != 1 || tally.warnings != 3 {
-		t.Fatalf("failures=%d warnings=%d, want 1 and 3\n%s", tally.failures, tally.warnings, output.String())
-	}
-	for _, want := range []string{
-		"doctor: claude_plugins claude[1] ok\n",
-		"doctor: claude_plugins claude[2] plugin sub-agent-compact@sub-agent-compact not enabled — run pfm",
-		"doctor: claude_plugins claude[3] could not read " + filepath.Join(broken, "settings.json"),
-		"doctor: claude_plugins claude[4] skipped: no settings.json at " + filepath.Join(fresh, "settings.json"),
-		"doctor: claude_plugins claude[5] plugin sub-agent-compact@sub-agent-compact not installed in " + shared +
-			" — run pfm install --yes",
-		"doctor: claude_plugins claude[5] plugin agent-effort@agent-effort not installed in " + shared +
-			" — run pfm install --yes",
-	} {
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("output missing %q:\n%s", want, output.String())
-		}
-	}
-	if strings.Contains(output.String(), "claude[2] plugin cache-live-control") ||
-		strings.Contains(output.String(), "env CLAUDE_CODE_AUTO_COMPACT_WINDOW absent") ||
-		strings.Contains(output.String(), "claude[5] plugin cache-live-control") {
-		t.Fatalf("a present plugin or removed env check was reported missing:\n%s", output.String())
+func TestClaudePluginsDoctorStore(t *testing.T) {
+	for _, state := range []string{"clean", "disabled", "uninstalled", "absent", "settings unreadable", "record unreadable"} {
+		t.Run(state, func(t *testing.T) {
+			store := t.TempDir()
+			path := filepath.Join(store, "settings.json")
+			enabled := map[string]bool{}
+			for _, id := range doctorPluginIDs {
+				enabled[id] = true
+			}
+			if state == "disabled" {
+				enabled[doctorPluginIDs[1]] = false
+			}
+			if state != "absent" {
+				raw, _ := json.Marshal(map[string]any{"enabledPlugins": enabled})
+				if err := os.WriteFile(path, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeDoctorInstalledPlugins(t, store, doctorPluginIDs...)
+			switch state {
+			case "uninstalled":
+				writeDoctorInstalledPlugins(t, store, doctorPluginIDs[0], doctorPluginIDs[2])
+			case "settings unreadable":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			case "record unreadable":
+				if err := os.WriteFile(
+					filepath.Join(store, "plugins", "installed_plugins.json"),
+					[]byte("{"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := "doctor: claude_plugins ok\n"
+			warnings, failures := 0, 0
+			switch state {
+			case "disabled":
+				warnings = 1
+				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not enabled in " + path + " — run pfm install --yes\n"
+			case "uninstalled":
+				warnings = 1
+				want = "doctor: claude_plugins plugin " + doctorPluginIDs[1] + " not installed in " + store + " — run pfm install --yes\n"
+			case "absent":
+				_, err := installer.ClaudePluginGaps(path)
+				want = fmt.Sprintf("doctor: claude_plugins skipped: %v (store never set up)\n", err)
+			case "settings unreadable":
+				failures = 1
+				_, err := installer.ClaudePluginGaps(path)
+				want = fmt.Sprintf("doctor: claude_plugins could not read %s: %v\n", path, err)
+			case "record unreadable":
+				failures = 1
+				_, err := installer.ClaudePluginsNotInstalled(store)
+				want = fmt.Sprintf(
+					"doctor: claude_plugins could not read %s: %v\n",
+					filepath.Join(store, "plugins", "installed_plugins.json"),
+					err,
+				)
+			}
+			var out bytes.Buffer
+			tally := &doctorTally{}
+			printClaudePluginsDoctor(&out, store, tally)
+			if out.String() != want || tally.warnings != warnings || tally.failures != failures {
+				t.Fatalf(
+					"got %q tally=%+v want %q warnings=%d failures=%d",
+					out.String(),
+					tally,
+					want,
+					warnings,
+					failures,
+				)
+			}
+		})
 	}
 }
 

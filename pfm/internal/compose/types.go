@@ -142,7 +142,6 @@ type AccountRoot struct {
 type ClaudeSeat struct {
 	Account   int
 	ConfigDir string
-	Implicit  bool
 }
 
 // Options controls pure presentation choices.

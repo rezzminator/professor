@@ -36,24 +36,26 @@ func TestInstallManagedArgsWriteSpacedDestination(t *testing.T) {
 	}
 }
 
-// TestLayoutManagedCommandsQuoteSpacedPath: the macOS managed dir holds a
+// TestInstallManagedCommandsQuoteSpacedPath: the macOS managed dir holds a
 // space, so the echoed sudo line and the set-it-by-hand advisory must each
 // keep the path one shell word — run through sh, the advisory writes the
 // drop-in at the path the classifier reads.
-func TestLayoutManagedCommandsQuoteSpacedPath(t *testing.T) {
-	env := layoutFixture(t)
-	env.ManagedDir = filepath.Join(env.Home, "Application Support", "ClaudeCode", "managed-settings.d")
-	managed := filepath.Join(env.ManagedDir, "pfm.json")
-	env.writeManaged = func(string, []byte) error { return os.ErrPermission }
-	env.runner = &layoutTestRunner{failSudo: true}
+func TestInstallManagedCommandsQuoteSpacedPath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Application Support", "ClaudeCode", "managed-settings.d")
+	managed := filepath.Join(dir, "pfm.json")
 	var output bytes.Buffer
-	if _, err := ApplyLayout(
-		context.Background(),
-		env,
-		NewJournal(context.Background(), env),
-		true,
-		&output,
-	); err != nil {
+	installer := &engine{
+		apply: true,
+		options: Options{
+			ManagedSettingsDir:    dir,
+			CleanupPeriodDays:     36500,
+			RequireManagedCleanup: true,
+			Runner:                stateRunner{err: os.ErrPermission},
+			Stdout:                &output,
+			writeManaged:          func(string, []byte) error { return os.ErrPermission },
+		},
+	}
+	if err := installer.installManagedCleanup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var echoed, advisory string
@@ -69,7 +71,7 @@ func TestLayoutManagedCommandsQuoteSpacedPath(t *testing.T) {
 		t.Fatalf("sudo echo or advisory missing:\n%s", output.String())
 	}
 	words := parseShellWords(t, echoed)
-	if last := words[len(words)-1]; last != managed && last != env.ManagedDir {
+	if last := words[len(words)-1]; last != managed && last != dir {
 		t.Fatalf("echoed sudo line split the managed path: last word %q of %q", last, words)
 	}
 	run := exec.Command("sh", "-c", strings.ReplaceAll(advisory, "sudo ", ""))
@@ -77,20 +79,15 @@ func TestLayoutManagedCommandsQuoteSpacedPath(t *testing.T) {
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("advisory %q failed: %v\n%s", advisory, err, out)
 	}
-	want := fmt.Sprintf("{\"cleanupPeriodDays\":%d}\n", env.Config.Claude.CleanupPeriodDays)
+	want := fmt.Sprintf("{\"cleanupPeriodDays\":%d}\n", 36500)
 	if got, err := os.ReadFile(managed); err != nil || string(got) != want {
 		t.Fatalf("advisory wrote %q (err %v), want %q at %s", got, err, want, managed)
 	}
-	if finding := layoutFindingByPath(
-		ClassifyLayout(env),
-		layoutRowManagedCleanup,
-		managed,
-	); finding.Verdict != VerdictOK {
-		t.Fatalf("managed row after advisory=%+v", finding)
+	if status := InspectManagedCleanup(dir, true, 36500); status.State != "ok" {
+		t.Fatalf("managed after advisory=%+v", status)
 	}
 }
 
-// parseShellWords returns the words a POSIX shell parses from line.
 func parseShellWords(t *testing.T, line string) []string {
 	t.Helper()
 	out, err := exec.Command("sh", "-c", "set -- "+line+"\nprintf '%s\\n' \"$@\"").Output()

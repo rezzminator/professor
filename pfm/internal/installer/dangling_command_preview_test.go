@@ -12,13 +12,13 @@ import (
 // apply run opens with a dry-run preflight, and only a dry run stages the
 // current command tree to preview the Codex plan; a retirement that deletes
 // templates/global/commands/<name> leaves the host link at
-// .claude/commands/<name> dangling until retireOrphanGlobalCommands prunes it,
+// .claude/commands/<name> dangling until retireDeadRegistryLinks prunes it,
 // which runs AFTER that preflight. So preview must step over a dangling link
 // rather than abort on it — otherwise the installer can never reach the prune
 // that would have fixed the tree, and every upgrade across the retirement
 // fails with the link's own resolution error.
 //
-// TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks proves the prune
+// TestInspectDeadRegistryLinks proves the prune
 // itself, but runs ModeApply, where future=!apply is false and the preview path
 // never executes — the gap this test closes.
 func TestCommandPreviewSurvivesDanglingGlobalCommandLink(t *testing.T) {

@@ -1,6 +1,6 @@
 # pfm home
 
-Where pfm keeps its own configuration and state. Nothing here belongs to one engine: Claude, Codex and OpenCode all read and write through these files, so none of them lives under an engine's config dir. How the Claude launch reads this config is in [claude-launch.md](claude-launch.md); how an older host is moved onto this layout is in [host-migration.md](host-migration.md).
+Where pfm keeps its own configuration and state. Nothing here belongs to one engine: Claude, Codex and OpenCode all read and write through these files, so none of them lives under an engine's config dir. How the Claude launch reads this config is in [claude-launch.md](claude-launch.md); the read-only host detectors and their operator fixes are in [host-checks.md](host-checks.md).
 
 ## Contents
 
@@ -26,7 +26,26 @@ Where pfm keeps its own configuration and state. Nothing here belongs to one eng
 - **`harvester.config.json`** lives beside it, `{clone}/harvester.config.json`, also gitignored.
 - **Created by `pfm install`** from `example.pfm.config.json` when absent; an existing file is never overwritten. Keys a newer pfm adds are reported by `pfm doctor` as `missing key … (default …)`, not written silently.
 - **Blocks:** `accounts` (the Claude account roster: `id`, `configDir`, per-account overrides), `claude` (every Claude launch setting — the full list is [claude-launch.md § Config keys](claude-launch.md#config-keys)), `codex`, `opencode`, `mcp`, `tmux`, `state`.
-- **Not migrated yet:** with no `--config` and no `PFM_CONFIG`, a load that finds no clone config while a legacy `{LegacyConfigDir}/pfm.config.json` or `config.json` (`$XDG_CONFIG_HOME/pfm`, else `~/.config/pfm`) is present never runs on defaults: every command but the installer fails with `config not migrated: run pfm install (… present, … absent)` (`config.ErrNotMigrated`). `pfm install` loads through `config.LoadInstallRuntime` and moves the file; `pfm doctor`, the statusline and `pfm config show|validate` run on defaults and print the error (`doctor: config error=config not migrated: …`).
+- **Legacy config refusal:** without an explicit override, a missing clone config with a legacy config under `$XDG_CONFIG_HOME/pfm` (else `~/.config/pfm`) refuses normal runtime loading with `config not migrated: run pfm doctor for the fix ({legacy} present, {target} absent)` (`config.ErrNotMigrated`). Install loads through `config.LoadInstallRuntime` so its read-only host gate can name the problem; it does not relocate the file. Doctor uses a diagnostic runtime and prints the error and the operator fix.
+
+### accounts
+
+With no configured roster, `config.Defaults` supplies account 1 at `~/.cc/1`, whether or not it has credentials, plus discovered numeric `~/.cc/{n>1}` directories whose `.credentials.json` has a nonempty `claudeAiOauth.accessToken`. Discovery sorts by numeric id and records skipped candidates. The store is `~/.claude`, never an account directory. `config.DefaultAccountDir` owns the conventional path.
+
+The jail's `PFM_CLAUDE_ROOTS` replaces discovery inputs. With a nonstandard root list, each root's parent becomes an account directory, with IDs assigned in list order and no extra `~/.cc` discovery. Empty roots or the single standard `~/.claude/projects` root use the default roster rule.
+
+An explicit roster validates positive unique IDs, absolute or home-relative paths, unique cleaned directory strings, and refuses the cleaned store path. Errors are prefixed `config {path}: accounts:`:
+
+- `entry {n} id must be positive` or `duplicate id {id}`.
+- `entry {n} configDir: must not contain NUL`, or `must be absolute or start with ~/ or $HOME/, got {value}`.
+- `entry {n} configDir {dir} duplicates entry {earlier}`.
+- `entry {n} configDir {store} is the Claude store; an account needs its own dir (default {account dir})`.
+
+Physical aliases to the store or into it are separately blocked by `account-is-store`. A symlinked account directory resolving outside the store is accepted. Launch refuses a missing directory with `run pfm install`, and a file or a directory resolving into the store with `run pfm doctor`. It also refuses a dangling link, naming its inspection error, and an unknown roster ID ([claude-launch.md](claude-launch.md#checkconfigdir)).
+
+### mcp.thirdParty
+
+A map from server name to a JSON object in Claude's `mcpServers` shape, default `{}`. pfm preserves each object's fields and passes every entry through `--mcp-config`. Definitions are operator-managed; host checks name entries still present in account or home state files. Validation refuses `mcp.thirdParty.professor: the name professor is pfm's own server` and `mcp.thirdParty.{name} must be a JSON object (a Claude mcpServers entry)`, prefixed `config {path}:`.
 
 ## example.pfm.config.json
 
@@ -41,18 +60,18 @@ Tracked at the repo root. It holds every key pfm reads, each at its default, wit
 
 - `paths.Values.StateDB` and `paths.Values.CacheDB` resolve them: the test-jail environment variable (`PFM_STATE_DB`, `PFM_CACHE_DB`) first, then the config key, then the default.
 - `hidden` lives only in `pfm.db`.
-- Both databases migrate by numbered, additive `migration_vN.sql` files (`pfm.db` gains the mechanism with `launch`). A migration backs the file up beside itself (`{file}.bak-before-v{n}`) before it runs.
-- The move onto this layout drops the retired `swap_event` table, the cache's unread `hidden` copy, and the empty `shared.db`.
-- **No fork while legacy data waits:** nothing creates `pfm.db` while `~/.cc/fleet.db` exists, nor `pfm-cache.db` while `~/.local/state/pfm/fleet.db` exists. The two create doors (`fleetdb.OpenSharedState`, reached by `RecordLaunch`, `SetClaudePrimaryAccount` and `store.Open`; the cache in `store.OpenContext`, which checks both pairs before opening either) fail with `paths.ErrLegacyPending`, naming both paths and `run pfm install`; doctor aborts on it as `doctor: unhealthy database: …`. An existing target opens as before, and a legacy path that cannot be inspected is an error, never read as absent. There is no bypass: `pfm install` moves the legacy files in its layout pass before it opens anything.
+- Both databases use numbered `migration_vN.sql` schema migrations. Before migrating an existing database, pfm preserves a backup beside it (`{file}.bak-before-v{n}`).
+- The state schema migration drops `swap_event`; the cache schema migration drops its `hidden` copy. The `shared-db` host check reports an old `shared.db` for the operator to inspect and remove.
+- **No fork while legacy data waits:** nothing creates the default state database while `~/.cc/fleet.db` waits, or the default cache while `~/.local/state/pfm/fleet.db` waits. `fleetdb.OpenSharedState` and `store.OpenContext` check before creating targets and return `paths.ErrLegacyPending`: `legacy database not migrated: {target} not created while legacy {legacy} still exists — run pfm doctor for the fix`. An existing target can open; an unreadable legacy path is an error. Install's host gate blocks on legacy database paths and doctor prints the operator's fix, including present WAL/SHM siblings.
 
 ## Other state
 
-All under `~/.local/state/pfm/`: `log/pfm.jsonl`, `migrations/` ([host-migration.md](host-migration.md#the-journal)), and flight directories under `flights/`.
+All under `~/.local/state/pfm/`: `log/pfm.jsonl`, generated assets under `generated/`, and flight directories under `flights/`.
 
 ## pfm doctor checks
 
 | Check | Broken state reports |
 | --- | --- |
-| config file | `config: missing {path} — run pfm install`, `config: unreadable {path} error=…` |
-| config keys | `config: missing key {key} (default {value})` per key the loader knows and the file lacks |
-| state paths | `state: {key}={path} missing`, or `state: legacy {old path} still present — run pfm install` |
+| config file | `doctor: config: missing {path} — run pfm install`, `doctor: config: unreadable {path} error=…` |
+| config keys | `doctor: config: missing key {key} (default {value})` per key the loader knows and the file lacks |
+| legacy state/cache paths | `host-check: BLOCK legacy-state-db` / `legacy-cache-db`, each with an operator fix |

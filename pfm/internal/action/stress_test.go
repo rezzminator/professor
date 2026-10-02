@@ -19,7 +19,7 @@ func TestActionStress(t *testing.T) {
 	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
 	t.Cleanup(func() { newSessionID = previous })
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
-	requests := stressRequests()
+	requests := stressRequests(t.TempDir())
 	expected := make([]Plan, len(requests))
 	for index, request := range requests {
 		plan, err := Synthesize(request)
@@ -65,10 +65,10 @@ func TestActionStress(t *testing.T) {
 	stressHostileProjectDirectories(t)
 }
 
-func stressRequests() []Request {
-	machine := testMachineConfig("/home/test")
+func stressRequests(home string) []Request {
+	machine := testMachineConfig(home)
 	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{
-		ID: 1, Home: "/home/test/.local/share/opencode",
+		ID: 1, Home: filepath.Join(home, ".local", "share", "opencode"),
 	}}
 	machine.OpenCode.Binary = "opencode"
 	rows := []compose.Row{
@@ -86,7 +86,7 @@ func stressRequests() []Request {
 			Kind:      compose.Agent,
 			ID:        "22222222-2222-4222-8222-222222222222",
 			CWD:       "/work/project",
-			ConfigDir: "/home/test/.cc/2",
+			ConfigDir: pfmconfig.DefaultAccountDir(home, 2),
 		},
 		{
 			Kind: compose.ResumeClaude,
@@ -126,7 +126,7 @@ func stressRequests() []Request {
 						PrimaryAccount: account,
 						Cache1H:        cache1H,
 						Bunker:         bunker,
-						Home:           "/home/test",
+						Home:           home,
 						Config:         machine,
 						FreshSocket: fmt.Sprintf(
 							"%s-1700000001-123-456",
@@ -142,6 +142,7 @@ func stressRequests() []Request {
 
 func stressHostileProjectDirectories(t *testing.T) {
 	t.Helper()
+	home := t.TempDir()
 	root := t.TempDir()
 	marker := filepath.Join(root, "EVAL_BREAKOUT")
 	roundTrip := filepath.Join(root, "roundtrip")
@@ -166,7 +167,7 @@ func stressHostileProjectDirectories(t *testing.T) {
 				CWD:  projectDir,
 			},
 			PrimaryAccount: 1,
-			Home:           "/home/test",
+			Home:           home,
 			FreshSocket:    "cc-stress-1",
 		})
 		if err != nil {

@@ -72,6 +72,9 @@ func stageHarnessPromptBaseline(t *testing.T, home string) {
 func jailTest(t *testing.T) string {
 	t.Helper()
 	root := testjail.InstalledHome(t)
+	dirs, files := storeLayout()
+	testjail.StageAccountLinks(t, filepath.Join(root, "home"), filepath.Join(root, "home", ".cc", "1"), dirs, files)
+	stageStorePlugins(t, filepath.Join(root, "home"))
 	return root
 }
 
@@ -158,4 +161,27 @@ type fourthMatcher struct{}
 
 func (fourthMatcher) IsCommand(argv []string, _ ...string) bool {
 	return len(argv) != 0 && filepath.Base(argv[0]) == "zed"
+}
+
+func storeLayout() ([]string, map[string]string) {
+	var names []string
+	files := make(map[string]string)
+	for _, entry := range installer.StoreEntries {
+		if entry.Dir {
+			names = append(names, entry.Name)
+		} else {
+			files[entry.Name] = entry.Seed
+		}
+	}
+	return names, files
+}
+
+func stageStorePlugins(t *testing.T, home string) {
+	t.Helper()
+	storeDir := installer.ClaudeStore(home)
+	ids, err := installer.ClaudePluginsNotInstalled(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testjail.StageClaudePlugins(t, storeDir, ids)
 }

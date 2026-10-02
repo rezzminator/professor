@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -143,10 +142,28 @@ func runInstallE2E(t *testing.T) {
 	harness.headBinary = harness.build(repo, filepath.Join(t.TempDir(), "pfm-head"))
 	harness.startPreviousBuild()
 
+	t.Run("plugin rows", func(t *testing.T) {
+		for _, row := range []struct {
+			output string
+			want   int
+		}{
+			{"doctor: claude_plugins plugin cache-live-control@cache-live-control not enabled in /fixture/.claude/settings.json — run pfm install --yes\n", 1},
+			{"doctor: claude_plugins plugin cache-live-control@cache-live-control not installed in /fixture/.claude — run pfm install --yes\n", 1},
+			{"doctor: claude_plugins ok\n", 0},
+		} {
+			if got := claudePluginRowWarnings(row.output); got != row.want {
+				t.Errorf("plugin row warnings=%d, want %d for %q", got, row.want, row.output)
+			}
+		}
+	})
+
 	var fresh surfaceSnapshot
 	var freshHome string
 	t.Run("install", func(t *testing.T) {
 		home := harness.newHome(harness.headBinary)
+		h := *harness
+		h.t = t
+		harness := &h
 		freshHome = home
 		result := harness.pfm(home, "install", "--yes", "--skip-harvest")
 		harness.requireSuccess("install", result)
@@ -171,7 +188,16 @@ func runInstallE2E(t *testing.T) {
 		}
 	})
 
+	t.Run("refused install on old-shape home", func(t *testing.T) {
+		h := *harness
+		h.t = t
+		h.assertOldShapeInstallConverges(fresh)
+	})
+
 	t.Run("init", func(t *testing.T) {
+		h := *harness
+		h.t = t
+		harness := &h
 		project := filepath.Join(t.TempDir(), "project")
 		result := harness.pfm(freshHome, "init", project)
 		harness.requireSuccess("init", result)
@@ -187,11 +213,17 @@ func runInstallE2E(t *testing.T) {
 		harness.assertInitPath(filepath.Join(project, "AGENTS.md"), "AGENTS.md")
 	})
 
-	t.Run("launcher", func(_ *testing.T) {
+	t.Run("launcher", func(t *testing.T) {
+		h := *harness
+		h.t = t
+		harness := &h
 		harness.assertLauncherRuntime(freshHome)
 	})
 
 	t.Run("vscode terminal profile", func(t *testing.T) {
+		h := *harness
+		h.t = t
+		harness := &h
 		home := harness.newHome(harness.headBinary)
 		platform := "linux"
 		settings := filepath.Join(home, ".config", "Code", "User", "settings.json")
@@ -234,6 +266,9 @@ func runInstallE2E(t *testing.T) {
 	})
 
 	t.Run("update", func(t *testing.T) {
+		h := *harness
+		h.t = t
+		harness := &h
 		previous := harness.previousBinary()
 		home := harness.newHome(previous)
 		result := harness.pfm(home, "install", "--yes", "--skip-harvest")
@@ -266,7 +301,10 @@ func runInstallE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("uninstall", func(_ *testing.T) {
+	t.Run("uninstall", func(t *testing.T) {
+		h := *harness
+		h.t = t
+		harness := &h
 		harness.plantManualState(freshHome)
 		result := harness.pfm(freshHome, "uninstall")
 		harness.requireSuccess("uninstall", result)
@@ -330,92 +368,6 @@ func buildPFM(source, output string) (string, error) {
 	return output, nil
 }
 
-func (h *e2eHarness) newHome(binary string) string {
-	h.t.Helper()
-	home, err := os.MkdirTemp("/tmp", "pfm-e2e-home-")
-	if err != nil {
-		h.t.Fatalf("create short e2e home: %v", err)
-	}
-	h.t.Cleanup(func() {
-		if err := os.RemoveAll(home); err != nil {
-			h.t.Errorf("remove short e2e home: %v", err)
-		}
-	})
-	for _, relative := range []string{
-		".claude", ".cc/1/projects", ".cc/2/projects", ".cc/3/projects",
-		".codex", ".config", "proc", "cgroup", "tmux", "tmp", ".local/bin",
-	} {
-		if err := os.MkdirAll(filepath.Join(home, relative), 0o700); err != nil {
-			h.t.Fatal(err)
-		}
-	}
-	for _, relative := range managedSettings {
-		path := filepath.Join(home, relative)
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			h.t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
-			h.t.Fatal(err)
-		}
-	}
-	if err := copyFile(binary, filepath.Join(home, e2eCanonicalPFM), 0o755); err != nil {
-		h.t.Fatalf("stage pfm binary: %v", err)
-	}
-	testBinary, err := os.Executable()
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	// Named a real vMAJOR.MINOR.PATCH string (matching the fixture's own
-	// --version output below) rather than an arbitrary "fixture": pfm's
-	// launcher now selects the versions/ candidate by parsed semantic
-	// version, in Go, and an unparsed name is never chosen (see
-	// internal/installer/claude_versions.go).
-	native := filepath.Join(home, ".local", "share", "claude", "versions", "2.1.238")
-	launcherEvidence := filepath.Join(home, "launcher-evidence")
-	body := "#!/bin/sh\n" +
-		"if [ \"${1-}\" = -p ]; then exec env PFM_E2E_CLAUDE_CAPTURE=1 " + shellQuoteFixture(testBinary) + " -test.run '^TestClaudeHarnessCaptureFixture$' -- \"$@\"; fi\n" +
-		"if [ \"${1-}\" = plugin ]; then exec env PFM_E2E_CLAUDE_PLUGIN=1 " +
-		"PFM_E2E_PLUGIN_CONFIG_DIR=\"$CLAUDE_CONFIG_DIR\" " + shellQuoteFixture(testBinary) +
-		" -test.run '^TestClaudePluginInstallFixture$' -- \"$@\"; fi\n" +
-		"if [ \"${1-}\" = --version ]; then printf '2.1.238 (Claude Code)\\n'; exit 0; fi\n" +
-		"printf '%s\\n' \"${TMUX%%,*}\" > " + shellQuoteFixture(launcherEvidence) + "\n" +
-		"exit 0\n"
-	if err := os.MkdirAll(filepath.Dir(native), 0o700); err != nil {
-		h.t.Fatal(err)
-	}
-	if err := testjail.WriteExecutable(native, []byte(body), 0o700); err != nil {
-		h.t.Fatal(err)
-	}
-	if err := os.Symlink(native, filepath.Join(home, e2eCanonicalClaude)); err != nil {
-		h.t.Fatal(err)
-	}
-	codex := filepath.Join(home, ".local", "bin", "codex")
-	codexBody := "#!/bin/sh\n" +
-		"if [ \"${1-}\" = app-server ]; then exec env PFM_E2E_CODEX_HOOK_FIXTURE=1 " + shellQuoteFixture(testBinary) + " -test.run '^TestCodexHookAPIFixture$'; fi\n" + `
-if [ "${1-}" = --version ]; then printf 'codex-cli 0.149.0\n'; exit 0; fi
-if [ "${1-}" = doctor ] && [ "${2-}" = --help ]; then printf 'usage: codex doctor\n'; exit 0; fi
-if [ "${1-}" = doctor ]; then printf 'healthy\n'; exit 0; fi
-exit 2
-`
-	if err := testjail.WriteExecutable(codex, []byte(codexBody), 0o700); err != nil {
-		h.t.Fatal(err)
-	}
-	auth := filepath.Join(home, ".codex", "auth.json")
-	if err := os.WriteFile(
-		auth,
-		[]byte(`{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`+"\n"),
-		0o600,
-	); err != nil {
-		h.t.Fatal(err)
-	}
-	stageSchedulerFixtures(h.t, home)
-	return home
-}
-
-func shellQuoteFixture(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
 func (h *e2eHarness) pfm(home string, args ...string) commandResult {
 	return h.pfmWithBinary(filepath.Join(home, e2eCanonicalPFM), home, args...)
 }
@@ -446,27 +398,29 @@ func (h *e2eHarness) environment(home string) []string {
 		filepath.Join(home, ".cc", "3", "projects"),
 	}
 	values := map[string]string{
-		"GOCACHE":                   h.goCache,
-		"GOMODCACHE":                h.goModCache,
-		"HOME":                      home,
-		"PFM_HOME":                  home,
-		"PFM_CONFIG":                filepath.Join(home, "pfm.config.json"),
-		"PFM_CACHE_DB":              filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db"),
-		"PFM_STATE_DB":              filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
-		"PFM_SID_DIR":               filepath.Join(home, "sid"),
-		"PFM_CLAUDE_ROOTS":          strings.Join(roots, string(os.PathListSeparator)),
-		"PFM_CODEX_ROOT":            filepath.Join(home, ".codex"),
-		"PFM_TMUX_DIR":              filepath.Join(home, "tmux"),
-		"PFM_TMUX_CONF":             filepath.Join(home, "tmux.conf"),
-		"PFM_PROC_ROOT":             filepath.Join(home, "proc"),
-		"PFM_CGROUP_ROOT":           filepath.Join(home, "cgroup"),
-		"TMUX_TMPDIR":               filepath.Join(home, "tmux"),
-		"TMPDIR":                    filepath.Join(home, "tmp"),
-		"XDG_CONFIG_HOME":           filepath.Join(home, ".config"),
-		"PATH":                      path,
-		e2eSourceRepo:               h.repo,
-		e2eHomeEnv:                  home,
-		"PFM_HARVESTPY_OFFLINE":     "1",
+		"GOCACHE":               h.goCache,
+		"GOMODCACHE":            h.goModCache,
+		"HOME":                  home,
+		"PFM_HOME":              home,
+		"PFM_CONFIG":            filepath.Join(home, "pfm.config.json"),
+		"PFM_CACHE_DB":          filepath.Join(home, ".local", "state", "pfm", "pfm-cache.db"),
+		"PFM_STATE_DB":          filepath.Join(home, ".local", "state", "pfm", "pfm.db"),
+		"PFM_SID_DIR":           filepath.Join(home, "sid"),
+		"PFM_CLAUDE_ROOTS":      strings.Join(roots, string(os.PathListSeparator)),
+		"PFM_CODEX_ROOT":        filepath.Join(home, ".codex"),
+		"PFM_TMUX_DIR":          filepath.Join(home, "tmux"),
+		"PFM_TMUX_CONF":         filepath.Join(home, "tmux.conf"),
+		"PFM_PROC_ROOT":         filepath.Join(home, "proc"),
+		"PFM_CGROUP_ROOT":       filepath.Join(home, "cgroup"),
+		"TMUX_TMPDIR":           filepath.Join(home, "tmux"),
+		"TMPDIR":                filepath.Join(home, "tmp"),
+		"XDG_CONFIG_HOME":       filepath.Join(home, ".config"),
+		"PATH":                  path,
+		e2eSourceRepo:           h.repo,
+		e2eHomeEnv:              home,
+		"PFM_HARVESTPY_OFFLINE": "1",
+		// Keep the whole-home refusal snapshot free of diagnostic log writes.
+		"PFM_LOG_LEVEL":             "off",
 		"PFM_SKILL_SOURCES_OFFLINE": "1", "PFM_THEMES_OFFLINE": "1",
 	}
 	return appendCleanEnv(os.Environ(), values)
@@ -514,103 +468,6 @@ func (h *e2eHarness) requireHarvestGate(phase string, result commandResult) {
 	h.t.Helper()
 	if !strings.Contains(result.stdout+result.stderr, e2eHarvestSkipLine) {
 		h.t.Fatalf("%s failed; differing paths: harvestpy gate output; want %q", phase, e2eHarvestSkipLine)
-	}
-}
-
-func (h *e2eHarness) assertInstalled(home string) {
-	h.t.Helper()
-	managed := filepath.Join(home, e2eManagedRoot)
-	if info, err := os.Stat(managed); err != nil || !info.IsDir() {
-		h.t.Fatalf("install surface failed; differing paths: %s; status: %v", e2eManagedRoot, err)
-	}
-	for _, relative := range managedAssets {
-		if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
-			h.t.Fatalf(
-				"install surface failed; differing paths: %s; status: %v",
-				filepath.Join(e2eManagedRoot, relative),
-				err,
-			)
-		}
-	}
-	for _, relative := range []string{"source-repo", "binary-ownership.json"} {
-		if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
-			h.t.Fatalf(
-				"install surface failed; differing paths: %s; status: %v",
-				filepath.Join(e2eManagedRoot, relative),
-				err,
-			)
-		}
-	}
-	canonicalClaude := filepath.Join(home, e2eCanonicalClaude)
-	managedClaude := filepath.Join(managed, "bin", "claude")
-	info, err := os.Lstat(canonicalClaude)
-	if err != nil || info.Mode()&os.ModeSymlink == 0 {
-		h.t.Fatalf("install surface failed; differing paths: %s launcher link; status: %v", e2eCanonicalClaude, err)
-	}
-	target, err := os.Readlink(canonicalClaude)
-	if err != nil || filepath.Clean(target) != filepath.Clean(managedClaude) {
-		h.t.Fatalf("install surface failed; differing paths: %s target=%q; status: %v", e2eCanonicalClaude, target, err)
-	}
-	if _, err := os.Stat(filepath.Join(managed, "launcher.state")); err != nil {
-		h.t.Fatalf("install surface failed; differing paths: launcher.state; status: %v", err)
-	}
-	h.readJSON(filepath.Join(managed, "binary-ownership.json"))
-	if runtime.GOOS == "linux" {
-		for _, relative := range []string{
-			"systemd/pfm-name-sync.path", "systemd/pfm-name-sync.service", "systemd/pfm-name-sync.timer",
-		} {
-			if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
-				h.t.Fatalf(
-					"install surface failed; differing paths: %s; status: %v",
-					filepath.Join(e2eManagedRoot, relative),
-					err,
-				)
-			}
-		}
-	}
-	h.assertCommandLinksInstalled(home)
-	// The shim is static and sourced straight from the clone the marker names;
-	// nothing is staged under the managed root.
-	clone, err := pfmpaths.ReadSourceRepoMarker(home)
-	if err != nil {
-		h.t.Fatalf("install surface failed; differing paths: source-repo marker; status: %v", err)
-	}
-	shim := filepath.Join(clone, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
-	if result := runTool(home, "zsh", "-n", shim); result.err != nil {
-		h.t.Fatalf("install surface failed; differing paths: shim/pfm.zsh syntax; status: %v", result.err)
-	}
-	if !hasSourceLine(filepath.Join(home, e2eZshrc), shim) {
-		zshrc, readErr := os.ReadFile(filepath.Join(home, e2eZshrc))
-		h.t.Fatalf("install surface failed; differing paths: .zshrc source line for %s; zshrc=%q status=%v",
-			shim, zshrc, readErr)
-	}
-	h.assertTmuxConfig(home)
-	codexHooksPath := filepath.Join(home, e2eCodexHooks)
-	if raw, err := os.ReadFile(codexHooksPath); err == nil {
-		var codex map[string]any
-		if err := json.Unmarshal(raw, &codex); err != nil {
-			h.t.Fatalf("install surface failed; differing paths: .codex/hooks.json parse; status: %v", err)
-		}
-		if containsJSONString(codex, filepath.Join(home, ".local", "bin", "pfm")+" internal clear-kill") {
-			h.t.Fatal("install surface failed; differing paths: .codex/hooks.json retained retired clear-kill")
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		h.t.Fatalf("install surface failed; differing paths: .codex/hooks.json; status: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, e2eSourceMarker)); err != nil {
-		h.t.Fatalf("install surface failed; differing paths: %s; status: %v", e2eSourceMarker, err)
-	}
-	if _, err := os.Stat(filepath.Join(home, e2eCanonicalPFM)); err != nil {
-		h.t.Fatalf("install surface failed; differing paths: %s; status: %v", e2eCanonicalPFM, err)
-	}
-	if runtime.GOOS == "linux" {
-		for _, name := range []string{"pfm-name-sync.path", "pfm-name-sync.service", "pfm-name-sync.timer"} {
-			if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", name)); err != nil {
-				h.t.Fatalf("install surface failed; differing paths: systemd/%s; status: %v", name, err)
-			}
-		}
-	} else if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist")); err != nil {
-		h.t.Fatalf("install surface failed; differing paths: launchd name-sync; status: %v", err)
 	}
 }
 
@@ -924,7 +781,7 @@ func (h *e2eHarness) assertUninstalled(home string) {
 func (h *e2eHarness) snapshot(home string) (surfaceSnapshot, error) {
 	h.t.Helper()
 	snapshot := surfaceSnapshot{}
-	for _, relative := range []string{e2eManagedRoot, e2eCommandRoot, e2eCodexHooks, e2eZshrc, e2eSettings, ".cc/1/settings.json", ".cc/2/settings.json", ".cc/3/settings.json", ".config/systemd/user", "Library/LaunchAgents"} {
+	for _, relative := range []string{e2eManagedRoot, e2eCommandRoot, e2eCodexHooks, e2eZshrc, e2eSettings, ".claude", ".cc", ".cc/1/settings.json", ".cc/2/settings.json", ".cc/3/settings.json", ".config/systemd/user", "Library/LaunchAgents"} {
 		root := filepath.Join(home, relative)
 		if err := addSnapshot(root, home, snapshot); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err

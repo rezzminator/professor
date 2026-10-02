@@ -18,12 +18,10 @@ const (
 	// FileName is the machine config's name inside the pfm config directory.
 	FileName = "pfm.config.json"
 	// LegacyFileName is the pre-split name. A machine that still has only this
-	// file keeps working until `pfm install` migrates it (PlanMigration).
+	// file remains readable; the pre-split-config host check names the fixes.
 	LegacyFileName = "config.json"
 	// HarvesterFileName holds every Harvester setting, beside FileName.
 	HarvesterFileName = "harvester.config.json"
-	// LegacyBackupName is where the migration parks the pre-split file.
-	LegacyBackupName = "config.json.pre-split"
 
 	// DefaultMCPPort is the loopback daemon port (chat + harvester, no auth).
 	DefaultMCPPort = 18377
@@ -34,7 +32,7 @@ const (
 	DefaultHarvesterExternalPort = 18378
 
 	// SourceLegacy marks a value still read from the pre-split pfm config.
-	SourceLegacy Source = "legacy pfm config — run `pfm install --yes` to migrate"
+	SourceLegacy Source = "legacy pfm config — run pfm doctor for the fixes"
 )
 
 // HarvesterConfig is the fully materialized harvester.config.json. It is the
@@ -739,4 +737,16 @@ func foldRetiredScholarlyKeys(content []byte) []byte {
 		return content
 	}
 	return out
+}
+
+func readTopLevel(path string) (map[string]json.RawMessage, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config %s: %w", path, err)
+	}
+	top := map[string]json.RawMessage{}
+	if err := json.Unmarshal(content, &top); err != nil {
+		return nil, configJSONError(path, err)
+	}
+	return top, nil
 }

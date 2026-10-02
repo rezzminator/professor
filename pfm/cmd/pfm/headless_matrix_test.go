@@ -97,7 +97,10 @@ func TestRunPromptSourcesAreExclusive(t *testing.T) {
 // TestModelAndEffortReachBothEngines proves item 4 of the order: a seat is
 // born with its tier, on the engine's own spelling.
 func TestModelAndEffortReachBothEngines(t *testing.T) {
-	home := "/home/tester"
+	home := t.TempDir()
+	if err := os.MkdirAll(pfmconfig.DefaultAccountDir(home, 1), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	machine := pfmconfig.Defaults(home, []string{filepath.Join(pfmconfig.DefaultAccountDir(home, 1), "projects")})
 	machine.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: home + "/.codex"}}
 	claude, err := action.HeadlessRun(action.HeadlessRequest{

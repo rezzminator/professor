@@ -78,6 +78,33 @@ func TestDoctorConfigFileRows(t *testing.T) {
 	if !strings.Contains(output.String(), "config: missing "+path+" — run pfm install") {
 		t.Fatalf("missing file row absent: %s", output.String())
 	}
+	// A legacy config waits behind the host gate, which refuses pfm install
+	// until it moves: the row names the host check's fix, never pfm install.
+	// Under an explicit --config the host check skips it, and so does the row.
+	home := filepath.Join(root, "home")
+	legacy := filepath.Join(config.LegacyConfigDir(paths.OSEnv{}, home), config.FileName)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}, Paths: paths.Values{Home: home}})
+	if !strings.Contains(
+		output.String(),
+		"config: legacy file "+legacy+" is not read — apply the host-check legacy-config fix\n",
+	) {
+		t.Fatalf("legacy file row: %s", output.String())
+	}
+	output.Reset()
+	PrintConfig(
+		&output,
+		config.Runtime{Config: config.Config{Path: path}, Paths: paths.Values{Home: home}, ConfigExplicit: true},
+	)
+	if strings.Contains(output.String(), "legacy file") {
+		t.Fatalf("explicit config legacy row: %s", output.String())
+	}
 	output.Reset()
 	PrintConfig(&output, config.Runtime{})
 	if !strings.Contains(output.String(), "config: missing (no source repo recorded) — run pfm install") {
@@ -123,7 +150,7 @@ func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
 func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	first := filepath.Join(home, ".claude")
+	first := config.DefaultAccountDir(home, 1)
 	second := filepath.Join(home, ".cc", "2")
 	if err := os.MkdirAll(first, 0o700); err != nil {
 		t.Fatal(err)
@@ -131,7 +158,7 @@ func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {
 	if err := os.MkdirAll(second, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{filepath.Join(home, ".claude.json"), filepath.Join(second, ".claude.json")} {
+	for _, path := range []string{filepath.Join(first, ".claude.json"), filepath.Join(second, ".claude.json")} {
 		if err := os.WriteFile(
 			path,
 			[]byte(`{"oauthAccount":{"emailAddress":"fixture@example.invalid"}}`),
@@ -141,7 +168,7 @@ func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {
 		}
 	}
 	machine := config.Config{Accounts: []config.Account{
-		{ID: 1, ConfigDir: first, Implicit: true},
+		{ID: 1, ConfigDir: first},
 		{ID: 2, ConfigDir: second},
 	}}
 	runtime := config.Runtime{Paths: paths.Values{Home: home}, Config: machine}
@@ -231,25 +258,22 @@ func TestDoctorSortsDuplicateSeatLoginAdvisoriesByEmail(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	accounts := []config.Account{
-		{ID: 1, Implicit: true},
+		{ID: 1, ConfigDir: config.DefaultAccountDir(home, 1)},
 		{ID: 2, ConfigDir: filepath.Join(home, ".cc", "2")},
 		{ID: 3, ConfigDir: filepath.Join(home, ".cc", "3")},
 		{ID: 4, ConfigDir: filepath.Join(home, ".cc", "4")},
 	}
 	for _, account := range accounts {
 		directory := account.ConfigDir
-		if account.Implicit {
-			directory = home
-		}
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for path, email := range map[string]string{
-		filepath.Join(home, ".claude.json"):             "z@example.invalid",
-		filepath.Join(home, ".cc", "2", ".claude.json"): "a@example.invalid",
-		filepath.Join(home, ".cc", "3", ".claude.json"): "a@example.invalid",
-		filepath.Join(home, ".cc", "4", ".claude.json"): "z@example.invalid",
+		filepath.Join(config.DefaultAccountDir(home, 1), ".claude.json"): "z@example.invalid",
+		filepath.Join(home, ".cc", "2", ".claude.json"):                  "a@example.invalid",
+		filepath.Join(home, ".cc", "3", ".claude.json"):                  "a@example.invalid",
+		filepath.Join(home, ".cc", "4", ".claude.json"):                  "z@example.invalid",
 	} {
 		if err := os.WriteFile(
 			path,
@@ -271,22 +295,16 @@ func TestDoctorSortsDuplicateSeatLoginAdvisoriesByEmail(t *testing.T) {
 	}
 }
 
-func TestDoctorWarnsOnRetiredHarvesterEnvAndPreSplitLayout(t *testing.T) {
+func TestDoctorWarnsOnRetiredHarvesterEnv(t *testing.T) {
 	clearRetiredHarvesterEnv(t)
 	t.Setenv("SEARXNG_URL", "http://127.0.0.1:8888")
 	t.Setenv("HARVESTER_LOCAL_ROOTS", "/srv")
 	runtime := config.Runtime{Config: config.Defaults(t.TempDir(), nil)}
-	runtime.Config.Path = filepath.Join(t.TempDir(), config.LegacyFileName)
-	runtime.Config.Harvester.Path = filepath.Join(filepath.Dir(runtime.Config.Path), config.HarvesterFileName)
-	runtime.Config.Exists = true
-	if err := os.WriteFile(runtime.Config.Path, []byte(`{"version":2}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	var stdout bytes.Buffer
-	if warnings := printHarvesterConfigDoctor(&stdout, runtime); warnings != 3 {
-		t.Fatalf("warnings=%d, want 3\n%s", warnings, stdout.String())
+	if warnings := printHarvesterConfigDoctor(&stdout, runtime); warnings != 2 {
+		t.Fatalf("warnings=%d, want 2\n%s", warnings, stdout.String())
 	}
-	for _, want := range []string{"layout=pre-split", "retired_env=SEARXNG_URL", "search.searxngURL", "retired_env=HARVESTER_LOCAL_ROOTS", "never honored"} {
+	for _, want := range []string{"retired_env=SEARXNG_URL", "search.searxngURL", "retired_env=HARVESTER_LOCAL_ROOTS", "never honored"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, stdout.String())
 		}

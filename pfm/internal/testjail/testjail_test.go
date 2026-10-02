@@ -1,12 +1,17 @@
 package testjail
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -317,20 +322,36 @@ func TestRunPassesProfilerVariablesThrough(t *testing.T) {
 }
 
 func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
-	check := func(home, configPath string) {
+	check := func(home, configPath string, installed bool) {
 		t.Helper()
 		if configPath != filepath.Join(home, "pfm.config.json") {
 			t.Fatalf("PFM_CONFIG=%q, want a config under %q", configPath, home)
 		}
 		body, err := os.ReadFile(configPath)
-		if err != nil || strings.TrimSpace(string(body)) != `{"version":2}` {
+		if err != nil {
 			t.Fatalf("seeded config = %q error %v", body, err)
 		}
+		var got map[string]any
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("parse seeded config = %q: %v", body, err)
+		}
+		want := map[string]any{"version": float64(2)}
+		if installed {
+			want["accounts"] = []any{map[string]any{
+				"id": float64(1), "configDir": config.DefaultAccountDir(home, 1),
+			}}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("seeded config = %q, want %v", body, want)
+		}
 	}
-	check(os.Getenv(paths.EnvHome), os.Getenv(paths.EnvConfig))
-	for _, builder := range []func(*testing.T) string{Fleet, InstalledHome} {
-		root := builder(t)
-		check(filepath.Join(root, "home"), os.Getenv(paths.EnvConfig))
+	check(os.Getenv(paths.EnvHome), os.Getenv(paths.EnvConfig), false)
+	for _, builder := range []struct {
+		build     func(*testing.T) string
+		installed bool
+	}{{Fleet, false}, {InstalledHome, true}} {
+		root := builder.build(t)
+		check(filepath.Join(root, "home"), os.Getenv(paths.EnvConfig), builder.installed)
 	}
 	_, environment := FleetEnv(t)
 	var envHome, envConfig string
@@ -342,9 +363,13 @@ func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 			envConfig = value
 		}
 	}
-	check(envHome, envConfig)
-	runtime := CleanHome(t)
-	check(runtime.Paths.Home, os.Getenv(paths.EnvConfig))
+	check(envHome, envConfig, false)
+	runtime := CleanHome(
+		t,
+		[]string{"projects", "file-history", "tasks", "session-env"},
+		map[string]string{"settings.json": "{}\n"},
+	)
+	check(runtime.Paths.Home, os.Getenv(paths.EnvConfig), false)
 }
 
 // TestRunScrubsAmbientIdentity pins the jail's own scrub: an executor's shell
@@ -376,7 +401,11 @@ func TestFleetPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 
 // TestCleanHomePinsXDGConfigHomeInsideTheJail pins the CleanHome door.
 func TestCleanHomePinsXDGConfigHomeInsideTheJail(t *testing.T) {
-	runtime := CleanHome(t)
+	runtime := CleanHome(
+		t,
+		[]string{"projects", "file-history", "tasks", "session-env"},
+		map[string]string{"settings.json": "{}\n"},
+	)
 	want := filepath.Join(runtime.Paths.Home, ".config")
 	if got := os.Getenv("XDG_CONFIG_HOME"); got != want {
 		t.Fatalf("XDG_CONFIG_HOME=%q, want %q under the CleanHome jail", got, want)
@@ -384,7 +413,11 @@ func TestCleanHomePinsXDGConfigHomeInsideTheJail(t *testing.T) {
 }
 
 func TestCleanHomeStagesOneSessionStoreAndManagedCleanup(t *testing.T) {
-	runtime := CleanHome(t)
+	runtime := CleanHome(
+		t,
+		[]string{"projects", "file-history", "tasks", "session-env"},
+		map[string]string{"settings.json": "{}\n"},
+	)
 	home := runtime.Paths.Home
 	if got := os.Getenv(paths.EnvClaudeRoots); got != filepath.Join(home, ".claude", "projects") {
 		t.Fatalf("Claude roots=%q", got)
@@ -401,6 +434,13 @@ func TestCleanHomeStagesOneSessionStoreAndManagedCleanup(t *testing.T) {
 			}
 		}
 	}
+
+	for _, id := range []int{1, 2} {
+		link := filepath.Join(config.DefaultAccountDir(home, id), "settings.json")
+		if target, err := os.Readlink(link); err != nil || target != filepath.Join(home, ".claude", "settings.json") {
+			t.Fatalf("settings link=%q error=%v", target, err)
+		}
+	}
 	managed := filepath.Join(runtime.Paths.ManagedSettingsDir, "pfm.json")
 	if raw, err := os.ReadFile(managed); err != nil || strings.TrimSpace(string(raw)) != `{"cleanupPeriodDays":36500}` {
 		t.Fatalf("managed settings=%q error=%v", raw, err)
@@ -413,11 +453,190 @@ func TestCleanHomeStagesOneSessionStoreAndManagedCleanup(t *testing.T) {
 	}
 }
 
+func TestStageAccountLinks(t *testing.T) {
+	home := t.TempDir()
+	accountDir := filepath.Join(t.TempDir(), "account")
+	entries := []string{"existing", "created"}
+	existing := filepath.Join(home, ".claude", entries[0])
+	if err := os.MkdirAll(existing, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude", "history.jsonl"), []byte("keep history"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	StageAccountLinks(
+		t,
+		home,
+		accountDir,
+		entries,
+		map[string]string{"settings.json": "{}\n", "history.jsonl": "replace history"},
+	)
+	if raw, err := os.ReadFile(
+		filepath.Join(accountDir, "history.jsonl"),
+	); err != nil ||
+		string(raw) != "keep history" {
+		t.Fatalf("existing file=%q error=%v", raw, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(accountDir, "settings.json"))
+	if err != nil || string(raw) != "{}\n" {
+		t.Fatalf("file seed=%q error=%v", raw, err)
+	}
+	info, err := os.Stat(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("file mode=%v error=%v", info, err)
+	}
+	if target, err := os.Readlink(
+		filepath.Join(accountDir, "settings.json"),
+	); err != nil ||
+		target != filepath.Join(home, ".claude", "settings.json") {
+		t.Fatalf("file link=%q error=%v", target, err)
+	}
+	for _, entry := range entries {
+		store := filepath.Join(home, ".claude", entry)
+		if info, err := os.Stat(store); err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+			t.Fatalf("store %s = %v, %v; want a 0700 directory", store, info, err)
+		}
+		link := filepath.Join(accountDir, entry)
+		if target, err := os.Readlink(link); err != nil || target != store {
+			t.Fatalf("%s → %q, %v; want %s", link, target, err, store)
+		}
+		if resolved, err := filepath.EvalSymlinks(link); err != nil || resolved != store {
+			t.Fatalf("resolve %s = %q, %v; want %s", link, resolved, err, store)
+		}
+	}
+}
+
+func TestStageAccountLinksErrors(t *testing.T) {
+	const marker = "PFM_TEST_ACCOUNT_LINK_ERROR"
+	if failure := os.Getenv(marker); failure != "" {
+		home, accountDir := t.TempDir(), t.TempDir()
+		blocked := filepath.Join(accountDir, "entry")
+		if failure == "store" {
+			blocked = filepath.Join(home, ".claude")
+		}
+		if err := os.WriteFile(blocked, []byte("blocked"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		StageAccountLinks(t, home, accountDir, []string{"entry"}, nil)
+		return
+	}
+	for _, failure := range []string{"store", "link"} {
+		t.Run(failure, func(t *testing.T) {
+			command := exec.Command(os.Args[0], "-test.run=^TestStageAccountLinksErrors$")
+			command.Env = envWithout(marker, marker+"="+failure)
+			output, err := command.CombinedOutput()
+			if err == nil {
+				t.Fatal("StageAccountLinks succeeded with a blocked path")
+			}
+			want := "entry"
+			if failure == "store" {
+				want = filepath.Join(".claude", "entry")
+			}
+			if !strings.Contains(string(output), want) {
+				t.Fatalf("error output %q does not name %s", output, want)
+			}
+		})
+	}
+}
+
 func TestInstalledHomeStagesCloneSourceLine(t *testing.T) {
 	root := InstalledHome(t)
 	path := filepath.Join(root, "home", ".zshrc")
 	raw, err := os.ReadFile(path)
 	if err != nil || !strings.Contains(string(raw), checkoutRoot()+"/pfm/internal/installer/assets/shim/pfm.zsh") {
 		t.Fatalf("installed source line=%q error=%v", raw, err)
+	}
+}
+
+func TestRunCreatesDefaultAccountDir(t *testing.T) {
+	dir := config.DefaultAccountDir(os.Getenv(paths.EnvHome), 1)
+	info, err := os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("account dir %s: mode %v, want real directory (0700)", dir, info.Mode())
+	}
+}
+
+func TestJailHomeSetupFailure(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(base, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cleanup, err := jailHome(base)
+	defer cleanup()
+	if !errors.Is(err, syscall.ENOTDIR) || !strings.HasPrefix(err.Error(), "create jailed home under "+base+": ") {
+		t.Fatalf("jail setup error = %v, want contextual not-a-directory error", err)
+	}
+}
+
+func TestInstalledHomeUsesAnAccountDirectory(t *testing.T) {
+	root := InstalledHome(t)
+	runtime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.DefaultAccountDir(filepath.Join(root, "home"), 1)
+	if len(runtime.Config.Accounts) != 1 || runtime.Config.Accounts[0].ConfigDir != want {
+		t.Fatalf("accounts=%+v want=%s", runtime.Config.Accounts, want)
+	}
+	info, err := os.Lstat(want)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("account=%v error=%v", info, err)
+	}
+	if got := os.Getenv(paths.EnvClaudeRoots); got != filepath.Join(root, "claude") {
+		t.Fatalf("roots=%s", got)
+	}
+}
+
+func TestStageGlobalAgentsUsesTheStore(t *testing.T) {
+	home := t.TempDir()
+	StageGlobalAgents(t, home)
+	entries, err := os.ReadDir(filepath.Join(home, ".claude", "agents"))
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("store agents=%v error=%v", entries, err)
+	}
+}
+
+func TestStageClaudePlugins(t *testing.T) {
+	store := filepath.Join(t.TempDir(), ".claude")
+	if err := os.MkdirAll(store, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "settings.json"), []byte(`{"keep":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	StageClaudePlugins(t, store, []string{"fixture@market"})
+	raw, err := os.ReadFile(filepath.Join(store, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		Keep           bool
+		EnabledPlugins map[string]bool
+	}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if !settings.Keep || !settings.EnabledPlugins["fixture@market"] {
+		t.Fatalf("settings=%s", raw)
+	}
+	raw, err = os.ReadFile(filepath.Join(store, "plugins", "installed_plugins.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Plugins map[string][]struct{ InstallPath string }
+	}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	entries := record.Plugins["fixture@market"]
+	if len(entries) != 1 {
+		t.Fatalf("record=%s", raw)
+	}
+	if info, err := os.Stat(entries[0].InstallPath); err != nil || !info.IsDir() {
+		t.Fatalf("install=%v error=%v", info, err)
 	}
 }

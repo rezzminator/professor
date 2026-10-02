@@ -264,7 +264,7 @@ func assertLegacyPending(t *testing.T, err error, values paths.Values) {
 	if !errors.Is(err, paths.ErrLegacyPending) {
 		t.Fatalf("error = %v, want paths.ErrLegacyPending", err)
 	}
-	for _, want := range []string{values.StateDB, paths.LegacyStateDB(values.Home), "run pfm install"} {
+	for _, want := range []string{values.StateDB, paths.LegacyStateDB(values.Home), "run pfm doctor for the fix"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q lacks %q", err, want)
 		}

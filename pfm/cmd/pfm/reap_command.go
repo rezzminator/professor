@@ -54,7 +54,7 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 	}
 
 	resolved := runtime.Paths
-	configDirs := runtime.Config.ClaudeConfigDirs(resolved.Home)
+	configDirs := runtime.Config.ClaudeConfigDirs()
 	ctx := context.Background()
 	runner, err := reap.New(reap.Dependencies{
 		Paths:          resolved,

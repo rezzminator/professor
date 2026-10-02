@@ -5,6 +5,7 @@ package testjail
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -33,28 +34,9 @@ import (
 // prove that real-tmux behavior.
 var KeepAmbientIdentity bool
 
-// Run points TMPDIR at a base that is both SHORT and CANONICAL, then runs the
-// package's tests. Every t.TempDir() in the package inherits it, which is why
-// this is one call per package instead of an edit at hundreds of call sites.
-//
-// Both properties are load-bearing, and macOS violates both by default:
-//
-//   - SHORT, because a unix socket path is capped at 104 bytes on macOS (108 on
-//     Linux) — and the cap is on the WHOLE path. The default macOS TMPDIR is
-//     already ~50 characters of /var/folders/<hash>/T, and t.TempDir() appends
-//     the test's own name, so a jail that binds a socket named after a long
-//     test fails with "bind: invalid argument" — an error that reads like a
-//     bug in the code under test rather than a path that ran out of room.
-//
-//   - CANONICAL, because /var is a symlink to /private/var on macOS, so every
-//     default temp path resolves to something other than itself. Paths used as
-//     stable filesystem identities must have one spelling: allowing one
-//     location to appear under both its symlinked and resolved paths splits
-//     state that belongs together. A normal checkout satisfies that invariant;
-//     only the default temp dir cannot.
-//
-// /tmp is the answer to both: it is short everywhere, and resolving it once
-// yields /private/tmp on macOS and /tmp on Linux — canonical on each.
+// Run places every test under a short, canonical scratch root. Unix socket paths
+// include t.TempDir's test name, so macOS's long TMPDIR can exceed its 104-byte
+// limit. Resolving /tmp once also collapses macOS's /private alias.
 func Run(m *testing.M) int {
 	// The operator's ~/.local/bin and pfm's managed install bin hold pfm's own
 	// `claude` launcher shim; a jailed test resolving a binary through PATH must
@@ -146,7 +128,12 @@ func Run(m *testing.M) int {
 		// No canonical base to stand on. Run anyway rather than failing the
 		// whole package: on a platform where the default temp dir is already
 		// short and canonical, nothing here was needed in the first place.
-		defer jailHome(os.TempDir())()
+		cleanup, setupErr := jailHome(os.TempDir())
+		defer cleanup()
+		if setupErr != nil {
+			warnSetup("%v", setupErr)
+			return 1
+		}
 		return runProfiled(m)
 	}
 	// No wrapper directory of our own: t.TempDir() already makes a unique path
@@ -157,7 +144,12 @@ func Run(m *testing.M) int {
 		warnSetup("set TMPDIR to %s: %v", base, err)
 		return 1
 	}
-	defer jailHome(base)()
+	cleanup, setupErr := jailHome(base)
+	defer cleanup()
+	if setupErr != nil {
+		warnSetup("%v", setupErr)
+		return 1
+	}
 	return runProfiled(m)
 }
 
@@ -239,21 +231,24 @@ func warnSetup(format string, args ...any) {
 // paths.Resolve() reads, and Resolve() refuses an unset one under test — so a
 // package that opts out of this helper fails loudly rather than escaping.
 //
-// BROKEN STATE: if the jail directory cannot be created this says so on stderr
-// and leaves PFM_HOME unset, which makes paths.Resolve() refuse. An unjailed
-// package fails its tests; it never silently writes to a live account.
-func jailHome(base string) func() {
+// A home or default-account creation failure returns an error to Run, which
+// refuses to run the package tests and still cleans up the jail.
+func jailHome(base string) (func(), error) {
 	home, err := os.MkdirTemp(base, "pfm-jail-home-")
 	if err != nil {
-		warnSetup("no jailed home under %s: %v", base, err)
-		return func() {}
+		return func() {}, fmt.Errorf("create jailed home under %s: %w", base, err)
+	}
+	cleanup := func() {
+		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			warnSetup("remove jail home %s: %v", home, err)
+		}
+	}
+	accountDir := config.DefaultAccountDir(home, 1)
+	if err := os.MkdirAll(accountDir, 0o700); err != nil {
+		return cleanup, fmt.Errorf("create jailed account directory %s: %w", accountDir, err)
 	}
 	if err := os.Setenv(paths.EnvHome, home); err != nil {
-		warnSetup("set %s to %s: %v", paths.EnvHome, home, err)
-		if removeErr := os.RemoveAll(home); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-			warnSetup("remove unused jail home %s: %v", home, removeErr)
-		}
-		return func() {}
+		return cleanup, fmt.Errorf("set %s to %s: %w", paths.EnvHome, home, err)
 	}
 	configPath := filepath.Join(home, "pfm.config.json")
 	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
@@ -286,11 +281,7 @@ func jailHome(base string) func() {
 			warnSetup("set %s to %s: %v", paths.EnvSIDDir, sidDir, err)
 		}
 	}
-	return func() {
-		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			warnSetup("remove jail home %s: %v", home, err)
-		}
-	}
+	return cleanup, nil
 }
 
 // ShortRoot returns a unique temporary directory whose path is as short as this
@@ -428,10 +419,7 @@ func InstalledHome(t *testing.T) string {
 	if err := os.Symlink(managedClaude, filepath.Join(jailedHome, ".local", "bin", claudeBinary)); err != nil {
 		t.Fatal(err)
 	}
-	// The pfm-statusline and tmux-title-renudge host overlays are contracted
-	// pfm-install artifacts (issue #14 F1) the same way the Claude launcher
-	// is — a jail meant to represent a healthy install carries both, same
-	// managed-copy-then-symlink shape.
+	// A healthy install carries both overlays as managed copies and links.
 	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
 		managedOverlay := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", overlay)
 		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
@@ -451,9 +439,57 @@ func InstalledHome(t *testing.T) string {
 		}
 	}
 	t.Setenv("PATH", strings.Join(testPath, string(os.PathListSeparator)))
-	StageGlobalAgents(t, jailedHome, root)
+	account := config.DefaultAccountDir(jailedHome, 1)
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content, err := json.Marshal(
+		map[string]any{"version": 2, "accounts": []map[string]any{{"id": 1, "configDir": account}}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jailedHome, "pfm.config.json"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	StageGlobalAgents(t, jailedHome)
 	stageCloneZshrc(t, jailedHome)
 	return root
+}
+
+// StageAccountLinks stages shared directories and files, then links them into an account.
+func StageAccountLinks(t *testing.T, home, accountDir string, dirs []string, files map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(accountDir, 0o700); err != nil {
+		t.Fatalf("create account directory %s: %v", accountDir, err)
+	}
+	for _, entry := range dirs {
+		store := filepath.Join(home, ".claude", entry)
+		if err := os.MkdirAll(store, 0o700); err != nil {
+			t.Fatalf("create store directory %s: %v", store, err)
+		}
+		link := filepath.Join(accountDir, entry)
+		if err := os.Symlink(store, link); err != nil {
+			t.Fatalf("link account entry %s: %v", link, err)
+		}
+	}
+	for name, seed := range files {
+		store := filepath.Join(home, ".claude", name)
+		if err := os.MkdirAll(filepath.Dir(store), 0o700); err != nil {
+			t.Fatalf("create store directory for %s: %v", store, err)
+		}
+		if _, err := os.Lstat(store); errors.Is(err, fs.ErrNotExist) {
+			if err := os.WriteFile(store, []byte(seed), 0o600); err != nil {
+				t.Fatalf("create store file %s: %v", store, err)
+			}
+		} else if err != nil {
+			t.Fatalf("inspect store file %s: %v", store, err)
+		}
+		link := filepath.Join(accountDir, name)
+		if err := os.Symlink(store, link); err != nil {
+			t.Fatalf("link account entry %s: %v", link, err)
+		}
+	}
 }
 
 func stageCloneZshrc(t *testing.T, home string) {
@@ -479,13 +515,11 @@ func StageSourceRepoMarker(t *testing.T, home string) {
 }
 
 // StageGlobalAgents wires the checkout's current role roster into a doctor jail.
-func StageGlobalAgents(t *testing.T, home string, extraClaudeConfigDirs ...string) {
+func StageGlobalAgents(t *testing.T, home string) {
 	t.Helper()
-	claudeConfigDirs := []string{filepath.Join(home, ".cc", "1"), filepath.Join(home, ".cc", "2")}
-	claudeConfigDirs = append(claudeConfigDirs, extraClaudeConfigDirs...)
 	_, err := codexgen.RunGlobalAgents(codexgen.GlobalAgentsOptions{
 		Home: home, SourceRepo: checkoutRoot(),
-		ClaudeConfigDirs: claudeConfigDirs,
+		ClaudeConfigDirs: []string{filepath.Join(home, ".claude")},
 		CodexHomes:       []string{filepath.Join(home, ".codex")}, Mode: codexgen.ModeBuild,
 	})
 	if err != nil {
@@ -544,7 +578,7 @@ func StageHarnessPromptBaseline(t *testing.T, home, alias, stem, captured, name 
 
 // CleanHome stages a healthy target HOME and returns the runtime a clean
 // diagnostic reads.
-func CleanHome(t *testing.T) config.Runtime {
+func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runtime {
 	t.Helper()
 	home := t.TempDir()
 	claudeBinary := pfmengine.MustLookup(pfmengine.Claude).Binary
@@ -565,17 +599,10 @@ func CleanHome(t *testing.T) config.Runtime {
 			t.Fatal(err)
 		}
 	}
-	for _, entry := range []string{"projects", "file-history", "tasks", "session-env"} {
-		store := filepath.Join(home, ".claude", entry)
-		if err := os.MkdirAll(store, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		for _, account := range []string{"1", "2"} {
-			if err := os.Symlink(store, filepath.Join(home, ".cc", account, entry)); err != nil {
-				t.Fatal(err)
-			}
-		}
+	for _, id := range []int{1, 2} {
+		StageAccountLinks(t, home, config.DefaultAccountDir(home, id), dirs, files)
 	}
+
 	canonical := filepath.Join(canonicalDir, "pfm")
 	if err := WriteExecutable(canonical, []byte("target-pfm"), 0o700); err != nil {
 		t.Fatal(err)
@@ -593,10 +620,7 @@ func CleanHome(t *testing.T) config.Runtime {
 	if err := os.Symlink(managedClaude, filepath.Join(canonicalDir, claudeBinary)); err != nil {
 		t.Fatal(err)
 	}
-	// The pfm-statusline and tmux-title-renudge host overlays are contracted
-	// pfm-install artifacts (issue #14 F1); a fixture representing a healthy
-	// target HOME carries both, same managed-copy-then-symlink shape as the
-	// Claude launcher above.
+	// Match the installed-home overlay shape.
 	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
 		managedOverlay := filepath.Join(home, ".local", "share", "pfm", "install", "bin", overlay)
 		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
@@ -617,7 +641,7 @@ func CleanHome(t *testing.T) config.Runtime {
 	}
 	t.Setenv(paths.EnvConfig, configPath)
 	StageSourceRepoMarker(t, home)
-	StageGlobalAgents(t, home, filepath.Join(home, ".claude"))
+	StageGlobalAgents(t, home)
 	stageCloneZshrc(t, home)
 	// Pinned alongside HOME/PFM_HOME (L3-F9) — see the same comment in
 	// fleetSetenv.
@@ -737,4 +761,38 @@ func pinGoDirs() int {
 		}
 	}
 	return 0
+}
+
+// StageClaudePlugins stages the caller's plugin roster in a shared Claude store.
+func StageClaudePlugins(t *testing.T, store string, ids []string) {
+	t.Helper()
+	settingsPath := filepath.Join(store, "settings.json")
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	enabled := make(map[string]bool)
+	records := make(map[string]any)
+	for _, id := range ids {
+		installPath := filepath.Join(store, "plugins", "cache", id)
+		if err := os.MkdirAll(installPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		enabled[id] = true
+		records[id] = []any{map[string]any{"installPath": installPath}}
+	}
+	document["enabledPlugins"] = enabled
+	for path, value := range map[string]any{settingsPath: document, filepath.Join(store, "plugins", "installed_plugins.json"): map[string]any{"version": 2, "plugins": records}} {
+		content, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

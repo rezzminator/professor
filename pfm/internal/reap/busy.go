@@ -36,7 +36,7 @@ type ClaudeAgents struct {
 
 // NewClaudeAgents wires the probe to the accounts on this machine.
 func NewClaudeAgents(resolved paths.Values, machine pfmconfig.Config) ClaudeAgents {
-	return NewClaudeAgentsConfigured(resolved, machine.Claude.Binary, machine.ClaudeConfigDirs(resolved.Home))
+	return NewClaudeAgentsConfigured(resolved, machine.Claude.Binary, machine.ClaudeConfigDirs())
 }
 
 // NewClaudeAgentsConfigured probes exactly the configured roster with the

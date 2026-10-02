@@ -87,13 +87,13 @@ func TestCurrentSocketReadsTheCallersOwnTmuxServer(t *testing.T) {
 }
 
 func TestClaudeSeatsKeepConfiguredDirs(t *testing.T) {
-	seats := claudeSeats([]config.Account{{ID: 2, ConfigDir: "/x/seat"}}, "/home")
+	seats := claudeSeats([]config.Account{{ID: 2, ConfigDir: "/x/seat"}})
 	if len(seats) != 1 || seats[0].Account != 2 || seats[0].ConfigDir != "/x/seat" {
 		t.Fatalf("claudeSeats() = %#v", seats)
 	}
-	implicit := claudeSeats([]config.Account{{ID: 1, ConfigDir: "/x/seat", Implicit: true}}, "/home")
-	if len(implicit) != 1 || implicit[0].ConfigDir != "/home/.claude" || !implicit[0].Implicit {
-		t.Fatalf("implicit claudeSeats() = %#v, want the process default config dir", implicit)
+	first := claudeSeats([]config.Account{{ID: 1, ConfigDir: "/x/seat"}})
+	if len(first) != 1 || first[0].Account != 1 || first[0].ConfigDir != "/x/seat" {
+		t.Fatalf("account one claudeSeats() = %#v, want its configured dir", first)
 	}
 	codex := codexAccountRoots([]config.CodexAccount{{ID: 1, Home: "/x/codex"}})
 	if len(codex) != 1 || codex[0].Account != 1 || codex[0].Path != "/x/codex" {

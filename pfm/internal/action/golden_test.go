@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,9 +13,10 @@ func TestGoldenCommandLines(t *testing.T) {
 	previous := newSessionID
 	newSessionID = func() (string, error) { return "00000000-0000-4000-8000-000000000004", nil }
 	t.Cleanup(func() { newSessionID = previous })
+	home := t.TempDir()
 	var actual bytes.Buffer
 	lastRoute := Route(0)
-	for _, request := range stressRequests() {
+	for _, request := range stressRequests(home) {
 		plan, err := Synthesize(request)
 		if err != nil {
 			t.Fatal(err)
@@ -27,6 +29,8 @@ func TestGoldenCommandLines(t *testing.T) {
 		if plan.Run != "" {
 			line = replaceGoldenRun(line, plan.Run)
 		}
+		line = strings.ReplaceAll(line, home, "/home/test")
+		plan.Run = strings.ReplaceAll(plan.Run, home, "/home/test")
 		fmt.Fprintf(
 			&actual,
 			"%c\tb=%t\ta=%d\th=%t\trun=%s\tline=%s\n",

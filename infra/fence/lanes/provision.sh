@@ -19,19 +19,15 @@ case "${1:-}" in
     umask 077
     mkdir -p "$(dirname "$PFM_CONFIG")" "$HOME/.codex" "$HOME/.local/share/opencode"
     cat >"$PFM_CONFIG" <<'JSON'
-{"version":2,"accounts":[{"id":1,"configDir":"~/.cc/1","emoji":"🥇"},{"id":2,"configDir":"~/.cc/2","emoji":"🥈"}],"codex":{"homes":[{"id":1,"home":"~/.codex","emoji":"🥇"}]},"claude":{"systemPrompt":"professor"},"mcp":{"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}
+{"version":2,"accounts":[{"id":1,"configDir":"~/.cc/1","emoji":"🥇"},{"id":2,"configDir":"~/.cc/2","emoji":"🥈"}],"codex":{"homes":[{"id":1,"home":"~/.codex","emoji":"🥇"}]},"claude":{"systemPrompt":"professor"},"mcp":{"servers":{"chat":{"enabled":true}}}}
 JSON
+    printf '{"enabled":true}\n' >"$(dirname "$PFM_CONFIG")/harvester.config.json"
     trust="$(printf '%s\n' atlas lumen orbit harvester express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s from_entries)"
-    mkdir -p "$HOME/.cc/1/themes"
     for id in 1 2; do
       dir="$HOME/.cc/$id"; mkdir -p "$dir"
-      case "$id" in 1) theme=professor-gold ;; 2) theme=professor-silver ;; esac
       jq -n --argjson trust "$trust" --arg email "seat$id@lane.invalid" \
         '{hasCompletedOnboarding: true, oauthAccount: {emailAddress: $email}, projects: $trust}' >"$dir/.claude.json"
-      jq -n --arg t "custom:$theme" \
-        '{skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' >"$dir/settings.json"
       cp "$HERE/fixtures/claude-seat-$id.json" "$dir/.credentials.json"
-      [ "$id" = 1 ] || [ -L "$dir/themes" ] || ln -s "$HOME/.cc/1/themes" "$dir/themes"
     done
     cp "$HERE/fixtures/codex-auth.json" "$HOME/.codex/auth.json"
     cp "$HERE/fixtures/opencode-auth.json" "$HOME/.local/share/opencode/auth.json"
@@ -41,6 +37,10 @@ JSON
     mkdir -p "$HOME/.config/opencode"
     printf '{"model":"openai/lane-fixture"}\n' >"$HOME/.config/opencode/opencode.jsonc"
     (cd /worktree && pfm install --yes)
+    settings_tmp="$(mktemp)"
+    jq --arg t "custom:professor-gold" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$HOME/.claude/settings.json" >"$settings_tmp"
+    cat "$settings_tmp" >"$HOME/.claude/settings.json"
+    rm -f "$settings_tmp"
     git config --global user.name demo
     git config --global user.email demo@example.invalid
     git config --global init.defaultBranch main

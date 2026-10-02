@@ -135,6 +135,9 @@ func headlessCLIRuntimeFor(t *testing.T, binary string, engine pfmengine.ID) com
 		config.OpenCode = pfmconfig.OpenCodePrefs{Binary: binary}
 		config.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: configDir}}
 	default:
+		if err := os.MkdirAll(configDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
 		config.Claude = pfmconfig.ClaudePrefs{Binary: binary}
 		config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: configDir}}
 	}

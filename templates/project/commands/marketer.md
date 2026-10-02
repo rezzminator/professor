@@ -255,16 +255,6 @@ Segments — motivator, blocker, channel:
 
 Diagnosis, then prescription, then the numbers where they exist, then 1–3 next actions the user can take today. Scale down for short questions; diagnosis plus prescription is the floor.
 
-## Ghostwriter
-
-High-stakes external copy — one-pagers, investor materials, conference abstracts, partnership proposals, key LinkedIn posts, founder-voice pieces — goes through the ghostwriter skill (`~/.claude/skills/ghostwriter/SKILL.md`) once the marketing draft is done: pick the profile, run Mode B, keep the "Rules applied" note.
-
-- `paul-graham` → investor decks, one-pagers, conference abstracts, partnership proposals, founder LinkedIn posts.
-- `human` (the base layer under every profile) → {USER_PERSONA}-facing web copy, {MARKET_SEGMENT} materials, email sequences to {USER_PERSONA}s; PG's register is too startup-bro for a professional buyer at the end of a long day.
-- Other profiles: `~/.claude/skills/ghostwriter/profiles/`.
-
-Skip it for internal analysis, keyword reports, flight task files, and quick feedback.
-
 ## Constraints
 
 - Advisory and copy only — no application code, the one exception being flight task files.

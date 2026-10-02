@@ -198,7 +198,8 @@ func TestOpenLegacyGuardUsesConfiguredStatePath(t *testing.T) {
 	t.Setenv(paths.EnvStateDB, "")
 	t.Setenv(paths.EnvCacheDB, "")
 	_, err := Open()
-	if err == nil || !strings.Contains(err.Error(), statePath) || !strings.Contains(err.Error(), "run pfm install") {
+	if err == nil || !strings.Contains(err.Error(), statePath) ||
+		!strings.Contains(err.Error(), "run pfm doctor for the fix") {
 		t.Fatalf("Open() error = %v, want configured-path legacy guard", err)
 	}
 }
@@ -502,7 +503,7 @@ func assertStoreLegacyPending(t *testing.T, err error, target, legacy string) {
 	if !errors.Is(err, paths.ErrLegacyPending) {
 		t.Fatalf("OpenContext error = %v, want paths.ErrLegacyPending", err)
 	}
-	for _, want := range []string{target, legacy, "run pfm install"} {
+	for _, want := range []string{target, legacy, "run pfm doctor for the fix"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q lacks %q", err, want)
 		}

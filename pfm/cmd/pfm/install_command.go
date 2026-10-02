@@ -3,24 +3,23 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
-	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // installHarvestProvisioner is nil in production and resolves to the real
@@ -33,12 +32,6 @@ var (
 
 var runInstaller = installer.Run
 
-// checkInstallSpace is the applying run's space preflight; a test swaps it.
-var checkInstallSpace = installer.CheckInstallSpace
-
-// planConfigMigration plans the pre-split config migration; a test swaps it.
-var planConfigMigration = pfmconfig.PlanMigrationFrom
-
 func installHarvestProvisioner() installer.HarvestProvisioner {
 	if installHarvestProvisionerOverride != nil {
 		return installHarvestProvisionerOverride
@@ -49,13 +42,15 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	flags := cli.NewFlagSet(
 		installCommand,
-		"usage: pfm install [--yes] [--check] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+		"usage: pfm install [--yes] [--check] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
-	check := flags.Bool("check", false, "answer whether --yes would refuse before any change (exit 4: the gate would)")
-	rollback := flags.String("rollback", "", "replay a layout journal backwards")
-	force := flags.Bool("force", false, "with --rollback: overwrite destinations changed since the install")
+	check := flags.Bool(
+		"check",
+		false,
+		"answer whether --yes would refuse before any change (exit 4: a blocking host check or a running name-sync job)",
+	)
 	vscode := flags.Bool(
 		"vscode",
 		false,
@@ -71,29 +66,6 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	if flags.NArg() != 0 || *check && *yes {
 		flags.Usage()
 		return 2
-	}
-	rollbackSet := false
-	flags.Visit(func(flag *flag.Flag) {
-		if flag.Name == "rollback" {
-			rollbackSet = true
-		}
-	})
-	if *force && !rollbackSet {
-		flags.Usage()
-		return 2
-	}
-	if rollbackSet {
-		other := false
-		flags.Visit(func(flag *flag.Flag) {
-			if flag.Name != "rollback" && flag.Name != "force" {
-				other = true
-			}
-		})
-		if other || *rollback == "" {
-			flags.Usage()
-			return 2
-		}
-		return runInstallRollback(*rollback, *force, stdout, stderr, runtimes)
 	}
 	skipCodex := false
 	if value := strings.TrimSpace(*skipEngine); value != "" {
@@ -128,25 +100,19 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 		fmt.Fprintf(stdout, "  skip    %s\n", refusal)
 	}
-	layoutEnv, err := installer.NewInstallLayoutEnv(runtime, paths.OSEnv{}, professor.DiscoverSourceRepo())
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm install: layout environment: %v\n", err)
-		return 1
-	}
-	journal := installer.NewInstallJournal(context.Background(), layoutEnv, stderr)
-	if mode == installer.ModeApply {
-		// The run's one journal line is its last stdout line, on every return
-		// once anything was recorded — a failure included; the name-sync units
-		// the layout stopped start only once installer.Run returned.
-		defer func() {
-			code = journal.RestartSchedulerUnits(code, stderr)
-			if dir := journal.Dir(); dir != "" {
-				fmt.Fprintln(stdout, "install journal: "+dir)
+	rows := hostcheck.RunAll(hostcheck.EnvFor(runtime, clock.Real.Now()))
+	if blocking := hostcheck.Count(rows, hostcheck.Block); blocking != 0 {
+		for _, row := range rows {
+			if row.Severity == hostcheck.Block {
+				fmt.Fprint(stderr, row.Render("pfm install: "))
 			}
-		}()
+		}
+		fmt.Fprintf(stderr, "pfm install: %d blocking — run pfm doctor for the fixes\n", blocking)
+		return 4
 	}
-	// withFlags carries the command's flags into an installer run: the apply
-	// and the space preflight's planning pass see the same install.
+	if warnings := hostcheck.Count(rows, hostcheck.Warn); warnings != 0 {
+		fmt.Fprintf(stdout, "pfm install: %d warnings — run pfm doctor to see them\n", warnings)
+	}
 	withFlags := func(options installer.Options) installer.Options {
 		options.VSCode = *vscode
 		options.InstallThemes = !*skipThemes
@@ -175,87 +141,40 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		_, failures, _ := doctor.PrintDependencies(context.Background(), w, runtime.Paths.Home, entries, probe)
 		return failures
 	}
-	layoutFindings := installer.ClassifyLayout(layoutEnv)
-	// --check runs the apply's refusals up to its gate, then answers there.
-	// Every read-only refusal precedes the first host write (ApplyLayout).
 	if mode == installer.ModeApply || *check {
-		planOptions := func(runtime commandRuntime) installer.Options {
-			return withFlags(
-				newInstallerOptions(installer.ModeDryRun, *configDir, *skipHarvest, io.Discard, io.Discard, runtime),
-			)
-		}
-		if code = installSpacePreflight(layoutEnv, layoutFindings, runtime, planOptions, stderr); code != 0 {
-			return code
-		}
-		code = installer.PreChangeRefusals(layoutEnv, layoutFindings, installer.PreChange{
-			Runtime: runtime, PlanMigration: planConfigMigration, PrintDependencies: printDependencies, Check: *check,
-		}, stdout, stderr)
-		if code != 0 || *check {
-			return code
+		if printDependencies(stdout, runtime) != 0 {
+			fmt.Fprintln(stderr, "pfm install: required dependency preflight failed")
+			return 1
 		}
 	}
-	journalDir, err := installer.ApplyLayout(
-		context.Background(), layoutEnv, journal, mode == installer.ModeApply, stdout,
+	if *check {
+		if err := installer.CheckScheduler(context.Background(), nil); err != nil {
+			fmt.Fprintln(stderr, installer.SchedulerRefusal(installCommand, err))
+			return 4
+		}
+		fmt.Fprintln(stdout, "install check: ok — pfm install --yes would pass its pre-change checks")
+		return 0
+	}
+	installConfig, seeded, configErr := installer.InstallConfig(
+		runtime,
+		paths.OSEnv{},
+		professor.DiscoverSourceRepo(),
+		mode == installer.ModeApply,
 	)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm install: %v\n", err)
-		return installer.LayoutExitCode(err)
-	}
-	if mode == installer.ModeApply && journalDir != "" {
-		for _, finding := range layoutFindings {
-			if (finding.Row != "state-db" && finding.Row != "cache-db") || finding.Source == "" {
-				continue
-			}
-			if _, sourceErr := os.Lstat(finding.Source); !os.IsNotExist(sourceErr) {
-				continue
-			}
-			if _, targetErr := os.Stat(finding.Path); targetErr != nil {
-				continue
-			}
-			existing, globErr := journal.MigrationBackups()
-			if globErr != nil {
-				fmt.Fprintf(stderr, "pfm install: %v\n", globErr)
-				return 1
-			}
-			if migrateErr := migrateInstalledLayoutDatabases(
-				context.Background(),
-				layoutEnv.StateDB,
-				layoutEnv.CacheDB,
-			); migrateErr != nil {
-				fmt.Fprintf(stderr, "pfm install: migrate moved databases: %v\n", migrateErr)
-				return 1
-			}
-			// The migration's rewrites and backups are this install's own
-			// changes, which rollback reverses, never drift.
-			if err := journal.JournalMigrationBackups(existing); err != nil {
-				fmt.Fprintf(stderr, "pfm install: journal migrated databases: %v\n", err)
-				return 1
-			}
-			break
-		}
-	}
-	installConfig, configErr := layoutEnv.InstallConfig(runtime, mode == installer.ModeApply)
 	if configErr != nil {
-		fmt.Fprintf(stderr, "pfm install: %v\n", configErr)
+		fmt.Fprintf(stderr, "pfm install: seed config: %v\n", configErr)
 		return 1
 	}
 	runtime.Config = installConfig
-	planSource := ""
-	if mode != installer.ModeApply {
-		planSource = installer.ConfigMoveSource(layoutFindings, runtime.Config.Path)
+	if seeded != "" {
+		fmt.Fprintf(stdout, "  change  seed %s from %s\n", runtime.Config.Path, seeded)
 	}
-	migrated, migrateCode := migrateMachineConfig(mode, journal, planSource, stdout, stderr, runtime)
-	if migrateCode != 0 {
-		return migrateCode
-	}
-	runtime = migrated
 	// An apply ran the dependency preflight before its first write.
 	preflight := 0
 	if mode != installer.ModeApply {
 		preflight = printDependencies(stdout, runtime)
 	}
 	options := withFlags(newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime))
-	options.Journal = journal
 	code = runInstallerCommand(installCommand, options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
 		if preflight != 0 {
@@ -283,114 +202,6 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	return code
 }
 
-// installSpacePreflight plans the run — the installer in dry-run with a fresh
-// journal, plus the harvester root a re-provision journals — and refuses the
-// apply when a filesystem cannot take the journal copies and cross-filesystem
-// moves (installer.CheckInstallSpace).
-func installSpacePreflight(
-	layoutEnv installer.LayoutEnv,
-	findings []installer.LayoutFinding,
-	runtime commandRuntime,
-	planOptions func(commandRuntime) installer.Options,
-	stderr io.Writer,
-) int {
-	ctx := context.Background()
-	planConfig, err := layoutEnv.InstallConfig(runtime, false)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm install: space preflight: plan install writes: %v\n", err)
-		return 1
-	}
-	runtime.Config = planConfig
-	options := planOptions(runtime)
-	plan := installer.NewJournal(ctx, layoutEnv)
-	options.Journal = plan
-	if _, err := runInstaller(ctx, options); err != nil {
-		fmt.Fprintf(stderr, "pfm install: space preflight: plan install writes: %v\n", err)
-		return 1
-	}
-	planned := append(plan.Planned(), installer.PlanHarvestJournal(ctx, options)...)
-	if err := checkInstallSpace(layoutEnv, findings, planned); err != nil {
-		for _, line := range strings.Split(err.Error(), "\n") {
-			fmt.Fprintf(stderr, "pfm install: %s\n", line)
-		}
-		return 1
-	}
-	return 0
-}
-
-func migrateInstalledLayoutDatabases(ctx context.Context, statePath, cachePath string) (returnErr error) {
-	resolved, err := pfmconfig.ResolvePaths()
-	if err != nil {
-		return fmt.Errorf("resolve moved database paths: %w", err)
-	}
-	if err := installer.DatabasePathsAgree(statePath, cachePath, resolved); err != nil {
-		return err
-	}
-	database, err := store.OpenContext(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { returnErr = errors.Join(returnErr, database.Close()) }()
-	if err := database.SharedDegraded(); err != nil {
-		return fmt.Errorf("shared state: %w", err)
-	}
-	return nil
-}
-
-// migrateMachineConfig moves a pre-split machine to the current layout
-// (pfm.config.json + harvester.config.json, loopback port 8377 → 18377)
-// BEFORE the installer reads the port it wires every client to — so client
-// registrations and the restarted daemon always agree. A preview prints the
-// plan and wires what the apply would.
-func migrateMachineConfig(
-	mode installer.Mode,
-	journal *installer.Journal,
-	planSource string,
-	stdout, stderr io.Writer,
-	runtime commandRuntime,
-) (commandRuntime, int) {
-	migration, err := planConfigMigration(runtime.Config, planSource)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm install: plan config migration: %v\n", err)
-		return runtime, 1
-	}
-	if migration.Empty() {
-		return runtime, 0
-	}
-	fmt.Fprintln(stdout, "config migration (pre-split layout):")
-	for _, step := range migration.Steps() {
-		fmt.Fprintf(stdout, "  change  %s\n", step)
-	}
-	if mode != installer.ModeApply {
-		runtime.Config = migration.Preview(runtime.Config)
-		return runtime, 0
-	}
-	apply := func() error { return pfmconfig.ApplyMigration(migration) }
-	if err := journal.WriteUnlessInterrupted(configMigrationPaths(migration), apply); err != nil {
-		fmt.Fprintf(stderr, "pfm install: apply config migration: %v\n", err)
-		return runtime, 1
-	}
-	reloaded, err := pfmconfig.LoadRuntime(migration.Path)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm install: reload migrated config %s: %v\n", migration.Path, err)
-		return runtime, 1
-	}
-	return reloaded, 0
-}
-
-// configMigrationPaths names every file pfmconfig.ApplyMigration writes,
-// renames or removes: the config, its harvester sibling, the pre-split file
-// and the parked copy it becomes.
-func configMigrationPaths(migration pfmconfig.Migration) []string {
-	changed := []string{migration.Path, pfmconfig.HarvesterPath(migration.Path)}
-	for _, legacy := range []string{migration.LegacyPath, migration.StrayLegacyPath} {
-		if legacy != "" {
-			changed = append(changed, legacy, filepath.Join(filepath.Dir(legacy), pfmconfig.LegacyBackupName))
-		}
-	}
-	return changed
-}
-
 func newInstallerOptions(
 	mode installer.Mode,
 	configDir string,
@@ -409,6 +220,9 @@ func newInstallerOptions(
 	}
 	if len(runtimes) != 0 {
 		runtime := runtimes[0]
+		options.ManagedSettingsDir = runtime.Paths.ManagedSettingsDir
+		options.CleanupPeriodDays = runtime.Config.Claude.CleanupPeriodDays
+		options.RequireManagedCleanup = runtime.Config.Claude.RequireManagedCleanup
 		options.Home = runtime.Paths.Home
 		options.StateDB = runtime.Paths.StateDB
 		options.MCPEnabled = make(map[string]bool, len(runtime.Config.MCPServers))
@@ -429,12 +243,22 @@ func newInstallerOptions(
 			options.CodexHomes = append(options.CodexHomes, account.Home)
 		}
 		if configDir == "" {
-			options.ConfigDirs = make([]string, 0, len(runtime.Config.Accounts))
-			for _, account := range runtime.Config.Accounts {
-				options.ConfigDirs = append(options.ConfigDirs, account.ConfigDir)
-			}
 			options.ClaudeAccounts = runtime.Config.Accounts
-
+			if len(runtime.Config.Accounts) > 0 {
+				id, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+				if err != nil {
+					id = runtime.Config.Accounts[0].ID
+					for _, account := range runtime.Config.Accounts {
+						if account.ID < id {
+							id = account.ID
+						}
+					}
+					fmt.Fprintf(stdout, "  skip    primary account unreadable (%v); using account %d\n", err, id)
+				}
+				if account, ok := runtime.Config.AccountByID(id); ok {
+					options.PrimaryConfigDir = account.ConfigDir
+				}
+			}
 		}
 	}
 	options.SourceRepo = resolveInstallSourceRepo(options.Home, stderr)

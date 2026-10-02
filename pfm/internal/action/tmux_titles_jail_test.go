@@ -92,8 +92,9 @@ func TestCodexServerLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) 
 // The policy travels with the PLAN, so every caller of Synthesize carries the
 // machine config's answer without wiring it a second time.
 func TestSynthesizeCarriesTheConfiguredTitlePolicyIntoTheCodexPlan(t *testing.T) {
+	home := t.TempDir()
 	for _, enabled := range []bool{true, false} {
-		machine := testMachineConfig("/home/test")
+		machine := testMachineConfig(home)
 		machine.Tmux = pfmconfig.Tmux{Titles: pfmconfig.TmuxTitles{Enabled: enabled}}
 		plan, err := Synthesize(Request{
 			Row: compose.Row{
@@ -102,7 +103,7 @@ func TestSynthesizeCarriesTheConfiguredTitlePolicyIntoTheCodexPlan(t *testing.T)
 				CWD:  "/work/codex",
 			},
 			PrimaryAccount: 1,
-			Home:           "/home/test",
+			Home:           home,
 			FreshSocket:    "cx-901-1-1",
 			Config:         machine,
 		})

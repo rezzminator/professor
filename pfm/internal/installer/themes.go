@@ -186,7 +186,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 
 		next := cloneThemeOwnership(ownership)
 		next[name] = themeOwnershipRecord{Path: target, SHA256: digest}
-		if err := installer.options.Journal.Write([]string{target, ownershipPath}, func() error {
+		if err := func() error {
 			if writeErr := atomicfile.Write(target, content, 0o644); writeErr != nil {
 				return fmt.Errorf("write %s: %w", target, writeErr)
 			}
@@ -198,7 +198,7 @@ func (installer *engine) installThemes(ctx context.Context) {
 				return fmt.Errorf("record ownership: %w", ledgerErr)
 			}
 			return nil
-		}); err != nil {
+		}(); err != nil {
 			installer.skip("theme " + name + " install failed: " + err.Error())
 			continue
 		}

@@ -32,9 +32,7 @@ func TestInstallPreflightRefusesRequiredDependencyBeforeInstallerRuns(t *testing
 	}
 	called := false
 	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		// The space preflight's dry-run plan precedes the dependency preflight,
-		// which refuses before the layout's first write
-		// (TestInstallPreChangeRefusalsPrecedeAnyHostWrite).
+		// The dependency preflight refuses before the installer runs in apply mode.
 		called = called || options.Mode == installer.ModeApply
 		return installer.Report{}, nil
 	}

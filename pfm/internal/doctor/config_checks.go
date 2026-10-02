@@ -127,10 +127,17 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		fmt.Fprintf(stdout, "doctor: config: missing %s — run pfm install\n", path)
-		if runtime.Paths.Home != "" {
-			legacy := filepath.Join(runtime.Paths.Home, ".config", "pfm", config.FileName)
+		// The host gate refuses pfm install while a legacy config waits, so the
+		// row names the host check's fix; under an explicit --config the check
+		// skips the file, and so does the row.
+		if runtime.Paths.Home != "" && !runtime.ConfigExplicit {
+			legacy := filepath.Join(config.LegacyConfigDir(paths.OSEnv{}, runtime.Paths.Home), config.FileName)
 			if _, err := os.Stat(legacy); err == nil {
-				fmt.Fprintf(stdout, "doctor: config: legacy file %s is not read; run pfm install\n", legacy)
+				fmt.Fprintf(
+					stdout,
+					"doctor: config: legacy file %s is not read — apply the host-check legacy-config fix\n",
+					legacy,
+				)
 			}
 		}
 		return 1, 0
@@ -305,14 +312,6 @@ func printDuplicateSeatLogins(stdout io.Writer, runtime config.Runtime, env path
 
 func printHarvesterConfigDoctorWithEnv(stdout io.Writer, runtime config.Runtime, env paths.Env) int {
 	warnings := 0
-	if migration, err := config.PlanMigration(runtime.Config); err != nil {
-		warnings++
-		fmt.Fprintf(stdout, "doctor: config layout=unknown error=%v\n", err)
-	} else if !migration.Empty() {
-		warnings++
-		fmt.Fprintf(stdout, "doctor: config layout=pre-split path=%s remediation=run pfm install --yes (%s)\n",
-			runtime.Config.Path, strings.Join(migration.Steps(), "; "))
-	}
 	for _, retired := range RetiredHarvesterEnv {
 		if strings.TrimSpace(env.Get(retired.Name)) == "" {
 			continue

@@ -321,7 +321,8 @@ checks_templates_dev_report() {
 
 }
 
-checks_templates_mirrors_opencode() {
+checks_templates_mirrors_opencode() { # optional: an executable pfm already built from this tree
+  local prebuilt="${1:-}" build_opencode
   head_ "templates — native opencode mirror"
   # Build the source-under-test inside the fence; verification must never
   # depend on or install a host binary. The ignored artifact also gives this
@@ -331,8 +332,12 @@ checks_templates_mirrors_opencode() {
   local opencode_scratch="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
   local opencode_bin="$opencode_scratch/pfm-dev-bin"
   local opencode_home="$opencode_scratch/opencode-verify-home"
+  # The gate's pfm.unit leaves its prebuilt pfm in the run dir (test-shard.sh --bin-dir): a copy of it
+  # is the same binary a build here would make. Absent (the verify path, a templates-only gate): build.
+  build_opencode=(go -C pfm build -o "$opencode_bin" ./cmd/pfm)
+  if [[ -n "$prebuilt" && -x "$prebuilt" ]]; then build_opencode=(cp "$prebuilt" "$opencode_bin"); fi
   if need_tool go templates && mkdir -p "$opencode_scratch" \
-    && go -C pfm build -o "$opencode_bin" ./cmd/pfm \
+    && "${build_opencode[@]}" \
     && "$opencode_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
     && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
     ok "opencode mirror current and parseable"
@@ -451,9 +456,51 @@ checks_pfm_history() { # timing base, current run; print newest usable unit stre
   done < <(find "$base" -maxdepth 2 -type f -path '*/run.*/unit.json' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2-)
 }
 
+# checks_pfm_profile_pointers <go-test.json> <profile dir> <FAILURES before the run>: under
+# go_test_report's block, each failing package's profile bundles (profile-report.sh failures). A
+# failed run whose stream names no failing package (NO TEST EVENTS, an unreadable stream) or a
+# report that could not be built still points at the profile root, never at nothing.
+checks_pfm_profile_pointers() {
+  local json="$1" profile="$2" before="$3" out rc
+  if out="$(bash "$REPO_ROOT/infra/fence/profile-report.sh" failures "$json" "$profile" 2>&1)"; then rc=0; else rc=$?; fi
+  [[ -z "$out" ]] || printf '%s\n' "$out"
+  (( rc == 0 )) || printf '  PROFILE failures NOT REPORTED — profile-report.sh failures exit %s\n' "$rc"
+  if (( rc != 0 )) || { [[ "$out" != *'PROFILE '* ]] && (( FAILURES > before )); }; then
+    printf '  PROFILE index %s/\n' "$profile"
+  fi
+}
+
+# checks_gate_fixture <kind> <run dir>: one deliberately broken step of the instrument's own proof
+# (gate_run registers the five only under PFM_GATE_FIXTURES=1): go-fail, go-hang and go-slow run
+# internal/testjail/testdata/profilefixture, whose profile bundles the failure pointers then name;
+# shell-fail and shell-hang are the scripts under infra/fence/gate-fixtures/. Every kind is red by
+# design, and a go-slow step is ended by its bound, never by this function.
+checks_gate_fixture() {
+  local kind="$1" run_dir="$2" mode timeout json before="$FAILURES"
+  case "$kind" in
+    shell-fail|shell-hang)
+      info "\$ bash infra/fence/gate-fixtures/$kind.sh"
+      bash "$REPO_ROOT/infra/fence/gate-fixtures/$kind.sh" || fail_step "fixture: $kind red (expected)"
+      return ;;
+    go-fail) mode=fail; timeout=2m ;;
+    go-hang) mode=hang; timeout=20s ;;
+    go-slow) mode=slow; timeout=5m; local -x PFM_PROFILE_FIXTURE_SLOW_S=120 ;;
+    *) fail_step "fixture: unknown kind '$kind'"; return ;;
+  esac
+  json="$run_dir/fixture-$kind.json"
+  local -x PFM_PROFILE_FIXTURE="$mode" PFM_TEST_ARTIFACT_DIR="$run_dir/profile"
+  info "\$ go -C pfm test -count=1 -json -timeout $timeout ./internal/testjail/testdata/profilefixture/ (PFM_PROFILE_FIXTURE=$mode)"
+  go -C "$REPO_ROOT/pfm" test -count=1 -json -timeout "$timeout" ./internal/testjail/testdata/profilefixture/ > "$json" \
+    || fail_step "fixture: go $mode red (expected)"
+  go_test_report "$json"
+  checks_pfm_profile_pointers "$json" "$run_dir/profile" "$before"
+}
+
 checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
-  local d="$1" run_dir="$2" flags_text="${3:-}" timing_base history
+  local d="$1" run_dir="$2" flags_text="${3:-}" timing_base history before="$FAILURES"
   local testflags=() shard_args=()
+  # Every test process of the run leaves profile/<label>.<pid>/ (internal/testjail).
+  local -x PFM_TEST_ARTIFACT_DIR="$run_dir/profile"
   if [[ -z "$flags_text" ]] && ! flags_text="$(make -s -C "$d" --no-print-directory testflags)"; then
     fail_step "pfm: TESTFLAGS could not be read from Makefile"; return
   fi
@@ -463,11 +510,28 @@ checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS
   [[ -z "$history" ]] || shard_args=(--history "$history")
   # Positional arguments keep flags and output paths out of shell code.
   # The JSON is retained even on failure; timing is a separate verdict.
-  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" "${shard_args[@]}" -- "${testflags[@]}"
+  # --bin-dir keeps the prebuilt pfm in the run dir for the templates.check-map and templates.mirrors steps.
+  run "pfm: go test" -- bash "$d/scripts/test-shard.sh" run --out "$run_dir/unit.json" --bin-dir "$run_dir/bin" "${shard_args[@]}" -- "${testflags[@]}"
   go_test_report "$run_dir/unit.json"
+  checks_pfm_profile_pointers "$run_dir/unit.json" "$run_dir/profile" "$before"
   skip_gate "pfm: skipped tests are all listed (unit)" "$run_dir/unit.json"
   run "pfm: test timing (budget)" -- bash "$d/scripts/test-timing.sh" \
     --check --suite unit --out "$run_dir/unit.tsv" "$run_dir/unit.json"
+}
+
+# checks_pfm_e2e <pfm dir> <run dir>: the tagged e2e rows (dev.sh pfm_e2e_rows), profiled into
+# <run dir>/profile, with the CPU load sampled into e2e.load for their whole span — stopped only
+# after the rows return, so the timing check inside them finds a load row at the stream's end.
+checks_pfm_e2e() {
+  local d="$1" run_dir="$2" before="$FAILURES" load_pid load_rc
+  local -x PFM_TEST_ARTIFACT_DIR="$run_dir/profile"
+  bash "$d/scripts/test-shard.sh" sample --out "$run_dir/e2e.load" &
+  load_pid=$!
+  pfm_e2e_rows "$d" "$run_dir"
+  kill -TERM "$load_pid" 2>/dev/null || true # already gone: its exit status below says why
+  if wait "$load_pid"; then load_rc=0; else load_rc=$?; fi
+  (( load_rc == 0 )) || printf '  PROFILE e2e.load NOT RECORDED — test-shard.sh sample exit %s (its stderr above)\n' "$load_rc"
+  checks_pfm_profile_pointers "$run_dir/e2e.json" "$run_dir/profile" "$before"
 }
 
 checks_pfm_test() {
@@ -485,45 +549,84 @@ checks_pfm_test() {
     fail_step "pfm: timing run directory could not be created under $timing_base"; return
   fi
   checks_pfm_unit "$d" "$timing_run" "$flags_text"
-  pfm_e2e_rows "$d" "$timing_run"
+  checks_pfm_e2e "$d" "$timing_run"
 }
 
-gate_budget_verdict() { # target, wall seconds, optional budget file
-  local target="$1" wall="$2" budgets="${3:-$REPO_ROOT/infra/fence/gate-budget.yml}"
-  local tolerance fail_factor value limit fail_limit name="gate($target)"
+gate_wall_ceil() { # gate_wall_ceil <seconds>: the wall rounded up to a whole second
+  awk -v w="$1" 'BEGIN { printf "%d", (w==int(w) ? w : int(w)+1) }'
+}
+
+# gate_budget_params <target> <budget file>: reads the file's tolerance, fail_factor and the
+# target's row into GATE_BUDGET_TOLERANCE, GATE_BUDGET_FAIL_FACTOR and GATE_BUDGET_VALUE (empty
+# when the target has no row). A file that cannot be judged returns 1 with GATE_BUDGET_REASON set.
+gate_budget_params() {
+  local target="$1" budgets="$2"
+  GATE_BUDGET_TOLERANCE="" GATE_BUDGET_FAIL_FACTOR="" GATE_BUDGET_VALUE="" GATE_BUDGET_REASON=""
   if [[ ! -r "$budgets" ]]; then
-    printf 'budget: ✗ %s — budget file unreadable: %s\n' "$name" "$budgets"
+    GATE_BUDGET_REASON="budget file unreadable: $budgets"
     return 1
   fi
-  tolerance="$(awk '$1=="tolerance:" {print $2; exit}' "$budgets")"
-  fail_factor="$(awk '$1=="fail_factor:" {print $2; exit}' "$budgets")"
-  value="$(awk -v want="$target" '$1=="gate:" {inside=1; next} /^[a-z]/ {inside=0} inside && $1==want ":" {print $2; exit}' "$budgets")"
-  if [[ -z "$tolerance" ]]; then
-    printf 'budget: ✗ %s — no tolerance in %s\n' "$name" "$budgets"
+  GATE_BUDGET_TOLERANCE="$(awk '$1=="tolerance:" {print $2; exit}' "$budgets")"
+  GATE_BUDGET_FAIL_FACTOR="$(awk '$1=="fail_factor:" {print $2; exit}' "$budgets")"
+  GATE_BUDGET_VALUE="$(awk -v want="$target" '$1=="gate:" {inside=1; next} /^[a-z]/ {inside=0} inside && $1==want ":" {print $2; exit}' "$budgets")"
+  if [[ -z "$GATE_BUDGET_TOLERANCE" ]]; then
+    GATE_BUDGET_REASON="no tolerance in $budgets"
     return 1
   fi
-  if [[ ! "$tolerance" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    printf 'budget: ✗ %s — invalid tolerance %s in %s\n' "$name" "$tolerance" "$budgets"
+  if [[ ! "$GATE_BUDGET_TOLERANCE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    GATE_BUDGET_REASON="invalid tolerance $GATE_BUDGET_TOLERANCE in $budgets"
     return 1
   fi
-  if [[ -z "$fail_factor" ]]; then
-    printf 'budget: ✗ %s — no fail_factor in %s\n' "$name" "$budgets"
+  if [[ -z "$GATE_BUDGET_FAIL_FACTOR" ]]; then
+    GATE_BUDGET_REASON="no fail_factor in $budgets"
     return 1
   fi
-  if [[ ! "$fail_factor" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! awk -v f="$fail_factor" 'BEGIN { exit !(f > 0) }'; then
-    printf 'budget: ✗ %s — invalid fail_factor %s in %s\n' "$name" "$fail_factor" "$budgets"
+  if [[ ! "$GATE_BUDGET_FAIL_FACTOR" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! awk -v f="$GATE_BUDGET_FAIL_FACTOR" 'BEGIN { exit !(f > 0) }'; then
+    GATE_BUDGET_REASON="invalid fail_factor $GATE_BUDGET_FAIL_FACTOR in $budgets"
     return 1
   fi
+}
+
+# gate_budget_limits <budget> <tolerance> <fail_factor>: prints "<limit> <fail_limit>", the one
+# arithmetic both the budget verdict and the step bound take.
+gate_budget_limits() {
+  local limit fail_limit
+  limit="$(awk -v v="$1" -v t="$2" 'BEGIN { printf "%d", v * t }')"
+  fail_limit="$(awk -v l="$limit" -v f="$3" 'BEGIN { printf "%d", l * f }')"
+  printf '%s %s\n' "$limit" "$fail_limit"
+}
+
+# gate_budget_verdict <target> <wall seconds> [budget file] [attribution]: prints the verdict
+# line, returns 1 when red, and leaves PASS, WARN, FAIL, UNPINNED or ERROR in BUDGET_VERDICT.
+# attribution is test-contention.sh's `<WORD><TAB><evidence>` line for the run: an over-limit line
+# ends with it, and a fail-tier wall the judge calls CONTENTION is a WARN, not a red gate.
+gate_budget_verdict() {
+  local target="$1" wall="$2" budgets="${3:-$REPO_ROOT/infra/fence/gate-budget.yml}" attribution="${4:-}"
+  local value limit fail_limit name="gate($target)" word="" suffix=""
+  if [[ -n "$attribution" ]]; then
+    word="${attribution%%$'\t'*}"
+    case "$word" in
+      CONTENTION|CODE|'not measured') suffix=" · attribution $word (${attribution#*$'\t'})" ;;
+      *) word='not measured'; suffix=" · attribution not measured (attribution unreadable: ${attribution//$'\t'/ })" ;;
+    esac
+  fi
+  BUDGET_VERDICT=ERROR
+  if ! gate_budget_params "$target" "$budgets"; then
+    printf 'budget: ✗ %s — %s\n' "$name" "$GATE_BUDGET_REASON"
+    return 1
+  fi
+  value="$GATE_BUDGET_VALUE"
   if [[ ! "$wall" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    printf 'budget: ✗ %s — no wall time read (got %s); the gate table is missing or has no WALL row\n' "$name" "${wall:-nothing}"
+    printf 'budget: ✗ %s — no wall time read (got %s); the gate table is missing or has no STEPS row\n' "$name" "${wall:-nothing}"
     return 1
   fi
-  wall="$(awk -v w="$wall" 'BEGIN { printf "%d", (w==int(w) ? w : int(w)+1) }')"
+  wall="$(gate_wall_ceil "$wall")"
   if [[ -z "$value" ]]; then
     printf 'budget: ✗ %s — UNBUDGETED: no row in %s (add one, `unpinned` until three green runs)\n' "$name" "$(basename "$budgets")"
     return 1
   fi
   if [[ "$value" == unpinned ]]; then
+    BUDGET_VERDICT=UNPINNED
     printf 'budget: %s unpinned — recorded, not judged: %ss\n' "$name" "$wall"
     return 0
   fi
@@ -531,38 +634,117 @@ gate_budget_verdict() { # target, wall seconds, optional budget file
     printf 'budget: ✗ %s — invalid budget %s in %s\n' "$name" "$value" "$budgets"
     return 1
   fi
-  limit="$(awk -v v="$value" -v t="$tolerance" 'BEGIN { printf "%d", v * t }')"
-  fail_limit="$(awk -v l="$limit" -v f="$fail_factor" 'BEGIN { printf "%d", l * f }')"
+  read -r limit fail_limit < <(gate_budget_limits "$value" "$GATE_BUDGET_TOLERANCE" "$GATE_BUDGET_FAIL_FACTOR")
   if (( wall > fail_limit )); then
-    printf 'budget: ✗ %s — %ss over the fail limit %ss (limit %ss ×%s)\n' "$name" "$wall" "$fail_limit" "$limit" "$fail_factor"
+    if [[ "$word" == CONTENTION ]]; then
+      BUDGET_VERDICT=WARN
+      printf 'budget: ⚠ %s — %ss over the fail limit %ss (limit %ss ×%s)%s · downgraded from FAIL\n' "$name" "$wall" "$fail_limit" "$limit" "$GATE_BUDGET_FAIL_FACTOR" "$suffix"
+      return 0
+    fi
+    BUDGET_VERDICT=FAIL
+    printf 'budget: ✗ %s — %ss over the fail limit %ss (limit %ss ×%s)%s\n' "$name" "$wall" "$fail_limit" "$limit" "$GATE_BUDGET_FAIL_FACTOR" "$suffix"
     return 1
   fi
   if (( wall > limit )); then
-    printf 'budget: ⚠ %s — %ss over limit %ss; fails past %ss (budget %ss ×%s ×%s)\n' "$name" "$wall" "$limit" "$fail_limit" "$value" "$tolerance" "$fail_factor"
+    BUDGET_VERDICT=WARN
+    printf 'budget: ⚠ %s — %ss over limit %ss; fails past %ss (budget %ss ×%s ×%s)%s\n' "$name" "$wall" "$limit" "$fail_limit" "$value" "$GATE_BUDGET_TOLERANCE" "$GATE_BUDGET_FAIL_FACTOR" "$suffix"
     return 0
   fi
-  printf 'budget: ✓ %s — %ss within %ss (budget %ss ×%s)\n' "$name" "$wall" "$limit" "$value" "$tolerance"
+  BUDGET_VERDICT=PASS
+  printf 'budget: ✓ %s — %ss within %ss (budget %ss ×%s)\n' "$name" "$wall" "$limit" "$value" "$GATE_BUDGET_TOLERANCE"
 }
 
-checks_templates_mirrors() {
+# gate_derive_bound <target>: when STEPS_BOUND_S is unset, exports the target's budget fail limit
+# as the per-step bound; a budget that cannot give one falls back to 1500 s and says why.
+# Returns 0 when it set the bound (the caller unsets it after the run), 1 when the caller's stays.
+gate_derive_bound() {
+  local target="$1" budgets="$REPO_ROOT/infra/fence/gate-budget.yml" reason="" bound=1500 limit fail_limit
+  [[ -z "${STEPS_BOUND_S:-}" ]] || return 1
+  if ! gate_budget_params "$target" "$budgets"; then
+    reason="$GATE_BUDGET_REASON"
+  elif [[ -z "$GATE_BUDGET_VALUE" ]]; then
+    reason="no row for gate($target) in $(basename "$budgets")"
+  elif [[ "$GATE_BUDGET_VALUE" == unpinned ]]; then
+    reason="gate($target) is unpinned in $(basename "$budgets")"
+  elif [[ ! "$GATE_BUDGET_VALUE" =~ ^[0-9]+$ ]]; then
+    reason="invalid budget $GATE_BUDGET_VALUE in $budgets"
+  else
+    read -r limit fail_limit < <(gate_budget_limits "$GATE_BUDGET_VALUE" "$GATE_BUDGET_TOLERANCE" "$GATE_BUDGET_FAIL_FACTOR")
+    if (( fail_limit >= 1 )); then bound="$fail_limit"; else reason="fail limit $fail_limit s from $budgets is no bound"; fi
+  fi
+  [[ -z "$reason" ]] || printf 'gate: step bound %s s — %s\n' "$bound" "$reason"
+  export STEPS_BOUND_S="$bound"
+}
+
+# gate_write_meta <run dir> <target> <started> <finished>: gate.meta, key<TAB>value; a value that
+# cannot be read is "NA <reason>", never an empty or a made-up one.
+gate_write_meta() {
+  local run_dir="$1" target="$2" started="$3" finished="$4" commit dirty jobs heavy_jobs out
+  if commit="$(repo_git rev-parse --short=12 HEAD 2>&1)"; then :; else commit="NA git rev-parse failed: ${commit//$'\n'/ }"; fi
+  if out="$(repo_git status --porcelain 2>&1)"; then
+    if [[ -z "$out" ]]; then dirty=0; else dirty="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"; fi
+  else dirty="NA git status failed: ${out//$'\n'/ }"; fi
+  if jobs="$(steps_jobs 2>&1)"; then :; else jobs="NA ${jobs//$'\n'/ }"; fi
+  if heavy_jobs="$(steps_heavy_jobs 2>&1)"; then :; else heavy_jobs="NA ${heavy_jobs//$'\n'/ }"; fi
+  {
+    printf 'target\t%s\ncommit\t%s\ndirty_files\t%s\n' "$target" "$commit" "$dirty"
+    printf 'started\t%s\nfinished\t%s\n' "$started" "$finished"
+    printf 'fixtures\t%s\nsteps_bound_s\t%s\n' "$([[ "${PFM_GATE_FIXTURES:-}" == 1 ]] && echo 1 || echo 0)" "${STEPS_BOUND_S:-1500}"
+    printf 'steps_jobs\t%s\nsteps_heavy_jobs\t%s\n' "$jobs" "$heavy_jobs"
+  } > "$run_dir/gate.meta"
+}
+
+checks_templates_mirrors() { # optional: an executable pfm already built from this tree
   checks_templates_mirrors_generate
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
-  checks_templates_mirrors_opencode
+  checks_templates_mirrors_opencode "${1:-}"
   checks_templates_mirrors_manifest
 }
 
 checks_gate_check_map() { # run dir
-  local run_dir="$1"
-  if go -C pfm build -o "$run_dir/check-map-pfm" ./cmd/pfm; then
-    run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$run_dir/check-map-pfm"
-  else
-    fail_step "templates: check-map pfm build FAILED"
+  local run_dir="$1" check_map_pfm="$1/bin/pfm"
+  # The pfm pfm.unit prebuilt (test-shard.sh --bin-dir) when this gate ran it and it built; else build one.
+  if [[ ! -x "$check_map_pfm" ]]; then
+    check_map_pfm="$run_dir/check-map-pfm"
+    if ! go -C pfm build -o "$check_map_pfm" ./cmd/pfm; then
+      fail_step "templates: check-map pfm build FAILED"
+      return
+    fi
+  fi
+  run "templates: lane↔command map (check-map)" -- bash infra/fence/lanes/check-map.sh --pfm "$check_map_pfm"
+}
+
+# gate_resources_stop <sampler pid> <run dir>: stops the gate's resource sampler and says when its
+# record is missing — the judge then reads "not measured", never a quiet pass.
+gate_resources_stop() {
+  local pid="$1" run_dir="$2" rc
+  kill -TERM "$pid" 2>/dev/null || true # already gone: its exit status below says why
+  if wait "$pid"; then rc=0; else rc=$?; fi
+  if (( rc != 0 )); then
+    printf 'PROFILE resources NOT RECORDED — sampler.sh exit %s (its stderr above)\n' "$rc"
+  elif [[ ! -s "$run_dir/resources.tsv" ]]; then
+    printf 'PROFILE resources NOT RECORDED — sampler.sh left no %s\n' "$run_dir/resources.tsv"
   fi
 }
 
+# gate_attribution <pfm dir> <run dir>: the judge's `<WORD><TAB><evidence>` line for the whole
+# run; a judge that fails or prints no verdict line is `not measured` with what it said.
+gate_attribution() {
+  local d="$1" run_dir="$2" out line
+  if out="$(bash "$d/scripts/test-contention.sh" window --resources "$run_dir/resources.tsv" 2>&1)"; then
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^(CONTENTION|CODE|not\ measured)$'\t' ]]; then printf '%s\n' "$line"; return 0; fi
+    done <<< "$out"
+    printf 'not measured\tjudge failed: no verdict line in: %s\n' "${out//$'\n'/ }"
+    return 0
+  fi
+  printf 'not measured\tjudge failed: %s\n' "${out//$'\n'/ }"
+}
+
 gate_run() { # pfm, templates, or all
-  local target="${1:-all}" d="$REPO_ROOT/pfm" base run_dir row stem f step_rc=0 budget_rc=0
+  local target="${1:-all}" d="$REPO_ROOT/pfm" base run_dir row stem f step_rc=0 budget_rc=0 derived=0 started
+  local gate_pid sampler_pid attribution summary_rc
   case "$target" in pfm|templates|all) ;; *) printf 'gate_run: unknown target: %s\n' "$target" >&2; return 2 ;; esac
   if [[ "$target" == pfm || "$target" == all ]]; then
     need_tool go pfm || return 1
@@ -581,7 +763,7 @@ gate_run() { # pfm, templates, or all
   steps_reset
   if [[ "$target" == pfm || "$target" == all ]]; then
     steps_add_heavy pfm.unit checks_pfm_unit "$d" "$run_dir"
-    steps_add_heavy pfm.e2e pfm_e2e_rows "$d" "$run_dir"
+    steps_add_heavy pfm.e2e checks_pfm_e2e "$d" "$run_dir"
     for f in "$d"/scripts/*_test.sh; do
       [[ -f "$f" ]] || { fail_step 'pfm: gate-script self-tests NOT RUN — no fixture suites found'; return 1; }
       stem="${f##*/}"; stem="${stem%_test.sh}"
@@ -600,12 +782,19 @@ gate_run() { # pfm, templates, or all
       steps_add "templates.demo.$stem" bash "$f"
     done
   fi
+  if [[ "${PFM_GATE_FIXTURES:-}" == 1 ]]; then
+    for stem in go-fail go-hang go-slow shell-fail shell-hang; do
+      steps_add "fixture.$stem" checks_gate_fixture "$stem" "$run_dir"
+      case "$stem" in go-slow) steps_set_bound 45 ;; shell-hang) steps_set_bound 5 ;; esac
+    done
+  fi
   steps_barrier
   if [[ "$target" == pfm || "$target" == all ]]; then
+    # Heavy static steps longest first, so the short ones queue behind them for a heavy slot.
     steps_add_heavy pfm.lint-new run 'pfm: lint-new (golangci-lint, changed lines)' -- make -C "$d" --no-print-directory lint-new
+    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check
     steps_add_heavy pfm.vet run 'pfm: go vet' -- go -C "$d" vet ./...
     steps_add_heavy pfm.vet-darwin run 'pfm: go vet (darwin/arm64)' -- env GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go -C "$d" vet ./...
-    steps_add_heavy pfm.fmt-check run 'pfm: fmt-check (gofumpt + gci + golines)' -- make -C "$d" --no-print-directory fmt-check
     steps_add pfm.arch run 'pfm: architecture ratchet' -- bash "$d/scripts/arch-check.sh"
   fi
   if [[ "$target" == templates || "$target" == all ]]; then
@@ -615,7 +804,7 @@ gate_run() { # pfm, templates, or all
     steps_add templates.placeholders checks_templates_placeholders
     steps_add templates.scratch-paths checks_templates_scratch_paths
     steps_add templates.descriptions checks_templates_descriptions
-    steps_add templates.mirrors checks_templates_mirrors
+    steps_add templates.mirrors checks_templates_mirrors "$run_dir/bin/pfm"
     steps_add templates.token-audit checks_templates_token_audit
     steps_add templates.flight-index checks_templates_flight_index
     steps_add templates.release-check checks_templates_release_check
@@ -627,8 +816,34 @@ gate_run() { # pfm, templates, or all
     steps_add templates.skill-tests checks_templates_skill_tests
     steps_add templates.opencode-writer-refs checks_templates_opencode_writer_refs
   fi
+  if gate_derive_bound "$target"; then derived=1; fi
+  started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if ! gate_write_meta "$run_dir" "$target" "$started" 'NA running'; then
+    fail_step "gate: cannot write $run_dir/gate.meta"
+    (( derived == 0 )) || unset STEPS_BOUND_S
+    return 1
+  fi
+  # The words of a `&` command expand in the forked child: read this shell's pid before the fork.
+  gate_pid="$BASHPID"
+  bash "$REPO_ROOT/infra/fence/sampler.sh" run --out "$run_dir/resources.tsv" --parent "$gate_pid" &
+  sampler_pid=$!
   if steps_run "$run_dir"; then step_rc=0; else step_rc=$?; fi
-  row="$(awk -F '\t' '$1=="WALL" {print $3}' "$run_dir/gate.tsv")"
-  if gate_budget_verdict "$target" "$row"; then budget_rc=0; else budget_rc=$?; fi
+  gate_resources_stop "$sampler_pid" "$run_dir"
+  attribution="$(gate_attribution "$d" "$run_dir")"
+  row="$(awk -F '\t' '$1=="STEPS" {print $3}' "$run_dir/gate.tsv" 2>/dev/null)"
+  BUDGET_VERDICT=ERROR
+  if gate_budget_verdict "$target" "$row" "" "$attribution"; then budget_rc=0; else budget_rc=$?; fi
+  if [[ "$row" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then row="$(gate_wall_ceil "$row")"; else row=NA; fi
+  if [[ -f "$run_dir/gate.tsv" ]] && ! printf 'BUDGET\t%s\t%s\n' "$BUDGET_VERDICT" "$row" >> "$run_dir/gate.tsv"; then
+    fail_step "gate: cannot append the BUDGET row to $run_dir/gate.tsv"; budget_rc=1
+  fi
+  # The PROFILE block, profile.tsv and profile/INDEX.txt; a report that fails is named, the
+  # gate's verdict stays the steps' and the budget's.
+  if bash "$REPO_ROOT/infra/fence/profile-report.sh" summary "$run_dir"; then summary_rc=0; else summary_rc=$?; fi
+  (( summary_rc == 0 )) || bad "PROFILE summary FAILED — profile-report.sh summary exit $summary_rc; no PROFILE block, profile.tsv or profile/INDEX.txt for $run_dir"
+  if ! gate_write_meta "$run_dir" "$target" "$started" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; then
+    fail_step "gate: cannot rewrite $run_dir/gate.meta"; budget_rc=1
+  fi
+  (( derived == 0 )) || unset STEPS_BOUND_S
   (( step_rc == 0 && budget_rc == 0 ))
 }

@@ -77,6 +77,7 @@ type e2eHarness struct {
 	headBinary string
 	goCache    string
 	goModCache string
+	previous   *previousBuild
 }
 
 type commandResult struct {
@@ -88,10 +89,12 @@ type commandResult struct {
 type surfaceSnapshot map[string]string
 
 func TestInstallInitUpdateUninstallE2E(t *testing.T) {
+	t.Parallel()
 	runInstallE2E(t)
 }
 
 func TestE2EFenceIsRequiredEvenWithoutHome(t *testing.T) {
+	t.Parallel()
 	const helper = "PFM_E2E_REQUIRE_FENCE_HELPER"
 	if os.Getenv(helper) == "1" {
 		requireE2EFence(t)
@@ -145,6 +148,7 @@ func runInstallE2E(t *testing.T) {
 		goModCache: requiredGoEnv(t, "GOMODCACHE"),
 	}
 	harness.headBinary = harness.build(repo, filepath.Join(t.TempDir(), "pfm-head"))
+	harness.startPreviousBuild()
 
 	var fresh surfaceSnapshot
 	var freshHome string
@@ -309,19 +313,28 @@ func requiredGoEnv(t *testing.T, name string) string {
 
 func (h *e2eHarness) build(source, output string) string {
 	h.t.Helper()
-	if explicit := strings.TrimSpace(os.Getenv(e2eBinaryEnv)); explicit != "" {
-		if _, err := os.Stat(explicit); err != nil {
-			h.t.Fatalf("%s=%s: %v", e2eBinaryEnv, explicit, err)
-		}
-		return explicit
-	}
-	if err := os.MkdirAll(filepath.Dir(output), 0o700); err != nil {
+	binary, err := buildPFM(source, output)
+	if err != nil {
 		h.t.Fatal(err)
 	}
-	if err := testjail.GoBuild(filepath.Join(source, "pfm"), output, "./cmd/pfm"); err != nil {
-		h.t.Fatalf("build %s: %v", output, err)
+	return binary
+}
+
+// buildPFM builds source's pfm to output, or returns PFM_E2E_BINARY when set.
+func buildPFM(source, output string) (string, error) {
+	if explicit := strings.TrimSpace(os.Getenv(e2eBinaryEnv)); explicit != "" {
+		if _, err := os.Stat(explicit); err != nil {
+			return "", fmt.Errorf("%s=%s: %w", e2eBinaryEnv, explicit, err)
+		}
+		return explicit, nil
 	}
-	return output
+	if err := os.MkdirAll(filepath.Dir(output), 0o700); err != nil {
+		return "", err
+	}
+	if err := testjail.GoBuild(filepath.Join(source, "pfm"), output, "./cmd/pfm"); err != nil {
+		return "", fmt.Errorf("build %s: %w", output, err)
+	}
+	return output, nil
 }
 
 func (h *e2eHarness) newHome(binary string) string {
@@ -377,7 +390,7 @@ func (h *e2eHarness) newHome(binary string) string {
 	if err := os.MkdirAll(filepath.Dir(native), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
-	if err := os.WriteFile(native, []byte(body), 0o700); err != nil {
+	if err := writeExecutable(native, []byte(body), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
 	if err := os.Symlink(native, filepath.Join(home, e2eCanonicalClaude)); err != nil {
@@ -391,7 +404,7 @@ if [ "${1-}" = doctor ] && [ "${2-}" = --help ]; then printf 'usage: codex docto
 if [ "${1-}" = doctor ]; then printf 'healthy\n'; exit 0; fi
 exit 2
 `
-	if err := os.WriteFile(codex, []byte(codexBody), 0o700); err != nil {
+	if err := writeExecutable(codex, []byte(codexBody), 0o700); err != nil {
 		h.t.Fatal(err)
 	}
 	auth := filepath.Join(home, ".codex", "auth.json")
@@ -816,34 +829,6 @@ func (h *e2eHarness) assertInitPath(path, relative string) {
 	}
 }
 
-func (h *e2eHarness) previousBinary() string {
-	h.t.Helper()
-	clone := filepath.Join(h.t.TempDir(), "previous")
-	if result := runGit(h.repo, "clone", "--no-local", h.repo, clone); result.err != nil {
-		h.t.Fatalf("previous release setup failed; differing paths: local clone; status: %v", result.err)
-	}
-	tag := strings.TrimSpace(os.Getenv(e2ePreviousTag))
-	if tag == "" {
-		result := runGit(clone, "tag", "--list", "v*", "--sort=-v:refname")
-		if result.err != nil {
-			h.t.Fatalf("previous release setup failed; differing paths: release tags; status: %v", result.err)
-		}
-		for _, candidate := range strings.Fields(result.stdout) {
-			if isReleaseTag(candidate) {
-				tag = candidate
-				break
-			}
-		}
-	}
-	if tag == "" {
-		h.t.Fatalf("previous release setup failed; differing paths: semantic release tag; status: none found")
-	}
-	if result := runGit(clone, "checkout", "--detach", "--quiet", tag); result.err != nil {
-		h.t.Fatalf("previous release setup failed; differing paths: checkout %s; status: %v", tag, result.err)
-	}
-	return h.build(clone, filepath.Join(h.t.TempDir(), "pfm-previous"))
-}
-
 func isReleaseTag(value string) bool {
 	parts := strings.Split(strings.TrimSpace(value), ".")
 	if len(parts) != 3 || !strings.HasPrefix(parts[0], "v") {
@@ -1089,7 +1074,7 @@ func copyFile(source, target string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(target, body, mode)
+	return writeExecutable(target, body, mode)
 }
 
 func runTool(home, name string, args ...string) commandResult {

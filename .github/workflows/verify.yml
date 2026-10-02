@@ -135,5 +135,9 @@ jobs:
           path: |
             ${{ env.TMP_BASE }}/timing/**/*.tsv
             ${{ env.TMP_BASE }}/timing/**/*.json
+            ${{ env.TMP_BASE }}/timing/**/profile/**
+            ${{ env.TMP_BASE }}/timing/**/steps/*.prof.tsv
+            ${{ env.TMP_BASE }}/timing/**/steps/*.xtrace
+            ${{ env.TMP_BASE }}/timing/**/steps/*.hang/**
           if-no-files-found: warn
           retention-days: 14

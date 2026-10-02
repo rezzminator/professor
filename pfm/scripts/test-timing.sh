@@ -23,6 +23,17 @@
 #           itself causes) is not a number to gate on.
 #           A missing load record names why limits are uncorrected; a malformed
 #           load record is TIMING-UNREADABLE, exit 2.
+#           Every CORRECTED, WARN and FAIL line ends ` · attribution <WORD>
+#           (<evidence>)`, WORD from the contention judge (scripts/
+#           test-contention.sh) over the package's own event window — or the
+#           whole stream's, for SUITE — in resources.tsv: CONTENTION, CODE or
+#           `not measured` (the reason in the evidence). A FAIL the judge
+#           calls CONTENTION is a WARN, ` · downgraded from FAIL`; nothing else
+#           changes a verdict. resources.tsv and profile/ (the per-process
+#           summaries whose run_delay_s the judge also weighs) are read from the
+#           stream's directory unless --resources / --profile name them; a
+#           stream read from stdin has neither. A judge that fails leaves every
+#           line `not measured (judge failed: …)` and says so on stderr.
 # --measure --suite NAME F1 F2 F3   three separate `go test -json` runs of the
 #           SAME suite; takes the median wall_s per package and ratchets
 #           pfm/.testtiming.yml DOWN only — a package already in that suite's
@@ -54,6 +65,8 @@ TMP_BASE="/tmp/$PROJECT"
 YML="$PFM/.testtiming.yml"
 SUITE_NAME="unit"
 OUT=""
+RESOURCES=""
+PROFILE_DIR=""
 MODE="parse"
 MEASURE_FILES=()
 POSITIONAL=()
@@ -61,11 +74,13 @@ POSITIONAL=()
 usage() {
   cat >&2 <<'EOF'
 usage: test-timing.sh [--suite NAME] [--out FILE] [--yml FILE] [FILE]
-       test-timing.sh [--suite NAME] [--out FILE] [--yml FILE] --check [FILE]
+       test-timing.sh [--suite NAME] [--out FILE] [--yml FILE] [--resources FILE] [--profile DIR] --check [FILE]
        test-timing.sh --suite NAME [--yml FILE] --measure FILE1 FILE2 FILE3
        test-timing.sh --self-test
 FILE defaults to stdin (a `go test -json` stream). With no FILE and no pipe,
 this blocks reading a terminal — pass '-' explicitly only if you mean stdin.
+--resources FILE (default resources.tsv) and --profile DIR (default profile)
+default to the stream's own directory; a stream on stdin has neither default.
 EOF
   exit 2
 }
@@ -75,6 +90,8 @@ while [ $# -gt 0 ]; do
     --suite) SUITE_NAME="${2:?--suite needs NAME}"; shift 2 ;;
     --out) OUT="${2:?--out needs FILE}"; shift 2 ;;
     --yml) YML="${2:?--yml needs FILE}"; shift 2 ;;
+    --resources) RESOURCES="${2:?--resources needs FILE}"; shift 2 ;;
+    --profile) PROFILE_DIR="${2:?--profile needs DIR}"; shift 2 ;;
     --check) MODE="check"; shift ;;
     --measure) MODE="measure"; shift ;;
     --self-test) MODE="self-test"; shift ;;
@@ -378,10 +395,58 @@ fail_report() {
   return 0
 }
 
-# load_factors <input-json> <out-tsv> — match each event window to bracketing
-# CPU samples. The first row is LOADED or UNAVAILABLE with its reason.
+# event_windows <out-tsv> — one row per package, then SUITE: `name<TAB>first
+# event<TAB>last event`, epoch seconds from each parsed event's Time. The load
+# factors and the attribution both read it, so a window means one thing.
+event_windows() {
+  python3 - "$T/clean.jsonl" "$1" <<'PY'
+import datetime
+import json
+import sys
+
+events_path, out_path = sys.argv[1:]
+
+
+def invalid(cause):
+    print(f'TIMING-UNREADABLE: event windows: {cause}', file=sys.stderr)
+    raise SystemExit(2)
+
+
+try:
+    with open(events_path, encoding='utf-8') as source:
+        events = json.load(source)['events']
+except (OSError, ValueError, KeyError, TypeError) as exc:
+    invalid(f'could not read parsed events: {exc}')
+
+windows = {}
+all_times = []
+for event in events:
+    value = event.get('Time')
+    if not value:
+        continue
+    try:
+        instant = datetime.datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    except (ValueError, AttributeError) as exc:
+        invalid(f'event timestamp {value!r}: {exc}')
+    all_times.append(instant)
+    package = event.get('Package')
+    if package:
+        windows.setdefault(package, []).append(instant)
+if not all_times:
+    invalid('no event timestamps')
+windows['SUITE'] = all_times
+
+with open(out_path, 'w', encoding='utf-8') as output:
+    for name, times in windows.items():
+        output.write(f'{name}\t{min(times)!r}\t{max(times)!r}\n')
+PY
+}
+
+# load_factors <input-json> <out-tsv> <windows-tsv> — match each event window
+# to bracketing CPU samples. The first row is LOADED or UNAVAILABLE with its
+# reason.
 load_factors() {
-  local input="$1" factors="$2" record
+  local input="$1" factors="$2" windows="$3" record
   if [ -z "$input" ] || [ "$input" = - ]; then
     printf 'UNAVAILABLE\tstream read from stdin\n' > "$factors"
     return 0
@@ -395,13 +460,11 @@ load_factors() {
     printf 'UNAVAILABLE\tload record %s missing\n' "$record" > "$factors"
     return 0
   fi
-  python3 - "$record" "$T/clean.jsonl" "$factors" <<'PY'
-import datetime
-import json
+  python3 - "$record" "$windows" "$factors" <<'PY'
 import math
 import sys
 
-record_path, events_path, out_path = sys.argv[1:]
+record_path, windows_path, out_path = sys.argv[1:]
 
 
 def invalid(cause):
@@ -444,34 +507,18 @@ if unavailable is not None:
         output.write(f'UNAVAILABLE\t{unavailable}\n')
     raise SystemExit(0)
 
-try:
-    with open(events_path, encoding='utf-8') as source:
-        events = json.load(source)['events']
-except (OSError, ValueError, KeyError, TypeError) as exc:
-    invalid(f'could not read parsed events: {exc}')
-
 windows = {}
-all_times = []
-for event in events:
-    value = event.get('Time')
-    if not value:
-        continue
-    try:
-        instant = datetime.datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
-    except (ValueError, AttributeError) as exc:
-        invalid(f'event timestamp {value!r}: {exc}')
-    all_times.append(instant)
-    package = event.get('Package')
-    if package:
-        windows.setdefault(package, []).append(instant)
-if not all_times:
-    invalid('no event timestamps')
-windows['SUITE'] = all_times
+try:
+    with open(windows_path, encoding='utf-8') as source:
+        for line in source.read().splitlines():
+            name, start, end = line.split('\t')
+            windows[name] = (float(start), float(end))
+except (OSError, ValueError) as exc:
+    invalid(f'could not read the event windows {windows_path}: {exc}')
 
 with open(out_path, 'w', encoding='utf-8') as output:
     output.write('LOADED\n')
-    for package, times in windows.items():
-        start, end = min(times), max(times)
+    for package, (start, end) in windows.items():
         before = next((row for row in reversed(samples) if row[0] <= start), None)
         after = next((row for row in samples if row[0] >= end), None)
         if before is None or after is None or before[0] == after[0]:
@@ -484,7 +531,146 @@ with open(out_path, 'w', encoding='utf-8') as output:
 PY
 }
 
-# check_timing <timing-tsv> <budgets-tsv> <suite-name> <load-factors> — the awk(1) comparator.
+# attribute_windows <timing-tsv> <budgets-tsv> <suite-name> <windows-tsv> <out-tsv>
+# — for every package (and the SUITE) over its budget*tolerance, ask the
+# contention judge whether the machine or the code made it slow, over that
+# package's event window; <out-tsv> rows are `key<TAB>WORD<TAB>evidence`, key
+# a package or SUITE. A package's profile/<label>.<pid>/summary.json (label: the
+# import path minus pfm/, `/` → `_`) adds its processes' run_delay_s and
+# user_s + sys_s; a helper process (helper_of set) and a summary with no
+# run_delay_s or CPU time are left out of both sums. Nothing over budget: no
+# judge call and an empty file. A judge that fails is `not measured` on every
+# row, with one stderr line naming it — never CODE.
+attribute_windows() {
+  local timing="$1" budgets="$2" want="$3" windows="$4" out="$5" resources="$RESOURCES" profile="$PROFILE_DIR" why=""
+  if [ -z "$resources" ]; then
+    if [ -n "$INPUT" ] && [ "$INPUT" != - ]; then resources="$(dirname -- "$INPUT")/resources.tsv"; else why="stream read from stdin"; fi
+  fi
+  if [ -z "$profile" ] && [ -n "$INPUT" ] && [ "$INPUT" != - ]; then profile="$(dirname -- "$INPUT")/profile"; fi
+  python3 - "$timing" "$budgets" "$want" "$windows" "$out" "$resources" "$why" "$profile" \
+    "$PFM/scripts/test-contention.sh" "$T/judge-windows.tsv" <<'PY'
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+PREFIX = 'github.com/rezzminator/professor/pfm/'
+WORDS = ('CONTENTION', 'CODE', 'not measured')
+timing_path, budgets_path, suite, windows_path, out_path, resources, why, profile, judge, judge_windows = sys.argv[1:]
+
+
+def unreadable(path, cause):
+    print(f'TIMING-UNREADABLE: attribution input {path}: {cause}', file=sys.stderr)
+    raise SystemExit(2)
+
+
+def table(path):
+    try:
+        return [line.split('\t') for line in Path(path).read_text(encoding='utf-8').splitlines() if line]
+    except (OSError, UnicodeError) as exc:
+        unreadable(path, exc)
+
+
+tolerance = suite_budget = None
+budget = {}
+for cells in table(budgets_path):
+    if cells[0] == 'tolerance':
+        tolerance = float(cells[1])
+    elif cells[0] == 'suite' and cells[1] == suite:
+        suite_budget = float(cells[2])
+    elif cells[0] == 'pkg' and cells[1] == suite:
+        budget[cells[2]] = float(cells[3])
+over = []
+try:
+    for cells in table(timing_path)[1:]:
+        if cells[0] == 'SUITE':
+            if suite_budget is not None and float(cells[1]) > suite_budget * tolerance:
+                over.append('SUITE')
+        elif cells[0] in budget and float(cells[1]) > budget[cells[0]] * tolerance:
+            over.append(cells[0])
+except (IndexError, ValueError, TypeError) as exc:
+    unreadable(timing_path, exc)
+if not over:
+    Path(out_path).write_text('', encoding='utf-8')
+    raise SystemExit(0)
+
+windows = {cells[0]: (cells[1], cells[2]) for cells in table(windows_path)}
+
+
+def process_totals(package):
+    """Summed run_delay_s and user_s + sys_s of a package's non-helper processes, or None."""
+    label = package.removeprefix(PREFIX).replace('/', '_')
+    delay = cpu = 0.0
+    found = False
+    pattern = re.compile(re.escape(label) + r'\.[0-9]+')
+    if not profile or not Path(profile).is_dir():
+        return None
+    for directory in sorted(Path(profile).iterdir()):
+        if not pattern.fullmatch(directory.name) or not (directory / 'summary.json').is_file():
+            continue
+        summary = directory / 'summary.json'
+        try:
+            data = json.loads(summary.read_text(encoding='utf-8'))
+            if data.get('helper_of'):
+                continue
+            run_delay, user, system = data.get('run_delay_s'), data.get('user_s'), data.get('sys_s')
+            if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in (run_delay, user, system)):
+                continue
+            delay += run_delay
+            cpu += user + system
+            found = True
+        except (OSError, UnicodeError, ValueError, AttributeError) as exc:
+            print(f'test-timing: profile summary {summary} unreadable: {exc}', file=sys.stderr)
+    return (delay, cpu) if found else None
+
+
+def judged():
+    if why:
+        return {key: ('not measured', why) for key in over}
+    with open(judge_windows, 'w', encoding='utf-8') as sink:
+        for key in over:
+            if key not in windows:
+                continue
+            row = [key, *windows[key]]
+            totals = process_totals(key) if key != 'SUITE' else None
+            if totals:
+                row += [f'{totals[0]:.6f}', f'{totals[1]:.6f}']
+            sink.write('\t'.join(row) + '\n')
+    asked = [key for key in over if key in windows]
+    command = ['bash', judge, 'windows', '--resources', resources, '--windows', judge_windows]
+    try:
+        run = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
+    except OSError as exc:
+        return failed(f'could not run {judge}: {exc}')
+    first = next((line.strip() for line in run.stderr.splitlines() if line.strip()), '')
+    if run.returncode != 0:
+        return failed(first or f'exit {run.returncode}, no stderr', judge, run.returncode)
+    if run.stderr:
+        sys.stderr.write(run.stderr)
+    answers = [line.split('\t') for line in run.stdout.splitlines()]
+    if [row[0] for row in answers] != asked or any(len(row) != 3 or row[1] not in WORDS for row in answers):
+        return failed(f'malformed answer ({len(answers)} rows for {len(asked)} windows)', judge, run.returncode)
+    verdicts = {row[0]: (row[1], row[2]) for row in answers}
+    for key in over:
+        verdicts.setdefault(key, ('not measured', 'no event window'))
+    return verdicts
+
+
+def failed(reason, judge_path=None, code=None):
+    where = f' {judge_path} failed (exit {code})' if judge_path else ''
+    print(f'test-timing: contention judge{where}: {reason}', file=sys.stderr)
+    return {key: ('not measured', f'judge failed: {reason}') for key in over}
+
+
+verdicts = judged()
+with open(out_path, 'w', encoding='utf-8') as sink:
+    for key in over:
+        sink.write(f'{key}\t{verdicts[key][0]}\t{verdicts[key][1]}\n')
+PY
+}
+
+# check_timing <timing-tsv> <budgets-tsv> <suite-name> <load-factors> <active> <attributions> — the awk(1) comparator.
 # Deliberately POSIX awk (no gawk-only length(array)/asort): the fence
 # image's /usr/bin/awk is not guaranteed to be gawk. <suite-name> selects
 # which `suites:` entry (and ONLY that entry's own packages) gates this run —
@@ -492,14 +678,20 @@ PY
 # since dev.sh checks each tier separately and an e2e run never sees the unit
 # package set.
 check_timing() {
-  local timing="$1" budgets="$2" want="$3" factors="$4" active="$5"
-  awk -F'\t' -v OFS='\t' -v want="$want" -v factors="$factors" -v active="$active" '
+  local timing="$1" budgets="$2" want="$3" factors="$4" active="$5" attributions="$6"
+  awk -F'\t' -v OFS='\t' -v want="$want" -v factors="$factors" -v active="$active" -v attributions="$attributions" '
     BEGIN {
       while ((getline row < factors) > 0) {
         split(row, parts, "\t")
         if (parts[1] != "LOADED" && parts[1] != "UNAVAILABLE") load[parts[1]]=parts[2]
       }
       close(factors)
+      while ((getline row < attributions) > 0) {
+        split(row, parts, "\t")
+        attr_word[parts[1]] = parts[2]
+        attr_text[parts[1]] = " · attribution " parts[2] " (" parts[3] ")"
+      }
+      close(attributions)
     }
     FNR==NR {
       if ($1=="tolerance") tol=$2
@@ -528,15 +720,19 @@ check_timing() {
         if (wall+0 > threshold+0) {
           pct = (wall-budget[pkg])/budget[pkg]*100
           if (wall+0 <= corrected+0 && corrected > threshold) {
-            printf "TIMING CORRECTED %s budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs\n", pkg, budget[pkg], wall, load[pkg]*100, corrected
+            printf "TIMING CORRECTED %s budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs%s\n", pkg, budget[pkg], wall, load[pkg]*100, corrected, attr_text[pkg]
             corrected_count++
           } else {
             if (wall+0 <= fail_factor*corrected) {
-              printf "TIMING WARN %s budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", pkg, budget[pkg], wall, pct, suffix, corrected, fail_factor*corrected
+              printf "TIMING WARN %s budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs%s\n", pkg, budget[pkg], wall, pct, suffix, corrected, fail_factor*corrected, attr_text[pkg]
+              warnings++
+              warning_names = warning_names (warning_names == "" ? "" : ", ") pkg
+            } else if (attr_word[pkg] == "CONTENTION") {
+              printf "TIMING WARN %s budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs%s · downgraded from FAIL\n", pkg, budget[pkg], wall, pct, suffix, corrected, fail_factor*corrected, attr_text[pkg]
               warnings++
               warning_names = warning_names (warning_names == "" ? "" : ", ") pkg
             } else {
-              printf "TIMING FAIL %s budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", pkg, budget[pkg], wall, pct, suffix, corrected, fail_factor*corrected > "/dev/stderr"
+              printf "TIMING FAIL %s budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs%s\n", pkg, budget[pkg], wall, pct, suffix, corrected, fail_factor*corrected, attr_text[pkg] > "/dev/stderr"
               bad++
             }
           }
@@ -572,15 +768,19 @@ check_timing() {
           if (suite_wall+0 > threshold+0) {
             pct = (suite_wall-suite_budget)/suite_budget*100
             if (suite_wall+0 <= corrected+0 && corrected > threshold) {
-              printf "TIMING CORRECTED SUITE(%s) budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs\n", want, suite_budget, suite_wall, load["SUITE"]*100, corrected
+              printf "TIMING CORRECTED SUITE(%s) budget=%ss measured=%ss other-load=%.0f%% limit=%.3fs%s\n", want, suite_budget, suite_wall, load["SUITE"]*100, corrected, attr_text["SUITE"]
               corrected_count++
             } else {
               if (suite_wall+0 <= fail_factor*corrected) {
-                printf "TIMING WARN SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", want, suite_budget, suite_wall, pct, suffix, corrected, fail_factor*corrected
+                printf "TIMING WARN SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs%s\n", want, suite_budget, suite_wall, pct, suffix, corrected, fail_factor*corrected, attr_text["SUITE"]
+                warnings++
+                warning_names = warning_names (warning_names == "" ? "" : ", ") "SUITE(" want ")"
+              } else if (attr_word["SUITE"] == "CONTENTION") {
+                printf "TIMING WARN SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs%s · downgraded from FAIL\n", want, suite_budget, suite_wall, pct, suffix, corrected, fail_factor*corrected, attr_text["SUITE"]
                 warnings++
                 warning_names = warning_names (warning_names == "" ? "" : ", ") "SUITE(" want ")"
               } else {
-                printf "TIMING FAIL SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs\n", want, suite_budget, suite_wall, pct, suffix, corrected, fail_factor*corrected > "/dev/stderr"
+                printf "TIMING FAIL SUITE(%s) budget=%ss measured=%ss over=%.0f%%%s limit=%.3fs fail-at=%.3fs%s\n", want, suite_budget, suite_wall, pct, suffix, corrected, fail_factor*corrected, attr_text["SUITE"] > "/dev/stderr"
                 bad++
               }
             }
@@ -624,15 +824,19 @@ case "$MODE" in
     fail_report "$OUT" || exit 1
     BUDGETS="$T/budgets.tsv"
     yml_fields "$YML" > "$BUDGETS" || exit 2
+    WINDOWS="$T/event-windows.tsv"
+    event_windows "$WINDOWS" || exit 2
     FACTORS="$T/load-factors.tsv"
-    load_factors "$INPUT" "$FACTORS" || exit 2
+    load_factors "$INPUT" "$FACTORS" "$WINDOWS" || exit 2
     LOAD_ACTIVE=0
     if IFS=$'\t' read -r state reason < "$FACTORS" && [ "$state" = LOADED ]; then
       LOAD_ACTIVE=1
     else
       echo "TIMING: other load not measured — $reason; limits uncorrected"
     fi
-    check_timing "$OUT" "$BUDGETS" "$SUITE_NAME" "$FACTORS" "$LOAD_ACTIVE"
+    ATTRIBUTIONS="$T/attributions.tsv"
+    attribute_windows "$OUT" "$BUDGETS" "$SUITE_NAME" "$WINDOWS" "$ATTRIBUTIONS" || exit 2
+    check_timing "$OUT" "$BUDGETS" "$SUITE_NAME" "$FACTORS" "$LOAD_ACTIVE" "$ATTRIBUTIONS"
     exit $?
     ;;
   measure)

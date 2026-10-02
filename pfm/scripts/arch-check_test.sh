@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Self-test for scripts/arch-check.sh's C1, C9, C12 and C23 ratchets. It runs
-# arch-check.sh against a throwaway git fixture (PFM=<fixture>), never against
-# this repo, and asserts on the relevant CHECK line rather than the exit
-# status — the fixture carries none of the other baselines, so every other
-# check legitimately reports ERROR there.
+# Self-test for scripts/arch-check.sh's C1, C9, C12, C23 and C25 ratchets and for
+# how it folds its concurrent checks: print order, exit status, and a check job
+# that dies. It runs arch-check.sh against a throwaway git fixture (PFM=<fixture>),
+# never against this repo, and asserts on the relevant CHECK line rather than the
+# exit status — the fixture carries none of the other baselines, so every other
+# check legitimately reports ERROR there. The last section builds a green fixture
+# (every baseline written by --measure) where the exit status can be asserted.
 #
 # Harness style follows scripts/test-sweep_test.sh, the sibling shell test.
 set -uo pipefail
@@ -223,6 +225,209 @@ if fixture "$REPO4"; then
   fi
 else
   bad "C23: could not build the measure-mv-failure fixture"
+fi
+
+# ---- C25: every test package's TestMain reaches testjail.Run ---------------
+
+JAILED_MAIN='package loud\n\nimport (\n\t"os"\n\t"testing"\n\n\t"pfm/internal/testjail"\n)\n\nfunc TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }\n'
+c25_fixture() { # <dir> <loud_test.go body printf-format>; empty baseline
+  fixture "$1" || return 1
+  : > "$1/.arch/testmain-jail.txt"
+  printf "$2" > "$1/internal/loud/loud_test.go"
+  git -C "$1" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+}
+
+REPO_C25="$T/c25-missing"
+if c25_fixture "$REPO_C25" 'package loud\n\nimport "testing"\n\nfunc TestShout(t *testing.T) {}\n'; then
+  line=$(check_line "$REPO_C25" C25-testmain-jail)
+  if [[ "$line" == *FAIL* && "$line" == *"new: internal/loud"* ]]; then
+    ok "C25: a test package without TestMain FAILs naming its directory"
+  else
+    bad "C25: expected FAIL for a package without TestMain" "$line"
+  fi
+else
+  bad "C25: could not build the missing-TestMain fixture"
+fi
+
+REPO_C25_BARE="$T/c25-bare"
+if c25_fixture "$REPO_C25_BARE" 'package loud\n\nimport (\n\t"os"\n\t"testing"\n)\n\nfunc TestMain(m *testing.M) { os.Exit(m.Run()) }\n'; then
+  line=$(check_line "$REPO_C25_BARE" C25-testmain-jail)
+  if [[ "$line" == *FAIL* && "$line" == *"new: internal/loud"* ]]; then
+    ok "C25: a TestMain calling m.Run() only FAILs"
+  else
+    bad "C25: expected FAIL for an unjailed TestMain" "$line"
+  fi
+else
+  bad "C25: could not build the unjailed-TestMain fixture"
+fi
+
+REPO_C25_OK="$T/c25-jailed"
+if c25_fixture "$REPO_C25_OK" "$JAILED_MAIN"; then
+  line=$(check_line "$REPO_C25_OK" C25-testmain-jail)
+  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+    ok "C25: a TestMain through testjail.Run passes"
+  else
+    bad "C25: expected PASS for a jailed TestMain" "$line"
+  fi
+else
+  bad "C25: could not build the jailed-TestMain fixture"
+fi
+
+REPO_C25_DATA="$T/c25-testdata"
+if c25_fixture "$REPO_C25_DATA" "$JAILED_MAIN"; then
+  mkdir -p "$REPO_C25_DATA/internal/loud/testdata/fix"
+  printf 'package fix\n\nimport "testing"\n\nfunc TestFix(t *testing.T) {}\n' > "$REPO_C25_DATA/internal/loud/testdata/fix/fix_test.go"
+  git -C "$REPO_C25_DATA" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  line=$(check_line "$REPO_C25_DATA" C25-testmain-jail)
+  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+    ok "C25: a _test.go under testdata is not judged"
+  else
+    bad "C25: expected PASS with a testdata test file" "$line"
+  fi
+else
+  bad "C25: could not build the testdata fixture"
+fi
+
+REPO_C25_NONE="$T/c25-none"
+if fixture "$REPO_C25_NONE"; then
+  line=$(check_line "$REPO_C25_NONE" C25-testmain-jail)
+  if [[ "$line" == *PASS* && "$line" == *"0 test packages"* ]]; then
+    ok "C25: a tree with no tests passes with 0 test packages"
+  else
+    bad "C25: expected PASS 0 test packages" "$line"
+  fi
+else
+  bad "C25: could not build the no-tests fixture"
+fi
+
+REPO_C25_SELF="$T/c25-testjail"
+if c25_fixture "$REPO_C25_SELF" "$JAILED_MAIN"; then
+  mkdir -p "$REPO_C25_SELF/internal/testjail"
+  printf 'package testjail\n\nimport (\n\t"os"\n\t"testing"\n)\n\nfunc TestMain(m *testing.M) { os.Exit(Run(m)) }\n' > "$REPO_C25_SELF/internal/testjail/testjail_test.go"
+  git -C "$REPO_C25_SELF" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  line=$(check_line "$REPO_C25_SELF" C25-testmain-jail)
+  if [[ "$line" == *PASS* && "$line" == *"0 baselined, 0 new"* ]]; then
+    ok "C25: internal/testjail whose TestMain calls Run(m) passes"
+  else
+    bad "C25: expected PASS for internal/testjail calling Run(m)" "$line"
+  fi
+else
+  bad "C25: could not build the testjail fixture"
+fi
+
+# ---- the concurrent checks: order, exit status, a job that dies ------------
+
+# green_fixture <dir>: a tree on which all 25 checks PASS — the fixture plus what
+# C12, C14 and C15 parse, an internal/mcpserv package for C10, a jailed test file
+# for C21 and C25, and the C24 script arch-check.sh runs from $PFM/scripts, with
+# every baseline the --measure of that tree writes.
+green_fixture() {
+  local dir=$1
+  fixture "$dir" || return 1
+  mkdir -p "$dir/scripts" && cp "$ROOT/scripts/arch-c24.sh" "$ROOT/scripts/repo-git.sh" "$dir/scripts/" || return 1
+  : > "$dir/CLAUDE.md"
+  cat > "$dir/cmd/pfm/main.go" <<'GO'
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+func run(args []string) int {
+    switch args[0] {
+    case "list":
+        return 0
+    }
+    return 1
+}
+
+func printUsage() {
+    fmt.Fprintln(os.Stderr, "  list the chats")
+}
+
+// usage: pfm internal a|b
+func runInternal(args []string) {
+    if args[0] == "a" || args[0] != "b" {
+        return
+    }
+}
+
+func main() { printUsage() }
+GO
+  mkdir -p "$dir/internal/mcpserv" && printf 'package mcpserv\n' > "$dir/internal/mcpserv/mcpserv.go" || return 1
+  printf "$JAILED_MAIN" > "$dir/internal/loud/loud_test.go"
+  env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$dir" bash "$SUT" --measure </dev/null >/dev/null 2>&1 || return 1
+}
+
+# run_all <dir> [env assignments…]: the whole run's stdout in $out and its exit status in $rc.
+run_all() {
+  local dir=$1; shift
+  out=$(env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE "$@" PFM="$dir" bash "$SUT" </dev/null 2>/dev/null); rc=$?
+}
+
+# Today's order: C1 … C23, then C25, then C24 (its own script, last).
+EXPECTED_ORDER="C1-ceiling-src C2-ceiling-test C3-cmd-budget C4-cmd-primitives C5-tmux-runner C6-atomic-write C7-sql-open C8-negation-dirs C9-package-doc C10-mcp-argv C11-db-names C12-claude-pointers C13-test-mirror C14-usage-parity C15-internal-usage C16-env-outside-paths C17-dup-functions C18-engine-spellings C19-env-namespace C20-codex-home C21-test-jail C22-host-doors C23-bare-log C25-testmain-jail C24-unwrapped-door"
+
+REPO_GREEN="$T/green"
+if green_fixture "$REPO_GREEN"; then
+  run_all "$REPO_GREEN"
+  order=$(printf '%s\n' "$out" | awk '$1 == "CHECK" {printf "%s ", $2}' | sed 's/ $//')
+  passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
+  if [ "$rc" -eq 0 ] && [ "$passes" -eq 25 ] && [ "$order" = "$EXPECTED_ORDER" ]; then
+    ok "exit: a tree where all 25 checks PASS exits 0, one line per check in today's order"
+  else
+    bad "exit: expected rc 0, 25 PASS lines in order" "rc=$rc passes=$passes" "$order" "$out"
+  fi
+else
+  bad "exit: could not build the green fixture"
+fi
+
+REPO_FAIL="$T/green-fail"
+if green_fixture "$REPO_FAIL"; then
+  printf 'func Again() { log.Fatalf("bye") }\n' >> "$REPO_FAIL/internal/loud/loud.go"
+  run_all "$REPO_FAIL"
+  others=$(printf '%s\n' "$out" | grep '^CHECK ' | grep -vc 'C23-bare-log .*FAIL ')
+  if [ "$rc" -eq 1 ] && [ "$others" -eq 24 ] && [[ "$out" == *"C23-bare-log"*"FAIL"*"internal/loud/loud.go (1->2)"* ]]; then
+    ok "exit: one FAIL and no ERROR exits 1"
+  else
+    bad "exit: expected rc 1 with only C23 failing" "rc=$rc others=$others" "$out"
+  fi
+
+  rm -f "$REPO_FAIL/.arch/ceiling-src.txt"
+  run_all "$REPO_FAIL"
+  if [ "$rc" -eq 2 ] && [[ "$out" == *"C1-ceiling-src"*"ERROR"*"baseline .arch/ceiling-src.txt missing"* ]] && [[ "$out" == *"C23-bare-log"*"FAIL"* ]]; then
+    ok "exit: an ERROR beside a FAIL exits 2, the maximum, and both lines print"
+  else
+    bad "exit: expected rc 2 with C1 ERROR and C23 FAIL" "rc=$rc" "$out"
+  fi
+else
+  bad "exit: could not build the FAIL fixture"
+fi
+
+# ---- a check job that dies leaves no result: its own ERROR line, exit 2 -----
+
+REPO_KILL="$T/green-killed"
+if green_fixture "$REPO_KILL"; then
+  # C1 is the only job that hands wc source files as operands (C2's are _test.go,
+  # the rest pipe), so this wc kills C1's job — the subshell that is its parent —
+  # and nothing else.
+  mkdir -p "$REPO_KILL/bin"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'for a in "$@"; do case $a in -*|*_test.go) ;; *) kill -KILL "$PPID"; exit 9 ;; esac; done' \
+    'exec /usr/bin/wc "$@"' > "$REPO_KILL/bin/wc"
+  chmod +x "$REPO_KILL/bin/wc"
+  run_all "$REPO_KILL" PATH="$REPO_KILL/bin:$PATH"
+  passes=$(printf '%s\n' "$out" | grep -c '^CHECK [^ ]* *PASS ')
+  lines=$(printf '%s\n' "$out" | grep -c '^CHECK ')
+  line=$(printf '%s\n' "$out" | grep '^CHECK C1-ceiling-src ' || true)
+  if [ "$rc" -eq 2 ] && [ "$lines" -eq 25 ] && [ "$passes" -eq 24 ] && [[ "$line" == *ERROR* && "$line" == *"without leaving its CHECK line"* ]]; then
+    ok "a check job killed before its result is an ERROR line naming it, exit 2, the other 24 checks PASS"
+  else
+    bad "a killed check job must print ERROR for that check and exit 2" "rc=$rc lines=$lines passes=$passes" "$line"
+  fi
+else
+  bad "a killed check job: could not build the green fixture"
 fi
 
 shtest_end

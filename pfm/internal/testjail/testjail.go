@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
@@ -81,6 +82,16 @@ func Run(m *testing.M) int {
 			}
 		}
 	}
+	// The gate's step profiler exports BASH_ENV with `set -E` and an ERR trap so
+	// every shell suite records its failures. Bash skips its exec-the-last-command
+	// step while an ERR trap is set, so a tmux pane launched as `bash -c '<launch>'`
+	// stays bash instead of becoming the launched program. Shell suites keep the
+	// tracer; a Go test process, and every child it starts, does not. Unset, not
+	// emptied, so no child sees the name at all.
+	if err := os.Unsetenv("BASH_ENV"); err != nil {
+		warnSetup("clear BASH_ENV: %v", err)
+		return 1
+	}
 	// Git fixtures must read only repository-local configuration. A developer's
 	// global identity, aliases, hooks, signing policy, or system configuration
 	// must never steer a test subprocess.
@@ -123,7 +134,7 @@ func Run(m *testing.M) int {
 		// whole package: on a platform where the default temp dir is already
 		// short and canonical, nothing here was needed in the first place.
 		defer jailHome(os.TempDir())()
-		return m.Run()
+		return runProfiled(m)
 	}
 	// No wrapper directory of our own: t.TempDir() already makes a unique path
 	// per test and removes it. An extra layer would only spend a dozen of the
@@ -134,7 +145,24 @@ func Run(m *testing.M) int {
 		return 1
 	}
 	defer jailHome(base)()
-	return m.Run()
+	return runProfiled(m)
+}
+
+// activeProfiler is the profiler of this process while runProfiled runs its
+// tests, nil when profiling is off; PauseFlightRecorder reaches it here.
+var activeProfiler atomic.Pointer[profiler]
+
+// runProfiled runs the package tests under the always-on profiler (profile.go).
+func runProfiled(m *testing.M) int {
+	p, off := startProfile()
+	activeProfiler.Store(p)
+	code := m.Run()
+	activeProfiler.Store(nil)
+	p.finish(code)
+	if off != "" && code != 0 {
+		warnSetup("profile off — %s; no diagnosis bundle for this red run", off)
+	}
+	return code
 }
 
 // warnSetup reports a testjail setup failure on stderr, in the "testjail:

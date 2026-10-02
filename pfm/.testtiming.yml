@@ -83,7 +83,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/stats: 4
       github.com/rezzminator/professor/pfm/internal/statusline: 6
       github.com/rezzminator/professor/pfm/internal/store: 10
-      github.com/rezzminator/professor/pfm/internal/testjail: 4
+      github.com/rezzminator/professor/pfm/internal/testjail: 12
       github.com/rezzminator/professor/pfm/internal/theme: 2
       github.com/rezzminator/professor/pfm/internal/tmux: 2
       github.com/rezzminator/professor/pfm/internal/transcript: 2

@@ -31,20 +31,22 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 ## Environments and cleanup
 
-- Every test runs under `internal/testjail` (`testjail.Run` in `TestMain`; `ShortRoot`, `Fleet`, `InstalledHome`, `CleanHome` build the homes). The `PFM_*` overrides in `pfm/internal/paths/paths.go` are the only knobs; `TMUX_TMPDIR = t.TempDir()`.
+- Every test runs under `internal/testjail` (`testjail.Run` in `TestMain`; `ShortRoot`, `Fleet`, `InstalledHome`, `CleanHome` build the homes). The `PFM_*` overrides in `pfm/internal/paths/paths.go` are the only knobs; `TMUX_TMPDIR = t.TempDir()`. `C25-testmain-jail` fails a test package whose `TestMain` does not reach `testjail.Run`; with `PFM_TEST_ARTIFACT_DIR` set (the gate sets `$run/profile`) every package process leaves `summary.json`, and a red or timed-out one a `DIAGNOSIS.txt` bundle: `docs/dev/testing/profiling.md`.
 - Code flights build and test inside the fence: `.claude/scripts/dev.sh iso`. The host's `~/.local/bin` and the real `$HOME` are never test targets.
 - Live traffic (a real page, the harvester's browser rung, a walled or lazy-loaded site) runs in the real-simulation fence: `.claude/scripts/dev.sh iso sim '<command>'` — Google Chrome (headless only, no display) and `pfm` installed from the worktree with the browser rung on; the harvester state persists per worktree. Its first line is `sim: chrome=… browser-rung=on` or `sim: BOOTSTRAP-FAILED — <step>`. A live check proves behavior; the regression test is still a fixture-driven unit test.
 
 ## Run commands
 
 - Affected, an executor's only run (flight or general): `.claude/scripts/dev.sh iso run "go -C pfm test ./internal/<package>/ -run <Test> -count=1"` in the fence, `go -C pfm test ./internal/<package>/ -run <Test>` on the host — timeout 600 s. Beside it, in the fence, the static checks on what the executor changed: `.claude/scripts/dev.sh iso run "make -C pfm lint-new"` (a finding on a line it did not change is burn-down, never its red); `make -C pfm arch` the same way when a Go file is added or grows (size ceilings; every `x.go` has its `x_test.go`); `go -C pfm test ./internal/claudelaunch/ -run TestNoLaunchLiteralOutsideRegistry -count=1` when a changed line spells a Claude flag, env value or `--settings` key.
-- Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh iso gate` (`iso gate pfm` for pfm alone) — the verify and test rows of pfm and templates as concurrent steps in one container, a `step · verdict · seconds` table in the run's `gate.tsv` under the timing dir, the wall judged against `infra/fence/gate-budget.yml` — in the fence only, a suite never runs on the host; timeout 600 s, background past that. `iso verify pfm` and `iso test pfm` still run their rows one after another.
+- Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh iso gate` (`iso gate pfm` for pfm alone) — the verify and test rows of pfm and templates as concurrent steps in one container, a `step · verdict · seconds` table in the run's `gate.tsv` (verdicts PASS, FAIL, NOT-RUN, TIMEOUT; rows `STEPS` and `BUDGET`), a `PROFILE` block pointing at each red step's diagnosis under the timing dir, the wall judged against `infra/fence/gate-budget.yml` — in the fence only, a suite never runs on the host; timeout 600 s, background past that. `iso verify pfm` and `iso test pfm` still run their rows one after another.
 - Static: `.claude/scripts/dev.sh iso verify pfm` (vet, fmt-check, lint-new, the architecture ratchet, the gate scripts' self-tests). Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. `LANE_PROFILE=1 infra/fence/lanes/run.sh --lanes <L>` writes `waits.tsv` (`lane · beat · helper · condition · elapsed_s · outcome`) and prints the top waits; a lane timing change is measured with it, before and after.
 
 ## Concurrency
 
 - Package and test concurrency is pinned by `TESTFLAGS ?= -p 6 -parallel 4` in `pfm/Makefile` (`make -s -C pfm testflags` prints it; the pick: `docs/dev/testing/concurrency-sweep.md`); callers may override it. A test that mutates process state (`t.Setenv`, `t.Chdir`, or a package variable) stays serial; a jail contained in a subprocess may use `t.Parallel` with `testjail.FleetEnv`. Isolation is the jail, one temp root per test. Timing budgets per package and per suite: `docs/dev/testing/timing.md`; an unbudgeted package fails.
 - Packages pinned in `pfm/scripts/test-shard.sh`'s `SHARDS` table run split by top-level test across concurrent processes of one compiled test binary (`docs/dev/testing/timing.md` § Sharded packages): a test never depends on another top-level test of its package having run in the same process, nor on a fixed port, path or name another process of that package could hold.
+- `go test -race` cannot run in the fence (`CGO_ENABLED=0`, no C compiler in the pfm-dev image): a `t.Parallel` change is proven by `-count=3` in the fence, under load once.
+- A top-level e2e test calls `t.Parallel` unless a comment names the shared resource that keeps it serial.
 
 ## Gates and floors
 
@@ -52,6 +54,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - `make -C pfm gate` is ready-to-merge: fmt-check, lint-new, vet, arch, test, iso.
 - Every skip is a row in `pfm/scripts/known-skips.tsv` (`pfm/scripts/skip-check.sh`); an unlisted skip fails.
 - `iso gate` runs under `infra/fence/egress.sh`, and every non-dry lanes run ends with the verdict of a capture inside its lane container: `EGRESS PASS`, or red as `EGRESS FAIL` (each DNS name and destination listed) or NOT RECORDED; that verdict is the only network check.
+- Every gate run is appended to the host ledger `$HOME/.local/state/pfm/gate-history/<project>/ledger.tsv`; `bash infra/fence/gate-history.sh report` shows per-step medians, regressions and verdict flips.
 
 ## Bug classes
 
@@ -66,6 +69,9 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 - `internal/harvest` (a `/private` symlink) and `internal/hookentry` (socket path length) are red on a macOS host and green in the fence.
 - A shell wait polls its own condition and counts its bound in 0.1 s ticks or from `$EPOCHREALTIME`, never a fixed sleep or whole `date +%s` seconds (a 1 s bound then waits up to 2 s); a fixed grace is a parameter a self-test can shorten (`MCP_STDIO_GRACE_SECS`).
 - A closed listener keeps accepting while a parallel test's fork holds its fd until exec: a test expecting a refused dial on a closed port stays serial.
+- `PFM_TEST_PROFILE=cpu` kills a test's exec'd children (SIGPROF survives execve): never in a gate.
+- A test binary started by a profiled test inherits `PFM_TEST_PROFILE_PARENT` and is a helper (summary only); a test that re-execs its own binary to prove profiling removes it from the child's env.
+- A test that reads process-wide allocation or heap counters (`testing.AllocsPerRun`, `runtime.ReadMemStats`) is serial and calls `testjail.PauseFlightRecorder(t)` first: the always-on flight recorder allocates in its own goroutine.
 
 ## What not to test
 

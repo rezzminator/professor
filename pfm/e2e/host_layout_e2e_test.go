@@ -27,6 +27,7 @@ import (
 )
 
 func TestHostLayoutMigratesLegacyHome(t *testing.T) {
+	t.Parallel()
 	requireE2EFence(t)
 	repo := sharedSourceRepo(t)
 	h := &e2eHarness{t: t, repo: repo, goCache: requiredGoEnv(t, "GOCACHE"), goModCache: requiredGoEnv(t, "GOMODCACHE")}
@@ -202,7 +203,7 @@ func plantLegacyHostLayout(t *testing.T, home, repo string) {
 		if name == "systemctl" {
 			quiet = strings.Replace(quiet, "case \"$*\" in\n", "case \"$*\" in\n  *stop*|*start*) exit 0 ;;\n", 1)
 		}
-		if err := os.WriteFile(path, []byte(quiet), 0o700); err != nil {
+		if err := writeExecutable(path, []byte(quiet), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

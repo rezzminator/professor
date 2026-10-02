@@ -10,7 +10,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestMain(m *testing.M) { os.Exit(Run(m)) }
+// keepAmbientChild marks the re-exec'd child that stands in for cmd/pfm's attach
+// helper: it runs Run with KeepAmbientIdentity set.
+const keepAmbientChild = "PFM_TEST_KEEP_AMBIENT_CHILD"
+
+func TestMain(m *testing.M) {
+	KeepAmbientIdentity = os.Getenv(keepAmbientChild) == "1"
+	os.Exit(Run(m))
+}
 
 // A `go` child (the self-update rebuild in internal/update, a `go run`) derives
 // GOCACHE, GOPATH and GOMODCACHE from HOME when they are unset. Every jail rehomes HOME, so the
@@ -160,6 +167,101 @@ func TestRunPreservesCallerSIDDir(t *testing.T) {
 	command.Env = append(os.Environ(), paths.EnvSIDDir+"="+want, marker+"="+want)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("child test with caller SID dir: %v: %s", err, output)
+	}
+}
+
+// The gate's step profiler exports BASH_ENV (set -E, an ERR trap) into every
+// step. Run drops it for the Go test process, so a shell the test starts writes
+// no record and a tmux pane launched as `bash -c '<launch>'` still becomes the
+// launched program. The child re-runs this test under Run: it must see BASH_ENV
+// unset, and so must a process it starts; with the attach helper's
+// KeepAmbientIdentity the ambient identity stays and BASH_ENV is gone anyway.
+func TestRunClearsBashEnv(t *testing.T) {
+	const marker = "PFM_TEST_BASH_ENV_CHILD"
+	if os.Getenv(marker) != "" {
+		if value, set := os.LookupEnv("BASH_ENV"); set {
+			t.Fatalf("BASH_ENV=%q after Run, want it unset", value)
+		}
+		if os.Getenv(keepAmbientChild) == "1" {
+			if got := os.Getenv("TMUX"); got != "ambient-tmux" {
+				t.Fatalf("TMUX=%q with KeepAmbientIdentity, want the ambient %q", got, "ambient-tmux")
+			}
+		}
+		listing, err := exec.Command("env").Output()
+		if err != nil {
+			t.Fatalf("list the environment of a child: %v", err)
+		}
+		for _, line := range strings.Split(string(listing), "\n") {
+			if strings.HasPrefix(line, "BASH_ENV=") {
+				t.Fatalf("a child process inherited %q, want BASH_ENV unset", line)
+			}
+		}
+		return
+	}
+	tracer := filepath.Join(t.TempDir(), "tracer.sh")
+	if err := os.WriteFile(tracer, []byte("set -E\ntrap : ERR\n"), 0o600); err != nil {
+		t.Fatalf("write the tracer env file: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		extra []string
+	}{
+		{"exported", []string{"BASH_ENV=" + tracer}},
+		{"not exported", nil},
+		{"attach helper", []string{"BASH_ENV=" + tracer, keepAmbientChild + "=1", "TMUX=ambient-tmux"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := exec.Command(os.Args[0], "-test.run=^TestRunClearsBashEnv$")
+			command.Env = envWithout("BASH_ENV", append(tc.extra, marker+"=1")...)
+			if output, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("child test (%s): %v: %s", tc.name, err, output)
+			}
+		})
+	}
+}
+
+// envWithout is the parent's environment with name removed, then extra added, so
+// a case that wants BASH_ENV absent gets it even when the gate exported one.
+func envWithout(name string, extra ...string) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, name+"=") {
+			env = append(env, entry)
+		}
+	}
+	// extra may restore the removed name: it is appended after the filter.
+	return append(env, extra...)
+}
+
+// The profiler's variables are the one channel a step's profile reaches a test
+// process and its helpers by; clearing BASH_ENV must leave all four as exported.
+func TestRunPassesProfilerVariablesThrough(t *testing.T) {
+	const marker = "PFM_TEST_PROFILER_VARS_CHILD"
+	want := map[string]string{
+		paths.EnvTestDeadlineEpoch: "4102444800",
+		paths.EnvTestProfile:       "cpu",
+		paths.EnvTestProfileParent: "4242",
+	}
+	if os.Getenv(marker) != "" {
+		for name, value := range want {
+			if got := os.Getenv(name); got != value {
+				t.Fatalf("%s=%q in the test process, want the exported %q", name, got, value)
+			}
+		}
+		artifacts := os.Getenv(marker)
+		if got := os.Getenv(paths.EnvTestArtifactDir); got != artifacts {
+			t.Fatalf("%s=%q in the test process, want the exported %q", paths.EnvTestArtifactDir, got, artifacts)
+		}
+		return
+	}
+	artifacts := filepath.Join(t.TempDir(), "artifacts")
+	command := exec.Command(os.Args[0], "-test.run=^TestRunPassesProfilerVariablesThrough$")
+	command.Env = envWithout("BASH_ENV", marker+"="+artifacts, paths.EnvTestArtifactDir+"="+artifacts)
+	for name, value := range want {
+		command.Env = append(command.Env, name+"="+value)
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("child test with the profiler variables exported: %v: %s", err, output)
 	}
 }
 

@@ -98,8 +98,17 @@ printf '%s\n' "$*" >>"$STUB_LOG"
 case "$1" in
   list)
     [ "${STUB_LIST_FAIL:-0}" = 0 ] || exit 9
-    printf '%s\n' github.com/rezzminator/professor/pfm/cmd/pfm github.com/rezzminator/professor/pfm/internal/quick ;;
+    if [ -n "${STUB_LIST_PACKAGES:-}" ]; then printf '%s\n' $STUB_LIST_PACKAGES
+    else printf '%s\n' github.com/rezzminator/professor/pfm/cmd/pfm github.com/rezzminator/professor/pfm/internal/quick; fi ;;
   build)
+    target="${*: -1}"
+    if [ -n "${STUB_BUILD_RENDEZVOUS:-}" ]; then
+      # A directory: each build leaves its mark and waits (at most 5 s) for the other's; one that waits alone says so.
+      : >"$STUB_BUILD_RENDEZVOUS/${target##*/}"
+      tick=0
+      while [ "$(ls "$STUB_BUILD_RENDEZVOUS" | wc -l)" -lt 2 ] && [ "$tick" -lt 50 ]; do sleep 0.1; tick=$((tick + 1)); done
+      if [ "$(ls "$STUB_BUILD_RENDEZVOUS" | wc -l)" -ge 2 ]; then printf 'build-overlap %s\n' "$target" >>"$STUB_LOG"; else printf 'build-alone %s\n' "$target" >>"$STUB_LOG"; fi
+    fi
     if [[ " $* " == *" ./cmd/mock-engine "* ]]; then
       [ "${STUB_MOCK_PREBUILD_FAIL:-0}" = 0 ] || { printf 'mock-build.go:7: broken fixture\n' >&2; exit 1; }
     else
@@ -108,7 +117,8 @@ case "$1" in
     while [ "$1" != -o ]; do shift; done
     shift
     printf '#!/bin/sh\nexit 0\n' >"$1"
-    chmod +x "$1" ;;
+    chmod +x "$1"
+    printf 'build-done %s\n' "$target" >>"$STUB_LOG" ;;
   test)
     printf 'child-env %s\n' "${PFM_TEST_PFM_BINARY-<unset>}" >>"$STUB_LOG"
     printf 'mock-env %s\n' "${PFM_TEST_MOCK_ENGINE_BINARY-<unset>}" >>"$STUB_LOG"
@@ -186,26 +196,29 @@ plain_rc=$rc
 rc=0; bash "$SUT" plan --out "$T/plan.json" --history "$T/thrashed.json" >"$T/thrashed.tsv" 2>"$T/plan.err" || rc=$?
 if [ "$plain_rc" -eq 0 ] && [ "$rc" -eq 0 ] && cmp -s <(cut -f1,2 "$T/plain.tsv") <(cut -f1,2 "$T/thrashed.tsv"); then ok thrashed-history-same-shards; else bad "thrashed-history-same-shards: rc=$rc" "$(cat "$T/plan.err")"; fi
 : >"$STUB_LOG"
-rc=0; bash "$SUT" run --out "$T/run.json" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
+rc=0; mkdir "$T/rendezvous"; STUB_BUILD_RENDEZVOUS="$T/rendezvous" bash "$SUT" run --out "$T/run.json" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
 if [ "$rc" -eq 1 ] && python3 - "$STUB_LOG" <<'PY'
-import sys
+import os, sys
 lines = open(sys.argv[1]).read().splitlines()
-builds = [line for line in lines if line.startswith('build ')]
-assert builds, lines
-parts = builds[0].split()
-assert parts[:3] == ['build', '-trimpath', '-buildvcs=false'], lines
-assert parts[-1] == './cmd/pfm', lines
-binary = parts[parts.index('-o') + 1]
-assert len(builds) == 2, builds
-mock = builds[1].split()
-assert mock[:3] == ['build', '-trimpath', '-buildvcs=false'], lines
-assert mock[-1] == './cmd/mock-engine', lines
-mock_binary = mock[mock.index('-o') + 1]
-assert all(lines.index(builds[0]) < i for i, line in enumerate(lines) if line.startswith(('test ', 'tool test2json ', 'binary '))), lines
-assert all(lines.index(builds[1]) < i for i, line in enumerate(lines) if line.startswith(('test ', 'tool test2json ', 'binary '))), lines
+builds = {line.split()[-1]: line.split() for line in lines if line.startswith('build ')}
+assert sorted(builds) == ['./cmd/mock-engine', './cmd/pfm'], lines
+for parts in builds.values():
+    assert parts[:3] == ['build', '-trimpath', '-buildvcs=false'], lines
+binary = builds['./cmd/pfm'][builds['./cmd/pfm'].index('-o') + 1]
+mock_binary = builds['./cmd/mock-engine'][builds['./cmd/mock-engine'].index('-o') + 1]
+# The two builds ran at once: each met the other at the rendezvous, neither waited alone.
+assert sorted(line for line in lines if line.startswith('build-overlap ')) == ['build-overlap ./cmd/mock-engine', 'build-overlap ./cmd/pfm'], lines
+assert not [line for line in lines if line.startswith('build-alone ')], lines
+# Both finished before any test process started.
+done = [i for i, line in enumerate(lines) if line.startswith('build-done ')]
+assert len(done) == 2, lines
+first_test = min(i for i, line in enumerate(lines) if line.startswith(('test ', 'tool test2json ', 'binary ')))
+assert max(done) < first_test, lines
 assert [line for line in lines if line.startswith('child-env ')], lines
 assert all(line == 'child-env ' + binary for line in lines if line.startswith('child-env ')), lines
 assert all(line == 'mock-env ' + mock_binary for line in lines if line.startswith('mock-env ')), lines
+# No --bin-dir: the prebuilt binaries lived in a temp dir the run removed.
+assert not os.path.exists(binary) and not os.path.exists(mock_binary), (binary, mock_binary)
 PY
 then ok prebuilt-before-tests; else bad "prebuilt-before-tests: rc=$rc" "$(cat "$STUB_LOG")"; fi
 : >"$STUB_LOG"
@@ -225,6 +238,68 @@ assert any(line.startswith('child-env ') and line != 'child-env <unset>' for lin
 assert [line for line in lines if line.startswith('mock-env ')] and all(line == 'mock-env <unset>' for line in lines if line.startswith('mock-env ')), lines
 PY
 then ok mock-prebuild-failure-kept; else bad "mock-prebuild-failure-kept: rc=$rc" "$(cat "$T/run.log")"; fi
+
+# --bin-dir: the prebuilt pfm and mock-engine are written there and left there.
+: >"$STUB_LOG"
+rc=0; bash "$SUT" run --out "$T/kept.json" --bin-dir "$T/kept-bin/nested" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && [ -x "$T/kept-bin/nested/pfm" ] && [ -x "$T/kept-bin/nested/mock-engine" ] &&
+  grep -Fxq "child-env $T/kept-bin/nested/pfm" "$STUB_LOG" && grep -Fxq "mock-env $T/kept-bin/nested/mock-engine" "$STUB_LOG" &&
+  ! grep -q '^child-env <unset>$' "$STUB_LOG" && ! grep -q '^mock-env <unset>$' "$STUB_LOG"; then
+  ok bin-dir-kept
+else bad "bin-dir-kept: rc=$rc" "$(cat "$T/run.log")" "$(cat "$STUB_LOG")"; fi
+# A relative --bin-dir means the caller's directory: the builds and the tests run in other ones.
+: >"$STUB_LOG"
+mkdir "$T/rel"
+rc=0; (cd "$T/rel" && bash "$SUT" run --out "$T/rel.json" --bin-dir rel-bin -- -p 4) >"$T/run.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && [ -x "$T/rel/rel-bin/pfm" ] && grep -Fxq "child-env $T/rel/rel-bin/pfm" "$STUB_LOG"; then
+  ok bin-dir-relative
+else bad "bin-dir-relative: rc=$rc" "$(cat "$T/run.log")" "$(cat "$STUB_LOG")"; fi
+# A binary an earlier run left there is not this run's when its build fails.
+mkdir "$T/stale-bin"
+printf '#!/bin/sh\nexit 0\n' >"$T/stale-bin/pfm"; chmod +x "$T/stale-bin/pfm"
+: >"$STUB_LOG"
+rc=0; STUB_PREBUILD_FAIL=1 bash "$SUT" run --out "$T/stale.json" --bin-dir "$T/stale-bin" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
+if [ "$rc" -eq 1 ] && [ ! -e "$T/stale-bin/pfm" ] && [ -x "$T/stale-bin/mock-engine" ] && grep -q 'test-shard: prebuilt pfm build failed' "$T/run.log"; then
+  ok bin-dir-failed-build-leaves-none
+else bad "bin-dir-failed-build-leaves-none: rc=$rc" "$(cat "$T/run.log")"; fi
+# A --bin-dir that cannot be made is exit 2 before any go call.
+: >"$T/a-file"
+for dir in "$T/a-file" "$T/a-file/sub"; do
+  : >"$STUB_LOG"
+  rc=0; bash "$SUT" run --out "$T/run.json" --bin-dir "$dir" -- -p 4 >"$T/error.log" 2>&1 || rc=$?
+  if [ "$rc" -eq 2 ] && [ ! -s "$STUB_LOG" ] && grep -q "^test-shard: --bin-dir $dir: " "$T/error.log"; then ok "bin-dir-uncreatable-before-go ($dir)"; else bad "bin-dir-uncreatable-before-go ($dir): rc=$rc" "$(cat "$T/error.log")" "$(cat "$STUB_LOG")"; fi
+done
+: >"$STUB_LOG"
+rc=0; bash "$SUT" plan --out "$T/plan.json" --bin-dir "$T/plan-bin" >"$T/error.log" 2>&1 || rc=$?
+if [ "$rc" -eq 2 ] && [ ! -s "$STUB_LOG" ] && [ ! -e "$T/plan-bin" ] && grep -q 'unrecognized arguments' "$T/error.log"; then ok bin-dir-run-only; else bad "bin-dir-run-only: rc=$rc" "$(cat "$T/error.log")"; fi
+
+# The unsharded packages start longest first by the package terminal events of --history; a package the history
+# does not hold comes first, in go list order, and ties keep go list order.
+P=github.com/rezzminator/professor/pfm/internal
+export STUB_LIST_PACKAGES="$PKG $P/mid $P/quick $P/tiea $P/fresh $P/slow $P/tieb"
+cat >"$T/order-history.json" <<JSON
+{"Action":"pass","Package":"$PKG","Test":"TestHeavyA","Elapsed":18}
+{"Action":"pass","Package":"$PKG","Test":"TestHeavyB","Elapsed":17}
+{"Action":"pass","Package":"$P/slow","Elapsed":30}
+{"Action":"pass","Package":"$P/mid","Test":"TestInside","Elapsed":99}
+{"Action":"pass","Package":"$P/mid","Elapsed":12}
+{"Action":"fail","Package":"$P/tiea","Elapsed":5}
+{"Action":"skip","Package":"$P/tieb","Elapsed":5}
+JSON
+unsharded_args() { grep '^test -timeout 25m ' "$STUB_LOG" | sed 's/.* -json //; s#github.com/rezzminator/professor/pfm/internal/##g'; }
+: >"$STUB_LOG"
+rc=0; bash "$SUT" run --out "$T/order.json" --history "$T/order-history.json" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
+if [ "$(unsharded_args)" = 'quick fresh slow mid tiea tieb' ]; then ok longest-first-order; else bad "longest-first-order: rc=$rc" "$(cat "$STUB_LOG")" "$(cat "$T/run.log")"; fi
+printf '{"Action":"output","Package":"%s","Output":"hello"}\n' "$P/slow" >"$T/order-eventless.json"
+for kind in absent unreadable eventless; do
+  history_arg=(--history "$T/order-$kind.json")
+  [ "$kind" != absent ] || history_arg=()
+  [ "$kind" != unreadable ] || mkdir -p "$T/order-unreadable.json"
+  : >"$STUB_LOG"
+  rc=0; bash "$SUT" run --out "$T/order.json" "${history_arg[@]}" -- -p 4 >"$T/run.log" 2>&1 || rc=$?
+  if [ "$(unsharded_args)" = 'mid quick tiea fresh slow tieb' ]; then ok "no-history-$kind-go-list-order"; else bad "no-history-$kind-go-list-order: rc=$rc" "$(cat "$STUB_LOG")" "$(cat "$T/run.log")"; fi
+done
+unset STUB_LIST_PACKAGES
 
 cat >"$T/proc.stat" <<'STAT'
 cpu  100 0 100 100 0 0 0 0 0 0
@@ -276,6 +351,49 @@ import json, sys
 assert any(json.loads(line).get('Package') == sys.argv[2] for line in open(sys.argv[1]))
 PY
 then ok load-write-failure-continues; else bad "load-write-failure-continues: rc=$rc" "$(cat "$T/write-fail.log")"; fi
+
+# sample: the load record alone, for a run this script does not drive (the e2e suite), until TERM or INT.
+sample_start() { # sample_start <load file> [proc.stat]: the sampler in the background, its pid in SAMPLER_PID
+  PFM_TEST_SHARD_PROC_STAT="${2:-$T/proc.stat}" PFM_TEST_SHARD_CPU_STAT="$T/cpu.stat" bash "$SUT" sample --out "$1" >"$T/sample.log" 2>&1 &
+  SAMPLER_PID=$!
+}
+wait_lines() { # wait_lines <file> <n>: until <file> holds n lines, at most 15 s in 0.1 s ticks
+  local tick=0
+  while [ "$(wc -l <"$1" 2>/dev/null || echo 0)" -lt "$2" ] && [ "$tick" -lt 150 ]; do sleep 0.1; tick=$((tick + 1)); done
+}
+: >"$STUB_LOG"
+sample_start "$T/e2e.load"
+wait_lines "$T/e2e.load" 5
+kill -TERM "$SAMPLER_PID"; rc=0; wait "$SAMPLER_PID" || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -s "$STUB_LOG" ] && python3 - "$T/e2e.load" <<'PY'
+import sys
+rows = open(sys.argv[1]).read().splitlines()
+assert rows[0] == 'epoch_s\tvm_busy_s\town_s\tcpus', rows
+assert len(rows) >= 6, rows
+assert all(len(row.split('\t')) == 4 and row.split('\t')[3] == '2' for row in rows[1:]), rows
+epochs = [float(row.split('\t')[0]) for row in rows[1:]]
+gaps = [later - earlier for earlier, later in zip(epochs, epochs[1:])]
+assert all(gap > 0 for gap in gaps), epochs
+assert all(gap >= 0.45 for gap in gaps[:-1]), gaps
+PY
+then ok sample-record-every-half-second; else bad "sample-record-every-half-second: rc=$rc" "$(cat "$T/sample.log")" "$(cat "$T/e2e.load")" "$(cat "$STUB_LOG")"; fi
+for signal in TERM INT; do
+  sample_start "$T/stop-$signal.load"
+  wait_lines "$T/stop-$signal.load" 2
+  kill -"$signal" "$SAMPLER_PID"; rc=0; wait "$SAMPLER_PID" || rc=$?
+  # TERM lands well inside the first half second: a second row can only be the final one.
+  if [ "$rc" -eq 0 ] && [ "$(wc -l <"$T/stop-$signal.load")" -ge 3 ]; then ok "sample-final-row-on-$signal"; else bad "sample-final-row-on-$signal: rc=$rc" "$(cat "$T/sample.log")" "$(cat "$T/stop-$signal.load")"; fi
+done
+sample_start "$T/unavailable-sample.load" "$T/missing.stat"
+wait_lines "$T/unavailable-sample.load" 2
+kill -TERM "$SAMPLER_PID"; rc=0; wait "$SAMPLER_PID" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(wc -l <"$T/unavailable-sample.load")" -eq 2 ] && grep -q "^UNAVAILABLE.*$T/missing.stat" "$T/unavailable-sample.load"; then ok sample-unavailable-row; else bad "sample-unavailable-row: rc=$rc" "$(cat "$T/sample.log")" "$(cat "$T/unavailable-sample.load")"; fi
+: >"$STUB_LOG"
+rc=0; bash "$SUT" sample --out "$T/not-here/e2e.load" >"$T/error.log" 2>&1 || rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$T/not-here/e2e.load" ] && [ ! -s "$STUB_LOG" ]; then ok sample-out-unwritable-before-sampling; else bad "sample-out-unwritable-before-sampling: rc=$rc" "$(cat "$T/error.log")"; fi
+ln -s /dev/full "$T/sample-full.load"
+rc=0; bash "$SUT" sample --out "$T/sample-full.load" >"$T/error.log" 2>&1 || rc=$?
+if [ "$rc" -eq 2 ] && grep -q "test-shard: load record $T/sample-full.load:" "$T/error.log"; then ok sample-write-failure-exits-2; else bad "sample-write-failure-exits-2: rc=$rc" "$(cat "$T/error.log")"; fi
 rc=0; bash "$SUT" plan --out "$T/plan.json" --history "$T/history.json" >"$T/plan.tsv" 2>"$T/plan.err" || rc=$?
 if [ "$rc" -eq 0 ] && python3 - "$T/plan.tsv" "$PKG" <<'PY'
 import sys

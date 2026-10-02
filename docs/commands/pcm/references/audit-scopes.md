@@ -1,6 +1,6 @@
-# PTM audit — per-scope deep checks
+# PCM audit — per-scope deep checks
 
-Loaded by `/pfm audit`: PTM reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in `pcm.md § Execution model`). Read-only checks — report `PASS/FAIL/WARN`, never fix.
+Loaded by `/pcm audit`: PCM reads this file when composing fan-out briefs; each agent's brief carries its scope's section below (adapted per the brief template in `pcm.md § Execution model`). Read-only checks — report `PASS/FAIL/WARN`, never fix.
 
 ## `agents` — Walk every agent file
 
@@ -38,6 +38,7 @@ Files: `templates/**`, `docs/{BLUEPRINT,SETUP,PLACEHOLDERS,RELEASE}.md`, `templa
 This is the scope with adopters downstream of it — a FAIL here ships.
 
 - **Internal reference resolution:** every template referencing another template, agent, command, script, or reference card → the target exists under `templates/` (a pointer that only resolves in the source project is a broken install)
+- **Verdict tokens ↔ their writers:** every token a `/flights:*` command (`templates/global/commands/flights/`) cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `TOO-LARGE`, `WAIT`, `BLOCKED`, `MAIN-CHAT`, `COMA`, `REVISED`) is one `flights-orchestrator`, `flights-speccer` or a `/flights:orchestrate-*` command writes
 - **Placeholder integrity:** every `{TOKEN}` in a template is registered in `PLACEHOLDERS.md`; every registered token is used or knowingly retired; no template carries a source-project value where a token belongs
 - **SETUP coverage:** every file under `templates/` has a write step in `SETUP.md`; every path `SETUP.md` writes has a template
 - **Cast consistency:** `README.md` and `BLUEPRINT.md` agent/command/skill lists match a live `ls` of `templates/project/agents/` and `templates/project/commands/`

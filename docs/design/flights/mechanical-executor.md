@@ -45,11 +45,11 @@ Friction: `Files` lists missed callers, and the drift was found mid-edit, with a
 
 One test per `Done when` row, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names:
 
-- every row's test is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; all the new tests run in one command against the unfixed tree, each failing on its assertion, the log kept; then the Steps are applied and the same command runs green once;
-- a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, and the lander's adversarial pass covers it; no executor re-breaks, stashes, reverts or mutates finished or landed code to watch a test fail;
+- every row's test is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; all the new tests run in one command against the unfixed tree, each failing on its assertion (a build error proves nothing), the log kept; then the Steps are applied and the same command runs green once;
+- a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log and the commit or `run.md` line that landed the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or landed code to watch a test fail;
 - a task with no behaviour change (a rename, a move, a deletion, the doc references one carries) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history or in a hit named under Outside defects, are its proof.
 
-Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break code for the proof; one reverted to the last commit in a worktree holding sibling tasks' uncommitted work, and one temporary break of a shared file turned a sibling's run red. An audit of 13 Codex executors measured the per-row red, fix, green cycle and its re-breaks at 62 red-run and 47 re-break calls, 68 of 275 minutes, some re-breaking rows already watched red. One red run and one green run per task keep the guarantee that every new test failed before its fix; code already in the tree is the lander's to attack, never the executor's to break.
+Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break code for the proof; one reverted to the last commit in a worktree holding sibling tasks' uncommitted work, and one temporary break of a shared file turned a sibling's run red. An audit of 13 Codex executors measured the per-row red, fix, green cycle and its re-breaks at 62 red-run and 47 re-break calls, 68 of 275 minutes, some re-breaking rows already watched red. One red run and one green run per task keep the guarantee that every new test failed before its fix; code already in the tree is never the executor's to break.
 
 ### Reds are bounded
 
@@ -97,7 +97,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | --- | --- |
 | A `Progress dependency` does not hold in a way that changes an edit | Change nothing; `SPEC-DRIFT {id}: {the fact}: {what it found}` |
 | A quote found nowhere or at more than one place, a new name taken, a break outside `Files`, a file pushed over the ceiling | Change nothing; `SPEC-DRIFT {id}` naming each |
-| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red outside `Files` it does not list stays `SPEC-DRIFT` |
+| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red its change causes outside `Files` that the list does not name stays `SPEC-DRIFT` |
 | A quoted line found at another place, an import the edit needs, the formatter's output | Adapt and list it under Adapted |
 | An edit the Steps do not settle (another approach, a name not given, a file outside `Files`) | Stop, every touched file building; `SPEC-DRIFT {id}: {what the task file lacks}` with what landed |
 | Its own edit turns a check red inside `Files` | Fix the cause there, rerun |

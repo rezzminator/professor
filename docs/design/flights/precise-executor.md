@@ -75,7 +75,7 @@ The layout laws bind this tier through its body: a deletion leaves nothing behin
 | --- | --- |
 | A `Progress dependency` whose failure changes the change | Change nothing; `SPEC-DRIFT {id}: {what it found}` |
 | A build, test or caller outside `Files` the change would break | Change nothing; `SPEC-DRIFT {id}`, every hit at once |
-| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red outside `Files` it does not list stays `SPEC-DRIFT` |
+| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red its change causes outside `Files` that the list does not name stays `SPEC-DRIFT` |
 | A stale comment or doc, an older defect | A defect line in the return; finish |
 | Spec and code disagree on a detail | Reach the Goal; say what it changed |
 | The Goal turns unreachable mid-task | Stop, every touched file building; `SPEC-DRIFT {id}` with what it found and what landed |

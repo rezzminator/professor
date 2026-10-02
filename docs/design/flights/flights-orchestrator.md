@@ -35,11 +35,21 @@ The same body is the only description of the protocol. A second copy for the liv
 | Input | Rule |
 | --- | --- |
 | The flight directory | Required. Work that arrives without one goes to `flights-speccer` first, and its return is the index |
-| Standing rules the executors work under | What the project contract and the testing manual do not carry: the worktree, the fenced command that runs one package's affected tests, the checks by command, anything the caller adds for this flight. Pasted into every executor brief, never into a task file; the orchestrator authors none. A second measured case: a brief whose rule read "every build/test runs … `dev.sh iso test pfm`" meant the script's path but named the full suite, and the orchestrator added "launch it backgrounded and wait once"; 146 of the six executors' 201 minutes went to full-suite waits, so the refusal keys on the full-suite command itself, however the rule frames it. A standing rule says where and with what an agent works, never what steps it runs: one that adds, drops or replaces a step of a role is refused and named under `NOTES`. The measured case: a launch message written by a chat born before the redesign ordered "every executor's self-review is a review over its own change"; the orchestrator pasted it as "overriding the role's no-review rule", and six executors ran 23 review processes. A rule that widens a test scope the testing manual sets (whole packages where it says `-run`) or prescribes a fixed sleep is refused the same way: an audit found a brief widening `-run` to `./internal/{pkg}/...` and one ordering `time.sleep(60)` before a rebuild. The fleet prompt carries the same law for every manual. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness and is never pasted or named |
+| Standing rules the executors work under | Where and with what the executors work, pasted into every brief: [Standing rules](#standing-rules) |
 | The projects and their testing manuals | Each project the flight touches, with its manual's path: it travels in every executor's and lander's brief. A project without one is a `NOTES` line |
 | A worktree | Used when the flight runs outside the checkout; otherwise the checkout |
 | The cap | Executors in flight at once; absent, ten. An executor's own cap (80 calls) lives in its agent; a `CLAIMED` line is stale after 60 minutes, the nested container's bound; a cross-harness seat is watched instead, by Monitors on its return file and on its `pfm chat watch` transitions |
 | The landing | Which checks run after the gate, whether gitter commits. Absent: the standing checks once, no commit. The gate itself is never optional and its review effort is the lander's to size, unless the user ordered a level above `medium`: that order travels to the lander as given |
+
+### Standing rules
+
+What the project contract and the testing manual do not carry: the worktree, the fenced command that runs one package's affected tests, the checks by command, anything the caller adds for this flight. Pasted into every executor brief, never into a task file; the orchestrator authors none. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness and is never pasted or named.
+
+A standing rule says where and with what an agent works, never what steps it runs: one that adds, drops or replaces a step of a role is refused and named under `NOTES`. The measured case: a launch message written by a chat born before the redesign ordered "every executor's self-review is a review over its own change"; the orchestrator pasted it as "overriding the role's no-review rule", and six executors ran 23 review processes. A second measured case: a brief whose rule read "every build/test runs … `dev.sh iso test pfm`" meant the script's path but named the full suite, and the orchestrator added "launch it backgrounded and wait once"; 146 of the six executors' 201 minutes went to full-suite waits, so the refusal keys on the full-suite command itself, however the rule frames it.
+
+A rule that widens a test scope the testing manual sets (whole packages where it says `-run`) or prescribes a fixed sleep is refused the same way: an audit found a brief widening `-run` to `./internal/{pkg}/...` and one ordering `time.sleep(60)` before a rebuild.
+
+The fleet prompt's manual law (`pfm/harness-prompts/share/tail.md` § Orchestration) refuses, for every manual, a caller's rule that contradicts it — a review inside an executor, a full suite per task, an extra report; the test-scope and fixed-sleep refusals live in the agent alone.
 
 ## The run
 
@@ -68,7 +78,7 @@ Nothing else: the task file is the spec, and the [executor's agent](flights-exec
 
 An executor's return is a claim. The orchestrator matches the first line's token and then verifies:
 
-- `DONE`: the return names what changed; per `Done when` row, a covering test with its failing line in the one red log or marked `pre-existing, no red proof`, or, for a row with no behaviour change (a rename, a move, a deletion, a doc) or one a written deliverable meets, its check line and the quoted line that meets it; and `git diff {baseline} --stat -- {the index's files}` shows a change: the files come from the index row, never from the return, so the judge is never the judged. A return that claims done with no proof, or with nothing changed, gets one question back to the same executor; a second such return is recorded `FAILED`.
+- `DONE`: the return names what changed; per `Done when` row, a covering test with its failing line in the red log whose path the return names, or marked `pre-existing, no red proof` with that test passing in that log and the commit or `run.md` line that landed the behaviour, so a pre-existing row is proved rather than asserted; or, for a row with no behaviour change (a rename, a move, a deletion, a doc) or one a written deliverable meets, its check line and the quoted line that meets it; and `git diff {baseline} --stat -- {the index's files}` shows a change: the files come from the index row, never from the return, so the judge is never the judged. A return that claims done with no proof, or with nothing changed, gets one question back to the same executor; a second such return is recorded `FAILED`.
 - `FAILED`, `SPEC-DRIFT`: the return names a cause, or names what was read and says the cause is unknown; a red with neither is shapeless. Recorded as returned with the executor's transcript named on the line; the reaction is in [Situations](#situations).
 - `BLOCKED`: recorded as returned; the reaction is in [Situations](#situations).
 - No token on the first line, or a red with no cause and no reading named: one question back asking for the return in shape; a second shapeless return is `FAILED`.
@@ -99,13 +109,17 @@ Every situation the manual answers, with who acts. The orchestrator fixes nothin
 | A question from an executor nobody but the user can answer | `BLOCKED` for that task, as above |
 | The concurrency cap is reached | never reported by the harness: the count of in-flight executors is the only guard. Hold the task; dispatch it as the next return lands |
 | An executor never returns | seen only when something wakes the loop (a sibling's return; in the live and cross-harness containers, the user): a `CLAIMED` line older than 60 minutes with no verdict. Named in `DISPATCHED` as a missing return; its task stays `CLAIMED`; the flight lands without it and the return says so. When it was the last executor, nothing wakes a nested orchestrator: the user re-runs the container, and the resume rule treats the task as not started |
-| A cross-harness seat stopped without finishing (a model-server error, a hung turn, a brief never submitted, a dialog, a dead process) | The seats Monitor's line names it and the cross-harness command's action table answers it: re-prompt, Enter once, capture and judge, answer, or re-dispatch; a model-server error writes `{id} COMA · {kind} · re-prompted · {time}`, and a second coma of one seat within 10 minutes re-dispatches the task on another model or engine |
+| A cross-harness seat stopped without finishing | [Cross-harness seat liveness](#cross-harness-seat-liveness) |
 | A standing check fails at landing | unspecified work: a revising `flights-speccer` call with the check's output and the completed ids; its task files dispatch like any other |
 | A lander returns `PASS {project}` | the gate line in `run.md`; when every lander has returned, the standing checks, then the commit |
 | A lander returns `FIXED {project}` | the gate line in `run.md`; the files it changed join the commit |
 | A lander returns `FAIL {project}`, a cap included | the residuals are unspecified work: a revising `flights-speccer` call, its task files dispatch like any other, then that project's gate runs again; a second `FAIL` of one project travels in the return and the flight lands without a commit |
 | A defect a return names outside the task's files, or a lander's finding outside the flight | `NOTES`; never a fix by the orchestrator |
 | A spec fault the orchestrator can see (two decisions contradict, an index row without a file) | a revising `flights-speccer` call; never a patch, never a ruling written beside the directory |
+
+### Cross-harness seat liveness
+
+A seat stops without finishing on a model-server error, a hung turn, a brief never submitted, a dialog or a dead process. The seats Monitor's line names it and the cross-harness command's action table answers it: re-prompt, Enter once, capture and judge, answer, or re-dispatch. A model-server error writes `{id} COMA · {kind} · re-prompted · {time}`; a second coma of one seat within 10 minutes re-dispatches the task on another Codex model when one is configured, else on the Claude engine with the task's tier model, and writes `{id} COMA · {kind} · re-dispatched on {engine} {model} · {time}`.
 
 ## Review
 

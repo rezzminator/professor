@@ -195,7 +195,7 @@ func TestLimitsSamplerTurnsPersistentCredentialRejectionIntoNamedSkip(t *testing
 	}})
 	sampler.Fetch = func(context.Context, LimitAccount) (usagehook.Usage, error) {
 		fetches++
-		return usagehook.Usage{}, fmt.Errorf("usage endpoint returned 403 Forbidden")
+		return usagehook.Usage{}, &usagehook.StatusError{Code: http.StatusUnauthorized, Status: "401 Unauthorized"}
 	}
 	sampler.Ack = func(context.Context, LimitAccount) error {
 		acks++

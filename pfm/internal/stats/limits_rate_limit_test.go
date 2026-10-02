@@ -149,13 +149,14 @@ func TestHTTPStatusClassifiersMatchAStatusCodeNotADigitRun(t *testing.T) {
 		{name: "http 429", message: "fetch Codex usage failed: HTTP 429", wantStatus: "provider rate-limited", wantOK: true},
 		{name: "phrase only", message: "too many requests", wantStatus: "provider rate-limited", wantOK: true},
 		{name: "returned 401", message: "usage endpoint returned 401", auth: true, wantOK: true},
-		{name: "status 403", message: "status 403", auth: true, wantOK: true},
+		{name: "status 403", message: "status 403", auth: true},
+		{name: "status 403 dead token", message: "status 403: OAuth token has expired", auth: true, wantOK: true},
 		{name: "403 in path", message: missingCredentials, auth: true},
 		{name: "403 in longer status", message: "status 4031", auth: true},
 		{name: "401 unauthorized", message: "401 Unauthorized", auth: true, wantOK: true},
-		{name: "403 forbidden", message: "403 Forbidden", auth: true, wantOK: true},
+		{name: "403 forbidden", message: "403 Forbidden", auth: true},
 		{name: "later valid 429", message: "status 4290, then status 429", wantStatus: "provider rate-limited", wantOK: true},
-		{name: "later valid 403", message: "status 4031, then returned 403", auth: true, wantOK: true},
+		{name: "later valid 401", message: "status 4011, then returned 401", auth: true, wantOK: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := errors.New(test.message)

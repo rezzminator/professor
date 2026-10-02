@@ -24,25 +24,21 @@ func writeExecutable(path string, body []byte, mode os.FileMode) error {
 	return os.WriteFile(path, body, mode)
 }
 
-func TestExecutableCopyRunsWhileOtherGoroutinesFork(t *testing.T) {
-	t.Parallel()
-	requireE2EFence(t)
+// startForkLoad starts 4 goroutines forking and execing true until the returned
+// stop function is called; stop also waits for them.
+func startForkLoad(t *testing.T) (stop func()) {
+	t.Helper()
 	trueBinary, err := exec.LookPath("true")
 	if err != nil {
 		t.Fatalf("fork load needs true: %v", err)
 	}
-	dir := t.TempDir()
-	source := filepath.Join(dir, "source")
-	if err := os.WriteFile(source, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	stop := make(chan struct{})
+	done := make(chan struct{})
 	var forks sync.WaitGroup
 	for range 4 {
 		forks.Go(func() {
 			for {
 				select {
-				case <-stop:
+				case <-done:
 					return
 				default:
 				}
@@ -50,8 +46,21 @@ func TestExecutableCopyRunsWhileOtherGoroutinesFork(t *testing.T) {
 			}
 		})
 	}
-	defer forks.Wait()
-	defer close(stop)
+	return func() {
+		close(done)
+		forks.Wait()
+	}
+}
+
+func TestExecutableCopyRunsWhileOtherGoroutinesFork(t *testing.T) {
+	t.Parallel()
+	requireE2EFence(t)
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source")
+	if err := os.WriteFile(source, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer startForkLoad(t)()
 	// Unlocked, a copy fails within its first 20 runs here; a second of runs
 	// keeps the fork load short beside the heavy tests.
 	deadline := time.Now().Add(time.Second)

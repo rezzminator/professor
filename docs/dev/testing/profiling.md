@@ -17,7 +17,7 @@ Every `iso gate` run records what each Go test process, each gate step and the c
 
 ### Per Go package process
 
-`testjail.Run` starts a profiler in every test binary that runs with `PFM_TEST_ARTIFACT_DIR` set (`checks_pfm_unit`, `checks_pfm_e2e` and the fixture steps set it to `$run/profile`). Each process writes `profile/<label>.<pid>/summary.json`: written at start with `event` `started-no-exit-recorded` and `exit_code` -1, rewritten at exit. A process that execs itself away or is killed keeps the start record.
+`testjail.Run` starts a profiler in every test binary that runs with `PFM_TEST_ARTIFACT_DIR` set (`checks_pfm_unit` and `checks_pfm_e2e` set it to `$run/profile`, each Go fixture step to `$run/profile/fixture-<kind>`, so a fixture's failure pointers name only its own bundles). Each process writes `profile/<label>.<pid>/summary.json`: written at start with `event` `started-no-exit-recorded` and `exit_code` -1, rewritten at exit. A process that execs itself away or is killed keeps the start record.
 
 | Key | Meaning |
 | --- | --- |
@@ -103,6 +103,7 @@ The step's `steps/<name>.xtrace` (see [Per step](#per-step)). For a red shell st
 | `bin/` | `pfm/scripts/test-shard.sh run --bin-dir` | the `pfm` and `mock-engine` the unit run built |
 | `profile/<label>.<pid>/summary.json` | `internal/testjail` | [Per Go package process](#per-go-package-process) |
 | `profile/<label>.<pid>/<reason>/` | `internal/testjail` | [Go bundles](#go-bundles) |
+| `profile/fixture-<kind>/<label>.<pid>/` | `internal/testjail` | the same summary and bundles, one root per Go fixture step, listed in `INDEX.txt` |
 | `profile/INDEX.txt`, `profile.tsv` | `infra/fence/profile-report.sh summary` | [Reading a red gate](#reading-a-red-gate) |
 | `fixture-go-<kind>.json` | fixture steps | `go test -json` stream of the profile fixture |
 
@@ -129,14 +130,14 @@ Every timing verdict says whether the host or the code is to blame, as one of th
 | --- | --- | --- |
 | `tick-deficit` | (Δ`vm_busy_s` − Δ`cg_cpu_s`) ÷ (Δ`epoch_s` × `cpus`); negative means the host withheld vCPU time | ≤ `tick_deficit_max` (-0.05, -5 %) |
 | `cpu-psi` | Δ`cg_psi_cpu_some_s` ÷ Δ`epoch_s` | ≥ `cpu_psi_share_min` (0.36) |
-| `spin` | median `spin_us` ÷ the least `spin_us` over this file and the 20 newest sibling `run.*/resources.tsv` | ≥ `spin_ratio_min` (×1.6) |
+| `spin` | median `spin_us` ÷ the least 5th-percentile `spin_us` of this file and the 20 newest sibling `run.*/resources.tsv` | ≥ `spin_ratio_min` (×1.6) |
 | `run-delay` | `run_delay_s` ÷ `cpu_s`, only when both are given | ≥ `run_delay_ratio_min` (1.4) |
 
 A signal needs `min_samples` (4) rows with a value inside the window, else it is `NA (<reason>)`. The verdict is `CONTENTION` when any measured signal crosses, `CODE` when at least one is measured and none crosses, and `not measured` when none is measured. A missing or empty `resources.tsv` is `not measured (<reason>)`; a judge that fails renders `not measured (judge failed: …)`, never a silent `CODE`. The evidence names every signal: `tick-deficit +3.3% (> -5%) · cpu-psi +24.6% (< 36%) · spin ×1.4 (< ×1.6; ref …) · run-delay NA (not given)`.
 
 **FAIL → WARN.** A fail-tier verdict whose own window the judge calls `CONTENTION` is downgraded to WARN and says `· downgraded from FAIL`: the gate budget (`BUDGET` row, whole run) and each package and SUITE row of `test-timing.sh --check` (the package's event window, or the whole stream). `CODE` and `not measured` change nothing. Every other verdict (a red test, a `TIMEOUT`, a malformed record) stays red whatever the attribution.
 
-The spin reference is the minimum over sibling runs: one sample shortened by a VM clock step becomes every later gate's reference and marks them all `CONTENTION`. When every gate turns `CONTENTION` at once, check the sibling `spin_us` minimums.
+The spin reference is the least floor over this file and its sibling runs, a floor being a file's nearest-rank 5th-percentile `spin_us` (its least when it has 20 samples or fewer): a single sample shortened by a VM clock step no longer sets the reference, while a file whose low 5 % is short still does. When every gate turns `CONTENTION` at once, check the sibling floors.
 
 ## Ledger and report
 

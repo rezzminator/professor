@@ -3,10 +3,15 @@
 package e2e
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // Both native manager names are intercepted before the host PATH. The Darwin
@@ -53,9 +58,52 @@ esac
 `,
 	}
 	for name, body := range scripts {
-		if err := os.WriteFile(filepath.Join(home, ".local", "bin", name), []byte(body), 0o700); err != nil {
+		if err := writeExecutable(filepath.Join(home, ".local", "bin", name), []byte(body), 0o700); err != nil {
 			return fmt.Errorf("write scheduler fixture %s: %w", name, err)
 		}
 	}
 	return nil
+}
+
+func TestSchedulerFixturesRunWhileOtherGoroutinesFork(t *testing.T) {
+	t.Parallel()
+	requireE2EFence(t)
+	dir := t.TempDir()
+	defer startForkLoad(t)()
+	deadline := time.Now().Add(time.Second)
+	for index := 0; index < 500 && time.Now().Before(deadline); index++ {
+		home := filepath.Join(dir, fmt.Sprintf("home-%d", index))
+		bin := filepath.Join(home, ".local", "bin")
+		if err := os.MkdirAll(bin, 0o700); err != nil {
+			t.Fatalf("iteration %d: %v", index, err)
+		}
+		if err := writeSchedulerFixtures(home); err != nil {
+			t.Fatalf("iteration %d: %v", index, err)
+		}
+		env := append(os.Environ(), "HOME="+home, "PFM_E2E_HOME="+home)
+		systemctl := exec.Command(filepath.Join(bin, "systemctl"), "--version")
+		systemctl.Env = env
+		output, err := systemctl.CombinedOutput()
+		if err != nil || string(output) != "systemd 253\n" {
+			t.Fatalf("iteration %d: systemctl --version beside forking goroutines: %v %q", index, err, output)
+		}
+		launchctl := exec.Command(filepath.Join(bin, "launchctl"))
+		launchctl.Env = env
+		output, err = launchctl.CombinedOutput()
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 64 {
+			t.Fatalf("iteration %d: launchctl with no argument must reach its own exit 64: %v %q", index, err, output)
+		}
+	}
+}
+
+func TestWriteSchedulerFixturesNamesTheStubThatFailedToWrite(t *testing.T) {
+	t.Parallel()
+	err := writeSchedulerFixtures(t.TempDir())
+	if err == nil {
+		t.Fatal("writeSchedulerFixtures into a home without .local/bin returned nil")
+	}
+	if got := err.Error(); !strings.HasPrefix(got, "write scheduler fixture ") || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("error %q does not name the fixture and wrap the write error", got)
+	}
 }

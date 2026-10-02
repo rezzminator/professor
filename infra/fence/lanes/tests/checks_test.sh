@@ -458,9 +458,10 @@ else bad 'summary failure' "$(cat "$T/case-summary-fail.out")"; fi
 
 gate_budget_verdict() { printf 'budget: forced red\n'; return 1; }
 PFM_TEST_TIMING_DIR="$T/case-forced"
-if ! gate_run all >"$T/gate-budget-red.out"; then
+# Red for the budget's reason only: an early return elsewhere in gate_run is red too, and leaves no gate.tsv.
+if ! gate_run all >"$T/gate-budget-red.out" && grep -Fxq 'budget: forced red' "$T/gate-budget-red.out"; then
   ok 'red budget makes gate_run red'
-else bad 'gate_run lost red budget'; fi
+else bad 'gate_run lost red budget, or went red before its budget verdict' "$(cat "$T/gate-budget-red.out")"; fi
 forced_tsv="$(ls -d "$PFM_TEST_TIMING_DIR"/run.* | head -1)/gate.tsv"
 unset PFM_TEST_TIMING_DIR
 if [ "$(tail -1 "$forced_tsv" | cut -f1,2)" = "$(printf 'BUDGET\tERROR')" ]; then
@@ -518,18 +519,18 @@ go() {
   return "${STUB_GO_RC:-1}"
 }
 fixture_go_case() { # fixture_go_case <step kind> <PFM_PROFILE_FIXTURE> <-timeout> <expected PFM_PROFILE_FIXTURE_SLOW_S>
-  local rd="$T/fixture-run-$1" json="$T/fixture-run-$1/fixture-$1.json"
+  local rd="$T/fixture-run-$1" json="$T/fixture-run-$1/fixture-$1.json" root="$T/fixture-run-$1/profile/fixture-$1"
   mkdir -p "$rd"; : > "$STUB_EVENTS"; : > "$T/go.calls"; FAILURES=0
-  export STUB_FAILURES_OUT="  PROFILE github.com/rezzminator/professor/pfm/internal/testjail/testdata/profilefixture: $rd/profile/internal_testjail_testdata_profilefixture.9/exit/DIAGNOSIS.txt"
+  export STUB_FAILURES_OUT="  PROFILE github.com/rezzminator/professor/pfm/internal/testjail/testdata/profilefixture: $root/internal_testjail_testdata_profilefixture.9/exit/DIAGNOSIS.txt"
   checks_gate_fixture "$1" "$rd" >"$T/fixture-$1.out" 2>&1
   unset STUB_FAILURES_OUT
-  if [ "$(cat "$T/go.calls")" = "go -C $T/fx/pfm test -count=1 -json -timeout $3 ./internal/testjail/testdata/profilefixture/ | PFM_PROFILE_FIXTURE=$2 SLOW_S=$4 ARTIFACT=$rd/profile" ] &&
+  if [ "$(cat "$T/go.calls")" = "go -C $T/fx/pfm test -count=1 -json -timeout $3 ./internal/testjail/testdata/profilefixture/ | PFM_PROFILE_FIXTURE=$2 SLOW_S=$4 ARTIFACT=$root" ] &&
     [ "$(cat "$json")" = '{"Action":"fail","Package":"stub"}' ] && [ "$FAILURES" -eq 1 ] &&
-    [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$json" "$json" "$rd/profile")" ] &&
+    [ "$(cat "$STUB_EVENTS")" = "$(printf 'go_test_report %s\nreport failures %s %s' "$json" "$json" "$root")" ] &&
     [ "$(grep -v '^  PROFILE ' "$T/fixture-$1.out")" = "FAILSTEP fixture: go $2 red (expected)" ] &&
-    grep -Fxq "  PROFILE github.com/rezzminator/professor/pfm/internal/testjail/testdata/profilefixture: $rd/profile/internal_testjail_testdata_profilefixture.9/exit/DIAGNOSIS.txt" "$T/fixture-$1.out" &&
+    grep -Fxq "  PROFILE github.com/rezzminator/professor/pfm/internal/testjail/testdata/profilefixture: $root/internal_testjail_testdata_profilefixture.9/exit/DIAGNOSIS.txt" "$T/fixture-$1.out" &&
     [ -z "${PFM_PROFILE_FIXTURE+x}${PFM_PROFILE_FIXTURE_SLOW_S+x}${PFM_TEST_ARTIFACT_DIR+x}" ]; then
-    ok "fixture.$1: go test -timeout $3 on the profile fixture in mode $2, its stream kept in the run dir, red, then the report and the failure pointers"
+    ok "fixture.$1: go test -timeout $3 on the profile fixture in mode $2 profiling into profile/fixture-$1, its stream kept in the run dir, red, then the report and the failure pointers over that root"
   else bad "fixture.$1" "$(cat "$T/go.calls")" "$(cat "$STUB_EVENTS")" "$(cat "$T/fixture-$1.out")"; fi
 }
 fixture_go_case go-fail fail 2m unset

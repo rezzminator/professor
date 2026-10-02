@@ -36,7 +36,8 @@ type profiler struct {
 	fr       *trace.FlightRecorder
 	frErr    error
 	watch    *time.Timer
-	watchS   float64 // seconds after start the watchdog fires; meaningful when watch is set
+	watchS   float64       // seconds after start the watchdog fires; meaningful when watch is set
+	watched  chan struct{} // closed when a fired watchdog has written its bundle and summary
 	mu       sync.Mutex
 	bundles  []string
 	psi0     map[string]float64
@@ -93,13 +94,24 @@ func startProfile() (*profiler, string) {
 	// is killed still leaves a summary saying it started and never finished.
 	p.writeSummary(-1, "started-no-exit-recorded")
 	if source != "" {
-		p.watch = time.AfterFunc(delay, func() {
-			p.stopCPU()
-			p.bundle(source)
-			p.writeSummary(-1, source+"-imminent")
-		})
+		p.armWatchdog(delay, source)
 	}
 	return p, ""
+}
+
+// armWatchdog writes the source's bundle and an imminent summary after delay.
+// It arms under p.mu, so a firing never reads p.watch before it is set.
+func (p *profiler) armWatchdog(delay time.Duration, source string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	watched := make(chan struct{})
+	p.watched = watched
+	p.watch = time.AfterFunc(delay, func() {
+		defer close(watched)
+		p.stopCPU()
+		p.bundle(source)
+		p.writeSummary(-1, source+"-imminent")
+	})
 }
 
 // planWatchdog picks when the watchdog fires and for which deadline ("timeout"
@@ -183,8 +195,11 @@ func (p *profiler) finish(code int) {
 	if p == nil {
 		return
 	}
-	if p.watch != nil {
-		p.watch.Stop()
+	if p.watch != nil && !p.watch.Stop() {
+		// Already fired: its bundle and imminent summary land first, so the
+		// exit summary below is the last word and the process never exits
+		// with the watchdog mid-write.
+		<-p.watched
 	}
 	p.stopCPU()
 	event := "exit"

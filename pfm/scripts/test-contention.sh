@@ -23,9 +23,13 @@
 #                 tick_deficit_max. (Steal time is blind in this VM: unused.)
 #   cpu-psi       Δcg_psi_cpu_some_s ÷ Δepoch_s: runnable work waiting in the
 #                 VM. Crosses at ≥ cpu_psi_share_min.
-#   spin          window median spin_us ÷ the least spin_us seen in this file and
-#                 the 20 newest run.*/resources.tsv beside it in the same timing
-#                 base (this file alone when none). Crosses at ≥ spin_ratio_min.
+#   spin          window median spin_us ÷ the reference: the least floor over this
+#                 file and the 20 newest run.*/resources.tsv beside it in the same
+#                 timing base (this file alone when none). A file's floor is its
+#                 nearest-rank 5th-percentile spin_us (rank ceil(n/20) of its n
+#                 numeric samples, so its least when n <= 20): one sample a VM clock
+#                 step shortened does not become the reference. Crosses at ≥
+#                 spin_ratio_min.
 #   run-delay     run_delay_s ÷ cpu_s. Crosses at ≥ run_delay_ratio_min.
 # Verdict: CONTENTION when any measured signal crosses; CODE when one is
 # measured and none crosses; `not measured` when none is. The evidence names
@@ -165,8 +169,15 @@ def read_rows(path):
     return rows
 
 
-def sibling_spin_min(path):
-    """The least spin_us of a sibling resources.tsv, or None when it has none; a bad sibling is skipped, loudly."""
+def spin_floor(values):
+    """A file's floor: its nearest-rank 5th-percentile spin_us (rank ceil(n/20), its least when n <= 20), or None."""
+    if not values:
+        return None
+    return sorted(values)[(len(values) + 19) // 20 - 1]
+
+
+def sibling_spin_floor(path):
+    """The floor of a sibling resources.tsv's spin_us, or None when it has none; a bad sibling is skipped, loudly."""
     try:
         lines = Path(path).read_text(encoding='utf-8').split('\n')
         if not lines or lines[0].split('\t') != HEADER:
@@ -183,7 +194,7 @@ def sibling_spin_min(path):
                 if not NUMBER.fullmatch(cells[index]):
                     raise ValueError(f'line {lineno}: spin_us is neither a number nor NA: {cells[index]!r}')
                 values.append(float(cells[index]))
-        return min(values) if values else None
+        return spin_floor(values)
     except (OSError, UnicodeError, ValueError) as exc:
         print(f'test-contention: sibling {path} skipped: {exc}', file=sys.stderr)
         return None
@@ -192,7 +203,7 @@ def sibling_spin_min(path):
 def spin_reference(resources, rows):
     """(reference µs, source text, sorted None when there is no spin value anywhere)."""
     own = [row['spin_us'] for row in rows if row['spin_us'] is not None]
-    candidates = [('this file', min(own))] if own else []
+    candidates = [('this file', spin_floor(own))] if own else []
     here = Path(resources).resolve()
     base = here.parent.parent
     found = []
@@ -204,9 +215,9 @@ def spin_reference(resources, rows):
         print(f'test-contention: siblings of {resources} not listed: {exc}', file=sys.stderr)
     found.sort(reverse=True)
     for _, _, sibling in found[:SIBLINGS]:
-        least = sibling_spin_min(sibling)
-        if least is not None:
-            candidates.append((sibling.parent.name, least))
+        floor = sibling_spin_floor(sibling)
+        if floor is not None:
+            candidates.append((sibling.parent.name, floor))
     if not candidates:
         return None, None
     name, value = min(candidates, key=lambda item: item[1])

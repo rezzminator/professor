@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime/pprof"
 	"slices"
 	"strconv"
 	"strings"
@@ -753,6 +754,45 @@ func TestProfileBundleListsAnArtifactItCouldNotWrite(t *testing.T) {
 	}
 	if !reflect.DeepEqual(p.bundles, []string{"exit"}) {
 		t.Errorf("bundles = %v, want [exit]", p.bundles)
+	}
+}
+
+// A package that ends while its watchdog is writing (the deadline came as the
+// last test returned) keeps the watchdog's bundle, and its summary says how it
+// exited: finish waits for the firing, so the imminent summary never lands last.
+func TestProfileFinishAfterAFiredWatchdogLeavesTheExitSummaryLast(t *testing.T) {
+	dir := t.TempDir()
+	p := &profiler{dir: dir, pkg: "x", start: time.Now(), bundles: []string{}, frErr: errors.New("no recorder here")}
+	// Held, p.mu stops the firing and finish both, so the two meet as they do
+	// at a real deadline: the watchdog already running when finish starts.
+	p.armWatchdog(time.Hour, "deadline")
+	p.mu.Lock()
+	p.watch.Reset(0)
+	running := func(frame string) func() bool {
+		return func() bool {
+			var dump bytes.Buffer
+			_ = pprof.Lookup("goroutine").WriteTo(&dump, 2)
+			return strings.Contains(dump.String(), frame)
+		}
+	}
+	waitFor(t, 10*time.Second, "the watchdog to fire", running("(*profiler).armWatchdog.func1"))
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		p.finish(0)
+	}()
+	waitFor(t, 10*time.Second, "finish to start", running("(*profiler).finish("))
+	p.mu.Unlock()
+	select {
+	case <-finished:
+	case <-time.After(30 * time.Second):
+		t.Fatal("finish did not return within 30s of the watchdog's firing")
+	}
+	wantSummary(t, readSummary(t, dir), map[string]any{
+		"event": "exit", "exit_code": float64(0), "bundles": []any{"deadline"},
+	})
+	if !fileExists(filepath.Join(dir, "deadline", "DIAGNOSIS.txt")) {
+		t.Error("finish returned before the fired watchdog wrote deadline/DIAGNOSIS.txt")
 	}
 }
 

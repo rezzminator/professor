@@ -81,7 +81,7 @@ steps_jobs() {
 }
 
 steps_heavy_jobs() {
-  local jobs="${STEPS_HEAVY_JOBS:-3}"
+  local jobs="${STEPS_HEAVY_JOBS:-2}"
   if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
     printf 'steps_run: STEPS_HEAVY_JOBS must be a positive integer: %s\n' "$jobs" >&2
     return 1

@@ -472,7 +472,8 @@ checks_pfm_profile_pointers() {
 
 # checks_gate_fixture <kind> <run dir>: one deliberately broken step of the instrument's own proof
 # (gate_run registers the five only under PFM_GATE_FIXTURES=1): go-fail, go-hang and go-slow run
-# internal/testjail/testdata/profilefixture, whose profile bundles the failure pointers then name;
+# internal/testjail/testdata/profilefixture, each profiling into its own root <run>/profile/fixture-<kind>
+# so the failure pointers name only that fixture's bundles, never a sibling's;
 # shell-fail and shell-hang are the scripts under infra/fence/gate-fixtures/. Every kind is red by
 # design, and a go-slow step is ended by its bound, never by this function.
 checks_gate_fixture() {
@@ -488,12 +489,13 @@ checks_gate_fixture() {
     *) fail_step "fixture: unknown kind '$kind'"; return ;;
   esac
   json="$run_dir/fixture-$kind.json"
-  local -x PFM_PROFILE_FIXTURE="$mode" PFM_TEST_ARTIFACT_DIR="$run_dir/profile"
+  local root="$run_dir/profile/fixture-$kind"
+  local -x PFM_PROFILE_FIXTURE="$mode" PFM_TEST_ARTIFACT_DIR="$root"
   info "\$ go -C pfm test -count=1 -json -timeout $timeout ./internal/testjail/testdata/profilefixture/ (PFM_PROFILE_FIXTURE=$mode)"
   go -C "$REPO_ROOT/pfm" test -count=1 -json -timeout "$timeout" ./internal/testjail/testdata/profilefixture/ > "$json" \
     || fail_step "fixture: go $mode red (expected)"
   go_test_report "$json"
-  checks_pfm_profile_pointers "$json" "$run_dir/profile" "$before"
+  checks_pfm_profile_pointers "$json" "$root" "$before"
 }
 
 checks_pfm_unit() { # pfm dir, run dir, optional already-read TESTFLAGS

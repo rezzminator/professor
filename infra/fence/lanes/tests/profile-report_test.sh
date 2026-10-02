@@ -207,7 +207,9 @@ has "the warning names the stream and the line" "$T/noisy.json: 1 line(s) are no
 for args in "" "bogus" "failures" "failures $T/fleet.json" "failures a b c" "summary" "summary a b"; do
   # shellcheck disable=SC2086 # the cases are word lists
   run_sut $args
-  eq "bad usage '$args': exit 64 and the usage on stderr" "64|1" "$RC|$([[ $ERR == *usage:* ]] && echo 1 || echo 0)"
+  # A red names what the call printed: a bare `1|0` cannot tell a usage regression from an interpreter that died.
+  if [[ $RC == 64 && $ERR == *usage:* ]]; then ok "bad usage '$args': exit 64 and the usage on stderr"
+  else bad "bad usage '$args': exit 64 and the usage on stderr" "exit: $RC" "stdout: $OUT" "stderr: $ERR"; fi
 done
 run_sut help
 eq "help prints the usage, exit 0" "0|1" "$RC|$([[ $OUT == *"usage: profile-report.sh failures"* ]] && echo 1 || echo 0)"
@@ -264,6 +266,11 @@ proc "$R/profile" cmd_pfm.2 exit 0 "4711"
 mkdir -p "$R/profile/cmd_pfm.3"
 mkdir -p "$R/profile/x.4"
 printf '{oops' > "$R/profile/x.4/summary.json"
+# The Go fixture steps (PFM_GATE_FIXTURES=1) each profile into their own root, profile/fixture-<kind>/.
+FIXLABEL=internal_testjail_testdata_profilefixture
+proc "$R/profile/fixture-go-fail" "$FIXLABEL.77" exit 1 "" exit
+mkdir -p "$R/profile/fixture-go-hang"
+mkdir -p "$R/profile/fixture-go-slow/$FIXLABEL.78"
 INDEX=$R/profile/INDEX.txt
 
 run_sut summary "$R"
@@ -353,11 +360,16 @@ mapfile -t IX < "$INDEX"
 has "INDEX: the header names the run and a UTC stamp" "# profile index $R · " "${IX[0]}"
 if [[ ${IX[0]} =~ ^"# profile index $R · "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then ok "INDEX: the stamp is a UTC second"; else bad "INDEX: the stamp is a UTC second" "${IX[0]}"; fi
 IXT=$(< "$INDEX")
-has "INDEX: Go test processes — count" "## Go test processes (4)" "$IXT"
+has "INDEX: Go test processes — count: the four top-level directories and the two inside fixture roots, a root itself not counted" "## Go test processes (6)" "$IXT"
 eq "INDEX: a helper process line says whose helper it is" "$R/profile/cmd_pfm.2 · event exit · exit 0 · wall 2.5s · run delay 0.123s · helper of 4711" "$(line_with "$IXT" "/cmd_pfm.2 ")"
 eq "INDEX: a dir without summary.json is NO SUMMARY" "$R/profile/cmd_pfm.3 NO SUMMARY" "$(line_with "$IXT" "/cmd_pfm.3 ")"
 eq "INDEX: a process line carries its bundle" "$R/profile/internal_fleet.4711 · event exit · exit 1 · wall 2.5s · run delay 0.123s → $R/profile/internal_fleet.4711/exit/DIAGNOSIS.txt" "$(line_with "$IXT" "/internal_fleet.4711 ")"
 eq "INDEX: a corrupt summary.json is named, never skipped" "$R/profile/x.4 SUMMARY UNREADABLE" "$(line_with "$IXT" "/x.4 ")"
+eq "INDEX: a process inside a fixture root is listed with its full path, event, exit, wall, run delay and bundle, as a top-level one" \
+  "$R/profile/fixture-go-fail/$FIXLABEL.77 · event exit · exit 1 · wall 2.5s · run delay 0.123s → $R/profile/fixture-go-fail/$FIXLABEL.77/exit/DIAGNOSIS.txt" "$(line_with "$IXT" "/$FIXLABEL.77 ")"
+eq "INDEX: an empty fixture root is one line naming the root and what was missing under it" \
+  "$R/profile/fixture-go-hang none recorded — no <label>.<pid> directory under $R/profile/fixture-go-hang" "$(line_with "$IXT" "fixture-go-hang")"
+eq "INDEX: a directory without summary.json inside a fixture root is NO SUMMARY" "$R/profile/fixture-go-slow/$FIXLABEL.78 NO SUMMARY" "$(line_with "$IXT" "/$FIXLABEL.78 ")"
 has "INDEX: Steps — one line per prof.tsv" "## Steps (11)" "$IXT"
 eq "INDEX: a step line — verdict, ended, rc, wall, CPU" "pfm.unit · FAIL · ended exit · rc 1 · wall 61.2s · cpu 55.0s" "$(line_with "$IXT" "pfm.unit · ")"
 eq "INDEX: a timed-out step carries its hang pointer" "slow.step · TIMEOUT · ended timeout · rc 124 · wall 120.0s · cpu 9.0s · hang $R/steps/slow.step.hang/tree.txt" "$(line_with "$IXT" "slow.step · ")"

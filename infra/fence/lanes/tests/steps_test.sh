@@ -211,9 +211,9 @@ for n in 1 2 3 4; do steps_add_heavy "default$n" heavy_step "default$n"; done
 unset STEPS_JOBS STEPS_HEAVY_JOBS
 : > "$T/heavy.events"
 if steps_run "$T/heavy-default" >"$T/heavy-default.out" &&
-  [ "$(sort -n "$T/heavy.events" | awk '{n+=($3=="start"?1:-1); if(n>max)max=n} END{print max+0}')" -eq 3 ] &&
+  [ "$(sort -n "$T/heavy.events" | awk '{n+=($3=="start"?1:-1); if(n>max)max=n} END{print max+0}')" -eq 2 ] &&
   [ "$(steps_jobs)" = "$(nproc)" ]; then
-  ok 'default heavy cap is three and default jobs follows CPU count'
+  ok 'default heavy cap is two and default jobs follows CPU count'
 else bad 'default heavy cap or jobs'; fi
 
 steps_reset; steps_add valid true

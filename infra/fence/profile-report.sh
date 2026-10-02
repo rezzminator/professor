@@ -21,7 +21,9 @@
 # cannot be read, are said in the line, never skipped.
 #
 # summary: reads <run-dir>/gate.tsv, steps/*.prof.tsv, resources.tsv,
-# resources.err and profile/*/summary.json; asks pfm/scripts/test-contention.sh
+# resources.err, profile/*/summary.json and profile/fixture-*/*/summary.json (each
+# Go fixture step profiles into its own profile/fixture-<kind>/ root; INDEX.txt lists
+# that root's process directories in its place); asks pfm/scripts/test-contention.sh
 # (windows) once for every step window plus the whole file; writes
 # <run-dir>/profile.tsv (one row per gate.tsv step, then GATE) and
 # <run-dir>/profile/INDEX.txt; prints
@@ -36,8 +38,9 @@
 # 71 an output cannot be written.
 #
 # Unmeasured cells are NA, never 0; a judge that cannot answer is
-# `attribution not measured (judge failed: <line>)`. This script is not called
-# from checks.sh and never judges contention itself.
+# `attribution not measured (judge failed: <line>)`. checks.sh calls `failures`
+# after each Go step's report and `summary` once the gate's rows are in; this
+# script never judges contention itself.
 set -uo pipefail
 export LC_ALL=C PYTHONUTF8=1
 
@@ -57,6 +60,7 @@ import tempfile
 PREFIX = 'github.com/rezzminator/professor/pfm/'
 NUMBER = re.compile(r'[+-]?[0-9]+(\.[0-9]+)?')
 REASON = re.compile(r'[A-Za-z0-9_-]+')
+FIXTURE_ROOT = re.compile(r'fixture-[a-z0-9-]+')  # a Go fixture step's profile root, never a process
 GO_STEPS = ('pfm.unit', 'pfm.e2e')
 GO_STEP_PREFIX = 'fixture.go-'
 SLOWEST_PASS = 5
@@ -517,6 +521,22 @@ def write(path, text):
         die(71, f'cannot write {path}: {exc}')
 
 
+def process_line(directory):
+    info = process_info(directory)
+    if info['problem']:
+        if info['reason']:
+            warn(info['reason'])
+        return f"{info['dir']} {info['problem']}"
+    facts = info['summary']
+    line = (f"{info['dir']} · event {facts.get('event', 'NA')} · exit {facts.get('exit_code', 'NA')}"
+            f" · wall {fixed(facts.get('wall_s'), 1)}s · run delay {fixed(facts.get('run_delay_s'), 3)}s")
+    if info['helper']:
+        line += f" · helper of {info['helper']}"
+    for file, exists, _ in info['bundles']:
+        line += f' → {file}' + ('' if exists else ' (MISSING)')
+    return line
+
+
 def go_process_section(run):
     profile_dir = f'{run}/profile'
     try:
@@ -526,22 +546,25 @@ def go_process_section(run):
         names, problem = [], f'{profile_dir} NOT RECORDED'
     except OSError as exc:
         names, problem = [], f'{profile_dir} UNREADABLE ({exc})'
-    lines = [f'## Go test processes ({len(names)})']
+    count, lines = 0, []
     for name in names:
-        info = process_info(f'{profile_dir}/{name}')
-        if info['problem']:
-            if info['reason']:
-                warn(info['reason'])
-            lines.append(f"{info['dir']} {info['problem']}")
+        path = f'{profile_dir}/{name}'
+        if not FIXTURE_ROOT.fullmatch(name):
+            lines.append(process_line(path))
+            count += 1
             continue
-        facts = info['summary']
-        line = (f"{info['dir']} · event {facts.get('event', 'NA')} · exit {facts.get('exit_code', 'NA')}"
-                f" · wall {fixed(facts.get('wall_s'), 1)}s · run delay {fixed(facts.get('run_delay_s'), 3)}s")
-        if info['helper']:
-            line += f" · helper of {info['helper']}"
-        for file, exists, _ in info['bundles']:
-            line += f' → {file}' + ('' if exists else ' (MISSING)')
-        lines.append(line)
+        # A Go fixture step's own profile root: its process directories take its place here.
+        try:
+            inner = process_names(path)
+        except OSError as exc:
+            lines.append(f'{path} UNREADABLE ({exc})')
+            continue
+        if not inner:
+            lines.append(f'{path} none recorded — no <label>.<pid> directory under {path}')
+        for process in inner:
+            lines.append(process_line(f'{path}/{process}'))
+            count += 1
+    lines.insert(0, f'## Go test processes ({count})')
     if problem:
         lines.append(problem)
     elif not names:

@@ -7,6 +7,7 @@ set -uo pipefail
 SHTEST_TAG=sampler-test
 # shellcheck source=../../../../scripts/shtest.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
+shtest_unset_gate_env # run nested under the gate's own stepprof wrapper, the suite starts from none of its knobs
 SUT="${SAMPLER_SUT:-$(dirname -- "${BASH_SOURCE[0]}")/../../sampler.sh}"
 TAB=$'\t'
 

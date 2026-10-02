@@ -18,7 +18,8 @@
 #                total= of each pressure line, in seconds
 #   spin_us      wall µs of a bash arithmetic loop of SAMPLER_SPIN_ITERS (default
 #                10000) iterations, run at each row: its slowdown against the
-#                least seen is how test-contention.sh tells a starved VM
+#                floor (each file's 5th-percentile sample, the least over the
+#                files) is how test-contention.sh tells a starved VM
 #   load1        /proc/loadavg field 1
 # The cgroup counters are read under SAMPLER_CGROUP_DIR (default /sys/fs/cgroup),
 # the VM's under SAMPLER_PROC_DIR (default /proc). A sample starts no process: every

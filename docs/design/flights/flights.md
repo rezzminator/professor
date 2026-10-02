@@ -32,7 +32,7 @@ A change lands in the design doc first, then in the template, then in every surf
 | `/flights:orchestrate-cross-harness` | command | The main chat reads the manual and runs the flight with chat seats (Codex, OpenCode, Claude) as executors through the professor MCP's `chat_*` tools | the main chat |
 | `/flights:audit` | command | The skeptic over a flight, running or landed: every claim against its artifact | the main chat |
 
-Five agents, five commands, nothing else. Project law reaches them through the project contract and the project's [testing manual](testing-manual.md); `gitter` is the fleet's own.
+Six agents, five commands, nothing else. Project law reaches them through the project contract and the project's [testing manual](testing-manual.md); `gitter` is the fleet's own.
 
 ## The lifecycle
 
@@ -50,15 +50,16 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
   0-{topic}.md    shared content, when needed   written by flights-speccer
   {level}-{letter}.md  one task, one executor   written by flights-speccer
   run.md          the ledger of the run         written by flights-orchestrator
-  agents.tsv      one row per spawn: task, type, agent id   appended by flights-orchestrator
+  agents.tsv      one row per spawn: task, type, agent id, round, time, engine   appended by flights-orchestrator
   briefs/         one brief file per spawn      written by flights-orchestrator
+  returns/        one return file per seat, cross-harness   written by each seat
   metrics.md      per-agent calls, context, tokens, price   written by token-audit.mjs at landing
   gate-{project}.md  the gate's attack map and findings  written by flights-lander
   audit.md        the last audit's report       written by /flights:audit
 ```
 
 - The directory lives outside the repo, under `$HOME/.local/state/pfm/flights/{project}/` (`{project}` = the repo directory's basename, leading dot stripped). It is kept across reboots and outlives the branch: the run resumes from it, and the audit reads it after the landing.
-- Four writers, one file each: `flights-speccer` writes the spec files and nothing else; the orchestrator writes `run.md`, appends `agents.tsv`, writes one file per spawn under `briefs/`, runs the script that writes `metrics.md`, and nothing else; each lander writes its `gate-{project}.md` and nothing else; the audit writes `audit.md` and nothing else. Nobody edits another writer's file. A task file changes only through a `flights-speccer` revising call.
+- Five writers, one file each: `flights-speccer` writes the spec files and nothing else; the orchestrator writes `run.md`, appends `agents.tsv`, writes one file per spawn under `briefs/`, runs the script that writes `metrics.md`, and nothing else; each lander writes its `gate-{project}.md` and nothing else; each cross-harness seat writes its `returns/{id}-r{round}.md` and nothing else; the audit writes `audit.md` and nothing else. Nobody edits another writer's file. A task file changes only through a `flights-speccer` revising call.
 - The `{flight}` name is short kebab-case chosen by whoever creates the directory: the user through `/flights:spec`, or the caller that hands the work to `flights-speccer`.
 
 ## Verdict tokens
@@ -71,10 +72,13 @@ One vocabulary for the executor's return, the orchestrator's ledger and the audi
 | `DONE` | executor → orchestrator, after verification | The Goal is reached and proven; the line names what was adapted, or `as specified` |
 | `FAILED` | executor, or orchestrator after a second unproven return or a cap | The spec stands but the executor could not reach the Goal; the return names the cause or what was read; goes to `flights-speccer` with the executor's transcript, to be cut smaller or re-approached |
 | `SPEC-DRIFT` | executor | The world moved or the spec contradicts itself; the executor changed nothing (or says what already landed) and names the cause or what it read; goes to `flights-speccer` with the executor's transcript |
-| `BLOCKED` | executor or `flights-speccer` | A question only the user can answer; carried in the return, the other tasks continue |
-| `STALE` | orchestrator, cross-harness only | A claimed seat silent past the bound; named, never auto-failed, never re-dispatched blind |
+| `BLOCKED` | executor, `flights-speccer`, or orchestrator at a third red | A question only the user can answer; carried in the return, the other tasks continue |
+| `WAIT` | orchestrator, from an executor's `FAILED {id}: blocked by {files}` | Every file stopping the executor's own tests is changed by a task in flight; frees the slot, is no red, never goes to `flights-speccer`; the task goes out once more, unchanged, after those tasks' verdicts, and a resume treats it as ready |
+| `TOO-LARGE` | orchestrator, from an executor's `SPEC-DRIFT {id}: too large` | The task exceeds one context; no round, no red, no transcript; a revising `flights-speccer` call cuts it |
+| `MAIN-CHAT` | sub-agent orchestrator | A task whose files only the main chat may change; it and its dependents wait until the caller applies it and re-runs the orchestrator naming `applied {ids}`, whose first step records `DONE · applied by the main chat` when git shows the change |
+| `STALE` | orchestrator, cross-harness only | A claimed seat silent 20 minutes past its last status change; named, never auto-failed, never re-dispatched blind |
 
-An executor's return opens with its token and id on the first line: `DONE 2-a`, `FAILED 2-a: {why}`, `SPEC-DRIFT 2-a: {what}`, `BLOCKED 2-a: {question}`. The orchestrator reads the first line; the rest is evidence.
+An executor's return opens with its token and id on the first line: `DONE 2-a`, `FAILED 2-a: {why}`, `FAILED 2-a: blocked by {files}`, `SPEC-DRIFT 2-a: {what}`, `SPEC-DRIFT 2-a: too large`, `BLOCKED 2-a: {question}`. The orchestrator reads the first line; the rest is evidence.
 
 The manual's `run.md` line names every token but `STALE`: only a seat can go stale, so the cross-harness container adds it as a substitution, and the manual never mentions it.
 
@@ -85,15 +89,15 @@ The manual is the `flights-orchestrator` agent body. It is written for the neste
 | Step in the manual | Nested (`/flights:orchestrate-nested`) | Live (`/flights:orchestrate-live`) | Cross-harness (`/flights:orchestrate-cross-harness`) |
 | --- | --- | --- | --- |
 | Who runs the loop | a `flights-orchestrator` sub-agent | the main chat, as the agent | the main chat, as the agent |
-| Spawn an executor | `Agent(subagent_type)`, no model override | the same | a seat of the chosen engine, named `{flight}-{id}`, in the project directory or the worktree: `chat_new` with the engine and the directory; when the executor type is a registered role, the shell `pfm chat new … --agent-role {role}` instead, because the MCP verb carries no role; on `codex` a mechanical seat runs `gpt-6-luna` at `xhigh` effort, a precise one `gpt-6.1-sol` at `high`, a smart one `gpt-6.1-sol` at `high`; the orchestrator reads no task file to choose. The `CLAIMED` line is written once the seat is born |
-| The model | the executor type's own frontmatter pin, picked by the rating | the same | `chat_new`'s `model` and `effort`, in the engine's own names; unset, the engine's default |
+| Spawn an executor | `Agent(subagent_type)`, no model override | the same | a seat of the chosen engine, named `{flight}-{id}`, in the project directory or the worktree: the shell `pfm chat new … --agent-role {role}`, because the MCP verb carries no role; on `codex` a mechanical seat runs `gpt-6-luna` at `xhigh` effort, a precise one `gpt-6.1-sol` at `high`, a smart one `gpt-6.1-sol` at `high`; the orchestrator reads no task file to choose. The `CLAIMED` line is written once the seat is born |
+| The model | the executor type's own frontmatter pin, picked by the rating | the same | `pfm chat new`'s `--model` and `--effort`, in the engine's own names; unset, the engine's default |
 | Deliver the brief | the spawn prompt | the same | `chat_inject` one message, the brief verbatim; the transport pastes any size. The brief closes with the way home: the seat writes its return to `{flight directory}/returns/{id}-r{round}.md`, beside the briefs and kept for the audit, and sends it with `pfm chat inject {orchestrator} --file {path}`, because a seat's plain inject carries one line. The return file is the return |
 | Wait | end the message with one line and no tool call; the return arrives | the same | the same; the seat's report arrives as an inject into this chat |
 | Verify a return | the return text plus `git diff {baseline} --stat -- {the index's files}` | the same | the same, plus `chat_last` when the inject was cut short; a trailing `**Verdict:**` line in the return file or in `chat_last` is ignored |
 | The gate | one `flights-lander` sub-agent per project at the landing; executors run no review | the same | the same: the lander is a sub-agent of the chat, never a seat |
-| Liveness | the harness reports a stopped agent; a lost one is seen only when something else wakes the loop | the same; the user is the wake-up | `chat_status` once past the stale bound, on any wake-up; a full-screen pane capture judges from process evidence, never from rendered text |
-| A spawn that does not happen | the harness reports nothing at its concurrency cap: the loop counts its in-flight executors and never exceeds the cap | the same | `chat_new` returns an error: no seat, no `CLAIMED` line; one retry, then the task holds and the return names it |
-| The executor's transcript, sent with every `FAILED` and `SPEC-DRIFT` | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl` — the id is the spawn's task id, the file is flat whatever the depth | the same | the seat's name and its transcript id (`chat_find` by name; `pfm chat save` when the reader needs a file) |
+| Liveness | the harness reports a stopped agent; a lost one is seen only when something else wakes the loop | the same; the user is the wake-up | `chat_status` once past the stale bound, on any wake-up; a full-screen pane capture judges from process evidence, never from rendered text; a seat dead by evidence gets a fresh seat, same task file, after the `STALE` line |
+| A spawn that does not happen | the harness reports nothing at its concurrency cap: the loop counts its in-flight executors and never exceeds the cap | the same | `pfm chat new` returns an error: no seat, no `CLAIMED` line; one retry, then the task holds and the return names it |
+| The executor's transcript, sent with every `FAILED` and `SPEC-DRIFT` | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl` — the id is the agent id the spawn returned (`agents.tsv` column 3), the file is flat whatever the depth | the same | the seat's session id, read right after birth with `pfm chat resolve {flight}-{id}` (third column), before `chat_kill`; `pfm chat save` when the reader needs a file |
 | Question only the user can answer | `BLOCKED` in the return; the caller asks, sends the ruling to `flights-speccer` as a revising call, and re-runs the container naming the revised ids | `AskUserQuestion` now; the run continues on the answer | `AskUserQuestion` now |
 | Stop an executor | not possible from inside; named in `DISPATCHED` | the same | `chat_kill` after the verdict is recorded |
 | Cost profile | the loop stays out of the main chat | the main chat's context carries the loop; paid for the user's steering | seat cold starts on three engines; paid for engine choice |
@@ -122,7 +126,7 @@ The harness prompt lives in `pfm/harness-prompts/`; `share/tail.md` § Orchestra
 
 ## Harness settings the family needs
 
-Claude Code stops the Agent tool three levels below the main chat and caps concurrent sub-agents at twenty. A nested flight is main → orchestrator → executor → the executor's `tracer` → its walkers: four levels. `pfm` therefore carries two keys in its own settings (`claude.maxSubagentSpawnDepth`, default 8; `claude.maxConcurrentSubagents`, unset by default) and writes them onto every Claude Code launch line as `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, the way it already sets the web-search budget. Neither ceiling is reported when hit: a spawn past it does not happen, and nothing says so. The orchestrator therefore counts its own in-flight executors (`CLAIMED` lines without a verdict) and dispatches as many ready tasks at once as the cap the brief names admits, holding the rest for a free slot: the one legal hold. Absent from the brief, the cap is ten in flight at once, a first value.
+Claude Code stops the Agent tool three levels below the main chat and caps concurrent sub-agents at twenty. A nested flight is main → orchestrator → executor → the executor's `tracer` → its walkers: four levels. `pfm` therefore carries two keys in its own settings (`claude.maxSubagentSpawnDepth`, default 8; `claude.maxConcurrentSubagents`, unset by default) and writes them onto every Claude Code launch line as `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, the way it already sets the web-search budget. Neither ceiling is reported when hit: a spawn past it does not happen, and nothing says so. The orchestrator therefore counts its own in-flight executors (`CLAIMED` lines without a later verdict or `WAIT`) and dispatches as many ready tasks at once as the cap the brief names admits, holding the rest for a free slot: the one legal hold. Absent from the brief, the cap is ten in flight at once, a first value.
 
 ## What the family replaced
 

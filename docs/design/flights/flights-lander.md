@@ -27,7 +27,7 @@ An executor that tests its own code is biased toward making it pass. The lander 
 From the orchestrator's brief, and nothing more:
 
 - the flight directory: `index.md` for each task's `files`, the task files' `Goal` and `Done when` as the statement of intent the attack reads against;
-- the baseline sha from `run.md`'s header: the diff is `git diff {baseline}` over the union of the `DONE` tasks' `files`, plus the uncommitted tree;
+- the baseline sha from `run.md`'s header, whose `DONE` lines name the done tasks: the diff is `git diff {baseline}` over the union of those tasks' `files`, plus the uncommitted tree;
 - the project and the path of its [testing manual](testing-manual.md);
 - the standing rules and the worktree.
 
@@ -37,7 +37,7 @@ The agent is pinned `model: opus`, `effort: high`.
 
 1. Read the testing manual, the index and the diff. The task files are read for `Goal` and `Done when` only.
 2. Open the gate: format, lint, type check and the full suite, once, each watched. What they report is fixed.
-3. `/code-review {effort}` over the flight's diff, at a level the lander sizes itself from `git diff {baseline} --stat` over the flight's files: `low`, or `medium` beyond 15 files or 800 changed lines; a `smart` task changes nothing, and a level above `medium` runs only on the user's own order carried in the brief. The measured cases: a lander that stepped a `smart` task past `high` into `max` spent more on one review than on every executor of its flight together, and one capped at `xhigh` still launched `xhigh` on a small port because the diff it sized carried a pre-existing uncommitted feature. Absent that order, the brief names no effort. The review runs forked in the background: the lander ends its turn and takes the findings from the review's return; a lander that looped over transcript mtimes to guess the review's end waited on a heuristic any busy sibling agent defeats. Every finding inside the flight's files is fixed; one outside them is recorded untouched.
+3. `/code-review {effort}` over the flight's diff, at a level the lander sizes itself from `git diff {baseline} --stat` over the flight's files: `low`, or `medium` beyond 15 files or 800 changed lines; a `smart` rating does not raise the level, and a level above `medium` runs only on the user's own order carried in the brief. The measured cases: a lander that stepped a `smart` task past `high` into `max` spent more on one review than on every executor of its flight together, and one capped at `xhigh` still launched `xhigh` on a small port because the diff it sized carried a pre-existing uncommitted feature. Absent that order, the brief names no effort. The review runs forked in the background: the lander ends its turn and takes the findings from the review's return; a lander that looped over transcript mtimes to guess the review's end waited on a heuristic any busy sibling agent defeats. Every finding inside the flight's files is fixed; one outside them is recorded untouched.
 
    The `{effort}` slot is also the Codex mapping's second source form: `pfm/internal/codexgen/review.go` compiles a written level into a `codex review` at that baked effort scoped to one task's files, and the slot form into a flight-scoped review whose `model_reasoning_effort` stays `{effort}` for the lander to fill at run time.
 4. The attack map, closed-world: every changed hunk gets one line — an attack hypothesis (the real product traffic or state that could break this hunk and the wrong behaviour that results), an explicit no-attack justification, or `RETIRE: {tests}`. A hunk absent from the map is uncovered. Attacks drive states the product can reach, never inputs it cannot send.
@@ -51,7 +51,7 @@ The agent is pinned `model: opus`, `effort: high`.
 The lander owns defect resolution: every defect its attacks, the review or the checks expose is fixed by the lander — implementation and tests, surgical, root cause. A round trip through the orchestrator, the speccer and a new executor for each finding costs more than the finding. Two things go back instead of being fixed:
 
 - a defect whose fix needs a design decision or crosses out of the flight's files: `FAIL` with the residual, which the orchestrator sends to `flights-speccer` as unspecified work;
-- a defect in code the flight forbids touching: recorded, named in the return.
+- a defect in code the standing rules forbid touching: recorded with status `outside the flight` and named in the return, never a residual and never a `FAIL`.
 
 ## What it does not do
 
@@ -70,7 +70,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 `{flight directory}/gate-{project}.md`: the attack map, then one row per finding — source (checks, review, attack, sweep) · area · failing test · reproduction · expected · status (fixed, residual, outside the flight).
 
-The return's first line is `PASS {project}` (zero findings), `FIXED {project}: {n} defects fixed` or `FAIL {project}: {n} residuals`; then the two full-run verdict lines as printed, the review's counts, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([Retro lines](flights-orchestrator.md#retro-lines)).
+The return's first line is `PASS {project}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {project}: {n} defects fixed` or `FAIL {project}: {n} residuals`; then the two full-run verdict lines as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([Retro lines](flights-orchestrator.md#retro-lines)).
 
 ## Context budget
 
@@ -90,7 +90,7 @@ A lander certifies its own fixes. The research collected for this design condemn
 | The orchestrator | [`flights-orchestrator`](flights-orchestrator.md) | The landing: landers, then `gitter`; the reaction to `FAIL` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project law the sweep and the gate run against |
 | The audit | [`flights-audit`](flights-audit.md) | `gate-{project}.md` as an anchor; the review read from the lander's transcript |
-| The family | [`flights.md`](flights.md) | The third agent and the directory's fourth writer |
+| The family | [`flights.md`](flights.md) | The lander among the six agents and the directory's five writers |
 
 ## Evidence
 

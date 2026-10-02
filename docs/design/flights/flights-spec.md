@@ -50,7 +50,7 @@ Spawn `Agent(subagent_type: "flights-speccer")` with content, never a format: th
 
 ## S4 — The one question
 
-A `BLOCKED` item in the return carries a question. One more round, holding that question alone, puts it to the user, and the answer goes back to the same `flights-speccer` by message as a revising call with the ruling. A second `BLOCKED` in the revised return stays `BLOCKED` in the presentation: the flight runs without that task, and the user decides whether to specify it later. At most one question round per flight; more means S2 was skipped.
+A `BLOCKED` item in the return carries a question. One more round, holding that question alone, puts it to the user, and the answer goes back by `SendMessage` to the `flights-speccer` that wrote the spec, as the one revising call not spawned fresh, with the ruling. A second `BLOCKED` in the revised return stays `BLOCKED` in the presentation: the flight runs without that task, and the user decides whether to specify it later. At most one question round per flight; more means S2 was skipped.
 
 ## S5 — Present
 
@@ -62,7 +62,7 @@ The index table as returned, one line per task naming its key decisions (the `De
 | --- | --- |
 | Writing the spec in the chat | `flights-speccer` writes it, fresh and cheap; the chat holds only the maps and the rulings |
 | Architect passes over the written spec | `flights-speccer`'s reconcile phase is the review; a fault found later is a revising call |
-| A refining pass by a nested `flights-speccer` | The six reconcile checks replaced it |
+| A refining pass by a nested `flights-speccer` | The four reconcile checks replaced it |
 | `poc` and research modes | `/rnd` and the RND ledger own them; a task that needs a proof is rated `smart` |
 | Merge mode over several specs | There is no scheduler; a flight is one directory |
 | The legal fence and the officer pass | Project rules, carried by the project's `CLAUDE.md`, which the harness gives every agent |

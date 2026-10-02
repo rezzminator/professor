@@ -54,7 +54,7 @@ Three consequences shape everything below.
 3. `flights-speccer` writes the flight directory and returns the path, the index and the dispatch order.
 4. A directory holding a single task the sub-agent executes itself; one holding several it hands to `flights-orchestrator`, which dispatches one fresh executor per task file by the [ready rule](#the-ready-rule) and executes none itself.
 
-Ordering between flights belongs to the main chat that runs them, one after another. `flights-speccer` sees one flight and nothing beside it.
+Ordering between flights belongs to the main chat that runs them, one after another. `flights-speccer` sees one flight and nothing beside it. Never two calls run on one directory at once, except a planner's [children](#nesting-a-large-flight-is-written-by-child-speccers); the agent's `description` says so.
 
 ## Input
 
@@ -184,12 +184,12 @@ The rating is computed from `Execution judgments`, not asserted. A call the task
 
 - A path in `Files` the guard keeps for the main chat (`.claude/**`, a `CLAUDE.md`): `main-chat`, whatever the count. No executor can write it, since the guard denies every sub-agent, so the main chat applies the task under `/pcm`. The first, fast-gate's 2-a, carried the value before it existed and the index script refused it.
 - More than three judgments: `smart`.
-- One to three judgments with an interface the task touches left unpinned: `smart`.
+- An interface the task touches left unpinned: `smart`, whatever the count.
 - Any judgment that is a diagnosis of an unknown cause: `smart`, whatever the count.
 - A deliverable that is a document, a prompt, a spec or a report: `smart`, whatever the count. Writing for a reader to act on is reasoning, however exactly the task file words it.
 - One to three judgments, with every interface the task touches pinned in `Shapes`: `precise`.
 - No judgment, but the difficulty is the implementation itself — concurrency, failure paths, many error rows: `precise`.
-- Otherwise, no judgment at all: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
+- Otherwise, no judgment, every touched interface pinned and the implementation itself not the difficulty: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
 
 The rating picks the executor: `mechanical` → `flights-mechanical-executor`, `precise` → `flights-precise-executor`, `smart` → `flights-smart-executor`, `main-chat` → none, the main chat applies it; the spawn carries no model override. Each tier's model and effort, and the measurement that set them, are the [tier table](flights-executors.md#the-tiers).
 
@@ -243,9 +243,7 @@ Batches exist only inside the spec run. The index stays one graph: the orchestra
 
 ## Drift: adapt, or `SPEC-DRIFT`
 
-An executor keeps the work moving. The rule lives in the executor's body, never in a task file:
-
-> Check the task's `Progress dependency` before step 1. If one does not hold, change nothing and return `SPEC-DRIFT {id}: {what you found}`. A red your own edit caused inside `Files` is iteration: fix it and rerun. Any other red is read until its cause is named — the line, the value and the code path that produced it — and returned as `SPEC-DRIFT` or `FAILED` with that cause, or with what you read and "cause unknown"; reading is never forbidden, an unchanged rerun and a fix outside `Files` are. A cause outside `Files` is edited nowhere, stops nothing early and returns with every other outside cause at once.
+An executor keeps the work moving. The rule lives in the executor's body, never in a task file. The red rule per tier, with its outside-defect `DONE` exception and the `blocked by` return of a cause outside `Files`, is in [What it holds](flights-executors.md#what-it-holds).
 
 What else differs from the spec is per tier. `precise` and `smart` reach the Goal their own way inside `Files` and say what they changed; a Goal that cannot be reached stops with `SPEC-DRIFT {id}`, what was found and what already landed. `mechanical` applies the Steps and makes only its listed adaptations — a quoted line found at another place, an import the edit needs, the formatter's output, a fix for its own red; anything else returns `SPEC-DRIFT`.
 
@@ -253,13 +251,13 @@ What else differs from the spec is per tier. `precise` and `smart` reach the Goa
 - The cause line exists because the executor is the one agent standing at the red with the logs open. A return that hands back a symptom and an artefact path moves the whole diagnosis to a reader who was not there. Measured once: five rounds on one task, each round's spec cut from the previous round's red line, 180 executor calls and four hours, because the executor's stop rule was read as "do not look" and nobody downstream looked either.
 - A `precise` or `smart` executor has an open hand inside its task: where a detail of the spec and the code disagree, the Goal wins and the return says so. A `mechanical` executor has no open hand: a disagreement beyond its listed adaptations is `SPEC-DRIFT`. `SPEC-DRIFT` is for a changed world and for a spec fault that puts the Goal out of reach (a contradiction, an outcome the decisions make impossible).
 - A small adaptation upstream reaches the downstream executor through its brief: the orchestrator pastes the `run.md` lines of the tasks it needs, and each line names what its executor adapted. `SPEC-DRIFT` remains for what a line cannot carry: a needed task that landed nothing, or a contract that changed shape rather than name.
-- On `SPEC-DRIFT` the dispatcher starts nothing that needs that task, sends the report, what already landed, the completed ids and the executor's transcript (its path, or the seat's name and transcript id) back to the same `flights-speccer`, and dispatches again from the rewritten index. The report is the executor's conclusion; the transcript is how it got there — what it read, what it ran, what each run printed — and the revising call reads it before rewriting a line.
-- The dispatcher counts reds per id. The second `SPEC-DRIFT` or `FAILED` of one id means the cause is unknown, whatever the reports say: the revising call is diagnose-first (below). A third red of the same id is returned `BLOCKED {id}` with the executor's cause line as the question; there is no third rewrite. One fault per run, prescribed from the last red line, is the loop the executor's stop rule exists to prevent, and it reappears one level up the moment the spec writer prescribes without diagnosing.
+- On `SPEC-DRIFT` the dispatcher starts nothing that needs that task, sends the report, what already landed, the completed ids and the executor's transcript (its path, or the seat's name and transcript id) back to a fresh `flights-speccer`, and dispatches again from the rewritten index. The report is the executor's conclusion; the transcript is how it got there — what it read, what it ran, what each run printed — and the revising call reads it before rewriting a line.
+- The orchestrator marks the revising call diagnose-first on the second `FAILED` or `SPEC-DRIFT` line of one id (`WAIT` and `TOO-LARGE` lines are not reds); a call so marked means the cause is unknown, whatever the reports say, and `flights-speccer` runs diagnose-first only on a call so marked, never by counting `run.md` lines itself (below). A third red of the same id is returned `BLOCKED {id}` with the executor's cause line as the question; there is no third rewrite. One fault per run, prescribed from the last red line, is the loop the executor's stop rule exists to prevent, and it reappears one level up the moment the spec writer prescribes without diagnosing.
 - `FAILED` takes the same road with a different brief: the spec stood and the executor could not reach the Goal (tests that would not pass, a cap hit). The revising call cuts the failed task smaller or re-approaches it; the same task file is never sent out again unchanged. Decomposing on failure measured +33 points over decomposing up front.
 - Only `flights-speccer` changes a task file. A dispatcher that patches one, or writes rulings beside the directory, makes a second spec over the first: the task files stop being the truth, every executor reads one more file, and the longest-lived context in the family does design work.
-- Revising: given an existing spec directory, a reason (`SPEC-DRIFT`, `FAILED`, a failing check, a ruling on a `BLOCKED` question, a refinement), what already landed and the completed ids, `flights-speccer` leaves the completed task files as they are, rewrites, adds or removes the remaining ones, rebuilds the index, and returns as usual with the changed ids in its notes. The fix goes into the task file itself, and a rewritten task file states what the previous round of the same task already landed.
-- A revising call often reaches a fresh `flights-speccer`: the one that wrote the directory was another agent's child, and a sub-agent cannot address it. The fresh one reads the directory as its map — the index, and the task files the reason names — and probes only for what the reason requires; the shapes already quoted are its own earlier work, and re-mapping the area would pay the whole run again.
-- Diagnose-first, on the second red of one id: before any rewrite, `flights-speccer` reads the whole unit the task changes — the entire test, beat or module, never the window around the failing line — and the runtime path it exercises, through one collector when the path leaves the unit, and writes the cause as a `Decisions` line in the task file. A rewrite without a named cause is the previous round again with new words. The executor transcripts of every round on that id are part of the reading.
+- Revising: given an existing spec directory, a reason (`SPEC-DRIFT`, `FAILED`, a failing check, a ruling on a `BLOCKED` question, a refinement), what already landed and the completed ids, `flights-speccer` leaves the completed task files as they are, rewrites, adds or removes the remaining ones, rebuilds the index, and returns its table cut to the rows of the index script's `DELTA added {ids} · changed {ids} · removed {ids}` line, and that line; the revised ids a caller names are the line's added and changed ids. The fix goes into the task file itself, and a rewritten task file states what the previous round of the same task already landed.
+- Every revising round is a fresh `Agent(subagent_type: "flights-speccer", model: "opus")`: the one that wrote the directory was another agent's child, and a sub-agent cannot address it. The one `SendMessage` revision is [`/flights:spec` S4](flights-spec.md#s4--the-one-question). The fresh one reads the directory as its map — the index, and the task files the reason names — and probes only for what the reason requires; the shapes already quoted are its own earlier work, and re-mapping the area would pay the whole run again.
+- Diagnose-first, on a call marked so: before any rewrite, `flights-speccer` reads the whole unit the task changes — the entire test, beat or module, never the window around the failing line — and the runtime path it exercises, through one tracer when the path leaves the unit, and writes the cause as a `Decisions` line in the task file. A rewrite without a named cause is the previous round again with new words. The executor transcripts of every round on that id are part of the reading.
 - A red in production code the flight forbids fixing (a report-only flight, a fenced module) is not a spec fault and does not cycle: the same revising call records it where the project keeps known defects (a registry row, an owed line), narrows the task's `Done when` to what the executor may prove, and names the defect in `NOTES` for the return.
 - A revising call leaves the task files of `CLAIMED` tasks untouched: their executors have read them, and a file rewritten under a live executor is two specs for one task. Its findings reach that task, if at all, through the next round.
 - A value one run printed — a count, a selection size, an id — never enters a `Done when` row, even when `flights-speccer` watched it print: the state a run sees is dynamic, and a row written from one run is a coincidence written as a contract. Observed values are evidence in the return.
@@ -277,7 +275,7 @@ A task that cannot be specified at all, because the input contradicts itself or 
 ```text
 SPEC {spec directory}
 {the index table, verbatim}
-DISPATCH {the ready rule, one executor per task file briefed with its task file and reads files, the pin-then-rating model rule, the SPEC-DRIFT procedure}
+DISPATCH {the ready rule, one executor per task file briefed with its task file and reads files, the rating → executor map, no model override, the SPEC-DRIFT procedure}
 RECONCILED {n} changes in {m} tasks, {b} batches, {k} blocked, {c} file collisions, largest read {x} chars
 BLOCKED {id or item}: {what is missing} · {the one question} | none
 NOTES {up to five lines} | none
@@ -324,7 +322,7 @@ A spec is judged from the transcript of the executor that ran it.
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-speccer.md` | The executable protocol, the only place the format is spelled out for a model; its `description` is the caller's input contract. It is pinned at `opus`, effort `high` |
+| The agent | `templates/global/agents/flights-speccer.md` | The executable protocol, the only place the format is spelled out for a model; its `description` is the caller's input contract. It is pinned at `opus`, effort `high`, with `autoCompact: forceAt: 600k`, which forces compaction of the speccer's context at 600k tokens |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The outer contract: unspecified work goes to `flights-speccer` with content and never a format; the flight directory, the index and the ready rule; only `flights-speccer` changes a task file |
 | The index script | `templates/global/commands/flights/flight-index.mjs` | The only writer of `index.md`, and the reconcile checks a script can decide; its tests run in the templates gate |
 | The transcript skill | `templates/global/skills/transcript/` | Digests an executor's Claude or Codex session into one line per event for the revising call; its tests run in the templates gate |

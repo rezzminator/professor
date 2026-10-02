@@ -63,11 +63,13 @@ def unique(items):
 def resolve(target, extra_roots):
     if os.path.isfile(target):
         return target
+    if re.fullmatch(r"/root(?:/[0-9A-Za-z_-]+)+", target):
+        return pick(target, *by_agent_path(target, extra_roots), extra_roots)
     if os.sep in target or target.endswith(".jsonl"):
         fail(f"no such transcript file: {target}")
     tid = target[6:] if target.startswith("agent-") else target
     if not re.fullmatch(r"[0-9A-Za-z_-]{6,}", tid):
-        fail(f"not a session id or a path: {target!r} (a seat name resolves to its id with `pfm chat find {target}`)")
+        fail(f"not a session id or a path: {target!r} (a seat name resolves to its id with `pfm chat resolve {target}`, third column)")
     hits = []
     for root in claude_roots():
         hits += glob.glob(f"{root}/*/{tid}*.jsonl") + glob.glob(f"{root}/*/*/subagents/agent-{tid}*.jsonl")
@@ -77,10 +79,43 @@ def resolve(target, extra_roots):
     for root in extra_roots:
         for pattern in (f"{tid}*.jsonl", f"agent-{tid}*.jsonl", f"rollout-*{tid}*.jsonl"):
             hits += glob.glob(f"{root}/**/{pattern}", recursive=True)
+    return pick(target, hits, [], extra_roots)
+
+
+def by_agent_path(target, extra_roots):
+    """A Codex orchestrator knows its sub-agent only by agent path (`/root/{name}`), which the
+    sub-agent's rollout names in its first record, session_meta."""
+    files = []
+    for home in codex_homes():
+        files += glob.glob(f"{home}/sessions/*/*/*/rollout-*.jsonl") + glob.glob(f"{home}/archived_sessions/rollout-*.jsonl")
+    for root in extra_roots:
+        files += glob.glob(f"{root}/**/rollout-*.jsonl", recursive=True)
+    hits, unreadable = [], []
+    for path in unique(files):
+        try:
+            with open(path, "rb") as handle:
+                first = json.loads(handle.readline() or b"null")
+        except (OSError, ValueError) as error:
+            unreadable.append(f"{path} ({error})")
+            continue
+        payload = field(first, "payload")
+        spawn = field(field(field(payload, "source"), "subagent"), "thread_spawn")
+        if target in (payload.get("agent_path"), spawn.get("agent_path")):
+            hits.append(path)
+    return hits, unreadable
+
+
+def field(obj, key):
+    value = obj.get(key) if isinstance(obj, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def pick(target, hits, unreadable, extra_roots):
     hits = unique(os.path.realpath(h) for h in hits)
     if not hits:
         searched = ", ".join(claude_roots() + codex_homes() + list(extra_roots)) or "no root exists"
-        fail(f"NOT FOUND {target} — searched {searched}")
+        tail = f"; {len(unreadable)} rollouts unreadable: " + " ".join(unreadable) if unreadable else ""
+        fail(f"NOT FOUND {target} — searched {searched}{tail}")
     if len(hits) > 1:
         fail(f"AMBIGUOUS {target} — {len(hits)} transcripts: " + " ".join(sorted(hits)))
     return hits[0]
@@ -725,7 +760,7 @@ def cmd_types(P, a):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="transcript.py", description="Mechanical reader of Claude Code and Codex transcripts.")
     ap.add_argument("verb", choices=("show", "counts", "types", "locate"))
-    ap.add_argument("target", help="a transcript path, a session id or its prefix, or a Claude agent id")
+    ap.add_argument("target", help="a transcript path, a session id or its prefix, a Claude agent id, or a Codex agent path (/root/{name})")
     ap.add_argument("--root", action="append", default=[], help="an extra directory searched for the id")
     ap.add_argument("--only", default=DEFAULT_ONLY, help=f"event kinds, comma-separated: {', '.join(KINDS)}; 'error' alone keeps only failed calls")
     ap.add_argument("--tool", action="append", default=[], help="keep only calls of these tool names (comma or repeated)")

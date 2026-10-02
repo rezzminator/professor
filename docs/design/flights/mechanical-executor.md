@@ -47,14 +47,14 @@ One test per `Done when` row, a row being a matrix row or a `Given` line, in the
 
 - a row on existing behaviour: write the test, watch its assertion fail, apply the Steps, run it green;
 - a row on code the task creates: apply the Steps, run it green, copy the file to the task's scratch directory, break that row's behaviour with one Edit, watch it fail, copy the file back, run it green;
-- a task with no behaviour change (a rename, a move, a deletion, a doc) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history, are its proof.
+- a task with no behaviour change (a rename, a move, a deletion, the doc references one carries) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history or in a hit named under Outside defects, are its proof.
 
 Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break code for the watched-failing proof; one reverted to the last commit in a worktree holding sibling tasks' uncommitted work, and one temporary break of a shared file turned a sibling's run red. The fixed order keeps the proof and removes git from it.
 
 ### Reds are bounded
 
 - A red its own edit caused inside `Files` (a typo, a missing import, a formatter complaint): fix its cause there and rerun; never a stop.
-- A cause outside `Files` (a sibling task's half-edited file in the shared worktree), a red in a test the diff does not reach, or a check rejecting what was there before the edit (a missing ToC, a file already over size): named under Outside defects, and the task finishes `DONE`. Only when it stops the executor's own tests: `FAILED {id}: blocked by {file}: {error line}`, which the orchestrator holds for the sibling's verdict instead of sending to the speccer.
+- A cause outside `Files` (a sibling task's half-edited file in the shared worktree), a red in a test the diff does not reach, or a check rejecting what was there before the edit (a missing ToC, a file already over size): named under Outside defects, and the task finishes `DONE`. Only when it stops the executor's own tests, after running what can still run past it: it returns every outside cause at once, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause. The orchestrator records `{id} WAIT · …` only when every named file is in the index `files` of a task in flight, and sends the task out once more unchanged after those tasks' verdicts; otherwise the `FAILED` road to the speccer.
 - Any other red: read the error and the lines it names, then return `SPEC-DRIFT` or `FAILED` with the cause, or what was read and "cause unknown". Deeper diagnosis is the `smart` tier's work.
 
 Friction: the base body's unbounded read-to-cause produced diagnosis spirals of 150 calls and more. Sibling reds were rediscovered flight after flight in `RETRO` lines. In the benchmark round the first tier body stopped as `SPEC-DRIFT` on a pre-existing missing ToC after finishing all its work; the outside-defect rule separates "report it and finish" from "stop".
@@ -100,7 +100,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A quoted line found at another place, an import the edit needs, the formatter's output | Adapt and list it under Adapted |
 | An edit the Steps do not settle (another approach, a name not given, a file outside `Files`) | Stop, every touched file building; `SPEC-DRIFT {id}: {what the task file lacks}` with what landed |
 | Its own edit turns a check red inside `Files` | Fix the cause there, rerun |
-| A sibling's file, an unreached test or a pre-existing finding is red | Outside defects; finish `DONE` — or `FAILED {id}: blocked by {file}: {error line}` when it stops its own tests |
+| A sibling's file, an unreached test or a pre-existing finding is red | Outside defects; finish `DONE` — or, when it stops its own tests, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
 | Any other red | Read the error and the lines it names; `SPEC-DRIFT` or `FAILED` with the cause or "cause unknown" |
 | A row that reads two ways | The reading today's code and the Steps support, named in the return; `SPEC-DRIFT` only when neither settles it and they build different code |
 | A brief naming the full suite, a whole-tree sweep or a review | Refused, named in the return |
@@ -131,5 +131,5 @@ The `gpt-6.1-sol` round covered the `precise` and `smart` tiers only; this tier 
 | The agent | `templates/global/agents/flights-mechanical-executor.md` | The executable wording and the pins |
 | The base | [flights-executors](flights-executors.md) | What every tier holds; the tier table |
 | The speccer | [flights-speccer](flights-speccer.md) | The `mechanical` rating; local choices as `Decisions` lines; reuse targets and the façade as `EXISTING` shapes |
-| The orchestrator | [flights-orchestrator](flights-orchestrator.md) | `blocked by {file}` held for the sibling's verdict |
+| The orchestrator | [flights-orchestrator](flights-orchestrator.md) | `blocked by` held as `WAIT` for the in-flight siblings' verdicts |
 | The cross-harness seat | `templates/global/commands/flights/orchestrate-cross-harness.md` | The Codex model and effort on the seat's launch line |

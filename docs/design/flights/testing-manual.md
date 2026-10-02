@@ -47,7 +47,7 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 | `general-foreman`, `general-executor` | all, when the brief names the manual | Writing the covering test in the project's pattern |
 | `flights-lander` | all, 5 to 9 most | Running the gate, sweeping test validity, raising the project's bug classes |
 
-The speccer takes facts from the manual into the task file as `Decisions` and `Files` lines; it never puts the manual in a task's `reads`, since the manual would consume the task's 16,000-character budget.
+The speccer takes facts from the manual into the task file as `Decisions` and `Files` lines; it never puts the manual in a task's `reads`, since the manual would consume the task's reading budget.
 
 ## How it reaches a flight
 
@@ -57,7 +57,7 @@ The speccer takes facts from the manual into the task file as `Decisions` and `F
 
 ## What stays out
 
-- The generic mechanism of writing and attacking tests: in the two agents.
+- The generic mechanism of writing and attacking tests: in the three executor bodies and the lander.
 - The cross-suite design of an integration suite — landscape, map, lanes, budgets: `/quality:integration-suite` designs it ([its design](../integration-suite/_index.md)), and the manual's section 3 states the duty it leaves on every change.
 - Pipeline glue (who spawns whom, where reports go): in the orchestrator.
 

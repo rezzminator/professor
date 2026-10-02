@@ -31,7 +31,7 @@ Friction: in one adopter flight the drifts came after the edits, each naming tes
 
 ### A red its own edit caused is iteration
 
-A red its own edit caused inside `Files` is fixed there. Every other red is read to its cause and returned, or, when it lies in an unreached test or a pre-existing finding, named as an outside defect while the task finishes `DONE`. Never an unchanged rerun.
+A red its own edit caused inside `Files` is fixed there. Every other red is read to its cause and returned, or, when it lies in an unreached test or a pre-existing finding, named as an outside defect while the task finishes `DONE`. Never an unchanged rerun. A cause outside `Files` that stops its own tests returns after what can still run past it ran: every outside cause at once, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause.
 
 Friction: on the benchmark round's first tier body a `gpt-6-sol` seat returned `FAILED` with its work about 90% done, on new log keys the project's log scrubber redacted — a red its own change caused in its own file; both seats on the shared body adapted in-file. It scored 71. The body carries that case as its ✗/✓ example.
 
@@ -49,7 +49,7 @@ Friction: 6 of 6 benchmark seats, and the reference diff, wrote a second impleme
 
 ### A test per row and per `Given` line
 
-One covering test per `Done when` row and per `Given` line. A row's alternatives and its error-handling column are one case each; user-visible text is asserted whole, every variant; a log line is read back through the project's logging façade as production emits it. Every branch it adds that stops, raises, retries, waits or logs is reached by a test, or reported as a missed row, or deleted. The return maps every row and `Given` line to its test.
+One covering test per `Done when` row and per `Given` line. A row's alternatives and its error-handling column are one case each; user-visible text is asserted whole, every variant; a log line is read back through the project's logging façade as production emits it. Every branch it adds that stops, raises, retries, waits or logs is reached by a test, or reported as a missed row, or deleted. A row with no behaviour change (a rename, a move, a deletion, the doc references one carries) is proven by its check line. The return maps every row and `Given` line to its test.
 
 Friction: the Sonnet-at-`high` seat that scored 77 against its twin's 95 left a `Given` line untested and shipped log keys the scrubber redacts in production; the five seats that tested the log line found the redaction through that test. Partly asserted alternatives and stop texts missing a clause cost the others points. The `xhigh` seats did these unprompted; the rules make it independent of the draw.
 
@@ -81,6 +81,7 @@ The layout laws bind this tier through its body: a deletion leaves nothing behin
 | Its own edit turns a check red inside `Files` | Fix it there, rerun |
 | A red in an unreached test, or a check rejecting what was there before | Outside defects; finish `DONE` |
 | Any other red | Read to the cause; `FAILED` or `SPEC-DRIFT` with it, or "cause unknown" |
+| A cause outside `Files` stops its own tests | Run what can still run past it; first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
 | An `Execution judgment` | Decide it by the rows it can break, pin it with a test, name both |
 | A guard no row asks for | A defect line, never code |
 | A helper, fake or fixture it would create | Search the repository first; reuse, or name why not |

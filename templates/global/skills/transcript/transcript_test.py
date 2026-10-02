@@ -138,6 +138,25 @@ class ResolveTest(Fixture):
         self.assertIn("AMBIGUOUS", proc.stderr)
         self.assertEqual(proc.stderr.count("rollout-"), 2)
 
+    def test_codex_agent_path_resolves_through_session_meta(self):
+        rollouts = {}
+        for name, meta in (("fix_1a", {"agent_path": "/root/fix_1a"}),
+                           ("fix_1p", {"source": {"subagent": {"thread_spawn": {"agent_path": "/root/fix_1p"}}}})):
+            records = codex_records()
+            records[0]["payload"] = dict(records[0]["payload"], id=f"cx-{name}", **meta)
+            rollouts[name] = os.path.join(self.home, ".codex/sessions/2026/09/29", f"rollout-2026-09-29T23-00-00-cx-{name}.jsonl")
+            write_jsonl(rollouts[name], records)
+        for name, path in rollouts.items():
+            self.assertEqual(self.ok("locate", f"/root/{name}").strip(), os.path.realpath(path))
+        proc = self.run_tp("show", "/root/fix_9z")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("NOT FOUND /root/fix_9z — searched", proc.stderr)
+
+    def test_a_seat_name_points_at_pfm_chat_resolve(self):
+        proc = self.run_tp("show", "seat.2-a")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("`pfm chat resolve seat.2-a`, third column", proc.stderr)
+
     def test_missing_path_and_empty_file_fail_differently(self):
         proc = self.run_tp("show", os.path.join(self.home, "nope.jsonl"))
         self.assertIn("no such transcript file", proc.stderr)

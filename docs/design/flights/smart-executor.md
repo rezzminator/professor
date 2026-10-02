@@ -42,7 +42,7 @@ Friction: one flight's task drifted over three rounds on consumers outside `File
 
 ### Tests prove every row, even one already met
 
-A row the code already met gets its test the same way: watched failing against a deliberate re-break. Every build and test runs where the brief's standing rules say from the first run. A row a written deliverable meets is proven by the project's check for that file kind plus the quoted line that meets it. A budget or ratchet its diff pushes over is its to bring back under, a split first when the design allows it.
+A row the code already met gets its test the same way: watched failing against a deliberate re-break. Every build and test runs where the brief's standing rules say from the first run. A row with no behaviour change (a rename, a move, a deletion, the doc references one carries) is proven by its check line; a row a written deliverable meets, by the project's check for that file kind plus the quoted line that meets it. A budget or ratchet its diff pushes over is its to bring back under, a split first when the design allows it.
 
 Friction: the losing benchmark seat returned `DONE` with three tests never watched failing and one row with no new test, and ran a test on the host once before rereading the fence rule.
 
@@ -60,7 +60,7 @@ Friction: in one flight two smart tasks returned `BLOCKED` on files already at t
 
 ### The cap is estimated before the edits
 
-With the design stated, it estimates the calls its edits and each row's proof need; when the calls spent plus that estimate pass 80, it returns `SPEC-DRIFT {id}: too large` with the split it would make, nothing changed. The speccer cuts the task; the return counts toward neither diagnose-first nor the third-red `BLOCKED`. Past 80, `FAILED {id}: cap` with the handoff.
+With the design stated, it estimates the calls its edits and each row's proof need; when the calls spent plus that estimate pass 80, it returns `SPEC-DRIFT {id}: too large` with the split it would make, nothing changed. The orchestrator records the return as `TOO-LARGE`, counted as no red, and a revising speccer call cuts the task. Past 80, `FAILED {id}: cap` with the handoff.
 
 Friction: 6 of 158 transcripts ran past 80 calls, and only one of them named the cap; five Codex tasks of one flight failed round 1 on the cap. The winning benchmark seat returned `DONE` at 92 calls, 42 of them reading before its first edit. The estimate surfaces an overrun while nothing has changed.
 
@@ -79,12 +79,13 @@ Friction: a return opened "DONE 1-a, with two gaps", another carried a round not
 | A consumer outside `Files` its design would break | Pick a design that keeps it working, or `SPEC-DRIFT {id}` naming each, nothing changed |
 | An open judgment | The candidate every row and Goal example holds under on live data; between equals, the smaller diff |
 | A row that reads two ways | The reading the Goal's example and today's code support, named in the return; neither settles it: `SPEC-DRIFT {id}` |
-| The estimate passes the cap | `SPEC-DRIFT {id}: too large` with the split, nothing changed |
+| The estimate passes the cap | `SPEC-DRIFT {id}: too large` with the split, nothing changed; recorded as `TOO-LARGE`, no red |
 | A written deliverable | Read the writing law first; copy every quote; keep every decision it does not set out to change |
 | A file over the size ceiling | Split into a new file beside a `Files` entry; a split needing an existing file outside `Files` → `SPEC-DRIFT {id}` naming it |
 | Its own edit turns a check red inside `Files` | Fix it there, rerun |
 | A red in an unreached test, a check rejecting what was there before, a stale comment or older defect | Outside defects; finish `DONE` |
 | Any other red | Read to the cause; `FAILED` or `SPEC-DRIFT` with it, or "cause unknown" |
+| A cause outside `Files` stops its own tests | Run what can still run past it; first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
 | The Goal cannot be reached | Stop; `SPEC-DRIFT {id}` with what it found and what landed |
 | A decision it cannot make | `BLOCKED {id}: {question}` |
 | 80 calls | `FAILED {id}: cap` with the handoff |
@@ -115,5 +116,5 @@ Blind-judged together with the Claude anchor: `gpt-6.1-sol` 96 and 91; `gpt-6-so
 | The agent | `templates/global/agents/flights-smart-executor.md` | The executable wording and the pins |
 | The base | [flights-executors](flights-executors.md) | What every tier holds; the tier table |
 | The speccer | [flights-speccer](flights-speccer.md) | The `smart` rating; sizing a task to the cap; cutting a task returned too large |
-| The orchestrator | [flights-orchestrator](flights-orchestrator.md) | `SPEC-DRIFT {id}: too large` sent to the speccer, counted as no red |
+| The orchestrator | [flights-orchestrator](flights-orchestrator.md) | `SPEC-DRIFT {id}: too large` recorded as `{id} TOO-LARGE · {the split it proposes}`, no round, no red, no transcript; a revising speccer call cuts the task |
 | The cross-harness seat | `templates/global/commands/flights/orchestrate-cross-harness.md` | `gpt-6.1-sol` at `high` on every smart seat's launch line |

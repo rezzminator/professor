@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: 'USER-ONLY Moves context to NEW chat — the user types /handoff [--branch] [message]; never run it unasked. Writes a file, seeds a fresh chat from it: default reboots this pane into it; --branch starts it detached. Not for branching/forking this conversation → pfm chat branch.'
+description: 'USER-ONLY Moves every open thread of the session to a NEW chat — the user types /handoff [--branch] [message]; never run it unasked. Writes a file, seeds a fresh chat from it: default reboots this pane into it; --branch starts it detached. Not for branching/forking this conversation → pfm chat branch.'
 ---
 
 # `/handoff [--branch] [message]`
@@ -8,23 +8,36 @@ description: 'USER-ONLY Moves context to NEW chat — the user types /handoff [-
 Write the handoff file first — this step is IDENTICAL in both modes. Then either reboot this pane
 into the new chat (default) or spawn a separate detached one and leave this pane alone (`--branch`).
 
-1. **Write the handoff file.** `mkdir -p ~/.local/share/pfm/handoff` first, then write
+1. **Write the handoff file.** Its scope is the whole session, never just the current task: the
+   new chat inherits every open thread and this chat keeps none. Enumerate the threads first, from
+   the session's first message (a compaction summary included):
+   - every user ask not yet closed;
+   - every agent, chat, background command and waiter still running;
+   - every repo's uncommitted, unmerged and unpushed work, and its worktrees;
+   - every item held for the user.
+
+   Then `mkdir -p ~/.local/share/pfm/handoff` and write
    `~/.local/share/pfm/handoff/<YYYYMMDD-HHMMSS>-<cwd basename>.md` with these sections, in this
    order:
 
-   - **Task** — the user's original ask VERBATIM plus every later addition, quoted.
-   - **State** — what's done and what's running: agent ids, worktrees, commits, files touched.
+   - **Task** — every ask of the session VERBATIM, in order, each marked done or open.
+   - **State** — per thread, what's done and what's running: agent ids, chats, worktrees, commits,
+     files touched.
    - **Decisions** — each one with its why.
    - **Open questions**
    - **Next steps** — ordered, concrete; the first one runnable as-is.
-   - **Anchors** — `path:line` for every file that matters.
+   - **Anchors**:
+     - `path:line` for every file that matters;
+     - this session's transcript path;
+     - every checkpoint or scratch file in a session-scoped directory, copied beside the handoff
+       file first (that directory dies with the session).
    - **Commands** — the exact gates/scripts to run.
    - **Rules learned** — constraints discovered this session.
-   - **Owed to the user** — every item the final report must contain.
+   - **Owed to the user** — every item the final report must contain, every held thread included.
 
    The new chat has NO access to this conversation. Write what it needs to continue without
    asking: complete sentences, the user's own words wherever wording matters, never a summary of
-   a summary.
+   a summary. A thread from the enumeration that is absent from the file makes the handoff partial.
 
 2. **Without `--branch` — reboot into the new chat and hide this one, once, via Bash:**
    ```

@@ -33,6 +33,11 @@ import (
 const (
 	StateWorking = "working"
 	StateIdle    = "idle"
+	// StateError is a live chat whose turn ENDED on an error — the model
+	// server refused it — and that now sits at its prompt waiting for its
+	// human. It is neither working (nothing runs) nor idle (it did not
+	// answer), and Status.Error names the kind.
+	StateError   = "error"
 	StateDead    = "dead"
 	StateMissing = "not-found"
 )
@@ -57,20 +62,23 @@ type Status struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
 	// IdleSeconds is how long the chat has been idle — nonzero ONLY when State
-	// is idle. A working chat mid tool run writes nothing for minutes; that
-	// silence is not idleness, and reporting it as such made the number
-	// contradict the state beside it.
-	IdleSeconds   int64        `json:"idle_seconds"`
-	Engine        pfmengine.ID `json:"engine"`
-	Model         string       `json:"model,omitempty"`
-	CWD           string       `json:"cwd,omitempty"`
-	SessionID     string       `json:"session_id,omitempty"`
-	Socket        string       `json:"socket,omitempty"`
-	ContextPct    float64      `json:"context_pct,omitempty"`
-	Last          string       `json:"last,omitempty"`
-	Summary       string       `json:"summary,omitempty"`
-	SummaryCached bool         `json:"summary_cached,omitempty"`
-	Ask           string       `json:"ask,omitempty"`
+	// is idle or error, both a turn that has ended. A working chat mid tool
+	// run writes nothing for minutes; that silence is not idleness, and
+	// reporting it as such made the number contradict the state beside it.
+	IdleSeconds int64        `json:"idle_seconds"`
+	Engine      pfmengine.ID `json:"engine"`
+	Model       string       `json:"model,omitempty"`
+	CWD         string       `json:"cwd,omitempty"`
+	SessionID   string       `json:"session_id,omitempty"`
+	Socket      string       `json:"socket,omitempty"`
+	ContextPct  float64      `json:"context_pct,omitempty"`
+	Last        string       `json:"last,omitempty"`
+	// Error is the kind of the error the turn ended on (server_overloaded,
+	// server_error, ...), set only when State is error.
+	Error         string `json:"error,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	SummaryCached bool   `json:"summary_cached,omitempty"`
+	Ask           string `json:"ask,omitempty"`
 }
 
 // SummaryLine is the human status suffix. Cached summaries say so at the
@@ -92,7 +100,7 @@ func (status Status) AskLine() string {
 // Alive reports whether the chat is a running seat, which is the only
 // distinction a caller may act on without reading the state string.
 func (status Status) Alive() bool {
-	return status.State == StateWorking || status.State == StateIdle
+	return status.State == StateWorking || status.State == StateIdle || status.State == StateError
 }
 
 // Line is the one-line human rendering.
@@ -122,7 +130,9 @@ func (status Status) Line() string {
 // newest record is a tool call or a human turn owes an answer, and one whose
 // newest record is the assistant speaking has delivered it. A long tool run
 // therefore reads as working however quiet the file goes, which is the honest
-// answer and the one a watcher must not mistake for finished.
+// answer and the one a watcher must not mistake for finished. A turn the
+// model server ended on an error leaves that error as the newest record, so
+// the chat reads as error, never as the tool call the error cut short.
 func Inspect(
 	ctx context.Context,
 	chat Chat,
@@ -173,9 +183,14 @@ func Inspect(
 	if len(entries) > 0 {
 		status.Last = transcript.Condensed(entries[len(entries)-1])
 		if chat.Live {
-			if assistantAnswered(entries[len(entries)-1].Role) {
+			last := entries[len(entries)-1]
+			switch {
+			case assistantAnswered(last.Role) && last.Error != "":
+				status.State = StateError
+				status.Error = last.Error
+			case assistantAnswered(last.Role):
 				status.State = StateIdle
-			} else {
+			default:
 				status.State = StateWorking
 			}
 		}
@@ -189,9 +204,10 @@ func Inspect(
 		}
 		if sidechainWorking {
 			status.State = StateWorking
+			status.Error = ""
 		}
 	}
-	if status.State != StateIdle {
+	if status.State != StateIdle && status.State != StateError {
 		status.IdleSeconds = 0
 	}
 	return status, nil

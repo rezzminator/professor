@@ -8,6 +8,7 @@ package transcript
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -44,6 +45,11 @@ type Entry struct {
 	Tool      string `json:"tool,omitempty"`
 	Input     string `json:"input,omitempty"`
 	Timestamp string `json:"timestamp,omitempty"`
+	// Error is the kind of the error a turn ended on — set only on the
+	// assistant entry that stands for that error (Codex's task_complete with an
+	// error, Claude's synthetic API-error message) — so a reader can tell a
+	// turn the model server stopped from one the assistant finished.
+	Error string `json:"error,omitempty"`
 }
 
 type record struct {
@@ -56,6 +62,12 @@ type record struct {
 	Payload          payloadRecord   `json:"payload"`
 	Content          json.RawMessage `json:"content"`
 	Role             string          `json:"role"`
+	// IsAPIErrorMessage and Error mark Claude's synthetic assistant message
+	// for a turn that ended on an API error; Error is its kind
+	// ("server_error", "rate_limit", ...). Raw, so a record whose error is not
+	// a string still parses.
+	IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
+	Error             json.RawMessage `json:"error"`
 }
 
 type messageRecord struct {
@@ -72,6 +84,16 @@ type payloadRecord struct {
 	Name      string          `json:"name"`
 	Input     string          `json:"input"`
 	Arguments string          `json:"arguments"`
+	// Error is a Codex task_complete's turn error, null when the turn
+	// finished. Raw, so a payload whose error has another shape still parses.
+	Error json.RawMessage `json:"error"`
+}
+
+// codexTurnError is a Codex task_complete's error: the message its TUI shows
+// and the kind (codex_error_info), a bare string or a one-key object.
+type codexTurnError struct {
+	Message string          `json:"message"`
+	Info    json.RawMessage `json:"codex_error_info"`
 }
 
 type contentBlock struct {
@@ -121,11 +143,15 @@ func parseClaude(parsed record) (Entry, bool) {
 		if parsed.Type == "user" && naming.IsJunkPrompt(text) {
 			return Entry{}, false
 		}
-		return Entry{
+		entry := Entry{
 			Role:      parsed.Type,
 			Text:      text,
 			Timestamp: parsed.Timestamp,
-		}, true
+		}
+		if parsed.Type == RoleAssistant && parsed.IsAPIErrorMessage {
+			entry.Error = turnErrorKind(parsed.Error)
+		}
+		return entry, true
 	default:
 		return Entry{}, false
 	}
@@ -151,6 +177,8 @@ func parseCodex(parsed record) (Entry, bool) {
 			Input:     parsed.Payload.Arguments,
 			Timestamp: timestamp,
 		}, parsed.Payload.Name != ""
+	case "task_complete":
+		return codexTurnEnd(parsed.Payload.Error, timestamp)
 	}
 
 	role := ""
@@ -188,6 +216,45 @@ func parseCodex(parsed record) (Entry, bool) {
 		return Entry{}, false
 	}
 	return Entry{Role: role, Text: text, Timestamp: timestamp}, true
+}
+
+// codexTurnEnd turns a task_complete into an entry only when the turn ended
+// on an error: Codex then writes no assistant message, and the newest entry
+// would otherwise be whatever the error cut short. The error stands in the
+// assistant's place, as Claude's synthetic API-error message already does.
+func codexTurnEnd(raw json.RawMessage, timestamp string) (Entry, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return Entry{}, false
+	}
+	var turnError codexTurnError
+	if err := json.Unmarshal(raw, &turnError); err != nil {
+		// Not the object shape: the turn still ended on an error, whose
+		// text is the raw value itself.
+		turnError.Message = strings.Trim(string(raw), `"`)
+	}
+	kind := turnErrorKind(turnError.Info)
+	text := turnError.Message
+	if text == "" {
+		text = kind
+	}
+	return Entry{Role: RoleAssistant, Text: text, Error: kind, Timestamp: timestamp}, true
+}
+
+// turnErrorKind names an error from its kind field: a bare string, the key of a
+// one-key object (Codex's codex_error_info), or "unknown" when the record
+// carries none — never empty, since an empty kind reads as no error.
+func turnErrorKind(raw json.RawMessage) string {
+	var kind string
+	if err := json.Unmarshal(raw, &kind); err == nil && kind != "" {
+		return kind
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err == nil && len(object) == 1 {
+		for key := range object {
+			return key
+		}
+	}
+	return "unknown"
 }
 
 // toolCall extracts the first tool_use block of a Claude message.
@@ -247,12 +314,16 @@ func decodeBlocks(raw json.RawMessage) ([]contentBlock, bool) {
 }
 
 // Condensed renders one entry as a single line: T for a tool call, A for the
-// assistant, U for the human, S for a compaction summary.
+// assistant, E for the error a turn ended on, U for the human, S for a
+// compaction summary.
 func Condensed(entry Entry) string {
 	switch entry.Role {
 	case RoleTool:
 		return "T " + entry.Tool + "|" + flatten(Truncate(entry.Input, ToolInputCap))
 	case RoleAssistant:
+		if entry.Error != "" {
+			return "E " + entry.Error + ": " + flatten(Truncate(entry.Text, TextCap))
+		}
 		return "A " + flatten(Truncate(entry.Text, TextCap))
 	case RoleUser:
 		return "U " + flatten(Truncate(entry.Text, TextCap))

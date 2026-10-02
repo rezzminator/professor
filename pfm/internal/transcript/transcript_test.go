@@ -66,6 +66,45 @@ func TestParseKeepsWhatWasSaidAndDropsTheRest(t *testing.T) {
 				"A the report is clean",
 			},
 		},
+		{
+			// A turn the model server ended: Codex writes no assistant
+			// message, only a task_complete carrying the error; a
+			// task_complete without one is no entry at all.
+			engine: "cx",
+			content: strings.Join([]string{
+				`{"type":"event_msg","payload":{"type":"user_message","message":"read the report"}}`,
+				`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"ls"}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0001","last_agent_message":null,"error":{"message":"Selected model is at capacity. Please try a different model.","codex_error_info":"server_overloaded"}}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0002","last_agent_message":"done","error":null}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0003","last_agent_message":"done"}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0004","error":{"message":"stream closed","codex_error_info":{"response_stream_disconnected":{"http_status_code":502}}}}}`,
+				`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0005","error":{"message":"no kind"}}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U read the report",
+				"T exec|ls",
+				"E server_overloaded: Selected model is at capacity. Please try a different model.",
+				"E response_stream_disconnected: stream closed",
+				"E unknown: no kind",
+			},
+		},
+		{
+			// Claude's synthetic API-error message is the assistant entry it
+			// always was, now carrying its kind.
+			engine: "cc",
+			content: strings.Join([]string{
+				`{"type":"user","message":{"role":"user","content":"ship the fix"}}`,
+				`{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error: 429 rate limited"}]}}`,
+				`{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: no kind"}]}}`,
+				`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"tests are green"}]}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U ship the fix",
+				"E rate_limit: API Error: 429 rate limited",
+				"E unknown: API Error: no kind",
+				"A tests are green",
+			},
+		},
 	} {
 		t.Run(testCase.engine, func(t *testing.T) {
 			path := writeTranscript(t, "chat.jsonl", testCase.content)

@@ -241,6 +241,7 @@ type StatusOutput struct {
 	Socket        string       `json:"socket,omitempty"`
 	ContextPct    float64      `json:"context_pct,omitempty"`
 	Last          string       `json:"last,omitempty"`
+	Error         string       `json:"error,omitempty"`
 	Summary       string       `json:"summary,omitempty"`
 	SummaryCached bool         `json:"summary_cached,omitempty"`
 	Ask           string       `json:"ask,omitempty"`

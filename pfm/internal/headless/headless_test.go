@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func writeChat(t *testing.T, lines ...string) string {
@@ -424,5 +426,118 @@ func TestUnreadableClaudeSidechainDirectoryIsAnInspectError(t *testing.T) {
 	}, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "read Claude sidechain directory") {
 		t.Fatalf("Inspect() = %#v, %v; want visible sidechain error", status, err)
+	}
+}
+
+// codexErrorTurnEnd is the record a Codex turn ends on when the model server
+// refuses it: no assistant message, a task_complete carrying the error.
+const codexErrorTurnEnd = `{"timestamp":"2026-01-01T00:00:03.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0001","last_agent_message":null,"error":{"message":"Selected model is at capacity. Please try a different model.","codex_error_info":"server_overloaded"},"duration_ms":1000}}`
+
+// claudeAPIErrorLine is the synthetic assistant record Claude Code writes
+// when its turn ends on an API error.
+const claudeAPIErrorLine = `{"type":"assistant","isApiErrorMessage":true,"error":"server_error","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error: 529 Overloaded"}]}}`
+
+// TestATurnThatEndedOnAnErrorIsErrorNotWorking: a seat whose turn the model
+// server ended with an error sits at its prompt waiting for its human. Its
+// newest SPOKEN record is the tool call the error cut short, and reading that
+// as "working, idle 0 s" hid a stopped seat behind healthy activity for as
+// long as nobody looked at its screen. Both engines' turn-ending errors read
+// as their own state, carry the error kind, and count idle time from the end
+// of the turn.
+func TestATurnThatEndedOnAnErrorIsErrorNotWorking(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		engine   string
+		lines    []string
+		wantKind string
+		wantLast string
+	}{
+		{
+			name:   "codex task_complete with error after a tool call",
+			engine: "cx",
+			lines: []string{
+				`{"timestamp":"2026-01-01T00:00:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"go"}}`,
+				`{"timestamp":"2026-01-01T00:00:01.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"ls"}}`,
+				`{"timestamp":"2026-01-01T00:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":null}}`,
+				codexErrorTurnEnd,
+				`{"timestamp":"2026-01-01T00:00:04.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-0001","item":{"type":"CommandExecution"}}}`,
+			},
+			wantKind: "server_overloaded",
+			wantLast: "E server_overloaded: Selected model is at capacity. Please try a different model.",
+		},
+		{
+			name:     "claude api error after a tool call",
+			engine:   "cc",
+			lines:    []string{userLine("go"), toolLine("Bash"), claudeAPIErrorLine},
+			wantKind: "server_error",
+			wantLast: "E server_error: API Error: 529 Overloaded",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := writeChat(t, testCase.lines...)
+			stamp := time.Now().Add(-90 * time.Second)
+			if err := os.Chtimes(path, stamp, stamp); err != nil {
+				t.Fatal(err)
+			}
+			status, err := Inspect(
+				context.Background(),
+				Chat{Name: "seat", Engine: pfmengine.ID(testCase.engine), Path: path, Live: true},
+				time.Now(),
+			)
+			if err != nil {
+				t.Fatalf("Inspect() error = %v", err)
+			}
+			if status.State != "error" {
+				t.Fatalf("state = %q, want %q (%#v)", status.State, "error", status)
+			}
+			if status.Last != testCase.wantLast {
+				t.Fatalf("last = %q, want %q", status.Last, testCase.wantLast)
+			}
+			if status.IdleSeconds < 89 || status.IdleSeconds > 92 {
+				t.Fatalf("idle seconds = %d, want ~90 since the turn ended", status.IdleSeconds)
+			}
+			if !status.Alive() {
+				t.Fatalf("Alive() = false for a seat stopped on an error")
+			}
+			line := status.Line()
+			if !strings.Contains(line, "\terror\tidle=") {
+				t.Fatalf("Line() = %q, want the error state", line)
+			}
+			assertErrorKind(t, status, testCase.wantKind)
+		})
+	}
+}
+
+func assertErrorKind(t *testing.T, status Status, want string) {
+	t.Helper()
+	if status.State != StateError || status.Error != want {
+		t.Fatalf("state/error = %q/%q, want %q/%q", status.State, status.Error, StateError, want)
+	}
+}
+
+// TestWatchAnnouncesATurnEndedOnAnErrorAsIdleWithItsKind: a watcher waiting
+// for a turn to end must not wait forever on one the model server ended; it
+// hears the end, and the kind, on the IDLE line its parsers already read.
+func TestWatchAnnouncesATurnEndedOnAnErrorAsIdleWithItsKind(t *testing.T) {
+	path := writeChat(t, userLine("go"), toolLine("Bash"), claudeAPIErrorLine)
+	watcher := Watcher{
+		Name: "seat",
+		Resolve: func(context.Context) (Chat, bool, error) {
+			return Chat{Name: "seat", Engine: "cc", Path: path, Live: true}, true, nil
+		},
+	}
+	var out bytes.Buffer
+	idleHooks := 0
+	status, err := watcher.Watch(context.Background(), WatchOptions{
+		Poll:   time.Millisecond,
+		Once:   true,
+		OnIdle: func(Status) error { idleHooks++; return nil },
+	}, &out)
+	if err != nil {
+		t.Fatalf("Watch() error = %v", err)
+	}
+	if !regexp.MustCompile(`^IDLE seat idle_seconds=\d+ error=server_error\n$`).MatchString(out.String()) ||
+		idleHooks != 1 || status.State != StateError {
+		t.Fatalf("watch output = %q hooks = %d status = %#v", out.String(), idleHooks, status)
 	}
 }

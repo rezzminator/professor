@@ -94,16 +94,23 @@ func (watcher Watcher) Watch(
 			}
 			return status, nil
 		}
-		idleEnough := status.State == StateIdle &&
+		// A turn ended on an error waits for its human exactly as an
+		// answered one does, so it is announced as idle with its kind.
+		idleEnough := (status.State == StateIdle || status.State == StateError) &&
 			time.Duration(status.IdleSeconds)*time.Second >= options.IdleAfter
 		switch {
 		case idleEnough && !announcedIdle:
 			announcedIdle = true
+			suffix := ""
+			if status.State == StateError {
+				suffix = " error=" + status.Error
+			}
 			if _, err := fmt.Fprintf(
 				out,
-				"IDLE %s idle_seconds=%d\n",
+				"IDLE %s idle_seconds=%d%s\n",
 				watcher.Name,
 				status.IdleSeconds,
+				suffix,
 			); err != nil {
 				return status, err
 			}

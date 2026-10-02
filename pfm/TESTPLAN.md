@@ -117,6 +117,7 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | `transcript.LastExchange` keeps the newest human turn and following tool/assistant records for both engines | UNIT | `TestLastExchangeIsEngineAgnosticAndKeepsTools`, `TestLastExchangeNamesPartialAndMissingShapesWithoutGuessing` | |
 | `internal/ask` runners use deps resolution, roster homes, model/effort, a process-group timeout, stderr-tail errors, and nullable usage | JAIL | `internal/ask/ask_test.go` | |
 | working vs idle comes from the TRANSCRIPT (assistant spoke last = idle), never from a timer | JAIL | `TestStateComesFromTheTranscriptNotAClock` | |
+| a turn the model server ended on an error (Codex `task_complete` with `error`, Claude `isApiErrorMessage`) is state `error` with its kind and idle time since the turn ended, never `working` or plain `idle`; watch announces it as `IDLE … error={kind}` | JAIL | `TestATurnThatEndedOnAnErrorIsErrorNotWorking`, `TestWatchAnnouncesATurnEndedOnAnErrorAsIdleWithItsKind`, `TestParseKeepsWhatWasSaidAndDropsTheRest` | Live engine error shapes beyond `server_overloaded` and `server_error` remain UNPLAYED. |
 | `chat read <target> [--tail N] [--condensed] [--json]` | JAIL | `transcript/transcript.go`; `transcript_test.go` | |
 | `chat last <target>` → the last assistant message, bare | JAIL | `TestLastFindsTheNewestAssistantTurn` | |
 | `chat stream <target> [--filter RE] [--margin N]` → follow prompts and replies | JAIL | `TestStreamFilterWithMargin` | |

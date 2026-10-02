@@ -7,7 +7,7 @@ internal/inject/engine.go 1621
 internal/installer/installer.go 2358
 internal/professor/project.go 876
 internal/reload/reload.go 938
-internal/stats/limits.go 1123
+internal/stats/limits.go 1082
 internal/statusline/render.go 969
 internal/ui/cosmos.go 1593
 internal/ui/model.go 1587

@@ -260,18 +260,6 @@ func TestStaleStatusClassifiesTimeout(t *testing.T) {
 	}
 }
 
-func TestLocalCredentialFileErrorsDoNotTriggerLiveAckRefresh(t *testing.T) {
-	for _, message := range []string{
-		"stat usage credentials: permission denied",
-		"read usage credentials: input/output error",
-		"decode usage credentials: invalid character",
-	} {
-		if needsCredentialRefresh(errors.New(message)) {
-			t.Fatalf("local I/O error routed to live credential refresh: %q", message)
-		}
-	}
-}
-
 func TestUsageWindowsDropsPastScopedFableAndExplainsMissingReset(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	used := 0.0

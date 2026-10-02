@@ -158,11 +158,24 @@ done
 // CC_STUB_OVERLAY models the recoverable shape of that same failure: the
 // prompt is held unsent behind a startup overlay, and an Escape followed by
 // an Enter submits it. Deaf is unrecoverable, overlay is what a retry saves.
+//
+// CC_STUB_TRUST models Claude Code's folder-trust dialog, whose default row is
+// "No, exit": "now" draws it at boot, "late" draws a composer first and the
+// dialog a second later. It logs one line to CC_STUB_KEYS for every key it is
+// sent, so a test can prove pfm pressed none.
 const stubClaude = `#!/usr/bin/env bash
 printf '%s\n' "$*" > "$CC_STUB_ARGV"
 stty -icanon -echo -ixon min 1 time 0 2>/dev/null
 ` + stubRecorder + `
 claude_live
+if [ -n "$CC_STUB_TRUST" ]; then
+  if [ "$CC_STUB_TRUST" = late ]; then printf 'claude ready\n❯ \n'; sleep 1; fi
+  printf '\033[2J\033[H Accessing workspace:\n\n %s\n\n' "$PWD"
+  printf ' Quick safety check: Is this a project you created or one you trust?\n\n'
+  printf ' ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel\n'
+  while IFS= read -r -d '' -n1 ch; do printf 'key\n' >> "$CC_STUB_KEYS"; done
+  exit 0
+fi
 prompt=""
 skip=0
 for argument in "$@"; do

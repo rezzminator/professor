@@ -167,6 +167,16 @@ func runChatKillContext(
 	case !fleet.ChatIDPattern.MatchString(target):
 		return renderNoSuchChat(target, stdout, stderr, false)
 	}
+	if id == "" {
+		// A chat found by name with no session id and no live address has
+		// nothing to tombstone and nothing to close; never hand runKill "".
+		fmt.Fprintf(
+			stderr,
+			"pfm chat kill: %s resolved to a chat with no session id and no live pane — nothing to close or hide\n",
+			target,
+		)
+		return 1
+	}
 	killArgs := make([]string, 0, 2)
 	if *exit {
 		killArgs = append(killArgs, "--exit")
@@ -220,6 +230,15 @@ func runChatUnkillContext(
 		}
 		if !found {
 			return renderNoSuchChat(target, stdout, stderr, false)
+		}
+		if chat.ID == "" {
+			fmt.Fprintf(
+				stderr,
+				"pfm chat unkill: %s carries no session id — no kill was recorded against it, "+
+					"so there is none to lift\n",
+				target,
+			)
+			return 1
 		}
 		target = chat.ID
 	}

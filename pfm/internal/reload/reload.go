@@ -673,9 +673,11 @@ func deliverThen(
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat reload --then: capture input box (try %d): %v\n", i+1, err)
+		} else if pfmengine.ClaudeTrustDialog(capture) {
+			return trustDialogError(request.Pane)
 		} else {
 			trustPrompt := false
-			for _, needle := range []string{"Trust this directory?", "trust this folder", "trust these settings"} {
+			for _, needle := range []string{"Trust this directory?", "trust these settings"} {
 				if strings.Contains(capture, needle) {
 					if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 						return fmt.Errorf("reload --then: accept trust prompt: %w", err)

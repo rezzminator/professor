@@ -24,9 +24,10 @@ set -uo pipefail
 # stopped. pair: runs the rollback's numbered `next` commands in order (no
 # block: make -C {clone}/pfm rollback), then {pfm} ls on the restored binary.
 # --stress: the managed drop-in is removed from the copied /etc, and a fake
-# live pid 424242 holds the legacy state database (proc/424242/fd/3); apply
-# must stop pfm-mcp.service (which releases the holder) and write the drop-in
-# through sudo; rollback must remove it again.
+# live pid 424242, a child of pfm-mcp.service's MainPID 4242 (proc/424242/stat),
+# holds the legacy state database (proc/424242/fd/3); apply must let it through
+# as service-owned, stop pfm-mcp.service (which releases the holder) and write
+# the drop-in through sudo; rollback must remove it again.
 # BACKUP is only read. Outputs in SCRATCH/rehearsal/:
 #   verdict.txt   first line REHEARSAL PASS or REHEARSAL FAIL {step}: {reason},
 #                 then one line per step run: step {name} ok | step {name} FAILED {reason}
@@ -105,6 +106,7 @@ C_GIT=/pfm-git-common
 C_ETC=/rehearsal-etc
 FLEET_UNITS="pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer"
 HOLDER_PID=424242
+MCP_MAIN_PID=4242
 C_GOMOD=/pfm-gomod
 DB_MAP=(".cc/fleet.db .local/state/pfm/pfm.db" ".local/state/pfm/fleet.db .local/state/pfm/pfm-cache.db")
 # Databases pfm no longer owns: an older backup still lists them, so they are named and skipped, never refused.
@@ -314,7 +316,10 @@ cmd_rehearse() {
     done
     [ -n "$held" ] || fail copy "no legacy state database to hold"
     rm -f "$dropin" || fail copy "removing the managed drop-in $dropin failed"
-    { mkdir -p "$R/proc/$HOLDER_PID/fd" && ln -s "$home/$held" "$R/proc/$HOLDER_PID/fd/3"; } ||
+    # proc stat: pid (comm) state ppid, then the fields pfm's reader needs.
+    { mkdir -p "$R/proc/$HOLDER_PID/fd" && ln -s "$home/$held" "$R/proc/$HOLDER_PID/fd/3" &&
+      printf '%s (sqlite3) S %s%s\n' "$HOLDER_PID" "$MCP_MAIN_PID" "$(printf ' 0%.0s' $(seq 20))" \
+        >"$R/proc/$HOLDER_PID/stat"; } ||
       fail copy "creating the holder pid $HOLDER_PID failed"
   fi
   pass copy
@@ -322,7 +327,7 @@ cmd_rehearse() {
   # build: stubs, container, make host-install
   {
     echo '#!/usr/bin/env bash'
-    printf 'stress=%q fleet=%q holder=%q\n' "$stress" "$FLEET_UNITS" "$HOLDER_PID"
+    printf 'stress=%q fleet=%q holder=%q mainpid=%q\n' "$stress" "$FLEET_UNITS" "$HOLDER_PID" "$MCP_MAIN_PID"
     cat <<'EOF'
 # The rehearsal dir ($C_REHEARSAL in the container): the parent of stubs/.
 D=${0%/*}; D=${D%/*}
@@ -358,7 +363,7 @@ show)
   s=$(state "${units[0]}")
   case $prop in
   ActiveState) echo "$s" ;;
-  MainPID) if [ "$s" = active ]; then echo 4242; else echo 0; fi ;;
+  MainPID) if [ "$s" = active ]; then echo "$mainpid"; else echo 0; fi ;;
   esac ;;
 cat) case " $fleet " in *" ${units[0]} "*) ;; *) exit 1 ;; esac ;;
 esac

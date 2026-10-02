@@ -26,9 +26,10 @@ type RunOptions struct {
 	// after the child exits or its context is cancelled. A zero value keeps
 	// os/exec's default (no extra bound).
 	WaitDelay time.Duration
-	// ProcessGroup runs the child in its own process group; cancellation or the
-	// deadline of the context SIGKILLs the whole group, descendants included,
-	// instead of the direct child alone.
+	// ProcessGroup runs the child in its own process group: a terminal's
+	// Ctrl-C reaches the caller alone and never kills the child mid-flight,
+	// and cancellation or the deadline of the context SIGKILLs the whole
+	// group, descendants included, instead of the direct child alone.
 	ProcessGroup bool
 }
 

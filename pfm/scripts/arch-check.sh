@@ -241,7 +241,7 @@ chk_C12() {
   else
     : > "$T/c12"
     for p in $(grep -oE '^\| `[a-z/]+/`' CLAUDE.md | tr -d '|` '; grep -oE '`[a-z/]+/`' CLAUDE.md | grep -vE '^`(cmd|internal|testdata|e2e)' | tr -d '`'); do
-      [ -d "internal/$p" ] || [ -d "$p" ] || echo "$p" >> "$T/c12"
+      [ -d "internal/$p" ] || [ -d "$p" ] || [ -d "../$p" ] || echo "$p" >> "$T/c12"
     done
     for f in $(grep -oE '`?[A-Z][A-Z_]+\.md`?' CLAUDE.md | tr -d '`' | sort -u); do [ -e "$f" ] || [ -e "../$f" ] || echo "$f" >> "$T/c12"; done
     # A PFM_* name counts as read only when production code uses it beyond

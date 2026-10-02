@@ -219,7 +219,7 @@ host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, preview i
 	    if [ $$probe -eq 0 ]; then \
 	      echo "host-install: WARNING — the new binary's install check refuses (exit $$checkrc), but this host is migrated, so the new binary reads its config; swapping — resolve the above before the next pfm install --yes" >&2; \
 	    elif [ $$checkrc -eq 4 ]; then \
-	      echo "host-install: the new binary's install gate refuses this host — $(BIN) untouched; close what it names (every Claude chat, Claude's daemon and bg-spare sessions: claude daemon stop --any) and rerun" >&2; \
+	      echo "host-install: the new binary's install check refuses this host — $(BIN) untouched; close or resolve what it names above, then rerun (a live chat includes Claude's daemon and bg-spare sessions: claude daemon stop --any)" >&2; \
 	      exit 1; \
 	    else \
 	      echo "host-install: the new binary's install check FAILED (exit $$checkrc) — $(BIN) untouched; fix the error above and rerun" >&2; \

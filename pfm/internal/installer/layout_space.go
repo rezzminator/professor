@@ -195,8 +195,7 @@ func layoutFindingApplies(finding LayoutFinding) bool {
 	if finding.Verdict != VerdictRefuse {
 		return true
 	}
-	return (finding.Row == layoutRowStateDB || finding.Row == layoutRowCacheDB) &&
-		strings.HasPrefix(finding.Detail, "held by pid ")
+	return finding.serviceHeld
 }
 
 // layoutApparentBytes sums the apparent size of the regular files at and

@@ -74,6 +74,10 @@ type LayoutEnv struct {
 	// settle waits a started fleet unit's settle before its state is read
 	// back; nil is the real clock (layout_services.go).
 	settle func(time.Duration)
+	// uid is the invoking user a merge moves files as; nil is os.Getuid.
+	uid func() int
+	// access answers access(2) for the invoking user; nil is unix.Access.
+	access func(path string, mode uint32) error
 }
 
 func NewLayoutEnv(runtime pfmconfig.Runtime, env paths.Env) (LayoutEnv, error) {
@@ -221,6 +225,8 @@ type LayoutFinding struct {
 	Source  string
 	Detail  string
 	Err     error
+	// serviceHeld: held only by pfm services apply stops (judgeHeldDB).
+	serviceHeld bool
 }
 
 // LayoutRow records the desired form and the legacy form recognised by a row.
@@ -326,11 +332,20 @@ func layoutLstat(row, path string) (LayoutFinding, fs.FileInfo, bool) {
 	return finding, info, true
 }
 
+// classifyManagedCleanup plans the managed cleanup drop-in row, the one row
+// ApplyLayout treats as advisory.
 func classifyManagedCleanup(env LayoutEnv) LayoutFinding {
 	path := filepath.Join(env.ManagedDir, "pfm.json")
 	finding, info, exists := layoutLstat(layoutRowManagedCleanup, path)
 	if !env.Config.Claude.RequireManagedCleanup {
 		finding.Detail = "check off by config"
+		return finding
+	}
+	if !filepath.IsAbs(env.ManagedDir) {
+		// The row is advisory: refused, it writes nothing and fails nothing.
+		finding.Err = nil
+		finding.Verdict = VerdictRefuse
+		finding.Detail = fmt.Sprintf("managed settings dir %q is not absolute — nothing written", env.ManagedDir)
 		return finding
 	}
 	if finding.Err != nil {
@@ -513,7 +528,12 @@ func classifyDB(env LayoutEnv, row, target, legacy string) LayoutFinding {
 	case err != nil:
 		finding.Err = err
 	case len(pids) > 0:
-		finding.Verdict, finding.Detail = VerdictRefuse, "held by pid "+strings.Join(pids, ",")
+		judgeHeldDB(env, &finding, pids)
+		if finding.serviceHeld && targetExists {
+			// Stopping the service would only reach the refusal below.
+			finding.serviceHeld = false
+			finding.Detail = "target and legacy database both exist"
+		}
 	case targetExists:
 		finding.Verdict, finding.Detail = VerdictRefuse, "target and legacy database both exist"
 	default:

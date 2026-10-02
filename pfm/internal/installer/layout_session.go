@@ -56,6 +56,7 @@ func classifySessionStore(env LayoutEnv) []LayoutFinding {
 					}
 					finding.Verdict = VerdictMerge
 					finding.Detail = fmt.Sprintf("%d entries", len(children))
+					judgeSessionOwnership(env, &finding, path)
 				default:
 					finding.Verdict, finding.Detail = VerdictRefuse, "not a directory or link"
 				}

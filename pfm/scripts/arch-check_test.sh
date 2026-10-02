@@ -113,6 +113,22 @@ if fixture "$REPO_C12"; then
   else
     bad "C12: expected PASS for a read constant" "$line"
   fi
+
+  # A directory pointer resolves under pfm/ or at the repo root (pfm/..).
+  printf 'PFM_X\n`croot/`\n' > "$REPO_C12/CLAUDE.md"
+  line=$(check_line "$REPO_C12" C12-claude-pointers)
+  if [[ "$line" == *FAIL* && "$line" == *croot/* ]]; then
+    ok "C12: a directory pointer that resolves nowhere FAILs"
+  else
+    bad "C12: expected FAIL for a dangling directory pointer" "$line"
+  fi
+  mkdir -p "$T/croot"
+  line=$(check_line "$REPO_C12" C12-claude-pointers)
+  if [[ "$line" == *PASS* ]]; then
+    ok "C12: a directory pointer resolving at the repo root passes"
+  else
+    bad "C12: expected PASS for a repo-root directory pointer" "$line"
+  fi
 else
   bad "C12: could not build the git fixture"
 fi

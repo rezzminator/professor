@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
@@ -46,6 +49,25 @@ type Journal struct {
 	ctx        context.Context
 	clock      clock.Clock
 	writeScope func(dir string, env LayoutEnv) error
+	// deferredScheduler are the name-sync scheduler units ApplyLayout stopped
+	// and left for RestartSchedulerUnits to start once installer.Run returned.
+	deferredScheduler []string
+	// heldServices are the other units ApplyLayout stopped and has not yet
+	// restarted; servicesMu guards both lists and the signal watch (signals,
+	// signalsDone, signalsExited), armed from before the first stop until
+	// every held unit is back.
+	heldServices  []string
+	servicesMu    sync.Mutex
+	signals       chan os.Signal
+	signalsDone   chan struct{}
+	signalsExited chan struct{}
+	// interrupted is the number of the first signal the watch received, 0
+	// while none did; stderr is where the watch speaks (nil: os.Stderr).
+	interrupted atomic.Int32
+	stderr      io.Writer
+	// stopSettled is a service stop that returned no error: every launchd label
+	// it booted out read not loaded afterwards (restartLaunchdLabels).
+	stopSettled bool
 }
 
 const (
@@ -67,6 +89,14 @@ func NewJournal(ctx context.Context, env LayoutEnv) *Journal {
 	return &Journal{env: env, ctx: ctx, clock: clock.Real}
 }
 
+// NewInstallJournal is `pfm install`'s journal: its signal watch speaks on
+// stderr, the command's own.
+func NewInstallJournal(ctx context.Context, env LayoutEnv, stderr io.Writer) *Journal {
+	journal := NewJournal(ctx, env)
+	journal.stderr = stderr
+	return journal
+}
+
 // Dir is the journal directory, "" until the first record.
 func (journal *Journal) Dir() string {
 	if journal == nil {
@@ -83,6 +113,15 @@ func (journal *Journal) Planned() []string {
 	planned := append([]string(nil), journal.planned...)
 	sort.Strings(planned)
 	return slices.Compact(planned)
+}
+
+// WriteUnlessInterrupted is Write for a step `pfm install` makes after
+// ApplyLayout: an interrupted install writes nothing, the interrupt its error.
+func (journal *Journal) WriteUnlessInterrupted(targets []string, action func() error) error {
+	if err := journal.Interrupted(); err != nil {
+		return err
+	}
+	return journal.Write(targets, action)
 }
 
 // Write records the prior state of paths as install records, runs action and

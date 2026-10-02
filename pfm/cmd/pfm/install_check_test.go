@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -35,7 +37,7 @@ func TestInstallCheckRefusesYesAndRollback(t *testing.T) {
 }
 
 // installCheckTree maps every path under root to its content, so a test can
-// prove `pfm install --check` wrote nothing.
+// prove `pfm install --check` wrote nothing; a symlink is recorded as its target.
 func installCheckTree(t *testing.T, root string) map[string]string {
 	t.Helper()
 	tree := map[string]string{}
@@ -46,6 +48,12 @@ func installCheckTree(t *testing.T, root string) map[string]string {
 		if entry.IsDir() {
 			tree[path] = "dir"
 			return nil
+		}
+		// A link is its target, so a dangling one the apply leaves reads as a change.
+		if entry.Type()&os.ModeSymlink != 0 {
+			target, linkErr := os.Readlink(path)
+			tree[path] = "link:" + target
+			return linkErr
 		}
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
@@ -239,4 +247,131 @@ func TestInstallCheckAnswersWithTheApplyRefusalsAndWritesNothing(t *testing.T) {
 			t.Fatalf("code=%d stdout=%q stderr=%q, want 1 and the missing-config refusal", code, stdout, stderr)
 		}
 	})
+}
+
+// TestInstallPreChangeRefusalsPrecedeAnyHostWrite stages each read-only
+// refusal the apply once reached only past ApplyLayout, on a host whose layout
+// has a write to make (a legacy config to move, or a legacy database), and
+// proves --yes refuses with HOME untouched — no journal, no move — and
+// --check answers the same refusal.
+func TestInstallPreChangeRefusalsPrecedeAnyHostWrite(t *testing.T) {
+	const launchctlRunning = "case \"$1\" in\n  print) echo \"state = running\" ;;\nesac\nexit 0\n"
+	cases := []struct {
+		name string
+		// legacy stages the config in ~/.config/pfm, which the layout moves.
+		legacy bool
+		// stage returns the --config flag the runtime loads, "" for none.
+		stage        func(t *testing.T, home, account string) string
+		apply, check int
+		want         string
+	}{
+		{
+			name: "required dependency", legacy: true,
+			stage: func(t *testing.T, _, _ string) string {
+				saved := doctor.DependencyProbeOverride
+				t.Cleanup(func() { doctor.DependencyProbeOverride = saved })
+				doctor.DependencyProbeOverride = func(
+					_ context.Context, entries []deps.Entry, _ deps.ProbeOptions,
+				) []deps.Result {
+					for _, entry := range entries {
+						if entry.Name == "tmux" {
+							return []deps.Result{{Entry: entry, State: deps.StateMissing}}
+						}
+					}
+					t.Fatal("tmux registry entry missing")
+					return nil
+				}
+				return ""
+			},
+			apply: 1, check: 1, want: "pfm install: required dependency preflight failed\n",
+		},
+		{
+			name: "running name-sync job", legacy: true,
+			stage: func(t *testing.T, _, _ string) string {
+				// A oneshot mid-run: `show` names it activating; launchd names it running.
+				binDir, _ := writeManagerFakes(
+					t, "case \"$*\" in *ActiveState*) echo activating;; esac\nexit 0\n", launchctlRunning,
+				)
+				t.Setenv("PATH", binDir)
+				return ""
+			},
+			apply: 97, check: installer.InstallCheckBlocked, want: "pfm install: the pfm name-sync ",
+		},
+		{
+			name: "moved database paths",
+			stage: func(t *testing.T, home, account string) string {
+				// A legacy database the layout moves to the explicit config's
+				// state.db, which ResolvePaths (the marker's config) never names.
+				legacy := paths.LegacyStateDB(home)
+				if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(legacy, nil, 0o600); err != nil { // an empty file is an empty SQLite database
+					t.Fatal(err)
+				}
+				explicit := filepath.Join(home, "explicit.json")
+				config := fmt.Sprintf(`{"version":2,"accounts":[{"id":1,"configDir":%q}],"state":{"db":%q}}`+"\n",
+					account, filepath.Join(home, "elsewhere", "state.db"))
+				if err := os.WriteFile(explicit, []byte(config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return explicit
+			},
+			apply: 1,
+			check: 1,
+			want:  "pfm install: migrate moved databases: moved database paths differ from resolved paths",
+		},
+		{
+			name: "config migration plan", legacy: true,
+			stage: func(t *testing.T, _, _ string) string {
+				saved := planConfigMigration
+				t.Cleanup(func() { planConfigMigration = saved })
+				planConfigMigration = func(pfmconfig.Config, string) (pfmconfig.Migration, error) {
+					return pfmconfig.Migration{}, errors.New("fixture plan failure")
+				}
+				return ""
+			},
+			apply: 1, check: 1, want: "pfm install: plan config migration: fixture plan failure\n",
+		},
+	}
+	for _, tc := range cases {
+		for _, flag := range []string{"--yes", "--check"} {
+			t.Run(tc.name+" "+flag, func(t *testing.T) {
+				home, _, account := installCheckHome(t, tc.legacy)
+				configFlag := tc.stage(t, home, account)
+				runtime, err := pfmconfig.LoadInstallRuntime(configFlag)
+				if err != nil {
+					t.Fatalf("LoadInstallRuntime: %v", err)
+				}
+				before := installCheckTree(t, home)
+				var stdout, stderr bytes.Buffer
+				code := runInstall([]string{flag}, &stdout, &stderr, runtime)
+				if after := installCheckTree(t, home); !reflect.DeepEqual(before, after) {
+					t.Fatalf(
+						"%s refused after a host write:\nbefore=%v\nafter=%v\nstderr=%s",
+						flag,
+						before,
+						after,
+						stderr.String(),
+					)
+				}
+				want := tc.apply
+				if flag == "--check" {
+					want = tc.check
+				}
+				if code != want || !strings.Contains(stderr.String(), tc.want) ||
+					strings.Contains(stdout.String(), "install check: ok") {
+					t.Fatalf(
+						"%s code=%d stdout=%q stderr=%q, want %d and %q",
+						flag,
+						code,
+						stdout.String(),
+						stderr.String(),
+						want,
+						tc.want,
+					)
+				}
+			})
+		}
+	}
 }

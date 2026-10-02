@@ -226,6 +226,8 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 	t.Run("running service refuses actionably", func(t *testing.T) {
 		home := t.TempDir()
 		// A oneshot mid-run: `show` names it activating (is-active would exit 3).
+		// install asks installer.CheckScheduler before its first host write;
+		// installer.Run asks again as the race guard.
 		script := "case \"$*\" in *ActiveState*) echo activating;; esac\nexit 0\n"
 		binDir, logPath := writeManagerFakes(t, script, launchctlRunning)
 		t.Setenv("HOME", home)

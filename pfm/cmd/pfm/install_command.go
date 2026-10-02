@@ -36,6 +36,9 @@ var runInstaller = installer.Run
 // checkInstallSpace is the applying run's space preflight; a test swaps it.
 var checkInstallSpace = installer.CheckInstallSpace
 
+// planConfigMigration plans the pre-split config migration; a test swaps it.
+var planConfigMigration = pfmconfig.PlanMigrationFrom
+
 func installHarvestProvisioner() installer.HarvestProvisioner {
 	if installHarvestProvisionerOverride != nil {
 		return installHarvestProvisionerOverride
@@ -43,7 +46,7 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 	return installer.NewHarvestProvisioner()
 }
 
-func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
 	flags := cli.NewFlagSet(
 		installCommand,
 		"usage: pfm install [--yes] [--check] [--rollback ID [--force]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
@@ -130,11 +133,13 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm install: layout environment: %v\n", err)
 		return 1
 	}
-	journal := installer.NewJournal(context.Background(), layoutEnv)
+	journal := installer.NewInstallJournal(context.Background(), layoutEnv, stderr)
 	if mode == installer.ModeApply {
 		// The run's one journal line is its last stdout line, on every return
-		// once anything was recorded — a failure included.
+		// once anything was recorded — a failure included; the name-sync units
+		// the layout stopped start only once installer.Run returned.
 		defer func() {
+			code = journal.RestartSchedulerUnits(code, stderr)
 			if dir := journal.Dir(); dir != "" {
 				fmt.Fprintln(stdout, "install journal: "+dir)
 			}
@@ -152,27 +157,49 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 		return options
 	}
+	// printDependencies is the required dependency preflight: it prints the
+	// table and returns its failure count. Provisioning only marks the
+	// harvester rows "provisioned by install"; every probe is read-only.
+	printDependencies := func(w io.Writer, runtime commandRuntime) int {
+		entries := deps.Registry(deps.Options{
+			Home:         runtime.Paths.Home,
+			ClaudeBinary: runtime.Config.Claude.Binary,
+			CodexBinary:  runtime.Config.Codex.Binary,
+		})
+		probe := deps.ProbeOptions{
+			SkipHarvest:  *skipHarvest,
+			SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
+			Provisioning: true,
+			Runner:       obs.Runner(deps.RealRunner{}),
+		}
+		_, failures, _ := doctor.PrintDependencies(context.Background(), w, runtime.Paths.Home, entries, probe)
+		return failures
+	}
 	layoutFindings := installer.ClassifyLayout(layoutEnv)
 	// --check runs the apply's refusals up to its gate, then answers there.
+	// Every read-only refusal precedes the first host write (ApplyLayout).
 	if mode == installer.ModeApply || *check {
 		planOptions := func(runtime commandRuntime) installer.Options {
 			return withFlags(
 				newInstallerOptions(installer.ModeDryRun, *configDir, *skipHarvest, io.Discard, io.Discard, runtime),
 			)
 		}
-		if code := installSpacePreflight(layoutEnv, layoutFindings, runtime, planOptions, stderr); code != 0 {
+		if code = installSpacePreflight(layoutEnv, layoutFindings, runtime, planOptions, stderr); code != 0 {
 			return code
 		}
-	}
-	if *check {
-		return installer.RunInstallCheck(layoutEnv, layoutFindings, stdout, stderr)
+		code = installer.PreChangeRefusals(layoutEnv, layoutFindings, installer.PreChange{
+			Runtime: runtime, PlanMigration: planConfigMigration, PrintDependencies: printDependencies, Check: *check,
+		}, stdout, stderr)
+		if code != 0 || *check {
+			return code
+		}
 	}
 	journalDir, err := installer.ApplyLayout(
 		context.Background(), layoutEnv, journal, mode == installer.ModeApply, stdout,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm install: %v\n", err)
-		return 1
+		return installer.LayoutExitCode(err)
 	}
 	if mode == installer.ModeApply && journalDir != "" {
 		for _, finding := range layoutFindings {
@@ -214,39 +241,22 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	}
 	runtime.Config = installConfig
 	planSource := ""
-	for _, finding := range layoutFindings {
-		if mode != installer.ModeApply && finding.Row == "config" && finding.Verdict == installer.VerdictMove &&
-			finding.Err == nil && finding.Source != "" && finding.Path == runtime.Config.Path {
-			planSource = finding.Source
-		}
+	if mode != installer.ModeApply {
+		planSource = installer.ConfigMoveSource(layoutFindings, runtime.Config.Path)
 	}
 	migrated, migrateCode := migrateMachineConfig(mode, journal, planSource, stdout, stderr, runtime)
 	if migrateCode != 0 {
 		return migrateCode
 	}
 	runtime = migrated
-	entries := deps.Registry(deps.Options{
-		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
-	})
-	_, preflight, _ := doctor.PrintDependencies(
-		context.Background(),
-		stdout,
-		runtime.Paths.Home,
-		entries,
-		deps.ProbeOptions{
-			SkipHarvest:  *skipHarvest,
-			SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
-			Provisioning: true,
-			Runner:       obs.Runner(deps.RealRunner{}),
-		},
-	)
-	if preflight != 0 && mode == installer.ModeApply {
-		fmt.Fprintln(stderr, "pfm install: required dependency preflight failed")
-		return 1
+	// An apply ran the dependency preflight before its first write.
+	preflight := 0
+	if mode != installer.ModeApply {
+		preflight = printDependencies(stdout, runtime)
 	}
 	options := withFlags(newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime))
 	options.Journal = journal
-	code := runInstallerCommand(installCommand, options, stderr)
+	code = runInstallerCommand(installCommand, options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
 		if preflight != 0 {
 			fmt.Fprintln(
@@ -313,9 +323,8 @@ func migrateInstalledLayoutDatabases(ctx context.Context, statePath, cachePath s
 	if err != nil {
 		return fmt.Errorf("resolve moved database paths: %w", err)
 	}
-	if resolved.StateDB != statePath || resolved.CacheDB != cachePath {
-		return fmt.Errorf("moved database paths differ from resolved paths: state %s != %s; cache %s != %s",
-			statePath, resolved.StateDB, cachePath, resolved.CacheDB)
+	if err := installer.DatabasePathsAgree(statePath, cachePath, resolved); err != nil {
+		return err
 	}
 	database, err := store.OpenContext(ctx)
 	if err != nil {
@@ -340,7 +349,7 @@ func migrateMachineConfig(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (commandRuntime, int) {
-	migration, err := pfmconfig.PlanMigrationFrom(runtime.Config, planSource)
+	migration, err := planConfigMigration(runtime.Config, planSource)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm install: plan config migration: %v\n", err)
 		return runtime, 1
@@ -357,7 +366,7 @@ func migrateMachineConfig(
 		return runtime, 0
 	}
 	apply := func() error { return pfmconfig.ApplyMigration(migration) }
-	if err := journal.Write(configMigrationPaths(migration), apply); err != nil {
+	if err := journal.WriteUnlessInterrupted(configMigrationPaths(migration), apply); err != nil {
 		fmt.Fprintf(stderr, "pfm install: apply config migration: %v\n", err)
 		return runtime, 1
 	}
@@ -467,20 +476,8 @@ func resolveInstallSourceRepo(home string, stderr io.Writer) string {
 
 func runInstallerCommand(command string, options installer.Options, stderr io.Writer) int {
 	_, err := runInstaller(context.Background(), options)
-	if errors.Is(err, installer.ErrNameSyncRunning) {
-		fmt.Fprintf(
-			stderr,
-			"pfm %s: the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop pfm-name-sync.service`, then retry\n",
-			command,
-		)
-		return 97
-	}
-	if errors.Is(err, installer.ErrLaunchAgentRunning) {
-		fmt.Fprintf(
-			stderr,
-			"pfm %s: the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first\n",
-			command,
-		)
+	if refusal := installer.SchedulerRefusal(command, err); refusal != "" {
+		fmt.Fprintln(stderr, refusal)
 		return 97
 	}
 	if err != nil {

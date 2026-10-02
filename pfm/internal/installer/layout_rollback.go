@@ -87,9 +87,9 @@ func RollbackLayout(ctx context.Context, env LayoutEnv, id string, force bool, s
 	}()
 	if stopFleet {
 		var stopErr error
-		stopped, stopErr = stopLayoutServices(ctx, env)
+		stopped, stopErr = stopLayoutServices(ctx, env, true)
 		if stopErr != nil {
-			return fmt.Errorf("rollback %s: stop fleet units: %w", id, stopErr)
+			return fmt.Errorf("rollback %s: stop fleet units: %w — rerun pfm install --rollback %s", id, stopErr, id)
 		}
 		for _, record := range records {
 			if record.Result == layoutRecordRestored ||

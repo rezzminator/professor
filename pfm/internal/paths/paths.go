@@ -450,6 +450,10 @@ func Resolve() (Values, error) {
 
 	tmuxBase := EnvOr("TMUX_TMPDIR", defaultTmpDir)
 
+	managed := EnvOr(EnvManagedSettingsDir, defaultManagedSettingsDir)
+	if !filepath.IsAbs(managed) {
+		return Values{}, fmt.Errorf("%s=%q is not an absolute path", EnvManagedSettingsDir, managed)
+	}
 	return Values{
 		CacheDB:            EnvOr(EnvCacheDB, DefaultCacheDB(home)),
 		StateDB:            EnvOr(EnvStateDB, DefaultStateDB(home)),
@@ -460,7 +464,7 @@ func Resolve() (Values, error) {
 		ArchiveDir:         filepath.Join(home, ".claude-archive"),
 		LogFile:            filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 		ProcRoot:           EnvOr(EnvProcRoot, "/proc"),
-		ManagedSettingsDir: EnvOr(EnvManagedSettingsDir, defaultManagedSettingsDir),
+		ManagedSettingsDir: managed,
 		CgroupRoot:         EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil
 }

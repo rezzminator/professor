@@ -149,6 +149,7 @@ var retiredHookCommands = []struct {
 }{
 	{Name: "bb", Subcommand: "bb"},
 	{Name: "bb", Subcommand: "chat bb"},
+	{Name: "callmeter", Subcommand: "internal callmeter"},
 	{Name: "clear-hide", Subcommand: "internal clear-hide"},
 	{Name: "compact-nudge", Subcommand: "internal compact-nudge"},
 	{Name: "dream-agent-inject", Subcommand: "dream hook agent-inject"},

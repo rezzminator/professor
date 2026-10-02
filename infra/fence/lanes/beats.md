@@ -148,7 +148,6 @@ Runs LAST: it reaps the graveyard F's storm filled, archives the fixture transcr
 - `O2.04-headless` · headless Claude selector returns a cc envelope; the codex selector runs through OpenCode's server and returns an ox envelope with usage · spends cc:$SEAT+cx
 - `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, git-guard, epic-inject, title-renudge · spends none
 - `O2.05b-activity-log` · the activity-log reader: `pfm log` shows the lane's own records, a filter narrows, an unknown `--comp`/`--level` and a positional argument exit 2 · spends none
-- `O2.05c-callmeter` · the call store's reader over a scratch home and config: `pfm callmeter report` with no store prints the no-store line, exits 0 and creates nothing; `pfm internal callmeter` fed a `PostToolUse` Read payload, then `report files` names the file; an unknown topic exits 2 · spends none
 - `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none
 - `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `inject` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT
 - `O2.08-dropped-seat-with-live-chat` · **cross-lane** — a seat dropped while a chat lives on it: the chat keeps working and `pfm doctor` names the seat · spends cc:${SPARE:-none}

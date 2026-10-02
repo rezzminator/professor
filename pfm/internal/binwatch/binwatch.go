@@ -64,7 +64,7 @@ func ownReplacement(ctx context.Context, stderr io.Writer, clk clock.Clock) <-ch
 	path, err := os.Executable()
 	if err == nil {
 		var replaced <-chan struct{}
-		if replaced, err = watchWithClock(ctx, path, watchInterval, stderr, clk); err == nil {
+		if replaced, err = watch(ctx, path, watchInterval, stderr, clk); err == nil {
 			return replaced
 		}
 	}
@@ -85,11 +85,7 @@ func ownReplacement(ctx context.Context, stderr io.Writer, clk clock.Clock) <-ch
 // A path that cannot be read mid-run is said out loud once per outage and never
 // treated as a replacement: restarting onto a binary that is not there would
 // take the server down with nothing to come back on.
-func watch(ctx context.Context, path string, interval time.Duration, stderr io.Writer) (<-chan struct{}, error) {
-	return watchWithClock(ctx, path, interval, stderr, clock.Real)
-}
-
-func watchWithClock(
+func watch(
 	ctx context.Context,
 	path string,
 	interval time.Duration,

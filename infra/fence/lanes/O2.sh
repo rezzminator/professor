@@ -708,45 +708,6 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "pfm log --since 60m: $n_all record(s), --level error: $n_err · unknown --comp and --level exit 2 naming the accepted set · a positional argument exits 2"
 fi
 
-# ─── O2.05c — the call store's reader ───────────────────────────────────────
-
-beat O2.05c-callmeter
-spends none
-bad=""
-# A scratch home and config: the fleet's own store, seats and transcripts stay untouched.
-cm_home="$(mktemp -d /tmp/o2-callmeter.XXXXXX)"
-cm_cfg="$cm_home/claude"
-cm_work="$cm_home/work"
-cm_err="$cm_home/err"
-cm_store="$cm_home/.local/state/pfm/callmeter.db"
-mkdir -p "$cm_cfg/projects/-lane-callmeter" "$cm_work"
-printf 'one\ntwo\n' > "$cm_work/hooked.md"
-printf '{"version":1,"accounts":[{"id":1,"configDir":"%s"}]}\n' "$cm_cfg" > "$cm_home/machine.json"
-cm() { HOME="$cm_home" PFM_HOME="$cm_home" pfm --config "$cm_home/machine.json" "$@"; }
-# X43 absence is its own line and creates nothing — never an empty table.
-out="$(cm callmeter report files 2>"$cm_err")"
-rc=$?
-[ "$rc" -eq 0 ] || bad="$bad report with no store exited $rc: $(one_line "$(cat "$cm_err")");"
-grep -qF "callmeter: no store at $cm_store: nothing recorded yet" <<<"$out" ||
-  bad="$bad report with no store did not print the no-store line: $(one_line "$out");"
-[ ! -e "$cm_store" ] || bad="$bad report with no store created $cm_store;"
-# X44 the hook records a Read that the report then names.
-printf '{"hook_event_name":"PostToolUse","session_id":"lane-cm","transcript_path":"%s","cwd":"%s","tool_name":"Read","tool_use_id":"toolu_lane_hook","tool_input":{"file_path":"%s"},"tool_response":{"type":"text","file":{"filePath":"%s","content":"one\\ntwo\\n","numLines":2,"startLine":1,"totalLines":2}},"duration_ms":3}\n' \
-  "$cm_cfg/projects/-lane-callmeter/lane-cm.jsonl" "$cm_work" "$cm_work/hooked.md" "$cm_work/hooked.md" |
-  HOME="$cm_home" PFM_HOME="$cm_home" pfm --config "$cm_home/machine.json" internal callmeter 2>"$cm_err" ||
-  bad="$bad pfm internal callmeter exited $?: $(one_line "$(cat "$cm_err")");"
-out="$(cm callmeter report files 2>"$cm_err")"
-rc=$?
-[ "$rc" -eq 0 ] || bad="$bad report files after the hook exited $rc: $(one_line "$(cat "$cm_err")");"
-grep -qF "$cm_work/hooked.md" <<<"$out" || bad="$bad report files does not name the hook-recorded file: $(one_line "$out");"
-cm callmeter report lane-no-such-topic >/dev/null 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || bad="$bad report with an unknown topic exited $rc (want 2, usage);"
-rm -rf "$cm_home"
-if [ -n "$bad" ]; then fail "$bad"; else
-  pass "no store: the no-store line, exit 0, nothing created · the hook's Read is in report files · an unknown topic exits 2"
-fi
-
 # ─── O2.06 — doctor's codex_pane rows while E2's chat lives ─────────────────
 
 beat O2.06-doctor-codex-pane

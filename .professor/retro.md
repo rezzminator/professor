@@ -169,3 +169,15 @@ Amend: judgment — verbatim text travels by file the script wrote, named in a s
 ## 2026-09-25 — Claude Code refuses a sub-agent's REPORT.md
 Observed: the reviewer benchmark's lead wrote `SANDBOX/REPORT.md` and got `Subagents should return findings as text, not write report files` — Claude Code 2.1.282 refuses any sub-agent Write whose basename matches `^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$`. `reviewer` now writes `review.md`. `templates/project/commands/rnd.md` still has its `general-purpose` run agent write `REPORT.md` (lines 27, 39, 43, 49), so that deliverable can never land.
 Amend: templates/project/commands/rnd.md — rename the run's REPORT.md to a name outside the refused pattern (e.g. `RESULT.md`) end to end; any prompt that names a sub-agent's output file keeps it outside that pattern.
+
+## 2026-10-02 — managed settings shut every user plugin out of the system prompt
+Observed: a cache-live-control probe's `prompt.section` hook never ran: the debug log showed 94 of 94 calls `bypassed by cc-plugin-sec-default (tier user)`, and `prompt.context` the same. The trigger is `cc-plugin-sec-default@builtin seated outermost: this machine has managed settings`; the only managed file is pfm's `managed-settings.d/pfm.json` (`cleanupPeriodDays` alone). Every Professor plugin that shapes prompts is limited to `prompt.submit` context on a pfm host. Whether a host without managed settings admits user-tier section hooks is unproven.
+Amend: judgment — decide whether pfm keeps a managed-settings file for `cleanupPeriodDays`; until then, a prompt-shaping hook is checked against `--debug-file` for "bypassed by cc-plugin-sec-default" before it is built on.
+
+## 2026-10-02 — test chats left running, launched six at once, watched to completion
+Observed: comparing cache TTLs, the main chat launched six Sonnet chats at once, watched them to completion when the first few turns already answered the question, left eight earlier test chats idle, and the plugin's live proof left claude processes and ~26 sessions in the picker. The user ruled: one test chat at a time, read only its first turns, kill it the moment the answer is in, delete what it leaves.
+Amend: judgment — a behaviour probe through `chat_new` runs one chat, reads its first turns, kills it, and removes any session it spawned outside the project.
+
+## 2026-10-02 — two pfm surfaces answer "fine" when they failed
+Observed: `pfm chat new` returned `the chat drew nothing within 30s` (exit 1) for ttl-n-5m-1 and ttl-s-1h-2, both running normally; `--settle 90` did not change the 30s check. `.claude/scripts/dev.sh iso run bash -c 'cd pfm && go test …'` printed `go: cannot find main module` and then `all steps passed`.
+Amend: pfm chat new — the draw check honours `settle` and confirms the pane before reporting a failed launch; .claude/scripts/dev.sh#iso run — exit and report the command's own status, never "all steps passed" after it failed.

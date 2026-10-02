@@ -140,9 +140,10 @@ func runUsageHookWithRuntime(
 	// The hook's log is stderr: a failed refresh is named there, while stdout
 	// stays the prompt text alone.
 	message, err := usagehook.Evaluate(context.Background(), usagehook.Options{
-		AccountDirs: accountDirs,
-		Version:     runtime.Version,
-		Log:         stderr,
+		AccountDirs:  accountDirs,
+		Version:      runtime.Version,
+		ClaudeBinary: runtime.Config.Claude.Binary,
+		Log:          stderr,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm usage-hook: evaluate (fail-open): %v\n", err)

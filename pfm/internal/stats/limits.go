@@ -62,19 +62,19 @@ type LimitsSampler struct {
 	FetchCodex    func(context.Context, LimitAccount) (codexUsage, error)
 	Ack           func(context.Context, LimitAccount) error
 
-	mu           sync.Mutex
-	cache        map[string]cachedLimits
-	ackAttempted map[string]bool
-	// ackFailure remembers WHY an account's one credential probe failed, so a
-	// later refresh — which the once-per-account guard stops from probing
-	// again — can still say it rather than decaying to the bare "credentials
-	// file missing" that sends the reader hunting for a file a keychain host
-	// is never supposed to have.
+	mu    sync.Mutex
+	cache map[string]cachedLimits
+	// ackFailure remembers WHY an account's credential probe failed — this
+	// process's own, or the one the cross-process gate (usagehook.ClaimProbe)
+	// recorded — so a later refresh the gate stops from probing again can
+	// still say it rather than decaying to the bare "credentials file
+	// missing" that sends the reader hunting for a file a keychain host is
+	// never supposed to have.
 	ackFailure map[string]string
 	flights    map[string]struct{}
 }
 
-// errAckAlreadyAttempted marks the guard's refusal, which is bookkeeping
+// errAckAlreadyAttempted marks the probe gate's refusal, which is bookkeeping
 // rather than a diagnosis: it must never be reported as the reason an account
 // is blank.
 var errAckAlreadyAttempted = errors.New("credential refresh already attempted")
@@ -112,11 +112,10 @@ const CodexLiveLimitsTTL = 90 * time.Second
 func NewLimitsSampler(accounts []LimitAccount) *LimitsSampler {
 	copyAccounts := append([]LimitAccount(nil), accounts...)
 	sampler := &LimitsSampler{
-		Accounts:     copyAccounts,
-		TTL:          defaultLimitsTTL,
-		cache:        make(map[string]cachedLimits),
-		ackAttempted: make(map[string]bool),
-		flights:      make(map[string]struct{}),
+		Accounts: copyAccounts,
+		TTL:      defaultLimitsTTL,
+		cache:    make(map[string]cachedLimits),
+		flights:  make(map[string]struct{}),
 	}
 	// Nil Fetch/FetchCodex selects the shared on-disk cache path. Tests may
 	// override either seam directly; an override intentionally bypasses that
@@ -218,6 +217,7 @@ func (sampler *LimitsSampler) fetchClaudeCached(
 		Now: sampler.now, Env: sampler.Env, ConfigDir: account.ConfigDir,
 		CacheDir: usagehook.DefaultCacheDir(), TTL: sampler.ttl(),
 		Client: sampler.client(), Endpoint: sampler.Endpoint, Version: sampler.Version,
+		ClaudeBinary: account.ClaudeBinary,
 	}
 	if bypassCredentialBackoff {
 		options.BypassBackoff = needsCredentialRefresh
@@ -490,10 +490,36 @@ func cloneAccountLimits(limits AccountLimits) AccountLimits {
 	return limits
 }
 
+// isCredentialRejection reports a refusal of the credential itself, the one
+// refusal a credential probe can repair: StatusError.CredentialInvalid for
+// the door's typed answer. An untyped message (an injected Fetch) counts a 401
+// or "unauthorized", and a 403 only when it says the token is dead; every
+// other 403 is the account's state (accountRefusal), which no probe repairs.
 func isCredentialRejection(err error) bool {
 	if err == nil {
 		return false
 	}
+	var status *usagehook.StatusError
+	if errors.As(err, &status) {
+		return status.CredentialInvalid()
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{"unauthorized", "access token rejected", "credential rejected"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	if hasHTTPStatus(message, "401") {
+		return true
+	}
+	return (strings.Contains(message, "forbidden") || hasHTTPStatus(message, "403")) &&
+		usagehook.NamesDeadCredential(message)
+}
+
+// isRefusal reports any refusal of the request, the credential's or the
+// account's, on either engine: a refused account's cached quota is never shown
+// as stale (staleEligible).
+func isRefusal(err error) bool {
 	message := strings.ToLower(err.Error())
 	for _, marker := range []string{"unauthorized", "forbidden", "access token rejected", "credential rejected"} {
 		if strings.Contains(message, marker) {
@@ -501,6 +527,17 @@ func isCredentialRejection(err error) bool {
 		}
 	}
 	return hasHTTPStatus(message, "401", "403")
+}
+
+// accountRefusal is the 403 in err that is the account's state — a disabled
+// subscription or organization, a scope or permission the token lacks: the
+// card names it, never as stale, and no credential probe runs for it.
+func accountRefusal(err error) (*usagehook.StatusError, bool) {
+	var status *usagehook.StatusError
+	if errors.As(err, &status) && status.AccountRefused() {
+		return status, true
+	}
+	return nil, false
 }
 
 func hasHTTPStatus(message string, codes ...string) bool {
@@ -523,7 +560,7 @@ func hasHTTPStatus(message string, codes ...string) bool {
 }
 
 func staleEligible(err error) bool {
-	if err == nil || needsCredentialRefresh(err) {
+	if err == nil || needsCredentialRefresh(err) || isRefusal(err) {
 		return false
 	}
 	message := strings.ToLower(err.Error())
@@ -583,6 +620,11 @@ func staleStatus(err error) string {
 	return "refresh failed; showing cached limits"
 }
 
+// tryAck runs the credential probe (Ack) only when the cross-process gate
+// grants it (usagehook.ClaimProbe): at most one probe per credential
+// fingerprint per usagehook.ProbeCooldown across every pfm process, so a
+// picker reopened every minute, the TUI and a statusline sampler never each
+// launch their own session in the account.
 func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -590,47 +632,75 @@ func (sampler *LimitsSampler) tryAck(ctx context.Context, account LimitAccount) 
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	key := account.cacheKey()
-	sampler.mu.Lock()
-	if sampler.ackAttempted == nil {
-		sampler.ackAttempted = make(map[string]bool)
-	}
-	if sampler.ackAttempted[key] {
-		sampler.mu.Unlock()
-		return fmt.Errorf("%w for account %d", errAckAlreadyAttempted, account.ID)
-	}
-	sampler.ackAttempted[key] = true
-	sampler.mu.Unlock()
 	if sampler.Ack == nil {
 		return fmt.Errorf("credential refresh unavailable for account %d", account.ID)
 	}
-	err := sampler.Ack(ctx, account)
+	logger := obs.Logger(ctx).With("acct", account.ID, "config_dir", account.ConfigDir)
+	cacheDir := usagehook.CacheDirFor(sampler.Env)
+	claim, err := usagehook.ClaimProbe(ctx, cacheDir, account.ID, account.ConfigDir, sampler.now())
+	if err != nil {
+		logger.Warn("usage.probe.gated", "reason", "the probe gate could not be read or written", "err", err.Error())
+		return fmt.Errorf("credential probe gate for account %d: %w", account.ID, err)
+	}
+	if !claim.Allowed {
+		logger.Info("usage.probe.gated", "credential", claim.Credential, "reason", claim.Reason,
+			"failure", claim.Previous.Failure)
+		if claim.Previous.Failure != "" {
+			sampler.rememberProbeFailure(account, claim.Previous.Failure)
+		}
+		return fmt.Errorf("%w for account %d: %s", errAckAlreadyAttempted, account.ID, claim.Reason)
+	}
+	logger.Warn("usage.probe.fired", "credential", claim.Credential)
+	err = sampler.Ack(ctx, account)
+	outcome, failure := "ok", ""
 	switch {
 	case ctx.Err() != nil:
-		sampler.mu.Lock()
-		delete(sampler.ackAttempted, key)
-		sampler.mu.Unlock()
+		// A cancelled probe already launched its session, so its claim
+		// stands: re-arming here is how a picker opened and closed every
+		// minute would launch one session per opening.
+		outcome = "cancelled"
 	case err != nil:
-		sampler.mu.Lock()
-		if sampler.ackFailure == nil {
-			sampler.ackFailure = make(map[string]string)
-		}
 		// The probe's combined output can carry the account's own hook chatter,
 		// newlines included, and this string lands in a single TUI row. Collapse
 		// every whitespace run so the card stays one line without discarding
 		// any of the reason.
-		sampler.ackFailure[key] = strings.Join(strings.Fields(err.Error()), " ")
-		sampler.mu.Unlock()
+		outcome, failure = "failed", strings.Join(strings.Fields(err.Error()), " ")
+		sampler.rememberProbeFailure(account, failure)
 	}
+	if settleErr := usagehook.SettleProbe(cacheDir, account.ID, claim, outcome, failure); settleErr != nil {
+		// The claim already gates its credential; only the outcome went unrecorded.
+		logger.Warn("usage.probe.settle", "credential", claim.Credential, "err", settleErr.Error())
+	}
+	logger.Info("usage.probe.done", "credential", claim.Credential, "outcome", outcome, "failure", failure)
 	return err
+}
+
+func (sampler *LimitsSampler) rememberProbeFailure(account LimitAccount, failure string) {
+	sampler.mu.Lock()
+	defer sampler.mu.Unlock()
+	if sampler.ackFailure == nil {
+		sampler.ackFailure = make(map[string]string)
+	}
+	sampler.ackFailure[account.cacheKey()] = failure
 }
 
 // probeFailure is the remembered reason this account's credential probe
 // failed, or "" if one never ran or ran successfully.
 func (sampler *LimitsSampler) probeFailure(account LimitAccount) string {
 	sampler.mu.Lock()
-	defer sampler.mu.Unlock()
-	return sampler.ackFailure[account.cacheKey()]
+	failure := sampler.ackFailure[account.cacheKey()]
+	sampler.mu.Unlock()
+	if failure != "" || account.Engine != pfmengine.Claude {
+		return failure
+	}
+	// This process never probed: the cross-process gate's record still says
+	// why another process's probe for this account failed.
+	recorded, err := usagehook.RecentProbeFailure(
+		usagehook.CacheDirFor(sampler.Env), account.ID, account.ConfigDir, sampler.now())
+	if err != nil {
+		return "the credential probe record could not be read: " + err.Error()
+	}
+	return recorded
 }
 
 func (account LimitAccount) cacheKey() string {

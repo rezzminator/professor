@@ -24,10 +24,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/ask: 2
       github.com/rezzminator/professor/pfm/internal/atomicfile: 2
       github.com/rezzminator/professor/pfm/internal/binwatch: 4
-      github.com/rezzminator/professor/pfm/internal/callmeter: 8
-      github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse: 4
-      github.com/rezzminator/professor/pfm/internal/callmeter/command: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter/report: 4
+      github.com/rezzminator/professor/pfm/internal/cmdparse: 4
       github.com/rezzminator/professor/pfm/internal/chat: 18
       github.com/rezzminator/professor/pfm/internal/claudelaunch: 14
       github.com/rezzminator/professor/pfm/internal/cli: 2

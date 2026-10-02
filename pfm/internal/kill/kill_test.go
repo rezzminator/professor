@@ -1248,15 +1248,6 @@ func assertKilled(
 	}
 }
 
-func tmuxKilledAt(t *testing.T, database *store.Store, id string) int64 {
-	t.Helper()
-	killed, found, err := database.Killed(context.Background(), id)
-	if err != nil || !found {
-		t.Fatalf("Killed(%q) found=%v err=%v", id, found, err)
-	}
-	return killed.KilledAt
-}
-
 // THE AGENT-ROW REGRESSION. ⌃X on a live agent row wrote NOTHING: the agent's
 // transcript had not reached the index yet, and the kill refused every id the
 // index could not name. The row is composed straight from the running process,

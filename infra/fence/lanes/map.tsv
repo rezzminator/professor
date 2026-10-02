@@ -20,7 +20,6 @@ harvester_read	M	M.11-harvester-tools
 harvester_search_literature	M	M.11-harvester-tools
 harvester_search_web	M	M.11-harvester-tools
 pfm archive	O2	O2.02-archive
-pfm callmeter report	O2	O2.05c-callmeter
 pfm chat ask	E1	E1.15-ask
 pfm chat ask	E2	E2.07-inject-ask-watch
 pfm chat branch	E1	E1.22-handoff
@@ -83,7 +82,6 @@ pfm install	F	F.10-concurrent-new
 pfm install	O1	O1.01-install-idempotent
 pfm install	O1	O1.02a-session-store
 pfm internal agent-open	F	F.16-picker-plumbing
-pfm internal callmeter	O2	O2.05c-callmeter
 pfm internal chat-server	F	F.16-picker-plumbing
 pfm internal claude-launch	E1	E1.01-open-seat1
 pfm internal claude-version	O2	O2.05-internal-plumbing

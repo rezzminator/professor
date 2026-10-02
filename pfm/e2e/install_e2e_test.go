@@ -59,13 +59,6 @@ var managedSettings = []string{
 	".cc/3/settings.json",
 }
 
-var expectedHooks = []string{
-	"usage-hook",
-	"internal explore-deny",
-	"internal epic-inject",
-	"internal launcher-repair",
-}
-
 var goEnvCache = struct {
 	mu     sync.Mutex
 	values map[string]string
@@ -1012,24 +1005,6 @@ func (h *e2eHarness) writeJSON(path string, document map[string]any) {
 	if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
 		h.t.Fatalf("write JSON %s: %v", path, err)
 	}
-}
-
-func containsHookCommand(document map[string]any, want string) bool {
-	hooks, _ := document["hooks"].(map[string]any)
-	for _, value := range hooks {
-		entries, _ := value.([]any)
-		for _, entryValue := range entries {
-			entry, _ := entryValue.(map[string]any)
-			inner, _ := entry["hooks"].([]any)
-			for _, hookValue := range inner {
-				hook, _ := hookValue.(map[string]any)
-				if hook["command"] == want {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func containsJSONString(value any, want string) bool {

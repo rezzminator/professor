@@ -241,7 +241,7 @@ func runChatReloadWorkerWithRuntime(
 				return 2
 			}
 			index++
-			if _, valid := positiveAccount(args[index]); !valid {
+			if !positiveAccount(args[index]) {
 				fmt.Fprintf(stderr, "pfm chat reload: --account takes an account NUMBER, not %q\n", args[index])
 				return 2
 			}
@@ -251,7 +251,7 @@ func runChatReloadWorkerWithRuntime(
 			}
 			account = args[index]
 		default:
-			if _, valid := positiveAccount(args[index]); !valid {
+			if !positiveAccount(args[index]) {
 				fmt.Fprintf(stderr, "pfm chat reload: %s\n", reloadArgumentHint(args[index]))
 				return 2
 			}
@@ -486,9 +486,9 @@ func flattenThenLine(text string) string {
 	return strings.NewReplacer("\n", " ", "\r", " ").Replace(text)
 }
 
-func positiveAccount(value string) (int, bool) {
+func positiveAccount(value string) bool {
 	account, err := strconv.Atoi(value)
-	return account, err == nil && account > 0
+	return err == nil && account > 0
 }
 
 func reloadDurationEnv(name string, fallbackMS int, env paths.Env) time.Duration {

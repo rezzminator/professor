@@ -1,6 +1,6 @@
 # hooks
 
-Professor reaches a chat through hooks at two tiers. pfm's twelve machine-global Claude hooks — eighteen registrations, since `callmeter` is one hook registered on seven events — ride every Claude launch: `claudelaunch.Render` renders them into the `hooks` key of the single `--settings` JSON the chat starts with. `pfm init` scaffolds a project's `.claude/settings.json` from the template, with six hooks over the project's own scripts. Claude merges hooks across its settings layers, so the project's hooks run beside the launch's. Codex and OpenCode carry no pfm hook. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` checks that prove each pfm hook is in place. The tool-call recorder itself is designed separately in [callmeter.md](callmeter.md); here it is only the last row of the inventory. The Bash guard over shared git state is designed in [git-guard.md](git-guard.md).
+Professor reaches a chat through hooks at two tiers. pfm's ten machine-global Claude hooks, one registration each, ride every Claude launch: `claudelaunch.Render` renders them into the `hooks` key of the single `--settings` JSON the chat starts with. `pfm init` scaffolds a project's `.claude/settings.json` from the template, with six hooks over the project's own scripts. Claude merges hooks across its settings layers, so the project's hooks run beside the launch's. Codex and OpenCode carry no pfm hook. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` checks that prove each pfm hook is in place. The Bash guard over shared git state is designed in [git-guard.md](git-guard.md).
 
 A change lands in this design doc first, then in the code or template, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -23,19 +23,19 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 ## Decisions
 
-- **One list is the truth for pfm's hooks.** `claudelaunch.HookTemplates` (`pfm/internal/claudelaunch/hooks.go`) names all twelve hooks as eighteen registrations — eleven single-placement hooks plus `callmeter`'s seven. `claudelaunch.Render` renders it into every launch's `--settings` payload, and spawn-audit compares each live chat's decoded payload against it. A new pfm hook is a new row there, never a second list.
+- **One list is the truth for pfm's hooks.** `claudelaunch.HookTemplates` (`pfm/internal/claudelaunch/hooks.go`) names all ten hooks, one registration each. `claudelaunch.Render` renders it into every launch's `--settings` payload, and spawn-audit compares each live chat's decoded payload against it. A new pfm hook is a new row there, never a second list.
 - **Hooks ride the launch, never a file.** `pfm install` writes no key into any account `settings.json`: no `hooks`, no `statusLine`, no `subagentStatusLine`. A chat carries the hook set it was launched with; a changed set reaches a running chat at its next reload (`pfm chat reload`) or relaunch.
 - **pfm never writes a project's `.claude/settings.json`.** The project tier is scaffolded once by `pfm init` (`pfm/internal/professor/scaffold.go:29`) and is the adopter's file from then on. Its hooks merge with the launch's; neither layer replaces the other.
 - **Every pfm hook command is the installed binary.** Each command is `$HOME/.local/bin/pfm` plus a subcommand (`pfm/internal/claudelaunch/hooks.go`). No pfm hook runs a shell script.
 - **An ownership ledger records what pfm wrote into a file.** It lives at `$HOME/.local/share/pfm/install/settings-hook-ownership.json` (`pfm/internal/installer/update_metadata.go:42-43`, `pfm/internal/installer/settings_ownership.go:13`), keyed by physical file, event, matcher and command (`pfm/internal/installer/settings_ownership.go:21-27`). Two readers use it: the Codex `hooks.json` writer, and the host-migration reconciler (`HostLayout`, verdict `strip`), which removes from each account `settings.json` the pfm hooks, `statusLine` and `subagentStatusLine` an older install left there — the ledger's entries plus every hook pfm owns by command shape ([The ownership rule](#the-ownership-rule)) — and keeps every other key.
 - **A retired hook is removed by the installer and reported by doctor.** One table names the retired subcommands (`pfm/internal/installer/settings.go:319-343`); the Codex writer strips them from every `hooks.json` event, and doctor flags any left behind as STALE.
-- **pfm hooks fail open.** A pfm hook that cannot do its job writes one stderr line and lets the chat continue. Only the two intercepts exit 2, and only for the prompt they were built to stop; `git-guard` alone also denies a git command it cannot read ([git-guard.md](git-guard.md#how-it-fails)). `callmeter` is fail-open the same way: it always exits 0 and logs and counts a fault rather than blocking a call.
+- **pfm hooks fail open.** A pfm hook that cannot do its job writes one stderr line and lets the chat continue. Only the two intercepts exit 2, and only for the prompt they were built to stop; `git-guard` alone also denies a git command it cannot read ([git-guard.md](git-guard.md#how-it-fails)).
 
 ## Count per engine
 
 | Engine | Tier | Hooks | Installed by |
 | --- | --- | --- | --- |
-| Claude | every interactive launch, `--settings` `hooks` | 12 hooks, 18 registrations (pfm-owned; `callmeter` alone is 7) | `claudelaunch.Render` |
+| Claude | every interactive launch, `--settings` `hooks` | 10 hooks, 10 registrations (pfm-owned) | `claudelaunch.Render` |
 | Claude | project `.claude/settings.json` | 6 in the template | `pfm init`, then the adopter |
 | Claude | operator's own, documented | 2 (memory backup, opt-in) | the adopter, by hand |
 | Codex | `{codex home}/hooks.json` | 0 owned; 2 retired shapes removed | `pfm install` (removal only) |
@@ -43,7 +43,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 ## Launch-time Claude hooks (pfm-owned)
 
-`claudelaunch.Render` (`pfm/internal/claudelaunch/render.go`) turns `claudelaunch.HookTemplates` into the `hooks` object of the launch `--settings` JSON: one entry per (event, matcher) pair, each registration once, `async: true` on every `callmeter` entry. Every interactive door renders it — `pfm chat new`, the picker and `pfm chat open`, `pfm chat branch`, `pfm chat reload`, `pfm internal agent-open`, a `claude` typed at a shell through the managed launcher ([claude-launch.md](../engines/claude-launch.md#doors)). Three runs carry no pfm hook: a launcher passthrough (`-p`, `--version`, the Claude subcommands, `PFM_LAUNCH_PASSTHROUGH=1`), which execs the real binary untouched; the `claude agents --json` query; and `pfm headless exec`, which is config-free by design. Each command below is `$HOME/.local/bin/pfm …`.
+`claudelaunch.Render` (`pfm/internal/claudelaunch/render.go`) turns `claudelaunch.HookTemplates` into the `hooks` object of the launch `--settings` JSON: one entry per (event, matcher) pair, each registration once. Every interactive door renders it — `pfm chat new`, the picker and `pfm chat open`, `pfm chat branch`, `pfm chat reload`, `pfm internal agent-open`, a `claude` typed at a shell through the managed launcher ([claude-launch.md](../engines/claude-launch.md#doors)). Three runs carry no pfm hook: a launcher passthrough (`-p`, `--version`, the Claude subcommands, `PFM_LAUNCH_PASSTHROUGH=1`), which execs the real binary untouched; the `claude agents --json` query; and `pfm headless exec`, which is config-free by design. Each command below is `$HOME/.local/bin/pfm …`.
 
 Placement holds by construction: the renderer emits each registration once under its own pair, so a launch cannot carry a duplicate, a moved or a mis-typed pfm hook. The only place such a copy can still sit is an account `settings.json` an older install wrote, which the [legacy row](#account-files-the-legacy-row) names and `pfm install` strips.
 
@@ -54,12 +54,11 @@ Placement holds by construction: the renderer emits each registration once under
 | clear-kill | `SessionEnd` | `""` | `pfm internal clear-kill` | `hooks.go` | `pfm/internal/hookentry/clear_kill.go:15` | Handles a `/clear` for the fleet session record | Fail-open, stderr line per cause (`clear_kill.go:27-66`) |
 | exit-close | `SessionEnd` | `""` | `pfm internal exit-close` | `hooks.go` | `pfm/internal/hookentry/exit_close.go:23` | Closes the terminal a chat was watched through after a human `/exit` | Fail-open, the terminal is left open (`exit_close.go:30-73`) |
 | explore-deny | `PreToolUse` | `Agent\|Task` | `pfm internal explore-deny` | `hooks.go` | `pfm/internal/hookentry/explore_deny.go:18` | Denies an `Explore` spawn and names `tracer` instead (`explore_deny.go:16`) | Fail-open on an unreadable payload (`explore_deny.go:22-30`) |
-| git-guard | `PreToolUse` | `Bash` | `pfm internal git-guard` | `hooks.go` | `pfm/internal/hookentry/git_guard.go:113` | Denies a shared git write (worktrees, history, branches, tags, remotes, the index, whole-tree destruction, repository settings) to every agent but `gitter`, per [git-guard.md](git-guard.md) | Fail-open on an unreadable payload or a parser error (`git_guard.go:114-142`); denies a git command one of whose parts does not parse |
+| git-guard | `PreToolUse` | `Bash` | `pfm internal git-guard` | `hooks.go` | `pfm/internal/hookentry/git_guard.go:106` | Denies a shared git write (worktrees, history, branches, tags, remotes, the index, whole-tree destruction, repository settings) to every agent but `gitter`, per [git-guard.md](git-guard.md) | Fail-open on an unreadable payload or a parser error (`git_guard.go:107-134`); denies a command that mentions git one of whose parts does not parse, and every command past the `git` filter that hits a parse bound |
 | rr-dir | `SubagentStart` | `rr\|super-rr\|heavy-rr` | `pfm internal rr-dir` | `hooks.go` | `pfm/internal/hookentry/rr_dir.go:27-31` | Hands the rr agents the directory their answer is saved into | Fail-open, exits 0 (`rr_dir.go:45-47`) |
 | epic-inject | `UserPromptSubmit` | `""` | `pfm internal epic-inject` | `hooks.go` | `pfm/internal/hookentry/epic_inject.go:44` | Injects an epic manifest once per session and epic name | Fail-open (`epic_inject.go:105`) |
 | reload-intercept | `UserPromptSubmit` | `""` | `pfm internal reload-intercept` | `hooks.go` | `pfm/internal/hookentry/reload_intercept.go:17` | Turns a `/reload` prompt into a scheduled reboot and blocks the prompt | Exits 2 with the reason when the reload cannot be scheduled (`reload_intercept.go:38-49`) |
 | exit-intercept | `UserPromptSubmit` | `""` | `pfm internal exit-intercept` | `hooks.go` | `pfm/internal/hookentry/exit_intercept.go:18` | Turns an exact `e` or `/e` prompt into a kill of this chat | Exits 2 when the kill fails (`exit_intercept.go:40`) |
-| callmeter | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `SubagentStart`, `SubagentStop`, `Stop` (one command, seven registrations) | `Bash` on `PreToolUse`; `*` on the other tool events and the subagent events; none on `PostToolBatch` and `Stop` | `pfm internal callmeter`, async | `hooks.go` | `pfm/internal/hookentry/callmeter.go` | Records calls, requests, agents and faults, per [callmeter.md](callmeter.md) | Always exits 0; logs and counts a fault |
 
 The usage hook and the `pfm ls` Limits tab reach `GET https://api.anthropic.com/api/oauth/usage` only through `usagehook.Fetch` (`pfm/internal/usagehook/fetch.go`), which answers in this order:
 
@@ -131,7 +130,7 @@ Three checks prove pfm's hooks. The launch hooks are proven per live chat, becau
 
 ### Launch hooks: spawn-audit
 
-`pfm doctor` spawn-audit reads each live `cc-` chat's Claude argv from `/proc` and decodes it with `claudelaunch.Parse`, the inverse of `Render` ([claude-launch.md](../engines/claude-launch.md#pfm-doctor-spawn-audit)). A chat is `INJECTED` only when its `--settings` payload carries the registry's hook set: every `claudelaunch.HookTemplates` registration present exactly once, under its own event and matcher, with the exact command and `async: true` where the template has it.
+`pfm doctor` spawn-audit reads each live `cc-` chat's Claude argv from `/proc` and decodes it with `claudelaunch.Parse`, the inverse of `Render` ([claude-launch.md](../engines/claude-launch.md#pfm-doctor-spawn-audit)). A chat is `INJECTED` only when its `--settings` payload carries the registry's hook set: every `claudelaunch.HookTemplates` registration present exactly once, under its own event and matcher, with the exact command. No current template sets `async`; the renderer keeps the field only as `Parse`'s round-trip twin.
 
 | Verdict | Hook meaning | Reports |
 | --- | --- | --- |
@@ -207,4 +206,3 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 | The engine adapters | `.claude/codex-build.json` | What Codex and OpenCode are told about hooks |
 | The CLI surface | `docs/dev/pfm-surface.md` | The `doctor`, `install` and `internal` rows |
 | The setup docs | `docs/SETUP.md`, `docs/BLUEPRINT.md`, `docs/references/memory-backup.md` | What an adopter is told to install |
-| The recorder | `pfm/internal/hookentry/callmeter.go`, `pfm/internal/callmeter/`, [callmeter.md](callmeter.md) | The tool-call hook and its design |

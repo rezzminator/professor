@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 type actionTmuxJail struct {
@@ -293,7 +295,7 @@ func fakeEngine(t *testing.T, source, target string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(target, content, 0o755); err != nil {
+	if err := testjail.WriteExecutable(target, content, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if runtime.GOOS != "darwin" {

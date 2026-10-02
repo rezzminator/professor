@@ -26,7 +26,7 @@ func TestInternalClaudeVersionPrintsNewestOrExits127(t *testing.T) {
 	older := filepath.Join(versions, "2.1.263")
 	newest := filepath.Join(versions, "2.1.270")
 	for _, path := range []string{older, newest} {
-		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

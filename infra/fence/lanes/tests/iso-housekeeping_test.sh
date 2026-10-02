@@ -24,7 +24,7 @@ R="$T/.$FXNAME"
 mkdir -p "$R/.claude/scripts" "$R/pfm/scripts" "$R/infra/fence/lanes"
 cp "$SUT" "$R/.claude/scripts/dev.sh"
 cp "$REPO/pfm/scripts/repo-git.sh" "$R/pfm/scripts/"
-cp "$REPO/infra/fence/housekeeping.sh" "$REPO/infra/fence/fence-env.sh" "$REPO/infra/fence/image-key.sh" "$REPO/infra/fence/docker-compose.yml" "$REPO/infra/fence/steps.sh" "$REPO/infra/fence/checks.sh" "$R/infra/fence/"
+cp "$REPO/infra/fence/housekeeping.sh" "$REPO/infra/fence/fence-env.sh" "$REPO/infra/fence/image-key.sh" "$REPO/infra/fence/docker-compose.yml" "$REPO/infra/fence/steps.sh" "$REPO/infra/fence/stepprof.sh" "$REPO/infra/fence/checks.sh" "$REPO/infra/fence/gate-history.sh" "$R/infra/fence/"
 printf 'FROM scratch\n' >"$R/infra/fence/pfm-dev.Dockerfile"
 # A fixture volume makes a hard-coded copy of today's list fail the order check.
 sed -i 's/^\(FENCE_CACHE_VOLUMES="[^"]*\)"/\1 fixture-cache"/' "$R/infra/fence/housekeeping.sh"
@@ -54,6 +54,7 @@ services:
 EOF
     elif [[ "$*" == *' run '* ]]; then
       printf 'KEY %s\n' "${PFM_DEV_INPUTS_KEY:-unset}" >>"$STUB_DOCKER_LOG"
+      exit "${STUB_RUN_RC:-0}"
     fi ;;
   "image inspect") printf '%s\n' "${STUB_LABEL:-unkeyed}" ;;
 esac
@@ -61,6 +62,7 @@ exit 0
 STUB
 chmod +x "$BIN/docker"
 export PATH="$BIN:$PATH" STUB_DOCKER_LOG="$T/docker.log" STUB_CONTEXT="$R/infra/fence" PFM_FENCE_STAMP_DIR="$T/stamp"
+export PFM_GATE_HISTORY_DIR="$T/ledger"
 
 iso() { : >"$STUB_DOCKER_LOG"; OUT="$(bash "$R/.claude/scripts/dev.sh" iso "$@" 2>&1)"; RC=$?; }
 line_of() { grep -n -- "$1" "$STUB_DOCKER_LOG" | head -1 | cut -d: -f1; }
@@ -79,6 +81,11 @@ for a in status "run true" shell "sim true"; do
   else bad "iso $a" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 done
 
+# steps.sh sources stepprof.sh from its own directory: a fixture without it dies at dev.sh's source line.
+iso status
+if [ "$RC" -eq 0 ] && ! grep -q 'cannot source' <<<"$OUT"; then ok "dev.sh sources steps.sh with the stepprof.sh the fixture holds"
+else bad "dev.sh sources steps.sh" "rc=$RC" "$OUT"; fi
+
 for a in test build; do
   iso "$a" templates
   hk="$(line_of '^image prune')"; c="$(line_of '^compose ')"
@@ -88,9 +95,25 @@ done
 
 iso gate
 if [ "$RC" -eq 0 ] && housekept && ensured_before_compose && [ "$(grep -c '^compose .* run ' "$STUB_DOCKER_LOG")" -eq 1 ] \
-  && grep -q '^compose .*pfm-dev bash -c .*bash infra/fence/egress\.sh run \./\.claude/scripts/dev\.sh gate all$' "$STUB_DOCKER_LOG"; then
-  ok "iso gate: housekeeping, then one compose run of the egress recorder"
+  && grep -q '^compose .*pfm-dev bash -c .*bash infra/fence/egress\.sh run \./\.claude/scripts/dev\.sh gate all$' "$STUB_DOCKER_LOG" \
+  && grep -q '^gate-history:' <<<"$OUT"; then
+  ok "iso gate: housekeeping, then one compose run of the egress recorder, then the ledger ingest"
 else bad "iso gate" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
+
+export STUB_RUN_RC=3
+iso gate
+unset STUB_RUN_RC
+if [ "$RC" -eq 3 ] && grep -q '^gate-history:' <<<"$OUT"; then
+  ok "iso gate red: the ledger ingest still runs and dev.sh exits with the gate's own status"
+else bad "iso gate red" "rc=$RC (want 3)" "$OUT"; fi
+
+export STEPS_HEAVY_JOBS=3
+unset PFM_TEST_PROFILE
+iso run true
+unset STEPS_HEAVY_JOBS
+if [ "$RC" -eq 0 ] && grep -q -- '-e STEPS_HEAVY_JOBS=3 ' "$STUB_DOCKER_LOG" && ! grep -q 'PFM_TEST_PROFILE' "$STUB_DOCKER_LOG"; then
+  ok "iso forwards a set profiling knob and leaves an unset one out"
+else bad "iso knobs" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 
 STUB_VOLUME=0 iso status
 if [ "$RC" -eq 0 ] && grep -qx 'volume create pfm-dev-gocache' "$STUB_DOCKER_LOG" && grep -qx 'volume create pfm-dev-lintcache' "$STUB_DOCKER_LOG" && grep -qx 'volume create fixture-cache' "$STUB_DOCKER_LOG"; then

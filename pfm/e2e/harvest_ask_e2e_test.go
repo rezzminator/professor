@@ -8,9 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestHarvestAskE2E(t *testing.T) {
+	t.Parallel()
 	requireE2EFence(t)
 	repo := t.TempDir()
 	headBinary := os.Getenv(e2eScriptBinaryEnv)
@@ -87,7 +90,7 @@ func TestHarvestAskE2E(t *testing.T) {
 			"cat > " + shellQuoteFixture(capture+".prompt") + "\n" +
 			"sed -n 's/^[0-9][0-9]*\\. \\(.*\\) — source:.*$/\\1/p' " + shellQuoteFixture(capture+".prompt") + " | while IFS= read -r prepared; do cat \"$prepared\"; done > " + shellQuoteFixture(capture+".files") + "\n" +
 			"printf '%s\\n' " + strings.Join(replyArgs, " ") + "\n"
-		if err := os.WriteFile(binary, []byte(body), 0o700); err != nil {
+		if err := testjail.WriteExecutable(binary, []byte(body), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		binaries[name] = binary

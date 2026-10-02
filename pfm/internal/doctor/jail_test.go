@@ -81,7 +81,7 @@ func TestDoctorReportsClaudeVersionCountBytesAndPrunable(t *testing.T) {
 	live := filepath.Join(versions, "2.1.263")
 	prunable := filepath.Join(versions, "2.1.250")
 	for _, path := range []string{newest, live, prunable} {
-		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -256,10 +256,10 @@ func TestPFMPathWarningsIgnoreHostShimsOutsideTargetHome(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(canonicalDir, "pfm"), []byte("target-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(canonicalDir, "pfm"), []byte("target-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,11 +283,11 @@ func TestPFMPathWarningsReportHostShimsOutsideHomeWithoutAJail(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(canonicalDir, "pfm"), []byte("canonical-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(canonicalDir, "pfm"), []byte("canonical-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	hostShim := filepath.Join(hostShimDir, "pfm")
-	if err := os.WriteFile(hostShim, []byte("shadowing-pfm"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(hostShim, []byte("shadowing-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 

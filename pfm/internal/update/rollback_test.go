@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // journalRollbackRunner plays the candidate's `install --rollback {id}` and
@@ -89,7 +90,7 @@ func (update journalRollbackUpdate) run(t *testing.T) (order []string, calls [][
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
-		return os.WriteFile(output, []byte("new\n"), 0o755)
+		return testjail.WriteExecutable(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return update.install()

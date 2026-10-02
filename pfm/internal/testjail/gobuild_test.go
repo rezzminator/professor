@@ -12,7 +12,7 @@ import (
 
 func TestPFMBinaryUsesExecutablePrebuilt(t *testing.T) {
 	prebuilt := filepath.Join(t.TempDir(), "pfm")
-	if err := os.WriteFile(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvTestPFMBinary, prebuilt)
@@ -65,7 +65,7 @@ shift
 printf '#!/bin/sh\nexit 0\n' > "$1"
 chmod +x "$1"
 `
-	if err := os.WriteFile(filepath.Join(goDir, "go"), []byte(stub), 0o700); err != nil {
+	if err := WriteExecutable(filepath.Join(goDir, "go"), []byte(stub), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))
@@ -105,7 +105,7 @@ chmod +x "$1"
 
 func TestMockEngineBinaryUsesExecutablePrebuilt(t *testing.T) {
 	prebuilt := filepath.Join(t.TempDir(), "mock-engine")
-	if err := os.WriteFile(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvTestMockEngineBinary, prebuilt)
@@ -157,7 +157,7 @@ shift
 printf '#!/bin/sh\nexit 0\n' > "$1"
 chmod +x "$1"
 `
-	if err := os.WriteFile(filepath.Join(goDir, "go"), []byte(stub), 0o700); err != nil {
+	if err := WriteExecutable(filepath.Join(goDir, "go"), []byte(stub), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))
@@ -182,7 +182,7 @@ chmod +x "$1"
 
 func TestGoBuildReportsCombinedOutput(t *testing.T) {
 	goDir := t.TempDir()
-	if err := os.WriteFile(
+	if err := WriteExecutable(
 		filepath.Join(
 			goDir,
 			"go",
@@ -204,7 +204,7 @@ func TestGoBuildReportsCombinedOutput(t *testing.T) {
 
 func TestGoBuildReportsStartFailure(t *testing.T) {
 	goDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(goDir, "go"), []byte("#!/missing-test-interpreter\n"), 0o700); err != nil {
+	if err := WriteExecutable(filepath.Join(goDir, "go"), []byte("#!/missing-test-interpreter\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", goDir+":"+os.Getenv("PATH"))

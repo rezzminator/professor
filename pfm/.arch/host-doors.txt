@@ -18,5 +18,6 @@ internal/spawn/socket.go 1
 internal/stats/docker_identity.go 1
 internal/statusline/process.go 1
 internal/statusline/runtime.go 2
+internal/testjail/profile.go 3
 internal/testjail/testjail.go 3
 internal/ui/model.go 2

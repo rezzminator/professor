@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func writeKeychainFixture(t *testing.T, body string, exitCode int) string {
@@ -23,7 +24,7 @@ func writeKeychainFixture(t *testing.T, body string, exitCode int) string {
 	if exitCode != 0 {
 		script += "exit " + strconv.Itoa(exitCode) + "\n"
 	}
-	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o755); err != nil {
 		t.Fatalf("write keychain fixture: %v", err)
 	}
 	return binary
@@ -58,7 +59,7 @@ func TestRunKeychainPreservesDeniedKeychainAsAnError(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "security-fixture")
 	const detail = "User interaction is not allowed"
 	script := "#!/bin/sh\nprintf '%s' '" + detail + "' >&2\nexit 36\n"
-	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o755); err != nil {
 		t.Fatalf("write denied keychain fixture: %v", err)
 	}
 
@@ -76,7 +77,7 @@ func TestRunKeychainPreservesDeniedKeychainAsAnError(t *testing.T) {
 
 func TestRunKeychainHonorsCallerCancellation(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "security-fixture")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nsleep 0.1\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nsleep 0.1\n"), 0o755); err != nil {
 		t.Fatalf("write hanging keychain fixture: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

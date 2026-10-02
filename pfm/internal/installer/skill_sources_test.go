@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // skillFixtureGit runs git in dir with a fixed identity; fixtures are local
@@ -689,8 +690,11 @@ func TestSourceFetchedSkillsDryRunOfAnExistingStoreChangesNothing(t *testing.T) 
 func TestRunSkillGitReturnsWithinItsBound(t *testing.T) {
 	t.Parallel()
 	script := filepath.Join(t.TempDir(), "git")
-	writeFixture(t, script, "#!/bin/sh\necho 'fatal: slow remote' >&2\nsleep 12 &\nsleep 12\n")
-	if err := os.Chmod(script, 0o755); err != nil {
+	if err := testjail.WriteExecutable(
+		script,
+		[]byte("#!/bin/sh\necho 'fatal: slow remote' >&2\nsleep 12 &\nsleep 12\n"),
+		0o755,
+	); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()

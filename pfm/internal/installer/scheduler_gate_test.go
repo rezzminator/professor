@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeRunner is the package tests' systemd/launchd runner: Run answers the
@@ -236,7 +238,11 @@ func TestNameSyncServiceRunningProductionShape(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			dir := t.TempDir()
 			if testCase.script != "" {
-				if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(testCase.script), 0o755); err != nil {
+				if err := testjail.WriteExecutable(
+					filepath.Join(dir, "systemctl"),
+					[]byte(testCase.script),
+					0o755,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}

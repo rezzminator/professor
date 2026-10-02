@@ -17,6 +17,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestSpawnAuditRegistryPayload(t *testing.T) {
@@ -513,7 +514,7 @@ func TestSpawnDoorStampUsesBinaryWhenComposedPromptUnreadable(t *testing.T) {
 	home := t.TempDir()
 	prompt := doctorProfessorPromptPath(t, home)
 	binary := filepath.Join(t.TempDir(), "pfm")
-	if err := os.WriteFile(binary, []byte("fixture"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Unix(1_700_000_000, 0)

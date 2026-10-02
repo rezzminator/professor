@@ -13,6 +13,7 @@ import (
 )
 
 func TestReleasedUpdaterInstallGate(t *testing.T) {
+	t.Parallel()
 	requireE2EFence(t)
 	repo := sharedSourceRepo(t)
 	h := &e2eHarness{t: t, repo: repo, goCache: requiredGoEnv(t, "GOCACHE"), goModCache: requiredGoEnv(t, "GOMODCACHE")}

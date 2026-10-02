@@ -8,6 +8,8 @@ import (
 	goruntime "runtime"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // writeBrowserEnv lays down an environment whose interpreter exists and whose
@@ -19,7 +21,7 @@ func writeBrowserEnv(t *testing.T, root, sourceSHA, lockSHA string) Runtime {
 	if err := os.MkdirAll(filepath.Dir(python), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(python, []byte("#!/bin/sh\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(python, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	record, err := json.Marshal(

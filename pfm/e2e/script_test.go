@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -144,16 +145,17 @@ func prepareScriptBinary() error {
 	if os.Getenv("GOCOVERDIR") != "" {
 		flags = append(flags, "-cover", "-covermode=atomic")
 	}
-	if err := testjail.GoBuild(pfmRoot, binary, "./cmd/pfm", flags...); err != nil {
-		_ = os.RemoveAll(root)
-		return err
-	}
-	if err := buildMockEngine(pfmRoot, root); err != nil {
+	mockEngine := filepath.Join(root, "mock-engine")
+	if err := buildConcurrently(
+		func() error { return testjail.GoBuild(pfmRoot, binary, "./cmd/pfm", flags...) },
+		func() error { return compileMockEngine(pfmRoot, mockEngine) },
+	); err != nil {
 		_ = os.RemoveAll(root)
 		return err
 	}
 	for name, value := range map[string]string{
 		e2eScriptBinaryEnv: binary,
+		e2eMockEngineEnv:   mockEngine,
 		e2eScriptRootEnv:   root,
 		e2eScriptOwnerEnv:  strconv.Itoa(os.Getpid()),
 	} {
@@ -165,11 +167,32 @@ func prepareScriptBinary() error {
 	return prepareCoverageDirectory()
 }
 
+// buildConcurrently runs every build at once and waits for all of them. Each
+// failure keeps its own error text, which names its target; together they are
+// joined in argument order.
+func buildConcurrently(builds ...func() error) error {
+	errs := make([]error, len(builds))
+	var group sync.WaitGroup
+	for index, build := range builds {
+		group.Go(func() { errs[index] = build() })
+	}
+	group.Wait()
+	return errors.Join(errs...)
+}
+
+// compileMockEngine builds cmd/mock-engine to binary.
+func compileMockEngine(pfmRoot, binary string) error {
+	if err := testjail.GoBuild(pfmRoot, binary, "./cmd/mock-engine"); err != nil {
+		return fmt.Errorf("build mock-engine: %w", err)
+	}
+	return nil
+}
+
 // buildMockEngine builds cmd/mock-engine into root and publishes its path.
 func buildMockEngine(pfmRoot, root string) error {
 	binary := filepath.Join(root, "mock-engine")
-	if err := testjail.GoBuild(pfmRoot, binary, "./cmd/mock-engine"); err != nil {
-		return fmt.Errorf("build mock-engine: %w", err)
+	if err := compileMockEngine(pfmRoot, binary); err != nil {
+		return err
 	}
 	if err := os.Setenv(e2eMockEngineEnv, binary); err != nil {
 		return fmt.Errorf("set %s: %w", e2eMockEngineEnv, err)
@@ -189,6 +212,7 @@ func prepareCoverageDirectory() error {
 }
 
 func TestScriptHarnessBuildSettings(t *testing.T) {
+	t.Parallel()
 	requireE2EFence(t)
 	if got := os.Getenv("GOCOVERDIR"); got != e2eCoverageAtStart {
 		t.Errorf("GOCOVERDIR after harness = %q, want original %q", got, e2eCoverageAtStart)
@@ -216,6 +240,57 @@ func TestScriptHarnessBuildSettings(t *testing.T) {
 	}
 }
 
+func TestScriptBinaryBuildsRunConcurrently(t *testing.T) {
+	t.Parallel()
+	requireE2EFence(t)
+	started := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+	build := func(own, other int) func() error {
+		return func() error {
+			close(started[own])
+			select {
+			case <-started[other]:
+				return nil
+			case <-time.After(10 * time.Second):
+				return fmt.Errorf("build %d waited 10s for build %d to start", own, other)
+			}
+		}
+	}
+	if err := buildConcurrently(build(0, 1), build(1, 0)); err != nil {
+		t.Fatalf("builds did not overlap: %v", err)
+	}
+}
+
+func TestScriptBinaryBuildFailureNamesItsTarget(t *testing.T) {
+	t.Parallel()
+	requireE2EFence(t)
+	empty := t.TempDir()
+	pfmBuild := func() error { return testjail.GoBuild(empty, filepath.Join(empty, "pfm"), "./cmd/pfm") }
+	mockBuild := func() error { return compileMockEngine(empty, filepath.Join(empty, "mock-engine")) }
+	succeeds := func() error { return nil }
+
+	err := buildConcurrently(pfmBuild, succeeds)
+	if err == nil || !strings.HasPrefix(err.Error(), "go build ./cmd/pfm: ") {
+		t.Fatalf("pfm build failure = %v, want it to name ./cmd/pfm", err)
+	}
+	err = buildConcurrently(succeeds, mockBuild)
+	if err == nil || !strings.HasPrefix(err.Error(), "build mock-engine: go build ./cmd/mock-engine: ") {
+		t.Fatalf("mock-engine build failure = %v, want it to name ./cmd/mock-engine", err)
+	}
+	err = buildConcurrently(pfmBuild, mockBuild)
+	if err == nil {
+		t.Fatal("both builds failed, want an error")
+	}
+	pfmAt := strings.Index(err.Error(), "go build ./cmd/pfm: ")
+	mockAt := strings.Index(err.Error(), "build mock-engine: go build ./cmd/mock-engine: ")
+	if pfmAt < 0 || mockAt < pfmAt {
+		t.Fatalf("both builds failed = %v, want the pfm failure then the mock-engine failure", err)
+	}
+}
+
+// TestScripts stays serial: install-init.txtar runs `pfm install` with no
+// PFM_MANAGED_SETTINGS_DIR, so it writes the machine managed-settings drop-in
+// (/etc/claude-code/managed-settings.d/pfm.json) that
+// TestInstallInitUpdateUninstallE2E reads back.
 func TestScripts(t *testing.T) {
 	requireE2EFence(t)
 	source := sharedSourceRepo(t)

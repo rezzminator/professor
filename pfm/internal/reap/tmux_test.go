@@ -2,18 +2,18 @@ package reap
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeTmuxBinary plays tmux: exits 0 and prints nothing.
 func fakeTmuxBinary(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -70,7 +70,7 @@ func TestTmuxReaperRecordsEveryInvocation(t *testing.T) {
 // a sweep failure.
 func TestTmuxReaperSessionsNoServerIsAbsence(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(
+	if err := testjail.WriteExecutable(
 		binary,
 		[]byte("#!/bin/sh\necho 'no server running on vsct' >&2\nexit 1\n"),
 		0o700,

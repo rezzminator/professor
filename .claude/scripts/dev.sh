@@ -169,9 +169,11 @@ go_test_report() {
       | grep -vE '^[[:space:]]*$' | tail -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
     info "log: $abs"; return
   fi
-  local failed failpkgs pkg test body total n=0
-  failed="$(jq -r 'select(.Action=="fail" and .Test != null) | .Package + "\t" + .Test' "$json" | sort -u)"
-  failpkgs="$(jq -r 'select(.Action=="fail" and .Test == null) | .Package' "$json" | sort -u)"
+  local fails failed failpkgs pkg test body total n=0
+  # One pass over the stream finds both kinds of failure; a green stream is read once more only by the probe above.
+  fails="$(jq -r 'select(.Action=="fail") | if .Test != null then "T\t" + .Package + "\t" + .Test else "P\t" + .Package end' "$json")"
+  failed="$(awk -F'\t' '$1=="T" { print $2 "\t" $3 }' <<< "$fails" | sort -u)"
+  failpkgs="$(awk -F'\t' '$1=="P" { print $2 }' <<< "$fails" | sort -u)"
   if [[ -n "$failed" ]]; then
     while IFS=$'\t' read -r pkg test; do
       [[ -z "$pkg" ]] && continue
@@ -424,6 +426,11 @@ cmd_iso() { # cmd_iso <action> [project | command…]
   mkdir -p "$TMP_BASE/timing"
   extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
   if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
+  # Profiling and step-scheduling knobs reach the fence when the caller set them.
+  local knob
+  for knob in STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
+    if [[ -n "${!knob+x}" ]]; then extra+=(-e "$knob=${!knob}"); fi
+  done
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   # infra/fence/image-key.sh: a service image is built only when the key of its
   # build inputs differs from the pfm.fence.inputs label the image carries, so a
@@ -446,7 +453,13 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       # The flight gate: pfm and templates rows as concurrent steps in ONE
       # container, the per-step table in the run dir under /pfm-timing. The
       # whole gate runs under the egress recorder; its verdict is the last line.
-      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; bash infra/fence/egress.sh run ./.claude/scripts/dev.sh gate ${2:-all}" ;;
+      local gate_rc=0
+      docker compose -f "$compose" run --rm ${FENCE_IMAGE_BUILD[@]+"${FENCE_IMAGE_BUILD[@]}"} ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; bash infra/fence/egress.sh run ./.claude/scripts/dev.sh gate ${2:-all}" || gate_rc=$?
+      # The permanent ledger lives on the host: append this run (and any real
+      # gate run not yet recorded) after the container is gone.
+      bash "$REPO_ROOT/infra/fence/gate-history.sh" ingest "$TMP_BASE/timing" --host-load-now \
+        || echo "gate-history: LEDGER-NOT-WRITTEN — ingest exited $? (the gate verdict above stands)" >&2
+      return "$gate_rc" ;;
     run)
       # An arbitrary command inside the fence, from the worktree root — for the
       # probes the fixed rows do not cover (`go test -json ./cmd/pfm`, a single

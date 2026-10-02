@@ -14,6 +14,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {
@@ -317,7 +318,7 @@ func TestCommandThenSpawnerStatesTheSenderToTheWaiter(t *testing.T) {
 	dump := filepath.Join(scratch, "environment.txt")
 	stub := filepath.Join(scratch, "setsid-stub")
 	script := "#!/bin/sh\nenv > " + dump + "\n"
-	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// An inherited definition must lose to the one this spawn states, or a
@@ -372,7 +373,7 @@ func TestCommandThenSpawnerFallsBackToNohup(t *testing.T) {
 	dump := filepath.Join(scratch, "nohup-arguments.txt")
 	nohup := filepath.Join(scratch, "nohup-stub")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + dump + "\n"
-	if err := os.WriteFile(nohup, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(nohup, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	spawner := CommandThenSpawner{
@@ -579,7 +580,7 @@ func TestCommandThenSpawnerStatesTheEngineAndArmsTheRecord(t *testing.T) {
 	dump := filepath.Join(scratch, "arguments.txt")
 	stub := filepath.Join(scratch, "setsid-stub")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + dump + "\n"
-	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(stub, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	spawner := CommandThenSpawner{Executable: filepath.Join(scratch, "pfm"), Setsid: stub}

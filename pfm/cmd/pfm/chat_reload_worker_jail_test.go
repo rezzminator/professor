@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func reloadWorkerAccountFixture(t *testing.T) (string, string, string) {
@@ -31,13 +32,13 @@ func reloadWorkerAccountFixture(t *testing.T) (string, string, string) {
 		t.Skip("python3 is not installed")
 	}
 	promptScript := filepath.Join(t.TempDir(), "prompt.py")
-	if err := os.WriteFile(promptScript, []byte(reloadPromptFixture), 0o700); err != nil {
+	if err := testjail.WriteExecutable(promptScript, []byte(reloadPromptFixture), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	captured := filepath.Join(t.TempDir(), "account.txt")
 	fixtureClaude := filepath.Join(t.TempDir(), "claude-fixture.sh")
 	script := "#!/bin/sh\nprintf 'ACCOUNT:%s\\n' \"${CLAUDE_CONFIG_DIR:-}\" > '" + captured + "'\nexec bash -c 'exec -a claude-fixture.sh python3 " + promptScript + "'\n"
-	if err := os.WriteFile(fixtureClaude, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(fixtureClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	configPath := writeConfigFixture(t, root, `{
@@ -318,13 +319,17 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		then  = "BOUND-CODEX-THEN"
 	)
 	promptScript := filepath.Join(t.TempDir(), "prompt.py")
-	if err := os.WriteFile(promptScript, []byte(strings.ReplaceAll(reloadPromptFixture, "❯", "›")), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		promptScript,
+		[]byte(strings.ReplaceAll(reloadPromptFixture, "❯", "›")),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	argvFile := filepath.Join(t.TempDir(), "codex-argv.txt")
 	fixtureCodex := filepath.Join(t.TempDir(), "codex-fixture.sh")
 	script := "#!/bin/sh\n{ printf 'CALL\\n'; for a in \"$@\"; do printf 'ARG:%s\\n' \"$a\"; done; } >> '" + argvFile + "'\nexec bash -c 'exec -a codex-fixture.sh python3 " + promptScript + "'\n"
-	if err := os.WriteFile(fixtureCodex, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(fixtureCodex, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	codexHome := filepath.Join(root, "codex")

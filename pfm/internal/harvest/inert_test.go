@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"golang.org/x/net/html"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // Fixtures under testdata/walls are hand-built from the structure of live
@@ -167,8 +169,13 @@ func TestInertUnwrapSurfacesOnlyUnseenDeferredContent(t *testing.T) {
 // the shown text the next probe searches, so the bookkeeping must grow with
 // the words surfaced — a page of 2N distinct deferred containers may cost at
 // most about twice the bytes of a page of N, never the square.
+//
+// Serial on purpose: it reads the process-wide runtime.MemStats.TotalAlloc, so
+// every parallel test allocating beside it lands in its measurement and can push
+// the 2N/N ratio past the bound. A serial test runs before any parallel one is
+// released.
 func TestInertBookkeepingGrowsLinearly(t *testing.T) {
-	t.Parallel()
+	testjail.PauseFlightRecorder(t)
 	page := func(containers int) string {
 		var b strings.Builder
 		b.WriteString(`<html><body><p>The visible lede of the page.</p>`)
@@ -316,6 +323,7 @@ func TestShadowRootWordsJoinShown(t *testing.T) {
 // always calls) must stay roughly constant as the page grows, not scale with
 // its word count.
 func TestNoInertContainerSkipsTheWindowScan(t *testing.T) {
+	testjail.PauseFlightRecorder(t)
 	buildDoc := func(t *testing.T, words int) *html.Node {
 		t.Helper()
 		var b strings.Builder
@@ -341,6 +349,7 @@ func TestNoInertContainerSkipsTheWindowScan(t *testing.T) {
 		return total - baseline
 	}
 	small, large := extra(t, 50), extra(t, 5000)
+	t.Logf("allocs beyond visibleWords: 50 words +%.0f, 5000 words +%.0f", small, large)
 	if large > small+50 {
 		t.Fatalf("unwrapInertContainers' cost beyond visibleWords grew with page size on a container-free page "+
 			"(50 words: +%.0f allocs, 5000 words: +%.0f allocs): the initial probe-window scan ran "+

@@ -9,3 +9,5 @@ A baseline entry that a wave ADDED (not measured from the old tree) carries its 
 - C13 `internal/claudelaunch/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C9 keeps the package comment required.
 - C13 `internal/hostfixture/doc.go`: a package-doc file with no code; its doc-prose test was deleted, and C9 keeps the package comment required.
 - C3 `cmd/pfm` budget 8698: `ThemesOffline` in `cmd/pfm/install_command.go` wires `paths.ThemesOffline` into the installer options beside `SkillSourcesOffline`; `askAwaitTimings` in `cmd/pfm/chat_ask_command.go` is the Await poll and settle seam `TestAskHoldsATwoWayConversation` sets, since `--settle` takes whole seconds.
+- C22 internal/testjail/profile.go: the test profiler measures real wall time and arms a real-time watchdog; a fake clock would hide the hang it exists to catch.
+- C2 `internal/harvestpy/harvestpy_test.go` 1062 → 1063: the `testjail` import its executable writes need under C26 (`testjail.WriteExecutable`); the file already used its whole move slack.

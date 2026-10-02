@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -334,7 +335,11 @@ func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {
 // reports a plain miss, never an error.
 func TestResolveStillMissesPastADeadSocket(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "tmux-no-server")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		binary,
+		[]byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	tmuxDir := t.TempDir()

@@ -18,6 +18,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func headlessJail(t *testing.T) {
@@ -31,7 +32,7 @@ func writeEngineStub(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "engine")
 	script := "#!/bin/sh\nset -eu\n" + body + "\n"
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

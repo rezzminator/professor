@@ -25,6 +25,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
@@ -140,7 +141,7 @@ func writeManagerFakes(t *testing.T, systemctlBody, launchctlBody string) (binDi
 	logPath = filepath.Join(t.TempDir(), "manager-calls.log")
 	write := func(name, body string) {
 		script := "#!/bin/sh\necho \"" + name + " $*\" >> " + logPath + "\n" + body
-		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
+		if err := testjail.WriteExecutable(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

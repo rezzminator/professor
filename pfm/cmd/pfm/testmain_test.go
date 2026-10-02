@@ -191,11 +191,11 @@ func TestTestMainUsesPrebuiltPFMBinary(t *testing.T) {
 		return
 	}
 	goDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 41\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(goDir, "go"), []byte("#!/bin/sh\nexit 41\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	prebuilt := filepath.Join(t.TempDir(), "pfm")
-	if err := os.WriteFile(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(prebuilt, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.Command(os.Args[0], "-test.run=^TestTestMainUsesPrebuiltPFMBinary$")

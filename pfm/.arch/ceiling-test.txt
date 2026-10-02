@@ -2,7 +2,7 @@ cmd/pfm/reconcile_codex_panes_jail_test.go 1229
 e2e/install_e2e_test.go 1155
 internal/compose/compose_test.go 1088
 internal/harvestmcp/remote_legacy_parity_test.go 1273
-internal/harvestpy/harvestpy_test.go 1062
+internal/harvestpy/harvestpy_test.go 1063
 internal/index/codexstate_test.go 1073
 internal/index/index_test.go 1016
 internal/inject/engine_test.go 1690

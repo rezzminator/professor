@@ -107,7 +107,14 @@ func TestLegacyConcurrentFailuresShareOneInFlightFetch(t *testing.T) {
 	}
 	close(release)
 	first, second := <-results, <-results
-	if first.Error == "" || second.Error != first.Error {
+	// The twin either joined the in-flight walk (the identical error) or, when
+	// the scheduler ran it after the walk had ended, was answered from the
+	// negative cache (the same error plus its "recently failed; cached"
+	// annotation). Which goroutine is the twin is the scheduler's call, so the
+	// comparison is symmetric; the transport count below is what proves nobody
+	// walked the rungs a second time.
+	if first.Error == "" || second.Error == "" ||
+		(!strings.Contains(first.Error, second.Error) && !strings.Contains(second.Error, first.Error)) {
 		t.Fatalf("shared failures=(%#v,%#v)", first, second)
 	}
 	wantRungs := []string{"direct", "chrome-impersonation", "jina", "defuddle", "wayback"}

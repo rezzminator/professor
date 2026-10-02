@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
-# Sourced by dev.sh. Registration is ordered; each command runs in its own shell.
+# Sourced by dev.sh. Registration is ordered; each command runs in its own shell,
+# under the step profiler (stepprof.sh), bounded by its own or the default bound.
+
+steps_profiler="$(dirname -- "${BASH_SOURCE[0]}")/stepprof.sh"
+if [[ ! -r "$steps_profiler" ]]; then
+  printf 'steps.sh: cannot source %s\n' "$steps_profiler" >&2
+  return 1
+fi
+# shellcheck source=stepprof.sh
+source "$steps_profiler" || { printf 'steps.sh: cannot source %s\n' "$steps_profiler" >&2; return 1; }
+unset steps_profiler
 
 steps_reset() {
   STEPS_NAMES=()
   STEPS_COMMANDS=()
   STEPS_HEAVY=()
+  STEPS_BOUND=()
   STEPS_PHASE=()
   STEPS_PHASE_ID=0
 }
@@ -26,12 +37,25 @@ steps_add() { # steps_add <name> <command> [args...]
   STEPS_NAMES+=("$name")
   STEPS_COMMANDS+=("$quoted")
   STEPS_HEAVY+=(0)
+  STEPS_BOUND+=("")
   STEPS_PHASE+=("$STEPS_PHASE_ID")
 }
 
 steps_add_heavy() { # steps_add_heavy <name> <command> [args...]
   steps_add "$@" || return 1
   STEPS_HEAVY[$((${#STEPS_HEAVY[@]} - 1))]=1
+}
+
+steps_set_bound() { # steps_set_bound <seconds>: the bound of the step registered last
+  if [[ ! "${1:-}" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'steps_set_bound: bound must be a positive integer: %s\n' "${1:-}" >&2
+    return 1
+  fi
+  if (( ${#STEPS_NAMES[@]} == 0 )); then
+    printf 'steps_set_bound: no step registered\n' >&2
+    return 1
+  fi
+  STEPS_BOUND[$((${#STEPS_BOUND[@]} - 1))]="$1"
 }
 
 steps_barrier() {
@@ -65,13 +89,38 @@ steps_heavy_jobs() {
   printf '%s\n' "$jobs"
 }
 
+steps_bound() { # the default per-step bound in seconds
+  local bound="${STEPS_BOUND_S:-1500}"
+  if [[ ! "$bound" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'steps_run: STEPS_BOUND_S must be a positive integer: %s\n' "$bound" >&2
+    return 1
+  fi
+  printf '%s\n' "$bound"
+}
+
+steps_body() { # steps_body <meta> <command...>: the step's body, inside stepprof_run's own background job
+  local _meta="$1" _rc
+  shift
+  set +e
+  FAILURES=0
+  "$@"
+  _rc=$?
+  printf '%s\n' "$FAILURES" > "$_meta"
+  return "$_rc"
+}
+
+steps_prof_field() { # steps_prof_field <prof.tsv> <key>: the value, nothing when the file or the key is absent
+  awk -F '\t' -v key="$2" '$1==key {print $2; exit}' "$1" 2>/dev/null
+}
+
 steps_run() { # steps_run <run-dir>
-  local run="$1" jobs heavy_jobs i n="${#STEPS_NAMES[@]}" active=0 heavy_active=0 completed=0 phase=0 red=0 first="" last=""
-  local name log meta command start finish elapsed pid rc failures done_pid row pick
-  local -a verdict=() seconds=() pids=() starts=() started=()
+  local run="$1" jobs heavy_jobs default_bound bound i n="${#STEPS_NAMES[@]}" active=0 heavy_active=0 completed=0 phase=0 red=0 first="" last=""
+  local name log meta prof command start finish elapsed pid rc failures done_pid row pick ended records
+  local -a verdict=() seconds=() pids=() starts=() started=() launched=()
   local -A pid_index=()
   jobs="$(steps_jobs)" || return 1
   heavy_jobs="$(steps_heavy_jobs)" || return 1
+  default_bound="$(steps_bound)" || return 1
   if ! mkdir -p "$run/steps"; then
     printf 'steps_run: cannot create step logs under %s\n' "$run" >&2
     return 1
@@ -105,15 +154,10 @@ steps_run() { # steps_run <run-dir>
           verdict[$i]=NOT-RUN; seconds[$i]=0.0; red=1
           completed=$((completed + 1))
         else
-          (
-            set +e
-            FAILURES=0
-            "$@" > "$log" 2>&1
-            rc=$?
-            printf '%s\n' "$FAILURES" > "$meta"
-            exit "$rc"
-          ) &
+          bound="${STEPS_BOUND[$i]:-$default_bound}"
+          ( stepprof_run "$run/steps" "$name" "$bound" -- steps_body "$meta" "$@" > "$log" 2>&1 ) &
           pid=$!
+          launched[$i]=1
           pids+=("$pid"); starts[$i]="$start"; pid_index[$pid]="$i"
           active=$((active + 1))
           if (( ${STEPS_HEAVY[$i]} )); then heavy_active=$((heavy_active + 1)); fi
@@ -135,7 +179,9 @@ steps_run() { # steps_run <run-dir>
       elapsed="$(steps_seconds "${starts[$row]}" "$finish")"
       seconds[$row]="$elapsed"
       failures="$(cat "$run/steps/${STEPS_NAMES[$row]}.failures" 2>/dev/null)" || failures=""
-      if (( rc > 128 )); then verdict[$row]=NOT-RUN; red=1
+      ended="$(steps_prof_field "$run/steps/${STEPS_NAMES[$row]}.prof.tsv" ended)"
+      if [[ "$ended" == timeout ]]; then verdict[$row]=TIMEOUT; red=1
+      elif (( rc > 128 )); then verdict[$row]=NOT-RUN; red=1
       elif (( rc != 0 )) || [[ ! "$failures" =~ ^[0-9]+$ ]] || (( failures > 0 )); then verdict[$row]=FAIL; red=1
       else verdict[$row]=PASS
       fi
@@ -157,7 +203,7 @@ steps_run() { # steps_run <run-dir>
       printf '%s\t%s\t%s\n' "${STEPS_NAMES[$i]}" "${verdict[$i]}" "${seconds[$i]}"
     done
     if (( red )); then row=FAIL; else row=PASS; fi
-    printf 'WALL\t%s\t%s\n' "$row" "$(steps_seconds "$first" "$last")"
+    printf 'STEPS\t%s\t%s\n' "$row" "$(steps_seconds "$first" "$last")"
   } > "$run/gate.tsv"; then
     printf 'steps_run: cannot write table: %s/gate.tsv\n' "$run" >&2
     return 1
@@ -165,11 +211,22 @@ steps_run() { # steps_run <run-dir>
   printf 'step\tverdict\tseconds\n'
   for (( i=0; i<n; i++ )); do
     printf '%s\t%s\t%s' "${STEPS_NAMES[$i]}" "${verdict[$i]}" "${seconds[$i]}"
-    [[ "${verdict[$i]}" == PASS ]] || printf '\t%s/steps/%s.log' "$run" "${STEPS_NAMES[$i]}"
+    name="${STEPS_NAMES[$i]}"
+    if [[ "${verdict[$i]}" != PASS ]]; then
+      printf '\t%s/steps/%s.log' "$run" "$name"
+      [[ "${verdict[$i]}" != TIMEOUT ]] || printf '\t%s/steps/%s.hang/tree.txt' "$run" "$name"
+      records="$(steps_prof_field "$run/steps/$name.prof.tsv" err_records)"
+      if [[ "$records" =~ ^[0-9]+$ ]] && (( records > 0 )); then printf '\t%s/steps/%s.xtrace' "$run" "$name"; fi
+    fi
     printf '\n'
   done
   if (( red )); then row=FAIL; else row=PASS; fi
-  printf 'WALL\t%s\t%s\n' "$row" "$(steps_seconds "$first" "$last")"
+  printf 'STEPS\t%s\t%s\n' "$row" "$(steps_seconds "$first" "$last")"
+  for (( i=0; i<n; i++ )); do
+    [[ -n "${launched[$i]:-}" ]] || continue
+    prof="$run/steps/${STEPS_NAMES[$i]}.prof.tsv"
+    [[ -f "$prof" ]] || printf 'PROFILE-MISSING %s — %s\n' "${STEPS_NAMES[$i]}" "$prof"
+  done
   for (( i=0; i<n; i++ )); do
     [[ "${verdict[$i]}" == PASS ]] || continue
     log="$run/steps/${STEPS_NAMES[$i]}.log"

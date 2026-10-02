@@ -19,6 +19,7 @@ const (
 	killStressIndexEnv  = "PFM_KILL_STRESS_INDEX"
 	killStressReadyEnv  = "PFM_KILL_STRESS_READY"
 	killStressGateEnv   = "PFM_KILL_STRESS_GATE"
+	killStressHomeEnv   = "PFM_KILL_STRESS_HOME"
 	killStressProcesses = 20
 	killStressIDs       = 5
 )
@@ -72,6 +73,7 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 			fmt.Sprintf("%s=%d", killStressIndexEnv, index),
 			killStressReadyEnv+"="+ready,
 			killStressGateEnv+"="+gate,
+			killStressHomeEnv+"="+jail.home,
 		)
 		process := &killStressProcess{command: command}
 		command.Stdout = &process.output
@@ -153,6 +155,10 @@ func TestKillStressProcessHelper(t *testing.T) {
 	if _, err := fmt.Sscanf(os.Getenv(killStressIndexEnv), "%d", &index); err != nil {
 		t.Fatal(err)
 	}
+	// The helper is a fresh test process: testjail.Run gave it a PFM_HOME of its
+	// own, and the shared state store lives under PFM_HOME, so it takes the
+	// parent's home back to write the rows the parent reads.
+	t.Setenv("PFM_HOME", os.Getenv(killStressHomeEnv))
 	database, err := store.Open(store.WithWarningWriter(os.Stdout))
 	if err != nil {
 		t.Fatal(err)

@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestQuoteRoundTripsHostileWords(t *testing.T) {
@@ -510,7 +511,7 @@ func writeActionFile(
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(content), mode); err != nil {
 		t.Fatal(err)
 	}
 }

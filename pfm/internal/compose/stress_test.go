@@ -10,12 +10,14 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestComposeStress(t *testing.T) {
 	if os.Getenv("PFM_STRESS") != "1" {
 		t.Skip("set PFM_STRESS=1 to run the WP5 stress phase")
 	}
+	testjail.PauseFlightRecorder(t)
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 
 	input := composeStressInput()

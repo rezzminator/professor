@@ -86,7 +86,7 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 		"  printf '%s\\n' \"$fork_path\" > \"$PFM_SID_DIR/$PFM_TEST_FRESH_SOCKET\"\n" +
 		"fi\n" +
 		"exec sleep 120\n"
-	if err := os.WriteFile(fakeClaude, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(fakeClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestBootingRowJailedTSV is the red-first, gather-through-render proof for
@@ -195,7 +197,7 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 		scriptPath := filepath.Join(jail.root, "kill.sh")
 		script := "#!/bin/sh\n" + shellQuote(jail.binary) + " ls\n" +
 			"echo RC=$? > " + shellQuote(marker) + "\n"
-		if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		driverSocket := "driver-boot-kill-" + strconv.Itoa(os.Getpid())
@@ -253,7 +255,7 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 
 		scriptPath := filepath.Join(jail.root, "attach.sh")
 		script := "#!/bin/sh\nexec " + shellQuote(jail.binary) + " ls\n"
-		if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		if err := testjail.WriteExecutable(scriptPath, []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		driverSocket := "driver-boot-attach-" + strconv.Itoa(os.Getpid())
@@ -351,7 +353,7 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 	wrapper := "#!/bin/sh\nexec " + shellQuote(executable) +
 		" -test.run '^TestPFMAttachHelper$' -- \"$@\"\n"
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := os.WriteFile(binary, []byte(wrapper), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(wrapper), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(home, ".local", "bin") + string(os.PathListSeparator) +

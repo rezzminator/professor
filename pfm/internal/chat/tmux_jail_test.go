@@ -53,7 +53,7 @@ while True:
     os.write(1, ch)
 `
 	script := filepath.Join(root, "rename-ui.py")
-	if err := os.WriteFile(script, []byte(renameUI), 0o700); err != nil {
+	if err := testjail.WriteExecutable(script, []byte(renameUI), 0o700); err != nil {
 		t.Fatal(err)
 	}
 

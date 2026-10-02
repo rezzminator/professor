@@ -12,7 +12,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - eval protocol (K1): the binary prints one shell line on stdout for the shim to `eval`, never execing the final tmux attach itself
 - K3: one implementation per rule — naming precedence, the kill ratchet, row classification, run-string synthesis — each in exactly one package with table-driven tests
 - façades: the one door per cross-cutting primitive — `atomicfile.Write` (whole-file replace), `sqlitedb` (every SQLite open), `tmux.Exec` and `tmux.Socket` over it (every tmux call on a chat socket), `internal/chat/` (the chat verbs a surface calls typed) · `internal/atomicfile/`, `internal/sqlitedb/`, `internal/tmux/`
-- architecture ratchet: C1–C21 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
+- architecture ratchet: C1–C26 checked against baselines that only shrink; `--measure` locks a shrink · `scripts/arch-check.sh`, `.arch/`
 - lint law: gofumpt + gci + golines at 120, plus dupl, goconst, gocritic, revive, staticcheck; coverage thresholds · `.golangci.yml`, `.testcoverage.yml`, tools pinned in `infra/fence/tools.env`
 - shim: the thin zsh wrapper that `eval`s the eval-protocol line, sourced in place from the clone · `internal/installer/assets/shim/pfm.zsh`, its tests `internal/installer/shim/`
 - installer: stages every host asset embedded from `internal/installer/assets/`; the fleet prompts and the shim are read from the clone instead · `internal/installer/`

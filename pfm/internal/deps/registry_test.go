@@ -27,7 +27,7 @@ func resetResolveCache(t *testing.T) {
 func writeExecutable(t *testing.T, directory, name string) string {
 	t.Helper()
 	path := filepath.Join(directory, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := writeExecutableUnderForkLock(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fixture executable %s: %v", name, err)
 	}
 	return path

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
@@ -44,7 +45,7 @@ func stubFailingTmux(t *testing.T, root string) {
 		t.Fatalf("create stub bin dir: %v", err)
 	}
 	stub := "#!/bin/sh\necho 'tmux: connect failed: permission denied' >&2\nexit 1\n"
-	if err := os.WriteFile(filepath.Join(binDir, "tmux"), []byte(stub), 0o700); err != nil {
+	if err := testjail.WriteExecutable(filepath.Join(binDir, "tmux"), []byte(stub), 0o700); err != nil {
 		t.Fatalf("write tmux stub: %v", err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))

@@ -1,4 +1,6 @@
-# Gate wall budgets: maximum WALL of three eligible captures, rounded up and
+# Gate wall budgets, judged against the STEPS wall of gate.tsv (first step start
+# to last step end, rounded up); the verdict lands in its BUDGET row. Each budget
+# is the maximum gate wall of three eligible captures, rounded up and
 # doubled, the same rule as pfm/.testtiming.yml. All and pfm use iso gate all
 # r5/all-2, all-3, all-4 (1m host load 8.00-12.69); templates uses iso gate
 # templates r7/tmpl-1, tmpl-2, tmpl-3 (1m host load 3.25-6.75).

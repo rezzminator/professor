@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // buildSourceCloneWithPrePushHook builds a bare git working tree with a
@@ -27,7 +28,7 @@ func buildSourceCloneWithPrePushHook(t *testing.T) string {
 		t.Fatal(err)
 	}
 	hook := filepath.Join(hooksDir, "pre-push")
-	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := testjail.WriteExecutable(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return clone

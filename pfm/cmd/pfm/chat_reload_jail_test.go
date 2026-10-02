@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // reload is a public chat operation; keep the contract pinned at the CLI
@@ -373,7 +374,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	captured := filepath.Join(t.TempDir(), "captured.txt")
 	fixtureClaude := filepath.Join(t.TempDir(), "claude-fixture.sh")
 	script := "#!/bin/sh\n{\n  pwd\n  for a in \"$@\"; do printf 'ARG:%s\\n' \"$a\"; done\n} >> '" + captured + "'\nexit 0\n"
-	if err := os.WriteFile(fixtureClaude, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(fixtureClaude, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	targetCWD := t.TempDir()
@@ -386,7 +387,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 }`)
 
 	promptScript := filepath.Join(t.TempDir(), "prompt.py")
-	if err := os.WriteFile(promptScript, []byte(reloadPromptFixture), 0o700); err != nil {
+	if err := testjail.WriteExecutable(promptScript, []byte(reloadPromptFixture), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	socket := probeReloadSocket(t, "fresh")

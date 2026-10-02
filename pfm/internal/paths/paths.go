@@ -76,6 +76,21 @@ const (
 	EnvCgroupRoot           = "PFM_CGROUP_ROOT"
 	EnvDevRepoGitDir        = "PFM_DEV_REPO_GIT_DIR"
 	EnvDevRepoWorkTree      = "PFM_DEV_REPO_WORK_TREE"
+	// EnvTestArtifactDir names the directory every Go test process writes its
+	// profile under (internal/testjail); unset, profiling writes nothing and a
+	// red run says so once on stderr. EnvTestProfile=0 turns profiling off;
+	// EnvTestProfile=cpu adds a CPU profile, opt-in only: its SIGPROF interval
+	// timer survives execve, so a test whose child execs another program (zsh, a
+	// re-exec'd pfm) sees that child killed by "profiling timer expired".
+	// EnvTestProfileParent is exported by the first profiled process: a test
+	// binary inheriting it is a helper, recorded but never a failure bundle,
+	// since helpers exit non-zero on purpose. EnvTestDeadlineEpoch is the step
+	// deadline in decimal epoch seconds, which the profiler's watchdog fires
+	// before.
+	EnvTestArtifactDir   = "PFM_TEST_ARTIFACT_DIR"
+	EnvTestProfile       = "PFM_TEST_PROFILE"
+	EnvTestProfileParent = "PFM_TEST_PROFILE_PARENT"
+	EnvTestDeadlineEpoch = "PFM_TEST_DEADLINE_EPOCH"
 	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
 	// the way a real chat runs — the server loads ~/.tmux.conf like every other
 	// terminal on the machine, because a chat IS a terminal the user lives in:
@@ -543,4 +558,26 @@ func PrebuiltPFMBinary() (string, bool) {
 // PrebuiltMockEngineBinary is the mock-engine binary a unit run built once.
 func PrebuiltMockEngineBinary() (string, bool) {
 	return OSEnv{}.Lookup(EnvTestMockEngineBinary)
+}
+
+// TestArtifactDir is the profile root of this Go test process, when one is set.
+func TestArtifactDir() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestArtifactDir)
+}
+
+// TestProfileMode is the profiling mode of this Go test process: "" (the
+// default), "0" (off) or "cpu" (adds a CPU profile).
+func TestProfileMode() string {
+	return OSEnv{}.Get(EnvTestProfile)
+}
+
+// TestProfileParent is the pid of the profiled process that started this one,
+// when this one is its helper.
+func TestProfileParent() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestProfileParent)
+}
+
+// TestDeadlineEpoch is the step deadline in decimal epoch seconds, when one is set.
+func TestDeadlineEpoch() (string, bool) {
+	return OSEnv{}.Lookup(EnvTestDeadlineEpoch)
 }

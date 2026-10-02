@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // writeFakeHarnessClaude stages a shell `claude` stand-in used only by the
@@ -30,7 +31,7 @@ func writeFakeHarnessClaude(t *testing.T, body string) string {
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = --version ]; then printf '2.1.270 (Claude Code)\\n'; exit 0; fi\n" +
 		body
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path

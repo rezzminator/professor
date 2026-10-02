@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeTmuxBinary plays tmux: exits 0 and prints nothing.
 func fakeTmuxBinary(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -38,7 +39,7 @@ done
 echo "server gone" >&2
 exit 1
 `
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -47,7 +48,11 @@ exit 1
 func fakeTmuxBinaryCreateFails(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "tmux")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\necho create failed >&2\nexit 1\n"), 0o700); err != nil {
+	if err := testjail.WriteExecutable(
+		binary,
+		[]byte("#!/bin/sh\necho create failed >&2\nexit 1\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	return binary
@@ -72,7 +77,7 @@ if [ %q = "configure" ]; then
 fi
 exit 0
 `, block, marker, block, marker)
-	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+	if err := testjail.WriteExecutable(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return binary

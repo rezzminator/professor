@@ -685,7 +685,7 @@ func TestProbeRecordsEachVersionProbe(t *testing.T) {
 func writeProbeStub(t *testing.T, directory, name, body string) {
 	t.Helper()
 	path := filepath.Join(directory, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+	if err := writeExecutableUnderForkLock(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 }

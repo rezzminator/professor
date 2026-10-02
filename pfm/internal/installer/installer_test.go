@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem is C: the
@@ -35,7 +36,7 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	live := filepath.Join(versions, "2.1.260")
 	prunable := filepath.Join(versions, "2.1.250")
 	for _, path := range []string{newest, second, live, prunable} {
-		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		if err := testjail.WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

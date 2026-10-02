@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # Split slow Go packages across processes and present one go test JSON stream.
+#   test-shard.sh run  --out F [--history H] [--bin-dir D] -- GO-TEST-FLAGS   run, merge, record the CPU load beside F (F.load);
+#       the pfm and mock-engine binaries the tests drive are built first, both at once, into D (kept) or a temp dir
+#       (removed); the history H also orders the unsharded packages, longest first
+#   test-shard.sh plan --out F [--history H]                    print the shard plan
+#   test-shard.sh merge --out F STREAM...                       merge shard streams
+#   test-shard.sh sample --out F.load                           record the CPU load alone (what `run` records
+#       beside its stream) until SIGTERM or SIGINT: a header, a row every 0.5 s, one final row; for a run
+#       this script does not drive, such as the e2e suite
 set -euo pipefail
 export PFM_SHARD_MODULE="$(cd "$(dirname "$0")/.." && pwd)"
 exec python3 - "$@" <<'PY'
@@ -7,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import statistics
 import subprocess
 import sys
@@ -41,6 +50,17 @@ def output_ready(path):
         error(f'--out {path} is not writable: {exc}')
 
 
+def bin_dir_ready(path):
+    # Absolute: the builds run in the module directory and the tests in their own.
+    try:
+        os.makedirs(path, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=path):
+            pass
+    except OSError as exc:
+        error(f'--bin-dir {path}: {exc}')
+    return Path(os.path.abspath(path))
+
+
 def history_tests(path):
     if not path:
         return None
@@ -55,6 +75,35 @@ def history_tests(path):
         if event.get('Action') in TERMINALS and name and '/' not in name and isinstance(event.get('Elapsed'), (float, int)):
             result[event.get('Package', '')][name] = float(event['Elapsed'])
     return result if any(result.values()) else None
+
+
+def package_elapsed(path):
+    """Each package's Elapsed from its terminal event (no Test field) in the history stream at path.
+
+    Empty when there is no history or it cannot be read: callers keep the go list order.
+    """
+    if not path:
+        return {}
+    result = {}
+    try:
+        with open(path, encoding='utf-8') as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                event = json.loads(line)
+                if event.get('Action') in TERMINALS and not event.get('Test') and event.get('Package') \
+                        and isinstance(event.get('Elapsed'), (float, int)):
+                    result[event['Package']] = float(event['Elapsed'])
+    except (OSError, ValueError):
+        return {}
+    return result
+
+
+def longest_first(packages, elapsed):
+    """Packages with no history first, in the order given, then the rest longest first; ties keep the order given."""
+    return [package for _, package in sorted(
+        enumerate(packages),
+        key=lambda item: (item[1] in elapsed, -elapsed.get(item[1], 0.0), item[0]))]
 
 
 def package_list():
@@ -229,15 +278,125 @@ def merged_streams(streams, out, expected=None):
     return 1 if failed else 0
 
 
+class LoadRecord:
+    """The CPU-load record of one run: a header, a row every 0.5 s, a final row at the end.
+
+    Sample times rise on the monotonic clock from one wall-clock anchor: a VM
+    clock correction can step time.time() back between two samples. A value
+    the host cannot give is one UNAVAILABLE row, its reason, and sampling stops;
+    a record that cannot be written is named on stderr once and left as it is.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self.stop_sampling = threading.Event()
+        self.sampling = None
+        self.record = None
+        self.record_error = False
+        self.wall_anchor, self.mono_anchor = time.time(), time.monotonic()
+        self.proc_stat = Path(os.environ.get('PFM_TEST_SHARD_PROC_STAT', '/proc/stat'))
+        self.cpu_stat = Path(os.environ.get('PFM_TEST_SHARD_CPU_STAT', '/sys/fs/cgroup/cpu.stat'))
+
+    def write_record(self, line):
+        if self.record is None or self.record_error:
+            return False
+        try:
+            self.record.write(line + '\n')
+            self.record.flush()
+            return True
+        except OSError as exc:
+            print(f'test-shard: load record {self.path}: {exc}', file=sys.stderr)
+            self.record_error = True
+            return False
+
+    def sample(self):
+        try:
+            lines = self.proc_stat.read_text(encoding='utf-8').splitlines()
+            total = next((line for line in lines if line.startswith('cpu ')), None)
+            cpus = sum(bool(re.match(r'cpu[0-9]+ ', line)) for line in lines)
+            if total is None or cpus < 1:
+                raise ValueError('missing cpu aggregate or cpuN rows')
+            fields = total.split()
+            if len(fields) < 9:
+                raise ValueError('cpu aggregate has too few fields')
+            busy = sum(int(fields[index]) for index in (1, 2, 3, 6, 7, 8)) / os.sysconf('SC_CLK_TCK')
+        except (OSError, UnicodeError, ValueError) as exc:
+            self.write_record(f'UNAVAILABLE\t{self.proc_stat}: {exc}')
+            self.stop_sampling.set()
+            return
+        try:
+            values = self.cpu_stat.read_text(encoding='utf-8').splitlines()
+            usage = [line.split() for line in values if line.startswith('usage_usec ')]
+            if len(usage) != 1 or len(usage[0]) != 2:
+                raise ValueError('missing or malformed usage_usec')
+            own = int(usage[0][1]) / 1e6
+        except (OSError, UnicodeError, ValueError) as exc:
+            self.write_record(f'UNAVAILABLE\t{self.cpu_stat}: {exc}')
+            self.stop_sampling.set()
+            return
+        epoch = self.wall_anchor + (time.monotonic() - self.mono_anchor)
+        if not self.write_record(f'{epoch:.6f}\t{busy:.6f}\t{own:.6f}\t{cpus}'):
+            self.stop_sampling.set()
+
+    def sample_loop(self):
+        while not self.stop_sampling.wait(0.5):
+            self.sample()
+
+    def start(self):
+        """Open the record, write its header and first row, sample on; False when it could not be opened or written."""
+        try:
+            self.record = self.path.open('w', encoding='utf-8')
+        except OSError as exc:
+            print(f'test-shard: load record {self.path}: {exc}', file=sys.stderr)
+            return False
+        if not self.write_record('epoch_s\tvm_busy_s\town_s\tcpus'):
+            return False
+        self.sample()
+        if not self.stop_sampling.is_set():
+            self.sampling = threading.Thread(target=self.sample_loop, daemon=True)
+            self.sampling.start()
+        return True
+
+    def finish(self):
+        """Stop sampling, write the final row when sampling ran to the end, close the record."""
+        sampled_to_end = not self.stop_sampling.is_set()
+        self.stop_sampling.set()
+        if self.sampling is not None:
+            self.sampling.join()
+        if self.record is not None:
+            if sampled_to_end and not self.record_error:
+                self.sample()
+            try:
+                self.record.close()
+            except OSError as exc:
+                if not self.record_error:
+                    print(f'test-shard: load record {self.path}: {exc}', file=sys.stderr)
+
+
+def sample_until_stopped(path):
+    stop = threading.Event()
+    for number in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(number, lambda *_: stop.set())
+    load = LoadRecord(path)
+    if not load.start():
+        load.finish()
+        return 2
+    stop.wait()
+    load.finish()
+    return 2 if load.record_error else 0
+
+
 def command_args():
     parser = argparse.ArgumentParser(prog='test-shard.sh')
     sub = parser.add_subparsers(dest='mode', required=True)
-    for mode in ('run', 'plan', 'merge'):
+    for mode in ('run', 'plan', 'merge', 'sample'):
         cmd = sub.add_parser(mode)
         cmd.add_argument('--out', required=True)
         if mode in ('run', 'plan'):
             cmd.add_argument('--history')
-        else:
+        if mode == 'run':
+            cmd.add_argument('--bin-dir')
+        elif mode == 'merge':
             cmd.add_argument('streams', nargs='+')
     args, flags = parser.parse_known_args()
     if args.mode == 'run':
@@ -253,9 +412,12 @@ def command_args():
 def main():
     args = command_args()
     output_ready(args.out)
+    if args.mode == 'sample':
+        return sample_until_stopped(Path(args.out))
     if args.mode == 'merge':
         return merged_streams([(path, None) for path in args.streams], args.out)
 
+    prebuilt_dir = bin_dir_ready(args.bin_dir) if args.mode == 'run' and args.bin_dir else None
     packages = package_list()
     history = history_tests(args.history)
     counts = shard_counts(packages)
@@ -268,10 +430,10 @@ def main():
                 old.unlink()
 
     with tempfile.TemporaryDirectory(prefix='test-shard-') as binary_dir:
-        return run_packages(args, packages, selected, counts, history, raw_dir, Path(binary_dir))
+        return run_packages(args, packages, selected, counts, history, raw_dir, Path(binary_dir), prebuilt_dir or Path(binary_dir))
 
 
-def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir):
+def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir, prebuilt_dir):
     processes = []
     streams = []
     exits = []
@@ -284,88 +446,30 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
         build_env = os.environ.copy()
         build_env.update({'CGO_ENABLED': '0', 'GOFLAGS': '', 'GOTOOLCHAIN': 'local',
                           'GOTELEMETRY': 'off', 'HOME': os.environ.get('HOME', '')})
+        # Both builds run at once and both finish before any test process starts.
+        builds = []
         for name, variable in (('pfm', 'PFM_TEST_PFM_BINARY'),
                                ('mock-engine', 'PFM_TEST_MOCK_ENGINE_BINARY')):
-            prebuilt = binary_dir / name
+            prebuilt = prebuilt_dir / name
+            # A failed build leaves no output: a binary kept from an earlier run must not pass for this one.
+            prebuilt.unlink(missing_ok=True)
             target = './cmd/' + name
-            build = subprocess.run(['go', 'build', '-trimpath', '-buildvcs=false', '-o', str(prebuilt), target],
-                                   cwd=MODULE, env=build_env, text=True, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT)
-            if build.returncode:
-                output = build.stdout or f'go build exited {build.returncode}'
+            proc = subprocess.Popen(['go', 'build', '-trimpath', '-buildvcs=false', '-o', str(prebuilt), target],
+                                    cwd=MODULE, env=build_env, text=True, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            builds.append((name, variable, prebuilt, target, proc))
+        for name, variable, prebuilt, target, proc in builds:
+            built, _ = proc.communicate()
+            if proc.returncode:
+                output = built or f'go build exited {proc.returncode}'
                 prebuild_errors.append((target, output))
                 print(f'test-shard: prebuilt {name} build failed: {output.rstrip()}', file=sys.stderr)
             else:
                 run_env[variable] = str(prebuilt)
 
-    load_path = Path(args.out).with_suffix('.load')
-    stop_sampling = threading.Event()
-    sampling = None
-    record = None
-    record_error = False
-    # Sample times rise on the monotonic clock from one wall-clock anchor: a VM
-    # clock correction can step time.time() back between two samples.
-    wall_anchor, mono_anchor = time.time(), time.monotonic()
-    proc_stat = Path(os.environ.get('PFM_TEST_SHARD_PROC_STAT', '/proc/stat'))
-    cpu_stat = Path(os.environ.get('PFM_TEST_SHARD_CPU_STAT', '/sys/fs/cgroup/cpu.stat'))
-
-    def write_record(line):
-        nonlocal record_error
-        if record is None or record_error:
-            return False
-        try:
-            record.write(line + '\n')
-            record.flush()
-            return True
-        except OSError as exc:
-            print(f'test-shard: load record {load_path}: {exc}', file=sys.stderr)
-            record_error = True
-            return False
-
-    def sample():
-        try:
-            lines = proc_stat.read_text(encoding='utf-8').splitlines()
-            total = next((line for line in lines if line.startswith('cpu ')), None)
-            cpus = sum(bool(re.match(r'cpu[0-9]+ ', line)) for line in lines)
-            if total is None or cpus < 1:
-                raise ValueError('missing cpu aggregate or cpuN rows')
-            fields = total.split()
-            if len(fields) < 9:
-                raise ValueError('cpu aggregate has too few fields')
-            busy = sum(int(fields[index]) for index in (1, 2, 3, 6, 7, 8)) / os.sysconf('SC_CLK_TCK')
-        except (OSError, UnicodeError, ValueError) as exc:
-            write_record(f'UNAVAILABLE\t{proc_stat}: {exc}')
-            stop_sampling.set()
-            return
-        try:
-            values = cpu_stat.read_text(encoding='utf-8').splitlines()
-            usage = [line.split() for line in values if line.startswith('usage_usec ')]
-            if len(usage) != 1 or len(usage[0]) != 2:
-                raise ValueError('missing or malformed usage_usec')
-            own = int(usage[0][1]) / 1e6
-        except (OSError, UnicodeError, ValueError) as exc:
-            write_record(f'UNAVAILABLE\t{cpu_stat}: {exc}')
-            stop_sampling.set()
-            return
-        epoch = wall_anchor + (time.monotonic() - mono_anchor)
-        if not write_record(f'{epoch:.6f}\t{busy:.6f}\t{own:.6f}\t{cpus}'):
-            stop_sampling.set()
-
-    def sample_loop():
-        while not stop_sampling.wait(0.5):
-            sample()
-
+    load = LoadRecord(Path(args.out).with_suffix('.load'))
     if args.mode == 'run':
-        try:
-            record = load_path.open('w', encoding='utf-8')
-        except OSError as exc:
-            print(f'test-shard: load record {load_path}: {exc}', file=sys.stderr)
-        else:
-            if write_record('epoch_s\tvm_busy_s\town_s\tcpus'):
-                sample()
-                if not stop_sampling.is_set():
-                    sampling = threading.Thread(target=sample_loop, daemon=True)
-                    sampling.start()
+        load.start()
 
     def start(command, cwd, package=None):
         index = len(streams) + 1
@@ -396,7 +500,8 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
             if proc.returncode:
                 exits.append((path, proc.returncode, executable))
 
-    unsharded = [package for package in packages if package not in selected]
+    # The packages that ran longest in the history start first: the stream ends with the last of them.
+    unsharded = longest_first([package for package in packages if package not in selected], package_elapsed(args.history))
     if args.mode == 'run' and unsharded:
         # The default timeout goes first so a caller's -timeout wins.
         start(['go', 'test', '-timeout', '25m', *args.flags, '-count=1', '-json', *unsharded], MODULE)
@@ -444,18 +549,7 @@ def run_packages(args, packages, selected, counts, history, raw_dir, binary_dir)
         return 0
     if processes and processes[0][2] is None:
         finish(processes[:1])
-    sampled_to_end = not stop_sampling.is_set()
-    stop_sampling.set()
-    if sampling is not None:
-        sampling.join()
-    if record is not None:
-        if sampled_to_end and not record_error:
-            sample()
-        try:
-            record.close()
-        except OSError as exc:
-            if not record_error:
-                print(f'test-shard: load record {load_path}: {exc}', file=sys.stderr)
+    load.finish()
     code = merged_streams(streams, args.out, expected)
     if prebuild_errors:
         with open(args.out, 'ab') as output:

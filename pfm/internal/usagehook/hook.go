@@ -50,7 +50,7 @@ type Options struct {
 	// version is unknown (Options.userAgent).
 	Version string
 	// ClaudeBinary is the account's Claude Code binary, asked for its version
-	// (ClaudeVersion) when a request is about to go out; empty means `claude`.
+	// (claudeCodeVersion) when a request is about to go out; empty means `claude`.
 	ClaudeBinary string
 	// BypassBackoff, when set, is a caller's one authorized live retry: a
 	// fresh cache no longer answers, and neither does an active backoff whose

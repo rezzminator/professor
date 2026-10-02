@@ -1,6 +1,7 @@
 package usagehook
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -489,7 +491,7 @@ func request(ctx context.Context, options Options) (usageResult Usage, credentia
 func sameReadings(previous, fetched Usage) bool {
 	before, errBefore := json.Marshal(previous)
 	after, errAfter := json.Marshal(fetched)
-	return errBefore == nil && errAfter == nil && string(before) == string(after)
+	return errBefore == nil && errAfter == nil && bytes.Equal(before, after)
 }
 
 // providerError reads the provider's `{"error":{"type","message"}}` from a
@@ -532,7 +534,7 @@ func joinBodyErr(status, bodyErr error) error {
 // the version unknown it names pfm, as every request did before; a bare
 // `claude-code` without a version is never sent.
 func (options Options) userAgent(ctx context.Context) (agent, source string) {
-	version, err := ClaudeVersion(ctx, options.ClaudeBinary)
+	version, err := claudeCodeVersion(ctx, options.ClaudeBinary)
 	if err != nil {
 		obs.Logger(ctx).Warn("usage.claude_version", "binary", options.ClaudeBinary, "err", err.Error())
 		return "pfm/" + options.Version, "fallback: Claude Code version unknown"
@@ -555,12 +557,12 @@ type claudeVersion struct {
 
 var semanticVersion = regexp.MustCompile(`\b\d+\.\d+\.\d+\b`)
 
-// ClaudeVersion is the semantic version the Claude Code binary reports
+// claudeCodeVersion is the semantic version the Claude Code binary reports
 // (binary empty means `claude` on PATH). It execs the binary only when a
 // request is about to go out and the binary changed since it last asked.
-func ClaudeVersion(ctx context.Context, binary string) (string, error) {
+func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	if binary == "" {
-		binary = "claude"
+		binary = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
 	path := deps.Executable(binary)
 	info, err := os.Stat(path)

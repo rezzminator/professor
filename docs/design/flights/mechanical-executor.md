@@ -41,15 +41,15 @@ Before the first edit it searches the project for every line the Steps quote, ev
 
 Friction: `Files` lists missed callers, and the drift was found mid-edit, with a partial diff left behind; one flight recorded that 2 of 2 drifts so far were `Files` lists missing test callers of a changed symbol. In a benchmark round 5 of 6 seats named a new helper with a name another package already exported. A search a small model can run literally catches both; whether a concept already exists under another name is a judgment, so the speccer quotes reuse targets as `EXISTING` shapes.
 
-### Tests in a fixed red-green order
+### Tests: one red run, one green run
 
 One test per `Done when` row, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names:
 
-- a row on existing behaviour: write the test, watch its assertion fail, apply the Steps, run it green;
-- a row on code the task creates: apply the Steps, run it green, copy the file to the task's scratch directory, break that row's behaviour with one Edit, watch it fail, copy the file back, run it green;
+- every row's test is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; all the new tests run in one command against the unfixed tree, each failing on its assertion, the log kept; then the Steps are applied and the same command runs green once;
+- a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, and the lander's adversarial pass covers it; no executor re-breaks, stashes, reverts or mutates finished or landed code to watch a test fail;
 - a task with no behaviour change (a rename, a move, a deletion, the doc references one carries) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history or in a hit named under Outside defects, are its proof.
 
-Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break code for the watched-failing proof; one reverted to the last commit in a worktree holding sibling tasks' uncommitted work, and one temporary break of a shared file turned a sibling's run red. The fixed order keeps the proof and removes git from it.
+Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break code for the proof; one reverted to the last commit in a worktree holding sibling tasks' uncommitted work, and one temporary break of a shared file turned a sibling's run red. An audit of 13 Codex executors measured the per-row red, fix, green cycle and its re-breaks at 62 red-run and 47 re-break calls, 68 of 275 minutes, some re-breaking rows already watched red. One red run and one green run per task keep the guarantee that every new test failed before its fix; code already in the tree is the lander's to attack, never the executor's to break.
 
 ### Reds are bounded
 
@@ -67,9 +67,9 @@ Friction: 36 of 130 runs slept or polled (102 `sleep` calls) and 12 used backgro
 
 ### Its own checks, the formatter included
 
-It runs the affected tests of its `Files`, then the formatter, linter and type check on each changed file and the static check the testing manual names, its architecture ratchet included, and fixes what its edits caused there. A brief naming the full suite, a whole-tree format sweep or a review as its run is refused and named in the return.
+It runs the affected tests of its `Files`; then, once, after its last edit, as one command, the formatter, linter and type check on each changed file and the static check the testing manual names, its architecture ratchet included; it fixes what its edits caused there and reruns only that check. A brief naming the full suite, a whole-tree format sweep or a review as its run is refused and named in the return.
 
-Friction: 3 of 4 benchmark seats left formatter and lint findings on their own files; "format" appeared in the base body only in the refused list.
+Friction: 3 of 4 benchmark seats left formatter and lint findings on their own files; "format" appeared in the base body only in the refused list. The 13-executor audit counted 37 battery runs, 15 lint and 13 architecture reruns among them, most after a one-line late edit: 18 minutes.
 
 ### Scratch and reading
 
@@ -97,6 +97,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | --- | --- |
 | A `Progress dependency` does not hold in a way that changes an edit | Change nothing; `SPEC-DRIFT {id}: {the fact}: {what it found}` |
 | A quote found nowhere or at more than one place, a new name taken, a break outside `Files`, a file pushed over the ceiling | Change nothing; `SPEC-DRIFT {id}` naming each |
+| A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red outside `Files` it does not list stays `SPEC-DRIFT` |
 | A quoted line found at another place, an import the edit needs, the formatter's output | Adapt and list it under Adapted |
 | An edit the Steps do not settle (another approach, a name not given, a file outside `Files`) | Stop, every touched file building; `SPEC-DRIFT {id}: {what the task file lacks}` with what landed |
 | Its own edit turns a check red inside `Files` | Fix the cause there, rerun |

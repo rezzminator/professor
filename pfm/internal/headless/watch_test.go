@@ -30,6 +30,11 @@ func erroredFor(seconds int64, kind string) fakeStep {
 }
 func gone() fakeStep { return fakeStep{status: Status{State: StateDead}} }
 
+// quietFor is a working seat whose transcript has been unchanged for seconds.
+func quietFor(seconds int64, last string) fakeStep {
+	return fakeStep{status: Status{State: StateWorking, QuietSeconds: seconds, Last: last}}
+}
+
 // fakeSeats scripts Resolve and Inspect per seat name: the Nth Inspect of a
 // seat answers its Nth step, and the last step repeats.
 type fakeSeats struct {
@@ -460,6 +465,61 @@ func TestTransitionsAnnounceEachChangeOnce(t *testing.T) {
 			lines, _, err := runFleet(t, namedFleet(seats, "x"), WatchOptions{
 				Transitions: true,
 				IdleAfter:   testCase.after,
+			})
+			if err != nil {
+				t.Fatalf("Watch() error = %v", err)
+			}
+			assertLines(t, lines, testCase.want)
+		})
+	}
+}
+
+// TestTransitionsAnnounceAQuietSeatOnce pins --quiet-after: a working seat
+// whose transcript sat unchanged for QuietAfter is QUIET once, WORKING again
+// when the transcript moves, and never quiet while QuietAfter is zero.
+func TestTransitionsAnnounceAQuietSeatOnce(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		steps []fakeStep
+		quiet time.Duration
+		want  []string
+	}{
+		{
+			"quiet at the bound, not before",
+			[]fakeStep{quietFor(0, "a"), quietFor(9, "a"), quietFor(10, "a"), quietFor(12, "a"), gone()},
+			10 * time.Second,
+			[]string{"SEEN x working", "QUIET x quiet_seconds=10", "EXIT x"},
+		},
+		{
+			"working again after the transcript moves",
+			[]fakeStep{quietFor(0, "a"), quietFor(10, "a"), quietFor(11, "a"), quietFor(0, "b"), quietFor(10, "b"), gone()},
+			10 * time.Second,
+			[]string{"SEEN x working", "QUIET x quiet_seconds=10", "WORKING x", "QUIET x quiet_seconds=10", "EXIT x"},
+		},
+		{
+			"a seat quiet at first sight",
+			[]fakeStep{quietFor(30, "a"), quietFor(31, "a"), quietFor(0, "b"), gone()},
+			10 * time.Second,
+			[]string{"SEEN x working quiet_seconds=30", "WORKING x", "EXIT x"},
+		},
+		{
+			"a quiet seat that answers is idle",
+			[]fakeStep{quietFor(0, "a"), quietFor(10, "a"), idleFor(1, "b"), gone()},
+			10 * time.Second,
+			[]string{"SEEN x working", "QUIET x quiet_seconds=10", "IDLE x idle_seconds=1", "EXIT x"},
+		},
+		{
+			"off when QuietAfter is zero",
+			[]fakeStep{quietFor(0, "a"), quietFor(900, "a"), gone()},
+			0,
+			[]string{"SEEN x working", "EXIT x"},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			seats := newFakeSeats(map[string][]fakeStep{"x": testCase.steps})
+			lines, _, err := runFleet(t, namedFleet(seats, "x"), WatchOptions{
+				Transitions: true,
+				QuietAfter:  testCase.quiet,
 			})
 			if err != nil {
 				t.Fatalf("Watch() error = %v", err)

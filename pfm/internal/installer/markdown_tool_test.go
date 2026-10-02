@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -73,15 +74,16 @@ func TestInstallMarkdownToolAlreadyPresentIsANoOp(t *testing.T) {
 			home := t.TempDir()
 
 			var output bytes.Buffer
-			eng := &engine{options: Options{Home: home, Stdout: &output}, apply: true}
+			eng := &engine{options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output}, apply: true}
 			if err := eng.installMarkdownTool(context.Background()); err != nil {
 				t.Fatalf("installMarkdownTool: %v\n%s", err, output.String())
 			}
 			if !strings.Contains(output.String(), test.wantOKContains) {
 				t.Fatalf("output=%q, want to contain %q", output.String(), test.wantOKContains)
 			}
-			if eng.report.OK != 1 || eng.report.Skipped != 0 || eng.report.Changed != 0 {
-				t.Fatalf("report=%+v, want OK=1 Skipped=0 Changed=0", eng.report)
+			// Changed=1 is the rumdl user config, written on this path too.
+			if eng.report.OK != 1 || eng.report.Skipped != 0 || eng.report.Changed != 1 {
+				t.Fatalf("report=%+v, want OK=1 Skipped=0 Changed=1", eng.report)
 			}
 			assertNeverRan(t, marker, "uv")
 		})
@@ -99,6 +101,7 @@ func TestInstallMarkdownToolUsesInjectedProcessRunner(t *testing.T) {
 	var output bytes.Buffer
 	eng := &engine{options: Options{
 		Home:          t.TempDir(),
+		Env:           &paths.MapEnv{},
 		Stdout:        &output,
 		ProcessRunner: runner,
 	}, apply: true}
@@ -129,7 +132,10 @@ func TestInstallMarkdownToolStaleVersionFallsThroughPastAlreadyPresent(t *testin
 	home := t.TempDir()
 
 	var output bytes.Buffer
-	eng := &engine{options: Options{Home: home, Stdout: &output, HarvestOffline: true}, apply: true}
+	eng := &engine{
+		options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output, HarvestOffline: true},
+		apply:   true,
+	}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
 		t.Fatalf("installMarkdownTool: %v\n%s", err, output.String())
 	}
@@ -158,7 +164,7 @@ func TestInstallMarkdownToolDryRunPlansOnlyAndRunsNothing(t *testing.T) {
 	home := t.TempDir()
 
 	var output bytes.Buffer
-	eng := &engine{options: Options{Home: home, Stdout: &output}, apply: false}
+	eng := &engine{options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output}, apply: false}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
 		t.Fatalf("installMarkdownTool: %v\n%s", err, output.String())
 	}
@@ -171,6 +177,13 @@ func TestInstallMarkdownToolDryRunPlansOnlyAndRunsNothing(t *testing.T) {
 	}
 	assertNeverRan(t, marker, "rumdl")
 	assertNeverRan(t, marker, "uv")
+	config := filepath.Join(home, ".config", "rumdl", "rumdl.toml")
+	if !strings.Contains(output.String(), "rumdl dry-run: would write user config "+config) {
+		t.Fatalf("output=%q, want the user config planned", output.String())
+	}
+	if _, err := os.Lstat(config); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote %s: %v", config, err)
+	}
 }
 
 // TestInstallMarkdownToolOfflineSkipsWithoutTouchingUV pins the offline
@@ -184,7 +197,10 @@ func TestInstallMarkdownToolOfflineSkipsWithoutTouchingUV(t *testing.T) {
 	home := t.TempDir()
 
 	var output bytes.Buffer
-	eng := &engine{options: Options{Home: home, Stdout: &output, HarvestOffline: true}, apply: true}
+	eng := &engine{
+		options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output, HarvestOffline: true},
+		apply:   true,
+	}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
 		t.Fatalf("installMarkdownTool: %v\n%s", err, output.String())
 	}
@@ -207,7 +223,7 @@ func TestInstallMarkdownToolNoUVAvailableSkipsWithoutFailingInstall(t *testing.T
 	home := t.TempDir()
 
 	var output bytes.Buffer
-	eng := &engine{options: Options{Home: home, Stdout: &output}, apply: true}
+	eng := &engine{options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output}, apply: true}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
 		t.Fatalf("installMarkdownTool must never fail the install: %v\n%s", err, output.String())
 	}
@@ -230,7 +246,7 @@ func TestInstallMarkdownToolUVExitFailureSkipsWithOutputAndNeverFailsInstall(t *
 	home := t.TempDir()
 
 	var output bytes.Buffer
-	eng := &engine{options: Options{Home: home, Stdout: &output}, apply: true}
+	eng := &engine{options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output}, apply: true}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
 		t.Fatalf("installMarkdownTool must never fail the install: %v\n%s", err, output.String())
 	}
@@ -266,7 +282,7 @@ exit 0
 	home := t.TempDir()
 
 	var output bytes.Buffer
-	eng := &engine{options: Options{Home: home, Stdout: &output}, apply: true}
+	eng := &engine{options: Options{Home: home, Env: &paths.MapEnv{}, Stdout: &output}, apply: true}
 	if err := eng.installMarkdownTool(context.Background()); err != nil {
 		t.Fatalf("installMarkdownTool: %v\n%s", err, output.String())
 	}
@@ -323,14 +339,18 @@ printf 'installed\n' > "$HOME/.local/share/uv/tools/rumdl/marker"
 	_ = uv
 	t.Setenv("PATH", fixture)
 	installer, journal, env := journaledEngine(t, home, true)
+	installer.options.Env = &paths.MapEnv{}
 	if err := installer.installMarkdownTool(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(home, ".local", "bin", "rumdl")
 	toolDir := filepath.Join(home, ".local", "share", "uv", "tools", "rumdl")
-	requireJournalPaths(t, installRecordDestinations(t, journal), link, toolDir)
+	config := filepath.Join(home, ".config", "rumdl", "rumdl.toml")
+	requireRumdlUserConfig(t, config)
+	requireJournalPaths(t, installRecordDestinations(t, journal), link, toolDir, filepath.Join(home, ".config"))
 	t.Setenv("PATH", filepath.Join(home, ".local", "bin")+string(os.PathListSeparator)+fixture)
 	idle, idleJournal, _ := journaledEngine(t, home, true)
+	idle.options.Env = &paths.MapEnv{}
 	if err := idle.installMarkdownTool(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -338,9 +358,140 @@ printf 'installed\n' > "$HOME/.local/share/uv/tools/rumdl/marker"
 		t.Fatalf("converged markdown tool journaled %v", idleJournal.records)
 	}
 	rollbackInstallJournal(t, env, journal)
-	for _, path := range []string{link, toolDir} {
+	for _, path := range []string{link, toolDir, config} {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("rollback left %s: %v", path, err)
 		}
+	}
+}
+
+// wantRumdlUserConfig is the exact file pfm install writes when the host has
+// no rumdl user config.
+const wantRumdlUserConfig = `# Written by pfm install: rumdl runs that find no project .rumdl.toml cache nothing,
+# so no stray .rumdl_cache appears in the working directory.
+[global]
+cache = false
+`
+
+func requireRumdlUserConfig(t *testing.T, path string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("rumdl user config %s not written: %v", path, err)
+	}
+	if string(got) != wantRumdlUserConfig {
+		t.Fatalf("rumdl user config %s = %q, want %q", path, got, wantRumdlUserConfig)
+	}
+}
+
+// presentRumdlEngine is an apply engine whose rumdl is already present at the
+// pin, journaled, with env as its environment.
+func presentRumdlEngine(t *testing.T, home string, env paths.Env) (*engine, *Journal, *bytes.Buffer) {
+	t.Helper()
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath("rumdl", "/fixture/rumdl", nil)
+	runner.Script([]string{"/fixture/rumdl", "--version"}, deps.RunResult{Stdout: []byte("rumdl 0.2.73\n")}, nil)
+	installer, journal, _ := journaledEngine(t, home, true)
+	var output bytes.Buffer
+	installer.options.Stdout = &output
+	installer.options.Env = env
+	installer.options.ProcessRunner = runner
+	return installer, journal, &output
+}
+
+// TestInstallMarkdownToolWritesRumdlUserConfigWhenAbsent pins the stray-cache
+// fix: with no user config, install writes one whose [global] cache = false
+// makes every config-less rumdl run cache nothing, and journals it.
+func TestInstallMarkdownToolWritesRumdlUserConfigWhenAbsent(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	installer, journal, output := presentRumdlEngine(t, home, &paths.MapEnv{})
+	if err := installer.installMarkdownTool(context.Background()); err != nil {
+		t.Fatalf("installMarkdownTool: %v\n%s", err, output)
+	}
+	config := filepath.Join(home, ".config", "rumdl", "rumdl.toml")
+	requireRumdlUserConfig(t, config)
+	requireJournalPaths(t, installRecordDestinations(t, journal), filepath.Join(home, ".config"))
+	if !strings.Contains(output.String(), "write rumdl user config -> "+config) {
+		t.Fatalf("output=%q, want the write reported", output)
+	}
+	if installer.report.Changed != 1 {
+		t.Fatalf("report=%+v, want Changed=1", installer.report)
+	}
+}
+
+// TestInstallMarkdownToolLeavesPresentRumdlUserConfigUntouched pins that the
+// user's own config is the truth: never rewritten, merged or journaled.
+func TestInstallMarkdownToolLeavesPresentRumdlUserConfigUntouched(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	config := filepath.Join(home, ".config", "rumdl", "rumdl.toml")
+	own := []byte("[global]\nline-length = 120\n")
+	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, own, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installer, journal, output := presentRumdlEngine(t, home, &paths.MapEnv{})
+	if err := installer.installMarkdownTool(context.Background()); err != nil {
+		t.Fatalf("installMarkdownTool: %v\n%s", err, output)
+	}
+	got, err := os.ReadFile(config)
+	if err != nil || !bytes.Equal(got, own) {
+		t.Fatalf("user config = %q, %v; want untouched %q", got, err, own)
+	}
+	if info, err := os.Stat(config); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("user config mode changed: %v %v", info, err)
+	}
+	if !strings.Contains(output.String(), "skip    rumdl user config present, left untouched: "+config) {
+		t.Fatalf("output=%q, want the skip reported", output)
+	}
+	if journal.Dir() != "" || installer.report.Changed != 0 || installer.report.Skipped != 1 {
+		t.Fatalf(
+			"journal=%v report=%+v, want nothing journaled, Changed=0 Skipped=1",
+			journal.records,
+			installer.report,
+		)
+	}
+}
+
+// TestInstallMarkdownToolRumdlUserConfigHonoursXDGConfigHome pins rumdl's own
+// lookup order: an absolute XDG_CONFIG_HOME wins over HOME/.config.
+func TestInstallMarkdownToolRumdlUserConfigHonoursXDGConfigHome(t *testing.T) {
+	t.Parallel()
+	home, xdg := t.TempDir(), t.TempDir()
+	env := &paths.MapEnv{Values: map[string]string{"XDG_CONFIG_HOME": xdg}}
+	installer, _, output := presentRumdlEngine(t, home, env)
+	if err := installer.installMarkdownTool(context.Background()); err != nil {
+		t.Fatalf("installMarkdownTool: %v\n%s", err, output)
+	}
+	requireRumdlUserConfig(t, filepath.Join(xdg, "rumdl", "rumdl.toml"))
+	if _, err := os.Lstat(filepath.Join(home, ".config")); !os.IsNotExist(err) {
+		t.Fatalf("HOME/.config touched despite XDG_CONFIG_HOME: %v", err)
+	}
+}
+
+// TestInstallMarkdownToolRumdlUserConfigErrorIsReportedNotFatal pins the
+// failure surface: a config root that cannot hold the file is a named skip
+// carrying the path and the cause, never absence and never a failed install.
+func TestInstallMarkdownToolRumdlUserConfigErrorIsReportedNotFatal(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	blocker := filepath.Join(home, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := &paths.MapEnv{Values: map[string]string{"XDG_CONFIG_HOME": blocker}}
+	installer, _, output := presentRumdlEngine(t, home, env)
+	if err := installer.installMarkdownTool(context.Background()); err != nil {
+		t.Fatalf("installMarkdownTool must never fail the install: %v\n%s", err, output)
+	}
+	want := "skip    rumdl user config NOT written: "
+	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), filepath.Join(blocker, "rumdl")) {
+		t.Fatalf("output=%q, want %q naming the path", output, want)
+	}
+	if installer.report.Skipped != 1 || installer.report.Changed != 0 {
+		t.Fatalf("report=%+v, want Skipped=1 Changed=0", installer.report)
 	}
 }

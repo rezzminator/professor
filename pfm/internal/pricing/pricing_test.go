@@ -3,6 +3,7 @@ package pricing
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"reflect"
 	"slices"
@@ -516,5 +517,14 @@ func TestJSONRoundTripsThroughTheDecoder(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClaudeCostPricesEveryColumnAtItsRate(t *testing.T) {
+	row := Row{In: 4, Out: 20, Hit: 0.2, W5m: 5, W1h: 8, LongIn: 2, LongOut: 1.5}
+	usage := ClaudeUsage{Input: 1_000_000, Output: 100_000, CacheRead: 2_000_000, Write5m: 200_000, Write1h: 50_000}
+	// 4 + 2 + 0.4 + 1 + 0.4 at base rates; the long-context multipliers stay out.
+	if got, want := row.ClaudeCost(usage), 7.8; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("ClaudeCost = %v, want %v", got, want)
 	}
 }

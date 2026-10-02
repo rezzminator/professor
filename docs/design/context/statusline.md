@@ -42,22 +42,24 @@ The command is rendered with `~` expanded to the home directory. `~/.local/bin/p
 
 ## The sub-agent row
 
-`pfm statusline --subagents` (`pfm/internal/statusline/subagents.go`) prints one row per task with an id and a size, fields in this order, joined by `│`:
+`pfm statusline --subagents` (`pfm/internal/statusline/subagents.go`) prints one row per task with an id and a size, fields in this order, joined by a bare `│` with no padding, because the panel is narrow:
 
 | Field | Shows | Rule |
 | --- | --- | --- |
 | nested | `2/5` | agents below this one working right now (their own turn is open), in green, over every agent below it at any depth, in the tools colour; `solo`, muted, when it spawned none. It leads the row because a parent row is read for it |
 | gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize` |
+| spend | `$1.24/3.1M/42K/12` | follows the gauge after a space, not a `│`: USD, prompt tokens (uncached, cache read, cache write), output tokens, distinct `tool_use` calls, billed by this agent and every agent below it at any depth, over each whole transcript, so spend from before a compaction counts. A response counts once per `message.id`; a usage block whose counts sit only in `usage.iterations` is folded, and a cache write is priced by its TTL split, the uncovered part at the 5-minute rate. Rates come from pfm's price table (`pfm/internal/pricing/`, the shipped table plus any `pfm.prices.json` override) at base rates, without the long-context premium, as the `/tokens` headline prices. A floor carries a yellow `+?`: a model the table cannot price, or a transcript below it that cannot be read. `$?` when nothing could be priced, `$?/?/?/?` when the agent's own transcript cannot be read |
 | identity | `scout·tracer` | the task name, then its role (`agentType`) |
 | model | `opus·🏎️ high` | the model family, then the effort (see [Effort](#effort)) |
 | status | `running 2m:0s` | status plus time since `startTime`, in the cache window's h:m:s shape; a finished task's clock stops at its transcript's last entry. `delegating` replaces a stopped status while any agent below still works, and its clock runs on |
 | idle | `idle 1m20s` | only while running and silent for 60 s or more; yellow, red from 5 min |
-| tools | `12 tools` | distinct `tool_use` ids in the sub-agent's transcript |
 | errors | `1 error` | tool results marked `is_error`; absent at zero |
 | cache | `💾5m✓3m:8s 94%` | the main line's cache segment, per agent: the time left on the agent's own prompt cache (the length its newest cache write used, from its `usage.cache_creation` split, counted from its newest request — the row payload carries no `prompt_cache` per agent), then cache reads over the whole prompt on its newest call, green from 80, yellow from 50, red below — muted as `was 94%` once the window has lapsed; `💾–` before its first reply |
 | compactions | `⟲2` | `compact_boundary` entries; absent at zero |
 | cwd | `repo` | only when it differs from the session's cwd |
 | label | the task's label, else its description | |
+
+A row wider than the panel fits itself to the payload's `columns`, less 8 for Claude Code's own `  ❯ ⏺ ` prefix and a margin (`rowPrefixWidth`, measured on a live 125-column pane). It gives parts up in rank order until it fits: cwd, cache, compactions, then the effort, leaving the model family alone. Nesting, gauge and spend, identity, status, idle, errors and the label always stay, and the label is last, so Claude Code's own truncation cuts only the label. A payload without `columns` keeps the full row.
 
 The row opens with `ESC[22m`, which cancels Claude Code's faint, so the colours read at full strength.
 
@@ -67,7 +69,7 @@ A row is finished once its status is `completed`, `failed`, `killed` or `error` 
 
 - A completed row, for its first minute: the whole row in one muted colour, without `ESC[22m`, so Claude Code's faint stays on and the row reads as disabled.
 - A failed, killed or errored row, for its first minute: a full row, because it is an alert.
-- Any finished row after one minute since its transcript's last entry: collapsed to `completed 3m0s ago │ scout·tracer │ label`, muted, the status word red when it is a failure.
+- Any finished row after one minute since its transcript's last entry: collapsed to `completed 3m0s ago│$1.24/3.1M/42K/12│scout·tracer│label`, muted, the status word red when it is a failure.
 
 ## Where each field comes from
 
@@ -77,7 +79,7 @@ Claude Code keeps each sub-agent's files beside the session's transcript: `{tran
 - Read from the meta file: the role (`agentType`).
 - Read from every meta file in the directory, once per render: the nesting. An agent spawned by another agent carries `parentAgentId` (and `spawnDepth`); one spawned by the main loop carries neither. An agent is working while its own turn is open; an orchestrator that ended its turn to wait on background workers is not working, its workers are, and its row says `delegating`. A turn is open unless the transcript's last message entry is an assistant message with a `stop_reason` and no `tool_use` (`pfm/internal/statusline/subagents_nest.go`).
 
-An unreadable fact renders as a failure to look, never as zero or empty: `tools ?`, `💾!`, `role ?`, `?/?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 unread)` for an agent below whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
+An unreadable fact renders as a failure to look, never as zero or empty: `$?/?/?/?`, `💾!`, `role ?`, `?/?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 unread)` for an agent below whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
 
 ## Effort
 
@@ -97,6 +99,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 ## The main statusline
 
+- After the context gauge, the spend block reads `💰$3.20/1.2M/40K/88`: Claude Code's own `cost.total_cost_usd` (dim, yellow from $2, red from $10), then the prompt tokens, output tokens and distinct tool calls of the chat's transcript and every sub-agent transcript beside it, the same scope that cost covers. It is read the way the sub-agent spend is, a response once per `message.id`, its last line. `+?` marks a sub-agent transcript that could not be read, and `?/?/?` a chat transcript that could not be. A Codex chat keeps `🧮` context tokens and `✎` prompts in its place (`pfm/internal/statusline/context.go`).
 - The model block reads `◆ Opus 5.5·🚀 xhigh`: model symbol and name, a muted `·`, then the effort (`pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.
 - The cache window reads `💾1h✓59m:28s 94%`: the cache window, the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry.
@@ -121,7 +124,7 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The row renderer | `pfm/internal/statusline/subagents.go`, `subagents_nest.go`, `session_effort.go`, `model_segment.go`, `palette.go` | fields, order, effort, colours |
+| The row renderer | `pfm/internal/statusline/subagents.go`, `subagents_nest.go`, `subagents_spend.go`, `session_effort.go`, `model_segment.go`, `palette.go` | fields, order, effort, spend, colours |
 | The command | `pfm/cmd/pfm/statusline_command.go` | `pfm statusline --subagents` (combining it with `--refresh-gpt` is a usage error, exit 2) |
 | The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the status-lines row: `statusLine` and `subagentStatusLine` in every launch's `--settings` payload |
 | The launch record | `fleetdb.LaunchFor` over `pfm.db` table `launch` | the cache window per `session_id` |

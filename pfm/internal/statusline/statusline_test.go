@@ -379,7 +379,7 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
 	for _, want := range []string{
 		"🥇 ", "◆ Opus 4", "🔖 BUILDER:1", "◆ Opus 4·🏎️ high", "sample",
-		"42%", "🧮10.3K", "💰$3.42", "⏳ 5m32s", "·2 ·1",
+		"42%", "💰$3.42/", "⏳ 5m32s", "·2 ·1",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("render lacks %q:\n%q", want, got)
@@ -503,7 +503,8 @@ func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T)
 		t.Fatal(err)
 	}
 	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
-	if !strings.Contains(plain, "25%") || strings.Contains(plain, "77%") || !strings.Contains(plain, "🧮1.0K ✎2") {
+	if !strings.Contains(plain, "25%") || strings.Contains(plain, "77%") ||
+		!strings.Contains(plain, "💰$0.00/250.0K/0/0") {
 		t.Fatalf("measured transcript gauge or prompt count missing:\n%q", plain)
 	}
 	floor, err := os.ReadFile(filepath.Join(root, ".cache", "pfm-statusline", "claude-work-sample.txt"))

@@ -223,6 +223,19 @@ func checkPatterns(rows []Row, source string) error {
 	return nil
 }
 
+// ClaudeUsage is one Claude response's billed token counts: cache writes split
+// by TTL, a write with no TTL breakdown counted at the 5-minute rate.
+type ClaudeUsage struct {
+	Input, Output, CacheRead, Write5m, Write1h int64
+}
+
+// ClaudeCost prices one response at the row's base rates, in USD. The
+// long-context premium is not applied, as the /tokens headline does not apply it.
+func (r Row) ClaudeCost(usage ClaudeUsage) float64 {
+	return (float64(usage.Input)*r.In + float64(usage.Output)*r.Out + float64(usage.CacheRead)*r.Hit +
+		float64(usage.Write5m)*r.W5m + float64(usage.Write1h)*r.W1h) / 1e6
+}
+
 // Resolve returns the row that prices modelID: of every pattern, of every row,
 // whose lowercased form is a substring of the lowercased id, the longest wins,
 // and of two of equal length the one starting earlier in the id. Row order never

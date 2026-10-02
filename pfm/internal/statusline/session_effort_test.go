@@ -34,7 +34,7 @@ func renderEffortAgentRow(t *testing.T, sidDir, session, task string) (content, 
 	var warn bytes.Buffer
 	payload := `{"session_id":"` + effortSession + `","transcript_path":` + jsonText(session) +
 		`,"tasks":[` + task + `]}`
-	got, err := RenderSubagents([]byte(payload), subagentNow, sidDir, &warn)
+	got, err := RenderSubagents([]byte(payload), subagentNow, sidDir, testPrices(t), &warn)
 	if err != nil {
 		t.Fatalf("RenderSubagents: %v", err)
 	}

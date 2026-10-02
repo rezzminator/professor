@@ -92,7 +92,7 @@ Every missing entry is created empty (apart from the `settings.json` seed). Exis
 | `telemetry` | queued account telemetry |
 | `feedback` | queued account feedback |
 
-`sessions/{pid}.json` describes a live process, rather than the conversation transcript. On reload, the new process registers in the selected account's directory. For `state` inside the store, `store-identity` checks only `state/mcp-discover-verdicts.json`. Unknown names in either the store or an account report `UNCLASSIFIED` and remain untouched.
+`sessions/{pid}.json` describes a live process, rather than the conversation transcript. On reload, the new process registers in the selected account's directory. For `state` inside the store, `store-identity` checks only `state/mcp-discover-verdicts.json`. While account 1's dir resolves to the store, each identity path in the store is the same file as its account path, so `store-identity` prints no delete: the entry moves into the real dir that `account-is-store`'s fix makes ([host-checks.md](host-checks.md#store-identity)). Unknown names in either the store or an account report `UNCLASSIFIED` and remain untouched.
 
 ## Settings
 

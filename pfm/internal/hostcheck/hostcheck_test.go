@@ -211,3 +211,168 @@ func TestRunHealthyAndAbsent(t *testing.T) {
 		assertRows(t, RunAll(healthy(t, string(example))))
 	})
 }
+
+func oneFile(remove, keep string) string {
+	return remove + " and " + keep + " are one file through a link: delete neither; " +
+		"replace the link with a real copy, then rerun pfm doctor"
+}
+
+// TestRemoveKeeping pins the one guard on a printed fix that deletes one path
+// while keeping another: one file under two names never prints the delete, and
+// a sameness stat that fails prints the UNREADABLE row in place of any fix.
+func TestRemoveKeeping(t *testing.T) {
+	const fix = "keep it; after checking, rm -r it"
+	for _, test := range []struct {
+		name  string
+		shape func(t *testing.T, dir, remove string) string
+		want  string
+	}{
+		{"different-files", func(t *testing.T, dir, _ string) string {
+			keep := filepath.Join(dir, "account", "entry")
+			writeFile(t, keep, "keep")
+			return keep
+		}, "fix"},
+		{"keep-absent", func(_ *testing.T, dir, _ string) string {
+			return filepath.Join(dir, "account", "entry")
+		}, "fix"},
+		{"symlink", func(t *testing.T, dir, remove string) string {
+			return linkEntry(t, dir, remove, os.Symlink)
+		}, "same"},
+		{"hard-link", func(t *testing.T, dir, remove string) string {
+			return linkEntry(t, dir, remove, os.Link)
+		}, "same"},
+		{"linked-dir", func(t *testing.T, dir, remove string) string {
+			if err := os.Symlink(filepath.Dir(remove), filepath.Join(dir, "account")); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(dir, "account", "entry")
+		}, "same"},
+		{"stat-error", func(t *testing.T, dir, _ string) string {
+			return linkEntry(t, dir, filepath.Join(dir, "gone"), os.Symlink)
+		}, "unreadable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			remove := filepath.Join(dir, "store", "entry")
+			writeFile(t, remove, "data")
+			keep := test.shape(t, dir, remove)
+			var rows []Row
+			got, ok := removeKeeping(&rows, "guard", keep, fix, filepath.Join(dir, "store", "other"), remove)
+			switch test.want {
+			case "unreadable":
+				assertUnreadable(t, rows, "guard", keep, syscall.ENOENT)
+				if ok || got != "" {
+					t.Fatalf("got %q %v, want no fix", got, ok)
+				}
+			case "same":
+				assertRows(t, rows)
+				if !ok || got != oneFile(remove, keep) || strings.Contains(got, "rm ") {
+					t.Fatalf("got %q %v, want %q", got, ok, oneFile(remove, keep))
+				}
+			default:
+				assertRows(t, rows)
+				if !ok || got != fix {
+					t.Fatalf("got %q %v, want %q", got, ok, fix)
+				}
+			}
+		})
+	}
+}
+
+func linkEntry(t *testing.T, dir, target string, link func(string, string) error) string {
+	t.Helper()
+	keep := filepath.Join(dir, "account", "entry")
+	makeDir(t, filepath.Dir(keep))
+	if err := link(target, keep); err != nil {
+		t.Fatal(err)
+	}
+	return keep
+}
+
+// TestRemoveKeepingDoors routes every printed fix that deletes one path while
+// keeping another through removeKeeping: each door, shown one file under two
+// names, prints the guard's fix and no rm.
+func TestRemoveKeepingDoors(t *testing.T) {
+	for _, door := range []struct {
+		check string
+		shape func(t *testing.T, env Env) (remove, keep string)
+	}{
+		{"legacy-config", func(t *testing.T, env Env) (string, string) {
+			remove := filepath.Join(env.LegacyConfigDir, config.FileName)
+			return remove, hardLink(t, env.ConfigPath, remove)
+		}},
+		{"legacy-harvester-config", func(t *testing.T, env Env) (string, string) {
+			remove := filepath.Join(env.LegacyConfigDir, "harvester.config.json")
+			return remove, hardLink(t, filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json"), remove)
+		}},
+		{"legacy-state-db", func(t *testing.T, env Env) (string, string) {
+			remove := paths.LegacyStateDB(env.Home)
+			writeFile(t, remove+"-wal", "wal")
+			return remove, hardLink(t, env.StateDB, remove)
+		}},
+		{"legacy-harvester-cache", func(t *testing.T, env Env) (string, string) {
+			remove, keep := paths.LegacyHarvesterCacheDir(env.Home), paths.HarvesterCacheDir(env.Home)
+			makeDir(t, remove)
+			symlink(t, remove, keep)
+			return remove, keep
+		}},
+		{"pre-split-config", func(t *testing.T, env Env) (string, string) {
+			remove := filepath.Join(filepath.Dir(env.ConfigPath), "config.json")
+			writeFile(t, remove, "{}")
+			symlink(t, remove, env.ConfigPath)
+			return remove, env.ConfigPath
+		}},
+		{"home-state-file", func(t *testing.T, env Env) (string, string) {
+			remove, keep := filepath.Join(env.Home, ".claude.json"), filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
+			writeFile(t, remove, "{}")
+			symlink(t, remove, keep)
+			return remove, keep
+		}},
+		{"account-entry-real", func(t *testing.T, env Env) (string, string) {
+			remove, keep := filepath.Join(env.Accounts[0].ConfigDir, "settings.json"), filepath.Join(env.Store, "settings.json")
+			writeFile(t, remove, "{}")
+			symlink(t, remove, keep)
+			return remove, keep
+		}},
+		{"beside-backup", func(t *testing.T, env Env) (string, string) {
+			remove, keep := filepath.Join(env.Store, "settings.json.bak-1"), filepath.Join(env.Store, "settings.json")
+			writeFile(t, remove, "{}")
+			symlink(t, remove, keep)
+			return remove, keep
+		}},
+		{"store-identity", func(t *testing.T, env Env) (string, string) {
+			remove := filepath.Join(env.Store, ".credentials.json")
+			keep := filepath.Join(env.Accounts[0].ConfigDir, ".credentials.json")
+			writeFile(t, remove, "{}")
+			symlink(t, remove, keep)
+			return remove, keep
+		}},
+	} {
+		t.Run(door.check, func(t *testing.T) {
+			env := fixtureEnv(t)
+			remove, keep := door.shape(t, env)
+			rows := detect(t, door.check, env)
+			if len(rows) != 1 || rows[0].Fix != oneFile(remove, keep) || strings.Contains(rows[0].Fix, "rm ") {
+				t.Fatalf("rows=%+v, want one fix %q", rows, oneFile(remove, keep))
+			}
+		})
+	}
+}
+
+func hardLink(t *testing.T, keep, remove string) string {
+	t.Helper()
+	writeFile(t, keep, "{}")
+	makeDir(t, filepath.Dir(remove))
+	if err := os.Link(keep, remove); err != nil {
+		t.Fatal(err)
+	}
+	return keep
+}
+
+func symlink(t *testing.T, target, path string) {
+	t.Helper()
+	makeDir(t, filepath.Dir(path))
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+}

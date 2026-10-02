@@ -1,10 +1,14 @@
 package hostcheck
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -39,6 +43,55 @@ func TestAccountIsStore(t *testing.T) {
 			assertRows(t, detect(t, "account-entry-real", env))
 		})
 	}
+	t.Run("parent-link", func(t *testing.T) {
+		env := fixtureEnv(t)
+		acct := env.Accounts[0].ConfigDir
+		parent, resolved := filepath.Dir(acct), filepath.Join(env.Store, filepath.Base(acct))
+		writeFile(t, filepath.Join(resolved, ".credentials.json"), "token")
+		writeFile(t, filepath.Join(env.Store, "settings.json"), "{}")
+		symlink(t, env.Store, parent)
+		fix := "[ ! -L " + parent + " ] || { rm " + parent + " && mkdir -m 700 " + parent + "; } && [ ! -e " + acct +
+			" ] && mv " + resolved + " " + acct
+		assertRows(
+			t,
+			detect(t, "account-is-store", env),
+			Row{Block, "account-is-store", acct, "account 1's config dir resolves to the store " + env.Store, fix},
+		)
+		if output, err := exec.Command("sh", "-c", fix).CombinedOutput(); err != nil {
+			t.Fatalf("fix %q: %v: %s", fix, err, output)
+		}
+		if info, err := os.Lstat(parent); err != nil || !info.IsDir() {
+			t.Fatalf("%s is not a real dir: %v %v", parent, info, err)
+		}
+		if raw, err := os.ReadFile(filepath.Join(acct, ".credentials.json")); err != nil || string(raw) != "token" {
+			t.Fatalf("credentials not in %s: %q %v", acct, raw, err)
+		}
+		if _, err := os.Lstat(resolved); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s left in the store: %v", resolved, err)
+		}
+		if _, err := os.Stat(filepath.Join(env.Store, "settings.json")); err != nil {
+			t.Fatalf("store lost its settings: %v", err)
+		}
+		assertRows(t, detect(t, "account-is-store", env))
+	})
+	t.Run("default-dir-resolves-to-store", func(t *testing.T) {
+		env := fixtureEnv(t)
+		env.Accounts[0].ConfigDir = env.Store
+		makeDir(t, env.Store)
+		symlink(t, env.Store, filepath.Dir(config.DefaultAccountDir(env.Home, 1)))
+		assertRows(
+			t,
+			detect(t, "account-is-store", env),
+			Row{
+				Block,
+				"account-is-store",
+				env.Store,
+				"account 1's config dir resolves to the store " + env.Store,
+				"point accounts[1].configDir in " + env.ConfigPath + " at a real dir outside the store " + env.Store +
+					"; " + config.DefaultAccountDir(env.Home, 1) + " resolves into it",
+			},
+		)
+	})
 	t.Run("unreadable-continues", func(t *testing.T) {
 		env := fixtureEnv(t)
 		parent := filepath.Join(env.Home, "file")
@@ -97,7 +150,7 @@ func TestAccountDirSymlink(t *testing.T) {
 						"account-entry-real",
 						plugins,
 						"plugins is a real dir; it belongs in the store",
-						"the store keeps its copy (reinstallable): rm -r " + plugins,
+						"rm -r " + plugins + "  # the store keeps its copy (reinstallable)",
 					},
 				)
 			case "dangling":
@@ -202,6 +255,181 @@ func TestStoreIdentity(t *testing.T) {
 			},
 		)
 	})
+	t.Run("config-dir-is-store", func(t *testing.T) {
+		env := fixtureEnv(t)
+		env.Accounts[0].ConfigDir = env.Store
+		path := filepath.Join(env.Store, ".credentials.json")
+		writeFile(t, path, "{}")
+		assertRows(
+			t,
+			detect(t, "store-identity", env),
+			Row{
+				Block,
+				"store-identity",
+				path,
+				".credentials.json is account identity inside the store",
+				"apply account-is-store's fix for " + env.Store + " first; pfm doctor then names this entry's move",
+			},
+		)
+	})
+	t.Run("dangling-account-entry", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, filepath.Join(env.Store, ".credentials.json"), "{}")
+		target := filepath.Join(env.Accounts[0].ConfigDir, ".credentials.json")
+		symlink(t, filepath.Join(env.Home, "gone"), target)
+		assertUnreadable(t, detect(t, "store-identity", env), "store-identity", target, syscall.ENOENT)
+	})
+}
+
+// TestStoreIdentityAccountLinkedToStore runs the printed fixes on the
+// account-is-store shape ~/.cc/1 -> ~/.claude, where each identity entry's
+// store and account paths are one file: no store-identity fix deletes either
+// side, and the fixes, run as printed in either order, leave every entry once,
+// in account 1's real dir.
+func TestStoreIdentityAccountLinkedToStore(t *testing.T) {
+	entries := []string{".credentials.json", ".claude.json", "sessions/1.json", "state/mcp-discover-verdicts.json"}
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprint("reverse=", reverse), func(t *testing.T) {
+			env := fixtureEnv(t)
+			acct := env.Accounts[0].ConfigDir
+			for _, entry := range entries {
+				writeFile(t, filepath.Join(env.Store, entry), entry)
+			}
+			symlink(t, env.Store, acct)
+			identity := detect(t, "store-identity", env)
+			if len(identity) != len(entries) {
+				t.Fatalf("store-identity rows=%+v", identity)
+			}
+			for _, row := range identity {
+				side := filepath.Join(acct, strings.TrimPrefix(row.Path, env.Store+string(filepath.Separator)))
+				for _, remove := range []string{"rm " + row.Path, "rm -r " + row.Path, "rm " + side, "rm -r " + side} {
+					if strings.Contains(row.Fix, remove) {
+						t.Errorf("fix deletes one side of %s: %q", row.Path, row.Fix)
+					}
+				}
+			}
+			fixes := append(detect(t, "account-is-store", env), identity...)
+			for i := range fixes {
+				row := fixes[i]
+				if reverse {
+					row = fixes[len(fixes)-1-i]
+				}
+				output, err := exec.Command("sh", "-c", row.Fix).CombinedOutput()
+				// Run last, account-is-store's own fix finds the real dir its
+				// link became and refuses, deleting nothing.
+				if err != nil && (!reverse || row.Check != "account-is-store") {
+					t.Fatalf("fix %q: %v: %s", row.Fix, err, output)
+				}
+			}
+			if info, err := os.Lstat(acct); err != nil || !info.IsDir() {
+				t.Fatalf("%s is not a real dir: %v %v", acct, info, err)
+			}
+			for _, entry := range entries {
+				if raw, err := os.ReadFile(filepath.Join(acct, entry)); err != nil || string(raw) != entry {
+					t.Fatalf("%s not in account 1's dir: %q %v", entry, raw, err)
+				}
+				if _, err := os.Lstat(filepath.Join(env.Store, entry)); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("%s left in the store: %v", entry, err)
+				}
+			}
+			assertRows(t, detect(t, "account-is-store", env))
+			assertRows(t, detect(t, "store-identity", env))
+		})
+	}
+}
+
+// TestAccountEntryRealFixesRun runs every account-entry-real fix as printed:
+// each shape is one shell line whose delete runs only after its merge into the
+// store succeeded, and a merge that finds a difference deletes nothing.
+func TestAccountEntryRealFixesRun(t *testing.T) {
+	env := fixtureEnv(t)
+	acct := env.Accounts[0].ConfigDir
+	for _, entry := range installer.StoreEntries {
+		path, target := filepath.Join(acct, entry.Name), filepath.Join(env.Store, entry.Name)
+		switch {
+		case entry.Dir:
+			writeFile(t, filepath.Join(path, "sub", "account"), "account")
+			writeFile(t, filepath.Join(path, "both"), "same")
+			writeFile(t, filepath.Join(target, "both"), "same")
+			writeFile(t, filepath.Join(target, "store"), "store")
+		case entry.Name == "settings.json":
+			writeFile(t, path, `{"account":1,"both":{"k":2}}`)
+			writeFile(t, target, `{"both":{"k":2},"store":3}`)
+		case entry.Name == "history.jsonl":
+			writeFile(t, path, `{"timestamp":1}`+"\n")
+			writeFile(t, target, `{"timestamp":2}`+"\n")
+		default:
+			writeFile(t, path, "account\n")
+			writeFile(t, target, "store\n")
+		}
+	}
+	rows := detect(t, "account-entry-real", env)
+	if len(rows) != len(installer.StoreEntries) {
+		t.Fatalf("rows=%+v", rows)
+	}
+	for _, row := range rows {
+		if output, err := exec.Command("sh", "-c", row.Fix).CombinedOutput(); err != nil {
+			t.Fatalf("fix %q: %v: %s", row.Fix, err, output)
+		}
+	}
+	assertRows(t, detect(t, "account-entry-real", env))
+	for _, entry := range installer.StoreEntries {
+		path, target := filepath.Join(acct, entry.Name), filepath.Join(env.Store, entry.Name)
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s left in the account: %v", path, err)
+		}
+		want := map[string]string{target: "store\n"}
+		switch {
+		case entry.Name == "plugins":
+			want = map[string]string{filepath.Join(target, "store"): "store", filepath.Join(target, "both"): "same"}
+		case entry.Dir:
+			want = map[string]string{
+				filepath.Join(target, "store"):          "store",
+				filepath.Join(target, "both"):           "same",
+				filepath.Join(target, "sub", "account"): "account",
+			}
+		case entry.Name == "settings.json":
+			raw, err := os.ReadFile(target)
+			var got map[string]any
+			merged := map[string]any{"account": 1.0, "both": map[string]any{"k": 2.0}, "store": 3.0}
+			if err != nil || json.Unmarshal(raw, &got) != nil || !reflect.DeepEqual(got, merged) {
+				t.Errorf("%s=%q %v", target, raw, err)
+			}
+			continue
+		case entry.Name == "history.jsonl":
+			want[target] = `{"timestamp":1}` + "\n" + `{"timestamp":2}` + "\n"
+		case entry.Name == "CLAUDE.md":
+			want[target] = "store\naccount\n"
+		}
+		for file, text := range want {
+			if raw, err := os.ReadFile(file); err != nil || string(raw) != text {
+				t.Errorf("%s=%q %v, want %q", file, raw, err, text)
+			}
+		}
+	}
+	for _, name := range []string{"projects", "settings.json"} {
+		t.Run(name+"-stops-on-a-difference", func(t *testing.T) {
+			env := fixtureEnv(t)
+			path, target := filepath.Join(env.Accounts[0].ConfigDir, name), filepath.Join(env.Store, name)
+			if name == "projects" {
+				path, target = filepath.Join(path, "f"), filepath.Join(target, "f")
+			}
+			writeFile(t, path, `{"k":1}`)
+			writeFile(t, target, `{"k":2}`)
+			rows := detect(t, "account-entry-real", env)
+			if len(rows) != 1 {
+				t.Fatalf("rows=%+v", rows)
+			}
+			if err := exec.Command("sh", "-c", rows[0].Fix).Run(); err == nil {
+				t.Fatalf("fix %q ran through a difference", rows[0].Fix)
+			}
+			for file, text := range map[string]string{path: `{"k":1}`, target: `{"k":2}`} {
+				if raw, err := os.ReadFile(file); err != nil || string(raw) != text {
+					t.Fatalf("%s=%q %v, want %q", file, raw, err, text)
+				}
+			}
+		})
+	}
 }
 
 func TestHomeStateFile(t *testing.T) {
@@ -234,19 +462,28 @@ func TestAccountEntryReal(t *testing.T) {
 	env := fixtureEnv(t)
 	var want []Row
 	fixes := map[string]string{}
-	for _, name := range strings.Fields("projects file-history tasks session-env paste-cache shell-snapshots plans uploads downloads teams") {
-		fixes[name] = "union into the store: cp -an {path}/. {store}/{entry}/ ; diff -rq {path} {store}/{entry} | grep -v '^Only in {store}/{entry}' (empty: nothing differs) ; rm -r {path}"
-	}
-	for _, name := range strings.Fields("agents commands skills rules themes") {
-		fixes[name] = "move what the store lacks: mv -n {path}/* {store}/{entry}/ ; compare what is left, then rm -r {path}"
+	for _, name := range strings.Fields(
+		"projects file-history tasks session-env paste-cache shell-snapshots plans uploads downloads teams " +
+			"agents commands skills rules themes",
+	) {
+		fixes[name] = "mkdir -p {store}/{entry} && cp -an {path}/. {store}/{entry}/ && " +
+			"! diff -rq {path} {store}/{entry} 2>&1 | grep -v '^Only in {store}/{entry}' && " +
+			"rm -r {path}  # union into the store; stops while a file differs"
 	}
 	for _, name := range strings.Fields("stats-cache.json .last-cleanup .last-update-result.json gh-pr-status-cache.json") {
-		fixes[name] = "a cache: rm {path}"
+		fixes[name] = "rm {path}  # a cache"
 	}
-	fixes["history.jsonl"] = "interleave by timestamp: jq -c -s 'sort_by(.timestamp)[]' {store}/history.jsonl {path} > {store}/history.jsonl.new && mv {store}/history.jsonl.new {store}/history.jsonl && rm {path}"
-	fixes["plugins"] = "the store keeps its copy (reinstallable): rm -r {path}"
-	fixes["settings.json"] = "copy any key you keep into {store}/settings.json, then rm {path}"
-	fixes["CLAUDE.md"] = "append what you keep to {store}/CLAUDE.md, then rm {path}"
+	fixes["history.jsonl"] = "jq -c -s 'sort_by(.timestamp)[]' {store}/history.jsonl {path} > " +
+		"{store}/history.jsonl.new && mv {store}/history.jsonl.new {store}/history.jsonl && " +
+		"rm {path}  # interleaved by timestamp"
+	fixes["plugins"] = "rm -r {path}  # the store keeps its copy (reinstallable)"
+	fixes["settings.json"] = "jq -e -s '.[0] as $s | .[1] | to_entries | all(.key as $k | ($s | has($k) | not) or " +
+		"$s[$k] == .value)' {store}/settings.json {path} > /dev/null && " +
+		"jq -s '.[0] * .[1]' {store}/settings.json {path} > " +
+		"{store}/settings.json.new && mv {store}/settings.json.new {store}/settings.json && rm {path}  " +
+		"# adds the keys the store lacks; stops while a key differs"
+	fixes["CLAUDE.md"] = "cat {path} >> {store}/CLAUDE.md && rm {path}  " +
+		"# appended whole; prune {store}/CLAUDE.md as you like"
 	for _, entry := range installer.StoreEntries {
 		path := filepath.Join(env.Accounts[0].ConfigDir, entry.Name)
 		kind := "file"
@@ -301,7 +538,7 @@ func TestAccountEntryReal(t *testing.T) {
 				"account-entry-real",
 				path,
 				"plugins is a real dir; it belongs in the store",
-				"the store keeps its copy (reinstallable): rm -r " + path,
+				"rm -r " + path + "  # the store keeps its copy (reinstallable)",
 			},
 		)
 	})

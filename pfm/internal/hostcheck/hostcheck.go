@@ -210,5 +210,50 @@ func moveOrRemove(rows *[]Row, check, source, target string) (string, bool) {
 	if info == nil {
 		return "mv " + source + " " + target, true
 	}
-	return "diff " + source + " " + target + " && rm " + source, true
+	return removeKeeping(rows, check, target, "diff "+source+" "+target+" && rm "+source, source)
+}
+
+// removeKeeping is the one door for a printed fix that deletes each of removes
+// while keeping keep: it returns fix only when no remove is the same file as
+// keep after following links, since deleting one name of a single file
+// deletes the data the fix promises to keep. One file under two names returns
+// a fix that deletes neither. A failed sameness stat appends check's
+// UNREADABLE row, whose fix deletes nothing, and returns false.
+func removeKeeping(rows *[]Row, check, keep, fix string, removes ...string) (string, bool) {
+	for _, remove := range removes {
+		same, err := samePhysicalFile(keep, remove)
+		if err != nil {
+			*rows = append(*rows, unreadable(check, remove, err))
+			return "", false
+		}
+		if same {
+			return remove + " and " + keep + " are one file through a link: delete neither; " +
+				"replace the link with a real copy, then rerun pfm doctor", true
+		}
+	}
+	return fix, true
+}
+
+// samePhysicalFile reports whether a and b are one file after following links. A path
+// with nothing at it is no file; a dangling link is a stat error.
+func samePhysicalFile(a, b string) (bool, error) {
+	aInfo, err := statPresent(a)
+	if err != nil || aInfo == nil {
+		return false, err
+	}
+	bInfo, err := statPresent(b)
+	if err != nil || bInfo == nil {
+		return false, err
+	}
+	return os.SameFile(aInfo, bInfo), nil
+}
+
+func statPresent(path string) (fs.FileInfo, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, lstatErr := os.Lstat(path); errors.Is(lstatErr, fs.ErrNotExist) {
+			return nil, nil
+		}
+	}
+	return info, err
 }

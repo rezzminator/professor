@@ -145,7 +145,13 @@ func besideConfig(env Env) []Row {
 		var document map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &document); err != nil {
 			rows = append(rows, unreadable("pre-split-config", path, err))
-		} else {
+		} else if fix, ok := removeKeeping(
+			&rows,
+			"pre-split-config",
+			env.ConfigPath,
+			"rm "+path+" once its content is in "+env.ConfigPath,
+			path,
+		); ok {
 			rows = append(
 				rows,
 				Row{
@@ -153,7 +159,7 @@ func besideConfig(env Env) []Row {
 					"pre-split-config",
 					path,
 					"a pre-split config.json beside the config",
-					"rm " + path + " once its content is in " + env.ConfigPath,
+					fix,
 				},
 			)
 		}
@@ -188,8 +194,24 @@ func legacyDB(check, kind, legacy, target string) ([]Row, error) {
 	if len(rows) != before {
 		return rows, nil
 	}
-	fix := "both exist — keep " + target + ": rm " + legacy + " " + legacy + "-wal " + legacy + "-shm"
-	if targetInfo == nil {
+	var fix string
+	if targetInfo != nil {
+		removes := make([]string, 0, len(present))
+		for _, suffix := range present {
+			removes = append(removes, legacy+suffix)
+		}
+		var ok bool
+		fix, ok = removeKeeping(
+			&rows,
+			check,
+			target,
+			"both exist — keep "+target+": rm "+legacy+" "+legacy+"-wal "+legacy+"-shm",
+			removes...,
+		)
+		if !ok {
+			return rows, nil
+		}
+	} else {
 		fix = "close every chat, stop pfm's services, then: "
 		for i, suffix := range present {
 			if i > 0 {
@@ -223,7 +245,10 @@ func legacyHarvesterCache(env Env) ([]Row, error) {
 	}
 	fix := "mv " + path + " " + target
 	if info != nil {
-		fix = "rm -r " + path
+		var ok bool
+		if fix, ok = removeKeeping(&rows, check, target, "rm -r "+path, path); !ok {
+			return rows, nil
+		}
 	}
 	rows = append(rows, Row{Warn, check, path, "pre-rename harvester cache dir", fix})
 	return rows, nil

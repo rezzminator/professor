@@ -257,11 +257,9 @@ func (h *e2eHarness) assertOldShapeInstallConverges(fresh surfaceSnapshot) {
 			want = append(
 				want,
 				"pfm install: BLOCK account-entry-real "+projects+" — projects is a real dir; it belongs in the store",
-				"pfm install:   fix: union into the store: cp -an "+projects+"/. "+target+"/ ; diff -rq "+
-					projects+" "+target+" | grep -v '^Only in "+target+"' (empty: nothing differs) ; rm -r "+projects,
+				"pfm install:   fix: "+unionFix(projects, target),
 				"pfm install: BLOCK account-entry-real "+settings+" — settings.json is a real file; it belongs in the store",
-				"pfm install:   fix: copy any key you keep into "+filepath.Join(store, "settings.json")+
-					", then rm "+settings,
+				"pfm install:   fix: "+settingsFix(settings, filepath.Join(store, "settings.json")),
 			)
 		}
 		want = append(want, "pfm install: 6 blocking — run pfm doctor for the fixes")
@@ -287,8 +285,8 @@ func (h *e2eHarness) assertOldShapeInstallConverges(fresh surfaceSnapshot) {
 			account := filepath.Join(home, filepath.Dir(relative))
 			projects, target := filepath.Join(account, "projects"), filepath.Join(store, "projects")
 			for _, fix := range []string{
-				"union into the store: cp -an " + projects + "/. " + target + "/ ; diff -rq " + projects + " " + target + " | grep -v '^Only in " + target + "' (empty: nothing differs) ; rm -r " + projects,
-				"copy any key you keep into " + filepath.Join(store, "settings.json") + ", then rm " + filepath.Join(account, "settings.json"),
+				unionFix(projects, target),
+				settingsFix(filepath.Join(account, "settings.json"), filepath.Join(store, "settings.json")),
 			} {
 				if !strings.Contains(output, "host-check:   fix: "+fix+"\n") {
 					t.Errorf("doctor omitted fix %q: %s", fix, output)
@@ -352,4 +350,20 @@ func (h *e2eHarness) applyOldShapeFixes(home string) {
 			h.t.Fatal(err)
 		}
 	}
+}
+
+// unionFix and settingsFix are account-entry-real's printed fixes for a real
+// projects dir and settings file, as the host check renders them.
+func unionFix(path, target string) string {
+	return "mkdir -p " + target + " && cp -an " + path + "/. " + target + "/ && ! diff -rq " + path + " " + target +
+		" 2>&1 | grep -v '^Only in " + target + "' && rm -r " + path +
+		"  # union into the store; stops while a file differs"
+}
+
+func settingsFix(path, target string) string {
+	return "jq -e -s '.[0] as $s | .[1] | to_entries | " +
+		"all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' " +
+		target + " " + path + " > /dev/null && jq -s '.[0] * .[1]' " + target + " " + path + " > " + target +
+		".new && mv " + target + ".new " + target + " && rm " + path +
+		"  # adds the keys the store lacks; stops while a key differs"
 }

@@ -28,6 +28,8 @@ Doctor prints every finding as `host-check: {row.Line()}`, followed by `host-che
 
 The fix strings below are instructions for the operator. Detection and the install gate do not execute them. Install creates missing store entries and account links only after the gate; doctor also checks these targets ([claude-config-dir.md](claude-config-dir.md#pfm-doctor-checks)).
 
+An operator or a model applies a fix exactly as printed, so each fix must be safe as written, in any order. A fix that deletes one path while keeping another goes through `removeKeeping` (`pfm/internal/hostcheck/hostcheck.go`). These are the present-target fixes of `legacy-config`, `legacy-harvester-config`, `legacy-state-db`, `legacy-cache-db`, `legacy-harvester-cache` and `store-identity`, plus `pre-split-config` (b), `home-state-file`, `beside-backup` and every `account-entry-real` fix. The fix prints only when no deleted path is the same file as the kept one after following links (`os.SameFile`; a path with nothing at it is no file). One file under two names prints `{remove} and {keep} are one file through a link: delete neither; replace the link with a real copy, then rerun pfm doctor` instead. A failed stat, a dangling link included, prints the `UNREADABLE` row in place of the row, with no delete.
+
 ## Paths and ordering
 
 `{home}` is the operator home, `{store}` is `~/.claude`, `{cfg}` is the runtime config path, `{legacy}` is `config.LegacyConfigDir`, `{acct}` is one roster account's `ConfigDir`, `{acct1}` is the lowest-ID account's directory, and `{managed}` is `~/.local/share/pfm/install`. Configured database targets are `{StateDB}` and `{CacheDB}`. `paths.LegacyStateDB` is `~/.cc/fleet.db`; `paths.LegacyCacheDB` is `~/.local/state/pfm/fleet.db`.
@@ -202,17 +204,26 @@ Looks at each account through `claudelaunch.InspectConfigDir`: its resolved real
 
 Problem: `account {id}'s config dir resolves to the store {store}`.
 
-Fix: `{acct}` is a symlink: `rm {acct} && mkdir -m 700 {acct}` (removes the link only); else `point accounts[{id}].configDir in {cfg} at {config.DefaultAccountDir(home, id)}`.
+Fix:
+
+- `{acct}` a symlink: `rm {acct} && mkdir -m 700 {acct}` (removes the link only).
+- A link `{link}` above `{acct}` resolving into the store (`~/.cc -> ~/.claude`): `[ ! -L {link} ] || { rm {link} && mkdir -m 700 {link}; } && [ ! -e {acct} ] && mv {real} {acct}`. Here `{real}` is `{acct}`'s resolved dir in the store, and `mkdir -m 700 -p {dir(acct)}` precedes the test when `{dir(acct)}` is not `{link}`. Each account's row replaces the one link guarded, so the rows run in any order. When `{real}` is the store itself or a known store entry, the fix is `{link} links into the store {store}: replace it with a real dir by hand, moving out only what {acct} holds, then rerun pfm doctor` instead.
+- Else `point accounts[{id}].configDir in {cfg} at {config.DefaultAccountDir(home, id)}`, or, when that dir also resolves into the store, `point accounts[{id}].configDir in {cfg} at a real dir outside the store {store}; {default} resolves into it`. The fix never points configDir at a path resolving into the store.
 
 ### store-identity
 
 **Severity:** BLOCK
 
-Looks at each `AccountEntries` entry in `{store}`; for `state`, only `state/mcp-discover-verdicts.json` is checked.
+Looks at each `AccountEntries` entry in `{store}`; for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
 
 Problem: `{entry} is account identity inside the store`.
 
-Fix: `{acct1}/{entry}` absent: `mkdir -m 700 -p {acct1} && mv {path} {acct1}/{entry}` (for `state`, `mkdir -m 700 -p {acct1} {acct1}/state`), runnable before account 1 exists; present: `keep {acct1}/{entry}; after checking, rm -r {path}`.
+Fix: `{acct1}` resolving to the store makes `{path}` and `{acct1}/{entry}` one file, so the fix deletes neither:
+
+- `{acct1}` a symlink: `[ ! -L {acct1} ] || { rm {acct1} && mkdir -m 700 {acct1}; } && ` followed by the move below. That prefix is `account-is-store`'s own fix, guarded so the line also runs after that fix has, and a later run of that fix refuses on the real dir without deleting anything.
+- `{acct1}` a real dir in the store: `apply account-is-store's fix for {acct1} first; pfm doctor then names this entry's move`.
+
+Otherwise, `{acct1}/{entry}` absent: `mkdir -m 700 -p {acct1} && mv {path} {acct1}/{entry}` (for `state`, `mkdir -m 700 -p {acct1} {acct1}/state`), runnable before account 1 exists; present: `keep {acct1}/{entry}; after checking, rm -r {path}`, through `removeKeeping`.
 
 ### home-state-file
 
@@ -232,17 +243,16 @@ Looks at each account × shared entry: a real file or dir at `{acct}/{entry}`; s
 
 Problem: `{entry} is a real {dir|file}; it belongs in the store`.
 
-Fix: the entry-specific manual rule below.
+Fix: the entry-specific rule below.
 
-For `account-entry-real`, the manual fix is selected by entry:
+For `account-entry-real`, the fix is selected by entry. Each fix is one shell line whose delete is the last link of an `&&` chain, so it runs only after the merge into the store succeeded. The trailing `#` comment carries the prose:
 
-- `projects`, `file-history`, `tasks`, `session-env`, `paste-cache`, `shell-snapshots`, `plans`, `uploads`, `downloads`, `teams`: `union into the store: cp -an {path}/. {store}/{entry}/ ; diff -rq {path} {store}/{entry} | grep -v '^Only in {store}/{entry}' (empty: nothing differs) ; rm -r {path}`.
-- `history.jsonl`: `interleave by timestamp: jq -c -s 'sort_by(.timestamp)[]' {store}/history.jsonl {path} > {store}/history.jsonl.new && mv {store}/history.jsonl.new {store}/history.jsonl && rm {path}`.
-- `plugins`: `the store keeps its copy (reinstallable): rm -r {path}`.
-- `settings.json`: `copy any key you keep into {store}/settings.json, then rm {path}`.
-- `CLAUDE.md`: `append what you keep to {store}/CLAUDE.md, then rm {path}`.
-- `agents`, `commands`, `skills`, `rules`, `themes`: `move what the store lacks: mv -n {path}/* {store}/{entry}/ ; compare what is left, then rm -r {path}`.
-- `stats-cache.json`, `.last-cleanup`, `.last-update-result.json`, `gh-pr-status-cache.json`: `a cache: rm {path}`.
+- `projects`, `file-history`, `tasks`, `session-env`, `paste-cache`, `shell-snapshots`, `plans`, `uploads`, `downloads`, `teams`, `agents`, `commands`, `skills`, `rules`, `themes`: `mkdir -p {store}/{entry} && cp -an {path}/. {store}/{entry}/ && ! diff -rq {path} {store}/{entry} 2>&1 | grep -v '^Only in {store}/{entry}' && rm -r {path}  # union into the store; stops while a file differs`. A differing file, or a diff error, stops the `rm`.
+- `history.jsonl`: `jq -c -s 'sort_by(.timestamp)[]' {store}/history.jsonl {path} > {store}/history.jsonl.new && mv {store}/history.jsonl.new {store}/history.jsonl && rm {path}  # interleaved by timestamp`.
+- `plugins`: `rm -r {path}  # the store keeps its copy (reinstallable)`.
+- `settings.json`: `jq -e -s '.[0] as $s | .[1] | to_entries | all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' {store}/settings.json {path} > /dev/null && jq -s '.[0] * .[1]' {store}/settings.json {path} > {store}/settings.json.new && mv {store}/settings.json.new {store}/settings.json && rm {path}  # adds the keys the store lacks; stops while a key differs`.
+- `CLAUDE.md`: `cat {path} >> {store}/CLAUDE.md && rm {path}  # appended whole; prune {store}/CLAUDE.md as you like`.
+- `stats-cache.json`, `.last-cleanup`, `.last-update-result.json`, `gh-pr-status-cache.json`: `rm {path}  # a cache`.
 
 ### unclassified
 
@@ -282,4 +292,4 @@ Looks at top-level names matching `*.pre-professor-*`, `*.bak-*`, `*.before-*` i
 
 Problem: `a backup beside the file`.
 
-Fix: `rm -r {path} once you no longer need it`.
+Fix: `rm -r {path} once you no longer need it`, through `removeKeeping` with the original, the name before the first backup marker, as the kept path.

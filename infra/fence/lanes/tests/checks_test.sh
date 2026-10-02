@@ -163,7 +163,7 @@ graph_order() {
 }
 static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
-templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.token-audit,templates.flight-index,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
+templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.token-audit,templates.flight-index,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
 if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.leak$' "$T/registered")" -eq 1 ] &&

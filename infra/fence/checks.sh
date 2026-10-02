@@ -321,6 +321,16 @@ checks_templates_dev_report() {
 
 }
 
+checks_templates_format_md() {
+  head_ "templates — format-md hook hands rumdl's unfixed issues to the agent"
+  if bash "$REPO_ROOT/scripts/test-format-md.sh" "$REPO_ROOT/templates/project/scripts/format-md.sh" && bash "$REPO_ROOT/scripts/test-format-md.sh" "$REPO_ROOT/.claude/scripts/format-md.sh"; then
+    ok "format-md exits 2 with one UNFIXED line per issue rumdl cannot fix, 0 on a clean file"
+  else
+    fail_step "format-md regression FAILED — an unfixed rumdl issue must reach the agent as exit 2 with UNFIXED lines (see output)"
+  fi
+
+}
+
 checks_templates_mirrors_opencode() { # optional: an executable pfm already built from this tree
   local prebuilt="${1:-}" build_opencode
   head_ "templates — native opencode mirror"
@@ -417,6 +427,7 @@ checks_templates() {
   checks_templates_refresh_scope
   checks_templates_pfm_guard
   checks_templates_dev_report
+  checks_templates_format_md
   checks_templates_mirrors_opencode
   checks_templates_opencode_writer_tests
   checks_templates_skill_tests
@@ -814,6 +825,7 @@ gate_run() { # pfm, templates, or all
     steps_add templates.refresh-scope checks_templates_refresh_scope
     steps_add templates.pfm-guard checks_templates_pfm_guard
     steps_add templates.dev-report checks_templates_dev_report
+    steps_add templates.format-md checks_templates_format_md
     steps_add templates.opencode-writer-tests checks_templates_opencode_writer_tests
     steps_add templates.skill-tests checks_templates_skill_tests
     steps_add templates.opencode-writer-refs checks_templates_opencode_writer_refs

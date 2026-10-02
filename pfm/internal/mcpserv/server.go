@@ -191,7 +191,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("chat_last", service.chatLast))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_status",
-		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle or error), context_pct and last; state error is a turn the model server ended (error names its kind, e.g. server_overloaded) and the chat waits at its prompt; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
+		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle or error), context_pct and last; state error is a turn the model server ended (error names its kind, e.g. server_overloaded) and the chat waits at its prompt; state blocked is a chat held by a permission dialog, question or modal on its screen, waiting for its human to answer it; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_status", service.chatStatus))
 	newInputSchema, err := jsonschema.For[NewInput](nil)

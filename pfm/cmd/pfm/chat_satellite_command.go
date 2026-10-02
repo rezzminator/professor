@@ -282,7 +282,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 	for index := range listed.Rows {
 		row := &listed.Rows[index]
 		chat := pfmchat.FromRow(*row)
-		status, inspectErr := headless.Inspect(context.Background(), chat, clk.Now())
+		status, inspectErr := pfmchat.InspectSeat(context.Background(), firstRuntime(runtimes), chat, clk.Now(), nil)
 		state := doctor.StateUnknown
 		if inspectErr != nil {
 			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)

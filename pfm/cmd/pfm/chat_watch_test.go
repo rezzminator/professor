@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestHookRunnerEmptyCommandBuildsNoHook proves an unset --on-idle/--on-exit
@@ -75,16 +78,84 @@ func TestHookRunnerReportsAFailedHookOnStderr(t *testing.T) {
 	}
 }
 
-// TestRunHeadlessWatchRejectsMultipleTargets pins the flag-parsing refusal
-// runHeadlessWatch owns, independent of any host door.
-func TestRunHeadlessWatchRejectsMultipleTargets(t *testing.T) {
+// TestRunHeadlessWatchRefusesBadTargetsAsUsage pins the refusals
+// runHeadlessWatch owns before any poll, independent of any host door: no
+// target at all, and a glob path.Match cannot parse.
+func TestRunHeadlessWatchRefusesBadTargetsAsUsage(t *testing.T) {
 	t.Parallel()
-	var stdout, stderr bytes.Buffer
-	code := runHeadlessWatch([]string{"a", "b"}, &stdout, &stderr, &deps.FakeRunner{})
-	if code != 2 {
-		t.Fatalf("runHeadlessWatch(a, b) rc = %d, want 2", code)
+	for _, testCase := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no target", nil, "usage: pfm chat watch"},
+		{"no target with a flag", []string{"--transitions"}, "usage: pfm chat watch"},
+		{"malformed glob", []string{"fine", "["}, `"["`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			code := runHeadlessWatch(testCase.args, &stdout, &stderr, &deps.FakeRunner{})
+			if code != 2 {
+				t.Fatalf("runHeadlessWatch(%q) rc = %d, want 2", testCase.args, code)
+			}
+			if !strings.Contains(stderr.String(), testCase.want) || stdout.Len() != 0 {
+				t.Fatalf(
+					"stdout = %q stderr = %q, want stderr naming %q",
+					stdout.String(),
+					stderr.String(),
+					testCase.want,
+				)
+			}
+		})
 	}
-	if !strings.Contains(stderr.String(), "usage: pfm chat watch") {
-		t.Fatalf("stderr = %q, want the usage line", stderr.String())
+}
+
+// TestWatchTransitionsAnswersAnUnknownSeatWithSeen: under --transitions there
+// is no pre-check, so first sight of a name nothing answers to is the SEEN
+// snapshot; the target ends and the exit code says it was not alive.
+func TestWatchTransitionsAnswersAnUnknownSeatWithSeen(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"chat", "watch", "ghost", "--transitions"}, &stdout, &stderr)
+	if code != codeDeadChat || stdout.String() != "SEEN ghost not-found\n" {
+		t.Fatalf(
+			"rc = %d stdout = %q stderr = %q, want rc %d and the SEEN row",
+			code,
+			stdout.String(),
+			stderr.String(),
+			codeDeadChat,
+		)
+	}
+}
+
+// TestWatchScanFailureIsAnErrorLineNeverAbsence: when the fleet scan cannot
+// look, the watch says so on stdout, where a monitor reads, in both modes.
+func TestWatchScanFailureIsAnErrorLineNeverAbsence(t *testing.T) {
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
+	for _, testCase := range []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStderr string
+	}{
+		{"legacy", []string{"chat", "watch", "ghost"}, 2, "pfm chat: "},
+		{"transitions", []string{"chat", "watch", "ghost", "--transitions"}, 1, "pfm chat watch: ghost: "},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(testCase.args, &stdout, &stderr)
+			if code != testCase.wantCode || !strings.HasPrefix(stdout.String(), "ERROR ghost ") ||
+				strings.Count(stdout.String(), "\n") != 1 || !strings.Contains(stderr.String(), testCase.wantStderr) {
+				t.Fatalf("rc = %d stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+			}
+		})
 	}
 }

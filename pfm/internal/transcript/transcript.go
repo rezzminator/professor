@@ -84,6 +84,8 @@ type payloadRecord struct {
 	Name      string          `json:"name"`
 	Input     string          `json:"input"`
 	Arguments string          `json:"arguments"`
+	// Reason is a Codex turn_aborted's cause ("interrupted").
+	Reason string `json:"reason"`
 	// Error is a Codex task_complete's turn error, null when the turn
 	// finished. Raw, so a payload whose error has another shape still parses.
 	Error json.RawMessage `json:"error"`
@@ -140,6 +142,12 @@ func parseClaude(parsed record) (Entry, bool) {
 		if text == "" {
 			return Entry{}, false
 		}
+		if parsed.Type == "user" && strings.HasPrefix(text, claudeInterruptMarker) {
+			// Before the junk drop: the marker starts with "[Request", which
+			// naming.IsJunkPrompt discards, and an interrupted turn must not
+			// vanish from the record.
+			return interruptedTurn("interrupted", parsed.Timestamp), true
+		}
 		if parsed.Type == "user" && naming.IsJunkPrompt(text) {
 			return Entry{}, false
 		}
@@ -179,6 +187,8 @@ func parseCodex(parsed record) (Entry, bool) {
 		}, parsed.Payload.Name != ""
 	case "task_complete":
 		return codexTurnEnd(parsed.Payload.Error, timestamp)
+	case "turn_aborted":
+		return interruptedTurn(parsed.Payload.Reason, timestamp), true
 	}
 
 	role := ""
@@ -238,6 +248,21 @@ func codexTurnEnd(raw json.RawMessage, timestamp string) (Entry, bool) {
 		text = kind
 	}
 	return Entry{Role: RoleAssistant, Text: text, Error: kind, Timestamp: timestamp}, true
+}
+
+// claudeInterruptMarker starts the user record Claude Code writes when its
+// human interrupts a turn ("[Request interrupted by user]", "... for tool use]").
+const claudeInterruptMarker = "[Request interrupted by user"
+
+// interruptedTurn is the entry for a turn its human aborted (Codex's
+// turn_aborted, Claude's interrupt marker). The abort stands in the assistant's
+// place exactly as codexTurnEnd's error does: the turn ended and the chat waits
+// for its human, so the newest entry must not stay whatever the abort cut short.
+func interruptedTurn(reason, timestamp string) Entry {
+	if reason == "" {
+		reason = "interrupted"
+	}
+	return Entry{Role: RoleAssistant, Text: "[turn aborted: " + reason + "]", Timestamp: timestamp}
 }
 
 // turnErrorKind names an error from its kind field: a bare string, the key of a

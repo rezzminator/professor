@@ -105,6 +105,40 @@ func TestParseKeepsWhatWasSaidAndDropsTheRest(t *testing.T) {
 				"A tests are green",
 			},
 		},
+		{
+			// An interrupted turn stands in the assistant's place on both
+			// engines: Codex writes turn_aborted, Claude a user record whose
+			// text is the interrupt marker (which IsJunkPrompt would drop).
+			engine: "cx",
+			content: strings.Join([]string{
+				`{"type":"event_msg","payload":{"type":"user_message","message":"read the report"}}`,
+				`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"sleep 600"}}`,
+				`{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-0001","reason":"interrupted"}}`,
+				`{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-0002"}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U read the report",
+				"T exec|sleep 600",
+				"A [turn aborted: interrupted]",
+				"A [turn aborted: interrupted]",
+			},
+		},
+		{
+			engine: "cc",
+			content: strings.Join([]string{
+				`{"type":"user","message":{"role":"user","content":"ship the fix"}}`,
+				`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{}}]}}`,
+				`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}`,
+				`{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`,
+				`{"type":"user","message":{"role":"user","content":"[Request failed: not an interrupt]"}}`,
+			}, "\n") + "\n",
+			want: []string{
+				"U ship the fix",
+				"T Bash|{}",
+				"A [turn aborted: interrupted]",
+				"A [turn aborted: interrupted]",
+			},
+		},
 	} {
 		t.Run(testCase.engine, func(t *testing.T) {
 			path := writeTranscript(t, "chat.jsonl", testCase.content)

@@ -10,9 +10,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
-// PaneCapture reads one live chat's pane. It is the seam Status crosses to
-// answer working-vs-idle for a chat whose transcript cannot answer it; nil
-// selects the real tmux capture.
+// PaneCapture reads one live chat's pane. It is the seam InspectSeat crosses to
+// answer working-vs-idle for a chat whose transcript cannot answer it, and
+// blocked for a silent pending tool call; nil selects the real tmux capture.
 type PaneCapture func(ctx context.Context, socketPath, target string) (string, error)
 
 // PaneTarget is the ONE ladder from a resolved chat to the tmux target its
@@ -39,28 +39,44 @@ func needsPaneState(chat headless.Chat, status headless.Status) bool {
 	return chat.Live && (chat.Path == "" || status.Last == "")
 }
 
-// paneState is the pane-evidence verdict: the engine's own running-turn
-// footer, read by that engine's own rule.
+// blockedQuietSeconds is how long a pending tool call must have been silent
+// before its pane is read for a dialog. A turn mid-stream writes continuously,
+// so only a tool call quiet past this reads the pane — which bounds `pfm chat
+// ls` to one capture per silent pending seat.
+const blockedQuietSeconds = 5
+
+// awaitsPane reports whether Inspect's working verdict for a live chat is one
+// only its screen can confirm: its newest transcript entry is a tool call, and
+// the transcript has been quiet long enough that a permission dialog, not the
+// tool, may be what it waits on.
+func awaitsPane(chat headless.Chat, status headless.Status) bool {
+	return chat.Live && status.State == headless.StateWorking &&
+		status.PendingTool != "" && status.QuietSeconds >= blockedQuietSeconds
+}
+
+// paneState is the pane-evidence verdict: a Claude trust dialog holds the seat
+// for its human, otherwise the engine's own running-turn footer, read by that
+// engine's own rule.
 func paneState(engine pfmengine.ID, capture string) string {
+	if pfmengine.ClaudeTrustDialog(capture) {
+		return headless.StateBlocked
+	}
 	if inject.IsBusyFor(engine, capture) {
 		return headless.StateWorking
 	}
 	return headless.StateIdle
 }
 
-// statusFromPane replaces a transcript-less live chat's state with what its
-// own screen says.
-//
-// A capture that could not RUN comes back as an ERROR and never as a state:
-// "we failed to look" rendered as "the chat is idle" is the exact confusion
-// headless refuses everywhere else.
-func statusFromPane(
+// readPane captures one live chat's screen through the capture seam (nil is
+// the real tmux read). A capture that could not RUN comes back as an ERROR and
+// never as a state: "we failed to look" rendered as "the chat is idle" is the
+// exact confusion headless refuses everywhere else.
+func readPane(
 	ctx context.Context,
 	chat headless.Chat,
-	status headless.Status,
 	capture PaneCapture,
 	runtime *pfmconfig.Runtime,
-) (headless.Status, error) {
+) (string, error) {
 	if capture == nil {
 		capture = func(ctx context.Context, socketPath, target string) (string, error) {
 			return (inject.TmuxInjector{}).Capture(ctx, socketPath, target, false, inject.FullScrollback)
@@ -68,19 +84,58 @@ func statusFromPane(
 	}
 	values, err := NameResolver{Runtime: runtime}.paths()
 	if err != nil {
-		return status, fmt.Errorf("resolve %s socket directory for a pane read: %w", chat.Name, err)
+		return "", fmt.Errorf("resolve %s socket directory for a pane read: %w", chat.Name, err)
 	}
 	socketPath, err := values.SocketUnder(chat.Socket)
 	if err != nil {
-		return status, fmt.Errorf("resolve %s socket %q: %w", chat.Name, chat.Socket, err)
+		return "", fmt.Errorf("resolve %s socket %q: %w", chat.Name, chat.Socket, err)
 	}
 	screen, err := capture(ctx, socketPath, PaneTarget(chat))
 	if err != nil {
-		return status, fmt.Errorf("read %s pane for status: %w", chat.Name, err)
+		return "", fmt.Errorf("read %s pane for status: %w", chat.Name, err)
+	}
+	return screen, nil
+}
+
+// statusFromPane replaces a transcript-less live chat's state with what its
+// own screen says.
+func statusFromPane(
+	ctx context.Context,
+	chat headless.Chat,
+	status headless.Status,
+	capture PaneCapture,
+	runtime *pfmconfig.Runtime,
+) (headless.Status, error) {
+	screen, err := readPane(ctx, chat, capture, runtime)
+	if err != nil {
+		return status, err
 	}
 	status.State = paneState(chat.Engine, screen)
 	// Inspect derives IdleSeconds from the transcript's mtime, which is the
 	// very evidence this path exists because there is none of.
+	status.IdleSeconds = 0
+	return status, nil
+}
+
+// blockedFromPane confirms a silent pending tool call against the screen: a
+// pane showing the engine's running-turn footer is a tool still running, so the
+// chat stays working; any other screen is a dialog or question holding it for
+// its human, so it is blocked.
+func blockedFromPane(
+	ctx context.Context,
+	chat headless.Chat,
+	status headless.Status,
+	capture PaneCapture,
+	runtime *pfmconfig.Runtime,
+) (headless.Status, error) {
+	screen, err := readPane(ctx, chat, capture, runtime)
+	if err != nil {
+		return status, err
+	}
+	if inject.IsBusyFor(chat.Engine, screen) {
+		return status, nil
+	}
+	status.State = headless.StateBlocked
 	status.IdleSeconds = 0
 	return status, nil
 }

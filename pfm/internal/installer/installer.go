@@ -67,6 +67,10 @@ func NewHarvestProvisioner() HarvestProvisioner { return pinnedHarvestProvisione
 func Run(ctx context.Context, options Options) (report Report, err error) {
 	endRun := runSpan(ctx, options.Mode)
 	defer func() { endRun(err) }()
+	// An install interrupted during its layout makes no write of its own.
+	if err := options.Journal.Interrupted(); err != nil {
+		return Report{}, err
+	}
 	options, err = normalizeInstallerOptions(options)
 	if err != nil {
 		return Report{}, fmt.Errorf("resolve installer options: %w", err)
@@ -75,22 +79,16 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		return Report{}, fmt.Errorf("unknown installer mode %d", options.Mode)
 	}
 	if options.Mode != ModeDryRun {
-		if schedulerIsLaunchd {
-			running, probed := launchAgentRunning(ctx, options.Runner)
-			if running {
-				return Report{}, ErrLaunchAgentRunning
-			}
-			if !probed {
-				options.launchGateUnprobed = true
-			}
-		} else {
-			running, probed := nameSyncServiceRunning(ctx, options.Runner)
-			if running {
-				return Report{}, ErrNameSyncRunning
-			}
-			if !probed {
-				options.nameSyncGateUnprobed = true
-			}
+		// A job running now refuses; `pfm install` starts the name-sync units
+		// its layout stopped only after Run (Journal.RestartSchedulerUnits).
+		probed, gateErr := schedulerGate(ctx, options.Runner)
+		if gateErr != nil {
+			return Report{}, gateErr
+		}
+		if !probed && schedulerIsLaunchd {
+			options.launchGateUnprobed = true
+		} else if !probed {
+			options.nameSyncGateUnprobed = true
 		}
 	}
 

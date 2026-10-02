@@ -5,7 +5,9 @@ package gather
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,6 +107,12 @@ func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
 func (proc *DarwinProcFS) Stat(pid int) (ProcStat, error) {
 	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
+		// kern.proc.pid answers an exited pid with an empty record, which
+		// x/sys reports as EIO: the kernel's ESRCH says it is gone, as a
+		// missing /proc entry does on Linux.
+		if pid > 0 && errors.Is(unix.Kill(pid, 0), unix.ESRCH) {
+			return ProcStat{}, fmt.Errorf("read kern.proc.pid for %d: process gone: %w", pid, fs.ErrNotExist)
+		}
 		return ProcStat{}, fmt.Errorf("read kern.proc.pid for %d: %w", pid, err)
 	}
 	started := process.Proc.P_starttime

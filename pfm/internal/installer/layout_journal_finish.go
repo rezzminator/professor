@@ -40,8 +40,18 @@ func (journal *Journal) Seal(stdout io.Writer) error {
 
 // MigrationBackups lists the pre-migration backups beside the journal's
 // state and cache databases, taken before the install's database migration
-// so JournalMigrationBackups can tell the ones that migration wrote.
+// so JournalMigrationBackups can tell the ones that migration wrote. An
+// interrupted install lists none: the interrupt is its error, so the database
+// migration never starts.
 func (journal *Journal) MigrationBackups() ([]string, error) {
+	if err := journal.Interrupted(); err != nil {
+		return nil, err
+	}
+	return journal.migrationBackups()
+}
+
+// migrationBackups is MigrationBackups past its interrupt check.
+func (journal *Journal) migrationBackups() ([]string, error) {
 	backups := []string{}
 	for _, database := range []string{journal.env.StateDB, journal.env.CacheDB} {
 		matches, err := filepath.Glob(database + ".bak-before-v*")
@@ -62,7 +72,7 @@ func (journal *Journal) JournalMigrationBackups(before []string) error {
 	if journal == nil || journal.dryRun || journal.dir == "" {
 		return nil
 	}
-	after, err := journal.MigrationBackups()
+	after, err := journal.migrationBackups()
 	if err != nil {
 		return err
 	}

@@ -172,7 +172,11 @@ type Report struct {
 	Skipped int
 }
 
-type execCommandRunner struct{}
+// execCommandRunner runs a command through the observed real runner;
+// processGroup starts it in its own process group.
+type execCommandRunner struct {
+	processGroup bool
+}
 
 type commandExitError struct {
 	name string
@@ -210,8 +214,10 @@ func (installer *engine) processRunner() deps.Runner {
 	return obs.Runner(deps.RealRunner{})
 }
 
-func (execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
-	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+func (runner execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		ctx, append([]string{name}, args...), deps.RunOptions{ProcessGroup: runner.processGroup},
+	)
 	if err != nil {
 		return err
 	}
@@ -221,8 +227,10 @@ func (execCommandRunner) Run(ctx context.Context, name string, args ...string) e
 	return nil
 }
 
-func (execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+func (runner execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	result, err := obs.Runner(deps.RealRunner{}).Run(
+		ctx, append([]string{name}, args...), deps.RunOptions{ProcessGroup: runner.processGroup},
+	)
 	if err != nil {
 		return nil, err
 	}

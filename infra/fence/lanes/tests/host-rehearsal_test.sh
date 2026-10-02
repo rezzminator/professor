@@ -120,6 +120,14 @@ case "$*" in
   [ "$mode" = db-sidecars ] && mkdir -p "$HOME/.cc" && : >"$HOME/.cc/fleet.db-wal" && : >"$HOME/.cc/fleet.db-shm"
   h="$PFM_PROC_ROOT/424242/fd/3"
   [ -L "$h" ] && readlink "$h" >"$T/holder-seen"
+  # The holder's parent (proc stat field 4) beside pfm-mcp's MainPID: pfm lets
+  # a holder through only when it descends from a service it stops.
+  s="$PFM_PROC_ROOT/424242/stat"
+  [ -f "$s" ] && printf '%s %s\n' "$(awk '{print $4}' "$s")" \
+    "$(systemctl --user show --property=MainPID --value pfm-mcp.service)" >"$T/holder-parent"
+  # RealProcFS.Stat reads fields[19] of what follows ") " (pid and comm come
+  # first): the planted stat line must carry at least 22 fields.
+  [ -f "$s" ] && awk '{print NF}' "$s" >"$T/holder-fields"
   systemctl --user stop $UNITS
   mkdir -p "$J"
   if [ ! -d "$HOME/.claude/projects/p1" ]; then
@@ -262,7 +270,7 @@ export PFM_REHEARSAL_KEEP_SCRATCH=1
 rehearse() {
   echo "$1" >"$T/mode"
   rm -rf "$FH"
-  rm -f "$T/holder-seen" "$T/make.log"
+  rm -f "$T/holder-seen" "$T/holder-parent" "$T/holder-fields" "$T/make.log"
   OUT="$(PATH="$HOSTPATH" bash "$SUT" "${3:-$BK}" "$2" ${4:+"$4"} 2>&1)"
   RC=$?
   rm -rf "$FH"
@@ -425,13 +433,16 @@ else bad "no legacy config" "rc=$RC" "$(cat "$S/rehearsal/verdict.txt" 2>/dev/nu
 # ---- stress -----------------------------------------------------------------
 S="$T/s-stress"
 rehearse happy "$S" "$BK" --stress
+hp=$(cat "$T/holder-parent" 2>/dev/null)
 if [ "$RC" -eq 0 ] && [ "$(verdict "$S")" = "REHEARSAL PASS" ] && [ "$(tail -n +2 "$S/rehearsal/verdict.txt")" = "$want_steps" ] &&
   [ "$(cat "$T/holder-seen" 2>/dev/null)" = "$FH/.cc/fleet.db" ] && [ ! -e "$S/rehearsal/proc/424242" ] &&
+  [ -n "$hp" ] && [ "${hp% *}" = "${hp#* }" ] && [ "${hp% *}" != 0 ] &&
+  [ "$(cat "$T/holder-fields" 2>/dev/null || echo 0)" -ge 22 ] &&
   grep -q -- '^-n install -D -m 0644 .* /etc/claude-code/managed-settings.d/pfm.json$' "$S/rehearsal/sudo.log" 2>/dev/null &&
   grep -qx -- '--user stop pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer' "$S/rehearsal/systemctl.log" &&
   [ ! -e "$S/etc/claude-code/managed-settings.d/pfm.json" ]; then
-  ok "stress: holder 424242 on the legacy database released by the stop, drop-in written through sudo, absent after rollback"
-else bad "stress" "rc=$RC" "$(cat "$S/rehearsal/verdict.txt" 2>/dev/null)" "holder=$(cat "$T/holder-seen" 2>/dev/null)" "$(cat "$S/rehearsal/sudo.log" 2>/dev/null)" "$OUT"; fi
+  ok "stress: holder 424242 (a stat line of 22+ fields), a child of pfm-mcp's MainPID, on the legacy database released by the stop, drop-in written through sudo, absent after rollback"
+else bad "stress" "rc=$RC" "$(cat "$S/rehearsal/verdict.txt" 2>/dev/null)" "holder=$(cat "$T/holder-seen" 2>/dev/null)" "holder parent, MainPID=$hp" "$(cat "$S/rehearsal/sudo.log" 2>/dev/null)" "$OUT"; fi
 b="$T/bk-nodb"; rm -rf "$b"; cp -a "$BK" "$b"; rm -f "$b/home/.cc/fleet.db" "$b/home/.local/state/pfm/fleet.db"
 S="$T/s-stress-nodb"
 rehearse happy "$S" "$b" --stress

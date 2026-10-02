@@ -136,7 +136,7 @@ fi
 
 # ---- make host-install while the new binary's install check refuses --------
 # The installed pfm differs from the build, so a swap would change its bytes.
-REFUSES_LINE="host-install: the new binary's install gate refuses this host — BINP untouched; close what it names (every Claude chat, Claude's daemon and bg-spare sessions: claude daemon stop --any) and rerun"
+REFUSES_LINE="host-install: the new binary's install check refuses this host — BINP untouched; close or resolve what it names above, then rerun (a live chat includes Claude's daemon and bg-spare sessions: claude daemon stop --any)"
 # refused <name> <state-file> <want>: an unmigrated host keeps pfm; the
 # literal BINP in <want> stands for this home's pfm.
 refused() {

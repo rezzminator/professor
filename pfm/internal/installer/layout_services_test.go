@@ -87,20 +87,27 @@ func TestLayoutApplyStopsFleetOnceAcrossBothDatabases(t *testing.T) {
 		}
 	}
 	env.runner = runner
+	journal := NewJournal(context.Background(), env)
 	var output bytes.Buffer
-	if _, err := ApplyLayout(context.Background(), env, nil, true, &output); err != nil {
+	if _, err := ApplyLayout(context.Background(), env, journal, true, &output); err != nil {
 		t.Fatalf("apply: %v output=%s", err, output.String())
+	}
+	// Only the MCP service restarts inside the apply; the scheduler waits for
+	// Journal.RestartSchedulerUnits, after installer.Run.
+	if !slices.Equal(journal.deferredScheduler, layoutSchedulerServices()) {
+		t.Fatalf("deferred scheduler = %q, want %q", journal.deferredScheduler, layoutSchedulerServices())
 	}
 	got := layoutSystemctlCalls(runner.calls)
 	if schedulerIsLaunchd {
-		if layoutCountCalls(got, "launchctl bootout ") != 2 || layoutCountCalls(got, "launchctl bootstrap ") != 2 {
-			t.Fatalf("launchd calls = %q, want one bootout pair and one bootstrap pair", got)
+		if layoutCountCalls(got, "launchctl bootout ") != 2 || layoutCountCalls(got, "launchctl bootstrap ") != 1 {
+			t.Fatalf("launchd calls = %q, want a bootout per label and one MCP bootstrap", got)
 		}
 		return
 	}
 	want := append([]string{"systemctl --user show-environment"}, layoutProbeCalls()...)
-	want = append(want, "systemctl --user stop "+fleetUnitList, "systemctl --user start "+fleetUnitList)
-	want = append(want, layoutProbeCalls()...)
+	// The name-sync job is asked again once its schedule is down.
+	want = append(want, "systemctl --user stop "+fleetUnitList, layoutActiveStateProbe+nameSyncServiceUnit,
+		"systemctl --user start "+mcpUnitName, layoutActiveStateProbe+mcpUnitName)
 	if !slices.Equal(got, want) {
 		t.Fatalf("systemctl calls = %q, want %q", got, want)
 	}
@@ -153,18 +160,17 @@ func TestLayoutApplyProbeFailureMovesNoDatabase(t *testing.T) {
 	runner := &layoutTestRunner{failProbe: true}
 	env.runner = runner
 	_, err := ApplyLayout(context.Background(), env, nil, true, &bytes.Buffer{})
-	if err == nil {
-		t.Fatal("apply with an unreadable unit state succeeded")
+	if err == nil || !strings.HasPrefix(err.Error(), "refused before any change:") ||
+		!strings.Contains(err.Error(), layoutActiveStateProbe+mcpUnitName) {
+		t.Fatalf("unreadable unit state did not refuse the whole apply naming the probe: %v", err)
 	}
-	for index, row := range []string{layoutRowStateDB, layoutRowCacheDB} {
-		target := []string{env.StateDB, env.CacheDB}[index]
-		want := fmt.Sprintf("layout %s %s: %s", row, target, layoutActiveStateProbe+mcpUnitName)
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q lacks %q", err, want)
+	for _, legacy := range legacies {
+		if _, statErr := os.Stat(legacy); statErr != nil {
+			t.Fatalf("%s moved without a stop: %v", legacy, statErr)
 		}
-		if _, statErr := os.Stat(legacies[index]); statErr != nil {
-			t.Fatalf("%s moved without a stop: %v", legacies[index], statErr)
-		}
+	}
+	if journals, err := InstallJournals(env.Home); err != nil || len(journals) != 0 {
+		t.Fatalf("journal written before the refusal: %+v err=%v", journals, err)
 	}
 	if layoutCountCalls(runner.calls, " stop ") != 0 || layoutCountCalls(runner.calls, " start ") != 0 {
 		t.Fatalf("units touched after a failed probe: %q", runner.calls)
@@ -182,8 +188,11 @@ func TestLayoutApplyWithoutUserManagerStopsNothing(t *testing.T) {
 	if _, err := ApplyLayout(context.Background(), env, nil, true, &bytes.Buffer{}); err != nil {
 		t.Fatalf("apply without a user manager: %v", err)
 	}
-	if got := layoutSystemctlCalls(runner.calls); !slices.Equal(got, []string{"systemctl --user show-environment"}) {
-		t.Fatalf("systemctl calls = %q, want only the manager check", got)
+	// The manager check, then the name-sync job's read-only re-ask: no unit
+	// is stopped or started.
+	want := []string{"systemctl --user show-environment", layoutActiveStateProbe + nameSyncServiceUnit}
+	if got := layoutSystemctlCalls(runner.calls); !slices.Equal(got, want) {
+		t.Fatalf("systemctl calls = %q, want only the manager check and the job probe", got)
 	}
 	if _, err := os.Stat(env.StateDB); err != nil {
 		t.Fatalf("holder scan did not decide the move: %v", err)
@@ -222,25 +231,65 @@ func TestLayoutApplyEarlyReturnAfterStopStartsOnce(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "layout config migration") {
 		t.Fatalf("apply error = %v, want the config migration failure", err)
 	}
-	stop, start := " stop ", " start "
-	if schedulerIsLaunchd {
-		stop, start = " bootout ", " bootstrap "
-	}
-	stops := layoutCountCalls(runner.calls, stop)
-	if stops == 0 || layoutCountCalls(runner.calls, start) != stops {
-		t.Fatalf("stopped units not started exactly once: %q", runner.calls)
+	stopped, started := layoutServiceSets(runner.calls)
+	if !slices.Equal(stopped, layoutAllServices()) || !slices.Equal(started, []string{layoutMCPService()}) {
+		t.Fatalf("stopped %q started %q, want all stopped and the MCP service started once: %q",
+			stopped, started, runner.calls)
 	}
 }
 
-func TestLayoutApplyWithoutDatabaseWorkTouchesNoUnit(t *testing.T) {
+// TestLayoutApplyOnAMigratedHostTouchesNoUnit proves a routine apply on a
+// migrated host (no layout work) stops, defers and starts no unit.
+func TestLayoutApplyOnAMigratedHostTouchesNoUnit(t *testing.T) {
 	env := layoutFixture(t)
 	runner := &layoutTestRunner{}
 	env.runner = runner
-	if _, err := ApplyLayout(context.Background(), env, nil, true, &bytes.Buffer{}); err != nil {
+	journal := NewJournal(context.Background(), env)
+	if _, err := ApplyLayout(context.Background(), env, journal, true, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := layoutSystemctlCalls(runner.calls); len(got) != 0 {
-		t.Fatalf("service calls without database work: %q", got)
+	stopped, started := layoutServiceSets(runner.calls)
+	if len(stopped) != 0 || len(started) != 0 || len(journal.deferredScheduler) != 0 {
+		t.Fatalf("stopped %q started %q deferred %q, want no unit touched: %q",
+			stopped, started, journal.deferredScheduler, runner.calls)
+	}
+}
+
+// TestLayoutApplyWithoutDatabaseWorkStopsOnlyTheScheduler proves layout work
+// with no database to move stops the scheduler alone and defers it to
+// RestartSchedulerUnits, which starts it after installer.Run.
+func TestLayoutApplyWithoutDatabaseWorkStopsOnlyTheScheduler(t *testing.T) {
+	env := layoutFixture(t)
+	// A staged prompt directory is layout work that moves no database.
+	layoutStagedPrompts(t, env)
+	runner := &layoutTestRunner{}
+	env.runner = runner
+	journal := NewJournal(context.Background(), env)
+	if _, err := ApplyLayout(context.Background(), env, journal, true, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	stopped, started := layoutServiceSets(runner.calls)
+	if want := layoutSchedulerServices(); !slices.Equal(stopped, want) || len(started) != 0 ||
+		!slices.Equal(journal.deferredScheduler, want) {
+		t.Fatalf("stopped %q started %q deferred %q, want the scheduler %q stopped and deferred: %q",
+			stopped, started, journal.deferredScheduler, want, runner.calls)
+	}
+	if code := journal.RestartSchedulerUnits(0, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("restart code = %d: %q", code, runner.calls)
+	}
+	if _, started := layoutServiceSets(runner.calls); !slices.Equal(started, layoutSchedulerServices()) {
+		t.Fatalf("started %q after Run, want the scheduler: %q", started, runner.calls)
+	}
+	// A scheduler stop that fails refuses before the first write.
+	env = layoutFixture(t)
+	layoutStagedPrompts(t, env)
+	env.runner = &layoutTestRunner{failStop: true}
+	dir, err := ApplyLayout(context.Background(), env, nil, true, &bytes.Buffer{})
+	if err == nil || !strings.HasPrefix(err.Error(), "refused before any change:") || dir != "" {
+		t.Fatalf("failed scheduler stop: dir=%q err=%v", dir, err)
+	}
+	if journals, err := InstallJournals(env.Home); err != nil || len(journals) != 0 {
+		t.Fatalf("journal written before the refusal: %+v err=%v", journals, err)
 	}
 }
 

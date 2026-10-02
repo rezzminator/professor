@@ -402,46 +402,6 @@ func TestLayoutApplyStripsAccountFilesAndLedgers(t *testing.T) {
 	}
 }
 
-func TestLayoutDBHolderRefusesAndIndependentShellRowContinues(t *testing.T) {
-	env := layoutFixture(t)
-	if err := os.Remove(env.StateDB); err != nil {
-		t.Fatal(err)
-	}
-	legacy := paths.LegacyStateDB(env.Home)
-	db, err := sqlitedb.OpenStore(context.Background(), legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	fd := filepath.Join(env.ProcRoot, "4242", "fd")
-	if err := os.MkdirAll(fd, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(legacy, filepath.Join(fd, "3")); err != nil {
-		t.Fatal(err)
-	}
-	zshrc := filepath.Join(env.Home, ".zshrc")
-	layoutWrite(t, zshrc, sourceLine(filepath.Join(env.ManagedRoot, "shim", "pfm.zsh"))+"\n")
-	var output bytes.Buffer
-	dir, err := ApplyLayout(context.Background(), env, nil, true, &output)
-	if err == nil || !strings.Contains(err.Error(), "layout state-db "+env.StateDB+" refused: held by pid 4242") ||
-		dir == "" {
-		t.Fatalf("refused DB should allow shell row: dir=%q err=%v output=%s", dir, err, output.String())
-	}
-	if !strings.Contains(output.String(), "refuse  layout state-db") ||
-		!strings.Contains(output.String(), "held by pid 4242") {
-		t.Fatalf("holder refusal missing: %s", output.String())
-	}
-	if _, err := os.Stat(legacy); err != nil {
-		t.Fatalf("held legacy DB moved: %v", err)
-	}
-	if finding := layoutFindingByPath(ClassifyLayout(env), "zshrc", zshrc); finding.Verdict != VerdictOK {
-		t.Fatalf("independent shell row did not apply: %+v", finding)
-	}
-}
-
 func TestLayoutLiveChatRefusesSessionMerge(t *testing.T) {
 	env := layoutFixture(t)
 	account := env.Config.Accounts[1].ConfigDir
@@ -558,7 +518,7 @@ func TestLayoutManagedSudoDeclinedWarnsAndContinues(t *testing.T) {
 		) || strings.Contains(output.String(), "refuse  layout managed-cleanup") {
 		t.Fatalf("sudo warning missing: %s", output.String())
 	}
-	if len(runner.calls) == 0 || !strings.HasPrefix(runner.calls[0], "sudo -n install -D -m 0644 ") {
+	if !slices.ContainsFunc(runner.calls, layoutManagedSudoCall) {
 		t.Fatalf("sudo command not injected: %v", runner.calls)
 	}
 	if finding := layoutFindingByPath(ClassifyLayout(env), "zshrc", zshrc); finding.Verdict != VerdictOK {
@@ -597,7 +557,7 @@ func TestLayoutManagedSudoWithCachedCredentialsApplies(t *testing.T) {
 	if _, err := ApplyLayout(context.Background(), env, nil, true, &output); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) == 0 || !strings.HasPrefix(runner.calls[0], "sudo -n install -D -m 0644 ") {
+	if !slices.ContainsFunc(runner.calls, layoutManagedSudoCall) {
 		t.Fatalf("runner calls=%v", runner.calls)
 	}
 	if finding := layoutFindingByPath(
@@ -607,6 +567,12 @@ func TestLayoutManagedSudoWithCachedCredentialsApplies(t *testing.T) {
 	); finding.Verdict != VerdictOK {
 		t.Fatalf("managed row=%+v", finding)
 	}
+}
+
+// layoutManagedSudoCall is the managed-cleanup drop-in's sudo install; the
+// apply's scheduler stop runs before it.
+func layoutManagedSudoCall(call string) bool {
+	return strings.HasPrefix(call, "sudo -n install -D -m 0644 ")
 }
 
 type layoutTestRunner struct {
@@ -626,7 +592,17 @@ type layoutTestRunner struct {
 	// show-environment fail.
 	failProbe bool
 	noManager bool
+	// mainPIDs is each service's running PID, keyed by systemd unit or launchd
+	// label (absent: not running); a stopped unit reads MainPID 0. garbagePID
+	// makes every PID probe answer something that is not a PID.
+	mainPIDs   map[string]int
+	garbagePID bool
+	// bootedOut are the launchd labels a bootout unloaded and no bootstrap
+	// loaded again: `launchctl print` answers them exit 113, as launchd does.
+	bootedOut map[string]bool
 }
+
+const layoutMainPIDProbe = "systemctl --user show --property=MainPID --value "
 
 const layoutActiveStateProbe = "systemctl --user show --property=ActiveState --value "
 
@@ -646,7 +622,8 @@ func (runner *layoutTestRunner) Run(_ context.Context, name string, args ...stri
 			return errors.New("exit status 5: unit " + unit + " not loaded")
 		}
 	}
-	if strings.Contains(runner.calls[len(runner.calls)-1], " stop ") && runner.failStop {
+	if last := runner.calls[len(runner.calls)-1]; runner.failStop &&
+		(strings.Contains(last, " stop ") || strings.Contains(last, " bootout ")) {
 		return os.ErrPermission
 	}
 	if strings.Contains(runner.calls[len(runner.calls)-1], " start ") && runner.failStart {
@@ -666,12 +643,46 @@ func (runner *layoutTestRunner) Run(_ context.Context, name string, args ...stri
 			}
 		}
 	}
+	if name == "launchctl" && len(args) > 1 {
+		label := strings.TrimSuffix(filepath.Base(args[len(args)-1]), ".plist")
+		switch args[0] {
+		case "bootout":
+			if runner.bootedOut == nil {
+				runner.bootedOut = map[string]bool{}
+			}
+			runner.bootedOut[label] = true
+		case "bootstrap":
+			delete(runner.bootedOut, label)
+		case "print":
+			if runner.bootedOut[label] {
+				return launchdExit(launchctlNotLoaded)
+			}
+		}
+	}
 	return nil
 }
 
 func (runner *layoutTestRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
 	runner.calls = append(runner.calls, call)
+	if label, ok := strings.CutPrefix(call, fmt.Sprintf("launchctl print gui/%d/", os.Getuid())); ok {
+		if runner.garbagePID {
+			return []byte("\tpid = not-a-pid\n"), nil
+		}
+		if pid, ok := runner.mainPIDs[label]; ok {
+			return []byte(fmt.Sprintf("%s = {\n\tstate = running\n\tpid = %d\n}\n", label, pid)), nil
+		}
+		return []byte(label + " = {\n\tstate = not running\n}\n"), nil
+	}
+	if unit, ok := strings.CutPrefix(call, layoutMainPIDProbe); ok {
+		if runner.garbagePID {
+			return []byte("[not set]\n"), nil
+		}
+		if pid, ok := runner.mainPIDs[unit]; ok && runner.states[unit] != "inactive" {
+			return []byte(fmt.Sprintf("%d\n", pid)), nil
+		}
+		return []byte("0\n"), nil
+	}
 	unit, ok := strings.CutPrefix(call, layoutActiveStateProbe)
 	if !ok {
 		return nil, errors.New("layoutTestRunner: no output for " + call)
@@ -682,7 +693,8 @@ func (runner *layoutTestRunner) Output(_ context.Context, name string, args ...s
 	if state, ok := runner.states[unit]; ok {
 		return []byte(state + "\n"), nil
 	}
-	if slices.Contains(runner.unloaded, unit) {
+	// The oneshot name-sync job is idle unless states names it.
+	if slices.Contains(runner.unloaded, unit) || unit == nameSyncServiceUnit {
 		return []byte("inactive\n"), nil
 	}
 	return []byte("active\n"), nil
@@ -762,6 +774,10 @@ func TestLayoutDatabaseServicesRestartAfterOutcome(t *testing.T) {
 				}
 			}
 			runner := &layoutTestRunner{}
+			if outcome == "holder" {
+				// The MCP service holds it at the gate; the holder outlives the stop.
+				runner.mainPIDs = map[string]int{mcpUnitName: 4242}
+			}
 			runner.onRun = func(call string) {
 				if strings.Contains(call, " stop ") {
 					if _, err := os.Stat(legacy); err != nil {
@@ -780,7 +796,8 @@ func TestLayoutDatabaseServicesRestartAfterOutcome(t *testing.T) {
 			if outcome == "failure" && err == nil {
 				t.Fatal("invalid database did not fail")
 			}
-			if outcome == "holder" && (err == nil || !strings.Contains(err.Error(), "refused: held by pid 4242")) {
+			if outcome == "holder" &&
+				(err == nil || !strings.Contains(err.Error(), "held by pid 4242 with the pfm services stopped")) {
 				t.Fatalf("holder refusal error=%v", err)
 			}
 			if outcome == "moved" && err != nil {
@@ -789,7 +806,7 @@ func TestLayoutDatabaseServicesRestartAfterOutcome(t *testing.T) {
 			lifecycle := layoutServiceLifecycle(runner.calls)
 			if len(lifecycle) != 2 ||
 				lifecycle[0] != "systemctl --user stop pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" ||
-				lifecycle[1] != "systemctl --user start pfm-mcp.service pfm-name-sync.path pfm-name-sync.timer" {
+				lifecycle[1] != "systemctl --user start pfm-mcp.service" {
 				t.Fatalf("service lifecycle %s: %v", outcome, runner.calls)
 			}
 		})
@@ -956,10 +973,9 @@ func TestLayoutDatabaseMoveStopsOnlyRunningServices(t *testing.T) {
 			lifecycle = append(lifecycle, call)
 		}
 	}
-	want := []string{
-		"systemctl --user stop pfm-name-sync.path pfm-name-sync.timer",
-		"systemctl --user start pfm-name-sync.path pfm-name-sync.timer",
-	}
+	// The unloaded MCP unit is neither stopped nor started; the scheduler
+	// units start after installer.Run (Journal.RestartSchedulerUnits).
+	want := []string{"systemctl --user stop pfm-name-sync.path pfm-name-sync.timer"}
 	if !slices.Equal(lifecycle, want) {
 		t.Fatalf("service lifecycle = %q, want %q", lifecycle, want)
 	}

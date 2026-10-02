@@ -25,6 +25,9 @@ type RunOptions struct {
 	// after the child exits or its context is cancelled. A zero value keeps
 	// os/exec's default (no extra bound).
 	WaitDelay time.Duration
+	// ProcessGroup gives the child its own process group, so a terminal's
+	// Ctrl-C reaches the caller alone and never kills the child mid-flight.
+	ProcessGroup bool
 }
 
 // RunResult is one command's completed run: stdout and stderr split (never
@@ -114,6 +117,9 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 	command.Env = opts.Env
 	command.Dir = opts.Dir
 	command.WaitDelay = opts.WaitDelay
+	if opts.ProcessGroup {
+		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	if opts.Stdin != nil {
 		command.Stdin = bytes.NewReader(opts.Stdin)
 	}

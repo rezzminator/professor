@@ -175,8 +175,10 @@ func TestLayoutDatabaseHolderRefusesAndUnreadableProcFails(t *testing.T) {
 	if err := os.Symlink(legacy, filepath.Join(fd, "0")); err != nil {
 		t.Fatal(err)
 	}
+	// A live holder has a stat; one without is gone, and dropped.
+	layoutProcess(t, env, 456, 1, "")
 	finding := requireLayoutVerdict(t, ClassifyLayout(env), "state-db", env.StateDB, VerdictRefuse)
-	if finding.Detail != "held by pid 456" {
+	if finding.Detail != "held by pid 456 (not a pfm service) — close it" || finding.serviceHeld {
 		t.Fatalf("holder detail=%q", finding.Detail)
 	}
 	env.ProcRoot = filepath.Join(env.Home, "missing-proc")

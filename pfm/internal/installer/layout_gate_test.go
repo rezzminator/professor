@@ -107,11 +107,22 @@ func TestInstallGateExemptsAdvisoryAndHeldDatabases(t *testing.T) {
 	env := layoutFixture(t)
 	findings := []LayoutFinding{
 		{Row: layoutRowManagedCleanup, Path: "/managed", Verdict: VerdictRefuse, Err: errors.New("unreadable")},
-		{Row: layoutRowStateDB, Path: "/state", Verdict: VerdictRefuse, Detail: "held by pid 77"},
-		{Row: layoutRowCacheDB, Path: "/cache", Verdict: VerdictRefuse, Detail: "held by pid 88"},
+		{Row: layoutRowStateDB, Path: "/state", Verdict: VerdictRefuse, Detail: "held by pid 77", serviceHeld: true},
+		{Row: layoutRowCacheDB, Path: "/cache", Verdict: VerdictRefuse, Detail: "held by pid 88", serviceHeld: true},
 	}
 	if err := installGate(env, findings); err != nil {
 		t.Fatal(err)
+	}
+	// A holder no pfm service owns is a refusal the gate names, never a skip.
+	findings[1] = LayoutFinding{
+		Row: layoutRowCacheDB, Path: "/cache", Verdict: VerdictRefuse,
+		Detail: "held by pid 88 (pfm) — close it",
+	}
+	err := installGate(env, findings)
+	if err == nil ||
+		!strings.Contains(err.Error(), "  refuse  layout cache-db /cache — held by pid 88 (pfm) — close it") ||
+		errors.As(err, new(gateUnreadableError)) {
+		t.Fatalf("non-service holder gate=%v", err)
 	}
 }
 

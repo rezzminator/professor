@@ -269,12 +269,30 @@ func (installer *engine) pause(d time.Duration) {
 // asking anyone to predict how long a teardown takes, and it costs a healthy
 // host nothing: the first attempt succeeds and no wait is ever taken.
 func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, _ string) error {
+	pause := func(_ context.Context, d time.Duration) error {
+		installer.pause(d)
+		return nil
+	}
+	return launchctlBootstrapWithRetry(ctx, installer.options.Runner, pause, domain, path)
+}
+
+// launchctlBootstrapWithRetry is bootstrapWithRetry's loop over any runner:
+// every launchd bootstrap after a bootout goes through it, pausing between
+// attempts through pause.
+func launchctlBootstrapWithRetry(
+	ctx context.Context,
+	runner CommandRunner,
+	pause func(context.Context, time.Duration) error,
+	domain, path string,
+) error {
 	var err error
 	for attempt := 0; attempt < launchdBootstrapAttempts; attempt++ {
 		if attempt > 0 {
-			installer.pause(launchdBootstrapRetryInterval)
+			if pauseErr := pause(ctx, launchdBootstrapRetryInterval); pauseErr != nil {
+				return errors.Join(err, pauseErr)
+			}
 		}
-		if err = installer.options.Runner.Run(ctx, "launchctl", "bootstrap", domain, path); err == nil {
+		if err = runner.Run(ctx, "launchctl", "bootstrap", domain, path); err == nil {
 			return nil
 		}
 	}

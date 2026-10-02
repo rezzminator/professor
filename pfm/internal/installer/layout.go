@@ -2,7 +2,6 @@ package installer
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -73,6 +72,10 @@ type LayoutEnv struct {
 	// settle waits a started fleet unit's settle before its state is read
 	// back; nil is the real clock (layout_services.go).
 	settle func(time.Duration)
+	// uid is the invoking user a merge moves files as; nil is os.Getuid.
+	uid func() int
+	// access answers access(2) for the invoking user; nil is unix.Access.
+	access func(path string, mode uint32) error
 }
 
 func NewLayoutEnv(runtime pfmconfig.Runtime, env paths.Env) (LayoutEnv, error) {
@@ -214,6 +217,8 @@ type LayoutFinding struct {
 	Source  string
 	Detail  string
 	Err     error
+	// serviceHeld: held only by pfm services apply stops (judgeHeldDB).
+	serviceHeld bool
 }
 
 // LayoutRow records the desired form and the legacy form recognised by a row.
@@ -314,49 +319,6 @@ func layoutLstat(row, path string) (LayoutFinding, fs.FileInfo, bool) {
 		return finding, nil, false
 	}
 	return finding, info, true
-}
-
-func classifyManagedCleanup(env LayoutEnv) LayoutFinding {
-	path := filepath.Join(env.ManagedDir, "pfm.json")
-	finding, info, exists := layoutLstat(layoutRowManagedCleanup, path)
-	if !env.Config.Claude.RequireManagedCleanup {
-		finding.Detail = "check off by config"
-		return finding
-	}
-	if finding.Err != nil {
-		return finding
-	}
-	if !exists {
-		finding.Verdict = VerdictCreate
-		return finding
-	}
-	if !info.Mode().IsRegular() {
-		finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
-		return finding
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		finding.Err = err
-		return finding
-	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &document); err != nil {
-		finding.Err = err
-		return finding
-	}
-	var value int
-	if err := json.Unmarshal(document["cleanupPeriodDays"], &value); err != nil {
-		finding.Err = fmt.Errorf("cleanupPeriodDays: %w", err)
-		return finding
-	}
-	if value != env.Config.Claude.CleanupPeriodDays {
-		finding.Verdict, finding.Detail = VerdictRepoint, fmt.Sprintf(
-			"cleanupPeriodDays=%d, want %d",
-			value,
-			env.Config.Claude.CleanupPeriodDays,
-		)
-	}
-	return finding
 }
 
 func classifyConfig(env LayoutEnv) LayoutFinding {
@@ -464,7 +426,12 @@ func classifyDB(env LayoutEnv, row, target, legacy string) LayoutFinding {
 	case err != nil:
 		finding.Err = err
 	case len(pids) > 0:
-		finding.Verdict, finding.Detail = VerdictRefuse, "held by pid "+strings.Join(pids, ",")
+		judgeHeldDB(env, &finding, pids)
+		if finding.serviceHeld && targetExists {
+			// Stopping the service would only reach the refusal below.
+			finding.serviceHeld = false
+			finding.Detail = "target and legacy database both exist"
+		}
 	case targetExists:
 		finding.Verdict, finding.Detail = VerdictRefuse, "target and legacy database both exist"
 	default:
@@ -537,6 +504,7 @@ func classifySessionStore(env LayoutEnv) []LayoutFinding {
 					}
 					finding.Verdict = VerdictMerge
 					finding.Detail = fmt.Sprintf("%d entries", len(children))
+					judgeSessionOwnership(env, &finding, path)
 				default:
 					finding.Verdict, finding.Detail = VerdictRefuse, "not a directory or link"
 				}

@@ -12,9 +12,10 @@ import (
 )
 
 // InstallCheckBlocked is `pfm install --check`'s exit when the install gate
-// would refuse this host: 0 is a pass, 1 a refusal before the gate or a check
-// that could not answer, 2 a usage error. make host-install reads it before
-// swapping a binary in.
+// would refuse this host or a name-sync job is running right now (where the
+// apply exits 97): both clear by waiting or stopping what holds the host. 0 is
+// a pass, 1 any other refusal or a check that could not answer, 2 a usage
+// error. make host-install reads it before swapping a binary in.
 const InstallCheckBlocked = 4
 
 // gateUnreadableError is a gate refusal made only of what the gate could not
@@ -122,8 +123,8 @@ func installGate(env LayoutEnv, findings []LayoutFinding) error {
 		if finding.Err == nil && finding.Verdict != VerdictRefuse {
 			continue
 		}
-		if finding.Err == nil && (finding.Row == layoutRowStateDB || finding.Row == layoutRowCacheDB) &&
-			strings.HasPrefix(finding.Detail, "held by pid ") {
+		if finding.Err == nil && finding.serviceHeld {
+			// apply stops the holding services, then rechecks before any write.
 			continue
 		}
 		detail := finding.Detail

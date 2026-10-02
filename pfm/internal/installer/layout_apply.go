@@ -28,10 +28,22 @@ var (
 )
 
 // ApplyLayout converges the layout rows, recording into journal (nil: a
-// private one); it returns the journal directory. An apply with database work
-// stops the running fleet units once, when the loop reaches the first
-// database row, and restarts and verifies them once, right after the last
-// database row's outcome or at any earlier return.
+// private one); it returns the journal directory. When the layout has work (a
+// host still migrating: layoutApplyWork), right after the gate and before any
+// row writes it stops the running name-sync scheduler units — and, with
+// database work, the MCP service — asks the name-sync job again, then rescans
+// both databases' holders: a stop that fails, a job still running, or a holder
+// left once the units are down refuses the whole apply with no journal record
+// and no host write. The journal holds what was stopped (holdServices): the
+// scheduler units wait for Journal.RestartSchedulerUnits, after installer.Run
+// returned; the MCP service restarts once, right after the last database
+// row's outcome or at any earlier return. From before the stop until every
+// held unit is back, a signal is an interrupt request (watchSignals): the
+// apply returns errInstallInterrupted before its next row, after the MCP
+// service's restart, and at its end. A migrated host's
+// apply stops no unit. The per-row recheck stays a race guard: a holder appearing after that
+// rescan refuses its database row alone, and the other rows keep today's
+// independent outcome.
 func ApplyLayout(
 	ctx context.Context,
 	env LayoutEnv,
@@ -39,7 +51,9 @@ func ApplyLayout(
 	apply bool,
 	stdout io.Writer,
 ) (dir string, err error) {
-	if journal == nil {
+	// A private journal arms no process-wide signal watch.
+	private := journal == nil
+	if private {
 		journal = NewJournal(ctx, env)
 	}
 	journal.dryRun = !apply
@@ -54,24 +68,54 @@ func ApplyLayout(
 	configMigrated := false
 	var independentFailures []error
 	lastDB, dbWork := layoutDatabaseWork(findings)
-	servicesArmed, servicesStopped := false, false
-	var stoppedUnits []string
-	var stopErr error
+	servicesArmed := false
 	restartServices := func() error {
 		if !servicesArmed {
 			return nil
 		}
 		servicesArmed = false
-		return restartLayoutServices(ctx, env, stoppedUnits)
+		return journal.restartHeldServices(ctx)
 	}
 	defer func() { err = errors.Join(err, restartServices()) }()
+	if apply && layoutApplyWork(env, findings) {
+		servicesArmed = true
+		if !private {
+			journal.watchSignals()
+		}
+		// A failed stop still returns what it stopped; the journal holds those
+		// for the restarts.
+		stopped, stopErr := stopLayoutServices(ctx, env, dbWork)
+		journal.holdServices(stopped, stopErr == nil)
+		if stopErr != nil {
+			return "", fmt.Errorf(
+				"refused before any change:\n  refuse  layout services — stopping the pfm services failed: %w\n"+
+					"fix what it names, then rerun pfm install --yes", stopErr)
+		}
+		// A job the schedule started before the stop still runs: installer.Run's
+		// gate would refuse it after the layout's writes. It exits 97 like the
+		// pre-change ask (LayoutExitCode).
+		if err := CheckScheduler(ctx, env.commandRunner()); err != nil {
+			return "", fmt.Errorf("refused before any change:\n  refuse  name-sync — %w with its schedule stopped\n%s",
+				err, SchedulerRefusal("install", err))
+		}
+		if dbWork {
+			if err := layoutDBHoldersAfterStop(env, findings); err != nil {
+				return "", err
+			}
+		}
+	}
 	for index, planned := range findings {
+		// A signal stops the apply here, before the next row or the config
+		// migration; the deferred restart brings the held units back.
+		if err := journal.Interrupted(); err != nil {
+			return journal.dir, err
+		}
 		if servicesArmed && index > lastDB {
 			independentFailures = append(independentFailures, restartServices())
-		}
-		if apply && dbWork && !servicesStopped && layoutDatabaseRow(planned.Row) {
-			servicesStopped, servicesArmed = true, true
-			stoppedUnits, stopErr = stopLayoutServices(ctx, env)
+			// A signal during that restart stops the apply before this row.
+			if err := journal.Interrupted(); err != nil {
+				return journal.dir, errors.Join(append(independentFailures, err)...)
+			}
 		}
 		if apply && !configMigrated && planned.Row == layoutRowStateDB {
 			if err := applyLayoutConfigMigration(journal); err != nil {
@@ -80,11 +124,6 @@ func ApplyLayout(
 			configMigrated = true
 		}
 		if planned.Verdict == VerdictOK && planned.Err == nil {
-			continue
-		}
-		if stopErr != nil && layoutDatabaseRow(planned.Row) {
-			independentFailures = append(independentFailures,
-				fmt.Errorf("layout %s %s: %w", planned.Row, planned.Path, stopErr))
 			continue
 		}
 		current := planned
@@ -101,8 +140,7 @@ func ApplyLayout(
 			}
 		}
 		if current.Row == layoutRowStateDB || current.Row == layoutRowCacheDB {
-			if apply && current.Err == nil && current.Verdict == VerdictRefuse &&
-				strings.HasPrefix(current.Detail, "held by pid ") {
+			if apply && current.Err == nil && current.Verdict == VerdictRefuse && current.serviceHeld {
 				// The service may be the holder; stop it before deciding refusal.
 				current.Verdict = VerdictMove
 			}
@@ -173,7 +211,9 @@ func ApplyLayout(
 		}
 		fmt.Fprintf(stdout, "  ok      layout %s %s\n", current.Row, current.Path)
 	}
-	independentFailures = append(independentFailures, restartServices())
+	// A signal after the last row's check still answers the interrupt: no
+	// later step of `pfm install` runs.
+	independentFailures = append(independentFailures, restartServices(), journal.Interrupted())
 	if apply {
 		if len(journal.records) == layoutStart {
 			fmt.Fprintln(stdout, "layout: nothing to do")
@@ -182,6 +222,34 @@ func ApplyLayout(
 		fmt.Fprintln(stdout, "layout: nothing to do")
 	}
 	return journal.dir, errors.Join(independentFailures...)
+}
+
+// layoutDBHoldersAfterStop rescans the holders of every legacy database the
+// apply would move, once the fleet units are stopped: any holder left is a
+// refusal before the first host write, naming each pid.
+func layoutDBHoldersAfterStop(env LayoutEnv, findings []LayoutFinding) error {
+	var lines []string
+	for _, finding := range findings {
+		if !layoutDatabaseRow(finding.Row) || finding.Source == "" {
+			continue
+		}
+		pids, err := dbHolderPIDs(env.ProcRoot, finding.Source)
+		if err != nil {
+			return fmt.Errorf("refused before any change:\n  refuse  layout %s %s — UNREADABLE %w",
+				finding.Row, finding.Path, err)
+		}
+		if len(pids) > 0 {
+			lines = append(lines, fmt.Sprintf(
+				"  refuse  layout %s %s — held by pid %s with the pfm services stopped — close it",
+				finding.Row, finding.Path, strings.Join(pids, ",")))
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(append(
+		[]string{"refused before any change:"},
+		append(lines, "close what it names, then rerun pfm install --yes")...), "\n"))
 }
 
 // layoutDatabaseRow reports whether row moves a database the fleet units hold.
@@ -392,8 +460,8 @@ func applyLayoutConfigMigration(journal *Journal) error {
 	if err != nil || migration.Empty() {
 		return err
 	}
-	if migration.LegacyPath != "" || migration.StrayLegacyPath != "" {
-		return fmt.Errorf("%w: pre-split config path is outside HostLayout", errLayoutRefuse)
+	if err := refuseStrayConfig(migration, ""); err != nil {
+		return err
 	}
 	change := LayoutFinding{Row: layoutRowConfig, Verdict: VerdictRepoint, Path: env.ConfigPath}
 	if err := journal.mutate(
@@ -648,7 +716,9 @@ func (env LayoutEnv) commandRunner() CommandRunner {
 	if env.runner != nil {
 		return env.runner
 	}
-	return execCommandRunner{}
+	// The services' stop, probe and restart run in their own process group: a
+	// terminal Ctrl-C reaches pfm's watch alone, never a restart mid-flight.
+	return execCommandRunner{processGroup: true}
 }
 
 // installProgram is install(1), which managedInstallArgs runs under sudo on
@@ -673,4 +743,56 @@ func shellCommandLine(words ...string) string {
 // shellSafeRune reports whether r needs no shell quoting.
 func shellSafeRune(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_@%+=:,./-", r)
+}
+
+// classifyManagedCleanup plans the managed cleanup drop-in row, the one row
+// ApplyLayout treats as advisory.
+func classifyManagedCleanup(env LayoutEnv) LayoutFinding {
+	path := filepath.Join(env.ManagedDir, "pfm.json")
+	finding, info, exists := layoutLstat(layoutRowManagedCleanup, path)
+	if !env.Config.Claude.RequireManagedCleanup {
+		finding.Detail = "check off by config"
+		return finding
+	}
+	if !filepath.IsAbs(env.ManagedDir) {
+		// The row is advisory: refused, it writes nothing and fails nothing.
+		finding.Err = nil
+		finding.Verdict = VerdictRefuse
+		finding.Detail = fmt.Sprintf("managed settings dir %q is not absolute — nothing written", env.ManagedDir)
+		return finding
+	}
+	if finding.Err != nil {
+		return finding
+	}
+	if !exists {
+		finding.Verdict = VerdictCreate
+		return finding
+	}
+	if !info.Mode().IsRegular() {
+		finding.Verdict, finding.Detail = VerdictRefuse, layoutNotRegular
+		return finding
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		finding.Err = err
+		return finding
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		finding.Err = err
+		return finding
+	}
+	var value int
+	if err := json.Unmarshal(document["cleanupPeriodDays"], &value); err != nil {
+		finding.Err = fmt.Errorf("cleanupPeriodDays: %w", err)
+		return finding
+	}
+	if value != env.Config.Claude.CleanupPeriodDays {
+		finding.Verdict, finding.Detail = VerdictRepoint, fmt.Sprintf(
+			"cleanupPeriodDays=%d, want %d",
+			value,
+			env.Config.Claude.CleanupPeriodDays,
+		)
+	}
+	return finding
 }

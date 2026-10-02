@@ -12,6 +12,8 @@
 
 [global]
 respect-gitignore = true
+# The result cache goes to the gitignored tmp/ (resolved from the project root).
+cache-dir = "tmp/rumdl"
 
 # MD014 strips `$` from shell examples. MD036 rewrites bold labels into headings,
 # restructuring prompts that use them as inline labels. MD040 appends `text` to
@@ -62,7 +64,6 @@ exclude = [
   ".worktrees",
   "node_modules",
   "**/node_modules/**",
-  ".rumdl_cache",
 ]
 
 # The reflow engine, not a length gate. line-length is set past any real line so

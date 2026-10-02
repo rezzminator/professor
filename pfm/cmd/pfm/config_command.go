@@ -179,7 +179,7 @@ func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRunti
 	fmt.Fprintln(stdout, "  convert: pdfOcr, pdfLayout — handed to the pinned Python converter")
 	fmt.Fprintln(
 		stdout,
-		"  cache: dir (default ~/.professor/.cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)",
+		"  cache: dir (default ~/.professor/.harvester-cache), ttlSeconds (0 = never expire), negativeTtlSeconds, negativeTransientTtlSeconds (0 = never cache failures)",
 	)
 	fmt.Fprintln(stdout, "  output: maxInlineChars")
 	return 0

@@ -58,7 +58,7 @@ func TestLegacyTokenEstimatorAllTenBehaviors(t *testing.T) {
 
 // TestCacheRootIsConfiguredDirOrTheOneDefault pins the single cache-root
 // rule: the configured dir (harvester.config.json cache.dir) when set, else
-// <home>/.professor/.cache — never the working directory, and never the
+// <home>/.professor/.harvester-cache — never the working directory, and never the
 // retired WEBFETCH_DIR / HARVESTER_CACHE_DIR variables.
 func TestCacheRootIsConfiguredDirOrTheOneDefault(t *testing.T) {
 	root := t.TempDir()
@@ -67,7 +67,7 @@ func TestCacheRootIsConfiguredDirOrTheOneDefault(t *testing.T) {
 	t.Setenv("HARVESTER_CACHE_DIR", ".harvest-cache")
 	jailHome := filepath.Join(root, "home")
 	t.Setenv(paths.EnvHome, jailHome)
-	if got, err := CacheRoot(""); err != nil || got != filepath.Join(jailHome, ".professor", ".cache") {
+	if got, err := CacheRoot(""); err != nil || got != filepath.Join(jailHome, ".professor", ".harvester-cache") {
 		t.Fatalf("default cache root=%q err=%v; the retired env variables must be ignored", got, err)
 	}
 	t.Setenv(paths.EnvHome, "")

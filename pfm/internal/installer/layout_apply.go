@@ -112,6 +112,11 @@ func ApplyLayout(
 			if current.Err != nil {
 				detail = current.Err.Error()
 			}
+			if layoutWarnOnly(current) {
+				// Two caches are the host owner's to reconcile: a warning, never a failed install.
+				fmt.Fprintf(stdout, "  warn    layout %s %s — %s\n", current.Row, current.Path, detail)
+				continue
+			}
 			fmt.Fprintf(stdout, "  refuse  layout %s %s — %s\n", current.Row, current.Path, detail)
 			if apply && current.Row != layoutRowManagedCleanup {
 				independentFailures = append(independentFailures,
@@ -220,7 +225,7 @@ func layoutFindingByPath(findings []LayoutFinding, row, path string) LayoutFindi
 // does not exist before the move, so it has nothing to copy.
 func layoutSnapshotPaths(env LayoutEnv, finding LayoutFinding) ([]string, error) {
 	switch finding.Row {
-	case layoutRowConfig, layoutRowHarvesterConfig:
+	case layoutRowConfig, layoutRowHarvesterConfig, layoutRowHarvesterCache:
 		if finding.Verdict == VerdictMove {
 			return []string{finding.Source, finding.Path}, nil
 		}
@@ -378,6 +383,10 @@ func applyLayoutRow(ctx context.Context, journal *Journal, finding LayoutFinding
 			return err
 		}
 		return journal.mutate(finding, paths, installer.migrateMemoryHelpers)
+	case layoutRowHarvesterCache:
+		if finding.Verdict == VerdictMove {
+			return journal.mutate(finding, paths, func() error { return os.Rename(finding.Source, finding.Path) })
+		}
 	case layoutRowAccountSettings, layoutRowAccountMCP:
 		return applyLayoutAccount(journal, finding, paths)
 	case layoutRowHomeMCP:

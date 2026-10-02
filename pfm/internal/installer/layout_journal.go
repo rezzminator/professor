@@ -614,6 +614,8 @@ func layoutRecordAllowed(env LayoutEnv, record layoutJournalRecord) bool {
 	case layoutRowHarvesterConfig:
 		return allows(filepath.Join(filepath.Dir(env.ConfigPath), "harvester.config.json"),
 			filepath.Join(env.LegacyConfigDir, "harvester.config.json"))
+	case layoutRowHarvesterCache:
+		return allows(paths.HarvesterCacheDir(env.Home), paths.LegacyHarvesterCacheDir(env.Home))
 	case layoutRowStateDB, layoutRowCacheDB:
 		legacy := paths.LegacyStateDB(env.Home)
 		target := env.StateDB

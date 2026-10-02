@@ -61,7 +61,8 @@ func installGate(env LayoutEnv, findings []LayoutFinding) error {
 	answered := false
 	updaterBlocked := false
 	for _, finding := range findings {
-		if finding.Row != layoutRowManagedCleanup && (finding.Err != nil || finding.Verdict != VerdictOK) {
+		if finding.Row != layoutRowManagedCleanup && (finding.Err != nil || finding.Verdict != VerdictOK) &&
+			!layoutWarnOnly(finding) {
 			updaterBlocked = true
 			break
 		}
@@ -116,7 +117,7 @@ func installGate(env LayoutEnv, findings []LayoutFinding) error {
 	}
 	layoutBlocked := false
 	for _, finding := range findings {
-		if finding.Row == layoutRowManagedCleanup {
+		if finding.Row == layoutRowManagedCleanup || layoutWarnOnly(finding) {
 			continue
 		}
 		if finding.Err == nil && finding.Verdict != VerdictRefuse {
@@ -160,4 +161,11 @@ func installGate(env LayoutEnv, findings []LayoutFinding) error {
 		return gateUnreadableError{errors.New(strings.Join(lines, "\n"))}
 	}
 	return errors.New(strings.Join(lines, "\n"))
+}
+
+// layoutWarnOnly is a refused finding that only warns: a harvester cache at
+// both its pre-rename and current paths (or a non-directory at the old one) is
+// the host owner's to reconcile, so it never blocks or fails an install.
+func layoutWarnOnly(finding LayoutFinding) bool {
+	return finding.Row == layoutRowHarvesterCache && finding.Err == nil && finding.Verdict == VerdictRefuse
 }

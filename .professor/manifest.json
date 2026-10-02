@@ -107,11 +107,11 @@
     ".claude/scripts/pfm-guard.sh": "b4e1a5d6f3f827410b40d484aaa687ce0c34b882938ef86080d8828f560d48dc",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
-    ".gitignore": "65cc2b9db5d7b61af166900deefb240aed6e9b71b99fbed06644cbf1cbaca9ce",
+    ".gitignore": "333d7b9833b8f4c7acb40cf1293ad669c0581a075d89e723062a56d59b14c475",
     "CLAUDE.md": "823e367f01626c30a289b23d83896c8d11f021cc0275fe442cb24cb0c8ecf11c",
     "docs/commands/pcm/references/audit-scopes.md": "0eb093cd384472d0cab03d30fe4b562b8424a6d0d6310fe1d51bad7efb04398b",
     "docs/commands/pcm/references/refresh.md": "96297f0e4f285d62d3e7587a373a5553b39f1361eeda09370f63c601f73e0a93",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
-    "pfm/CLAUDE.md": "70b1f54f3bdfe0adb662cf23ec20c4a7774f4205a83d4f2d844457559cc40f0a"
+    "pfm/CLAUDE.md": "7cea32af81cfe244203470f589e2fba5cc54d52c0f432cf3ecf2ee98f23e73ef"
   }
 }

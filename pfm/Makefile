@@ -29,7 +29,8 @@ REPO    := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..)
 TMP_BASE := /tmp/$(patsubst .%,%,$(notdir $(REPO)))
 DEV     := $(REPO)/.claude/scripts/dev.sh
 BIN     := $(HOME)/.local/bin/pfm
-LOCAL   := pfm.dev
+# The local build artifact lives in the repo's gitignored tmp/, never in the tree.
+LOCAL   := $(REPO)/tmp/bin/pfm.dev
 UNIT    := pfm-mcp.service
 # The macOS twin of UNIT: the launch agent pfm install wires for the daemon.
 AGENT   := com.professor.pfm.mcp
@@ -71,8 +72,10 @@ help: ## List every target
 
 # ---------------------------------------------------------------- build ----
 
-build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
+build: ## Compile to tmp/bin/pfm.dev (a local artifact, never the shipped path); its absolute path is the last line
+	@mkdir -p $(dir $(LOCAL))
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
+	@echo "built: $(LOCAL)"
 
 # The composer runs here, so it builds for the host even when a cross build
 # exports GOOS/GOARCH (else: "exec format error").

@@ -1,5 +1,4 @@
 /pfm
-/pfm.dev
 *.test
 /cmd/pfm/pfm
 *.db-shm

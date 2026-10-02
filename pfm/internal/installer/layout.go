@@ -34,6 +34,7 @@ const (
 	layoutRowManagedCleanup  = "managed-cleanup"
 	layoutRowConfig          = "config"
 	layoutRowHarvesterConfig = "harvester-config"
+	layoutRowHarvesterCache  = "harvester-cache"
 	layoutRowStateDB         = "state-db"
 	layoutRowCacheDB         = "cache-db"
 	layoutRowSessionStore    = "session-store"
@@ -234,6 +235,7 @@ var HostLayout = []LayoutRow{
 	{layoutRowManagedCleanup, "{ManagedDir}/pfm.json at configured cleanupPeriodDays", "absent or wrong value"},
 	{layoutRowConfig, "{ConfigPath} regular file", "{LegacyConfigDir}/pfm.config.json or config.json"},
 	{layoutRowHarvesterConfig, "beside ConfigPath, regular file or absent", "{LegacyConfigDir}/harvester.config.json"},
+	{layoutRowHarvesterCache, "{home}/.professor/.harvester-cache directory or absent", "{home}/.professor/.cache"},
 	{layoutRowStateDB, "{StateDB}, no legacy database", "{home}/.cc/legacy database and siblings"},
 	{layoutRowCacheDB, "{CacheDB}, no legacy database", "{home}/.local/state/pfm/legacy database and siblings"},
 	{
@@ -263,6 +265,8 @@ func ClassifyLayout(env LayoutEnv) []LayoutFinding {
 			findings = append(findings, classifyConfig(env))
 		case layoutRowHarvesterConfig:
 			findings = append(findings, classifyHarvesterConfig(env))
+		case layoutRowHarvesterCache:
+			findings = append(findings, classifyHarvesterCache(env))
 		case layoutRowStateDB:
 			findings = append(
 				findings,
@@ -379,6 +383,45 @@ func classifyHarvesterConfig(env LayoutEnv) LayoutFinding {
 		[]string{filepath.Join(env.LegacyConfigDir, "harvester.config.json")},
 		false,
 	)
+}
+
+// classifyHarvesterCache judges the pre-rename harvester cache directory
+// {home}/.professor/.cache against its target {home}/.professor/.harvester-cache.
+// An explicitly configured cache.dir owns the location, so nothing is read. A
+// cache present at both paths is refused, never merged: two caches hold
+// different handles and the host's owner keeps one by hand.
+func classifyHarvesterCache(env LayoutEnv) LayoutFinding {
+	target := paths.HarvesterCacheDir(env.Home)
+	legacy := paths.LegacyHarvesterCacheDir(env.Home)
+	finding := LayoutFinding{Row: layoutRowHarvesterCache, Verdict: VerdictOK, Path: target}
+	if strings.TrimSpace(env.Config.Harvester.Cache.Dir) != "" {
+		finding.Detail = "cache.dir configured; untouched"
+		return finding
+	}
+	targetFinding, _, targetExists := layoutLstat(layoutRowHarvesterCache, target)
+	if targetFinding.Err != nil {
+		finding.Err = targetFinding.Err
+		return finding
+	}
+	legacyFinding, legacyInfo, legacyExists := layoutLstat(layoutRowHarvesterCache, legacy)
+	if legacyFinding.Err != nil {
+		finding.Err = legacyFinding.Err
+		return finding
+	}
+	if !legacyExists {
+		return finding
+	}
+	finding.Source = legacy
+	switch {
+	case !legacyInfo.IsDir():
+		finding.Verdict, finding.Detail = VerdictRefuse, "legacy cache path is not a directory"
+	case targetExists:
+		finding.Verdict, finding.Detail = VerdictRefuse,
+			"both .cache and .harvester-cache exist; never merged — keep one by hand"
+	default:
+		finding.Verdict = VerdictMove
+	}
+	return finding
 }
 
 func classifyMovedFile(row, target string, legacy []string, createWhenAbsent bool) LayoutFinding {

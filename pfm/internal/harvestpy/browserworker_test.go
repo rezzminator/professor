@@ -424,6 +424,7 @@ func TestBrowserRouteGuardPythonSeam(t *testing.T) {
 	script := filepath.Join("assets", "browser", "browser_route_guard_test.py")
 	command := exec.Command(python, script)
 	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser route-guard seam failed: %v\n%s", err, output)
@@ -442,6 +443,7 @@ func TestBrowserRenderPythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_render_test.py"))
 	command.Dir = assetDirForTest()
+	command.Env = withPythonBytecodeHome(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser render seam failed: %v\n%s", err, output)
@@ -458,7 +460,7 @@ func TestBrowserConsentPythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_consent_test.py"))
 	command.Dir = assetDirForTest()
-	command.Env = append(os.Environ(), "BROWSER_LIVE=0")
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=0"))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser consent seam failed: %v\n%s", err, output)
@@ -474,7 +476,7 @@ func TestBrowserRoutePythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_route_test.py"))
 	command.Dir = assetDirForTest()
-	command.Env = append(os.Environ(), "BROWSER_LIVE=0")
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=0"))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser route seam failed: %v\n%s", err, output)

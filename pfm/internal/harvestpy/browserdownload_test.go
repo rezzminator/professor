@@ -120,7 +120,7 @@ func TestBrowserDownloadPythonSeam(t *testing.T) {
 	}
 	command := exec.Command(python, filepath.Join("assets", "browser", "browser_download_test.py"))
 	command.Dir = assetDirForTest()
-	command.Env = append(os.Environ(), "BROWSER_LIVE=0")
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=0"))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("browser download seam failed: %v\n%s", err, output)

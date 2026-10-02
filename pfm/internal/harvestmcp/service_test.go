@@ -90,8 +90,9 @@ func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 
 // TestServiceCacheIsTheOneRootNotTheWorkingDirectory pins the split-cache
 // defect: NewConfigured resolved a cwd-relative ".cache", so the daemon
-// (systemd cwd = $HOME) cached into ~/.cache while the CLI used
-// ~/.professor/.cache and the two never shared a hit.
+// (systemd cwd = $HOME) cached into ~/.cache while the CLI used the one
+// default root (now ~/.professor/.harvester-cache) and the two never shared a
+// hit.
 func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 	t.Chdir(t.TempDir())
 	home := filepath.Join(t.TempDir(), "home")
@@ -102,7 +103,7 @@ func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = service.Close() }()
-	if want := filepath.Join(home, ".professor", ".cache"); service.runtime.CacheDir != want {
+	if want := filepath.Join(home, ".professor", ".harvester-cache"); service.runtime.CacheDir != want {
 		t.Fatalf("service cache root = %q, want the one default %q", service.runtime.CacheDir, want)
 	}
 }

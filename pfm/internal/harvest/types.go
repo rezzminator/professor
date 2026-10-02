@@ -382,7 +382,7 @@ type fetchFlight struct {
 // New constructs a Harvester. A nil Converter is valid for callers that only
 // need archive listing, search, or raw transport tests; converted fetches then
 // report a useful error instead of silently returning bytes. It fails when no
-// CacheDir was given and the one default (<home>/.professor/.cache) cannot be
+// CacheDir was given and the one default (<home>/.professor/.harvester-cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
 	if options.Clock == nil {

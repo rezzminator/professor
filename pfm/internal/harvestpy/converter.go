@@ -55,9 +55,28 @@ var converterProtocolEnv = []string{
 	"HARVESTER_PDF_OCR", "HARVESTER_PDF_LAYOUT", "HARVESTPY_MODEL_ROOT", "HARVESTPY_MODEL_STAGING",
 }
 
+// pythonPycachePrefixEnv points CPython's bytecode cache at one directory.
+const pythonPycachePrefixEnv = "PYTHONPYCACHEPREFIX"
+
+// withPythonBytecodeHome is parent with PYTHONPYCACHEPREFIX set to the one
+// fixed temp home (os.TempDir honours TMPDIR; Python creates it lazily), an
+// inherited value replaced: a sidecar launched from the clone never writes
+// __pycache__ beside its sources under pfm/internal/harvestpy/assets.
+func withPythonBytecodeHome(parent []string) []string {
+	env := make([]string, 0, len(parent)+1)
+	for _, entry := range parent {
+		if name, _, _ := strings.Cut(entry, "="); name != pythonPycachePrefixEnv {
+			env = append(env, entry)
+		}
+	}
+	return append(env, pythonPycachePrefixEnv+"="+filepath.Join(os.TempDir(), "pfm-pycache"))
+}
+
 // workerEnv is the converter process environment: the parent environment
-// minus the converter protocol variables, plus the configured flags.
+// minus the converter protocol variables, plus the configured flags and the
+// fixed bytecode home.
 func workerEnv(parent []string, runtime Runtime) []string {
+	parent = withPythonBytecodeHome(parent)
 	env := make([]string, 0, len(parent)+2)
 	for _, entry := range parent {
 		name, _, _ := strings.Cut(entry, "=")

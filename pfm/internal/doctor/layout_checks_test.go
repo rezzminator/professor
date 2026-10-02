@@ -324,6 +324,25 @@ func TestLayoutDoctorStateAndOtherRows(t *testing.T) {
 	}
 }
 
+func TestLayoutDoctorHarvesterCacheWarnsNeverFails(t *testing.T) {
+	runtime := testjail.CleanHome(t)
+	home := runtime.Paths.Home
+	legacy := paths.LegacyHarvesterCacheDir(home)
+	target := paths.HarvesterCacheDir(home)
+	doctorLayoutWrite(t, filepath.Join(legacy, "h1"), "handle")
+	output, warnings, failures := layoutDoctorOutput(t, runtime)
+	want := "layout: harvester-cache move " + legacy + " -> " + target + " — run pfm install\n"
+	if warnings != 1 || failures != 0 || !strings.Contains(output, want) {
+		t.Fatalf("legacy only: warnings=%d failures=%d output=%q", warnings, failures, output)
+	}
+	doctorLayoutWrite(t, filepath.Join(target, "h2"), "handle")
+	output, warnings, failures = layoutDoctorOutput(t, runtime)
+	want = "layout: harvester-cache refuse " + target + " — both .cache and .harvester-cache exist"
+	if warnings != 1 || failures != 0 || !strings.Contains(output, want) {
+		t.Fatalf("both present: warnings=%d failures=%d output=%q", warnings, failures, output)
+	}
+}
+
 func TestLayoutDoctorHomeMCPLines(t *testing.T) {
 	runtime := testjail.CleanHome(t)
 	home := runtime.Paths.Home

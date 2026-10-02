@@ -163,6 +163,21 @@ func printLayoutChecks(stdout io.Writer, runtime config.Runtime, environment pat
 				)
 				failures++
 			}
+		case "harvester-cache":
+			switch finding.Verdict {
+			case installer.VerdictOK:
+			case installer.VerdictMove:
+				fmt.Fprintf(
+					stdout,
+					"layout: harvester-cache move %s -> %s — run pfm install\n",
+					finding.Source,
+					finding.Path,
+				)
+				warnings++
+			default:
+				printOtherLayoutFinding(stdout, finding)
+				warnings++
+			}
 		case "state-db", "cache-db":
 			if finding.Source != "" {
 				fmt.Fprintf(stdout, "state: legacy %s still present — run pfm install\n", finding.Source)

@@ -84,7 +84,7 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   lane_abort "no working directory for the chats to live in ($CWD)"
 need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it (M.01, M.02)"
-# The harvester's default cache is <home>/.professor/.cache, and here
+# The harvester's default cache is <home>/.professor/.harvester-cache, and here
 # <home>/.professor is the blueprint clone, mounted read-only: every stored
 # result would fail with "read-only file system". The lane configures its own
 # writable cache.dir under $HOME BEFORE the daemon starts, so the HTTP daemon

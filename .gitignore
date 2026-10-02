@@ -49,14 +49,17 @@ templates/global/agents/*.toml
 # paths into /tmp clones); the RR document carries the commit-pinned links.
 .professor/RR/tracer-rr/
 # Harvester conversion cache and OpenCode's own runtime files (plugin install
-# tree, nested config): host state, never repo content.
+# tree, nested config): host state, never repo content. `.cache/` is the
+# harvester cache's pre-migration name, ignored until `pfm install` renames it.
+.harvester-cache/
 .cache/
 .opencode/.opencode/
 .opencode/node_modules/
 .opencode/package.json
 .opencode/package-lock.json
 .opencode/.gitignore
-# Python bytecode caches (harvestpy browser worker dev runs).
+# Python bytecode caches from python runs outside pfm (pfm's harvestpy launches
+# send theirs to $TMPDIR/pfm-pycache).
 __pycache__/
 
 # The scrub table maps real private values to placeholder tokens — it MUST stay local,
@@ -66,6 +69,3 @@ scripts/placeholder-map.tsv
 # leak-check.sh private denylist — names the very things that must never be
 # published, so it is never tracked/public. See scripts/leak-check.sh header.
 scripts/leak-terms.txt
-
-# rumdl result cache (see /quality:md-forlint) — host state, never repo content.
-.rumdl_cache/

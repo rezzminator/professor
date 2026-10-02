@@ -47,7 +47,7 @@ func TestLiveBrowserConsentFixtures(t *testing.T) {
 	}
 	command := exec.Command(live.Python, filepath.Join("assets", "browser", "browser_consent_test.py"))
 	command.Dir = assetDirForTest()
-	command.Env = append(os.Environ(), "BROWSER_LIVE=1")
+	command.Env = withPythonBytecodeHome(append(os.Environ(), "BROWSER_LIVE=1"))
 	output, err := command.CombinedOutput()
 	t.Logf("%s", output)
 	if err != nil {

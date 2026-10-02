@@ -23,7 +23,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - config: account identity, emoji, theme and permission posture · `internal/config/`
 - lineage: folds a Codex subagent thread into its parent seat · `internal/store/lineage.go`
 - migrations: additive, numbered `migration_v{N}.sql` files, each with its `go:embed` · `internal/store/schema.sql`
-- `pfm.dev`: the local build artifact, never the shipped path; the host mirror build is `make host-install` (root § Host), which stamps `-X main.version` from `VERSION`
+- `tmp/bin/pfm.dev`: the local build `make -C pfm build` writes into the repo's gitignored `tmp/`, printing `built: {absolute path}` as its last line; never the shipped path; the host mirror build is `make host-install` (root § Host), which stamps `-X main.version` from `VERSION`
 
 # Runtime
 

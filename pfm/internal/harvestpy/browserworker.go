@@ -363,6 +363,7 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 		context.Background(),
 		[]string{worker.runtime.Python, worker.runtime.Script},
 		deps.StartOptions{
+			Env:          withPythonBytecodeHome(os.Environ()),
 			StdinPipe:    true,
 			StdoutPipe:   true,
 			ProcessGroup: true,

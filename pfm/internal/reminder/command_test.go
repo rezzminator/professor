@@ -2,12 +2,19 @@ package reminder
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func unreachableNotFound(name string, _ io.Writer) int { panic("chat lookup reached for " + name) }
@@ -80,5 +87,103 @@ func TestWriteReminderTableEmptyIsSaidOutLoud(t *testing.T) {
 	var out bytes.Buffer
 	if err := writeReminderTable(&out, nil); err != nil || out.String() != "no reminders\n" {
 		t.Fatalf("out=%q err=%v", out.String(), err)
+	}
+}
+
+// standInsideCodexThread makes the command's caller a Codex chat whose
+// CODEX_THREAD_ID is thread, in a scratch fleet whose rollout index holds the
+// given rollouts.
+func standInsideCodexThread(t *testing.T, thread string, rollouts ...store.Rollout) {
+	t.Helper()
+	testjail.Fleet(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range rollouts {
+		if err := database.UpsertRollout(context.Background(), rollouts[index]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	previous := callerIdentity
+	callerIdentity = func(context.Context, *pfmconfig.Runtime) (resolve.Identity, bool) {
+		return resolve.Identity{Engine: string(pfmengine.Codex), ID: thread, Source: "env-codex"}, true
+	}
+	t.Cleanup(func() { callerIdentity = previous })
+}
+
+func storedReminders(t *testing.T) []fleetdb.Reminder {
+	t.Helper()
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	if err := state.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	reminders, err := state.Reminders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reminders
+}
+
+// A reminder set from inside a Codex chat is keyed on the chat's lineage root,
+// the id its fleet row carries and a fire matches: CODEX_THREAD_ID may name a
+// resumed member of the lineage, and a reminder keyed on it would never fire.
+func TestReminderSetFromInsideCodexChatKeysTheLineageRoot(t *testing.T) {
+	const (
+		root   = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d"
+		member = "0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e"
+	)
+	standInsideCodexThread(t, member,
+		store.Rollout{ID: root, Path: "/work/rollout-root.jsonl", UserThread: true, PromptCount: 1},
+		store.Rollout{
+			ID: member, Path: "/work/rollout-member.jsonl", ParentThread: root,
+			UserThread: true, PromptCount: 2,
+		},
+	)
+	var stdout, stderr bytes.Buffer
+	code := RunReminderCommand(
+		[]string{"set", "--every", "1h", "--prompt", "check the build"}, &stdout, &stderr, nil, unreachableNotFound,
+	)
+	if code != 0 {
+		t.Fatalf("set from inside Codex thread: code=%d stderr=%q", code, stderr.String())
+	}
+	reminders := storedReminders(t)
+	if len(reminders) != 1 {
+		t.Fatalf("stored reminders = %+v, want one", reminders)
+	}
+	if got := reminders[0]; got.SessionID != root || got.SetByID != root || got.Engine != string(pfmengine.Codex) {
+		t.Fatalf("stored chat id = %q, set by %q, engine %q; want the lineage root %q for both, engine %q",
+			got.SessionID, got.SetByID, got.Engine, root, pfmengine.Codex)
+	}
+}
+
+// A Codex thread the index cannot map to its chat is refused out loud and
+// stores nothing: a reminder keyed on it could never fire.
+func TestReminderSetFromInsideUnindexedCodexThreadIsRefused(t *testing.T) {
+	const thread = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f"
+	standInsideCodexThread(t, thread)
+	var stdout, stderr bytes.Buffer
+	code := RunReminderCommand(
+		[]string{"set", "--every", "1h", "--prompt", "check the build"}, &stdout, &stderr, nil, unreachableNotFound,
+	)
+	if code != 1 || stdout.Len() != 0 ||
+		!strings.Contains(stderr.String(), "holds no Codex conversation with thread "+thread) {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want 1 and the unindexed-thread refusal",
+			code, stdout.String(), stderr.String())
+	}
+	if reminders := storedReminders(t); len(reminders) != 0 {
+		t.Fatalf("stored reminders = %+v, want none", reminders)
 	}
 }

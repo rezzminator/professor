@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -15,8 +16,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (
@@ -97,31 +100,77 @@ func closeReminderStore(state *fleetdb.Store, command string, stderr io.Writer, 
 	return code
 }
 
-// reminderCaller is the chat running this command: runWhoami's resolution,
-// then the label its row carries. ok is false when the caller cannot be told.
-func reminderCaller(
-	ctx context.Context,
-	runtime *pfmconfig.Runtime,
-) (identity resolve.Identity, label string, ok bool) {
+// callerIdentity is the chat running this command: runWhoami's resolution,
+// else the Codex seat lookup. ok is false when the caller cannot be told. A
+// test replaces it to stand inside a chat.
+var callerIdentity = func(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Identity, bool) {
 	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identity := resolve.Identity{}
 	if err == nil {
 		identity, err = identifier.Identify(ctx)
 	}
 	if err != nil {
 		seat, found := pfmchat.SeatIdentity(ctx, runtime)
 		if !found {
-			return resolve.Identity{}, "", false
+			return resolve.Identity{}, false
 		}
 		identity = seat
 	}
-	if identity.ID == "" {
-		return identity, "", false
+	return identity, identity.ID != ""
+}
+
+// reminderCaller is the chat running this command, keyed by reminderChatKey,
+// then the label its row carries. ok is false when the caller cannot be told;
+// keyErr says why a known caller has no fireable key, and identity.ID then
+// stays the raw id the caller reported.
+func reminderCaller(
+	ctx context.Context,
+	runtime *pfmconfig.Runtime,
+) (identity resolve.Identity, label string, ok bool, keyErr error) {
+	identity, ok = callerIdentity(ctx, runtime)
+	if !ok {
+		return identity, "", false, nil
 	}
+	key, keyErr := reminderChatKey(ctx, identity.Engine, identity.ID)
+	if keyErr != nil {
+		return identity, "", true, keyErr
+	}
+	identity.ID = key
 	chat, found, resolveErr := pfmchat.Resolve(ctx, identity.ID, io.Discard, runtime)
 	if resolveErr == nil && found {
 		label = chat.Name
 	}
-	return identity, label, true
+	return identity, label, true, nil
+}
+
+// reminderChatKey is the id a reminder for this chat is stored under: the id
+// a fire matches against the fleet's rows. A Codex row is keyed on its
+// lineage root, while CODEX_THREAD_ID, and a self lookup built on it, may name
+// any thread of the lineage — inherited, resumed or reset — so a Codex id maps
+// to its root through the rollout index. An id the index does not hold is
+// refused: a reminder keyed on it could never fire.
+func reminderChatKey(ctx context.Context, engine, id string) (string, error) {
+	if engine != string(pfmengine.Codex) {
+		return id, nil
+	}
+	database, err := store.Open(store.WithWarningWriter(io.Discard))
+	if err != nil {
+		return "", fmt.Errorf("open the chat index to map Codex thread %s: %w", id, err)
+	}
+	lineage, found, err := database.CodexLineage(ctx, id)
+	if closeErr := database.Close(); closeErr != nil {
+		err = errors.Join(err, fmt.Errorf("close the chat index: %w", closeErr))
+	}
+	if err != nil {
+		return "", fmt.Errorf("map Codex thread %s to its chat: %w", id, err)
+	}
+	if !found || lineage.RootID == "" {
+		return "", fmt.Errorf(
+			"the chat index holds no Codex conversation with thread %s yet; retry once pfm has indexed it, or name the chat",
+			id,
+		)
+	}
+	return lineage.RootID, nil
 }
 
 func runReminderSet(
@@ -152,7 +201,7 @@ func runReminderSet(
 		return 2
 	}
 	ctx := context.Background()
-	caller, callerLabel, callerKnown := reminderCaller(ctx, runtime)
+	caller, callerLabel, callerKnown, callerKeyErr := reminderCaller(ctx, runtime)
 	entry := fleetdb.Reminder{Prompt: *prompt, Interval: interval, Created: clock.Real.Now()}
 	if callerKnown {
 		entry.SetByID, entry.SetByLabel = caller.ID, callerLabel
@@ -160,6 +209,10 @@ func runReminderSet(
 	if len(positional) == 0 {
 		if !callerKnown {
 			fmt.Fprintf(stderr, "%s set: cannot tell which chat this is; name the chat\n", reminderCommand)
+			return 1
+		}
+		if callerKeyErr != nil {
+			fmt.Fprintf(stderr, "%s set: %v\n", reminderCommand, callerKeyErr)
 			return 1
 		}
 		entry.SessionID, entry.Engine, entry.Label = caller.ID, caller.Engine, callerLabel
@@ -176,7 +229,12 @@ func runReminderSet(
 			fmt.Fprintf(stderr, "%s set: chat %q has no session id yet\n", reminderCommand, positional[0])
 			return 1
 		}
-		entry.SessionID, entry.Engine, entry.Label = chat.ID, string(chat.Engine), chat.Name
+		key, err := reminderChatKey(ctx, string(chat.Engine), chat.ID)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s set: chat %q: %v\n", reminderCommand, positional[0], err)
+			return 1
+		}
+		entry.SessionID, entry.Engine, entry.Label = key, string(chat.Engine), chat.Name
 	}
 	state, opened := openReminderStore(ctx, reminderCommand+" set", stderr, runtime)
 	if !opened {

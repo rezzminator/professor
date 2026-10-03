@@ -45,6 +45,7 @@ Every command, agent, and rule sorts into one of three tiers:
 - **/flights:audit** — the skeptic over a flight, running or landed: every claim checked against its artifact — `run.md`, git, the executor transcripts, the checks' own output — and an artifact it cannot read is a finding, never an absence.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
+- **/reminder** — a recurring wake-up for one chat: on each fire pfm resumes the chat if it has exited, types the stored self-contained prompt into it, and pins its picker row red at the top until opened; `ls` and `rm` manage the set.
 - **/ultimate** — one piece of work made with the running model's own imagination at full stretch: past its first idea to one that surprises it, the most capable medium, built by its own hand around its boldest element, and raised on the delivered output until a whole look finds only polish.
 - **/quality:doc** / **/quality:prompt** / **/quality:description** / **/quality:claude-md** / **/quality:md-forlint** — the quality gates: reference-doc shape, prompt prose, the `description:` routing field, the orientation file's (CLAUDE.md, AGENTS.md) spine and admission, and markdown lint/format mechanics.
 - **/quality:llm-codebase** — source-tree layout designed for agent maintainers: one directory per unit of change, a fixed file anatomy, grep-true names, façades for the cross-cutting calls, and the brief anchors a build hand reads; greenfield designs a tree, brownfield measures the existing one and writes the migration.
@@ -205,7 +206,7 @@ your-project/
 │   └── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 ├── .claude/
 │   ├── agents/                        ← root agents (gitter; tracer and the whole flights cast are machine-global)
-│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /context-meter, /quality:*, /tokens, /h:gh, /ultimate — `pfm install` installs them host-level)
+│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /context-meter, /quality:*, /tokens, /h:gh, /reminder, /ultimate — `pfm install` installs them host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, format-md.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
 │   └── settings.json                  ← permissions, project hooks (pfm-guard, guard-stamp, format-md, codex-sync)

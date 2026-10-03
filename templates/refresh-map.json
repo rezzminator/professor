@@ -73,6 +73,9 @@
     "global/commands/quality/prompt.md": {
       "curated": true
     },
+    "global/commands/reminder.md": {
+      "curated": true
+    },
     "global/commands/tokens/README.md": {
       "curated": true
     },

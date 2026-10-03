@@ -15,7 +15,7 @@ $ARGUMENTS
 Operator verbs:
 
 - ls: list or pick fleet chats (`--killed` for the graveyard)
-- chat: operate on one chat — new, open, status, last, read, stream, inject, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve
+- chat: operate on one chat — new, open, status, last, read, stream, inject, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve, reminder
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
 - index: refresh the transcript index

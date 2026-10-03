@@ -66,7 +66,7 @@
         "path": "plugins/callmeter",
         "ref": "main"
       },
-      "description": "Records every Claude Code tool call, model request, sub-agent turn and lifecycle event into one local SQLite store, with reports.",
+      "description": "Claude Code plugin for tracking token usage and context growth — every tool call and sub-agent in local SQLite",
       "homepage": "https://github.com/rezzminator/callmeter",
       "license": "MIT",
       "keywords": ["claude-code", "hooks", "telemetry", "tool-calls", "token-usage", "sqlite", "sub-agents", "observability", "professor"]

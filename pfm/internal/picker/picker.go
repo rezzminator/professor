@@ -104,11 +104,12 @@ func Run(
 	}()
 
 	request := scanRequest{
-		View:    view,
-		NoSky:   *noSky,
-		Safe:    *safe,
-		Runtime: &runtime,
-		Comms:   sharedState,
+		View:      view,
+		NoSky:     *noSky,
+		Safe:      *safe,
+		Runtime:   &runtime,
+		Comms:     sharedState,
+		Reminders: sharedState,
 	}
 	var scan scanResult
 	var outcome ui.Outcome
@@ -117,6 +118,9 @@ func Run(
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
+		}
+		if scan.Snapshot.ReminderError != "" {
+			fmt.Fprintf(stderr, "pfm ls: %s\n", scan.Snapshot.ReminderError)
 		}
 		var picker ui.Picker
 		if *plain {

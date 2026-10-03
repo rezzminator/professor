@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Fire every due pfm reminder (pfm internal reminder-fire).
+
+  The macOS twin of pfm-reminder.timer: StartInterval 300 is the timer's
+  5-minute tick. The plist is written as a real file, not a symlink, because
+  launchd refuses a symlinked plist. __PFM_HOME__ is substituted at install
+  time — launchd has no %h.
+
+  The fire exits 1 while a reminder stays due, so the job may read "failed"
+  between ticks; the next tick still starts it, and an overlapping tick is a
+  no-op under the fire's flock.
+
+  RunAtLoad stays false: the first tick lands within 5 minutes, and a fire
+  racing login would inject into a fleet that has not started.
+
+  PATH is rendered at install from the one service search path every pfm unit
+  shares (installer servicePath): launchd's bare PATH cannot see Homebrew's
+  tmux.
+
+  StandardOutPath / StandardErrorPath land this job's own stdout/stderr in
+  __PFM_HOME__/Library/Logs/pfm/reminder.log. The installer creates
+  ~/Library/Logs/pfm (ensureLaunchdLogDir) before loading this agent.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.professor.pfm.reminder</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__PFM_HOME__/.local/bin/pfm</string>
+		<string>internal</string>
+		<string>reminder-fire</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>__PFM_SERVICE_PATH__</string>
+	</dict>
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/reminder.log</string>
+	<key>StandardErrorPath</key>
+	<string>__PFM_HOME__/Library/Logs/pfm/reminder.log</string>
+</dict>
+</plist>

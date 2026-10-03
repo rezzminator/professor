@@ -14,10 +14,17 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 //go:embed migration_v2.sql
 var migrationV2 string
+
+//go:embed migration_v3.sql
+var migrationV3 string
+
+// sharedMigrations is indexed by the version each step produces; version 1 is
+// schemaDDL itself, so the first two slots stay empty.
+var sharedMigrations = [...]string{2: migrationV2, 3: migrationV3}
 
 func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (returnErr error) {
 	var version int
@@ -45,7 +52,8 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 	if version == SchemaVersion {
 		return nil
 	}
-	if err := BackupBeforeMigration(ctx, db, path, SchemaVersion, existed); err != nil {
+	first := max(version+1, 2)
+	if err := BackupBeforeMigration(ctx, db, path, first, existed); err != nil {
 		return err
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -57,14 +65,16 @@ func migrate(ctx context.Context, db *sql.DB, path string, existed bool) (return
 			returnErr = errors.Join(returnErr, fmt.Errorf("roll back shared database migration: %w", err))
 		}
 	}()
-	if _, err := tx.ExecContext(ctx, migrationV2); err != nil {
-		return fmt.Errorf("apply shared database migration 2: %w", err)
+	for next := first; next <= SchemaVersion; next++ {
+		if _, err := tx.ExecContext(ctx, sharedMigrations[next]); err != nil {
+			return fmt.Errorf("apply shared database migration %d: %w", next, err)
+		}
 	}
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=2"); err != nil {
-		return fmt.Errorf("set shared database schema version 2: %w", err)
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
+		return fmt.Errorf("set shared database schema version %d: %w", SchemaVersion, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit shared database migration 2: %w", err)
+		return fmt.Errorf("commit shared database migration %d: %w", SchemaVersion, err)
 	}
 	return nil
 }

@@ -152,6 +152,7 @@ func (h *e2eHarness) assertInstalled(home string) {
 	if runtime.GOOS == "linux" {
 		for _, relative := range []string{
 			"systemd/pfm-name-sync.path", "systemd/pfm-name-sync.service", "systemd/pfm-name-sync.timer",
+			"systemd/pfm-reminder.service", "systemd/pfm-reminder.timer",
 		} {
 			if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
 				h.t.Fatalf(
@@ -227,13 +228,15 @@ func (h *e2eHarness) assertInstalled(home string) {
 		h.t.Fatalf("install surface failed; differing paths: %s; status: %v", e2eCanonicalPFM, err)
 	}
 	if runtime.GOOS == "linux" {
-		for _, name := range []string{"pfm-name-sync.path", "pfm-name-sync.service", "pfm-name-sync.timer"} {
+		for _, name := range []string{"pfm-name-sync.path", "pfm-name-sync.service", "pfm-name-sync.timer", "pfm-reminder.service", "pfm-reminder.timer"} {
 			if _, err := os.Stat(filepath.Join(home, ".config", "systemd", "user", name)); err != nil {
 				h.t.Fatalf("install surface failed; differing paths: systemd/%s; status: %v", name, err)
 			}
 		}
 	} else if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.name-sync.plist")); err != nil {
 		h.t.Fatalf("install surface failed; differing paths: launchd name-sync; status: %v", err)
+	} else if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")); err != nil {
+		h.t.Fatalf("install surface failed; differing paths: launchd reminder; status: %v", err)
 	}
 }
 

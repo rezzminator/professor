@@ -90,6 +90,9 @@ type Snapshot struct {
 	Height                 int
 	InitialQuery           string
 	InitialCursorID        string
+	// ReminderError is a failed read of the unseen-reminder flags, shown in
+	// the Chats header so a broken read never renders as "no reminders".
+	ReminderError string
 	// MergeNewChat is used only by the interactive picker. Plain and TSV
 	// output leave it false so their existing two-row output remains stable.
 	MergeNewChat bool

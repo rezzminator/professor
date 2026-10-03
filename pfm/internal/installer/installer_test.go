@@ -382,6 +382,14 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
 			filepath.Join(unitDir, nameSyncTimerUnit),
 		)
+		for _, unit := range []string{reminderServiceUnit, reminderTimerUnit} {
+			assertLink(t, filepath.Join(unitDir, unit), filepath.Join(managed, "systemd", unit))
+		}
+		assertLink(
+			t,
+			filepath.Join(unitDir, "timers.target.wants", reminderTimerUnit),
+			filepath.Join(unitDir, reminderTimerUnit),
+		)
 	}
 	// The predecessor's enablement links are a systemd concept; a launchd host
 	// never wires systemd at all, so it has none to retire.
@@ -531,6 +539,9 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	for _, removed := range []string{
 		filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
 		filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
+		filepath.Join(unitDir, "timers.target.wants", reminderTimerUnit),
+		filepath.Join(unitDir, reminderServiceUnit),
+		filepath.Join(unitDir, reminderTimerUnit),
 	} {
 		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
 			t.Fatalf("uninstall left enablement link at %s: %v", removed, err)
@@ -1110,7 +1121,7 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 	wantCalls := []string{
 		nameSyncStateProbe,
 		"systemctl --user daemon-reload",
-		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit,
+		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit + " " + reminderTimerUnit,
 	}
 	if schedulerIsLaunchd {
 		// launchd has no manager probe to fail: the agent is bootstrapped into

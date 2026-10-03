@@ -201,8 +201,12 @@ type Row struct {
 	AgeNS          int64
 	Account        int
 	LaunchUnread   bool
-	Accounts       []int
-	Killed         bool
+	// Reminded marks a chat with a fired reminder nobody has looked at yet
+	// (fleetdb reminders.unseen). The picker sets it from the shared state
+	// database; the row renders red and sorts above every other row.
+	Reminded bool
+	Accounts []int
+	Killed   bool
 	// NameKilled marks a row killed by its "_KILL…" label rather than by a
 	// store row: the picker's kill key cannot toggle it, because the label —
 	// not the killed table — is what keeps it out of the list.

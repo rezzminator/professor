@@ -91,6 +91,7 @@ func configureStyles(palette theme.Palette) {
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Header)).
 		Background(lipgloss.Color(palette.Selected))
+	configureReminderStyles(palette)
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
 	openCodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.OpenCode]))
@@ -231,10 +232,7 @@ func (model Model) renderHeader(width int) string {
 	case TabCosmos:
 		lines = append(lines, dimStyle.Render(fillLine(model.renderCosmosSubheader(), contentWidth)))
 	default:
-		lines = append(lines, dimStyle.Render(fillLine(
-			" Chats · fuzzy search and all existing chat controls",
-			contentWidth,
-		)))
+		lines = append(lines, model.chatsHeaderLine(contentWidth))
 	}
 	if !model.skyEnabled {
 		return strings.Join(lines, "\n")
@@ -877,6 +875,9 @@ func (model Model) renderGroupedRow(
 		maxInt(1, width-lipgloss.Width(left)-lipgloss.Width(age)),
 	) + age
 	line = fillLine(line, width)
+	if row.Reminded {
+		return renderRemindedRow(line, selected)
+	}
 	if selected {
 		if row.Kind == compose.ProfessorUpdate {
 			return professorUpdateSelectedStyle.Render(line)

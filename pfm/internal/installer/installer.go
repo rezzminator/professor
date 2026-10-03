@@ -245,7 +245,7 @@ func (installer *engine) install(ctx context.Context) error {
 		if installer.apply {
 			if installer.options.launchGateUnprobed {
 				installer.skip(
-					"launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync run is not refused",
+					"launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or reminder run is not refused",
 				)
 			} else {
 				installer.ok("launch-agent gate: name-sync is not mid-execution")
@@ -257,13 +257,16 @@ func (installer *engine) install(ctx context.Context) error {
 		if err := installer.wireLaunchAgent(ctx); err != nil {
 			return err
 		}
+		if err := installer.wireReminderLaunchAgent(ctx); err != nil {
+			return err
+		}
 		if err := installer.wireMCPLaunchAgent(ctx); err != nil {
 			return err
 		}
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
 			installer.skip(
-				"name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync run is not refused",
+				"name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or reminder run is not refused",
 			)
 		}
 		unitChanged, err := installer.wireUnits(ctx)
@@ -748,10 +751,15 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		if err := installer.unwireLaunchAgent(ctx); err != nil {
 			return err
 		}
+		if err := installer.unwireReminderLaunchAgent(ctx); err != nil {
+			return err
+		}
 	}
 	managerAvailable := installer.userManagerAvailable(ctx)
 	if managerAvailable && installer.apply {
-		installer.runSystemctl(ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, mcpUnitName)
+		installer.runSystemctl(
+			ctx, "disable", "--now", nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit, mcpUnitName,
+		)
 	}
 	if _, err := installer.retireUnitEnablements(
 		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
@@ -1437,6 +1445,8 @@ var unitNames = []string{
 	nameSyncPathUnit,
 	"pfm-name-sync.service",
 	nameSyncTimerUnit,
+	reminderServiceUnit,
+	reminderTimerUnit,
 }
 
 const (
@@ -1457,6 +1467,7 @@ var unitEnablements = []struct {
 }{
 	{unit: nameSyncPathUnit, wants: systemdDefaultWants},
 	{unit: nameSyncTimerUnit, wants: "timers.target.wants"},
+	{unit: reminderTimerUnit, wants: "timers.target.wants"},
 	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
 
@@ -1586,7 +1597,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		return
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
-	installer.runSystemctl(ctx, "enable", "--now", nameSyncPathUnit, nameSyncTimerUnit)
+	installer.runSystemctl(ctx, "enable", "--now", nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit)
 	if installer.mcpAnyEnabled() {
 		installer.runSystemctl(ctx, "enable", "--now", mcpUnitName)
 	}

@@ -394,6 +394,7 @@ func Run(
 	if err := tmux.Respawn(ctx, request.SocketPath, request.Pane, request.CWD, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
+	carryReminders(ctx, leftBehind, request.SessionID, stderr)
 	if err := writeHandoff(lock, handoffRecord{
 		Engine: request.Engine, SessionID: request.SessionID, Account: request.Account,
 		LeftBehind: leftBehind, Cache1H: request.Cache1H, CWD: request.CWD, WrittenAt: options.Clock.Now(),

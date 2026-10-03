@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"time"
 
@@ -136,6 +137,9 @@ type scanRequest struct {
 	Safe    string
 	Runtime *pfmconfig.Runtime
 	Comms   commsReader
+	// Reminders reads which sessions have an unseen reminder; nil leaves every
+	// row unmarked.
+	Reminders unseenReminderReader
 }
 
 // resolveCosmosSafe decides whether the cosmos tab renders in vscode-safe
@@ -156,6 +160,10 @@ func resolveCosmosSafe(flagValue, termProgram string) bool {
 
 type commsReader interface {
 	CommsSince(context.Context, int64, int) ([]fleetdb.CommsEvent, error)
+}
+
+type unseenReminderReader interface {
+	UnseenReminderSessionIDs(context.Context) (map[string]bool, error)
 }
 
 type cosmosSampler struct{ reader commsReader }
@@ -238,13 +246,30 @@ func buildSnapshot(
 			}
 		}
 	}
+	rows := output.Rows
+	reminderError := ""
+	if request.Reminders != nil {
+		unseen, err := request.Reminders.UnseenReminderSessionIDs(ctx)
+		if err != nil {
+			reminderError = fmt.Errorf("read reminder flags: %w", err).Error()
+		} else {
+			// Clone: output.Rows is shared with scanResult.Output.
+			rows = slices.Clone(output.Rows)
+			for index := range rows {
+				if rows[index].ID != "" {
+					rows[index].Reminded = unseen[rows[index].ID]
+				}
+			}
+		}
+	}
 	machine := environment.Config
 	cacheByAccount := make(map[int]bool)
 	for _, account := range machine.AccountIDs() {
 		cacheByAccount[account] = machine.EffectiveClaude(account).Cache1H
 	}
 	return ui.Snapshot{
-		Rows:                   output.Rows,
+		Rows:                   rows,
+		ReminderError:          reminderError,
 		View:                   request.View,
 		KilledCount:            output.KilledCount,
 		SuppressedCount:        output.SuppressedCount,

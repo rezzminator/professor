@@ -332,8 +332,9 @@ func probeAnswered(err error) bool {
 	return deps.ExitCode(err) > 0
 }
 
-// launchAgentRunning reports whether the name-sync job is executing right now,
-// and whether the question could be asked at all.
+// launchAgentRunning reports whether the launch agent labelled label (name-sync
+// or the reminder fire) is executing right now, and whether the question could
+// be asked at all.
 //
 // "state = not running" contains "running", so the state line is compared whole
 // rather than searched — a substring match here would refuse every install on a
@@ -342,13 +343,13 @@ func probeAnswered(err error) bool {
 // does not know is not an error to report — nothing is installed yet, so
 // nothing can be mid-execution); anything else means the probe never got an
 // answer at all.
-func launchAgentRunning(ctx context.Context, runner CommandRunner) (running, probed bool) {
+func launchAgentRunning(ctx context.Context, runner CommandRunner, label string) (running, probed bool) {
 	reader, ok := runner.(OutputRunner)
 	if !ok {
 		return false, false
 	}
 	output, err := reader.Output(
-		ctx, "launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+launchdLabel,
+		ctx, "launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+label,
 	)
 	if err != nil {
 		if probeAnswered(err) {

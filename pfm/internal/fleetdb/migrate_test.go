@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +49,7 @@ func TestSharedMigrationFromV1PreservesRowsAndBacksUp(t *testing.T) {
 		}
 	}()
 	var version int
-	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
 		t.Fatalf("version=%d err=%v", version, err)
 	}
 	var count int
@@ -138,16 +140,16 @@ func TestSharedMigrationReopenKeepsBackup(t *testing.T) {
 func TestSharedMigrationRejectsNewerVersion(t *testing.T) {
 	t.Parallel()
 	state, values := openTestStore(t)
-	if _, err := state.db.Exec("PRAGMA user_version=3"); err != nil {
+	if _, err := state.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion+1)); err != nil {
 		t.Fatal(err)
 	}
 	if err := state.Close(); err != nil {
 		t.Fatal(err)
 	}
 	second := OpenSharedState(context.Background(), values)
-	if err := second.Degraded(); err == nil || !strings.Contains(err.Error(), "3") ||
-		!strings.Contains(err.Error(), "2") {
-		t.Fatalf("Degraded()=%v, want versions 3 and 2", err)
+	if err := second.Degraded(); err == nil || !strings.Contains(err.Error(), strconv.Itoa(SchemaVersion+1)) ||
+		!strings.Contains(err.Error(), strconv.Itoa(SchemaVersion)) {
+		t.Fatalf("Degraded()=%v, want versions %d and %d", err, SchemaVersion+1, SchemaVersion)
 	}
 	_ = second.Close()
 }

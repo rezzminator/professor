@@ -23,6 +23,10 @@ type fakeRunner struct {
 	// "inactive". Leaving both false models a probe that could not run at all
 	// (systemctl missing, dead bus, permission denied) via a plain error.
 	nameSyncIdle bool
+	// reminderActive makes the state probe for pfm-reminder.service answer
+	// "activating" (a reminder fire mid-run). The same idle flags make it answer
+	// "inactive"; otherwise the probe fails like an unanswered one.
+	reminderActive bool
 	// mcpState is pfm-mcp.service's ActiveState after its restart ("" is
 	// active).
 	mcpState string
@@ -49,8 +53,12 @@ func (runner *fakeRunner) Run(_ context.Context, name string, args ...string) er
 	return errors.New("dead user bus")
 }
 
-// nameSyncStateProbe is the exact argv nameSyncServiceRunning runs.
+// nameSyncStateProbe is the exact argv schedulerServiceRunning runs.
 const nameSyncStateProbe = "systemctl --user show --property=ActiveState --value pfm-name-sync.service"
+
+// reminderStateProbe is the exact argv schedulerServiceRunning runs for the
+// reminder fire.
+const reminderStateProbe = "systemctl --user show --property=ActiveState --value pfm-reminder.service"
 
 func (runner *fakeRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
@@ -60,6 +68,14 @@ func (runner *fakeRunner) Output(_ context.Context, name string, args ...string)
 			return []byte("activating\n"), nil
 		}
 		if runner.nameSyncIdle {
+			return []byte("inactive\n"), nil
+		}
+	}
+	if call == reminderStateProbe {
+		if runner.reminderActive {
+			return []byte("activating\n"), nil
+		}
+		if runner.nameSyncIdle || runner.nameSyncActive {
 			return []byte("inactive\n"), nil
 		}
 	}
@@ -164,7 +180,7 @@ func TestRunningNameSyncRefusesMutatingModesBeforeWriting(t *testing.T) {
 }
 
 // stateRunner answers every Output call with a fixed state line or error, so
-// nameSyncServiceRunning can be unit-tested directly against every answer
+// schedulerServiceRunning can be unit-tested directly against every answer
 // `systemctl show -p ActiveState --value` gives and every way it can fail.
 type stateRunner struct {
 	state string
@@ -183,7 +199,7 @@ type runOnlyRunner struct{}
 func (runOnlyRunner) Run(context.Context, string, ...string) error { return nil }
 
 // TestNameSyncServiceRunningClassifiesProbeAnswers is a direct pin on
-// nameSyncServiceRunning. pfm-name-sync.service is Type=oneshot: mid-run its
+// schedulerServiceRunning. pfm-name-sync.service is Type=oneshot: mid-run its
 // state is "activating", and `is-active` exits 3 for that exactly as it does for
 // "inactive" — so the gate reads the state by name. Any state in which the unit
 // is doing work refuses; inactive/failed is probed-idle; anything the gate
@@ -210,10 +226,10 @@ func TestNameSyncServiceRunningClassifiesProbeAnswers(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			running, probed := nameSyncServiceRunning(context.Background(), testCase.runner)
+			running, probed := schedulerServiceRunning(context.Background(), testCase.runner, "pfm-name-sync.service")
 			if running != testCase.wantRunning || probed != testCase.wantProbed {
 				t.Fatalf(
-					"nameSyncServiceRunning() = (%v, %v), want (%v, %v)",
+					"schedulerServiceRunning() = (%v, %v), want (%v, %v)",
 					running, probed, testCase.wantRunning, testCase.wantProbed,
 				)
 			}
@@ -221,7 +237,7 @@ func TestNameSyncServiceRunningClassifiesProbeAnswers(t *testing.T) {
 	}
 }
 
-// TestNameSyncServiceRunningProductionShape runs nameSyncServiceRunning
+// TestNameSyncServiceRunningProductionShape runs schedulerServiceRunning
 // through the real execCommandRunner against a systemctl script on PATH (none
 // when script is empty). The scripts answer `show` with a state and exit 3 for
 // `is-active`, as real systemd does for a oneshot mid-run: a gate that trusts
@@ -251,10 +267,12 @@ func TestNameSyncServiceRunningProductionShape(t *testing.T) {
 				}
 			}
 			t.Setenv("PATH", dir)
-			running, probed := nameSyncServiceRunning(context.Background(), execCommandRunner{})
+			running, probed := schedulerServiceRunning(
+				context.Background(), execCommandRunner{}, "pfm-name-sync.service",
+			)
 			if running != testCase.wantRunning || probed != testCase.wantProbed {
 				t.Fatalf(
-					"nameSyncServiceRunning() = (%v, %v), want (%v, %v)",
+					"schedulerServiceRunning() = (%v, %v), want (%v, %v)",
 					running, probed, testCase.wantRunning, testCase.wantProbed,
 				)
 			}
@@ -282,7 +300,7 @@ func TestLaunchAgentRunningClassifiesProbeAnswers(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			runner := &outputRunner{printOutput: testCase.output, printErr: testCase.err}
-			running, probed := launchAgentRunning(context.Background(), runner)
+			running, probed := launchAgentRunning(context.Background(), runner, launchdLabel)
 			if running != testCase.wantRunning || probed != testCase.wantProbed {
 				t.Fatalf(
 					"launchAgentRunning() = (%v, %v), want (%v, %v)",
@@ -306,6 +324,14 @@ func TestSchedulerRefusalNamesOnlyARunningJob(t *testing.T) {
 			fmt.Errorf("gate: %w", ErrLaunchAgentRunning),
 			"pfm install: the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first",
 		},
+		{
+			ErrReminderRunning,
+			"pfm install: the pfm reminder service is running; wait for it to finish or run `systemctl --user stop pfm-reminder.service`, then retry",
+		},
+		{
+			fmt.Errorf("gate: %w", ErrReminderAgentRunning),
+			"pfm install: the pfm reminder launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.reminder` first",
+		},
 		{errors.New("other"), ""},
 		{nil, ""},
 	}
@@ -313,5 +339,67 @@ func TestSchedulerRefusalNamesOnlyARunningJob(t *testing.T) {
 		if got := SchedulerRefusal("install", tc.err); got != tc.want {
 			t.Fatalf("SchedulerRefusal(%v) = %q, want %q", tc.err, got, tc.want)
 		}
+	}
+}
+
+// A reminder fire is a oneshot like name-sync: while it runs, an install must
+// not rewrite its unit or binary. The refusal names the reminder, not name-sync.
+func TestRunningReminderRefusesMutatingModesBeforeWriting(t *testing.T) {
+	t.Parallel()
+	if schedulerIsLaunchd {
+		t.Skip("the systemd reminder gate is Linux-only")
+	}
+	for _, mode := range []Mode{ModeApply, ModeUninstall} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			home := t.TempDir()
+			_, err := Run(context.Background(), Options{
+				MCPConfigPath: testConfigPath(t),
+				Mode:          mode, Home: home,
+				Runner: &fakeRunner{nameSyncIdle: true, reminderActive: true},
+			})
+			if !errors.Is(err, ErrReminderRunning) {
+				t.Fatalf("Run() error = %v, want %v", err, ErrReminderRunning)
+			}
+			if got := SchedulerRefusal("install", err); !strings.Contains(got, "the pfm reminder service is running") {
+				t.Fatalf("SchedulerRefusal = %q, want the reminder named", got)
+			}
+			if entries, readErr := os.ReadDir(home); readErr != nil || len(entries) != 0 {
+				t.Fatalf("running-reminder refusal wrote files: entries=%v err=%v", entries, readErr)
+			}
+		})
+	}
+}
+
+// labelRunner answers a `launchctl print` per label, so the two agents can be
+// told apart.
+type labelRunner struct {
+	states map[string]string
+}
+
+func (r labelRunner) Run(context.Context, string, ...string) error { return nil }
+
+func (r labelRunner) Output(_ context.Context, _ string, args ...string) ([]byte, error) {
+	target := args[len(args)-1]
+	for label, state := range r.states {
+		if strings.HasSuffix(target, "/"+label) {
+			return []byte(state), nil
+		}
+	}
+	return nil, commandExitError{name: "launchctl", code: 113}
+}
+
+// launchAgentRunning probes the label it is given: the reminder agent running
+// is not read off the name-sync agent's state, and vice versa.
+func TestLaunchAgentRunningProbesTheGivenLabel(t *testing.T) {
+	t.Parallel()
+	runner := labelRunner{states: map[string]string{
+		launchdLabel:         "state = not running\n",
+		reminderLaunchdLabel: "state = running\n",
+	}}
+	if running, probed := launchAgentRunning(context.Background(), runner, launchdLabel); running || !probed {
+		t.Fatalf("name-sync label = (%v, %v), want (false, true)", running, probed)
+	}
+	if running, probed := launchAgentRunning(context.Background(), runner, reminderLaunchdLabel); !running || !probed {
+		t.Fatalf("reminder label = (%v, %v), want (true, true)", running, probed)
 	}
 }

@@ -166,6 +166,29 @@ func TestRenderGoldens(t *testing.T) {
 			},
 		},
 		{
+			name: "reminded row ansi 80 columns",
+			path: "ui_reminded_80.ansi",
+			got: func() string {
+				return quoteANSI(NewModel(remindedGoldenSnapshot(80, true)).View().Content)
+			},
+		},
+		{
+			name: "reminder cleared by refresh ansi 80 columns",
+			path: "ui_reminder_cleared_80.ansi",
+			got: func() string {
+				return quoteANSI(remindedClearedModel(80).View().Content)
+			},
+		},
+		{
+			name: "reminder read error ansi 80 columns",
+			path: "ui_reminder_error_80.ansi",
+			got: func() string {
+				snapshot := fixtureSnapshot(80)
+				snapshot.ReminderError = "list unseen reminder chats: database is locked"
+				return quoteANSI(NewModel(snapshot).View().Content)
+			},
+		},
+		{
 			name: "plain",
 			path: "ui_plain.txt",
 			got: func() string {
@@ -203,6 +226,57 @@ func TestRenderGoldens(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+// remindedGoldenSnapshot is the fixture with its fourth row, a mid-list
+// resumable chat, flagged (or not) as holding an unseen fired reminder.
+func remindedGoldenSnapshot(width int, reminded bool) Snapshot {
+	snapshot := fixtureSnapshot(width)
+	const remindedID = "44444444-4444-4444-8444-444444444444"
+	for index := range snapshot.Rows {
+		if snapshot.Rows[index].ID == remindedID {
+			snapshot.Rows[index].Reminded = reminded
+		}
+	}
+	return snapshot
+}
+
+// remindedClearedModel opens on the reminded snapshot and then takes a
+// refresh that no longer carries the flag.
+func remindedClearedModel(width int) Model {
+	model := NewModel(remindedGoldenSnapshot(width, true))
+	updated, _ := model.Update(RefreshMsg{Snapshot: remindedGoldenSnapshot(width, false)})
+	return updated.(Model)
+}
+
+// TestReminderRowColourFollowsTheFlag reads the colour off the rendered line
+// itself, so a stale golden cannot hide a row that lost (or kept) its red.
+func TestReminderRowColourFollowsTheFlag(t *testing.T) {
+	probe := lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Load("").LimitRed)).Render("x")
+	red, _, found := strings.Cut(probe, "x")
+	if !found || red == "" {
+		t.Fatalf("limit red probe %q carries no colour sequence", probe)
+	}
+	// The red foreground rides inside a combined SGR, so compare its colour
+	// parameters, not the whole escape.
+	redParams := strings.TrimSuffix(strings.TrimPrefix(red, "\x1b["), "m")
+	lineOf := func(view string) string {
+		for _, line := range strings.Split(view, "\n") {
+			if strings.Contains(ansi.Strip(line), "Resume Claude") {
+				return line
+			}
+		}
+		t.Fatalf("no Resume Claude row in view:\n%s", ansi.Strip(view))
+		return ""
+	}
+	reminded := lineOf(NewModel(remindedGoldenSnapshot(80, true)).View().Content)
+	cleared := lineOf(remindedClearedModel(80).View().Content)
+	if !strings.Contains(reminded, redParams) {
+		t.Fatalf("reminded row carries no LimitRed (%q): %q", redParams, reminded)
+	}
+	if strings.Contains(cleared, redParams) {
+		t.Fatalf("cleared row still carries LimitRed (%q): %q", redParams, cleared)
 	}
 }
 

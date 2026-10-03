@@ -497,6 +497,19 @@ func TestChatBranchRecordsResolvedForkFromParentLaunch(t *testing.T) {
 	cleanupBranchSocket(t, jail, branchSocket)
 	registerParentTranscript(t, jail.parentDir, parentID)
 	recordBranchParent(t, jail, parentID, 7, false)
+	sharedState := paths.Values{StateDB: filepath.Join(jail.root, "shared.db")}
+	// A branch is a different chat: the parent's reminder stays the parent's.
+	reminders := fleetdb.OpenSharedState(context.Background(), sharedState)
+	if err := reminders.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reminders.Close() }()
+	if _, err := reminders.CreateReminder(context.Background(), fleetdb.Reminder{
+		SessionID: parentID, Engine: string(pfmengine.Claude), Prompt: "check the build",
+		Interval: time.Hour, Created: time.Unix(1_700_000_000, 0),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout, stderr, code := runBranchForked(t, jail,
 		"--engine", "claude", "--session-id", parentID,
@@ -524,6 +537,10 @@ func TestChatBranchRecordsResolvedForkFromParentLaunch(t *testing.T) {
 	fork, err := launches.LaunchFor(context.Background(), forkID)
 	if err != nil || fork.Account != 7 || fork.Cache1H {
 		t.Fatalf("fork launch=%#v err=%v", fork, err)
+	}
+	kept, err := reminders.Reminders(context.Background())
+	if err != nil || len(kept) != 1 || kept[0].SessionID != parentID {
+		t.Fatalf("reminders after branch=%#v err=%v, want one on the parent %s", kept, err, parentID)
 	}
 }
 

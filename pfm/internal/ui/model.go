@@ -98,6 +98,7 @@ type Model struct {
 	killedCount          int
 	suppressedCount      int
 	refreshing           bool
+	reminderError        string
 	primary              int
 	initialPrimary       int
 	accountIDs           []int
@@ -215,6 +216,7 @@ func NewModel(snapshot Snapshot) Model {
 		killedCount:         snapshot.KilledCount,
 		suppressedCount:     snapshot.SuppressedCount,
 		refreshing:          snapshot.Refreshing,
+		reminderError:       snapshot.ReminderError,
 		primary:             validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		initialPrimary:      validAccount(snapshot.PrimaryAccount, snapshot.AccountIDs),
 		accountIDs:          normalizedAccountIDs(snapshot.AccountIDs),
@@ -1156,6 +1158,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.killedCount = snapshot.KilledCount
 	model.suppressedCount = snapshot.SuppressedCount
 	model.refreshing = snapshot.Refreshing
+	model.reminderError = snapshot.ReminderError
 	for index := range model.rows {
 		id := model.rows[index].ID
 		if id != "" {
@@ -1320,7 +1323,7 @@ func (model *Model) rebuildOrder() {
 	for _, group := range model.groups {
 		for _, index := range group.indices {
 			row := model.rows[index]
-			if !model.visibleInView(row) || !isNameGroupRow(row.Kind) {
+			if row.Reminded || !model.visibleInView(row) || !isNameGroupRow(row.Kind) {
 				continue
 			}
 			if prefix, ok := nameGroupPrefix(row.Name); ok {
@@ -1330,6 +1333,7 @@ func (model *Model) rebuildOrder() {
 	}
 	emitted := make(map[string]bool)
 	pinned := make(map[int]bool)
+	model.pinRemindedRows(pinned)
 	if model.mergeNewChat {
 		// The update notice is an extra global action above the ordinary new-chat
 		// row. Neither row belongs to project activity order: pinning both keeps

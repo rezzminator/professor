@@ -18,6 +18,10 @@ const (
 	// (internal/installer/assets/systemd/pfm-mcp.service, installer.go's
 	// mcpUnitName) — the daemon M47 names.
 	pfmMCPSystemdUnit = "pfm-mcp.service"
+	// pfmReminderSystemdUnit is the timer staged by the installer
+	// (internal/installer/assets/systemd/pfm-reminder.timer) that runs
+	// pfm internal reminder-fire every five minutes.
+	pfmReminderSystemdUnit = "pfm-reminder.timer"
 )
 
 // serviceManagerIdentity names the manager and unit the row reports without
@@ -42,6 +46,34 @@ func probeServiceManager(ctx context.Context, runner deps.Runner) serviceManager
 	report.Present = true
 	report.Unit = probeSystemdUnit(ctx, runner, pfmMCPSystemdUnit)
 	return report
+}
+
+// reminderScheduleIdentity names the manager and timer the reminders row
+// reports without asking the manager anything.
+func reminderScheduleIdentity() (manager, unit string) {
+	return serviceManagerLinuxName, pfmReminderSystemdUnit
+}
+
+// probeReminderSchedule asks systemd --user about the pfm reminder timer; a
+// systemctl binary absent from PATH is Present=false, the same clean answer
+// probeServiceManager gives.
+func probeReminderSchedule(ctx context.Context, runner deps.Runner) serviceManagerReport {
+	report := serviceManagerReport{
+		Manager: serviceManagerLinuxName,
+		Unit:    serviceManagerUnitState{Unit: pfmReminderSystemdUnit},
+	}
+	if _, err := runner.LookPath("systemctl"); err != nil {
+		return report
+	}
+	report.Present = true
+	report.Unit = probeSystemdUnit(ctx, runner, pfmReminderSystemdUnit)
+	return report
+}
+
+// reminderScheduleArmed is true when the timer is installed, enabled and
+// running: only then does anything fire a due reminder.
+func reminderScheduleArmed(unit serviceManagerUnitState) bool {
+	return unit.Present && unit.Enabled && unit.Active
 }
 
 // probeSystemdUnit asks systemd --user once, `systemctl --user show

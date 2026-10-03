@@ -72,6 +72,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/reap: 2
       github.com/rezzminator/professor/pfm/internal/recovery: 2
       github.com/rezzminator/professor/pfm/internal/reload: 8
+      github.com/rezzminator/professor/pfm/internal/reminder: 2
       github.com/rezzminator/professor/pfm/internal/resolve: 16
       github.com/rezzminator/professor/pfm/internal/semver: 2
       github.com/rezzminator/professor/pfm/internal/sky: 2

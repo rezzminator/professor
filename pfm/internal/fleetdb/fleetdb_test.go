@@ -22,7 +22,7 @@ func TestSharedSchemaIsComplete(t *testing.T) {
 SELECT name FROM sqlite_master
 WHERE type='table' AND name NOT LIKE 'sqlite_%'
 ORDER BY name`)
-	want := []string{"chat", "children", "comms", "hidden", "issues", "launch", "meta"}
+	want := []string{"chat", "children", "comms", "hidden", "issues", "launch", "meta", "reminders"}
 	if !reflect.DeepEqual(tables, want) {
 		t.Fatalf("shared tables = %v, want %v", tables, want)
 	}
@@ -63,8 +63,8 @@ ORDER BY name`)
 		t.Fatalf("launch columns = %v", columns)
 	}
 	var version int
-	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
-		t.Fatalf("user_version = %d, %v; want 2", version, err)
+	if err := state.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
+		t.Fatalf("user_version = %d, %v; want %d", version, err, SchemaVersion)
 	}
 	if _, err := os.Stat(state.path + ".bak-before-v2"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("fresh database backup = %v", err)

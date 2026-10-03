@@ -117,6 +117,87 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 	})
 }
 
+type fakeReminderReader struct {
+	unseen map[string]bool
+	err    error
+}
+
+func (reader fakeReminderReader) UnseenReminderSessionIDs(context.Context) (map[string]bool, error) {
+	return reader.unseen, reader.err
+}
+
+func TestBuildSnapshotMarksRemindedRows(t *testing.T) {
+	output := compose.Output{Rows: []compose.Row{{ID: "idA"}, {ID: "idB"}, {}}}
+	snapshot := buildSnapshot(
+		context.Background(),
+		fleet.Env{},
+		scanRequest{Reminders: fakeReminderReader{unseen: map[string]bool{"idA": true, "": true}}},
+		output,
+	)
+	if snapshot.ReminderError != "" {
+		t.Fatalf("ReminderError = %q, want none", snapshot.ReminderError)
+	}
+	if len(snapshot.Rows) != 3 || !snapshot.Rows[0].Reminded || snapshot.Rows[1].Reminded || snapshot.Rows[2].Reminded {
+		t.Fatalf("snapshot rows Reminded = %v, want only idA", remindedFlags(snapshot.Rows))
+	}
+	for index, row := range output.Rows {
+		if row.Reminded {
+			t.Fatalf("buildSnapshot mutated the composed output: row %d is Reminded", index)
+		}
+	}
+}
+
+func TestBuildSnapshotReportsReminderReadFailure(t *testing.T) {
+	output := compose.Output{Rows: []compose.Row{{ID: "idA"}, {ID: "idB"}}}
+	snapshot := buildSnapshot(
+		context.Background(),
+		fleet.Env{},
+		scanRequest{Reminders: fakeReminderReader{err: errors.New("database unavailable")}},
+		output,
+	)
+	if !strings.Contains(snapshot.ReminderError, "read reminder flags") ||
+		!strings.Contains(snapshot.ReminderError, "database unavailable") {
+		t.Fatalf("ReminderError = %q, want the wrapped read failure", snapshot.ReminderError)
+	}
+	if len(snapshot.Rows) != 2 || snapshot.Rows[0].Reminded || snapshot.Rows[1].Reminded {
+		t.Fatalf("rows after a failed read = %v, want both present and none Reminded", remindedFlags(snapshot.Rows))
+	}
+}
+
+// TestBuildSnapshotReportsDegradedReminderStore proves a state database that
+// cannot open reads as an error at the snapshot, never as "no reminders".
+func TestBuildSnapshotReportsDegradedReminderStore(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("a regular file, not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	state := fleetdb.OpenSharedState(ctx, paths.Values{StateDB: filepath.Join(blocker, "state.db")})
+	t.Cleanup(func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close degraded shared state: %v", err)
+		}
+	})
+	snapshot := buildSnapshot(
+		ctx, fleet.Env{}, scanRequest{Reminders: state}, compose.Output{Rows: []compose.Row{{ID: "idA"}}},
+	)
+	if snapshot.ReminderError == "" {
+		t.Fatal("a degraded reminder store produced no ReminderError: a broken database reads as no reminders")
+	}
+	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Reminded {
+		t.Fatalf("rows with a degraded store = %v, want the row present, not Reminded", remindedFlags(snapshot.Rows))
+	}
+}
+
+func remindedFlags(rows []compose.Row) []bool {
+	flags := make([]bool, len(rows))
+	for index := range rows {
+		flags[index] = rows[index].Reminded
+	}
+	return flags
+}
+
 type slowIndexRunner struct {
 	started chan struct{}
 	release chan struct{}

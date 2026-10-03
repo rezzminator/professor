@@ -12,6 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/heal"
 	"github.com/rezzminator/professor/pfm/internal/kill"
@@ -305,6 +306,9 @@ func OpenRow(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
+	// Dispatch execs tmux or zsh when stdout is a terminal and never returns,
+	// so the unseen flag clears before it.
+	markRemindersSeen(ctx, effective.Paths, row.ID, stderr)
 	if line != "" {
 		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
@@ -312,6 +316,24 @@ func OpenRow(
 		}
 	}
 	return 0
+}
+
+// markRemindersSeen clears the unseen-reminder flag of a chat a human is now
+// opening. A failed clear is reported and the open proceeds: the chat is
+// already open, and the flag stays visible as a still-marked row.
+func markRemindersSeen(ctx context.Context, values paths.Values, id string, stderr io.Writer) {
+	if id == "" {
+		return
+	}
+	state := fleetdb.OpenSharedState(ctx, values)
+	defer func() {
+		if err := state.Close(); err != nil {
+			fmt.Fprintf(stderr, "pfm chat open: close shared state: %v\n", err)
+		}
+	}()
+	if _, err := state.ClearReminderUnseen(ctx, id); err != nil {
+		fmt.Fprintf(stderr, "pfm chat open: clear reminder flag of %s: %v\n", id, err)
+	}
 }
 
 // newOpenExecutor is action.New, the one executor constructor both open doors

@@ -42,7 +42,7 @@ func (r *loadedRunner) Run(_ context.Context, name string, args ...string) error
 // running `pfm mcp serve` on this host. Checked for both launchd labels.
 func TestReloadLaunchAgentLoadedUnchangedRestartsNothing(t *testing.T) {
 	t.Parallel()
-	for _, label := range []string{mcpLaunchdLabel, launchdLabel} {
+	for _, label := range []string{mcpLaunchdLabel, launchdLabel, reminderLaunchdLabel} {
 		t.Run(label, func(t *testing.T) {
 			runner := &loadedRunner{}
 			installer := engine{

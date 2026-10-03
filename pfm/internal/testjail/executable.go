@@ -64,23 +64,69 @@ exit 0
 // returns the number of recorded runs.
 func AssertClaudeRanInThrowawayHomes(t *testing.T, home, sid, record string) int {
 	t.Helper()
-	for _, written := range []string{filepath.Join(home, ".claude", "backups"), filepath.Join(home, ".claude.json")} {
-		if _, err := os.Lstat(written); !os.IsNotExist(err) {
-			t.Errorf("a claude probe wrote %s (lstat err=%v): it ran in the real Claude home", written, err)
+	return assertRanInThrowawayHomes(t, pfmengine.MustLookup(pfmengine.Claude).Binary,
+		[]string{filepath.Join(home, ".claude", "backups"), filepath.Join(home, ".claude.json")}, sid, record)
+}
+
+// WriteLoggedOutCodex writes a fake `codex` at path that writes to disk the
+// way the real binary does on every run: its launcher's tmp/arg0 dir and its
+// log database, in the registry's Codex home variable, or $HOME/.codex when it
+// is unset. Each run first appends that variable (or UNSET) as one line to
+// record. It answers --version and `doctor --help`; doctor is the shell run
+// for `doctor --summary`, and empty means the real binary's answer in a home
+// with no login: every row ok but `[XX] auth`, exit 1.
+func WriteLoggedOutCodex(path, record, doctor string) error {
+	if doctor == "" {
+		doctor = "printf 'Codex Doctor v0.159.0 · linux-x86_64\\n  [ok] install      consistent\\n" +
+			"  [XX] auth         no Codex credentials were found - Run codex login\\n20 ok | 0 warn | 1 fail\\n'; exit 1"
+	}
+	script := strings.NewReplacer(
+		"{VAR}", pfmengine.MustLookup(pfmengine.Codex).HomeEnv,
+		"{RECORD}", record,
+		"{DOCTOR}", doctor,
+	).Replace(`#!/bin/sh
+dir="${{VAR}:-}"
+printf '%s\n' "${dir:-UNSET}" >> '{RECORD}'
+home="${dir:-$HOME/.codex}"
+/bin/mkdir -p "$home/tmp/arg0/codex-arg0fake" && : > "$home/logs_2.sqlite"
+case "$1" in
+--version) printf 'codex-cli 0.159.0\n' ;;
+doctor) if [ "$2" = "--help" ]; then printf 'usage: codex doctor\n'; else {DOCTOR}; fi ;;
+esac
+exit 0
+`)
+	return WriteExecutable(path, []byte(script), 0o700)
+}
+
+// AssertCodexRanInThrowawayHomes is AssertClaudeRanInThrowawayHomes for the
+// fake WriteLoggedOutCodex: neither of its writes in $HOME/.codex, every run
+// in its own Codex home directly under sid, each gone.
+func AssertCodexRanInThrowawayHomes(t *testing.T, home, sid, record string) int {
+	t.Helper()
+	return assertRanInThrowawayHomes(t, pfmengine.MustLookup(pfmengine.Codex).Binary, []string{
+		filepath.Join(home, ".codex", "tmp", "arg0", "codex-arg0fake"), filepath.Join(home, ".codex", "logs_2.sqlite"),
+	}, sid, record)
+}
+
+func assertRanInThrowawayHomes(t *testing.T, name string, written []string, sid, record string) int {
+	t.Helper()
+	for _, path := range written {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Errorf("a %s probe wrote %s (lstat err=%v): it ran in the real home", name, path, err)
 		}
 	}
 	raw, err := os.ReadFile(record)
 	if err != nil {
-		t.Fatalf("read the fake claude's run record: %v", err)
+		t.Fatalf("read the fake %s's run record: %v", name, err)
 	}
 	runs := strings.Fields(string(raw))
 	for _, dir := range runs {
 		if filepath.Dir(dir) != sid {
-			t.Errorf("a claude probe ran with config dir %q, want a throwaway dir under %s", dir, sid)
+			t.Errorf("a %s probe ran with home %q, want a throwaway dir under %s", name, dir, sid)
 			continue
 		}
 		if _, err := os.Lstat(dir); !os.IsNotExist(err) {
-			t.Errorf("the throwaway config dir %s outlived its probe (lstat err=%v)", dir, err)
+			t.Errorf("the throwaway %s home %s outlived its probe (lstat err=%v)", name, dir, err)
 		}
 	}
 	return len(runs)

@@ -478,6 +478,12 @@ func TestDoctorLeavesHomeByteIdenticalWithALoggedOutClaude(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	codexRecord := filepath.Join(scratch, "codex-homes.log")
+	if err := testjail.WriteLoggedOutCodex(
+		filepath.Join(bin, engine.MustLookup(engine.Codex).Binary), codexRecord, "",
+	); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	before := homeSnapshot(t, home)
 	var stdout, stderr bytes.Buffer
@@ -495,5 +501,11 @@ func TestDoctorLeavesHomeByteIdenticalWithALoggedOutClaude(t *testing.T) {
 	}
 	if runs := testjail.AssertClaudeRanInThrowawayHomes(t, home, sid, record); runs == 0 {
 		t.Errorf("doctor never ran the fake claude; stdout:\n%s", stdout.String())
+	}
+	if runs := testjail.AssertCodexRanInThrowawayHomes(t, home, sid, codexRecord); runs == 0 {
+		t.Errorf("doctor never ran the fake codex; stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "account rows left to pfm: auth") {
+		t.Errorf("the logged-out throwaway home's auth row was judged as the binary's:\n%s", stdout.String())
 	}
 }

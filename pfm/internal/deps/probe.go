@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -304,16 +305,66 @@ func probeSelfDoctor(
 			strings.Contains(strings.ToLower(string(output)), "interactive") {
 			return "unavailable (interactive-only)", "", nil
 		}
-		return string(StateBroken), selfDoctorFailureLine(string(output)), nil
+		failing := selfDoctorFailingChecks(string(output))
+		if len(failing) != 0 && onlyAccountChecks(failing, entry.AccountChecks) {
+			return "ok (account rows left to pfm: " + strings.Join(failing, ",") + ")", "", nil
+		}
+		return string(StateBroken), selfDoctorFailureLine(string(output), entry.AccountChecks), nil
 	}
 	return "ok", "", nil
 }
 
-func selfDoctorFailureLine(output string) string {
+// selfDoctorFailRow returns the check a self-doctor summary line fails —
+// `[FAIL] auth …`, Codex's ASCII `[XX] auth …`, or `✗ auth …` — lowercased,
+// and whether the line is a failing row at all.
+func selfDoctorFailRow(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	lower := strings.ToLower(trimmed)
+	for _, label := range []string{"[fail]", "[xx]", "✗"} {
+		if rest, ok := strings.CutPrefix(lower, label); ok {
+			fields := strings.Fields(rest)
+			if len(fields) == 0 {
+				return "", true
+			}
+			return fields[0], true
+		}
+	}
+	return "", false
+}
+
+// selfDoctorFailingChecks lists each check the summary fails, once, in order.
+func selfDoctorFailingChecks(output string) []string {
+	var checks []string
+	for line := range strings.SplitSeq(output, "\n") {
+		if check, failing := selfDoctorFailRow(line); failing && !slices.Contains(checks, check) {
+			checks = append(checks, check)
+		}
+	}
+	return checks
+}
+
+func onlyAccountChecks(failing, account []string) bool {
+	for _, check := range failing {
+		if !slices.Contains(account, check) {
+			return false
+		}
+	}
+	return true
+}
+
+// selfDoctorFailureLine names the first failing row that is not one of the
+// account rows, which a throwaway home fails by construction.
+func selfDoctorFailureLine(output string, accountChecks []string) string {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		lower := strings.ToLower(trimmed)
+		if check, failing := selfDoctorFailRow(trimmed); failing {
+			if !slices.Contains(accountChecks, check) {
+				return trimmed
+			}
+			continue
+		}
 		if strings.Contains(trimmed, "✗") || strings.Contains(lower, "[fail]") ||
 			strings.HasPrefix(lower, "fail") || strings.Contains(lower, "error:") {
 			return trimmed

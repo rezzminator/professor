@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -411,5 +413,109 @@ func startNoopCodexPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 				socket, want, output, err)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestReconcileCodexPanesCarriesRemindersAcrossAReset: a Codex reset rotates
+// the pane onto a thread of a new lineage without a restart, so the chat's
+// row id moves from the retired lineage root to the new one. A reminder set on
+// that chat — by name, keyed on the lineage root, or from inside it, keyed on
+// the compacted child the pane was bound to — follows the pane onto the new
+// thread; a reminder of another chat stays where it is.
+func TestReconcileCodexPanesCarriesRemindersAcrossAReset(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	testjail.Fleet(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmuxTmpDir := t.TempDir()
+	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx := context.Background()
+	const rootID = "56565656-5656-4656-8656-565656565656"
+	const childID = "78787878-7878-4878-8878-787878787878"
+	const resetID = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a"
+	const otherID = "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc"
+	for _, thread := range []store.Rollout{{ID: rootID}, {ID: childID, SessionID: rootID}, {ID: resetID}} {
+		rolloutPath := filepath.Join(
+			resolved.Roots[pfmengine.Codex][0], "sessions", "2030", "01", "02",
+			"rollout-2030-01-02T03-04-05-"+thread.ID+".jsonl",
+		)
+		if err := os.MkdirAll(filepath.Dir(rolloutPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		meta := `"id":"` + thread.ID + `"`
+		if thread.SessionID != "" {
+			meta += `,"session_id":"` + thread.SessionID + `"`
+		}
+		body := `{"type":"session_meta","payload":{` + meta + `,"thread_source":"user","cwd":"/work/example"}}` + "\n"
+		if err := os.WriteFile(rolloutPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		thread.Path, thread.CWD, thread.UserThread, thread.PromptCount = rolloutPath, "/work/example", true, 1
+		if err := database.UpsertRollout(ctx, thread); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const socket = "cx-1800000099-1-3"
+	const pane = "%0"
+	startNoopCodexPane(t, tmuxTmpDir, socket, "  "+resetID+` · /work/example · Full Access\n`)
+	manager, err := kill.New(database, kill.Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, moved, err := manager.AdvanceCodexPane(ctx, socket, pane, childID); err != nil || !moved {
+		t.Fatalf("bind the compacted child: moved=%v err=%v", moved, err)
+	}
+	created := time.Unix(1_900_000_000, 0)
+	for _, reminder := range []fleetdb.Reminder{
+		{SessionID: rootID, Prompt: "set by name"},
+		{SessionID: childID, Prompt: "set from inside"},
+		{SessionID: otherID, Prompt: "another chat"},
+	} {
+		reminder.Engine, reminder.Interval, reminder.Created = string(pfmengine.Codex), time.Hour, created
+		if _, err := database.Shared().CreateReminder(ctx, reminder); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stderr bytes.Buffer
+	ReconcileCodexPanesWith(
+		ctx,
+		database,
+		gather.Snapshot{Panes: []gather.ProbePane{{
+			Socket: socket, SessionName: socket, WindowID: "@1", PaneID: pane, CurrentCommand: "codex",
+		}}},
+		pfmconfig.Runtime{Paths: resolved},
+		&recordingCodexRenamer{},
+		PrintWarn(&stderr),
+	)
+
+	bound, found, err := manager.CodexPaneBinding(ctx, socket, pane)
+	if err != nil || !found || bound != resetID {
+		t.Fatalf("binding = (%q, %v, %v), want %q: stderr=%q", bound, found, err, resetID, stderr.String())
+	}
+	reminders, err := database.Shared().Reminders(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]string, len(reminders))
+	for index := range reminders {
+		got[reminders[index].Prompt] = reminders[index].SessionID
+	}
+	want := map[string]string{"set by name": resetID, "set from inside": resetID, "another chat": otherID}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reminders by prompt = %v, want %v: stderr=%q", got, want, stderr.String())
 	}
 }

@@ -235,6 +235,18 @@ func ReconcileCodexPanesWith(
 				continue
 			}
 			changed = true
+			// The pane now shows another lineage, so the chat's row carries
+			// BindRoot: its reminders move there, keyed on the retired root (set
+			// by name) or on the thread the pane was bound to (set from inside).
+			// Moved before the binding advances, a failed move keeps the only
+			// record of this rotation for the next pass to retry.
+			if err := carryCodexReminders(ctx, database, action.BindRoot, target.ID, action.ClearKill); err != nil {
+				warn(fmt.Sprintf(
+					"codex pane %s %s: move reminders onto %s (binding retained for retry): %v",
+					action.Socket, action.PaneID, action.BindRoot, err,
+				))
+				continue
+			}
 		}
 		_, moved, err := manager.AdvanceCodexPane(
 			ctx, action.Socket, action.PaneID, action.Bind,
@@ -312,6 +324,21 @@ func ReconcileCodexPanesWith(
 		}
 	}
 	return changed
+}
+
+// carryCodexReminders moves every reminder keyed on one of from onto to, the
+// lineage root a Codex pane moved to on a reset or clear. Each hop moves what
+// earlier hops carried, so a chat reset twice keeps its reminders.
+func carryCodexReminders(ctx context.Context, database *store.Store, to string, from ...string) error {
+	for _, id := range from {
+		if id == "" || id == to {
+			continue
+		}
+		if _, err := database.Shared().RekeyReminders(ctx, id, to); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ObserveCodexPanes captures every live Codex pane, pairs each with the

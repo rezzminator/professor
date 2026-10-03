@@ -65,10 +65,14 @@ func vscodeProfile() map[string]any {
 		// deletes an inherited env var. The registry supplies the identity
 		// markers, alongside the TMUX pair naming its tmux server.
 		vscodeProfileEnvKey: vscodeIdentityEnv(),
-		// icon/color give the canonical PFM profile the same visual identity
-		// the Professor extension's own contributed profile carries (15
-		// cycling icons, 6 colours) — mortar-board/magenta is the single,
-		// unchanging pair for the ONE settings profile pfm writes. Safe to add
+		// icon/color mark a terminal this settings profile still builds —
+		// one VS Code creates without running workbench.action.terminal.new:
+		// Ctrl+` on an empty panel, a split, a double-click on the tabs' empty
+		// area, the + dropdown's plain "New Terminal" entry, or a + pressed
+		// before the extension host is up — with the single, unchanging
+		// mortar-board/magenta pair, outside the extension's cycle (15 icons,
+		// 6 colours), which the + button and Ctrl+Shift+` reach through the
+		// extension. Safe to add
 		// unconditionally because of the relinquish rule above: an operator's
 		// own edit to this profile after install is never fought.
 		"icon":  "mortar-board",

@@ -68,5 +68,8 @@
     "keepFiles": 5,
     "maxMB": 8,
     "keepDays": 30
+  },
+  "doctor": {
+    "ignoreWarnings": []
   }
 }

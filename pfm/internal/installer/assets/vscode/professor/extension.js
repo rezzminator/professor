@@ -3,13 +3,15 @@
 //
 // Its first surface is the Professor terminal profile: a login shell that opens the pfm chat
 // fleet, whose tab carries the attached chat's live name, and which puts you in the terminal
-// you just made. Each new terminal also takes the next icon+colour pair — icons and colours
-// advance on independent counters persisted in globalState — so tabs read apart at a glance.
+// you just made. Each new terminal also takes the next icon+colour pair — one counter persisted
+// in globalState indexes both lists, so with the default 15 icons and 6 colours a pair repeats
+// only every 30 terminals — so tabs read apart at a glance.
 //
-// Two entry points reach the terminal: the contributed profile (the + dropdown's "Professor"
-// entry) and the professor.newChatTerminal command (palette + its keybinding). Both resolve
-// through provideTerminalProfile -> nextTerminal, the ONE builder below, so both carry the same
-// icon/colour and env. The onDidOpenTerminal focus hook covers both entry points too.
+// Three entry points reach the terminal: the contributed profile (the + dropdown's "Professor"
+// entry), the professor.newChatTerminal command (palette + its keybinding), and VS Code's own
+// workbench.action.terminal.new, which this extension takes over (see activate). All resolve
+// through provideTerminalProfile -> nextTerminal, the ONE builder below, so all carry the same
+// icon/colour cycle and env. The onDidOpenTerminal focus hook covers every entry point too.
 const vscode = require('vscode');
 
 // Terminals this activation handed to VS Code and has not yet seen open, keyed by the marker
@@ -50,6 +52,23 @@ function nextTerminal(context) {
   };
 }
 
+// Opens a terminal through the SAME contributed-profile route the + dropdown uses — never
+// vscode.window.createTerminal(options) with its own options, which renders the default
+// profile's icon/colour instead of the extension's own (issue #24 finding 10). A refused route
+// (profile not registered, VS Code too old) is shown, never dropped.
+function openTerminal(options) {
+  return vscode.commands.executeCommand('workbench.action.terminal.newWithProfile', options).then(undefined, (err) => {
+    vscode.window.showErrorMessage(`Professor: could not open a chat terminal — ${err?.message ?? err}`);
+  });
+}
+
+// The Professor profile as newWithProfile addresses it: extensionIdentifier is 'publisher.name'
+// from this extension's own manifest; id/title match the profile declared in package.json's
+// contributes.terminal.profiles.
+function professorProfile(context) {
+  return { extensionIdentifier: context.extension.id, id: 'professor.terminal', title: 'Professor' };
+}
+
 function activate(context) {
   context.subscriptions.push(
     // A contributed profile's terminal reaches the workbench with no id to focus, so it
@@ -63,19 +82,23 @@ function activate(context) {
     vscode.window.registerTerminalProfileProvider('professor.terminal', {
       provideTerminalProfile: () => new vscode.TerminalProfile(nextTerminal(context)),
     }),
-    // Delegates to the SAME contributed-profile route the + dropdown uses — never
-    // vscode.window.createTerminal(options) with its own options, which renders the default
-    // profile's icon/colour instead of the extension's own (issue #24 finding 10).
-    // extensionIdentifier is 'publisher.name' from this extension's own manifest; id/title match
-    // the profile declared in package.json's contributes.terminal.profiles.
-    vscode.commands.registerCommand('professor.newChatTerminal', () => {
-      vscode.commands.executeCommand('workbench.action.terminal.newWithProfile', {
-        config: { extensionIdentifier: context.extension.id, id: 'professor.terminal', title: 'Professor' },
-      }).then(undefined, (err) => {
-        // A refused route (profile not registered, VS Code too old) is shown, never dropped.
-        vscode.window.showErrorMessage(`Professor: could not open a chat terminal — ${err?.message ?? err}`);
-      });
-    }),
+    vscode.commands.registerCommand('professor.newChatTerminal', () => openTerminal({ config: professorProfile(context) })),
+    // The terminal view's + button and Ctrl+Shift+` run workbench.action.terminal.new, which
+    // builds from the default profile: the PFM SETTINGS profile and its one fixed icon/colour.
+    // VS Code can neither set an icon/colour on an open terminal (its changeIcon/changeColor
+    // commands take no value, only a quick pick) nor safely default to this contributed
+    // profile (a window reload would replace every live terminal — see vscodeProfileName in
+    // pfm/internal/installer/vscode.go). A command an extension registers under a built-in id
+    // runs in its place (the workbench's CommandsRegistry serves the latest registration), so
+    // that route opens a Professor terminal instead. The extension activates on that command's
+    // own onCommand event (package.json), which the workbench's CommandService awaits before it
+    // runs a registered command, so even a window's first + reaches this handler. A window
+    // reload reattaches its terminals without running any command, so the PFM default still
+    // revives them untouched. A caller that passes its own config keeps it and its location:
+    // newWithProfile takes the same options, save cwd, which it sets itself (the folder picked
+    // in a multi-root window).
+    vscode.commands.registerCommand('workbench.action.terminal.new', (args) =>
+      openTerminal(args?.config ? args : { config: professorProfile(context), location: args?.location })),
   );
 }
 function deactivate() {}

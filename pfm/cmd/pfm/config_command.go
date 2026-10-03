@@ -231,6 +231,11 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.NameSync.Interval,
 		config.Source("nameSync.interval"),
 	)
+	ignored := strings.Join(config.Doctor.IgnoreWarnings, ",")
+	if ignored == "" {
+		ignored = "none"
+	}
+	fmt.Fprintf(stdout, "config doctor.ignoreWarnings=%s (%s)\n", ignored, config.Source("doctor.ignoreWarnings"))
 	fmt.Fprintf(stdout, "config codex.yolo=%t (%s)\n", config.Codex.Yolo, config.Source("codex.yolo"))
 	fmt.Fprintf(stdout, "config codex.binary=%s (%s)\n", config.Codex.Binary, config.Source("codex.binary"))
 	fmt.Fprintf(stdout, "config mcp.http.port=%d (%s)\n", config.MCP.HTTP.Port, config.Source("mcp.http.port"))

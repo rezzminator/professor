@@ -204,6 +204,7 @@ type Config struct {
 	OpenCode         OpenCode
 	Tmux             Tmux
 	NameSync         NameSync
+	Doctor           Doctor
 	Log              Log
 	MCPServers       map[string]MCPServer
 	MCP              MCPConfig
@@ -244,6 +245,7 @@ type rawConfig struct {
 	OpenCode *rawOpenCode  `json:"opencode,omitempty"`
 	Tmux     *rawTmux      `json:"tmux,omitempty"`
 	NameSync *rawNameSync  `json:"nameSync,omitempty"`
+	Doctor   *rawDoctor    `json:"doctor,omitempty"`
 	MCP      *rawMCP       `json:"mcp,omitempty"`
 	Log      *rawLog       `json:"log,omitempty"`
 	Ask      *rawAsk       `json:"ask,omitempty"`
@@ -444,10 +446,11 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
 		engineConfigKey(pfmengine.OpenCode, engineKeyBinary): SourceDefault,
-		"mcp.http.port":       SourceDefault,
-		"ask.engine":          SourceDefault,
-		"tmux.titles.enabled": SourceDefault,
-		"nameSync.interval":   SourceDefault,
+		"mcp.http.port":         SourceDefault,
+		"ask.engine":            SourceDefault,
+		"tmux.titles.enabled":   SourceDefault,
+		"nameSync.interval":     SourceDefault,
+		keyDoctorIgnoreWarnings: SourceDefault,
 	}
 	for _, id := range pfmengine.All() {
 		name := pfmengine.MustLookup(id).LongName
@@ -831,6 +834,9 @@ func loadWithMCPServers(
 		}
 		result.NameSync.Interval = interval
 		result.Sources["nameSync.interval"] = SourceFile
+	}
+	if err := applyDoctor(&result, raw.Doctor); err != nil {
+		return Config{}, err
 	}
 	if err := applyLog(&result, raw.Log); err != nil {
 		return Config{}, err

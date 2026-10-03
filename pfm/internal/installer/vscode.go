@@ -24,17 +24,23 @@ const (
 	// Code's getContributedDefaultProfile hands a restored terminal (no
 	// executable, no extHostTerminalId) to an EXTENSION-contributed default —
 	// the extension makes a brand-new terminal, the live one is never
-	// reattached, and the pty host shuts it down after its grace time.
+	// reattached, and the pty host shuts it down after its grace time. The
+	// cycling icon/colour still reaches the + button and Ctrl+Shift+`: the
+	// extension takes over their command, workbench.action.terminal.new, and
+	// opens its own profile there, while a reload's reattach runs no command.
 	vscodeProfileName = "PFM"
 	// vscodeExtensionProfileTitle is the terminal profile the Professor
 	// extension contributes (its title in assets/vscode/professor/package.json):
 	// offered in the + dropdown, never selected as the default. An owned
 	// default holding it — written by the release that briefly selected it —
-	// is pfm's own earlier value and moves back to vscodeProfileName. The
-	// professor.newChatTerminal command now delegates to this same
-	// contributed-profile route (workbench.action.terminal.newWithProfile)
-	// instead of building its own createTerminal options, and the extension
-	// carries a default keybinding for it (extension.js, package.json).
+	// is pfm's own earlier value and moves back to vscodeProfileName. Every
+	// terminal the extension opens goes through this same contributed-profile
+	// route (workbench.action.terminal.newWithProfile), never its own
+	// createTerminal options: the professor.newChatTerminal command with its
+	// default keybinding, and workbench.action.terminal.new — the + button
+	// and Ctrl+Shift+` — which the extension registers over the built-in,
+	// activated by that command's own onCommand event (extension.js,
+	// package.json).
 	vscodeExtensionProfileTitle = "Professor"
 	// vscodeExtensionLinkName is the folder name pfm links into each VS Code
 	// product's extensions directory, and the extension id VS Code records

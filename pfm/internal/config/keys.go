@@ -60,5 +60,6 @@ func Keys() []KeyDefault {
 		{"log.keepFiles", DefaultLog().KeepFiles},
 		{"log.maxMB", DefaultLog().MaxMB},
 		{"log.keepDays", DefaultLog().KeepDays},
+		{keyDoctorIgnoreWarnings, []string{}},
 	}
 }

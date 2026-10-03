@@ -7,7 +7,7 @@
   "engines": { "vscode": "^1.90.0" },
   "extensionKind": ["workspace", "ui"],
   "main": "./extension.js",
-  "activationEvents": ["onTerminalProfile:professor.terminal"],
+  "activationEvents": ["onTerminalProfile:professor.terminal", "onCommand:workbench.action.terminal.new"],
   "contributes": {
     "terminal": {
       "profiles": [
@@ -34,7 +34,7 @@
         "professor.terminal.colors": {
           "type": "array",
           "default": ["terminal.ansiRed", "terminal.ansiGreen", "terminal.ansiYellow", "terminal.ansiBlue", "terminal.ansiMagenta", "terminal.ansiCyan"],
-          "description": "Theme colours cycled on an independent counter beside the icons."
+          "description": "Theme colours cycled beside the icons on the same counter, so a pair repeats only every least-common-multiple of the two list lengths."
         }
       }
     }

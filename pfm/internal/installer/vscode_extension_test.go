@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -485,6 +487,14 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 	if !found {
 		t.Fatalf("activationEvents %v missing %q", manifest.ActivationEvents, wantEvent)
 	}
+	// The + button's command reaches the extension's handler only once the
+	// extension is active. VS Code's CommandService awaits the onCommand:<id>
+	// activation before it runs a registered command, so activating on that
+	// event routes even a window's first + through the extension.
+	wantNewEvent := "onCommand:workbench.action.terminal.new"
+	if !slices.Contains(manifest.ActivationEvents, wantNewEvent) {
+		t.Fatalf("activationEvents %v missing %q", manifest.ActivationEvents, wantNewEvent)
+	}
 	mainRelative := strings.TrimPrefix(manifest.Main, "./")
 	if mainRelative == "" {
 		t.Fatal("package.json main is empty")
@@ -509,38 +519,41 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 }
 
 // TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions is the
-// M9 regression for issue #24 findings 10-12: professor.newChatTerminal must
-// build its terminal through the SAME contributed-profile route the + dropdown
-// uses (workbench.action.terminal.newWithProfile addressed at professor.terminal),
+// M9 regression for issue #24 findings 10-12: every terminal the extension
+// opens must go through the SAME contributed-profile route the + dropdown uses
+// (workbench.action.terminal.newWithProfile addressed at professor.terminal),
 // never through a bare createTerminal(options) call, which renders the
-// default profile's icon instead of the extension's own (finding 10).
+// default profile's icon instead of the extension's own (finding 10). It reads
+// the code with its comments stripped, so it runs where Node does not; the
+// route itself is driven under Node by
+// TestVSCodeExtensionNewTerminalCommandsOpenTheProfessorProfile.
 func TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions(t *testing.T) {
 	t.Parallel()
 	raw, err := embeddedAssets.ReadFile("assets/" + vscodeExtensionSource + "/extension.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := string(raw)
-	marker := "registerCommand('professor.newChatTerminal'"
-	idx := strings.Index(source, marker)
-	if idx < 0 {
-		t.Fatalf("extension.js does not register professor.newChatTerminal: %s", source)
+	var kept strings.Builder
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "//") {
+			kept.WriteString(line + "\n")
+		}
 	}
-	body := source[idx:]
-	if strings.Contains(body, "createTerminal(") {
+	code := kept.String()
+	if !strings.Contains(code, "registerCommand('professor.newChatTerminal'") {
+		t.Fatalf("extension.js does not register professor.newChatTerminal: %s", code)
+	}
+	if strings.Contains(code, "createTerminal(") {
 		t.Fatalf(
-			"professor.newChatTerminal still calls createTerminal(...) with its own options instead of delegating to the contributed profile route: %s",
-			body,
+			"extension.js calls createTerminal(...) with its own options instead of delegating to the contributed profile route: %s",
+			code,
 		)
 	}
-	if !strings.Contains(body, "workbench.action.terminal.newWithProfile") {
-		t.Fatalf(
-			"professor.newChatTerminal does not delegate through workbench.action.terminal.newWithProfile: %s",
-			body,
-		)
+	if !strings.Contains(code, "workbench.action.terminal.newWithProfile") {
+		t.Fatalf("extension.js does not delegate through workbench.action.terminal.newWithProfile: %s", code)
 	}
-	if !strings.Contains(body, "id: 'professor.terminal'") && !strings.Contains(body, `id: "professor.terminal"`) {
-		t.Fatalf("professor.newChatTerminal's newWithProfile call does not address id professor.terminal: %s", body)
+	if !strings.Contains(code, "id: 'professor.terminal'") && !strings.Contains(code, `id: "professor.terminal"`) {
+		t.Fatalf("extension.js's newWithProfile call does not address id professor.terminal: %s", code)
 	}
 }
 
@@ -773,9 +786,15 @@ func TestVSCodeDefaultTerminalIsASettingsProfileNeverAnExtensionContributedOne(t
 // package on disk) and drives the real embedded extension.js through
 // activate() -> registerTerminalProfileProvider -> provideTerminalProfile(),
 // the same call chain VS Code itself makes when a Professor terminal opens.
+// Its mode (argv[3]) picks the output: "profile" prints the provided terminal
+// profile; "route" runs the handlers activate() registered for the
+// professor.newChatTerminal command and VS Code's own
+// workbench.action.terminal.new (the + button, Ctrl+Shift+`) and prints every
+// command they executed.
 const vscodeExtensionDriverJS = `
 const Module = require('module');
 const extensionPath = process.argv[2];
+const mode = process.argv[3];
 
 const defaults = {
   shellPath: '/bin/zsh',
@@ -786,6 +805,8 @@ const defaults = {
 };
 
 let provider;
+const registered = {};
+const executed = [];
 const vscodeStub = {
   workspace: {
     getConfiguration() {
@@ -800,7 +821,16 @@ const vscodeStub = {
     },
     createTerminal: () => ({ show() {} }),
   },
-  commands: { registerCommand: () => ({ dispose() {} }) },
+  commands: {
+    registerCommand: (id, handler) => {
+      registered[id] = handler;
+      return { dispose() {} };
+    },
+    executeCommand: (...call) => {
+      executed.push(call);
+      return Promise.resolve();
+    },
+  },
   ThemeIcon: function (id) { this.id = id; },
   ThemeColor: function (id) { this.id = id; },
   TerminalProfile: function (options) { return options; },
@@ -815,6 +845,7 @@ Module._load = function (request, parent, isMain) {
 const extension = require(extensionPath);
 const store = {};
 const context = {
+  extension: { id: 'professor.professor' },
   subscriptions: [],
   globalState: {
     get: (key, def) => (key in store ? store[key] : def),
@@ -822,7 +853,20 @@ const context = {
   },
 };
 extension.activate(context);
-process.stdout.write(JSON.stringify(provider.provideTerminalProfile()));
+if (mode === 'route') {
+  for (const id of ['professor.newChatTerminal', 'workbench.action.terminal.new']) {
+    if (!registered[id]) {
+      process.stderr.write('extension.js registers no handler for ' + id + '; registered: ' + Object.keys(registered).join(', '));
+      process.exit(3);
+    }
+  }
+  registered['professor.newChatTerminal']();
+  registered['workbench.action.terminal.new']();
+  registered['workbench.action.terminal.new']({ config: { profileName: 'bash' }, location: 2 });
+  process.stdout.write(JSON.stringify(executed));
+} else {
+  process.stdout.write(JSON.stringify(provider.provideTerminalProfile()));
+}
 `
 
 // TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv runs the embedded
@@ -832,28 +876,7 @@ process.stdout.write(JSON.stringify(provider.provideTerminalProfile()));
 // inherited (see the comment beside nextTerminal's env in extension.js).
 func TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv(t *testing.T) {
 	t.Parallel()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")
-	}
-
-	extensionPath, err := filepath.Abs(filepath.Join("assets", "vscode", "professor", "extension.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, statErr := os.Stat(extensionPath); statErr != nil {
-		t.Fatalf("embedded extension asset %s: %v", extensionPath, statErr)
-	}
-
-	driverPath := filepath.Join(t.TempDir(), "driver.js")
-	if err := os.WriteFile(driverPath, []byte(vscodeExtensionDriverJS), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	output, err := exec.Command(node, driverPath, extensionPath).CombinedOutput()
-	if err != nil {
-		t.Fatalf("run extension.js under node: %v: %s", err, output)
-	}
+	output := runVSCodeExtensionDriver(t, "profile")
 
 	var profile struct {
 		Env map[string]any `json:"env"`
@@ -878,4 +901,75 @@ func TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv(t *testing.T) {
 			t.Fatalf("terminal profile env[%s] = %v, want JSON null (VS Code deletes the inherited var)", key, value)
 		}
 	}
+}
+
+// TestVSCodeExtensionNewTerminalCommandsOpenTheProfessorProfile drives, under
+// Node, the handlers the extension registers for professor.newChatTerminal and
+// for VS Code's own workbench.action.terminal.new — the command the terminal
+// view's + button and Ctrl+Shift+` run. Both must open the Professor
+// contributed profile through newWithProfile, the route provideTerminalProfile
+// serves, so every default-route terminal takes the next icon/colour pair off
+// the one shared counter. A caller that passes its own config keeps it.
+func TestVSCodeExtensionNewTerminalCommandsOpenTheProfessorProfile(t *testing.T) {
+	t.Parallel()
+	output := runVSCodeExtensionDriver(t, "route")
+
+	var executed [][]any
+	if err := json.Unmarshal(output, &executed); err != nil {
+		t.Fatalf("decode executed commands JSON: %v: %s", err, output)
+	}
+	professor := map[string]any{"config": map[string]any{
+		"extensionIdentifier": "professor.professor",
+		"id":                  "professor.terminal",
+		"title":               vscodeExtensionProfileTitle,
+	}}
+	want := [][]any{
+		{"workbench.action.terminal.newWithProfile", professor},
+		{"workbench.action.terminal.newWithProfile", professor},
+		{"workbench.action.terminal.newWithProfile", map[string]any{
+			"config":   map[string]any{"profileName": "bash"},
+			"location": float64(2),
+		}},
+	}
+	if !reflect.DeepEqual(executed, want) {
+		t.Fatalf(
+			"executed commands =\n%v\nwant (newChatTerminal, + with no options, + with a caller's own config) =\n%v",
+			executed,
+			want,
+		)
+	}
+}
+
+// runVSCodeExtensionDriver runs the embedded extension.js under Node through
+// vscodeExtensionDriverJS in the given mode and returns its stdout.
+func runVSCodeExtensionDriver(t *testing.T, mode string) []byte {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("named gap: node unavailable; extension.js behaviour not exercised")
+	}
+
+	extensionPath, err := filepath.Abs(filepath.Join("assets", "vscode", "professor", "extension.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(extensionPath); statErr != nil {
+		t.Fatalf("embedded extension asset %s: %v", extensionPath, statErr)
+	}
+
+	driverPath := filepath.Join(t.TempDir(), "driver.js")
+	if err := os.WriteFile(driverPath, []byte(vscodeExtensionDriverJS), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := exec.Command(node, driverPath, extensionPath, mode).Output()
+	if err != nil {
+		var stderr []byte
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr = exitErr.Stderr
+		}
+		t.Fatalf("run extension.js under node (mode %s): %v: %s%s", mode, err, output, stderr)
+	}
+	return output
 }

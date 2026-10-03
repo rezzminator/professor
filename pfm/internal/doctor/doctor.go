@@ -241,7 +241,7 @@ func Run(
 		}
 	}
 	primary, _ := runtime.Config.AccountByID(primaryAccount)
-	tally.warnings += printVSCodeDoctor(stdout, resolved.Home, primary.ConfigDir)
+	tally.warnings += printIgnorableDoctor(stdout, runtime.Config, resolved.Home, primary.ConfigDir)
 	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(
 		stdout,
 		resolved.Home,

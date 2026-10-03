@@ -41,6 +41,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `E1.24-exit-contract` · the shared headless-verb exit contract holds across the matrix · spends none
 - `E1.25-end` · `end` kills the whole tmux server, ending the lane · spends none
 - `E1.26-resolver-prefers-live` · a name held by exactly one live row plus its own resume row (what `E1.06`'s `--new` leaves behind) resolves to the live row · spends cc:$SEAT
+- `E1.27-reminder` · `chat reminder set`/`ls`/`rm` keep a reminder on the chat's live session; the `reminder-fire` tick leaves one not yet due unfired · spends none
 
 ## Lane E2 — Codex
 

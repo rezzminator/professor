@@ -53,6 +53,9 @@ pfm chat reload	E1	E1.06-reload-new
 pfm chat reload	E1	E1.07-reload-then
 pfm chat reload	E1	E1.08-reload-sock
 pfm chat reload	E1	E1.11-role-reload
+pfm chat reminder ls	E1	E1.27-reminder
+pfm chat reminder rm	E1	E1.27-reminder
+pfm chat reminder set	E1	E1.27-reminder
 pfm chat resolve	F	F.15-addressing
 pfm chat save	F	F.15-addressing
 pfm chat status	E1	E1.12-status
@@ -99,6 +102,7 @@ pfm internal primary-get	O2	O2.05-internal-plumbing
 pfm internal primary-set	O2	O2.05-internal-plumbing
 pfm internal reload-intercept	E1	E1.09-reload-while-busy
 pfm internal reload-run	E1	E1.09-reload-while-busy
+pfm internal reminder-fire	E1	E1.27-reminder
 pfm internal stale	O2	O2.05-internal-plumbing
 pfm internal statusline	E1	E1.23-launcher
 pfm internal then	E1	E1.07-reload-then

@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -13,6 +15,7 @@ import (
 const (
 	continuedPredecessor = "11111111-2222-4333-8444-555555555555"
 	continuedSuccessor   = "66666666-7777-4888-8999-aaaaaaaaaaaa"
+	continuedThird       = "bbbbbbbb-cccc-4ddd-9eee-ffffffffffff"
 	// preContinuationParserVersion is the claude parser version every pfm
 	// wrote before continued-in records were read. A database it indexed
 	// holds rows whose files will never change again, so only a version bump
@@ -194,5 +197,94 @@ func TestClaudeContinuationFillsRowsAPreviousParserIndexed(t *testing.T) {
 		t.Fatalf("predecessor after upgrade = {continuedIn=%q superseded=%t}, want the handoff filled "+
 			"— claudeParserVersion must move past %q so rows indexed before continued-in was read are reparsed",
 			filled.ContinuedIn, filled.Superseded, preContinuationParserVersion)
+	}
+}
+
+// TestContinuedChatCarriesItsReminders pins that a reminder follows its chat
+// into the session Claude Code continued it in: it stays on the predecessor
+// while the successor is not indexed (the picker still shows the predecessor),
+// moves once the successor is indexed, and lands on the newest segment of a
+// chain — a reminder set later on a superseded id included. Left behind, it
+// fires at a segment the picker no longer holds.
+func TestContinuedChatCarriesItsReminders(t *testing.T) {
+	project, database, indexer := continuationJail(t)
+	ctx := context.Background()
+	if err := database.SharedDegraded(); err != nil {
+		t.Fatalf("shared state in the jail is degraded: %v", err)
+	}
+	shared := database.Shared()
+	setReminder := func(session string) int64 {
+		t.Helper()
+		id, err := shared.CreateReminder(ctx, fleetdb.Reminder{
+			SessionID: session, Engine: "claude", Prompt: "check the lanes",
+			Interval: time.Hour, Created: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("CreateReminder(%s) = %v", session, err)
+		}
+		return id
+	}
+	sessionOf := func(id int64) string {
+		t.Helper()
+		reminders, err := shared.Reminders(ctx)
+		if err != nil {
+			t.Fatalf("Reminders() = %v", err)
+		}
+		for index := range reminders {
+			if reminders[index].ID == id {
+				return reminders[index].SessionID
+			}
+		}
+		t.Fatalf("reminder %d is gone, want it carried", id)
+		return ""
+	}
+	run := func() {
+		t.Helper()
+		if _, err := indexer.Run(ctx, Options{}); err != nil {
+			t.Fatalf("Run() = %v", err)
+		}
+	}
+	successorPath := filepath.Join(project, continuedSuccessor+".jsonl")
+
+	early := setReminder(continuedPredecessor)
+	rewriteJSONLines(t, filepath.Join(project, continuedPredecessor+".jsonl"), []any{
+		continuedPrompt("design the lanes"),
+		continuedIn(continuedPredecessor, continuedSuccessor),
+	})
+	run()
+	if got := sessionOf(early); got != continuedPredecessor {
+		t.Fatalf(
+			"reminder before the successor is indexed sits on %s, want %s — the picker still shows the predecessor",
+			got,
+			continuedPredecessor,
+		)
+	}
+
+	rewriteJSONLines(t, successorPath, []any{continuedPrompt("design the lanes")})
+	run()
+	if got := sessionOf(early); got != continuedSuccessor {
+		t.Fatalf(
+			"reminder after the continuation sits on %s, want the successor %s — left behind, it fires at a dead segment",
+			got,
+			continuedSuccessor,
+		)
+	}
+
+	late := setReminder(continuedPredecessor)
+	rewriteJSONLines(t, successorPath, []any{
+		continuedPrompt("design the lanes"),
+		continuedIn(continuedSuccessor, continuedThird),
+	})
+	rewriteJSONLines(t, filepath.Join(project, continuedThird+".jsonl"), []any{continuedPrompt("design the lanes")})
+	run()
+	for _, id := range []int64{early, late} {
+		if got := sessionOf(id); got != continuedThird {
+			t.Fatalf(
+				"reminder %d after a second handoff sits on %s, want the chain's newest segment %s",
+				id,
+				got,
+				continuedThird,
+			)
+		}
 	}
 }

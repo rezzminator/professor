@@ -161,11 +161,13 @@ func Run(
 	tally.warnings += PrintMCPClientCutover(stdout, runtime)
 	tally.warnings += printMCPDaemonDoctor(stdout, runtime)
 	tally.warnings += printMCPServeProcessesDoctor(stdout, runtime, gather.NewProcFS(resolved.ProcRoot))
-	database, err := store.Open(store.WithWarningWriter(stderr))
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy database: %v\n", err)
+	// Read-only: doctor never creates or migrates a database (store.OpenWithoutMigrating),
+	// and an open that fails is a row (printDatabaseDoctor), never the end of the run:
+	// the host checks below carry the fix for a database doctor cannot open.
+	database, databaseErr := store.OpenWithoutMigrating(context.Background(), store.WithWarningWriter(stderr))
+	if database != nil {
+		defer func() { cli.CloseResource(database, "doctor: close database", stderr, &exitCode) }()
 	}
-	defer func() { cli.CloseResource(database, "doctor: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 	pathWarnings := pfmPathWarningsWithEnv(resolved.Home, dependencies.Env.Get("PATH"), dependencies.Env)
 	for _, warning := range pathWarnings {
@@ -285,95 +287,9 @@ func Run(
 	tally.warnings += cleanupWarnings
 	tally.failures += cleanupFailures
 
-	version, err := database.UserVersion(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy user_version: %v\n", err)
+	if code, aborted := printDatabaseDoctor(ctx, stdout, database, databaseErr, resolved, tally); aborted {
+		return code
 	}
-	check, err := database.QuickCheck(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy integrity: %v\n", err)
-	}
-	if version != store.SchemaVersion || check != "ok" {
-		tally.warn()
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: database user_version=%d expected=%d quick_check=%s\n",
-		version,
-		store.SchemaVersion,
-		check,
-	)
-
-	// Kills live in the fleet's shared database, not this binary's cache.
-	sharedState := "ok"
-	if degraded := database.SharedDegraded(); degraded != nil {
-		tally.warn()
-		sharedState = degraded.Error()
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: shared store=%s state=%s\n",
-		database.SharedPath(),
-		sharedState,
-	)
-
-	counts, err := database.Counts(ctx)
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy row counts: %v\n", err)
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: rows transcripts=%d rollouts=%d cx_names=%d killed=%d orphaned_killed=%d\n",
-		counts.Transcripts,
-		counts.Rollouts,
-		counts.CxNames,
-		counts.Killed,
-		counts.OrphanedKills,
-	)
-	// The census row above counts orphans; it never calls one a defect. A
-	// warning nobody can read is the same as no warning at all — worse, it
-	// inflates `doctor: warnings=N` past every line the reader can point at —
-	// so the counted state names itself here.
-	if counts.OrphanedKills != 0 {
-		tally.warn()
-		fmt.Fprintf(
-			stdout,
-			"doctor: warning orphaned_killed=%d kills whose chat resolves to no transcript, rollout, or OpenCode session\n",
-			counts.OrphanedKills,
-		)
-		fmt.Fprintln(
-			stdout,
-			"doctor: remediation: list them with `pfm archive --prune-orphans`, then delete them with "+
-				"`pfm archive --prune-orphans --yes` (a deleted kill does not come back)",
-		)
-	}
-
-	walBytes := int64(0)
-	if info, err := os.Stat(database.Path() + "-wal"); err == nil {
-		walBytes = info.Size()
-	} else if !os.IsNotExist(err) {
-		tally.warn()
-		fmt.Fprintf(stdout, "doctor: warning WAL stat: %v\n", err)
-	}
-	fmt.Fprintf(stdout, "doctor: wal_bytes=%d\n", walBytes)
-
-	killWarnings, err := metaCounter(ctx, database, "busy_kill_warnings")
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err)
-	}
-	unkillWarnings, err := metaCounter(ctx, database, "busy_unkill_warnings")
-	if err != nil {
-		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err)
-	}
-	if killWarnings != 0 || unkillWarnings != 0 {
-		tally.warn()
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: busy_warnings kill=%d unkill=%d\n",
-		killWarnings,
-		unkillWarnings,
-	)
 
 	// The process table is probed by READING it, not by stat'ing /proc. macOS has
 	// no /proc and never will — pfm reads its process table through sysctl there
@@ -395,7 +311,7 @@ func Run(
 	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
 
-	tally.warnings += PrintCodexPaneBinding(ctx, stdout, database, runtime)
+	tally.warnings += printCodexPaneDoctor(ctx, stdout, database, databaseErr, runtime)
 
 	crumbEntries, crumbInvalid, crumbErr := crumbHealth(resolved.SIDDir)
 	if crumbErr != nil {
@@ -917,6 +833,10 @@ func PrintDependencies(
 		if result.VerboseErr != "" {
 			warnings++
 			fmt.Fprintf(stdout, "doctor: dep %s verbose broken error=%s\n", entry.Name, result.VerboseErr)
+		}
+		if result.ProbeHomeErr != "" {
+			warnings++
+			fmt.Fprintf(stdout, "doctor: dep %s probe-home residue error=%s\n", entry.Name, result.ProbeHomeErr)
 		}
 	}
 	return warnings, failures, claudeAbsent

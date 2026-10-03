@@ -114,24 +114,12 @@ func Open(options ...OpenOption) (*Store, error) {
 
 // OpenContext is Open with caller-controlled cancellation.
 func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
-	resolved, err := pfmconfig.ResolvePaths()
+	resolved, settings, err := resolveOpen(options)
 	if err != nil {
-		return nil, fmt.Errorf("resolve store paths: %w", err)
-	}
-	// Neither database is created while its legacy file waits for pfm doctor's fix:
-	// the cache pair first, then the state pair, before anything opens.
-	if resolved.Home != "" {
-		if err := paths.CheckLegacyPending(resolved.CacheDB, paths.LegacyCacheDB(resolved.Home)); err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	if err := fleetdb.CheckLegacyState(resolved); err != nil {
 		return nil, err
-	}
-
-	settings := openOptions{warn: os.Stderr, clock: clock.Real}
-	for _, option := range options {
-		option(&settings)
 	}
 
 	info, statErr := os.Stat(resolved.CacheDB)
@@ -163,6 +151,27 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 		)
 	}
 	return store, nil
+}
+
+// resolveOpen resolves both database paths and the open settings, refusing
+// while the legacy cache file waits for pfm doctor's fix. The state pair is
+// the caller's: OpenContext refuses on it before anything opens, and
+// OpenWithoutMigrating carries it in SharedDegraded so doctor reads past it.
+func resolveOpen(options []OpenOption) (paths.Values, openOptions, error) {
+	resolved, err := pfmconfig.ResolvePaths()
+	if err != nil {
+		return paths.Values{}, openOptions{}, fmt.Errorf("resolve store paths: %w", err)
+	}
+	if resolved.Home != "" {
+		if err := paths.CheckLegacyPending(resolved.CacheDB, paths.LegacyCacheDB(resolved.Home)); err != nil {
+			return paths.Values{}, openOptions{}, err
+		}
+	}
+	settings := openOptions{warn: os.Stderr, clock: clock.Real}
+	for _, option := range options {
+		option(&settings)
+	}
+	return resolved, settings, nil
 }
 
 func (s *Store) clockNow() time.Time {

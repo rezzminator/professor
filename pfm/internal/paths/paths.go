@@ -29,6 +29,10 @@ const (
 	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
 	// a crash can leave one behind, so the crumb audit accepts it.
 	SIDHarnessConfigDirPrefix = "pfm-harness-configdir-"
+	// SIDEngineProbeHomePrefix names the throwaway engine home a version or
+	// self-doctor probe runs in (deps.NewEngineProbeHome, os.MkdirTemp in the
+	// SID dir); a crash can leave one behind, so the crumb audit accepts it.
+	SIDEngineProbeHomePrefix = "pfm-probe-home-"
 	// SIDExchangeScratchPattern is the os.CreateTemp pattern of the prepared
 	// exchange headless.writePreparedExchange writes into the SID dir.
 	SIDExchangeScratchPattern = "exchange-*.md"

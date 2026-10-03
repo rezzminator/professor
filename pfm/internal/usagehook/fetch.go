@@ -575,9 +575,21 @@ func claudeCodeVersion(ctx context.Context, binary string) (string, error) {
 	if found && cached.modTime.Equal(info.ModTime()) && cached.size == info.Size() {
 		return cached.version, nil
 	}
+	// The version probe judges the binary, never an account: it runs in a
+	// throwaway home so a logged-out binary cannot write the real store.
+	home, err := deps.NewEngineProbeHome(pfmengine.Claude)
+	if err != nil {
+		return "", fmt.Errorf("%s --version: %w", path, err)
+	}
+	defer func() {
+		if removeErr := home.Remove(); removeErr != nil {
+			obs.Logger(ctx).Warn("usage.claude_version_probe_home", "binary", path, "error", removeErr)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, deps.ProbeTimeout)
 	defer cancel()
 	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, []string{path, "--version"}, deps.RunOptions{
+		Env:       home.Env(os.Environ()),
 		WaitDelay: time.Second,
 	})
 	if err != nil {

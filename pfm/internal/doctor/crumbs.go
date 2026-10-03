@@ -64,7 +64,8 @@ func crumbHealthWith(
 		}
 		if entry.IsDir() {
 			if !slices.Contains(paths.SIDScratchDirs(), name) &&
-				!strings.HasPrefix(name, paths.SIDHarnessConfigDirPrefix) {
+				!strings.HasPrefix(name, paths.SIDHarnessConfigDirPrefix) &&
+				!strings.HasPrefix(name, paths.SIDEngineProbeHomePrefix) {
 				invalid++
 			}
 			continue

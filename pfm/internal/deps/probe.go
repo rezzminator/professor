@@ -56,6 +56,9 @@ type Result struct {
 	Error      string
 	Raw        string
 	VerboseErr string
+	// ProbeHomeErr is the error removing the engine's throwaway probe home
+	// left behind; the probe's verdict stands, the residue is reported.
+	ProbeHomeErr string
 	// ExitCode is the version probe's process exit code, or -1 when the
 	// failure never reached one (lookup, timeout, cancellation).
 	ExitCode int
@@ -131,8 +134,8 @@ func Probe(ctx context.Context, entries []Entry, options ProbeOptions) []Result 
 	return results
 }
 
-func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
-	result := Result{Entry: entry, ExitCode: -1}
+func probeOne(ctx context.Context, entry Entry, options ProbeOptions) (result Result) {
+	result = Result{Entry: entry, ExitCode: -1}
 	path, err := options.LookPath(entry.Command)
 	if err != nil {
 		result.State = StateMissing
@@ -152,8 +155,25 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 		return result
 	}
 	result.Path = path
+	versionEnvironment, selfDoctorEnvironment := []string(nil), terminalEnvironment()
+	if entry.ProbeHome {
+		home, homeErr := NewEngineProbeHome(entry.Engine)
+		if homeErr != nil {
+			result.State = StateBroken
+			result.Error = homeErr.Error()
+			return result
+		}
+		defer func() {
+			if removeErr := home.Remove(); removeErr != nil {
+				result.ProbeHomeErr = removeErr.Error()
+			}
+		}()
+		versionEnvironment = home.Env(os.Environ())
+		selfDoctorEnvironment = home.Env(selfDoctorEnvironment)
+	}
 	if len(entry.VersionArgs) != 0 {
-		output, runErr := boundedOutput(ctx, options.Timeout, options.Runner, path, entry.VersionArgs...)
+		output, runErr := boundedOutputWithEnvironment(
+			ctx, options.Timeout, versionEnvironment, options.Runner, path, entry.VersionArgs...)
 		result.Raw = string(output)
 		if verboseErr := writeVerbose(options.VerboseDir, entry.Name+"-version", output); verboseErr != nil {
 			result.VerboseErr = verboseErr.Error()
@@ -201,6 +221,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 			entry,
 			options.VerboseDir,
 			selfDoctorTimeout(options),
+			selfDoctorEnvironment,
 			options.Runner,
 		)
 		if err != nil {
@@ -241,10 +262,11 @@ func probeSelfDoctor(
 	entry Entry,
 	verboseDir string,
 	timeout time.Duration,
+	environment []string,
 	runner Runner,
 ) (string, string, error) {
 	helpArgs := []string{entry.SelfDoctorArgs[0], "--help"}
-	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, terminalEnvironment(), runner, path, helpArgs...)
+	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, environment, runner, path, helpArgs...)
 	if err := writeVerbose(verboseDir, entry.Name+"-self-doctor-help", help); err != nil {
 		return "", "", err
 	}
@@ -264,7 +286,7 @@ func probeSelfDoctor(
 	output, err := boundedOutputWithEnvironment(
 		ctx,
 		timeout,
-		terminalEnvironment(),
+		environment,
 		runner,
 		path,
 		entry.SelfDoctorArgs...)
@@ -318,16 +340,6 @@ func effectiveTimeout(timeout time.Duration) time.Duration {
 		return ProbeTimeout
 	}
 	return timeout
-}
-
-func boundedOutput(
-	parent context.Context,
-	timeout time.Duration,
-	runner Runner,
-	path string,
-	args ...string,
-) ([]byte, error) {
-	return boundedOutputWithEnvironment(parent, timeout, nil, runner, path, args...)
 }
 
 // boundedOutputWithEnvironment runs path+args through runner (nil defaults to

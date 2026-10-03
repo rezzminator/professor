@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -47,16 +48,16 @@ func printSupervisionDoctor(
 		printReminderDoctor(ctx, stdout, dependencies.Runner, runtime.Paths, dependencies.Clock.Now())
 }
 
-// printReminderDoctor opens the shared state database (OpenSharedState
-// creates and migrates it when absent; this row only queries it), prints the
-// one reminders line and returns its warnings.
+// printReminderDoctor opens the shared state database read-only (never
+// creating or migrating it; this row only queries it), prints the one
+// reminders line and returns its warnings.
 func printReminderDoctor(
 	ctx context.Context, stdout io.Writer, runner deps.Runner, values paths.Values, now time.Time,
 ) (warnings int) {
 	if runner == nil {
 		runner = obs.Runner(deps.RealRunner{})
 	}
-	store := fleetdb.OpenSharedState(ctx, values)
+	store := fleetdb.OpenSharedStateReadOnly(ctx, values)
 	defer func() {
 		if err := store.Close(); err != nil {
 			fmt.Fprintf(stdout, "doctor: reminders close state db=%s error=%v\n", values.StateDB, err)
@@ -127,7 +128,10 @@ func reminderDatabasePart(ctx context.Context, source reminderSource, now time.T
 	unreadable := func(err error) (string, []string, bool) {
 		return fmt.Sprintf("db=unreadable error=%v", err), []string{"reminder state unknown"}, true
 	}
-	if err := source.Degraded(); err != nil {
+	if err := source.Degraded(); errors.Is(err, fleetdb.ErrAbsent) {
+		// Not created yet: no reminder was ever set, and nothing is wrong.
+		return "db=absent", nil, false
+	} else if err != nil {
 		return unreadable(err)
 	}
 	due, err := source.DueReminders(ctx, now)

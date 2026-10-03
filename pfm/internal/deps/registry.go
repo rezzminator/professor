@@ -35,6 +35,9 @@ type Entry struct {
 	InstallHint    string
 	Harvest        bool
 	SelfDoctorArgs []string
+	// ProbeHome runs the version and self-doctor probes in a throwaway engine
+	// home (NewEngineProbeHome), never the ambient account.
+	ProbeHome bool
 }
 
 // Options materializes the config- and platform-owned registry entries.
@@ -215,6 +218,10 @@ func Registry(options ...Options) []Entry {
 			Purpose:     "configured " + descriptor.Short + " engine",
 			VersionArgs: []string{versionFlag}, Parse: firstVersion,
 			InstallHint: "install the configured " + descriptor.Short + " CLI", SelfDoctorArgs: doctorArgs,
+			// Claude's probes judge the binary, so they run in a throwaway
+			// home. Codex keeps its ambient home: its self-doctor judges the
+			// account too (an auth check), and an empty home would fail it.
+			ProbeHome: id == pfmengine.Claude,
 		})
 	}
 	harvestRoot := filepath.Join(resolved.Home, ".local", "state", "pfm", "harvest-python")

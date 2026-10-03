@@ -315,6 +315,10 @@ func (s *Store) UnkillIfPayload(
 
 // KilledRecords returns the complete shared kill state keyed by chat id.
 func (s *Store) KilledRecords(ctx context.Context) (records map[string]KilledRecord, returnErr error) {
+	if errors.Is(s.degraded, ErrAbsent) {
+		// Only a read-only open leaves a file absent: one never written holds no kills.
+		return map[string]KilledRecord{}, nil
+	}
 	if s.db == nil {
 		return nil, fmt.Errorf("query shared kills: %w", s.degraded)
 	}

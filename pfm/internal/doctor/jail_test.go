@@ -352,27 +352,33 @@ func clearRetiredHarvesterEnv(t *testing.T) {
 	}
 }
 
-// TestDoctorEarlyExitPrintsItsFailureCount: a database doctor cannot open ends
-// the run early with exit 3 — and `pfm update` reads the failure only from the
-// `doctor: failures=N` line, so the early exit prints it too.
-func TestDoctorEarlyExitPrintsItsFailureCount(t *testing.T) {
+// TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd: a database doctor cannot
+// open is a failure row and exit 3, and doctor reads on to the host checks —
+// `pfm update` reads the failure only from the `doctor: failures=N` line.
+func TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
 	blocked := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(paths.EnvStateDB, filepath.Join(blocked, "pfm.db"))
+	// Both resolutions doctor reads — the store's own and the runtime's — name the unopenable path.
+	runtime.Paths.StateDB = filepath.Join(blocked, "pfm.db")
+	t.Setenv(paths.EnvStateDB, runtime.Paths.StateDB)
 
 	var stdout, stderr bytes.Buffer
 	code := runDoctor(nil, &stdout, &stderr, runtime)
+	output := stdout.String()
 	if code != 3 {
-		t.Fatalf("unopenable database doctor code=%d, want 3\nstdout=%s", code, stdout.String())
+		t.Fatalf("unopenable database doctor code=%d, want 3\nstdout=%s", code, output)
 	}
-	if !strings.Contains(stdout.String(), "doctor: unhealthy database: ") {
-		t.Fatalf("the unhealthy database row is missing:\n%s", stdout.String())
+	if !strings.Contains(output, "doctor: unhealthy database: ") {
+		t.Fatalf("the unhealthy database row is missing:\n%s", output)
 	}
-	if !strings.HasSuffix(stdout.String(), "doctor: failures=1\n") {
-		t.Fatalf("the early exit did not end with doctor: failures=1:\n%s", stdout.String())
+	if !strings.Contains(output, "host-check: ") || !strings.Contains(output, "doctor: rows could not look: ") {
+		t.Fatalf("doctor stopped at the database instead of reading on:\n%s", output)
+	}
+	if !strings.Contains(output, "\ndoctor: failures=") {
+		t.Fatalf("doctor printed no failure count:\n%s", output)
 	}
 }
 
@@ -410,5 +416,84 @@ func TestDoctorUsesTheInjectedRunnerAndEnv(t *testing.T) {
 	}
 	if code == 0 || strings.Contains(stdout.String(), "doctor: clean") {
 		t.Fatalf("a refused override ended doctor clean (code=%d):\n%s", code, stdout.String())
+	}
+}
+
+// homeSnapshot maps each path under root to its mode and, for a file, its
+// bytes or, for a symlink, its target, so two snapshots compare byte for byte.
+func homeSnapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	snapshot := map[string]string{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		entry := info.Mode().String()
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			entry += " -> " + target
+		case info.Mode().IsRegular():
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			entry += " " + string(content)
+		}
+		snapshot[path] = entry
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot %s: %v", root, err)
+	}
+	return snapshot
+}
+
+// TestDoctorLeavesHomeByteIdenticalWithALoggedOutClaude: on a migrated host one
+// plain pfm doctor ran a logged-out claude with the ambient env, which
+// recreated ~/.claude/backups in the shared store plus $HOME/.claude.json; the
+// host check then reported store-identity and install refused. Doctor's claude
+// runs each get a throwaway home, so $HOME, the store included, is unchanged.
+func TestDoctorLeavesHomeByteIdenticalWithALoggedOutClaude(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	home := runtime.Paths.Home
+	// The real dependency probe, so its claude runs reach the fake.
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
+	DependencyProbeOverride = nil
+	// Production's SID dir is /tmp/cc-sid, outside HOME.
+	sid := filepath.Join(t.TempDir(), "sid")
+	t.Setenv(paths.EnvSIDDir, sid)
+	scratch := t.TempDir()
+	record := filepath.Join(scratch, "config-dirs.log")
+	bin := filepath.Join(scratch, "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := testjail.WriteLoggedOutClaude(
+		filepath.Join(bin, engine.MustLookup(engine.Claude).Binary), record, "",
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	before := homeSnapshot(t, home)
+	var stdout, stderr bytes.Buffer
+	runDoctor(nil, &stdout, &stderr, runtime)
+	after := homeSnapshot(t, home)
+	for path, entry := range after {
+		if before[path] != entry {
+			t.Errorf("doctor changed %s", path)
+		}
+	}
+	for path := range before {
+		if _, ok := after[path]; !ok {
+			t.Errorf("doctor removed %s", path)
+		}
+	}
+	if runs := testjail.AssertClaudeRanInThrowawayHomes(t, home, sid, record); runs == 0 {
+		t.Errorf("doctor never ran the fake claude; stdout:\n%s", stdout.String())
 	}
 }

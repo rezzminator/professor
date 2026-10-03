@@ -139,15 +139,19 @@ func TestDoctorCrumbsAcceptHarnessPromptRecords(t *testing.T) {
 func TestDoctorCrumbsAcceptHarnessCaptureConfigDirs(t *testing.T) {
 	root := jailTest(t)
 	sidDir := filepath.Join(root, "sid")
-	if _, err := os.MkdirTemp(sidDir, paths.SIDHarnessConfigDirPrefix); err != nil {
-		t.Fatal(err)
+	// The harness capture's config dir and a dependency probe's throwaway
+	// engine home: both live only while their run does, a crash leaves one.
+	for _, prefix := range []string{paths.SIDHarnessConfigDirPrefix, paths.SIDEngineProbeHomePrefix} {
+		if _, err := os.MkdirTemp(sidDir, prefix); err != nil {
+			t.Fatal(err)
+		}
 	}
 	entries, invalid, err := crumbHealth(sidDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries != 1 || invalid != 0 {
-		t.Fatalf("crumbHealth() entries=%d invalid=%d, want the harness config dir accepted", entries, invalid)
+	if entries != 2 || invalid != 0 {
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want both throwaway config dirs accepted", entries, invalid)
 	}
 }
 

@@ -241,7 +241,9 @@ chk_C12() {
   else
     : > "$T/c12"
     for p in $(grep -oE '^\| `[a-z/]+/`' CLAUDE.md | tr -d '|` '; grep -oE '`[a-z/]+/`' CLAUDE.md | grep -vE '^`(cmd|internal|testdata|e2e)' | tr -d '`'); do
-      [ -d "internal/$p" ] || [ -d "$p" ] || [ -d "../$p" ] || echo "$p" >> "$T/c12"
+      # A generated directory the repo root's .gitignore names (`/tmp/`) resolves before any build made it.
+      [ -d "internal/$p" ] || [ -d "$p" ] || [ -d "../$p" ] \
+        || grep -qxE "/?${p%/}/?" ../.gitignore 2>/dev/null || echo "$p" >> "$T/c12"
     done
     for f in $(grep -oE '`?[A-Z][A-Z_]+\.md`?' CLAUDE.md | tr -d '`' | sort -u); do [ -e "$f" ] || [ -e "../$f" ] || echo "$f" >> "$T/c12"; done
     # A PFM_* name counts as read only when production code uses it beyond

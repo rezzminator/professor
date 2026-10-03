@@ -129,6 +129,17 @@ if fixture "$REPO_C12"; then
   else
     bad "C12: expected PASS for a repo-root directory pointer" "$line"
   fi
+
+  # A generated directory the repo root's .gitignore names resolves before any build made it.
+  printf 'PFM_X\n`gen/`\n' > "$REPO_C12/CLAUDE.md"
+  printf '/gen/\n' > "$T/.gitignore"
+  line=$(check_line "$REPO_C12" C12-claude-pointers)
+  if [[ "$line" == *PASS* ]]; then
+    ok "C12: a gitignored generated directory pointer passes before it exists"
+  else
+    bad "C12: expected PASS for a gitignored generated directory pointer" "$line"
+  fi
+  rm -f "$T/.gitignore"
 else
   bad "C12: could not build the git fixture"
 fi

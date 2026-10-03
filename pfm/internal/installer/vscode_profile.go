@@ -22,7 +22,8 @@ const (
 // CURRENT shape becomes a new legacy entry so an install still holding it
 // keeps upgrading. The first two predate the chat-identity env keys below;
 // the third is the shape vscodeProfile() itself wrote before M8 added
-// icon/color.
+// icon/color; the fourth is the shape it wrote after M8, while the identity
+// env still held three names, before IdentityHygiene grew to five.
 var vscodeLegacyProfiles = []map[string]any{
 	{
 		vscodePathKey:        vscodeShellPath,
@@ -35,6 +36,13 @@ var vscodeLegacyProfiles = []map[string]any{
 		vscodeProfileEnvKey:  map[string]any{vscodeAutoOpenEnv: MCPClientPFM},
 	},
 	{vscodePathKey: vscodeShellPath, vscodeProfileArgsKey: []any{"-l"}, vscodeProfileEnvKey: vscodeLegacyIdentityEnv()},
+	{
+		vscodePathKey:        vscodeShellPath,
+		vscodeProfileArgsKey: []any{"-l"},
+		vscodeProfileEnvKey:  vscodeLegacyIdentityEnv(),
+		"icon":               "mortar-board",
+		"color":              "terminal.ansiMagenta",
+	},
 }
 
 func vscodeLegacyIdentityEnv() map[string]any {
@@ -52,6 +60,16 @@ func isLegacyVSCodeProfile(profile any) bool {
 		}
 	}
 	return false
+}
+
+// vscodeProfileConflicts reports whether an existing "PFM" profile blocks
+// `pfm install --vscode` when pfm does not own it: it is neither the current
+// canonical shape nor one pfm ever wrote (vscodeLegacyProfiles), so it is the
+// operator's own and is never overwritten. mergeVSCodeSettings refuses on it
+// and InspectVSCode reports it, so the installer's verdict and doctor's fix
+// are one rule.
+func vscodeProfileConflicts(profile any, hasProfile bool) bool {
+	return hasProfile && !reflect.DeepEqual(profile, vscodeProfile()) && !isLegacyVSCodeProfile(profile)
 }
 
 func vscodeProfile() map[string]any {

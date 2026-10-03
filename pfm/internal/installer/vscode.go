@@ -322,7 +322,7 @@ func (installer *engine) mergeVSCodeSettings(
 		profileRelinquished = true
 	}
 	if installer.options.VSCode || record.ProfileOwned {
-		if hasProfile && !reflect.DeepEqual(existingProfile, canonical) && !upgradingProfile {
+		if vscodeProfileConflicts(existingProfile, hasProfile) {
 			if !profileRelinquished {
 				return nil, record, false, fmt.Errorf(
 					"VS Code settings %s: profile %q already exists and is not PFM-owned",
@@ -334,6 +334,12 @@ func (installer *engine) mergeVSCodeSettings(
 		if !hasProfile {
 			record.ProfileOwned = true
 			record.ProfilesPropertyAdded = !hasProfiles
+		}
+		if installer.options.VSCode && upgradingProfile && !record.ProfileOwned {
+			// pfm's own earlier shape, relinquished by an upgrade that did not
+			// yet recognize it (or never ledgered): --vscode reclaims it and the
+			// rewrite below brings it to canonical.
+			record.ProfileOwned = true
 		}
 	}
 

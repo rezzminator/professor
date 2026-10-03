@@ -95,13 +95,23 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 			fmt.Fprintln(stdout, row)
 		}
 		if settings.Error == "" && primaryDir != "" {
+			envFix := vscodeFix
+			if settings.ProfileConflict {
+				// `pfm install --vscode` refuses an operator's own PFM profile,
+				// so the fix names the step that clears the refusal first.
+				envFix = fmt.Sprintf(
+					`rename or remove the "PFM" terminal profile in %s, then %s`,
+					settings.Path,
+					vscodeFix,
+				)
+			}
 			switch {
 			case settings.ClaudeConfigDir == "":
 				warnings += filter.warn(
 					stdout,
 					warnVSCodeSettings,
 					"doctor: vscode settings="+settings.Path+" CLAUDE_CONFIG_DIR missing",
-					vscodeFix,
+					envFix,
 				)
 			case settings.ClaudeConfigDir != primaryDir:
 				warnings += filter.warn(
@@ -113,7 +123,7 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 						settings.ClaudeConfigDir,
 						primaryDir,
 					),
-					vscodeFix,
+					envFix,
 				)
 			}
 		}

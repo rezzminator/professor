@@ -263,7 +263,12 @@ type VSCodeSettingsStatus struct {
 	Path            string
 	// Profile is one of "owned", "relinquished", "missing", "unreadable".
 	Profile string
-	Default string
+	// ProfileConflict is true when pfm does not own the existing "PFM"
+	// profile and it matches no shape pfm ever wrote — the state in which
+	// `pfm install --vscode` refuses (vscodeProfileConflicts), so doctor
+	// never prints that command alone as the fix.
+	ProfileConflict bool
+	Default         string
 	// Error carries a read or decode failure's text when Profile ==
 	// "unreadable" — an error never renders as bare absence (issue #24 F6):
 	// one settings file's unreadable state names its own cause instead of
@@ -373,7 +378,8 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 			}
 			profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 			profiles, _ := document[profileKey].(map[string]any)
-			_, hasProfile := profiles[vscodeProfileName]
+			existingProfile, hasProfile := profiles[vscodeProfileName]
+			status.ProfileConflict = !record.ProfileOwned && vscodeProfileConflicts(existingProfile, hasProfile)
 			switch {
 			case record.ProfileOwned && hasProfile:
 				status.Profile = "owned"

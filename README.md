@@ -201,6 +201,7 @@ claude plugin install sub-agent-compact@professor
 - [cache-live-control](https://github.com/rezzminator/cache-live-control): a `/cache` command that switches the prompt-cache TTL (5m, 1h or automatic) for one chat and its sub-agents, live, with no model turn.
 - [agent-effort](https://github.com/rezzminator/agent-effort): per-spawn reasoning effort for sub-agents — start the Agent prompt with `[effort: low|medium|high|xhigh|max]`.
 - [buddy](https://github.com/rezzminator/buddy): a tiny ASCII companion above your prompt — Quack the duck, seven more characters or your own — that comments on each turn, suggests your next prompt and answers `/buddy` questions from what it remembers of the chat.
+- [callmeter](https://github.com/rezzminator/callmeter): records every tool call, model request, sub-agent turn and session event into one local SQLite store — counts and sizes, never your prompts or file contents — and answers which files, commands and agents cost the most.
 
 ## Origin
 

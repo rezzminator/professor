@@ -57,6 +57,19 @@
       "homepage": "https://github.com/rezzminator/buddy",
       "license": "MIT",
       "keywords": ["claude-code", "buddy", "companion", "ascii-art", "terminal-pet", "function-hooks", "professor"]
+    },
+    {
+      "name": "callmeter",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/rezzminator/callmeter.git",
+        "path": "plugins/callmeter",
+        "ref": "main"
+      },
+      "description": "Records every Claude Code tool call, model request, sub-agent turn and lifecycle event into one local SQLite store, with reports.",
+      "homepage": "https://github.com/rezzminator/callmeter",
+      "license": "MIT",
+      "keywords": ["claude-code", "hooks", "telemetry", "tool-calls", "token-usage", "sqlite", "sub-agents", "observability", "professor"]
     }
   ]
 }

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
@@ -168,8 +170,12 @@ func Await(
 			// The chat's record moved — a transcript that did not exist when
 			// the message was sent, or a resumed thread writing a new file.
 			// The frontier belonged to the old file, so the new one is read
-			// whole.
-			if path != "" {
+			// whole. A new SPELLING of the same file is not a move: a fresh
+			// Claude chat is named by its hook crumb's path until the index
+			// has it, then by the index's, and an account whose projects/ is
+			// a symlink spells the one file two ways. Reading it whole again
+			// would count the question twice.
+			if path != "" && !sameTranscriptFile(ctx, path, chat.Path) {
 				offset = 0
 			}
 			path = chat.Path
@@ -244,4 +250,25 @@ func finish(turn Turn, answers []string, start, now time.Time) Turn {
 	turn.Answer = strings.TrimSpace(strings.Join(answers, "\n\n"))
 	turn.WaitedSeconds = now.Sub(start).Seconds()
 	return turn
+}
+
+// sameTranscriptFile says whether two transcript paths name one file,
+// following symlinks. A path that cannot be resolved is compared as spelled,
+// and the failure is logged: treating it as a move costs a re-read, while
+// treating two files as one would lose a turn.
+func sameTranscriptFile(ctx context.Context, left, right string) bool {
+	return resolvedTranscriptPath(ctx, left) == resolvedTranscriptPath(ctx, right)
+}
+
+func resolvedTranscriptPath(ctx context.Context, path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		obs.Logger(ctx).Warn(
+			"await: transcript path could not be resolved; comparing it as spelled",
+			"path", path,
+			obs.FieldErr, err.Error(),
+		)
+		return filepath.Clean(path)
+	}
+	return resolved
 }

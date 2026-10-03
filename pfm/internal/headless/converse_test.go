@@ -407,3 +407,45 @@ func TestAwaitFlagsAnAnswerSomebodyElseMayOwn(t *testing.T) {
 		t.Fatalf("Answer = %q", turn.Answer)
 	}
 }
+
+// TestAwaitReadsOneTranscriptOnceThroughTwoSpellings: the fleet names a fresh
+// Claude chat's transcript by its hook crumb's spelling until the index has
+// it, then by the index's — and with an account's projects/ symlinked to a
+// shared one, those are two strings for one file. Re-reading the file from
+// the top on the switch would count the one question twice and call the
+// answer somebody else's.
+func TestAwaitReadsOneTranscriptOnceThroughTwoSpellings(t *testing.T) {
+	talk := newConversation(t)
+	linked := filepath.Join(t.TempDir(), "projects")
+	if err := os.Symlink(filepath.Dir(talk.path), linked); err != nil {
+		t.Fatal(err)
+	}
+	crumbSpelling := filepath.Join(linked, filepath.Base(talk.path))
+	calls := 0
+	resolve := func(ctx context.Context) (Chat, bool, error) {
+		chat, found, err := talk.resolve(ctx)
+		if calls == 0 {
+			chat.Path = crumbSpelling
+		}
+		calls++
+		return chat, found, err
+	}
+	talk.say(user("my question"))
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		talk.say(assistant("the answer"))
+	}()
+	turn, err := Await(context.Background(), resolve, fastOptions())
+	if err != nil {
+		t.Fatalf("Await() error = %v", err)
+	}
+	if calls < 2 {
+		t.Fatalf("resolver ran %d times, want the switch to the second spelling seen", calls)
+	}
+	if turn.Superseded {
+		t.Fatal("Superseded = true for one question read through two spellings of one transcript")
+	}
+	if turn.Answer != "the answer" {
+		t.Fatalf("Answer = %q, want %q", turn.Answer, "the answer")
+	}
+}

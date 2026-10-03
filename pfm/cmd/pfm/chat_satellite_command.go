@@ -27,7 +27,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/headless"
-	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
@@ -637,13 +636,9 @@ func sanitizeBranchName(value string) string {
 }
 
 func defaultBranchName(id string) string {
-	parent := ""
-	database, err := store.Open(store.WithWarningWriter(io.Discard))
-	if err == nil {
-		if indexed, found, queryErr := database.Transcript(context.Background(), id); queryErr == nil && found {
-			parent = naming.DisplayName(indexed.CustomTitle, indexed.AITitle, indexed.FirstPrompt)
-		}
-		_ = database.Close()
+	parent, err := store.SessionLabel(context.Background(), id, store.WithWarningWriter(io.Discard))
+	if err != nil {
+		parent = ""
 	}
 	if strings.TrimSpace(parent) == "" {
 		parent = transcript.Truncate(id, 8)

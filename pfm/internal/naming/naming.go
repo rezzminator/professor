@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // KillPrefix is the label prefix that kills a chat from the default listing.
@@ -210,6 +211,42 @@ func CodexRowName(
 		name = CxName(rootID, "", "", names, firstPrompt)
 	}
 	return name
+}
+
+// LaunchNameRunes caps a launch name. A launch name rides argv — ps,
+// /proc/{pid}/cmdline — and Linux caps one argument at 128 KiB, so a label that
+// fell back to a pasted first prompt is clipped rather than failing the exec.
+const LaunchNameRunes = 120
+
+// LaunchName is the one normalizer between a chat's pfm label and the
+// --name Claude is launched with: every whitespace run collapses to one space,
+// every other control rune (NUL included) is dropped, and the result is
+// trimmed and clipped to LaunchNameRunes. An empty label and the Unnamed
+// sentinel return "" — nothing to name. A _KILL / _HIDE label passes through
+// verbatim: the kill marker is the chat's real label, and Claude records the
+// name it is given, so a stripped name written back would un-kill the chat.
+func LaunchName(label string) string {
+	var cleaned strings.Builder
+	cleaned.Grow(len(label))
+	inSpace := false
+	for _, r := range label {
+		switch {
+		case unicode.IsSpace(r):
+			if !inSpace {
+				cleaned.WriteByte(' ')
+				inSpace = true
+			}
+		case unicode.IsControl(r):
+		default:
+			cleaned.WriteRune(r)
+			inSpace = false
+		}
+	}
+	name := strings.TrimSpace(cleaned.String())
+	if name == "" || name == Unnamed {
+		return ""
+	}
+	return strings.TrimSpace(ClipRunes(name, LaunchNameRunes))
 }
 
 // ClipRunes returns at most limit runes without splitting UTF-8.

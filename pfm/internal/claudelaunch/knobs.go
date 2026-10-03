@@ -69,6 +69,7 @@ const (
 	flagSessionID                  = "--session-id"
 	flagResume                     = "--resume"
 	flagName                       = "--name"
+	flagNameShort                  = "-n"
 	flagPromptFile                 = "--system-prompt-file"
 	flagForkSession                = "--fork-session"
 	flagAllowBypass                = "--allow-dangerously-skip-permissions"

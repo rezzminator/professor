@@ -15,6 +15,7 @@ func TestLauncherRunNativeCursorFollowsConfig(t *testing.T) {
 			"/home/test",
 			pfmconfig.Config{},
 			pfmconfig.ClaudePrefs{NativeCursor: want},
+			"",
 		)
 		if err != nil {
 			t.Fatalf("LauncherRun(nativeCursor=%v) error = %v", want, err)

@@ -50,12 +50,14 @@ func envStripWords(names []string) string {
 // home and claude carry the systemPrompt choice; the launcher re-decides it
 // every spawn (hygiene strips any inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).
 // machine supplies only its MCP servers and mcp.thirdParty, never its roster.
+// name is the chat's pfm label, carried as --name; "" carries nothing.
 func LauncherRun(
 	realBinary string,
 	args []string,
 	configDir, home string,
 	machine pfmconfig.Config,
 	claude pfmconfig.ClaudePrefs,
+	name string,
 	sessionID ...string,
 ) (string, error) {
 	values := append([]string{realBinary, configDir}, args...)
@@ -88,6 +90,7 @@ func LauncherRun(
 		Home:              home,
 		Args:              args,
 		SessionID:         id,
+		Name:              name,
 		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
 		explicitConfigDir: configDir,
 		binary:            realBinary,
@@ -138,6 +141,34 @@ func LauncherIdentity(args []string) (string, bool, bool) {
 		}
 	}
 	return "", false, fork
+}
+
+// LauncherResumeTarget is the session a launcher invocation resumes or forks
+// FROM: the value of --resume / -r (a separate word that is not a flag) or
+// --resume=. A value ending in .jsonl is a transcript path and yields its
+// basename without the extension. It returns "" unless the result is a session
+// UUID — a bare --resume, --continue and a named resume have no known source.
+func LauncherResumeTarget(args []string) string {
+	value := ""
+	for i, arg := range args {
+		if arg == claudeResumeFlag || arg == claudeResumeShort {
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				value = args[i+1]
+			}
+			break
+		}
+		if resumed, ok := strings.CutPrefix(arg, claudeResumeFlag+"="); ok {
+			value = resumed
+			break
+		}
+	}
+	if base, ok := strings.CutSuffix(value, ".jsonl"); ok {
+		value = filepath.Base(base)
+	}
+	if !pfmengine.IsUUID(value) {
+		return ""
+	}
+	return value
 }
 
 // Synthesize produces a deterministic action plan without touching tmux,
@@ -309,6 +340,7 @@ func Synthesize(request Request) (Plan, error) {
 			account,
 			request.Cache1H,
 			machine,
+			request.Row.Name,
 			claudeResumeFlag,
 			request.Row.ID,
 		)
@@ -340,6 +372,7 @@ func Synthesize(request Request) (Plan, error) {
 			account,
 			request.Cache1H,
 			machine,
+			request.Row.Name,
 			claudeResumeFlag,
 			request.Row.ID,
 		)
@@ -424,9 +457,10 @@ func claudeCommand(
 	account int,
 	cache1H bool,
 	machine pfmconfig.Config,
+	name string,
 	args ...string,
 ) (string, error) {
-	return claudeCommandWith(purpose, claudelaunch.Hygiene(), home, account, cache1H, machine, args...)
+	return claudeCommandWith(purpose, claudelaunch.Hygiene(), home, account, cache1H, machine, name, args...)
 }
 
 // claudeCommandWith is claudeCommand over a caller-chosen environment strip,
@@ -441,6 +475,7 @@ func claudeCommandWith(
 	account int,
 	cache1H bool,
 	machine pfmconfig.Config,
+	name string,
 	args ...string,
 ) (string, error) {
 	_ = strip
@@ -448,6 +483,7 @@ func claudeCommandWith(
 		Purpose: purpose,
 		Account: account,
 		Cache1H: &cache1H,
+		Name:    name,
 		Args:    args,
 		Home:    home,
 		Machine: machine,

@@ -39,6 +39,16 @@ func prepareReload(request Request) (Request, string, bool, error) {
 		}
 		request.SessionID, request.fresh = id, true
 	}
+	if request.Engine == pfmengine.Claude && request.Label != nil {
+		// A same-pane reboot resumes under the label of the session it
+		// resumes — read here, so a handoff that switched sessions reads it
+		// again. A fresh session has no label yet, so nothing is carried or,
+		// through followName, typed for it.
+		request.Name = ""
+		if !wasNew && request.Label != nil {
+			request.Name = request.Label(request.SessionID)
+		}
+	}
 	run, err := engineRun(request)
 	if err != nil {
 		return request, "", false, err

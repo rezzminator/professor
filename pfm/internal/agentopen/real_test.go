@@ -3,6 +3,7 @@ package agentopen
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -201,5 +203,45 @@ func TestSocketForPIDErrorsWhenTmuxCouldNotRun(t *testing.T) {
 	}
 	if socket != "" {
 		t.Fatalf("SocketForPID() socket = %q, want empty on a tmux-could-not-run error", socket)
+	}
+}
+
+// TestExecCommandsResumeCarriesTheChatLabel pins the agent-open resume door:
+// the resumed chat is launched under its pfm label, and an unindexed session
+// under none.
+func TestExecCommandsResumeCarriesTheChatLabel(t *testing.T) {
+	commands, argvPath, _, accountDir := testExecCommands(t)
+	ctx := context.Background()
+	const named, unknown = "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"
+	database, err := store.Open(store.WithWarningWriter(io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpsertTranscript(ctx, store.Transcript{
+		UUID: named, Path: "/fixtures/named.jsonl", CustomTitle: "Fix login", FirstPrompt: "first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{named: "Fix login", unknown: ""} {
+		if err := commands.Resume(ctx, accountDir, t.TempDir(), id, true); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(argvPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		argv := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		got := ""
+		for index, word := range argv {
+			if word == "--name" && index+1 < len(argv) {
+				got = argv[index+1]
+			}
+		}
+		if got != want {
+			t.Fatalf("resume %s --name = %q, want %q; argv %q", id, got, want, argv)
+		}
 	}
 }

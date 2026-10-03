@@ -150,7 +150,15 @@ func TestClaudeSpawnCarriesRegistrySettingsAfterCallerFlag(t *testing.T) {
 // too, since it is a distinct constructor from ClaudeSpawn's exported fields.
 func TestLauncherRunCarriesDefaultOutputStyle(t *testing.T) {
 	home := t.TempDir()
-	shell, err := LauncherRun("/opt/claude/real", nil, t.TempDir(), home, pfmconfig.Config{}, pfmconfig.ClaudePrefs{})
+	shell, err := LauncherRun(
+		"/opt/claude/real",
+		nil,
+		t.TempDir(),
+		home,
+		pfmconfig.Config{},
+		pfmconfig.ClaudePrefs{},
+		"",
+	)
 	if err != nil {
 		t.Fatalf("LauncherRun() error = %v", err)
 	}
@@ -173,7 +181,7 @@ func TestLauncherRunSessionRouting(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			run, err := LauncherRun("/bin/claude", scenario.args, "", t.TempDir(),
-				pfmconfig.Config{}, pfmconfig.ClaudePrefs{PermissionMode: pfmconfig.PermissionBypass})
+				pfmconfig.Config{}, pfmconfig.ClaudePrefs{PermissionMode: pfmconfig.PermissionBypass}, "")
 			if err != nil {
 				t.Fatal(err)
 			}

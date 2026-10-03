@@ -91,10 +91,18 @@ type Request struct {
 	CodexYolo    bool
 	Cache1H      bool
 	Then         string
-	// Name is the display name the chat wore before a --new reboot; the
-	// reborn pane takes it over and the abandoned session is relabelled
-	// (followName). "" carries nothing — a chat named from its prompts.
+	// Name is the chat's pfm label, carried to Claude as --name: on --new the
+	// custom title the reborn chat inherits (followName also types /rename and
+	// relabels the session left behind). A same-pane Claude reboot owns it
+	// instead: prepareReload sets it from Label for the session it resumes.
+	// "" carries nothing.
 	Name string
+	// Label is set for a same-pane Claude reboot only: it resolves a session's
+	// pfm label (store.SessionLabel), and prepareReload asks it again whenever
+	// a handoff moves the reboot onto another session, so the reborn pane
+	// never wears the label of the session the pane used to show. When set it
+	// owns Name; "" carries no --name; the resolver reports its own failure.
+	Label func(sessionID string) string
 	// Model and Effort pin the reborn seat's tier — the same pair
 	// HeadlessRequest carries for a fresh launch (internal/action/headless.go).
 	// "" means "inherit whatever the CLI/account would have chosen on its
@@ -573,37 +581,6 @@ func (request Request) claudeBinary() string {
 		return binary
 	}
 	return pfmengine.MustLookup(pfmengine.Claude).Binary
-}
-
-// claudeRun is the respawn line for a Claude seat. It owns nothing: the strip,
-// the autonomy posture and the system prompt all come from the one spawn door,
-// so a chat that reboots in place comes back with exactly what a fresh launch
-// would have carried.
-func claudeRun(request Request) (string, error) {
-	effort, err := action.ClaudeEffort(request.Effort)
-	if err != nil {
-		return "", fmt.Errorf("resolve claude respawn effort: %w", err)
-	}
-	spawn := action.ClaudeSpawn{
-		Purpose:    action.PurposeResume,
-		Account:    request.Account,
-		Cache1H:    &request.Cache1H,
-		Home:       request.Home,
-		Machine:    request.Machine,
-		Model:      request.Model,
-		Effort:     effort,
-		PromptFile: request.PromptChannel,
-	}
-	if request.fresh {
-		spawn.Purpose, spawn.SessionID = action.PurposeInteractive, request.SessionID
-	} else {
-		spawn.Resume = request.SessionID
-	}
-	run, err := spawn.ShellCommand()
-	if err != nil {
-		return "", fmt.Errorf("render claude respawn command: %w", err)
-	}
-	return run, nil
 }
 
 func engineRun(request Request) (string, error) {

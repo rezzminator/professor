@@ -48,7 +48,7 @@ func TestLauncherRunSystemPromptModes(t *testing.T) {
 			[]string{"--resume", "abc"},
 			"",
 			home,
-			pfmconfig.Config{}, pfmconfig.ClaudePrefs{SystemPrompt: testCase.mode},
+			pfmconfig.Config{}, pfmconfig.ClaudePrefs{SystemPrompt: testCase.mode}, "",
 		)
 		if err != nil {
 			t.Fatalf("LauncherRun(mode=%q) error = %v", testCase.mode, err)
@@ -64,7 +64,7 @@ func TestLauncherRunSystemPromptModes(t *testing.T) {
 }
 
 func TestLauncherRunHygieneStripsInheritedArm(t *testing.T) {
-	run, err := LauncherRun("/bin/claude", nil, "", "/home/test", pfmconfig.Config{}, pfmconfig.ClaudePrefs{})
+	run, err := LauncherRun("/bin/claude", nil, "", "/home/test", pfmconfig.Config{}, pfmconfig.ClaudePrefs{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestClaudeCommandSystemPromptModes(t *testing.T) {
 	} {
 		machine := testMachineConfig(home)
 		machine.Claude.SystemPrompt = testCase.mode
-		run, err := claudeCommandWith(PurposeResume, hygieneNames, home, 1, false, machine, "--resume", "abc")
+		run, err := claudeCommandWith(PurposeResume, hygieneNames, home, 1, false, machine, "", "--resume", "abc")
 		if err != nil {
 			t.Fatalf("mode %q: claudeCommandWith error = %v", testCase.mode, err)
 		}

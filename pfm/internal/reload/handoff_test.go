@@ -339,3 +339,59 @@ func TestRunKeepsTheHandoffWhenAQueuedReloadFailsBeforeRespawn(t *testing.T) {
 		}
 	}
 }
+
+// TestPrepareReloadNamesTheSessionItResumes pins the same-pane and handoff
+// doors: the reborn Claude pane carries the label of the session it resumes,
+// read again when a handoff moved the reboot onto another session, and never
+// a name it does not own.
+func TestPrepareReloadNamesTheSessionItResumes(t *testing.T) {
+	home := t.TempDir()
+	const (
+		first  = "11111111-1111-4111-8111-111111111111"
+		second = "22222222-2222-4222-8222-222222222222"
+		blank  = "33333333-3333-4333-8333-333333333333"
+	)
+	labels := map[string]string{first: "Fix login", second: "Ship it"}
+	for _, scenario := range []struct {
+		name string
+		edit func(*Request)
+		want string
+	}{
+		{"same-pane resume wears its label", func(r *Request) { r.SessionID = first }, "Fix login"},
+		{"a handoff onto another session wears that session's label", func(r *Request) {
+			r.SessionID, r.Name = second, "Fix login"
+		}, "Ship it"},
+		{"an unlabelled session carries no name", func(r *Request) { r.SessionID, r.Name = blank, "stale" }, ""},
+		{"a fresh session carries no name", func(r *Request) {
+			r.SessionID, r.fresh, r.Name = first, true, "stale"
+		}, ""},
+		{"no resolver carries no name", func(r *Request) { r.SessionID, r.Label = first, nil }, ""},
+		{"--new keeps the title it inherits", func(r *Request) {
+			r.New, r.Name, r.Label = true, "Inherited", nil
+		}, "Inherited"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			request := Request{
+				Engine:     pfmengine.Claude,
+				SocketPath: "/tmp/cc-label",
+				Pane:       "%1",
+				Account:    2,
+				AccountIDs: []int{2},
+				Home:       home,
+				Machine:    reloadTestMachine(pfmconfig.SystemPromptLean, home),
+				Label:      func(id string) string { return labels[id] },
+			}
+			scenario.edit(&request)
+			_, run, _, err := prepareReload(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := parsedReloadShell(t, run).Name; got != scenario.want {
+				t.Fatalf("--name = %q, want %q", got, scenario.want)
+			}
+			if scenario.want == "" && strings.Contains(run, "'--name'") {
+				t.Fatal("an unlabelled reboot carries --name")
+			}
+		})
+	}
+}

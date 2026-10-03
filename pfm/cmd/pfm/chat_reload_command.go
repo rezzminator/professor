@@ -318,6 +318,13 @@ func runChatReloadWorkerWithRuntime(
 			)
 		}
 	}
+	// A same-pane Claude reboot resumes under the pfm label of the session it
+	// resumes (reload.Request.Label), so Remote Control keeps the name the
+	// picker shows; --new carries the custom title it inherits instead.
+	var label func(string) string
+	if !newSeat && engine == pfmengine.Claude {
+		label = sessionLabeler(stderr)
+	}
 	cwd, err := reload.TranscriptCWD(transcript)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v; using the live pane directory\n", err)
@@ -403,6 +410,7 @@ func runChatReloadWorkerWithRuntime(
 			Cache1H:       cache,
 			Then:          then,
 			Name:          name,
+			Label:         label,
 			Model:         model,
 			Effort:        effort,
 			PromptChannel: promptChannel,
@@ -497,6 +505,24 @@ func flattenThenLine(text string) string {
 func positiveAccount(value string) bool {
 	account, err := strconv.Atoi(value)
 	return err == nil && account > 0
+}
+
+// sessionLabeler is a same-pane reboot's label resolver: the session's pfm
+// label from the fleet database, or "" — with the failure on stderr — when it
+// cannot be read, so the reborn pane keeps Claude's own name.
+func sessionLabeler(stderr io.Writer) func(string) string {
+	return func(id string) string {
+		label, err := store.SessionLabel(context.Background(), id, store.WithWarningWriter(stderr))
+		if err != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm chat reload: resolve the label of session %s: %v — the reborn pane keeps Claude's own name\n",
+				id, err,
+			)
+			return ""
+		}
+		return label
+	}
 }
 
 func reloadDurationEnv(name string, fallbackMS int, env paths.Env) time.Duration {

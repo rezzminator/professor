@@ -11,6 +11,7 @@ import (
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -116,8 +117,8 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 	if request.Fork {
 		result.Argv = append(result.Argv, flagForkSession)
 	}
-	if request.Name != "" {
-		result.Argv = append(result.Argv, flagName, request.Name)
+	if name := naming.LaunchName(request.Name); name != "" && !argsName(request.Args) {
+		result.Argv = append(result.Argv, flagName, name)
 	}
 	result.Argv = append(result.Argv, request.Args...)
 	settings := settingsFor(request, prefs, noFlicker(request, settingsDir))

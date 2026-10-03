@@ -59,9 +59,11 @@ func (spawn ClaudeSpawn) render() (claudelaunch.Launch, error) {
 	if spawn.Purpose < PurposeInteractive || spawn.Purpose > PurposeQuery {
 		return claudelaunch.Launch{}, fmt.Errorf("claude spawn: unknown purpose %d", spawn.Purpose)
 	}
+	// spawn.Name is no NUL candidate: Render strips control runes from it
+	// (naming.LaunchName), so a label read from a transcript never fails a resume.
 	values := []string{
 		spawn.Home, spawn.Model, spawn.Effort, spawn.binary,
-		spawn.explicitConfigDir, spawn.SessionID, spawn.Resume, spawn.Name, spawn.PromptFile,
+		spawn.explicitConfigDir, spawn.SessionID, spawn.Resume, spawn.PromptFile,
 	}
 	values = append(values, spawn.Args...)
 	if hasNUL(values...) {

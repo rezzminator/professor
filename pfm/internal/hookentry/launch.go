@@ -27,6 +27,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
@@ -198,6 +199,21 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		}
 		identity = freshID
 	}
+	// A resumed or forked chat keeps its pfm label as Claude's --name, so
+	// Remote Control shows the name the picker shows. A fresh launch has none.
+	name := ""
+	if target := action.LauncherResumeTarget(arguments); target != "" {
+		label, labelErr := store.SessionLabel(context.Background(), target, store.WithWarningWriter(stderr))
+		if labelErr != nil {
+			fmt.Fprintf(
+				stderr,
+				"pfm internal launch: resolve the label of session %s: %v — Claude names this chat itself\n",
+				target, labelErr,
+			)
+		} else {
+			name = label
+		}
+	}
 	realRun, err := action.LauncherRun(
 		*realBinary,
 		arguments,
@@ -205,6 +221,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		runtime.Paths.Home,
 		runtime.Config,
 		runtime.Config.EffectiveClaude(accountID),
+		name,
 		freshID,
 	)
 	if err != nil {

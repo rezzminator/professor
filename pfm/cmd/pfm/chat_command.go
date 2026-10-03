@@ -451,6 +451,13 @@ func applyChatName(
 		fmt.Fprintf(stderr, "pfm chat name: rename delivered but window convergence failed: %v\n", err)
 		return 1
 	}
+	// Claude names the chat Remote Control shows from this /rename; it is
+	// read back from the transcript, never assumed from the keystrokes.
+	if chat.Engine == pfmengine.Claude {
+		if warning := unconfirmedClaudeName(ctx, chat, name); warning != "" {
+			fmt.Fprintf(stderr, "pfm chat name: WARNING: %s\n", warning)
+		}
+	}
 	return 0
 }
 

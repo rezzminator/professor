@@ -115,6 +115,17 @@ func Parse(argv []string) (Parsed, error) {
 	return parsed, nil
 }
 
+// argsName reports whether the caller's own args already name the session —
+// --name, --name=…, or Claude's short -n — so Render never emits a second one.
+func argsName(args []string) bool {
+	for _, arg := range args {
+		if arg == flagName || arg == flagNameShort || strings.HasPrefix(arg, flagName+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func parseHooks(raw any) ([]Hook, error) {
 	if raw == nil {
 		return nil, nil

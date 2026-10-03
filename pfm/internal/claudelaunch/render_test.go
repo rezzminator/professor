@@ -528,3 +528,63 @@ func TestRenderConfigDirValidation(t *testing.T) {
 		}
 	}
 }
+
+// nameWords is every value that follows a name flag in a rendered argv.
+func nameWords(argv []string) []string {
+	var words []string
+	for index, word := range argv {
+		if (word == flagName || word == flagNameShort) && index+1 < len(argv) {
+			words = append(words, argv[index+1])
+		}
+	}
+	return words
+}
+
+func TestRenderNameFlag(t *testing.T) {
+	home, machine := renderMachine(t)
+	for _, scenario := range []struct {
+		name    string
+		request Request
+		want    []string
+	}{
+		{"empty name carries no flag", Request{Name: ""}, nil},
+		{"blank name carries no flag", Request{Name: "   "}, nil},
+		{"control-only name carries no flag", Request{Name: "\n\t\x00"}, nil},
+		{"unnamed sentinel carries no flag", Request{Name: "(unnamed)"}, nil},
+		{"whitespace runs collapse", Request{Name: "fix\n  login"}, []string{"fix login"}},
+		{"control runes drop", Request{Name: "fix\x00 lo\x1bgin"}, []string{"fix login"}},
+		{"long name is clipped", Request{Name: strings.Repeat("é", 300)}, []string{strings.Repeat("é", 120)}},
+		{"kill marker passes verbatim", Request{Name: "_KILL worker 3"}, []string{"_KILL worker 3"}},
+		{
+			"an Args name wins, long form",
+			Request{Name: "other", Args: []string{"--name", "keep"}},
+			[]string{"keep"},
+		},
+		{
+			"an Args name wins, short form",
+			Request{Name: "other", Args: []string{flagNameShort, "keep"}},
+			[]string{"keep"},
+		},
+		{
+			"an Args name wins, equals form",
+			Request{Name: "other", Args: []string{"--name=keep"}},
+			nil,
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			request := scenario.request
+			request.Purpose, request.Home, request.Account = PurposeResume, home, 2
+			launch, err := Render(request, machine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := nameWords(launch.Argv); !slices.Equal(got, scenario.want) {
+				t.Fatalf("name words = %q, want %q", got, scenario.want)
+			}
+			if request.Args != nil && slices.Contains(request.Args, "--name=keep") &&
+				slices.Contains(launch.Argv, flagName) {
+				t.Fatal("a second --name rode beside --name=keep")
+			}
+		})
+	}
+}

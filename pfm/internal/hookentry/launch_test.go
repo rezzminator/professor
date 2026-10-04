@@ -174,3 +174,32 @@ func TestAttachArgumentsBindNestedSeatToItsPane(t *testing.T) {
 		t.Fatalf("nested tmux: attachArguments = %q, want %q", got, nested)
 	}
 }
+
+// TestLauncherSeatAccountIgnoresTheLoginDefault: a bare `claude` from a shell
+// carrying the login default lands on the fleet primary, as with nothing
+// exported; an explicit CLAUDE_CONFIG_DIR still picks its own account.
+func TestLauncherSeatAccountIgnoresTheLoginDefault(t *testing.T) {
+	one, two := t.TempDir(), t.TempDir()
+	machine := config.Runtime{Config: config.Config{Accounts: []config.Account{
+		{ID: 1, ConfigDir: one}, {ID: 2, ConfigDir: two},
+	}}}
+	for _, test := range []struct {
+		name, value, sentinel, wantDir string
+		wantAccount                    int
+	}{
+		{"neither set", "", "", two, 2},
+		{"login default", one, one, two, 2},
+		{"explicit, no sentinel", one, "", one, 1},
+		{"explicit over another dir's sentinel", one, two, one, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := &paths.MapEnv{Values: map[string]string{
+				"CLAUDE_CONFIG_DIR": test.value, claudelaunch.ConfigDirDefaultEnv: test.sentinel,
+			}}
+			dir, account := launcherSeatAccount(machine, 2, env)
+			if dir != test.wantDir || account != test.wantAccount {
+				t.Fatalf("launcherSeatAccount = (%s, %d), want (%s, %d)", dir, account, test.wantDir, test.wantAccount)
+			}
+		})
+	}
+}

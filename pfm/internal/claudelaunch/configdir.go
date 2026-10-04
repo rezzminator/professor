@@ -30,6 +30,23 @@ type ConfigDir struct {
 	Err   error
 }
 
+// ConfigDirDefaultEnv names the sentinel the login default exports beside
+// CLAUDE_CONFIG_DIR, holding the same value, only when the login shell found
+// CLAUDE_CONFIG_DIR unset. Every pfm launch strips it (Hygiene,
+// IdentityHygiene) and sets CLAUDE_CONFIG_DIR explicitly, so its presence
+// means the value came from the login default, not from pfm or the operator.
+const ConfigDirDefaultEnv = "PFM_CLAUDE_CONFIG_DIR_DEFAULT"
+
+// InheritedConfigDir reports whether CLAUDE_CONFIG_DIR, read through getenv,
+// is the login default: the sentinel is non-empty and names the same dir. A
+// reader choosing an account or an engine treats it as unset; a reader of a
+// Claude process's own environment keeps it, since that Claude runs on it.
+func InheritedConfigDir(getenv func(string) string) bool {
+	sentinel := strings.TrimSpace(getenv(ConfigDirDefaultEnv))
+	value := strings.TrimSpace(getenv(configDirEnv))
+	return sentinel != "" && value != "" && filepath.Clean(sentinel) == filepath.Clean(value)
+}
+
 // ClaudeStore is the shared Claude data directory.
 func ClaudeStore(home string) string { return filepath.Join(home, ".claude") }
 

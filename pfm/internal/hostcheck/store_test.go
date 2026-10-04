@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -184,6 +185,9 @@ func TestStoreIdentity(t *testing.T) {
 				env.Accounts...)
 			var want []Row
 			for _, entry := range installer.AccountEntries {
+				if slices.Contains(installer.RetiredStoreEntries, entry) {
+					continue // retired-store-entry's, a warning
+				}
 				if entry == "state" {
 					entry = "state/mcp-discover-verdicts.json"
 				}
@@ -200,7 +204,13 @@ func TestStoreIdentity(t *testing.T) {
 				}
 				want = append(
 					want,
-					Row{Block, "store-identity", path, entry + " is account identity inside the store", fix},
+					Row{
+						Block,
+						"store-identity",
+						path,
+						entry + " is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)",
+						fix,
+					},
 				)
 			}
 			assertRows(t, detect(t, "store-identity", env), want...)
@@ -223,7 +233,7 @@ func TestStoreIdentity(t *testing.T) {
 				Block,
 				"store-identity",
 				path,
-				".credentials.json is account identity inside the store",
+				".credentials.json is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)",
 				"mkdir -m 700 -p " + config.DefaultAccountDir(env.Home, 1) + " && mv " + path + " " +
 					filepath.Join(config.DefaultAccountDir(env.Home, 1), ".credentials.json"),
 			},
@@ -249,7 +259,7 @@ func TestStoreIdentity(t *testing.T) {
 				Block,
 				"store-identity",
 				other,
-				"telemetry is account identity inside the store",
+				"telemetry is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)",
 				"mkdir -m 700 -p " + env.Accounts[0].ConfigDir + " && mv " + other + " " +
 					filepath.Join(env.Accounts[0].ConfigDir, "telemetry"),
 			},
@@ -267,7 +277,7 @@ func TestStoreIdentity(t *testing.T) {
 				Block,
 				"store-identity",
 				path,
-				".credentials.json is account identity inside the store",
+				".credentials.json is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)",
 				"apply account-is-store's fix for " + env.Store + " first; pfm doctor then names this entry's move",
 			},
 		)
@@ -470,7 +480,7 @@ func TestAccountEntryReal(t *testing.T) {
 			"! diff -rq {path} {store}/{entry} 2>&1 | grep -v '^Only in {store}/{entry}' && " +
 			"rm -r {path}  # union into the store; stops while a file differs"
 	}
-	for _, name := range strings.Fields("stats-cache.json .last-cleanup .last-update-result.json gh-pr-status-cache.json") {
+	for _, name := range strings.Fields("stats-cache.json .last-cleanup gh-pr-status-cache.json") {
 		fixes[name] = "rm {path}  # a cache"
 	}
 	fixes["history.jsonl"] = "jq -c -s 'sort_by(.timestamp)[]' {store}/history.jsonl {path} > " +

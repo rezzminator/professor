@@ -454,3 +454,38 @@ func TestParseCodexSkipsAgentMessageEventPairedWithResponseItem(t *testing.T) {
 		t.Fatalf("entries\n got: %v\nwant: %v (agent_message event double-counted the reply)", got, want)
 	}
 }
+
+// A Codex rollout's newest turn record says whether its turn is still running:
+// assistant commentary between tool calls never ends one.
+func TestReadMetaFollowsTheNewestCodexTurnRecord(t *testing.T) {
+	const (
+		started    = `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`
+		completed  = `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":null}}`
+		aborted    = `{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-1","reason":"interrupted"}}`
+		prompt     = `{"type":"event_msg","payload":{"type":"user_message","message":"go"}}`
+		commentary = `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"running the tests next"}]}}`
+	)
+	for _, testCase := range []struct {
+		name  string
+		lines []string
+		want  CodexTurnState
+	}{
+		{"no turn record", []string{prompt, commentary}, CodexTurnUnrecorded},
+		{"commentary mid-turn", []string{started, prompt, commentary}, CodexTurnOpen},
+		{"task_complete", []string{started, prompt, commentary, completed}, CodexTurnEnded},
+		{"turn_aborted", []string{started, prompt, aborted}, CodexTurnEnded},
+		{"a prompt after the turn ended", []string{started, completed, prompt}, CodexTurnOpen},
+		{"the next turn started", []string{started, completed, started, commentary}, CodexTurnOpen},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := writeTranscript(t, "rollout.jsonl", strings.Join(testCase.lines, "\n")+"\n")
+			meta, err := ReadMeta(path, "cx")
+			if err != nil {
+				t.Fatalf("ReadMeta() error = %v", err)
+			}
+			if meta.CodexTurn != testCase.want {
+				t.Fatalf("CodexTurn = %d, want %d", meta.CodexTurn, testCase.want)
+			}
+		})
+	}
+}

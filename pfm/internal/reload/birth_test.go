@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -112,5 +113,39 @@ func TestReloadExplicitlyRejectsOpenCode(t *testing.T) {
 	}}, machine, pfmengine.OpenCode, "ses-fixture")
 	if err == nil || !strings.Contains(err.Error(), "OpenCode") {
 		t.Fatalf("SessionTranscript(OpenCode) error=%v, want product-level refusal", err)
+	}
+}
+
+// TestReloadBirthDetachedShellIgnoresTheLoginDefault: with no seat process in
+// the pane, a reload reads the caller's own birth config; the login default
+// there names no seat, so it resolves as if nothing were exported.
+func TestReloadBirthDetachedShellIgnoresTheLoginDefault(t *testing.T) {
+	root := t.TempDir()
+	values := paths.Values{StateDB: filepath.Join(root, "missing.db"), ProcRoot: t.TempDir()}
+	machine := pfmconfig.Config{
+		Claude: pfmconfig.Claude{Binary: "claude"},
+		Accounts: []pfmconfig.Account{
+			{ID: 1, ConfigDir: filepath.Join(root, "one")},
+			{ID: 2, ConfigDir: filepath.Join(root, "two")},
+		},
+	}
+	two := machine.Accounts[1].ConfigDir
+	for _, test := range []struct {
+		name, value, sentinel string
+		want                  int
+	}{
+		{"neither set", "", "", 1},
+		{"login default", two, two, 1},
+		{"explicit", two, "", 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			account, _, err := BirthAccount(values, machine, "cc-seat", "unrecorded", Pane{PID: 100}, &bytes.Buffer{},
+				&paths.MapEnv{Values: map[string]string{
+					"CLAUDE_CONFIG_DIR": test.value, claudelaunch.ConfigDirDefaultEnv: test.sentinel,
+				}})
+			if err != nil || account != test.want {
+				t.Fatalf("birth = %d, %v; want %d", account, err, test.want)
+			}
+		})
 	}
 }

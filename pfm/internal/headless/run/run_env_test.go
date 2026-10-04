@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
@@ -148,6 +149,24 @@ func TestResolveChecksOnlyClaudeConfigDir(t *testing.T) {
 					t.Fatalf("ConfigDir=%q, want %q", resolved.ConfigDir, dir)
 				}
 			})
+		}
+	}
+}
+
+// TestClaudeEnvironmentDropsTheLoginDefaultSentinel: a headless run sets its
+// own CLAUDE_CONFIG_DIR, so the login default's sentinel must not ride along
+// and make the child's readers take pfm's choice for the login default.
+func TestClaudeEnvironmentDropsTheLoginDefaultSentinel(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		var got []string
+		setEnvironment([]string{
+			"CLAUDE_CONFIG_DIR=/home/test/.cc/1", claudelaunch.ConfigDirDefaultEnv + "=/home/test/.cc/1",
+		}, pfmengine.Claude, "/cfg2", explicit, &got)
+		if value := lastEnvironmentValue(got, claudelaunch.ConfigDirDefaultEnv); value != "" {
+			t.Errorf("explicit=%t: sentinel survived as %q in %q", explicit, value, got)
+		}
+		if value := lastEnvironmentValue(got, "CLAUDE_CONFIG_DIR"); value != "/cfg2" {
+			t.Errorf("explicit=%t: CLAUDE_CONFIG_DIR=%q, want /cfg2", explicit, value)
 		}
 	}
 }

@@ -136,6 +136,8 @@ type Options struct {
 	ThenTries   int
 	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
 	Clock clock.Clock
+	// Paste delivers a Codex --then as one bracketed paste (then_paste.go).
+	Paste func(ctx context.Context, socket, pane, text string) error
 }
 
 type Result struct {
@@ -689,6 +691,9 @@ ready:
 	}
 	if !live {
 		return fmt.Errorf("reload --then: no live %s on the pane", engineLabel(request.Engine))
+	}
+	if request.Engine == pfmengine.Codex {
+		return deliverCodexThen(ctx, request, options, tmux, stderr)
 	}
 	// A composer baseline captured BEFORE the send lets us tell a freshly
 	// typed paste placeholder from one left over from an earlier turn — a

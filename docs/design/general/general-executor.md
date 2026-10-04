@@ -46,7 +46,7 @@ Everything true for every change:
 
 ## Tests
 
-When the change alters behaviour, the executor writes the covering test in the project's pattern, per the testing manual the brief names, and accepts it only after watching it fail against the unfixed code or a deliberate re-break. A change that alters no behaviour (a doc, a rename a build proves, a moved file) proves itself with the brief's check alone.
+When the change alters behaviour, the executor writes the covering test in the project's pattern, per the testing manual the brief names, and accepts it only after watching it fail against the unfixed code; when the fix already landed, against a mktemp copy holding the unfixed code (e.g. the base revision's files), never by breaking working code. A change that alters no behaviour (a doc, a rename a build proves, a moved file) proves itself with the brief's check alone.
 
 ## The cap and the handoff
 

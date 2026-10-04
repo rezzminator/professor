@@ -55,10 +55,10 @@ func Run(m *testing.M) int {
 		warnSetup("%v", err)
 		return 1
 	}
-	// Installer tests must not inherit an operator account as an MCP write
-	// target. Packages that can install host state enter through this jail.
-	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {
-		warnSetup("clear CLAUDE_CONFIG_DIR: %v", err)
+	// No operator account or login default reaches an installer test as an MCP write target; installers enter here.
+	sentinelErr := os.Unsetenv("PFM_CLAUDE_CONFIG_DIR_DEFAULT") // claudelaunch.ConfigDirDefaultEnv; import cycle
+	if err := errors.Join(os.Setenv("CLAUDE_CONFIG_DIR", ""), sentinelErr); err != nil {
+		warnSetup("clear CLAUDE_CONFIG_DIR and the login default's sentinel: %v", err)
 		return 1
 	}
 	// The fence has none of these — no tmux pane, no chat socket, no host

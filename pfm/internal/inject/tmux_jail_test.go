@@ -102,14 +102,17 @@ func (jail *injectTmuxJail) command(arguments ...string) *exec.Cmd {
 const busyThenIdleUI = `import os, select, sys, time, tty
 tty.setraw(0)
 delay = float(sys.argv[1])
+glyph = sys.argv[2] if len(sys.argv) > 2 else ""
 start = time.time()
-sys.stdout.write("Working (2s · 9 tokens)")
+sys.stdout.write("Working (2s · 9 tokens)" + ("\r\n" + glyph + " " if glyph else ""))
 sys.stdout.flush()
 idle = False
 buf = bytearray()
 while True:
     if not idle and time.time() - start >= delay:
         idle = True
+        if glyph:
+            sys.stdout.write("\x1b7\x1b[1;1H\x1b[2K\x1b8")
         sys.stdout.write("\r\x1b[2K❯ ")
         sys.stdout.flush()
     ready, _, _ = select.select([0], [], [], 0.05)
@@ -179,10 +182,13 @@ while True:
     time.sleep(0.00005)
 `
 
+// startBusyPane starts the busy-then-idle UI; a non-empty glyph draws the
+// composer row under the busy line, the way Codex keeps it while working.
 func (jail *injectTmuxJail) startBusyPane(
 	t *testing.T,
 	socket, session string,
 	busyFor time.Duration,
+	glyph string,
 ) string {
 	t.Helper()
 	script := filepath.Join(jail.root, "ui.py")
@@ -203,6 +209,7 @@ func (jail *injectTmuxJail) startBusyPane(
 		"python3",
 		script,
 		strconv.FormatFloat(busyFor.Seconds(), 'f', 2, 64),
+		glyph,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("start jailed pane: %v: %s", err, output)
@@ -331,7 +338,7 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	jail := newInjectTmuxJail(t)
 	socket := "probe-pfm-inject-then"
-	pane := jail.startBusyPane(t, socket, "steer-session", 900*time.Millisecond)
+	pane := jail.startBusyPane(t, socket, "steer-session", 900*time.Millisecond, "")
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 
 	engine, err := New(Dependencies{
@@ -413,7 +420,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 	// Deliberately keep a non-Codex socket spelling: the verified foreground
 	// process, not the immutable address, decides queue semantics.
 	socket := "probe-pfm-inject-codex-queue"
-	pane := jail.startBusyPane(t, socket, "queue-session", 30*time.Second)
+	pane := jail.startBusyPane(t, socket, "queue-session", 30*time.Second, "›")
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: pane},
@@ -488,7 +495,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 func TestJailedBusyClaudeQueuesWithoutControlKeys(t *testing.T) {
 	jail := newInjectTmuxJail(t)
 	socket := "probe-pfm-inject-claude-queue"
-	pane := jail.startBusyPane(t, socket, "claude-queue-session", 30*time.Second)
+	pane := jail.startBusyPane(t, socket, "claude-queue-session", 30*time.Second, "")
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: pane},

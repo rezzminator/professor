@@ -66,8 +66,8 @@ func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
 	// ever prints the skipped line.
 	if !strings.Contains(stdout.String(), "doctor: clean") ||
 		!strings.Contains(stdout.String(), "doctor: claude_plugins ok\n") ||
-		!strings.Contains(stdout.String(), "host-check: ok (21 checks)") ||
-		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 23 entries)") {
+		!strings.Contains(stdout.String(), "host-check: ok (22 checks)") ||
+		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 22 entries)") {
 		t.Fatalf("fresh target HOME doctor output=%q", stdout.String())
 	}
 }

@@ -32,7 +32,7 @@ Everything you read is re-sent on every later call.
 ## Tests
 
 - Run the brief's check and the affected tests only. The full suite, a review and a format sweep are never yours: a brief naming one as your run is refused, and your return names it.
-- A task that changes behavior gets a covering test in the project's pattern, per the testing manual the brief names; it counts only after you watched it fail against the unfixed code, or against a deliberate re-break when the fix already landed. A test that exists but did not run is missing.
+- A task that changes behavior gets a covering test in the project's pattern, per the testing manual the brief names; it counts only after you watched it fail against the unfixed code; when the fix already landed, against a mktemp copy holding the unfixed code (e.g. the base revision's files), never by breaking working code. A test that exists but did not run is missing.
 - A test proves behaviour that exists, never that something is gone: no test asserts that a removed function, file, flag or string stays absent, and a test guarding a deleted thing is itself an orphan. A test of how code handles a missing input is behaviour and stays.
 - A task that changes no behavior — a doc, a rename a build proves, a moved file — proves itself with the brief's check alone.
 

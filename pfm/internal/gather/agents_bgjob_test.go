@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
 
 // TestDetectAgentsFindsClaudeDaemonJobs pins the daemon-job door. Claude Code
@@ -80,5 +82,59 @@ func TestDetectAgentsFindsClaudeDaemonJobs(t *testing.T) {
 	if agents[1].SessionID != primaryJobSession || agents[1].PID != 801 ||
 		agents[1].ConfigDir != primaryDir {
 		t.Fatalf("DetectAgents()[1] = %#v, want pid 801 on the primary config dir", agents[1])
+	}
+}
+
+// TestDetectAgentsKeepsLoginDefaultClaudesOffTheAgentList: a Claude started
+// outside pfm used to carry no CLAUDE_CONFIG_DIR and was never an agent; the
+// login default must not turn it into one. Its dir stays the truth: an
+// explicit value is an agent on it, and a daemon job is still found there.
+func TestDetectAgentsKeepsLoginDefaultClaudesOffTheAgentList(t *testing.T) {
+	const session = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	const jobSession = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+	home := t.TempDir()
+	one := filepath.Join(home, ".cc", "1")
+	for _, test := range []struct {
+		name       string
+		env        map[string]string
+		wantAgents int
+	}{
+		{"neither set", map[string]string{}, 0},
+		{"login default", map[string]string{"CLAUDE_CONFIG_DIR": one, claudelaunch.ConfigDirDefaultEnv: one}, 0},
+		{"explicit", map[string]string{"CLAUDE_CONFIG_DIR": one}, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			proc := &fakeProcFS{processes: map[int]fakeProcess{
+				900: {
+					cmdline: []string{"claude", "--session-id", session},
+					environ: test.env,
+					stat:    ProcStat{ParentPID: 1},
+				},
+			}}
+			agents, _, err := DetectAgents(proc, home, nil)
+			if err != nil || len(agents) != test.wantAgents {
+				t.Fatalf("DetectAgents() = %#v, %v; want %d agents", agents, err, test.wantAgents)
+			}
+			if test.wantAgents == 1 && agents[0].ConfigDir != one {
+				t.Fatalf("agent dir = %s, want %s", agents[0].ConfigDir, one)
+			}
+		})
+	}
+	sessions := filepath.Join(one, "sessions")
+	if err := os.MkdirAll(sessions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"pid":901,"sessionId":"` + jobSession + `","procStart":"700","kind":"bg"}`
+	if err := os.WriteFile(filepath.Join(sessions, "901.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proc := &fakeProcFS{processes: map[int]fakeProcess{901: {
+		cmdline: []string{"claude", "bg-spare", "--bg-spare", "/tmp/claim.sock"},
+		environ: map[string]string{"CLAUDE_CONFIG_DIR": one, claudelaunch.ConfigDirDefaultEnv: one},
+		stat:    ProcStat{ParentPID: 1, StartTime: 700},
+	}}}
+	agents, _, err := DetectAgents(proc, home, nil)
+	if err != nil || len(agents) != 1 || agents[0].SessionID != jobSession || agents[0].ConfigDir != one {
+		t.Fatalf("DetectAgents() = %#v, %v; want the daemon job on %s", agents, err, one)
 	}
 }

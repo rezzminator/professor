@@ -175,19 +175,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: read primary account: %v\n", primaryErr)
 		return 1
 	}
-	configDir := config.AmbientClaudeConfigDir()
-	if configDir == "" {
-		if account, found := runtime.Config.AccountByID(primary); found {
-			configDir = account.ConfigDir
-		}
-	}
-	accountID := primary
-	for _, account := range runtime.Config.Accounts {
-		if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
-			accountID = account.ID
-			break
-		}
-	}
+	configDir, accountID := launcherSeatAccount(runtime, primary, paths.OSEnv{})
 	identity, _, continuing := action.LauncherIdentity(arguments)
 	freshID := ""
 	if identity == "" && !continuing {
@@ -396,4 +384,29 @@ func readLaunchStatus(path string) (int, error) {
 
 func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *pfmtmux.Cmd {
 	return pfmtmux.Exec(ctx, binary, socketPath, args...)
+}
+
+// launcherSeatAccount picks the config dir and account a bare `claude` seat
+// launches on: the ambient CLAUDE_CONFIG_DIR the shell exported, else the
+// fleet primary's dir; the account is the roster entry owning that dir, else
+// the primary. The login default is no choice of the operator's: it counts as
+// unset, so the fleet primary wins over it.
+func launcherSeatAccount(runtime config.Runtime, primary int, env paths.Env) (string, int) {
+	configDir := config.AmbientClaudeConfigDirFrom(env)
+	if claudelaunch.InheritedConfigDir(env.Get) {
+		configDir = ""
+	}
+	if configDir == "" {
+		if account, found := runtime.Config.AccountByID(primary); found {
+			configDir = account.ConfigDir
+		}
+	}
+	accountID := primary
+	for _, account := range runtime.Config.Accounts {
+		if configDir != "" && filepath.Clean(account.ConfigDir) == filepath.Clean(configDir) {
+			accountID = account.ID
+			break
+		}
+	}
+	return configDir, accountID
 }

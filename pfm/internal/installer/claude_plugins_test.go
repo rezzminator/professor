@@ -14,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // pluginCall is one argv the fake runner saw, with the account it ran for.
@@ -29,6 +31,7 @@ type pluginCall struct {
 type pluginRunner struct {
 	deps.Runner
 	calls []pluginCall
+	envs  [][]string
 	fail  map[string]string
 	onRun func(configDir, argv string)
 }
@@ -42,6 +45,7 @@ func (runner *pluginRunner) Run(_ context.Context, argv []string, options deps.R
 	}
 	joined := strings.Join(argv[1:], " ")
 	runner.calls = append(runner.calls, pluginCall{argv: joined, configDir: configDir})
+	runner.envs = append(runner.envs, options.Env)
 	if runner.onRun != nil {
 		runner.onRun(configDir, joined)
 	}
@@ -59,9 +63,9 @@ func pluginFixture(t *testing.T) (home, binary, first, second string) {
 	t.Helper()
 	home = t.TempDir()
 	binary = writeScript(t, t.TempDir(), "claude-real", "#!/bin/sh\nexit 0\n")
-	first = filepath.Join(home, ".claude")
+	first = filepath.Join(home, ".cc", "1")
 	second = filepath.Join(home, ".cc", "2")
-	for _, dir := range []string{first, second} {
+	for _, dir := range []string{filepath.Join(home, ".claude"), first, second} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -71,26 +75,31 @@ func pluginFixture(t *testing.T) (home, binary, first, second string) {
 
 func pluginEngine(home, binary, first, second string, runner deps.Runner, out *bytes.Buffer, apply bool) *engine {
 	return &engine{options: Options{
-		Home:           home,
-		ConfigDir:      first,
-		ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: first}, {ID: 2, ConfigDir: second}},
-		ClaudeBinary:   binary,
-		ProcessRunner:  runner,
-		Stdout:         out,
+		Home:             home,
+		ConfigDir:        filepath.Join(home, ".claude"),
+		PrimaryConfigDir: first,
+		ClaudeAccounts:   []pfmconfig.Account{{ID: 1, ConfigDir: first}, {ID: 2, ConfigDir: second}},
+		ClaudeBinary:     binary,
+		ProcessRunner:    runner,
+		Stdout:           out,
 	}, apply: apply}
 }
 
+// TestEnsureClaudePluginsRunsOnceThroughPrimaryOrStore: a roster host runs
+// the step in the primary account's dir; a host with no roster, where
+// ~/.claude is an ordinary config dir, keeps running it in Options.ConfigDir.
 func TestEnsureClaudePluginsRunsOnceThroughPrimaryOrStore(t *testing.T) {
-	for _, primary := range []bool{false, true} {
-		t.Run(fmt.Sprint(primary), func(t *testing.T) {
-			home, binary, store, account := pluginFixture(t)
+	for _, roster := range []bool{false, true} {
+		t.Run(fmt.Sprint(roster), func(t *testing.T) {
+			home, binary, first, account := pluginFixture(t)
 			runner := &pluginRunner{}
 			var out bytes.Buffer
-			inst := pluginEngine(home, binary, store, account, runner, &out, true)
-			dir := store
-			if primary {
-				inst.options.PrimaryConfigDir = account
-				dir = account
+			inst := pluginEngine(home, binary, first, account, runner, &out, true)
+			inst.options.PrimaryConfigDir = account
+			dir := account
+			if !roster {
+				inst.options.ClaudeAccounts, inst.options.PrimaryConfigDir = nil, ""
+				dir = inst.options.ConfigDir
 			}
 			if err := inst.ensureClaudePlugins(context.Background()); err != nil {
 				t.Fatal(err)
@@ -113,6 +122,53 @@ func TestEnsureClaudePluginsRunsOnceThroughPrimaryOrStore(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestClaudePluginStepRefusesTheStoreOnARosterHost: with no primary dir
+// resolved, the fallback to Options.ConfigDir (the store) is refused the way a
+// launch refuses it, and no claude command runs with the store as its dir.
+func TestClaudePluginStepRefusesTheStoreOnARosterHost(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	t.Setenv(paths.EnvHome, home)
+	runner := &pluginRunner{}
+	var out bytes.Buffer
+	inst := pluginEngine(home, binary, first, second, runner, &out, true)
+	inst.options.PrimaryConfigDir = ""
+	store := inst.options.ConfigDir
+	err := inst.ensureClaudePlugins(context.Background())
+	if err == nil || !strings.Contains(err.Error(), store+" resolves to the Claude store") {
+		t.Fatalf("err=%v, want the store refusal\n%s", err, out.String())
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("ran %v with the store as config dir\n%s", runner.calls, out.String())
+	}
+	if !strings.Contains(out.String(), "  FAIL    claude plugins in "+store+": ") {
+		t.Fatalf("no FAIL line for the refusal:\n%s", out.String())
+	}
+}
+
+// TestClaudePluginCommandDropsTheLoginDefaultSentinel: the child runs on the
+// dir pfm chose, so the login default's sentinel never rides along with it.
+func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {
+	home, binary, first, second := pluginFixture(t)
+	t.Setenv(claudelaunch.ConfigDirDefaultEnv, first)
+	runner := &pluginRunner{}
+	var out bytes.Buffer
+	if err := pluginEngine(home, binary, first, second, runner, &out, true).ensureClaudePlugins(
+		context.Background(),
+	); err != nil {
+		t.Fatalf("ensureClaudePlugins: %v\n%s", err, out.String())
+	}
+	if len(runner.envs) == 0 {
+		t.Fatalf("no plugin command ran\n%s", out.String())
+	}
+	for index, environment := range runner.envs {
+		for _, entry := range environment {
+			if strings.HasPrefix(entry, claudelaunch.ConfigDirDefaultEnv+"=") {
+				t.Fatalf("command %v carries %s", runner.calls[index], entry)
+			}
+		}
 	}
 }
 
@@ -318,13 +374,14 @@ func TestEnsureClaudePluginsUnresolvedBinaryIsAVisibleSkip(t *testing.T) {
 }
 
 func TestInstallRunsTheClaudePluginStep(t *testing.T) {
-	home, binary, first, second := pluginFixture(t)
+	home, binary, _, second := pluginFixture(t)
+	store := filepath.Join(home, ".claude")
 	runner := &pluginRunner{}
 	var out bytes.Buffer
 	if _, err := Run(context.Background(), Options{
 		Mode:          ModeApply,
 		Home:          home,
-		ConfigDir:     first,
+		ConfigDir:     store,
 		ClaudeBinary:  binary,
 		ProcessRunner: runner,
 		Runner:        &outputRunner{printOutput: "state = not running\n"},
@@ -339,7 +396,7 @@ func TestInstallRunsTheClaudePluginStep(t *testing.T) {
 			installs[call.configDir]++
 		}
 	}
-	if installs[first] != len(claudePlugins) || installs[second] != 0 {
+	if installs[store] != len(claudePlugins) || installs[second] != 0 {
 		t.Fatalf(
 			"plugin installs per dir=%v, want %d only in the store\n%s",
 			installs,

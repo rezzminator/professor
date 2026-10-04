@@ -165,6 +165,9 @@ func parseClaude(parsed record) (Entry, bool) {
 	}
 }
 
+// codexUserMessageType is the type of the record Codex writes for a human prompt.
+const codexUserMessageType = "user_message"
+
 func parseCodex(parsed record) (Entry, bool) {
 	timestamp := parsed.Timestamp
 	if timestamp == "" {
@@ -194,7 +197,7 @@ func parseCodex(parsed record) (Entry, bool) {
 	role := ""
 	var content json.RawMessage
 	switch parsed.Payload.Type {
-	case "user_message":
+	case codexUserMessageType:
 		role = RoleUser
 		content = parsed.Payload.Message
 	// "agent_message" is not handled here: it is an event_msg record that
@@ -207,7 +210,7 @@ func parseCodex(parsed record) (Entry, bool) {
 		role = parsed.Payload.Role
 		content = parsed.Payload.Content
 	default:
-		if parsed.Type == "user_message" {
+		if parsed.Type == codexUserMessageType {
 			role = RoleUser
 			content = parsed.Message.Content
 			if len(content) == 0 {

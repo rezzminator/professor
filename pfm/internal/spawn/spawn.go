@@ -168,6 +168,9 @@ func Run(
 	if renameErr != nil {
 		return result, renameErr
 	}
+	if err := untrustedFolderGuard(ctx, tmux, request, target); err != nil {
+		return result, err
+	}
 	result.Named = warning == ""
 	if warning != "" {
 		result.Warnings = append(result.Warnings, warning)
@@ -194,15 +197,11 @@ func Run(
 		)
 		return result, nil
 	}
-	if err := submitPrompt(
-		ctx,
-		tmux,
-		request.Socket,
-		target,
-		request.Prompt,
-		timings,
-		trace,
-	); err != nil {
+	err = submitPrompt(ctx, tmux, request.Socket, target, request.Prompt, timings, trace)
+	if guardErr := untrustedFolderGuard(ctx, tmux, request, target); guardErr != nil {
+		return result, guardErr
+	}
+	if err != nil {
 		result.Warnings = append(
 			result.Warnings,
 			fmt.Sprintf("the first prompt was not delivered: %v", err),
@@ -334,6 +333,10 @@ func waitForComposer(
 			// An overlay: dismiss it once the screen has stopped changing, so
 			// a half-drawn frame is never mistaken for a stuck modal.
 			held = 0
+			if codexFolderUntrusted(capture) {
+				trace.step("untrusted folder: nothing pressed | %s", screen(capture))
+				return false
+			}
 			trimmed := strings.TrimSpace(capture)
 			if trimmed != "" && trimmed == previous && dismissals < startupEscapes {
 				key := startupOverlayKey(capture)
@@ -469,9 +472,12 @@ func renameCodexThread(
 	if err := tmux.SendKey(ctx, socket, target, "Enter"); err != nil {
 		return false, fmt.Sprintf("could not open the rename prompt: %v", err), false
 	}
-	if !pollCapture(ctx, tmux, socket, target, timings, renameModalOpen) {
+	if !awaitRenameModal(ctx, tmux, socket, target, timings) {
 		capture, _ := tmux.Capture(ctx, socket, target)
 		trace.step("no name prompt | %s", screen(capture))
+		if codexFolderUntrusted(capture) {
+			return false, "Codex has no active thread to rename", true
+		}
 		_ = tmux.SendKey(ctx, socket, target, "Escape")
 		return false, "Codex never asked for a thread name — the chat is running unnamed", false
 	}
@@ -687,7 +693,7 @@ func composerHolds(capture, needle string) bool {
 // nothing — a draft taller than the pane pushes the row off the top, and
 // reading that as "submitted" is what let a typed-but-unsent brief pass.
 func composerReleased(capture, needle string) bool {
-	return inject.LastComposerLine(capture) != "" && !composerHolds(capture, needle)
+	return inject.ComposerRowShown(capture) && !composerHolds(capture, needle)
 }
 
 func flattenComposerText(value string) string {

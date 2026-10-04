@@ -43,7 +43,6 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"history.jsonl",
 		"stats-cache.json",
 		".last-cleanup",
-		".last-update-result.json",
 		"gh-pr-status-cache.json",
 	}
 	var want []StoreEntry
@@ -76,9 +75,13 @@ func TestClaudeStoreEntries(t *testing.T) {
 		"mcp-needs-auth-cache.json",
 		"telemetry",
 		"feedback",
+		".last-update-result.json",
 	}
 	if !reflect.DeepEqual(AccountEntries, accounts) {
 		t.Fatalf("accounts=%v", AccountEntries)
+	}
+	if retired := []string{".last-update-result.json"}; !reflect.DeepEqual(RetiredStoreEntries, retired) {
+		t.Fatalf("retired=%v, want %v", RetiredStoreEntries, retired)
 	}
 	ignored := []string{"ide", ".cc-new-children", ".cc-pane-children", "settings.local.json"}
 	if !reflect.DeepEqual(IgnoredEntries, ignored) {

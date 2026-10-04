@@ -59,6 +59,7 @@ The table gives one row per detector; exact problems and fixes follow under each
 | `store-identity` | BLOCK | account entries in store | identity inside store | move or inspect/remove |
 | `home-state-file` | WARN | home Claude state | launch without account env | compare account/remove |
 | `account-entry-real` | BLOCK | real shared account entries | data outside store | entry-specific merge |
+| `retired-store-entry` | WARN | retired entries in accounts and store | leftover link or store copy | `pfm install` |
 | `unclassified` | WARN | unknown top-level names | neither entry list | keep |
 | `third-party-mcp` | WARN | user-level MCP names | server outside pfm config | edit `mcp.thirdParty` |
 | `stale-state-tmp` | WARN | old state temp files | older than 24 hours | remove |
@@ -214,9 +215,9 @@ Fix:
 
 **Severity:** BLOCK
 
-Looks at each `AccountEntries` entry in `{store}`; for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
+Looks at each `AccountEntries` entry in `{store}` that is not in `RetiredStoreEntries` (those are `retired-store-entry`'s); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
 
-Problem: `{entry} is account identity inside the store`.
+Problem: `{entry} is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)`. pfm launches always set `CLAUDE_CONFIG_DIR` to an account dir, so identity lands in the store only through a launch that points it at the store.
 
 Fix: `{acct1}` resolving to the store makes `{path}` and `{acct1}/{entry}` one file, so the fix deletes neither:
 
@@ -252,7 +253,17 @@ For `account-entry-real`, the fix is selected by entry. Each fix is one shell li
 - `plugins`: `rm -r {path}  # the store keeps its copy (reinstallable)`.
 - `settings.json`: `jq -e -s '.[0] as $s | .[1] | to_entries | all(.key as $k | ($s | has($k) | not) or $s[$k] == .value)' {store}/settings.json {path} > /dev/null && jq -s '.[0] * .[1]' {store}/settings.json {path} > {store}/settings.json.new && mv {store}/settings.json.new {store}/settings.json && rm {path}  # adds the keys the store lacks; stops while a key differs`.
 - `CLAUDE.md`: `cat {path} >> {store}/CLAUDE.md && rm {path}  # appended whole; prune {store}/CLAUDE.md as you like`.
-- `stats-cache.json`, `.last-cleanup`, `.last-update-result.json`, `gh-pr-status-cache.json`: `rm {path}  # a cache`.
+- `stats-cache.json`, `.last-cleanup`, `gh-pr-status-cache.json`: `rm {path}  # a cache`.
+
+### retired-store-entry
+
+**Severity:** WARN
+
+Looks at each `RetiredStoreEntries` entry: per account by ID, a link at `{acct}/{entry}` resolving to `{store}/{entry}` (skipped for an account `account-is-store` reports), then `{store}/{entry}`. A real `{acct}/{entry}` is the account's own file and gives no row.
+
+Problem: `{entry} links into the store; it is a per-account file now` for a link, `{entry} is a per-account file now; the store copy is retired` for the store copy.
+
+Fix: `run pfm install; it removes the link, and Claude writes this account's own file` for a link, `run pfm install; it archives the copy under {home}/.local/state/pfm/retired-store-entries` for the store copy. Never a BLOCK: the install a block would refuse is the step that migrates these.
 
 ### unclassified
 

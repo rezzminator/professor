@@ -29,7 +29,24 @@ type Meta struct {
 	HumanPrompts        int
 	CompactedAfterUsage bool
 	PostCompactTokens   int64
+	// CodexTurn is where the newest Codex turn record leaves the rollout:
+	// inside a turn or after one ended. Codex writes assistant commentary
+	// between the tool calls of one turn, so only these records tell a turn
+	// that ended from a quiet gap inside one.
+	CodexTurn CodexTurnState
 }
+
+// CodexTurnState is what a Codex rollout's turn records say about its newest turn.
+type CodexTurnState int
+
+const (
+	// CodexTurnUnrecorded is a rollout that holds no turn record at all.
+	CodexTurnUnrecorded CodexTurnState = iota
+	// CodexTurnOpen follows a task_started, or a user_message after a turn ended.
+	CodexTurnOpen
+	// CodexTurnEnded follows a task_complete or a turn_aborted.
+	CodexTurnEnded
+)
 
 // ContextPercent is the share of the context window in use, or 0 when the
 // transcript never stated a window.
@@ -129,6 +146,18 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 	if engine == string(pfmengine.Codex) {
 		if parsed.Payload.Model != "" {
 			meta.Model = parsed.Payload.Model
+		}
+		switch parsed.Payload.Type {
+		case "task_started":
+			meta.CodexTurn = CodexTurnOpen
+		case "task_complete", "turn_aborted":
+			meta.CodexTurn = CodexTurnEnded
+		case codexUserMessageType:
+			// A prompt after a turn ended opens the next one even before its
+			// task_started lands.
+			if meta.CodexTurn == CodexTurnEnded {
+				meta.CodexTurn = CodexTurnOpen
+			}
 		}
 		if parsed.Payload.Type == "token_count" {
 			// Codex emits both the current context-window use and a lifetime

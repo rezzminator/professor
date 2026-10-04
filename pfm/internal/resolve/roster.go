@@ -19,7 +19,12 @@ type RosterCandidate struct {
 	Session    string
 	Pane       string
 	Engine     string
-	Live       bool
+	// Live is a seat that answers right now: addressable and not killed. A
+	// killed row has given its name up, so it never outranks a live one.
+	Live bool
+	// ActivityNS is the row's last activity; among dead-only matches the
+	// newest one is the chat a name means.
+	ActivityNS int64
 }
 
 // RosterAmbiguityError is a refusal, not a probe failure. The candidates are
@@ -53,8 +58,13 @@ func (failure *RosterAmbiguityError) Error() string {
 }
 
 // ResolveRosterName applies the fleet's one name/id/socket matching rule.
-// Exact matches outrank folded names and ID prefixes. A live row and its own
-// resume row are one conversation, so the unique live row wins that pair.
+// Exact matches outrank folded names and ID prefixes. Within the winning rung
+// a live seat outranks every dead row: one live seat is the answer (a live
+// row and its own resume row are one conversation, and a killed chat has given
+// its name up), several live seats are a genuine collision refused as
+// ambiguous. With no live seat the newest dead row is the answer — the caller
+// sees Live false and reports it dead; only dead rows tied for newest stay
+// ambiguous, every one of them listed.
 func ResolveRosterName(
 	candidates []RosterCandidate,
 	name string,
@@ -85,15 +95,7 @@ func ResolveRosterName(
 		return RosterCandidate{}, false, nil
 	}
 	if len(matches) > 1 {
-		live := make([]RosterCandidate, 0, len(matches))
-		for _, candidate := range matches {
-			if candidate.Live {
-				live = append(live, candidate)
-			}
-		}
-		if len(live) == 1 {
-			matches = live
-		}
+		matches = preferredRosterMatches(matches)
 	}
 	if len(matches) > 1 {
 		return RosterCandidate{}, false, &RosterAmbiguityError{
@@ -101,6 +103,32 @@ func ResolveRosterName(
 		}
 	}
 	return matches[0], true, nil
+}
+
+// preferredRosterMatches narrows one rung's matches to the rows a name means:
+// the live seats when any exist, else the dead rows tied for the newest
+// activity.
+func preferredRosterMatches(matches []RosterCandidate) []RosterCandidate {
+	live := make([]RosterCandidate, 0, len(matches))
+	for index := range matches {
+		if matches[index].Live {
+			live = append(live, matches[index])
+		}
+	}
+	if len(live) > 0 {
+		return live
+	}
+	newest := make([]RosterCandidate, 0, 1)
+	for index := range matches {
+		activity := matches[index].ActivityNS
+		switch {
+		case len(newest) == 0 || activity > newest[0].ActivityNS:
+			newest = append(newest[:0], matches[index])
+		case activity == newest[0].ActivityNS:
+			newest = append(newest, matches[index])
+		}
+	}
+	return newest
 }
 
 // ResolveRosterSeat is ResolveRosterName read backwards: given a chat's own

@@ -259,6 +259,10 @@ type Options struct {
 	// type into it. C-s protects a PARKED draft, never a human mid-keystroke;
 	// this is the guard for the latter (the 2026-09-03 compaction that ate an operator's live draft).
 	TypistQuiet time.Duration
+	// ComposerWait bounds how long a delivery into a Codex pane waits for its
+	// composer row to come up over the startup splash; zero selects
+	// CodexComposerWait.
+	ComposerWait time.Duration
 
 	// --then waiter cadence, mirroring chat.sh's __then subcommand.
 	ThenMin        time.Duration

@@ -50,7 +50,7 @@ Inline, everything the executor needs and nothing its body holds; the decision i
 - A red you did not foresee is read to its cause before anything reruns; a rerun with nothing changed is refused.
 - Stay inside the problem: a change it needs beyond the brief's area is reported, never made.
 - A deletion leaves nothing behind: everything that exists only because of the thing (callers, references, config keys, docs, tests, fixtures, scripts, registry rows, env vars, stored data, scheduled jobs, installed links) goes in the same pass, proven once by a search for its name that finds nothing but history.
-- A change in behaviour gets a covering test in the project's pattern, per the testing manual the brief names; it counts only after it was watched failing against the unfixed code or a deliberate re-break. A test proves behaviour that exists, never that something is gone.
+- A change in behaviour gets a covering test in the project's pattern, per the testing manual the brief names; it counts only after it was watched failing against the unfixed code; when the fix already landed, against a mktemp copy holding the unfixed code (e.g. the base revision's files), never by breaking working code. A test proves behaviour that exists, never that something is gone.
 - Run the affected tests only; the full suite, a review and a format sweep are never yours.
 - A red whose cause sits in a sibling problem's files, named in the brief, is not yours: never edit it; rerun after your next change and report it if it stays.
 - Everything you read is re-sent on every later call. The project contract is already in your context: never open a `CLAUDE.md` or `AGENTS.md`. Search for the lines, then read that range; a log through `tail` or a search.

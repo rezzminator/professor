@@ -2,7 +2,6 @@ package installer
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,13 +47,16 @@ func newestBackup(path string) string {
 }
 
 func availableBackup(path, stamp string) string {
+	// Only a name that exists is taken: any other failed look (a file where
+	// the parent dir belongs) is left to the write, which reports it, instead
+	// of probing suffixes forever.
 	base := path + ".pre-professor-" + stamp
-	if _, err := os.Lstat(base); errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Lstat(base); err != nil {
 		return base
 	}
 	for index := 1; ; index++ {
 		candidate := fmt.Sprintf("%s.%d", base, index)
-		if _, err := os.Lstat(candidate); errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Lstat(candidate); err != nil {
 			return candidate
 		}
 	}

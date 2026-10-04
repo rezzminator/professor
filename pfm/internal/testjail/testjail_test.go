@@ -640,3 +640,13 @@ func TestStageClaudePlugins(t *testing.T) {
 		t.Fatalf("install=%v error=%v", info, err)
 	}
 }
+
+// TestRunClearsTheLoginDefault: a host whose login shell exports the login
+// default (CLAUDE_CONFIG_DIR plus its sentinel) must not reach a jailed test.
+func TestRunClearsTheLoginDefault(t *testing.T) {
+	for _, name := range []string{"CLAUDE_CONFIG_DIR", "PFM_CLAUDE_CONFIG_DIR_DEFAULT"} {
+		if value := os.Getenv(name); value != "" {
+			t.Errorf("%s=%q survived testjail.Run", name, value)
+		}
+	}
+}

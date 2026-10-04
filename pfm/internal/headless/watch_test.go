@@ -5,12 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // fakeStep is one Inspect answer.
@@ -651,3 +654,77 @@ func TestFleetWatchWriteFailureIsTheReturnedError(t *testing.T) {
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("pipe closed") }
+
+// Neither watch mode announces a Codex seat IDLE through a quiet gap inside a
+// turn (seat account-sync-4-a read IDLE between tool calls while its screen
+// said Working); the turn's task_complete or turn_aborted is what IDLE waits on.
+func TestWatchHoldsIdleForACodexTurnUntilItsEndRecord(t *testing.T) {
+	const endPoll, stopPoll = 4, 7
+	now := time.Date(2026, 10, 2, 18, 22, 0, 0, time.UTC)
+	stamp := now.Add(-10 * time.Minute)
+	for _, ending := range []struct{ name, line string }{
+		{"task_complete", codexTurnCompleteLine},
+		{"turn_aborted", codexAbortLine},
+	} {
+		for _, transitions := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s transitions=%t", ending.name, transitions), func(t *testing.T) {
+				rollout := writeChat(t, codexTurnStartLine, codexUserLine, codexAssistantLine)
+				if err := os.Chtimes(rollout, stamp, stamp); err != nil {
+					t.Fatal(err)
+				}
+				seat := Chat{Name: "cx", Engine: pfmengine.Codex, Path: rollout, Live: true}
+				polls := 0
+				var idlePolls []int
+				lines, _, err := runFleet(t, func(cancel context.CancelFunc) FleetWatcher {
+					return FleetWatcher{
+						Targets: []string{"cx"},
+						Resolve: func(context.Context, string) (Chat, bool, error) { return seat, true, nil },
+						Inspect: func(ctx context.Context, chat Chat, at time.Time) (Status, error) {
+							polls++
+							if polls == endPoll {
+								appendCodexTurnEnd(t, rollout, ending.line, stamp)
+							}
+							if polls >= stopPoll {
+								cancel()
+							}
+							return Inspect(ctx, chat, at)
+						},
+						Now: func() time.Time { return now },
+					}
+				}, WatchOptions{
+					IdleAfter:   time.Second,
+					Transitions: transitions,
+					OnIdle:      func(Status) error { idlePolls = append(idlePolls, polls); return nil },
+				})
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("Watch() error = %v, want context.Canceled", err)
+				}
+				want := []string{"IDLE cx idle_seconds=600"}
+				if transitions {
+					want = append([]string{"SEEN cx working"}, want...)
+				}
+				assertLines(t, lines, want)
+				if !reflect.DeepEqual(idlePolls, []int{endPoll}) {
+					t.Fatalf("IDLE fired at polls %v, want only at poll %d, when the turn ended", idlePolls, endPoll)
+				}
+			})
+		}
+	}
+}
+
+func appendCodexTurnEnd(t *testing.T, rollout, line string, stamp time.Time) {
+	t.Helper()
+	file, err := os.OpenFile(rollout, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(line + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(rollout, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+}

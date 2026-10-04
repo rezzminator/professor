@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,6 +120,12 @@ func unlinkAccountFix(dir string) string {
 	return "rm " + dir + " && mkdir -m 700 " + dir
 }
 
+// storeIdentityProblem names how identity reaches the store: pfm launches set
+// CLAUDE_CONFIG_DIR to an account dir, so only a launch pointing it at the
+// store writes there.
+const storeIdentityProblem = " is account identity inside the store, written by a Claude launched with " +
+	"CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)"
+
 func storeIdentity(env Env) ([]Row, error) {
 	var rows []Row
 	acct := firstAccountDir(env)
@@ -130,6 +137,10 @@ func storeIdentity(env Env) ([]Row, error) {
 		}
 	}
 	for _, entry := range installer.AccountEntries {
+		if slices.Contains(installer.RetiredStoreEntries, entry) {
+			// Its store copy is retired-store-entry's: pfm install archives it.
+			continue
+		}
 		if entry == "state" {
 			entry = filepath.Join(entry, "mcp-discover-verdicts.json")
 		}
@@ -174,7 +185,7 @@ func storeIdentity(env Env) ([]Row, error) {
 				}
 			}
 		}
-		rows = append(rows, Row{Block, "store-identity", path, entry + " is account identity inside the store", fix})
+		rows = append(rows, Row{Block, "store-identity", path, entry + storeIdentityProblem, fix})
 	}
 	return rows, nil
 }

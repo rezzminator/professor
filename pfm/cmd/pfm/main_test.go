@@ -472,8 +472,8 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "doctor: clean") ||
 		!strings.Contains(stdout.String(), "transcripts=1") ||
-		!strings.Contains(stdout.String(), "host-check: ok (21 checks)") ||
-		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 23 entries)") {
+		!strings.Contains(stdout.String(), "host-check: ok (22 checks)") ||
+		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 22 entries)") {
 		t.Fatalf("doctor stdout=%q", stdout.String())
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -130,6 +131,11 @@ func EngineFromEnvironment(getenv func(string) string) (pfmengine.ID, error) {
 	}
 	for _, id := range pfmengine.All() {
 		d := pfmengine.MustLookup(id)
+		if id == pfmengine.Claude && claudelaunch.InheritedConfigDir(getenv) {
+			// The login default names no seat: a real Claude seat carries its
+			// session id, matched above.
+			continue
+		}
 		if d.HomeEnv != "" && strings.TrimSpace(getenv(d.HomeEnv)) != "" {
 			return id, nil
 		}

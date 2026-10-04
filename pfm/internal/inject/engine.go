@@ -580,9 +580,6 @@ func (engine *Engine) injectResolved(
 		base.Message = "target pane is dead or unreadable"
 		return base, nil
 	}
-	if refused, held := refuseTrustDialog(base, target.Pane, capture); held {
-		return refused, nil
-	}
 	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
 	verifiedEngine := ""
 	if commandErr == nil {
@@ -594,6 +591,10 @@ func (engine *Engine) injectResolved(
 	// Busy is read only AFTER the pane's own process names the engine: the
 	// three TUIs render three different footers (IsBusyFor).
 	paneEngine := pfmengine.ID(target.Engine)
+	capture, err = engine.awaitInputScreen(ctx, &base, target, paneEngine, capture)
+	if err != nil || base.Code != 0 {
+		return base, err
+	}
 	base.Busy = IsBusyFor(paneEngine, capture)
 	// Both TUIs own a safe composer queue while a turn is running. A normal
 	// inject types there and submits without interrupting the active turn;

@@ -78,3 +78,42 @@ func jailStore(t *testing.T) string {
 	}
 	return ClaudeStore(home)
 }
+
+// TestInheritedConfigDirTellsTheLoginDefaultFromAnExplicitValue pins the one
+// rule every reader asks: the login default is CLAUDE_CONFIG_DIR with the
+// sentinel naming the same dir; anything else is an explicit value.
+func TestInheritedConfigDirTellsTheLoginDefaultFromAnExplicitValue(t *testing.T) {
+	for _, test := range []struct {
+		name, value, sentinel string
+		want                  bool
+	}{
+		{"neither", "", "", false},
+		{"login default", "/home/test/.cc/1", "/home/test/.cc/1", true},
+		{"login default, spelled with a trailing slash", "/home/test/.cc/1/", "/home/test/.cc/1", true},
+		{"explicit, no sentinel", "/home/test/.cc/1", "", false},
+		{"explicit over a stale sentinel", "/home/test/.cc/2", "/home/test/.cc/1", false},
+		{"sentinel alone", "", "/home/test/.cc/1", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := map[string]string{"CLAUDE_CONFIG_DIR": test.value, ConfigDirDefaultEnv: test.sentinel}
+			if got := InheritedConfigDir(func(name string) string { return env[name] }); got != test.want {
+				t.Fatalf("InheritedConfigDir(%q, sentinel %q) = %t, want %t", test.value, test.sentinel, got, test.want)
+			}
+		})
+	}
+}
+
+// TestEveryLaunchStripsTheLoginDefaultSentinel pins the sentinel's meaning:
+// a pfm launch sets CLAUDE_CONFIG_DIR itself, so the sentinel never reaches a
+// child whose dir pfm chose, in either hygiene list.
+func TestEveryLaunchStripsTheLoginDefaultSentinel(t *testing.T) {
+	for name, list := range map[string][]string{"Hygiene": Hygiene(), "IdentityHygiene": IdentityHygiene()} {
+		found := false
+		for _, entry := range list {
+			found = found || entry == ConfigDirDefaultEnv
+		}
+		if !found {
+			t.Errorf("%s() = %q, want it to strip %s", name, list, ConfigDirDefaultEnv)
+		}
+	}
+}

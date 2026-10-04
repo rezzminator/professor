@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
@@ -135,10 +136,21 @@ func pluginEnabled(document map[string]any, id string) bool {
 }
 
 // ensureClaudePlugins installs the shared plugins through the primary account.
+// On a roster host its dir passes the refusal every launch applies, so the
+// Options.ConfigDir fallback (the store) never runs; a host with no roster
+// keeps Options.ConfigDir, there an ordinary config dir.
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	dir := installer.options.PrimaryConfigDir
 	if dir == "" {
 		dir = installer.options.ConfigDir
+	}
+	if len(installer.options.ClaudeAccounts) > 0 {
+		if err := installer.checkLaunchConfigDir(0, dir); err != nil {
+			failure := fmt.Errorf("claude plugins in %s: %w", dir, err)
+			installer.say("  FAIL    %s", failure)
+			installer.record("fail", failure.Error(), err)
+			return failure
+		}
 	}
 	document, err := readClaudeSettingsDocument(filepath.Join(dir, "settings.json"))
 	if err != nil {
@@ -227,7 +239,7 @@ func (installer *engine) installClaudePlugin(ctx context.Context, binary, dir st
 		"run %s=%s %s && %s", claudeConfigDirEnv, dir, strings.Join(add, " "), strings.Join(install, " "),
 	)
 	return installer.change(message, func() error {
-		options := deps.RunOptions{Env: deps.EnvironmentWith(claudeConfigDirEnv, dir)}
+		options := deps.RunOptions{Env: pluginCommandEnvironment(dir)}
 		// An already-added marketplace exits non-zero; the install that
 		// follows is the judge, so its failure carries this answer too.
 		addErr := runClaudePluginCommand(ctx, installer.processRunner(), add, options)
@@ -239,6 +251,20 @@ func (installer *engine) installClaudePlugin(ctx context.Context, binary, dir st
 		}
 		return nil
 	})
+}
+
+// pluginCommandEnvironment is the inherited environment with CLAUDE_CONFIG_DIR
+// set to dir and the login default's sentinel dropped: the child runs on the
+// dir pfm chose, so nothing may read it as the inherited default.
+func pluginCommandEnvironment(dir string) []string {
+	inherited := deps.EnvironmentWith(claudeConfigDirEnv, dir)
+	environment := make([]string, 0, len(inherited))
+	for _, entry := range inherited {
+		if !strings.HasPrefix(entry, claudelaunch.ConfigDirDefaultEnv+"=") {
+			environment = append(environment, entry)
+		}
+	}
+	return environment
 }
 
 func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []string, options deps.RunOptions) error {

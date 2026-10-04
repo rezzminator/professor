@@ -52,7 +52,7 @@ func TestRenderFreshInteractive(t *testing.T) {
 		Request{Purpose: PurposeInteractive, Home: home, Account: 2, SessionID: "S"},
 		machine,
 	)
-	if !reflect.DeepEqual(launch.Unset, Hygiene()) || len(launch.Unset) != 22 {
+	if !reflect.DeepEqual(launch.Unset, Hygiene()) || len(launch.Unset) != 23 {
 		t.Errorf("unset=%q", launch.Unset)
 	}
 	if !reflect.DeepEqual(launch.Env, []string{
@@ -272,7 +272,7 @@ func TestRenderQuery(t *testing.T) {
 		Request{Purpose: PurposeQuery, Home: home, Args: []string{"agents", "--json"}},
 		machine,
 	)
-	if len(launch.Unset) != 22 || parsed.Settings["outputStyle"] != "default" ||
+	if len(launch.Unset) != 23 || parsed.Settings["outputStyle"] != "default" ||
 		parsed.Settings["cleanupPeriodDays"] == nil ||
 		parsed.Settings["env"] == nil {
 		t.Errorf("query settings=%#v", parsed.Settings)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -137,11 +138,16 @@ func BirthAccount(
 		return account, cache, nil
 	}
 	// A tool shell can be detached from the seat's process tree. In that case
-	// its own birth config is the only safe account rung for a cache-only reload.
+	// its own birth config is the only safe account rung for a cache-only reload;
+	// the login default is no birth config, so it reads as unset.
 	if engine == pfmengine.Codex {
 		account = CodexHomeAccount(machine, env.Get("CODEX_HOME"))
 	} else {
-		account = machine.AccountForConfigDir(env.Get("CLAUDE_CONFIG_DIR"))
+		birthDir := env.Get("CLAUDE_CONFIG_DIR")
+		if claudelaunch.InheritedConfigDir(env.Get) {
+			birthDir = ""
+		}
+		account = machine.AccountForConfigDir(birthDir)
 		cache = machine.EffectiveClaude(account).Cache1H
 	}
 	return account, cache, nil

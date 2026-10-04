@@ -147,7 +147,9 @@ func (status Status) Line() string {
 //
 // working vs idle is decided by the TRANSCRIPT, not by a timer: a chat whose
 // newest record is a tool call or a human turn owes an answer, and one whose
-// newest record is the assistant speaking has delivered it. A long tool run
+// newest record is the assistant speaking has delivered it — for Codex, whose
+// rollout records each turn's start and end, only a task_complete or a
+// turn_aborted ends the turn (applyCodexTurnRecord). A long tool run
 // therefore reads as working however quiet the file goes, which is the honest
 // answer and the one a watcher must not mistake for finished. A turn the
 // model server ended on an error leaves that error as the newest record, so
@@ -222,6 +224,9 @@ func Inspect(
 	} else if chat.Live {
 		status.State = StateWorking
 	}
+	if chat.Live && chat.Engine == pfmengine.Codex {
+		applyCodexTurnRecord(&status, meta.CodexTurn)
+	}
 	if chat.Live && chat.Engine == pfmengine.Claude && chat.ID != "" {
 		sidechainWorking, err := newerClaudeSidechain(chat.Path, chat.ID, meta.ModifiedUnixNS)
 		if err != nil {
@@ -247,6 +252,27 @@ func Inspect(
 		status.IdleSeconds = 0
 	}
 	return status, nil
+}
+
+// applyCodexTurnRecord lets a Codex rollout's own turn records overrule the
+// newest-entry rule. Codex writes assistant commentary between the tool calls
+// of one turn, so an assistant entry newest is not a turn that ended — only a
+// task_complete or a turn_aborted is, however long the gap before the next
+// tool call. A rollout holding no turn record keeps the newest-entry rule.
+func applyCodexTurnRecord(status *Status, turn transcript.CodexTurnState) {
+	switch turn {
+	case transcript.CodexTurnOpen:
+		status.State = StateWorking
+		status.Error = ""
+	case transcript.CodexTurnEnded:
+		if status.State == StateWorking {
+			// The turn ended after a tool call with no closing message.
+			status.State = StateIdle
+			status.PendingTool = ""
+		}
+	case transcript.CodexTurnUnrecorded:
+		// No turn record to read: the newest-entry rule stands.
+	}
 }
 
 func assistantAnswered(role string) bool {

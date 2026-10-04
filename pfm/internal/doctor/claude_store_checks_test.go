@@ -40,7 +40,7 @@ func TestClaudeStoreChecks(t *testing.T) {
 				}
 			}
 			link := filepath.Join(account, "agents")
-			want, failures := "account-links: ok (1 accounts × 23 entries)\n", 0
+			want, failures := "account-links: ok (1 accounts × 22 entries)\n", 0
 			switch scenario {
 			case "ok":
 			case "store-missing":
@@ -174,7 +174,7 @@ func TestClaudeStoreChecksSymlinkedAccount(t *testing.T) {
 				t.Fatal(err)
 			}
 			want, failures := map[string]string{
-				"outside":      "account-links: ok (1 accounts × 23 entries)\n",
+				"outside":      "account-links: ok (1 accounts × 22 entries)\n",
 				"inside-store": "",
 				"dangling":     fmt.Sprintf("account: 1 %s UNREADABLE error=stat %s: %s\n", account, account, syscall.ENOENT),
 			}[scenario], 0
@@ -211,7 +211,7 @@ func TestDoctorInstalledHomeAccountLinks(t *testing.T) {
 	if got := printClaudeStoreChecks(&out, runtime); got != 0 {
 		t.Fatalf("store failures=%d output=%q", got, out.String())
 	}
-	if want := "host-check: ok (21 checks)\naccount-links: ok (1 accounts × 23 entries)\n"; out.String() != want {
+	if want := "host-check: ok (22 checks)\naccount-links: ok (1 accounts × 22 entries)\n"; out.String() != want {
 		t.Fatalf("output=%q want=%q", out.String(), want)
 	}
 	for _, account := range runtime.Config.Accounts {

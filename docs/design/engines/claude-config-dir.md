@@ -65,7 +65,6 @@ Claude's state file is `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`. With the vari
 | `history.jsonl` | file | prompt history; empty seed |
 | `stats-cache.json` | file | statistics cache; empty seed |
 | `.last-cleanup` | file | cleanup marker; empty seed |
-| `.last-update-result.json` | file | update result; empty seed |
 | `gh-pr-status-cache.json` | file | pull-request status cache; empty seed |
 
 Every missing entry is created empty (apart from the `settings.json` seed). Existing entries are left intact. Transcript readers use `~/.claude/projects` (`engine.claudeDefaultRoots`); `PFM_CLAUDE_ROOTS` is a jail override. The transcript path does not identify its account; the [launch record](claude-launch.md#the-launch-record) does.
@@ -91,6 +90,9 @@ Every missing entry is created empty (apart from the `settings.json` seed). Exis
 | `mcp-needs-auth-cache.json` | MCP servers awaiting account OAuth |
 | `telemetry` | queued account telemetry |
 | `feedback` | queued account feedback |
+| `.last-update-result.json` | the native updater's last result |
+
+`.last-update-result.json` was a store entry until Claude's native updater was seen writing it by temp file and rename at the account path, which replaces a link with a real file. It is the first of `RetiredStoreEntries` (`pfm/internal/installer/retired_store_entries.go`): an entry once linked from every account and now per-account. A real file in an account dir is the healthy shape; a leftover link into the store and the store copy are `retired-store-entry` warnings, which `pfm install` migrates ([Install build](#install-build)). A future retirement is one more row in that list and its name in `AccountEntries`.
 
 `sessions/{pid}.json` describes a live process, rather than the conversation transcript. On reload, the new process registers in the selected account's directory. For `state` inside the store, `store-identity` checks only `state/mcp-discover-verdicts.json`. While account 1's dir resolves to the store, each identity path in the store is the same file as its account path, so `store-identity` prints no delete: the entry moves into the real dir that `account-is-store`'s fix makes ([host-checks.md](host-checks.md#store-identity)). Unknown names in either the store or an account report `UNCLASSIFIED` and remain untouched.
 
@@ -116,6 +118,8 @@ The intended account `.claude.json` contains no `mcpServers`. Install does not i
 
 - The terminal's `claude()` shell function calls pfm's managed launcher (`pfm/internal/installer/assets/shim/pfm.zsh`). Its rendered account launch chooses the ambient account directory or the primary account and sets `CLAUDE_CONFIG_DIR`. Passthrough preserves the ambient environment and supplies only the session plugin values; it does not choose an account.
 - `pfm install --yes --vscode` sets `claudeCode.environmentVariables` in owned VS Code settings to include `CLAUDE_CONFIG_DIR` for the primary account. `vscode-ownership.json` records the prior value. Other environment entries are preserved; an operator edit to pfm's value relinquishes ownership. Uninstall restores the prior value only while pfm's value is still present.
+- `pfm install` writes the login default, so a Claude started from a login shell, a systemd user service or a desktop launcher lands in account 1's dir (the roster's account 1, never a literal) instead of the store. `~/.config/environment.d/pfm-claude-config-dir.conf` carries `CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-{config dir}}` and `PFM_CLAUDE_CONFIG_DIR_DEFAULT={config dir}`; `~/.profile` and `~/.zshenv` each carry one block fenced by `# BEGIN pfm claude-config-dir — installer-owned` and `# END pfm claude-config-dir — installer-owned` that sets and exports both only when `CLAUDE_CONFIG_DIR` is unset or empty (`if [ -z "${CLAUDE_CONFIG_DIR:-}" ]`). The condition is load-bearing: `~/.zshenv` runs in every zsh, including the shells of panes pfm launched on another account and every tool shell of a running chat. environment.d has no conditional that sets one variable on another's absence, so its sentinel is unconditional; `claudelaunch.InheritedConfigDir` counts the sentinel only where `CLAUDE_CONFIG_DIR` equals it, so a preset dir never reads as the default. Every pfm launch strips the sentinel and sets `CLAUDE_CONFIG_DIR` itself.
+- Install creates a missing file, keeps every other line, replaces the block in place (appending it the first time; a changed existing file is backed up as `{file}.pre-professor-{stamp}`) and writes a symlinked startup file through to its target; a second install prints `ok` and changes nothing; a preview prints the same `change` lines and writes nothing. A host with no roster, or none with account 1, gets `skip    login default: {reason}`. Account 1's dir failing the launch refusal, a value with a space, quote, backslash, `$` or backtick, or a damaged fence (a begin with no end, an end with no begin, two begins) prints `FAIL    login default: …` and fails the run after every other step, the file untouched. Uninstall removes both blocks, deleting a file left empty, and the environment.d file.
 - A bare binary launched without `CLAUDE_CONFIG_DIR` reads shared files from the store and state from `~/.claude.json`. Doctor warns about that home state file and blocks on identity entries inside the store. A bare binary needs an explicit account directory to use that account's identity.
 
 ## Install build
@@ -129,6 +133,13 @@ After the gate, `wireClaudeStore` builds the shared entries and links:
 3. Create an absent shared-entry link to the store; replace a link pointing elsewhere; report a correct link as `ok`. Leave every real file or directory untouched: the host gate already refused that shape.
 
 The install transcript uses `change  create {path}`, `change  link {config dir}/{entry} -> {store}/{entry}`, `change  repoint {config dir}/{entry} -> {store}/{entry} (was {old})`, and `ok      {config dir}/{entry}`.
+
+Then `retireStoreEntries` migrates each `RetiredStoreEntries` entry:
+
+1. In each account, by ID, remove a link at `{config dir}/{entry}` resolving to `{store}/{entry}`: `change  unlink {config dir}/{entry} (a per-account file now)`. A real file, a link elsewhere and an absent entry are left alone; Claude writes the account's own file.
+2. After every account's link is gone, move `{store}/{entry}` into `{home}/.local/state/pfm/retired-store-entries/{entry}.pre-professor-{stamp}` (a `.N` suffix when taken): `change  archive {store}/{entry} -> {archive}`. Nothing is deleted. While an account resolves to the store, the copy stays: `skip    keep {store}/{entry}: account {id} {dir} resolves to the store — pfm doctor names the fix`.
+
+A preview prints the same lines and writes nothing. A failed remove, mkdir or rename returns the error naming its paths. A second run finds nothing to do and prints nothing.
 
 ## Managed settings
 
@@ -145,6 +156,8 @@ The value comes from `claude.cleanupPeriodDays` and also rides launch `--setting
 pfm writes no launch setting or env key into user settings, no account `.claude.json` content, no `settings.local.json`, `output-styles/` or `keybindings.json`, and no user `CLAUDE.md` content. It creates the shared `CLAUDE.md` empty when absent. Account trust, onboarding and identity are Claude's.
 
 The plugin step runs once through the primary account for `cache-live-control`, `sub-agent-compact` and `agent-effort`. Claude's plugin commands write shared `plugins/**` and `enabledPlugins` in shared `settings.json` through that account's links. An already installed and enabled plugin needs no command. A live chat on any account defers needed plugin commands; an unreadable live-process probe or a failed command returns an error.
+
+On a host with an account roster the step's dir passes `claudelaunch.CheckConfigDir`, the refusal every launch applies: with no primary dir resolved, the fallback to install's config dir (the store) prints `FAIL    claude plugins in {store}: {store} resolves to the Claude store — run pfm doctor`, runs no command and fails the run after every later step. A preview passes a primary dir install would create first. A host with no roster, or `--config-dir`, keeps running the step in that dir, there an ordinary config dir. Each plugin command's environment sets `CLAUDE_CONFIG_DIR` and drops `PFM_CLAUDE_CONFIG_DIR_DEFAULT`.
 
 ## Registries
 

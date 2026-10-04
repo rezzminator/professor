@@ -38,7 +38,49 @@ func (resolver NameResolver) ResolveName(
 	if err != nil {
 		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("resolve roster name %q: %w", name, err)
 	}
-	return seatTarget(values, liveSeats(rows, requiredEngine), name)
+	return rosterTarget(values, rows, requiredEngine, name)
+}
+
+// rosterTarget is ResolveName over an already-read roster. Only a live seat is
+// a target; a name only dead rows answer to is still a miss — the raw pane
+// rungs may yet find a fresh seat — but the miss names the newest dead chat
+// and says it is dead, so it never reads as a chat that does not exist.
+func rosterTarget(
+	values paths.Values,
+	rows []compose.Row,
+	requiredEngine, name string,
+) (inject.Target, int, string, error) {
+	target, code, detail, err := seatTarget(values, liveSeats(rows, requiredEngine), name)
+	if err != nil || code != inject.CodeUnknown {
+		return target, code, detail, err
+	}
+	engineRows := make([]compose.Row, 0, len(rows))
+	for index := range rows {
+		if requiredEngine == "" || string(compose.EngineForKind(rows[index].Kind)) == requiredEngine {
+			engineRows = append(engineRows, rows[index])
+		}
+	}
+	dead, found, err := Match(engineRows, name)
+	if err != nil {
+		var ambiguous *resolve.RosterAmbiguityError
+		if errors.As(err, &ambiguous) {
+			return inject.Target{}, inject.CodeUnknown, fmt.Sprintf(
+				"%q matched no live chat; its dead matches are tied: %s", name, ambiguous.Error(),
+			), nil
+		}
+		return inject.Target{}, inject.CodeUndelivered, "", fmt.Errorf("resolve dead roster name %q: %w", name, err)
+	}
+	if !found || dead.Live {
+		return inject.Target{}, inject.CodeUnknown, "", nil
+	}
+	socket := dead.Socket
+	if socket == "" {
+		socket = "none"
+	}
+	return inject.Target{}, inject.CodeUnknown, fmt.Sprintf(
+		"%q matched no live chat; its newest match is dead: thread id %s (socket %s, name %q)",
+		name, dead.ID, socket, dead.Name,
+	), nil
 }
 
 // paths is the runtime's resolved paths — the ones its scan read — or the

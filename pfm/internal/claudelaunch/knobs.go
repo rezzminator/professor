@@ -128,7 +128,7 @@ type Knob struct {
 }
 
 var hygiene = []string{
-	envSessionID, envClaudeCode, envChildSession, configDirEnv,
+	envSessionID, envClaudeCode, envChildSession, configDirEnv, ConfigDirDefaultEnv,
 	envProjectDir, envCache1H, envCache5M, envPromptCacheTTL, envSubagentPromptCacheTTL,
 	envCacheLiveControlMainTTL, envCacheLiveControlAgentsTTL,
 	envSimplePrompt, envAnthropicBaseURL, envAnthropicAuthToken,
@@ -309,6 +309,7 @@ func IdentityHygiene() []string {
 		envClaudeCode,
 		envChildSession,
 		configDirEnv,
+		ConfigDirDefaultEnv,
 		envCodexThreadID,
 	}
 }

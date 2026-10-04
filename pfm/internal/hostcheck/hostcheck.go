@@ -89,6 +89,7 @@ func Detectors() []Detector {
 		{"store-identity", storeIdentity},
 		{"home-state-file", homeStateFile},
 		{"account-entry-real", accountEntryReal},
+		{checkRetiredStoreEntry, retiredStoreEntry},
 		{classUnclassified, unclassified},
 		{"third-party-mcp", thirdPartyMCP},
 		{"stale-state-tmp", staleStateTmp},

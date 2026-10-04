@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
@@ -853,5 +854,30 @@ func TestStatuslineQuotaSnapshotRecordsAZeroFiveHourReadingAndEveryWindow(t *tes
 	usage, _, found, err := usagehook.ReadStatuslineSnapshot(rateDir, 2, configDir, now, time.Minute)
 	if err != nil || !found || usage.FiveHour.Utilization == nil || *usage.FiveHour.Utilization != 0 {
 		t.Fatalf("read back found=%v err=%v five_hour=%v, want the 0%% reading", found, err, usage.FiveHour)
+	}
+}
+
+// TestEngineFromEnvironmentIgnoresTheLoginDefault: the login default is no
+// engine signal; a real Claude seat still names itself by its session id.
+func TestEngineFromEnvironmentIgnoresTheLoginDefault(t *testing.T) {
+	const dir = "/home/test/.cc/1"
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+		want pfmengine.ID
+	}{
+		{"neither set", map[string]string{}, ""},
+		{"login default", map[string]string{"CLAUDE_CONFIG_DIR": dir, claudelaunch.ConfigDirDefaultEnv: dir}, ""},
+		{"explicit", map[string]string{"CLAUDE_CONFIG_DIR": dir}, pfmengine.Claude},
+		{"login default inside a Claude seat", map[string]string{
+			"CLAUDE_CONFIG_DIR": dir, claudelaunch.ConfigDirDefaultEnv: dir, "CLAUDE_CODE_SESSION_ID": "s",
+		}, pfmengine.Claude},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := EngineFromEnvironment(func(key string) string { return test.env[key] })
+			if got != test.want || (test.want == "") != errors.Is(err, ErrNoEngineInEnvironment) {
+				t.Fatalf("EngineFromEnvironment(%q) = (%q, %v), want %q", test.env, got, err, test.want)
+			}
+		})
 	}
 }

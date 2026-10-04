@@ -59,7 +59,12 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-codex-then", Pane: "%7",
 			Then: "continue the task",
 		},
-		Options{ThenTries: 2},
+		// A Codex follow-up is pasted (then_paste.go); the fake draws the
+		// pasted text as its draft the same way it draws typed text.
+		Options{ThenTries: 2, Paste: func(_ context.Context, _, _, text string) error {
+			tmux.literal = text
+			return nil
+		}},
 		tmux,
 		proc,
 		io.Discard,

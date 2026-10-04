@@ -53,7 +53,6 @@ var StoreEntries = []StoreEntry{
 	{Name: "history.jsonl"},
 	{Name: "stats-cache.json"},
 	{Name: ".last-cleanup"},
-	{Name: ".last-update-result.json"},
 	{Name: "gh-pr-status-cache.json"},
 }
 
@@ -61,7 +60,7 @@ var AccountEntries = []string{
 	".credentials.json", ".claude.json", ".claude.json.backup", "backups",
 	"sessions", "daemon", "daemon.log", "daemon-auth-status.json",
 	"daemon-auth-cooldown", "jobs", "cache", "state", "mcp-needs-auth-cache.json",
-	"telemetry", "feedback",
+	"telemetry", "feedback", ".last-update-result.json",
 }
 
 var IgnoredEntries = []string{"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName}

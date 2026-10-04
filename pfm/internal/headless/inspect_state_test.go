@@ -245,3 +245,48 @@ func TestABlockedChatIsAliveAndKeepsItsState(t *testing.T) {
 		t.Fatalf("Line() = %q, want the blocked state", status.Line())
 	}
 }
+
+const (
+	codexTurnStartLine    = `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-0001"}}`
+	codexTurnCompleteLine = `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-0001","last_agent_message":null}}`
+)
+
+// A live Codex seat is idle only once its rollout's newest turn record ends the
+// turn: the assistant commentary Codex writes between tool calls is newest
+// through every quiet gap of a turn still running.
+func TestACodexTurnIsIdleOnlyAfterItsEndRecord(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"commentary mid-turn", []string{codexTurnStartLine, codexUserLine, codexAssistantLine}, StateWorking},
+		{"task_complete", []string{codexTurnStartLine, codexUserLine, codexAssistantLine, codexTurnCompleteLine}, StateIdle},
+		{"turn_aborted", []string{codexTurnStartLine, codexUserLine, codexAssistantLine, codexAbortLine}, StateIdle},
+		{"task_complete after a tool call", []string{codexTurnStartLine, codexUserLine, codexToolLine, codexTurnCompleteLine}, StateIdle},
+		{"a prompt after the turn ended", []string{codexTurnStartLine, codexAssistantLine, codexTurnCompleteLine, codexUserLine}, StateWorking},
+		{"no turn record keeps the newest-entry rule", []string{codexUserLine, codexAssistantLine}, StateIdle},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := writeChat(t, testCase.lines...)
+			stamp := time.Now().Add(-10 * time.Minute)
+			if err := os.Chtimes(path, stamp, stamp); err != nil {
+				t.Fatal(err)
+			}
+			status, err := Inspect(context.Background(),
+				Chat{Name: "seat", Engine: pfmengine.Codex, Path: path, Live: true}, time.Now())
+			if err != nil {
+				t.Fatalf("Inspect() error = %v", err)
+			}
+			if status.State != testCase.want {
+				t.Fatalf("State = %q, want %q (status %#v)", status.State, testCase.want, status)
+			}
+			if status.State == StateIdle && (status.IdleSeconds < 599 || status.PendingTool != "") {
+				t.Fatalf("status = %#v, want idle ~600s with no pending tool", status)
+			}
+			if status.State == StateWorking && status.IdleSeconds != 0 {
+				t.Fatalf("IdleSeconds = %d on a working seat", status.IdleSeconds)
+			}
+		})
+	}
+}

@@ -196,6 +196,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.wireClaudeStore(); err != nil {
 		return err
 	}
+	if err := installer.retireStoreEntries(); err != nil {
+		return err
+	}
 	if err := installer.retirePredecessors(); err != nil {
 		return err
 	}
@@ -318,7 +321,10 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.writeUpdateMetadata(); err != nil {
 		return errors.Join(err, restartErr)
 	}
-	return errors.Join(pluginErr, restartErr)
+	// Like a failed plugin install, a refused login default is reported at
+	// once and fails the run after every other step has landed.
+	loginErr := installer.wireLoginDefault(false)
+	return errors.Join(pluginErr, loginErr, restartErr)
 }
 
 // wireCodexAgents runs on every install: it serves the Claude agent
@@ -803,6 +809,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.wireShell(true); err != nil {
+		return err
+	}
+	if err := installer.wireLoginDefault(true); err != nil {
 		return err
 	}
 	if err := installer.wireVSCode(); err != nil {

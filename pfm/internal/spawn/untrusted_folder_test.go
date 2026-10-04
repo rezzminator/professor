@@ -7,14 +7,16 @@ import (
 )
 
 // untrustedCodex is fakeCodex in a folder it does not trust, as a live 0.159.0
-// pane played it: the folder-trust dialog (Escape there leads on to a Read
-// Only composer with no thread), and a composer that answers /rename with
-// codexNoThread and only queues a prompt — the composer empties, so the
-// prompt looks submitted.
+// pane played it: the folder-trust dialog (its option key "1" trusts the
+// folder and starts a thread; Escape leads on to a Read Only composer with no
+// thread), and a composer that answers /rename with codexNoThread and only
+// queues a prompt — the composer empties, so the prompt looks submitted.
+// holdsTrust is a dialog that ignores its option key.
 type untrustedCodex struct {
 	*fakeCodex
 
 	trustAsked bool
+	holdsTrust bool
 	noThread   bool
 	noticed    bool
 }
@@ -46,8 +48,11 @@ func (fake *untrustedCodex) SendKey(ctx context.Context, socket, target, key str
 	switch {
 	case fake.trustAsked:
 		fake.keys = append(fake.keys, "key:"+key)
-		if key == "Escape" {
+		switch {
+		case key == "Escape":
 			fake.trustAsked = false
+		case key == "1" && !fake.holdsTrust:
+			fake.trustAsked, fake.noThread = false, false
 		}
 		fake.mutex.Unlock()
 		return nil
@@ -95,13 +100,43 @@ func TestCodexWithoutAThreadFailsAtThePrompt(t *testing.T) {
 	requireUntrustedRefusal(t, result, err)
 }
 
+// TestCodexFolderTrustDialogIsNeverEscaped is 0.159's "Trust this folder?"
+// dialog: pfm trusts the folder by the dialog's own option key, exactly as it
+// accepts the older "1. Yes, continue", then renames and prompts. Escape there
+// would leave a thread-less Read Only composer.
 func TestCodexFolderTrustDialogIsNeverEscaped(t *testing.T) {
 	fake := newUntrustedCodex()
 	fake.trustAsked = true
 	result, err := Run(context.Background(), fake, codexRequest())
+	if err != nil {
+		t.Fatalf("Run() error = %v, keys=%v", err, fake.keys)
+	}
+	if len(fake.keys) == 0 || fake.keys[0] != "key:1" {
+		t.Fatalf("trust dialog keys=%v, want its option key 1 first", fake.keys)
+	}
+	if countKey(fake.keys, "key:Escape") != 0 {
+		t.Fatalf("the folder-trust dialog was escaped: %v", fake.keys)
+	}
+	if !result.Named || !result.Prompted || len(result.Warnings) != 0 {
+		t.Fatalf("result = %#v, keys=%v", result, fake.keys)
+	}
+}
+
+// TestCodexFolderTrustDialogThatHoldsFailsLoudly is a dialog that ignores its
+// option key: nothing is typed into it, nothing escapes it, and the spawn
+// fails naming the untrusted folder instead of reporting a chat started.
+func TestCodexFolderTrustDialogThatHoldsFailsLoudly(t *testing.T) {
+	fake := newUntrustedCodex()
+	fake.trustAsked, fake.holdsTrust = true, true
+	result, err := Run(context.Background(), fake, codexRequest())
 	requireUntrustedRefusal(t, result, err)
-	if len(fake.keys) != 0 {
-		t.Fatalf("keys sent to an untrusted folder's dialog: %v", fake.keys)
+	for _, key := range fake.keys {
+		if key != "key:1" {
+			t.Fatalf("a held trust dialog got more than its option key: %v", fake.keys)
+		}
+	}
+	if count := countKey(fake.keys, "key:1"); count == 0 || count > startupEscapes {
+		t.Fatalf("option key presses = %d, want 1..%d: %v", count, startupEscapes, fake.keys)
 	}
 }
 
@@ -133,6 +168,29 @@ func TestCodexFolderUntrustedReadsOnlyTheNotice(t *testing.T) {
 	for _, testCase := range cases {
 		if got := codexFolderUntrusted(testCase.capture); got != testCase.want {
 			t.Errorf("%s: codexFolderUntrusted = %v, want %v", testCase.name, got, testCase.want)
+		}
+	}
+}
+
+func TestCodexFolderTrustKeyReadsTheDialogsOwnOption(t *testing.T) {
+	cases := []struct {
+		name    string
+		capture string
+		want    string
+	}{
+		{"the dialog", untrustedDialog, "1"},
+		{"the row renumbered", strings.Replace(untrustedDialog, "1. Trust", "2. Trust", 1), "2"},
+		{"the row not selected", strings.Replace(untrustedDialog, "› 1. Trust", "  1. Trust", 1), "1"},
+		{"the row without the title", "› 1. Trust and continue\n  2. Back to Agent Command Center\n", ""},
+		{"the title without the row", "  Trust this folder? is what it asked\n› \n" + fakeStatusLine, ""},
+		{"the older trust dialog", codexTrustQuestion + "\n› " + codexTrustYes + "\n", ""},
+	}
+	for _, testCase := range cases {
+		if got := codexFolderTrustKey(testCase.capture); got != testCase.want {
+			t.Errorf("%s: codexFolderTrustKey = %q, want %q", testCase.name, got, testCase.want)
+		}
+		if key := startupOverlayKey(testCase.capture); testCase.want != "" && key != testCase.want {
+			t.Errorf("%s: startupOverlayKey = %q, want %q", testCase.name, key, testCase.want)
 		}
 	}
 }

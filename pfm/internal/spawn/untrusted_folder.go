@@ -19,8 +19,10 @@ import (
 //     Its Escape is "Back to Agent Command Center", and a second Escape lands
 //     on a Read Only composer with no thread — a screen that looks ready and
 //     is not, which is how a chat was reported started with its first prompt
-//     still queued. Pressing "Trust and continue" saves a trust decision that
-//     lets the folder's settings run code, which pfm leaves to the human.
+//     still queued. pfm answers it as it answers the older trust dialog
+//     (codexTrustYes): "Trust and continue", chosen by the option key the
+//     dialog numbers it with, never Escape. A dialog still standing after
+//     that is a folder Codex will not trust, and the spawn fails on it.
 const (
 	codexNoThread         = "No active thread is available."
 	codexFolderTrustTitle = "Trust this folder?"
@@ -50,6 +52,42 @@ func codexFolderUntrusted(capture string) bool {
 		}
 	}
 	return trustAsked && trustOffered
+}
+
+// codexFolderTrustKey returns the option key of the "Trust and continue" row
+// of 0.159's trust dialog — "1" for "› 1. Trust and continue" — or "" when the
+// capture shows no such dialog. The row counts only under the dialog's title,
+// with or without the selection glyph before it.
+func codexFolderTrustKey(capture string) string {
+	asked, key := false, ""
+	for _, line := range strings.Split(capture, "\n") {
+		row := strings.TrimSpace(line)
+		if strings.HasPrefix(row, codexFolderTrustTitle) {
+			asked = true
+			continue
+		}
+		option := strings.TrimSpace(strings.TrimPrefix(row, codexComposer))
+		number, label, found := strings.Cut(option, ". ")
+		if found && label == codexFolderTrustYes && len(number) == 1 && unicode.IsDigit(rune(number[0])) {
+			key = number
+		}
+	}
+	if !asked {
+		return ""
+	}
+	return key
+}
+
+// startupOverlayKey is the key that clears a startup overlay: each trust
+// dialog's affirmative choice, Escape for everything else.
+func startupOverlayKey(capture string) string {
+	if key := codexFolderTrustKey(capture); key != "" {
+		return key
+	}
+	if strings.Contains(capture, codexTrustQuestion) && strings.Contains(capture, codexTrustYes) {
+		return "Enter"
+	}
+	return "Escape"
 }
 
 // awaitRenameModal waits for Codex's rename dialog and reports whether it

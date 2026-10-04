@@ -92,6 +92,10 @@ type Options struct {
 	// ClaudeAccounts is the configured Claude account roster whose registries
 	// (ClaudeUserRegistries) the fullscreen canary clear visits; nil visits none.
 	ClaudeAccounts []pfmconfig.Account
+	// ClaudeRosterHost is set when the config lists Claude accounts, with or
+	// without --config-dir, which leaves ClaudeAccounts nil; only the plugin
+	// step reads it, refusing a dir that resolves to the store.
+	ClaudeRosterHost bool
 	// CodexBinary enables native hook trust registration for command callers.
 	CodexBinary string
 	Clock       clock.Clock

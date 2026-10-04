@@ -296,7 +296,8 @@ func composerReady(capture string) bool {
 // waitForCodexComposer returns once the composer is drawn, dismissing startup
 // overlays along the way. Most overlays dismiss with Escape, but Codex
 // 0.149's directory-trust dialog makes Escape quit the whole TUI; its exact
-// affirmative row is accepted with Enter. A key is sent only once the screen
+// affirmative row is accepted with Enter, and 0.159's "Trust this folder?" by
+// its option key (startupOverlayKey). A key is sent only once the screen
 // has stopped changing, so a slow paint is never mistaken for a stuck modal.
 func waitForCodexComposer(
 	ctx context.Context,
@@ -333,7 +334,7 @@ func waitForComposer(
 			// An overlay: dismiss it once the screen has stopped changing, so
 			// a half-drawn frame is never mistaken for a stuck modal.
 			held = 0
-			if codexFolderUntrusted(capture) {
+			if codexFolderUntrusted(capture) && codexFolderTrustKey(capture) == "" {
 				trace.step("untrusted folder: nothing pressed | %s", screen(capture))
 				return false
 			}
@@ -357,13 +358,6 @@ func waitForComposer(
 			return false
 		}
 	}
-}
-
-func startupOverlayKey(capture string) string {
-	if strings.Contains(capture, codexTrustQuestion) && strings.Contains(capture, codexTrustYes) {
-		return "Enter"
-	}
-	return "Escape"
 }
 
 // nameCodexThread waits for a composer that holds, then renames — retrying the

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
@@ -131,6 +132,7 @@ func Await(
 	answers := make([]string, 0, 2)
 	newestRole := ""
 	quietSince := start
+	codexTurn := codexTurnRead{at: -1}
 	var chat Chat
 	found := false
 	resolvedAt := time.Time{}
@@ -220,6 +222,13 @@ func Await(
 		answered := len(answers) > 0 &&
 			assistantAnswered(newestRole) &&
 			options.Now().Sub(quietSince) >= options.Settle
+		if answered && chat.Engine == pfmengine.Codex {
+			open, err := codexTurn.open(path, offset)
+			if err != nil {
+				return finish(turn, answers, start, options.Now()), err
+			}
+			answered = !open
+		}
 		if answered {
 			turn.State = StateIdle
 			return finish(turn, answers, start, options.Now()), nil
@@ -239,6 +248,30 @@ func Await(
 			return finish(turn, answers, start, options.Now()), err
 		}
 	}
+}
+
+// codexTurnRead holds a Codex rollout's turn record as last read, keyed by the
+// transcript offset it was read at, so a quiet file is scanned once, not once
+// per poll.
+type codexTurnRead struct {
+	at    int64
+	state transcript.CodexTurnState
+}
+
+// open says whether the rollout's newest turn record leaves a turn running —
+// the end-record rule Inspect applies (applyCodexTurnRecord). Codex writes
+// assistant commentary between the tool calls of one turn, so a quiet gap
+// after it is not an answer until a task_complete or a turn_aborted lands. A
+// rollout holding no turn record keeps the newest-entry rule.
+func (read *codexTurnRead) open(path string, offset int64) (bool, error) {
+	if read.at != offset {
+		meta, err := transcript.ReadMeta(path, string(pfmengine.Codex))
+		if err != nil {
+			return false, fmt.Errorf("read Codex turn records %s: %w", path, err)
+		}
+		read.at, read.state = offset, meta.CodexTurn
+	}
+	return read.state == transcript.CodexTurnOpen, nil
 }
 
 // Frontier is the transcript offset to record before speaking.

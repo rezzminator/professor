@@ -242,6 +242,7 @@ func newInstallerOptions(
 		for _, account := range runtime.Config.CodexAccounts {
 			options.CodexHomes = append(options.CodexHomes, account.Home)
 		}
+		options.ClaudeRosterHost = len(runtime.Config.Accounts) > 0
 		if configDir == "" {
 			options.ClaudeAccounts = runtime.Config.Accounts
 			if len(runtime.Config.Accounts) > 0 {

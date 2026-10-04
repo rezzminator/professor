@@ -597,6 +597,9 @@ func TestInstallerOptionsPrimaryAccount(t *testing.T) {
 			if options.PrimaryConfigDir != want {
 				t.Fatalf("PrimaryConfigDir=%q want %q", options.PrimaryConfigDir, want)
 			}
+			if roster := state != "empty"; options.ClaudeRosterHost != roster {
+				t.Fatalf("ClaudeRosterHost=%v want %v", options.ClaudeRosterHost, roster)
+			}
 			if state == "unreadable" {
 				_, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
 				line := fmt.Sprintf("  skip    primary account unreadable (%v); using account 2\n", err)

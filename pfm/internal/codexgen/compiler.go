@@ -37,6 +37,7 @@ type Result struct {
 	// silently disarms the gate, and an unrelated warning that happens to carry
 	// the word arms it against nothing.
 	Dangling  []string
+	leafLinks []sourceEntry // unresolvable leaf source links (unresolved.go)
 	Wrote     int
 	Unchanged int
 	Deleted   int
@@ -177,7 +178,7 @@ func Run(options Options) (Result, error) {
 		}
 	}
 	for _, output := range outputs {
-		if strings.HasSuffix(output.Path, ".toml") {
+		if output.Kept == nil && strings.HasSuffix(output.Path, ".toml") {
 			if parseErr := validateTOML(output.Content); parseErr != nil {
 				problem(fmt.Sprintf("UNPARSEABLE generated %s: %v", output.Path, parseErr))
 			}
@@ -366,12 +367,6 @@ func discoverCommandRosterIn(sourceRoot string, exclusions []string, result *Res
 	return roster
 }
 
-type sourceEntry struct {
-	path     string
-	rel      string
-	skillDir bool
-}
-
 func discoverMarkdown(dir string, excludes []string, result *Result) []sourceEntry {
 	entries := []sourceEntry{}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -411,7 +406,7 @@ func discoverMarkdown(dir string, excludes []string, result *Result) []sourceEnt
 			info, statErr := os.Stat(path)
 			if item.Type()&os.ModeSymlink != 0 {
 				if statErr != nil {
-					result.danglingSource(path, statErr)
+					result.unresolvedLeaf(path, rel, statErr)
 					continue
 				}
 			}
@@ -469,7 +464,7 @@ func compileAgents(
 	seen := map[string]bool{}
 	for _, project := range projects {
 		dir := filepath.Join(root, project, ".claude", "agents")
-		for _, entry := range discoverMarkdown(dir, nil, result) {
+		for _, entry := range markdownSources(dir, nil, result) {
 			if entry.skillDir {
 				continue
 			}
@@ -502,6 +497,10 @@ func compileAgents(
 				continue
 			}
 			seen[name] = true
+			if entry.target != "" {
+				add(keptTwin(filepath.Join(root, ".codex", "agents", name+".toml"), entry))
+				continue
+			}
 			raw, err := os.ReadFile(entry.path)
 			if err != nil {
 				problem(fmt.Sprintf("read %s: %v", entry.path, err))
@@ -558,7 +557,11 @@ func compileRepoCommands(
 	result *Result,
 ) {
 	sourceRoot := filepath.Join(root, ".claude", "commands")
-	for _, entry := range discoverMarkdown(sourceRoot, cfg.ExcludeDirs, result) {
+	for _, entry := range markdownSources(sourceRoot, cfg.ExcludeDirs, result) {
+		if entry.target != "" {
+			add(keptCommandTwin(root, entry))
+			continue
+		}
 		if entry.skillDir {
 			dst := filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)))
 			add(generatedFile{Path: dst, Link: relativeLink(dst, entry.path)})

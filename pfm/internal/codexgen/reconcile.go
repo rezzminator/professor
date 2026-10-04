@@ -29,6 +29,10 @@ type generatedFile struct {
 	// means "use the package default" (0o644) — every existing caller
 	// leaves it unset, so this changes nothing until a caller sets it.
 	Mode os.FileMode
+	// Kept marks the twin of a source link that does not resolve right now
+	// (an uninitialised submodule): reconcile leaves the path as it is and
+	// never sweeps it as an orphan (unresolved.go).
+	Kept *sourceEntry
 }
 
 // defaultGeneratedFileMode is the permission every reconcileFile write has
@@ -87,6 +91,10 @@ func reconcileManagedWithClaim(
 			return result, result.err
 		}
 		wanted[managedEntry(output.Path, managed)] = true
+		if output.Kept != nil {
+			result.keepTwin(output)
+			continue
+		}
 		if output.Link != "" {
 			result.reconcileLink(output, mode, owns)
 			continue

@@ -148,6 +148,41 @@ func TestClaudePluginStepRefusesTheStoreOnARosterHost(t *testing.T) {
 	}
 }
 
+// TestClaudePluginStepRefusesAConfigDirStoreOnARosterHost: --config-dir
+// leaves the roster unpassed; on a roster host a --config-dir that resolves to
+// the store, spelled directly or through a symlink, is refused the same way.
+func TestClaudePluginStepRefusesAConfigDirStoreOnARosterHost(t *testing.T) {
+	for _, spelling := range []string{"store", "symlink"} {
+		t.Run(spelling, func(t *testing.T) {
+			home, binary, first, second := pluginFixture(t)
+			t.Setenv(paths.EnvHome, home)
+			runner := &pluginRunner{}
+			var out bytes.Buffer
+			inst := pluginEngine(home, binary, first, second, runner, &out, true)
+			inst.options.ClaudeAccounts, inst.options.PrimaryConfigDir = nil, ""
+			inst.options.ClaudeRosterHost = true
+			dir := inst.options.ConfigDir
+			if spelling == "symlink" {
+				dir = filepath.Join(t.TempDir(), "claude-link")
+				if err := os.Symlink(inst.options.ConfigDir, dir); err != nil {
+					t.Fatal(err)
+				}
+				inst.options.ConfigDir = dir
+			}
+			err := inst.ensureClaudePlugins(context.Background())
+			if err == nil || !strings.Contains(err.Error(), dir+" resolves to the Claude store") {
+				t.Fatalf("err=%v, want the store refusal\n%s", err, out.String())
+			}
+			if len(runner.calls) != 0 {
+				t.Fatalf("ran %v with the store as config dir\n%s", runner.calls, out.String())
+			}
+			if !strings.Contains(out.String(), "  FAIL    claude plugins in "+dir+": ") {
+				t.Fatalf("no FAIL line for the refusal:\n%s", out.String())
+			}
+		})
+	}
+}
+
 // TestClaudePluginCommandDropsTheLoginDefaultSentinel: the child runs on the
 // dir pfm chose, so the login default's sentinel never rides along with it.
 func TestClaudePluginCommandDropsTheLoginDefaultSentinel(t *testing.T) {

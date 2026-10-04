@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // conversation is a chat whose transcript a test writes by hand, plus the
@@ -447,5 +449,92 @@ func TestAwaitReadsOneTranscriptOnceThroughTwoSpellings(t *testing.T) {
 	}
 	if turn.Answer != "the answer" {
 		t.Fatalf("Answer = %q, want %q", turn.Answer, "the answer")
+	}
+}
+
+func codexSaid(text string) string {
+	return `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` +
+		text + `"}]}}`
+}
+
+// A Codex seat writes commentary between the tool calls of one turn, so an
+// assistant entry newest and a quiet file past Settle is not an answer: only
+// the rollout's task_complete or turn_aborted ends the turn. Claude, whose
+// transcript holds no turn records, keeps the newest-entry rule.
+func TestAwaitHoldsACodexTurnUntilItsEndRecord(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		engine pfmengine.ID
+		turn   []string
+		end    string
+		answer string
+	}{
+		{
+			name:   "codex task_complete",
+			engine: pfmengine.Codex,
+			turn: []string{
+				codexTurnStartLine, codexUserLine, codexToolLine, codexSaid("checking the next file"),
+				codexToolLine, codexSaid("still looking"),
+			},
+			end:    codexTurnCompleteLine,
+			answer: "checking the next file\n\nstill looking",
+		},
+		{
+			name:   "codex turn_aborted",
+			engine: pfmengine.Codex,
+			turn:   []string{codexTurnStartLine, codexUserLine, codexToolLine, codexSaid("checking the next file")},
+			end:    codexAbortLine,
+			answer: "checking the next file\n\n[turn aborted: interrupted]",
+		},
+		{
+			name:   "codex without turn records keeps the newest-entry rule",
+			engine: pfmengine.Codex,
+			turn:   []string{codexUserLine, codexToolLine, codexSaid("answered")},
+			answer: "answered",
+		},
+		{
+			name:   "claude is unchanged",
+			engine: pfmengine.Claude,
+			turn:   []string{user("hello"), tool("Read"), assistant("answered")},
+			answer: "answered",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			talk := newConversation(t)
+			talk.chat.Engine = testCase.engine
+			options := fastOptions()
+			done := make(chan Turn, 1)
+			go func() {
+				turn, err := Await(context.Background(), talk.resolve, options)
+				if err != nil {
+					t.Errorf("Await() error = %v", err)
+				}
+				done <- turn
+			}()
+			talk.say(testCase.turn...)
+			quiet := time.NewTimer(8 * options.Settle)
+			defer quiet.Stop()
+			var turn Turn
+			select {
+			case turn = <-done:
+				if testCase.end != "" {
+					t.Fatalf("Await() returned %q mid-turn with answer %q, want it waiting for the turn's end record",
+						turn.State, turn.Answer)
+				}
+			case <-quiet.C:
+				if testCase.end == "" {
+					t.Fatalf("Await() still waiting after %v of quiet, want the answer", 8*options.Settle)
+				}
+				talk.say(testCase.end)
+				select {
+				case turn = <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("Await() still waiting after the turn's end record")
+				}
+			}
+			if turn.State != StateIdle || turn.Answer != testCase.answer || !turn.Delivered {
+				t.Fatalf("turn = %#v, want delivered idle with answer %q", turn, testCase.answer)
+			}
+		})
 	}
 }

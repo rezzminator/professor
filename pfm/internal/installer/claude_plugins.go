@@ -138,13 +138,14 @@ func pluginEnabled(document map[string]any, id string) bool {
 // ensureClaudePlugins installs the shared plugins through the primary account.
 // On a roster host its dir passes the refusal every launch applies, so the
 // Options.ConfigDir fallback (the store) never runs; a host with no roster
-// keeps Options.ConfigDir, there an ordinary config dir.
+// keeps Options.ConfigDir, there an ordinary config dir. A --config-dir on a
+// roster host carries no roster but ClaudeRosterHost, so the same refusal holds.
 func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	dir := installer.options.PrimaryConfigDir
 	if dir == "" {
 		dir = installer.options.ConfigDir
 	}
-	if len(installer.options.ClaudeAccounts) > 0 {
+	if len(installer.options.ClaudeAccounts) > 0 || installer.options.ClaudeRosterHost {
 		if err := installer.checkLaunchConfigDir(0, dir); err != nil {
 			failure := fmt.Errorf("claude plugins in %s: %w", dir, err)
 			installer.say("  FAIL    %s", failure)

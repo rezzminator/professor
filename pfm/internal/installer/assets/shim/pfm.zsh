@@ -138,6 +138,26 @@ codex() {
   return "$exit_status"
 }
 
+# pfm — the picker typed into a bare terminal hands that terminal to the chat it opens, as `cx`
+# does. With stdout captured, pfm draws the picker on /dev/tty and prints the chosen action as
+# one line (action.Dispatch); this shell runs it, then closes when the chat ends or is detached,
+# so no prompt is left behind to read the terminal's late colour-query replies as typed input.
+# Esc prints nothing and returns to the prompt; a failed pfm returns its status. Any argument, a
+# script, a shell inside another tmux, or a snapshot shell without the helpers runs pfm as is.
+pfm() {
+  if (( $# )) || [[ ! -o interactive ]] || (( ! ${+functions[_pfm_owns_terminal]} )) ||
+    ! _pfm_owns_terminal; then
+    "$HOME/.local/bin/pfm" "$@"
+    return
+  fi
+  local line exit_status
+  line="$("$HOME/.local/bin/pfm")"
+  exit_status=$?
+  (( exit_status == 0 )) && [[ -n "$line" ]] || return "$exit_status"
+  eval "$line"
+  _pfm_own_terminal $?
+}
+
 # _pfm_selfswitch prevents attaching a Codex server inside itself.
 _pfm_selfswitch() {
   local sock="$1" w
@@ -192,7 +212,7 @@ if [[ -o interactive && -n "${PFM_AUTO_OPEN:-}${CC_AUTO_OPEN:-}${VSCODE_AUTO_CC:
     local cmd
     case "$_pfm_auto_what" in
       cx|codex)     cmd=cx ;;                 # a fresh Codex chat
-      *)           cmd="$HOME/.local/bin/pfm" ;; # retired and unknown values open the picker
+      *)           cmd=pfm ;;                # retired and unknown values open the picker
     esac
     unset _pfm_auto_what
     $cmd

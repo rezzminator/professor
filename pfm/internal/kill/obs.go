@@ -47,3 +47,20 @@ func cleared(trail *obs.Trail, found bool, err error) {
 		trail.Reach("skipped", "not an indexed fleet chat")
 	}
 }
+
+// resumeTrail opens a resume trail: a resumed thread is `killed` until the
+// standing kill lifts.
+func resumeTrail(ctx context.Context) *obs.Trail { return obs.NewTrail(ctx, "kill", "killed") }
+
+// resumed closes a resume trail: `live` when a kill was lifted, `skipped`
+// when none was standing, failed with err.
+func resumed(trail *obs.Trail, removed bool, err error) {
+	switch {
+	case err != nil:
+		trail.End(err)
+	case removed:
+		trail.Reach("live", "resumed thread unkilled")
+	default:
+		trail.Reach("skipped", "no standing kill")
+	}
+}

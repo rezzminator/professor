@@ -271,8 +271,17 @@ func TestVSCodeUninstallRemovesASettingsFilePFMCreated(t *testing.T) {
 func TestVSCodeProfileUsesTheShimPickerValueExplicitly(t *testing.T) {
 	t.Parallel()
 	shim := readFixture(t, filepath.Join("assets", "shim", "pfm.zsh"))
-	if !strings.Contains(shim, `cmd="$HOME/.local/bin/pfm"`) {
-		t.Fatal("the installed PFM_AUTO_OPEN=pfm value is not routed to the absolute PFM picker")
+	// The value opens the shim's own pfm function, which hands the terminal to
+	// the chosen chat; both of its doors reach the absolute PFM binary, never a
+	// PATH lookup that could find another pfm.
+	for _, want := range []string{
+		`cmd=pfm ;;`,
+		`"$HOME/.local/bin/pfm" "$@"`,
+		`line="$("$HOME/.local/bin/pfm")"`,
+	} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("the installed PFM_AUTO_OPEN=pfm value is not routed to the absolute PFM picker: no %s", want)
+		}
 	}
 }
 

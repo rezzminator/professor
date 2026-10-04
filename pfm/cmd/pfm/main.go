@@ -67,7 +67,7 @@ var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-launch", "epic-inject", "reminder-fire",
 	"exit-close", "exit-intercept", "explore-deny", "git-guard", "kill-exit", "launch",
-	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "rr-dir",
+	"launcher-repair", "orchestrator-wait", "primary-get", "primary-set", "reload-intercept", "resume-unkill", "rr-dir",
 	reloadRunCommand, staleCommand, statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
 }
 
@@ -402,6 +402,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "clear-kill" {
 		return hookentry.ClearKill(args[1:], os.Stdin, stderr, runtime)
 	}
+	if len(args) != 0 && args[0] == "resume-unkill" {
+		return hookentry.ResumeUnkill(args[1:], os.Stdin, stderr, runtime)
+	}
 	if len(args) != 0 && args[0] == "agent-open" {
 		return hookentry.AgentOpen(args[1:], stderr, runtime)
 	}
@@ -504,7 +507,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|reminder-fire|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|epic-inject|exit-close|exit-intercept|explore-deny|git-guard|kill-exit|launch|launcher-repair|orchestrator-wait|primary-get|primary-set|reload-intercept|reload-run|reminder-fire|resume-unkill|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

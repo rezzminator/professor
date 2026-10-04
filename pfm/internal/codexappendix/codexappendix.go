@@ -1,4 +1,5 @@
-// Package codexappendix retires the Codex SessionStart appendix hook.
+// Package codexappendix retires the Codex SessionStart appendix hook and
+// records the Codex trust of the one Codex hook pfm owns, resume-unkill.
 //
 // The hook used to deliver the fleet prompt as `additionalContext`, which
 // codex-cli truncates at 2,500 tokens, drops at compaction, and re-appends —
@@ -7,7 +8,8 @@
 // registers the hook any more. What remains is the cleanup an EXISTING
 // install needs: the identity of the retired handler, so the installer can
 // recognize and remove its hooks.json entry, and the recorded trust it wrote
-// into each account's config.toml.
+// into each account's config.toml. The resume-unkill hook's trust has its own
+// receipt and its own register/unregister pair (trust.go).
 package codexappendix
 
 import (
@@ -44,56 +46,73 @@ func receiptPath(account string) string {
 // anything left to clean up" question; an unreadable receipt answers yes, so
 // the cleanup runs and reports its own error rather than passing as absence.
 func TrustRecorded(account string) bool {
-	_, err := os.Stat(receiptPath(account))
-	return !errors.Is(err, os.ErrNotExist)
+	return receiptRecorded(receiptPath(account))
 }
 
 // Unregister removes recorded trust without depending on native hook discovery,
 // feature enablement, the original hook file, or an installed native executable.
 func Unregister(account string) error {
-	receiptRaw, err := os.ReadFile(receiptPath(account))
+	return unregisterTrust(receiptPath(account), account)
+}
+
+func receiptRecorded(receipt string) bool {
+	_, err := os.Stat(receipt)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+// unregisterTrust removes the hooks.state tables the receipt at receiptFile
+// names from the account's config.toml, then the receipt itself.
+func unregisterTrust(receiptFile, account string) error {
+	receiptRaw, err := os.ReadFile(receiptFile)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("read trust receipt %s: %w", receiptFile, err)
 	}
 	var receipt map[string]string
 	if err = json.Unmarshal(receiptRaw, &receipt); err != nil {
-		return fmt.Errorf("parse appendix trust receipt: %w", err)
+		return fmt.Errorf("parse trust receipt %s: %w", receiptFile, err)
 	}
 	path := filepath.Join(account, "config.toml")
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return os.Remove(receiptPath(account))
+		return removeReceipt(receiptFile)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 	updated, err := removeRecordedTrust(string(raw), receipt)
 	if err != nil {
-		return err
+		return fmt.Errorf("clean %s: %w", path, err)
 	}
 	if updated != string(raw) {
 		physical, err := filepath.EvalSymlinks(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("resolve %s: %w", path, err)
 		}
 		latest, readErr := os.ReadFile(physical)
 		if readErr != nil || !bytes.Equal(latest, raw) {
-			return fmt.Errorf("appendix config changed during cleanup; retry uninstall")
+			return fmt.Errorf("%s changed during trust cleanup; retry uninstall", path)
 		}
 		if err := replaceFile(physical, []byte(updated)); err != nil {
-			return err
+			return fmt.Errorf("write %s: %w", physical, err)
 		}
 	}
-	return os.Remove(receiptPath(account))
+	return removeReceipt(receiptFile)
+}
+
+func removeReceipt(receiptFile string) error {
+	if err := os.Remove(receiptFile); err != nil {
+		return fmt.Errorf("remove trust receipt %s: %w", receiptFile, err)
+	}
+	return nil
 }
 
 func removeRecordedTrust(raw string, receipt map[string]string) (string, error) {
 	var document map[string]any
 	if _, err := toml.Decode(raw, &document); err != nil {
-		return "", fmt.Errorf("parse appendix config cleanup: %w", err)
+		return "", fmt.Errorf("parse config cleanup: %w", err)
 	}
 	hooks, _ := document["hooks"].(map[string]any)
 	states, _ := hooks["state"].(map[string]any)
@@ -130,7 +149,7 @@ func removeRecordedTrust(raw string, receipt map[string]string) (string, error) 
 	result.WriteString(raw[start:])
 	var checked map[string]any
 	if _, err := toml.Decode(result.String(), &checked); err != nil {
-		return "", fmt.Errorf("appendix trust cleanup requires manual removal from edited TOML layout: %w", err)
+		return "", fmt.Errorf("trust cleanup requires manual removal from edited TOML layout: %w", err)
 	}
 	for key := range targets {
 		delete(states, key)
@@ -140,7 +159,7 @@ func removeRecordedTrust(raw string, receipt map[string]string) (string, error) 
 	normalizeEmptyTables(document)
 	normalizeEmptyTables(checked)
 	if !reflect.DeepEqual(document, checked) {
-		return "", fmt.Errorf("appendix trust cleanup cannot safely edit this TOML layout")
+		return "", fmt.Errorf("trust cleanup cannot safely edit this TOML layout")
 	}
 	return result.String(), nil
 }
@@ -162,7 +181,10 @@ func replaceFile(path string, raw []byte) error {
 	if err == nil {
 		mode = existing.Mode().Perm()
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("stat %s: %w", path, err)
 	}
-	return atomicfile.Write(path, raw, mode)
+	if err := atomicfile.Write(path, raw, mode); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }

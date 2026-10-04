@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
@@ -19,6 +20,12 @@ import (
 // doctor check). MISSING reuses HostOverlayMissing's "missing".
 const (
 	stateOK = "ok"
+	// stateMissing is an expected hook absent from its file; the same word the
+	// host overlay rows use.
+	stateMissing = string(HostOverlayMissing)
+	// stateUntrusted is a pfm Codex hook present with no recorded Codex trust:
+	// Codex may refuse to run an untrusted hook. A warning.
+	stateUntrusted = "untrusted"
 	// stateHookDrift is a pfm hook present in a shape pfm install converges
 	// away: a wrong event or matcher, another binary path, an executable
 	// that does not resolve, a duplicate, a missing async flag. A failure.
@@ -35,7 +42,10 @@ const (
 	stateNoClaudeConfig = "no-claude-config"
 )
 
-var hookTargetClaude = pfmengine.MustLookup(pfmengine.Claude).LongName
+var (
+	hookTargetClaude = pfmengine.MustLookup(pfmengine.Claude).LongName
+	hookTargetCodex  = pfmengine.MustLookup(pfmengine.Codex).LongName
+)
 
 // HookProbeResult is one doctor hook row. What, Want and Got name the
 // difference a hook-drift row found, and Want/Got carry the ledger and file
@@ -49,8 +59,8 @@ type HookProbeResult struct {
 	Got   string
 }
 
-// ProbeExpectedHooks checks the launch hook binary once and keeps Codex hook
-// residue checks. Claude account settings are inspected by the pfm-settings host check.
+// ProbeExpectedHooks checks the launch hook binary once and the one hook pfm
+// owns in each Codex hooks.json, plus Codex hook residue. Claude account settings are inspected by the pfm-settings host check.
 func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult {
 	results := []HookProbeResult{}
 	if len(config.Accounts) == 0 {
@@ -84,6 +94,12 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		)
 	} else {
 		seen := map[string]bool{}
+		// The ledger row of the one hook pfm owns in a Codex hooks.json is
+		// expected, not drift; probeCodexHooks judges that hook itself.
+		var ownedCodexHook *ExpectedHook
+		if hook, hookErr := codexResumeUnkillHook(home); hookErr == nil {
+			ownedCodexHook = &hook
+		}
 		for _, account := range config.CodexAccounts {
 			path := physicalSettingsPath(filepath.Join(account.Home, "hooks.json"))
 			if seen[path] {
@@ -91,6 +107,10 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 			}
 			seen[path] = true
 			for _, key := range sortedHookKeys(ownership[path]) {
+				if ownedCodexHook != nil && key.Event == ownedCodexHook.Event &&
+					key.Matcher == ownedCodexHook.Matcher && key.Command == ownedCodexHook.Command {
+					continue
+				}
 				results = append(results, HookProbeResult{
 					Hook: ExpectedHook{
 						Target:  "ownership",
@@ -147,11 +167,21 @@ func executableVerdict(path string) string {
 	return ""
 }
 
-// probeCodexHooks reads every configured Codex home's hooks.json for pfm
-// residue. pfm expects no Codex hook, so an absent file is healthy and only
-// STALE and UNREADABLE rows come from here.
+// probeCodexHooks reads every configured Codex home's hooks.json for the one
+// hook pfm owns there and for pfm residue. It never runs Codex or writes a
+// file: an absent file or a missing SessionStart "resume" resume-unkill handler
+// is a MISSING row, a handler with no recorded hook trust an UNTRUSTED row
+// naming `pfm install --yes`, a healthy account none; STALE and UNREADABLE
+// rows report residue and files that could not be read.
 func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []HookProbeResult {
 	var results []HookProbeResult
+	expected, err := codexResumeUnkillHook(home)
+	if err != nil {
+		return []HookProbeResult{{
+			Hook:  ExpectedHook{Target: hookTargetCodex, Name: codexResumeUnkillHookName},
+			State: stateUnreadable, Error: err.Error(),
+		}}
+	}
 	seen := map[string]bool{}
 	for _, account := range config.CodexAccounts {
 		path := filepath.Join(account.Home, "hooks.json")
@@ -160,7 +190,9 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 			continue
 		}
 		seen[physical] = true
-		target := fmt.Sprintf("codex[%d]", account.ID)
+		target := fmt.Sprintf("%s[%d]", hookTargetCodex, account.ID)
+		expectedHook := expected
+		expectedHook.Target, expectedHook.File = target, path
 		unreadable := func(err error) {
 			results = append(results, HookProbeResult{
 				Hook: ExpectedHook{Target: target, File: path}, State: stateUnreadable, Error: err.Error(),
@@ -172,6 +204,7 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 			continue
 		}
 		if absent {
+			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
 			continue
 		}
 		var document map[string]any
@@ -182,6 +215,15 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 		if err := validateCodexHooks(document); err != nil {
 			unreadable(err)
 			continue
+		}
+		switch {
+		case codexHookHandlerCount(document, expected) == 0:
+			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
+		case !codexappendix.HookTrustRecorded(account.Home):
+			results = append(results, HookProbeResult{
+				Hook: expectedHook, State: stateUntrusted,
+				Error: "no Codex trust is recorded for the hook, so Codex may refuse to run it",
+			})
 		}
 		for _, key := range sortedHookKeys(countSettingsHookCommands(document)) {
 			if stale, found := staleHookResult(target, path, key, pfmBinary, home, true); found {
@@ -249,7 +291,7 @@ func sortHookKeys(keys []settingsHookKey) {
 // without staging real settings.json content for it.
 var HookProbeOverride func(home string, machine pfmconfig.Config) []HookProbeResult
 
-// ReportHooks prints the launch executable and Codex residue checks.
+// ReportHooks prints the launch executable, Codex hook and Codex residue checks.
 func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool) (warnings, failures int) {
 	results := ProbeExpectedHooks(home, machine)
 	if HookProbeOverride != nil {
@@ -279,6 +321,12 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, _ bool
 		switch result.State {
 		case stateOK:
 			fmt.Fprintln(stdout, prefix+" ok")
+		case stateMissing:
+			failures++
+			fmt.Fprintf(stdout, "%s MISSING — run pfm install --yes\n", prefix)
+		case stateUntrusted:
+			warnings++
+			fmt.Fprintf(stdout, "%s UNTRUSTED %s — run pfm install --yes\n", prefix, result.Error)
 		case stateStale:
 			failures++
 			fmt.Fprintf(stdout, "%s STALE %s — run pfm install\n", prefix, hook.Name)

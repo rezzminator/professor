@@ -1,6 +1,6 @@
 # hooks
 
-Professor reaches a chat through hooks at two tiers. pfm's ten machine-global Claude hooks, one registration each, ride every Claude launch: `claudelaunch.Render` renders them into the `hooks` key of the single `--settings` JSON the chat starts with. `pfm init` scaffolds a project's `.claude/settings.json` from the template, with six hooks over the project's own scripts. Claude merges hooks across its settings layers, so the project's hooks run beside the launch's. Codex and OpenCode carry no pfm hook. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` checks that prove each pfm hook is in place. The Bash guard over shared git state is designed in [git-guard.md](git-guard.md).
+Professor reaches a chat through hooks at two tiers. pfm's eleven machine-global Claude hooks, one registration each, ride every Claude launch: `claudelaunch.Render` renders them into the `hooks` key of the single `--settings` JSON the chat starts with. `pfm init` scaffolds a project's `.claude/settings.json` from the template, with six hooks over the project's own scripts. Claude merges hooks across its settings layers, so the project's hooks run beside the launch's. Codex carries one pfm hook, `resume-unkill`, which `pfm install` writes into each Codex home's `hooks.json` and trusts; OpenCode carries none. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` checks that prove each pfm hook is in place. The Bash guard over shared git state is designed in [git-guard.md](git-guard.md).
 
 A change lands in this design doc first, then in the code or template, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -23,7 +23,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 ## Decisions
 
-- **One list is the truth for pfm's hooks.** `claudelaunch.HookTemplates` (`pfm/internal/claudelaunch/hooks.go`) names all ten hooks, one registration each. `claudelaunch.Render` renders it into every launch's `--settings` payload, and spawn-audit compares each live chat's decoded payload against it. A new pfm hook is a new row there, never a second list.
+- **One list is the truth for pfm's hooks.** `claudelaunch.HookTemplates` (`pfm/internal/claudelaunch/hooks.go`) names all eleven hooks, one registration each. `claudelaunch.Render` renders it into every launch's `--settings` payload, and spawn-audit compares each live chat's decoded payload against it. A new pfm hook is a new row there, never a second list.
 - **Hooks ride the launch, never a file.** `pfm install` writes no key into any account `settings.json`: no `hooks`, no `statusLine`, no `subagentStatusLine`. A chat carries the hook set it was launched with; a changed set reaches a running chat at its next reload (`pfm chat reload`) or relaunch.
 - **pfm never writes a project's `.claude/settings.json`.** The project tier is scaffolded once by `pfm init` (`pfm/internal/professor/scaffold.go:29`) and is the adopter's file from then on. Its hooks merge with the launch's; neither layer replaces the other.
 - **Every pfm hook command is the installed binary.** Each command is `$HOME/.local/bin/pfm` plus a subcommand (`pfm/internal/claudelaunch/hooks.go`). No pfm hook runs a shell script.
@@ -35,10 +35,10 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 | Engine | Tier | Hooks | Installed by |
 | --- | --- | --- | --- |
-| Claude | every interactive launch, `--settings` `hooks` | 10 hooks, 10 registrations (pfm-owned) | `claudelaunch.Render` |
+| Claude | every interactive launch, `--settings` `hooks` | 11 hooks, 11 registrations (pfm-owned): launcher-repair, resume-unkill, usage, clear-kill, exit-close, explore-deny, git-guard, rr-dir, epic-inject, reload-intercept, exit-intercept | `claudelaunch.Render` |
 | Claude | project `.claude/settings.json` | 6 in the template | `pfm init`, then the adopter |
 | Claude | operator's own, documented | 2 (memory backup, opt-in) | the adopter, by hand |
-| Codex | `{codex home}/hooks.json` | 0 owned; 2 retired shapes removed | `pfm install` (removal only) |
+| Codex | `{codex home}/hooks.json` | 1 owned (`resume-unkill`, `SessionStart` matcher `resume`), with recorded trust; 2 retired shapes removed | `pfm install` |
 | OpenCode | none | 0 | none |
 
 ## Launch-time Claude hooks (pfm-owned)
@@ -50,6 +50,7 @@ Placement holds by construction: the renderer emits each registration once under
 | Name | Event | Matcher | Command | Defined | Body | Does | On failure |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | launcher-repair | `SessionStart` | `""` | `pfm internal launcher-repair` | `hooks.go` | `pfm/internal/hookentry/launcher_repair.go:12-25` | Repairs the Claude launcher each session start | Exits 1 with one stderr line; the session continues |
+| resume-unkill | `SessionStart` | `resume` | `pfm internal resume-unkill` | `hooks.go` | `pfm/internal/hookentry/resume_unkill.go:20` | Lifts the kill on a thread its engine just resumed under its own session id (`kill.Manager.UnkillResumed`), so a killed chat reopened by `--resume`, `--continue`, the in-app `/resume` or pfm's own resume shows in `pfm chat ls` again; the same entry serves the Codex hook below | Fail-open, exits 0 with one stderr line per cause (`resume_unkill.go:30-72`) |
 | usage | `UserPromptSubmit` | `""` | `pfm usage-hook` | `hooks.go` | `pfm/cmd/pfm/statusline_command.go:136-175` | Checks the account's usage through `usagehook.Fetch`, the one door to the usage endpoint (order below), and prints a warning into the prompt when one is due; a no-op under Codex (`statusline_command.go:152-153`) | Fail-open, exits 0 (`statusline_command.go:166-168`); a failed refresh is written to stderr, the hook's log |
 | clear-kill | `SessionEnd` | `""` | `pfm internal clear-kill` | `hooks.go` | `pfm/internal/hookentry/clear_kill.go:15` | Handles a `/clear` for the fleet session record | Fail-open, stderr line per cause (`clear_kill.go:27-66`) |
 | exit-close | `SessionEnd` | `""` | `pfm internal exit-close` | `hooks.go` | `pfm/internal/hookentry/exit_close.go:23` | Closes the terminal a chat was watched through after a human `/exit` | Fail-open, the terminal is left open (`exit_close.go:30-73`) |
@@ -91,7 +92,7 @@ The memory-backup hooks are documented for the adopter to install by hand into t
 
 ## Codex
 
-pfm owns no Codex hook: the fleet prompt reaches Codex through `config.toml`'s `developer_instructions` (`pfm/internal/installer/expected_hooks.go`). `pfm install` still reads and rewrites `{codex home}/hooks.json` for every Codex account (`pfm/internal/installer/installer.go:2021-2055`), and only to remove pfm's retired hooks while keeping the operator's (`pfm/internal/installer/codex_hooks.go:16-18`), recording what it owns in the ownership ledger. An unparsable file is skipped loudly unless owned hooks would be stranded (`pfm/internal/installer/installer.go:2060-2071`).
+pfm owns one Codex hook, `resume-unkill`: a `SessionStart` handler with matcher `resume` running `pfm internal resume-unkill`, the same command and matcher as its Claude row in `claudelaunch.HookTemplates`, from which the Codex writer takes it. Codex fires `SessionStart` with `source` `resume` and the resumed thread's id as `session_id` (codex-cli's `session-start.command.input` schema, `source` one of `startup`, `resume`, `clear`, `compact`, `fork`), so `codex resume`, the in-app `/resume`, pfm's resume of a Codex chat and a pfm Codex pane resuming inside all lift a standing kill through it; the entry resolves an indexed lineage member to its root (`kill.Manager.Unkill`). `pfm install` writes the handler into `{codex home}/hooks.json` for every Codex account, records it in the ownership ledger, and records its trust in that account's `config.toml` (`hooks.state."{key}"`, the key and hash read from Codex's own `codex app-server` `hooks/list`, with a receipt at `{codex home}/.professor-hook-trust.json` so uninstall removes exactly that trust; `pfm/internal/codexappendix/trust.go`). Without a configured Codex binary the install says the hook stays untrusted. The writer still removes pfm's retired hooks while keeping the operator's (`pfm/internal/installer/codex_hooks.go`). The fleet prompt reaches Codex through `config.toml`'s `developer_instructions`, never a hook. An unparsable file is skipped loudly unless owned hooks would be stranded.
 
 ## OpenCode
 
@@ -119,14 +120,14 @@ Each name matches from the `pfm` or `cc-fleet` binary, at any path (`retiredHook
 
 ## The ownership rule
 
-- **pfm owns** exactly the hooks in `claudelaunch.HookTemplates`, which live only in the launch payload, and the retired shapes above. In a Codex `hooks.json` its record is the ownership ledger, and pfm removes exactly what the ledger records. In an account `settings.json` left by an older install, pfm owns what the ledger records plus every hook whose command is a `claudelaunch.HookTemplates` command or a retired shape — ownership by command shape, so an install older than the ledger is cleaned too.
+- **pfm owns** exactly the hooks in `claudelaunch.HookTemplates`, which live only in the launch payload, the Codex `resume-unkill` handler it writes into each `hooks.json`, and the retired shapes above. In a Codex `hooks.json` its record is the ownership ledger, and pfm removes exactly what the ledger records. In an account `settings.json` left by an older install, pfm owns what the ledger records plus every hook whose command is a `claudelaunch.HookTemplates` command or a retired shape — ownership by command shape, so an install older than the ledger is cleaned too.
 - **The operator owns** every other hook in a settings file: a notification script, a memory sync, anything hand-wired. pfm never rewrites, reorders or removes one, and doctor never reports one. The Codex writer's contract says the same (`pfm/internal/installer/codex_hooks.go:16`).
 - **An operator's hook that calls pfm stays the operator's.** A hook naming a subcommand this binary implements, such as `pfm doctor`, is never treated as residue (`pfm/internal/installer/settings.go:423-436`). Only an unknown subcommand in pfm's own shape is.
 - **Project-tier hooks are the adopter's.** pfm scaffolds them once; later changes flow through `pfm doctor --project-updates` and an upstream diff the project ports by judgment, never a rewrite.
 
 ## The pfm doctor checks
 
-Three checks prove pfm's hooks. The launch hooks are proven per live chat, because that is the only place they exist; account files are checked for leftovers that would double-fire beside the launch; Codex homes are checked for retired residue. Doctor checks only pfm's own hooks and prints nothing about the operator's — no count line either. The project tier has no doctor coverage.
+Three checks prove pfm's hooks. The launch hooks are proven per live chat, because that is the only place they exist; account files are checked for leftovers that would double-fire beside the launch; Codex homes are checked for the `resume-unkill` handler, its recorded trust and retired residue. Doctor checks only pfm's own hooks and prints nothing about the operator's — no count line either. The project tier has no doctor coverage.
 
 ### Launch hooks: spawn-audit
 
@@ -150,10 +151,12 @@ An absent file or a file without pfm-owned keys produces no row. An unreadable f
 
 ### Codex hooks.json
 
-The Codex probe (`probeCodexHooks`, `pfm/internal/installer/hook_probe.go:326-362`) opens every configured Codex home's `hooks.json`, drawn from the machine config's Codex accounts, named `codex[{id}]`, de-duplicated by physical path. Each row keeps the prefix `doctor: hook {target} {file} {event} {name}`. With no expected Codex hook there is nothing to be MISSING, so it prints only these states:
+The Codex probe (`probeCodexHooks`, `pfm/internal/installer/hook_probe.go`) opens every configured Codex home's `hooks.json`, drawn from the machine config's Codex accounts, named `codex[{id}]`, de-duplicated by physical path. Each row keeps the prefix `doctor: hook {target} {file} {event} {name}`. It expects one handler per account, `resume-unkill` (`SessionStart`, matcher `resume`), and reads files only: it never runs Codex. It prints these states:
 
 | State | When | Prints | Tally |
 | --- | --- | --- | --- |
+| MISSING | `hooks.json` is absent, or holds no `resume-unkill` handler under a `SessionStart` entry with matcher `resume` | `… MISSING — run pfm install --yes` | failure |
+| UNTRUSTED | The handler is present but no hook-trust receipt (`{codex home}/.professor-hook-trust.json`) records its Codex trust | `… UNTRUSTED no Codex trust is recorded for the hook, so Codex may refuse to run it — run pfm install --yes` | warning |
 | STALE | A retired or unknown pfm hook is registered; the Codex-only retired shapes (the old `clear-kill` `SessionStart` hook and the retired appendix hook) are flagged only under `SessionStart` | `… STALE {name} — run pfm install` | failure |
 | UNREADABLE | The file or the ownership ledger exists but cannot be read or parsed, is a dangling symlink, or its `hooks` value has the wrong shape (a non-object `hooks`, a non-array event, a non-object entry, a non-string `matcher`, a non-array `hooks` list, a non-object hook, a missing or empty `command`) | one line per file, no per-hook rows: `doctor: hook {target} {file} UNREADABLE error={cause}`; for the ledger, target `ownership` | failure |
 | DRIFT (ledger) | The ledger owns an entry the file lacks, or one the installer no longer expects | `… DRIFT ledger ownership={n} file={m}`, `m` also `absent` or `not-expected` | warning |
@@ -189,7 +192,8 @@ Each check returns its warnings and failures to the doctor tally (`pfm/internal/
 | The account-file host check | `pfm/internal/hostcheck/owned.go` | `pfm-settings` BLOCK rows with the operator’s fix |
 | The Codex probe and printer | `pfm/internal/installer/hook_probe.go` | `probeCodexHooks`, `ReportHooks`, `executableVerdict`, the states |
 | The retired table | `pfm/internal/installer/settings.go` | the retired names, the unknown-subcommand rule |
-| The Codex writer | `pfm/internal/installer/codex_hooks.go` | Codex retirement |
+| The Codex writer | `pfm/internal/installer/codex_hooks.go` | The `resume-unkill` handler, its trust, Codex retirement |
+| Codex hook trust | `pfm/internal/codexappendix/trust.go` | `RegisterHookTrust`, `UnregisterHookTrust`, the receipt |
 | The ledger | `pfm/internal/installer/settings_ownership.go` | Ownership keys and counts |
 | The dispatch | `pfm/cmd/pfm/main.go:54-68` | Every subcommand a hook may name |
 | The hook bodies | `pfm/internal/hookentry/`, `pfm/cmd/pfm/statusline_command.go` | What each command does |

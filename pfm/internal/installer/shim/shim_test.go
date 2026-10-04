@@ -118,21 +118,22 @@ func TestClaudeCodexCxSkipTerminalOwnershipWithoutHelpers(t *testing.T) {
 	writeShimFile(t, filepath.Join(fakeBin, "codex"), "#!/bin/sh\nexit 9\n")
 	script := "source " + quoteZsh(embeddedShimPath(t)) + "\n" +
 		// Simulate the snapshot: every `_`-prefixed helper is gone, but the
-		// three callable functions survive.
+		// callable functions survive.
 		"unfunction -m '_*'\n" +
 		"claude; print -r -- \"claude=$?\"\n" +
 		"codex; print -r -- \"codex=$?\"\n" +
-		"cx --resume x; print -r -- \"cx=$?\"\n"
+		"cx --resume x; print -r -- \"cx=$?\"\n" +
+		"pfm; print -r -- \"pfm=$?\"\n"
 	command := jailedZshCommand(
 		zsh, script, home,
-		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PATH="+binDir+string(os.PathListSeparator)+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("claude/codex/cx without helpers: %v: %s", err, output)
 	}
 	got := string(output)
-	for _, want := range []string{"claude=7", "codex=9", "cx: needs an interactive terminal", "cx=1"} {
+	for _, want := range []string{"claude=7", "codex=9", "cx: needs an interactive terminal", "cx=1", "pfm=0"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output=%q, want %q", got, want)
 		}
@@ -493,4 +494,91 @@ func embeddedShimPath(t *testing.T) string {
 
 func quoteZsh(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+// TestPickerTypedIntoABareTerminalHandsItToTheChat pins the picker's terminal
+// ownership: `pfm` typed into a bare terminal runs the action the picker chose
+// and then ENDS the shell, so a chat's /exit (or a detach) closes the terminal
+// instead of dropping to a prompt that reads the terminal's late colour-query
+// replies as typed input. Esc (no action line) and a failed pfm keep the
+// shell. The fake pfm behaves as action.Dispatch does: it execs the attach
+// itself when stdout is a terminal and prints the one-line action otherwise.
+func TestPickerTypedIntoABareTerminalHandsItToTheChat(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is not installed")
+	}
+	if _, err := exec.LookPath("script"); err != nil {
+		t.Skip("script is not installed")
+	}
+	cases := []struct {
+		name      string
+		pfm       string
+		wantShell bool
+		wantTmux  bool
+	}{
+		{
+			name: "a chosen chat ends the shell when the attach returns",
+			pfm: `#!/bin/sh
+if [ "$#" -ne 0 ]; then exit 64; fi
+if [ -t 1 ]; then TMUX= exec tmux -L cc-1-2-3 attach -t cc-1-2-3; fi
+printf '%s\n' 'TMUX= tmux -L cc-1-2-3 attach -t cc-1-2-3'
+`,
+			wantShell: false, wantTmux: true,
+		},
+		{name: "Esc returns to the prompt", pfm: "#!/bin/sh\nexit 0\n", wantShell: true},
+		{name: "a failed picker returns to the prompt", pfm: "#!/bin/sh\nexit 1\n", wantShell: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			home := t.TempDir()
+			fakeBin := filepath.Join(home, "fake-bin")
+			for _, directory := range []string{filepath.Join(home, ".local", "bin"), fakeBin} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeShimFile(t, filepath.Join(home, ".local", "bin", "pfm"), testCase.pfm)
+			tmuxLog := filepath.Join(home, "tmux.log")
+			writeShimFile(t, filepath.Join(fakeBin, "tmux"), `#!/bin/sh
+printf 'tmux %s TMUX=[%s]\n' "$*" "$TMUX" >> "$SHIM_TMUX_LOG"
+`)
+			driver := filepath.Join(home, "driver.zsh")
+			writeShimFile(t, driver,
+				"source "+quoteZsh(embeddedShimPath(t))+"\n"+
+					"pfm\n"+
+					"print -r -- SHELL-CAME-BACK\n",
+			)
+			command := testjail.PTYCommand(zsh, "-fi", driver)
+			command.Env = append(
+				os.Environ(),
+				"HOME="+home,
+				"PATH="+filepath.Join(home, ".local", "bin")+":"+fakeBin+":"+os.Getenv("PATH"),
+				"TMUX=",
+				"TERM=dumb",
+				"SHIM_TMUX_LOG="+tmuxLog,
+			)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("drive interactive picker: %v: %s", err, output)
+			}
+			tmuxCalls, readErr := os.ReadFile(tmuxLog)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				t.Fatalf("read tmux log: %v", readErr)
+			}
+			attach := "tmux -L cc-1-2-3 attach -t cc-1-2-3 TMUX=[]"
+			if got := strings.Contains(string(tmuxCalls), attach); got != testCase.wantTmux {
+				t.Fatalf(
+					"attach ran=%v, want %v: tmux log %q, output %q",
+					got, testCase.wantTmux, tmuxCalls, output,
+				)
+			}
+			if got := strings.Contains(string(output), "SHELL-CAME-BACK"); got != testCase.wantShell {
+				t.Fatalf(
+					"shell survived=%v, want %v: the picker's terminal stayed at a prompt after its chat ended: %q",
+					got, testCase.wantShell, output,
+				)
+			}
+		})
+	}
 }

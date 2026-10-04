@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
 type reconcileResult struct {
@@ -29,6 +30,16 @@ func reconcileOpenCode(outputs []generatedFile, mode Mode, root, home string) re
 	wanted := map[string]bool{}
 	for _, output := range outputs {
 		wanted[managedOpenCodeEntry(output.Path, managed)] = true
+		if output.Kept != nil {
+			warning, problem := sourcelink.KeepTwin(output.Path, output.Kept.Path, output.Kept.Target)
+			if warning != "" {
+				result.Warnings = append(result.Warnings, warning)
+			}
+			if problem != "" {
+				result.Problems = append(result.Problems, problem)
+			}
+			continue
+		}
 		if output.Link != "" {
 			reconcileOpenCodeLink(&result, output, mode)
 		} else {

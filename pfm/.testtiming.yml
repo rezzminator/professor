@@ -76,6 +76,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/resolve: 16
       github.com/rezzminator/professor/pfm/internal/semver: 2
       github.com/rezzminator/professor/pfm/internal/sky: 2
+      github.com/rezzminator/professor/pfm/internal/sourcelink: 2
       github.com/rezzminator/professor/pfm/internal/spawn: 8
       github.com/rezzminator/professor/pfm/internal/sqlitedb: 2
       github.com/rezzminator/professor/pfm/internal/stale: 2

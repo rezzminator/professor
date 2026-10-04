@@ -15,6 +15,7 @@ import (
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
 // Mode selects whether the compiler may change the filesystem.
@@ -77,12 +78,18 @@ type generatedFile struct {
 	// Source is the file a MirrorCopy output copies byte for byte; empty
 	// for every compiled output.
 	Source string
+	// Kept marks the twin of a source link that does not resolve right now:
+	// reconcile leaves the path as it is and never sweeps it as an orphan.
+	Kept *sourceEntry
 }
 
 type sourceEntry struct {
 	Path     string
 	Rel      string
 	SkillDir bool
+	// Target is set only on an agent source link that does not resolve
+	// right now (an uninitialised submodule): the link's own target text.
+	Target string
 }
 
 // compileOpenCode discovers, renders, validates, and reconciles all OpenCode outputs.
@@ -352,7 +359,14 @@ func discoverOpenCodeAgents(dir string, problem func(string, ...any), dangling f
 			continue
 		}
 		path := filepath.Join(dir, item.Name())
-		info, ok := statOpenCodeSource(path, item, problem, dangling)
+		info, ok := statOpenCodeSource(path, item, problem, func(path string, err error) {
+			dangling(path, err)
+			entries = append(entries, sourceEntry{
+				Path:   path,
+				Rel:    item.Name(),
+				Target: sourcelink.LinkTarget(path),
+			})
+		})
 		if !ok || !info.Mode().IsRegular() {
 			continue
 		}
@@ -383,6 +397,13 @@ func compileOpenCodeAgents(
 				continue
 			}
 			seen[name] = true
+			if entry.Target != "" {
+				add(generatedFile{
+					Path: filepath.Join(root, ".opencode", "agent", name+".md"),
+					Kept: &entry,
+				})
+				continue
+			}
 			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, skip, warn)
 		}
 	}

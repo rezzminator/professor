@@ -87,6 +87,54 @@ func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 	}
 }
 
+// A Codex rollout whose newest entry is commentary between tool calls is a
+// running turn: its summary is PARTIAL and never cached as final, so the next
+// read pays the runner again.
+func TestSummarizeNeverCachesAMidTurnCodexExchange(t *testing.T) {
+	root, database := summaryTestStore(t)
+	transcriptPath := filepath.Join(root, "rollout.jsonl")
+	writeSummaryTranscript(
+		t,
+		transcriptPath,
+		codexTurnStartLine,
+		codexUserLine,
+		codexToolLine,
+		codexSaid("checking the next file"),
+	)
+	counter := filepath.Join(root, "calls")
+	bin := filepath.Join(root, "bin")
+	writeSummaryStub(
+		t,
+		bin,
+		"claude",
+		"printf x >> \"$ASK_COUNTER\"\nprintf '%s\\n' '{\"result\":\"still checking files\"}'",
+	)
+	t.Setenv("PATH", bin)
+	t.Setenv("ASK_COUNTER", counter)
+	options := SummaryOptions{
+		Config:   summaryMachine(t, "claude"),
+		Database: database,
+		TempDir:  filepath.Join(root, "tmp"),
+	}
+	chat := Chat{Name: "seat", Engine: pfmengine.Codex, Path: transcriptPath}
+	for iteration := 0; iteration < 2; iteration++ {
+		result := Summarize(context.Background(), chat, options)
+		if result.Cached || !strings.HasPrefix(result.Text, "PARTIAL: ") {
+			t.Fatalf("iteration %d summary=%+v, want an uncached PARTIAL", iteration, result)
+		}
+	}
+	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "xx" {
+		t.Fatalf("runner calls=%q err=%v", calls, err)
+	}
+	info, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := database.ChatSummary(context.Background(), transcriptPath, info.Size()); err != nil || found {
+		t.Fatalf("mid-turn summary cached at offset %d: found=%v err=%v", info.Size(), found, err)
+	}
+}
+
 func TestSummarizePreservesAnswerWhenPreparedExchangeCleanupFails(t *testing.T) {
 	root, database := summaryTestStore(t)
 	transcriptPath := filepath.Join(root, "exchange.jsonl")

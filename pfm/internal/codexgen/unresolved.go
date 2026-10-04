@@ -1,11 +1,11 @@
 package codexgen
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
 // sourceEntry is one discovered Claude source. A non-empty target marks a
@@ -22,15 +22,14 @@ type sourceEntry struct {
 // unresolvedLeaf records a leaf source link discoverMarkdown cannot resolve:
 // the typed dangling entry Check gates on, plus the link itself so a caller
 // that can name the link's twin keeps that twin instead of sweeping it as an
-// orphan. An unreadable link still records the read failure as its target,
-// never an empty string that would read as "no link".
+// orphan (sourcelink.LinkTarget names an unreadable link's read failure).
 func (result *Result) unresolvedLeaf(path, rel string, err error) {
 	result.danglingSource(path, err)
-	target, readErr := os.Readlink(path)
-	if readErr != nil {
-		target = fmt.Sprintf("unreadable link (%v)", readErr)
-	}
-	result.leafLinks = append(result.leafLinks, sourceEntry{path: path, rel: rel, target: target})
+	result.leafLinks = append(result.leafLinks, sourceEntry{
+		path:   path,
+		rel:    rel,
+		target: sourcelink.LinkTarget(path),
+	})
 }
 
 // markdownSources is discoverMarkdown plus every unresolvable leaf .md link
@@ -60,18 +59,14 @@ func keptCommandTwin(root string, entry sourceEntry) generatedFile {
 	return keptTwin(filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)), "SKILL.md"), entry)
 }
 
-// keepTwin leaves a kept twin exactly as it is and says so when one exists.
-// A twin that was never generated has nothing to keep; one that cannot be
-// inspected is a problem, never a silent keep.
+// keepTwin leaves a kept twin exactly as it is and says so when one exists
+// (sourcelink.KeepTwin).
 func (r *reconcileResult) keepTwin(output generatedFile) {
-	if _, err := os.Lstat(output.Path); err != nil {
-		if !os.IsNotExist(err) {
-			r.Problems = append(r.Problems, fmt.Sprintf("inspect kept twin %s: %v", output.Path, err))
-		}
-		return
+	warning, problem := sourcelink.KeepTwin(output.Path, output.Kept.path, output.Kept.target)
+	if warning != "" {
+		r.Warnings = append(r.Warnings, warning)
 	}
-	r.Warnings = append(
-		r.Warnings,
-		fmt.Sprintf("source unresolvable: %s → %s; twin kept", output.Kept.path, output.Kept.target),
-	)
+	if problem != "" {
+		r.Problems = append(r.Problems, problem)
+	}
 }

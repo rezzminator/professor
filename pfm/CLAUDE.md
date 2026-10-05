@@ -19,6 +19,7 @@ It reads and writes the user's real chat state: a destructive operation on a liv
 - composed prompts: the tracked fleet prompt per engine, drift-gated by a test · `harness-prompts/composed/` · generated from `harness-prompts/` by `make -C pfm prompts`
 - machine config: gitignored `{clone}/pfm.config.json`, seeded from `example.pfm.config.json`; `PFM_CONFIG` overrides · design `docs/design/engines/pfm-home.md`
 - launch registry: every flag, env value and `--settings` key a Claude chat starts with · `internal/claudelaunch/` · design `docs/design/engines/claude-launch.md`
+- workbench: a nested sub-project marked by `.professor/workbench.json`, its own picker group `{project} › {title}`, every launch door running on its prompt · `internal/workbench/` · manual `/pfm:workbench` · design `docs/design/engines/workbench.md`
 - `deps.Registry`: the single place a platform difference is declared; `deps.Resolve` refuses a gated name off-platform even when it is on PATH · `internal/deps/registry.go`
 - config: account identity, emoji, theme and permission posture · `internal/config/`
 - lineage: folds a Codex subagent thread into its parent seat · `internal/store/lineage.go`

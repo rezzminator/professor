@@ -21,7 +21,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### How the pieces connect
 
 - `CLAUDE.md` — the orientation file: Vocabulary, Runtime, Rules; shaped by `/quality:claude-md`
-- `.claude/commands/**/*.md` — slash commands (`/pcm`, `/pfm:release`, `/dev`; `/quality:*`, `/context-meter`, `/pfm` are global)
+- `.claude/commands/**/*.md` — slash commands (`/pcm`, `/pfm:release`, `/dev`; `/quality:*`, `/context-meter`, `/pfm`, `/pfm:workbench` are global)
 - `.claude/agents/*.md` — registered agents (`ls` for the set); `gitter` is the Git writer, `tracer` the consumer-tree trace
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set; source-fetched per `templates/project/skills/sources.json`, never vendored)
 - `.claude/scripts/*.{sh,mjs}` — dev.sh, pfm-guard.sh, guard-stamp.sh, format-md.sh, codex-sync.sh (mirror auto-compile; the Codex compiler itself is `pfm codex build`)

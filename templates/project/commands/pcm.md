@@ -21,7 +21,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### How the pieces connect
 
 - `CLAUDE.md` — the orientation file: Vocabulary, Runtime, Rules; shaped by `/quality:claude-md`
-- `.claude/commands/*.md` — project slash commands (/pcm, /dev, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/pfm`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
+- `.claude/commands/*.md` — project slash commands (/pcm, /dev, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/pfm`, `/pfm:workbench`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
 - `.claude/agents/*.md` — root pipeline agents (gitter) + any `{proj}-{role}` specialist wrappers the project wrote
 - `.claude/commands/{project}-testing-manual.md` — one per project: its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set)

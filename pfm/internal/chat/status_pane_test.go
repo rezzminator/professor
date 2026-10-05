@@ -61,9 +61,9 @@ func TestNeedsPaneStateOnlyForALiveChatWithNoTranscriptEvidence(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := needsPaneState(test.chat, headless.Status{Last: test.last})
-			if got != test.want {
-				t.Fatalf("needsPaneState = %v, want %v", got, test.want)
+			got, err := needsPaneState(test.chat, headless.Status{Last: test.last})
+			if err != nil || got != test.want {
+				t.Fatalf("needsPaneState = (%v, %v), want %v", got, err, test.want)
 			}
 		})
 	}
@@ -280,5 +280,58 @@ func TestInspectSeatReadsATrustDialogOnATranscriptlessSeatAsBlocked(t *testing.T
 	}
 	if status.State != headless.StateBlocked || calls != 1 {
 		t.Fatalf("state = %q after %d capture(s), want blocked after 1", status.State, calls)
+	}
+}
+
+// codexIdlePane is a Codex screen with no running-turn footer.
+const codexIdlePane = "\n› Ask Codex to do anything\n\n  gpt-5.5 high · 100% context left\n"
+
+// A Codex rollout holding only task_started has no entry for Last, yet its
+// turn record says the turn runs: the screen between two tool calls shows no
+// footer, and reading it called a working seat idle. Only a rollout with no
+// open turn, or a seat with no transcript evidence, is read from its pane.
+func TestInspectSeatKeepsAnOpenCodexTurnWorking(t *testing.T) {
+	testjail.Fleet(t)
+	for _, testCase := range []struct {
+		name      string
+		engine    pfmengine.ID
+		records   []string
+		path      bool
+		want      string
+		wantCalls int
+	}{
+		{"codex turn open, only task_started", pfmengine.Codex, []string{codexTaskStarted}, true, headless.StateWorking, 0},
+		{"codex turn ended", pfmengine.Codex, []string{codexTaskStarted, codexTaskComplete}, true, headless.StateIdle, 1},
+		{"claude at an empty prompt", pfmengine.Claude, nil, true, headless.StateIdle, 1},
+		{"opencode with no transcript", pfmengine.OpenCode, nil, false, headless.StateIdle, 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			chat := headless.Chat{
+				Name: "seat", Engine: testCase.engine, Live: true, Socket: "ox-1-2-3", Pane: "%0",
+			}
+			if testCase.path {
+				chat.Path = filepath.Join(t.TempDir(), "rollout.jsonl")
+				body := ""
+				if len(testCase.records) > 0 {
+					body = strings.Join(testCase.records, "\n") + "\n"
+				}
+				if err := os.WriteFile(chat.Path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			screen := codexIdlePane
+			if testCase.engine == pfmengine.OpenCode {
+				screen = openCodeIdlePane
+			}
+			calls := 0
+			status, err := InspectSeat(context.Background(), nil, chat, time.Now(), countingCapture(screen, &calls))
+			if err != nil {
+				t.Fatalf("InspectSeat() error = %v", err)
+			}
+			if status.State != testCase.want || calls != testCase.wantCalls {
+				t.Fatalf("state = %q after %d capture(s), want %q after %d",
+					status.State, calls, testCase.want, testCase.wantCalls)
+			}
+		})
 	}
 }

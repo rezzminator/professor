@@ -51,6 +51,10 @@ var (
 	ErrNoTranscript = errors.New("chat has not written a transcript")
 	// ErrNoAnswer: the chat's transcript holds no assistant turn yet.
 	ErrNoAnswer = errors.New("chat has not answered")
+	// ErrTurnInProgress: the chat's newest Codex turn is still running, so
+	// what it said last is commentary, not an answer. Never ErrNoAnswer, and
+	// never an older turn's answer served in its place.
+	ErrTurnInProgress = errors.New("mid-turn: no final answer yet")
 )
 
 // TargetError is a verb's failure to resolve its target. Err is

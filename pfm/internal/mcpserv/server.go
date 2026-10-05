@@ -186,7 +186,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	}, obs.Tool("chat_read", service.chatRead))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_last",
-		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure). For screen text, chat_capture; for older turns, chat_read.",
+		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure); a turn still in progress is a tool error that says so. For screen text, chat_capture; for older turns, chat_read.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_last", service.chatLast))
 	mcp.AddTool(server, &mcp.Tool{

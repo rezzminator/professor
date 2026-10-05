@@ -51,8 +51,12 @@ func InspectSeat(
 	if err != nil {
 		return headless.Status{}, err
 	}
+	pane, err := needsPaneState(target, status)
+	if err != nil {
+		return headless.Status{}, err
+	}
 	switch {
-	case needsPaneState(target, status):
+	case pane:
 		status, err = statusFromPane(ctx, target, status, capture, runtime)
 	case awaitsPane(target, status):
 		status, err = blockedFromPane(ctx, target, status, capture, runtime)

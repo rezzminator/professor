@@ -2,12 +2,15 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // PaneCapture reads one live chat's pane. It is the seam InspectSeat crosses to
@@ -34,9 +37,36 @@ func PaneTarget(chat headless.Chat) string {
 // this process can read (OpenCode), or one whose transcript exists but holds
 // no turn yet (a chat still sitting at an empty prompt). headless.Inspect
 // answers StateWorking for both — the honest answer given only a file, and a
-// wrong one about a chat that is plainly waiting for its human.
-func needsPaneState(chat headless.Chat, status headless.Status) bool {
-	return chat.Live && (chat.Path == "" || status.Last == "")
+// wrong one about a chat that is plainly waiting for its human. A Codex
+// rollout whose turn record leaves its newest turn open is that evidence even
+// with no entry for Last (only task_started so far): its screen between two
+// tool calls shows no footer, and read as idle it hid a working seat.
+func needsPaneState(chat headless.Chat, status headless.Status) (bool, error) {
+	if !chat.Live || (chat.Path != "" && status.Last != "") {
+		return false, nil
+	}
+	open, err := codexTurnOpen(chat)
+	return err == nil && !open, err
+}
+
+// codexTurnOpen says whether a Codex chat's rollout leaves its newest turn
+// running (transcript.Meta.CodexTurn) — the end-record rule headless applies
+// in Inspect and Await. Any other engine, a chat with no transcript, a rollout
+// not created yet and one holding no turn record are not open. A rollout that
+// could not be read is an error, never "not open": a failed read must not
+// render as idle or as a finished answer.
+func codexTurnOpen(chat headless.Chat) (bool, error) {
+	if chat.Engine != pfmengine.Codex || chat.Path == "" {
+		return false, nil
+	}
+	meta, err := transcript.ReadMeta(chat.Path, string(pfmengine.Codex))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s Codex turn records %s: %w", chat.Name, chat.Path, err)
+	}
+	return meta.CodexTurn == transcript.CodexTurnOpen, nil
 }
 
 // blockedQuietSeconds is how long a pending tool call must have been silent

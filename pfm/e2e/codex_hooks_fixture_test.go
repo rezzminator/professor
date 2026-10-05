@@ -27,7 +27,8 @@ func TestCodexHookAPIFixture(t *testing.T) {
 	}
 	var doc struct {
 		Hooks map[string][]struct {
-			Hooks []struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
 				Command string `json:"command"`
 			} `json:"hooks"`
 		} `json:"hooks"`
@@ -44,6 +45,7 @@ func TestCodexHookAPIFixture(t *testing.T) {
 				map[string]any{
 					"key":         "fixture-hook",
 					"command":     hook.Command,
+					"matcher":     group.Matcher,
 					"sourcePath":  source,
 					"source":      "user",
 					"currentHash": hex.EncodeToString(sum[:]),

@@ -72,8 +72,13 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	if !changed {
 		t.Fatal("Codex hook wiring did not strip the leftover clear-kill hook")
 	}
-	if len(owned) != 0 {
-		t.Fatalf("Codex hook ownership=%#v, want none owned", owned)
+	resumeUnkill := settingsHookKey{
+		Event:   "SessionStart",
+		Matcher: "resume",
+		Command: filepath.Join(home, ".local", "bin", "pfm") + " internal resume-unkill",
+	}
+	if len(owned) != 1 || owned[resumeUnkill] != 1 {
+		t.Fatalf("Codex hook ownership=%#v, want exactly the resume-unkill hook owned once", owned)
 	}
 	if got := hookCommandCount(t, string(updated), "SessionStart", canonical); got != 0 {
 		t.Fatalf("canonical clear-kill count=%d, want zero:\n%s", got, updated)
@@ -81,8 +86,11 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	if got := hookCommandCount(t, string(updated), "SessionStart", legacyParent); got != 0 {
 		t.Fatalf("shell-parent clear-kill count=%d, want zero:\n%s", got, updated)
 	}
-	if strings.Contains(string(updated), "SessionStart") {
-		t.Fatalf("SessionStart survived with nothing left to hold: %s", updated)
+	if strings.Contains(string(updated), codexClearMatcher) {
+		t.Fatalf("a clear-kill matcher entry survived with nothing left to hold: %s", updated)
+	}
+	if got := hookCommandCount(t, string(updated), "SessionStart", resumeUnkill.Command); got != 1 {
+		t.Fatalf("resume-unkill handler count=%d, want exactly one:\n%s", got, updated)
 	}
 
 	// Idempotent: a second pass over the already-converged file changes
@@ -148,6 +156,26 @@ func TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept(t *testing.T) {
 	}
 	if !foundClose {
 		t.Fatal("claudeHookTemplates dropped the exit-close hook")
+	}
+}
+
+func TestClaudeHookTemplatesIncludesResumeUnkill(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join("neutral", "home")
+	found := 0
+	for _, template := range claudeHookTemplates(home) {
+		if template.Name != "resume-unkill" {
+			continue
+		}
+		found++
+		if template.Event != "SessionStart" || template.Matcher != "resume" || template.Async ||
+			template.Command != home+"/.local/bin/pfm internal resume-unkill" {
+			t.Fatalf("resume-unkill template=%#v, want SessionStart, matcher resume, not async, "+
+				"pfm internal resume-unkill", template)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("resume-unkill templates=%d, want exactly 1 among the expected hooks", found)
 	}
 }
 

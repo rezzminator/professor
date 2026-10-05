@@ -579,6 +579,11 @@ func TestClaudePfmsRenderedSettingsRunPlayedHooks(t *testing.T) {
 		if hook.Event == hookPreToolUse && hook.Matcher != "Bash" && hook.Matcher != "*" && hook.Matcher != "" {
 			continue
 		}
+		// A SessionStart matcher selects the start source; this run is a fresh
+		// startup, so only unmatched and startup-matched hooks fire.
+		if hook.Event == hookSessionStart && hook.Matcher != "" && hook.Matcher != sourceStartup {
+			continue
+		}
 		key := hook.Event + "|" + strings.TrimPrefix(hook.Command, filepath.Join(bin, "pfm")+" ")
 		if seen[key] != 1 {
 			t.Errorf("%s ran %d times, want 1; records: %q", key, seen[key], got)

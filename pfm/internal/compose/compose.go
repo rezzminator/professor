@@ -34,6 +34,7 @@ type composer struct {
 	paneByTarget     map[string]gather.ProbePane
 	claudeSockets    map[string]struct{}
 	liveTranscripts  map[string]struct{}
+	livePaneThreads  map[string]string
 	liveRollouts     map[string]struct{}
 	liveOpenCode     map[string]struct{}
 	claudeAccounts   []ClaudeSeat
@@ -334,6 +335,7 @@ func (current *composer) buildIndexes() {
 		}
 	}
 	current.liveTranscripts = make(map[string]struct{})
+	current.livePaneThreads = make(map[string]string)
 	current.liveRollouts = make(map[string]struct{})
 	current.liveOpenCode = make(map[string]struct{})
 	current.claudeAccounts = current.input.ClaudeSeats
@@ -533,6 +535,7 @@ func (current *composer) liveClaudeRows() ([]Row, []Row) {
 		row, id := current.liveClaudeRow(socket, pane, crumb.TranscriptPath)
 		if id != "" {
 			current.liveTranscripts[id] = struct{}{}
+			current.livePaneThreads[targetKey(socket, pane.PaneID)] = id
 		}
 		rows = append(rows, row)
 	}
@@ -643,6 +646,7 @@ func (current *composer) splitRow(
 		}
 		if transcript.UUID != "" {
 			current.liveTranscripts[transcript.UUID] = struct{}{}
+			current.livePaneThreads[targetKey(socket, paneID)] = transcript.UUID
 		}
 		indexed := naming.DisplayName(
 			transcript.CustomTitle,
@@ -823,6 +827,9 @@ func (current *composer) agentRows() []Row {
 		}
 		agent := agents[id]
 		transcript, found := current.transcriptByID[id]
+		if current.abandonedLaunch(agent, transcript, found) {
+			continue
+		}
 		if !found {
 			transcript = store.Transcript{UUID: id}
 		}

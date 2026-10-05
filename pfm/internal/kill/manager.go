@@ -491,6 +491,15 @@ func (manager *Manager) Unkill(ctx context.Context, id string) (bool, error) {
 	return manager.database.Unkill(ctx, id)
 }
 
+// UnkillResumed lifts the kill on a thread its engine just resumed under its
+// own id: a chat that is live again is no longer killed, whichever route
+// reopened it. It reports whether a kill was standing.
+func (manager *Manager) UnkillResumed(ctx context.Context, id string) (removed bool, err error) {
+	trail := resumeTrail(ctx)
+	defer func() { resumed(trail, removed, err) }()
+	return manager.Unkill(ctx, id)
+}
+
 // unkillLineage clears every id in a Codex resume lineage, root and members
 // alike — see Unkill's own comment for why the root alone is not enough.
 func (manager *Manager) unkillLineage(

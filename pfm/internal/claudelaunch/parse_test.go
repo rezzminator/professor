@@ -123,7 +123,7 @@ func TestParseRoundTripEveryKnob(t *testing.T) {
 					t.Error("cleanup missing")
 				}
 			case "hooks":
-				if len(parsed.Hooks) != 10 {
+				if len(parsed.Hooks) != 11 {
 					t.Errorf("hooks=%d", len(parsed.Hooks))
 				}
 				for _, hook := range parsed.Hooks {

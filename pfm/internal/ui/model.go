@@ -310,9 +310,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.query.SetWidth(maxInt(8, model.width/2))
 		return model, nil
 	case RefreshMsg:
-		arrivals := len(model.deck.arrivals)
+		arrivals := model.deck.arrivalCount
 		model.applyRefresh(message.Snapshot)
-		if len(model.deck.arrivals) > arrivals {
+		if model.deck.arrivalCount > arrivals {
 			// A chat just arrived: wake the ambient tick so its flare plays out
 			// even if the picker had parked.
 			command := model.wakeSky()

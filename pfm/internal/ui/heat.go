@@ -82,13 +82,14 @@ func heatRuler(heat float64, hot, cold, unlit, bg string) string {
 		lit = min(heatRulerCells, max(1, int(math.Ceil(heat*heatRulerCells))))
 	}
 	var ruler strings.Builder
+	ruler.Grow(heatRulerCells * 48)
 	for index := range heatRulerCells {
 		if index < lit {
 			step := float64(index+1) / heatRulerCells
-			ruler.WriteString(tone{fg: blendHex(cold, hot, step*heat), bg: bg}.render("▰"))
+			tone{fg: blendHex(cold, hot, step*heat), bg: bg}.renderTo(&ruler, "▰")
 			continue
 		}
-		ruler.WriteString(tone{fg: unlit, bg: bg}.render("▱"))
+		tone{fg: unlit, bg: bg}.renderTo(&ruler, "▱")
 	}
 	return ruler.String()
 }

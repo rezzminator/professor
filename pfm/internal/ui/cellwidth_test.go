@@ -88,3 +88,12 @@ func BenchmarkCellWidth(b *testing.B) {
 		}
 	})
 }
+
+// glyphCells must count one character exactly as the grapheme measurer does.
+func TestGlyphCellsAgreesWithTheGraphemeMeasurer(t *testing.T) {
+	for _, glyph := range []string{"a", " ", "~", "\t", "\x7f", "●", "↻", "⚙", "◐", "◆", "─", "é", "🥈", "界", "\u0301", "\u200d"} {
+		if got, want := glyphCells(glyph), ansi.StringWidth(glyph); got != want {
+			t.Errorf("glyphCells(%q) = %d, ansi.StringWidth = %d", glyph, got, want)
+		}
+	}
+}

@@ -11,10 +11,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
-// claudeScanWidths are the tail sizes tried in turn: most transcripts end in a
-// few kilobytes, and a turn that finishes on a very large tool result needs the
-// wider read.
-var claudeScanWidths = []int64{256 << 10, 2 << 20}
+// claudeScanWidths are the tail sizes tried in turn. The picker's first refresh
+// reads every row's transcript, so the first read is sized to what nearly all of
+// them need: measured over 400 real transcripts, the newest decisive record
+// sat within 16 KiB of the end for four in five, and within 256 KiB for all.
+// A turn that finishes on a very large tool result takes the wider reads.
+var claudeScanWidths = []int64{16 << 10, 256 << 10, 2 << 20}
 
 // claudeRecord is the part of a transcript line the facts come from.
 type claudeRecord struct {

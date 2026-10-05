@@ -342,3 +342,21 @@ func TestGroupHexAlternatesWithTheProjectOrdinal(t *testing.T) {
 		t.Errorf("projects alternate between the two group colours, saw %v", seen)
 	}
 }
+
+// A chat that arrives in a refresh is drawn brighter than its settled self for
+// arrivalGlowNS, then exactly like it: the flare the sky is woken to play out.
+func TestArrivedRowFlaresThenSettlesIntoItsColour(t *testing.T) {
+	model := deckModel(120, 30)
+	model.nowNS = fixtureNowNS
+	arrival := newArrival()
+	model.deck.noteArrivals(nil, []compose.Row{arrival}, fixtureNowNS)
+	settled := model
+	settled.deck.arrivals = nil
+	if model.renderGroupedRow(arrival, false, 100, false) == settled.renderGroupedRow(arrival, false, 100, false) {
+		t.Error("a chat that just arrived is drawn exactly like a settled one: the flare never renders")
+	}
+	model.nowNS, settled.nowNS = fixtureNowNS+arrivalGlowNS, fixtureNowNS+arrivalGlowNS
+	if model.renderGroupedRow(arrival, false, 100, false) != settled.renderGroupedRow(arrival, false, 100, false) {
+		t.Error("the flare must be gone once arrivalGlowNS has passed")
+	}
+}

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -129,14 +130,12 @@ func TestToneRenderFallsBackToLipglossForAColourItCannotSpell(t *testing.T) {
 	}
 }
 
-func TestTruecolorParams(t *testing.T) {
-	if got, ok := truecolorParams("#5f3dc4"); !ok || got != "95;61;196" {
-		t.Errorf("#5f3dc4 = %q %v", got, ok)
-	}
-	if got, ok := truecolorParams(""); !ok || got != "" {
-		t.Errorf("an empty colour spells nothing and is fine: %q %v", got, ok)
-	}
-	if _, ok := truecolorParams("#zzzzzz"); ok {
-		t.Error("a non-hex colour is not spellable")
+// hexOfRGB spells a colour byte for byte as the palette's "#%02x%02x%02x" does.
+func TestHexOfRGBSpellsWhatThePaletteFormatWould(t *testing.T) {
+	for value := range 256 {
+		colour := RGB{uint8(value), uint8(255 - value), uint8(value * 7)}
+		if got, want := hexOfRGB(colour), fmt.Sprintf("#%02x%02x%02x", colour.R, colour.G, colour.B); got != want {
+			t.Fatalf("hexOfRGB(%v) = %q, want %q", colour, got, want)
+		}
 	}
 }

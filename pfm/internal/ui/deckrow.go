@@ -80,16 +80,23 @@ type deckLayout struct {
 // row at every width — the dossier lists the whole menu beside it.
 func deckTiers(chip bool) [][]deckColumn {
 	if chip {
-		return [][]deckColumn{
-			{deckColWork, deckColModel, deckColPrompts, deckColSize, deckColChip, deckColAge},
-			{deckColWork, deckColModel, deckColPrompts, deckColChip, deckColAge},
-			{deckColWork, deckColModel, deckColChip, deckColAge},
-			{deckColWork, deckColChip, deckColAge},
-			{deckColChip, deckColAge},
-			{deckColAge},
-		}
+		return deckChipTiers
 	}
-	return [][]deckColumn{
+	return deckRulerTiers
+}
+
+// The tier tables are read for every row of every frame and never written, so
+// they are built once.
+var (
+	deckChipTiers = [][]deckColumn{
+		{deckColWork, deckColModel, deckColPrompts, deckColSize, deckColChip, deckColAge},
+		{deckColWork, deckColModel, deckColPrompts, deckColChip, deckColAge},
+		{deckColWork, deckColModel, deckColChip, deckColAge},
+		{deckColWork, deckColChip, deckColAge},
+		{deckColChip, deckColAge},
+		{deckColAge},
+	}
+	deckRulerTiers = [][]deckColumn{
 		{deckColWork, deckColModel, deckColPrompts, deckColSize, deckColRuler, deckColAge},
 		{deckColWork, deckColModel, deckColPrompts, deckColSize, deckColAge},
 		{deckColWork, deckColModel, deckColPrompts, deckColAge},
@@ -97,7 +104,7 @@ func deckTiers(chip bool) [][]deckColumn {
 		{deckColWork, deckColAge},
 		{deckColAge},
 	}
-}
+)
 
 func deckClusterWidth(columns []deckColumn) int {
 	total := 0
@@ -264,6 +271,11 @@ func (model Model) renderGroupedRow(
 	shade := engineHex
 	if recent {
 		shade = heatShade(engineHex, palette.HeatCold, floor+(1-floor)*heat)
+	}
+	if glow := model.deck.glow(row, model.nowNS); glow > 0 {
+		// A chat that just arrived flares toward white and fades back into its
+		// own colour over arrivalGlowNS (deckstate.go).
+		shade = blendHex(shade, "#ffffff", arrivalFlarePeak*glow)
 	}
 	ink := tone{fg: shade, bg: bg}
 	switch {

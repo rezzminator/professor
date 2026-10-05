@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"fmt"
-	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -34,84 +32,22 @@ func (paint tone) style() lipgloss.Style {
 // no stray escape sequence behind. A deck frame paints hundreds of runs, so the
 // common case — #rrggbb colours and the three text attributes — writes its one
 // SGR sequence directly instead of building a lipgloss style per run; anything
-// else (a named colour, say) still goes through lipgloss.
+// else (a named colour, say) still goes through lipgloss (sgr.go).
 func (paint tone) render(text string) string {
 	if text == "" {
 		return ""
 	}
-	fg, fgOK := truecolorParams(paint.fg)
-	bg, bgOK := truecolorParams(paint.bg)
-	if !fgOK || !bgOK {
+	if !truecolorOK(paint.fg) || !truecolorOK(paint.bg) {
 		return paint.style().Render(text)
 	}
 	var buf strings.Builder
 	buf.Grow(len(text) + 48)
-	sep := func() string {
-		if buf.Len() == 0 {
-			buf.WriteString("\x1b[")
-			return ""
-		}
-		return ";"
-	}
-	if paint.bold {
-		buf.WriteString(sep())
-		buf.WriteByte('1')
-	}
-	// lipgloss writes italic before faint; the same order keeps the two paths
-	// byte-identical.
-	if paint.italic {
-		buf.WriteString(sep())
-		buf.WriteByte('3')
-	}
-	if paint.dim {
-		buf.WriteString(sep())
-		buf.WriteByte('2')
-	}
-	if fg != "" {
-		buf.WriteString(sep())
-		buf.WriteString("38;2;")
-		buf.WriteString(fg)
-	}
-	if bg != "" {
-		buf.WriteString(sep())
-		buf.WriteString("48;2;")
-		buf.WriteString(bg)
-	}
-	if buf.Len() == 0 {
+	if !paint.writeSGR(&buf) {
 		return text
 	}
-	buf.WriteByte('m')
 	buf.WriteString(text)
 	buf.WriteString("\x1b[m")
 	return buf.String()
-}
-
-// truecolorParams spells a #rrggbb colour as the r;g;b of a truecolor SGR. An
-// empty colour is valid and spells nothing; anything that is not #rrggbb is not
-// ok, and the caller falls back to lipgloss for it.
-func truecolorParams(hex string) (string, bool) {
-	if hex == "" {
-		return "", true
-	}
-	if len(hex) != 7 || hex[0] != '#' {
-		return "", false
-	}
-	var channel [3]uint8
-	for index := range channel {
-		high, highOK := hexDigit(hex[1+2*index])
-		low, lowOK := hexDigit(hex[2+2*index])
-		if !highOK || !lowOK {
-			return "", false
-		}
-		channel[index] = high<<4 | low
-	}
-	return strconv.Itoa(
-		int(channel[0]),
-	) + ";" + strconv.Itoa(
-		int(channel[1]),
-	) + ";" + strconv.Itoa(
-		int(channel[2]),
-	), true
 }
 
 func hexDigit(value byte) (uint8, bool) {
@@ -142,10 +78,16 @@ type span struct {
 	paint tone
 }
 
+// joinSpans paints spans into one line, every run written straight into it.
 func joinSpans(spans []span) string {
+	size := 0
+	for index := range spans {
+		size += len(spans[index].text) + 48 // the longest opening sequence and its reset
+	}
 	var line strings.Builder
-	for _, part := range spans {
-		line.WriteString(part.paint.render(part.text))
+	line.Grow(size)
+	for index := range spans {
+		spans[index].paint.renderTo(&line, spans[index].text)
 	}
 	return line.String()
 }
@@ -160,7 +102,14 @@ func spansWidth(spans []span) int {
 
 // hexOfRGB spells a colour the way the palette does.
 func hexOfRGB(colour RGB) string {
-	return fmt.Sprintf("#%02x%02x%02x", colour.R, colour.G, colour.B)
+	const digits = "0123456789abcdef"
+	spelled := [7]byte{
+		'#',
+		digits[colour.R>>4], digits[colour.R&0xf],
+		digits[colour.G>>4], digits[colour.G&0xf],
+		digits[colour.B>>4], digits[colour.B&0xf],
+	}
+	return string(spelled[:])
 }
 
 // blendHex mixes two palette colours; t=0 is from, t=1 is to.

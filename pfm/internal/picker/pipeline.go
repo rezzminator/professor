@@ -369,6 +369,15 @@ func streamFleetRefreshesWith(
 	dependencies refreshDependencies,
 ) {
 	defer close(updates)
+	refreshClock := dependencies.clock
+	if refreshClock == nil {
+		refreshClock = clock.Real
+	}
+	// lastPass is when the last published pass STARTED: the header ages the
+	// fleet from its snapshot's scan clock, which a pass takes as it resolves
+	// its environment, so a key the header calls stale is stale here too —
+	// stamping the END would hide a long pass's own duration from the wake.
+	lastPass := refreshClock.Now()
 	environment, err := fleet.ResolveEnv(request.fleetRequest())
 	if err != nil {
 		writeRefreshError(ctx, stderr, "", err)
@@ -457,10 +466,6 @@ func streamFleetRefreshesWith(
 	}
 
 	cadence := newRefreshCadence(dependencies.activity)
-	refreshClock := dependencies.clock
-	if refreshClock == nil {
-		refreshClock = clock.Real
-	}
 	timer := refreshClock.NewTimer(cadence.interval)
 	defer timer.Stop()
 	// parked survives across iterations: once the cadence backs off past
@@ -470,7 +475,6 @@ func streamFleetRefreshesWith(
 	// wakes a full pass to publish the new binding and hidden predecessor.
 	parked := false
 	wake := dependencies.activity.Wake()
-	lastPass := refreshClock.Now()
 	// A failed publication must be retried even if reconciliation already
 	// committed the binding and therefore reports no further identity change.
 	pendingRefresh := false
@@ -556,6 +560,7 @@ func streamFleetRefreshesWith(
 			timer.Reset(next)
 		}
 		pendingRefresh = true
+		passStart := refreshClock.Now()
 		environment, err = fleet.ResolveEnv(request.fleetRequest())
 		if err != nil {
 			writeRefreshError(ctx, stderr, "", err)
@@ -638,7 +643,7 @@ func streamFleetRefreshesWith(
 			return
 		}
 		pendingRefresh = false
-		lastPass = refreshClock.Now()
+		lastPass = passStart
 		// A full pass can publish while reconciliation reports a retryable
 		// failure. Let the first parked poll verify the binding before caching.
 		parkedRollouts = nil

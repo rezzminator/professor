@@ -12,6 +12,9 @@ import (
 type deckState struct {
 	home     string
 	arrivals map[string]int64
+	// arrivalCount counts every arrival ever stamped; arrivals itself is pruned,
+	// so its length cannot say whether a refresh brought one.
+	arrivalCount uint64
 	// rev counts the messages that can change what the fleet passes below read
 	// (a key, a paste, a refresh); agg memoises those passes against it. agg is
 	// a pointer so every copy of the model shares one cache, and each entry
@@ -84,12 +87,22 @@ const (
 	// arrivalGlowNS is how long a freshly arrived chat's row flares before it
 	// settles into its normal colour.
 	arrivalGlowNS = int64(2200 * time.Millisecond)
+	// arrivalFlarePeak is how far toward white an arrived row's colour is
+	// lifted at the moment it lands; the lift fades with glow.
+	arrivalFlarePeak = 0.55
 )
 
 // noteArrivals stamps every chat that is in after but was not in before. The
 // first snapshot is never compared (there is no before), so opening the picker
 // does not flare the whole fleet.
 func (state *deckState) noteArrivals(before, after []compose.Row, nowNS int64) bool {
+	// A flare that has played out is forgotten, so the map holds only the
+	// chats still glowing and a frame with none asks it nothing.
+	for key, landed := range state.arrivals {
+		if nowNS-landed >= arrivalGlowNS {
+			delete(state.arrivals, key)
+		}
+	}
 	known := make(map[string]bool, len(before))
 	for index := range before {
 		known[compose.RowKey(before[index])] = true
@@ -105,6 +118,7 @@ func (state *deckState) noteArrivals(before, after []compose.Row, nowNS int64) b
 			state.arrivals = make(map[string]int64)
 		}
 		state.arrivals[key] = nowNS
+		state.arrivalCount++
 		arrived = true
 	}
 	return arrived
@@ -113,6 +127,9 @@ func (state *deckState) noteArrivals(before, after []compose.Row, nowNS int64) b
 // glow is how bright a row's arrival flare still is, 1 at the moment it lands
 // and 0 once arrivalGlowNS has passed.
 func (state *deckState) glow(row compose.Row, nowNS int64) float64 {
+	if len(state.arrivals) == 0 {
+		return 0
+	}
 	landed, ok := state.arrivals[compose.RowKey(row)]
 	if !ok {
 		return 0

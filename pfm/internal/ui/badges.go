@@ -62,19 +62,11 @@ func rowBadgeParts(row compose.Row) []badgePart {
 	if row.SplitCount > 1 {
 		parts = append(parts, badgePart{text: fmt.Sprintf("⊞%d", row.SplitCount)})
 	}
-	switch {
-	case row.LaunchUnread:
+	if row.LaunchUnread {
 		parts = append(parts, badgePart{text: "⚠", kind: badgeWarn})
-	case len(row.Accounts) != 0:
-		for _, account := range row.Accounts {
-			parts = append(parts, badgePart{text: accountMedal(account)})
-		}
-	case row.Account != 0:
-		if compose.EngineForKind(row.Kind) == pfmengine.Codex {
-			parts = append(parts, badgePart{text: codexAccountMedal(row.Account)})
-		} else {
-			parts = append(parts, badgePart{text: accountMedal(row.Account)})
-		}
+	}
+	for _, medal := range rowMedals(row) {
+		parts = append(parts, badgePart{text: medal})
 	}
 	if row.C1H && !row.LaunchUnread {
 		parts = append(parts, badgePart{text: "⚡"})
@@ -89,6 +81,27 @@ func rowBadgeParts(row compose.Row) []badgePart {
 		parts = append(parts, badgePart{text: "·hidden", kind: badgeDim})
 	}
 	return parts
+}
+
+// rowMedals is the medal of every account a row runs on — none while its launch
+// is unread, which shows its warning instead. The badge column and the
+// dossier's medal strip both read it.
+func rowMedals(row compose.Row) []string {
+	switch {
+	case row.LaunchUnread:
+		return nil
+	case len(row.Accounts) != 0:
+		medals := make([]string, 0, len(row.Accounts))
+		for _, account := range row.Accounts {
+			medals = append(medals, accountMedal(account))
+		}
+		return medals
+	case row.Account != 0 && compose.EngineForKind(row.Kind) == pfmengine.Codex:
+		return []string{codexAccountMedal(row.Account)}
+	case row.Account != 0:
+		return []string{accountMedal(row.Account)}
+	}
+	return nil
 }
 
 // rowBadges is the badge string the plain twin prints: parts joined by a space,

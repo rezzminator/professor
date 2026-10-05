@@ -95,12 +95,18 @@ func clockLabel(activityNS, nowNS int64) string {
 	}
 	then := time.Unix(0, activityNS)
 	now := time.Unix(0, nowNS)
-	switch dayGap := int(now.Sub(then).Hours() / 24); {
-	case then.YearDay() == now.YearDay() && then.Year() == now.Year():
+	// Days are counted between calendar midnights, not as elapsed hours: 23:00
+	// two evenings ago is not "yesterday" because fewer than 48 hours passed.
+	// Rounding absorbs the 23- and 25-hour days a DST change makes.
+	midnight := func(at time.Time) time.Time {
+		return time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, at.Location())
+	}
+	switch dayGap := int(math.Round(midnight(now).Sub(midnight(then)).Hours() / 24)); {
+	case dayGap == 0:
 		return "today " + then.Format("15:04")
-	case dayGap <= 1:
+	case dayGap == 1:
 		return "yesterday " + then.Format("15:04")
-	case dayGap < 7:
+	case dayGap > 1 && dayGap < 7:
 		return then.Format("Mon 15:04")
 	default:
 		return then.Format("Jan 2")
@@ -315,14 +321,7 @@ func (model Model) dossierEnterLine(row compose.Row, inner int) dossierLine {
 
 // rowAccountMedals is the account medal strip of a row, for the pane's head.
 func rowAccountMedals(row compose.Row) string {
-	var medals []string
-	for _, part := range rowBadgeParts(row) {
-		if part.kind == badgePlain && strings.ContainsFunc(part.text, func(r rune) bool { return r > 0x2000 }) &&
-			part.text != "⬢" && part.text != "◇" && part.text != "⚡" && part.text != "⇄" {
-			medals = append(medals, part.text)
-		}
-	}
-	return strings.Join(medals, " ")
+	return strings.Join(rowMedals(row), " ")
 }
 
 // dossierPrompt quotes the chat's last prompt behind an accent rail, wrapped to

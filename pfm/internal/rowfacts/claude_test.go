@@ -2,6 +2,7 @@ package rowfacts
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -122,5 +123,31 @@ func TestClaudeFactsReadsTheRecordFirstAndOnlyALiveSeatWorks(t *testing.T) {
 	facts, _ = reader.claudeFacts(&live, now+workingFreshNS+int64(time.Second))
 	if facts.Working {
 		t.Error("a turn that looks open but has been silent past the bound reads as idle")
+	}
+}
+
+// BenchmarkReadClaudeTail is the picker's first refresh for one ordinary
+// transcript: a long history whose newest records sit in its last few KiB.
+func BenchmarkReadClaudeTail(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "session.jsonl")
+	var history strings.Builder
+	for history.Len() < 600<<10 {
+		history.WriteString(
+			`{"type":"system","subtype":"turn_duration","content":"` + strings.Repeat("x", 400) + `"}` + "\n",
+		)
+	}
+	history.WriteString(`{"type":"user","message":{"role":"user","content":"ship it"}}` + "\n")
+	history.WriteString(
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","stop_reason":"end_turn","content":[]}}` + "\n",
+	)
+	if err := os.WriteFile(path, []byte(history.String()), 0o600); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if tail, err := readClaudeTail(path); err != nil || tail.model != "claude-opus-5-5" || tail.working {
+			b.Fatalf("readClaudeTail = %+v, %v", tail, err)
+		}
 	}
 }

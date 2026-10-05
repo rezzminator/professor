@@ -101,6 +101,21 @@ func TestRenderTabsLightsTheOpenTab(t *testing.T) {
 	}
 }
 
+// A facts error names a path and can outrun the line: the short refreshing
+// marker must stay in view beside it, and the error is what the edge cuts.
+func TestChatsHeaderLineKeepsRefreshingInViewBesideALongFactsError(t *testing.T) {
+	model := deckModel(120, 30)
+	model.refreshing = true
+	model.deck.factsError = "3 unreadable, first: row \"x\": stat " + strings.Repeat(
+		"/deep",
+		40,
+	) + ": permission denied"
+	line := ansi.Strip(model.chatsHeaderLine(100))
+	if !strings.Contains(line, "⟳ refreshing") || !strings.Contains(line, "⚠ row facts") {
+		t.Errorf("both the refresh marker and the facts warning must show: %q", line)
+	}
+}
+
 func TestChatsHeaderLineKeepsItsContextTokens(t *testing.T) {
 	model := deckModel(120, 30)
 	line := ansi.Strip(model.chatsHeaderLine(100))

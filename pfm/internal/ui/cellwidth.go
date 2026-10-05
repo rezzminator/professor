@@ -110,3 +110,16 @@ func singleCell(r rune) bool {
 	}
 	return false
 }
+
+// glyphCells is the width of one character's text, as ansi.StringWidth counts
+// it: printable ASCII and the single-cell runes on the spot, anything else
+// (an emoji, a control) through the measurer.
+func glyphCells(text string) int {
+	if len(text) == 1 && text[0] >= 0x20 && text[0] < 0x7f {
+		return 1
+	}
+	if r, _ := utf8.DecodeRuneInString(text); r >= 0x80 && singleCell(r) {
+		return 1
+	}
+	return ansi.StringWidth(text)
+}

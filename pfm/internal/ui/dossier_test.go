@@ -238,6 +238,9 @@ func TestClockLabelReadsInTheReadersOwnTerms(t *testing.T) {
 	}{
 		{time.Hour, "today 14:00"},
 		{20 * time.Hour, "yesterday 19:00"},
+		// 40 hours back is Saturday 23:00 seen on Monday: two midnights ago,
+		// so it is not "yesterday" however few whole days have elapsed.
+		{40 * time.Hour, "Sat 23:00"},
 		{3 * 24 * time.Hour, "Fri 15:00"},
 		{30 * 24 * time.Hour, "Sep 5"},
 	}
@@ -248,6 +251,22 @@ func TestClockLabelReadsInTheReadersOwnTerms(t *testing.T) {
 	}
 	if clockLabel(0, now.UnixNano()) != "" {
 		t.Error("no activity time, no label")
+	}
+}
+
+// The dossier's medal strip names the accounts a chat runs on and nothing else:
+// the agent, split and here badges are not medals.
+func TestRowAccountMedalsCarryOnlyTheRowsAccounts(t *testing.T) {
+	agent := compose.Row{Kind: compose.Agent, Account: 2, SplitCount: 3, Here: true, Attached: true, C1H: true}
+	if got, want := rowAccountMedals(agent), accountMedal(2); got != want {
+		t.Errorf("rowAccountMedals(agent) = %q, want only its account's medal %q", got, want)
+	}
+	live := compose.Row{Kind: compose.LiveClaude, Accounts: []int{1, 3}, Here: true}
+	if got, want := rowAccountMedals(live), accountMedal(1)+" "+accountMedal(3); got != want {
+		t.Errorf("rowAccountMedals(live) = %q, want %q", got, want)
+	}
+	if got := rowAccountMedals(compose.Row{Kind: compose.LiveClaude, Account: 1, LaunchUnread: true}); got != "" {
+		t.Errorf("an unread launch shows its warning, not a medal: %q", got)
 	}
 }
 

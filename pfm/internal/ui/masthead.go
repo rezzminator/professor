@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/charmbracelet/x/ansi"
+	"unicode/utf8"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -221,34 +220,19 @@ func (model Model) mastheadBandColours() *[mastheadBands]string {
 }
 
 // mastheadFill lays spans over a left-to-right gradient of the header band,
-// exactly width cells, with the sweep's glow added where it is.
+// exactly width cells, with the sweep's glow added where it is. It runs on every
+// sweep frame, so cells are walked in place and each run of one paint is
+// written straight into the line: no string per cell, none per run.
 func (model Model) mastheadFill(spans []span, width int) string {
-	type mastCell struct {
-		text  string
-		paint tone
-	}
-	cells := make([]mastCell, 0, width)
-	used := 0
-fill:
-	for _, part := range spans {
-		for _, value := range part.text {
-			cellWidth := ansi.StringWidth(string(value))
-			if used+cellWidth > width {
-				break fill
-			}
-			cells = append(cells, mastCell{text: string(value), paint: part.paint})
-			used += cellWidth
-		}
-	}
-	for ; used < width; used++ {
-		cells = append(cells, mastCell{text: " "})
-	}
 	centre, sweeping := model.sweepCentre(width)
 	bands := model.mastheadBandColours()
-	runs := make([]span, 0, 16)
+	var line strings.Builder
+	line.Grow(width * 32)
+	var scratch [256]byte
+	run := scratch[:0]
+	var runPaint tone
 	x := 0
-	for _, cell := range cells {
-		paint := cell.paint
+	put := func(text string, cells int, paint tone) {
 		if paint.bg == "" {
 			bg := bands[0]
 			if width > 1 {
@@ -261,14 +245,32 @@ fill:
 			}
 			paint.bg = bg
 		}
-		if last := len(runs) - 1; last >= 0 && runs[last].paint == paint {
-			runs[last].text += cell.text
-		} else {
-			runs = append(runs, span{text: cell.text, paint: paint})
+		if len(run) > 0 && paint != runPaint {
+			runPaint.renderBytesTo(&line, run)
+			run = run[:0]
 		}
-		x += ansi.StringWidth(cell.text)
+		runPaint = paint
+		run = append(run, text...)
+		x += cells
 	}
-	return joinSpans(runs)
+fill:
+	for _, part := range spans {
+		for index := 0; index < len(part.text); {
+			_, size := utf8.DecodeRuneInString(part.text[index:])
+			text := part.text[index : index+size]
+			cells := glyphCells(text)
+			if x+cells > width {
+				break fill
+			}
+			put(text, cells, part.paint)
+			index += size
+		}
+	}
+	for x < width {
+		put(" ", 1, tone{})
+	}
+	runPaint.renderBytesTo(&line, run)
+	return line.String()
 }
 
 // renderTabs draws the tab chips on a flat strip of the header colour: the open
@@ -340,11 +342,14 @@ func (model Model) chatsHeaderLine(width int) string {
 		{text: fmt.Sprintf("%d", model.suppressedCount), paint: value},
 		{text: " empty", paint: dim},
 	}
-	if model.deck.factsError != "" {
-		spans = append(spans, sep, span{text: "⚠ row facts: " + model.deck.factsError, paint: tone{fg: palette.Warn}})
-	}
+	// The short refresh marker goes before the facts warning: the warning names
+	// a path and can outrun the line, and the edge must cut the error, never
+	// hide that a scan is under way.
 	if model.refreshing || model.deck.waking {
 		spans = append(spans, sep, span{text: "⟳ refreshing", paint: tone{fg: palette.Accent}})
+	}
+	if model.deck.factsError != "" {
+		spans = append(spans, sep, span{text: "⚠ row facts: " + model.deck.factsError, paint: tone{fg: palette.Warn}})
 	}
 	return fillLine(joinSpans(spans), width)
 }

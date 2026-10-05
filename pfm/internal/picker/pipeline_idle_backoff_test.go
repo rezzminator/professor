@@ -248,3 +248,72 @@ func TestPickerRefreshStreamWakesOnKeystrokeWithoutWaitingForThePoll(t *testing.
 	for range updates {
 	}
 }
+
+// The header reads a fleet's age from its snapshot's scan clock, taken as a pass
+// STARTS; the stream must measure staleness from the same instant. A pass that
+// ran longer than the bound leaves a fleet the header already calls stale, so a
+// key right after it lands must start the next pass, not be told it is fresh.
+func TestPickerRefreshStreamMeasuresStalenessFromThePassStartTheHeaderReads(t *testing.T) {
+	shortenRefreshIntervals(t)
+	jailTest(t)
+	previousStale := fleetRefreshStaleAfter
+	// The cadence and the park poll are pushed past the test, so the only way a
+	// pass can start inside it is a keystroke's wake token.
+	fleetRefreshInterval, fleetRefreshParkThreshold = 30*time.Minute, time.Hour
+	fleetRefreshParkPollInterval, fleetRefreshStaleAfter = time.Hour, 300*time.Millisecond
+	t.Cleanup(func() { fleetRefreshStaleAfter = previousStale })
+
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan ui.Snapshot, 1)
+	var stderr bytes.Buffer
+	runner := &slowIndexRunner{started: make(chan struct{}), release: make(chan struct{})}
+	clock := ui.NewActivityClock(time.Now())
+	go streamFleetRefreshesWith(ctx, database, scanRequest{}, fleet.PrintWarn(&stderr), &stderr, updates,
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) { return runner, nil },
+			activity:   clock,
+		},
+	)
+	select {
+	case <-runner.started:
+	case <-time.After(20 * time.Second):
+		t.Fatalf("the first pass never reached the indexer: %s", stderr.String())
+	}
+	// The first pass outlives the staleness bound before it can publish.
+	time.Sleep(fleetRefreshStaleAfter + 100*time.Millisecond)
+	close(runner.release)
+	for settled := false; !settled; {
+		select {
+		case snapshot, ok := <-updates:
+			if !ok {
+				t.Fatalf("refresh stream closed before the first pass published: %s", stderr.String())
+			}
+			settled = !snapshot.Refreshing
+		case <-time.After(20 * time.Second):
+			t.Fatalf("the first pass never published: %s", stderr.String())
+		}
+	}
+
+	clock.Stamp(time.Now())
+	select {
+	case _, ok := <-updates:
+		if !ok {
+			t.Fatal("refresh stream closed instead of waking on a keystroke")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a key on a fleet whose last pass started past the staleness bound did not start a pass within 1s")
+	}
+	cancel()
+	for range updates {
+	}
+}

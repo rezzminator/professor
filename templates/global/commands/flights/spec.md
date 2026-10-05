@@ -1,6 +1,6 @@
 ---
 name: flights:spec
-description: 'MANDATORY — the main chat''s only way to start flights-speccer: /flights:spec [tasks | file] maps the area, grills the user until no gap is left, hands the rulings to flights-speccer. /flights:spec → flights-speccer → /flights:orchestrate-{nested|live|cross-harness} → flights-orchestrator → flights-*-executor → flights-lander → /flights:audit. Returns the index.'
+description: 'MANDATORY — the main chat''s only way to start flights-speccer: /flights:spec [tasks | file] maps the area, grills the user until no gap is left, hands the rulings to flights-speccer. /flights:init → /flights:spec → flights-speccer → /flights:orchestrate-{nested|live|cross-harness} → flights-orchestrator → flights-*-executor → flights-lander → /flights:audit. Returns the index.'
 argument-hint: [tasks | task file]
 ---
 
@@ -39,7 +39,7 @@ The grill ends when the frontier is empty: every branch visited, nothing silentl
 
 ## S3 — Hand off
 
-Spawn `Agent(subagent_type: "flights-speccer")` with content, never a format: the numbered tasks, the confirmed rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), the testing manual of each project touched, and the directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`. End your message; the return arrives with the index.
+Spawn `Agent(subagent_type: "flights-speccer")` with content, never a format: the numbered tasks, the confirmed rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence), the testing manual of each project touched, and the directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`. End your message; the return arrives with the index.
 
 ## S4 — The one question
 

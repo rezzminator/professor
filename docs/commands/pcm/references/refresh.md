@@ -33,7 +33,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{init,spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
@@ -172,7 +172,7 @@ One-paragraph pitch: portable .claude/ that turns Claude Code into a self-discip
 install pfm, cd your-project, `pfm init .`, claude → follow the printed SETUP.md install interview → customize → smoke test
 
 ## The cast — Tier A
-Professor, /pfm, /flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev
+Professor, /pfm, /flights:{init,spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev
 
 ## Tier B (opt-in)
 /officer, /mentor, /marketer

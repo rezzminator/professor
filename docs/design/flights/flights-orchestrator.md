@@ -43,11 +43,11 @@ The same body is the only description of the protocol. A second copy for the liv
 
 ### Standing rules
 
-What the project contract and the testing manual do not carry: the worktree, the fenced command that runs one package's affected tests, the checks by command, anything the caller adds for this flight. Pasted into every executor brief, never into a task file; the orchestrator authors none. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness and is never pasted or named.
+What the project contract and the testing manual do not carry: the worktree, the fenced command that runs one package's affected tests, anything the caller adds for this flight. Pasted into every executor brief, never into a task file; the orchestrator authors none. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness and is never pasted or named.
 
 A standing rule says where and with what an agent works, never what steps it runs: one that adds, drops or replaces a step of a role is refused and named under `NOTES`. The measured case: a launch message written by a chat born before the redesign ordered "every executor's self-review is a review over its own change"; the orchestrator pasted it as "overriding the role's no-review rule", and six executors ran 23 review processes. A second measured case: a brief whose rule read "every build/test runs … `dev.sh iso test pfm`" meant the script's path but named the full suite, and the orchestrator added "launch it backgrounded and wait once"; 146 of the six executors' 201 minutes went to full-suite waits, so the refusal keys on the full-suite command itself, however the rule frames it.
 
-A rule that widens a test scope the testing manual sets (whole packages where it says `-run`) or prescribes a fixed sleep is refused the same way: an audit found a brief widening `-run` to `./internal/{pkg}/...` and one ordering `time.sleep(60)` before a rebuild.
+A rule that widens a test scope the testing manual sets (whole packages where it names single tests) or prescribes a fixed sleep is refused the same way: an audit found a brief widening `-run` to `./internal/{pkg}/...` and one ordering `time.sleep(60)` before a rebuild.
 
 The fleet prompt's manual law (`pfm/harness-prompts/share/tail.md` § Orchestration) refuses, for every manual, a caller's rule that contradicts it — a review inside an executor, a full suite per task, an extra report; the test-scope and fixed-sleep refusals live in the agent alone.
 

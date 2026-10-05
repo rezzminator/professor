@@ -46,7 +46,7 @@ A round is a chat message, not an `AskUserQuestion` call: the frontier can hold 
 
 ## S3 — Hand off
 
-Spawn `Agent(subagent_type: "flights-speccer")` with content, never a format: the numbered tasks, the confirmed rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), the testing manual of each project touched, and the directory. End the message; the return arrives with the index.
+Spawn `Agent(subagent_type: "flights-speccer")` with content, never a format: the numbered tasks, the confirmed rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence), the testing manual of each project touched, and the directory. End the message; the return arrives with the index.
 
 ## S4 — The one question
 

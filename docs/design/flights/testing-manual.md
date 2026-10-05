@@ -42,7 +42,7 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 
 | Reader | Sections | For |
 | --- | --- | --- |
-| `flights-speccer` | 1, 2, 3, 8, and the removal clause of 11 | The tier decides a task's `shares`; the test home and the registry rows are `Files` entries; a removal lists its retiring tests; a floor is never a task's row |
+| `flights-speccer` | 1, 2, 3, 8, and the removal clause of 11 | The tier decides a task's `shares`; the test home, the registry rows and the gate-owned data a gate keeps are `Files` entries; a removal lists its retiring tests; a floor is never a task's row |
 | `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | all | Writing the covering tests in the project's pattern |
 | `general-foreman`, `general-executor` | all, when the brief names the manual | Writing the covering test in the project's pattern |
 | `flights-lander` | all, 5 to 9 most | Running each project's gate with its floors as gate rows, sweeping test validity, raising the project's bug classes |
@@ -51,8 +51,8 @@ The speccer takes facts from the manual into the task file as `Decisions` and `F
 
 ## How it reaches a flight
 
-- The caller of a flight names the project; `flights-speccer` opens that project's manual, its path recorded in the speccer manual, during intake and applies the four sections above. A project without a manual is a `NOTES` line in the speccer's return, never a silent skip.
-- The orchestrator's brief carries the manual's path as a standing rule: an executor's its own project's, the lander's every touched project's.
+- The caller of a flight names the project; `flights-speccer` opens that project's manual, its path recorded in the speccer manual, during intake and applies the sections above. A project without a manual is a `NOTES` line in the speccer's return, never a silent skip.
+- The orchestrator's brief carries the manual's path, as the speccer manual records it, beside the standing rules: an executor's its own project's, the lander's every touched project's.
 - A `Done when` test row names the tier, and `Files` names the test home and every registry file: a test outside the pattern is then a task that cannot verify as `DONE`.
 
 ## What stays out
@@ -67,7 +67,7 @@ The speccer takes facts from the manual into the task file as `Decisions` and `F
 | --- | --- | --- |
 | The template | `templates/project/commands/per-project/testing-manual.md` | The eleven headings with placeholder bodies |
 | This repository's own manual | `.claude/commands/pfm-testing-manual.md` | The pfm instance, drawn from `pfm/CLAUDE.md` and `docs/dev/testing/` |
-| The speccer | [`flights-speccer`](flights-speccer.md) | Reads sections 1, 2, 3, 8 at intake |
+| The speccer | [`flights-speccer`](flights-speccer.md) | Reads sections 1, 2, 3, 8 and the removal clause of 11 at intake |
 | The executor and the lander | [flight executors](flights-executors.md), [`flights-lander`](flights-lander.md) | Read it whole |
 | Setup | `docs/SETUP.md`, `templates/refresh-map.json` | Generation of one manual per project |
 | The scaffold | `pfm/internal/professor/scaffold.go`, lane `A` (`infra/fence/lanes/A.sh`) | `commands/per-project/` is never deployed by a bare `pfm init` |

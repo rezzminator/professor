@@ -62,7 +62,7 @@ func TestFrameKeepsTheStringsTheLaneScriptsScrape(t *testing.T) {
 func TestCarouselWalksOnTheSelectedRowAtEveryWidth(t *testing.T) {
 	for _, width := range []int{100, 160} {
 		model := selectChat(t, deckModel(width, 30), "P:BUILDER")
-		want := []string{"◖▶ open◗", "◖⚡ reboot◗", "◖🕐 1h◗"}
+		want := []string{"◖▶ open◗", "◖⚡ reboot◗", "◖✖ kill◗"}
 		for step, label := range want {
 			if !strings.Contains(strings.Join(frameLines(model), "\n"), label) {
 				t.Fatalf("width %d step %d: the selected row lacks %q", width, step, label)

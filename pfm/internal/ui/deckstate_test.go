@@ -2,10 +2,12 @@ package ui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -155,5 +157,28 @@ func TestFleetPassesWorkOnAModelWithNoCache(t *testing.T) {
 	}
 	if len(model.tempoBins(40)) != 40 {
 		t.Error("uncached bins still span the axis")
+	}
+}
+
+func TestKeyAfterALongIdleMarksTheHeaderRefreshingUntilTheSnapshotLands(t *testing.T) {
+	model := deckModel(120, 30)
+	model.activity = NewActivityClock(time.Now())
+	model.deck.freshNS = time.Now().Add(-2 * RefreshStaleAfter).UnixNano()
+	if strings.Contains(ansi.Strip(model.chatsHeaderLine(100)), "refreshing") {
+		t.Fatal("an idle picker with no key yet claims to be refreshing")
+	}
+	model, _ = applyKey(t, model, specialKey(tea.KeyDown))
+	if !strings.Contains(ansi.Strip(model.chatsHeaderLine(100)), "refreshing") {
+		t.Error("a key on a stale fleet says the wake is under way")
+	}
+	model.applyRefresh(deckFleet(120, 30))
+	if strings.Contains(ansi.Strip(model.chatsHeaderLine(100)), "refreshing") {
+		t.Error("the landed snapshot ends the marker")
+	}
+	fresh := deckModel(120, 30)
+	fresh.activity = NewActivityClock(time.Now())
+	fresh, _ = applyKey(t, fresh, specialKey(tea.KeyDown))
+	if strings.Contains(ansi.Strip(fresh.chatsHeaderLine(100)), "refreshing") {
+		t.Error("a key on a fleet refreshed moments ago must not cry refreshing")
 	}
 }

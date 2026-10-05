@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 	"github.com/rezzminator/professor/pfm/internal/pricing"
 )
 
@@ -395,9 +396,9 @@ func subagentModel(model, recorded string, effort json.RawMessage, inherited ses
 	}
 	if level != "" {
 		if family == "" {
-			return color + effortLabel(level) + reset
+			return color + modelglyph.EffortLabel(level) + reset
 		}
-		return cModel + family + reset + cMuted + "·" + reset + color + effortLabel(level) + reset
+		return cModel + family + reset + cMuted + "·" + reset + color + modelglyph.EffortLabel(level) + reset
 	}
 	if family == "" {
 		return ""

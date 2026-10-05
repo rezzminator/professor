@@ -256,7 +256,10 @@ func NewModel(snapshot Snapshot) Model {
 			statsRefreshMaxInterval,
 		),
 		mergeNewChat: snapshot.MergeNewChat,
-		deck:         deckState{home: snapshot.Home, rev: 1, agg: &deckAgg{}},
+		deck: deckState{
+			home: snapshot.Home, rev: 1, agg: &deckAgg{}, freshNS: snapshot.NowNS,
+			factsError: snapshot.FactsError,
+		},
 		newChatEngine: defaultNewChatEngine(
 			snapshot.AccountIDs,
 			snapshot.CodexAccountIDs,
@@ -299,6 +302,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// Only these can change the fleet a frame is drawn from (deckAgg).
 		model.deck.rev++
 	}
+	model.deck.noteMessage(message)
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		model.width = positiveOr(message.Width, model.width)
@@ -400,16 +404,21 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		model.activity.Stamp(time.Now())
 		model.updateQuery(model.query.Value() + message.Content)
-		command := model.wakeSky()
-		return model, command
+		return model, batchCommands(model.wakeSky(), model.startSweep())
 	case tea.KeyMsg:
-		model.activity.Stamp(time.Now())
+		now := time.Now()
+		model.activity.Stamp(now)
+		model.deck.touch(now.UnixNano())
 		// The status line is the receipt of the LAST keystroke: this one retires
 		// the previous receipt, and sets its own if it has one.
 		model.killStatus = ""
 		wake := model.wakeSky()
+		sweep := model.startSweep()
 		updated, cmd := model.updateKey(message)
-		return updated, batchCommands(cmd, wake)
+		return updated, batchCommands(cmd, wake, sweep)
+	case sweepTickMsg:
+		command := model.advanceSweep(message.nowNS)
+		return model, command
 	default:
 		return model, nil
 	}
@@ -507,12 +516,9 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return model, tea.Quit
 				}
 			case 2:
-				model.cache1H = !model.cache1H
-				return model, nil
-			case 3:
 				model.toggleKilled()
 				return model, nil
-			case 4:
+			case 3:
 				switch {
 				case row.Kind == compose.LiveSplit:
 					model.killStatus = "deactive refused — split live window; deactivate its chats individually"
@@ -1111,6 +1117,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	model.killedCount = snapshot.KilledCount
 	model.suppressedCount = snapshot.SuppressedCount
 	model.refreshing = snapshot.Refreshing
+	model.deck.refreshed(snapshot.NowNS, snapshot.FactsError)
 	model.reminderError = snapshot.ReminderError
 	for index := range model.rows {
 		id := model.rows[index].ID

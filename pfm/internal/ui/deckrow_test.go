@@ -65,8 +65,9 @@ func TestDeckPlanShedsColumnsFromTheRightInOrder(t *testing.T) {
 		t.Errorf("the name keeps its minimum at 40 cells, got %d", narrow.name)
 	}
 	tight := deckPlan(32, false, false)
-	if has(tight, deckColSize) || !has(tight, deckColPrompts) {
-		t.Errorf("a 32-cell row sheds the size before the prompts: %#v", tight)
+	if has(tight, deckColSize) || has(tight, deckColPrompts) || has(tight, deckColModel) ||
+		!has(tight, deckColWork) {
+		t.Errorf("a 32-cell row sheds the size, prompts and model before the work gauge: %#v", tight)
 	}
 	bare := deckPlan(24, false, false)
 	if len(bare.columns) != 1 || !has(bare, deckColAge) {
@@ -189,10 +190,10 @@ func TestRightClusterColumnsAlignAcrossRows(t *testing.T) {
 	}
 }
 
-func TestLiveMarkerPulsesOnlyForAChatWorkingRightNow(t *testing.T) {
-	working := compose.Row{Kind: compose.LiveClaude, ActivityNS: fixtureNowNS - int64(2*time.Second)}
-	idle := compose.Row{Kind: compose.LiveClaude, ActivityNS: fixtureNowNS - int64(time.Hour)}
-	resumable := compose.Row{Kind: compose.ResumeClaude, ActivityNS: fixtureNowNS - int64(2*time.Second)}
+func TestLiveMarkerPulsesOnlyWhileTheChatIsMidTurn(t *testing.T) {
+	working := compose.Row{Kind: compose.LiveClaude, Working: true}
+	idle := compose.Row{Kind: compose.LiveClaude, ActivityNS: fixtureNowNS - int64(2*time.Second)}
+	resumable := compose.Row{Kind: compose.ResumeClaude, Working: true}
 	even, odd := int64(0), deckPulseNS
 	base := fixtureNowNS - fixtureNowNS%(2*deckPulseNS)
 	if got := liveMarker(working, base+even); got != "●" {
@@ -202,7 +203,7 @@ func TestLiveMarkerPulsesOnlyForAChatWorkingRightNow(t *testing.T) {
 		t.Errorf("odd phase = %q, want ◉", got)
 	}
 	if got := liveMarker(idle, base+odd); got != "●" {
-		t.Errorf("an idle live chat holds steady, got %q", got)
+		t.Errorf("a live chat that is not mid-turn holds steady, however recently it wrote: %q", got)
 	}
 	if got := liveMarker(resumable, base+odd); got != "↻" {
 		t.Errorf("a resumable chat never pulses, got %q", got)

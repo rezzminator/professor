@@ -96,6 +96,10 @@ type Snapshot struct {
 	// ReminderError is a failed read of the unseen-reminder flags, shown in
 	// the Chats header so a broken read never renders as "no reminders".
 	ReminderError string
+	// FactsError is the first failure met reading the rows' model, effort and
+	// working state (internal/rowfacts), shown in the header: rows with no
+	// facts must read as "could not look", never as "nothing to show".
+	FactsError string
 	// MergeNewChat is used only by the interactive picker. Plain and TSV
 	// output leave it false so their existing two-row output remains stable.
 	MergeNewChat bool

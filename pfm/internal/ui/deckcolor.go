@@ -153,7 +153,7 @@ func joinSpans(spans []span) string {
 func spansWidth(spans []span) int {
 	width := 0
 	for _, part := range spans {
-		width += lipgloss.Width(part.text)
+		width += cellWidth(part.text)
 	}
 	return width
 }
@@ -174,8 +174,12 @@ func padRightCells(text string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	text = ansi.Truncate(text, width, "…")
-	if gap := width - lipgloss.Width(text); gap > 0 {
+	measured := cellWidth(text)
+	if measured > width {
+		text = ansi.Truncate(text, width, "…")
+		measured = cellWidth(text)
+	}
+	if gap := width - measured; gap > 0 {
 		text += strings.Repeat(" ", gap)
 	}
 	return text
@@ -186,8 +190,12 @@ func padLeftCells(text string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	text = ansi.Truncate(text, width, "…")
-	if gap := width - lipgloss.Width(text); gap > 0 {
+	measured := cellWidth(text)
+	if measured > width {
+		text = ansi.Truncate(text, width, "…")
+		measured = cellWidth(text)
+	}
+	if gap := width - measured; gap > 0 {
 		text = strings.Repeat(" ", gap) + text
 	}
 	return text

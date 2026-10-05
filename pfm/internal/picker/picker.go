@@ -20,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
@@ -136,6 +137,9 @@ func Run(
 		if updateNotice != "" {
 			fmt.Fprintln(stderr, updateNotice)
 		}
+		// Row facts feed the picker's live gauge, so only the interactive picker
+		// reads them; the scripted listings stay as composed.
+		request.Facts = rowfacts.NewReader(runtime.Paths.SIDDir)
 		scan, err = scanFleetCached(ctx, database, request)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)

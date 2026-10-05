@@ -23,13 +23,17 @@ import (
 // slows nothing down, it only declines to speed anything up.
 type ActivityClock struct {
 	lastNS atomic.Int64
+	// wake carries one coalesced "somebody touched the keyboard" token to the
+	// refresh stream, so a picker that slept through a long idle stretch
+	// refreshes the moment a key arrives instead of at its next poll.
+	wake chan struct{}
 }
 
 // NewActivityClock starts a clock already stamped: typing `pfm ls` IS the
 // first interaction, so the picker opens at full cadence rather than climbing
 // out of a backoff it never earned.
 func NewActivityClock(now time.Time) *ActivityClock {
-	clock := &ActivityClock{}
+	clock := &ActivityClock{wake: make(chan struct{}, 1)}
 	clock.Stamp(now)
 	return clock
 }
@@ -40,6 +44,21 @@ func (clock *ActivityClock) Stamp(now time.Time) {
 		return
 	}
 	clock.lastNS.Store(now.UnixNano())
+	select {
+	case clock.wake <- struct{}{}:
+	default: // a token is already waiting; the stream reads staleness itself
+	}
+}
+
+// Wake is the channel one token lands on per interaction burst. The refresh
+// stream owns the staleness decision (it alone knows when it last finished a
+// pass), so a key that finds a fresh fleet costs it one channel receive and no
+// work. A nil clock returns a nil channel, which blocks forever in a select.
+func (clock *ActivityClock) Wake() <-chan struct{} {
+	if clock == nil {
+		return nil
+	}
+	return clock.wake
 }
 
 // StampNS returns the raw stamp of the last interaction, or 0 for a nil or

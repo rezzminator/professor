@@ -18,20 +18,20 @@ func TestTempoStarsAndRulerFitEveryWidth(t *testing.T) {
 			t.Fatalf("tempoStars(%d) is %d cells wide", width, got)
 		}
 	}
-	for width := 3; width <= 200; width++ {
+	for width := 2; width <= 200; width++ {
 		ruler := model.tempoRuler(width)
 		if got := lipgloss.Width(ruler); got != width {
 			t.Fatalf("tempoRuler(%d) is %d cells wide: %q", width, got, ansi.Strip(ruler))
 		}
 		plain := ansi.Strip(ruler)
-		if !strings.HasPrefix(plain, "╰") || !strings.HasSuffix(plain, "╯") {
-			t.Fatalf("tempoRuler(%d) must keep both corners: %q", width, plain)
+		if !strings.HasPrefix(plain, "╰") || strings.ContainsAny(plain, "╯│") {
+			t.Fatalf("tempoRuler(%d) keeps its left corner and is open on the right: %q", width, plain)
 		}
 	}
 	if got := model.tempoStars(0); got != "" {
 		t.Errorf("a zero-width axis draws nothing, got %q", got)
 	}
-	if got := model.tempoRuler(2); got != "" {
+	if got := model.tempoRuler(1); got != "" {
 		t.Errorf("a ruler with no inner cells draws nothing, got %q", got)
 	}
 }

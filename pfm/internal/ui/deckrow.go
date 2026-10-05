@@ -13,11 +13,12 @@ import (
 
 // Column budget of one deck row, left to right:
 //
-//	rail · marker · name (flexes) · badges │ prompts · size · heat ruler · age
+//	rail · marker · name (flexes) · badges │ work · model · prompts · size · heat ruler · age
 //
 // The right cluster sheds columns as the list narrows — ruler first, then
-// size, then prompts — and the badges shrink before the name does, so the name
-// and the age survive down to the 40-column floor.
+// size, then prompts, then the model — and the badges shrink before the name
+// does, so the name, the live gauge and the age survive down to the 40-column
+// floor.
 const (
 	deckNameMin   = 14
 	deckNameMax   = 56
@@ -27,10 +28,8 @@ const (
 	deckSizeW     = 5
 	deckAgeW      = 4
 	deckChipW     = 13
-	// deckWorkingNS is how recently a live chat must have written for its marker
-	// to pulse: it is mid-turn right now.
-	deckWorkingNS = int64(20 * time.Second)
-	deckPulseNS   = int64(500 * time.Millisecond)
+	// deckPulseNS is the period of a working chat's marker pulse.
+	deckPulseNS = int64(500 * time.Millisecond)
 	// unnamedChat stands in for a row that has no name yet.
 	unnamedChat = "(unnamed)"
 )
@@ -44,6 +43,8 @@ const (
 	deckColRuler
 	deckColChip
 	deckColAge
+	deckColWork
+	deckColModel
 )
 
 func (column deckColumn) width() int {
@@ -56,6 +57,10 @@ func (column deckColumn) width() int {
 		return heatRulerCells
 	case deckColChip:
 		return deckChipW
+	case deckColWork:
+		return deckWorkW
+	case deckColModel:
+		return deckModelW
 	default:
 		return deckAgeW
 	}
@@ -76,16 +81,20 @@ type deckLayout struct {
 func deckTiers(chip bool) [][]deckColumn {
 	if chip {
 		return [][]deckColumn{
-			{deckColPrompts, deckColSize, deckColChip, deckColAge},
-			{deckColPrompts, deckColChip, deckColAge},
+			{deckColWork, deckColModel, deckColPrompts, deckColSize, deckColChip, deckColAge},
+			{deckColWork, deckColModel, deckColPrompts, deckColChip, deckColAge},
+			{deckColWork, deckColModel, deckColChip, deckColAge},
+			{deckColWork, deckColChip, deckColAge},
 			{deckColChip, deckColAge},
 			{deckColAge},
 		}
 	}
 	return [][]deckColumn{
-		{deckColPrompts, deckColSize, deckColRuler, deckColAge},
-		{deckColPrompts, deckColSize, deckColAge},
-		{deckColPrompts, deckColAge},
+		{deckColWork, deckColModel, deckColPrompts, deckColSize, deckColRuler, deckColAge},
+		{deckColWork, deckColModel, deckColPrompts, deckColSize, deckColAge},
+		{deckColWork, deckColModel, deckColPrompts, deckColAge},
+		{deckColWork, deckColModel, deckColAge},
+		{deckColWork, deckColAge},
 		{deckColAge},
 	}
 }
@@ -122,11 +131,12 @@ func deckPlan(width int, grouped, chip bool) deckLayout {
 	return deckLayout{lead: lead, name: max(1, width-lead-deckClusterWidth(columns)), columns: columns}
 }
 
-// liveMarker is rowMarker for the deck: a live chat that wrote within the last
-// seconds is mid-turn, so its dot pulses. The clock only ticks while the picker
-// is being watched, which is exactly when the pulse should move.
+// liveMarker is rowMarker for the deck: a live chat that is mid-turn, itself or
+// through its agents (the picker read that from its transcript), pulses its
+// dot. The clock only ticks while the picker is being watched, which is exactly
+// when the pulse should move.
 func liveMarker(row compose.Row, nowNS int64) string {
-	if row.Kind.IsLiveSeat() && rowAgeNS(row, nowNS) < deckWorkingNS && (nowNS/deckPulseNS)%2 == 1 {
+	if workActive(row) && (nowNS/deckPulseNS)%2 == 1 {
 		return "◉"
 	}
 	return rowMarker(row.Kind)
@@ -142,7 +152,7 @@ func badgeSpans(parts []badgePart, width int, bg string) []span {
 	spans := make([]span, 0, len(parts)*2+1)
 	used := 0
 	for _, part := range parts {
-		cost := ansi.StringWidth(part.text)
+		cost := cellWidth(part.text)
 		if used > 0 {
 			cost++
 		}
@@ -355,6 +365,10 @@ func (model Model) columnSpans(
 			text:  padRightCells(carouselCompact(model.actionIndex), deckChipW),
 			paint: tone{fg: palette.Accent, bg: bg, bold: true},
 		}}
+	case deckColWork:
+		return workGauge(row, model.nowNS, engineHexOf(row), palette.HeatCold, bg)
+	case deckColModel:
+		return modelCell(row, bg)
 	default:
 		if !recent {
 			return blank()

@@ -135,12 +135,12 @@ func (model Model) tempoStars(cells int) string {
 	return joinSpans(mergeSpans(spans))
 }
 
-// tempoRuler renders the ruler, exactly width cells including its corners, as
-// the list panel's bottom border: ticks at one week, a day, six hours, an hour,
+// tempoRuler renders the ruler, exactly width cells including its left corner,
+// as the list panel's bottom border (open at the right, see openPanel): ticks at one week, a day, six hours, an hour,
 // ten minutes and a minute — each labelled where it fits — and a triangle under
 // the selected chat's diamond with its age beside it.
 func (model Model) tempoRuler(width int) string {
-	inner := width - 2
+	inner := width - 1
 	if inner <= 0 {
 		return ""
 	}
@@ -198,7 +198,6 @@ func (model Model) tempoRuler(width int) string {
 		}
 		spans = append(spans, span{text: string(value), paint: paint})
 	}
-	spans = append(spans, span{text: "╯", paint: tone{fg: palette.Border}})
 	return joinSpans(mergeSpans(spans))
 }
 

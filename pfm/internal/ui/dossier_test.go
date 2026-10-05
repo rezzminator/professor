@@ -52,8 +52,15 @@ func TestDossierSaysNothingSelectedOnAnEmptyList(t *testing.T) {
 func TestDossierQuotesTheLastPromptAndSaysWhenThereIsNone(t *testing.T) {
 	model := selectChat(t, deckModel(160, 38), "P:BUILDER")
 	panel := ansi.Strip(model.renderDossier(30))
-	if !strings.Contains(panel, "┃ Wire the tempo axis") || !strings.Contains(panel, "viewport scrolls.") {
-		t.Errorf("the prompt is quoted whole behind a rail:\n%s", panel)
+	var quoted []string
+	for _, line := range strings.Split(panel, "\n") {
+		if _, text, ok := strings.Cut(line, "┃"); ok {
+			quoted = append(quoted, strings.TrimSpace(text))
+		}
+	}
+	const prompt = "Wire the tempo axis into the list panel and keep the cursor row visible when the viewport scrolls."
+	if got := strings.Join(quoted, " "); got != prompt {
+		t.Errorf("the prompt is quoted whole behind a rail, got %q:\n%s", got, panel)
 	}
 	bare := selectChat(t, deckModel(160, 38), "P:BUILDER-2")
 	if panel := ansi.Strip(bare.renderDossier(30)); !strings.Contains(panel, "no prompt recorded") {
@@ -99,27 +106,27 @@ func TestDossierActionsDimWhatTheRowWouldRefuse(t *testing.T) {
 	cases := []struct {
 		name string
 		row  compose.Row
-		want [5]bool
+		want [4]bool
 	}{
 		{
 			"live claude",
 			compose.Row{Kind: compose.LiveClaude, ID: "x", Socket: "s"},
-			[5]bool{true, true, true, true, true},
+			[4]bool{true, true, true, true},
 		},
-		{"live split", compose.Row{Kind: compose.LiveSplit, Socket: "s"}, [5]bool{true, true, true, false, false}},
-		{"resumable", compose.Row{Kind: compose.ResumeClaude, ID: "x"}, [5]bool{true, false, true, true, false}},
-		{"booting", compose.Row{Kind: compose.Booting}, [5]bool{true, false, true, false, false}},
+		{"live split", compose.Row{Kind: compose.LiveSplit, Socket: "s"}, [4]bool{true, true, false, false}},
+		{"resumable", compose.Row{Kind: compose.ResumeClaude, ID: "x"}, [4]bool{true, false, true, false}},
+		{"booting", compose.Row{Kind: compose.Booting}, [4]bool{true, false, false, false}},
 		{
 			"killed by label",
 			compose.Row{Kind: compose.ResumeClaude, ID: "x", NameKilled: true},
-			[5]bool{true, false, true, false, false},
+			[4]bool{true, false, false, false},
 		},
 		{
 			"live without a socket",
 			compose.Row{Kind: compose.LiveCodex, ID: "x"},
-			[5]bool{true, true, true, true, false},
+			[4]bool{true, true, true, false},
 		},
-		{"update failed", compose.Row{Kind: compose.ProfessorUpdateFailed}, [5]bool{false, false, false, false, false}},
+		{"update failed", compose.Row{Kind: compose.ProfessorUpdateFailed}, [4]bool{false, false, false, false}},
 	}
 	for _, test := range cases {
 		for index, want := range test.want {
@@ -130,30 +137,23 @@ func TestDossierActionsDimWhatTheRowWouldRefuse(t *testing.T) {
 	}
 }
 
-func TestDossierMarksTheArmedActionAndLabelsTheCacheState(t *testing.T) {
+func TestDossierMarksTheArmedActionAndOffersAHiddenChatUnhide(t *testing.T) {
 	model := selectChat(t, deckModel(160, 38), "P:BUILDER")
-	model.actionIndex = 3
+	model.actionIndex = 2
 	row, _ := model.selectedRow()
 	actions := model.dossierActions(row, 36)
 	if len(actions) != len(carouselActions) {
 		t.Fatalf("one line per carousel action, got %d", len(actions))
 	}
-	armed := ansi.Strip(joinSpans(actions[3]))
+	armed := ansi.Strip(joinSpans(actions[2]))
 	if !strings.Contains(armed, "◖") || !strings.Contains(armed, "kill") || !strings.Contains(armed, "◗") {
 		t.Errorf("the armed action is boxed: %q", armed)
 	}
 	if other := ansi.Strip(joinSpans(actions[0])); strings.Contains(other, "◖") {
 		t.Errorf("only the armed action is boxed: %q", other)
 	}
-	if cache := ansi.Strip(joinSpans(actions[2])); !strings.Contains(cache, "1h  on") {
-		t.Errorf("the 1h line shows the cache state: %q", cache)
-	}
-	model.cache1H = false
-	if cache := ansi.Strip(joinSpans(model.dossierActions(row, 36)[2])); !strings.Contains(cache, "1h  off") {
-		t.Errorf("the 1h line shows the cache state: %q", cache)
-	}
 	row.Killed = true
-	if kill := ansi.Strip(joinSpans(model.dossierActions(row, 36)[3])); !strings.Contains(kill, "unhide") {
+	if kill := ansi.Strip(joinSpans(model.dossierActions(row, 36)[2])); !strings.Contains(kill, "unhide") {
 		t.Errorf("a hidden chat offers to unhide: %q", kill)
 	}
 	for _, line := range actions {

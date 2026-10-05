@@ -10,6 +10,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/modelglyph"
 )
 
 // The dossier is the picker's preview pane: a chat is chosen by remembering
@@ -18,7 +19,9 @@ import (
 // it is, and the actions the carousel will run — with the ones that would be
 // refused dimmed, so a key is never a surprise.
 const (
-	dossierWidth     = 40
+	dossierWidth = 40
+	// dossierLead is the blank gutter between the list and the dossier.
+	dossierLead      = 2
 	dossierMinWidth  = 112
 	dossierLabelW    = 9
 	dossierGaugeW    = 10
@@ -131,10 +134,10 @@ func (model Model) dossierActionAvailable(index int, row compose.Row) bool {
 	switch index {
 	case 1:
 		return row.Kind.IsLiveSeat()
-	case 3:
+	case 2:
 		return row.ID != "" && !row.NameKilled && row.Kind != compose.Booting &&
 			row.Kind != compose.LiveSplit && !isNoticeKind(row.Kind)
-	case 4:
+	case 3:
 		return row.Kind.IsLiveSeat() && row.Kind != compose.LiveSplit && row.Socket != ""
 	default:
 		return row.Kind != compose.ProfessorUpdateFailed
@@ -168,16 +171,11 @@ func isNoticeKind(kind compose.Kind) bool {
 // the ones this row would refuse dimmed.
 func (model Model) dossierActions(row compose.Row, inner int) []dossierLine {
 	palette := configuredPalette
-	hints := []string{"⏎", "⌃O", "⌃E", "⌃X", ""}
+	hints := []string{"⏎", "⌃O", "⌃X", ""}
 	lines := make([]dossierLine, 0, len(carouselActions))
 	for index, action := range carouselActions {
 		label := action.Label
-		switch {
-		case index == 2 && model.cache1H:
-			label = "1h  on"
-		case index == 2:
-			label = "1h  off"
-		case index == 3 && row.Killed:
+		if index == 2 && row.Killed {
 			label = "unhide"
 		}
 		armed := index == model.actionIndex
@@ -368,6 +366,18 @@ func (model Model) dossierDetails(row compose.Row, inner int, heat float64) []do
 		project = "?"
 	}
 	details := []dossierLine{{label("project"), value(project)}}
+	if row.Model != "" {
+		shown := modelglyph.ListSymbol(row.Model) + " " + shortModel(row.Model)
+		if row.Effort != "" {
+			shown += "  " + modelglyph.RowEffort(row.Effort) + " " + row.Effort
+		}
+		details = append(details, dossierLine{label("model"), value(shown)})
+	}
+	if workActive(row) {
+		details = append(details, append(dossierLine{label("working")},
+			append(workGauge(row, model.nowNS, engineHexOf(row), palette.HeatCold, ""),
+				span{text: "  " + workSummary(row), paint: tone{fg: palette.Header}})...))
+	}
 	if recent := hasRecency(row); recent {
 		hot := engineHexOf(row)
 		ruler := heatRuler(heat, hot, palette.HeatCold, palette.Border, "")
@@ -417,7 +427,7 @@ func (model Model) dossierDetails(row compose.Row, inner int, heat float64) []do
 // renderDossier draws the preview pane as a framed panel of exactly height
 // lines and dossierWidth cells.
 func (model Model) renderDossier(height int) string {
-	innerWidth := maxInt(1, dossierWidth-2)
+	innerWidth := maxInt(1, dossierWidth-dossierLead-1)
 	innerHeight := maxInt(1, height-2)
 	var lines []string
 	if row, ok := model.selectedRow(); ok {
@@ -430,5 +440,5 @@ func (model Model) renderDossier(height int) string {
 	for len(lines) < innerHeight {
 		lines = append(lines, strings.Repeat(" ", innerWidth))
 	}
-	return framePanel(" dossier ", lines, dossierWidth)
+	return openPanel(openPanelSpec{title: " dossier ", lead: dossierLead}, lines, dossierWidth)
 }

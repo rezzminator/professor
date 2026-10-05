@@ -79,6 +79,19 @@ func writeSessionEffort(sidDir, sessionID string, record sessionEffortRecord) er
 	return nil
 }
 
+// SessionRecord is the model id and effort level the main statusline last
+// recorded for a session; either is "" when the statusline had none to record.
+type SessionRecord struct{ Model, Level string }
+
+// ReadSession reads the record the main statusline left for sessionID, for the
+// picker's rows. No directory, no session or no record yet is the zero record
+// and no error; a record that exists but cannot be read or parsed is an error
+// naming its path.
+func ReadSession(sidDir, sessionID string) (SessionRecord, error) {
+	record, err := inheritedEffort(sidDir, sessionID)
+	return SessionRecord{Model: record.Model, Level: record.Level}, err
+}
+
 func sessionEffortPath(sidDir, sessionID string) string {
 	return filepath.Join(sidDir, paths.SIDEffortPrefix+sessionID)
 }

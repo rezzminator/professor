@@ -9,7 +9,6 @@ import (
 var carouselActions = []struct{ Glyph, Label string }{
 	{"▶", "open"},
 	{"⚡", "reboot"},
-	{"🕐", "1h"},
 	{"✖", "kill"},
 	{"⏸", "deactive"},
 }

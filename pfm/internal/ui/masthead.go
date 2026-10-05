@@ -17,12 +17,16 @@ const (
 	// right edge of all three header lines.
 	skyWidgetWidth = 18
 	// mastheadSweepNS is how long the light takes to cross the masthead after a
-	// keystroke, and mastheadSweepRadius how wide its glow is, in cells.
+	// keystroke, and mastheadSweepRadius how far its head glows ahead of its
+	// centre, in cells; the tail trails twice that far behind it.
 	mastheadSweepNS     = int64(1300 * time.Millisecond)
 	mastheadSweepRadius = 12.0
-	// mastheadBands quantises the gradient: the eye cannot tell 32 steps from
-	// 100, and a line of runs costs far less to paint than a line of cells.
-	mastheadBands = 32
+	mastheadSweepPeak   = 0.24
+	// mastheadBands quantises the resting gradient: the palette's two header
+	// colours differ by fewer 8-bit steps than this, so a band is a colour the
+	// terminal can already tell apart, and a line of runs costs far less to
+	// paint than a line of cells.
+	mastheadBands = 64
 	mastheadInk   = "#0b1020"
 )
 
@@ -172,14 +176,53 @@ func (model Model) sweepCentre(width int) (float64, bool) {
 	if elapsed < 0 || elapsed >= mastheadSweepNS {
 		return 0, false
 	}
+	// Smoothstep: the light gathers speed, crosses, and settles off the edge
+	// instead of marching at one pace.
 	progress := float64(elapsed) / float64(mastheadSweepNS)
-	return -mastheadSweepRadius + progress*(float64(width)+2*mastheadSweepRadius), true
+	eased := progress * progress * (3 - 2*progress)
+	return -mastheadSweepRadius + eased*(float64(width)+4*mastheadSweepRadius), true
+}
+
+// sweepGlow is the light's strength at distance d from its centre (cells,
+// positive ahead of it): a bright head and a longer fading tail, so the light
+// reads as one moving thing and never as a block stepping across the line.
+func sweepGlow(distance float64) float64 {
+	switch {
+	case distance >= 0 && distance < mastheadSweepRadius:
+		fall := 1 - distance/mastheadSweepRadius
+		return fall * fall
+	case distance < 0 && distance > -2*mastheadSweepRadius:
+		fall := 1 + distance/(2*mastheadSweepRadius)
+		return fall * fall * fall
+	}
+	return 0
+}
+
+// mastheadBandColours is the resting gradient, one colour per band, memoised on
+// the palette's two header colours so a frame blends none of them.
+func (model Model) mastheadBandColours() *[mastheadBands]string {
+	palette := configuredPalette
+	build := func(bands *[mastheadBands]string) {
+		for band := range bands {
+			bands[band] = blendHex(palette.HeaderBg, palette.Selected, float64(band)/float64(mastheadBands-1))
+		}
+	}
+	agg := model.deck.agg
+	if agg == nil {
+		var bands [mastheadBands]string
+		build(&bands)
+		return &bands
+	}
+	if agg.bandFrom != palette.HeaderBg || agg.bandTo != palette.Selected {
+		build(&agg.bands)
+		agg.bandFrom, agg.bandTo = palette.HeaderBg, palette.Selected
+	}
+	return &agg.bands
 }
 
 // mastheadFill lays spans over a left-to-right gradient of the header band,
 // exactly width cells, with the sweep's glow added where it is.
 func (model Model) mastheadFill(spans []span, width int) string {
-	palette := configuredPalette
 	type mastCell struct {
 		text  string
 		paint tone
@@ -201,20 +244,19 @@ fill:
 		cells = append(cells, mastCell{text: " "})
 	}
 	centre, sweeping := model.sweepCentre(width)
+	bands := model.mastheadBandColours()
 	runs := make([]span, 0, 16)
 	x := 0
 	for _, cell := range cells {
 		paint := cell.paint
 		if paint.bg == "" {
-			band := 0.0
+			bg := bands[0]
 			if width > 1 {
-				band = float64(x*mastheadBands/width) / float64(mastheadBands-1)
+				bg = bands[x*(mastheadBands-1)/(width-1)]
 			}
-			bg := blendHex(palette.HeaderBg, palette.Selected, band)
 			if sweeping {
-				if distance := (float64(x) - centre) / mastheadSweepRadius; distance > -1 && distance < 1 {
-					glow := (1 - distance*distance)
-					bg = blendHex(bg, "#ffffff", 0.22*glow*glow)
+				if glow := sweepGlow(float64(x) - centre); glow > 0.004 {
+					bg = blendHex(bg, "#ffffff", mastheadSweepPeak*glow)
 				}
 			}
 			paint.bg = bg
@@ -298,7 +340,10 @@ func (model Model) chatsHeaderLine(width int) string {
 		{text: fmt.Sprintf("%d", model.suppressedCount), paint: value},
 		{text: " empty", paint: dim},
 	}
-	if model.refreshing {
+	if model.deck.factsError != "" {
+		spans = append(spans, sep, span{text: "⚠ row facts: " + model.deck.factsError, paint: tone{fg: palette.Warn}})
+	}
+	if model.refreshing || model.deck.waking {
 		spans = append(spans, sep, span{text: "⟳ refreshing", paint: tone{fg: palette.Accent}})
 	}
 	return fillLine(joinSpans(spans), width)

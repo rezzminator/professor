@@ -158,7 +158,7 @@ func (model Model) render() string {
 	case TabCosmos:
 		body = model.renderCosmosPanel(width, bodyHeight)
 	default:
-		body = model.renderChatsBody(width, bodyHeight)
+		body = model.chatsBody(width, bodyHeight)
 	}
 	return strings.Join([]string{header, query, body, footer}, "\n")
 }

@@ -100,7 +100,7 @@ func (model Model) emptyListLine(width int) string {
 // deck rows, then the tempo axis under them.
 func (model Model) renderListPanel(width, height int) string {
 	title := fmt.Sprintf(" fleet %d ", len(model.filtered))
-	innerWidth := maxInt(1, width-2)
+	innerWidth := maxInt(1, width-1)
 	innerHeight := maxInt(1, height-2)
 	tempo := innerHeight >= 7
 	rowsHeight := innerHeight
@@ -163,9 +163,11 @@ func (model Model) renderListPanel(width, height int) string {
 	for len(lines) < rowsHeight {
 		lines = append(lines, strings.Repeat(" ", innerWidth))
 	}
+	spec := openPanelSpec{title: title, rail: true}
 	if !tempo {
-		return framePanel(title, lines, width)
+		return openPanel(spec, lines, width)
 	}
 	lines = append(lines, model.tempoStars(innerWidth))
-	return framePanelWithBottom(title, lines, width, model.tempoRuler(width))
+	spec.bottom = model.tempoRuler(width)
+	return openPanel(spec, lines, width)
 }

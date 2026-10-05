@@ -746,21 +746,11 @@ if requires; then
     tui_send Right
     tui_wait 10 '◖⚡ reboot◗' || bad="$bad T11 right did not move the carousel to reboot: $(one_line "$(tui_selected)");"
     tui_send Right
-    tui_wait 10 '◖🕐 1h◗' || bad="$bad T11 second right did not reach 1h: $(one_line "$(tui_selected)");"
-    # T16: enter ACTS on the carousel index — index 2 toggles the cache mode in place.
-    cache0="$(tui_cache)"
-    tui_send Enter
-    wait_for 10 "[ -n \"\$(tui_cache)\" ] && [ \"\$(tui_cache)\" != '$cache0' ]" ||
-      bad="$bad T16 enter on the 1h action did not flip the header cache: $LANE_WAIT_WHY;"
-    cache1="$(tui_cache)"
-    [ -n "$cache0" ] && [ -n "$cache1" ] && [ "$cache0" != "$cache1" ] || bad="$bad T16 enter on the 1h action did not flip the header cache ('$cache0' → '$cache1');"
-    tui_send Enter
-    wait_for 10 "[ \"\$(tui_cache)\" = '$cache0' ]" ||
-      bad="$bad T16 a second enter did not flip the cache back: $LANE_WAIT_WHY;"
-    [ "$(tui_cache)" = "$cache0" ] || bad="$bad T16 a second enter did not flip the cache back;"
+    tui_wait 10 '◖✖ kill◗' || bad="$bad T11 second right did not reach kill: $(one_line "$(tui_selected)");"
     tui_keys Left; tui_send Left
     tui_wait 10 '◖▶ open◗' || bad="$bad T11 left did not return the carousel to open: $(one_line "$(tui_selected)");"
     # T13: ⌃E toggles the 1h cache from the Chats tab.
+    cache0="$(tui_cache)"
     tui_send C-e
     wait_for 10 "[ \"\$(tui_cache)\" != '$cache0' ]" || bad="$bad T13 ⌃E did not flip the header cache ('$cache0'): $LANE_WAIT_WHY;"
     tui_send C-e
@@ -971,7 +961,7 @@ if requires; then
   fi
   tui_close
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "picker entry, four tabs both ways, no fullscreen view, query editing, carousel, enter-act (1h), ⌃E, ⌃X (hidden — $GRP), cursor keys, Stats rows + sorts, Limits card for seat $SEAT + scroll, cosmos select/focus/classic/scrub/play/now, T23 $t23, esc/⌃C drop a pending ⌃S, ⌃S cycles $acct0→$acct1, enter attached a client, ⌃O $reboot_note"
+    pass "picker entry, four tabs both ways, no fullscreen view, query editing, carousel, ⌃E, ⌃X (hidden — $GRP), cursor keys, Stats rows + sorts, Limits card for seat $SEAT + scroll, cosmos select/focus/classic/scrub/play/now, T23 $t23, esc/⌃C drop a pending ⌃S, ⌃S cycles $acct0→$acct1, enter attached a client, ⌃O $reboot_note"
   fi
 fi
 

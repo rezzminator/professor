@@ -202,7 +202,7 @@ func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
 	}
 
 	model = NewModel(snapshot)
-	for step := 0; step < 4; step++ {
+	for step := 0; step < 3; step++ {
 		model, command = applyKey(t, model, specialKey(tea.KeyRight))
 		if command != nil {
 			t.Fatalf("deactive carousel step %d returned command", step)

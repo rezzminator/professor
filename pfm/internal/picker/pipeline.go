@@ -18,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
 )
@@ -50,6 +51,11 @@ var (
 	// use their own slower cadence.
 	fleetRefreshParkPollInterval  = 2 * time.Second
 	fleetRefreshCodexPollInterval = 10 * time.Second
+	// fleetRefreshStaleAfter is how old the last finished pass must be before
+	// a keystroke is allowed to start the next one on the spot. A driven picker
+	// refreshes every fleetRefreshInterval, so this only ever fires for a
+	// picker that backed off or parked and is being used again.
+	fleetRefreshStaleAfter = ui.RefreshStaleAfter
 )
 
 // refreshCadence is one refresh stream's backoff state. It starts at
@@ -140,6 +146,10 @@ type scanRequest struct {
 	// Reminders reads which sessions have an unseen reminder; nil leaves every
 	// row unmarked.
 	Reminders unseenReminderReader
+	// Facts reads each chat's model, effort and working state from its
+	// transcript tail; nil — every non-interactive caller, so --plain and --tsv
+	// stay byte-identical — leaves the rows as composed.
+	Facts *rowfacts.Reader
 }
 
 // resolveCosmosSafe decides whether the cosmos tab renders in vscode-safe
@@ -217,6 +227,9 @@ func scanFleetCached(
 	if err != nil {
 		return scanResult{}, err
 	}
+	// The first frame is the index as it stands: reading every transcript tail
+	// is the refresh's job, so the picker opens before it is done.
+	request.Facts = nil
 	snapshot := buildSnapshot(ctx, result.Env, request, result.Output)
 	snapshot.Refreshing = true
 	return scanResult{Output: result.Output, Snapshot: snapshot, Paths: result.Env.Paths}, nil
@@ -262,6 +275,14 @@ func buildSnapshot(
 			}
 		}
 	}
+	factsError := ""
+	if request.Facts != nil {
+		var failures []error
+		rows, failures = request.Facts.Enrich(rows, environment.NowNS)
+		if len(failures) > 0 {
+			factsError = fmt.Sprintf("%d unreadable, first: %v", len(failures), failures[0])
+		}
+	}
 	machine := environment.Config
 	cacheByAccount := make(map[int]bool)
 	for _, account := range machine.AccountIDs() {
@@ -270,6 +291,7 @@ func buildSnapshot(
 	return ui.Snapshot{
 		Rows:                   rows,
 		ReminderError:          reminderError,
+		FactsError:             factsError,
 		View:                   request.View,
 		KilledCount:            output.KilledCount,
 		SuppressedCount:        output.SuppressedCount,
@@ -447,6 +469,8 @@ func streamFleetRefreshesWith(
 	// interacting in Codex does not stamp the picker's activity clock. A clear
 	// wakes a full pass to publish the new binding and hidden predecessor.
 	parked := false
+	wake := dependencies.activity.Wake()
+	lastPass := refreshClock.Now()
 	// A failed publication must be retried even if reconciliation already
 	// committed the binding and therefore reports no further identity change.
 	pendingRefresh := false
@@ -466,6 +490,13 @@ func streamFleetRefreshesWith(
 		case <-ctx.Done():
 			return
 		case <-timer.C():
+		case <-wake:
+			// A keystroke lands here, not on the timer. A fleet refreshed
+			// moments ago is fresh enough; one the backoff left behind is
+			// refreshed now, without waiting out the park poll.
+			if refreshClock.Now().Sub(lastPass) < fleetRefreshStaleAfter {
+				continue
+			}
 		}
 		// Rearm BEFORE the pass, never after it. The body below leaves through
 		// several `continue`s on transient errors, and a Reset parked at the
@@ -607,6 +638,7 @@ func streamFleetRefreshesWith(
 			return
 		}
 		pendingRefresh = false
+		lastPass = refreshClock.Now()
 		// A full pass can publish while reconciliation reports a retryable
 		// failure. Let the first parked poll verify the binding before caching.
 		parkedRollouts = nil

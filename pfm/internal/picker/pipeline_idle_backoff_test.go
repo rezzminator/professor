@@ -176,3 +176,75 @@ func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 	for range updates {
 	}
 }
+
+// A keystroke must wake a parked stream through the activity clock's wake
+// channel, not through the park poll. The poll is stretched to an hour here, so
+// the only way a pass can arrive inside the second is the wake token.
+func TestPickerRefreshStreamWakesOnKeystrokeWithoutWaitingForThePoll(t *testing.T) {
+	shortenRefreshIntervals(t)
+	jailTest(t)
+	previousPoll, previousStale := fleetRefreshParkPollInterval, fleetRefreshStaleAfter
+	fleetRefreshParkPollInterval = time.Hour
+	fleetRefreshStaleAfter = time.Millisecond
+	t.Cleanup(func() {
+		fleetRefreshParkPollInterval, fleetRefreshStaleAfter = previousPoll, previousStale
+	})
+
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan ui.Snapshot, 1)
+	var stderr bytes.Buffer
+	clock := ui.NewActivityClock(time.Now())
+	go streamFleetRefreshesWith(
+		ctx,
+		database,
+		scanRequest{},
+		fleet.PrintWarn(&stderr),
+		&stderr,
+		updates,
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
+			activity:   clock,
+		},
+	)
+
+	completed := 0
+	starve := time.After(20 * time.Second)
+	for completed < 2 {
+		select {
+		case snapshot, ok := <-updates:
+			if !ok {
+				t.Fatalf("refresh stream closed after %d of 2 passes: %s", completed, stderr.String())
+			}
+			if !snapshot.Refreshing {
+				completed++
+			}
+		case <-starve:
+			t.Fatalf("refresh stream produced %d of 2 passes in 20s: %s", completed, stderr.String())
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond) // past the staleness bound, while parked
+	clock.Stamp(time.Now())
+	select {
+	case _, ok := <-updates:
+		if !ok {
+			t.Fatal("refresh stream closed instead of waking on a keystroke")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a keystroke on a stale, parked picker did not start a pass within 1s")
+	}
+	cancel()
+	for range updates {
+	}
+}

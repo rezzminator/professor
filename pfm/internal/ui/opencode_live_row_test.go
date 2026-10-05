@@ -6,6 +6,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/theme"
 )
 
 // A live OpenCode seat renders as a live chat (●) in OpenCode's own colour and
@@ -20,13 +21,14 @@ func TestLiveOpenCodeRendersAsALiveOpenCodeRow(t *testing.T) {
 	if got := model.rowBadges(row); got != "◇" {
 		t.Fatalf("rowBadges(LiveOpenCode) = %q, want the OpenCode badge ◇", got)
 	}
+	configureStyles(theme.Load("default"))
 	rendered := model.renderGroupedRow(row, false, 120, false)
-	styled, _, found := strings.Cut(openCodeStyle.Render("x"), "x")
-	if !found {
-		t.Fatal("openCodeStyle renders no escape prefix to assert on")
+	engineColour, _, found := strings.Cut(tone{fg: engineHexOf(row)}.render("x"), "x")
+	if !found || engineColour == "" {
+		t.Fatal("the OpenCode engine colour renders no escape prefix to assert on")
 	}
-	if !strings.HasPrefix(rendered, styled) {
-		t.Fatalf("renderGroupedRow(LiveOpenCode) = %q, want OpenCode's own row style %q", rendered, styled)
+	if !strings.Contains(rendered, engineColour) {
+		t.Fatalf("renderGroupedRow(LiveOpenCode) = %q, want OpenCode's own engine colour %q", rendered, engineColour)
 	}
 }
 

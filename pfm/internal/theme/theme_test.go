@@ -35,6 +35,20 @@ func TestEveryEngineHasThemeColours(t *testing.T) {
 	}
 }
 
+// The picker's recency ramp blends toward HeatCold; an unset one would blend
+// toward an empty string and paint every stale row in a broken colour.
+func TestEveryPaletteHasAHeatColdEnd(t *testing.T) {
+	for _, paletteName := range []string{"default", "tokyo-night"} {
+		palette := Load(paletteName)
+		if len(palette.HeatCold) != 7 || palette.HeatCold[0] != '#' {
+			t.Errorf("%s HeatCold = %q, want a #rrggbb colour", paletteName, palette.HeatCold)
+		}
+		if palette.HeatCold == palette.Header {
+			t.Errorf("%s HeatCold equals the header colour, so the ramp has no cold end", paletteName)
+		}
+	}
+}
+
 func TestUnknownPaletteFallsBackToDefault(t *testing.T) {
 	if got, want := Load("not-a-palette"), Load("default"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("unknown palette = %#v, want default %#v", got, want)

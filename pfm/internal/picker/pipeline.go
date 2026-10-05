@@ -282,6 +282,7 @@ func buildSnapshot(
 		OpenCodePrimaryAccount: machine.PrimaryOpenCodeAccount(),
 		OpenCodeAccountIDs:     machine.OpenCodeAccountIDs(),
 		Theme:                  machine.Theme,
+		Home:                   environment.Paths.Home,
 		Cache1H:                machine.EffectiveClaude(environment.Primary).Cache1H,
 		Cache1HByAccount:       cacheByAccount,
 		NowNS:                  environment.NowNS,

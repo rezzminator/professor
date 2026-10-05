@@ -71,6 +71,11 @@ type Palette struct {
 	LimitAmber  string
 	LimitRed    string
 	Label       string
+	// HeatCold is the cold end of the picker's recency ramp: a chat active
+	// just now burns in its engine colour, and one untouched for a month has
+	// cooled all the way to this. It sits between Dim and the terminal
+	// background on purpose — a stale row recedes, it does not vanish.
+	HeatCold string
 }
 
 var defaultPalette = Palette{
@@ -108,6 +113,7 @@ var defaultPalette = Palette{
 	LimitAmber:    "#facc15",
 	LimitRed:      "#fb7185",
 	Label:         "#67e8f9",
+	HeatCold:      "#475569",
 }
 
 var tokyoNightPalette = Palette{
@@ -145,6 +151,7 @@ var tokyoNightPalette = Palette{
 	LimitAmber:    tokyoWarningColor,
 	LimitRed:      "#f7768e",
 	Label:         "#2ac3de",
+	HeatCold:      "#3b4261",
 }
 
 // Load returns an embedded palette. Unknown names intentionally degrade to

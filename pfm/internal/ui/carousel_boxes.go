@@ -32,3 +32,11 @@ func carouselBoxes(index int) string {
 	}
 	return strings.Join(boxes, " ")
 }
+
+// carouselCompact is the one-action form for a row with no dossier beside it:
+// only the current action, in its box, so the row keeps its name.
+func carouselCompact(index int) string {
+	count := len(carouselActions)
+	action := carouselActions[((index%count)+count)%count]
+	return "◖" + action.Glyph + " " + action.Label + "◗"
+}

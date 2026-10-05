@@ -192,6 +192,9 @@ type Model struct {
 	applyDeactivate    func(compose.Row) error
 	deactivatedSockets map[string]bool
 	killStatus         string
+	// deck is the deck layer's own state: the reader's home and the arrival
+	// clock of chats that appeared while the picker was open (deckstate.go).
+	deck deckState
 }
 
 // NewModel builds the first frame entirely from cached state.
@@ -253,6 +256,7 @@ func NewModel(snapshot Snapshot) Model {
 			statsRefreshMaxInterval,
 		),
 		mergeNewChat: snapshot.MergeNewChat,
+		deck:         deckState{home: snapshot.Home, rev: 1, agg: &deckAgg{}},
 		newChatEngine: defaultNewChatEngine(
 			snapshot.AccountIDs,
 			snapshot.CodexAccountIDs,
@@ -279,63 +283,6 @@ var (
 	configuredCodexAccountEmojis map[int]string
 )
 
-func defaultNewChatEngine(claude, codex, openCode []int) pfmengine.ID {
-	if len(normalizedAccountIDs(claude)) != 0 ||
-		(len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(openCode)) == 0) {
-		return pfmengine.Claude
-	}
-	if len(normalizedAccountIDs(codex)) != 0 {
-		return pfmengine.Codex
-	}
-	return pfmengine.OpenCode
-}
-
-func copyEmojis(values map[int]string) map[int]string {
-	if len(values) == 0 {
-		return nil
-	}
-	result := make(map[int]string, len(values))
-	for id, emoji := range values {
-		result[id] = emoji
-	}
-	return result
-}
-
-func positiveOr(value, fallback int) int {
-	if value > 0 {
-		return value
-	}
-	return fallback
-}
-
-func validAccount(account int, roster []int) int {
-	ids := normalizedAccountIDs(roster)
-	for _, id := range ids {
-		if account == id {
-			return account
-		}
-	}
-	if len(ids) == 0 {
-		return 0
-	}
-	return ids[0]
-}
-
-func normalizedAccountIDs(values []int) []int {
-	if len(values) == 0 {
-		return nil
-	}
-	result := make([]int, 0, len(values))
-	seen := make(map[int]bool, len(values))
-	for _, value := range values {
-		if value > 0 && !seen[value] {
-			seen[value] = true
-			result = append(result, value)
-		}
-	}
-	return result
-}
-
 // Init starts the wall clock and optional animation. Provider and resource
 // sampling starts only when its tab is selected.
 func (model Model) Init() tea.Cmd {
@@ -347,6 +294,11 @@ func (model Model) Init() tea.Cmd {
 
 // Update applies one message without touching the outside world.
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch message.(type) {
+	case tea.KeyMsg, tea.PasteMsg, RefreshMsg:
+		// Only these can change the fleet a frame is drawn from (deckAgg).
+		model.deck.rev++
+	}
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		model.width = positiveOr(message.Width, model.width)
@@ -354,7 +306,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.query.SetWidth(maxInt(8, model.width/2))
 		return model, nil
 	case RefreshMsg:
+		arrivals := len(model.deck.arrivals)
 		model.applyRefresh(message.Snapshot)
+		if len(model.deck.arrivals) > arrivals {
+			// A chat just arrived: wake the ambient tick so its flare plays out
+			// even if the picker had parked.
+			command := model.wakeSky()
+			return model, command
+		}
 		return model, nil
 	case clockTickMsg:
 		if model.tab == TabCosmos && model.skyEnabled {
@@ -445,6 +404,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return model, command
 	case tea.KeyMsg:
 		model.activity.Stamp(time.Now())
+		// The status line is the receipt of the LAST keystroke: this one retires
+		// the previous receipt, and sets its own if it has one.
+		model.killStatus = ""
 		wake := model.wakeSky()
 		updated, cmd := model.updateKey(message)
 		return updated, batchCommands(cmd, wake)
@@ -823,18 +785,6 @@ func (model *Model) cycleSelectedAccount() {
 	}
 }
 
-func nextAccount(current int, ids []int) int {
-	if len(ids) == 0 {
-		return 0
-	}
-	for index, id := range ids {
-		if id == current {
-			return ids[(index+1)%len(ids)]
-		}
-	}
-	return ids[0]
-}
-
 func (model Model) accountForKind(kind compose.Kind) int {
 	return model.accountForEngine(compose.EngineForKind(kind))
 }
@@ -1141,6 +1091,9 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 				})
 			}
 		}
+	}
+	if model.skyEnabled {
+		model.deck.noteArrivals(model.rows, rows, max(model.nowNS, snapshot.NowNS))
 	}
 	model.rows = append(model.rows[:0], rows...)
 	model.adoptClock(snapshot.NowNS)

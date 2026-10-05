@@ -713,7 +713,7 @@ if requires; then
     bad="$bad T1 $TUI_WHY;"
   else
     # T4: Chats is the default tab; T9: no literal fullscreen tab anywhere.
-    tui_wait 10 'Chats · fuzzy search and all existing chat controls' || bad="$bad T4 the Chats hint is not on the default frame;"
+    tui_wait 10 'Chats · ' || bad="$bad T4 the Chats context line is not on the default frame;"
     grep -qi 'fullscreen' <<<"$(tui_pane)" && bad="$bad T9 a 'fullscreen' view exists on the frame;"
     # T8: tab cycles Chats → Stats → Limits → cosmos → Chats; shift+tab reverses.
     tui_send Tab
@@ -723,7 +723,7 @@ if requires; then
     tui_send Tab
     tui_wait 10 'cosmos ·' || bad="$bad T8 third tab did not land on cosmos: $(one_line "$(tui_pane | sed -n 1,4p)");"
     tui_send Tab
-    tui_wait 10 'Chats · fuzzy search' || bad="$bad T8 fourth tab did not wrap to Chats: $(one_line "$(tui_pane | sed -n 1,4p)");"
+    tui_wait 10 'Chats · ' || bad="$bad T8 fourth tab did not wrap to Chats: $(one_line "$(tui_pane | sed -n 1,4p)");"
     tui_send BTab
     tui_wait 10 'cosmos ·' || bad="$bad T8 shift+tab from Chats did not land on cosmos: $(one_line "$(tui_pane | sed -n 1,4p)");"
     tui_keys Tab
@@ -990,27 +990,30 @@ if requires; then
     if ! tui_open 80 "$g_lines" ls; then
       fail "T30 $TUI_WHY"
     else
-      tui_wait 10 'Chats · fuzzy search and all existing chat controls' ||
-        bad="$bad T30 the golden frame's Chats hint did not paint;"
+      tui_wait 10 'Chats · ' ||
+        bad="$bad T30 the golden frame's Chats context line did not paint;"
       frame="$(tui_pane)"
       n_frame="$(grep -c '' <<<"$frame")"
-      # T28: the STATIC lines of the pinned frame, verbatim — tabs (up to the
-      # sky widget), the Chats hint, both footer lines. The dynamic lines are
-      # held to the golden's shape: header format, and three counts that agree.
+      # T28: the STATIC lines of the pinned frame — the tabs line (up to the sky
+      # widget) verbatim, both footer lines once their state words (the ⌃X verb,
+      # the cache the ⌃E key flips to, the armed ⏎ action) are folded to a name,
+      # since those follow the selected row and the live config, never the
+      # fixture. The dynamic lines are held to the golden's shape: the masthead,
+      # the Chats context line, and three counts that agree.
       g_tabs="$(golden_line "$golden" 2 | sed 's/tab\/shift+tab.*/tab\/shift+tab/')"
       l_tabs="$(printf '%s\n' "$frame" | sed -n 2p | sed 's/tab\/shift+tab.*/tab\/shift+tab/')"
       [ "$g_tabs" = "$l_tabs" ] || bad="$bad T28 tabs line differs: golden '$g_tabs' vs live '$l_tabs';"
-      g_hint="$(golden_line "$golden" 3 | sed 's/controls.*/controls/')"
-      l_hint="$(printf '%s\n' "$frame" | sed -n 3p | sed 's/controls.*/controls/')"
-      [ "$g_hint" = "$l_hint" ] || bad="$bad T28 Chats hint differs: golden '$g_hint' vs live '$l_hint';"
+      footer_shape() { sed -E -e 's/⌃X +(kill|hide|unhide)/⌃X <verb>/' -e 's/⌃E +1h cache (on|off)/⌃E <cache>/' -e 's/⏎ +(open|upgrade|start|—)/⏎ <act>/'; }
       for n in $((g_lines - 1)) "$g_lines"; do
-        g_foot="$(golden_line "$golden" "$n")"
-        l_foot="$(printf '%s\n' "$frame" | sed -n "${n}p" | sed 's/ *$//')"
+        g_foot="$(golden_line "$golden" "$n" | footer_shape)"
+        l_foot="$(printf '%s\n' "$frame" | sed -n "${n}p" | sed 's/ *$//' | footer_shape)"
         [ "$g_foot" = "$l_foot" ] || bad="$bad T28 footer line $n differs: golden '$g_foot' vs live '$l_foot';"
       done
-      grep -Eq ' pfm  .+ account [0-9]+ · (⚡ 1h|🪫 5m) · [0-9]+ rows · [0-9]+ hidden · [0-9]+ empty' <<<"$(printf '%s\n' "$frame" | sed -n 1p)" ||
-        bad="$bad T28 header line is not the pinned shape: '$(printf '%s\n' "$frame" | sed -n 1p)';"
-      rows_hdr="$(printf '%s\n' "$frame" | sed -n 1p | sed -n 's/.* · \([0-9]*\) rows · .*/\1/p')"
+      grep -Eq '^ ◆ pfm ' <<<"$(printf '%s\n' "$frame" | sed -n 1p)" ||
+        bad="$bad T28 masthead line is not the pinned shape: '$(printf '%s\n' "$frame" | sed -n 1p)';"
+      grep -Eq '^ Chats · .+ account [0-9]+ · (⚡ 1h|🪫 5m) · [0-9]+ rows · [0-9]+ hidden · [0-9]+ empty' <<<"$(printf '%s\n' "$frame" | sed -n 3p)" ||
+        bad="$bad T28 Chats context line is not the pinned shape: '$(printf '%s\n' "$frame" | sed -n 3p)';"
+      rows_hdr="$(printf '%s\n' "$frame" | sed -n 3p | sed -n 's/.* · \([0-9]*\) rows · .*/\1/p')"
       rows_fleet="$(printf '%s\n' "$frame" | sed -n 's/.*╭─ fleet \([0-9]*\) .*/\1/p' | head -1)"
       rows_vis="$(printf '%s\n' "$frame" | sed -n 's/.* \([0-9]*\)\/\([0-9]*\) visible.*/\1 \2/p' | head -1)"
       # `fleet N` and `N/N visible` are one count (the filtered rows); the header's

@@ -733,15 +733,6 @@ func TestAccountsOffTheRosterFallBackToTheFirst(t *testing.T) {
 	}
 }
 
-func TestValidAccountUsesRosterOnly(t *testing.T) {
-	if got := validAccount(3, nil); got != 0 {
-		t.Fatalf("validAccount(3, nil) = %d, want 0", got)
-	}
-	if got := validAccount(3, []int{1, 2}); got != 1 {
-		t.Fatalf("validAccount(3, [1 2]) = %d, want 1", got)
-	}
-}
-
 func TestFuzzyFilterAndRefreshCursorFollow(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.InitialCursorID = snapshot.Rows[3].ID

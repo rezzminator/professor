@@ -422,7 +422,7 @@ func (model Model) renderCosmosPanel(width, height int) string {
 			1,
 			0,
 			ellipsizeRunes(chip, maxInt(0, canvas.Cols-2)),
-			rgbFromHex(configuredCosmosPalette.Warn),
+			rgbFromHex(configuredPalette.Warn),
 			true,
 		)
 	}
@@ -560,7 +560,7 @@ func (model Model) renderCompactCosmos(width, innerWidth, innerHeight int) strin
 
 func drawCosmosStars(canvas *Canvas, now time.Time) {
 	t := float64(now.UnixNano()) / 1e9
-	starColor := rgbFromHex(configuredCosmosPalette.CosmosStar)
+	starColor := rgbFromHex(configuredPalette.CosmosStar)
 	// Far layer: dimmer, slower, sparser — depth behind the main twinkle.
 	far := rand.New(rand.NewSource(56))
 	for range canvas.Cols * canvas.Rows / 32 {
@@ -581,7 +581,7 @@ func drawCosmosStars(canvas *Canvas, now time.Time) {
 		canvas.Dot(star.px, star.py, scaleRGB(starColor, brightness))
 	}
 	// A few bright stars that flare into a four-point sparkle at their peak.
-	bright := rgbFromHex(configuredCosmosPalette.CosmosBright)
+	bright := rgbFromHex(configuredPalette.CosmosBright)
 	poles := rand.New(rand.NewSource(57))
 	for range 4 {
 		px, py := poles.Intn(canvas.PW()), poles.Intn(canvas.PH())
@@ -623,8 +623,8 @@ func drawCosmosMeteor(canvas *Canvas, now time.Time) {
 	}
 	headX += directionX * flight
 	headY += directionY * flight
-	bright := rgbFromHex(configuredCosmosPalette.CosmosBright)
-	starColor := rgbFromHex(configuredCosmosPalette.CosmosStar)
+	bright := rgbFromHex(configuredPalette.CosmosBright)
+	starColor := rgbFromHex(configuredPalette.CosmosStar)
 	for segment := 0; segment < 7; segment++ {
 		trail := float64(segment) / 7
 		color := scaleRGB(lerpRGB(bright, starColor, trail), (1-trail)*(1-0.5*flight))
@@ -706,7 +706,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 	// FOLLOW a track rather than float. Structure, not animation: drawn in
 	// --no-sky too. The classic sky has no orbits, so it has no tracks.
 	if !model.classicSky {
-		guide := scaleRGB(rgbFromHex(configuredCosmosPalette.CosmosStar), 0.8)
+		guide := scaleRGB(rgbFromHex(configuredPalette.CosmosStar), 0.8)
 		for _, home := range starOrder {
 			anchor := starPoints[home]
 			for _, factor := range frame.rings[home] {
@@ -749,7 +749,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 		fromColor, toColor := cosmosNodeColor(from), cosmosNodeColor(to)
 		if edge.Kind == fleetdb.KindSpawn {
 			dashed = true
-			fromColor = rgbFromHex(configuredCosmosPalette.CosmosLineage)
+			fromColor = rgbFromHex(configuredPalette.CosmosLineage)
 		}
 		if model.skyEnabled {
 			if flightAge := view.Sub(
@@ -763,7 +763,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 		// the same curve translated one braille row up and down, dimmer —
 		// so a live conversation reads as a thick, shining cable and a
 		// day-old one as a thin thread, both still visible.
-		bright := rgbFromHex(configuredCosmosPalette.CosmosBright)
+		bright := rgbFromHex(configuredPalette.CosmosBright)
 		fromColor = lerpRGB(fromColor, bright, 0.40*heat)
 		toColor = lerpRGB(toColor, bright, 0.40*heat)
 		rail := cosmosEdgeRail(fp, tp, cx, cy)
@@ -799,7 +799,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			fromColor, toColor := cosmosNodeColor(nodes[edge.From]), cosmosNodeColor(nodes[edge.To])
 			particles := 2
 			if edge.Kind == fleetdb.KindSpawn {
-				fromColor = rgbFromHex(configuredCosmosPalette.CosmosLineage)
+				fromColor = rgbFromHex(configuredPalette.CosmosLineage)
 				particles = 1
 			}
 			rail := cosmosEdgeRail(fp, tp, cx, cy)
@@ -816,7 +816,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			}
 		}
 
-		white := rgbFromHex(configuredCosmosPalette.CosmosBright)
+		white := rgbFromHex(configuredPalette.CosmosBright)
 		const tailSegments = 18
 		for _, edge := range graph.Edges {
 			duration := cosmosCometDuration(edge.Kind)
@@ -835,7 +835,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			t := float64(age) / float64(duration)
 			base := lerpRGB(cosmosNodeColor(from), cosmosNodeColor(to), t)
 			if edge.Kind == fleetdb.KindSpawn {
-				base = lerpRGB(rgbFromHex(configuredCosmosPalette.CosmosLineage), white, 0.4)
+				base = lerpRGB(rgbFromHex(configuredPalette.CosmosLineage), white, 0.4)
 			}
 			et := ease(t)
 			for tail := 0; tail < tailSegments; tail++ {
@@ -906,7 +906,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			return edge.From
 		})
 	}
-	white := rgbFromHex(configuredCosmosPalette.CosmosBright)
+	white := rgbFromHex(configuredPalette.CosmosBright)
 	orbitDepth := func(key string) int {
 		depth := 0
 		for parent := moonParents[key]; parent != "" && depth <= 8; parent = moonParents[parent] {
@@ -1135,9 +1135,9 @@ func drawCosmosSun(
 	temperature, clock float64,
 	sky bool,
 ) RGB {
-	sunColor := rgbFromHex(configuredCosmosPalette.CosmosSun)
-	hot := rgbFromHex(configuredCosmosPalette.CosmosSunHot)
-	bright := rgbFromHex(configuredCosmosPalette.CosmosBright)
+	sunColor := rgbFromHex(configuredPalette.CosmosSun)
+	hot := rgbFromHex(configuredPalette.CosmosSunHot)
+	bright := rgbFromHex(configuredPalette.CosmosBright)
 	heat := math.Min(1, float64(population)/8)
 	base := lerpRGB(lerpRGB(sunColor, hot, temperature), bright, 0.25*heat)
 	if !sky {
@@ -1453,7 +1453,7 @@ func drawCosmosTicker(canvas *Canvas, graph compose.CosmosGraph) {
 		row := canvas.Rows - 2 - index
 		color := cosmosDimColor()
 		if index == 0 {
-			color = rgbFromHex(configuredCosmosPalette.CosmosBright)
+			color = rgbFromHex(configuredPalette.CosmosBright)
 		}
 		line := cosmosTickerLine(graph.Edges[index], nodes)
 		canvas.Text(1, row, ellipsizeRunes(line, maxInt(0, canvas.Cols-2)), color, false)
@@ -1487,11 +1487,11 @@ func (model Model) drawCosmosBanner(canvas *Canvas) {
 	}
 	x := (canvas.Cols - width) / 2
 	y := canvas.Rows/2 - 2
-	alarm := rgbFromHex(configuredCosmosPalette.Warn)
+	alarm := rgbFromHex(configuredPalette.Warn)
 	canvas.Text(x, y, "┌"+repeat('─', width-2)+"┐", alarm, false)
 	for index, line := range lines {
 		line = ellipsizeRunes(line, maxInt(0, width-2))
-		color := rgbFromHex(configuredCosmosPalette.CosmosBright)
+		color := rgbFromHex(configuredPalette.CosmosBright)
 		if index > 0 {
 			color = cosmosDimColor()
 		}
@@ -1572,9 +1572,9 @@ func newestDirectionalFlash(
 
 func cosmosNodeColor(node compose.CosmosNode) RGB {
 	if id, err := pfmengine.Parse(node.Engine); err == nil {
-		return rgbFromHex(configuredCosmosPalette.StatsEngine[id])
+		return rgbFromHex(configuredPalette.StatsEngine[id])
 	}
-	return rgbFromHex(configuredCosmosPalette.Muted)
+	return rgbFromHex(configuredPalette.Muted)
 }
 
 func cosmosNodeGlyph(node compose.CosmosNode) rune {
@@ -1590,4 +1590,4 @@ func cosmosNodeGlyph(node compose.CosmosNode) rune {
 	}
 }
 
-func cosmosDimColor() RGB { return rgbFromHex(configuredCosmosPalette.Dim) }
+func cosmosDimColor() RGB { return rgbFromHex(configuredPalette.Dim) }

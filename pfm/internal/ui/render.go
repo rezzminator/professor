@@ -17,7 +17,6 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
-	"github.com/rezzminator/professor/pfm/internal/sky"
 	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/theme"
 )
@@ -75,11 +74,11 @@ var (
 				Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color("#facc15"))
 	professorUpdateSelectedStyle = lipgloss.NewStyle().Bold(true).Blink(true).
 					Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color("#fde047"))
-	configuredCosmosPalette theme.Palette
+	configuredPalette theme.Palette
 )
 
 func configureStyles(palette theme.Palette) {
-	configuredCosmosPalette = palette
+	configuredPalette = palette
 	headerStyle = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Header)).
@@ -91,7 +90,6 @@ func configureStyles(palette theme.Palette) {
 		Bold(true).
 		Foreground(lipgloss.Color(palette.Header)).
 		Background(lipgloss.Color(palette.Selected))
-	configureReminderStyles(palette)
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
 	openCodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.OpenCode]))
@@ -160,140 +158,24 @@ func (model Model) render() string {
 	case TabCosmos:
 		body = model.renderCosmosPanel(width, bodyHeight)
 	default:
-		body = model.renderListPanel(width, bodyHeight)
+		body = model.renderChatsBody(width, bodyHeight)
 	}
 	return strings.Join([]string{header, query, body, footer}, "\n")
 }
 
-func (model Model) renderTabs(width int) string {
-	chat := " Chats "
-	stats := " Stats "
-	limits := " Limits "
-	cosmos := " cosmos "
-	switch model.tab {
-	case TabChats:
-		chat = selectedStyle.Render(chat)
-	case TabStats:
-		stats = selectedStyle.Render(stats)
-	case TabLimits:
-		limits = selectedStyle.Render(limits)
-	case TabCosmos:
-		cosmos = selectedStyle.Render(cosmos)
+// renderChatsBody is the Chats tab's body: the list, with the dossier beside it
+// when the terminal is wide enough.
+func (model Model) renderChatsBody(width, height int) string {
+	if !model.showDossier() {
+		return model.renderListPanel(width, height)
 	}
-	return fillLine(" tabs  "+chat+" "+stats+" "+limits+" "+cosmos+"   tab/shift+tab", width)
-}
-
-func (model Model) renderHeader(width int) string {
-	contentWidth := width
-	if model.skyEnabled {
-		contentWidth = maxInt(1, width-18)
+	list := strings.Split(model.renderListPanel(width-dossierWidth, height), "\n")
+	side := strings.Split(model.renderDossier(height), "\n")
+	joined := make([]string, len(list))
+	for index := range list {
+		joined[index] = list[index] + side[index]
 	}
-	cache := "🪫 5m"
-	if model.cache1H {
-		cache = "⚡ 1h"
-	}
-	refresh := ""
-	if model.refreshing {
-		refresh = " · ⟳ refreshing"
-	}
-	headerAccount := model.primary
-	headerMedal := accountMedal(headerAccount)
-	if len(model.accountIDs) == 0 {
-		if len(model.codexAccountIDs) != 0 {
-			headerAccount = model.codexPrimary
-			headerMedal = codexAccountMedal(headerAccount)
-		} else if len(model.openCodeAccountIDs) != 0 {
-			headerAccount = model.openCodePrimary
-			headerMedal = accountMedal(headerAccount)
-		}
-	}
-	text := fmt.Sprintf(
-		" pfm  %s account %d · %s · %d rows · %d hidden · %d empty%s",
-		headerMedal,
-		headerAccount,
-		cache,
-		len(model.rows),
-		model.killedCount,
-		model.suppressedCount,
-		refresh,
-	)
-	lines := []string{
-		headerStyle.Render(fillLine(text, contentWidth)),
-		model.renderTabs(contentWidth),
-	}
-	switch model.tab {
-	case TabStats:
-		lines = append(lines, model.renderStatsHeader(contentWidth))
-	case TabLimits:
-		lines = append(lines, dimStyle.Render(fillLine(
-			" Limits · live usage windows across every account",
-			contentWidth,
-		)))
-	case TabCosmos:
-		lines = append(lines, dimStyle.Render(fillLine(model.renderCosmosSubheader(), contentWidth)))
-	default:
-		lines = append(lines, model.chatsHeaderLine(contentWidth))
-	}
-	if !model.skyEnabled {
-		return strings.Join(lines, "\n")
-	}
-	counts := liveEngineCounts(model.rows)
-	widget := sky.Frame(sky.Options{
-		Counts:   counts,
-		Width:    18,
-		Height:   3,
-		TimeNS:   model.nowNS,
-		Events:   model.skyEvents,
-		Colorize: true,
-	})
-	for index := range lines {
-		lines[index] = fillLine(lines[index], contentWidth) + widget[index]
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (model Model) renderQuery(width int) string {
-	if model.tab == TabStats {
-		return model.renderStatsSubtabs(width)
-	}
-	if model.tab == TabLimits {
-		return dimStyle.Render(fillLine(" limits  live usage windows · ↑↓ scroll", width))
-	}
-	if model.tab == TabCosmos {
-		// Precedence is the receipt of the LAST keystroke first: a refused key
-		// names itself before anything else, then the reticle's card, then
-		// the ledger's own state.
-		switch {
-		case model.cosmosStatus != "":
-			return warnStyle.Render(
-				fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosStatus, maxInt(0, width-9)), width),
-			)
-		case model.cosmosSelected != "":
-			return dimStyle.Render(
-				fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosSelectionHUD(), maxInt(0, width-9)), width),
-			)
-		}
-		status := "live comms ledger"
-		if model.cosmosLoading {
-			status = "sampling…"
-		}
-		return dimStyle.Render(fillLine(" cosmos  "+status+" · newest 24h", width))
-	}
-	input := model.query.View()
-	status := fmt.Sprintf("%d/%d visible", len(model.filtered), len(model.order))
-	// ⌃X takes the status line either way: the receipt when it landed, the
-	// reason when it was refused. It acts immediately, so its outcome has to
-	// be as immediate — and as visible — as the keystroke.
-	if model.killStatus != "" {
-		status = model.killStatus
-	}
-	available := maxInt(8, width-lipgloss.Width(status)-2)
-	input = ansi.Truncate(input, available, "…")
-	line := input + strings.Repeat(
-		" ",
-		maxInt(1, width-lipgloss.Width(input)-lipgloss.Width(status)),
-	) + dimStyle.Render(status)
-	return fillLine(line, width)
+	return strings.Join(joined, "\n")
 }
 
 func (model Model) renderStatsSubtabs(width int) string {
@@ -338,39 +220,6 @@ func (model Model) renderStatsHeader(width int) string {
 		}
 	}
 	return fillLine(line, width)
-}
-
-func (model Model) renderFooter(width int) string {
-	if model.tab == TabStats {
-		first := " ↑↓ focus/rows  ←→ focused tab  c CPU sort  m RAM sort"
-		second := " esc cancel · live samples every 2s only while Stats is focused"
-		return dimStyle.Render(fillLine(first, width)) + "\n" +
-			dimStyle.Render(fillLine(second, width))
-	}
-	if model.tab == TabLimits {
-		first := " ↑↓ scroll  pgup/pgdown page  home/end jump"
-		second := " tab/shift+tab cycle tabs · esc cancel · live samples every 2s while focused"
-		return dimStyle.Render(fillLine(first, width)) + "\n" +
-			dimStyle.Render(fillLine(second, width))
-	}
-	if model.tab == TabCosmos {
-		first := " ↑↓ select · enter open · s system · o classic sky · tab/shift+tab cycle tabs · esc cancel"
-		second := " [ ] ±5m · { } ±1h · space play · n now · ledger samples every 2s while focused"
-		if width < 96 {
-			first = " ↑↓ select · enter open · s system · o classic · esc cancel"
-			second = " [ ] ±5m · { } ±1h · space play · n now"
-		}
-		return dimStyle.Render(fillLine(first, width)) + "\n" +
-			dimStyle.Render(fillLine(second, width))
-	}
-	first := " ↑↓ move  enter open  esc cancel  type to fuzzy-find"
-	second := " ⌃X kill  ⌃E 1h  ⌃S account  ⌃O reboot"
-	if width < 96 {
-		first = " ↑↓ move · enter open · esc cancel · type find"
-		second = " ⌃X kill · ⌃E 1h · ⌃S acct · ⌃O reboot"
-	}
-	return dimStyle.Render(fillLine(first, width)) + "\n" +
-		dimStyle.Render(fillLine(second, width))
 }
 
 func (model Model) renderStatsPanel(width, height int) string {
@@ -722,76 +571,6 @@ func titleWord(value string) string {
 	return strings.ToUpper(value[:1]) + value[1:]
 }
 
-func (model Model) renderListPanel(width, height int) string {
-	title := fmt.Sprintf(" fleet %d ", len(model.filtered))
-	innerWidth := maxInt(1, width-2)
-	innerHeight := maxInt(1, height-2)
-	lines := make([]string, 0, innerHeight)
-	if len(model.filtered) == 0 {
-		lines = append(lines, dimStyle.Render(fillLine("  no matches", innerWidth)))
-	} else {
-		start := maxInt(0, model.cursor-innerHeight/2)
-		previousProject := ""
-		previousNameGroup := ""
-		for position := start; position < len(model.filtered) &&
-			len(lines) < innerHeight; position++ {
-			row := model.rows[model.filtered[position]]
-			project := cleanField(row.Project)
-			if project == "" {
-				project = "?"
-			}
-			nameGroup, grouped := model.nameGroups[model.filtered[position]]
-			// A name group folded across projects (rebuildOrder already placed
-			// every member contiguously, at the first project's slot) reads as
-			// ONE panel: crossing into a member's own project here must not
-			// reopen a second project banner or repeat the group's label.
-			continuesGroup := grouped && nameGroup.name == previousNameGroup
-			if project != previousProject && !continuesGroup {
-				if len(lines)+1 >= innerHeight && position == model.cursor {
-					// The selected row always wins the final viewport line.
-				} else {
-					style := groupStyleA
-					if model.projectOrdinal(project)%2 == 1 {
-						style = groupStyleB
-					}
-					group := "╭─ " + clipRunesEllipsis(project, maxInt(1, innerWidth-5))
-					lines = append(
-						lines,
-						style.Render(fillLine(group, innerWidth)),
-					)
-				}
-				previousNameGroup = ""
-			}
-			previousProject = project
-			if len(lines) >= innerHeight {
-				break
-			}
-			if grouped && nameGroup.name != previousNameGroup && len(lines) < innerHeight {
-				lines = append(lines, labelStyle.Render(fillLine(
-					"│  "+nameGroup.name+fmt.Sprintf(" (%d)", nameGroup.count),
-					innerWidth,
-				)))
-			}
-			if grouped {
-				previousNameGroup = nameGroup.name
-			} else {
-				previousNameGroup = ""
-			}
-			if len(lines) >= innerHeight {
-				break
-			}
-			lines = append(
-				lines,
-				model.renderGroupedRow(row, position == model.cursor, innerWidth, grouped),
-			)
-		}
-	}
-	for len(lines) < innerHeight {
-		lines = append(lines, strings.Repeat(" ", innerWidth))
-	}
-	return framePanel(title, lines, width)
-}
-
 func (model Model) projectOrdinal(project string) int {
 	for index, group := range model.groups {
 		if group.name == project {
@@ -801,111 +580,20 @@ func (model Model) projectOrdinal(project string) int {
 	return 0
 }
 
-func (model Model) renderGroupedRow(
-	row compose.Row,
-	selected bool,
-	width int,
-	grouped bool,
-) string {
-	pointer := "│ "
-	if selected {
-		pointer = "› "
-	}
-	if grouped {
-		pointer += "  "
-	}
-	name := cleanField(row.Name)
-	if name == "" {
-		name = "(unnamed)"
-	}
-	if model.mergeNewChat && (isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
-		ids := model.newChatEngines()
-		labels := make([]string, 0, len(ids))
-		for _, id := range ids {
-			label := pfmengine.MustLookup(id).Short
-			if id == model.newChatEngine {
-				label = "[ " + label + " ]"
-			}
-			labels = append(labels, label)
-		}
-		if row.Kind == compose.ProfessorUpdate {
-			for index, label := range labels {
-				if strings.HasPrefix(label, "[ ") {
-					labels[index] = "◖ " + strings.TrimSuffix(strings.TrimPrefix(label, "[ "), " ]") + " ◗"
-				} else {
-					labels[index] = "[ " + label + " ]"
-				}
-			}
-			name += "  " + strings.Join(labels, " ")
-		} else {
-			name = strings.Join(labels, " ")
-		}
-	}
-	switch row.Kind {
-	case compose.ProfessorUpdate:
-		sparkle := "✦"
-		if (model.nowNS/int64(500*time.Millisecond))%2 != 0 {
-			sparkle = "✧"
-		}
-		content := pointer + sparkle + " PROFESSOR UPDATE " + sparkle + "  " + name + "  Enter → guided upgrade"
-		line := fillLine(ansi.Truncate(content, width, "…"), width)
-		if selected {
-			return professorUpdateSelectedStyle.Render(line)
-		}
-		return professorUpdateStyle.Render(line)
-	case compose.ProfessorUpdateFailed:
-		return renderProfessorUpdateFailedRow(pointer, name, selected, width)
-	}
-	name = fixedDisplayColumn(name, 30)
-	marker := rowMarker(row.Kind)
-	badges := model.rowBadges(row)
-	badges = fixedDisplayColumn(badges, 20)
-	prompts := fmt.Sprintf("%dp", row.PromptCount)
-	size := sizeBadge(row)
-	left := pointer + marker + " " + name + " " + badges + " " +
-		fmt.Sprintf("%4s %6s", prompts, size)
-	age := formatAge(row, model.nowNS)
-	if selected && (!model.mergeNewChat || (!isNewChatActionKind(row.Kind) && row.Kind != compose.ProfessorUpdate)) {
-		age += "  " + carouselBoxes(model.actionIndex)
-	}
-	leftWidth := maxInt(1, width-lipgloss.Width(age)-1)
-	left = ansi.Truncate(left, leftWidth, "…")
-	line := left + strings.Repeat(
-		" ",
-		maxInt(1, width-lipgloss.Width(left)-lipgloss.Width(age)),
-	) + age
-	line = fillLine(line, width)
-	if row.Reminded {
-		return renderRemindedRow(line, selected)
-	}
-	if selected {
-		if row.Kind == compose.ProfessorUpdate {
-			return professorUpdateSelectedStyle.Render(line)
-		}
-		return selectedStyle.Render(line)
-	}
-	switch row.Kind {
-	case compose.ProfessorUpdate:
-		return professorUpdateStyle.Render(line)
-	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
-		return codexStyle.Render(line)
-	case compose.LiveOpenCode, compose.ResumeOpenCode, compose.NewOpenCode:
-		return openCodeStyle.Render(line)
-	case compose.LiveClaude, compose.ResumeClaude, compose.NewClaude:
-		return statsClaudeStyle.Render(line)
-	case compose.Agent:
-		return agentStyle.Render(line)
-	default:
-		return line
-	}
+func framePanel(title string, lines []string, width int) string {
+	return framePanelWithBottom(title, lines, width, "")
 }
 
-func framePanel(title string, lines []string, width int) string {
+// framePanelWithBottom is framePanel with its own bottom edge: the list panel
+// hands it the tempo ruler, which is a full-width line including both corners.
+func framePanelWithBottom(title string, lines []string, width int, bottom string) string {
 	innerWidth := maxInt(1, width-2)
 	topLabel := "─" + title
 	top := "╭" + ansi.Truncate(topLabel, innerWidth, "…")
 	top += strings.Repeat("─", maxInt(0, width-lipgloss.Width(top)-1)) + "╮"
-	bottom := "╰" + strings.Repeat("─", innerWidth) + "╯"
+	if bottom == "" {
+		bottom = borderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	}
 	framed := make([]string, 0, len(lines)+2)
 	framed = append(framed, borderStyle.Render(top))
 	for _, line := range lines {
@@ -916,86 +604,12 @@ func framePanel(title string, lines []string, width int) string {
 				borderStyle.Render("│"),
 		)
 	}
-	framed = append(framed, borderStyle.Render(bottom))
+	framed = append(framed, bottom)
 	return strings.Join(framed, "\n")
 }
 
-func rowMarker(kind compose.Kind) string {
-	switch kind {
-	case compose.LiveClaude, compose.LiveCodex, compose.LiveOpenCode, compose.LiveSplit:
-		return "●"
-	case compose.Booting:
-		return "◐"
-	case compose.Agent:
-		return "⚙"
-	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
-		return "↻"
-	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode:
-		return "✦"
-	case compose.ProfessorUpdate:
-		return "⬆"
-	default:
-		return "·"
-	}
-}
-
-func (model Model) rowBadges(row compose.Row) string {
-	badges := make([]string, 0, 7)
-	switch row.Kind {
-	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
-		badges = append(badges, "⬢")
-	case compose.LiveOpenCode, compose.ResumeOpenCode, compose.NewOpenCode:
-		badges = append(badges, "◇")
-	case compose.Agent:
-		badges = append(badges, "⚙ agent")
-	}
-	if row.ServerCount > 1 {
-		badges = append(
-			badges,
-			warnStyle.Render(fmt.Sprintf("⚠%dsrv", row.ServerCount)),
-		)
-	}
-	if row.SplitCount > 1 {
-		badges = append(badges, fmt.Sprintf("⊞%d", row.SplitCount))
-	}
-	switch {
-	case row.LaunchUnread:
-		badges = append(badges, warnStyle.Render("⚠"))
-	case len(row.Accounts) != 0:
-		for _, account := range row.Accounts {
-			badges = append(badges, accountMedal(account))
-		}
-	case row.Account != 0:
-		if compose.EngineForKind(row.Kind) == pfmengine.Codex {
-			badges = append(badges, codexAccountMedal(row.Account))
-		} else {
-			badges = append(badges, accountMedal(row.Account))
-		}
-	}
-	if row.C1H && !row.LaunchUnread {
-		badges = append(badges, "⚡")
-	}
-	if row.Attached {
-		badges = append(badges, "⇄")
-	}
-	if row.Here {
-		badges = append(badges, "←here")
-	}
-	if row.Killed {
-		badges = append(badges, dimStyle.Render("·hidden"))
-	}
-	return strings.Join(badges, " ")
-}
-
 func formatAge(row compose.Row, nowNS int64) string {
-	age := row.AgeNS
-	if nowNS > 0 && row.ActivityNS > 0 {
-		age = nowNS - row.ActivityNS
-	}
-	if age < 0 {
-		age = 0
-	}
-	duration := time.Duration(age)
+	duration := time.Duration(rowAgeNS(row, nowNS))
 	switch {
 	case duration < time.Minute:
 		return fmt.Sprintf("%ds", int64(duration/time.Second))

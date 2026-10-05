@@ -27,19 +27,19 @@ A change lands in this file first, then in the templates, then in every surface 
 | Member | Kind | Does | Runs at | Design |
 | --- | --- | --- | --- | --- |
 | `rr` | agent | The lead: opens, plans, aggregates, dispatches, verifies, synthesizes, saves; the only agent holding `Write`, and it holds no `Read` | smart (`opus`), effort `low` | this file |
-| `super-rr` | variant of `rr` | The same body at higher effort with wider caps and the repository lane swapped in by `variants.json` `replace`, rendered by `pfm codex agents` | `opus`, effort `medium` | [super-rr.md](super-rr.md) |
-| `heavy-rr` | variant of `rr` | As `super-rr`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [heavy-rr.md](heavy-rr.md) |
+| `rr-pro` | variant of `rr` | The same body at higher effort with wider caps and the repository lane swapped in by `variants.json` `replace`, rendered by `pfm codex agents` | `opus`, effort `medium` | [rr-pro.md](rr-pro.md) |
+| `rr-pro-max` | variant of `rr` | As `rr-pro`, 8 diggers a round, no round ceiling, and `Read` added to its tools | `opus`, effort `medium` | [rr-pro-max.md](rr-pro-max.md) |
 | `sub-rr` | agent | The digger: answers a numbered batch of sub-queries, returns findings and rabbit holes | mechanical (`sonnet`), effort `low` | [sub-rr.md](sub-rr.md) |
-| `tracer-rr` | agent | The repository digger of `super-rr` and `heavy-rr`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [tracer-rr.md](tracer-rr.md) |
-| `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|super-rr\|heavy-rr` | `pfm internal rr-dir` | this file |
+| `tracer-rr` | agent | The repository digger of `rr-pro` and `rr-pro-max`: clones a public repository, answers a numbered batch of sub-queries from its code, writes a result file of absolute `path:line` evidence | smart (`opus`), effort `medium` | [tracer-rr.md](tracer-rr.md) |
+| `rr-dir` | `SubagentStart` hook | Puts the `RR-DIR:` line (the ledger directory) into the lead's context; matcher `rr\|rr-pro\|rr-pro-max` | `pfm internal rr-dir` | this file |
 
 The leads differ in their caps and in the repository lane, which sends a sub-area whose answer lives in a repository's code to `tracer-rr` ([tracer-rr.md](tracer-rr.md), § Who spawns it); every other line of the body is `rr.md`'s:
 
 | Lead | Diggers a round | Round ceiling | Verification pages | Repository lane |
 | --- | --- | --- | --- | --- |
 | `rr` | 4 | 3 | 8 | no |
-| `super-rr` | 6 | 5 | 12 | yes |
-| `heavy-rr` | 8 | none: the convergence stops alone end the run | 16 | yes |
+| `rr-pro` | 6 | 5 | 12 | yes |
+| `rr-pro-max` | 8 | none: the convergence stops alone end the run | 16 | yes |
 
 Vocabulary, one term per concept: a rabbit hole is a link, gap or missing piece a source raises and leaves unexplained; a sub-area is one part of the knowledge area, named in the plan; a finding is a digger's answer to one sub-query; a fact is a load-bearing statement in the map; a quote is the verbatim sentence that states a fact.
 
@@ -60,7 +60,7 @@ One run produces one markdown document, `{RR dir}/{slug}-{YYYY-MM-DD}.md`, and n
 
 - One writer. The lead is the only agent that writes it. `sub-rr` holds no `Write`, `Edit` or `Bash`; its `tools:` line carries that invariant, so the harness enforces it and no prose has to. `tracer-rr` holds `Bash` to clone and writes only its own result file under `{RR dir}/tracer-rr/`, which the document lists and never absorbs.
 - One write. The finished document is written once, at SAVE. Nothing is written before it and nothing is appended, so the lead needs no `Edit` tool and no sentinel lines.
-- No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing. It is what turns a second run on a taken name into a refusal instead of the silent loss of the first run's document. Adding `Read` to the lead's `tools:` line removes the guard. It would also let a lead open the ledger and inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path. `heavy-rr` alone opts out: its `tools` override adds `Read`, accepting both costs ([heavy-rr.md](heavy-rr.md) § Read, and the name guard it gives up).
+- No `Read`, on purpose. The harness refuses a Write over an existing file the agent has not read (`File has not been read yet`), and relaxes that refusal for an agent that holds the `Read` tool: such an agent overwrites an unread file without a word. The lead's missing `Read` is therefore load-bearing. It is what turns a second run on a taken name into a refusal instead of the silent loss of the first run's document. Adding `Read` to the lead's `tools:` line removes the guard. It would also let a lead open the ledger and inherit an earlier map's conclusions instead of deriving its own; for the same reason both prompts admit only web URLs and document identifiers as sources, because harvester `fetch` accepts a local path. `rr-pro-max` alone opts out: its `tools` override adds `Read`, accepting both costs ([rr-pro-max.md](rr-pro-max.md) § Read, and the name guard it gives up).
 - A failed save is loud. With no `RR-DIR:` line, an `RR-DIR-ERROR:` line, or a Write that fails for any reason but a taken name, the return opens `NOT SAVED — {reason}` and carries the synthesis inline.
 
 Layout of the finished document:
@@ -106,7 +106,7 @@ A lead call is one model invocation of the lead; each re-sends the lead's whole 
 | VERIFY | 1 | Every check in one message |
 | SAVE, RETURN | 2 | The Write, then the final message |
 
-A run costs `r(d + 1) + 5` lead calls: 15 for two rounds of four, 20 at `rr`'s ceiling of three, 40 at `super-rr`'s ceiling of five rounds of six; `heavy-rr` has no ceiling, so its cost is bounded only by convergence, at 9 lead calls a round of eight; a round of fewer diggers costs fewer, so three rounds of 4, 3 and 2 diggers cost 17. Every digger costs the lead one call when it returns, which is why width is bought inside a digger (more sub-queries per batch) and never as more diggers.
+A run costs `r(d + 1) + 5` lead calls: 15 for two rounds of four, 20 at `rr`'s ceiling of three, 40 at `rr-pro`'s ceiling of five rounds of six; `rr-pro-max` has no ceiling, so its cost is bounded only by convergence, at 9 lead calls a round of eight; a round of fewer diggers costs fewer, so three rounds of 4, 3 and 2 diggers cost 17. Every digger costs the lead one call when it returns, which is why width is bought inside a digger (more sub-queries per batch) and never as more diggers.
 
 What enters the lead's context is held flat: a finding keeps its 2-4 sentence size with quotes in place of paraphrase, a verification answer is a YES or NO with one sentence (8 pages came to about 1K tokens), and `Coverage` and `Verification` add a few hundred output tokens a run.
 
@@ -146,7 +146,7 @@ The judge is neither the digger that reported the fact nor the lead that will wr
 - A rabbit hole is kept when it serves an unsettled sub-area; when unsure whether it serves one, it does. One that serves no sub-area is listed open in the document and is not dug.
 - The frontier is grouped by sub-area and each group goes to one digger, so overlap between parallel diggers is removed by construction. Parallel diggers share no state, and a shared visited-URL list would be a shared file (the race above) or URLs relayed through the lead (output tokens in every brief). A page fetched twice costs one digger fetch; the harm that matters is closed at aggregation.
 - Support is counted by independent source. Pages repeating one origin (a press release, a paper, each other) are one source, so no page counts twice toward corroboration.
-- Digging ends when every sub-area is settled, when a round settled nothing and added no sub-area, or at the lead's round ceiling (§ The family); `heavy-rr` has none. New relevant documents stop arriving after a few iterations, so depth past that point buys re-reads; the ceiling is a safety stop, never a target.
+- Digging ends when every sub-area is settled, when a round settled nothing and added no sub-area, or at the lead's round ceiling (§ The family); `rr-pro-max` has none. New relevant documents stop arriving after a few iterations, so depth past that point buys re-reads; the ceiling is a safety stop, never a target.
 
 ## Marks
 
@@ -175,8 +175,8 @@ An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOU
 | Left out | Reason |
 | --- | --- |
 | A verifier digger | Two lead calls (the spawn's wait line and the return) against one for the lead's own check message, plus a digger's run |
-| More than 4 diggers a round for `rr` | Each digger is one more lead call on return; width goes into the batch. `super-rr` and `heavy-rr` buy width at that price by design |
-| A fourth dig round for `rr` | Depth saturates; the three-round ceiling keeps the run under its former cost with verification included. `super-rr` and `heavy-rr` pay for depth by design |
+| More than 4 diggers a round for `rr` | Each digger is one more lead call on return; width goes into the batch. `rr-pro` and `rr-pro-max` buy width at that price by design |
+| A fourth dig round for `rr` | Depth saturates; the three-round ceiling keeps the run under its former cost with verification included. `rr-pro` and `rr-pro-max` pay for depth by design |
 | A log of findings written round by round | Every finding would be emitted twice, once by the digger and once by the lead |
 | A `RUNNING` stub written at the start and replaced at the end | Replacing it is a Write over an existing file: refused without `Read`, even for the lead's own stub, and allowed for every file with it, which removes the name guard. A dead run leaves no document; its plan and findings are in the transcript |
 | A human gate on the plan | The lead is a sub-agent and holds no way to ask; the plan is reported in `Coverage` |
@@ -202,8 +202,8 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `tracer-rr.md`, `variants.json` | The three protocols; the `super-rr` and `heavy-rr` overrides, whose `replace` text must occur exactly once in `rr.md`, and their repository lane, identical in both entries |
-| The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `super-rr` and `heavy-rr`, re-rendered by `pfm codex agents` after every edit of `rr.md` |
+| The agents | `templates/global/agents/rr.md`, `sub-rr.md`, `tracer-rr.md`, `variants.json` | The three protocols; the `rr-pro` and `rr-pro-max` overrides, whose `replace` text must occur exactly once in `rr.md`, and their repository lane, identical in both entries |
+| The rendered variants | pfm's generated directory, linked into `~/.claude/agents/` and `~/.codex/agents/` | `rr-pro` and `rr-pro-max`, re-rendered by `pfm codex agents` after every edit of `rr.md` |
 | The hook | `pfm internal rr-dir`, wired by `pfm/internal/installer/expected_hooks.go` | The `RR-DIR:` line; its matcher names every agent rendered from `rr.md` |
 | The roster line | `docs/BLUEPRINT.md` | The family's members and the variant mechanism |
 | This directory | `docs/design/RR/` | This file and one file per other member |

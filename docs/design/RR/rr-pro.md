@@ -1,6 +1,6 @@
-# super-rr
+# rr-pro
 
-`super-rr` is the `rr` lead with wider caps, more reasoning and the repository lane: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`, and a `tracer-rr` for each repository whose code holds an answer. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
+`rr-pro` is the `rr` lead with wider caps, more reasoning and the repository lane: 6 diggers a round, a ceiling of 5 rounds, 12 verification pages, `opus` at effort `medium`, and a `tracer-rr` for each repository whose code holds an answer. Every other line of its prompt is `rr.md`'s, so the run, the document, the marks and the verification rules are the family's (`rr.md` in this directory). This file holds what is its own: the caps, how the variant is built, what it costs, when a caller picks it, and what its runs measured.
 
 ## Contents
 
@@ -20,15 +20,15 @@
 | Tools | `WebSearch, WebFetch, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` (inherited from `rr.md`) |
 | Spawns | `sub-rr`, and `tracer-rr` for a repository sub-area |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
-| Start hook | `rr-dir`, matcher `rr\|super-rr\|heavy-rr` |
+| Start hook | `rr-dir`, matcher `rr\|rr-pro\|rr-pro-max` |
 
-Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → here → heavy-rr. Delegate for "super rr", "super-rr X", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.`
+Description, verbatim: `Maps a query deeper — tier 2, higher stakes: rr → here → rr-pro-max. Delegate for "rr pro", "rr-pro X", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.`
 
 ## How the variant is built
 
 `pfm install` and `pfm codex agents` render the variant from `rr.md`: `name:` and the declared frontmatter keys are overridden, and each `replace` entry swaps one piece of body text. The swaps, verbatim from `variants.json`:
 
-| `rr.md` text | `super-rr` text |
+| `rr.md` text | `rr-pro` text |
 | --- | --- |
 | `Spawn at most 4 diggers a round` | `Spawn at most 6 diggers a round` |
 | `so 4 diggers carry the entire frontier` | `so 6 diggers carry the entire frontier` |
@@ -50,8 +50,8 @@ A run costs `r(d + 1) + 5` lead calls (the family's lead-call budget: one spawn 
 | Need | Agent |
 | --- | --- |
 | A map of a question, cheaply | `rr` |
-| A map where a wrong or missing fact costs something, or whose answer is partly in a repository's code | `super-rr` |
-| A map that must settle every sub-area whatever the cost | `heavy-rr` |
+| A map where a wrong or missing fact costs something, or whose answer is partly in a repository's code | `rr-pro` |
+| A map that must settle every sub-area whatever the cost | `rr-pro-max` |
 
 ## What the runs measured
 
@@ -66,9 +66,9 @@ Three runs on one query (how faithfully fetch-and-answer tools quote a page) set
 
 | Surface | File |
 | --- | --- |
-| The declaration | `templates/global/agents/variants.json`, entry `super-rr` |
+| The declaration | `templates/global/agents/variants.json`, entry `rr-pro` |
 | The body it swaps into | `templates/global/agents/rr.md` |
-| The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `heavy-rr` entry |
+| The repository digger | `templates/global/agents/tracer-rr.md`, `docs/design/RR/tracer-rr.md` — the lane text is identical in the `rr-pro-max` entry |
 | The renderer and its tests | `pfm/internal/codexgen/globalvariants.go`, `globalvariants_test.go` |
 | The start hook's matcher | `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) |
 | The family doc | `docs/design/RR/rr.md` |

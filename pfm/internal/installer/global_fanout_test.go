@@ -768,7 +768,7 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 	declaration := filepath.Join(repo, "templates", "global", "agents", "variants.json")
 	if err := os.WriteFile(
 		declaration,
-		[]byte(`{"super-rr":{"from":"rr","description":"deep rr."}}`),
+		[]byte(`{"rr-pro":{"from":"rr","description":"deep rr."}}`),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -780,22 +780,22 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 	_, failures := ReportGlobalAgents(&output, home, false)
 	if failures != 2 {
 		t.Fatalf(
-			"failures=%d, want 2 (the store and the Codex registry lack super-rr)\n%s",
+			"failures=%d, want 2 (the store and the Codex registry lack rr-pro)\n%s",
 			failures,
 			output.String(),
 		)
 	}
-	if !strings.Contains(output.String(), "state=MISSING names=super-rr") {
+	if !strings.Contains(output.String(), "state=MISSING names=rr-pro") {
 		t.Fatalf("the missing variant was not named:\n%s", output.String())
 	}
 
-	if err := os.WriteFile(declaration, []byte(`{"super-rr":{"from":"ghost"}}`), 0o644); err != nil {
+	if err := os.WriteFile(declaration, []byte(`{"rr-pro":{"from":"ghost"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	output.Reset()
 	_, failures = ReportGlobalAgents(&output, home, false)
 	if failures != 1 || !strings.Contains(output.String(), "state=UNREADABLE") ||
-		!strings.Contains(output.String(), "super-rr") {
+		!strings.Contains(output.String(), "rr-pro") {
 		t.Fatalf(
 			"failures=%d; a broken declaration must be UNREADABLE naming the variant:\n%s",
 			failures,

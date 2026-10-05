@@ -1,6 +1,6 @@
 # tracer-rr
 
-`tracer-rr` is the family's repository digger: given a public repository's URL and a numbered batch of sub-queries, it clones the repository into `/tmp`, answers each sub-query from the code, writes a result file whose every piece of evidence is an absolute `path:line` into the clone, and returns a code-quoted finding per sub-query to its lead. It is `tracer`'s reading discipline pointed at someone else's code for a research lead. It is spawned only by `super-rr` and `heavy-rr`, never delegated to directly; `rr` does not know it exists. The lead's side of the exchange (when a sub-area goes to a repository, the brief, verification) is the repository lane in this file and in `rr.md` in this directory.
+`tracer-rr` is the family's repository digger: given a public repository's URL and a numbered batch of sub-queries, it clones the repository into `/tmp`, answers each sub-query from the code, writes a result file whose every piece of evidence is an absolute `path:line` into the clone, and returns a code-quoted finding per sub-query to its lead. It is `tracer`'s reading discipline pointed at someone else's code for a research lead. It is spawned only by `rr-pro` and `rr-pro-max`, never delegated to directly; `rr` does not know it exists. The lead's side of the exchange (when a sub-area goes to a repository, the brief, verification) is the repository lane in this file and in `rr.md` in this directory.
 
 ## Contents
 
@@ -30,11 +30,11 @@
 | Writes | its clone under `/tmp/rr-repos/`, and one result file under `{RR dir}/tracer-rr/` |
 | Start hook | none — `pfm/internal/claudelaunch/hooks.go` (`HookRRDirMatcher`) lists exact names and omits it; the `RR-DIR:` line arrives in the brief |
 
-Description, verbatim: `RR-ONLY digs a repository's code — spawned by super-rr and heavy-rr with a repo URL and numbered sub-queries, never delegated to directly. Returns its result file path, then a code-quoted finding per sub-query, then rabbit holes.`
+Description, verbatim: `RR-ONLY digs a repository's code — spawned by rr-pro and rr-pro-max with a repo URL and numbered sub-queries, never delegated to directly. Returns its result file path, then a code-quoted finding per sub-query, then rabbit holes.`
 
 ## Who spawns it
 
-Only the two deeper leads. The repository lane is not in `rr.md`'s body: `variants.json` swaps it into `super-rr` and `heavy-rr` by one `replace` entry each, keyed on the DIG step's last sentence, `` `sub-rr` is the only agent type you spawn. `` A plain `rr` run keeps its one digger and reads a repository only as web pages. The lane costs an `opus` digger and a clone per repository, which the cheap map does not buy.
+Only the two deeper leads. The repository lane is not in `rr.md`'s body: `variants.json` swaps it into `rr-pro` and `rr-pro-max` by one `replace` entry each, keyed on the DIG step's last sentence, `` `sub-rr` is the only agent type you spawn. `` A plain `rr` run keeps its one digger and reads a repository only as web pages. The lane costs an `opus` digger and a clone per repository, which the cheap map does not buy.
 
 The swapped-in text, identical in both entries:
 
@@ -129,7 +129,7 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | A `blob:none` history clone | Each old file version is fetched over the network, one request at a time, the first time `git log -S` or `-p` touches it: a pickaxe over one repository's history ran past 120 s in every dig of a trial, where the `blob:limit=1m` clone answers in under a second |
 | A clone verb in the harvester | It would take `Bash` away from a reader of untrusted code and give Codex a sandbox-independent clone, at the price of engine work; the digger clones with `git` itself |
 | Reusing `tracer` | `tracer` forbids the network and returns spec-writer furniture (test homes, check commands) a research lead cannot use |
-| A lane in plain `rr` | The cheap map stays cheap; `super-rr` and `heavy-rr` pay for an `opus` digger and a clone by design |
+| A lane in plain `rr` | The cheap map stays cheap; `rr-pro` and `rr-pro-max` pay for an `opus` digger and a clone by design |
 | A commit `Ref:` | Every git command that materializes an arbitrary commit — `fetch`, `remote add`, `checkout` of a commit — is blocked by the fleet's git-guard hook (`pfm/internal/hookentry/git_guard.go`, `gitGuardBlocks`); running one inside a heredoc the guard does not parse would route around it. `git clone --branch` takes a branch or tag and is not guarded |
 | Absolute paths in the return | The lead cites web URLs only; the paths live in the result file |
 
@@ -138,7 +138,7 @@ The digger reads a stranger's repository while holding `Bash`. Its prompt treats
 | Surface | File |
 | --- | --- |
 | The agent | `templates/global/agents/tracer-rr.md` |
-| The lane its briefs come from | `templates/global/agents/variants.json`, the `replace` entry of `super-rr` and of `heavy-rr`, identical text |
+| The lane its briefs come from | `templates/global/agents/variants.json`, the `replace` entry of `rr-pro` and of `rr-pro-max`, identical text |
 | The sentence the lane swaps | `templates/global/agents/rr.md`, step 4's last sentence |
 | The renderer's gate | `TestShippedGlobalAgentVariantsRender`, `pfm/internal/codexgen/globalvariants_test.go` |
 | The family doc | `docs/design/RR/rr.md` |

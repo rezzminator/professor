@@ -1,6 +1,6 @@
 ---
 name: rr
-description: 'Maps a query''s knowledge area — tier 1, the default: rr → super-rr → heavy-rr. Delegate for "rr", "quick research", "profile X" when one web search will not do. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited map and the rabbit holes left open.'
+description: 'Maps a query''s knowledge area — tier 1, the default: rr → rr-pro → rr-pro-max. Delegate for "rr", "quick research", "profile X" when one web search will not do. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited map and the rabbit holes left open.'
 tools: WebSearch, WebFetch, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web
 model: opus
 effort: low

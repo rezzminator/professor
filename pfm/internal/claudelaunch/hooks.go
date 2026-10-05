@@ -5,7 +5,7 @@ import "path/filepath"
 const (
 	HookEventUserPromptSubmit = "UserPromptSubmit"
 	HookExploreMatcher        = "Agent|Task"
-	HookRRDirMatcher          = "rr|super-rr|heavy-rr"
+	HookRRDirMatcher          = "rr|rr-pro|rr-pro-max"
 	// HookResumeMatcher selects the SessionStart source Claude reports for
 	// --resume, --continue and the in-app /resume.
 	HookResumeMatcher   = "resume"

@@ -1,7 +1,7 @@
 {
-  "heavy-rr": {
+  "rr-pro-max": {
     "from": "rr",
-    "description": "Maps a query exhaustively — tier 3, the ultimate: super-rr → here. Delegate for \"heavy rr\", \"heavy-rr X\", when every sub-area must settle whatever the cost. Returns the saved RR path, then the cited map.",
+    "description": "Maps a query exhaustively — tier 3, the ultimate: rr-pro → here. Delegate for \"rr pro max\", \"rr-pro-max X\", when every sub-area must settle whatever the cost. Returns the saved RR path, then the cited map.",
     "effort": "medium",
     "tools": "WebSearch, WebFetch, Read, Write, Agent, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web",
     "replace": {
@@ -12,9 +12,9 @@
       "`sub-rr` is the only agent type you spawn.": "`sub-rr` digs the web. A sub-area whose answer lives in a public repository's code — how a project implements something, not what a page says about it — goes to `tracer-rr`: one per repository, never two on one repository in a round, counted in the round's cap; a sub-area spanning several repositories gets one `tracer-rr` per named repository, never a `sub-rr` guessing their raw file URLs; a later question about a repository a `tracer-rr` already dug goes to a `tracer-rr` on that repository, never to a `sub-rr`. Its brief carries `Repository: {clone URL}`, `Ref: {branch or tag}` when the query names one, `History: yes` when a sub-query asks how the code changed over time, the numbered sub-queries, the `Goal:` line and your `RR-DIR:` line. Its findings are read from the clone and cite links pinned to the commit: each such fact carries its `tracer-rr` link inline in the map, counts as fetched, and is not re-fetched at step 6, whose pages go to web facts, `unquoted` ones first. The document's `Coverage` section lists each result file a `tracer-rr` returned by its path relative to your RR directory, `tracer-rr/{file}`, never the absolute path. These two are the only agent types you spawn."
     }
   },
-  "super-rr": {
+  "rr-pro": {
     "from": "rr",
-    "description": "Maps a query deeper — tier 2, higher stakes: rr → here → heavy-rr. Delegate for \"super rr\", \"super-rr X\", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.",
+    "description": "Maps a query deeper — tier 2, higher stakes: rr → here → rr-pro-max. Delegate for \"rr pro\", \"rr-pro X\", when a wrong or missing fact costs something or the answer is partly in a repository's code. Returns the saved RR path, then the cited map.",
     "effort": "medium",
     "replace": {
       "Spawn at most 4 diggers a round": "Spawn at most 6 diggers a round",

@@ -31,7 +31,7 @@ The chat builds a design tree from the tasks and the maps: the flight's goal at 
 
 - technical: a branch with two or more defensible options and materially different consequences (transport, data placement, migration, failure behaviour);
 - product: who the change is for, what must be true when it lands, what it must never do, what the user sees;
-- touchpoints: every moment the flight would need the user (a secret, a deploy review, a destructive operation), pre-authorised now or removed from scope — never a merge nod, which the lander's `PASS` or `FIXED` gives; a flight that stops mid-run for a user answer is a failed spec. A task that moves protected data gets a question about its channel, never a default.
+- touchpoints: every moment the flight would need the user (a secret, a deploy review, a destructive operation), pre-authorised now or removed from scope; a flight that stops mid-run for a user answer is a failed spec. A task that moves protected data gets a question about its channel, never a default.
 
 The rounds work like this:
 

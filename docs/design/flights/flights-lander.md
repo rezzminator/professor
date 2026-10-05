@@ -57,7 +57,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 - No nested copy of itself and no `Agent` tool. The adopter's QA handed its fixes to a fresh QA seat; here the closing full-suite run and the watched-failing proof of every new test are the judges of the lander's own fixes.
 - No conformance audit against the spec. An executor that drifts from its spec breaks the task that needs it, which returns `SPEC-DRIFT` and wakes the speccer; checking it again at the end buys little and costs a read of every task file. The task files are read as the attack's statement of intent, not audited row by row.
-- No commit and no merge. `gitter` commits after the lander returns, and lands a worktree flight on the lander's `PASS` or `FIXED`.
+- No commit and no merge. `gitter` commits after the lander returns, and lands a committed worktree flight whose every task is `DONE` on the lander's `PASS` or `FIXED`.
 
 ## Bounds
 
@@ -72,7 +72,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 The return's first line is `PASS {flight}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {flight}: {n} defects fixed` or `FAIL {flight}: {n} residuals`, `{flight}` being the flight directory's name; then each project's two full-run verdict lines as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([Retro lines](flights-orchestrator.md#retro-lines)).
 
-The return is also a file. The lander's last act before returning writes it, verbatim, to `{flight directory}/returns/gate-r{round}.md`, `{round}` read from its brief file's name: the directory created, the text written under a dot-prefixed temporary name in it and moved onto that name, so the file appears whole and a directory watcher's glob never sees the temporary. The lander ends turns mid-gate (its gate runs may be background commands, and its review runs forked), and a return sent after such a turn can reach the main chat instead of the orchestrator; the orchestrator's own background wait on this file always reaches it ([flights-orchestrator](flights-orchestrator.md#review)). The background gate runs stay allowed.
+The return is also a file. The lander's last act before returning writes it, verbatim, to `{flight directory}/returns/gate-r{round}.md`, `{round}` read from its brief file's name: the directory created, the text written under a dot-prefixed temporary name in it and moved onto that name, so the file appears whole and a directory watcher's glob never sees the temporary. An answer to a question back goes the same way to the file the question names. The lander ends turns mid-gate (its gate runs may be background commands, and its review runs forked), and a return sent after such a turn can reach the main chat instead of the orchestrator; the orchestrator's own background wait on this file always reaches it ([flights-orchestrator](flights-orchestrator.md#review)). The background gate runs stay allowed.
 
 ## Context budget
 

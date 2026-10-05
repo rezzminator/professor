@@ -78,11 +78,16 @@
       "pfm:release"
     ],
     "scripts": [
+      "check-pfm.sh",
+      "check-templates.sh",
       "codex-sync.sh",
       "dev.sh",
       "format-md.sh",
       "guard-stamp.sh",
-      "pfm-guard.sh"
+      "pfm-guard.sh",
+      "test-pfm.sh",
+      "test-templates.sh",
+      "unit-path.sh"
     ],
     "skills_source_fetched": {},
     "deliberately_absent": {
@@ -98,13 +103,18 @@
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
     ".claude/commands/pcm.md": "daccaff45704176078693803c3865b17f577156907d935dc35778c7f6e3d56d2",
-    ".claude/commands/pfm-testing-manual.md": "669e39ac87abc93191dc7528c30d83a431e48d028475e417d6c729ff6679c022",
+    ".claude/commands/pfm-testing-manual.md": "a337093499efa10d521fd40eed081812bce73effed1c41c93f290ba077d32358",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
+    ".claude/scripts/check-pfm.sh": "d0396e5c5b8044e26d22ac65ac7d91a0a623e960397757b01d71fc225c0b1dcd",
+    ".claude/scripts/check-templates.sh": "c04dd11fa1eeef2bb66fd426b6444c2892fa2b823af42bb8f86931416d1ccef6",
     ".claude/scripts/codex-sync.sh": "21de880295af7280054ef29e4f7505bdc415976c11d6f1cd07c0a78d0a60a94e",
     ".claude/scripts/dev.sh": "4b0925780afaee09c8d74b3ca74e8bde10142bfd5d4e0e494a6594e8df05a82f",
     ".claude/scripts/format-md.sh": "5b2c0c35e4e5ad5a627c0e3194af6f8f82db20f8e4ff3050d478abfad7d28885",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
     ".claude/scripts/pfm-guard.sh": "b4e1a5d6f3f827410b40d484aaa687ce0c34b882938ef86080d8828f560d48dc",
+    ".claude/scripts/test-pfm.sh": "a3a1f9e91a22f7fa54a965c6b2cf3fa80ce56276354a7f5836afe27032a0c34d",
+    ".claude/scripts/test-templates.sh": "f2465d15447631d75ad14c0b531c4e4c4c044aed44291a181f38b12b8f3f4053",
+    ".claude/scripts/unit-path.sh": "484d1069e0a9ccdc8c7492f2fd2f3e72fece27cfb1888ee5aa8669ac9fab0918",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "333d7b9833b8f4c7acb40cf1293ad669c0581a075d89e723062a56d59b14c475",

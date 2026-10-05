@@ -43,7 +43,7 @@ jobs:
           (cd pfm && go run ./cmd/pfm opencode build ..)
 
       - name: Scan
-        uses: hashgraph-online/ai-plugin-scanner-action@966f1e711a202e0fd5987c120fbdb59b2f2a398b # v1.2.700
+        uses: hashgraph-online/ai-plugin-scanner-action@ff72bdc87402c9751fe9be6977de41c0cfcc514b # v1.2.706
         with:
           plugin_dir: "."
           min_score: 80

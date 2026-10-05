@@ -184,7 +184,7 @@ Work takes the lowest rung that fits (the fleet prompt's § Orchestration): dire
                                      ▼
   the landing (once)     one flights-lander for the flight: each project's
                          checks, one review of the whole diff, adversarial
-                         tests, its own fixes · the standing checks watched
+                         tests, its own fixes · the landing checks watched
                          printing · gitter commits when the brief asked for
                          a commit
                                      │

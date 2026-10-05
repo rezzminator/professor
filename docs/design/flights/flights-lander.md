@@ -1,6 +1,6 @@
 # flights-lander
 
-`flights-lander` is the last step of a flight: one fresh agent for the whole flight, whatever projects it touched, which runs each project's checks, reviews the flight's whole diff across every project, attacks the change with tests written to break it, and fixes what it finds itself. It is the flight's one review and its only independent tester; the executors write their own covering tests and run no review.
+`flights-lander` is a flight's gate, the step before its landing: one fresh agent for the whole flight, whatever projects it touched, which runs each project's checks, reviews the flight's whole diff across every project, attacks the change with tests written to break it, and fixes what it finds itself. It is the flight's one review and its only independent tester; the executors write their own covering tests and run no review.
 
 Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-lander.md`](../../../templates/global/agents/flights-lander.md).
 
@@ -57,7 +57,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 - No nested copy of itself and no `Agent` tool. The adopter's QA handed its fixes to a fresh QA seat; here the closing full-suite run and the watched-failing proof of every new test are the judges of the lander's own fixes.
 - No conformance audit against the spec. An executor that drifts from its spec breaks the task that needs it, which returns `SPEC-DRIFT` and wakes the speccer; checking it again at the end buys little and costs a read of every task file. The task files are read as the attack's statement of intent, not audited row by row.
-- No commit. `gitter` commits after the lander returns.
+- No commit and no merge. `gitter` commits after the lander returns, and lands a worktree flight on the lander's `PASS` or `FIXED`.
 
 ## Bounds
 
@@ -71,6 +71,8 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 `{flight directory}/gate.md`: the attack map, then one row per finding — project · source (checks, review, attack, sweep) · area · failing test · reproduction · expected · status (fixed, residual, outside the flight).
 
 The return's first line is `PASS {flight}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {flight}: {n} defects fixed` or `FAIL {flight}: {n} residuals`, `{flight}` being the flight directory's name; then each project's two full-run verdict lines as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([Retro lines](flights-orchestrator.md#retro-lines)).
+
+The return is also a file. The lander's last act before returning writes it, verbatim, to `{flight directory}/returns/gate-r{round}.md`, `{round}` read from its brief file's name: the directory created, the text written under a dot-prefixed temporary name in it and moved onto that name, so the file appears whole and a directory watcher's glob never sees the temporary. The lander ends turns mid-gate (its gate runs may be background commands, and its review runs forked), and a return sent after such a turn can reach the main chat instead of the orchestrator; the orchestrator's own background wait on this file always reaches it ([flights-orchestrator](flights-orchestrator.md#review)). The background gate runs stay allowed.
 
 ## Context budget
 
@@ -87,9 +89,9 @@ A lander certifies its own fixes. The research collected for this design condemn
 | Surface | File | Holds |
 | --- | --- | --- |
 | The agent | `templates/global/agents/flights-lander.md` | The executable wording |
-| The orchestrator | [`flights-orchestrator`](flights-orchestrator.md) | The landing: the lander, then `gitter`; the reaction to `FAIL` |
+| The orchestrator | [`flights-orchestrator`](flights-orchestrator.md) | The landing: the lander and the wait on its return file, then `gitter`'s commit and merge; the reaction to `FAIL` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project law the sweep and the gate run against |
-| The audit | [`flights-audit`](flights-audit.md) | `gate.md` as an anchor; the review read from the lander's transcript |
+| The audit | [`flights-audit`](flights-audit.md) | `gate.md` and `returns/gate-r{round}.md` as anchors; the review read from the lander's transcript |
 | The family | [`flights.md`](flights.md) | The lander among the six agents and the directory's five writers |
 
 ## Evidence

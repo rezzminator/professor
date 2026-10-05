@@ -11,7 +11,7 @@ Read the `flights-orchestrator` agent body from the registry (`~/.claude/agents/
 | In the manual | Here |
 | --- | --- |
 | Spawn an executor `Agent(subagent_type)` | A seat of the engine (the argument; default `codex`), named `{flight}-{id}`, in the project directory or the worktree, born with the executor role its rating picks and, on `codex`, the model and effort its rating picks — mechanical `gpt-6-luna` at `xhigh`; precise `gpt-6.1-sol` at `high`; smart `gpt-6.1-sol` at `high`: the shell `pfm chat new --name {flight}-{id} --engine {engine} --cwd {dir} --agent-role {flights-mechanical-executor, flights-precise-executor or flights-smart-executor} --model {model} --effort {effort} --prompt-file {flight directory}/briefs/{id}-r{round}.md` (another engine drops `--model` and `--effort`: the role's own pin holds) — the MCP verb carries no role. Its exit 0 is the brief confirmed as the seat's first turn; the `CLAIMED` line is written only once the Claim call (§ Monitors) then exits 0: a brief that never started is no claim. Any other exit is no claim: `chat_kill` the seat it left, if any, no `CLAIMED` line; one retry, then the task holds and the return names it |
-| Spawn the lander | Unchanged: a sub-agent of this chat, never a seat |
+| Spawn the lander | Unchanged: a sub-agent of this chat, never a seat; the returns Monitor's `RETURN` line for its `gate-r{round}.md` is one more wake for the same file |
 | The brief in the spawn prompt | The brief file, written before the spawn, goes verbatim as the seat's first turn through `--prompt-file`, never a later `chat_inject`. It closes with the way home: "when done, write your return to `{flight directory}/returns/{id}-r{round}.md` and send it with `pfm chat inject {this chat's name} --file {path}`"; the return file is the return, and a trailing `**Verdict:**` line in it or in `chat_last` is ignored — your name from `chat_whoami`; a seat's plain inject carries one line |
 | Wait: end the message, the return arrives | The same; a return is its file appearing in `returns/`, announced by the returns Monitor's `RETURN {path}` line; the seat's inject is a bonus, never the signal |
 | Verify from the return and `git diff {baseline} --stat -- {files}` | The same; `chat_last` on the seat when the inject arrived cut short |
@@ -22,7 +22,7 @@ Read the `flights-orchestrator` agent body from the registry (`~/.claude/agents/
 | The caller hears from you once | The user is the caller: the return at the end |
 | After a verdict is recorded | `chat_kill` the seat; `DISPATCHED` counts seats born against returns received |
 
-Input: $ARGUMENTS, resolved as `/flights:orchestrate-nested` resolves it, plus the engine. Every seat is one-shot: born for one task file, killed after its verdict. Waiting is the two Monitors below; a seat is never polled by `chat_status`.
+Input: $ARGUMENTS, resolved as `/flights:orchestrate-nested` resolves it, plus the engine. Every seat is one-shot: born for one task file, killed after its verdict. After your return, a `LANDED` or `CONFLICT` row is handled as `/flights:orchestrate-nested` step 4 handles it. Waiting is the two Monitors below; a seat is never polled by `chat_status`.
 
 ## Monitors
 

@@ -20,7 +20,7 @@ Build the design tree from the tasks and the maps: the root is the flight's goal
 
 - Technical: every branch with two or more defensible options and materially different consequences (transport, data placement, migration, failure behaviour).
 - Product: who the change is for, what must be true when it lands, what it must never do, what the user sees.
-- Touchpoints: every moment the flight would need the user (a secret, a deploy review, a destructive operation, a merge nod), pre-authorised now or cut from scope; a flight that stops mid-run for a user answer is a failed spec. A task that moves protected data gets a question about its channel, never a default.
+- Touchpoints: every moment the flight would need the user (a secret, a deploy review, a destructive operation), pre-authorised now or cut from scope; a flight that stops mid-run for a user answer is a failed spec. A task that moves protected data gets a question about its channel, never a default.
 
 Work the tree in rounds. The frontier is every open decision whose prerequisites are settled: a question whose answer depends on another question still open waits for a later round. Round one always holds the scope boundary (the user's whole objective restated, what this flight includes, what it defers — scope never narrows silently) and every task the maps could not ground: specify, defer or drop. Ask the whole frontier in one plain-text message, then end it and wait:
 

@@ -78,7 +78,7 @@ The layout laws bind this tier through its body: a deletion leaves nothing behin
 | A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red its change causes outside `Files` that the list does not name stays `SPEC-DRIFT` |
 | A stale comment or doc, an older defect | A defect line in the return; finish |
 | Spec and code disagree on a detail | Reach the Goal; say what it changed |
-| The Goal turns unreachable mid-task | Stop, every touched file building; `SPEC-DRIFT {id}` with what it found and what landed |
+| The Goal turns unreachable mid-task | Stop, every touched file building; `SPEC-DRIFT {id}` with what it found and what is done |
 | Its own edit turns a check red inside `Files` | Fix it there, rerun |
 | A branch no example covers | Deleted; when a `Done when` row needs it, `SPEC-DRIFT {id}` so the speccer adds the example |
 | A red in an unreached test, or a check rejecting what was there before | Outside defects; finish `DONE` |

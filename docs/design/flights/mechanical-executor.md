@@ -26,7 +26,7 @@ The friction below comes from a transcript audit of 130 flight runs and 21 gener
 
 ### The Steps are the change
 
-The executor applies the Steps and makes only four adaptations without asking: a quoted line found at another place, an import the edit needs, the formatter's output, a fix for its own red. Another approach, a name the task does not give or an edit outside `Files` is a judgment: it stops and returns `SPEC-DRIFT {id}: {what the task file lacks}` with what landed, leaving every touched file building. It makes no design choice.
+The executor applies the Steps and makes only four adaptations without asking: a quoted line found at another place, an import the edit needs, the formatter's output, a fix for its own red. Another approach, a name the task does not give or an edit outside `Files` is a judgment: it stops and returns `SPEC-DRIFT {id}: {what the task file lacks}` with what is done, leaving every touched file building. It makes no design choice.
 
 Friction: "the Goal wins over a detail" invited the executor to adapt, which is judgment. The 9 audited `SPEC-DRIFT` runs took a median of 92 calls before returning; one first edited at call 76 and returned at 158.
 
@@ -47,7 +47,7 @@ One test per `Done when` row, a row being a matrix row or a `Given` line, in the
 
 - tests before code, never after: each row's unit test, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; no test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example;
 - every row's test is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; all the new tests run in one command against the unfixed tree, each failing on its assertion (a build error proves nothing), the log kept; then the Steps are applied and the same command runs green once;
-- a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log and the commit or `run.md` line that landed the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or landed code to watch a test fail, even where the testing manual asks for a re-break or mutation proof; a new gate proves its bite on a fixture or a `mktemp` copy;
+- a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log and the commit or `run.md` line that introduced the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or committed code to watch a test fail, even where the testing manual asks for a re-break or mutation proof; a new gate proves its bite on a fixture or a `mktemp` copy;
 - a task with no behaviour change (a rename, a move, a deletion, the doc references one carries) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history or in a hit named under Outside defects, are its proof.
 
 Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break code for the proof; one reverted to the last commit in a worktree holding sibling tasks' uncommitted work, and one temporary break of a shared file turned a sibling's run red. An audit of 13 Codex executors measured the per-row red, fix, green cycle and its re-breaks at 62 red-run and 47 re-break calls, 68 of 275 minutes, some re-breaking rows already watched red. One red run and one green run per task keep the guarantee that every new test failed before its fix; code already in the tree is never the executor's to break.
@@ -100,7 +100,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A quote found nowhere or at more than one place, a new name taken, a break outside `Files`, a file pushed over the ceiling | Change nothing; `SPEC-DRIFT {id}` naming each |
 | A test the Decisions list under `Temporary reds` | Neither `SPEC-DRIFT` nor `FAILED`: named in the return, the task continues; a red its change causes outside `Files` that the list does not name stays `SPEC-DRIFT` |
 | A quoted line found at another place, an import the edit needs, the formatter's output | Adapt and list it under Adapted |
-| An edit the Steps do not settle (another approach, a name not given, a file outside `Files`) | Stop, every touched file building; `SPEC-DRIFT {id}: {what the task file lacks}` with what landed |
+| An edit the Steps do not settle (another approach, a name not given, a file outside `Files`) | Stop, every touched file building; `SPEC-DRIFT {id}: {what the task file lacks}` with what is done |
 | Its own edit turns a check red inside `Files` | Fix the cause there, rerun |
 | A branch no example covers | Deleted; when a `Done when` row needs it, `SPEC-DRIFT {id}` so the speccer adds the example |
 | A sibling's file, an unreached test or a pre-existing finding is red | Outside defects; finish `DONE` — or, when it stops its own tests, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
@@ -108,7 +108,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A row that reads two ways | The reading today's code and the Steps support, named in the return; `SPEC-DRIFT` only when neither settles it and they build different code |
 | A brief naming the full suite, a whole-tree sweep or a review | Refused, named in the return |
 | A decision it cannot make | `BLOCKED {id}: {question}` |
-| 80 calls | `FAILED {id}: cap` with what landed, what is left, the next step |
+| 80 calls | `FAILED {id}: cap` with what is done, what is left, the next step |
 
 ## The general twin
 

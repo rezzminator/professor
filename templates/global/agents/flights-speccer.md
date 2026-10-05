@@ -39,10 +39,10 @@ Seven phases; skip one with nothing to ask. A one-task flight whose caller suppl
    - A NOTES line, never a task: what you find wise and nobody asked for; a decision a human may want to overrule.
 4. Form tasks (below). Tasks in separate contexts: § Nesting replaces phases 5 to 7.
 5. Collect shapes, each pasted from output this run printed (a tracer's fenced lines, your `sed -n` or Read of exactly those lines, a collector's return), only the lines a task quotes. Many shapes in unread files go to `Agent(subagent_type: "collector")` with the repo root and numbered orders. A read that elides text ("shown above", "…") is read again, never filled from memory.
-6. Sweep, then write. Before a task's `Files` close, sweep the whole repository (tests, fixtures, golden files, `*.tsv` and `*.json` registries, scripts, docs) with `grep` or a tracer for every symbol, signature, file, flag, literal and behaviour the task changes or deletes, and every output string and error text the changed behaviour prints; every hit lands in this task's `Files`, in a later task's `Files` with a `Temporary reds` line here, or in a Decisions line stating it out of scope and why. Shared files first; then each task file inside a budget computed first, 25000 characters minus `wc -c` of its `reads`; all files of a level in one message.
+6. Sweep, then write. Before a task's `Files` close, sweep the whole repository (tests, fixtures, golden files, `*.tsv` and `*.json` registries, scripts, docs) with `grep` or a tracer for every symbol, signature, file, flag, literal and behaviour the task changes or deletes, and every output string and error text the changed behaviour prints; every hit goes in this task's `Files`, in a later task's `Files` with a `Temporary reds` line here, or in a Decisions line stating it out of scope and why. Shared files first; then each task file inside a budget computed first, 25000 characters minus `wc -c` of its `reads`; all files of a level in one message.
 7. Reconcile: run the index script. It rebuilds `index.md` and prints the table, its delta, file collisions (a file in two tasks with no `needs` chain between them), the largest read and one `ERROR` per defect (bad frontmatter, unknown `needs` id, missing `reads` file, cycle, task over budget). Fix every `ERROR` and collision, rerun until exit 0; over budget, cut words first, the task second; exit 2 built nothing. Its task count, collisions and largest read are the `RECONCILED` numbers. Then fix before returning:
    - Restatement: no task or shared file restates what the executor or lander agent holds, or a testing-manual rule.
-   - Coverage: every numbered change, and every mention of a removed or renamed thing, lands in exactly one task or in `BLOCKED`.
+   - Coverage: every numbered change, and every mention of a removed or renamed thing, sits in exactly one task or in `BLOCKED`.
    - Sense: each Done when can come true under its Decisions; no two decisions contradict; every sweep hit is placed, so nothing changed breaks a reader outside its Files; every task fits step 3's size; a step that demands a red has the test edits it needs in Files.
    - Names: you write only `0-*.md` and `{level}-{letter}.md`.
 
@@ -134,13 +134,13 @@ A task you cannot specify (the input contradicts itself, or a fact lives in neit
 
 ## Revising
 
-Given a spec directory and a reason (a report, a failing check, a ruling on a `BLOCKED` question, a refinement), the caller names the completed tasks and what landed; their files stay. Rewrite, add or remove the rest so the fix lives in the task files; a `FAILED` task is cut smaller or re-approached, never resent unchanged. Reconcile, then return the table cut to the rows you added or rewrote and one line `REVISED {those ids} · REMOVED {ids}`. Read the index and the task files the reason names; probe only for what it requires.
+Given a spec directory and a reason (a report, a failing check, a ruling on a `BLOCKED` question, a refinement), the caller names the completed tasks and what is done; their files stay. Rewrite, add or remove the rest so the fix lives in the task files; a `FAILED` task is cut smaller or re-approached, never resent unchanged. Reconcile, then return the table cut to the rows you added or rewrote and one line `REVISED {those ids} · REMOVED {ids}`. Read the index and the task files the reason names; probe only for what it requires.
 
 - Before rewriting, read `run.md`'s `RETRO` lines and the transcript, one call: `python3 ~/.claude/skills/transcript/transcript.py show {transcript}` (the path or session id the `run.md` line carries); open more only at a line the digest names (`--lines {n}-{m} --results full`, `--grep '{failing id}' --results tail:40`). A `TOO-LARGE` line carries no transcript by design and takes no note; any other missing transcript, or a `TRANSCRIPT FAILED` line, goes in NOTES as `NO TRANSCRIPT {id}: {why}`; the rewrite rests on the report.
 - Diagnose-first means the cause is unknown, whatever the reports say: before any rewrite, read the whole unit the task changes (the entire test, beat or module) and the runtime path it exercises (one tracer when it leaves the unit), with every transcript of that id through `show`; write the cause as a `Decisions` line. A third red the caller returns as `BLOCKED`.
 - A red in code the flight forbids fixing is no spec fault: record it where the project keeps known defects, narrow the Done when, name it in NOTES.
 - Never touch a `CLAIMED` task's file: its executor has read it.
-- A rewritten task file's `Progress dependency` states what the previous round of it landed, from the executor's return.
+- A rewritten task file's `Progress dependency` states what the previous round of it did, from the executor's return.
 
 ## Return
 

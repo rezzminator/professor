@@ -43,7 +43,7 @@ Six agents, six commands, nothing else. Project law reaches them through the pro
    - Every `Done when` row carries a concrete example with real values: `call(args) → result` for a unit, `given … / when … / then …` at the project's real entry and exit for an integration. The executor's test keeps the example's inputs and expected values exactly. A testing manual's floors are never a task's row: they are the lander's.
 3. Orchestrate. One of the three `orchestrate-*` commands runs the manual over the directory: ready tasks dispatched together, each executor briefed with its task file, each return verified before it is recorded, faults sent back to `flights-speccer`, then the landing once: one `flights-lander` for the whole flight, the landing checks, the commit, and, once every task is `DONE`, a worktree flight's merge onto its integration branch, the lander's `PASS` or `FIXED` being the merge nod.
    - An executor writes its tests from the task's examples before any code, one red run, and no test after the code. Before an edit it searches only what could break, the callers and the tests, file names first. Last, before its return, it runs the testing manual's static-check command once over the task's files; a red is fixed and the same command run again.
-   - After the return the main chat branches its next flight from the landed tip; once the last flight it runs has landed, the integration branch's gate runs once, skipped when every landing was a fast-forward (the lander gated that exact tree); a `NOT LANDED` conflict or refusal, or a red at that gate, goes to one `general-foreman`, which lands the flight through the repository's git writer.
+   - After the return the main chat branches its next flight from the landed tip; once the last flight it runs has landed, the integration branch's gate runs once, skipped when every landing was a `gated tree` (the lander gated that exact tree); a `NOT LANDED` conflict or refusal, or a red at that gate, goes to one `general-foreman`, which lands the flight through the repository's git writer.
 4. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
 
 Specifying and running are two decisions. Approval of an index never starts a run; the user picks the container.
@@ -76,10 +76,10 @@ One vocabulary for the executor's return, the orchestrator's ledger and the audi
 
 | Token | Written by | Means |
 | --- | --- | --- |
-| `CLAIMED` | orchestrator, at dispatch | An executor holds this task; a resume treats it as in flight until a verdict lands |
+| `CLAIMED` | orchestrator, at dispatch | An executor holds this task; a resume treats it as in flight until a verdict arrives |
 | `DONE` | executor → orchestrator, after verification | The Goal is reached and proven; the line names what was adapted, or `as specified` |
 | `FAILED` | executor, or orchestrator after a second unproven return or a cap | The spec stands but the executor could not reach the Goal; the return names the cause or what was read; goes to `flights-speccer` with the executor's transcript, to be cut smaller or re-approached |
-| `SPEC-DRIFT` | executor | The world moved or the spec contradicts itself; the executor changed nothing (or says what already landed) and names the cause or what it read; goes to `flights-speccer` with the executor's transcript |
+| `SPEC-DRIFT` | executor | The world moved or the spec contradicts itself; the executor changed nothing (or says what is already done) and names the cause or what it read; goes to `flights-speccer` with the executor's transcript |
 | `BLOCKED` | executor, `flights-speccer`, or orchestrator at a third red | A question only the user can answer; carried in the return, the other tasks continue |
 | `WAIT` | orchestrator, from an executor's `FAILED {id}: blocked by {files}` | Every file stopping the executor's own tests is changed by a task in flight; frees the slot, is no red, never goes to `flights-speccer`; the task goes out once more, unchanged, after those tasks' verdicts, and a resume treats it as ready |
 | `TOO-LARGE` | orchestrator, from an executor's `SPEC-DRIFT {id}: too large` | The task exceeds one context; no round, no red, no transcript; a revising `flights-speccer` call cuts it |

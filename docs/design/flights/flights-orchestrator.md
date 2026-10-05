@@ -164,7 +164,7 @@ RETRO {id}: {lesson} [MANUAL] | none
 NOTES {up to five lines} | none
 ```
 
-`DISPATCHED` reconciles agents sent against returns received; a missing return is named, never silent. `LANDED` names where the flight went and whether its rebase carried it over other commits, which decides whether the main chat's integration gate runs; `NOT LANDED` names why the flight stayed off its integration branch (a conflict's files, the git writer's refusal, the unfinished task ids), its worktree left standing; `none` means no worktree or no commit asked, never a failed landing. `GATE` repeats the lander's first line and counts; the audit checks it against `gate.md` and the lander's transcript. `NOTES` carries the findings reported outside the flight's files and anything the user should know that fits no row.
+`DISPATCHED` reconciles agents sent against returns received; a missing return is named, never silent. `LANDED` names where the flight went and its kind, read from the tree as [Landing](#landing) says: `gated tree` when the landed tree is the one the lander gated, else `new tree`, which decides whether the main chat's integration gate runs; `NOT LANDED` names why the flight stayed off its integration branch (a conflict's files, the git writer's refusal, the unfinished task ids), its worktree left standing; `none` means no worktree or no commit asked, never a failed landing. `GATE` repeats the lander's first line and counts; the audit checks it against `gate.md` and the lander's transcript. `NOTES` carries the findings reported outside the flight's files and anything the user should know that fits no row.
 
 ## Retro lines
 

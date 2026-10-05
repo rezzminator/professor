@@ -41,7 +41,7 @@ Six agents, six commands, nothing else. Project law reaches them through the pro
 2. Specify. `/flights:spec` maps, grills, hands off; or a model caller whose work sits on the ladder's third rung hands it to `flights-speccer` without a human. Either way the output is a flight directory.
    - A goal that spans several projects (build units with their own testing manual) becomes one task per project; inside one project, one goal stays one task. The order is inside-out: the shared contract's task first, owning the contract and every output generated from it in its consumers; every other project's task needs only that task and runs in parallel against the contract, unless it needs another project's code beyond it.
    - Every `Done when` row carries a concrete example with real values: `call(args) → result` for a unit, `given … / when … / then …` at the project's real entry and exit for an integration. The executor's test keeps the example's inputs and expected values exactly. A testing manual's floors are never a task's row: they are the lander's.
-3. Orchestrate. One of the three `orchestrate-*` commands runs the manual over the directory: ready tasks dispatched together, each executor briefed with its task file, each return verified before it is recorded, faults sent back to `flights-speccer`, then the landing once: one `flights-lander` for the whole flight, the standing checks, the commit.
+3. Orchestrate. One of the three `orchestrate-*` commands runs the manual over the directory: ready tasks dispatched together, each executor briefed with its task file, each return verified before it is recorded, faults sent back to `flights-speccer`, then the landing once: one `flights-lander` for the whole flight, the landing checks, the commit.
    - An executor writes its tests from the task's examples before any code, one red run, and no test after the code. Before an edit it searches only what could break, the callers and the tests, file names first. Last, before its return, it runs the testing manual's static-check command once over the task's files; a red is fixed and the same command run again.
 4. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
 
@@ -146,7 +146,7 @@ Claude Code stops the Agent tool three levels below the main chat and caps concu
 | `scheduler` agent, trains under `docs/dev/trains/` | none: a flight is one directory; several flights run one after another by the main chat |
 | `architect` agent | `flights-speccer`'s reconcile phase |
 | `speccer`, `speccer-orchestrator` | `flights-speccer`, `flights-orchestrator` |
-| BUILD-GREEN handshakes, entry-point census, conformance pass, a worktree per wave | verification of each return, one `flights-lander` per flight, the standing checks once |
+| BUILD-GREEN handshakes, entry-point census, conformance pass, a worktree per wave | verification of each return, one `flights-lander` per flight, the landing checks once |
 
 ## Surfaces that stay in sync
 

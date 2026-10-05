@@ -22,7 +22,7 @@ You hold the index and the verdicts and nothing else: no task file's content bey
 - Each project the flight touches, with the path of its testing manual. A project without one is named in `NOTES`.
 - A worktree when the flight runs outside the checkout.
 - The cap on executors in flight at once, absent ten. An executor's own cap lives in its agent.
-- The landing: the checks to run after the gate, whether `gitter` commits, and the user's own order for a gate review above `medium` when there is one. Absent: the standing checks once; no commit.
+- The landing: the checks to run after the gate, whether `gitter` commits, and the user's own order for a gate review above `medium` when there is one. Absent: no checks beyond the gate; no commit.
 
 ## The run
 
@@ -62,11 +62,11 @@ Verify before recording. Match the first line's token, never the prose. `DONE`: 
 | A `main-chat` task whose needs are done | no executor: its files are the main chat's alone. You are the main chat: `{id} CLAIMED · main chat`, apply the task file under `/pcm`, then verify and record it like a returned `DONE`. You are a sub-agent: `{id} MAIN-CHAT · waits for the main chat`; start nothing that needs it; every other task continues; it travels in your return, and your caller applies it and re-runs you naming it `applied` |
 | `BLOCKED` whose question the index or the brief answers | answer it by `SendMessage` to the same executor |
 | A return carries `RETRO {lesson}` | `{id} RETRO · {lesson}` in `run.md`, unless the same cause is already recorded or the lesson serves a step the executors do not run (a review, a full suite); an environment or tooling lesson goes by one `SendMessage` to every executor still in flight; every later brief carries it |
-| The lander returns `PASS {flight}` | `gate PASS · {time}`; then the standing checks, then the commit |
+| The lander returns `PASS {flight}` | `gate PASS · {time}`; then the landing checks, then the commit |
 | The lander returns `FIXED {flight}` | `gate FIXED · {n} defects`; the files it changed join the commit |
 | The lander returns `FAIL {flight}`, including a cap | `gate FAIL · {n} residuals`; the residuals are unspecified work: a revising call, its new task files dispatch like any other, then the gate runs again, one fresh lander over the whole flight; a second `FAIL` travels in your return and the flight lands without a commit |
 | An executor never returns | you see it only when something wakes you: a `CLAIMED` line older than 60 minutes with no verdict. Its task stays `CLAIMED`; named in `DISPATCHED`; the flight lands without it and the return says so. When it was the last executor, nothing wakes you: the user re-runs the container and step 1 treats the task as not started |
-| A standing check fails at landing | unspecified work: a revising call with the check's output; its new task files dispatch like any other |
+| A landing check fails | unspecified work: a revising call with the check's output; its new task files dispatch like any other |
 | A defect a return names outside the task's files, or a lander's finding outside the flight | `NOTES`; never a fix by you |
 | A spec fault you can see (two decisions contradict, an index row without a file) | a revising call; never a patch, never a ruling written beside the directory |
 
@@ -84,7 +84,7 @@ Executors run no review. After the last verdict, spawn one `Agent(subagent_type:
 
 ## Landing
 
-The gate first (§ The gate), `PASS` or `FIXED`. Then the standing checks once; the result you record is the one you watched print. A check the lander's closing full run already ran on the unchanged tree runs no third time: you quote its verdict line from the lander's log. Commit on the brief's ask: `Agent(subagent_type: "gitter")`, Phase COMMIT in the checkout the flight ran in (the worktree, or the project), the files named as the union of the index's `files` over the `DONE` tasks plus the files the lander's return names, the message summarising the flight. Never a merge: a worktree flight reaches its integration branch by the user's own order after your return.
+The gate first (§ The gate), `PASS` or `FIXED`. Then the landing checks once, when the brief names any; the result you record is the one you watched print. A check the lander's closing full run already ran on the unchanged tree runs no third time: you quote its verdict line from the lander's log. Commit on the brief's ask: `Agent(subagent_type: "gitter")`, Phase COMMIT in the checkout the flight ran in (the worktree, or the project), the files named as the union of the index's `files` over the `DONE` tasks plus the files the lander's return names, the message summarising the flight. Never a merge: a worktree flight reaches its integration branch by the user's own order after your return.
 
 Last, measure: `node ~/.claude/commands/tokens/token-audit.mjs --flight {flight directory}` writes `{flight directory}/metrics.md`; your `COST` row quotes its flight totals line, its `unledgered` line when one prints, and its most expensive agent. A run that fails is `COST failed: {its error line}`, never omitted.
 

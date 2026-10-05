@@ -286,6 +286,11 @@ func SIDDirFrom(env Env) string {
 	return EnvOrFrom(env, EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid"))
 }
 
+// WorkbenchManifest is the marker declaring a nested workbench.
+func WorkbenchManifest(dir string) string {
+	return filepath.Join(dir, ".professor", "workbench.json")
+}
+
 // DevRepoGitDir returns the fence-mounted git directory when root is the
 // corresponding mounted worktree.
 func DevRepoGitDir(root string) (string, bool) {
@@ -369,6 +374,11 @@ func HomeFrom(env Env) (string, error) {
 // applied. It only computes pathnames; it does not access the filesystem.
 func DefaultStateDB(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "pfm.db")
+}
+
+// OpenCodeWorkbenchPlugin is the seat plugin staged beside the fleet cache.
+func OpenCodeWorkbenchPlugin(home string) string {
+	return filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-workbench-plugin.mjs")
 }
 
 func DefaultCacheDB(home string) string {
@@ -608,4 +618,9 @@ func TestProfileParent() (string, bool) {
 // TestDeadlineEpoch is the step deadline in decimal epoch seconds, when one is set.
 func TestDeadlineEpoch() (string, bool) {
 	return OSEnv{}.Lookup(EnvTestDeadlineEpoch)
+}
+
+// WorkbenchCache names the discovery cache beside the fleet index.
+func WorkbenchCache(values Values) string {
+	return filepath.Join(filepath.Dir(values.CacheDB), "workbenches.json")
 }

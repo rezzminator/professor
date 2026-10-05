@@ -47,6 +47,13 @@ func TestRenderGoldens(t *testing.T) {
 		got  func() string
 	}{
 		{
+			name: "workbench ansi 80 columns",
+			path: "ui_workbench_80.ansi",
+			got: func() string {
+				return quoteANSI(workbenchGoldenModel(80).View().Content)
+			},
+		},
+		{
 			name: "ansi 80 columns",
 			path: "ui_80.ansi",
 			got: func() string {

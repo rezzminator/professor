@@ -182,6 +182,7 @@ func Run(
 		// restamps it; going quiet is what makes the stream back off.
 		activity := ui.NewActivityClock(clock.Real.Now())
 		scan.Snapshot.Activity = activity
+		request.RepoRoots = scan.Output.RepoRoots()
 		go streamFleetRefreshes(
 			refreshContext,
 			database,

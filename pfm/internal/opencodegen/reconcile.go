@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
@@ -25,7 +26,9 @@ func reconcileOpenCode(outputs []generatedFile, mode Mode, root, home string) re
 		filepath.Join(root, ".opencode", "agent"),
 		filepath.Join(root, ".opencode", "command"),
 		filepath.Join(root, ".opencode", "skills"),
-		filepath.Join(home, ".config", openCodeName(), "command"),
+	}
+	if !hasRegularFile(paths.WorkbenchManifest(root)) {
+		managed = append(managed, filepath.Join(home, ".config", openCodeName(), "command"))
 	}
 	wanted := map[string]bool{}
 	for _, output := range outputs {

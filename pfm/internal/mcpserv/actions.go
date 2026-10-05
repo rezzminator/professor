@@ -14,6 +14,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 const chatCommand = "chat"
@@ -104,10 +105,6 @@ func (service *Service) chatNew(
 	request *mcp.CallToolRequest,
 	input NewInput,
 ) (*mcp.CallToolResult, ActionOutput, error) {
-	if strings.TrimSpace(input.Name) == "" {
-		return nil, ActionOutput{}, fmt.Errorf("name is required")
-	}
-	args := []string{chatCommand, "new", "--name", input.Name}
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
 		return nil, ActionOutput{}, err
@@ -125,31 +122,52 @@ func (service *Service) chatNew(
 		}
 		ctx = chat.WithResolvedSelf(ctx, self)
 	}
+	directory := input.CWD
+	if directory != "" && caller.valid && !filepath.IsAbs(directory) {
+		if strings.TrimSpace(self.CWD) == "" {
+			return nil, ActionOutput{}, fmt.Errorf(
+				"chat_new: caller working directory is required to resolve relative cwd %q",
+				directory,
+			)
+		}
+		if !filepath.IsAbs(self.CWD) {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: caller working directory %q is not absolute", self.CWD)
+		}
+		directory = filepath.Join(self.CWD, directory)
+	} else if directory == "" && caller.valid {
+		directory = self.CWD
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		if directory == "" {
+			return nil, ActionOutput{}, fmt.Errorf("name is required outside a workbench")
+		}
+		effective, err := pfmconfig.LoadRuntime("")
+		if err != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
+		}
+		name, found, err := chat.WorkbenchName(ctx, directory, service.backend.warnings, &effective)
+		if err != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
+		}
+		if !found {
+			return nil, ActionOutput{}, fmt.Errorf("name is required outside a workbench")
+		}
+		input.Name = name
+	}
+	args := []string{chatCommand, "new", "--name", input.Name}
 	if input.Engine != "" {
 		args = append(args, "--engine", input.Engine)
 	} else if caller.valid && caller.row.Engine != "" {
-		args = append(args, "--engine", string(caller.row.Engine))
-	}
-	if input.CWD != "" {
-		directory := input.CWD
-		if caller.valid && !filepath.IsAbs(directory) {
-			if strings.TrimSpace(self.CWD) == "" {
-				return nil, ActionOutput{}, fmt.Errorf(
-					"chat_new: caller working directory is required to resolve relative cwd %q",
-					directory,
-				)
-			}
-			if !filepath.IsAbs(self.CWD) {
-				return nil, ActionOutput{}, fmt.Errorf(
-					"chat_new: caller working directory %q is not absolute",
-					self.CWD,
-				)
-			}
-			directory = filepath.Join(self.CWD, directory)
+		bench, found, err := workbench.Nearest(directory)
+		if err != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: resolve workbench: %w", err)
 		}
+		if !found || bench.Err != nil || bench.Enables(caller.row.Engine) {
+			args = append(args, "--engine", string(caller.row.Engine))
+		}
+	}
+	if strings.TrimSpace(directory) != "" {
 		args = append(args, "--cwd", directory)
-	} else if caller.valid && strings.TrimSpace(self.CWD) != "" {
-		args = append(args, "--cwd", self.CWD)
 	}
 	if input.Account != 0 {
 		args = append(args, "--account", fmt.Sprint(input.Account))

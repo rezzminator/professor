@@ -114,7 +114,7 @@ func (model Model) renderListPanel(width, height int) string {
 		tallies := model.projectTallies()
 		start := maxInt(0, model.cursor-rowsHeight/2)
 		previousProject := ""
-		previousNameGroup := ""
+		previousGroupKey := ""
 		for position := start; position < len(model.filtered) &&
 			len(lines) < rowsHeight; position++ {
 			row := model.rows[model.filtered[position]]
@@ -123,11 +123,12 @@ func (model Model) renderListPanel(width, height int) string {
 				project = "?"
 			}
 			nameGroup, grouped := model.nameGroups[model.filtered[position]]
+			groupKey, _, _ := workbenchNameGroup(row)
 			// A name group folded across projects (rebuildOrder already placed
 			// every member contiguously, at the first project's slot) reads as
 			// ONE panel: crossing into a member's own project here must not
 			// reopen a second project banner or repeat the group's label.
-			continuesGroup := grouped && nameGroup.name == previousNameGroup
+			continuesGroup := grouped && groupKey == previousGroupKey
 			if project != previousProject && !continuesGroup {
 				// The selected row always wins the final viewport line.
 				if len(lines)+1 < rowsHeight || position != model.cursor {
@@ -135,21 +136,21 @@ func (model Model) renderListPanel(width, height int) string {
 						project, model.projectOrdinal(project), innerWidth, tallies[project],
 					))
 				}
-				previousNameGroup = ""
+				previousGroupKey = ""
 			}
 			previousProject = project
 			if len(lines) >= rowsHeight {
 				break
 			}
-			if grouped && nameGroup.name != previousNameGroup {
+			if grouped && groupKey != previousGroupKey {
 				lines = append(lines, labelStyle.Render(fillLine(
 					"│  "+nameGroup.name+fmt.Sprintf(" (%d)", nameGroup.count),
 					innerWidth,
 				)))
 			}
-			previousNameGroup = ""
+			previousGroupKey = ""
 			if grouped {
-				previousNameGroup = nameGroup.name
+				previousGroupKey = groupKey
 			}
 			if len(lines) >= rowsHeight {
 				break

@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
@@ -198,6 +199,9 @@ func codexRepoRoot() (string, error) {
 	}
 	fallback := ""
 	for {
+		if _, err := os.Stat(paths.WorkbenchManifest(dir)); err == nil {
+			return dir, nil
+		}
 		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
 			return dir, nil
 		}

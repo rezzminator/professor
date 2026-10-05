@@ -24,6 +24,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // runSpawnTimings is zero in production, which makes spawn use its live
@@ -51,12 +52,16 @@ func runRun(
 	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		"chat new",
-		"usage: pfm chat new --name NAME [--engine cc|cx] [--cwd DIR] "+
+		"usage: pfm chat new [--name NAME] [--engine cc|cx] [--cwd DIR] "+
 			"[--account N] [--cache 1h|5m] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
 			"[--harness-prompt PATH] [--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
 		stderr,
 	)
-	name := flags.String("name", "", "chat name (a _KILL… name stays out of the list)")
+	name := flags.String(
+		"name",
+		"",
+		"chat name (optional inside a workbench: {name}:{n}; a _KILL… name stays out of the list)",
+	)
 	engine := flags.String(
 		"engine",
 		"",
@@ -79,7 +84,7 @@ func runRun(
 	if !ok {
 		return parseCode
 	}
-	if *name == "" || *timeout < 0 || *settle < 0 || (*attach && *await) {
+	if *timeout < 0 || *settle < 0 || (*attach && *await) {
 		flags.Usage()
 		return 2
 	}
@@ -98,6 +103,18 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
 	}
+	if *name == "" {
+		auto, found, nameErr := pfmchat.WorkbenchName(ctx, directory, stderr, &runtime)
+		if nameErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", nameErr)
+			return 1
+		}
+		if !found {
+			flags.Usage()
+			return 2
+		}
+		*name = auto
+	}
 	requestedEngine, _ := pfmengine.Parse(*engine)
 	if *role != "" && requestedEngine == pfmengine.OpenCode {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", agentrole.ValidateSeatPromptPolicy(requestedEngine, ""))
@@ -109,6 +126,55 @@ func runRun(
 		return 1
 	}
 	engineName, selectedAccount, err := resolveRunEngineAccount(*engine, *account, runtime.Config, fleetPrimary, env)
+	if *engine == "" {
+		bench, found, lookupErr := workbench.Nearest(directory)
+		if lookupErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", lookupErr)
+			return 2
+		}
+		if found && bench.Err == nil {
+			// An engine with an account but no headless planner is passed over,
+			// and taken only when nothing else is left, so its own refusal names it.
+			var unplanned pfmengine.ID
+			unplannedAccount := 0
+			picked, ok := workbench.PickEngine(bench, engineName, func(id pfmengine.ID) bool {
+				_, candidate, accountErr := resolveRunEngineIDAccount(id, *account, runtime.Config, fleetPrimary)
+				if accountErr != nil {
+					return false
+				}
+				if _, plannerErr := action.PlannerFor(id); plannerErr != nil {
+					if unplanned == "" {
+						unplanned, unplannedAccount = id, candidate
+					}
+					return false
+				}
+				selectedAccount = candidate
+				return true
+			})
+			if !ok && unplanned != "" {
+				picked, ok, selectedAccount = unplanned, true, unplannedAccount
+			}
+			if !ok {
+				words := make([]string, len(bench.Engines))
+				for i, id := range bench.Engines {
+					words[i] = pfmengine.MustLookup(id).LongName
+				}
+				fmt.Fprintf(
+					stderr,
+					"pfm chat new: workbench %s enables %s, and this machine has no account for any of them\n",
+					bench.Dir,
+					strings.Join(words, ", "),
+				)
+				return 2
+			}
+			engineName, err = picked, nil
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+		return 2
+	}
+	persona, err := workbench.ForLaunch(directory, engineName, workbench.New)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
@@ -119,7 +185,7 @@ func runRun(
 		return 2
 	}
 	socket := spawn.FreshSocket(engineName)
-	if *role != "" && harnessPath == "" {
+	if *role != "" && harnessPath == "" && !persona.Applies() {
 		policy := runtime.Config.EffectiveClaude(selectedAccount).SystemPrompt
 		if policyErr := agentrole.ValidateSeatPromptPolicy(engineName, policy); policyErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", policyErr)
@@ -132,6 +198,12 @@ func runRun(
 		return 2
 	}
 	promptChannel := harnessPath
+	if harnessPath == "" && persona.Applies() {
+		promptChannel = persona.Body
+		if engineName == pfmengine.Claude {
+			promptChannel = persona.Prompt
+		}
+	}
 	seatStateWritten := false
 	defer func() {
 		if seatStateWritten {
@@ -141,27 +213,8 @@ func runRun(
 		}
 	}()
 	if *role != "" {
-		constitution, _, err := agentrole.Resolve(engineName, *role, directory, resolved.Home)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
-			return 2
-		}
-		fleetPrompt := harnessBody
-		if engineName == pfmengine.Claude && harnessPath == "" {
-			promptPath, pathErr := action.ProfessorPromptPath(resolved.Home)
-			if pathErr != nil {
-				fmt.Fprintf(stderr, "pfm chat new: %v\n", pathErr)
-				return 2
-			}
-			raw, readErr := os.ReadFile(promptPath)
-			if readErr != nil {
-				fmt.Fprintf(stderr, "pfm chat new: read Claude prompt %s: %v\n", promptPath, readErr)
-				return 2
-			}
-			fleetPrompt = string(raw)
-		}
-		seatPrompt, composeErr := agentrole.ComposeSeatPrompt(
-			engineName, *role, constitution, fleetPrompt,
+		seatPrompt, constitution, composeErr := agentrole.ResolveSeatPrompt(
+			engineName, *role, directory, resolved.Home, harnessBody,
 		)
 		if composeErr != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", composeErr)
@@ -188,14 +241,20 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
+	if engineName == pfmengine.Codex && persona.Applies() {
+		if err := workbench.EnsureMirror(persona.Bench, engineName, resolved.Home); err != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
+			return 2
+		}
+	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:         engineName,
 		Name:           *name,
 		CWD:            directory,
 		Prompt:         prompt,
 		PromptChannel:  promptChannel,
-		Model:          *model,
-		Effort:         *effort,
+		Model:          persona.ModelOr(*model),
+		Effort:         persona.EffortOr(*effort),
 		Home:           resolved.Home,
 		PrimaryAccount: selectedAccount,
 		Cache1H:        cache1H,

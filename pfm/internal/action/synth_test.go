@@ -14,6 +14,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 func TestQuoteRoundTripsHostileWords(t *testing.T) {
@@ -40,6 +41,57 @@ func TestQuoteRoundTripsHostileWords(t *testing.T) {
 		if string(content) != value {
 			t.Fatalf("Quote(%q) round trip = %q", value, content)
 		}
+	}
+}
+
+func TestLauncherRunAsWorkbench(t *testing.T) {
+	request, dir := actionWorkbenchFixture(t, `{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`)
+	persona, err := workbench.ForLaunch(dir, pfmengine.Claude, workbench.New)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, zero := range []bool{false, true} {
+		t.Run(map[bool]string{false: "persona", true: "zero"}[zero], func(t *testing.T) {
+			selected := persona
+			if zero {
+				selected = workbench.Persona{}
+			}
+			got, err := LauncherRunAs(
+				selected,
+				"/bin/claude",
+				nil,
+				"",
+				request.Home,
+				pfmconfig.Config{},
+				pfmconfig.ClaudePrefs{},
+				"",
+				"",
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if zero {
+				want, err := LauncherRun(
+					"/bin/claude",
+					nil,
+					"",
+					request.Home,
+					pfmconfig.Config{},
+					pfmconfig.ClaudePrefs{},
+					"",
+					"",
+				)
+				if err != nil || got != want {
+					t.Fatalf("zero persona = %s, %v; want %s", got, err, want)
+				}
+				return
+			}
+			for _, pair := range []string{"'--system-prompt-file' " + Quote(persona.Prompt), "'--effort' 'xhigh'", "'--model' 'sonnet'"} {
+				if !strings.Contains(got, pair) {
+					t.Errorf("command lacks %s: %s", pair, got)
+				}
+			}
+		})
 	}
 }
 

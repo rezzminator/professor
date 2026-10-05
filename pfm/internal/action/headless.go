@@ -9,6 +9,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // HeadlessWidth and HeadlessHeight are the geometry a detached chat is born
@@ -135,6 +136,7 @@ type HeadlessForkRequest struct {
 	Cache1H        bool
 	Model          string
 	Config         pfmconfig.Config
+	Persona        workbench.Persona
 }
 
 // HeadlessFork synthesizes the command for a real Claude or Codex fork.
@@ -159,7 +161,8 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 		run, err := (ClaudeSpawn{
 			Purpose: PurposeResume, Home: request.Home, Account: request.PrimaryAccount,
 			Cache1H: &request.Cache1H, Resume: request.SessionID, Fork: true,
-			Name: request.Name, Model: request.Model, Machine: machine,
+			Name: request.Name, Model: request.Persona.ModelOr(request.Model), Machine: machine,
+			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
 		}).ShellCommand()
 		if err != nil {
 			return HeadlessPlan{}, err
@@ -178,8 +181,14 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 			)
 		}
 		arguments := make([]string, 0, 3)
-		if request.Model != "" {
-			arguments = append(arguments, "--model", request.Model)
+		if model := request.Persona.ModelOr(request.Model); model != "" {
+			arguments = append(arguments, "--model", model)
+		}
+		if request.Persona.Effort != "" {
+			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
+		}
+		if request.Persona.Applies() {
+			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
 		}
 		arguments = append(arguments, "fork", request.SessionID)
 		return HeadlessPlan{

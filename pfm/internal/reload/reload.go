@@ -225,6 +225,9 @@ func Run(
 	defer func() { trail.End(err) }()
 	options.defaults()
 	entry := options.Clock.Now()
+	if request, err = applyReloadWorkbench(request); err != nil {
+		return Result{}, err
+	}
 	request, run, wasNew, err := prepareReload(request)
 	if err != nil {
 		return Result{}, err

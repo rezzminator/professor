@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func renderMachine(t *testing.T) (string, pfmconfig.Config) {
@@ -30,6 +31,87 @@ func renderMachine(t *testing.T) (string, pfmconfig.Config) {
 		}
 	}
 	return home, machine
+}
+
+func TestRenderExplicitPersonaFlags(t *testing.T) {
+	home, machine := renderMachine(t)
+	machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+	prompt := filepath.Join(home, "seat.md")
+	if err := os.WriteFile(prompt, []byte("seat"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{flagModel, flagEffort, flagPromptFile} {
+		for _, equals := range []bool{false, true} {
+			t.Run(flag+"/equals="+strconv.FormatBool(equals), func(t *testing.T) {
+				args := []string{flag, "opus"}
+				if equals {
+					args = []string{flag + "=opus"}
+				}
+				launch, err := Render(
+					Request{
+						Purpose:    PurposeLauncher,
+						Home:       home,
+						Model:      "sonnet",
+						Effort:     "xhigh",
+						PromptFile: prompt,
+						Args:       args,
+					},
+					machine,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var flags []string
+				for _, arg := range launch.Argv {
+					if arg == flag || strings.HasPrefix(arg, flag+"=") {
+						flags = append(flags, arg)
+					}
+				}
+				if !reflect.DeepEqual(flags, args[:1]) {
+					t.Fatalf("explicit %s: flags %q, want %q; argv %q", flag, flags, args[:1], launch.Argv)
+				}
+			})
+		}
+	}
+}
+
+func TestRenderExplicitDefaultPrompt(t *testing.T) {
+	home, machine := renderMachine(t)
+	machine.Claude.SystemPrompt = pfmconfig.SystemPromptProfessor
+	clone := filepath.Join(home, "blueprint")
+	for path, body := range map[string]string{
+		filepath.Join(clone, "pfm", "harness-prompts", "composed", "claude.md"): "Professor.",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := PromptFile(home)
+	if err != nil || staged == "" {
+		t.Fatalf("professor prompt fixture = %q, %v", staged, err)
+	}
+	launch, err := Render(
+		Request{Purpose: PurposeLauncher, Home: home, Args: []string{flagPromptFile, "/work/alt.md"}},
+		machine,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, arg := range launch.Argv {
+		if arg == flagPromptFile {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("prompt flag count = %d; argv %q", count, launch.Argv)
+	}
 }
 
 func renderParsed(t *testing.T, request Request, machine pfmconfig.Config) (Launch, Parsed) {

@@ -258,7 +258,7 @@ type NameInput struct {
 }
 
 type NewInput struct {
-	Name      string `json:"name" jsonschema:"the chat's name in pfm ls and the target chat_inject, chat_status and chat_kill take"`
+	Name      string `json:"name,omitempty" jsonschema:"the chat's name in pfm ls and the target chat_inject, chat_status and chat_kill take; inside a workbench, empty takes its next {name}:{n}"`
 	Engine    string `json:"engine,omitempty" jsonschema:"cc/claude, cx/codex or ox/opencode; the caller's engine when empty"`
 	CWD       string `json:"cwd,omitempty" jsonschema:"working directory, relative to the caller's; the caller's directory when empty"`
 	Account   int    `json:"account,omitempty" jsonschema:"account number to launch on; pfm picks when 0"`

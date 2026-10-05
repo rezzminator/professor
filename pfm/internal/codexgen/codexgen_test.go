@@ -732,3 +732,32 @@ func snapshotTestTree(t *testing.T, roots ...string) string {
 	sort.Strings(rows)
 	return strings.Join(rows, "\n")
 }
+
+func TestWorkbenchRootIgnoresGlobalCommands(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Scribe.\n")
+	writeTestFile(t, filepath.Join(root, ".professor", "workbench.json"), `{}`)
+	writeTestFile(t, filepath.Join(root, ".claude", "codex-build.json"), `{"version":1,"globalCommands":true}`)
+	writeTestFile(t, filepath.Join(root, ".claude", "agents", "clerk.md"), "---\ndescription: Clerk.\n---\nClerk.\n")
+	writeTestFile(t, filepath.Join(home, ".claude", "commands", "memo.md"), "---\ndescription: Memo.\n---\nMemo.\n")
+	sentinel := filepath.Join(home, ".codex", "prompts", "kept.md")
+	body := generatedHeader("fixture") + "\nKept.\n"
+	writeTestFile(t, sentinel, body)
+	result, err := Build(Options{Root: root, Home: home})
+	if err != nil || !result.OK {
+		t.Fatalf("build=%#v err=%v", result, err)
+	}
+	for _, path := range []string{filepath.Join(root, "AGENTS.md"), filepath.Join(root, ".codex", "agents", "clerk.toml")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Error(err)
+		}
+	}
+	for _, path := range []string{filepath.Join(home, ".codex", "prompts", "memo.md"), filepath.Join(home, ".codex", "skills", "memo")} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Errorf("home output %s: %v", path, err)
+		}
+	}
+	if data, err := os.ReadFile(sentinel); err != nil || string(data) != body {
+		t.Errorf("home sentinel=%q err=%v", data, err)
+	}
+}

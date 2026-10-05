@@ -254,6 +254,9 @@ func openDetachedRow(
 	relocated := ""
 	if !row.Kind.IsLiveSeat() {
 		if info, err := os.Stat(row.CWD); err != nil || !info.IsDir() {
+			if row.Workbench != "" {
+				return action.OpenResult{}, fmt.Errorf("open: workbench directory %s is missing", row.CWD)
+			}
 			relocated = fmt.Sprintf(
 				"opened in %s: its own directory %s is gone", effective.Paths.Home, row.CWD,
 			)
@@ -261,6 +264,7 @@ func openDetachedRow(
 		}
 	}
 	executor, request, err := prepareOpen(
+		ctx,
 		row, primary, effective.Config.EffectiveClaude(primary).Cache1H, "", stderr, effective,
 	)
 	if err != nil {
@@ -291,12 +295,16 @@ func OpenRow(
 	}
 	if !row.Kind.IsLiveSeat() {
 		if info, statErr := os.Stat(row.CWD); statErr != nil || !info.IsDir() {
+			if row.Workbench != "" {
+				fmt.Fprintf(stderr, "open: workbench directory %s is missing\n", row.CWD)
+				return 1
+			}
 			if currentDir, cwdErr := os.Getwd(); cwdErr == nil {
 				row.CWD = currentDir
 			}
 		}
 	}
-	executor, request, err := prepareOpen(row, primary, cache1H, prompt, stderr, effective)
+	executor, request, err := prepareOpen(ctx, row, primary, cache1H, prompt, stderr, effective)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
@@ -348,6 +356,7 @@ var newOpenExecutor = action.New
 // K1 eval line it yields, OpenDetachedID drives the detached door with it, and
 // neither may drift from the other's idea of how a chat is opened.
 func prepareOpen(
+	ctx context.Context,
 	row compose.Row,
 	primary int,
 	cache1H bool,
@@ -355,6 +364,14 @@ func prepareOpen(
 	stderr io.Writer,
 	effective config.Runtime,
 ) (*action.Executor, action.Request, error) {
+	launchName := ""
+	if row.Kind == compose.NewClaude && row.Workbench != "" {
+		var err error
+		launchName, _, err = WorkbenchName(ctx, row.CWD, stderr, &effective)
+		if err != nil {
+			return nil, action.Request{}, err
+		}
+	}
 	healCodexRoot := effective.Paths.FirstRoot(pfmengine.Codex)
 	if account, found := effective.Config.CodexAccountByID(primary); found {
 		healCodexRoot = account.Home
@@ -374,6 +391,7 @@ func prepareOpen(
 	}
 	return executor, action.Request{
 		Row:            row,
+		LaunchName:     launchName,
 		Prompt:         prompt,
 		PrimaryAccount: primary,
 		Cache1H:        cache1H,

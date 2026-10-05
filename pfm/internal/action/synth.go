@@ -11,6 +11,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // hygiene prints the registry's environment strip for non-Claude launchers.
@@ -60,6 +61,20 @@ func LauncherRun(
 	name string,
 	sessionID ...string,
 ) (string, error) {
+	return LauncherRunAs(workbench.Persona{}, realBinary, args, configDir, home, machine, claude, name, sessionID...)
+}
+
+// LauncherRunAs carries the owning workbench's persona through the launcher.
+func LauncherRunAs(
+	persona workbench.Persona,
+	realBinary string,
+	args []string,
+	configDir, home string,
+	machine pfmconfig.Config,
+	claude pfmconfig.ClaudePrefs,
+	name string,
+	sessionID ...string,
+) (string, error) {
 	values := append([]string{realBinary, configDir}, args...)
 	if hasNUL(values...) {
 		return "", errors.New("launcher values cannot contain NUL")
@@ -91,6 +106,9 @@ func LauncherRun(
 		Args:              args,
 		SessionID:         id,
 		Name:              name,
+		PromptFile:        persona.Prompt,
+		Effort:            persona.Effort,
+		Model:             persona.Model,
 		Machine:           pfmconfig.Config{Claude: claude, MCPServers: machine.MCPServers, MCP: machine.MCP},
 		explicitConfigDir: configDir,
 		binary:            realBinary,
@@ -242,6 +260,8 @@ func Synthesize(request Request) (Plan, error) {
 			Purpose: PurposeInteractive, Home: request.Home,
 			Account: request.PrimaryAccount, Cache1H: &request.Cache1H,
 			SessionID: id, Args: arguments, Machine: machine,
+			PromptFile: request.Persona.Prompt, Effort: request.Persona.Effort,
+			Model: request.Persona.Model, Name: request.LaunchName,
 		}.ShellCommand()
 		if err != nil {
 			return Plan{}, err
@@ -271,6 +291,11 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		personaEnv, err := openCodePersonaEnv(request)
+		if err != nil {
+			return Plan{}, err
+		}
+		command.WriteString(personaEnv)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
@@ -294,6 +319,11 @@ func Synthesize(request Request) (Plan, error) {
 		}
 		var command strings.Builder
 		command.WriteString(opencodeHygiene)
+		personaEnv, err := openCodePersonaEnv(request)
+		if err != nil {
+			return Plan{}, err
+		}
+		command.WriteString(personaEnv)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
@@ -334,12 +364,13 @@ func Synthesize(request Request) (Plan, error) {
 			owningConfig,
 		)
 		account := deadClaudeAccount(request, machine)
-		resume, err := claudeCommand(
+		resume, err := claudeCommandForPersona(
 			PurposeResume,
 			request.Home,
 			account,
 			request.Cache1H,
 			machine,
+			request.Persona,
 			request.Row.Name,
 			claudeResumeFlag,
 			request.Row.ID,
@@ -366,12 +397,13 @@ func Synthesize(request Request) (Plan, error) {
 			)
 		}
 		account := deadClaudeAccount(request, machine)
-		resume, err := claudeCommand(
+		resume, err := claudeCommandForPersona(
 			PurposeResume,
 			request.Home,
 			account,
 			request.Cache1H,
 			machine,
+			request.Persona,
 			request.Row.Name,
 			claudeResumeFlag,
 			request.Row.ID,
@@ -403,8 +435,18 @@ func Synthesize(request Request) (Plan, error) {
 				"resuming Codex requires id, cwd, and fresh socket",
 			)
 		}
-		plan.Run = continuityBanner(request.Row) +
-			codexCommandFor(machine, request.PrimaryAccount, "resume", request.Row.ID)
+		var arguments []string
+		if request.Persona.Model != "" {
+			arguments = append(arguments, "--model", request.Persona.Model)
+		}
+		if request.Persona.Effort != "" {
+			arguments = append(arguments, CodexEffortArg(request.Persona.Effort)...)
+		}
+		if request.Persona.Body != "" {
+			arguments = append(arguments, CodexDeveloperInstructionsArg(request.Persona.Body)...)
+		}
+		arguments = append(arguments, "resume", request.Row.ID)
+		plan.Run = continuityBanner(request.Row) + codexCommandFor(machine, request.PrimaryAccount, arguments...)
 		plan = onChatServer(plan, request, machine, pfmengine.Codex)
 	}
 	return plan, nil
@@ -479,15 +521,7 @@ func claudeCommandWith(
 	args ...string,
 ) (string, error) {
 	_ = strip
-	return ClaudeSpawn{
-		Purpose: purpose,
-		Account: account,
-		Cache1H: &cache1H,
-		Name:    name,
-		Args:    args,
-		Home:    home,
-		Machine: machine,
-	}.ShellCommand()
+	return claudeCommandForPersona(purpose, home, account, cache1H, machine, workbench.Persona{}, name, args...)
 }
 
 // ProfessorPromptPath resolves the clone's composed Claude prompt.

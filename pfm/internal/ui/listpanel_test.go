@@ -120,3 +120,85 @@ func TestProjectBannerIsNotRepeatedWithinOneProject(t *testing.T) {
 		}
 	}
 }
+
+func TestNameGroupsSharingAPrefixKeepTheirOwnBanners(t *testing.T) {
+	rows := []compose.Row{
+		{
+			Kind:      compose.ResumeClaude,
+			ID:        "scribe1",
+			Name:      "_SCRIBE:1",
+			Project:   "acme › Scribe",
+			CWD:       "/work/acme/docs/scribe",
+			Workbench: "/work/acme/docs/scribe",
+			Killed:    true,
+		},
+		{
+			Kind:    compose.ResumeClaude,
+			ID:      "scribe9",
+			Name:    "_SCRIBE:9",
+			Project: "acme",
+			CWD:     "/work/acme",
+			Killed:  true,
+		},
+		{
+			Kind:      compose.ResumeCodex,
+			ID:        "notes1",
+			Name:      "_SCRIBE:1",
+			Project:   "acme › Notes",
+			CWD:       "/work/acme/docs/notes",
+			Workbench: "/work/acme/docs/notes",
+			Killed:    true,
+		},
+	}
+	tests := []struct {
+		name     string
+		rows     []compose.Row
+		projects []string
+	}{
+		{
+			name:     "workbench group beside a plain group",
+			rows:     rows[:2],
+			projects: []string{"acme › Scribe", "acme"},
+		},
+		{
+			name:     "two workbench groups with one prefix",
+			rows:     []compose.Row{rows[0], rows[2]},
+			projects: []string{"acme › Scribe", "acme › Notes"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := fixtureSnapshot(120)
+			snapshot.View = compose.KilledView
+			snapshot.Rows = test.rows
+			model := NewModel(snapshot)
+			lines := strings.Split(ansi.Strip(model.renderListPanel(120, snapshot.Height)), "\n")
+
+			banners := 0
+			for index, line := range lines {
+				if !strings.HasPrefix(line, "│╭─ acme") {
+					continue
+				}
+				banners++
+				if index+1 == len(lines) || !strings.HasPrefix(lines[index+1], "││  _SCRIBE (1)") {
+					t.Errorf("line after banner %q is not the _SCRIBE (1) label", line)
+				}
+			}
+			if banners != len(test.projects) {
+				t.Fatalf("got %d project banners, want %d:\n%s", banners, len(test.projects), strings.Join(lines, "\n"))
+			}
+			for _, project := range test.projects {
+				want := "│╭─ " + project + " "
+				got := 0
+				for _, line := range lines {
+					if strings.HasPrefix(line, want) && (project != "acme" || !strings.HasPrefix(line, "│╭─ acme ›")) {
+						got++
+					}
+				}
+				if got != 1 {
+					t.Errorf("project %q has %d banners, want one:\n%s", project, got, strings.Join(lines, "\n"))
+				}
+			}
+		})
+	}
+}

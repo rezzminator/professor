@@ -52,3 +52,38 @@ func TestRepoRootFallsBackOnAnUnreadableGitFile(t *testing.T) {
 		t.Fatalf("RepoRoot under a dangling .git file = %q, want %q", got, root)
 	}
 }
+
+func TestProjectLabelsADirectoryByItsRepository(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "acme")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(repo, "src")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(base, "plain")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture := testjail.GitRepoWithWorktrees(t, "acme")
+
+	for _, testCase := range []struct {
+		name, dir, wantRoot, wantName string
+	}{
+		{"repository subdirectory", subdir, repo, "acme"},
+		{"plain directory", plain, plain, "plain"},
+		{"empty directory", "", "", "?"},
+		{"filesystem root", string(filepath.Separator), string(filepath.Separator), "?"},
+		{"linked worktree", fixture.Inner, fixture.Repo, "acme"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			root, name := Project(testCase.dir)
+			if root != testCase.wantRoot || name != testCase.wantName {
+				t.Fatalf("Project(%q) = (%q, %q), want (%q, %q)",
+					testCase.dir, root, name, testCase.wantRoot, testCase.wantName)
+			}
+		})
+	}
+}

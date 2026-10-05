@@ -34,6 +34,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 const branchAction = "branch"
@@ -441,6 +442,14 @@ func runChatBranch(
 			return 1
 		}
 	}
+	persona, err := action.WorkbenchPersona(cwd, engine, workbench.Resume)
+	if err == nil && engine == pfmengine.Codex && persona.Applies() {
+		err = workbench.EnsureMirror(persona.Bench, engine, runtime.Paths.Home)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)
+		return 1
+	}
 	nameInput := *requestedName
 	if flags.NArg() != 0 {
 		nameInput = strings.Join(flags.Args(), " ")
@@ -464,6 +473,7 @@ func runChatBranch(
 		Engine: engine, SessionID: *id, Name: name, CWD: cwd,
 		Home: runtime.Paths.Home, PrimaryAccount: selectedAccount,
 		Cache1H: forkCache1H,
+		Persona: persona,
 		Model:   model, Config: runtime.Config,
 	})
 	if err != nil {

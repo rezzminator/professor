@@ -3,6 +3,7 @@ package agentopen
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -39,6 +41,42 @@ func TestExecCommandsQueriesAndViewsWithoutRecording(t *testing.T) {
 	}
 	if _, err := os.Stat(values.StateDB); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("query/view created a launch database: %v", err)
+	}
+}
+
+func TestExecCommandsResumeWorkbench(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		t.Run(fmt.Sprintf("invalid=%v", invalid), func(t *testing.T) {
+			commands, argvPath, values, accountDir := testExecCommands(t)
+			dir := filepath.Join(values.Home, "acme", "docs", "scribe")
+			prompt := filepath.Join(dir, ".professor", "scribe.md")
+			manifest := `{"prompt":"scribe.md","effort":"XHigh","model":"sonnet"}`
+			if invalid {
+				manifest = `{"prompt":""}`
+			}
+			for path, body := range map[string]string{filepath.Join(values.Home, "acme", ".professor", "baseline.json"): "{}", paths.WorkbenchManifest(dir): manifest, prompt: "You are scribe."} {
+				if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			const id = "44444444-4444-4444-8444-444444444444"
+			err := commands.Resume(context.Background(), accountDir, dir, id, true)
+			if invalid {
+				want := "resume agent session: " + paths.WorkbenchManifest(dir) + `: "prompt" is required`
+				if err == nil || err.Error() != want {
+					t.Fatalf("resume error = %v, want %s", err, want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed := assertAgentLaunch(t, argvPath, "--resume", id)
+			if parsed.Resume != id || parsed.PromptFile != prompt || parsed.Effort != "xhigh" ||
+				parsed.Model != "sonnet" {
+				t.Fatalf("persona = %+v", parsed)
+			}
+		})
 	}
 }
 

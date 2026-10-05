@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 func TestGoldenCommandLines(t *testing.T) {
@@ -16,7 +19,8 @@ func TestGoldenCommandLines(t *testing.T) {
 	home := t.TempDir()
 	var actual bytes.Buffer
 	lastRoute := Route(0)
-	for _, request := range stressRequests(home) {
+	personaRows, prompt := personaGoldenRequests(t, home)
+	for _, request := range append(stressRequests(home), personaRows...) {
 		plan, err := Synthesize(request)
 		if err != nil {
 			t.Fatal(err)
@@ -29,6 +33,8 @@ func TestGoldenCommandLines(t *testing.T) {
 		if plan.Run != "" {
 			line = replaceGoldenRun(line, plan.Run)
 		}
+		line = strings.ReplaceAll(line, prompt, "/work/acme/docs/scribe/.professor/scribe.md")
+		plan.Run = strings.ReplaceAll(plan.Run, prompt, "/work/acme/docs/scribe/.professor/scribe.md")
 		line = strings.ReplaceAll(line, home, "/home/test")
 		plan.Run = strings.ReplaceAll(plan.Run, home, "/home/test")
 		fmt.Fprintf(
@@ -113,4 +119,25 @@ func firstGoldenDifference(want, got []byte) string {
 		}
 	}
 	return fmt.Sprintf("lengths %d/%d", len(want), len(got))
+}
+
+func personaGoldenRequests(t *testing.T, home string) ([]Request, string) {
+	t.Helper()
+	prompt := filepath.Join(t.TempDir(), "scribe.md")
+	if err := os.WriteFile(prompt, []byte("You are scribe."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests []Request
+	for _, kind := range []compose.Kind{compose.NewClaude, compose.ResumeClaude, compose.Agent, compose.ResumeCodex, compose.NewOpenCode, compose.ResumeOpenCode, compose.NewCodex} {
+		request := stressRequests(home)[0]
+		request.Row = compose.Row{Kind: kind, CWD: "/work/acme/docs/scribe", ID: "44444444-4444-4444-8444-444444444444"}
+		request.Persona = workbench.Persona{Prompt: prompt, Body: "You are scribe.", Effort: "xhigh", Model: "gpt-x"}
+		request.OpenCodePlugin = filepath.Join(home, ".local", "state", "pfm", "opencode-workbench-plugin.mjs")
+		request.OpenCodeFleetPrompt = "/work/clone/pfm/harness-prompts/composed/opencode.md"
+		if kind == compose.NewClaude {
+			request.LaunchName = "_SCRIBE:3"
+		}
+		requests = append(requests, request)
+	}
+	return requests, prompt
 }

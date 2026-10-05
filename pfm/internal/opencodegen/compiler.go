@@ -161,16 +161,18 @@ func compileOpenCode(options Options) (Result, error) {
 		skip,
 		dangling,
 	)
-	compileOpenCodeCommands(
-		filepath.Join(home, ".claude", "commands"),
-		"$HOME/.claude/commands",
-		roster,
-		filepath.Join(home, ".config", openCodeName(), "command"),
-		add,
-		problem,
-		skip,
-		dangling,
-	)
+	if !hasRegularFile(paths.WorkbenchManifest(root)) {
+		compileOpenCodeCommands(
+			filepath.Join(home, ".claude", "commands"),
+			"$HOME/.claude/commands",
+			roster,
+			filepath.Join(home, ".config", openCodeName(), "command"),
+			add,
+			problem,
+			skip,
+			dangling,
+		)
+	}
 	compileOpenCodeSkills(root, add, problem, skip, dangling)
 	compileConfig(root, add, problem, warn)
 	for _, name := range []string{"LICENSE", "SECURITY.md"} {
@@ -233,6 +235,9 @@ func discoverOpenCodeProjects(root string, problem func(string, ...any)) []strin
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "templates" || entry.Name() == ".claude" || entry.Name() == ".opencode" {
+			continue
+		}
+		if hasRegularFile(paths.WorkbenchManifest(filepath.Join(root, entry.Name()))) {
 			continue
 		}
 		if hasRegularFile(filepath.Join(root, entry.Name(), "CLAUDE.md")) {
@@ -572,11 +577,14 @@ func validateOutputs(outputs []generatedFile, root string, result *Result) {
 }
 
 func validateDoctorSurfaces(root, home string, result *Result) {
-	for _, dir := range []string{
+	dirs := []string{
 		filepath.Join(root, ".opencode", "agent"),
 		filepath.Join(root, ".opencode", "command"),
-		filepath.Join(home, ".config", openCodeName(), "command"),
-	} {
+	}
+	if !hasRegularFile(paths.WorkbenchManifest(root)) {
+		dirs = append(dirs, filepath.Join(home, ".config", openCodeName(), "command"))
+	}
+	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue

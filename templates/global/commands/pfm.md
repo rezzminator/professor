@@ -10,6 +10,8 @@ $ARGUMENTS
 
 `pfm` is the host binary Professor ships: it manages the chat fleet, the memory organs, the harvester, the host integration, and this project's template baseline. This file is the map; the flags of any verb are `pfm <verb> --help` — never invent one. Template store: `{BLUEPRINT_CLONE_PATH}` (default `~/.professor`; `.professor/manifest.json` can point elsewhere).
 
+For creating, adopting, modifying or checking a workbench, load `/pfm:workbench`.
+
 ## Verb map
 
 Operator verbs:

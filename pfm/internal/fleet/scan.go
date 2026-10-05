@@ -23,6 +23,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // TestNowNSEnv pins the scan clock under test — a jail's fixtures carry fixed
@@ -31,7 +32,8 @@ const TestNowNSEnv = "PFM_TEST_NOW_NS"
 
 // Request is one scan's scope.
 type Request struct {
-	View compose.View
+	Workbenches bool
+	View        compose.View
 	// ReadOnly scans write nothing: no tmux window renames and no Codex pane
 	// reconcile. Every verb that only resolves a target scans read-only.
 	ReadOnly bool
@@ -42,10 +44,12 @@ type Request struct {
 
 // Env is the machine state one scan composes against.
 type Env struct {
-	Paths      paths.Values
-	Config     pfmconfig.Config
-	CurrentDir string
-	NowNS      int64
+	Workbenches     []workbench.Bench
+	WorkbenchErrors []workbench.WalkError
+	Paths           paths.Values
+	Config          pfmconfig.Config
+	CurrentDir      string
+	NowNS           int64
 	// Primary is the operator's primary Claude account (see PrimaryAccount).
 	Primary int
 }
@@ -249,13 +253,20 @@ func ResolveEnv(request Request) (Env, error) {
 	if err != nil {
 		return Env{}, fmt.Errorf("resolve primary account: %w", err)
 	}
-	return Env{
+	env := Env{
 		Paths:      resolved,
 		CurrentDir: currentDir,
 		NowNS:      nowNS,
 		Primary:    primary,
 		Config:     machine,
-	}, nil
+	}
+	if request.Workbenches {
+		benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(resolved))
+		if err == nil {
+			env.Workbenches, env.WorkbenchErrors = benches, faults
+		}
+	}
+	return env, nil
 }
 
 // Compose classifies, merges and sorts one view's rows from the loaded data
@@ -267,6 +278,8 @@ func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) c
 		defer func() { _ = launches.Close() }()
 	}
 	output := compose.Compose(compose.Input{
+		Workbenches:      env.Workbenches,
+		WorkbenchErrors:  env.WorkbenchErrors,
 		Snapshot:         live,
 		Transcripts:      data.Transcripts,
 		Rollouts:         data.Rollouts,

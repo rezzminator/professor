@@ -82,6 +82,7 @@ The root image build. Its steps build the shared `pfm-lane-root:<hash>` image ev
 - `F.16-picker-plumbing` · picker plumbing: per-window pane opener, tmux-session shim · spends none
 - `F.17-additional-k-coverage` · additional K-category items this lane also asserts (auto-reconciled) · spends none
 - `F.18-e1-chat-survives-storm` · **cross-lane** — after the storm and kill-storm, E1's named chat still answers `status`/`last`/`inject` (the sequence's first cross-lane state effect) · spends cc:$SEAT
+- `F.19-new-workbench` · `chat new` inside a workbench: auto-named `{name}:{n}`, the workbench prompt, a disabled engine refused · spends cc:$SEAT
 
 ## Lane M — MCP
 

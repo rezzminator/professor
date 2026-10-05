@@ -3,9 +3,11 @@ package compose
 import (
 	"context"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // Kind identifies the action and visual treatment for a row.
@@ -53,6 +55,7 @@ const (
 	// only ever be listed as its own resume row — "resume-opencode", dead to
 	// every chat verb, while its TUI sat there answering keystrokes.
 	LiveOpenCode
+	WorkbenchInvalid
 )
 
 func (kind Kind) String() string {
@@ -85,6 +88,8 @@ func (kind Kind) String() string {
 		return "professor-update-failed"
 	case LiveOpenCode:
 		return "live-opencode"
+	case WorkbenchInvalid:
+		return "workbench-invalid"
 	default:
 		return "unknown"
 	}
@@ -159,6 +164,8 @@ type Options struct {
 
 // Input is the complete immutable input to one composition pass.
 type Input struct {
+	Workbenches      []workbench.Bench
+	WorkbenchErrors  []workbench.WalkError
 	Snapshot         gather.Snapshot
 	Transcripts      []store.Transcript
 	Rollouts         []store.Rollout
@@ -188,6 +195,8 @@ type Row struct {
 	WindowName  string
 	Name        string
 	LastPrompt  string
+	Workbench   string
+	Engines     []pfmengine.ID
 	Project     string
 	CWD         string
 	Size        int64

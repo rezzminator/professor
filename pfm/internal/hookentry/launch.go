@@ -29,6 +29,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // LaunchExec is the process-replacing seam used by launch and codex-launch.
@@ -59,7 +60,7 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 	}
 	for _, argument := range arguments {
 		switch argument {
-		case "-p", "--print", "--output-format", "-h", "--help", "--version", "-v":
+		case "-p", "--print", "--output-format", "-h", helpFlag, versionFlag, "-v":
 			return true
 		}
 		if strings.HasPrefix(argument, "--output-format=") {
@@ -78,7 +79,7 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 func launchStartsSession(arguments []string) bool {
 	for _, argument := range arguments {
 		switch argument {
-		case "-h", "--help", "--version", "-v":
+		case "-h", helpFlag, versionFlag, "-v":
 			return false
 		}
 	}
@@ -176,7 +177,16 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		return 1
 	}
 	configDir, accountID := launcherSeatAccount(runtime, primary, paths.OSEnv{})
-	identity, _, continuing := action.LauncherIdentity(arguments)
+	identity, resuming, continuing := action.LauncherIdentity(arguments)
+	mode := workbench.New
+	if resuming || continuing {
+		mode = workbench.Resume
+	}
+	persona, err := action.WorkbenchPersona(workingDir, pfmengine.Claude, mode)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
+		return 1
+	}
 	freshID := ""
 	if identity == "" && !continuing {
 		var idErr error
@@ -202,7 +212,8 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 			name = label
 		}
 	}
-	realRun, err := action.LauncherRun(
+	realRun, err := action.LauncherRunAs(
+		persona,
 		*realBinary,
 		arguments,
 		configDir,

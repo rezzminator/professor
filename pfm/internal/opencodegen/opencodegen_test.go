@@ -608,3 +608,75 @@ func TestOpenCodeAbsentAgentSourceStillDeletesItsTwin(t *testing.T) {
 		t.Fatalf("an absent source claimed a kept twin: %q", stderr)
 	}
 }
+
+func TestOpenCodeWorkbenchParentProjects(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, "scribe", "CLAUDE.md"), "Scribe.\n")
+	writeTestFile(t, filepath.Join(root, "scribe", ".professor", "workbench.json"), `{}`)
+	writeTestFile(
+		t,
+		filepath.Join(root, "scribe", ".claude", "agents", "clerk.md"),
+		"---\ndescription: Clerk.\n---\nClerk.\n",
+	)
+	writeTestFile(t, filepath.Join(root, "api", "CLAUDE.md"), "API.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, "api", ".claude", "agents", "clerk.md"),
+		"---\ndescription: Clerk.\n---\nClerk.\n",
+	)
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("build=%#v err=%v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".opencode", "agent", "clerk-api.md")); err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".opencode", "agent", "clerk-scribe.md")); !os.IsNotExist(err) {
+		t.Errorf("parent compiled workbench: %v", err)
+	}
+}
+
+func TestOpenCodeWorkbenchHomeFree(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".professor", "workbench.json"), `{}`)
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "memo.md"),
+		"---\ndescription: Memo.\n---\nUse /tools:review.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "tools", "review.md"),
+		"---\ndescription: Review.\n---\nReview.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "commands", "local.md"),
+		"---\ndescription: Local.\n---\nUse /tools:review.\n",
+	)
+	sentinel := filepath.Join(home, ".config", "opencode", "command", "kept.md")
+	body := newMarker + " from fixture\n---\ndescription: \n---\nKept.\n"
+	writeTestFile(t, sentinel, body)
+	for _, mode := range []Mode{ModeBuild, ModeCheck, ModeDoctor} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			result, err := Compile(Options{Root: root, Home: home, Mode: mode})
+			if err != nil || !result.OK {
+				t.Errorf("mode=%v result=%#v err=%v", mode, result, err)
+			}
+			if _, err := os.Stat(
+				filepath.Join(home, ".config", "opencode", "command", "memo.md"),
+			); !os.IsNotExist(
+				err,
+			) {
+				t.Errorf("home memo: %v", err)
+			}
+			if data, err := os.ReadFile(sentinel); err != nil || string(data) != body {
+				t.Errorf("home sentinel=%q err=%v", data, err)
+			}
+			data, err := os.ReadFile(filepath.Join(root, ".opencode", "command", "local.md"))
+			if err != nil || !strings.Contains(string(data), "Use /tools-review.") {
+				t.Errorf("home roster not used: %q err=%v", data, err)
+			}
+		})
+	}
+}

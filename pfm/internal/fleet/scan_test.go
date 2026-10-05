@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 func TestComposeFleetLaunchReadFailureKeepsRow(t *testing.T) {
@@ -145,5 +146,61 @@ func TestComposeCarriesTheDefaultViewsCachedCounts(t *testing.T) {
 	}
 	if env := (Env{Paths: paths.Values{Home: "h"}}); env.Runtime().Paths.Home != "h" {
 		t.Fatalf("Env.Runtime() dropped the paths: %+v", env.Runtime())
+	}
+}
+
+func TestResolveEnvWorkbenchCacheOptIn(t *testing.T) {
+	runtime := jailRuntime(t)
+	runtime.Paths.CacheDB = filepath.Join(t.TempDir(), "index.db")
+	root := filepath.Join(t.TempDir(), "acme")
+	dir := filepath.Join(root, "docs", "scribe")
+	if err := os.MkdirAll(filepath.Join(dir, ".professor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		paths.WorkbenchManifest(dir),
+		[]byte(`{"prompt":"scribe.md","title":"Scribe"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, ".professor", "scribe.md"),
+		[]byte("You are scribe."),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := workbench.WriteCache(
+		paths.WorkbenchCache(runtime.Paths),
+		[]workbench.Bench{workbench.LoadBench(dir, root)},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	env, err := ResolveEnv(Request{Runtime: runtime, Workbenches: true})
+	if err != nil || len(env.Workbenches) != 1 {
+		t.Fatalf("workbench environment = %+v, %v", env, err)
+	}
+	output := ComposeFleet(env, compose.AllView, Data{}, gather.Snapshot{})
+	found := false
+	for _, row := range output.Rows {
+		if row.Workbench == dir && row.Kind == compose.NewClaude {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cache not composed: %#v", output.Rows)
+	}
+	env, err = ResolveEnv(Request{Runtime: runtime})
+	if err != nil || len(env.Workbenches) != 0 {
+		t.Fatalf("chat environment = %+v, %v", env, err)
+	}
+	if err := os.WriteFile(paths.WorkbenchCache(runtime.Paths), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, err = ResolveEnv(Request{Runtime: runtime, Workbenches: true})
+	if err != nil || len(env.Workbenches) != 0 {
+		t.Fatalf("corrupt first frame = %+v, %v", env, err)
 	}
 }

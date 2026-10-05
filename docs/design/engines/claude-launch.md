@@ -164,6 +164,7 @@ env -u {hygiene…} CLAUDE_CONFIG_DIR={config dir} CACHE_LIVE_CONTROL_MAIN_TTL={
 
 - **The composed file is built, not staged.** `make -C pfm prompts` (run by `dev.sh build pfm` and by `/pfm:release`) composes `share/head.md` + `{engine}/professor.md` + `share/tail.md` into the tracked `pfm/harness-prompts/composed/{claude,codex,opencode}.md`. `dev.sh test pfm` fails when a composed file differs from its parts.
 - **Launch points at the repo.** `--system-prompt-file` is `{clone}/pfm/harness-prompts/composed/claude.md`, `{clone}` from the source-repo record. Nothing is copied at install.
+- **Workbench launches** replace the composed file with the manifest prompt; explicit `--system-prompt-file` / `--harness-prompt` win, and a role seat composes on that base (`internal/workbench/persona.go`, `internal/agentrole/base_prompt.go`).
 - **Role seats** compose the claude prompt with the role into a seat file under the SID dir and pass that instead (`agentrole.ComposeSeatPrompt`); `pfm chat reload` refreshes it before respawning.
 - **Missing file fails open:** the launch omits the flag and starts on Claude's own prompt; spawn-audit reports it.
 

@@ -1466,4 +1466,42 @@ if requires; then
   fi
 fi
 
+# ─── F.19 — a workbench names its chat and supplies its prompt ──────────────
+
+beat F.19-new-workbench
+spends "cc:$SEAT"
+target F_WB:1
+expect-log 'does not enable codex'
+bad=""
+bench=/tmp/f-wb/root/bench
+if ! mkdir -p /tmp/f-wb/root/.professor "$bench/.professor"; then
+  fail "could not create the workbench fixture"
+else
+  printf '{}\n' >/tmp/f-wb/root/.professor/baseline.json
+  printf '{"prompt":"bench.md","title":"Bench","name":"F_WB"}\n' >"$bench/.professor/workbench.json"
+  printf 'You are Bench.\n' >"$bench/.professor/bench.md"
+  out="$(pfm chat new --engine cc --account "$SEAT" --cwd "$bench" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    bad="$bad auto-name launch exited $rc: $(one_line "$out");"
+  elif ! wait_for 10 "live_chat 'F_WB:1'"; then
+    bad="$bad no live F_WB:1 row: $LANE_WAIT_WHY;"
+  else
+    sock="$(live_field F_WB:1 11)"
+    start="$(tmux -S "$(socket_path "$sock")" list-panes -F '#{pane_start_command}' 2>&1 | head -1)"
+    grep -Fq -- "'--system-prompt-file' '$bench/.professor/bench.md'" <<<"$start" ||
+      bad="$bad workbench prompt missing from launch: $(one_line "$start" | cut -c1-240);"
+  fi
+  out="$(pfm chat new --engine cx --name F_WB_NO --cwd "$bench" 2>&1)"
+  rc=$?
+  [ "$rc" -eq 2 ] && grep -q 'does not enable codex' <<<"$out" ||
+    bad="$bad disabled Codex launch exited $rc: $(one_line "$out");"
+  if live_chat F_WB:1; then
+    pfm chat kill F_WB:1 >/dev/null 2>&1 || bad="$bad could not kill F_WB:1;"
+  fi
+  if [ -n "$bad" ]; then fail "$bad"; else
+    pass "F_WB:1 launched on the workbench prompt; disabled Codex refused; chat killed"
+  fi
+fi
+
 lane_end

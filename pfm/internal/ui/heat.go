@@ -51,7 +51,7 @@ func rowAgeNS(row compose.Row, nowNS int64) int64 {
 func hasRecency(row compose.Row) bool {
 	switch row.Kind {
 	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode,
-		compose.ProfessorUpdate, compose.ProfessorUpdateFailed:
+		compose.ProfessorUpdate, compose.ProfessorUpdateFailed, compose.WorkbenchInvalid:
 		return false
 	default:
 		return row.ActivityNS > 0

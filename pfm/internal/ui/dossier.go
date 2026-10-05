@@ -60,6 +60,8 @@ func dossierStatus(row compose.Row) string {
 		return "NEW"
 	case row.Kind == compose.ProfessorUpdate, row.Kind == compose.ProfessorUpdateFailed:
 		return "UPDATE"
+	case row.Kind == compose.WorkbenchInvalid:
+		return "WORKBENCH"
 	default:
 		return "RESUMABLE"
 	}
@@ -146,7 +148,7 @@ func (model Model) dossierActionAvailable(index int, row compose.Row) bool {
 	case 3:
 		return row.Kind.IsLiveSeat() && row.Kind != compose.LiveSplit && row.Socket != ""
 	default:
-		return row.Kind != compose.ProfessorUpdateFailed
+		return !isLaunchFailureNotice(row.Kind)
 	}
 }
 
@@ -159,10 +161,15 @@ func dossierPurpose(row compose.Row) string {
 		return "Enter starts the guided upgrade."
 	case row.Kind == compose.ProfessorUpdateFailed:
 		return "The last update check failed. This row is a notice, not a chat."
+	case row.Kind == compose.WorkbenchInvalid:
+		return "This workbench cannot launch: " + row.Name
 	case isNewChatActionKind(row.Kind):
 		short := "chat"
 		if descriptor, err := pfmengine.Lookup(compose.EngineForKind(row.Kind)); err == nil {
 			short = descriptor.Short + " chat"
+		}
+		if row.Workbench != "" {
+			return "Enter starts a new " + short + " in " + row.CWD + " on its workbench prompt."
 		}
 		return "Enter starts a new " + short + " in your current directory."
 	}
@@ -170,7 +177,7 @@ func dossierPurpose(row compose.Row) string {
 }
 
 func isNoticeKind(kind compose.Kind) bool {
-	return kind == compose.ProfessorUpdate || kind == compose.ProfessorUpdateFailed
+	return kind == compose.ProfessorUpdate || isLaunchFailureNotice(kind)
 }
 
 // dossierActions lists the carousel as a menu: the armed action in its box,
@@ -212,6 +219,9 @@ func (model Model) dossierActions(row compose.Row, inner int) []dossierLine {
 
 // dossierLines composes the pane for the selected row.
 func (model Model) dossierLines(row compose.Row, inner, rows int) []dossierLine {
+	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
+		row, _ = model.newChatActionRow(row)
+	}
 	palette := configuredPalette
 	engineHex := engineHexOf(row)
 	age := rowAgeNS(row, model.nowNS)
@@ -313,7 +323,7 @@ func (model Model) dossierEnterLine(row compose.Row, inner int) dossierLine {
 	label := model.enterLabel(row, true)
 	body := "◖ ⏎ " + label + " ◗"
 	paint := tone{fg: palette.Accent, bold: true}
-	if row.Kind == compose.ProfessorUpdateFailed {
+	if isLaunchFailureNotice(row.Kind) {
 		paint = tone{fg: palette.Dim, dim: true}
 	}
 	return dossierLine{{text: padRightCells(body, inner), paint: paint}}

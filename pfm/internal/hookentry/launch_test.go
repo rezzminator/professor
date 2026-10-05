@@ -9,9 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestLaunchPassThroughPredicate(t *testing.T) {
@@ -53,6 +56,150 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 					got,
 					test.want,
 				)
+			}
+		})
+	}
+}
+
+func TestLaunchWorkbench(t *testing.T) {
+	for _, scenario := range []string{"new", "resume", "explicit", "invalid", "disabled", "disabled session id", "disabled resume", "outside", "version", "mcp"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := testjail.ShortRoot(t)
+			dir := filepath.Join(root, "acme", "docs", "scribe")
+			prompt := filepath.Join(dir, ".professor", "scribe.md")
+			manifest := `{"prompt":"scribe.md","effort":"XHigh"}`
+			args := []string{}
+			wantPrompt, wantEffort, wantError := prompt, "xhigh", ""
+			switch scenario {
+			case "resume":
+				args = []string{"--resume", "44444444-4444-4444-8444-444444444444"}
+			case "explicit":
+				args = []string{"--effort", "low", "--system-prompt-file", "/work/alt.md"}
+				wantPrompt, wantEffort = "/work/alt.md", "low"
+			case "invalid":
+				manifest = `{"prompt":""}`
+				wantError = "pfm internal launch: " + paths.WorkbenchManifest(dir) + `: "prompt" is required` + "\n"
+			case "disabled", "disabled session id", "disabled resume":
+				manifest = `{"prompt":"scribe.md","engines":["codex"],"effort":"xhigh"}`
+				if scenario == "disabled session id" {
+					// --session-id names a NEW session: a disabled engine is refused.
+					args = []string{"--session-id", "55555555-5555-4555-8555-555555555555"}
+				}
+				if scenario != "disabled resume" {
+					wantError = "pfm internal launch: workbench " + dir + ` does not enable claude: add "claude" to "engines" in ` + paths.WorkbenchManifest(
+						dir,
+					) + "\n"
+				} else {
+					args = []string{"--continue"}
+					wantPrompt, wantEffort = "", ""
+				}
+			case "outside":
+				wantPrompt, wantEffort = "", ""
+			case "version", "mcp":
+				manifest = `{"prompt":""}`
+				args = []string{"--version"}
+				if scenario == "mcp" {
+					args = []string{"mcp", "list"}
+				}
+			}
+			for path, body := range map[string]string{
+				filepath.Join(root, "acme", ".professor", "baseline.json"): "{}",
+				paths.WorkbenchManifest(dir):                               manifest, prompt: "You are scribe.",
+			} {
+				if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "outside" {
+				dir = filepath.Join(root, "acme", "src")
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			binary, argvPath := filepath.Join(root, "claude"), filepath.Join(root, "argv")
+			if err := testjail.WriteExecutable(
+				binary,
+				[]byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+action.Quote(argvPath)+"\n"),
+				0o700,
+			); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			t.Setenv("TMUX", "")
+			t.Setenv(paths.EnvHome, root)
+			t.Setenv(paths.EnvStateDB, filepath.Join(root, "state", "pfm.db"))
+			runtime := config.Runtime{
+				Config: config.Config{},
+				Paths: paths.Values{
+					Home:    root,
+					StateDB: filepath.Join(root, "state", "pfm.db"),
+					SIDDir:  filepath.Join(root, "sid"),
+					TmuxDir: filepath.Join(root, "tmux"),
+				},
+			}
+			var stderr, stdout bytes.Buffer
+			previous := LaunchExec
+			t.Cleanup(func() { LaunchExec = previous })
+			LaunchExec = func(path string, argv, _ []string) error {
+				if scenario != "version" && scenario != "mcp" {
+					t.Fatal("refusal reached exec")
+				}
+				if path != binary || !reflect.DeepEqual(argv, append([]string{binary}, args...)) {
+					t.Fatalf("passthrough = %s %q", path, argv)
+				}
+				return nil
+			}
+			// A non-terminal launcher runs the real tmux boundary and records the engine argv.
+			code := Launch(
+				append([]string{"--real", binary, "--cwd", dir, "--"}, args...),
+				&stdout,
+				&stderr,
+				runtime,
+				&paths.MapEnv{},
+			)
+			if wantError != "" {
+				if code != 1 || stderr.String() != wantError {
+					t.Fatalf("refusal = %d %q, want 1 %q", code, stderr.String(), wantError)
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("launch = %d: %s", code, stderr.String())
+			}
+			if scenario == "version" || scenario == "mcp" {
+				return
+			}
+			raw, err := os.ReadFile(argvPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			argv := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+			parsed, err := claudelaunch.Parse(append([]string{binary}, argv...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parsed.PromptFile != wantPrompt || parsed.Effort != wantEffort {
+				t.Fatalf(
+					"persona = %q %q, want %q %q; argv %q",
+					parsed.PromptFile,
+					parsed.Effort,
+					wantPrompt,
+					wantEffort,
+					argv,
+				)
+			}
+			if scenario == "explicit" {
+				for _, flag := range []string{"--effort", "--system-prompt-file"} {
+					count := 0
+					for _, arg := range argv {
+						if arg == flag {
+							count++
+						}
+					}
+					if count != 1 {
+						t.Errorf("%s count = %d", flag, count)
+					}
+				}
 			}
 		})
 	}

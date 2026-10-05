@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Mode selects whether the reconciler may change the filesystem.
@@ -99,6 +101,9 @@ func Run(options Options) (Result, error) {
 	cfg, err := loadConfig(root, cli)
 	if err != nil {
 		return Result{}, err
+	}
+	if _, statErr := os.Stat(paths.WorkbenchManifest(root)); statErr == nil {
+		cfg.GlobalCommands = false
 	}
 	result := Result{Warnings: []string{}, Problems: []string{}, Dangling: []string{}}
 	outputs := make([]generatedFile, 0)
@@ -304,31 +309,6 @@ func generatedHeader(source string) string {
 
 func generatedLine(source string) string {
 	return generatedMarker + " from " + source + "; do not edit — edit the source, then re-run: pfm codex build"
-}
-
-func discoverProjects(root string, cfg Config, result *Result) []string {
-	projects := []string{"."}
-	if cfg.Projects != nil {
-		for _, project := range cfg.Projects {
-			if project != "." && hasClaude(filepath.Join(root, project)) {
-				projects = append(projects, project)
-			}
-		}
-	} else if entries, err := os.ReadDir(root); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() || excluded(cfg.ExcludeProjects, entry.Name()) || entry.Name() == ".claude" ||
-				entry.Name() == ".codex" {
-				continue
-			}
-			if hasClaude(filepath.Join(root, entry.Name())) {
-				projects = append(projects, entry.Name())
-			}
-		}
-	} else {
-		result.Problems = append(result.Problems, fmt.Sprintf("read repository root %s: %v", root, err))
-	}
-	sort.Strings(projects[1:])
-	return projects
 }
 
 func hasClaude(dir string) bool {

@@ -43,6 +43,7 @@ pfm chat new	F	F.01-new-engine
 pfm chat new	F	F.02-new-label-role
 pfm chat new	F	F.03-new-account-1h-model
 pfm chat new	F	F.04-new-await-attach
+pfm chat new	F	F.19-new-workbench
 pfm chat open	F	F.06-ls-rows
 pfm chat read	E1	E1.13-last-read-stream
 pfm chat recover	E2	E2.04-recover

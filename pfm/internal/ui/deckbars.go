@@ -93,7 +93,7 @@ func (model Model) enterLabel(row compose.Row, hasRow bool) string {
 	switch {
 	case hasRow && row.Kind == compose.ProfessorUpdate:
 		return "upgrade"
-	case hasRow && row.Kind == compose.ProfessorUpdateFailed:
+	case hasRow && isLaunchFailureNotice(row.Kind):
 		return "—"
 	case hasRow && isNewChatActionKind(row.Kind):
 		return "start"

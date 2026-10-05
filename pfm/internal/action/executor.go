@@ -117,6 +117,10 @@ func (executor *Executor) Open(
 		}
 	}
 
+	// A workbench refusal comes before Solo closes any seat holding the chat.
+	if err := applyWorkbench(&request); err != nil {
+		return "", err
+	}
 	switch request.Row.Kind {
 	case compose.Agent:
 		if err := executor.Solo(ctx, request.Row.ID, "", true, request.Config.Claude.Binary); err != nil {

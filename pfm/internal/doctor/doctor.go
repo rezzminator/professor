@@ -310,6 +310,9 @@ func Run(
 		claudeAbsent,
 	)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
+	workbenchWarnings, workbenchFailures := printWorkbenchDoctor(stdout, ".", resolved.Home)
+	tally.warnings += workbenchWarnings
+	tally.failures += workbenchFailures
 
 	tally.warnings += printCodexPaneDoctor(ctx, stdout, database, databaseErr, runtime)
 

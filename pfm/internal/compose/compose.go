@@ -44,7 +44,10 @@ type composer struct {
 
 // Compose performs the row composition pass, reading the supplied launch handle.
 func Compose(input Input) Output {
-	current := &composer{input: input, projects: projectNames{}}
+	current := &composer{
+		input:    input,
+		projects: projectNames{resolved: make(map[string]projectRef), benches: input.Workbenches},
+	}
 	current.buildIndexes()
 
 	liveClaude, splits := current.liveClaudeRows()
@@ -219,6 +222,7 @@ func Compose(input Input) Output {
 
 	output.Rows, output.ProjectOrder = sortProjectRows(output.Rows)
 	output = leadWithCurrentProject(output, input.Options.CurrentDir)
+	output = withWorkbenches(output, input)
 	output = withNewRows(output)
 	return output
 }

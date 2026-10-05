@@ -465,3 +465,68 @@ func TestResolveArtifactPathIsAbsolute(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkbenchRoleAndReload(t *testing.T) {
+	for _, name := range []string{"Codex role", "reload no role", "reload Codex", "reload role", "reload disabled", "reload invalid", "role outside"} {
+		t.Run(name, func(t *testing.T) {
+			root, dir, home := roleWorkbenchFixture(t)
+			sid := t.TempDir()
+			engine := pfmengine.Claude
+			if name == "Codex role" || name == "reload Codex" || name == "reload disabled" {
+				engine = pfmengine.Codex
+			}
+			if name == "Codex role" || name == "reload Codex" {
+				mustWrite(t, paths.WorkbenchManifest(dir), `{"prompt":"scribe.md","engines":["codex","claude"]}`)
+			}
+			if name == "role outside" {
+				body, _, err := Resolve(engine, "r", root, home)
+				base, baseErr := BasePrompt(engine, root, home)
+				got, composeErr := ComposeSeatPrompt(engine, "r", body, base)
+				want := "<!-- pfm agent-role: r -->\nFLEET\n\n---\n\nROLE R"
+				if err != nil || baseErr != nil || composeErr != nil || got != want {
+					t.Fatalf("outside role = %q, %v/%v/%v; want %q", got, err, baseErr, composeErr, want)
+				}
+				return
+			}
+			if name == "Codex role" {
+				got, _, err := Resolve(engine, "r", dir, home)
+				if err != nil || got != "You are scribe.\n---\n\nROLE R" {
+					t.Fatalf("Codex role = %q, %v", got, err)
+				}
+				return
+			}
+			if name == "reload role" {
+				if err := WriteSeatPrompt(sid, "cc-r", "", "<!-- pfm agent-role: r -->\nSTALE"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if name == "reload invalid" {
+				mustWrite(t, paths.WorkbenchManifest(dir), `{"prompt":""}`)
+			}
+			got, err := RefreshSeatPrompt(engine, sid, "cc-r", "", dir, home)
+			if name == "reload invalid" {
+				if err == nil || err.Error() != paths.WorkbenchManifest(dir)+`: "prompt" is required` {
+					t.Fatalf("reload invalid = %q, %v", got, err)
+				}
+				return
+			}
+			want := filepath.Join(dir, ".professor", "scribe.md")
+			switch name {
+			case "reload Codex":
+				want = "You are scribe."
+			case "reload disabled":
+				want = ""
+			case "reload role":
+				raw, readErr := os.ReadFile(got)
+				want = "<!-- pfm agent-role: r -->\nYou are scribe.\n\n---\n\nROLE R"
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				got = string(raw)
+			}
+			if err != nil || got != want {
+				t.Fatalf("reload = %q, %v; want %q", got, err, want)
+			}
+		})
+	}
+}

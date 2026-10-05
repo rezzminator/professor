@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -19,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 func clearBranchCache1HEnv(t *testing.T) {
@@ -37,6 +39,125 @@ func clearBranchCache1HEnv(t *testing.T) {
 		})
 	}
 	t.Setenv("CLAUDECODE", "")
+}
+
+func TestChatBranchWorkbench(t *testing.T) {
+	for _, name := range []string{"Claude", "Claude no parent model", "Codex", "invalid", "mirror failure", "outside"} {
+		t.Run(name, func(t *testing.T) {
+			jail := newRunJail(t)
+			t.Cleanup(func() { jail.killSockets(t) })
+			scribe, duo := newWorkbenchRunFixture(t, jail)
+			engine, dir, socket, argvFile := "claude", scribe, "cc-workbench-branch", "cc-argv"
+			parentID := "a1000000-1111-4111-8111-111111111111"
+			var wantError string
+			wantArgs := []string{
+				"--resume " + parentID,
+				"--fork-session",
+				"--system-prompt-file " + filepath.Join(scribe, ".professor", "scribe.md"),
+				"--effort xhigh",
+			}
+			switch name {
+			case "Claude no parent model":
+				if err := atomicfile.Write(
+					paths.WorkbenchManifest(scribe),
+					[]byte(`{"prompt":"scribe.md","effort":"XHigh","model":"sonnet"}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				wantArgs = append(wantArgs, "--model sonnet")
+			case "Codex", "mirror failure":
+				engine, dir, socket, argvFile = "codex", duo, "cx-workbench-branch", "cx-argv"
+				if err := atomicfile.Write(
+					paths.WorkbenchManifest(duo),
+					[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"High"}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("CX_STUB_ARGV", filepath.Join(jail.root, argvFile))
+				wantArgs = []string{
+					`--model gpt-x -c model_reasoning_effort="high" -c developer_instructions="""` + "\n" + `You are duo.""" fork ` + parentID,
+				}
+				if name == "mirror failure" {
+					if err := atomicfile.Write(filepath.Join(duo, ".mcp.json"), []byte("{"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					persona, err := workbench.ForLaunch(duo, pfmengine.Codex, workbench.Resume)
+					if err != nil {
+						t.Fatal(err)
+					}
+					err = workbench.EnsureMirror(persona.Bench, pfmengine.Codex, filepath.Join(jail.root, "home"))
+					if err == nil {
+						t.Fatal("mirror fixture did not fail")
+					}
+					wantError = "pfm chat branch: " + err.Error() + "\n"
+				}
+			case "invalid":
+				if err := atomicfile.Write(
+					paths.WorkbenchManifest(scribe),
+					[]byte(`{"prompt":""}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+				wantError = "pfm chat branch: " + paths.WorkbenchManifest(scribe) + `: "prompt" is required` + "\n"
+			case "outside":
+				dir = filepath.Join(jail.root, "work", "acme", "src")
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				wantArgs = []string{"--resume " + parentID, "--fork-session", "--name workbench-branch"}
+			}
+			t.Setenv("PFM_TEST_FRESH_SOCKET", socket)
+			var stdout, stderr bytes.Buffer
+			code := run(
+				[]string{
+					"chat",
+					"branch",
+					"--engine",
+					engine,
+					"--session-id",
+					parentID,
+					"--account",
+					"1",
+					"--cwd",
+					dir,
+					"--name",
+					"workbench-branch",
+				},
+				&stdout,
+				&stderr,
+			)
+			if wantError != "" {
+				if code != 1 || stderr.String() != wantError {
+					t.Fatalf("branch code=%d stderr=%q; want 1 and %q", code, stderr.String(), wantError)
+				}
+				if _, err := os.Stat(filepath.Join(jail.tmuxDir, socket)); !os.IsNotExist(err) {
+					t.Fatalf("refused branch socket: %v", err)
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("refused branch stdout=%q", stdout.String())
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("branch code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			argv := jail.await(t, argvFile, "--")
+			for _, want := range wantArgs {
+				if !strings.Contains(argv, want) {
+					t.Errorf("branch argv=%q lacks %q", argv, want)
+				}
+			}
+			if name == "Codex" {
+				body, err := os.ReadFile(filepath.Join(duo, "AGENTS.md"))
+				if err != nil || !strings.Contains(string(body), "Duo.") {
+					t.Fatalf("branch mirror=%q, err=%v", body, err)
+				}
+			}
+		})
+	}
 }
 
 // branchInheritJail is the shared fixture for the "a fork inherits its

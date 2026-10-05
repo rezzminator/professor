@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/rowfacts"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 const (
@@ -134,10 +136,11 @@ func (buffer *bufferedWarnings) flush(stderr io.Writer) {
 }
 
 type scanRequest struct {
-	View     compose.View
-	Query    string
-	ReadOnly bool
-	NoSky    bool
+	RepoRoots []string
+	View      compose.View
+	Query     string
+	ReadOnly  bool
+	NoSky     bool
 	// Safe is the --safe flag verbatim (auto|on|off); resolveCosmosSafe
 	// turns it into the snapshot's CosmosSafe bool at build time.
 	Safe    string
@@ -193,7 +196,7 @@ type scanResult struct {
 // fleetRequest is the scan scope inside a picker request; the rest of
 // scanRequest shapes the snapshot the picker renders.
 func (request scanRequest) fleetRequest() fleet.Request {
-	return fleet.Request{View: request.View, ReadOnly: request.ReadOnly, Runtime: request.Runtime}
+	return fleet.Request{View: request.View, ReadOnly: request.ReadOnly, Runtime: request.Runtime, Workbenches: true}
 }
 
 // scanFleet is fleet.Scan plus the picker snapshot over its rows.
@@ -320,6 +323,7 @@ type indexRunner interface {
 }
 
 type refreshDependencies struct {
+	discover   func([]string) ([]workbench.Bench, []workbench.WalkError)
 	newIndexer func(*store.Store) (indexRunner, error)
 	// activity is the picker's presence clock. Nil — every non-interactive
 	// caller and every existing stream test — reads as permanently active and
@@ -369,6 +373,12 @@ func streamFleetRefreshesWith(
 	dependencies refreshDependencies,
 ) {
 	defer close(updates)
+	if ctx.Err() != nil {
+		return
+	}
+	if err := refreshWorkbenches(request, dependencies.discover); err != nil {
+		writeRefreshError(ctx, stderr, " workbenches", err)
+	}
 	refreshClock := dependencies.clock
 	if refreshClock == nil {
 		refreshClock = clock.Real
@@ -684,4 +694,44 @@ func primaryWriteback(kind ui.OutcomeKind, account, current int) (int, bool) {
 		return 0, false
 	}
 	return account, true
+}
+
+func refreshWorkbenches(request scanRequest, discover func([]string) ([]workbench.Bench, []workbench.WalkError)) error {
+	var values paths.Values
+	if request.Runtime != nil {
+		values = request.Runtime.Paths
+	} else {
+		resolved, err := pfmconfig.ResolvePaths()
+		if err != nil {
+			return fmt.Errorf("resolve workbench cache paths: %w", err)
+		}
+		values = resolved
+	}
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("read workbench discovery directory: %w", err)
+	}
+	dirs := append(append([]string(nil), request.RepoRoots...), currentDir)
+	var roots []string
+	var faults []workbench.WalkError
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		managed, err := workbench.ManagedRoots([]string{dir})
+		if err != nil {
+			faults = append(faults, workbench.WalkError{Root: dir, Path: dir, Err: err})
+			continue
+		}
+		for _, root := range managed {
+			if !seen[root] {
+				roots = append(roots, root)
+				seen[root] = true
+			}
+		}
+	}
+	slices.Sort(roots)
+	if discover == nil {
+		discover = workbench.Discover
+	}
+	benches, walkErrors := discover(roots)
+	return workbench.WriteCache(paths.WorkbenchCache(values), benches, append(faults, walkErrors...))
 }

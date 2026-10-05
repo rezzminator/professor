@@ -206,10 +206,10 @@ func (model Model) nameSpans(row compose.Row, width int, name, bg string, base t
 		spans := make([]span, 0, 8)
 		labels := make([]string, 0, 4)
 		used := 0
-		for index, id := range model.newChatEngines() {
+		for index, id := range model.newChatEnginesFor(row) {
 			label := pfmengine.MustLookup(id).Short
 			paint := tone{fg: palette.Muted, bg: bg}
-			if id == model.newChatEngine {
+			if id == model.effectiveNewChatEngine(row) {
 				label = "[ " + label + " ]"
 				paint = tone{fg: palette.Accent, bg: bg, bold: true}
 			}
@@ -389,10 +389,9 @@ func (model Model) columnSpans(
 	}
 }
 
-// renderNoticeRow draws the two banner kinds — the update notice and its
-// failure twin — which are not chats and keep their own full-width treatment.
+// renderNoticeRow gives action and failure notices their full-width treatment.
 func (model Model) renderNoticeRow(row compose.Row, selected bool, width int, grouped bool) (string, bool) {
-	if row.Kind != compose.ProfessorUpdate && row.Kind != compose.ProfessorUpdateFailed {
+	if !isNoticeKind(row.Kind) {
 		return "", false
 	}
 	pointer := "│ "
@@ -408,6 +407,9 @@ func (model Model) renderNoticeRow(row compose.Row, selected bool, width int, gr
 	}
 	if row.Kind == compose.ProfessorUpdateFailed {
 		return renderProfessorUpdateFailedRow(pointer, name, selected, width), true
+	}
+	if row.Kind == compose.WorkbenchInvalid {
+		return renderWorkbenchInvalidRow(pointer, name, selected, width), true
 	}
 	if model.mergeNewChat {
 		ids := model.newChatEngines()

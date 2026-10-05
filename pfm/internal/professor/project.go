@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/cli"
@@ -315,7 +316,7 @@ func writeProjectFailure(stdout io.Writer, jsonOutput bool, err error) {
 
 // RunPostUpdate reports project drift after a successful binary update. No baseline is a successful NOT-MANAGED terminal.
 func runPostUpdate(rootFlag string, jsonOutput bool, stdout io.Writer, runtime config.Runtime) int {
-	root, found, err := resolveProjectRoot(rootFlag)
+	root, found, err := ResolveProjectRoot(rootFlag)
 	if err != nil {
 		writeProjectFailure(stdout, jsonOutput, err)
 		return 1
@@ -357,7 +358,7 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 		flags.Usage()
 		return 2
 	}
-	root, found, err := resolveProjectRoot(*rootFlag)
+	root, found, err := ResolveProjectRoot(*rootFlag)
 	if err != nil || !found {
 		if err == nil {
 			err = errBaselineNotFound
@@ -461,7 +462,7 @@ func runProjectDrop(args []string, stdout, stderr io.Writer) int {
 		flags.Usage()
 		return 2
 	}
-	root, found, err := resolveProjectRoot(*rootFlag)
+	root, found, err := ResolveProjectRoot(*rootFlag)
 	if err != nil || !found {
 		if err == nil {
 			err = errBaselineNotFound
@@ -507,7 +508,7 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 		flags.Usage()
 		return 2
 	}
-	root, found, err := resolveProjectRoot(*rootFlag)
+	root, found, err := ResolveProjectRoot(*rootFlag)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm update adopt: %v\n", err)
 		return 1
@@ -665,7 +666,7 @@ func runProjectIgnore(args []string, stdout, stderr io.Writer, runtime config.Ru
 		flags.Usage()
 		return 2
 	}
-	root, found, err := resolveProjectRoot(*rootFlag)
+	root, found, err := ResolveProjectRoot(*rootFlag)
 	if err != nil || !found {
 		if err == nil {
 			err = errBaselineNotFound
@@ -793,7 +794,7 @@ func removeIgnored(ignored []string, template string) []string {
 
 // PrintDoctor prints the project-side doctor row.
 func PrintDoctor(stdout io.Writer, start, home string) int {
-	root, found, err := resolveProjectRoot(start)
+	root, found, err := ResolveProjectRoot(start)
 	if err != nil {
 		fmt.Fprintf(stdout, "professor: UNREADABLE %v\n", err)
 		return 1
@@ -816,7 +817,7 @@ func PrintDoctor(stdout io.Writer, start, home string) int {
 	return reviewRequired
 }
 
-func resolveProjectRoot(rootFlag string) (string, bool, error) {
+func ResolveProjectRoot(rootFlag string) (string, bool, error) {
 	start := strings.TrimSpace(rootFlag)
 	if start == "" {
 		var err error
@@ -833,7 +834,8 @@ func resolveProjectRoot(rootFlag string) (string, bool, error) {
 		path := BaselinePath(absolute)
 		if _, err := os.Stat(path); err == nil {
 			return absolute, true, nil
-		} else if !errors.Is(err, fs.ErrNotExist) {
+		} else if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+			// ENOTDIR: a regular file named .professor holds no baseline.
 			return "", false, fmt.Errorf("UNREADABLE %s: %w", path, err)
 		}
 		parent := filepath.Dir(absolute)

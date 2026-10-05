@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -11,6 +13,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestChatNewCacheChoiceAndValidation(t *testing.T) {
@@ -151,4 +160,129 @@ func listedChatNew(t *testing.T) *mcp.Tool {
 	}
 	t.Fatal("chat_new tool missing")
 	return nil
+}
+
+func TestChatNewWorkbench(t *testing.T) {
+	for _, name := range []string{"auto-name", "outside", "no cwd", "named", "caller disabled", "caller enabled", "caller cwd", "roster error"} {
+		t.Run(name, func(t *testing.T) {
+			root := testjail.Fleet(t)
+			dir := filepath.Join(root, "acme", "docs", "scribe")
+			for path, body := range map[string]string{
+				filepath.Join(root, "acme", ".professor", "baseline.json"): "{}",
+				paths.WorkbenchManifest(dir):                               `{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"xhigh"}`,
+				filepath.Join(dir, ".professor", "scribe.md"):              "You are scribe.",
+			} {
+				if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var calls [][]string
+			backend := &backend{
+				warnings: io.Discard,
+				paths:    paths.Values{TmuxDir: filepath.Join(root, "tmux")},
+				dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
+					calls = append(calls, append([]string(nil), args...))
+					return 0
+				},
+			}
+			service := newService("test", backend)
+			input := NewInput{CWD: dir}
+			want := []string{"chat", "new", "--name", "_SCRIBE:1", "--cwd", dir}
+			var request *mcp.CallToolRequest
+			switch name {
+			case "outside":
+				input.CWD = filepath.Join(root, "acme", "src")
+			case "no cwd":
+				input.CWD = ""
+			case "named":
+				input = NewInput{Name: "child"}
+				want = []string{"chat", "new", "--name", "child"}
+			case "caller disabled", "caller enabled", "caller cwd":
+				engine, kind, socket := pfmengine.Codex, compose.LiveCodex, "cx-caller"
+				if name != "caller disabled" {
+					engine, kind, socket = pfmengine.Claude, compose.LiveClaude, "cc-caller"
+				}
+				backend.chat = &fakeChatVerbs{
+					listed: chat.ListResult{
+						Rows: []compose.Row{
+							{
+								Kind:        kind,
+								ID:          "caller-id",
+								Name:        "caller",
+								SessionName: "caller",
+								Socket:      socket,
+								PaneID:      "%0",
+								CWD:         dir,
+							},
+						},
+						Matched: 1,
+					},
+				}
+				request = &mcp.CallToolRequest{
+					Params: &mcp.CallToolParamsRaw{
+						Meta: mcp.Meta{
+							"pfmProxy": map[string]any{
+								"v":       ProxyWireVersion,
+								"engine":  string(engine),
+								"session": "caller",
+							},
+						},
+					},
+				}
+				if name != "caller disabled" {
+					want = []string{"chat", "new", "--name", "_SCRIBE:1", "--engine", "cc", "--cwd", dir}
+				}
+				if name == "caller cwd" {
+					input.CWD = ""
+				}
+			case "roster error":
+				blocker := filepath.Join(root, "blocker")
+				if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
+			}
+			_, _, err := service.chatNew(context.Background(), request, input)
+			if name == "outside" || name == "no cwd" {
+				if err == nil || err.Error() != "name is required outside a workbench" || len(calls) != 0 {
+					t.Fatalf("outside = %v, calls %q", err, calls)
+				}
+				return
+			}
+			if name == "roster error" {
+				if err == nil || !strings.Contains(err.Error(), "chat_new: name the chat:") || len(calls) != 0 {
+					t.Fatalf("roster = %v, calls %q", err, calls)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(calls, [][]string{want}) {
+				t.Fatalf("chat_new = %v, calls %q; want %q", err, calls, want)
+			}
+		})
+	}
+}
+
+func TestChatNewWorkbenchNameSchema(t *testing.T) {
+	tool := listedChatNew(t)
+	raw, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range schema.Required {
+		if field == "name" {
+			t.Fatal("name required inside a workbench")
+		}
+	}
+	if !strings.Contains(schema.Properties["name"].Description, "inside a workbench, empty takes its next {name}:{n}") {
+		t.Fatalf("name schema: %s", raw)
+	}
 }

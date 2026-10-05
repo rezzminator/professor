@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -441,4 +443,180 @@ func TestOpenDetachedIDKeepsUnseenReminder(t *testing.T) {
 		t.Fatalf("OpenDetachedID() error = %v", err)
 	}
 	requireUnseen(t, runtime, id, true)
+}
+
+func TestOpenWorkbenchLaunchName(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open", true: "detached"}[detached], func(t *testing.T) {
+			root := testjail.Fleet(t)
+			dir := chatWorkbenchFixture(t, root)
+			seedClaudeChat(
+				t,
+				root,
+				"a1111111-1111-4111-8111-111111111111",
+				`{"type":"custom-title","customTitle":"_SCRIBE:1"}`,
+			)
+			seedClaudeChat(
+				t,
+				root,
+				"b2222222-2222-4222-8222-222222222222",
+				`{"type":"custom-title","customTitle":"_SCRIBE:2"}`,
+			)
+			runtime, err := config.RuntimeOrDefault(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeOpenTmux{}
+			stubOpenExecutor(t, fake)
+			row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
+			var stderr, stdout bytes.Buffer
+			if detached {
+				_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
+			} else {
+				if code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, &runtime); code != 0 {
+					t.Fatalf("open=%d: %s", code, stderr.String())
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(fake.created) != 1 || !strings.Contains(fake.created[0].Run, "'--name' '_SCRIBE:3'") {
+				t.Fatalf("launch name=%#v", fake.created)
+			}
+		})
+	}
+}
+
+func TestOpenWorkbenchRosterFailure(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open", true: "detached"}[detached], func(t *testing.T) {
+			root := testjail.Fleet(t)
+			dir := chatWorkbenchFixture(t, root)
+			blocker := filepath.Join(root, "blocker")
+			if err := atomicfile.Write(blocker, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "cache.db"))
+			runtime, err := config.RuntimeOrDefault(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeOpenTmux{}
+			stubOpenExecutor(t, fake)
+			row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
+			var stderr, stdout bytes.Buffer
+			if detached {
+				_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
+				if err == nil {
+					t.Fatal("roster failure did not refuse detached launch")
+				}
+			} else {
+				if code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, &runtime); code == 0 {
+					t.Fatal("roster failure did not refuse launch")
+				}
+			}
+			if len(fake.created) != 0 {
+				t.Fatalf("created=%d", len(fake.created))
+			}
+		})
+	}
+}
+
+func TestPrepareOpenWorkbenchNonClaudeName(t *testing.T) {
+	root := testjail.Fleet(t)
+	dir := chatWorkbenchFixture(t, root)
+	runtime, err := config.RuntimeOrDefault(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A failing cache makes a roster read visible without an artificial reader seam.
+	blocker := filepath.Join(root, "blocker")
+	if err := atomicfile.Write(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Paths.CacheDB = filepath.Join(blocker, "cache.db")
+	stubOpenExecutor(t, &fakeOpenTmux{})
+	for _, kind := range []compose.Kind{compose.NewCodex, compose.NewOpenCode} {
+		_, request, err := prepareOpen(
+			context.Background(),
+			compose.Row{Kind: kind, CWD: dir, Workbench: dir},
+			1,
+			false,
+			"",
+			io.Discard,
+			runtime,
+		)
+		if err != nil || request.LaunchName != "" {
+			t.Fatalf("non-Claude name=%q, %v", request.LaunchName, err)
+		}
+	}
+}
+
+func TestOpenGoneWorkbench(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		for _, directory := range []bool{false, true} {
+			t.Run(
+				map[bool]string{false: "open", true: "detached"}[detached]+map[bool]string{false: "/gone", true: "/file"}[directory],
+				func(t *testing.T) {
+					root := testjail.Fleet(t)
+					dir := filepath.Join(root, "acme", "docs", "scribe")
+					if directory {
+						if err := atomicfile.Write(dir, nil, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					runtime, err := config.RuntimeOrDefault(nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					fake := &fakeOpenTmux{}
+					stubOpenExecutor(t, fake)
+					row := compose.Row{Kind: compose.NewClaude, CWD: dir, Workbench: dir}
+					want := "open: workbench directory " + dir + " is missing"
+					var stderr, stdout bytes.Buffer
+					if detached {
+						_, err = openDetachedRow(context.Background(), row, 1, &stderr, runtime)
+						if err == nil || err.Error() != want {
+							t.Fatalf("gone error=%v; want %q", err, want)
+						}
+					} else {
+						if code := OpenRow(
+							context.Background(),
+							row,
+							1,
+							false,
+							"",
+							&stdout,
+							&stderr,
+							&runtime,
+						); code == 0 ||
+							!strings.Contains(stderr.String(), want) {
+							t.Fatalf("gone code=%d, stderr=%s", code, stderr.String())
+						}
+					}
+					if len(fake.created) != 0 {
+						t.Fatalf("created=%d", len(fake.created))
+					}
+				},
+			)
+		}
+	}
+}
+
+func TestOpenPlainGoneDirectory(t *testing.T) {
+	root := testjail.Fleet(t)
+	fake := &fakeOpenTmux{}
+	stubOpenExecutor(t, fake)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr, stdout bytes.Buffer
+	row := compose.Row{Kind: compose.NewClaude, CWD: filepath.Join(root, "gone")}
+	if code := OpenRow(context.Background(), row, 1, false, "", &stdout, &stderr, nil); code != 0 {
+		t.Fatalf("open=%d: %s", code, stderr.String())
+	}
+	if len(fake.created) != 1 || fake.created[0].CWD != cwd {
+		t.Fatalf("plain fallback=%#v, want %s", fake.created, cwd)
+	}
 }

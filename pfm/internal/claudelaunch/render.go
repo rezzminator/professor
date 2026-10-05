@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -142,20 +143,21 @@ func Render(request Request, machine pfmconfig.Config) (Launch, error) {
 			}
 			result.Argv = append(result.Argv, flagMCPConfig, path)
 		}
-		if request.Model != "" {
+		if request.Model != "" && !argsPersonaFlag(request.Args, flagModel) {
 			result.Argv = append(result.Argv, flagModel, request.Model)
 		}
-		if request.Effort != "" {
+		if request.Effort != "" && !argsPersonaFlag(request.Args, flagEffort) {
 			result.Argv = append(result.Argv, flagEffort, request.Effort)
 		}
 		// A role seat's file is its constitution whatever the mode; the
 		// composed prompt stands in for it only under professor.
 		prompt := request.PromptFile
-		if prompt == "" && prefs.SystemPrompt == pfmconfig.SystemPromptProfessor {
+		if prompt == "" && !argsPersonaFlag(request.Args, flagPromptFile) &&
+			prefs.SystemPrompt == pfmconfig.SystemPromptProfessor {
 			// A missing marker or composed file omits the flag by contract.
 			prompt, _ = PromptFile(request.Home)
 		}
-		if prompt != "" {
+		if prompt != "" && !argsPersonaFlag(request.Args, flagPromptFile) {
 			if info, err := os.Stat(prompt); err == nil && !info.IsDir() {
 				result.Argv = append(result.Argv, flagPromptFile, prompt)
 			}
@@ -311,6 +313,15 @@ func mcpConfig(home string, machine pfmconfig.Config) map[string]any {
 
 func PromptFile(home string) (string, error) {
 	return paths.ComposedHarnessPrompt(home, pfmengine.Claude)
+}
+
+func argsPersonaFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func NewSessionID() (string, error) {

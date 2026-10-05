@@ -92,6 +92,8 @@ Sacred ground (the topics where humor drops) is collected in question 8 — it f
 
 ### 3. Project roster
 
+A workbench is not a roster project: it lives inside one and is made with `/pfm:workbench`.
+
 > How many projects does this repo hold, and what is each one? **One project is valid and first-class** — a single-project repo is a roster of one, not a stripped-down path. For each project, give: directory, role (what it does), tech stack, package manager, test runner, build tool, and dev server port(s).
 
 This becomes the **roster** — the ordered list of 1..N projects that drives the whole install. Templates carry generic per-project PATTERN blocks; Phase 2 expands each block once per roster entry (see "Materialization" below), so a 1-project and a 7-project repo get correctly-sized files from the same source. **The blueprint assumes no fixed project count** — whatever you list here is the truth.

@@ -136,7 +136,7 @@ func renderProjectCheck(root, home string, jsonOutput bool, stdout io.Writer) in
 // or store unreadable, any UPDATED diff unreadable). It resolves the root
 // itself and shares its report writing with renderProjectCheck.
 func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer) int {
-	root, found, err := resolveProjectRoot(rootFlag)
+	root, found, err := ResolveProjectRoot(rootFlag)
 	if err != nil {
 		writeProjectFailure(stdout, jsonOutput, err)
 		return 3

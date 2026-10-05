@@ -483,30 +483,11 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				model.outcomeEngine = model.newChatEngine
 				return model, tea.Quit
 			}
-			if row.Kind == compose.ProfessorUpdateFailed {
+			if isLaunchFailureNotice(row.Kind) {
 				return model, nil // notice only, no chat to open — see professor_update_failed_row.go
 			}
 			if model.mergeNewChat && isNewChatActionKind(row.Kind) {
-				switch model.newChatEngine {
-				case pfmengine.Codex:
-					row.Kind = compose.NewCodex
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.Codex).Short + " chat"
-				case pfmengine.Claude:
-					row.Kind = compose.NewClaude
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.Claude).Short + " chat"
-				case pfmengine.OpenCode:
-					row.Kind = compose.NewOpenCode
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.OpenCode).Short + " chat"
-				default:
-					model.killStatus = "new chat is not available for " + pfmengine.MustLookup(
-						model.newChatEngine,
-					).Short
-					return model, nil
-				}
-				row.Account = model.accountForKind(row.Kind)
-				model.outcome = OutcomeSelected
-				model.outcomeRow = row
-				return model, tea.Quit
+				return model.selectNewChat(row)
 			}
 			switch model.actionIndex {
 			case 1:
@@ -692,7 +673,7 @@ func batchCommands(commands ...tea.Cmd) tea.Cmd {
 func (model Model) navigateChatHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if row, ok := model.selectedRow(); ok && model.mergeNewChat &&
 		(isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
-		model.newChatEngine = adjacentID(model.newChatEngine, direction, model.newChatEngines())
+		model.newChatEngine = adjacentID(model.effectiveNewChatEngine(row), direction, model.newChatEnginesFor(row))
 		return model, nil
 	}
 	model.actionIndex = (model.actionIndex + len(carouselActions) + direction) % len(carouselActions)
@@ -737,6 +718,9 @@ func (model Model) newChatEngines() []pfmengine.ID {
 	}
 	for index := range model.rows {
 		row := &model.rows[index]
+		if row.Workbench != "" {
+			continue
+		}
 		switch row.Kind {
 		case compose.NewClaude:
 			appendUnique(pfmengine.Claude)
@@ -775,7 +759,7 @@ func (model *Model) cycleSelectedAccount() {
 	}
 	engine := compose.EngineForKind(row.Kind)
 	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
-		engine = model.newChatEngine
+		engine = model.effectiveNewChatEngine(row)
 	}
 	if engine == pfmengine.Codex {
 		model.codexPrimary = nextAccount(model.codexPrimary, model.codexAccountIDs)
@@ -1185,6 +1169,9 @@ func (model *Model) toggleKilled() {
 	case row.Kind == compose.ProfessorUpdateFailed:
 		model.killStatus = "⌃X refused — the update-check failure row is a notice, not a chat"
 		return
+	case row.Kind == compose.WorkbenchInvalid:
+		model.killStatus = "⌃X refused — the workbench error row is a notice, not a chat"
+		return
 	case row.Kind == compose.Booting:
 		model.killStatus = "⌃X refused — " + row.Name +
 			" is still booting (no identity yet); retry once it settles"
@@ -1286,8 +1273,8 @@ func (model *Model) rebuildOrder() {
 			if row.Reminded || !model.visibleInView(row) || !isNameGroupRow(row.Kind) {
 				continue
 			}
-			if prefix, ok := nameGroupPrefix(row.Name); ok {
-				members[prefix] = append(members[prefix], index)
+			if key, _, ok := workbenchNameGroup(row); ok {
+				members[key] = append(members[key], index)
 			}
 		}
 	}
@@ -1307,7 +1294,7 @@ func (model *Model) rebuildOrder() {
 		}
 		for index := range model.rows {
 			row := &model.rows[index]
-			if isNewChatActionKind(row.Kind) && model.visibleInView(*row) {
+			if isFleetNewChatRow(*row) && model.visibleInView(*row) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 				newChatEmitted = true
@@ -1323,13 +1310,13 @@ func (model *Model) rebuildOrder() {
 			if !model.visibleInView(model.rows[index]) {
 				continue
 			}
-			if model.mergeNewChat && isNewChatActionKind(model.rows[index].Kind) {
+			if model.mergeNewChat && isFleetNewChatRow(model.rows[index]) {
 				if newChatEmitted {
 					continue
 				}
 				newChatEmitted = true
 			}
-			prefix, grouped := nameGroupPrefix(model.rows[index].Name)
+			key, prefix, grouped := workbenchNameGroup(model.rows[index])
 			// ONE member is a group. A chat named GROUP:NAME has already
 			// declared where it belongs, and the panel is what makes that
 			// readable — so it gets the header and the indent immediately
@@ -1342,17 +1329,17 @@ func (model *Model) rebuildOrder() {
 			// called for.
 			grouped = grouped &&
 				isNameGroupRow(model.rows[index].Kind) &&
-				len(members[prefix]) >= 1
+				len(members[key]) >= 1
 			if !grouped {
 				model.order = append(model.order, index)
 				continue
 			}
-			if emitted[prefix] {
+			if emitted[key] {
 				continue
 			}
-			emitted[prefix] = true
-			for _, member := range members[prefix] {
-				model.nameGroups[member] = nameGroup{name: prefix, count: len(members[prefix])}
+			emitted[key] = true
+			for _, member := range members[key] {
+				model.nameGroups[member] = nameGroup{name: prefix, count: len(members[key])}
 				model.order = append(model.order, member)
 			}
 		}

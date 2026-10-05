@@ -32,7 +32,7 @@ Every command, agent, and rule sorts into one of three tiers:
 ### The cast (Tier A — universal)
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator voice and root persona. Lives in `pfm/harness-prompts/`, composed per engine and selected by the Claude launch policy.
-- **/pcm** — Professor Change Manager: edits the pipeline at the source. Surgery, not journaling. `/pcm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget.
+- **/pcm** — Professor Change Manager: edits the pipeline at the source. Surgery, not journaling. `/pcm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget. `/pfm` is the machine-global CLI guide; `/pfm:workbench` scaffolds and checks workbenches.
 - **/flights:{init,spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the chat family of the opt-in `professor` MCP server the same binary registers — one stdio command, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`; its chat and harvester families toggle through `mcp.servers.chat.enabled` and `harvester.enabled`.
 
 > The Tier A persona ships as ONE version: `professor.md` (the harness replacement) — lean voice plus the behavioral contract (concise delivery, the Verdict, the Analysis Protocol).
@@ -213,7 +213,7 @@ your-project/
 │   └── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 ├── .claude/
 │   ├── agents/                        ← root agents (gitter; tracer and the whole flights cast are machine-global)
-│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /context-meter, /quality:*, /tokens, /h:gh, /reminder, /ultimate — `pfm install` installs them host-level)
+│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /pfm:workbench, /context-meter, /quality:*, /tokens, /h:gh, /reminder, /ultimate — `pfm install` installs them host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, format-md.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
 │   └── settings.json                  ← permissions, project hooks (pfm-guard, guard-stamp, format-md, codex-sync)
@@ -228,6 +228,7 @@ your-project/
 ├── {project-b}/                       ← second subproject
 │   ├── CLAUDE.md
 │   └── .claude/agents/
+├── {dir}/.professor/workbench.json     ← (OPTIONAL) marks a workbench: /pfm:workbench
 ├── docs/
 │   ├── agents/                        ← cross-project permanent docs (architecture, API, map, features)
 │   ├── commands/{cmd}/                ← command-owned docs ($CDOCS root)

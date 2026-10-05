@@ -12,6 +12,12 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
+func TestWorkbenchManifest(t *testing.T) {
+	if got := WorkbenchManifest("/work/acme/docs/scribe"); got != "/work/acme/docs/scribe/.professor/workbench.json" {
+		t.Fatalf("WorkbenchManifest = %q", got)
+	}
+}
+
 func TestResolveOverrides(t *testing.T) {
 	testRoot := t.TempDir()
 	t.Setenv("TMUX_TMPDIR", filepath.Join(testRoot, "t"))
@@ -427,5 +433,22 @@ func TestTestProfileAccessorsReadTheirOwnVariable(t *testing.T) {
 				t.Fatalf("%s set: got (%q, %v), want (%q, true)", lookup.env, got, ok, "value-"+lookup.env)
 			}
 		})
+	}
+}
+
+func TestWorkbenchCacheBesideCacheDB(t *testing.T) {
+	for _, path := range []string{"/work/state/index.db", "/work/other/cache.db"} {
+		want := filepath.Join(filepath.Dir(path), "workbenches.json")
+		if got := WorkbenchCache(Values{CacheDB: path}); got != want {
+			t.Fatalf("WorkbenchCache = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestOpenCodeWorkbenchPlugin(t *testing.T) {
+	home := "/work/test"
+	want := filepath.Join(filepath.Dir(DefaultCacheDB(home)), "opencode-workbench-plugin.mjs")
+	if got := OpenCodeWorkbenchPlugin(home); got != want {
+		t.Fatalf("plugin = %q, want %q", got, want)
 	}
 }

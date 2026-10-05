@@ -21,6 +21,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 type fakeCommsReader struct {
@@ -730,5 +731,206 @@ func TestPrimaryWritebackSentinelNeverHitsTheRosterCheck(t *testing.T) {
 	}
 	if _, should := primaryWriteback(ui.OutcomeSelected, 0, current); should {
 		t.Fatal("primaryWriteback let the unset sentinel through — runLS would still crash")
+	}
+}
+
+func pickerWorkbenchFixture(t *testing.T) (string, string, *store.Store, paths.Values) {
+	t.Helper()
+	jailTest(t)
+	root := filepath.Join(t.TempDir(), "acme")
+	dir := filepath.Join(root, "docs", "scribe")
+	for _, sub := range []string{filepath.Join(root, ".git"), filepath.Join(root, ".professor"), filepath.Join(dir, ".professor")} {
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{
+		filepath.Join(root, ".professor", "baseline.json"): "{}",
+		paths.WorkbenchManifest(dir):                       `{"prompt":"scribe.md","title":"Scribe"}`,
+		filepath.Join(dir, ".professor", "scribe.md"):      "You are scribe.",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	values, err := config.ResolvePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, dir, database, values
+}
+
+func TestPickerWorkbenchCachedFirstFrame(t *testing.T) {
+	root, dir, database, values := pickerWorkbenchFixture(t)
+	if err := workbench.WriteCache(
+		paths.WorkbenchCache(values),
+		[]workbench.Bench{workbench.LoadBench(dir, root)},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := scanFleetCached(context.Background(), database, scanRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range cached.Snapshot.Rows {
+		if row.Workbench == dir && row.Kind == compose.NewClaude && row.Project == "acme › Scribe" {
+			return
+		}
+	}
+	t.Fatalf("first frame lacks cached bench: %#v", cached.Snapshot.Rows)
+}
+
+func TestPickerWorkbenchRefreshDiscoversAndCaches(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(fmt.Sprint(corrupt), func(t *testing.T) {
+			root, dir, database, values := pickerWorkbenchFixture(t)
+			t.Chdir(t.TempDir())
+			if corrupt {
+				if err := os.WriteFile(
+					filepath.Join(filepath.Dir(values.CacheDB), "workbenches.json"),
+					[]byte("{broken"),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := database.UpsertTranscript(
+				context.Background(),
+				store.Transcript{UUID: "A", Path: "/jail/A.jsonl", CWD: root, Size: 10, PromptCount: 1, MTimeNS: 900},
+			); err != nil {
+				t.Fatal(err)
+			}
+			cached, err := scanFleetCached(context.Background(), database, scanRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := scanRequest{RepoRoots: cached.Output.RepoRoots()}
+			ctx, cancel := context.WithCancel(context.Background())
+			updates := make(chan ui.Snapshot, 1)
+			var stderr bytes.Buffer
+			go streamFleetRefreshesWith(
+				ctx,
+				database,
+				request,
+				fleet.PrintWarn(&stderr),
+				&stderr,
+				updates,
+				refreshDependencies{
+					newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
+				},
+			)
+			var first ui.Snapshot
+			select {
+			case first = <-updates:
+			case <-time.After(10 * time.Second):
+				cancel()
+				for range updates {
+				}
+				t.Fatal("refresh timed out")
+			}
+			cancel()
+			for range updates {
+			}
+			found := false
+			for _, row := range first.Rows {
+				if row.Workbench == dir && row.Kind == compose.NewClaude {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("first refresh lacks discovered bench: %#v; %s", first.Rows, stderr.String())
+			}
+			benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+			if err != nil || len(benches) != 1 || benches[0].Dir != dir || len(faults) != 0 {
+				t.Fatalf("refresh cache = %v, %v, %v", benches, faults, err)
+			}
+		})
+	}
+}
+
+func TestPickerWorkbenchRefreshWalkErrors(t *testing.T) {
+	root, dir, database, values := pickerWorkbenchFixture(t)
+	t.Chdir(root)
+	fault := workbench.WalkError{
+		Root: root,
+		Path: filepath.Join(root, "docs", "locked"),
+		Err:  errors.New("permission denied"),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	updates := make(chan ui.Snapshot, 1)
+	var stderr bytes.Buffer
+	go streamFleetRefreshesWith(
+		ctx,
+		database,
+		scanRequest{},
+		fleet.PrintWarn(&stderr),
+		&stderr,
+		updates,
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) { return &immediateIndexRunner{}, nil },
+			discover: func(roots []string) ([]workbench.Bench, []workbench.WalkError) {
+				benches, _ := workbench.Discover(roots)
+				return benches, []workbench.WalkError{fault}
+			},
+		},
+	)
+	var first ui.Snapshot
+	select {
+	case first = <-updates:
+	case <-time.After(10 * time.Second):
+		cancel()
+		for range updates {
+		}
+		t.Fatal("refresh timed out")
+	}
+	cancel()
+	for range updates {
+	}
+	found := false
+	for _, row := range first.Rows {
+		if row.Kind == compose.WorkbenchInvalid && row.Project == "acme" && row.Name == fault.Error() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("refresh lacks walk error: %#v; %s", first.Rows, stderr.String())
+	}
+	benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+	if err != nil || len(benches) != 1 || benches[0].Dir != dir || len(faults) != 1 ||
+		faults[0].Error() != fault.Error() {
+		t.Fatalf("walk error cache = %v, %v, %v", benches, faults, err)
+	}
+}
+
+// A repo root whose managed root cannot be resolved still names the directory
+// the walk could not read, so the picker's error row says where to look.
+func TestPickerWorkbenchRefreshNamesUnresolvableRoot(t *testing.T) {
+	_, _, _, values := pickerWorkbenchFixture(t)
+	t.Chdir(t.TempDir())
+	looped := filepath.Join(t.TempDir(), "zeta")
+	if err := os.MkdirAll(looped, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".professor", filepath.Join(looped, ".professor")); err != nil {
+		t.Fatal(err)
+	}
+	none := func([]string) ([]workbench.Bench, []workbench.WalkError) { return nil, nil }
+	if err := refreshWorkbenches(scanRequest{RepoRoots: []string{looped}}, none); err != nil {
+		t.Fatal(err)
+	}
+	_, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+	if err != nil || len(faults) != 1 || faults[0].Root != looped || faults[0].Path != looped ||
+		!strings.Contains(faults[0].Error(), "could not read "+looped+": ") {
+		t.Fatalf("cached faults = %#v, %v; want one naming %s", faults, err, looped)
 	}
 }

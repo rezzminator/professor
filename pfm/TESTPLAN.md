@@ -68,6 +68,44 @@ The compiler is one static-binary surface. `build` may write only generated arti
 
 | flow | safety | expected behavior (source) | regression |
 | --------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Full Scribe workbench manifest resolves its root, title, prefix, key, absolute prompt, engine and effort | JAIL | `internal/workbench/manifest.go` | `internal/workbench/manifest_test.go: TestLoadFullManifest` |
+| Workbench manifest defaults to directory title, generated prefix and Claude | JAIL | `internal/workbench/manifest.go` | `internal/workbench/manifest_test.go: TestLoadDefaults` |
+| Each invalid workbench field/prompt yields the exact path-qualified fault while retaining its key | JAIL | `internal/workbench/manifest.go` | `internal/workbench/manifest_test.go: TestLoadFaults` |
+| Workbench engines retain manifest order; Enables tests membership | JAIL | `internal/workbench/manifest.go` | `internal/workbench/manifest_test.go: TestBenchEnables` |
+| Workbench discovery includes .professor and depths 1–6, skips excluded segments and symlinks | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestDiscoverEligibility` |
+| A workbench inside a nested repository still belongs to the managed root | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestDiscoverNestedRepository` |
+| Repository project labels resolve subdirectories, plain directories, empty roots and linked worktrees | JAIL | `internal/gitroot/gitroot.go` | `internal/gitroot/gitroot_test.go: TestProjectLabelsADirectoryByItsRepository` |
+| A managed root nested in a repository gives its workbench the repository project label | JAIL | `internal/workbench/manifest.go` | `internal/workbench/discover_test.go: TestDiscoverManagedRootNestedInRepository` |
+| Workbench discovery continues past unreadable directories and returns WalkError | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestDiscoverUnreadableDirectory` |
+| Duplicate workbench titles use both directories relative to their project's repository root as keys | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestDiscoverDuplicateTitles, TestDiscoverDuplicateTitlesAcrossManagedRoots` |
+| Workbench Owner and Nearest choose the innermost eligible bench above cwd | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestOwnerAndNearestInnerWins` |
+| Linked-worktree cwd maps to the main checkout before nearest workbench lookup | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestNearestMapsLinkedWorktree` |
+| A workbench manifest without a managed ancestor does not establish ownership | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestNearestNeedsManagedRoot` |
+| ManagedRoots deduplicates managed ancestors and reports stat errors | JAIL | `internal/workbench/discover.go` | `internal/workbench/discover_test.go: TestManagedRoots, TestManagedRootsReportsStatError` |
+| ForLaunch New reads the workbench prompt body and carries effort | JAIL | `internal/workbench/persona.go` | `internal/workbench/persona_test.go: TestForLaunchNewPersona` |
+| ForLaunch New refuses an explicitly disabled engine with the manifest edit hint | JAIL | `internal/workbench/persona.go` | `internal/workbench/persona_test.go: TestForLaunchDisabledNew` |
+| ForLaunch Resume of a disabled engine returns the zero persona | JAIL | `internal/workbench/persona.go` | `internal/workbench/persona_test.go: TestForLaunchDisabledResume` |
+| An invalid workbench refuses every engine in New and Resume modes | JAIL | `internal/workbench/persona.go` | `internal/workbench/persona_test.go: TestForLaunchInvalidManifest` |
+| Explicit effort/model precede workbench defaults; empty defaults stay empty | JAIL | `internal/workbench/persona.go` | `internal/workbench/persona_test.go: TestPersonaPrecedence` |
+| OpenCode seat removes only the fleet block, keeps its system array and reports unreadable, blank or reshaped prompts | JAIL | `internal/workbench/opencode_seat.go` | `internal/workbench/opencode_seat_test.go: TestOpenCodeSeatPluginRemovesOnlyTheFleetPrompt` |
+| OpenCode workbench launch resolves recorded, absent, gone and unreadable clone markers | JAIL | `internal/action/persona.go` | `internal/action/persona_test.go: TestExecutorWorkbenchOpenCodeFleetPrompt` |
+| WorkbenchPrefix uppercases letters/digits and falls back to WORKBENCH | JAIL | `internal/naming/workbench.go` | `internal/naming/workbench_test.go: TestWorkbenchPrefix` |
+| NextNumbered fills the first exact positive-number gap, ignoring a suffixed lookalike | JAIL | `internal/naming/workbench.go` | `internal/naming/workbench_test.go: TestNextNumbered` |
+| WorkbenchName reserves live and killed roster names and refuses a roster read failure | JAIL | `internal/chat/workbench_name.go` | `internal/chat/workbench_name_test.go: TestWorkbenchNameReservesLiveAndKilledRosterNames, TestWorkbenchNameReportsRosterFailure` |
+| WorkbenchName outside a bench returns no auto-name | JAIL | `internal/chat/workbench_name.go` | `internal/chat/workbench_name_test.go: TestWorkbenchNameOutside` |
+| Parent Codex/OpenCode builds skip workbench children discovered or explicitly listed | JAIL | `internal/codexgen/project_discovery.go; internal/opencodegen/compiler.go` | `internal/codexgen/project_discovery_test.go: TestWorkbenchParentProjects; internal/opencodegen/opencodegen_test.go: TestOpenCodeWorkbenchParentProjects` |
+| An explicitly listed workbench child produces the own-root build warning | JAIL | `internal/codexgen/project_discovery.go` | `internal/codexgen/project_discovery_test.go: TestWorkbenchParentProjects` |
+| Workbench mirror roots compile local artifacts without writing home commands/skills/prompts | JAIL | `internal/codexgen/compiler.go; internal/opencodegen/compiler.go` | `internal/codexgen/codexgen_test.go: TestWorkbenchRootIgnoresGlobalCommands; internal/opencodegen/opencodegen_test.go: TestOpenCodeWorkbenchHomeFree` |
+| EnsureMirror writes the enabled Codex/OpenCode mirror; Claude needs none | JAIL | `internal/workbench/mirror.go` | `internal/workbench/mirror_test.go: TestEnsureMirror` |
+| EnsureMirror wraps compiler failure with the engine and workbench directory | JAIL | `internal/workbench/mirror.go` | `internal/workbench/mirror_test.go: TestEnsureMirrorFails` |
+| CheckMirror distinguishes current artifacts, first stale problem and compiler failure | JAIL | `internal/workbench/mirror.go` | `internal/workbench/mirror_test.go: TestCheckMirror` |
+| pfm doctor prints workbench ok with engines and prompt; fresh mirrors add no warning | JAIL | `internal/doctor/workbench_checks.go` | `internal/doctor/workbench_checks_test.go: TestWorkbenchDoctorMirrors` |
+| pfm doctor workbench mirror STALE names the first problem and next-launch rebuild; one warning | JAIL | `internal/doctor/workbench_checks.go` | `internal/doctor/workbench_checks_test.go: TestWorkbenchDoctorMirrors` |
+| pfm doctor workbench mirror BROKEN names the compiler error; one failure | JAIL | `internal/doctor/workbench_checks.go` | `internal/doctor/workbench_checks_test.go: TestWorkbenchDoctorMirrors` |
+| pfm doctor invalid workbench prints FAILED and skips mirror checks; one failure | JAIL | `internal/doctor/workbench_checks.go` | `internal/doctor/workbench_checks_test.go: TestWorkbenchDoctorMirrors` |
+| pfm doctor discovery FAILED says whether more benches exist is UNKNOWN | JAIL | `internal/doctor/workbench_checks.go` | `internal/doctor/workbench_checks_test.go: TestWorkbenchDoctorWalkError` |
+| pfm doctor outside a managed root omits workbench lines; root lookup error prints UNREADABLE | JAIL | `internal/doctor/workbench_checks.go; internal/doctor/doctor.go` | `internal/doctor/workbench_checks_test.go: TestWorkbenchDoctorOutsideAndUnreadable, TestWorkbenchDoctorRunWiring` |
+| pfm codex build from a workbench descendant chooses the bench root | JAIL | `cmd/pfm/codex_command.go` | `cmd/pfm/codex_command_test.go: TestCodexBuildInsideWorkbench` |
 | no args → the same interactive picker as `pfm ls` | JAIL+tmux | `main.go`, `attach_jail_test.go` | |
 | unknown subcommand → usage, rc 2 | JAIL | `main.go:62-66` | |
 | `help` / `-h` / `--help` → usage on stdout, rc 0 | JAIL | `main.go:59-61` | |
@@ -379,6 +417,40 @@ A hand-linked `extensions/professor` directory is never loaded on its own: moder
 
 | flow | safety | expected behavior (source) | regression |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------- | ---------- |
+| Managed-root family activity order keeps workbench groups after their parent in directory order | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchFamilyOrder` |
+| Workbench-owned chats carry the bench directory and key; ordinary chats retain their project | JAIL | `internal/compose/project.go; internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchOwnership` |
+| Workbench ✦ row carries its cwd, ownership, primary account and enabled engines with accounts | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchNewRowEngines` |
+| Workbench engines without accounts are filtered while retaining manifest order | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchNewRowEngines` |
+| No account for any enabled workbench engine yields a visible non-addressable error row | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchNoEngineAccount` |
+| A nested managed root joins repository chats; WalkError uses its repository project label | JAIL | `internal/compose/project.go`; `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchNestedManagedRootJoinsRepositoryFamily` |
+| Two clones of one repository keep one group and one ✦ row per bench | JAIL | `internal/workbench/discover.go`; `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchTwoClonesKeepOneGroupPerBench` |
+| Chatless workbenches keep their own group and ✦ row | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchChatlessFamilies` |
+| Picker opened inside a bench prioritizes its managed-root family; top ✦ stays at the managed root | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchOpenedInsideTargetsFamily` |
+| Killed view keeps owned chats and adds neither workbench ✦ nor error rows | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchKilledView` |
+| Discovery WalkError appears as a notice in its managed-root project group | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchWalkError` |
+| Compose without workbenches retains the existing row golden | JAIL | `internal/compose/compose.go` | `internal/compose/golden_test.go` |
+| RepoRoots includes each workbench directory beside managed and ordinary roots | JAIL | `internal/compose/workbench.go` | `internal/compose/workbench_test.go: TestWorkbenchRepoRoots` |
+| Workbench cache round trip reloads both valid/invalid manifests and keeps discovery failures | JAIL | `internal/workbench/cache.go` | `internal/workbench/cache_test.go: TestWorkbenchCacheRoundTrip` |
+| Missing workbench cache is empty; corrupt cache is an error | JAIL | `internal/workbench/cache.go` | `internal/workbench/cache_test.go: TestWorkbenchCacheMissingAndCorrupt` |
+| Workbench cache drops deleted manifests and rereads changed fields/prompts | JAIL | `internal/workbench/cache.go` | `internal/workbench/cache_test.go: TestWorkbenchCacheStaleEntryAndReload` |
+| Cached duplicate workbench titles recalculate directory keys | JAIL | `internal/workbench/cache.go` | `internal/workbench/cache_test.go: TestWorkbenchCacheDuplicateTitles` |
+| First picker frame uses cached benches without discovery; corrupt cache leaves that frame without benches | JAIL | `internal/picker/pipeline.go` | `internal/picker/pipeline_test.go: TestPickerWorkbenchCachedFirstFrame` |
+| First published refresh discovers workbenches and atomically caches them | JAIL | `internal/picker/pipeline.go` | `internal/picker/pipeline_test.go: TestPickerWorkbenchRefreshDiscoversAndCaches` |
+| Picker refresh preserves discovery faults in both cache and rows | JAIL | `internal/picker/pipeline.go` | `internal/picker/pipeline_test.go: TestPickerWorkbenchRefreshWalkErrors` |
+| Fleet workbench cache loading is opt-in; plain scans retain existing rows | JAIL | `internal/fleet/scan.go` | `internal/fleet/scan_test.go: TestResolveEnvWorkbenchCacheOptIn` |
+| Top and bench ✦ rows retain their positions, with the bench row immediately after its header | JAIL | `internal/ui/workbench_rows.go; internal/ui/listpanel.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchLaunchRowsKeepGroupPosition` |
+| Top ✦ carousel cycles its global engines independently of workbench rows | JAIL | `internal/ui/workbench_rows.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchTopCarousel` |
+| Workbench carousel renders only its engines, falling back to its first when the global engine is absent | JAIL | `internal/ui/workbench_rows.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchCarouselAndEffectiveEngine` |
+| Workbench Enter uses the effective Codex/Claude engine, account, cwd and ownership | JAIL | `internal/ui/workbench_rows.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchEnterEngine` |
+| Workbench account cycling uses the effective engine | JAIL | `internal/ui/workbench_rows.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchAccountCycleUsesEffectiveEngine` |
+| Invalid workbench renders red WORKBENCH notice, inert Enter and cannot-launch dossier purpose | JAIL | `internal/ui/deckrow.go; internal/ui/dossier.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchInvalidNotice` |
+| Kill on workbench error notice names the refusal | JAIL | `internal/ui/model.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchInvalidKillRefused` |
+| Equal name prefixes fold within each workbench, separately from ordinary rows | JAIL | `internal/ui/model.go; internal/ui/listpanel.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchNameGroupsStayWithOwner` |
+| Ordinary colon-name folds still cluster across projects | JAIL | `internal/ui/model.go` | `internal/ui/model_name_groups_test.go: TestColonNameGroupsClusterAcrossProjects` |
+| Workbench ✦ dossier names the effective engine, directory and workbench prompt | JAIL | `internal/ui/dossier.go` | `internal/ui/workbench_rows_test.go: TestWorkbenchDossierLaunchPurpose` |
+| Width-80 workbench render matches its ANSI golden | JAIL | `internal/ui/golden_test.go` | `internal/ui/golden_test.go: TestRenderGoldens; testdata/golden/ui_workbench_80.ansi` |
+| Killed workbench/plain groups with equal prefixes each retain their banner and fold label | JAIL | `internal/ui/listpanel.go` | `internal/ui/listpanel_test.go: TestNameGroupsSharingAPrefixKeepTheirOwnBanners` |
+| Two killed workbench groups with equal prefixes each retain their banner and fold label | JAIL | `internal/ui/listpanel.go` | `internal/ui/listpanel_test.go: TestNameGroupsSharingAPrefixKeepTheirOwnBanners` |
 | chat-row carousel is `open → reboot → kill → deactive` (the 1h cache is the header toggle `⌃E`, never a row action); `⌃T` is unbound | JAIL | `ui/model_test.go`, `ui/carousel_boxes_test.go` | |
 | Project groups keep their natural order; retired `⌃R` is a no-op | JAIL | `ui/model_test.go` | |
 | `⌃X` persists the kill immediately; a live row is ended and demoted | JAIL+tmux | `ui/model.go`, `internal/picker/picker.go` | B3 |
@@ -557,8 +629,39 @@ Each row is one **session kind** crossed with the operations that touch it. This
 
 | flow | safety | expected behavior (source) | regression |
 | -------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------- | ---------- |
+| Workbench picker ✦ NewClaude carries system prompt, effort, model and numbered name | JAIL | `internal/action/synth.go` | `internal/action/persona_test.go: TestSynthesizeWorkbenchPersona` |
+| Workbench picker ResumeClaude carries resume identity, prompt and effort | JAIL | `internal/action/synth.go` | `internal/action/persona_test.go: TestSynthesizeWorkbenchPersona` |
+| Workbench Agent row carries the manifest prompt on resume | JAIL | `internal/action/synth.go` | `internal/action/persona_test.go: TestSynthesizeWorkbenchPersona` |
+| Workbench ResumeCodex inserts model, effort and developer instructions before resume | JAIL | `internal/action/synth.go` | `internal/action/persona_test.go: TestSynthesizeWorkbenchPersona` |
+| Workbench NewOpenCode carries plugin config and system-file environment | JAIL | `internal/action/synth.go; internal/action/persona.go` | `internal/action/persona_test.go: TestSynthesizeWorkbenchPersona` |
+| Workbench ResumeOpenCode carries the same plugin/system-file environment before session args | JAIL | `internal/action/synth.go` | `internal/action/persona_test.go: TestSynthesizeWorkbenchPersona` |
+| Workbench NewCodex picker line retains cx; CodexLaunch applies the persona | JAIL | `internal/action/synth.go; internal/hookentry/codex_launch.go` | `internal/action/persona_test.go: TestSynthesizeWorkbenchPersona; cmd/pfm/internal_codex_launch_test.go: TestCodexLaunchWorkbench` |
+| Non-workbench synthesis retains existing command bytes | JAIL | `internal/action/synth.go` | `internal/action/golden_test.go: TestGoldenCommandLines` |
+| Dead workbench chat resume carries the prompt through Executor.Open and OpenDetached | JAIL | `internal/action/persona.go; internal/action/executor.go; internal/action/open_detached.go` | `internal/action/persona_test.go: TestExecutorWorkbenchPersona` |
+| Invalid manifest refuses both executor doors before chat server creation | JAIL | `internal/action/persona.go` | `internal/action/persona_test.go: TestExecutorWorkbenchRefusals` |
+| Every persona door carries the manifest effort through its engine's roster, lower-cased; an unknown effort refuses before spawn | JAIL | `internal/action/persona.go; internal/hookentry/launch.go; internal/hookentry/codex_launch.go; internal/agentopen/real.go; cmd/pfm/chat_satellite_command.go` | `internal/action/persona_test.go: TestExecutorWorkbenchPersona, TestExecutorWorkbenchUnknownEffort; internal/hookentry/launch_test.go: TestLaunchWorkbench; cmd/pfm/internal_codex_launch_test.go: TestCodexLaunchWorkbench; internal/agentopen/real_test.go: TestExecCommandsResumeWorkbench; cmd/pfm/chat_branch_inherit_test.go: TestChatBranchWorkbench` |
+| Disabled New engine refuses both executor doors; disabled Resume uses zero persona | JAIL | `internal/action/persona.go` | `internal/action/persona_test.go: TestExecutorWorkbenchRefusals, TestExecutorWorkbenchDisabledResume` |
+| Executor Codex resume builds bench AGENTS.md before creating the server; mirror failure refuses | JAIL | `internal/action/persona.go; internal/workbench/mirror.go` | `internal/action/persona_test.go: TestExecutorWorkbenchPersona, TestExecutorWorkbenchRefusals` |
+| Executor OpenCode builds mirror and stages the plugin; plugin write failure refuses | JAIL | `internal/action/persona.go; internal/workbench/opencode_seat.go` | `internal/action/persona_test.go: TestExecutorWorkbenchPersona, TestExecutorWorkbenchRefusals; internal/workbench/opencode_seat_test.go` |
+| Workbench Claude picker launch reserves the next live/killed roster name; read error refuses | JAIL | `internal/chat/open.go` | `internal/chat/open_test.go: TestOpenWorkbenchLaunchName, TestOpenWorkbenchRosterFailure` |
+| Workbench Codex/OpenCode picker launch does not allocate a Claude numbered name | JAIL | `internal/chat/open.go` | `internal/chat/open_test.go: TestPrepareOpenWorkbenchNonClaudeName` |
+| Gone workbench cwd refuses open and detached open; ordinary missing cwd keeps its fallback | JAIL | `internal/chat/open.go` | `internal/chat/open_test.go: TestOpenGoneWorkbench` |
+| Bare claude and internal launch/claude-launch apply workbench persona to new sessions | JAIL | `internal/hookentry/launch.go; internal/action/synth.go` | `internal/hookentry/launch_test.go: TestLaunchWorkbench; internal/action/synth_test.go: TestLauncherRunAsWorkbench` |
+| Bare claude resume carries workbench prompt and effort | JAIL | `internal/hookentry/launch.go` | `internal/hookentry/launch_test.go: TestLaunchWorkbench` |
+| Bare Claude explicit effort/system prompt wins once over manifest values | JAIL | `internal/claudelaunch/render.go; internal/hookentry/launch.go` | `internal/hookentry/launch_test.go: TestLaunchWorkbench; internal/claudelaunch/render_test.go: TestRenderExplicitPersonaFlags` |
+| Bare Claude invalid manifest or disabled New engine refuses before exec | JAIL | `internal/hookentry/launch.go` | `internal/hookentry/launch_test.go: TestLaunchWorkbench` |
+| Bare Claude disabled Resume engine uses fleet prompt; outside launches retain their policy | JAIL | `internal/hookentry/launch.go` | `internal/hookentry/launch_test.go: TestLaunchWorkbench` |
+| Launcher explicit model/effort/system prompt flags, including equals forms, override defaults | JAIL | `internal/claudelaunch/render.go` | `internal/claudelaunch/render_test.go: TestRenderExplicitPersonaFlags` |
+| Explicit bare Claude system prompt suppresses the default professor prompt | JAIL | `internal/claudelaunch/render.go` | `internal/claudelaunch/render_test.go: TestRenderExplicitDefaultPrompt` |
+| Bare cx New builds its mirror and inserts manifest model/effort/developer instructions | JAIL | `internal/hookentry/codex_launch.go` | `cmd/pfm/internal_codex_launch_test.go: TestCodexLaunchWorkbench` |
+| Bare cx Resume/fork inserts persona flags before the subcommand | JAIL | `internal/hookentry/codex_launch.go` | `cmd/pfm/internal_codex_launch_test.go: TestCodexLaunchWorkbench` |
+| Bare cx explicit model, effort and developer instructions win over each manifest field | JAIL | `internal/hookentry/codex_launch.go` | `cmd/pfm/internal_codex_launch_test.go: TestCodexLaunchWorkbench` |
+| Bare cx disabled New engine and mirror failures refuse; disabled Resume uses fleet policy | JAIL | `internal/hookentry/codex_launch.go` | `cmd/pfm/internal_codex_launch_test.go: TestCodexLaunchWorkbench` |
+| Bare cx administrative commands pass through without workbench persona/refusal | JAIL | `internal/hookentry/codex_launch.go` | `cmd/pfm/internal_codex_launch_test.go: TestCodexLaunchWorkbench` |
+| agent-open resumes on workbench prompt/effort and refuses an invalid manifest | JAIL | `internal/agentopen/real.go` | `internal/agentopen/real_test.go: TestExecCommandsResumeWorkbench` |
+| chat open, MCP chat_open and reminder resume routes share the prepared executor persona | JAIL | `internal/chat/open.go; internal/action/persona.go` | `internal/action/persona_test.go: TestExecutorWorkbenchPersona, TestExecutorWorkbenchRefusals` |
 | `NewClaude` → native `ClaudeSpawn` policy and `tmux new-session` | JAIL | `action.Synthesize`, `action.ClaudeSpawn` | `internal/action/native_new_claude_test.go` |
-| Every Claude launch (interactive, resume, probe, query, shim, headless) renders `claudelaunch` settings, environment, hooks and MCP for that invocation. `--settings` carries the resolved output style and optional account theme; the professor prompt comes from `{clone}/pfm/harness-prompts/composed/claude.md`. Codex and OpenCode use their own launch policy | JAIL | `internal/claudelaunch/render.go`, `internal/action/claude_spawn.go`, `internal/headless/run/run.go` | `internal/action/output_style_settings_test.go`, `internal/headless/run/output_style_settings_test.go` |
+| Every Claude launch (interactive, resume, probe, query, shim, headless) renders `claudelaunch` settings, environment, hooks and MCP for that invocation. `--settings` carries the resolved output style and optional account theme; the default professor prompt comes from `{clone}/pfm/harness-prompts/composed/claude.md`, with explicit or workbench prompts taking precedence. Codex and OpenCode use their own launch policy | JAIL | `internal/claudelaunch/render.go`, `internal/action/claude_spawn.go`, `internal/headless/run/run.go` | `internal/action/output_style_settings_test.go`, `internal/headless/run/output_style_settings_test.go` |
 | `NewCodex` → `(cd -- <cwd> && cx)` | JAIL | `action/synth.go:94-98` | |
 | `tmux.titles.enabled` (default true) and `nameSync.interval` (Go duration, minimum 1m floor, default 15m) load, validate, round-trip through `Marshal`, and show up in `pfm config show` with their source | JAIL | `internal/config/config.go`, `internal/config/tmux_titles_test.go`, `internal/config/name_sync_test.go`, `cmd/pfm/config_command_test.go` | issue #14 F10/F12 |
 | `doctor.ignoreWarnings` (array of doctor warning IDs, default empty) loads with its source and a malformed ID is a load error naming its index; every VS Code doctor warning carries an ID (`vscode-inspect`, `vscode-link`, `vscode-index`, `vscode-settings`) and ends with a hint naming the ID, the key and the resolved config path; an ignored ID prints its row `IGNORED (doctor.ignoreWarnings)` and leaves the warning tally; an unknown ID is itself a warning and silences nothing | JAIL | `internal/config/doctor_test.go` (`TestDoctorIgnoreWarningsLoadsAndValidatesAtLoad`), `internal/doctor/warning_ids_test.go` (`TestWarningFilterHintsIgnoresAndRejectsUnknownIDs`), `internal/doctor/vscode_test.go` (`TestDoctorVSCodeWarningsCarryIDsAndHonourIgnoreWarnings`) | |
@@ -593,6 +696,12 @@ Each row is one **session kind** crossed with the operations that touch it. This
 
 | flow | safety | expected behavior (source) | regression |
 | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| chat_new without name inside a workbench allocates its numbered name and dispatches cwd | JAIL | `internal/mcpserv/actions.go` | `internal/mcpserv/server_chat_new_test.go: TestChatNewWorkbench` |
+| chat_new outside a workbench or without cwd/caller requires name and dispatches nothing on error | JAIL | `internal/mcpserv/actions.go` | `internal/mcpserv/server_chat_new_test.go: TestChatNewWorkbench` |
+| chat_new with an explicit name preserves its dispatch args | JAIL | `internal/mcpserv/actions.go` | `internal/mcpserv/server_chat_new_test.go: TestChatNewWorkbench` |
+| chat_new omits a disabled caller engine so the CLI selects the bench engine; enabled caller engine is forwarded | JAIL | `internal/mcpserv/actions.go` | `internal/mcpserv/server_chat_new_test.go: TestChatNewWorkbench` |
+| chat_new auto-name reports roster read failure instead of inventing a name | JAIL | `internal/mcpserv/actions.go` | `internal/mcpserv/server_chat_new_test.go: TestChatNewWorkbench` |
+| chat_new schema makes name optional and its description states the workbench condition | JAIL | `internal/mcpserv/types.go; internal/mcpserv/server.go` | `internal/mcpserv/server_chat_new_test.go: TestChatNewWorkbenchNameSchema` |
 | Tool roster is exactly the canonical `ToolNames()` set with correct read-only / mutating annotations | JAIL | `mcpserv/server.go`, `mcpserv/workflow_roster_test.go` | |
 | `chat_new` passes `agentRole` as `--agent-role`; its description routes every chat or model run here within the 600-rune budget, its example call names only schema fields, and every schema field is described | JAIL | `mcpserv/actions.go` (`chatNew`), `mcpserv/types.go` (`NewInput`), `mcpserv/server_chat_new_test.go` | |
 | `mcp ls` reports each registered server's independent enabled state and source | JAIL | `main.go`, `config_cli_test.go`, `internal/config/config_test.go` | |
@@ -624,6 +733,31 @@ Each row is one **session kind** crossed with the operations that touch it. This
 
 | flow | safety | expected behavior (source) | regression | Coverage |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------- | ----------------------- | --- |
+| chat new inside a workbench auto-names the first seat and carries prompt/effort without a harness record | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new workbench auto-name advances over existing roster names | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new explicit effort precedes the workbench default | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new explicit harness precedes the bench prompt and is recorded per socket | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new omitted engine keeps the caller engine when the bench enables it | JAIL+tmux | `cmd/pfm/chat_new_command.go; internal/workbench/engine_pick.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench; internal/workbench/engine_pick_test.go: TestPickEngine` | |
+| chat new omitted disabled caller engine falls back to the first enabled engine with an account | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new bench with no usable enabled account refuses rc 2 before spawning | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new explicit disabled engine refuses rc 2 with the manifest edit hint | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new invalid workbench manifest refuses rc 2 even with an explicit name | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new outside a bench still requires a name; workbench roster error refuses rc 1 | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| chat new Codex carries the bench developer instructions and builds AGENTS.md first; failure refuses rc 2 | JAIL+tmux | `cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| Claude role seat composes role onto the bench base prompt | JAIL+tmux | `internal/agentrole/base_prompt.go; cmd/pfm/chat_new_command.go` | `cmd/pfm/chat_new_workbench_test.go: TestChatNewWorkbench` | |
+| Codex role seat composes the bench prompt then separator then role body | JAIL | `internal/agentrole/agentrole.go` | `internal/agentrole/agentrole_test.go: TestWorkbenchRoleAndReload` | |
+| Role seat outside workbenches keeps the fleet base | JAIL | `internal/agentrole/base_prompt.go` | `internal/agentrole/agentrole_test.go: TestWorkbenchRoleAndReload; internal/agentrole/base_prompt_test.go: TestBasePrompt` | |
+| Reload without role resolves Claude prompt path or Codex body from the bench | JAIL | `internal/agentrole/agentrole.go` | `internal/agentrole/agentrole_test.go: TestWorkbenchRoleAndReload` | |
+| Reload rewrites an existing role seat using the bench base | JAIL | `internal/agentrole/agentrole.go` | `internal/agentrole/agentrole_test.go: TestWorkbenchRoleAndReload` | |
+| Reload prompt resolution uses fleet for a disabled engine and refuses an invalid manifest | JAIL | `internal/agentrole/agentrole.go` | `internal/agentrole/agentrole_test.go: TestWorkbenchRoleAndReload` | |
+| Reload carries workbench effort; explicit effort wins | JAIL | `internal/reload/workbench.go` | `internal/reload/workbench_test.go: TestReloadWorkbench` | |
+| Reload Codex carries workbench model/effort and builds the mirror; failure returns its error | JAIL | `internal/reload/workbench.go` | `internal/reload/workbench_test.go: TestReloadWorkbench` | |
+| Reload outside a bench or on a disabled engine preserves the request | JAIL | `internal/reload/workbench.go` | `internal/reload/workbench_test.go: TestReloadWorkbench` | |
+| Reload invalid manifest refuses before pane locking or tmux calls | JAIL | `internal/reload/reload.go; internal/reload/workbench.go` | `internal/reload/workbench_test.go: TestReloadWorkbenchInvalidBeforePaneLock` | |
+| Claude branch carries workbench prompt/effort and keeps the inherited parent model | JAIL | `internal/action/headless.go; cmd/pfm/chat_satellite_command.go` | `internal/action/headless_fork_test.go: TestHeadlessForkWorkbench; cmd/pfm/chat_branch_inherit_test.go: TestChatBranchWorkbench` | |
+| Claude branch without a parent model takes the bench model | JAIL | `internal/action/headless.go` | `internal/action/headless_fork_test.go: TestHeadlessForkWorkbench` | |
+| Codex branch carries workbench model/effort/developer instructions before fork; mirror failure refuses | JAIL | `internal/action/headless.go; cmd/pfm/chat_satellite_command.go` | `internal/action/headless_fork_test.go: TestHeadlessForkWorkbench; cmd/pfm/chat_branch_inherit_test.go: TestChatBranchWorkbench` | |
+| Branch invalid manifest refuses before spawning; outside benches keeps the existing command | JAIL | `cmd/pfm/chat_satellite_command.go; internal/action/headless.go` | `cmd/pfm/chat_branch_inherit_test.go: TestChatBranchWorkbench; internal/action/headless_fork_test.go: TestHeadlessForkWorkbench` | |
 | root `whoami [--label]` → this chat's immutable socket identity or display label | JAIL+tmux | `whoami_command.go`, `whoami_test.go` | | |
 | `chat new NAME` → detached chat on a fresh immutable `cc-*`/`cx-*` socket | JAIL+tmux | `chat_new_command.go`, `chat_new_jail_test.go` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
 | `chat ls --all` lists a newly created live chat and stops listing it after `chat end` | JAIL+tmux | `cmd/pfm/chat_satellite_command.go`, `internal/picker/picker.go` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
@@ -829,6 +963,11 @@ The Go action policy owns fresh Claude launches. The binary executes selected ac
 16. Actual Claude and Codex transcript shapes for multi-turn `chat new --await`, `ask`, timeout and read; mock E1/E2 cover pfm's handling of their fixture transcripts.
 17. Codex `/clear` event timing and payload session id.
 18. A chat spawned through `pfm-mcp.service` surviving a real user-manager restart.
+
+**Workbench engine gaps:**
+
+1. **UNPLAYED** — Real Codex honouring the workbench `developer_instructions` and its mirror’s skills; fixtures prove argv and mirror artifacts.
+2. **UNPLAYED** — Real OpenCode merging the workbench prompt's `instructions` entry and running the seat plugin's `experimental.chat.system.transform`; Node fixtures prove the plugin on OpenCode 1.18.18's system shape, Go fixtures the environment and staging.
 
 **Claude process and UI gaps:**
 

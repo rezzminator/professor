@@ -19,6 +19,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 // ExecCommands is the production command boundary. Every Claude invocation it
@@ -92,6 +93,10 @@ func (commands ExecCommands) QueryAgents(ctx context.Context, configName string)
 }
 
 func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id string, cache1H bool) error {
+	persona, err := action.WorkbenchPersona(cwd, pfmengine.Claude, workbench.Resume)
+	if err != nil {
+		return fmt.Errorf("resume agent session: %w", err)
+	}
 	account, err := commands.accountFor(configName)
 	if err != nil {
 		return fmt.Errorf("resume agent session: %w", err)
@@ -114,6 +119,7 @@ func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id str
 		Purpose: claudelaunch.PurposeResume,
 		Account: account, Cache1H: &cache1H, Resume: id, Name: label,
 		Home: commands.Home, Machine: commands.Machine,
+		PromptFile: persona.Prompt, Effort: persona.Effort, Model: persona.Model,
 	}.Command(ctx)
 	if err != nil {
 		return fmt.Errorf("resume agent session: %w", err)

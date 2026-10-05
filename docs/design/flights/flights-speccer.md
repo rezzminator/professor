@@ -70,7 +70,7 @@ Only the first item is required. Whatever is absent, `flights-speccer` derives f
 | Boundaries: out of scope, files another owner holds | No task touches them |
 | Standing rules the executors work under | Specs stay inside them. The project's contract (the `CLAUDE.md` files) reaches every executor from the harness, and the flight's own rules (worktree, fence, checks, cap) travel in the dispatcher's brief; a task file carries neither, even when a caller's rule asks for them there |
 | The [testing manual](testing-manual.md) of each project touched | Opened at intake: Tiers, Where a test lives, Lanes and registries, Gates and floors, the removal clause of What not to test. Its facts enter a task as `Decisions`, `Files` and `Done when` lines — a test row names its tier, `Files` lists the test home and every registry file — and the manual is never a `reads` entry. A project without one is a `NOTES` line |
-| The flight directory | One directory under `$HOME/.local/state/pfm/flights/{project}/`; `flights-speccer` writes everything there and nowhere else |
+| The flight directory | One directory under `$HOME/.local/state/pfm/flights/{project}/`; `flights-speccer` writes everything there, and [its manual](#the-speccers-manual) beside it, and nowhere else |
 
 ### What a spec never restates
 
@@ -79,6 +79,10 @@ Anything the [executor](flights-executors.md) or the [lander](flights-lander.md)
 ### Layout laws at design time
 
 Four laws of `/quality:llm-codebase` bind when tasks are cut, and live in the Design phase: a task cuts along a unit of change, never across one; the unit's fixed file set decides `Files`; no new hand-kept parallel list and no directory named by negation, a registry being a hot file; a change crossing a wire boundary starts at the contract package's consumer index, and `needs` follows it. The laws that bind while a file is written live in the executor.
+
+### The speccer's manual
+
+`$HOME/.local/state/pfm/flights/{project}/speccer-manual.md`, beside the project's flight directories: in the flights state root, outside the repository, so the git-read-only speccer writes it and no guard or docs-ownership rule reaches it. It holds the static facts that barely change, each with its path: the build units (each with its own testing manual) and their inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. `/flights:init` writes it; `flights-speccer` reads it at intake when present, writes it from its map phase when absent, and rewrites every line it finds wrong. The code wins over it, and it is never a source of shapes: a shape is always pasted from output the run printed.
 
 ### The model by round
 
@@ -101,12 +105,14 @@ Each reader reads only its own artifact, and nothing is stated twice.
 ## The spec directory
 
 ```text
-$HOME/.local/state/pfm/flights/{project}/{flight}/
-  index.md      one row per task
-  0-{topic}.md  a shared file, only when two or more tasks need the same content
-  1-a.md        a task file: {level}-{letter}.md
-  2-a.md
-  3-a.md  3-b.md  3-c.md
+$HOME/.local/state/pfm/flights/{project}/
+  speccer-manual.md  the speccer's manual, shared by every flight
+  {flight}/
+    index.md      one row per task
+    0-{topic}.md  a shared file, only when two or more tasks need the same content
+    1-a.md        a task file: {level}-{letter}.md
+    2-a.md
+    3-a.md  3-b.md  3-c.md
 ```
 
 - One task file is one task, one fresh executor and one outcome.
@@ -146,10 +152,10 @@ Frontmatter carries `id`, `title`, `rating`, `needs`, `shares`, `reads` and `fil
 | Section | Holds | Prevents |
 | --- | --- | --- |
 | `Goal` | The deliverable and why it exists, two sentences at most, then a `Never:` line: what is out of scope and which approaches are forbidden | An executor wandering before it knows the finish line, or past the fence |
-| `Done when` | A matrix of scenarios (scenario · input or state · expected behaviour · error handling), then Given/When/Then lines for what the matrix cannot hold; behaviour only, never a command; the flight's own checks (the full suite, the static gate, "the flight green") are the gate's, never a task's | A task with no finish line; an acceptance command predicted for code that does not exist yet; a "make the whole flight green" task that runs the gate's checks a second time |
+| `Done when` | A matrix of scenarios (scenario · input or state · expected behaviour · error handling), then Given/When/Then lines for what the matrix cannot hold; every row carries a concrete example in real values the speccer decides: a unit row `call(args) → result` (errors `→ throws X` or `→ error {…}`), an integration row `given … / when … / then …` at the project's real entry and exit; behaviour only, never a command; the flight's own checks (the full suite, the static gate, "the flight green") and the testing manual's floors are the lander's gate, never a task's | A task with no finish line; a test whose values drift from the decided contract; an acceptance command predicted for code that does not exist yet; a "make the whole flight green" task that runs the gate's checks a second time |
 | `Progress dependency` | What the needed tasks must have landed | A whole directory drifting on a false premise |
 | `Files` | Every file created, edited or deleted, with its action; a rename or deletion lists every reference, docs and tests included; the gate-owned data the change trips (line baselines, exemption lists, codegen outputs, mirrored or twin tests, a test home already at its line ceiling); every hit of the caller sweep lands here, in a later task's `Files` under a `Temporary reds` line, or in a Decisions line stating it out of scope | Out-of-scope edits, half-finished renames and deletions, a gate tripped by a file nobody listed |
-| `Decisions` | Every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text; `Temporary reds: {test ids} · green by {task id}`, written only by the speccer, for tests this task leaves red that a later task turns green; `External need: {flight directory} {id}` for another flight's output, dispatched on once that flight's `run.md` shows the id `DONE` | The executor re-deciding the design |
+| `Decisions` | Every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text; `Temporary reds: {test ids} · green by {task id}`, written only by the speccer, for tests this task leaves red that a later task turns green; when one project's work spans several tasks, its first task carries the project's integration examples and writes their test red under this line, green by the project's last task; `External need: {flight directory} {id}` for another flight's output, dispatched on once that flight's `run.md` shows the id `DONE` | The executor re-deciding the design |
 | `Shapes` | `EXISTING`: what the executor types against, quoted with its file path. `NEW`: what the task creates, by name, inputs, outputs and behaviour | Re-reading the code to learn a shape |
 | `Steps` | Numbered in the order they run, inside-out; each names the file, the place as a quoted line of code, and the change as behaviour; none re-breaks or mutates working code to watch a red, and a new gate proves its bite on a fixture in `Files` | The executor assembling an order from scattered constraints; working code broken to stage a proof |
 | `Execution judgments` | Every implementation call left to the executor | A hidden hole; it also computes the rating |
@@ -158,7 +164,7 @@ Reuse targets and the target directory's conventions are `EXISTING` shapes: a he
 
 A task file instructs and never argues. After its research `flights-speccer` holds the reasons, the rejected options and the history; an executor needs none of them and would re-read them on every call. They stay with `flights-speccer`, and the `NOTES` lines of the return are the only place a reason travels.
 
-`Done when` is data, not a script. Each matrix row and each Given/When/Then line is an assertion the executor turns into a test (tests carried in the spec measured large gains in pass rate in the published ablations, with no failing-test loop needed). An exact command with predicted output, written for code that does not exist, is a guess that reads as verified; an executor rightly refuses to rewrite its own acceptance line, so each wrong guess stops the flight. How a row is proven, and what a row read two ways does, live in the executor's body, never as lines in a task file: a row read two ways takes the reading today's code supports, named in the return, and `SPEC-DRIFT` only when neither reading settles it and they build different code. The project's standing checks (the test suite, the linter) arrive through a `0-` file or the dispatcher's brief.
+`Done when` is data, not a script. Each matrix row and each Given/When/Then line is an assertion the executor turns into a test (tests carried in the spec measured large gains in pass rate in the published ablations, with no failing-test loop needed); the test keeps its example's inputs and expected values exactly, and only the test framework's idiom is the executor's own. An example states the contract the speccer decides. An exact command with predicted printed output, written for code that does not exist, is a guess that reads as verified, and stays banned; an executor rightly refuses to rewrite its own acceptance line, so each wrong guess stops the flight. How a row is proven, and what a row read two ways does, live in the executor's body, never as lines in a task file: a row read two ways takes the reading today's code supports, named in the return, and `SPEC-DRIFT` only when neither reading settles it and they build different code. The project's standing checks (the test suite, the linter) arrive through a `0-` file or the dispatcher's brief.
 
 ## Altitude: what is pinned, what is described
 
@@ -176,7 +182,7 @@ Pin what crosses a boundary; describe what stays inside one.
 - `flights-speccer` has no compiler, so every invented detail is a chance to be wrong, and an early wrong detail bends every task after it. At a boundary it either copies what exists or defines something new, which keeps it where it is reliable.
 - A place is a file path plus a quoted line of code. A quote survives edits by other tasks and fails loudly when stale, because the search finds zero matches or two. The path is the executor's fallback when the quote has moved.
 - A task that depends on an earlier task names what that task creates by its decided name and signature; it never quotes code an earlier task is about to change.
-- Exact text appears only where `flights-speccer` copied it from the code or saw a command print it during the run. A command, a flag, an exit code or an output it has not observed is written as intent. A shape or a literal written from memory is a defect: precision that was never run reads as verified. A value a run printed about its data — a count, a selection size, an id — is evidence for the return, never a `Done when` row: the state a run sees is dynamic, and a row written from one run is a coincidence written as a contract.
+- Exact text appears only where `flights-speccer` copied it from the code or saw a command print it during the run. A command, a flag, an exit code or an output it has not observed is written as intent. A shape or a literal written from memory is a defect: precision that was never run reads as verified. A value a run printed about its data — a count, a selection size, an id — is evidence for the return, never a `Done when` row, whose example values are decided, never observed: the state a run sees is dynamic, and a row written from one run is a coincidence written as a contract.
 
 ## Rating
 
@@ -197,8 +203,8 @@ The rating picks the executor: `mechanical` → `flights-mechanical-executor`, `
 
 Seven phases, each producing one thing. The order keeps `flights-speccer`'s own context small: the first reading of an area goes to probes, the design is settled before any shape is collected, and writing comes last. A phase with nothing to ask is skipped; a one-task flight whose caller supplied the maps runs intake, design, one shapes round and write.
 
-1. Intake. No reading. The input becomes a numbered list of requested changes, and the absent inputs are noted.
-2. Map, probe round one. `tracer` probes, as many as the speccer judges, all in one message, each handed the repo root and numbered questions; test homes, the check command and the verbatim lines to paste come back unasked, and a `NOT READ` is asked again or read, never taken as a fact (an experiment: see Open items). A removal or a rename adds one probe that returns every place mentioning the thing. What the caller handed over is not asked again.
+1. Intake. No reading beyond [the speccer's manual](#the-speccers-manual), when present. The input becomes a numbered list of requested changes, and the absent inputs are noted.
+2. Map, probe round one. `tracer` probes, as many as the speccer judges, all in one message, each handed the repo root and numbered questions; test homes, the check command and the verbatim lines to paste come back unasked, and a `NOT READ` is asked again or read, never taken as a fact (an experiment: see Open items). A removal or a rename adds one probe that returns every place mentioning the thing. What the caller handed over is not asked again. With no manual, the speccer writes it from these maps.
 3. Design. Per change: mechanism, placement, names, the contracts that cross a boundary, failure behaviour, the outcome. Two rules. Right-size: the smallest design that delivers the numbered changes; every mechanism names the change it serves, a pattern borrowed from a reference is scaled to the project borrowing it, and what `flights-speccer` finds wise but nobody asked for is one line in the return's notes, never a task. Reuse: look for a similar problem this codebase already solves, follow its pattern, reuse whatever exists, and invent nothing that already exists. A decision a human would want the chance to overrule also gets one notes line; it is still decided.
 4. Form tasks, as laid out below. It follows design because `needs` edges come from who creates and who consumes each contract.
 5. Collect shapes. Only after the design is it known which existing shapes each executor types against; quoting before designing means quoting everything. The tracers' fenced verbatim lines are shapes already and are pasted as they stand. What is still missing, and only the lines a task will quote, never a whole file, the speccer reads itself by line range, or sends to `collector` when many shapes sit in files it has not read. A mandated `codeprobe.py collect` plan was measured and dropped: 2 of 72 speccer runs used it, because 586 of the 631 reads in one flight's runs came before the first task file, so the text was already in context; in a matched test on 21 real orders a plan cost about 20% more money and context than reading the ranges directly, at the same fidelity. Measured on the tracer replay: a phase 5 that re-ordered everything, 14 whole files among it, wrote 4,363 lines, of which 11% reached the task files and half of those the tracers had already returned; reading it was about a quarter of the speccer's tokens. A shape in a task file is copied, never typed from memory; the caller's maps give direction, never a quote.
@@ -213,12 +219,14 @@ The map budget is also what keeps `flights-speccer` cheap to wake: every report 
 
 ### Forming tasks
 
-A task is one goal: one cohesive change, even when it spans layers and files. Two tasks exist only where two top-level deliverables could each be reviewed, tested and merged without the other. Verbs, "and"s and noun phrases are never counted, and the layers of one goal are never split: "add the export button and show its progress" is one task; "add the export button, move auth to tokens, and build the admin page" is three. Joining is the default and a cut has to pay for itself, because every cut costs twice: the fixed price of one more task, and one more in-between state of the code that never ships and still has to be designed correctly.
+A task is one goal of one project: one cohesive change, even when it spans layers and files inside it. Two tasks exist only where two top-level deliverables could each be reviewed, tested and merged without the other. Verbs, "and"s and noun phrases are never counted, and the layers of one goal are never split: "add the export button and show its progress" is one task; "add the export button, move auth to tokens, and build the admin page" is three. Joining is the default and a cut has to pay for itself, because every cut costs twice: the fixed price of one more task, and one more in-between state of the code that never ships and still has to be designed correctly.
+
+A goal that spans several projects — build units, each with its own testing manual — becomes one task per project, ordered inside-out by dependency. The shared contract between the projects comes first, and its task owns the contract and every output generated from it in the consumer projects (generated types, vendored copies). Every other project's task `needs` only the contract task, and those tasks run in parallel against the contract; a project `needs` another project's task only when it uses that task's code beyond the contract. The order is derived every run from the map and [the speccer's manual](#the-speccers-manual), never fixed in this design.
 
 1. List every requested change with what it touches (files and shared resources) and what it needs to exist first.
-2. Start from one task holding every change.
+2. Start from one task per project, holding that project's changes.
 3. Cut only for a reason: the parts can run at the same time and the flight finishes sooner, or the task is too large for one executor (more than 15 files or about 25 steps). Cut only on a condition: each piece's outcome can be verified on its own. Pieces of a too-large task still overlap, so they form a chain, each needing the one before.
-4. Absorb: a piece under about 5 files or 8 steps joins a neighbour, unless it runs beside something.
+4. Absorb: a piece under about 5 files or 8 steps joins a neighbour in its project, unless it runs beside something.
 5. No filler: no task exists only to keep the state between two other tasks tidy, and none for work nobody asked for.
 6. Extract hot files: a file nearly every parallel task would add a line to (a registry, a routes table, a barrel) gets all its edits in one task, placed before the others when they need it and after them when they do not.
 7. Relate: `needs` when a task uses what another creates; `shares` when tasks contend for a resource and either order works. Contention written as `needs` forces an order nobody requires and stops a free slot from taking whichever task is ready. A `shares` still serializes its tasks, so it is cut first: contenders touch different build units (one Go package, one TS project); when unavoidable, the share stays off the tasks the rest of the flight needs first, and share-mates are ordered by `needs`, smallest first. Measured: one Go package share held a single task for 84 minutes while another package share queued four. Another flight's output is a Decisions line `External need: {flight directory} {id}`, never a `needs` entry: the index script checks `needs` against this directory's ids only.
@@ -325,6 +333,7 @@ A spec is judged from the transcript of the executor that ran it.
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The outer contract: unspecified work goes to `flights-speccer` with content and never a format; the flight directory, the index and the ready rule; only `flights-speccer` changes a task file |
 | The index script | `templates/global/commands/flights/flight-index.mjs` | The only writer of `index.md`, and the reconcile checks a script can decide; its tests run in the templates gate |
 | The transcript skill | `templates/global/skills/transcript/` | Digests an executor's Claude or Codex session into one line per event for the revising call; its tests run in the templates gate |
+| The init command | `/flights:init` | Writes the speccer's manual; its content list is the one under [The speccer's manual](#the-speccers-manual) |
 | The command | `/flights:spec` | The human-in-the-loop front end: the maps, the user's answers, the hand-off, the one question, the presentation. It never restates the format |
 | The adopter contract | `CLAUDE.md` and `templates/project/CLAUDE.md`, `/pcm` | Wording that names the spec writer and how a spec travels |
 

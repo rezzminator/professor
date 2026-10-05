@@ -36,6 +36,7 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 - Affected, an executor's only run (flight or general): `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
 - Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
+- Static check, an executor's only one, run once, last, given its task's files: {the one static-check command that takes a list of files}; a red is fixed and the same command run again.
 - Type check `{PROJECT_TYPECHECK}` · lint `{PROJECT_LINT}` · format `{PROJECT_FORMAT}`.
 
 ## Concurrency

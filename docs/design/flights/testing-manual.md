@@ -20,7 +20,7 @@ In the adopter this was measured on, project test law was spread over twelve fil
 
 ## Where it lives
 
-`.claude/commands/{project}-testing-manual.md`, invoked as `/{project}-testing-manual`; a single-project repository names it `testing-manual`. A command, because it is the documentation a human also opens and because the mirrors compile commands for Codex and OpenCode. Agents read it by path; only its `description:` line rides in the chat's command listing. It is a project-tier file the install interview writes, one per roster entry — `pfm init` skips `commands/per-project/` as it skips every roster-only source — then pinned with `pfm update pin --template` and owned and kept true by the project. Target size 4 to 9 KB; the manual cites a runbook for stack detail rather than restating it.
+`.claude/commands/{project}-testing-manual.md`, invoked as `/{project}-testing-manual`; a single-project repository names it `testing-manual`. A command, because it is the documentation a human also opens and because the mirrors compile commands for Codex and OpenCode. Agents read it by path; only its `description:` line rides in the chat's command listing. It is a project-tier file the install interview writes, one per roster entry — `pfm init` skips `commands/per-project/` as it skips every roster-only source — then pinned with `pfm update pin --template` and owned and kept true by the project. Where a build unit has none, [`/flights:init`](flights-init.md) writes a minimal one holding only the facts its map proved, marked as a starting point; an existing manual it never rewrites. Target size 4 to 9 KB; the manual cites a runbook for stack detail rather than restating it.
 
 ## The sections
 
@@ -31,9 +31,9 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 3. Lanes and registries: the lane or beat a capability lands with, the registry rows that land in the same change, the shared-core files with one editor.
 4. Mock boundary: what may be mocked and what is always real.
 5. Environments and cleanup: environment files, stack start, ports, the cleanup targets.
-6. Run commands: the command per scope — affected, full — and the timeout each needs.
+6. Run commands: the command per scope — affected, full — and the timeout each needs; the static-check command, one command that takes a list of files, an executor's only static check, run once, last.
 7. Concurrency: workers, isolation, what may run beside what.
-8. Gates and floors: coverage floor, lint, type check, format, any scored gate and its thresholds.
+8. Gates and floors: coverage floor, lint, type check, format, any scored gate and its thresholds; read by the lander as its gate rows.
 9. Bug classes: the finding codes only this project raises.
 10. Tricks and traps: the hard-won local knowledge that a newcomer would get wrong.
 11. What not to test: the tests this project refuses, and what a removal takes with it.
@@ -42,17 +42,17 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 
 | Reader | Sections | For |
 | --- | --- | --- |
-| `flights-speccer` | 1, 2, 3, 8, and the removal clause of 11 | The tier decides a task's `shares`; the test home and the registry rows are `Files` entries; a floor is a `Done when` row; a removal lists its retiring tests |
+| `flights-speccer` | 1, 2, 3, 8, and the removal clause of 11 | The tier decides a task's `shares`; the test home and the registry rows are `Files` entries; a removal lists its retiring tests; a floor is never a task's row |
 | `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | all | Writing the covering tests in the project's pattern |
 | `general-foreman`, `general-executor` | all, when the brief names the manual | Writing the covering test in the project's pattern |
-| `flights-lander` | all, 5 to 9 most | Running the gate, sweeping test validity, raising the project's bug classes |
+| `flights-lander` | all, 5 to 9 most | Running each project's gate with its floors as gate rows, sweeping test validity, raising the project's bug classes |
 
 The speccer takes facts from the manual into the task file as `Decisions` and `Files` lines; it never puts the manual in a task's `reads`, since the manual would consume the task's reading budget.
 
 ## How it reaches a flight
 
-- The caller of a flight names the project; `flights-speccer` opens that project's manual during intake and applies the four sections above. A project without a manual is a `NOTES` line in the speccer's return, never a silent skip.
-- The orchestrator's brief to every executor and lander carries the manual's path as a standing rule.
+- The caller of a flight names the project; `flights-speccer` opens that project's manual, its path recorded in the speccer manual, during intake and applies the four sections above. A project without a manual is a `NOTES` line in the speccer's return, never a silent skip.
+- The orchestrator's brief carries the manual's path as a standing rule: an executor's its own project's, the lander's every touched project's.
 - A `Done when` test row names the tier, and `Files` names the test home and every registry file: a test outside the pattern is then a task that cannot verify as `DONE`.
 
 ## What stays out

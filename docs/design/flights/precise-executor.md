@@ -25,7 +25,7 @@ The friction below comes from a transcript audit of a six-seat benchmark round o
 
 ### The blast radius is searched before the first edit
 
-Before step 1, after the `Progress dependency`, it searches the repository for every test, caller and doc pinning a name, behaviour or text it changes. A build, test or caller outside `Files` that its change would break returns `SPEC-DRIFT {id}` with nothing changed and every hit at once. A stale comment or doc, an older defect, anything its diff leaves no worse is a defect line in the return, and the task finishes. A Goal that turns unreachable mid-task stops with every touched file building.
+Before step 1, after the `Progress dependency`, it searches only the code that could break — the callers and tests of each name or behaviour it changes: file names first (`grep -rl`), then only the hits outside `Files` are read; never docs, which the speccer's sweep placed and the lander's whole-diff review reads. A build, test or caller outside `Files` that its change would break returns `SPEC-DRIFT {id}` with nothing changed and every hit at once. A stale comment or doc, an older defect, anything its diff leaves no worse is a defect line in the return, and the task finishes. A Goal that turns unreachable mid-task stops with every touched file building.
 
 Friction: in one adopter flight the drifts came after the edits, each naming tests outside `Files` that pinned the changed behaviour; one seat ran the wide suite after its edits, stopped with a package half-changed, and broke its sibling's test collection. On the benchmark round's first tier body the consumer rule fired on a still-true comment and returned an unjustified `SPEC-DRIFT` that scored 4; the rule now keys on what breaks a build, a test or a caller.
 
@@ -37,7 +37,7 @@ Friction: on the benchmark round's first tier body a `gpt-6-sol` seat returned `
 
 ### Judgments are pinned, and nothing is added unasked
 
-Each `Execution judgment` is the executor's inside `Decisions` and `Shapes`: decided by the rows it can break, pinned with a test, named with its test in the return. It builds what a row, Decision or Step asks; a guard none asks for is a defect line, never code.
+Each `Execution judgment` is the executor's inside `Decisions` and `Shapes`: decided by the rows it can break, pinned with a test written with the row tests before any code, named with its test in the return. It builds what a row, Decision or Step asks; a guard none asks for is a defect line, never code.
 
 Friction: three of six benchmark seats added mechanisms no row asked for (an unasked callback, an unasked helper, a second off-site parse) and reported them as adaptations.
 
@@ -49,13 +49,13 @@ Friction: 6 of 6 benchmark seats, and the reference diff, wrote a second impleme
 
 ### A test per row and per `Given` line
 
-One covering test per `Done when` row and per `Given` line. A row's alternatives and its error-handling column are one case each; user-visible text is asserted whole, every variant; a log line is read back through the project's logging façade as production emits it. Every branch it adds that stops, raises, retries, waits or logs is reached by a test, or reported as a missed row, or deleted. A row with no behaviour change (a rename, a move, a deletion, the doc references one carries) is proven by its check line. The return maps every row and `Given` line to its test.
+One covering test per `Done when` row and per `Given` line. A row's alternatives and its error-handling column are one case each; user-visible text is asserted whole, every variant; a log line is read back through the project's logging façade as production emits it. Tests before code, never after: each row's unit test, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; a judgment's test is written with them. No test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example. A row with no behaviour change (a rename, a move, a deletion, the doc references one carries) is proven by its check line. The return maps every row and `Given` line to its test.
 
 Friction: the Sonnet-at-`high` seat that scored 77 against its twin's 95 left a `Given` line untested and shipped log keys the scrubber redacts in production; the five seats that tested the log line found the redaction through that test. Partly asserted alternatives and stop texts missing a clause cost the others points. The `xhigh` seats did these unprompted; the rules make it independent of the draw.
 
 ### Its own checks, the formatter included
 
-The affected tests as it goes; the type check, lint and formatter of its own files and the static check the testing manual names, its architecture ratchet included, once, after its last edit, as one command, a red there fixed and only that check rerun; a ratchet its diff pushes over is its to bring back under. A split's new file beside a `Files` entry, in the same unit, is in scope; a split needing an existing file outside `Files` returns `SPEC-DRIFT {id}` naming it.
+The affected tests as it goes; the testing manual's static-check command runs once, as the last step after the work is finished and before the return is written, given the task's `Files` list, a red fixed and the same command run again; a manual naming no single command has its checks run as one command, same rule; a ratchet its diff pushes over is its to bring back under. A split's new file beside a `Files` entry, in the same unit, is in scope; a split needing an existing file outside `Files` returns `SPEC-DRIFT {id}` naming it.
 
 Friction: a lander formatted the two Codex precise seats' files after the flight, as it did every flight: "the format sweep belongs to the gate" was read as "never format".
 
@@ -80,6 +80,7 @@ The layout laws bind this tier through its body: a deletion leaves nothing behin
 | Spec and code disagree on a detail | Reach the Goal; say what it changed |
 | The Goal turns unreachable mid-task | Stop, every touched file building; `SPEC-DRIFT {id}` with what it found and what landed |
 | Its own edit turns a check red inside `Files` | Fix it there, rerun |
+| A branch no example covers | Deleted; when a `Done when` row needs it, `SPEC-DRIFT {id}` so the speccer adds the example |
 | A red in an unreached test, or a check rejecting what was there before | Outside defects; finish `DONE` |
 | Any other red | Read to the cause; `FAILED` or `SPEC-DRIFT` with it, or "cause unknown" |
 | A cause outside `Files` stops its own tests | Run what can still run past it; first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |

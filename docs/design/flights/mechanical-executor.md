@@ -32,7 +32,7 @@ Friction: "the Goal wins over a detail" invited the executor to adapt, which is 
 
 ### The map is checked before the first edit
 
-Before the first edit it searches the project for every line the Steps quote, every new function, type or file name the task gives, and, for a rename, move or deletion, the old name. It changes nothing and returns `SPEC-DRIFT {id}` naming each hit when:
+Before the first edit it searches the project for every line the Steps quote, every new function, type or file name the task gives, and, for a rename, move or deletion, the old name: file names first (`grep -rl`), then only the hits outside `Files` are read. It changes nothing and returns `SPEC-DRIFT {id}` naming each hit when:
 
 - a quote is found nowhere, or at more than one place the Steps could mean;
 - a new name is already taken;
@@ -45,6 +45,7 @@ Friction: `Files` lists missed callers, and the drift was found mid-edit, with a
 
 One test per `Done when` row, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names:
 
+- tests before code, never after: each row's unit test, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; no test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example;
 - every row's test is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; all the new tests run in one command against the unfixed tree, each failing on its assertion (a build error proves nothing), the log kept; then the Steps are applied and the same command runs green once;
 - a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log and the commit or `run.md` line that landed the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or landed code to watch a test fail, even where the testing manual asks for a re-break or mutation proof; a new gate proves its bite on a fixture or a `mktemp` copy;
 - a task with no behaviour change (a rename, a move, a deletion, the doc references one carries) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history or in a hit named under Outside defects, are its proof.
@@ -67,7 +68,7 @@ Friction: 36 of 130 runs slept or polled (102 `sleep` calls) and 12 used backgro
 
 ### Its own checks, the formatter included
 
-It runs the affected tests of its `Files`; then, once, after its last edit, as one command, the formatter, linter and type check on each changed file and the static check the testing manual names, its architecture ratchet included; it fixes what its edits caused there and reruns only that check. A brief naming the full suite, a whole-tree format sweep or a review as its run is refused and named in the return.
+It runs the affected tests of its `Files`; then the testing manual's static-check command, once, as the last step after the work is finished and before the return is written, given the task's `Files` list; a red is fixed and the same command run again. A manual naming no single command has its checks run as one command, same rule. A brief naming the full suite, a whole-tree format sweep or a review as its run is refused and named in the return.
 
 Friction: 3 of 4 benchmark seats left formatter and lint findings on their own files; "format" appeared in the base body only in the refused list. The 13-executor audit counted 37 battery runs, 15 lint and 13 architecture reruns among them, most after a one-line late edit: 18 minutes.
 
@@ -101,6 +102,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A quoted line found at another place, an import the edit needs, the formatter's output | Adapt and list it under Adapted |
 | An edit the Steps do not settle (another approach, a name not given, a file outside `Files`) | Stop, every touched file building; `SPEC-DRIFT {id}: {what the task file lacks}` with what landed |
 | Its own edit turns a check red inside `Files` | Fix the cause there, rerun |
+| A branch no example covers | Deleted; when a `Done when` row needs it, `SPEC-DRIFT {id}` so the speccer adds the example |
 | A sibling's file, an unreached test or a pre-existing finding is red | Outside defects; finish `DONE` — or, when it stops its own tests, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
 | Any other red | Read the error and the lines it names; `SPEC-DRIFT` or `FAILED` with the cause or "cause unknown" |
 | A row that reads two ways | The reading today's code and the Steps support, named in the return; `SPEC-DRIFT` only when neither settles it and they build different code |

@@ -60,7 +60,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 			case "Claude no parent model":
 				if err := atomicfile.Write(
 					paths.WorkbenchManifest(scribe),
-					[]byte(`{"prompt":"scribe.md","effort":"XHigh","model":"sonnet"}`),
+					[]byte(`{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`),
 					0o600,
 				); err != nil {
 					t.Fatal(err)
@@ -70,7 +70,7 @@ func TestChatBranchWorkbench(t *testing.T) {
 				engine, dir, socket, argvFile = "codex", duo, "cx-workbench-branch", "cx-argv"
 				if err := atomicfile.Write(
 					paths.WorkbenchManifest(duo),
-					[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"High"}`),
+					[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"high"}`),
 					0o600,
 				); err != nil {
 					t.Fatal(err)
@@ -771,5 +771,27 @@ func TestChatBranchUnreadableParentLaunchRefuses(t *testing.T) {
 	if code != 1 || !strings.Contains(stderr, "pfm chat branch: read launch record for "+parentID+":") ||
 		strings.Contains(stdout, "Branched") {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestChatBranchCodexRequiresLogin(t *testing.T) {
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.Remove(filepath.Join(home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-logged-out-branch")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--config", configPath, "chat", "branch", "--engine", "codex",
+		"--session-id", "a1000000-1111-4111-8111-111111111111", "--account", "1",
+		"--cwd", filepath.Join(jail.root, "work"), "--name", "logged-out-branch",
+	}, &stdout, &stderr)
+	if code != 1 || !strings.HasPrefix(stderr.String(), "pfm chat branch: create detached seat:") ||
+		!strings.Contains(stderr.String(), "run codex login") {
+		t.Fatalf("chat branch code=%d stderr=%q", code, stderr.String())
 	}
 }

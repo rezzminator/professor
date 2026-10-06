@@ -7,12 +7,34 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const DevelopmentVersion = "dev"
+
+var configPathPin struct {
+	sync.RWMutex
+	path   string
+	pinned bool
+}
+
+// UseConfigPath pins the loaded config for database readers until restore runs.
+// An empty path pins the defaults: a runtime loaded with no config file (an
+// install over an unusable marker) reads the same database pair it reports.
+func UseConfigPath(path string) (restore func()) {
+	configPathPin.Lock()
+	previous, previouslyPinned := configPathPin.path, configPathPin.pinned
+	configPathPin.path, configPathPin.pinned = path, true
+	configPathPin.Unlock()
+	return func() {
+		configPathPin.Lock()
+		configPathPin.path, configPathPin.pinned = previous, previouslyPinned
+		configPathPin.Unlock()
+	}
+}
 
 // Runtime is the resolved machine policy for one pfm process: the effective
 // config and the filesystem locations it implies. It is loaded exactly once
@@ -93,7 +115,7 @@ var ErrNotMigrated = errors.New("config not migrated: run pfm doctor for the fix
 // A broken config is an error, and so is a default load that would run on
 // defaults while a legacy config waits (ErrNotMigrated).
 func LoadRuntime(configPath string) (Runtime, error) {
-	runtime, err := LoadInstallRuntime(configPath)
+	runtime, err := loadConfigRuntime(configPath, false)
 	if err != nil {
 		return Runtime{}, err
 	}
@@ -103,9 +125,13 @@ func LoadRuntime(configPath string) (Runtime, error) {
 	return runtime, nil
 }
 
-// LoadInstallRuntime is LoadRuntime without the ErrNotMigrated refusal: the
-// install gate names the pending legacy config and points at pfm doctor's fix.
+// LoadInstallRuntime permits defaults over an unusable marker or pending legacy
+// config: install names the marker fallback and its gate gives the legacy fix.
 func LoadInstallRuntime(configPath string) (Runtime, error) {
+	return loadConfigRuntime(configPath, true)
+}
+
+func loadConfigRuntime(configPath string, install bool) (Runtime, error) {
 	resolved, err := paths.Resolve()
 	if err != nil {
 		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
@@ -120,7 +146,10 @@ func LoadInstallRuntime(configPath string) (Runtime, error) {
 		resolved.FirstRoot(pfmengine.Codex),
 	)
 	if err != nil {
-		return Runtime{}, err
+		var markerErr *sourceRepoMarkerError
+		if !install || !errors.As(err, &markerErr) {
+			return Runtime{}, err
+		}
 	}
 	configExplicit, err := configPathIsExplicit(configPath, resolved.Home)
 	if err != nil {
@@ -158,7 +187,7 @@ func configPathIsExplicit(configPath, home string) (bool, error) {
 // --config path or PFM_CONFIG is never refused.
 func checkLegacyConfig(configPath, home string, loaded Config) error {
 	env := paths.OSEnv{}
-	if configPath != "" || env.Get(paths.EnvConfig) != "" || loaded.Exists {
+	if configPath != "" || configOverridden(env) || loaded.Exists {
 		return nil
 	}
 	target, resolveErr := ResolvePath(home)
@@ -256,7 +285,11 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	}
 	effective = Defaults(resolved.Home, resolved.Roots[pfmengine.Claude], resolved.FirstRoot(pfmengine.Codex))
 	effective.Path = path
-	effective.Exists = true
+	effective.Exists = path != ""
+	if state, err := loadState(path, resolved.Home); err == nil {
+		effective.State = state
+		applyStatePaths(&resolved, effective, paths.OSEnv{})
+	}
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
 	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr, ConfigExplicit: configExplicit}, nil
 }
@@ -280,12 +313,19 @@ func StatePathsFrom(env paths.Env, home string) (stateDB, cacheDB string, err er
 	if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
 		return "", "", err
 	}
-	configPath, err := ResolvePathFrom(env, home)
-	if err != nil {
-		if env.Get(paths.EnvConfig) != "" {
-			return "", "", err
+	configPathPin.RLock()
+	configPath, pinned := configPathPin.path, configPathPin.pinned
+	configPathPin.RUnlock()
+	if !pinned {
+		configPath, err = ResolvePathFrom(env, home)
+		if err != nil {
+			if configOverridden(env) {
+				return "", "", err
+			}
+			if markerErr := configMarkerError(err); markerErr != nil {
+				return "", "", markerErr
+			}
 		}
-		configPath = ""
 	}
 	state, err := loadState(configPath, home)
 	if err != nil {

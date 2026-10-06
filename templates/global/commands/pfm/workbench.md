@@ -58,16 +58,20 @@ For `/pfm:workbench new docs/scribe` in `/work/acme`:
 
 ## check
 
-Run `pfm doctor` from the managed root or bench. Read each line, including discovery failures; absence of workbench lines outside a managed root says nothing about a bench elsewhere. The output patterns below come from `pfm/internal/doctor/workbench_checks.go` in `{BLUEPRINT_CLONE_PATH}`; `{dir}`, `{engine}`, `{prompt}`, `{fault}` and `{err}` stand for the printed values.
+Run `pfm doctor` from the managed root or bench. Read each line, including discovery failures; `none — not inside a Professor project` means the cwd has no managed root; `none under {root}` means discovery found no workbench there. The output patterns below come from `pfm/internal/doctor/workbench_checks.go` in `{BLUEPRINT_CLONE_PATH}`; `{dir}`, `{root}`, `{engine}`, `{engines}`, `{prompt}`, `{fault}`, `{problem}`, `{problems}` and `{err}` stand for printed values; `{problems}` joins rebuildable problems with `; `.
 
-| doctor line | action |
-| --- | --- |
-| `doctor: workbench {dir} ok · engines {engines} · prompt {prompt}` | Manifest valid; inspect any following mirror line. |
-| `doctor: workbench {dir} FAILED: {fault}` | Repair the named manifest field or prompt file: valid JSON, known typed fields, an in-bench regular non-empty prompt, supported non-repeated engines, non-empty title, and a one-word name without `:`. Rerun doctor. |
-| `doctor: workbench {dir} {engine} mirror STALE: {first problem} — the next launch there rebuilds it` | Resolve the first problem, then run `pfm codex build {dir}` or `pfm opencode build {dir}` and rerun doctor. Write a missing `CLAUDE.md` before the Codex build. |
-| `doctor: workbench {dir} {engine} mirror BROKEN: {err}` | Repair the source/config file named by the compiler error, rebuild that engine's mirror, then rerun doctor. |
-| `doctor: workbench discovery FAILED: {WalkError text} — whether more workbenches exist there is UNKNOWN` | Restore access to the named path; rerun doctor to complete discovery. |
-| `doctor: workbench UNREADABLE {err}` | Repair the managed-root lookup path named by the error, then rerun doctor. |
+| doctor line | count | action |
+| --- | --- | --- |
+| `doctor: workbench none — not inside a Professor project` | none | Run from a managed root or bench. |
+| `doctor: workbench none under {root}` | none | No workbench was found under this root. |
+| `doctor: workbench {dir} ok · engines {engines} · prompt {prompt}` | none | Manifest valid; printed after mirror checks only when none failed. |
+| `doctor: workbench {dir} FAILED: {fault}` | failure | Repair the named manifest field or prompt: valid JSON, known typed fields, an in-bench regular non-empty prompt, supported non-repeated engines, non-empty title and a one-word name without `:`. Rerun doctor. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | A build clears stale, missing, wrong-mode and orphaned outputs. Launch there to rebuild, or run `pfm {engine} build {dir}`. |
+| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run pfm {engine} build {dir}` | failure per problem | Repair each named problem, build that mirror, then rerun doctor. Write a missing `CLAUDE.md` before a Codex build. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by pfm {engine} build {dir} once the failures are fixed` | warning | Fix the mirror failures, then build to clear these rebuildable outputs. |
+| `doctor: workbench {dir} {engine} mirror BROKEN: {err}` | failure | Repair the named source/config, build that mirror, then rerun doctor. |
+| `doctor: workbench discovery FAILED: {WalkError text} — whether more workbenches exist there is UNKNOWN` | failure | Restore access to the named path; rerun doctor. |
+| `doctor: workbench UNREADABLE {err}` | failure | Repair the managed-root lookup path, then rerun doctor. |
 
 An invalid manifest refuses new launches and resumes. A new disabled engine is refused as `workbench {dir} does not enable {word}: add "{word}" to "engines" in {manifest path}`; add the intended engine and build its mirror. A disabled engine resuming an existing chat uses the fleet prompt.
 

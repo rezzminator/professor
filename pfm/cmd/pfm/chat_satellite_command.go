@@ -490,7 +490,7 @@ func runChatBranch(
 	if engine == pfmengine.Codex {
 		spawned, spawnErr := spawn.Run(context.Background(), tmux, spawn.Request{
 			Engine: engine, Name: name, Socket: socket, CWD: cwd, Run: plan.Run,
-			Binary:              plan.Binary,
+			Binary: plan.Binary, CodexHome: plan.CodexHome,
 			PromptOnCommandLine: plan.PromptOnCommandLine,
 			Width:               action.HeadlessWidth, Height: action.HeadlessHeight,
 		})

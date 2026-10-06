@@ -1,9 +1,11 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -46,9 +48,28 @@ func TestRefuseAmbientConfigHomeFromRefusesCurrentClone(t *testing.T) {
 	if err := RefuseAmbientConfigHomeFrom(env, home); err == nil || !strings.Contains(err.Error(), paths.EnvConfig) {
 		t.Fatalf("current-clone marker error = %v, want a jailed override remedy", err)
 	}
+	env.Values[paths.EnvConfig] = "  "
+	if err := RefuseAmbientConfigHomeFrom(env, home); err == nil ||
+		!strings.HasPrefix(err.Error(), "refusing ambient config in real clone") {
+		t.Fatalf("blank override guard = %v, want ambient refusal", err)
+	}
 	env.Values[paths.EnvConfig] = filepath.Join(home, "pfm.config.json")
 	if err := RefuseAmbientConfigHomeFrom(env, home); err != nil {
 		t.Fatalf("jailed override refused: %v", err)
+	}
+}
+
+func TestConfigMarkerErrorUnreadable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvConfig, "")
+	marker := paths.SourceRepoPath(home)
+	if err := os.MkdirAll(marker, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load("", home, nil)
+	if !errors.Is(err, syscall.EISDIR) || !strings.Contains(err.Error(), marker) ||
+		!strings.Contains(err.Error(), "run pfm install from the clone") {
+		t.Fatalf("unreadable marker load = %v, want the marker path and remedy", err)
 	}
 }
 

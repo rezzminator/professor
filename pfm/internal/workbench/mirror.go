@@ -48,32 +48,41 @@ func EnsureMirror(bench Bench, engine pfmengine.ID, home string) error {
 	return nil
 }
 
-// CheckMirror separates stale generated artifacts from a failed compiler.
-func CheckMirror(bench Bench, engine pfmengine.ID, home string) (stale string, err error) {
+// MirrorCheck separates problems a build clears from failures it cannot repair.
+type MirrorCheck struct {
+	Rebuildable, Failing []string
+}
+
+// CheckMirror returns every mirror problem, split by whether a build clears it.
+func CheckMirror(bench Bench, engine pfmengine.ID, home string) (check MirrorCheck, err error) {
 	var problems []string
 	switch engine {
 	case pfmengine.Codex:
 		var result codexgen.Result
 		result, err = codexgen.Check(codexgen.Options{Root: bench.Dir, Home: home})
-		if !result.OK {
-			problems = result.Problems
-		}
+		problems, check.Rebuildable = result.Problems, result.Rebuildable
 	case pfmengine.OpenCode:
 		var result opencodegen.Result
 		result, err = opencodegen.Compile(opencodegen.Options{Root: bench.Dir, Home: home, Mode: opencodegen.ModeCheck})
-		if !result.OK {
-			problems = result.Problems
-		}
+		problems, check.Rebuildable = result.Problems, result.Rebuildable
 	default:
-		return "", nil
+		return MirrorCheck{}, nil
 	}
 	if err != nil {
 		obs.Logger(context.Background()).
 			Error("workbench mirror check", "path", bench.Dir, obs.FieldEngine, string(engine), obs.FieldErr, err)
-		return "", err
+		return MirrorCheck{}, err
 	}
-	if len(problems) != 0 {
-		return problems[0], nil
+	rebuildable := make(map[string]int, len(check.Rebuildable))
+	for _, problem := range check.Rebuildable {
+		rebuildable[problem]++
 	}
-	return "", nil
+	for _, problem := range problems {
+		if rebuildable[problem] > 0 {
+			rebuildable[problem]--
+		} else {
+			check.Failing = append(check.Failing, problem)
+		}
+	}
+	return check, nil
 }

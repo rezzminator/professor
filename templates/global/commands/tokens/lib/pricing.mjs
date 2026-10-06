@@ -6,25 +6,31 @@ import { spawnSync } from "node:child_process";
 // failing or unreadable table is an Error whose message follows "token-audit: ", never a fallback.
 // TOKEN_AUDIT_PRICES names a saved `pfm price --json` document or the shipped prices.json and
 // keeps pfm unspawned; otherwise TOKEN_AUDIT_PFM, or `pfm` on PATH, is run.
-function loadTable(env) {
+function loadTable(env, timeoutMs = 15000) {
   const file = env.TOKEN_AUDIT_PRICES;
   if (file) {
     let text; try { text = fs.readFileSync(file, "utf8"); } catch (e) { throw new Error(`TOKEN_AUDIT_PRICES ${file}: ${e.message}`); }
     return tableOf(text, `TOKEN_AUDIT_PRICES ${file}: `);
   }
   const bin = env.TOKEN_AUDIT_PFM || "pfm", cmd = `\`${bin} price --json\``;
-  const r = spawnSync(bin, ["price", "--json"], { encoding: "utf8" });
+  const r = spawnSync(bin, ["price", "--json"], { encoding: "utf8", timeout: timeoutMs });
   if (r.error?.code === "ENOENT") throw new Error(`pfm not found (${bin}) — prices come from \`pfm price --json\`; install pfm or set TOKEN_AUDIT_PFM`);
+  if (r.error?.code === "ETIMEDOUT") throw new Error(`${cmd} timed out after ${timeoutMs / 1000} s`);
   if (r.error) throw new Error(`${cmd} failed: ${r.error.message}`);
-  if (r.status !== 0) throw new Error(`${cmd} failed (exit ${r.status ?? r.signal}): ${(r.stderr || "").trim()}`);
+  if (r.status !== 0) { const stderr = (r.stderr || "").trim(), older = stderr.includes('unknown command "price"');
+    throw new Error(`${cmd} failed (exit ${r.status ?? r.signal}): ${stderr}${older ? " — this pfm predates `pfm price`; update pfm" : ""}`); }
   return tableOf(r.stdout, `${cmd} returned an unreadable table: `);
 }
-// Only the envelope is checked here; validating rows is pfm's. The shipped prices.json has no
+// Check the envelope and every rate used in billing. The shipped prices.json has no
 // `override`: it reads as null.
 function tableOf(text, fault) {
   let d; try { d = JSON.parse(text); } catch (e) { throw new Error(fault + e.message); }
   if (d?.version !== 1) throw new Error(`${fault}version ${JSON.stringify(d?.version)}, want 1`);
   if (!Array.isArray(d.rows)) throw new Error(`${fault}rows is not an array`);
+  for (const row of d.rows) {
+    const fields = row.engine === "codex" ? ["in", "out", "cached", "long_in", "long_out"] : ["in", "out", "hit", "w5m", "w1h", "long_in", "long_out"];
+    for (const field of fields) if (!Number.isFinite(row[field])) throw new Error(`${fault}row ${row.key}: ${field} is not a number`);
+  }
   return { rows: d.rows, override: d.override ?? null };
 }
 
@@ -40,6 +46,7 @@ function rateOf(table, model) {
   let best = null, len = -1, at = 0;
   for (const row of table.rows) for (const m of row.match || []) {
     const p = String(m).toLowerCase(), i = id.indexOf(p);
+    if (!p) continue;
     if (i >= 0 && (p.length > len || (p.length === len && i < at))) { best = row; len = p.length; at = i; }
   }
   if (!best) return null;

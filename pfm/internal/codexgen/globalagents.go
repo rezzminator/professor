@@ -37,10 +37,6 @@ type GlobalAgentsOptions struct {
 	// empty means {Home}/.codex alone.
 	CodexHomes []string
 	Mode       Mode
-	// BeforeWrite, when set, is called in build mode with the absolute path
-	// immediately before each file write, role write, link create/replace and
-	// removal; an error aborts the build before that write. Nil: no call.
-	BeforeWrite func(path string) error
 }
 
 // GlobalAgentCompiled is one desired role file or rendered variant source.
@@ -286,9 +282,6 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		if same {
 			continue
 		}
-		if err := callBeforeWrite(options.BeforeWrite, agent.mdSource); err != nil {
-			return GlobalAgentsResult{}, err
-		}
 		if err := writeGlobalAgentFile(agent.mdSource, agent.mdContent); err != nil {
 			return GlobalAgentsResult{}, err
 		}
@@ -300,11 +293,6 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		state, _, err := ClassifyGlobalRole(role.target, role.content, ownedLinkDirs)
 		if err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("re-inspect global role %s: %w", role.target, err)
-		}
-		if state.writes() {
-			if err := callBeforeWrite(options.BeforeWrite, role.target); err != nil {
-				return GlobalAgentsResult{}, err
-			}
 		}
 		if err := ApplyGlobalRole(role.target, role.content, state); err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("install global role %s: %w", role.target, err)
@@ -321,11 +309,6 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		state, _, err := ClassifyGlobalLink(installed.Path, installed.Source, sourceRepo, GlobalLinkFile)
 		if err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("re-inspect global agent artifact %s: %w", installed.Path, err)
-		}
-		if state.writes() {
-			if err := callBeforeWrite(options.BeforeWrite, installed.Path); err != nil {
-				return GlobalAgentsResult{}, err
-			}
 		}
 		if err := ApplyGlobalLink(installed.Path, installed.Source, state); err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("install global agent artifact %s: %w", installed.Path, err)
@@ -448,17 +431,6 @@ func sameGlobalAgentFile(path string, content []byte) (bool, error) {
 	return bytes.Equal(raw, content), nil
 }
 
-// callBeforeWrite runs a build's optional before-write hook for one path.
-func callBeforeWrite(hook func(path string) error, path string) error {
-	if hook == nil {
-		return nil
-	}
-	if err := hook(path); err != nil {
-		return fmt.Errorf("before write %s: %w", path, err)
-	}
-	return nil
-}
-
 func writeGlobalAgentFile(path string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
@@ -476,6 +448,62 @@ func writeGlobalAgentFile(path string, content []byte) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+// claudeInheritModel is the Claude agent model value meaning "the session's model".
+const claudeInheritModel = "inherit"
+
+type codexRole struct {
+	Model, Effort, Sandbox string
+}
+
+func codexRoleSettings(fields, modelMap map[string]string, source string) (codexRole, error) {
+	role := codexRole{Effort: strings.TrimSpace(fields["effort"])}
+	if override, ok := fields["codex-model"]; ok {
+		role.Model = strings.TrimSpace(override)
+	} else if model := strings.TrimSpace(fields["model"]); model != "" {
+		mapped, ok := modelMap[model]
+		if !ok && model == claudeInheritModel {
+			// Claude's "inherit" is the session's model: a Codex role with no
+			// model line runs on its session's model too.
+			mapped, ok = "", true
+		}
+		if !ok {
+			keys := make([]string, 0, len(modelMap))
+			for key := range modelMap {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			return codexRole{}, fmt.Errorf(
+				"%s: unmapped model %q (modelMap keys: %s)",
+				source,
+				model,
+				strings.Join(keys, ", "),
+			)
+		}
+		role.Model = mapped
+	}
+	if override, ok := fields["codex-effort"]; ok {
+		role.Effort = strings.TrimSpace(override)
+		switch role.Effort {
+		case codeReviewBareEffort, codexMediumEffort, codexHighEffort, codeReviewTopEffort:
+		default:
+			return codexRole{}, fmt.Errorf(
+				"%s: invalid codex-effort %q (want low, medium, high, or xhigh)",
+				source,
+				role.Effort,
+			)
+		}
+	}
+	if sandbox, ok := fields["codex-sandbox"]; ok {
+		if strings.TrimSpace(sandbox) != "workspace-write" {
+			return codexRole{}, fmt.Errorf("%s: invalid codex-sandbox %q (want workspace-write)", source, sandbox)
+		}
+		role.Sandbox = "workspace-write"
+	} else if codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(source), ".md")) {
+		role.Sandbox = "read-only"
+	}
+	return role, nil
 }
 
 // codexReadOnly reports whether a role compiles to sandbox_mode = "read-only",
@@ -523,34 +551,22 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	// tier map is the compiler's default: this path loads no project config.
 	description = rewriteCodeReview(description, nil)
 	body = rewriteCodeReview(body, nil)
-	model := strings.TrimSpace(fields["model"])
-	if mapped, ok := defaultConfig().ModelMap[model]; ok {
-		model = mapped
-	}
-	if override, ok := fields["codex-model"]; ok {
-		model = strings.TrimSpace(override)
-	}
-	effort := strings.TrimSpace(fields["effort"])
-	if override, ok := fields["codex-effort"]; ok {
-		effort = strings.TrimSpace(override)
-		switch effort {
-		case codeReviewBareEffort, codexMediumEffort, codexHighEffort, codeReviewTopEffort:
-		default:
-			return "", "", fmt.Errorf("%s: invalid codex-effort %q (want low, medium, high, or xhigh)", mdPath, effort)
-		}
+	role, err := codexRoleSettings(fields, defaultConfig().ModelMap, mdPath)
+	if err != nil {
+		return "", "", err
 	}
 
 	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n"
-	if model != "" {
-		content += "model = \"" + globalAgentEscape(model) + "\"\n"
+	if role.Model != "" {
+		content += "model = \"" + globalAgentEscape(role.Model) + "\"\n"
 	}
-	if effort != "" {
-		content += "model_reasoning_effort = \"" + globalAgentEscape(effort) + "\"\n"
+	if role.Effort != "" {
+		content += "model_reasoning_effort = \"" + globalAgentEscape(role.Effort) + "\"\n"
 	}
-	if codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(mdPath), ".md")) {
-		content += "sandbox_mode = \"read-only\"\n"
+	if role.Sandbox != "" {
+		content += "sandbox_mode = \"" + globalAgentEscape(role.Sandbox) + "\"\n"
 	}
 	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
 

@@ -95,10 +95,11 @@ See [Harness-prompt drift probe](#harness-prompt-drift-probe). `pfm doctor` also
 | `DRIFT live=… baseline=…` | the built-in prompt changed; up to 20 section added/removed/changed lines follow — review before re-pinning |
 | `CANNOT CAPTURE … — drift unknown` | the CLI answered from the real endpoint and ignored `ANTHROPIC_BASE_URL` |
 | `CHECK FAILED to run … — drift unknown` | the probe failed, including no request reaching the sink |
-| `BASELINE UNAVAILABLE … run pfm install` | a staged baseline is missing or inconsistent |
+| `BASELINE UNAVAILABLE … — {state}; update or restore the clone at {dir}` | a baseline file is missing, unreadable, malformed, has a malformed digest or is inconsistent; `path=` and `error=` name its cause |
+| `BASELINE UNAVAILABLE … dir=(unresolved) …` | no source repo recorded: run `pfm install` from the clone; recorded clone unusable: restore it, or run `pfm install` from a working clone |
 | `skipped (no Claude Code binary installed)` | nothing to probe |
 
-The header names what stays unchecked: `unchecked=active-chat,fable,codex` (`harness_prompt_baselines.go:131`).
+The header names what stays unchecked: `unchecked=active-chat,fable,codex` (`printModelHarnessPromptDoctorWithDeps` in `harness_prompt_baselines.go`).
 
 ## Session identity
 

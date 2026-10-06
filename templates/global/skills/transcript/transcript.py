@@ -118,6 +118,8 @@ def pick(target, hits, unreadable, extra_roots):
         fail(f"NOT FOUND {target} — searched {searched}{tail}")
     if len(hits) > 1:
         fail(f"AMBIGUOUS {target} — {len(hits)} transcripts: " + " ".join(sorted(hits)))
+    if unreadable:
+        sys.stderr.write(f"TRANSCRIPT WARNING — {len(unreadable)} rollouts unreadable while resolving {target}: " + " ".join(unreadable) + "\n")
     return hits[0]
 
 
@@ -281,20 +283,22 @@ def parse_claude(P, records):
             continue
         t, ts = o.get("type") or "?", o.get("timestamp", "")
         P.stamp(ts)
-        for key, field in (("cwd", "cwd"), ("session", "sessionId"), ("agent", "agentId")):
-            if o.get(field):
-                P.meta.setdefault(key, o[field])
+        for key, source_key in (("cwd", "cwd"), ("session", "sessionId"), ("agent", "agentId")):
+            if o.get(source_key):
+                P.meta.setdefault(key, o[source_key])
         msg = o.get("message") if isinstance(o.get("message"), dict) else {}
         if t == "assistant":
             if msg.get("model") and msg["model"] != "<synthetic>":
                 P.meta.setdefault("model", msg["model"])
             blocks = msg.get("content")
             blocks = [{"type": "text", "text": blocks}] if isinstance(blocks, str) else (blocks or [])
+            last_text = max((i for i, b in enumerate(blocks) if isinstance(b, dict) and b.get("type") == "text"), default=-1)
             shown, other = False, []
-            for b in blocks:
+            for i, b in enumerate(blocks):
                 bt = b.get("type") if isinstance(b, dict) else "?"
-                if bt == "text" and b.get("text", "").strip():
-                    P.events.append(Event(n, ts, "reply", text=b["text"].strip()))
+                if bt == "text" and (b.get("text") or "").strip():
+                    kind = "final" if msg.get("stop_reason") in ("end_turn", "stop_sequence") and i == last_text else "reply"
+                    P.events.append(Event(n, ts, kind, text=b["text"].strip()))
                     shown = True
                 elif bt == "tool_use":
                     name = b.get("name", "?")
@@ -335,7 +339,7 @@ def parse_claude(P, records):
                     label = f"user.{bt}"
             P.mark(n, "rendered" if shown else "skipped", "user" if shown else label)
         elif t == "attachment":
-            att = o.get("attachment") or {}
+            att = field(o, "attachment")
             if att.get("type") == "queued_command":
                 ev = Event(n, ts, "prompt", text=flat(att.get("prompt")))
                 ev.sub = "queued"
@@ -531,10 +535,6 @@ def parse(path):
     (parse_codex if P.engine == "codex" else parse_claude)(P, records)
     for n, _ in records:
         P.disp.setdefault(n, ("skipped", "unaccounted"))
-    if not any(e.kind == "final" for e in P.events):
-        replies = [e for e in P.events if e.kind == "reply"]
-        if replies:
-            replies[-1].kind = "final"
     return P
 
 
@@ -551,11 +551,25 @@ def window_time(spec, P):
         if P.t0 is None:
             fail(f"--since/--until {spec}: the transcript carries no timestamps")
         parts = [int(x) for x in spec.split(":")] + [0]
-        return P.t0.replace(hour=parts[0], minute=parts[1], second=parts[2], microsecond=0)
+        try:
+            return P.t0.replace(hour=parts[0], minute=parts[1], second=parts[2], microsecond=0)
+        except ValueError:
+            pass
     t = parse_ts(spec)
     if t is None:
         fail(f"--since/--until: unreadable time {spec!r} (HH:MM[:SS] UTC, an ISO time, -15m from the end, +5m from the start)")
     return t
+
+
+def line_bounds(spec):
+    span = re.fullmatch(r"(\d+)(?:-(\d*))?", spec)
+    if not span:
+        fail(f"--lines {spec!r}: FROM-TO, FROM- or one line number")
+    low = int(span.group(1))
+    high = low if span.group(2) is None else (int(span.group(2)) if span.group(2) else float("inf"))
+    if low > high:
+        fail(f"--lines {spec}: FROM is after TO")
+    return low, high
 
 
 def select(P, a):
@@ -570,11 +584,7 @@ def select(P, a):
         names = {x.strip().lower() for x in ",".join(a.tool).split(",") if x.strip()}
         events = [e for e in events if e.kind != "call" or e.name.lower() in names]
     if a.lines:
-        span = re.fullmatch(r"(\d+)(?:-(\d*))?", a.lines)
-        if not span:
-            fail(f"--lines {a.lines!r}: FROM-TO, FROM- or one line number")
-        low = int(span.group(1))
-        high = low if span.group(2) is None else (int(span.group(2)) if span.group(2) else float("inf"))
+        low, high = line_bounds(a.lines)
         events = [e for e in events if low <= e.line <= high]
     if a.since or a.until:
         lo = window_time(a.since, P) if a.since else None
@@ -721,6 +731,12 @@ def cmd_show(P, a):
     lines = header(P, a, len(events))
     for e in events:
         lines += render_event(e, a)
+    for e in reversed(P.events):
+        if e.kind == "final":
+            break
+        if e.kind in ("prompt", "reply", "call"):
+            lines.append("UNFINISHED — the last turn has no final reply: the run was cut off or is still running")
+            break
     lines.append(skipped_line(P))
     body = lines[:1] + [shorten(ln, P) for ln in lines[1:]]
     body[1] = lines[1]
@@ -728,7 +744,8 @@ def cmd_show(P, a):
 
 
 def cmd_counts(P, a):
-    calls = [e for e in P.events if e.kind == "call" and not e.hidden]
+    events = select(P, a)
+    calls = [e for e in events if e.kind == "call"]
     rows = {}
     for e in calls:
         r = rows.setdefault(e.name, [0, 0, 0, 0, 0])
@@ -740,17 +757,24 @@ def cmd_counts(P, a):
     lines = header(P, a) + ["TOOL | CALLS | ERR | RESULT TOTAL | RESULT MAX | NO RESULT"]
     for name, r in sorted(rows.items(), key=lambda kv: -kv[1][0]):
         lines.append(f"{name} | {r[0]} | {r[1]} | {size(r[2])} | {size(r[3])} | {r[4]}")
-    kinds = Counter(e.kind for e in P.events if not e.hidden)
+    kinds = Counter(e.kind for e in events)
     lines.append("EVENTS " + " · ".join(f"{k} {v}" for k, v in kinds.most_common()))
     lines.append(skipped_line(P))
     return "\n".join(lines) + "\n"
 
 
 def cmd_types(P, a):
+    for flag, given in (("--only", a.only != DEFAULT_ONLY), ("--tool", a.tool), ("--grep", a.grep),
+                        ("--since", a.since), ("--until", a.until), ("--first", a.first), ("--last", a.last)):
+        if given:
+            fail(f"types counts records: {flag} does not apply (only --lines does)")
+    low, high = line_bounds(a.lines) if a.lines else (0, float("inf"))
     groups = {}
-    for d, label in P.disp.values():
-        groups.setdefault(d, Counter())[label] += 1
-    lines = [f"RECORDS {P.records} in {P.path} ({P.engine})"]
+    for n, (d, label) in P.disp.items():
+        if low <= n <= high:
+            groups.setdefault(d, Counter())[label] += 1
+    total = sum(sum(c.values()) for c in groups.values())
+    lines = [f"RECORDS {total} in {P.path} ({P.engine})"]
     for d in ("rendered", "header", "skipped"):
         c = groups.get(d, Counter())
         lines.append(f"{d} {sum(c.values())}: " + (" · ".join(f"{k} {v}" for k, v in c.most_common()) or "none"))
@@ -788,6 +812,7 @@ def main(argv=None):
     try:
         if not re.fullmatch(r"brief|none|full|tail:\d+", a.results):
             fail(f"--results {a.results!r}: brief, none, full or tail:N")
+        sys.stdout.reconfigure(errors="backslashreplace")
         path = resolve(a.target, a.root)
         if a.verb == "locate":
             sys.stdout.write(path + "\n")
@@ -795,15 +820,21 @@ def main(argv=None):
         P = parse(path)
         text = {"show": cmd_show, "counts": cmd_counts, "types": cmd_types}[a.verb](P, a)
         if a.out:
-            os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-            with open(a.out, "w") as handle:
-                handle.write(text)
-            sys.stdout.write(f"WROTE {a.out} · {len(text.encode())} bytes · {text.count(chr(10))} lines\n")
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+                with open(a.out, "w", errors="backslashreplace") as handle:
+                    handle.write(text)
+            except OSError as error:
+                fail(f"--out {a.out}: {error}")
+            sys.stdout.write(f"WROTE {a.out} · {len(text.encode(errors='backslashreplace'))} bytes · {text.count(chr(10))} lines\n")
         else:
             sys.stdout.write(text)
         return 0
     except Failure as error:
         sys.stderr.write(FAILED + str(error) + "\n")
+        return 2
+    except Exception as error:
+        sys.stderr.write(FAILED + f"internal error: {type(error).__name__}: {error}\n")
         return 2
 
 

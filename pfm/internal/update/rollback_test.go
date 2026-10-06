@@ -84,8 +84,8 @@ func TestUpdateRollbackRestoresBinaryAndSourceBeforePreviousInstall(t *testing.T
 				return doctorOutcome{}, nil
 			}
 			var stdout, stderr bytes.Buffer
-			if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 1 {
-				t.Fatalf("Run() code = %d, want 1; stderr = %q", code, stderr.String())
+			if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 5 {
+				t.Fatalf("Run() code = %d, want 5; stderr = %q", code, stderr.String())
 			}
 			want := []string{"candidate-install", "previous-install", "previous-doctor"}
 			if phase == "doctor" {
@@ -135,6 +135,7 @@ func TestUpdateRollbackJoinsStepFailures(t *testing.T) {
 				previousRef,
 				step == "source",
 				replacements,
+				nil,
 				runtime,
 				false,
 				io.Discard,

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
 // Mode selects whether the reconciler may change the filesystem.
@@ -29,9 +30,10 @@ type Options struct {
 }
 
 type Result struct {
-	OK       bool
-	Warnings []string
-	Problems []string
+	OK          bool
+	Warnings    []string
+	Problems    []string
+	Rebuildable []string
 	// Dangling records sources that vanished, as a TYPED condition rather than
 	// a substring of rendered prose. Build reports these as warnings and still
 	// writes; Check promotes them to Problems. Classifying by scanning warning
@@ -70,10 +72,6 @@ type GlobalCommandsOptions struct {
 	Home       string
 	SourceHome string
 	Mode       Mode
-	// BeforeWrite, when set, is called in build mode with the absolute path
-	// immediately before each link create/replace, file write, chmod and
-	// orphan removal; an error aborts the build before that write. Nil: no call.
-	BeforeWrite func(path string) error
 }
 
 const defaultAgentPreamble = "You are the ${name} role in this repository, running as a native Codex subagent.\nFirst action: read the repository root AGENTS.md in full. Follow its laws and the protocol below exactly; your mode and task come from the dispatch prompt.\n\n"
@@ -102,7 +100,9 @@ func Run(options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if _, statErr := os.Stat(paths.WorkbenchManifest(root)); statErr == nil {
+	if found, err := paths.HasWorkbenchManifest(root); err != nil {
+		return Result{}, err
+	} else if found {
 		cfg.GlobalCommands = false
 	}
 	result := Result{Warnings: []string{}, Problems: []string{}, Dangling: []string{}}
@@ -201,6 +201,7 @@ func Run(options Options) (Result, error) {
 	}
 	result.Warnings = append(result.Warnings, reconciled.Warnings...)
 	result.Problems = append(result.Problems, reconciled.Problems...)
+	result.Rebuildable = append(result.Rebuildable, reconciled.Rebuildable...)
 	result.Wrote = reconciled.Wrote
 	result.Unchanged = reconciled.Unchanged
 	result.Deleted = reconciled.Deleted
@@ -247,12 +248,13 @@ func RunGlobalCommands(options GlobalCommandsOptions) (Result, error) {
 	reconciled, err := reconcileManagedWithClaim(outputs, options.Mode, []string{
 		filepath.Join(home, ".codex", "skills"),
 		filepath.Join(home, ".codex", "prompts"),
-	}, markerClaimable(home), options.BeforeWrite)
+	}, markerClaimable(home))
 	if err != nil {
 		return Result{}, err
 	}
 	result.Warnings = append(result.Warnings, reconciled.Warnings...)
 	result.Problems = append(result.Problems, reconciled.Problems...)
+	result.Rebuildable = append(result.Rebuildable, reconciled.Rebuildable...)
 	result.Wrote = reconciled.Wrote
 	result.Unchanged = reconciled.Unchanged
 	result.Deleted = reconciled.Deleted
@@ -445,7 +447,7 @@ func compileAgents(
 	for _, project := range projects {
 		dir := filepath.Join(root, project, ".claude", "agents")
 		for _, entry := range markdownSources(dir, nil, result) {
-			if entry.skillDir {
+			if entry.skillDir || entry.dirLink {
 				continue
 			}
 			name := strings.TrimSuffix(filepath.Base(entry.path), ".md")
@@ -493,33 +495,33 @@ func compileAgents(
 				problem(fmt.Sprintf("parse %s: %v", entry.path, parseErr))
 				continue
 			}
-			modelAlias := fields["model"]
-			model := modelAlias
-			if mapped, ok := cfg.ModelMap[modelAlias]; ok {
-				model = mapped
+			role, err := codexRoleSettings(fields, cfg.ModelMap, entry.path)
+			if err != nil {
+				problem(err.Error())
+				continue
 			}
+			modelAlias := fields["model"]
 			tomlName := strings.ReplaceAll(name, "-", "_")
-			readOnly := codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(entry.path), ".md"))
 			instructions := strings.ReplaceAll(cfg.AgentPreamble, "${name}", tomlName)
 			instructions += transformMarkdown(strings.TrimSpace(body), options)
 			toml := "# " + generatedLine(filepath.ToSlash(rel)) + "\n"
-			if model != "" {
-				toml += "# tier: " + tomlEscape(model)
-				if modelAlias != "" && modelAlias != model {
+			if role.Model != "" {
+				toml += "# tier: " + tomlEscape(role.Model)
+				if modelAlias != "" && modelAlias != role.Model {
 					toml += " (Claude alias: " + tomlEscape(modelAlias) + ")"
 				}
 				toml += "\n"
 			}
 			description := transformMarkdown(fields["description"], options)
 			toml += "name = " + tomlString(tomlName) + "\ndescription = " + tomlString(description) + "\n"
-			if model != "" {
-				toml += "model = " + tomlString(model) + "\n"
+			if role.Model != "" {
+				toml += "model = " + tomlString(role.Model) + "\n"
 			}
-			if effort := strings.TrimSpace(fields["effort"]); effort != "" {
-				toml += "model_reasoning_effort = " + tomlString(effort) + "\n"
+			if role.Effort != "" {
+				toml += "model_reasoning_effort = " + tomlString(role.Effort) + "\n"
 			}
-			if readOnly {
-				toml += "sandbox_mode = \"read-only\"\n"
+			if role.Sandbox != "" {
+				toml += "sandbox_mode = " + tomlString(role.Sandbox) + "\n"
 			}
 			toml += "developer_instructions = \"\"\"\n" + tomlMultiline(instructions) + "\"\"\"\n"
 			add(generatedFile{Path: filepath.Join(root, ".codex", "agents", name+".toml"), Content: toml})
@@ -539,6 +541,12 @@ func compileRepoCommands(
 	sourceRoot := filepath.Join(root, ".claude", "commands")
 	for _, entry := range markdownSources(sourceRoot, cfg.ExcludeDirs, result) {
 		if entry.target != "" {
+			if entry.dirLink {
+				for _, twin := range keptDirTwins(root, entry, problem) {
+					add(twin)
+				}
+				continue
+			}
 			add(keptCommandTwin(root, entry))
 			continue
 		}
@@ -708,15 +716,18 @@ func compileRepoSkills(root string, add func(generatedFile), problem func(string
 	}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
+		dst := filepath.Join(root, ".codex", "skills", entry.Name())
 		info, statErr := os.Stat(path)
 		if statErr != nil {
 			result.danglingSource(path, statErr)
+			if entry.Type()&os.ModeSymlink != 0 {
+				add(keptTwin(dst, sourceEntry{path: path, rel: entry.Name(), target: sourcelink.LinkTarget(path)}))
+			}
 			continue
 		}
 		if !info.IsDir() {
 			continue
 		}
-		dst := filepath.Join(root, ".codex", "skills", entry.Name())
 		add(generatedFile{Path: dst, Link: relativeLink(dst, path)})
 	}
 }

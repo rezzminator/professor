@@ -237,6 +237,25 @@ class ExtractionVerbsTest(unittest.TestCase):
         self.assertIn('pkg/caller.py:5\t    return greet("world")\n', text)
         self.assertIn("pkg/greet.py:1\tdef greet(name):\n", text)
 
+    def test_grep_readings_support_bre_boundaries_intervals_and_literal_fallback(self):
+        with open(os.path.join(self.root, "pkg", "idx.py"), "w") as handle:
+            handle.write("x = a.Do[0]\n")
+        for pattern, count, reading, hit in ((r"\<greet\>", "3 hits in 2 files", "read as grep BRE", "pkg/greet.py:1\tdef greet(name):"),
+                                             (r"l\{2\}", "1 hits in 1 files", "read as grep BRE", 'pkg/greet.py:2\t    return f"hello {name}"'),
+                                             (r"\.Do[", "1 hits in 1 files", "not a valid regex; matched literally", "pkg/idx.py:1\tx = a.Do[0]")):
+            with self.subTest(pattern=pattern), tempfile.TemporaryDirectory() as self.out_dir:
+                text = self.collect_one(f"grep '{pattern}' pkg")
+                self.assertIn(f"· {count} · {reading}", text)
+                self.assertIn(hit, text)
+
+    def test_python_regex_misses_name_the_reading_for_grep_and_block(self):
+        for command in ("grep 'zz+q' pkg", "block config.yml 'zz+q'", "block config.yml 'build:' -n 2"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as out_dir:
+                proc = run_collect(self.root, out_dir, f"= 1 t\n{command}\n")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn("MISS 1", proc.stdout)
+                self.assertIn("read as a Python regex", proc.stdout)
+
     def test_verb_grep_reads_an_invalid_regex_the_way_grep_does(self):
         with open(os.path.join(self.root, "pkg", "client.py"), "w") as fh:
             fh.write("resp = client.Do(req)\n")

@@ -14,6 +14,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -41,7 +42,7 @@ func TestSpawnAuditRegistryPayload(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			verdict, reason := classifySpawn(parsed, observation, machine.EffectiveClaude(1), home, 100)
+			verdict, reason := classifySpawn(parsed, observation, machine.EffectiveClaude(1), home, 100, nil)
 			if verdict != spawnInjected {
 				t.Fatalf("%s: %s", verdict, reason)
 			}
@@ -69,20 +70,24 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 			return hooks
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			changed := parsed
-			changed.Hooks = change(append([]claudelaunch.Hook(nil), parsed.Hooks...))
-			verdict, reason := classifySpawn(
-				changed,
-				spawnObservation{StartedUnix: 50},
-				machine.EffectiveClaude(1),
-				home,
-				100,
-			)
-			if verdict != spawnPredatesLayer || !strings.Contains(reason, "hook set differs from the registry") {
-				t.Fatalf("%s: %s", verdict, reason)
-			}
-		})
+		for _, started := range []int64{50, 200} {
+			t.Run(fmt.Sprintf("%s/born_%d", name, started), func(t *testing.T) {
+				changed := parsed
+				changed.Hooks = change(append([]claudelaunch.Hook(nil), parsed.Hooks...))
+				verdict, reason := classifySpawn(
+					changed,
+					spawnObservation{StartedUnix: started},
+					machine.EffectiveClaude(1),
+					home,
+					100,
+					nil,
+				)
+				if verdict != spawnPredatesLayer ||
+					reason != "hook set differs from the registry — reload to carry it" {
+					t.Fatalf("%s: %s", verdict, reason)
+				}
+			})
+		}
 	}
 }
 
@@ -97,6 +102,7 @@ func TestSpawnAuditBypassAndUndecodable(t *testing.T) {
 		prefs,
 		home,
 		100,
+		nil,
 	); verdict != spawnViolation ||
 		!strings.Contains(reason, "bypassed") {
 		t.Fatalf("%s: %s", verdict, reason)
@@ -110,11 +116,20 @@ func TestSpawnAuditBypassAndUndecodable(t *testing.T) {
 }
 
 func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
+	root := t.TempDir()
+	accountDir := filepath.Join(root, "accounts", "2")
+	if err := os.MkdirAll(accountDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(accountDir, link); err != nil {
+		t.Fatal(err)
+	}
 	machine := config.Config{
 		Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
 		Accounts: []config.Account{
 			{ID: 1, ConfigDir: "/accounts/1", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor}},
-			{ID: 2, ConfigDir: "/accounts/2", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
+			{ID: 2, ConfigDir: accountDir, Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
 		},
 	}
 	for _, test := range []struct {
@@ -122,22 +137,127 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 		want   int
 		reason string
 	}{
-		{"/accounts/2", 2, ""},
+		{accountDir, 2, ""},
+		{accountDir + "/", 2, ""},
+		{link, 2, ""},
+		{"/accounts/1/", 1, ""},
 		{"/unknown", 1, "account unmatched; graded against primary"},
 		{"", 1, "account unmatched; graded against primary"},
 	} {
-		got, reason := spawnAccount(
-			machine,
-			1,
-			spawnObservation{Environ: map[string]string{"CLAUDE_CONFIG_DIR": test.dir}},
-		)
-		if got != test.want || reason != test.reason {
-			t.Fatalf("dir %s: account=%d reason=%q", test.dir, got, reason)
-		}
+		t.Run(test.dir, func(t *testing.T) {
+			got, reason := spawnAccount(
+				machine,
+				1,
+				spawnObservation{Environ: map[string]string{"CLAUDE_CONFIG_DIR": test.dir}},
+			)
+			if got != test.want || reason != test.reason {
+				t.Fatalf("dir %s: account=%d reason=%q", test.dir, got, reason)
+			}
+		})
 	}
 	got, reason := spawnAccount(machine, 1, spawnObservation{EnvironErr: errors.New("denied")})
 	if got != 1 || !strings.Contains(reason, "unreadable") {
 		t.Fatalf("account=%d reason=%q", got, reason)
+	}
+	t.Run("empty roster", func(t *testing.T) {
+		got, reason := spawnAccount(
+			config.Config{},
+			1,
+			spawnObservation{Environ: map[string]string{"CLAUDE_CONFIG_DIR": "/srv/acct"}},
+		)
+		if got != 1 || reason != "" {
+			t.Fatalf("empty roster: account=%d reason=%q", got, reason)
+		}
+	})
+}
+
+func TestSpawnAuditMissingPromptMaterial(t *testing.T) {
+	home := t.TempDir()
+	for _, test := range []struct {
+		name      string
+		prefs     config.ClaudePrefs
+		started   int64
+		promptErr error
+		verdict   spawnVerdict
+		reason    string
+	}{
+		{
+			name:      "composed prompt unavailable",
+			prefs:     config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+			started:   200,
+			promptErr: errors.New("resolve composed harness prompt: no source repository recorded"),
+			verdict:   spawnViolation,
+			reason:    "no --system-prompt-file prompt material — composed prompt unavailable (resolve composed harness prompt: no source repository recorded); every door omits the flag until it exists: update or restore the clone, then reload",
+		},
+		{
+			name:    "age carried",
+			prefs:   config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
+			started: 50,
+			verdict: spawnPredatesLayer,
+			reason:  "missing --settings outputStyle default (born 50s before the current spawn door)",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observation := spawnObservation{Argv: []string{"claude"}, StartedUnix: test.started}
+			verdict, reason := classifySpawn(
+				mustParseSpawn(t, observation.Argv),
+				observation,
+				test.prefs,
+				home,
+				100,
+				test.promptErr,
+			)
+			if verdict != test.verdict || reason != test.reason {
+				t.Fatalf("%s: %s; want %s: %s", verdict, reason, test.verdict, test.reason)
+			}
+		})
+	}
+}
+
+func TestPrintSpawnAuditCountsUndecodableSeats(t *testing.T) {
+	home := t.TempDir()
+	machine := config.Config{Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}}
+	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := spawnObservationsProbe
+	t.Cleanup(func() { spawnObservationsProbe = previous })
+	for _, test := range []struct {
+		name   string
+		unread []string
+		row    string
+	}{
+		{name: "undecodable seat", row: "1 seat(s) could NOT be audited: cc-a pid=1: argv undecodable"},
+		{name: "other probe warning", unread: []string{"cc-c pid=3: environment unreadable"}, row: "2 seat(s) could NOT be audited: cc-a pid=1: argv undecodable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spawnObservationsProbe = func(context.Context, paths.Values, config.Config, clock.Clock) ([]spawnObservation, []string, error) {
+				return []spawnObservation{
+					{Socket: "cc-a", PID: 1, Argv: []string{"claude", "--settings", "{"}},
+					{
+						Socket:  "cc-b",
+						PID:     2,
+						Argv:    append([]string{launch.Binary}, launch.Argv...),
+						Environ: map[string]string{},
+					},
+				}, append([]string(nil), test.unread...), nil
+			}
+			var out bytes.Buffer
+			warnings := printSpawnAuditDoctorWithClock(
+				t.Context(),
+				&out,
+				paths.Values{Home: home},
+				machine,
+				1,
+				clock.Real,
+			)
+			if warnings != 1 ||
+				!strings.Contains(out.String(), "chats=2 injected=1 predates-layer=0 violations=0 undecodable=1") ||
+				!strings.Contains(out.String(), test.row) {
+				t.Fatalf("warnings=%d output=%s", warnings, out.String())
+			}
+		})
 	}
 }
 
@@ -466,8 +586,9 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 	t.Cleanup(func() { spawnDoorExecutable = previous })
 	spawnDoorExecutable = func() (string, error) { return binary, nil }
 
-	stamp, signal := spawnDoorStamp(home)
-	if stamp != binaryAt.Unix() || !strings.Contains(signal, prompt) || !strings.Contains(signal, binary) {
+	stamp, signal, promptErr := spawnDoorStamp(home)
+	if promptErr != nil || stamp != binaryAt.Unix() || !strings.Contains(signal, prompt) ||
+		!strings.Contains(signal, binary) {
 		t.Fatalf("spawnDoorStamp = %d %q; want the binary's %d with both inputs named", stamp, signal, binaryAt.Unix())
 	}
 	// Launched by an older pfm between the prompt and the binary: prompt
@@ -483,6 +604,7 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 		config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
 		home,
 		stamp,
+		nil,
 	); verdict != spawnPredatesLayer {
 		t.Fatalf("older seat = %s (%s), want %s", verdict, reason, spawnPredatesLayer)
 	}
@@ -494,14 +616,15 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 		config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
 		home,
 		stamp,
+		nil,
 	); verdict != spawnViolation {
 		t.Fatalf("fresh seat = %s (%s), want %s", verdict, reason, spawnViolation)
 	}
 	// The binary unreadable: the prompt still stands and the signal says why.
 	spawnDoorExecutable = func() (string, error) { return "", errors.New("no executable path") }
-	if stamp, signal := spawnDoorStamp(
+	if stamp, signal, promptErr := spawnDoorStamp(
 		home,
-	); stamp != promptAt.Unix() ||
+	); promptErr != nil || stamp != promptAt.Unix() ||
 		!strings.Contains(signal, "no executable path") {
 		t.Fatalf(
 			"unreadable binary: spawnDoorStamp = %d %q; want the prompt's %d and the reason",
@@ -526,9 +649,27 @@ func TestSpawnDoorStampUsesBinaryWhenComposedPromptUnreadable(t *testing.T) {
 	previous := spawnDoorExecutable
 	t.Cleanup(func() { spawnDoorExecutable = previous })
 	spawnDoorExecutable = func() (string, error) { return binary, nil }
-	stamp, signal := spawnDoorStamp(home)
-	if stamp != at.Unix() || !strings.Contains(signal, prompt) || !strings.Contains(signal, "prompt layer") {
-		t.Fatalf("stamp=%d signal=%q; want binary stamp and unreadable prompt", stamp, signal)
+	for _, test := range []struct {
+		name string
+		home string
+		want string
+	}{
+		{name: "missing prompt", home: home, want: "no such file or directory"},
+		{name: "prompt directory", home: home, want: "not a regular file"},
+		{name: "no source repository", home: t.TempDir(), want: "no source repository recorded"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if test.name == "prompt directory" {
+				if err := os.MkdirAll(prompt, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stamp, signal, promptErr := spawnDoorStamp(test.home)
+			if promptErr == nil || !strings.Contains(promptErr.Error(), test.want) || stamp != at.Unix() ||
+				!strings.Contains(signal, "prompt layer") || !strings.Contains(signal, binary) {
+				t.Fatalf("stamp=%d signal=%q error=%v; want binary stamp and %s", stamp, signal, promptErr, test.want)
+			}
+		})
 	}
 }
 

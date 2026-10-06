@@ -637,7 +637,7 @@ func CleanHome(t *testing.T, dirs []string, files map[string]string) config.Runt
 	t.Setenv("HOME", home)
 	t.Setenv(paths.EnvHome, home)
 	configPath := filepath.Join(home, "pfm.config.json")
-	if err := os.WriteFile(configPath, []byte("{\"version\":2}\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("{\"version\":2,\"ask\":{\"engine\":\"claude\"}}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(paths.EnvConfig, configPath)

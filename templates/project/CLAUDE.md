@@ -14,7 +14,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 {PROJECT_ROSTER}
 
 - child CLAUDE.md: a roster entry's own conventions and code placement, beside its agents and skills · `{project}/CLAUDE.md`, `{project}/.claude/`
-- fleet prompt: the main chat's system layer — voice, § Model Selection, § Orchestration — composed per engine by `pfm install` · `{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`
+- fleet prompt: the main chat's system layer — voice, § Model Selection, § Orchestration — composed at build time by `make -C pfm prompts` into the clone's tracked `composed/`; `pfm install` stages none of it · `{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`
 - guard: the PreToolUse hook gating `.claude/**` and every `CLAUDE.md` · `.claude/scripts/pfm-guard.sh`
 - permanent docs: the main loop's reference docs · `docs/agents/`, each roster entry's `{project}/docs/`
 - flight directory: a flight's task files and audit trail, kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
@@ -47,7 +47,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 ## Local
 
 - Scratch lives in `/tmp/{project}/{purpose}/`, outside the tree: `{project}` is this repo's directory name minus any leading dot, derived, never hardcoded.
-- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/{timing|guard}/`); a scratch path named to a human or a model is absolute.
+- One scratch subdirectory per purpose, each owned by a named protocol (`/tmp/{project}/{dev|guard}/`); a scratch path named to a human or a model is absolute.
 
 # Rules
 
@@ -64,8 +64,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 - Before your first tool call, count the tasks in your brief: a task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
 - A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
 - A brief carrying the user's ruling to skip the ceremony (no `flights-speccer`, no orchestrator): do it yourself, start to finish, whatever its size.
-- You finish within 45 calls; at the cap, return what landed, what is left and the next step.
-- Otherwise take the lowest rung that fits; a higher rung needs its named reason.
+- Otherwise take the lowest rung that fits; a higher rung needs its named reason. You finish within 45 calls; at the cap, return what landed, what is left and the next step.
   1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish, when it fits your 45 calls; otherwise one or two sub-agents, in sequence or in parallel.
   2. The solution is in hand but the volume is more than one or two agents finish (about 80 calls) — many clear tasks, each with nameable files: your first tool call spawns `general-orchestrator` (Agent tool, `subagent_type: general-orchestrator`), handing it the work, everything you already hold and the check that proves the batch done; it cuts the batch, runs one short executor per task and returns once.
   3. The solution is not in hand — a design to choose, a failure of unknown cause, files you cannot name — and the work is large: your first tool call spawns `flights-speccer` (Agent tool, `subagent_type: flights-speccer`), handing it the work, everything you already hold and a directory under `$HOME/.local/state/pfm/flights/{project}/`; its return is your orders: a directory of one task file you execute yourself; of several, you execute none and hand the directory to `flights-orchestrator` (Agent tool, `subagent_type: flights-orchestrator`), which runs one fresh executor per task file and returns once. Below opus you write no spec yourself.

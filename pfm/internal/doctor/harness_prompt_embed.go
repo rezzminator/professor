@@ -152,10 +152,6 @@ func inspectHarnessPromptEmbed(tree string) harnessPromptEmbedReport {
 // directory the go:embed line does not name yet — so it is no difference
 // either.
 func harnessPromptTreeExcluded(name string) bool {
-	if name == "composed" || name == "compose" || strings.HasPrefix(name, "composed/") ||
-		strings.HasPrefix(name, "compose/") {
-		return true
-	}
 	if strings.HasSuffix(name, ".go") {
 		return true
 	}

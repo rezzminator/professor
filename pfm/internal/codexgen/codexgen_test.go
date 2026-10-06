@@ -431,12 +431,12 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, ".claude", "agents", "unmapped.md"),
-		"---\ndescription: unmapped model\nmodel: something-else\n---\nunmapped\n",
+		"---\ndescription: unmapped model\ncodex-model: something-else\n---\nunmapped\n",
 	)
 	writeTestFile(
 		t,
 		filepath.Join(root, ".claude", "agents", "escaped.md"),
-		"---\ndescription: escaped values\nmodel: 'model\\path\"quoted'\neffort: 'effort\\path\"quoted'\n---\nescaped\n",
+		"---\ndescription: escaped values\ncodex-model: 'model\\path\"quoted'\neffort: 'effort\\path\"quoted'\n---\nescaped\n",
 	)
 	writeTestFile(t, filepath.Join(root, ".claude", "agents", "private.md"), "---\ndescription: private\n---\nno\n")
 	writeTestFile(
@@ -659,6 +659,51 @@ func TestReconcileFindingsAreNamedAndNonDestructive(t *testing.T) {
 			t.Fatalf("conflict file changed: %q", got)
 		}
 	})
+}
+
+func TestProjectAgentCodexRoleSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, frontmatter string
+		refused                 bool
+	}{
+		{name: "project tier honours the keys", file: "lab.md", frontmatter: "model: opus\ncodex-model: gpt-fixture-lab\ncodex-effort: low\ncodex-sandbox: workspace-write\ntools: Read, Grep\n"},
+		{name: "project tier refusal", file: "orch.md", frontmatter: "model: claude-sonnet-5-5\n", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, home := t.TempDir(), t.TempDir()
+			writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
+			source := filepath.Join(root, ".claude", "agents", tc.file)
+			writeTestFile(t, source, "---\ndescription: Lab.\n"+tc.frontmatter+"---\nLab.\n")
+			result, err := Build(Options{Root: root, Home: home})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.refused {
+				if result.OK || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], source) ||
+					result.Wrote != 0 {
+					t.Fatalf("refusal = %#v, want one source problem and no writes", result)
+				}
+				if _, err := os.Lstat(filepath.Join(root, ".codex", "agents")); !os.IsNotExist(err) {
+					t.Fatalf("refused build materialized agents: %v", err)
+				}
+				return
+			}
+			if !result.OK {
+				t.Fatalf("build = %#v", result)
+			}
+			twin := filepath.Join(root, ".codex", "agents", "lab.toml")
+			assertTestFileContains(t, twin,
+				"# tier: gpt-fixture-lab (Claude alias: opus)\n",
+				"model = \"gpt-fixture-lab\"\nmodel_reasoning_effort = \"low\"\nsandbox_mode = \"workspace-write\"\n")
+			content := string(mustReadTestFile(t, twin))
+			if strings.Contains(content, "read-only") {
+				t.Fatalf("workspace-write role is read-only:\n%s", content)
+			}
+			if err := validateTOML(content); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func containsFinding(items []string, needle string) bool {

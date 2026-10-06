@@ -47,6 +47,22 @@ func ResolvePathFrom(env paths.Env, home string) (string, error) {
 	return filepath.Join(repo, FileName), nil
 }
 
+func configOverridden(env paths.Env) bool {
+	return strings.TrimSpace(env.Get(paths.EnvConfig)) != ""
+}
+
+type sourceRepoMarkerError struct{ cause error }
+
+func (err *sourceRepoMarkerError) Error() string { return NoConfigPathError(err.cause).Error() }
+func (err *sourceRepoMarkerError) Unwrap() error { return err.cause }
+
+func configMarkerError(markerErr error) error {
+	if errors.Is(markerErr, paths.ErrNoSourceRepoMarker) {
+		return nil
+	}
+	return &sourceRepoMarkerError{cause: markerErr}
+}
+
 // NoConfigPathError gives writers the remedy for a missing clone marker.
 func NoConfigPathError(markerErr error) error {
 	if markerErr == nil || errors.Is(markerErr, paths.ErrNoSourceRepoMarker) {
@@ -69,7 +85,7 @@ func RefuseAmbientConfigHomeFrom(env paths.Env, home string) error {
 	if !testing.Testing() || env.Get(paths.EnvRealHome) != "" {
 		return nil
 	}
-	if env.Get(paths.EnvConfig) != "" {
+	if configOverridden(env) {
 		return nil
 	}
 	repo, err := paths.ReadSourceRepoMarker(home)

@@ -46,12 +46,13 @@ var (
 )
 
 type projectReportItem struct {
-	Status    projectStatus `json:"status"`
-	Local     string        `json:"local,omitempty"`
-	Template  string        `json:"template"`
-	Pin       FilePin       `json:"pin,omitempty"`
-	Diff      string        `json:"diff,omitempty"`
-	DiffError string        `json:"diffError,omitempty"`
+	Status      projectStatus `json:"status"`
+	Local       string        `json:"local,omitempty"`
+	Template    string        `json:"template"`
+	Pin         FilePin       `json:"pin,omitempty"`
+	Diff        string        `json:"diff,omitempty"`
+	DiffError   string        `json:"diffError,omitempty"`
+	DiffSkipped string        `json:"diffSkipped,omitempty"`
 }
 type projectReport struct {
 	Root     string
@@ -223,7 +224,7 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 					case strings.TrimSpace(item.Diff) == "":
 						fmt.Fprintf(
 							stdout,
-							"      upstream change EMPTY — git shows no difference from the pin; compare by hand: diff %s %s\n",
+							"      upstream change EMPTY — the pin was taken from an uncommitted or untracked store file, so git cannot show the change; compare by hand: diff %s %s\n",
 							filepath.Join(r.Root, filepath.FromSlash(item.Local)),
 							filepath.Join(r.Store.Templates, filepath.FromSlash(item.Template)),
 						)
@@ -319,7 +320,7 @@ func runPostUpdate(rootFlag string, jsonOutput bool, stdout io.Writer, runtime c
 	root, found, err := ResolveProjectRoot(rootFlag)
 	if err != nil {
 		writeProjectFailure(stdout, jsonOutput, err)
-		return 1
+		return 3
 	}
 	if found {
 		return renderProjectCheck(root, runtime.Paths.Home, jsonOutput, stdout)

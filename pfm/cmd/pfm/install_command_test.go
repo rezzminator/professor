@@ -584,7 +584,6 @@ func TestInstallerOptionsPrimaryAccount(t *testing.T) {
 				if err := os.Mkdir(runtime.Paths.StateDB, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				want = runtime.Config.Accounts[1].ConfigDir
 			case "explicit":
 				explicit = filepath.Join(home, "store")
 				want = ""
@@ -602,7 +601,7 @@ func TestInstallerOptionsPrimaryAccount(t *testing.T) {
 			}
 			if state == "unreadable" {
 				_, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
-				line := fmt.Sprintf("  skip    primary account unreadable (%v); using account 2\n", err)
+				line := fmt.Sprintf("  skip    primary account unreadable (%v); using account 7\n", err)
 				if out.String() != line {
 					t.Fatalf("got %q want %q", out.String(), line)
 				}

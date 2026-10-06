@@ -238,7 +238,7 @@ Claude takes your answers and:
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `legal` | Bundled `templates/project/skills/legal/` | None |
 | `god-speed` | host-global source-fetched (`templates/global/skills/sources.json`), fetched and linked by `pfm install` <https://github.com/rezzminator/god-speed> | None |
-| `/rnd` | Command `templates/project/commands/rnd.md` | `tokens`: `{AI_SERVICE_NAME}`, `{LLM_PROVIDER}`, `{SECONDARY_LANG}`; by hand: `{PROJECT}` (the entry holding the LLM-calling code), `{ai_module}` |
+| `/rnd` | Command `templates/project/commands/rnd.md` | `tokens`: `{AI_SERVICE_NAME}`, `{DOMAIN_ADJ}`, `{SECONDARY_LANG}`; by hand: `{PROJECT}` (the entry holding the LLM-calling code), `{ai_module}` |
 | `/flights:*` | Commands `templates/global/commands/flights/*.md` — host-global, linked by `pfm install` | None (pipeline-coupled) |
 | `/quality:prompt` | Command `templates/global/commands/quality/prompt.md` | Replace `{DOMAIN_ADJ}`, `{SENSITIVE_DATA}` |
 | `/quality:doc` | Command `templates/global/commands/quality/doc.md` | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples |
@@ -277,7 +277,7 @@ Claude takes your answers and:
 
     `pfm install` also writes rumdl's user config (`$XDG_CONFIG_HOME/rumdl/rumdl.toml`, else `~/.config/rumdl/rumdl.toml`) when none exists, with `[global] cache = false`: a rumdl run that finds no project `.rumdl.toml` then writes no stray `.rumdl_cache`. An existing user config is never rewritten.
 
-7d. **(Opt-in) Installs multi-account fleet tooling** — obtain the versioned binary using [INSTALL.md](../INSTALL.md), then run `pfm install` to preview or `pfm install --yes` to apply. Read-only host checks refuse BLOCK rows before any write; `pfm doctor` prints their fixes. Install creates missing shared store entries, links every account to `~/.claude`, writes global registries once into that store and stages the clone-sourced shim and platform scheduler. Hooks, status line and MCP ride each Claude launch. Plugins install once through the primary account. Opt-in MCP and VS Code retain their enablement; VS Code offers **Professor** in its Extensions view and terminal dropdown, with the `PFM` terminal selected as default. Codex homes receive the owned fleet appendix in `developer_instructions`. Claude always has account 1 at `~/.cc/1` by default; explicitly empty Codex and OpenCode rosters remain empty. Custom settings are preserved. The write gate refuses an active name-sync job, and service activation failures remain errors. Uninstall removes owned registrations and staged assets. Skipped if the user declines.
+7d. **(Opt-in) Installs multi-account fleet tooling** — obtain the versioned binary using [INSTALL.md](../INSTALL.md), then run `pfm install` to preview or `pfm install --yes` to apply. Read-only host checks refuse BLOCK rows before any write; `pfm doctor` prints their fixes. Install creates missing shared store entries, links every account to `~/.claude`, writes global registries once into that store and stages the clone-sourced shim and platform scheduler. Hooks, status line and MCP ride each Claude launch. Plugins install once through the primary account. Opt-in MCP and VS Code retain their enablement; VS Code offers **Professor** in its Extensions view and terminal dropdown, with the `PFM` terminal selected as default. Codex homes receive the owned fleet appendix in `developer_instructions`. Claude always has account 1 at `~/.cc/1` by default; explicitly empty Codex and OpenCode rosters remain empty. Custom settings are preserved. The write gate refuses a running name-sync job at once with exit 97; it waits up to 90 s for a running reminder fire, then refuses with exit 97 if the fire is still running. Service activation failures remain errors. Uninstall removes owned registrations and staged assets. Skipped if the user declines.
 
 7d-i. **(Opt-in, host-level) The professor MCP server** — while either `mcp.servers.chat.enabled` or `harvester.enabled` is on, every managed engine receives the one stdio server `professor`, running `~/.local/bin/pfm mcp serve --stdio`. Claude receives it and `mcp.thirdParty` in `--mcp-config`; installation writes no account `.claude.json` key. Host checks name pfm-owned leftovers and third-party registrations, with fixes for the operator. Codex receives an owned `[mcp_servers.professor]` fence; OpenCode receives `mcp.professor` in `opencode.jsonc`. When both families are off, owned client registrations are removed. Third-party configuration survives. Doctor inspects the daemon, launch configuration and clients; failed reads remain errors. The chat family exposes `chat_*` and `servicedesk`; the harvester exposes `harvester_*`. `/reload` remains in the shared command registry.
 
@@ -300,8 +300,11 @@ Claude takes your answers and:
 ```json
 {
   "schema": 1,
-  "version": "0.5.0",
-  "installed_from_tag": "v0.5.0",
+  "installed_from": {
+    "mode": "clone",
+    "repo": "rezzminator/professor",
+    "version": "X.Y.Z"
+  },
   "installed_at": "2026-04-28T14:32:00Z",
   "updated_at": null,
   "interview": {
@@ -353,13 +356,13 @@ Claude takes your answers and:
     "ports": { "a": 3000, "db": 5432 }
   },
   "tokens": {
-    "PROJECT_NAME": "neurolab",
-    "PROJECT_TAGLINE": "AI-assisted neuropsychological assessment platform",
-    "SACRED_GROUND": "patient cognitive assessment data and diagnostic accuracy",
-    "DOMAIN_ADJ": "clinical",
-    "SENSITIVE_DATA": "patient assessment records",
-    "REGULATION": "HIPAA",
-    "DATABASE": "Postgres"
+    "PROJECT_NAME": "acme-orders",
+    "PROJECT_TAGLINE": "Example order-tracking service for a fictional shop",
+    "SACRED_GROUND": "fictional customer orders and their payment state",
+    "DOMAIN_ADJ": "retail",
+    "SENSITIVE_DATA": "customer order records",
+    "REGULATION": "PCI DSS",
+    "DATABASE": "SQLite"
   }
 }
 ```
@@ -386,7 +389,7 @@ After install, Claude verifies the project routes through the installed develope
 
 Then exercise one small task through the pipeline and watch its project checks. The first run reveals anything missed in adaptation. If something asks the wrong question or runs the wrong command, invoke `/pcm` to fix it at the source.
 
-Before creating the `professor: install` commit, close the update ledger per [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes): run `pfm doctor --project-updates`; run `pfm update pin --template <template> <local>` for every interview-deployed file, including per-project agents and each child `CLAUDE.md`; and run `pfm update ignore <template>` for every declined or deliberately non-materialized template — Tier B archetypes not opted in, `project/per-project/CLAUDE.md` for a roster of one, and `project/settings-global.json` because it is merged into home settings rather than installed as a project file. `pfm update ignore` refuses a template a local file is still pinned to: for a declined template `pfm init` scaffolded (the Tier B archetypes), delete the local file and run `pfm update drop <local>` first, then `pfm update ignore <template>`. `pfm update drop` alone is never how a template is declined — it forgets the pin, and the next report lists the template as `NEW` again. Re-run `pfm doctor --project-updates`; it must exit 0 and end in `clean` before the commit.
+Before creating the `professor: install` commit, close the update ledger per [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes): run `pfm doctor --project-updates`; run `pfm update pin --template <template> <local>` for every interview-deployed file, including per-project agents and each child `CLAUDE.md`; and run `pfm update ignore <template>` for every declined or deliberately non-materialized template — Tier B archetypes not opted in, `project/per-project/CLAUDE.md` for a roster of one, and `project/settings-global.json` because nothing installs that template — `cleanupPeriodDays` reaches Claude through the `managed-settings.d/pfm.json` drop-in `pfm install` writes and each launch's `--settings`. `pfm update ignore` refuses a template a local file is still pinned to: for a declined template `pfm init` scaffolded (the Tier B archetypes), delete the local file and run `pfm update drop <local>` first, then `pfm update ignore <template>`. `pfm update drop` alone is never how a template is declined — it forgets the pin, and the next report lists the template as `NEW` again. Re-run `pfm doctor --project-updates`; it must exit 0 and end in `clean` before the commit.
 
 ---
 

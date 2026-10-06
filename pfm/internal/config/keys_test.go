@@ -55,6 +55,10 @@ func TestExampleConfigMatchesKeys(t *testing.T) {
 	flattenExample("", object, actual)
 	want := map[string]any{}
 	for _, entry := range Keys() {
+		// The example omits ask.engine so DefaultEngine can resolve the local roster.
+		if entry.Key == "ask.engine" {
+			continue
+		}
 		encoded, err := json.Marshal(entry.Default)
 		if err != nil {
 			t.Fatal(err)

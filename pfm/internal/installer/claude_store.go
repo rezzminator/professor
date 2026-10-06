@@ -143,13 +143,15 @@ func InspectClaudeStore(store string, accounts []pfmconfig.Account) ClaudeStoreR
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	for _, account := range ordered {
 		state := AccountLinks{ID: account.ID, Dir: account.ConfigDir, State: "ok"}
-		// A not-dir account stays "ok": its links then name ENOTDIR each.
+		// A non-directory account is one failure, not one error per link.
 		inspected := claudelaunch.InspectConfigDir(store, state.Dir)
 		switch inspected.State {
 		case claudelaunch.ConfigDirMissing:
 			state.State = string(HostOverlayMissing)
 		case claudelaunch.ConfigDirUnreadable:
 			state.State, state.Err = stateUnreadable, inspected.Err
+		case claudelaunch.ConfigDirNotDir:
+			state.State = string(claudelaunch.ConfigDirNotDir)
 		case claudelaunch.ConfigDirStore:
 			state.State = stateStore
 		}
@@ -159,7 +161,8 @@ func InspectClaudeStore(store string, accounts []pfmconfig.Account) ClaudeStoreR
 		if inspected.Real != "" {
 			base = inspected.Real
 		}
-		if state.State != stateStore && state.State != stateUnreadable {
+		if state.State != stateStore && state.State != stateUnreadable &&
+			inspected.State != claudelaunch.ConfigDirNotDir {
 			for _, entry := range StoreEntries {
 				state.Links = append(
 					state.Links,

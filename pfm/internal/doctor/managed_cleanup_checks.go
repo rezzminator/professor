@@ -20,18 +20,29 @@ func printManagedCleanupChecks(stdout io.Writer, runtime config.Runtime) (warnin
 	case installer.ManagedCleanupMissing:
 		fmt.Fprintf(
 			stdout,
-			"managed-cleanup: %s missing — transcripts older than 30 days are deleted by any Claude launch outside pfm\n",
+			"managed-cleanup: %s missing — transcripts older than 30 days are deleted by any Claude launch outside pfm; run: %s\n",
 			status.Path,
+			installer.ManagedCleanupFix(dir, status.Path, prefs.CleanupPeriodDays),
 		)
 		warnings++
 	case installer.ManagedCleanupWrong:
-		fmt.Fprintf(
-			stdout,
-			"managed-cleanup: %s cleanupPeriodDays=%d, want %d\n",
-			status.Path,
-			status.Value,
-			prefs.CleanupPeriodDays,
-		)
+		if status.KeyAbsent {
+			fmt.Fprintf(
+				stdout,
+				"managed-cleanup: %s has no cleanupPeriodDays, want %d",
+				status.Path,
+				prefs.CleanupPeriodDays,
+			)
+		} else {
+			fmt.Fprintf(
+				stdout,
+				"managed-cleanup: %s cleanupPeriodDays=%d, want %d",
+				status.Path,
+				status.Value,
+				prefs.CleanupPeriodDays,
+			)
+		}
+		fmt.Fprintf(stdout, "; run: %s\n", installer.ManagedCleanupFix(dir, status.Path, prefs.CleanupPeriodDays))
 		warnings++
 	case installer.ManagedCleanupUnreadable:
 		fmt.Fprintf(stdout, "managed-cleanup: %s UNREADABLE error=%v\n", status.Path, status.Err)

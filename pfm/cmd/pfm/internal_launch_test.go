@@ -353,6 +353,7 @@ func TestDoctorReportsClaudeLauncherMissingDisplacedAndOK(t *testing.T) {
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
 	root := jailTest(t)
 	home := filepath.Join(root, "home")
+	testjail.PinClaudeAsk(t, home)
 	canonical := filepath.Join(home, ".local", "bin", "claude")
 	managed := filepath.Join(home, ".local", "share", "pfm", "install", "bin", "claude")
 	native := filepath.Join(home, ".local", "share", "claude", "versions", "fixture")

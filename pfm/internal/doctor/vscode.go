@@ -1,8 +1,11 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
@@ -83,16 +86,34 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 		}
 	}
 	for _, settings := range report.Settings {
+		settingsFix := vscodeFix
+		if settings.ProfileConflict {
+			// Install refuses an operator's PFM profile until it is cleared.
+			settingsFix = fmt.Sprintf(
+				`rename or remove the "PFM" terminal profile in %s, then %s`,
+				settings.Path,
+				vscodeFix,
+			)
+		}
 		row := fmt.Sprintf(
 			"doctor: vscode settings=%s profile=PFM(%s) default=%s",
 			settings.Path,
 			settings.Profile,
 			settings.Default,
 		)
-		if settings.Profile == missingState || settings.Profile == unreadableState {
-			warnings += filter.warn(stdout, warnVSCodeSettings, row, "")
+		if settings.Profile == missingState || settings.Profile == unreadableState || settings.ProfileConflict {
+			profileFix := ""
+			if settings.Profile == missingState || settings.ProfileConflict {
+				profileFix = settingsFix
+			}
+			warnings += filter.warn(stdout, warnVSCodeSettings, row, profileFix)
 		} else {
 			fmt.Fprintln(stdout, row)
+		}
+		if settings.Profile == missingState {
+			if _, err := os.Stat(settings.Path); errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
 		}
 		if settings.Error == "" {
 			if settings.EnvError != "" {
@@ -103,16 +124,6 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 					"",
 				)
 			} else if primaryDir != "" {
-				envFix := vscodeFix
-				if settings.ProfileConflict {
-					// `pfm install --vscode` refuses an operator's own PFM profile,
-					// so the fix names the step that clears the refusal first.
-					envFix = fmt.Sprintf(
-						`rename or remove the "PFM" terminal profile in %s, then %s`,
-						settings.Path,
-						vscodeFix,
-					)
-				}
 				suffix := ""
 				if settings.EnvRelinquished {
 					suffix = " (pfm relinquished it after an operator edit)"
@@ -123,7 +134,7 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 						stdout,
 						warnVSCodeSettings,
 						"doctor: vscode settings="+settings.Path+" CLAUDE_CONFIG_DIR missing"+suffix,
-						envFix,
+						settingsFix,
 					)
 				case settings.ClaudeConfigDir != primaryDir:
 					warnings += filter.warn(
@@ -136,7 +147,7 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 							primaryDir,
 							suffix,
 						),
-						envFix,
+						settingsFix,
 					)
 				}
 			}

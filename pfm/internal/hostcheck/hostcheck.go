@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -44,6 +45,7 @@ func (row Row) Render(prefix string) string {
 }
 
 type Env struct {
+	CloneConfigPath                                                         string
 	Home, Store, ConfigPath, LegacyConfigDir, StateDB, CacheDB, ManagedRoot string
 	ConfigExplicit                                                          bool
 	HarvesterCacheDir                                                       string
@@ -55,8 +57,13 @@ type Env struct {
 // EnvFor builds the read-only detector environment from the loaded runtime.
 func EnvFor(runtime config.Runtime, now time.Time) Env {
 	home := runtime.Paths.Home
+	var cloneConfigPath string
+	if repo, err := paths.ReadSourceRepoMarker(home); err == nil {
+		cloneConfigPath = filepath.Join(repo, config.FileName)
+	}
 	return Env{
 		Home: home, Store: installer.ClaudeStore(home), ConfigPath: runtime.Config.Path,
+		CloneConfigPath: cloneConfigPath,
 		LegacyConfigDir: config.LegacyConfigDir(paths.OSEnv{}, home),
 		StateDB:         runtime.Paths.StateDB, CacheDB: runtime.Paths.CacheDB,
 		ManagedRoot: installer.ManagedRoot(home), ConfigExplicit: runtime.ConfigExplicit,
@@ -72,7 +79,7 @@ type Detector struct {
 
 func Detectors() []Detector {
 	return []Detector{
-		{"legacy-config", legacyConfig},
+		{legacyConfigCheck, legacyConfig},
 		{"legacy-harvester-config", legacyHarvesterConfig},
 		{"pre-split-config", preSplitConfig},
 		{"legacy-state-db", detectLegacyStateDB},

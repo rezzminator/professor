@@ -32,8 +32,8 @@ type DaemonStatus struct {
 // only probe outcome that lets `pfm mcp serve` try to bind the port.
 var ErrDaemonAbsent = errors.New("no service answered")
 
-// ErrDaemonUnresponsive means a listener held the port but did not answer the
-// status probe before its deadline. Callers must not try to bind that port.
+// ErrDaemonUnresponsive means the status probe timed out within its 2 s deadline,
+// including a dial timeout. Callers must not try to bind that port.
 var ErrDaemonUnresponsive = errors.New("no status answer within the probe deadline")
 
 const daemonProbeTimeout = 2 * time.Second
@@ -42,10 +42,10 @@ const daemonProbeTimeout = 2 * time.Second
 // test when positive. Zero leaves the production deadline in effect.
 var DaemonProbeTimeoutOverride time.Duration
 
-// ProbeDaemon reads a healthy loopback daemon's status document, and names
-// which way the probe failed when it did not: absent (connection failed),
-// unresponsive (deadline reached), a non-200 answer, a body that is not the
-// status document, or a document carrying no pid.
+// ProbeDaemon reads a healthy loopback daemon's status document within 2 s.
+// Any timeout, including a dial timeout, reads as unresponsive; a connection
+// failure without a timeout reads as absent. Other errors name a non-200 answer,
+// a body that is not the status document, or a document carrying no pid.
 func ProbeDaemon(address string) (DaemonStatus, error) {
 	return probeDaemonContext(context.Background(), address)
 }

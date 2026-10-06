@@ -3,6 +3,7 @@ package claudelaunch
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -188,6 +189,53 @@ func TestParseUnknownFlagPairs(t *testing.T) {
 	}
 	if !slices.Equal(parsed.Rest, []string{"agents", "--format", "json", "--strange=yes", "tail"}) {
 		t.Errorf("rest=%q", parsed.Rest)
+	}
+}
+
+func TestParseValueFlags(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		argv []string
+		want Parsed
+		err  string
+	}{
+		{
+			name: "equals form",
+			argv: []string{"claude", "--system-prompt-file=/srv/p.md", "--resume=abc", `--settings={"outputStyle":"default"}`},
+			want: Parsed{PromptFile: "/srv/p.md", Resume: "abc", Settings: map[string]any{"outputStyle": "default"}},
+		},
+		{
+			name: "bare resume before flag",
+			argv: []string{"claude", "--resume", "--settings", `{"outputStyle":"default"}`},
+			want: Parsed{Settings: map[string]any{"outputStyle": "default"}},
+		},
+		{name: "bare resume last", argv: []string{"claude", "--resume"}},
+		{name: "required flag followed by flag", argv: []string{"claude", "--model", "--settings", "{}"}, err: "--model requires a value"},
+		{name: "required flag last", argv: []string{"claude", "--model"}, err: "--model requires a value"},
+		{name: "required empty equals value", argv: []string{"claude", "--system-prompt-file="}, err: "--system-prompt-file requires a value"},
+		{
+			name: "settings file",
+			argv: []string{"claude", "--settings", "/srv/claude/settings.json"},
+			want: Parsed{Rest: []string{"--settings", "/srv/claude/settings.json"}},
+		},
+		{
+			name: "remaining equals flags",
+			argv: []string{"claude", "--session-id=sid", "--name=seat", "--model=sonnet", "--effort=high", "--mcp-config=/srv/mcp.json"},
+			want: Parsed{SessionID: "sid", Name: "seat", Model: "sonnet", Effort: "high", MCPConfig: "/srv/mcp.json"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := Parse(test.argv)
+			if test.err != "" {
+				if err == nil || err.Error() != test.err {
+					t.Fatalf("Parse error=%v, want %q", err, test.err)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("Parse=%#v, error=%v; want %#v", got, err, test.want)
+			}
+		})
 	}
 }
 

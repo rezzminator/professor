@@ -146,6 +146,7 @@ func Run(
 	resolved := runtime.Paths
 	tally := &doctorTally{}
 	if runtime.ConfigError != nil {
+		// PrintConfig names the unreadable file without counting this failure again.
 		fmt.Fprintf(stdout, "doctor: config error=%v\n", runtime.ConfigError)
 		tally.fail()
 	}
@@ -263,9 +264,7 @@ func Run(
 	)
 	tally.warnings += depWarnings
 	tally.failures += depFailures
-	overlayWarnings, overlayFailures := printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
-	tally.warnings += overlayWarnings
-	tally.failures += overlayFailures
+	tally.failures += printHostOverlayDoctor(stdout, resolved.Home)
 	printClaudePluginsDoctor(stdout, installer.ClaudeStore(resolved.Home), tally)
 	printFullscreenDoctor(stdout, resolved.Home, runtime.Config, tally)
 	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalRegistries(
@@ -331,6 +330,7 @@ func Run(
 			crumbInvalid,
 		)
 	}
+	tally.warnings += printLeakedProbeHomes(stdout, resolved.SIDDir, dependencies.Clock.Now())
 	if *skipHarvest {
 		fmt.Fprintln(stdout, "doctor: harvestpy skipped (--skip-harvest)")
 	} else {
@@ -633,6 +633,17 @@ func printEngineDoctor(stdout io.Writer, machine config.Config) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "doctor: roster %s default=%s\n", strings.Join(parts, " "), defaultEngine)
+	if machine.Source("ask.engine") != config.SourceFile && machine.Ask.Engine != "" &&
+		defaultEngine != machine.Ask.Engine {
+		fmt.Fprintf(
+			stdout,
+			"doctor: warning ask.engine unset: the default engine %s has no account, so asks fall back to %s — set ask.engine, or add a %s account\n",
+			machine.Ask.Engine,
+			defaultEngine,
+			pfmengine.MustLookup(machine.Ask.Engine).Name,
+		)
+		return 1
+	}
 	return 0
 }
 
@@ -767,7 +778,7 @@ func PrintDependencies(
 					entry.Name,
 					result.Path,
 				)
-				continue
+				break
 			} else if entry.Required {
 				unverified(gatesEngine)
 			}
@@ -845,19 +856,10 @@ func PrintDependencies(
 	return warnings, failures, claudeAbsent
 }
 
-// printHostOverlayDoctor checks the two contracted ~/.local/bin overlay
-// scripts pfm install owns (installer.InspectHostOverlays), and — for every
-// configured Claude account's settings.json — that statusLine.command names
-// the pfm-statusline overlay rather than the raw `pfm statusline` an
-// unwired or pre-overlay install leaves behind. Every non-clean state here
-// is a FAILURE (warnings++), never a soft note: an absent or misdirected
-// overlay renders identically to a healthy plain statusline (issue #14 F1)
-// — the failure is invisible from the prompt itself, so doctor has to be
-// the thing that notices it.
 // printHostOverlayDoctor treats every missing, displaced, or unknown overlay
 // symlink as a failure: a misdirected or absent overlay is invisible from the
 // prompt itself (issue #14 F1).
-func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config) (warnings, failures int) {
+func printHostOverlayDoctor(stdout io.Writer, home string) (failures int) {
 	for _, overlay := range installer.InspectHostOverlays(home) {
 		switch overlay.State {
 		case installer.HostOverlayOK:
@@ -883,7 +885,7 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 			)
 		}
 	}
-	return warnings, failures
+	return failures
 }
 
 // printClaudeVersionsDoctor reports the growth pfm's launcher causes by

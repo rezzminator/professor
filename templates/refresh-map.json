@@ -31,10 +31,28 @@
     ".claude/scripts/prod-deploy-watch.sh"
   ],
   "templates": {
+    "global/agents/agent-optimizer.md": {
+      "curated": true
+    },
+    "global/agents/flights-precise-executor.md": {
+      "curated": true
+    },
+    "global/agents/flights-smart-executor.md": {
+      "curated": true
+    },
+    "global/agents/general-executor.md": {
+      "curated": true
+    },
+    "global/agents/general-foreman.md": {
+      "curated": true
+    },
     "global/agents/reviewer.md": {
       "curated": true
     },
     "global/agents/rr.md": {
+      "curated": true
+    },
+    "global/agents/tracer-rr.md": {
       "curated": true
     },
     "global/agents/tracer.md": {
@@ -44,6 +62,15 @@
       "curated": true
     },
     "global/commands/context-meter.md": {
+      "curated": true
+    },
+    "global/commands/flights/flight-index.mjs": {
+      "curated": true
+    },
+    "global/commands/flights/flight-index.test.mjs": {
+      "curated": true
+    },
+    "global/commands/flights/init.md": {
       "curated": true
     },
     "global/commands/h/gh.md": {
@@ -88,6 +115,27 @@
     "global/commands/tokens/fake-pfm.mjs": {
       "curated": true
     },
+    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.jsonl": {
+      "curated": true
+    },
+    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t1.meta.json": {
+      "curated": true
+    },
+    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t2.jsonl": {
+      "curated": true
+    },
+    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t2.meta.json": {
+      "curated": true
+    },
+    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t3.jsonl": {
+      "curated": true
+    },
+    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t4.jsonl": {
+      "curated": true
+    },
+    "global/commands/tokens/fixtures/timeline/-tmp-tl-proj/sess-tl/subagents/agent-t5.jsonl": {
+      "curated": true
+    },
     "global/commands/tokens/lib/claude.mjs": {
       "curated": true
     },
@@ -127,7 +175,19 @@
     "global/commands/ultimate.md": {
       "curated": true
     },
+    "global/skills/close-out/SKILL.md": {
+      "curated": true
+    },
     "global/skills/sources.json": {
+      "curated": true
+    },
+    "global/skills/transcript/SKILL.md": {
+      "curated": true
+    },
+    "global/skills/transcript/transcript.py": {
+      "curated": true
+    },
+    "global/skills/transcript/transcript_test.py": {
       "curated": true
     },
     "project/CLAUDE.md": {

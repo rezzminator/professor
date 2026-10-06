@@ -120,7 +120,7 @@ else
   bad "a red stream with failing tests and a failing package read to a different report (rc $rc)" "$(diff <(printf '%s\n' "$want") <(printf '%s\n' "$out"))"
 fi
 
-# Case 5: timing_run_dir makes a run dir a non-root reader can open, even under
+# Case 5: a run dir and its base are readable by a non-root reader, even under
 # umask 077 (the fence runs as root; the host reads its timing TSVs), and an
 # uncreatable base fails naming the base with no path printed.
 TRD="$T/timing-run-dir.sh"
@@ -133,18 +133,18 @@ else
   mode=$( [[ -n "$out" && -d "$out" ]] && ls -ld "$out" | cut -c1-10 )
   base_mode=$( [[ -d "$base" ]] && ls -ld "$base" | cut -c1-10 )
   if [[ $rc -eq 0 && "$out" == "$base"/run.* && -d "$out" && "$mode" == "drwxr-xr-x" && "$base_mode" == "drwxr-xr-x" ]]; then
-    ok "timing_run_dir makes an absent base and its run dir 0755 under umask 077"
+    ok "an absent base and its run dir are readable by a non-root reader under umask 077"
   else
-    bad "timing_run_dir did not make an absent base and its run dir 0755 under umask 077 (rc $rc, run dir ${mode:-none}, base ${base_mode:-none})" "stdout: ${out:-<none>}" "stderr: $(cat "$T/trd.err")"
+    bad "an absent base or its run dir is not readable by a non-root reader under umask 077 (rc $rc, run dir ${mode:-none}, base ${base_mode:-none})" "stdout: ${out:-<none>}" "stderr: $(cat "$T/trd.err")"
   fi
   : > "$T/plain-file"
   base="$T/plain-file/timing"
   out=$(bash -c 'source "$1"; timing_run_dir "$2"' _ "$TRD" "$base" 2>"$T/trd.err"); rc=$?
   err=$(cat "$T/trd.err")
   if [[ $rc -ne 0 && -z "$out" && "$err" == *"$base"* ]]; then
-    ok "timing_run_dir fails on an uncreatable base, names it on stderr and prints no path"
+    ok "an uncreatable timing base fails, names the base on stderr and prints no path"
   else
-    bad "timing_run_dir on an uncreatable base did not fail cleanly (rc $rc)" "stdout: ${out:-<none>}" "stderr: ${err:-<none>}"
+    bad "an uncreatable timing base did not fail cleanly (rc $rc)" "stdout: ${out:-<none>}" "stderr: ${err:-<none>}"
   fi
 fi
 

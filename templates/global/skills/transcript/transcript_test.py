@@ -1,11 +1,15 @@
+import contextlib
+import io
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 # TRANSCRIPT_SCRIPT lets the watched-failure proof point this whole suite at a mutated
@@ -43,7 +47,7 @@ def claude_records():
         rec("weird_future_type", 35),
         rec("assistant", 36, message={"content": [
             {"type": "tool_use", "id": "t3", "name": "Grep", "input": {"pattern": "fork", "path": "pkg"}}]}),
-        rec("assistant", 40, message={"content": [{"type": "text", "text": "SPEC revised: 3-d cut smaller."}]}),
+        rec("assistant", 40, message={"stop_reason": "end_turn", "content": [{"type": "text", "text": "SPEC revised: 3-d cut smaller."}]}),
     ]
 
 
@@ -117,6 +121,19 @@ class Fixture(unittest.TestCase):
 
 
 class ResolveTest(Fixture):
+    def test_one_agent_path_hit_warns_about_unreadable_rollouts(self):
+        records = codex_records()
+        records[0]["payload"]["agent_path"] = "/root/fix_1a"
+        write_jsonl(self.codex, records)
+        unreadable = os.path.join(os.path.dirname(self.codex), "rollout-unreadable.jsonl")
+        with open(unreadable, "w") as handle:
+            handle.write("{not json\n")
+        proc = self.run_tp("locate", "/root/fix_1a")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), self.codex)
+        self.assertTrue(proc.stderr.startswith("TRANSCRIPT WARNING — 1 rollouts unreadable while resolving /root/fix_1a: "), proc.stderr)
+        self.assertIn(unreadable, proc.stderr)
+
     def test_agent_id_resolves_to_the_subagent_file(self):
         self.assertEqual(self.ok("locate", CLAUDE_AGENT).strip(), os.path.realpath(self.claude))
         self.assertEqual(self.ok("locate", "agent-" + CLAUDE_AGENT).strip(), os.path.realpath(self.claude))
@@ -168,6 +185,80 @@ class ResolveTest(Fixture):
 
 
 class ClaudeTest(Fixture):
+    def test_turn_end_final_keeps_each_turn_and_only_its_last_text_block(self):
+        for stop in ("end_turn", "stop_sequence"):
+            with self.subTest(stop=stop):
+                records = [
+                    {"type": "user", "message": {"content": "A"}},
+                    {"type": "assistant", "message": {"stop_reason": stop, "content": [
+                        {"type": "text", "text": "x" * 900}]}},
+                    {"type": "user", "message": {"content": "B"}},
+                    {"type": "assistant", "message": {"stop_reason": stop, "content": [
+                        {"type": "text", "text": "earlier block"},
+                        {"type": "text", "text": "done"}]}},
+                ]
+                write_jsonl(self.claude, records)
+                out = self.ok("show", self.claude)
+                self.assertEqual(len(re.findall(r"^L\d+ .* FINAL$", out, re.M)), 2, out)
+                self.assertIn("  " + "x" * 900 + "\n", out)
+                self.assertRegex(out, r"L4 .* SAY earlier block\nL4 .* FINAL\n  done")
+                self.assertNotIn("…[+", out)
+                self.assertNotIn("UNFINISHED", out)
+
+    def test_cut_off_turn_reports_unfinished_even_when_filtered(self):
+        unfinished = "UNFINISHED — the last turn has no final reply: the run was cut off or is still running"
+        cut_off = claude_records()
+        cut_off[-1]["message"].pop("stop_reason")
+        cases = [("claude cut off", self.claude, cut_off),
+                 ("codex cut off", self.codex, codex_records()[:-2])]
+        for kind, message in (("user", {"content": "next prompt"}),
+                              ("assistant", {"content": [{"type": "text", "text": "next reply"}]}),
+                              ("assistant", {"content": [{"type": "tool_use", "id": "next", "name": "Bash", "input": {"command": "pwd"}}]})):
+            cases.append((str(message), self.claude, claude_records() + [{"type": kind, "message": message}]))
+        for name, path, records in cases:
+            with self.subTest(case=name):
+                write_jsonl(path, records)
+                out = self.ok("show", path)
+                self.assertIn(unfinished + "\nSKIPPED", out)
+                if name == "claude cut off":
+                    self.assertRegex(out, r"L12 20:00:40 SAY SPEC revised")
+                    self.assertNotIn("FINAL", out)
+                filtered = self.ok("show", path, "--only", "error")
+                self.assertIn(unfinished + "\nSKIPPED", filtered)
+
+    def test_nullable_text_and_non_dict_attachment_are_counted(self):
+        for record, label in (({"type": "assistant", "message": {"content": [{"type": "text", "text": None}]}}, "assistant.text 1"),
+                              ({"type": "attachment", "attachment": "x"}, "attachment.? 1")):
+            with self.subTest(record=record):
+                write_jsonl(self.claude, claude_records() + [record])
+                out = self.ok("show", self.claude)
+                self.assertIn("TRANSCRIPT claude", out)
+                self.assertIn(label, out.splitlines()[-1])
+
+    def test_lone_surrogate_is_written_as_text_to_stdout_and_out(self):
+        records = claude_records()
+        records[-1]["message"]["content"][0]["text"] = "\ud800"
+        write_jsonl(self.claude, records)
+        for to_file in (False, True):
+            with self.subTest(to_file=to_file):
+                target = os.path.join(self.home, "digest.txt")
+                out = self.ok("show", self.claude, *(["--out", target] if to_file else []))
+                if to_file:
+                    with open(target) as handle:
+                        out = handle.read()
+                self.assertIn(r"\ud800", out)
+
+    def test_unexpected_exception_is_an_internal_failure(self):
+        main = runpy.run_path(SCRIPT)["main"]
+        error = io.StringIO()
+        with mock.patch.dict(main.__globals__, {"parse": mock.Mock(side_effect=KeyError("x"))}), contextlib.redirect_stderr(error):
+            try:
+                status = main(["show", self.claude])
+            except KeyError as raised:
+                self.fail(f"main raised {type(raised).__name__}: {raised}")
+        self.assertEqual(status, 2)
+        self.assertEqual(error.getvalue(), "TRANSCRIPT FAILED — internal error: KeyError: 'x'\n")
+
     def test_digest_renders_prompt_calls_error_tail_queued_prompt_and_final(self):
         out = self.ok("show", self.claude)
         self.assertIn("TRANSCRIPT claude · agent a0123456789abcdef of session", out)
@@ -232,6 +323,39 @@ class CodexTest(Fixture):
 
 
 class FilterTest(Fixture):
+    def test_invalid_input_reports_failure_without_traceback(self):
+        for args, reason in ((["--since", "25:00"], "unreadable time '25:00'"),
+                             (["--lines", "9-3"], "--lines 9-3: FROM is after TO"),
+                             (["--out", self.home], "--out " + self.home)):
+            with self.subTest(args=args):
+                proc = self.run_tp("show", self.claude, *args)
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                self.assertTrue(proc.stderr.startswith("TRANSCRIPT FAILED — "), proc.stderr)
+                self.assertIn(reason, proc.stderr)
+                self.assertNotIn("Traceback", proc.stderr)
+
+    def test_counts_filters_tabulate_only_selected_calls(self):
+        for args, expected in ((["--tool", "Bash"], ["Bash"]), (["--lines", "4-5"], ["Bash"]),
+                               (["--only", "error"], ["Bash"]), (["--grep", "TestFork"], ["Bash"]),
+                               (["--since", "20:00:30", "--until", "20:00:32"], ["Read"]),
+                               (["--first", "2"], ["Bash"]), (["--last", "2"], ["Grep"])):
+            with self.subTest(args=args):
+                out = self.ok("counts", self.claude, *args)
+                self.assertEqual(re.findall(r"^(\S+) \| \d+ \|", out, re.M), expected, out)
+
+    def test_types_filters_records_by_lines_and_refuses_other_filters(self):
+        with self.subTest(lines="4-8"):
+            out = self.ok("types", self.claude, "--lines", "4-8")
+            parts = sum(int(n) for n in re.findall(r"^(?:rendered|header|skipped) (\d+):", out, re.M))
+            self.assertEqual(parts, 5, out)
+            self.assertRegex(out, r"^RECORDS 5 ")
+        for args in (["--tool", "Bash"], ["--only", "error"], ["--grep", "fork"],
+                     ["--since", "20:00"], ["--until", "20:01"], ["--first", "2"], ["--last", "2"]):
+            with self.subTest(args=args):
+                proc = self.run_tp("types", self.claude, *args)
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                self.assertEqual(proc.stderr, f"TRANSCRIPT FAILED — types counts records: {args[0]} does not apply (only --lines does)\n")
+
     def events(self, out):
         return [ln for ln in out.splitlines() if re.match(r"L\d+ ", ln)]
 

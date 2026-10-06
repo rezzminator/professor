@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,12 +29,25 @@ func TestDoctorReportsMissingCodexLogin(t *testing.T) {
 
 func TestDoctorReportsCodexLoginStates(t *testing.T) {
 	for _, tc := range []struct {
-		name, auth, want string
-		failures         int
+		name, auth, config, want string
+		failures                 int
 	}{
 		{name: "missing", want: "missing — run codex login", failures: 1},
 		{name: "invalid", auth: `{}`, want: "has no tokens.access_token and tokens.account_id — run codex login", failures: 1},
+		{name: "corrupt", auth: `{`, want: "UNREADABLE error=unexpected end of JSON input — run codex login", failures: 1},
+		{
+			name:     "wrong shape",
+			auth:     `{"tokens":"fixture"}`,
+			want:     "UNREADABLE error=json: cannot unmarshal string into Go struct field ",
+			failures: 1,
+		},
 		{name: "valid", auth: `{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`, want: "ok", failures: 0},
+		{
+			name:     "corrupt config.toml",
+			config:   `cli_auth_credentials_store = `,
+			want:     "UNREADABLE error=parse {home}/config.toml: ",
+			failures: 1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -42,14 +56,23 @@ func TestDoctorReportsCodexLoginStates(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if tc.config != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			runtime := config.Runtime{Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 2, Home: home}}}}
 			var output bytes.Buffer
 			_, failures := PrintConfig(&output, runtime)
 			want := "doctor: codex-login codex[2] "
 			if tc.name != "valid" {
-				want += filepath.Join(home, "auth.json") + " "
+				path := filepath.Join(home, "auth.json")
+				if tc.config != "" {
+					path = filepath.Join(home, "config.toml")
+				}
+				want += path + " "
 			}
-			want += tc.want
+			want += strings.ReplaceAll(tc.want, "{home}", home)
 			if failures != tc.failures || !strings.Contains(output.String(), want) {
 				t.Fatalf("failures=%d output=%q, want failures=%d row=%q", failures, output.String(), tc.failures, want)
 			}
@@ -71,6 +94,7 @@ func TestDoctorReportsCodexLoginStates(t *testing.T) {
 }
 
 func TestDoctorConfigFileRows(t *testing.T) {
+	t.Setenv(paths.EnvConfig, "")
 	root := t.TempDir()
 	path := filepath.Join(root, "pfm.config.json")
 	var output bytes.Buffer
@@ -105,11 +129,6 @@ func TestDoctorConfigFileRows(t *testing.T) {
 	if strings.Contains(output.String(), "legacy file") {
 		t.Fatalf("explicit config legacy row: %s", output.String())
 	}
-	output.Reset()
-	PrintConfig(&output, config.Runtime{})
-	if !strings.Contains(output.String(), "config: missing (no source repo recorded) — run pfm install") {
-		t.Fatalf("missing marker row absent: %s", output.String())
-	}
 	if err := os.Mkdir(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +136,70 @@ func TestDoctorConfigFileRows(t *testing.T) {
 	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
 	if !strings.Contains(output.String(), "config: unreadable "+path) {
 		t.Fatalf("unreadable file row absent: %s", output.String())
+	}
+	for _, tc := range []struct {
+		name, content, override, want string
+		counted, directory            bool
+		warnings, failures            int
+	}{
+		{
+			name: "malformed already counted", content: "{", counted: true,
+			want: "doctor: config: unreadable %s error=unexpected end of JSON input",
+		},
+		{
+			name: "malformed uncounted", content: "{", failures: 1,
+			want: "doctor: config: unreadable %s error=unexpected end of JSON input",
+		},
+		{
+			name: "null", content: "null", failures: 1,
+			want: "doctor: config: unreadable %s error=config is JSON null, not an object",
+		},
+		{
+			name: "read failure already counted", directory: true, counted: true,
+		},
+		{
+			name: "no source repo", warnings: 1,
+			want: "doctor: config: missing (no source repo recorded) — run pfm install",
+		},
+		{
+			name: "resolved not loaded", override: "/srv/cfg/pfm.config.json", warnings: 1,
+			want: "doctor: config: missing (resolves to /srv/cfg/pfm.config.json, not loaded) — run pfm install",
+		},
+		{
+			name: "invalid override", override: "relative.json", warnings: 1,
+			want: `doctor: config: missing (PFM_CONFIG must be an absolute path: "relative.json") — run pfm install`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(paths.EnvConfig, tc.override)
+			runtime := config.Runtime{Paths: paths.Values{Home: t.TempDir()}}
+			want := tc.want
+			if tc.content != "" || tc.directory {
+				runtime.Config.Path = filepath.Join(runtime.Paths.Home, "pfm.config.json")
+				if tc.directory {
+					if err := os.Mkdir(runtime.Config.Path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					_, err := os.ReadFile(runtime.Config.Path)
+					want = fmt.Sprintf("doctor: config: unreadable %s error=%v", runtime.Config.Path, err)
+				} else {
+					if err := os.WriteFile(runtime.Config.Path, []byte(tc.content), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					want = fmt.Sprintf(want, runtime.Config.Path)
+				}
+			}
+			if tc.counted {
+				runtime.ConfigError = errors.New("config " + runtime.Config.Path + ": unexpected end of JSON input")
+			}
+			var output bytes.Buffer
+			warnings, failures := PrintConfig(&output, runtime)
+			row, _, _ := strings.Cut(output.String(), "\n")
+			if row != want || warnings != tc.warnings || failures != tc.failures {
+				t.Fatalf("row=%q warnings=%d failures=%d, want %q %d/%d",
+					row, warnings, failures, want, tc.warnings, tc.failures)
+			}
+		})
 	}
 }
 
@@ -126,15 +209,16 @@ func TestDoctorReportsMissingConfigKeysOnlyAfterParse(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
+	warnings, failures := PrintConfig(&output, config.Runtime{Config: config.Config{Path: path}})
 	if !strings.Contains(
 		output.String(),
 		"config: missing key claude.webSearchesPerSession (default 9007199254740991)",
 	) {
 		t.Fatalf("missing-key row absent: %s", output.String())
 	}
-	if !strings.Contains(output.String(), "config: missing key claude.autoCompactWindow (default 100000)") {
-		t.Fatalf("auto compact window missing-key row absent: %s", output.String())
+	want := "doctor: config: missing key claude.autoCompactWindow (default 100000) — informational: unset, its default applies\n"
+	if !strings.Contains(output.String(), want) || warnings != 0 || failures != 0 {
+		t.Fatalf("missing-key row=%q warnings=%d failures=%d, want %q 0/0", output.String(), warnings, failures, want)
 	}
 	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)

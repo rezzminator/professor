@@ -52,8 +52,8 @@ func TestRemoteDownloadIsAResourceLinkServedOnlyThroughMCP(t *testing.T) {
 		&mcp.ReadResourceParams{URI: downloadURIPrefix + strings.Repeat("0", 64)},
 	)
 	var wire *jsonrpc.Error
-	if !errors.As(err, &wire) || wire.Code != jsonrpc.CodeInvalidParams {
-		t.Fatalf("unknown id error = %v, want ResourceNotFound (-32602)", err)
+	if !errors.As(err, &wire) || wire.Code != jsonrpc.CodeInvalidParams || wire.Message != "Resource not found" {
+		t.Fatalf("unknown id error = %v, want ResourceNotFound (-32602) with message Resource not found", err)
 	}
 	service.runtime.MaxResourceBytes = 8
 	if _, err := session.ReadResource(

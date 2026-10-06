@@ -53,8 +53,9 @@ type Request struct {
 	Run    string
 	// Binary mirrors SessionSpec.Binary: the executable word Run launches,
 	// preflighted before the server exists. Empty skips the preflight.
-	Binary string
-	Prompt string
+	Binary    string
+	CodexHome string
+	Prompt    string
 	// PromptOnCommandLine means the launch command already carries Prompt;
 	// the spawner records delivery without typing into the TUI.
 	PromptOnCommandLine bool

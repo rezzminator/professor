@@ -53,7 +53,7 @@ var (
 	// use their own slower cadence.
 	fleetRefreshParkPollInterval  = 2 * time.Second
 	fleetRefreshCodexPollInterval = 10 * time.Second
-	// fleetRefreshStaleAfter is how old the last finished pass must be before
+	// fleetRefreshStaleAfter is how old the last attempt must be before
 	// a keystroke is allowed to start the next one on the spot. A driven picker
 	// refreshes every fleetRefreshInterval, so this only ever fires for a
 	// picker that backed off or parked and is being used again.
@@ -107,8 +107,9 @@ func (cadence *refreshCadence) next() time.Duration {
 // refresh goroutine while an interactive picker owns the terminal (runLS),
 // releasing them to stderr only once flush is called after Pick returns.
 type bufferedWarnings struct {
-	mu       sync.Mutex
-	warnings []string
+	mu         sync.Mutex
+	warnings   []string
+	rawEntries []string
 }
 
 func (buffer *bufferedWarnings) add(warning string) {
@@ -122,16 +123,34 @@ func (buffer *bufferedWarnings) add(warning string) {
 	buffer.warnings = append(buffer.warnings, warning)
 }
 
+func (buffer *bufferedWarnings) Write(p []byte) (int, error) {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	raw := string(p)
+	for _, existing := range buffer.rawEntries {
+		if existing == raw {
+			return len(p), nil
+		}
+	}
+	buffer.rawEntries = append(buffer.rawEntries, raw)
+	return len(p), nil
+}
+
 // flush prints every warning collected so far and clears the buffer, so a
 // caller that flushes between picker frames never
 // prints the same warning twice.
 func (buffer *bufferedWarnings) flush(stderr io.Writer) {
 	buffer.mu.Lock()
 	pending := buffer.warnings
+	rawEntries := buffer.rawEntries
 	buffer.warnings = nil
+	buffer.rawEntries = nil
 	buffer.mu.Unlock()
 	for _, warning := range pending {
 		fmt.Fprintf(stderr, "pfm: tmux probe warning: %s\n", warning)
+	}
+	for _, raw := range rawEntries {
+		fmt.Fprint(stderr, raw)
 	}
 }
 
@@ -383,11 +402,10 @@ func streamFleetRefreshesWith(
 	if refreshClock == nil {
 		refreshClock = clock.Real
 	}
-	// lastPass is when the last published pass STARTED: the header ages the
-	// fleet from its snapshot's scan clock, which a pass takes as it resolves
-	// its environment, so a key the header calls stale is stale here too —
-	// stamping the END would hide a long pass's own duration from the wake.
-	lastPass := refreshClock.Now()
+	// lastAttempt records each pass's start, including a failed pass. Even
+	// when a stale fleet's passes fail, keys start at most one per bound.
+	// Parked Codex probes are not full passes and leave the stamp alone.
+	lastAttempt := refreshClock.Now()
 	environment, err := fleet.ResolveEnv(request.fleetRequest())
 	if err != nil {
 		writeRefreshError(ctx, stderr, "", err)
@@ -508,7 +526,7 @@ func streamFleetRefreshesWith(
 			// A keystroke lands here, not on the timer. A fleet refreshed
 			// moments ago is fresh enough; one the backoff left behind is
 			// refreshed now, without waiting out the park poll.
-			if refreshClock.Now().Sub(lastPass) < fleetRefreshStaleAfter {
+			if refreshClock.Now().Sub(lastAttempt) < fleetRefreshStaleAfter {
 				continue
 			}
 		}
@@ -571,6 +589,7 @@ func streamFleetRefreshesWith(
 		}
 		pendingRefresh = true
 		passStart := refreshClock.Now()
+		lastAttempt = passStart
 		environment, err = fleet.ResolveEnv(request.fleetRequest())
 		if err != nil {
 			writeRefreshError(ctx, stderr, "", err)
@@ -653,7 +672,6 @@ func streamFleetRefreshesWith(
 			return
 		}
 		pendingRefresh = false
-		lastPass = passStart
 		// A full pass can publish while reconciliation reports a retryable
 		// failure. Let the first parked poll verify the binding before caching.
 		parkedRollouts = nil
@@ -707,13 +725,17 @@ func refreshWorkbenches(request scanRequest, discover func([]string) ([]workbenc
 		}
 		values = resolved
 	}
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("read workbench discovery directory: %w", err)
-	}
-	dirs := append(append([]string(nil), request.RepoRoots...), currentDir)
+	dirs := append([]string(nil), request.RepoRoots...)
 	var roots []string
 	var faults []workbench.WalkError
+	currentDir, err := os.Getwd()
+	if err != nil {
+		faults = append(faults, workbench.WalkError{
+			Root: ".", Path: ".", Err: fmt.Errorf("read workbench discovery directory: %w", err),
+		})
+	} else {
+		dirs = append(dirs, currentDir)
+	}
 	seen := make(map[string]bool)
 	for _, dir := range dirs {
 		managed, err := workbench.ManagedRoots([]string{dir})

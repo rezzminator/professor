@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -12,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -98,6 +101,23 @@ func assertDoctorLeftDatabase(t *testing.T, path string, before doctorDatabaseFi
 // refused every command. Doctor reads it, warns, and leaves it as found.
 func TestDoctorReadsAnOlderStateDatabaseWithoutMigratingIt(t *testing.T) {
 	runtime := buildCleanDoctorHome(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := kill.New(database, kill.Dependencies{})
+	if err != nil {
+		t.Fatal(errors.Join(err, database.Close()))
+	}
+	for i, thread := range []string{"t-1", "t-2"} {
+		socket := fmt.Sprintf("cx-%d", i+1)
+		if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", thread); err != nil {
+			t.Fatal(errors.Join(err, database.Close()))
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
 	path := runtime.Paths.StateDB
 	older := fleetdb.SchemaVersion - 1
 	stageDoctorDatabaseVersion(t, path, older)
@@ -119,8 +139,125 @@ func TestDoctorReadsAnOlderStateDatabaseWithoutMigratingIt(t *testing.T) {
 	if !strings.Contains(output, "doctor: rows "+unread) {
 		t.Fatalf("the kill census rendered an unread state database as a count (want %q):\n%s", unread, output)
 	}
-	if code != 1 {
-		t.Fatalf("older state database doctor code=%d, want 1 (warnings, no failure)\n%s", code, output)
+	paneRow := "doctor: codex_pane_bindings " + unread +
+		" — binding audit skipped: its kill state lives in the shared store\n"
+	reminderSuffix := "reminder state unknown; the doctor: shared store row counts it\n"
+	if code != 1 || strings.Count(output, warning) != 1 || strings.Count(output, paneRow) != 1 ||
+		!strings.Contains(output, reminderSuffix) || strings.Contains(output, "kill-state-unreadable") ||
+		!strings.Contains(output, "doctor: warnings=1\n") {
+		t.Fatalf("one unread state database must count once and skip dependent audits: code=%d\n%s", code, output)
+	}
+}
+
+func TestSchemaMismatchText(t *testing.T) {
+	mismatch := &fleetdb.SchemaMismatchError{Name: "cache", Path: "/c/cache.db", Found: 4, Expected: 5}
+	closeErr := errors.New("close cache database /c/cache.db: database is locked")
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "bare mismatch", err: mismatch, want: mismatch.Error()},
+		{
+			name: "nested joins with repeated mismatch and multiline cause",
+			err:  errors.Join(mismatch, errors.Join(closeErr, errors.New("read warning\ncleanup warning")), mismatch),
+			want: mismatch.Error() + "; " + closeErr.Error() + "; read warning; cleanup warning",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := schemaMismatchText(tc.err, mismatch); got != tc.want {
+				t.Fatalf("schema mismatch text=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPrintUnreadCache(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		found int
+		cause error
+		row   string
+	}{
+		{
+			name: "joined older mismatch", found: 4,
+			cause: errors.New("close cache database /c/cache.db: database is locked"),
+			row: "doctor: warning cache database /c/cache.db schema v4, this build expects v5 — doctor left it as found; " +
+				"once this build is installed (pfm install --yes), the first pfm command that opens it " +
+				"migrates it and keeps a backup",
+		},
+		{
+			name: "joined newer mismatch", found: 6,
+			cause: errors.New("close cache database /c/cache.db: database is locked"),
+			row: "doctor: warning cache database /c/cache.db schema v6 is newer than this build's v5 — a newer pfm wrote it; " +
+				"this pfm cannot use it until that newer pfm is installed again (pfm install --yes from its build)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mismatch := &fleetdb.SchemaMismatchError{Name: "cache", Path: "/c/cache.db", Found: tc.found, Expected: 5}
+			err := errors.Join(mismatch, tc.cause)
+			var out strings.Builder
+			var tally doctorTally
+			got := printUnreadCache(&out, err, mismatch.Path, &tally)
+			want := mismatch.Error() + "; " + tc.cause.Error()
+			row := tc.row + "; " + tc.cause.Error() + "\n"
+			if got != want || out.String() != row || tally.warnings != 1 || tally.failures != 0 {
+				t.Fatalf(
+					"unread=%q, want %q; row=%q, want %q; warnings=%d failures=%d, want 1 and 0",
+					got, want, out.String(), row, tally.warnings, tally.failures,
+				)
+			}
+		})
+	}
+}
+
+func TestPrintSharedStoreDoctor(t *testing.T) {
+	mismatch := &fleetdb.SchemaMismatchError{Name: "state", Path: "/s/state.db", Found: 4, Expected: 5}
+	closeErr := errors.New("close state database /s/state.db: database is locked")
+	openErr := errors.New("open state database /s/state.db read-only: database is locked")
+	for _, tc := range []struct {
+		name   string
+		err    error
+		row    string
+		unread string
+	}{
+		{
+			name: "joined mismatch", err: errors.Join(mismatch, closeErr),
+			row: "doctor: warning state database /s/state.db schema v4, this build expects v5 — doctor left it as found; " +
+				"once this build is installed (pfm install --yes), the first pfm command that opens it " +
+				"migrates it and keeps a backup; close state database /s/state.db: database is locked\n",
+			unread: mismatch.Error() + "; " + closeErr.Error(),
+		},
+		{
+			name: "generic open error", err: openErr,
+			row:    "doctor: shared store=/s/state.db state=open state database /s/state.db read-only: database is locked\n",
+			unread: "could not look: " + openErr.Error(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			var tally doctorTally
+			printSharedStoreDoctor(&out, mismatch.Path, tc.err, &tally)
+			got := sharedUnread(tc.err)
+			if out.String() != tc.row || got != tc.unread || tally.warnings != 1 || tally.failures != 0 {
+				t.Fatalf(
+					"row=%q, want %q; unread=%q, want %q; warnings=%d failures=%d, want 1 and 0",
+					out.String(), tc.row, got, tc.unread, tally.warnings, tally.failures,
+				)
+			}
+		})
+	}
+}
+
+func TestPrintCodexPaneDoctor(t *testing.T) {
+	mismatch := &fleetdb.SchemaMismatchError{Name: "cache", Path: "/c/cache.db", Found: 4, Expected: 5}
+	err := errors.Join(mismatch, errors.New("close cache database /c/cache.db: database is locked"))
+	var out strings.Builder
+	got := printCodexPaneDoctor(context.Background(), &out, nil, err, config.Runtime{})
+	want := "doctor: codex_pane_bindings could not look: cache database /c/cache.db schema v4, this build expects v5; " +
+		"close cache database /c/cache.db: database is locked\n"
+	if out.String() != want || got != 0 {
+		t.Fatalf("row=%q, want %q; warnings=%d, want 0", out.String(), want, got)
 	}
 }
 

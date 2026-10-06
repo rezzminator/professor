@@ -78,7 +78,7 @@ func TestConfigShowThirdPartyMCP(t *testing.T) {
 	for _, tc := range []struct{ name, mcp, want string }{
 		{"two from file", `{"thirdParty":{"b":{"type":"stdio","command":"b"},"a":{"type":"stdio","command":"a"}}}`, "config mcp.thirdParty=a,b (file)\n"},
 		{"absent", `{}`, "config mcp.thirdParty=none (default)\n"},
-		{"empty from file", `{"thirdParty":{}}`, "config mcp.thirdParty=none (default)\n"},
+		{"empty from file", `{"thirdParty":{}}`, "config mcp.thirdParty=none (file)\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -101,6 +101,21 @@ func TestConfigShowThirdPartyMCP(t *testing.T) {
 				t.Fatalf("config show lacks consecutive lines %q:\n%s", portLine+tc.want, stdout.String())
 			}
 		})
+	}
+}
+
+func TestConfigShowStateDatabaseSources(t *testing.T) {
+	t.Setenv(paths.EnvStateDB, "/env/state.db")
+	t.Setenv(paths.EnvCacheDB, "/env/cache.db")
+	machine := pfmconfig.Defaults(t.TempDir(), nil)
+	var stdout bytes.Buffer
+	printResolvedConfig(&stdout, commandRuntime{
+		Config: machine,
+		Paths:  paths.Values{StateDB: "/env/state.db", CacheDB: "/env/cache.db"},
+	})
+	want := "config state.db=/env/state.db (env)\nconfig state.cacheDb=/env/cache.db (env)\n"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("config show lacks consecutive lines %q:\n%s", want, stdout.String())
 	}
 }
 

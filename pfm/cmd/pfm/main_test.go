@@ -467,6 +467,7 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
+	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
 	if code := run([]string{"doctor"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -500,6 +501,7 @@ func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
 	doctor.PrePushGateProbeOverride = nil
 	t.Cleanup(func() { doctor.PrePushGateProbeOverride = savedProbe })
 	root := jailTest(t)
+	testjail.PinClaudeAsk(t, filepath.Join(root, "home"))
 	home := jailPaths(t).Home
 	account := pfmconfig.DefaultAccountDir(home, 42)
 	if err := os.MkdirAll(account, 0o700); err != nil {

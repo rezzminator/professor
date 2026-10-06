@@ -3,6 +3,8 @@ package codexgen
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -83,47 +85,76 @@ func TestReconcileFileDefaultModeIsUnchangedFromBeforeTheFix(t *testing.T) {
 	}
 }
 
-func TestGlobalCommandsBeforeWriteSeesEveryChangedPathBeforeItsWrite(t *testing.T) {
+func TestRebuildableMirrorProblems(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
+	for _, name := range []string{"a", "b", "d"} {
+		writeTestFile(t, filepath.Join(root, ".claude", "agents", name+".md"),
+			"---\ndescription: Agent.\n---\nAgent.\n")
+	}
+	writeTestFile(t, filepath.Join(root, ".claude", "commands", "c.md"), "Command.\n")
+	if result, err := Build(Options{Root: root, Home: home}); err != nil || !result.OK {
+		t.Fatalf("seed build: %#v, %v", result, err)
+	}
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Edited root.\n")
+	if err := os.Remove(filepath.Join(root, ".codex", "agents", "a.toml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, ".codex", "agents", "b.toml"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	conflict := filepath.Join(root, ".codex", "skills", "c", "SKILL.md")
+	writeTestFile(t, conflict, "hand\n")
+	if err := os.Remove(filepath.Join(root, ".claude", "agents", "d.md")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Check(Options{Root: root, Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantProblems := []string{
+		"STALE " + filepath.Join(root, "AGENTS.md"),
+		"MISSING " + filepath.Join(root, ".codex", "agents", "a.toml"),
+		"MODE " + filepath.Join(root, ".codex", "agents", "b.toml") + " (want 0644, have 0600)",
+		"CONFLICT " + conflict + " — exists without a generated marker; not touching it",
+		"ORPHAN " + filepath.Join(root, ".codex", "agents", "d.toml"),
+	}
+	if len(result.Problems) != len(wantProblems) {
+		t.Fatalf("Problems = %q, want exactly %q", result.Problems, wantProblems)
+	}
+	for _, problem := range wantProblems {
+		if !contains(result.Problems, problem) {
+			t.Fatalf("Problems = %q, missing %q", result.Problems, problem)
+		}
+	}
+	var wantRebuildable []string
+	for _, problem := range result.Problems {
+		if !strings.HasPrefix(problem, "CONFLICT ") {
+			wantRebuildable = append(wantRebuildable, problem)
+		}
+	}
+	if result.OK || !reflect.DeepEqual(result.Rebuildable, wantRebuildable) {
+		t.Fatalf("check = %#v, want Problems %q and Rebuildable %q", result, wantProblems, wantRebuildable)
+	}
+}
+
+func TestGlobalCommandsRebuildableOrphans(t *testing.T) {
 	home := t.TempDir()
-	source := filepath.Join(home, ".claude", "commands", "fixture.md")
-	writeTestFile(t, source, "---\ndescription: fixture\n---\nUse /fixture.\n")
-
-	var calls []string
-	existed := map[string]bool{}
-	options := GlobalCommandsOptions{Home: home, Mode: ModeBuild, BeforeWrite: recordBeforeWrite(&calls, existed, "")}
-	build, err := RunGlobalCommands(options)
-	if err != nil || !build.OK || build.Wrote != 2 {
-		t.Fatalf("global build: result=%#v err=%v", build, err)
+	source := filepath.Join(home, ".claude", "commands", "swap.md")
+	writeTestFile(t, source, "Swap.\n")
+	if result, err := RunGlobalCommands(GlobalCommandsOptions{Home: home, Mode: ModeBuild}); err != nil || !result.OK {
+		t.Fatalf("seed global command: %#v, %v", result, err)
 	}
-	if len(calls) != 2 {
-		t.Fatalf("BeforeWrite calls = %q, want one per written path", calls)
-	}
-	for _, path := range calls {
-		if existed[path] {
-			t.Fatalf("BeforeWrite ran after the write of %s", path)
-		}
-		if _, statErr := os.Lstat(path); statErr != nil {
-			t.Fatalf("hooked path %s was not written: %v", path, statErr)
-		}
-	}
-
-	calls = nil
-	if _, err := RunGlobalCommands(options); err != nil || len(calls) != 0 {
-		t.Fatalf("converged build: calls=%q err=%v, want no call", calls, err)
-	}
-
 	if err := os.Remove(source); err != nil {
 		t.Fatal(err)
 	}
-	orphans := []string{}
-	failing := GlobalCommandsOptions{Home: home, Mode: ModeBuild, BeforeWrite: func(path string) error {
-		orphans = append(orphans, path)
-		return os.ErrPermission
-	}}
-	if _, err := RunGlobalCommands(failing); err == nil || len(orphans) != 1 {
-		t.Fatalf("orphan removal with a failing hook: calls=%q err=%v, want one call and an error", orphans, err)
+	result, err := RunGlobalCommands(GlobalCommandsOptions{Home: home, Mode: ModeCheck})
+	if err != nil || result.OK || len(result.Problems) == 0 || !reflect.DeepEqual(result.Rebuildable, result.Problems) {
+		t.Fatalf("check = %#v, %v, want rebuildable orphan problems", result, err)
 	}
-	if _, statErr := os.Lstat(orphans[0]); statErr != nil {
-		t.Fatalf("orphan %s removed despite the failing hook: %v", orphans[0], statErr)
+	for _, problem := range result.Problems {
+		if !strings.HasPrefix(problem, "ORPHAN "+filepath.Join(home, ".codex")+string(filepath.Separator)) {
+			t.Fatalf("non-orphan problem: %s", problem)
+		}
 	}
 }

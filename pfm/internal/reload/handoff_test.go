@@ -173,6 +173,13 @@ func TestAdoptHandoffKeepsTheReloadsOwnResolutionForAnOlderRecordWithoutBreadcru
 				request.Machine = pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{
 					{ID: 1, Home: dir}, {ID: 2, Home: dir},
 				}}
+				if err := os.WriteFile(
+					filepath.Join(dir, "auth.json"),
+					[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
 			}
 			got, left, adopted, err := adoptHandoff(request, record, entry, dir)
 			if err != nil {
@@ -276,6 +283,15 @@ func TestAdoptHandoffContinuesBoundCodexConversationAfterNew(t *testing.T) {
 				Machine: pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{
 					{ID: 1, Home: dir}, {ID: 2, Home: cwd},
 				}},
+			}
+			for _, account := range request.Machine.CodexAccounts {
+				if err := os.WriteFile(
+					filepath.Join(account.Home, "auth.json"),
+					[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+					0o600,
+				); err != nil {
+					t.Fatal(err)
+				}
 			}
 			entry := time.Unix(1, 0)
 			if tc.later {

@@ -264,6 +264,10 @@ func ResolveEnv(request Request) (Env, error) {
 		benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(resolved))
 		if err == nil {
 			env.Workbenches, env.WorkbenchErrors = benches, faults
+		} else {
+			env.WorkbenchErrors = []workbench.WalkError{
+				{Root: currentDir, Path: paths.WorkbenchCache(resolved), Err: err},
+			}
 		}
 	}
 	return env, nil

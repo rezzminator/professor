@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
@@ -26,12 +27,29 @@ func TestUnreachable(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	}))
 	defer untagged.Close()
+	release := make(chan struct{})
+	timeout := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-release
+	}))
+	t.Cleanup(func() {
+		close(release)
+		timeout.Close()
+	})
+	tls := httptest.NewTLSServer(http.NotFoundHandler())
+	defer tls.Close()
 
 	for _, tc := range []struct {
 		name, url, current string
 		unwritable, want   bool
+		client             *http.Client
 	}{
 		{name: "transport", url: url, current: "v1.0.0", want: true},
+		{
+			name: "timeout", url: timeout.URL, current: "v1.0.0", want: true,
+			client: &http.Client{Timeout: 50 * time.Millisecond},
+		},
+		{name: "TLS failure", url: tls.URL, current: "v1.0.0"},
+		{name: "unsupported URL", url: "ftp://127.0.0.1/latest", current: "v1.0.0"},
 		{name: "answered", url: answered.URL, current: "v1.0.0"},
 		{name: "untagged", url: untagged.URL, current: "v1.0.0"},
 		{name: "bad current", url: url, current: "broken"},
@@ -44,7 +62,13 @@ func TestUnreachable(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := CheckForUpdate(context.Background(), cache, tc.current, tc.url, nil)
+			err := CheckForUpdate(context.Background(), cache, tc.current, tc.url, tc.client)
+			if tc.want || tc.name == "TLS failure" {
+				marker, found, markerErr := ReadFailure(cache)
+				if markerErr != nil || !found || marker.Class != failureNetwork || marker.Reason == "" {
+					t.Fatalf("failure marker = %#v, %t, %v", marker, found, markerErr)
+				}
+			}
 			if err == nil || Unreachable(err) != tc.want {
 				t.Fatalf("err=%v unreachable=%t want=%t", err, Unreachable(err), tc.want)
 			}

@@ -17,23 +17,39 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-func TestUpdateRefusesDirtyWorktree(t *testing.T) {
+func TestUpdateStopsBeforeSelfUpdate(t *testing.T) {
 	repo := newUpdateGitFixture(t)
 	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("dirty\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
 	runtime := updateTestRuntime(t)
-	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf(
-			"Run() code = 0, want dirty-worktree refusal; stdout=%q stderr=%q",
-			stdout.String(),
-			stderr.String(),
-		)
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(stderr.String(), "dirty worktree") {
-		t.Fatalf("Run() stderr = %q, want dirty-worktree diagnostic", stderr.String())
+	t.Setenv(paths.EnvConfig, path)
+	for _, tc := range []struct {
+		name, diagnostic string
+		args             []string
+		config           bool
+	}{
+		{"dirty source", "dirty worktree", []string{"--repo", repo}, false},
+		{"missing marker", "pfm update: ", []string{"--skip-harvest"}, false},
+		{"bare config", "pfm update: config: ", []string{"--skip-harvest"}, true},
+		{"project config", "pfm update: config: ", []string{"pin", "CLAUDE.md"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtimes := []pfmconfig.Runtime{runtime}
+			if tc.config {
+				runtimes = nil
+			}
+			var stdout, stderr bytes.Buffer
+			if code := Run(tc.args, &stdout, &stderr, runtimes...); code != 5 ||
+				!strings.HasPrefix(stderr.String(), "pfm update: ") ||
+				!strings.Contains(stderr.String(), tc.diagnostic) {
+				t.Fatalf("code = %d, want 5; stderr = %q, want %q", code, stderr.String(), tc.diagnostic)
+			}
+		})
 	}
 }
 
@@ -251,17 +267,11 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldBuild := updateBuildCandidate
-	oldInstall := updateApplyInstall
-	oldDoctor := updateRunDoctor
-	oldRollbackInstall := updateRollbackInstall
-	oldRollbackDoctor := updateRollbackDoctor
+	oldBuild, oldInstall, oldDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
 	t.Cleanup(func() {
-		updateBuildCandidate = oldBuild
-		updateApplyInstall = oldInstall
-		updateRunDoctor = oldDoctor
-		updateRollbackInstall = oldRollbackInstall
-		updateRollbackDoctor = oldRollbackDoctor
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldDoctor
+		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
 	builds := 0
 	updateBuildCandidate = func(_ context.Context, _, version, output string) error {
@@ -429,8 +439,8 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf("Run() code=0, want failure; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 5 {
+		t.Fatalf("Run() code=%d, want 5; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if got, err := os.ReadFile(canonical); err != nil || string(got) != "old\n" {
 		t.Fatalf("canonical after rollback=%q err=%v, want old", got, err)
@@ -673,7 +683,7 @@ func TestUpdateRollbackDoctorWarningsAreNotResidue(t *testing.T) {
 	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
 		t.Fatalf("Run() code=0, want failure; stdout=%q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "rolled back update-owned changes") {
+	if !strings.Contains(stderr.String(), "rolled back what the lines above name, then re-ran the previous install") {
 		t.Fatalf("stderr=%q, want the no-residue rollback message", stderr.String())
 	}
 	if strings.Contains(stderr.String(), "rollback residue") {

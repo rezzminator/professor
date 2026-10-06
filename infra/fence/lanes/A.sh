@@ -623,17 +623,17 @@ else
   done
   # Preflight refusals, each before anything is staged or replaced.
   o="$(pfm update --repo "$B" --to v0 2>&1)"; rc=$?
-  [ "$rc" -eq 1 ] && grep -qF 'invalid target tag "v0" (expected vMAJOR.MINOR.PATCH)' <<<"$o" ||
+  [ "$rc" -eq 5 ] && grep -qF 'invalid target tag "v0" (expected vMAJOR.MINOR.PATCH)' <<<"$o" ||
     bad="$bad --to v0 exited $rc without 'invalid target tag' ($(one_line "$o"));"
   o="$(pfm update --repo "$B" --to v999.999.999 2>&1)"; rc=$?
-  [ "$rc" -eq 1 ] && grep -qF 'target tag "v999.999.999" is not present after fetch' <<<"$o" ||
+  [ "$rc" -eq 5 ] && grep -qF 'target tag "v999.999.999" is not present after fetch' <<<"$o" ||
     bad="$bad --to v999.999.999 exited $rc without 'is not present after fetch' ($(one_line "$o"));"
   LANE_TAG=v99.0.0
   git -C "$B" tag -f "$LANE_TAG" "$B_BASE" >/dev/null 2>&1 || bad="$bad the lane tag $LANE_TAG could not be created in $B;"
   : >"$B/lane-a-dirty"
   o="$(pfm update --repo "$B" --to "$LANE_TAG" 2>&1)"; rc=$?
   rm -f "$B/lane-a-dirty"
-  [ "$rc" -eq 1 ] && grep -qF 'refuse dirty worktree; commit or stash changes before update' <<<"$o" ||
+  [ "$rc" -eq 5 ] && grep -qF 'refuse dirty worktree; commit or stash changes before update' <<<"$o" ||
     bad="$bad a dirty --repo exited $rc without 'refuse dirty worktree' ($(one_line "$o"));"
   if [ -n "$bad" ]; then
     fail "preflight:$bad — the rebuild was not attempted"
@@ -658,11 +658,11 @@ else
       jq --arg p "$WORKTREE/VERSION" '.paths += [$p]' "$LEDGER" >"$LEDGER.tmp" && mv "$LEDGER.tmp" "$LEDGER"
       rb="$(pfm update --repo "$B" --to "$LANE_TAG" --skip-harvest 2>&1)"
       rb_rc=$?
-      [ "$rb_rc" -eq 1 ] || bad="$bad the update with an unwritable owned path exited $rb_rc, want 1;"
+      [ "$rb_rc" -eq 5 ] || bad="$bad the update with an unwritable owned path exited $rb_rc, want 5;"
       grep -qF "replace owned binary $WORKTREE/VERSION" <<<"$rb" || bad="$bad the failure did not name the unwritable owned path $WORKTREE/VERSION;"
       [ "$(tr -d '[:space:]' <"$WORKTREE/VERSION")" = "$(tr -d '[:space:]' <"$B/VERSION")" ] || bad="$bad $WORKTREE/VERSION was altered by the failed replacement;"
       [ "$(pfm version 2>&1)" = "pfm $LANE_TAG" ] || bad="$bad the failed update did not leave the pre-attempt $LANE_TAG binary installed;"
-      grep -qF 'rolled back update-owned changes' <<<"$rb" || bad="$bad the terminal does not say 'rolled back update-owned changes': $(one_line "$(printf '%s' "$rb" | grep 'pfm update:' | tail -1)");"
+      grep -qF 'rolled back what the lines above name' <<<"$rb" || bad="$bad the terminal does not say 'rolled back what the lines above name': $(one_line "$(printf '%s' "$rb" | grep 'pfm update:' | tail -1)");"
       [ "$(pfm version 2>&1)" = "pfm $LANE_TAG" ] || bad="$bad after the rollback pfm version reads '$(pfm version 2>&1)', want the pre-attempt 'pfm $LANE_TAG';"
     else
       bad="$bad rollback-on-failure not exercised because the update itself failed;"

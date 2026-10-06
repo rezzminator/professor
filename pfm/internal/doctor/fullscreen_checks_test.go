@@ -46,6 +46,7 @@ func TestFullscreenDoctorNamesEachAccount(t *testing.T) {
 		{ID: 4, ConfigDir: dirs[4]},
 		{ID: 5, ConfigDir: dirs[5]},
 		{ID: 6, ConfigDir: dirs[6]},
+		{ID: 7, ConfigDir: dirs[1]},
 	}}
 	var output bytes.Buffer
 	tally := &doctorTally{}
@@ -61,6 +62,7 @@ func TestFullscreenDoctorNamesEachAccount(t *testing.T) {
 		"doctor: fullscreen claude[4] could not read " + filepath.Join(dirs[4], ".claude.json"),
 		"doctor: fullscreen claude[5] skipped: no settings.json at " + filepath.Join(dirs[5], "settings.json"),
 		"doctor: fullscreen claude[6] could not read " + filepath.Join(dirs[6], "settings.json"),
+		"doctor: fullscreen claude[7] shares " + filepath.Join(dirs[1], ".claude.json") + ", reported above\n",
 	} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, output.String())

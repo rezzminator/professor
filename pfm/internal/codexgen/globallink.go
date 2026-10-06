@@ -97,16 +97,6 @@ func ClassifyGlobalLink(target, source, sourceRepoRoot string, kind GlobalLinkKi
 	return GlobalLinkConflict, "", nil
 }
 
-// writes reports whether ApplyGlobalLink changes the filesystem in this state.
-func (state GlobalLinkState) writes() bool {
-	switch state {
-	case GlobalLinkMissing, GlobalLinkCopy, GlobalLinkWrongTarget, GlobalLinkDangling:
-		return true
-	default:
-		return false
-	}
-}
-
 // ApplyGlobalLink performs the filesystem change ClassifyGlobalLink's state
 // recommends. Correct and Conflict are both no-ops — the first because
 // nothing is wrong, the second because a conflict is never touched. Missing,

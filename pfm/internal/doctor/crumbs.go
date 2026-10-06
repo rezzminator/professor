@@ -3,17 +3,67 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
+
+const probeHomeLeakAge = 10 * time.Minute
+
+func printLeakedProbeHomes(stdout io.Writer, sidDir string, now time.Time) int {
+	return printLeakedProbeHomesWith(stdout, sidDir, now, os.ReadDir)
+}
+
+func printLeakedProbeHomesWith(
+	stdout io.Writer,
+	sidDir string,
+	now time.Time,
+	readDir func(string) ([]os.DirEntry, error),
+) int {
+	entries, err := readDir(sidDir)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(stdout, "doctor: warning probe_home could not look: %v\n", err)
+		return 1
+	}
+	warnings := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), paths.SIDEngineProbeHomePrefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			fmt.Fprintf(stdout, "doctor: warning probe_home could not look: %v\n", err)
+			warnings++
+			continue
+		}
+		age := now.Sub(info.ModTime())
+		if age <= probeHomeLeakAge {
+			continue
+		}
+		path := filepath.Join(sidDir, entry.Name())
+		fmt.Fprintf(
+			stdout,
+			"doctor: warning probe_home %s left %s ago by a probe that never cleaned up — remove it: rm -rf %s\n",
+			path,
+			age.Truncate(time.Second),
+			path,
+		)
+		warnings++
+	}
+	return warnings
+}
 
 func metaCounter(
 	ctx context.Context,

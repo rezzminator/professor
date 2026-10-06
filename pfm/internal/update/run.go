@@ -43,18 +43,20 @@ var (
 func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) int {
 	if len(args) > 0 {
 		switch args[0] {
+		case "check":
+			return runUpdateCheckAlias(args[1:], stdout, stderr, runtimes)
 		case "adopt", "pin", "ignore", "drop":
 			runtime, err := config.OptionalRuntime(runtimes)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
-				return 1
+				return 5
 			}
 			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime)
 		}
 	}
 	flags := cli.NewFlagSet(
 		updateCommand,
-		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {adopt|pin|ignore|drop} [options]",
+		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop} [options]",
 		stderr,
 	)
 	target := flags.String("to", "", "target semantic-version tag")
@@ -73,24 +75,24 @@ func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) in
 	runtime, err := config.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
-		return 1
+		return 5
 	}
 	repo := strings.TrimSpace(*repoFlag)
 	if repo == "" {
 		repo, err = paths.ReadSourceRepoMarker(runtime.Paths.Home)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm update: %v\n", err)
-			return 1
+			return 5
 		}
 	}
 	repo, err = filepath.Abs(repo)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm update: resolve repository: %v\n", err)
-		return 1
+		return 5
 	}
 	if err := updateRepository(context.Background(), repo, *target, *skipHarvest, stdout, stderr, runtime); err != nil {
 		fmt.Fprintf(stderr, "pfm update: %v\n", err)
-		return 1
+		return 5
 	}
 	postArgs := []string{"--root", *projectRoot}
 	if *jsonOutput {
@@ -260,6 +262,10 @@ func updateRepository(
 		}
 		replacements = append(replacements, updateReplacement{target: targetPath, backup: backup})
 	}
+	snapshots, err := snapshotUpdateOwnedFiles(runtime)
+	if err != nil {
+		return fmt.Errorf("snapshot update-owned files before install: %w", err)
+	}
 	// Read current health before replacement so candidate deltas exclude old warnings.
 	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, skipHarvest, stdout, stderr)
 	switch {
@@ -293,6 +299,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
+				nil,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -307,6 +314,7 @@ func updateRepository(
 	}
 
 	installErr := updateApplyInstall(ctx, candidateA, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr)
+	recordUpdateOwnedFilesAfter(snapshots)
 	if installErr != nil {
 		return updateFailure(
 			fmt.Errorf("install --yes after staging: %w", installErr),
@@ -317,6 +325,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -343,6 +352,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -361,6 +371,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -397,6 +408,7 @@ func updateRepository(
 				previousRef,
 				sourceAdvanced,
 				replacements,
+				snapshots,
 				runtime,
 				skipHarvest,
 				stdout,
@@ -546,10 +558,8 @@ func copyUpdateFile(source, target string) error {
 }
 
 // applyUpdateInstall runs a candidate or rollback binary's `install --yes`,
-// forwarding --config only when runtime.Config.Path actually exists — a
-// defaults-only host (nothing to migrate or restore) must not have that
-// forwarded path read as operator-explicit and trip install_command.go's B
-// refusal; a real file is still forwarded so migration/restore keep working.
+// forwarding --config only when runtime.Config.Exists, so a defaults-only
+// host's path is not read as operator-explicit by install_command.go.
 func applyUpdateInstall(
 	ctx context.Context,
 	candidate, repo, sourceRepo string,
@@ -573,8 +583,7 @@ func applyUpdateInstall(
 		args...)
 }
 
-// updateInstallConfigPath is the --config an install and its journal rollback
-// are given: runtime.Config.Path only when that file exists.
+// updateInstallConfigPath is the --config an install is given, only when it exists.
 func updateInstallConfigPath(runtime config.Runtime) string {
 	if runtime.Config.Exists {
 		return runtime.Config.Path

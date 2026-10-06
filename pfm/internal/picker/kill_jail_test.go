@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
@@ -21,6 +22,37 @@ func jailPaths(t *testing.T) paths.Values {
 		t.Fatalf("resolve jail paths: %v", err)
 	}
 	return resolved
+}
+
+func TestUnkillThatClearsNothing(t *testing.T) {
+	jailTest(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	apply, err := killApplier(context.Background(), database, pfmconfig.Runtime{Paths: jailPaths(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := ui.KillChange{
+		ID: "33333333-3333-4333-8333-333333333333", Engine: "cc", Killed: true, Name: "ARCHIVED",
+	}
+	if err := apply(change); err != nil {
+		t.Fatalf("hide the chat: %v", err)
+	}
+	change.Killed = false
+	if err := apply(change); err != nil {
+		t.Fatalf("first unkill: %v", err)
+	}
+	if err := apply(change); err == nil ||
+		!strings.Contains(err.Error(), "33333333-3333-4333-8333-333333333333 is not killed; nothing was unkilled") {
+		t.Fatalf("second unkill = %v; want an explicit nothing-was-unkilled error", err)
+	}
 }
 
 // Hide and deactive are separate contracts, exercised against real tmux

@@ -1,6 +1,7 @@
 ---
 name: close-out
-description: 'USER-ONLY Finishes a chat completely — /close-out, "wrap this chat up", "anything left before I close?": sweeps open threads, unfinished or unverified work, uncommitted changes, running agents; does what needs no ruling, asks the rest. Returns the closing report.'
+description: 'USER-ONLY Finishes a chat completely — /close-out: sweeps open threads, unfinished or unverified work, uncommitted changes, running agents; does what needs no ruling, asks the rest. Returns the closing report.'
+disable-model-invocation: true
 ---
 
 # close-out

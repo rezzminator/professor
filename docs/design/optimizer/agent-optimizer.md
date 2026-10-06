@@ -38,14 +38,14 @@ Description, verbatim: `Audits a run end-to-end — "optimize agent X", "audit t
 | `Transcripts:` | one or more transcript paths, or agent ids; every transcript is a run of that one agent type |
 | `Intent:` | optional: what the caller needed from the run; absent, the brief inside the transcript and the agent's description stand in |
 | `Prompt:` | optional: the prompt file, overriding the lookup — for a prompt not yet installed, such as one under review in a worktree |
-| `Blueprint:` | optional: the blueprint clone root; absent, `~/.professor` |
 
 One report per agent type. A lead and its diggers are two audits: the lead's report judges the diggers only as the lead saw their returns, and the diggers' report covers every transcript of that type from the run, so a pattern across diggers counts once with its frequency.
 
 ## What it reads
 
+- The clone root: `agent_source=$(readlink -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/agent-optimizer.md")`; require a readable resolved file, then `clone_root=$(cd "$(dirname "$agent_source")/../../.." && pwd)`. A failed or dangling link or unreadable source is `UNREADABLE — {path}: {the error}`; root-dependent lookups are skipped, never marked `NO DESIGN DOC`.
 - The prompt: `Prompt:` when given; else `{cwd}/.claude/agents/{name}.md` for the `cwd` the transcript records, since a project agent wins over a machine one; else `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/{name}.md` resolved through its link. A variant resolves into pfm's generated directory; the audit then reads the source agent and the variant's `variants.json` entry too, since a finding may belong to either.
-- The design doc: `{Blueprint}/docs/design/**/{name}.md`, and the source agent's doc for a variant. None found is stated, never guessed around.
+- The design doc: `find "$clone_root/docs/design" -name '{Agent}.md'`, and the source agent's doc for a variant; the variant's entry is in `"$clone_root/templates/global/agents/variants.json"`. None found is stated only after a successful search, never guessed around.
 - Each transcript and its `.meta.json` beside it (agent type, model, spawn depth, the description the caller gave). An agent id resolves by `find {CLAUDE_CONFIG_DIR or ~/.claude}/projects -name 'agent-{id}.jsonl'`.
 - What the run produced: files it wrote, read from disk when they exist, since a claim in the return is only a claim.
 
@@ -57,7 +57,7 @@ A transcript can run to megabytes; it is never read whole. One call to `token-au
 - One row per model call (several `assistant` records sharing one `requestId` are one call): clock, seconds since the previous tool result, context (`input + cache read + cache write`), output, USD, and each tool the call issued with its target, result size, `ERR` and wait.
 - `UNREADABLE — {path}: {error}` or `NO CALLS — {path}` for a run it cannot digest, a mark the report carries rather than an estimate.
 
-A second call prints each run's content with one `jq` recipe the prompt carries: one line per record with its transcript line number, holding the brief, every tool input, the start of every result and the return. The timeline's tool targets are cut at 100 characters and often share one prefix, so without that view every audit built its own transcript dumper (about 21 calls over four self-audited runs). The prompt, a variant's source and the design doc are read whole with `cat -n` in the same first message, so later citations never re-grep for line numbers. Every Bash command opens with `emulate sh 2>/dev/null;`, since zsh aborts on `echo ====`. The transcript is opened beyond that only at a line number a finding needs. The script is the blueprint's (`{Blueprint}/templates/global/commands/tokens/`), so an audit run against a worktree reads that worktree's version.
+A second call prints each run's content with `transcript.py show`, one call per run: one line per event with its transcript line number, holding the brief, every tool call with its target and result status, a failure's tail and the return. The timeline's tool targets are cut at 100 characters and often share one prefix, so without that view every audit built its own transcript dumper (about 21 calls over four self-audited runs). The prompt, a variant's source and the design doc are read whole with `cat -n` in the same first message, so later citations never re-grep for line numbers. Every Bash command opens with `emulate sh 2>/dev/null;`, since zsh aborts on `echo ====`. The transcript is opened beyond that only at a line number a finding needs. The installed script runs as `node ~/.claude/commands/tokens/token-audit.mjs --timeline {transcript} --timeline {transcript}…`; a worktree's prompt still comes in through `Prompt:`.
 
 ## The audit
 

@@ -28,6 +28,33 @@ func TestExplicitConfigFlagWinsOverPFMConfig(t *testing.T) {
 	}
 }
 
+func TestExplicitConfigIndexUsesFlagDatabase(t *testing.T) {
+	root := jailTest(t)
+	home := filepath.Join(root, "home")
+	fromEnv, fromFlag := filepath.Join(root, "env.json"), filepath.Join(root, "flag.json")
+	for path, content := range map[string]string{
+		fromEnv:  `{"version":2,"state":{"db":"~/env.db"}}`,
+		fromFlag: `{"version":2,"state":{"db":"~/flag.db"}}`,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(paths.EnvConfig, fromEnv)
+	t.Setenv(paths.EnvStateDB, "")
+	t.Setenv(paths.EnvCacheDB, "")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--config", fromFlag, "index"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("explicit config index=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "flag.db")); err != nil {
+		t.Fatalf("flag database: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "env.db")); !os.IsNotExist(err) {
+		t.Fatalf("environment database exists or cannot be inspected: %v", err)
+	}
+}
+
 func TestConfigCLIRejectsGlobalConfigSyntaxAndLoadErrors(t *testing.T) {
 	root := jailTest(t)
 	for _, test := range []struct {

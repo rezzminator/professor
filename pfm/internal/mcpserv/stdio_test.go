@@ -488,6 +488,12 @@ func TestSendWithRetryRetriesUnresponsiveReplayProbe(t *testing.T) {
 	if !errors.Is(err, ErrDaemonUnresponsive) || errors.Is(err, ErrDaemonAbsent) {
 		t.Fatalf("replay probe error = %v, want wrapped unresponsive timeout", err)
 	}
+	want := "pfm MCP daemon " + address + " held its port without answering pfm's status probe for 250ms; stop the process listening there ("
+	if !strings.HasPrefix(err.Error(), want) ||
+		!strings.Contains(err.Error(), "lsof -iTCP@"+address+" -sTCP:LISTEN") ||
+		strings.Contains(err.Error(), "pfm mcp serve") {
+		t.Fatalf("replay probe remedy = %q, want occupied-port remedy starting %q", err, want)
+	}
 	if posts != 1 {
 		t.Fatalf("POST attempts = %d, want only the original before timed-out probes", posts)
 	}

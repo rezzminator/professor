@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // withLaunchShell adds the Claude launch shell (claudelaunch.ShellEnv) judged
@@ -30,4 +32,11 @@ func withLaunchShell(environment []string) []string {
 		environment = kept
 	}
 	return environment
+}
+
+func checkCodexRunLogin(request Request) error {
+	if request.Engine == pfmengine.Codex && !request.WithoutAccount && request.ConfigDir != "" {
+		return pfmconfig.CodexLoginError(request.ConfigDir)
+	}
+	return nil
 }

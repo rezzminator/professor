@@ -10,6 +10,12 @@ func TestProbeEnv(t *testing.T) {
 	for _, name := range Hygiene() {
 		input = append(input, name+"=old")
 	}
+	input = append(input,
+		"CLAUDE_CODE_USE_BEDROCK=1",
+		"CLAUDE_CODE_USE_VERTEX=1",
+		"ANTHROPIC_BEDROCK_BASE_URL=https://bedrock.example",
+		"ANTHROPIC_VERTEX_PROJECT_ID=proj",
+	)
 	want := []string{
 		"KEEP=value",
 		"ANTHROPIC_BASE_URL=http://sink",

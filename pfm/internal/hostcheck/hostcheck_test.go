@@ -32,6 +32,24 @@ func fixtureEnv(t *testing.T) Env {
 	}
 }
 
+func TestLoadedStoreAccountReachesHostGate(t *testing.T) {
+	env := fixtureEnv(t)
+	makeDir(t, env.Store)
+	writeFile(t, env.ConfigPath, `{"version":2,"accounts":[{"id":1,"configDir":"~/.claude"}]}`)
+	loaded, err := config.Load(env.ConfigPath, env.Home, nil)
+	if err != nil {
+		t.Fatalf("Load(store account) = %v, want nil", err)
+	}
+	env.Accounts = loaded.Accounts
+	assertRows(t, detect(t, "account-is-store", env), Row{
+		Block,
+		"account-is-store",
+		env.Store,
+		"account 1's config dir resolves to the store " + env.Store,
+		"point accounts[1].configDir in " + env.ConfigPath + " at " + config.DefaultAccountDir(env.Home, 1),
+	})
+}
+
 func writeFile(t *testing.T, path, text string) {
 	t.Helper()
 	makeDir(t, filepath.Dir(path))
@@ -168,6 +186,20 @@ func TestEnvFor(t *testing.T) {
 	env.HarvesterCacheDir = runtime.Config.Harvester.Cache.Dir
 	if !reflect.DeepEqual(got, env) {
 		t.Fatalf("env=%+v want=%+v", got, env)
+	}
+	clone := filepath.Dir(env.ConfigPath)
+	makeDir(t, clone)
+	if err := paths.WriteSourceRepoMarker(env.Home, clone); err != nil {
+		t.Fatal(err)
+	}
+	if got := EnvFor(runtime, env.Now); got.CloneConfigPath != env.ConfigPath {
+		t.Fatalf("recorded clone config=%q, want %q", got.CloneConfigPath, env.ConfigPath)
+	}
+	if err := os.Rename(clone, clone+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if got := EnvFor(runtime, env.Now); got.CloneConfigPath != "" {
+		t.Fatalf("unusable marker clone config=%q, want empty", got.CloneConfigPath)
 	}
 }
 

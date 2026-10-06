@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // fakeCodex is a Codex TUI as far as this package can tell: it draws a
@@ -841,5 +843,18 @@ func TestRenameModalOpenReadsOnlyTheDialog(t *testing.T) {
 		if got := renameModalOpen(test.capture); got != test.want {
 			t.Errorf("%s: renameModalOpen = %v, want %v", test.name, got, test.want)
 		}
+	}
+}
+
+func TestSpawnCodexRequiresLogin(t *testing.T) {
+	home := t.TempDir()
+	fake := newFakeCodex()
+	_, err := Run(context.Background(), fake, Request{
+		Engine: "cx", Socket: "cx-a", Run: "cx", CWD: t.TempDir(), CodexHome: home,
+	})
+	want := filepath.Join(home, "auth.json") + " "
+	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) ||
+		len(fake.sessions) != 0 {
+		t.Fatalf("spawn error=%v sessions=%d; want %q", err, len(fake.sessions), want)
 	}
 }

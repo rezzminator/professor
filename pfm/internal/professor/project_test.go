@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestProfessorDoctorProjectLine(t *testing.T) {
@@ -315,7 +317,8 @@ func TestUpdatedRowPrintsUnreadableAndEmptyDiffVariants(t *testing.T) {
 		Diff:     "",
 	}))
 	emptyText := empty.String()
-	want := "upstream change EMPTY — git shows no difference from the pin; compare by hand: diff " +
+	want := "upstream change EMPTY — the pin was taken from an uncommitted or untracked store file, " +
+		"so git cannot show the change; compare by hand: diff " +
 		"/work/project/CLAUDE.md /work/blueprint/templates/project/CLAUDE.md"
 	if !strings.Contains(emptyText, want) {
 		t.Fatalf("UPDATED row missing the EMPTY line %q:\n%s", want, emptyText)
@@ -348,5 +351,26 @@ func TestWriteProjectUnmanagedHumanAndJSON(t *testing.T) {
 	terminal, ok := object["terminal"].(string)
 	if !ok || !strings.HasPrefix(terminal, "NOT-MANAGED — ") {
 		t.Fatalf("JSON terminal=%#v", object["terminal"])
+	}
+}
+
+func TestRunPostUpdateUnreadableRoot(t *testing.T) {
+	root := t.TempDir()
+	baseline := BaselinePath(root)
+	if err := os.MkdirAll(filepath.Dir(baseline), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(baseline, baseline); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := RunProjectUpdate("", []string{"--root", root}, &stdout, &stderr, config.Runtime{})
+	if code != 3 || !strings.HasPrefix(stdout.String(), "FAILED — UNREADABLE ") {
+		t.Fatalf(
+			"RunProjectUpdate() code=%d stdout=%q stderr=%q, want 3 and FAILED — UNREADABLE",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }

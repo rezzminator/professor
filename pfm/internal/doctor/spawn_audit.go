@@ -19,6 +19,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // spawnVerdict is one live chat's standing against the configured prompt
@@ -28,13 +29,11 @@ type spawnVerdict string
 const (
 	// spawnInjected: the launch carries the policy's prompt material.
 	spawnInjected spawnVerdict = "INJECTED"
-	// spawnPredatesLayer: the chat was born before the prompt layer existed,
-	// so its flagless argv is history rather than a defect. It is stated
-	// separately from a clean verdict — the seat IS running the CLI's own
-	// prompt and only a reload fixes it.
+	// spawnPredatesLayer: the chat carries an older launch or hook set;
+	// only a reload brings it through the current spawn door.
 	spawnPredatesLayer spawnVerdict = "PREDATES-LAYER"
-	// spawnViolation: born after the layer, still flagless. Some spawn site
-	// bypassed the door.
+	// spawnViolation: required launch material is missing; the reason
+	// distinguishes a bypassed door from an unavailable composed prompt.
 	spawnViolation spawnVerdict = "VIOLATION"
 )
 
@@ -77,12 +76,19 @@ func classifySpawn(
 	prefs config.ClaudePrefs,
 	home string,
 	layerStampUnix int64,
+	promptErr error,
 ) (spawnVerdict, string) {
 	missing := ""
 	switch promptPolicyName(prefs.SystemPrompt) {
 	case config.SystemPromptProfessor:
 		if parsed.PromptFile == "" {
 			missing = "no --system-prompt-file prompt material"
+			if promptErr != nil {
+				return spawnViolation, missing + fmt.Sprintf(
+					" — composed prompt unavailable (%v); every door omits the flag until it exists: update or restore the clone, then reload",
+					promptErr,
+				)
+			}
 		}
 	case config.SystemPromptLean:
 		if parsed.SettingsEnv["CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT"] != "1" {
@@ -93,7 +99,7 @@ func classifySpawn(
 		missing = "missing --settings outputStyle default"
 	}
 	if missing == "" && !sameSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
-		missing = "hook set differs from the registry — reload to carry it"
+		return spawnPredatesLayer, "hook set differs from the registry — reload to carry it"
 	}
 	if missing == "" {
 		switch promptPolicyName(prefs.SystemPrompt) {
@@ -105,8 +111,8 @@ func classifySpawn(
 			return spawnInjected, "production payload and registry hooks"
 		}
 	}
-	if _, older := predatesLayer(observation, layerStampUnix); older {
-		return spawnPredatesLayer, missing
+	if age, older := predatesLayer(observation, layerStampUnix); older {
+		return spawnPredatesLayer, missing + fmt.Sprintf(" (born %s before the current spawn door)", age)
 	}
 	if parsed.Resume != "" && parsed.Settings == nil {
 		return spawnPredatesLayer, "resumed argv with no registry payload — reborn before the door"
@@ -255,13 +261,13 @@ func printSpawnAuditDoctorWithClock(
 		}
 	}
 
-	observations, unread, err := liveClaudeSpawns(ctx, resolved, machine, clk)
+	observations, unread, err := spawnObservationsProbe(ctx, resolved, machine, clk)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: spawn-audit: CHECK FAILED to run (%v) — live chats unaudited\n", err)
 		return 1
 	}
 
-	stamp, stampSignal := spawnDoorStamp(resolved.Home)
+	stamp, stampSignal, promptErr := spawnDoorStamp(resolved.Home)
 	if len(observations) == 0 {
 		fmt.Fprintf(
 			stdout,
@@ -278,10 +284,12 @@ func printSpawnAuditDoctorWithClock(
 		return observations[left].PID < observations[right].PID
 	})
 	counts := map[spawnVerdict]int{}
+	undecodable := 0
 	for index := range observations {
 		observation := &observations[index]
 		if warning := decodeSpawn(observation); warning != "" {
 			unread = append(unread, warning)
+			undecodable++
 			continue
 		}
 		accountID, accountReason := spawnAccount(machine, primary, *observation)
@@ -291,6 +299,7 @@ func printSpawnAuditDoctorWithClock(
 			machine.EffectiveClaude(accountID),
 			resolved.Home,
 			stamp,
+			promptErr,
 		)
 		if accountReason != "" {
 			reason += " (" + accountReason + ")"
@@ -308,12 +317,13 @@ func printSpawnAuditDoctorWithClock(
 	roleWarnings := printSpawnRoleAudit(stdout, observations)
 	fmt.Fprintf(
 		stdout,
-		"doctor: spawn-audit: policy=%s chats=%d injected=%d predates-layer=%d violations=%d (age signal: %s)\n",
+		"doctor: spawn-audit: policy=%s chats=%d injected=%d predates-layer=%d violations=%d undecodable=%d (age signal: %s)\n",
 		policy,
 		len(observations),
 		counts[spawnInjected],
 		counts[spawnPredatesLayer],
 		counts[spawnViolation],
+		undecodable,
 		stampSignal,
 	)
 	warnings := spawnAuditUnreadWarnings(stdout, unread)
@@ -333,12 +343,15 @@ func decodeSpawn(observation *spawnObservation) string {
 }
 
 func spawnAccount(machine config.Config, primary int, observation spawnObservation) (int, string) {
+	if len(machine.Accounts) == 0 {
+		return primary, ""
+	}
 	if observation.Environ == nil {
 		return primary, "account environment unreadable; graded against primary"
 	}
 	dir := observation.Environ["CLAUDE_CONFIG_DIR"]
 	for _, account := range machine.Accounts {
-		if account.ConfigDir == dir {
+		if usagehook.SameConfigDir(account.ConfigDir, dir) {
 			return account.ID, ""
 		}
 	}
@@ -373,6 +386,8 @@ func promptPolicyName(value string) string {
 // judges; tests point it at a fixture.
 var spawnDoorExecutable = os.Executable
 
+var spawnObservationsProbe = liveClaudeSpawns
+
 // spawnDoorStamp is the moment this host's CURRENT spawn door went live: the
 // later of the clone's composed professor prompt mtime (the prompt layer) and the
 // running pfm binary's mtime (the argv every door builds). One stamp cannot
@@ -383,26 +398,35 @@ var spawnDoorExecutable = os.Executable
 // born after BOTH can blame the door now installed; an older seat carries the
 // argv of the pfm that launched it, and a reload is its fix. The signal names
 // every input, so a reader knows what the age claim rests on.
-func spawnDoorStamp(home string) (int64, string) {
+func spawnDoorStamp(home string) (int64, string, error) {
 	var stamp int64
 	var sources, failures []string
-	consider := func(label, path string, err error) {
+	consider := func(label, path string, err error) error {
 		if err == nil {
 			var info os.FileInfo
-			if info, err = os.Stat(path); err == nil {
+			info, err = os.Stat(path)
+			if err == nil && label == "prompt layer" {
+				if !info.Mode().IsRegular() {
+					err = fmt.Errorf("%s is not a regular file", path)
+				} else {
+					_, err = os.ReadFile(path)
+				}
+			}
+			if err == nil {
 				stamp = max(stamp, info.ModTime().Unix())
 				sources = append(sources, "mtime of "+path)
-				return
+				return nil
 			}
 		}
 		failures = append(failures, fmt.Sprintf("%s: %v", label, err))
+		return err
 	}
 	promptPath, promptErr := action.ProfessorPromptPath(home)
-	consider("prompt layer", promptPath, promptErr)
+	promptErr = consider("prompt layer", promptPath, promptErr)
 	executable, err := spawnDoorExecutable()
 	consider("pfm binary", executable, err)
 	if stamp == 0 {
-		return 0, fmt.Sprintf("unavailable (%s) — age never decided a verdict", strings.Join(failures, "; "))
+		return 0, fmt.Sprintf("unavailable (%s) — age never decided a verdict", strings.Join(failures, "; ")), promptErr
 	}
 	signal := fmt.Sprintf(
 		"%s, the later of %s",
@@ -412,7 +436,7 @@ func spawnDoorStamp(home string) (int64, string) {
 	if len(failures) != 0 {
 		signal += " (unreadable: " + strings.Join(failures, "; ") + ")"
 	}
-	return stamp, signal
+	return stamp, signal, promptErr
 }
 
 // liveClaudeSpawns enumerates the fleet's own Claude sockets through the same

@@ -50,7 +50,7 @@ func TestExecCommandsResumeWorkbench(t *testing.T) {
 			commands, argvPath, values, accountDir := testExecCommands(t)
 			dir := filepath.Join(values.Home, "acme", "docs", "scribe")
 			prompt := filepath.Join(dir, ".professor", "scribe.md")
-			manifest := `{"prompt":"scribe.md","effort":"XHigh","model":"sonnet"}`
+			manifest := `{"prompt":"scribe.md","effort":"xhigh","model":"sonnet"}`
 			if invalid {
 				manifest = `{"prompt":""}`
 			}

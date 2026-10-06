@@ -3,6 +3,7 @@ package workbench
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -107,8 +108,13 @@ func TestCheckMirror(t *testing.T) {
 					t.Fatalf("build=%#v err=%v", result, err)
 				}
 			}
-			if stale, err := CheckMirror(bench, engine, home); stale != "" || err != nil {
-				t.Errorf("fresh=%q err=%v", stale, err)
+			if check, err := CheckMirror(
+				bench,
+				engine,
+				home,
+			); len(check.Rebuildable) != 0 || len(check.Failing) != 0 ||
+				err != nil {
+				t.Errorf("fresh=%#v err=%v", check, err)
 			}
 			writeBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Edited scribe.\n")
 			writeBenchFile(
@@ -116,13 +122,13 @@ func TestCheckMirror(t *testing.T) {
 				filepath.Join(dir, ".claude", "commands", "local.md"),
 				"---\ndescription: Local.\n---\nEdited.\n",
 			)
-			var first string
+			var problems []string
 			if engine == pfmengine.Codex {
 				result, err := codexgen.Check(codexgen.Options{Root: dir, Home: home})
 				if err != nil {
 					t.Fatal(err)
 				}
-				first = result.Problems[0]
+				problems = result.Problems
 			} else {
 				result, err := opencodegen.Compile(
 					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeCheck},
@@ -130,24 +136,93 @@ func TestCheckMirror(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				first = result.Problems[0]
+				problems = result.Problems
 			}
-			if stale, err := CheckMirror(bench, engine, home); stale != first || err != nil {
-				t.Errorf("stale=%q err=%v, want %q", stale, err, first)
+			if check, err := CheckMirror(
+				bench,
+				engine,
+				home,
+			); !reflect.DeepEqual(check.Rebuildable, problems) || len(check.Failing) != 0 ||
+				err != nil {
+				t.Errorf("stale=%#v err=%v, want %q", check, err, problems)
 			}
 			config := "codex-build.json"
 			if engine == pfmengine.OpenCode {
 				config = "opencode-build.json"
 			}
 			writeBenchFile(t, filepath.Join(dir, ".claude", config), "{")
-			stale, err := CheckMirror(bench, engine, home)
+			check, err := CheckMirror(bench, engine, home)
 			if engine == pfmengine.Codex {
 				_, want := codexgen.Check(codexgen.Options{Root: dir, Home: home})
-				if stale != "" || err == nil || err.Error() != want.Error() {
-					t.Errorf("broken=%q err=%v, want %v", stale, err, want)
+				if len(check.Rebuildable) != 0 || len(check.Failing) != 0 || err == nil || err.Error() != want.Error() {
+					t.Errorf("broken=%#v err=%v, want %v", check, err, want)
 				}
-			} else if stale == "" || err != nil {
-				t.Errorf("OpenCode config problem is returned in Result: stale=%q err=%v", stale, err)
+			} else if len(check.Failing) == 0 || len(check.Rebuildable) != 0 || err != nil {
+				t.Errorf("OpenCode config problem is returned in Result: check=%#v err=%v", check, err)
+			}
+		})
+	}
+}
+
+func TestCheckMirrorProblemSplit(t *testing.T) {
+	for _, scenario := range []string{"Codex orphan", "OpenCode mixed", "OpenCode config"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, dir := benchFixture(t)
+			writeBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Scribe.\n")
+			bench, home := LoadBench(dir, root), t.TempDir()
+			engine := pfmengine.OpenCode
+			want := MirrorCheck{}
+			switch scenario {
+			case "Codex orphan":
+				engine = pfmengine.Codex
+				source := filepath.Join(dir, ".claude", "agents", "old.md")
+				writeBenchFile(t, source, "---\nname: old\ndescription: Old.\n---\nOld.\n")
+				result, err := codexgen.Build(codexgen.Options{Root: dir, Home: home})
+				if err != nil || !result.OK {
+					t.Fatalf("build=%#v err=%v", result, err)
+				}
+				if err := os.Remove(source); err != nil {
+					t.Fatal(err)
+				}
+				want.Rebuildable = []string{"ORPHAN " + filepath.Join(dir, ".codex", "agents", "old.toml")}
+			case "OpenCode mixed":
+				source := filepath.Join(dir, ".claude", "commands", "local.md")
+				writeBenchFile(t, source, "---\ndescription: Local.\n---\nLocal.\n")
+				result, err := opencodegen.Compile(
+					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeBuild},
+				)
+				if err != nil || !result.OK {
+					t.Fatalf("build=%#v err=%v", result, err)
+				}
+				writeBenchFile(t, source, "---\ndescription: Local.\n---\nEdited.\n")
+				writeBenchFile(
+					t,
+					filepath.Join(dir, ".claude", "commands", "hand.md"),
+					"---\ndescription: Hand.\n---\nHand.\n",
+				)
+				writeBenchFile(t, filepath.Join(dir, ".opencode", "command", "hand.md"), "hand\n")
+				want.Rebuildable = []string{"STALE " + filepath.Join(dir, ".opencode", "command", "local.md")}
+				want.Failing = []string{
+					"CONFLICT " + filepath.Join(
+						dir,
+						".opencode",
+						"command",
+						"hand.md",
+					) + " — exists without a generated marker; not touching it",
+				}
+			case "OpenCode config":
+				writeBenchFile(t, filepath.Join(dir, ".claude", "opencode-build.json"), "{")
+				result, err := opencodegen.Compile(
+					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeCheck},
+				)
+				if err != nil || len(result.Problems) == 0 {
+					t.Fatalf("config=%#v err=%v", result, err)
+				}
+				want.Failing = result.Problems
+			}
+			got, err := CheckMirror(bench, engine, home)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("check=%#v err=%v, want %#v", got, err, want)
 			}
 		})
 	}

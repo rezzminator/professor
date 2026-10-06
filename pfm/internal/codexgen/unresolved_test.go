@@ -113,6 +113,96 @@ func TestUnresolvableRepoCommandSourceKeepsItsTwin(t *testing.T) {
 	assertUnresolvedTwinKept(t, build, source, unresolvedSubmoduleTarget, twin, seeded)
 }
 
+func TestUnresolvableCommandDirectoryKeepsTwins(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	source := filepath.Join(root, ".claude", "commands", "lab")
+	twin := filepath.Join(root, ".codex", "skills", "lab-run", "SKILL.md")
+	seeded := seedUnresolvedFixture(t, root, home, filepath.Join(".claude", "commands", "lab", "run.md"), twin)
+	old := filepath.Join(root, ".claude", "commands", "old.md")
+	writeTestFile(t, old, "Old.\n")
+	if result, err := Build(Options{Root: root, Home: home}); err != nil || !result.OK {
+		t.Fatalf("seed old command: %#v, %v", result, err)
+	}
+	if err := os.Remove(old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(source, filepath.Join(root, "saved-lab")); err != nil {
+		t.Fatal(err)
+	}
+	target := "../../vendor/lab/commands"
+	if err := os.Symlink(target, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Build(Options{Root: root, Home: home})
+	if err != nil || !result.OK {
+		t.Fatalf("build: %#v, %v", result, err)
+	}
+	if got := mustReadTestFile(t, twin); !bytes.Equal(got, seeded) {
+		t.Fatalf("command directory twin changed: got %q, want %q", got, seeded)
+	}
+	warning := "source unresolvable: " + source + " → " + target + "; twin kept"
+	if !contains(result.Warnings, warning) {
+		t.Fatalf("warnings = %q, want %q", result.Warnings, warning)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".codex", "skills", "old")); !os.IsNotExist(err) {
+		t.Fatalf("retired old command twin remains: %v", err)
+	}
+}
+
+func TestUnresolvableSkillDirectoryKeepsTwin(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
+	source := filepath.Join(root, ".claude", "skills", "pdf")
+	writeTestFile(t, filepath.Join(source, "SKILL.md"), "PDF.\n")
+	if result, err := Build(Options{Root: root, Home: home}); err != nil || !result.OK {
+		t.Fatalf("seed skill: %#v, %v", result, err)
+	}
+	twin := filepath.Join(root, ".codex", "skills", "pdf")
+	seeded, err := os.Readlink(twin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(source, filepath.Join(root, "saved-pdf")); err != nil {
+		t.Fatal(err)
+	}
+	target := "../../vendor/pdf"
+	if err := os.Symlink(target, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Build(Options{Root: root, Home: home})
+	if err != nil || !result.OK {
+		t.Fatalf("build: %#v, %v", result, err)
+	}
+	if got, err := os.Readlink(twin); err != nil || got != seeded {
+		t.Fatalf("skill twin = %q, %v, want %q, nil", got, err, seeded)
+	}
+	if !contains(result.Warnings, "source unresolvable: "+source+" → "+target+"; twin kept") {
+		t.Fatalf("warnings = %q, want named twin-kept warning", result.Warnings)
+	}
+}
+
+func TestRealCommandSourceWinsOverKeptDirectoryTwin(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
+	command := filepath.Join(root, ".claude", "commands", "git-commit.md")
+	writeTestFile(t, command, "Older body.\n")
+	if result, err := Build(Options{Root: root, Home: home}); err != nil || !result.OK {
+		t.Fatalf("seed command: %#v, %v", result, err)
+	}
+	writeTestFile(t, command, "Commit.\n")
+	if err := os.Symlink("../../vendor/git/commands", filepath.Join(root, ".claude", "commands", "git")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Build(Options{Root: root, Home: home})
+	if err != nil || !result.OK {
+		t.Fatalf("build: %#v, %v", result, err)
+	}
+	assertTestFileContains(t, filepath.Join(root, ".codex", "skills", "git-commit", "SKILL.md"), "Commit.")
+	if containsFinding(result.Warnings, "twin kept") {
+		t.Fatalf("real source reported as kept: %q", result.Warnings)
+	}
+}
+
 func TestAbsentAgentSourceStillDeletesItsTwin(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

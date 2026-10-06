@@ -110,8 +110,8 @@ func TestHarnessCaptureUsesRegistryProbeEnvironment(t *testing.T) {
 	shortenHarnessCaptureSinkGrace(t)
 	path := filepath.Join(t.TempDir(), "environment")
 	t.Setenv("PFM_TEST_PROBE_ENV", path)
-	t.Setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "parent")
-	binary := writeFakeHarnessClaude(t, `if printenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC >/dev/null; then
+	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+	binary := writeFakeHarnessClaude(t, `if printenv CLAUDE_CODE_USE_BEDROCK >/dev/null; then
   printf 'leaked\n' >> "$PFM_TEST_PROBE_ENV"
 else
   printf 'clean\n' >> "$PFM_TEST_PROBE_ENV"

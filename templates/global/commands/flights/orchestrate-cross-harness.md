@@ -1,12 +1,14 @@
 ---
 name: flights:orchestrate-cross-harness
-description: 'Executors on another engine — /flights:orchestrate-cross-harness {directory} [engine claude|codex|opencode] [worktree {path}] [commit]: this chat acts as flights-orchestrator, one chat seat per task file instead of a sub-agent, default engine codex. /flights:spec → here → executor seats.'
-argument-hint: <flight directory> [engine <claude|codex|opencode>] [worktree <path>] [commit]
+description: 'Run tasks on another engine — /flights:orchestrate-cross-harness {directory} [engine claude|codex] [worktree {path}] [commit]: this chat acts as flights-orchestrator, one chat seat per task file instead of a sub-agent, default engine codex. /flights:spec → here → executor seats.'
+argument-hint: <flight directory> [engine <claude|codex>] [worktree <path>] [commit]
 ---
 
 # Orchestrate, cross-harness — run a flight on chat seats
 
 Read the `flights-orchestrator` agent body from the registry (`~/.claude/agents/flights-orchestrator.md`) and be it for the rest of this flight, with the transport substituted and nothing else:
+
+At input, accept only `claude` or `codex` (default `codex`). Any other engine stops before a seat or `CLAIMED` line, printing `engine {engine} refused: pfm chat new --agent-role cannot launch an {engine} seat`.
 
 | In the manual | Here |
 | --- | --- |
@@ -14,7 +16,7 @@ Read the `flights-orchestrator` agent body from the registry (`~/.claude/agents/
 | Spawn the lander | Unchanged: a sub-agent of this chat, never a seat; the returns Monitor's `RETURN` line for its `gate-r{round}` file is one more wake for the same file |
 | The brief in the spawn prompt | The brief file, written before the spawn, goes verbatim as the seat's first turn through `--prompt-file`, never a later `chat_inject`. It closes with the way home: "when done, write your return to `{flight directory}/returns/{id}-r{round}.md` and send it with `pfm chat inject {this chat's name} --file {path}`"; the return file is the return, and a trailing `**Verdict:**` line in it or in `chat_last` is ignored — your name from `chat_whoami`; a seat's plain inject carries one line |
 | Wait: end the message, the return arrives | The same; a return is its file appearing in `returns/`, announced by the returns Monitor's `RETURN {path}` line; the seat's inject is a bonus, never the signal |
-| Verify from the return and `git diff {baseline} --stat -- {files}` | The same; `chat_last` on the seat when the inject arrived cut short |
+| Verify from the return and the new-file rule | The orchestrator's verify, unchanged; `chat_last` on the seat when the inject arrived cut short |
 | A question back by `SendMessage` | `chat_inject` on the seat, closing with "continue, then return once more in the return shape" |
 | The executor's transcript, sent to `flights-speccer` with every `FAILED` and `SPEC-DRIFT` and named on the `run.md` line | The seat's session id, read right after birth while its name still resolves: `pfm chat resolve {flight}-{id}`, third column. It goes on the `CLAIMED` line as `sid {session id}` and on each verdict line as `transcript {session id}`, always before `chat_kill`. A resolve with no third column writes `transcript UNRESOLVED · {what resolve printed}`, never nothing |
 | An executor never returns | The watch Monitor's lines, each acted on per § Monitors |

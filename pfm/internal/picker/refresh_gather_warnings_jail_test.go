@@ -3,6 +3,7 @@ package picker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -215,5 +216,53 @@ func TestBufferedWarningsDeduplicateRepeatedRefreshFailures(t *testing.T) {
 	warnings.flush(&output)
 	if got := strings.Count(output.String(), "same failure"); got != 1 {
 		t.Fatalf("same warning printed %d times, want once: %q", got, output.String())
+	}
+}
+
+func TestBufferedWarningsHoldRawRefreshErrors(t *testing.T) {
+	var warnings bufferedWarnings
+	raw := []byte("pfm refresh workbenches: workbench cache /x/workbenches.json: read: permission denied\n")
+	for range 2 {
+		if n, err := warnings.Write(raw); n != len(raw) || err != nil {
+			t.Fatalf("Write = %d, %v; want %d, nil", n, err, len(raw))
+		}
+	}
+	warnings.add("socket cc-3 did not answer")
+	var out bytes.Buffer
+	warnings.flush(&out)
+	want := string(raw) + "pfm: tmux probe warning: socket cc-3 did not answer\n"
+	otherOrder := "pfm: tmux probe warning: socket cc-3 did not answer\n" + string(raw)
+	if got := out.String(); got != want && got != otherOrder {
+		t.Fatalf("flush = %q; want the raw error verbatim and the probe warning once", got)
+	}
+	out.Reset()
+	warnings.flush(&out)
+	if got := out.String(); got != "" {
+		t.Fatalf("second flush = %q; want an empty drained buffer", got)
+	}
+}
+
+func TestInteractiveRefreshBuffersStreamErrorsUntilFlushed(t *testing.T) {
+	_, _, database, _ := pickerWorkbenchFixture(t)
+	var warnings bufferedWarnings
+	var terminal bytes.Buffer
+	updates := make(chan ui.Snapshot, 4)
+	streamFleetRefreshesWith(context.Background(), database, scanRequest{}, warnings.add, &warnings, updates,
+		refreshDependencies{
+			newIndexer: func(*store.Store) (indexRunner, error) {
+				return nil, errors.New("index unavailable")
+			},
+		},
+	)
+	for range updates {
+	}
+	warnings.flush(&terminal)
+	if got, want := terminal.String(), "pfm refresh index: index unavailable\n"; got != want {
+		t.Fatalf("terminal after picker exit = %q, want %q", got, want)
+	}
+	terminal.Reset()
+	warnings.flush(&terminal)
+	if got := terminal.String(); got != "" {
+		t.Fatalf("second flush = %q; want no repeated error", got)
 	}
 }

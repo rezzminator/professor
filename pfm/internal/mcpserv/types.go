@@ -268,7 +268,7 @@ type NewInput struct {
 	AgentRole string `json:"agentRole,omitempty" jsonschema:"registered agent the chat runs as, e.g. flights-smart-executor: its role prompt joins the fleet prompt; not on OpenCode"`
 	Prompt    string `json:"prompt,omitempty" jsonschema:"first message; the chat opens idle without one"`
 	Await     bool   `json:"await,omitempty" jsonschema:"wait for the first answer and return it instead of the launch message"`
-	Timeout   int    `json:"timeout,omitempty" jsonschema:"with await: seconds to wait, 0 waits forever; 600 when unset"`
+	Timeout   *int   `json:"timeout,omitempty" jsonschema:"with await: seconds to wait, 0 waits forever; 600 when unset"`
 	Settle    int    `json:"settle,omitempty" jsonschema:"with await: seconds of quiet that end the answer; 3 when unset"`
 	Progress  bool   `json:"progress,omitempty" jsonschema:"with await: the chat's turns go to stderr while waiting"`
 	Attach    bool   `json:"attach,omitempty" jsonschema:"attach a terminal to the new chat; not with await"`

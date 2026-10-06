@@ -25,9 +25,6 @@ const (
 
 	// DefaultMCPPort is the loopback daemon port (chat + harvester, no auth).
 	DefaultMCPPort = 18377
-	// legacyDefaultMCPPort is the port `pfm config init` wrote explicitly into
-	// every pre-split file; the migration moves exactly this value.
-	legacyDefaultMCPPort = 8377
 	// DefaultHarvesterExternalPort is the authenticated external gateway port.
 	DefaultHarvesterExternalPort = 18378
 

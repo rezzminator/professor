@@ -73,6 +73,12 @@ func TestDoctorBaselineUnavailableNamesCloneDirectoryAndMissingMarker(t *testing
 	dir := filepath.Join(clone, "pfm", "harness-prompts", "claude", "baselines")
 	check(home, "BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\" dir="+dir)
 	check(t.TempDir(), "no source repo recorded, run pfm install from the clone")
+	if err := os.RemoveAll(clone); err != nil {
+		t.Fatal(err)
+	}
+	check(home, "dir=(unresolved) error=resolve harness baseline directory: inspect recorded source repository")
+	check(home, "recorded source repository is unusable")
+	check(home, "— the recorded clone is unusable: restore it, or run pfm install from a working clone")
 }
 
 func TestHarnessPromptVerdictMasksBuildStamp(t *testing.T) {
@@ -213,7 +219,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 				HarnessCaptureOverride = refuseCapture(t)
 			},
 			wantWarn: true,
-			want:     "BASELINE UNAVAILABLE identity=harness-original model=\"sonnet\"",
+			want:     "baseline file malformed",
 		},
 		{
 			name: "override content matching the clone baseline reports clean",

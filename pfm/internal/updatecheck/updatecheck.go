@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -223,13 +224,25 @@ type noAnswerError struct{ cause error }
 func (e *noAnswerError) Error() string { return e.cause.Error() }
 func (e *noAnswerError) Unwrap() error { return e.cause }
 
+func networkUnreachable(err error) bool {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var timeout interface{ Timeout() bool }
+	return (errors.As(err, &timeout) && timeout.Timeout()) || errors.Is(err, context.DeadlineExceeded)
+}
+
 type recordedUnreachableError struct{ cause error }
 
 func (e *recordedUnreachableError) Error() string { return e.cause.Error() }
 func (e *recordedUnreachableError) Unwrap() error { return e.cause }
 
-// Unreachable reports a release request that received no HTTP answer and
-// whose failure marker was written successfully.
+// Unreachable reports a dial, DNS or timeout failure whose marker was written successfully.
 func Unreachable(err error) bool {
 	var recorded *recordedUnreachableError
 	return errors.As(err, &recorded)
@@ -353,7 +366,11 @@ func follow(
 ) (resolved *url.URL, location string, returnErr error) {
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, "", &noAnswerError{fmt.Errorf("request latest Professor release: %w", err)}
+		cause := fmt.Errorf("request latest Professor release: %w", err)
+		if networkUnreachable(err) {
+			return nil, "", &noAnswerError{cause}
+		}
+		return nil, "", cause
 	}
 	defer func() {
 		if err := response.Body.Close(); err != nil {

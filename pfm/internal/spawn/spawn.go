@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
@@ -114,6 +115,11 @@ func Run(
 	}
 	if request.Socket == "" || request.Run == "" || request.CWD == "" {
 		return Result{}, errors.New("spawn requires a socket, command and directory")
+	}
+	if request.CodexHome != "" {
+		if err := pfmconfig.CodexLoginError(request.CodexHome); err != nil {
+			return Result{}, err
+		}
 	}
 	launcher, err := LauncherFor(request.Engine)
 	if err != nil {

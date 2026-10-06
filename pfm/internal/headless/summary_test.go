@@ -220,13 +220,21 @@ func summaryTestStore(t *testing.T) (string, *store.Store) {
 
 func summaryMachine(t *testing.T, engineName string) pfmconfig.Config {
 	t.Helper()
+	codexHome := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(codexHome, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	id, err := pfmengine.Parse(engineName)
 	if err != nil {
 		panic(err)
 	}
 	return pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: t.TempDir()}},
-		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: "/fixture/codex"}},
+		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
 		Claude:        pfmconfig.Claude{Binary: "claude"},
 		Codex:         pfmconfig.Codex{Binary: "codex"},
 		Ask: pfmconfig.AskConfig{Engine: id, Prefs: map[pfmengine.ID]pfmconfig.EnginePrefs{

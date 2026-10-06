@@ -1,13 +1,31 @@
 package fleet
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func TestPrimaryAccountWithoutRecordedPrimary(t *testing.T) {
+	home := t.TempDir()
+	values := paths.Values{Home: home, StateDB: filepath.Join(home, "pfm.db")}
+	state := fleetdb.OpenSharedState(context.Background(), values)
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(values.StateDB); err != nil {
+		t.Fatal(err)
+	}
+	machine := config.Config{Accounts: []config.Account{{ID: 7}, {ID: 1}}}
+	if got, err := PrimaryAccount(values, machine); got != 1 || err != nil {
+		t.Fatalf("PrimaryAccount() = %d, %v, want 1, nil", got, err)
+	}
+}
 
 // TestPrimaryAccountGoesThroughTheStateStore fixtures the OUTCOME of a picker
 // account change: the shared store validates the roster and mirrors the choice

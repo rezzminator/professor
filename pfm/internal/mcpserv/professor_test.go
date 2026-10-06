@@ -113,12 +113,14 @@ func TestProfessorCombinedServesEveryFamily(t *testing.T) {
 	professor := newTestProfessor(t, ProfessorOptions{Chat: newTestChat(t), Harvester: harvester})
 	session := professorSession(t, professor.Handler())
 
-	want := sortedRoster(harvesterRosterNoSearch, chatToolNames)
+	want := []string{
+		"chat_capture", "chat_find", "chat_inject", "chat_keys", "chat_kill",
+		"chat_last", "chat_ls", "chat_name", "chat_new", "chat_open", "chat_read",
+		"chat_resolve", "chat_save", "chat_status", "chat_unkill", "chat_whoami",
+		"harvester_download_file", "harvester_read", "harvester_search_literature", "servicedesk",
+	}
 	if got := sessionToolNames(t, session); !slices.Equal(got, want) {
 		t.Fatalf("combined tools/list = %v, want %v", got, want)
-	}
-	if len(want) != 20 || !slices.Contains(want, "servicedesk") {
-		t.Fatalf("combined roster = %v, want the 3 harvester tools and the 17 chat tools", want)
 	}
 	initialized := session.InitializeResult()
 	if initialized.ServerInfo.Name != "professor" {

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -910,4 +911,59 @@ func stringsContainsAll(value string, fragments ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestOpenCodexRequiresLogin(t *testing.T) {
+	for _, name := range []string{"new missing auth", "resume empty auth", "live self-switch"} {
+		t.Run(name, func(t *testing.T) {
+			jailAction(t)
+			home := t.TempDir()
+			machine := testMachineConfig(home)
+			authPath := filepath.Join(home, ".codex", "auth.json")
+			if name == "resume empty auth" {
+				if err := os.WriteFile(authPath, []byte(`{}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Remove(authPath); err != nil {
+				t.Fatal(err)
+			}
+			tmux := &fakeActionTmux{
+				alive: map[string]bool{"cx-live": true},
+				panes: map[string][]ActionPane{"cx-live": {{WindowName: "Codex", CurrentCommand: "codex"}}},
+			}
+			heals := 0
+			executor, err := New(Dependencies{
+				Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard,
+				Heal: func(context.Context, string) string { heals++; return "healed" },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := Request{
+				Row:    compose.Row{Kind: compose.NewCodex, CWD: "/work"},
+				Config: machine, Home: home, PrimaryAccount: 1, FreshSocket: "cx-fresh",
+			}
+			switch name {
+			case "resume empty auth":
+				request.Row.Kind, request.Row.ID = compose.ResumeCodex, "t1"
+			case "live self-switch":
+				request.Row = compose.Row{Kind: compose.LiveCodex, Socket: "cx-live", Account: 1}
+				request.CurrentTMUX = filepath.Join(home, "cx-live") + ",1,0"
+			}
+			line, err := executor.Open(context.Background(), request)
+			if name == "live self-switch" {
+				if err != nil || line != "" || len(tmux.selected) != 1 {
+					t.Fatalf("live self-switch line=%q error=%v selected=%v", line, err, tmux.selected)
+				}
+			} else {
+				// the refusal's own text is CodexLoginError's (TestCodexLoginError); the door owns its prefix and home
+				want := "Codex account 1: " + authPath + " "
+				if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) ||
+					line != "" || len(tmux.created) != 0 || heals != 0 {
+					t.Fatalf("Open line=%q error=%v created=%d heals=%d; want %q before effects",
+						line, err, len(tmux.created), heals, want)
+				}
+			}
+		})
+	}
 }

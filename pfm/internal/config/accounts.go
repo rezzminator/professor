@@ -73,13 +73,23 @@ func (config Config) PrimaryAccountFor(engine pfmengine.ID, claudePrimary int) i
 	}
 }
 
+// ImplicitAccount prefers account 1, then the first configured account, then 1.
+func (config Config) ImplicitAccount() int {
+	for _, account := range config.Accounts {
+		if account.ID == 1 {
+			return 1
+		}
+	}
+	if len(config.Accounts) != 0 {
+		return config.Accounts[0].ID
+	}
+	return 1
+}
+
 // AccountForConfigDir returns the Claude account represented by configDir.
 func (config Config) AccountForConfigDir(configDir string) int {
-	if len(config.Accounts) == 0 {
-		return 1
-	}
-	if configDir == "" {
-		return config.Accounts[0].ID
+	if configDir == "" || len(config.Accounts) == 0 {
+		return config.ImplicitAccount()
 	}
 	if resolved, err := filepath.EvalSymlinks(configDir); err == nil {
 		configDir = resolved
@@ -94,7 +104,7 @@ func (config Config) AccountForConfigDir(configDir string) int {
 			return account.ID
 		}
 	}
-	return config.Accounts[0].ID
+	return config.ImplicitAccount()
 }
 
 // OpenCodeAccountIDs lists every OpenCode account id, in roster order.
@@ -131,14 +141,6 @@ func validateAccounts(values []rawAccount, home string) ([]Account, error) {
 			return nil, fmt.Errorf("entry %d configDir: %w", index+1, err)
 		}
 		configDir = filepath.Clean(configDir)
-		if configDir == filepath.Join(home, ".claude") {
-			return nil, fmt.Errorf(
-				"entry %d configDir %s is the Claude store; an account needs its own dir (default %s)",
-				index+1,
-				configDir,
-				DefaultAccountDir(home, value.ID),
-			)
-		}
 		if earlier, found := seenDirs[configDir]; found {
 			return nil, fmt.Errorf("entry %d configDir %s duplicates entry %d", index+1, configDir, earlier)
 		}

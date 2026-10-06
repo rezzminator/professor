@@ -14,7 +14,10 @@ func discoverProjects(root string, cfg Config, result *Result) []string {
 	if cfg.Projects != nil {
 		for _, project := range cfg.Projects {
 			if project != "." {
-				if _, statErr := os.Stat(paths.WorkbenchManifest(filepath.Join(root, project))); statErr == nil {
+				if found, err := paths.HasWorkbenchManifest(filepath.Join(root, project)); err != nil {
+					result.Problems = append(result.Problems, err.Error())
+					continue
+				} else if found {
 					result.Warnings = append(
 						result.Warnings,
 						project+" is a workbench: it builds as its own root, not as a child project",
@@ -32,7 +35,10 @@ func discoverProjects(root string, cfg Config, result *Result) []string {
 				entry.Name() == ".codex" {
 				continue
 			}
-			if _, statErr := os.Stat(paths.WorkbenchManifest(filepath.Join(root, entry.Name()))); statErr == nil {
+			if found, err := paths.HasWorkbenchManifest(filepath.Join(root, entry.Name())); err != nil {
+				result.Problems = append(result.Problems, err.Error())
+				continue
+			} else if found {
 				continue
 			}
 			if hasClaude(filepath.Join(root, entry.Name())) {

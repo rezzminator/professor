@@ -88,7 +88,15 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) (int, int) {
 			var pathErr *os.PathError
 			_, statErr := os.Stat(path)
 			switch {
-			case errors.Is(statErr, os.ErrNotExist):
+			case errors.Is(statErr, os.ErrNotExist) && !errors.Is(err, config.ErrCodexLoggedOut):
+				fmt.Fprintf(
+					stdout,
+					"doctor: codex-login codex[%d] %s UNREADABLE error=%v\n",
+					account.ID,
+					filepath.Join(account.Home, "config.toml"),
+					err,
+				)
+			case errors.Is(statErr, os.ErrNotExist) && errors.Is(err, config.ErrCodexLoggedOut):
 				fmt.Fprintf(stdout, "doctor: codex-login codex[%d] %s missing — run codex login\n", account.ID, path)
 			case errors.As(err, &pathErr):
 				fmt.Fprintf(
@@ -97,6 +105,20 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) (int, int) {
 					account.ID,
 					path,
 					pathErr.Err,
+				)
+			case !errors.Is(err, config.ErrCodexLoggedOut):
+				// A present auth.json Codex cannot decode (corrupt, or a field of the wrong type)
+				// is a failure to read the login, never "has no tokens".
+				cause := errors.Unwrap(err)
+				if cause == nil {
+					cause = err
+				}
+				fmt.Fprintf(
+					stdout,
+					"doctor: codex-login codex[%d] %s UNREADABLE error=%v — run codex login\n",
+					account.ID,
+					path,
+					cause,
 				)
 			default:
 				fmt.Fprintf(
@@ -116,13 +138,19 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) (int, int) {
 func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, failures int) {
 	path := runtime.Config.Path
 	if path == "" {
-		_, markerErr := config.ResolvePath(runtime.Paths.Home)
-		if markerErr == nil || errors.Is(markerErr, paths.ErrNoSourceRepoMarker) {
+		resolved, markerErr := config.ResolvePath(runtime.Paths.Home)
+		switch {
+		case markerErr == nil:
+			fmt.Fprintf(stdout, "doctor: config: missing (resolves to %s, not loaded) — run pfm install\n", resolved)
+		case errors.Is(markerErr, paths.ErrNoSourceRepoMarker):
 			fmt.Fprintln(stdout, "doctor: config: missing (no source repo recorded) — run pfm install")
-		} else {
+		default:
 			fmt.Fprintf(stdout, "doctor: config: missing (%v) — run pfm install\n", markerErr)
 		}
 		return 1, 0
+	}
+	if runtime.ConfigError == nil {
+		failures = 1
 	}
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -144,12 +172,16 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 	}
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: config: unreadable %s error=%v\n", path, err)
-		return 0, 1
+		return 0, failures
 	}
 	var object map[string]any
-	if err := json.Unmarshal(content, &object); err != nil || object == nil {
+	err = json.Unmarshal(content, &object)
+	if err == nil && object == nil {
+		err = errors.New("config is JSON null, not an object")
+	}
+	if err != nil {
 		fmt.Fprintf(stdout, "doctor: config: unreadable %s error=%v\n", path, err)
-		return 0, 1
+		return 0, failures
 	}
 	for _, entry := range config.Keys() {
 		parts := strings.Split(entry.Key, ".")
@@ -168,7 +200,12 @@ func printConfigFileRows(stdout io.Writer, runtime config.Runtime) (warnings, fa
 			}
 		}
 		if !found {
-			fmt.Fprintf(stdout, "doctor: config: missing key %s (default %v)\n", entry.Key, entry.Default)
+			fmt.Fprintf(
+				stdout,
+				"doctor: config: missing key %s (default %v) — informational: unset, its default applies\n",
+				entry.Key,
+				entry.Default,
+			)
 		}
 	}
 	return 0, 0
@@ -222,10 +259,8 @@ func printHarvesterExternalDoctor(stdout io.Writer, harvester config.HarvesterCo
 	return 1
 }
 
-// printHarvesterConfigDoctor reports the two ways a harvester setting can stop
-// applying without an error: a config migration still pending (pre-split
-// layout, an interrupted migration's leftover, the old default port), and a
-// retired environment variable still set. Each is a warning.
+// printHarvesterConfigDoctor warns when a retired harvester environment
+// variable is still set, naming the config setting that replaced it.
 func printHarvesterConfigDoctor(stdout io.Writer, runtime config.Runtime) int {
 	return printHarvesterConfigDoctorWithEnv(stdout, runtime, paths.OSEnv{})
 }

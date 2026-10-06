@@ -256,7 +256,10 @@ func (professor *Professor) runStdioTransport(
 	if address == "" {
 		return inProcess("daemon address missing")
 	}
-	status, probeErr := ProbeDaemon(address)
+	status, probeErr := probeDaemonContext(ctx, address)
+	if ctx.Err() != nil {
+		return fmt.Errorf("pfm mcp stdio: daemon probe cancelled: %w", probeErr)
+	}
 	if errors.Is(probeErr, ErrDaemonAbsent) {
 		return inProcess(fmt.Sprintf("daemon absent at %s (%v)", address, probeErr))
 	}
@@ -659,7 +662,9 @@ func (proxy *stdioProxy) post(ctx context.Context, frame []byte) (proxyPostResul
 	return result, nil
 }
 
-// retryableConnectionFailure reports a failure to connect: a dial error means no request byte was written, so a retry cannot deliver the request twice.
+// retryableConnectionFailure retries every dial error: no request byte was written.
+// One call can overrun the retry window by one dial; a replay status probe
+// classifies any timeout, including a dial timeout, as unresponsive.
 func retryableConnectionFailure(err error) bool {
 	var network *net.OpError
 	return errors.As(err, &network) && network.Op == "dial"

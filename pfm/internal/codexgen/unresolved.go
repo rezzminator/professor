@@ -1,6 +1,8 @@
 package codexgen
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -9,13 +11,14 @@ import (
 )
 
 // sourceEntry is one discovered Claude source. A non-empty target marks a
-// leaf symlink that does not resolve right now — an adopter's
+// symlink that does not resolve right now — an adopter's
 // .claude/agents/labber.md pointing into an uninitialised submodule — and
 // carries the link's own target text for the warning.
 type sourceEntry struct {
 	path     string
 	rel      string
 	skillDir bool
+	dirLink  bool
 	target   string
 }
 
@@ -32,7 +35,7 @@ func (result *Result) unresolvedLeaf(path, rel string, err error) {
 	})
 }
 
-// markdownSources is discoverMarkdown plus every unresolvable leaf .md link
+// markdownSources is discoverMarkdown plus every unresolvable .md or directory link
 // that walk recorded, each marked by its target. A source that is truly gone
 // (no file and no link) appears in neither list, so its twin stays an orphan.
 func markdownSources(dir string, excludes []string, result *Result) []sourceEntry {
@@ -41,6 +44,9 @@ func markdownSources(dir string, excludes []string, result *Result) []sourceEntr
 	for _, leaf := range result.leafLinks[before:] {
 		name := filepath.Base(leaf.path)
 		if strings.HasSuffix(name, ".md") && name != "README.md" && name != "SKILL.md" {
+			entries = append(entries, leaf)
+		} else if !strings.HasSuffix(name, ".md") {
+			leaf.dirLink = true
 			entries = append(entries, leaf)
 		}
 	}
@@ -57,6 +63,26 @@ func keptTwin(path string, source sourceEntry) generatedFile {
 // writes for entry.
 func keptCommandTwin(root string, entry sourceEntry) generatedFile {
 	return keptTwin(filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)), "SKILL.md"), entry)
+}
+
+func keptDirTwins(root string, entry sourceEntry, problem func(string)) []generatedFile {
+	dir := filepath.Join(root, ".codex", "skills")
+	twins, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		problem(fmt.Sprintf("read %s: %v", dir, err))
+		return nil
+	}
+	name := flatName(filepath.ToSlash(entry.rel))
+	var outputs []generatedFile
+	for _, twin := range twins {
+		if twin.Name() == name || strings.HasPrefix(twin.Name(), name+"-") {
+			outputs = append(outputs, keptTwin(filepath.Join(dir, twin.Name()), entry))
+		}
+	}
+	return outputs
 }
 
 // keepTwin leaves a kept twin exactly as it is and says so when one exists

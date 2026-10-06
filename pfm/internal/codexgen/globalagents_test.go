@@ -273,6 +273,9 @@ func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
 			if first != second {
 				t.Fatalf("renderGlobalAgentTOML is not deterministic:\nfirst:\n%q\nsecond:\n%q", first, second)
 			}
+			if strings.Contains(first, "model = \"claude-") {
+				t.Fatalf("Claude model ID in Codex role:\n%s", first)
+			}
 
 			var document struct {
 				Name        string `toml:"name"`
@@ -785,6 +788,11 @@ func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
 		want, wantAbsent  []string
 	}{
 		{
+			file:        "tracer-rr.md",
+			frontmatter: "name: tracer-rr\ndescription: Reads.\ntools: Bash, Read\nmodel: opus\ncodex-sandbox: workspace-write\n",
+			want:        []string{"model = \"gpt-6.1-sol\"\n", "sandbox_mode = \"workspace-write\"\n"},
+		},
+		{
 			file:        "scout.md",
 			frontmatter: "name: scout\ndescription: Reads.\ntools: Read, Grep, Glob, Bash\n",
 			want:        []string{"sandbox_mode = \"read-only\"\n"},
@@ -838,63 +846,63 @@ func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
 	}
 }
 
-// recordBeforeWrite is a BeforeWrite hook that records each path together with
-// whether it existed at the moment of the call, and fails on failPath.
-func recordBeforeWrite(calls *[]string, existed map[string]bool, failPath string) func(string) error {
-	return func(path string) error {
-		*calls = append(*calls, path)
-		if _, err := os.Lstat(path); err == nil {
-			existed[path] = true
-		}
-		if path == failPath {
-			return os.ErrPermission
-		}
-		return nil
+func TestCodexRoleSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		fields    map[string]string
+		modelMap  map[string]string
+		source    string
+		want      codexRole
+		wantError string
+	}{
+		{name: "codex-model wins", fields: map[string]string{"model": "claude-sonnet-5-5", "codex-model": "gpt-6-luna"}, source: "/a/orch.md", want: codexRole{Model: "gpt-6-luna"}},
+		{name: "Claude ID refused", fields: map[string]string{"model": "claude-sonnet-5-5"}, source: "/a/orch.md", wantError: "claude-sonnet-5-5"},
+		{name: "inherit keeps the session model", fields: map[string]string{"model": "inherit", "effort": "high"}, source: "/a/x.md", want: codexRole{Effort: "high"}},
+		{name: "configured key maps", fields: map[string]string{"model": "fast"}, modelMap: map[string]string{"fast": "gpt-fixture"}, source: "/a/x.md", want: codexRole{Model: "gpt-fixture"}},
+		{name: "codex-effort overrides", fields: map[string]string{"model": "opus", "effort": "high", "codex-effort": "xhigh"}, source: "/a/x.md", want: codexRole{Model: "gpt-6.1-sol", Effort: "xhigh"}},
+		{name: "bad codex-effort", fields: map[string]string{"codex-effort": "max"}, source: "/a/x.md", wantError: "max"},
+		{name: "workspace-write", fields: map[string]string{"tools": "Bash, Read, Grep, Glob", "codex-sandbox": "workspace-write"}, source: "/a/tracer-rr.md", want: codexRole{Sandbox: "workspace-write"}},
+		{name: "bad codex-sandbox", fields: map[string]string{"codex-sandbox": "danger-full-access"}, source: "/a/x.md", wantError: "danger-full-access"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modelMap := tc.modelMap
+			if modelMap == nil {
+				modelMap = defaultConfig().ModelMap
+			}
+			got, err := codexRoleSettings(tc.fields, modelMap, tc.source)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.source) ||
+					!strings.Contains(err.Error(), tc.wantError) ||
+					got != (codexRole{}) {
+					t.Fatalf(
+						"settings = %#v, %v, want no role and error naming %s and %s",
+						got,
+						err,
+						tc.source,
+						tc.wantError,
+					)
+				}
+				if tc.name == "Claude ID refused" && !strings.Contains(err.Error(), "fable, haiku, opus, sonnet") {
+					t.Fatalf("unmapped model error lacks sorted map keys: %v", err)
+				}
+			} else if err != nil || got != tc.want {
+				t.Fatalf("settings = %#v, %v, want %#v, nil", got, err, tc.want)
+			}
+		})
 	}
 }
 
-func TestGlobalAgentsBeforeWriteSeesEveryChangedPathBeforeItsWrite(t *testing.T) {
+func TestGlobalAgentsRefusesClaudeModel(t *testing.T) {
 	home := t.TempDir()
-	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
-		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-	link := filepath.Join(home, ".claude", "agents", "alpha.md")
-	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
-
-	var calls []string
-	existed := map[string]bool{}
-	options := GlobalAgentsOptions{Home: home, BeforeWrite: recordBeforeWrite(&calls, existed, "")}
-	if _, err := RunGlobalAgents(options); err != nil {
-		t.Fatalf("RunGlobalAgents: %v", err)
+	source := filepath.Join(home, ".professor", "templates", "global", "agents", "orch.md")
+	raw := "---\nname: orch\ndescription: O.\nmodel: claude-sonnet-5-5\n---\nOrchestrate.\n"
+	writeTestFile(t, source, raw)
+	_, _, renderErr := renderGlobalAgentTOML(source, raw, filepath.Dir(source))
+	if renderErr == nil || !strings.Contains(renderErr.Error(), source) {
+		t.Errorf("render error = %v, want source %s", renderErr, source)
 	}
-	if strings.Join(calls, "\n") != role+"\n"+link {
-		t.Fatalf("BeforeWrite calls = %q, want the role then the link once each", calls)
-	}
-	if existed[link] || existed[role] {
-		t.Fatalf("BeforeWrite ran after a write: existed = %v", existed)
-	}
-
-	calls = nil
-	if _, err := RunGlobalAgents(options); err != nil {
-		t.Fatalf("RunGlobalAgents (converged): %v", err)
-	}
-	if len(calls) != 0 {
-		t.Fatalf("BeforeWrite on a converged home = %q, want no call", calls)
-	}
-}
-
-func TestGlobalAgentsBeforeWriteErrorAbortsBeforeTheWrite(t *testing.T) {
-	home := t.TempDir()
-	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
-		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
-	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
-
-	var calls []string
-	failing := recordBeforeWrite(&calls, map[string]bool{}, role)
-	_, err := RunGlobalAgents(GlobalAgentsOptions{Home: home, BeforeWrite: failing})
-	if err == nil || !strings.Contains(err.Error(), role) {
-		t.Fatalf("RunGlobalAgents error = %v, want the hook failure naming %s", err, role)
-	}
-	if _, statErr := os.Lstat(role); !os.IsNotExist(statErr) {
-		t.Fatalf("role written despite the failing hook: %v", statErr)
+	_, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
+	if err == nil || !strings.Contains(err.Error(), source) {
+		t.Fatalf("RunGlobalAgents error = %v, want source %s", err, source)
 	}
 }

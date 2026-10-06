@@ -42,21 +42,8 @@ const defaultGeneratedFileMode = os.FileMode(0o644)
 type reconcileResult struct {
 	Wrote, Unchanged, Deleted int
 	Problems, Warnings        []string
+	Rebuildable               []string
 	Actions                   []Action
-	// beforeWrite is the build's optional before-write hook; err is the
-	// first hook failure, which stops every later write.
-	beforeWrite func(path string) error
-	err         error
-}
-
-// announce runs the before-write hook for path; false means the write must
-// not happen (an earlier or this hook call failed).
-func (r *reconcileResult) announce(path string) bool {
-	if r.err != nil {
-		return false
-	}
-	r.err = callBeforeWrite(r.beforeWrite, path)
-	return r.err == nil
 }
 
 func reconcile(root, home string, outputs []generatedFile, mode Mode, manageGlobal bool) (reconcileResult, error) {
@@ -73,7 +60,7 @@ func reconcile(root, home string, outputs []generatedFile, mode Mode, manageGlob
 }
 
 func reconcileManaged(outputs []generatedFile, mode Mode, managed []string) (reconcileResult, error) {
-	return reconcileManagedWithClaim(outputs, mode, managed, claimable, nil)
+	return reconcileManagedWithClaim(outputs, mode, managed, claimable)
 }
 
 func reconcileManagedWithClaim(
@@ -81,16 +68,22 @@ func reconcileManagedWithClaim(
 	mode Mode,
 	managed []string,
 	owns func(string) bool,
-	beforeWrite func(path string) error,
 ) (reconcileResult, error) {
-	result := reconcileResult{beforeWrite: beforeWrite}
+	result := reconcileResult{}
+	claimed := map[string]bool{}
+	for _, output := range outputs {
+		if output.Kept == nil {
+			claimed[managedEntry(output.Path, managed)] = true
+		}
+	}
 	sort.Slice(outputs, func(i, j int) bool { return outputs[i].Path < outputs[j].Path })
 	wanted := map[string]bool{}
 	for _, output := range outputs {
-		if result.err != nil {
-			return result, result.err
+		entry := managedEntry(output.Path, managed)
+		if output.Kept != nil && claimed[entry] {
+			continue
 		}
-		wanted[managedEntry(output.Path, managed)] = true
+		wanted[entry] = true
 		if output.Kept != nil {
 			result.keepTwin(output)
 			continue
@@ -104,7 +97,7 @@ func reconcileManagedWithClaim(
 	for _, dir := range managed {
 		result.reconcileOrphans(dir, wanted, mode, owns)
 	}
-	return result, result.err
+	return result, nil
 }
 
 func managedEntry(path string, managed []string) string {
@@ -141,7 +134,9 @@ func (r *reconcileResult) reconcileLink(output generatedFile, mode Mode, owns fu
 		if os.IsNotExist(err) {
 			state = "MISSING"
 		}
-		r.Problems = append(r.Problems, fmt.Sprintf("%s %s (want symlink → %s)", state, output.Path, output.Link))
+		problem := fmt.Sprintf("%s %s (want symlink → %s)", state, output.Path, output.Link)
+		r.Problems = append(r.Problems, problem)
+		r.Rebuildable = append(r.Rebuildable, problem)
 		r.Actions = append(r.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
 		return
 	}
@@ -150,9 +145,6 @@ func (r *reconcileResult) reconcileLink(output generatedFile, mode Mode, owns fu
 			r.Problems,
 			fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
 		)
-		return
-	}
-	if !r.announce(output.Path) {
 		return
 	}
 	r.Actions = append(r.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
@@ -205,21 +197,22 @@ func (r *reconcileResult) reconcileFile(output generatedFile, mode Mode, owns fu
 			return
 		}
 		if modeOnlyDrift {
-			r.Problems = append(
-				r.Problems,
-				fmt.Sprintf("MODE %s (want %04o, have %04o)", output.Path, wantMode, haveMode),
-			)
+			problem := fmt.Sprintf("MODE %s (want %04o, have %04o)", output.Path, wantMode, haveMode)
+			r.Problems = append(r.Problems, problem)
+			r.Rebuildable = append(r.Rebuildable, problem)
 			r.Actions = append(
 				r.Actions,
 				Action{Kind: actionChmod, Path: output.Path, Target: fmt.Sprintf("%04o", wantMode)},
 			)
 			return
 		}
+		state := "STALE"
 		if current == "" {
-			r.Problems = append(r.Problems, "MISSING "+output.Path)
-		} else {
-			r.Problems = append(r.Problems, "STALE "+output.Path)
+			state = "MISSING"
 		}
+		problem := state + " " + output.Path
+		r.Problems = append(r.Problems, problem)
+		r.Rebuildable = append(r.Rebuildable, problem)
 		r.Actions = append(r.Actions, Action{Kind: actionWrite, Path: output.Path})
 		return
 	}
@@ -228,9 +221,6 @@ func (r *reconcileResult) reconcileFile(output generatedFile, mode Mode, owns fu
 			r.Problems,
 			fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
 		)
-		return
-	}
-	if !r.announce(output.Path) {
 		return
 	}
 	if modeOnlyDrift {
@@ -276,11 +266,9 @@ func (r *reconcileResult) reconcileOrphans(dir string, wanted map[string]bool, m
 		}
 		if mode == ModeCheck {
 			r.Problems = append(r.Problems, "ORPHAN "+path)
+			r.Rebuildable = append(r.Rebuildable, "ORPHAN "+path)
 			r.Actions = append(r.Actions, Action{Kind: "delete", Path: path})
 			continue
-		}
-		if !r.announce(path) {
-			return
 		}
 		r.Actions = append(r.Actions, Action{Kind: "delete", Path: path})
 		if err := os.RemoveAll(path); err != nil {

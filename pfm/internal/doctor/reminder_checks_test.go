@@ -60,10 +60,11 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 	overdue := fleetdb.Reminder{ID: 3, Label: "standup", NextFire: now.Add(-20 * time.Minute)}
 	withinGrace := fleetdb.Reminder{ID: 4, Label: "tea", NextFire: now.Add(-2 * time.Minute)}
 	failedOld := fleetdb.Reminder{
-		ID: 7, Label: "old", NextFire: now.Add(time.Hour), LastError: "chat gone", LastErrorAt: now.Add(-2 * time.Hour),
+		ID: 7, Label: "old", NextFire: now.Add(-20 * time.Minute),
+		LastError: "chat gone", LastErrorAt: now.Add(-2 * time.Hour),
 	}
 	failedNew := fleetdb.Reminder{
-		ID: 9, Label: "new", NextFire: now.Add(time.Hour),
+		ID: 9, Label: "new", NextFire: now.Add(-20 * time.Minute),
 		LastError: "inject refused", LastErrorAt: now.Add(-time.Hour),
 	}
 	const head = "doctor: reminders scheduler=systemd unit=pfm-reminder.timer "
@@ -172,8 +173,8 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 			name:     "degraded source",
 			schedule: armedTimerReport(),
 			source:   fakeReminderSource{degraded: dbErr, due: []fleetdb.Reminder{overdue}},
-			want:     armed + "db=unreadable error=disk image is malformed — reminder state unknown\n",
-			warnings: 1,
+			want: armed + "db=unreadable error=disk image is malformed — " +
+				"reminder state unknown; the doctor: shared store row counts it\n",
 		},
 		{
 			name:     "due query error",
@@ -266,14 +267,15 @@ func TestPrintReminderDoctorUnreadableState(t *testing.T) {
 	got := printReminderDoctor(context.Background(), &out, &deps.FakeRunner{}, values, time.Now())
 	line := out.String()
 	if !strings.HasPrefix(line, "doctor: reminders scheduler=systemd unit=pfm-reminder.timer armed=true state=active "+
-		"db=unreadable error=") || !strings.HasSuffix(line, " — reminder state unknown\n") {
+		"db=unreadable error=") || !strings.HasSuffix(line,
+		" — reminder state unknown; the doctor: shared store row counts it\n") {
 		t.Fatalf("output = %q", line)
 	}
 	if strings.Contains(line, "due=") || strings.Count(line, "\n") != 1 {
 		t.Fatalf("an unreadable database must render one line without counts: %q", line)
 	}
-	if got != 1 {
-		t.Fatalf("warnings = %d, want 1", got)
+	if got != 0 {
+		t.Fatalf("warnings = %d, want 0", got)
 	}
 }
 

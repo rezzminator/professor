@@ -554,21 +554,17 @@ func TestAccountEntryReal(t *testing.T) {
 		path := filepath.Join(other, "plugins")
 		makeDir(t, path)
 		rows := detect(t, "account-entry-real", env)
-		if len(rows) != len(installer.StoreEntries)+1 {
-			t.Fatalf("rows=%v", rows)
-		}
-		for i, entry := range installer.StoreEntries {
-			assertUnreadable(
-				t,
-				rows[i:i+1],
-				"account-entry-real",
-				filepath.Join(env.Accounts[0].ConfigDir, entry.Name),
-				syscall.ENOTDIR,
-			)
-		}
+		dir := env.Accounts[0].ConfigDir
 		assertRows(
 			t,
-			rows[len(rows)-1:],
+			rows,
+			Row{
+				Block,
+				"account-entry-real",
+				dir,
+				"account config dir is a file, not a directory",
+				"mv " + dir + " " + dir + ".bak  # pfm install then creates the account dir",
+			},
 			Row{
 				Block,
 				"account-entry-real",

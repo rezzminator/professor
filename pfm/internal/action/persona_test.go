@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/workbench"
 )
 
 func TestSynthesizeWorkbenchPersona(t *testing.T) {
@@ -113,143 +115,225 @@ func actionWorkbenchFixture(t *testing.T, manifest string) (Request, string) {
 	return request, dir
 }
 
-func TestExecutorWorkbenchPersona(t *testing.T) {
-	for _, detached := range []bool{false, true} {
-		for _, kind := range []compose.Kind{compose.ResumeClaude, compose.Agent, compose.ResumeCodex, compose.NewOpenCode, compose.ResumeOpenCode} {
-			t.Run(kind.String()+map[bool]string{false: "/open", true: "/detached"}[detached], func(t *testing.T) {
-				request, dir := actionWorkbenchFixture(
-					t,
-					`{"prompt":"scribe.md","effort":"XHigh","engines":["claude","codex","opencode"]}`,
-				)
-				request.Row.Kind = kind
-				tmux := &fakeActionTmux{alive: map[string]bool{}}
-				tmux.onCreate = func() {
-					var outputs []string
-					if kind == compose.ResumeCodex {
-						outputs = []string{filepath.Join(dir, "AGENTS.md")}
-					}
-					if kind == compose.NewOpenCode || kind == compose.ResumeOpenCode {
-						outputs = []string{
-							filepath.Join(dir, ".opencode", "opencode.jsonc"),
-							paths.OpenCodeWorkbenchPlugin(request.Home),
+func TestWorkbenchPersonaEffort(t *testing.T) {
+	for _, test := range []struct {
+		name, manifest, wantEffort, quotedEffort string
+		engines                                  []pfmengine.ID
+		mode                                     workbench.Mode
+		refused                                  map[pfmengine.ID]bool
+		passThrough                              bool
+	}{
+		{
+			name: "unknown Claude effort", manifest: `{"prompt":"scribe.md","effort":"turbo"}`,
+			engines: []pfmengine.ID{pfmengine.Claude}, mode: workbench.New,
+			refused: map[pfmengine.ID]bool{pfmengine.Claude: true}, quotedEffort: `"turbo"`,
+		},
+		{
+			name:     "Codex-only effort refused for Claude",
+			manifest: `{"prompt":"scribe.md","effort":"minimal","engines":["claude","codex"]}`,
+			engines:  []pfmengine.ID{pfmengine.Claude, pfmengine.Codex}, mode: workbench.New,
+			refused: map[pfmengine.ID]bool{pfmengine.Claude: true}, wantEffort: "minimal",
+		},
+		{
+			name:     "unknown Codex effort",
+			manifest: `{"prompt":"scribe.md","effort":"turbo","engines":["claude","codex"]}`,
+			engines:  []pfmengine.ID{pfmengine.Codex}, mode: workbench.Resume,
+			refused: map[pfmengine.ID]bool{pfmengine.Codex: true},
+		},
+		{
+			name:     "mixed case lowered",
+			manifest: `{"prompt":"scribe.md","effort":"XHigh","engines":["claude","codex"]}`,
+			engines:  []pfmengine.ID{pfmengine.Claude, pfmengine.Codex}, mode: workbench.New,
+			wantEffort: "xhigh",
+		},
+		{
+			name:     "OpenCode effort unvalidated",
+			manifest: `{"prompt":"scribe.md","effort":"turbo","engines":["opencode"]}`,
+			engines:  []pfmengine.ID{pfmengine.OpenCode}, mode: workbench.New, wantEffort: "turbo",
+		},
+		{
+			name: "ForLaunch error passes through", manifest: `{"prompt":""}`,
+			engines: []pfmengine.ID{pfmengine.Claude}, mode: workbench.New, passThrough: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, dir := actionWorkbenchFixture(t, test.manifest)
+			for _, engine := range test.engines {
+				t.Run(string(engine), func(t *testing.T) {
+					persona, err := WorkbenchPersona(dir, engine, test.mode)
+					if test.passThrough {
+						_, wantErr := workbench.ForLaunch(dir, engine, test.mode)
+						if wantErr == nil || err == nil || err.Error() != wantErr.Error() {
+							t.Fatalf("WorkbenchPersona = %v; want ForLaunch error %v", err, wantErr)
 						}
+						return
 					}
-					for _, path := range outputs {
-						if _, err := os.Stat(path); err != nil {
-							t.Errorf("not prepared before spawn: %s: %v", path, err)
+					if test.refused[engine] {
+						if err == nil || !strings.Contains(err.Error(), "workbench "+dir) ||
+							(test.quotedEffort != "" && !strings.Contains(err.Error(), test.quotedEffort)) ||
+							!reflect.DeepEqual(persona, workbench.Persona{}) {
+							t.Fatalf(
+								"WorkbenchPersona = %#v, %v; want contextual refusal and zero persona",
+								persona,
+								err,
+							)
 						}
+						return
+					}
+					if err != nil || !persona.Applies() || persona.Effort != test.wantEffort {
+						t.Fatalf("WorkbenchPersona = %#v, %v; want effort %q", persona, err, test.wantEffort)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestExecutorWorkbenchDoors(t *testing.T) {
+	for _, test := range []struct {
+		name, manifest string
+		kind           compose.Kind
+		both           bool
+	}{
+		{"refusal before any side effect", `{"prompt":""}`, compose.ResumeClaude, true},
+		{"allowed", `{"prompt":"scribe.md","effort":"xhigh","engines":["claude","codex","opencode"]}`, compose.ResumeClaude, true},
+		{"disabled resume", `{"prompt":"scribe.md"}`, compose.ResumeCodex, false},
+		{"booting row ignores the manifest", `{"prompt":""}`, compose.Booting, false},
+	} {
+		doors := []bool{false}
+		if test.both {
+			doors = append(doors, true)
+		}
+		for _, detached := range doors {
+			t.Run(test.name+map[bool]string{false: "/open", true: "/detached"}[detached], func(t *testing.T) {
+				request, dir := actionWorkbenchFixture(t, test.manifest)
+				request.Row.Kind = test.kind
+				processes := &fakeProcesses{}
+				var wantError, wantRun string
+				switch test.name {
+				case "refusal before any side effect":
+					processes.processes = []Process{
+						{PID: 42, Argv: []string{"claude", "--resume", request.Row.ID}, TTY: "pts/1"},
+					}
+					_, err := workbench.ForLaunch(dir, pfmengine.Claude, workbench.Resume)
+					if err == nil {
+						t.Fatal("fixture ForLaunch did not fail")
+					}
+					wantError = err.Error()
+				case "disabled resume":
+					plain, err := Synthesize(request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantRun = plain.Run
+				case "booting row ignores the manifest":
+					request.Row = compose.Row{
+						Kind: compose.Booting, ID: "cc-new-fixture-1", Socket: "cc-new-fixture-1",
+						SessionName: "cc-new-fixture-1", CWD: dir, Workbench: dir,
 					}
 				}
-				executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
+				tmux := &fakeActionTmux{alive: map[string]bool{}}
+				executor, err := New(Dependencies{
+					Tmux:      tmux,
+					Processes: processes,
+					Gate:      fixedGate(false),
+					Runner:    &captureRunner{},
+					Stderr:    io.Discard,
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
+				var line string
 				if detached {
 					_, err = executor.OpenDetached(context.Background(), request)
 				} else {
-					_, err = executor.Open(context.Background(), request)
+					line, err = executor.Open(context.Background(), request)
+				}
+				if wantError != "" {
+					if err == nil || !strings.Contains(err.Error(), wantError) || len(tmux.created) != 0 ||
+						len(processes.terminated) != 0 {
+						t.Fatalf(
+							"refusal=%v, created=%v, terminated=%v; want %q",
+							err,
+							tmux.created,
+							processes.terminated,
+							wantError,
+						)
+					}
+					return
 				}
 				if err != nil {
 					t.Fatal(err)
+				}
+				if test.kind == compose.Booting {
+					if !strings.Contains(line, "cc-new-fixture-1") || len(tmux.created) != 0 {
+						t.Fatalf("booting attach = %q, created=%v", line, tmux.created)
+					}
+					return
 				}
 				if len(tmux.created) != 1 {
-					t.Fatalf("created=%d", len(tmux.created))
+					t.Fatalf("created=%d; want one server", len(tmux.created))
 				}
-				want := filepath.Join(dir, ".professor", "scribe.md")
-				if kind == compose.ResumeCodex {
-					want = "You are scribe."
+				run := tmux.created[0].Run
+				if test.name == "disabled resume" {
+					if run != wantRun {
+						t.Fatalf("disabled resume=%s; want %s", run, wantRun)
+					}
+					return
 				}
-				if !strings.Contains(tmux.created[0].Run, want) {
-					t.Fatalf("persona missing: %s", tmux.created[0].Run)
-				}
-				effort := map[compose.Kind]string{
-					compose.ResumeClaude: "'--effort' 'xhigh'", compose.Agent: "'--effort' 'xhigh'",
-					compose.ResumeCodex: `model_reasoning_effort="xhigh"`,
-				}[kind]
-				if !strings.Contains(tmux.created[0].Run, effort) {
-					t.Fatalf("run lacks the roster's effort %s: %s", effort, tmux.created[0].Run)
+				if !stringsContainsAll(run, filepath.Join(dir, ".professor", "scribe.md"), "'--effort' 'xhigh'") {
+					t.Fatalf("persona missing: %s", run)
 				}
 			})
 		}
 	}
 }
 
-func TestExecutorWorkbenchUnknownEffort(t *testing.T) {
-	for _, kind := range []compose.Kind{compose.ResumeClaude, compose.ResumeCodex} {
-		t.Run(kind.String(), func(t *testing.T) {
-			request, dir := actionWorkbenchFixture(
-				t,
-				`{"prompt":"scribe.md","effort":"turbo","engines":["claude","codex"]}`,
-			)
-			request.Row.Kind = kind
-			tmux := &fakeActionTmux{alive: map[string]bool{}}
-			executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = executor.Open(context.Background(), request)
-			if err == nil || !strings.Contains(err.Error(), "workbench "+dir) ||
-				!strings.Contains(err.Error(), `effort "turbo"`) || len(tmux.created) != 0 {
-				t.Fatalf(
-					"Open = %v, created=%d; want the bench's unknown-effort refusal, nothing spawned",
-					err,
-					len(tmux.created),
-				)
-			}
-		})
-	}
-}
-
-func TestExecutorWorkbenchRefusals(t *testing.T) {
-	for _, detached := range []bool{false, true} {
-		for _, failure := range []string{"manifest", "disabled-new", "mirror", "plugin"} {
-			t.Run(failure+map[bool]string{false: "/open", true: "/detached"}[detached], func(t *testing.T) {
+func TestExecutorWorkbenchPrep(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		kind compose.Kind
+		fail bool
+	}{
+		{"Codex mirror before server", compose.ResumeCodex, false},
+		{"OpenCode before server", compose.NewOpenCode, false},
+		{"mirror write fails", compose.ResumeCodex, true},
+		{"plugin write fails", compose.NewOpenCode, true},
+	} {
+		for _, detached := range []bool{false, true} {
+			t.Run(test.name+map[bool]string{false: "/open", true: "/detached"}[detached], func(t *testing.T) {
 				request, dir := actionWorkbenchFixture(
-					t,
-					`{"prompt":"scribe.md","engines":["claude","codex","opencode"]}`,
+					t, `{"prompt":"scribe.md","effort":"xhigh","engines":["claude","codex","opencode"]}`,
 				)
-				want := ""
-				switch failure {
-				case "manifest":
-					if err := atomicfile.Write(
-						paths.WorkbenchManifest(dir),
-						[]byte(`{"prompt":""}`),
-						0o600,
-					); err != nil {
+				request.Row.Kind = test.kind
+				var outputs []string
+				if test.kind == compose.ResumeCodex {
+					outputs = []string{filepath.Join(dir, "AGENTS.md")}
+				} else {
+					outputs = []string{
+						filepath.Join(dir, ".opencode", "opencode.jsonc"),
+						paths.OpenCodeWorkbenchPlugin(request.Home),
+					}
+				}
+				if test.fail {
+					blocker, body := filepath.Join(dir, ".claude", "codex-build.json"), []byte("{")
+					if test.kind == compose.NewOpenCode {
+						blocker, body = filepath.Join(request.Home, ".local", "state", "pfm"), nil
+					}
+					if err := atomicfile.Write(blocker, body, 0o600); err != nil {
 						t.Fatal(err)
 					}
-					want = paths.WorkbenchManifest(dir) + `: "prompt" is required`
-				case "disabled-new":
-					if err := atomicfile.Write(
-						paths.WorkbenchManifest(dir),
-						[]byte(`{"prompt":"scribe.md"}`),
-						0o600,
-					); err != nil {
-						t.Fatal(err)
-					}
-					request.Row.Kind = compose.NewCodex
-					want = "workbench " + dir + ` does not enable codex: add "codex" to "engines" in ` + paths.WorkbenchManifest(
-						dir,
-					)
-				case "mirror":
-					request.Row.Kind = compose.ResumeCodex
-					if err := atomicfile.Write(
-						filepath.Join(dir, ".claude", "codex-build.json"),
-						[]byte("{"),
-						0o600,
-					); err != nil {
-						t.Fatal(err)
-					}
-					want = "build the codex mirror of workbench " + dir
-				case "plugin":
-					request.Row.Kind = compose.NewOpenCode
-					blocker := filepath.Join(request.Home, ".local", "state", "pfm")
-					if err := atomicfile.Write(blocker, nil, 0o600); err != nil {
-						t.Fatal(err)
-					}
-					want = paths.OpenCodeWorkbenchPlugin(request.Home)
 				}
 				tmux := &fakeActionTmux{alive: map[string]bool{}}
+				if !test.fail {
+					tmux.onCreate = func() {
+						for _, path := range outputs {
+							if _, err := os.Stat(path); err != nil {
+								t.Errorf("not prepared before spawn: %s: %v", path, err)
+							}
+						}
+					}
+				}
 				executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
 				if err != nil {
 					t.Fatal(err)
@@ -259,82 +343,15 @@ func TestExecutorWorkbenchRefusals(t *testing.T) {
 				} else {
 					_, err = executor.Open(context.Background(), request)
 				}
-				if err == nil || !strings.Contains(err.Error(), want) || len(tmux.created) != 0 {
-					t.Fatalf("refusal=%v, created=%d; want %q", err, len(tmux.created), want)
+				if test.fail {
+					if err == nil || len(tmux.created) != 0 {
+						t.Fatalf("preparation refusal=%v, created=%v", err, tmux.created)
+					}
+				} else if err != nil || len(tmux.created) != 1 {
+					t.Fatalf("prepared open=%v, created=%v; want one server", err, tmux.created)
 				}
 			})
 		}
-	}
-}
-
-func TestExecutorWorkbenchDisabledResume(t *testing.T) {
-	request, _ := actionWorkbenchFixture(t, `{"prompt":"scribe.md"}`)
-	request.Row.Kind = compose.ResumeCodex
-	plain, err := Synthesize(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmux := &fakeActionTmux{alive: map[string]bool{}}
-	executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := executor.Open(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
-	if len(tmux.created) != 1 || tmux.created[0].Run != plain.Run {
-		t.Fatalf("disabled resume=%#v, want %s", tmux.created, plain.Run)
-	}
-}
-
-// A refused workbench launch must leave the chat's competing seat alone: the
-// refusal comes before Solo closes anything that holds the transcript.
-func TestExecutorWorkbenchRefusalKeepsCompetingSeat(t *testing.T) {
-	for _, detached := range []bool{false, true} {
-		t.Run(map[bool]string{false: "open", true: "detached"}[detached], func(t *testing.T) {
-			request, dir := actionWorkbenchFixture(t, `{"prompt":""}`)
-			processes := &fakeProcesses{processes: []Process{
-				{PID: 42, Argv: []string{"claude", "--resume", request.Row.ID}, TTY: "pts/1"},
-			}}
-			tmux := &fakeActionTmux{alive: map[string]bool{}}
-			executor, err := New(Dependencies{
-				Tmux: tmux, Processes: processes, Gate: fixedGate(false), Runner: &captureRunner{}, Stderr: io.Discard,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if detached {
-				_, err = executor.OpenDetached(context.Background(), request)
-			} else {
-				_, err = executor.Open(context.Background(), request)
-			}
-			want := paths.WorkbenchManifest(dir) + `: "prompt" is required`
-			if err == nil || !strings.Contains(err.Error(), want) || len(tmux.created) != 0 {
-				t.Fatalf("refusal=%v, created=%d; want %q", err, len(tmux.created), want)
-			}
-			if len(processes.terminated) != 0 {
-				t.Fatalf("refused open closed the competing seat: terminated=%v", processes.terminated)
-			}
-		})
-	}
-}
-
-// Enter on a booting row attaches to a seat already launched: it relaunches
-// nothing, so the workbench manifest has no say and cannot refuse it.
-func TestExecutorWorkbenchBootingRowAttaches(t *testing.T) {
-	request, dir := actionWorkbenchFixture(t, `{"prompt":""}`)
-	request.Row = compose.Row{
-		Kind: compose.Booting, ID: "cc-new-fixture-1", Socket: "cc-new-fixture-1",
-		SessionName: "cc-new-fixture-1", CWD: dir, Workbench: dir,
-	}
-	tmux := &fakeActionTmux{alive: map[string]bool{}}
-	executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}, Stderr: io.Discard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	line, err := executor.Open(context.Background(), request)
-	if err != nil || !strings.Contains(line, "cc-new-fixture-1") || len(tmux.created) != 0 {
-		t.Fatalf("booting attach = %q, %v, created=%d", line, err, len(tmux.created))
 	}
 }
 

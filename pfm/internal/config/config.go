@@ -29,8 +29,7 @@ const (
 	// defaultAskEffort is the reasoning effort every engine's ask defaults
 	// carry until an operator sets one.
 	defaultAskEffort = "low"
-	// defaultAskEngine is ask.engine's default, the value the tracked
-	// example.pfm.config.json carries.
+	// defaultAskEngine is ask.engine's value when the key is absent.
 	defaultAskEngine = pfmengine.Codex
 )
 
@@ -624,7 +623,7 @@ func skipsOutsideDir(skips []AccountSkip, root string) []AccountSkip {
 }
 
 // Load reads a machine config over defaults. An absent file returns defaults;
-// every present-file error is returned with the file path attached.
+// an unusable marker returns defaults and its error, and present-file errors carry the path.
 func Load(path, home string, projectRoots []string, codexHomes ...string) (Config, error) {
 	return loadWithMCPServers(path, home, projectRoots, productionMCPServers(), codexHomes...)
 }
@@ -644,13 +643,13 @@ func loadWithMCPServers(
 		var err error
 		path, err = ResolvePath(home)
 		if err != nil {
-			if strings.TrimSpace(paths.OSEnv{}.Get(paths.EnvConfig)) != "" {
+			if configOverridden(paths.OSEnv{}) {
 				return Config{}, err
 			}
 			if err := finishHarvester(&result, home, registered, nil); err != nil {
 				return Config{}, err
 			}
-			return result, nil
+			return result, configMarkerError(err)
 		}
 	} else if !filepath.IsAbs(path) {
 		absolute, err := filepath.Abs(path)
@@ -906,32 +905,11 @@ func loadWithMCPServers(
 			}
 		}
 	}
-	// A file holding ask.engine at its default (every seeded
-	// example.pfm.config.json does) loads like an absent key: DefaultEngine
-	// resolves the roster at use and names an empty one. Only a deliberate
-	// non-default engine is refused here when its roster is empty.
-	if raw.Ask != nil && raw.Ask.Engine != nil && result.Ask.Engine != defaultAskEngine {
-		counts := result.Engines()
-		switch result.Ask.Engine {
-		case pfmengine.Claude:
-			if counts[pfmengine.Claude] == 0 {
-				return Config{}, fmt.Errorf(
-					"config %s: ask.engine %q has zero Claude accounts; add an accounts entry or choose codex",
-					result.Path,
-					result.Ask.Engine,
-				)
-			}
-		case pfmengine.OpenCode:
-			if counts[pfmengine.OpenCode] == 0 {
-				descriptor := pfmengine.MustLookup(pfmengine.OpenCode)
-				return Config{}, fmt.Errorf(
-					"config %s: ask.engine %q has zero %s accounts; create %s or choose another engine",
-					result.Path,
-					result.Ask.Engine,
-					descriptor.Short,
-					filepath.Join(descriptor.DefaultRoots(home)[0], "opencode.db"),
-				)
-			}
+	// An explicit engine with an empty roster is refused. An absent key
+	// resolves through DefaultEngine, which falls back to an engine with accounts.
+	if raw.Ask != nil && raw.Ask.Engine != nil {
+		if err := validateAskEngine(result, home); err != nil {
+			return Config{}, err
 		}
 	}
 	if err := finishHarvester(&result, home, registered, legacyHarvesterEnabled); err != nil {
@@ -1456,6 +1434,9 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	}
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
+	}
+	if len(config.Doctor.IgnoreWarnings) != 0 {
+		value["doctor"] = map[string]any{"ignoreWarnings": config.Doctor.IgnoreWarnings}
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

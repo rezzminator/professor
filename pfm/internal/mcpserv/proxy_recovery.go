@@ -116,6 +116,15 @@ func (proxy *stdioProxy) retryExhausted(lastErr error) error {
 			proxy.address, proxy.retryWindow, lastErr,
 		)
 	}
+	if errors.Is(lastErr, ErrDaemonUnresponsive) {
+		return fmt.Errorf(
+			"pfm MCP daemon %s held its port without answering pfm's status probe for %s; stop the process listening there (`lsof -iTCP@%s -sTCP:LISTEN` names it) and retry: %w",
+			proxy.address,
+			proxy.retryWindow,
+			proxy.address,
+			lastErr,
+		)
+	}
 	return fmt.Errorf(
 		"pfm MCP daemon %s stayed unreachable for %s; start it with `pfm mcp serve` and retry: %w",
 		proxy.address, proxy.retryWindow, lastErr,

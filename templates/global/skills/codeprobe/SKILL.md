@@ -19,7 +19,7 @@ PATH is relative to ROOT; a directory PATH searches every file under it.
 | `sig PATH NAME…` | Each signature only |
 | `defs PATH [--public] [--containing REGEX]` | Every definition's signature; `--containing` keeps the definitions whose body matches, matching lines marked `*` |
 | `block PATH REGEX [-n K]` | The block opening at the K-th matching line: a YAML entry, a SQL statement, a Markdown section, a Makefile target, a brace or indent block |
-| `grep REGEX [PATH…] [-C N] [-w] [-i] [-F]` | Every matching line; grep's `\|` form is read the way grep reads it; no match is a MISS |
+| `grep REGEX [PATH…] [-C N] [-w] [-i] [-F]` | Every matching line; grep BRE forms `\|`, `\<`, `\>` and `\{n,m\}` are read the way grep reads them; a MISS names the pattern's reading |
 | `consts PATH TYPE` | Every constant or variable declared with type TYPE under PATH, iota runs included |
 
 "The columns of table T" is `block MIGRATION 'CREATE TABLE T'` plus `grep 'ALTER TABLE T' MIGRATIONS_DIR`; "the line an insert goes after" is `grep` on that line with `-C 3`.

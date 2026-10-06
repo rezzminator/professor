@@ -338,6 +338,7 @@ func TestChatReloadWorkerContinuesBoundCodexConversationAfterNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	codexHome := filepath.Join(root, "codex")
+	writeJailedCodexAuth(t, root)
 	configPath := writeConfigFixture(
 		t,
 		root,

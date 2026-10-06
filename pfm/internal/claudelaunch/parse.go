@@ -22,8 +22,14 @@ func Parse(argv []string) (Parsed, error) {
 		return parsed, fmt.Errorf("parse Claude argv: missing binary")
 	}
 	for index := 1; index < len(argv); index++ {
-		flag := argv[index]
+		flag, inlineValue, inline := splitValueFlag(argv[index])
 		value := func() (string, error) {
+			if inline {
+				return inlineValue, nil
+			}
+			if flag == flagResume && (index+1 >= len(argv) || strings.HasPrefix(argv[index+1], "-")) {
+				return "", nil
+			}
 			if index+1 >= len(argv) {
 				return "", fmt.Errorf("%s requires a value", flag)
 			}
@@ -43,6 +49,9 @@ func Parse(argv []string) (Parsed, error) {
 			if err != nil {
 				return Parsed{}, err
 			}
+			if flag != flagResume && (word == "" || strings.HasPrefix(word, "-")) {
+				return Parsed{}, fmt.Errorf("%s requires a value", flag)
+			}
 			switch flag {
 			case flagSessionID:
 				parsed.SessionID = word
@@ -57,6 +66,10 @@ func Parse(argv []string) (Parsed, error) {
 			case flagPromptFile:
 				parsed.PromptFile = word
 			case flagSettings:
+				if !strings.HasPrefix(strings.TrimSpace(word), "{") {
+					parsed.Rest = append(parsed.Rest, flag, word)
+					continue
+				}
 				if err := json.Unmarshal([]byte(word), &parsed.Settings); err != nil {
 					return Parsed{}, fmt.Errorf("--settings: %w", err)
 				}
@@ -113,6 +126,16 @@ func Parse(argv []string) (Parsed, error) {
 		}
 	}
 	return parsed, nil
+}
+
+func splitValueFlag(word string) (string, string, bool) {
+	name, value, inline := strings.Cut(word, "=")
+	switch name {
+	case flagSessionID, flagResume, flagName, flagModel, flagEffort, flagPromptFile, flagSettings, flagMCPConfig:
+		return name, value, inline
+	default:
+		return word, "", false
+	}
 }
 
 // argsName reports whether the caller's own args already name the session —

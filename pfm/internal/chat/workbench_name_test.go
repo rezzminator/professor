@@ -114,6 +114,15 @@ func TestWorkbenchNameOutside(t *testing.T) {
 	}
 }
 
+func TestWorkbenchNameReservedNames(t *testing.T) {
+	root := testjail.Fleet(t)
+	dir := chatWorkbenchFixture(t, root)
+	name, found, err := WorkbenchName(context.Background(), dir, io.Discard, nil, "_SCRIBE:1", "_SCRIBE:3")
+	if err != nil || !found || name != "_SCRIBE:2" {
+		t.Fatalf("WorkbenchName with reserved names = %q, %t, %v; want _SCRIBE:2, true, nil", name, found, err)
+	}
+}
+
 func TestWorkbenchNameReportsRosterFailure(t *testing.T) {
 	root := testjail.Fleet(t)
 	dir := chatWorkbenchFixture(t, root)

@@ -37,13 +37,14 @@ type Options struct {
 
 // Result is the operator-visible compiler report.
 type Result struct {
-	OK        bool
-	Warnings  []string
-	Problems  []string
-	Wrote     int
-	Unchanged int
-	Deleted   int
-	Actions   []Action
+	OK          bool
+	Warnings    []string
+	Problems    []string
+	Rebuildable []string
+	Wrote       int
+	Unchanged   int
+	Deleted     int
+	Actions     []Action
 }
 
 // Action records a filesystem change build would make. Check and doctor
@@ -87,7 +88,7 @@ type sourceEntry struct {
 	Path     string
 	Rel      string
 	SkillDir bool
-	// Target is set only on an agent source link that does not resolve
+	// Target is set only on a source link that does not resolve
 	// right now (an uninitialised submodule): the link's own target text.
 	Target string
 }
@@ -99,6 +100,10 @@ func compileOpenCode(options Options) (Result, error) {
 		return Result{}, err
 	}
 	home, err := resolveOpenCodePath(options.Home, "home")
+	if err != nil {
+		return Result{}, err
+	}
+	workbench, err := paths.HasWorkbenchManifest(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -161,7 +166,7 @@ func compileOpenCode(options Options) (Result, error) {
 		skip,
 		dangling,
 	)
-	if !hasRegularFile(paths.WorkbenchManifest(root)) {
+	if !workbench {
 		compileOpenCodeCommands(
 			filepath.Join(home, ".claude", "commands"),
 			"$HOME/.claude/commands",
@@ -186,20 +191,21 @@ func compileOpenCode(options Options) (Result, error) {
 		}
 	}
 
-	if options.Mode == ModeBuild && len(result.Problems) != 0 {
+	if modelMapErr != nil || options.Mode == ModeBuild && len(result.Problems) != 0 {
 		result.OK = false
 		return result, nil
 	}
-	reconciled := reconcileOpenCode(outputs, options.Mode, root, home)
+	reconciled := reconcileOpenCode(outputs, options.Mode, root, home, workbench)
 	result.Warnings = append(result.Warnings, reconciled.Warnings...)
 	result.Problems = append(result.Problems, reconciled.Problems...)
+	result.Rebuildable = append(result.Rebuildable, reconciled.Rebuildable...)
 	result.Wrote, result.Unchanged, result.Deleted = reconciled.Wrote, reconciled.Unchanged, reconciled.Deleted
 	result.Actions = reconciled.Actions
 	if options.Mode == ModeCheck || options.Mode == ModeDoctor {
 		validateOutputs(outputs, root, &result)
 	}
 	if options.Mode == ModeDoctor {
-		validateDoctorSurfaces(root, home, &result)
+		validateDoctorSurfaces(root, home, workbench, &result)
 	}
 	result.OK = len(result.Problems) == 0
 	return result, nil
@@ -237,7 +243,12 @@ func discoverOpenCodeProjects(root string, problem func(string, ...any)) []strin
 		if !entry.IsDir() || entry.Name() == "templates" || entry.Name() == ".claude" || entry.Name() == ".opencode" {
 			continue
 		}
-		if hasRegularFile(paths.WorkbenchManifest(filepath.Join(root, entry.Name()))) {
+		workbench, err := paths.HasWorkbenchManifest(filepath.Join(root, entry.Name()))
+		if err != nil {
+			problem("%v", err)
+			continue
+		}
+		if workbench {
 			continue
 		}
 		if hasRegularFile(filepath.Join(root, entry.Name(), "CLAUDE.md")) {
@@ -389,7 +400,8 @@ func compileOpenCodeAgents(
 	problem, skip, warn func(string, ...any),
 	dangling func(string, error),
 ) {
-	seen := map[string]bool{}
+	seen := map[string]sourceEntry{}
+	var kept []string
 	knownServers := openCodeKnownMCPServers(root)
 	for _, project := range projects {
 		for _, entry := range discoverOpenCodeAgents(filepath.Join(root, project, ".claude", "agents"), problem, dangling) {
@@ -397,19 +409,24 @@ func compileOpenCodeAgents(
 			if project != "." {
 				name += "-" + project
 			}
-			if seen[name] {
-				warn("skip %s — root agent %s owns the registration", filepath.ToSlash(entry.Path), name)
-				continue
+			if previous, exists := seen[name]; exists {
+				if previous.Target == "" || entry.Target != "" {
+					warn("skip %s — root agent %s owns the registration", filepath.ToSlash(entry.Path), name)
+					continue
+				}
+				warn("source unresolvable: %s — compiling real source %s instead", previous.Path, entry.Path)
 			}
-			seen[name] = true
+			seen[name] = entry
 			if entry.Target != "" {
-				add(generatedFile{
-					Path: filepath.Join(root, ".opencode", "agent", name+".md"),
-					Kept: &entry,
-				})
+				kept = append(kept, name)
 				continue
 			}
 			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, skip, warn)
+		}
+	}
+	for _, name := range kept {
+		if entry := seen[name]; entry.Target != "" {
+			add(generatedFile{Path: filepath.Join(root, ".opencode", "agent", name+".md"), Kept: &entry})
 		}
 	}
 }
@@ -492,7 +509,25 @@ func compileOpenCodeCommands(
 	problem, skip func(string, ...any),
 	dangling func(string, error),
 ) {
-	for _, entry := range discoverOpenCodeMarkdown(sourceRoot, problem, dangling) {
+	keepDangling := func(path string, err error) {
+		dangling(path, err)
+		name := filepath.Base(path)
+		if sourceLabel != ".claude/commands" || !strings.HasSuffix(name, ".md") || name == "README.md" ||
+			name == "SKILL.md" {
+			return
+		}
+		target := sourcelink.LinkTarget(path)
+		rel, relErr := filepath.Rel(sourceRoot, path)
+		if relErr != nil {
+			problem("relative path of %s: %v", path, relErr)
+			return
+		}
+		add(generatedFile{
+			Path: filepath.Join(outputRoot, openCodeFlatName(rel)+".md"),
+			Kept: &sourceEntry{Path: path, Rel: rel, Target: target},
+		})
+	}
+	for _, entry := range discoverOpenCodeMarkdown(sourceRoot, problem, keepDangling) {
 		file := entry.Path
 		if entry.SkillDir {
 			file = filepath.Join(entry.Path, "SKILL.md")
@@ -576,12 +611,12 @@ func validateOutputs(outputs []generatedFile, root string, result *Result) {
 	}
 }
 
-func validateDoctorSurfaces(root, home string, result *Result) {
+func validateDoctorSurfaces(root, home string, workbench bool, result *Result) {
 	dirs := []string{
 		filepath.Join(root, ".opencode", "agent"),
 		filepath.Join(root, ".opencode", "command"),
 	}
-	if !hasRegularFile(paths.WorkbenchManifest(root)) {
+	if !workbench {
 		dirs = append(dirs, filepath.Join(home, ".config", openCodeName(), "command"))
 	}
 	for _, dir := range dirs {

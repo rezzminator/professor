@@ -1,6 +1,8 @@
 package action
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -95,5 +97,21 @@ func TestHeadlessForkWorkbench(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHeadlessForkCodexStatesSelectedHome(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	want := filepath.Join(home, ".codex-3")
+	if err := os.Remove(filepath.Join(want, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := HeadlessFork(HeadlessForkRequest{
+		Engine: pfmengine.Codex, Name: "worker", CWD: "/work", SessionID: "s1",
+		Home: home, PrimaryAccount: 3, Config: machine,
+	})
+	if err != nil || plan.CodexHome != want {
+		t.Fatalf("plan CodexHome=%q error=%v; want %q", plan.CodexHome, err, want)
 	}
 }

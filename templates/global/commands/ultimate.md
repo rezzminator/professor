@@ -24,7 +24,7 @@ The work: $ARGUMENTS — with none, the work in hand in this chat. Make it with 
 - Every detail is chosen: names, timing, colour, spacing, copy, the empty, error and reduced-motion states.
 - The work carries its own identity: your chat persona's traits, catchphrases and costume stay out unless the brief asks for them.
 - A fact the work needs that sits on disk is read, never asked for. A fact only the user holds is never invented: build around it and name it in the report; ask only for one the work cannot stand without, in one question.
-- A new direction gets a new build, never a patch of the old file, the user's own included; a kept direction is raised in place.
+- A new direction is built anew within the project's change rules, the user's own file included: where the rules demand surgical changes it lands as those edits; a kept direction is raised in place.
 
 ## Look and raise
 

@@ -69,6 +69,9 @@ func (executor *Executor) OpenDetached(
 	if err := applyWorkbench(&request); err != nil {
 		return OpenResult{}, fmt.Errorf("open detached: %w", err)
 	}
+	if err := checkCodexLaunch(request); err != nil {
+		return OpenResult{}, fmt.Errorf("open detached: %w", err)
+	}
 	switch request.Row.Kind {
 	case compose.Agent, compose.ResumeClaude:
 		if err := executor.Solo(

@@ -105,6 +105,34 @@ test("loadTable: a pfm that exits non-zero carries its exit code and trimmed std
   assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: bin }), { message: `\`${bin} price --json\` failed (exit 1): pfm: pfm.prices.json: unknown field` });
 });
 
+test("loadTable: a hung pfm is killed at the requested timeout", () => {
+  const bin = fakePfm("exec sleep 5"), started = Date.now();
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: bin }, 200), { message: `\`${bin} price --json\` timed out after 0.2 s` });
+  assert.ok(Date.now() - started < 2000, "the loader must return before sleep completes");
+});
+
+test("loadTable: a pfm predating price names the failed command and the update", () => {
+  const bin = fakePfm(`echo 'pfm: unknown command "price"' >&2; exit 2`);
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PFM: bin }),
+    { message: `\`${bin} price --json\` failed (exit 2): pfm: unknown command "price" — this pfm predates \`pfm price\`; update pfm` });
+});
+
+test("loadTable: every row requires its engine's finite numeric rates", () => {
+  const missingHit = file("missing-hit.json", '{"version":1,"rows":[{"key":"x","engine":"claude","match":["x"],"in":1,"out":1,"w5m":1,"w1h":1,"long_in":1,"long_out":1}]}');
+  assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: missingHit }), { message: `TOKEN_AUDIT_PRICES ${missingHit}: row x: hit is not a number` });
+  for (const [r, fields] of [
+    [row("claude", ["c"], 1), ["in", "out", "hit", "w5m", "w1h", "long_in", "long_out"]],
+    [{ key: "codex", engine: "codex", match: ["x"], in: 1, out: 1, cached: 0, long_in: 1, long_out: 1 }, ["in", "out", "cached", "long_in", "long_out"]],
+  ]) for (const field of fields) for (const value of [undefined, null, "1", true, Infinity, NaN]) {
+    const doc = file("bad-rate.json", JSON.stringify({ version: 1, rows: [row("valid", ["valid"], 0), { ...r, [field]: value }] }));
+    assert.throws(() => P.loadTable({ TOKEN_AUDIT_PRICES: doc }), { message: `TOKEN_AUDIT_PRICES ${doc}: row ${r.key}: ${field} is not a number` });
+  }
+});
+
+test("rateOf: an empty pattern never prices a model", () => {
+  assert.equal(P.rateOf({ rows: [row("empty", [""], 9)], override: null }, "claude-opus-5-5"), null);
+});
+
 test("loadTable: not JSON, version 2, or rows not an array is an unreadable table", () => {
   for (const [out, fault] of [["price table", /\S/], ['{"version":2,"rows":[]}', /version/], ['{"version":1,"rows":{}}', /rows/]]) {
     const bin = fakePfm(`echo '${out}'`);

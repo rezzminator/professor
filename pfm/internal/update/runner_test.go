@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"testing"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
@@ -32,6 +34,7 @@ type scriptedUpdateRunner struct {
 	runResult deps.RunResult
 	runErr    error
 	startEnv  *[]string
+	startArgv *[]string
 }
 
 func (runner scriptedUpdateRunner) Run(context.Context, []string, deps.RunOptions) (deps.RunResult, error) {
@@ -48,11 +51,14 @@ func (runner scriptedUpdateRunner) LookPath(string) (string, error) {
 
 func (runner scriptedUpdateRunner) Start(
 	_ context.Context,
-	_ []string,
+	argv []string,
 	options deps.StartOptions,
 ) (deps.Process, error) {
 	if runner.startEnv != nil {
 		*runner.startEnv = append([]string(nil), options.Env...)
+	}
+	if runner.startArgv != nil {
+		*runner.startArgv = append([]string(nil), argv...)
 	}
 	if options.Stdout != nil {
 		if _, err := io.WriteString(options.Stdout, runner.stdout); err != nil {
@@ -135,4 +141,39 @@ func TestRunUpdateCandidateCommandClearsInheritedSourceRepo(t *testing.T) {
 		}
 	}
 	t.Fatalf("candidate environment omitted an explicit empty PFM_SOURCE_REPO: %v", capturedEnv)
+}
+
+func TestApplyUpdateInstallConfig(t *testing.T) {
+	for _, testcase := range []struct {
+		name        string
+		exists      bool
+		skipHarvest bool
+		want        []string
+	}{
+		{
+			name: "config file exists", exists: true, skipHarvest: true,
+			want: []string{"/tmp/pfm-candidate", "--config", "/cfg/pfm.config.json", "install", "--yes", "--skip-harvest"},
+		},
+		{
+			name: "no config file",
+			want: []string{"/tmp/pfm-candidate", "install", "--yes"},
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			var argv []string
+			t.Cleanup(StubRunnerForTest(scriptedUpdateRunner{startArgv: &argv}))
+			runtime := pfmconfig.Runtime{
+				Config: pfmconfig.Config{Path: "/cfg/pfm.config.json", Exists: testcase.exists},
+			}
+			if err := applyUpdateInstall(
+				context.Background(), "/tmp/pfm-candidate", t.TempDir(), "", runtime,
+				testcase.skipHarvest, io.Discard, io.Discard,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(argv, testcase.want) {
+				t.Fatalf("install argv = %q; want %q", argv, testcase.want)
+			}
+		})
+	}
 }

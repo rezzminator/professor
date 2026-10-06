@@ -62,32 +62,116 @@ func TestProjectUpdatesDiffIgnoresTheUsersGitDiffConfig(t *testing.T) {
 	runStoreGit(t, "-C", store, "config", "diff.external", "false")
 	project, home := newUpdatedGitStoreProject(t, store)
 
+	t.Run("diff ran", func(t *testing.T) {
+		var stdout bytes.Buffer
+		if code := RunProjectUpdates(project, home, true, &stdout); code != 1 {
+			t.Fatalf("RunProjectUpdates(--json) code=%d, want 1 (review): %s", code, stdout.String())
+		}
+		var report struct {
+			Items []projectReportItem `json:"items"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+			t.Fatalf("report is not one JSON object: %v\n%s", err, stdout.String())
+		}
+		for _, item := range report.Items {
+			if item.Status != projectUpdated {
+				continue
+			}
+			if item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") ||
+				strings.Contains(item.Diff, "\x1b[") {
+				t.Fatalf(
+					"UPDATED %s diff=%q diffError=%q, want git's plain unified diff",
+					item.Local,
+					item.Diff,
+					item.DiffError,
+				)
+			}
+			var payload struct {
+				Items []map[string]json.RawMessage `json:"items"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			for _, encoded := range payload.Items {
+				if _, skipped := encoded["diffSkipped"]; skipped {
+					t.Fatalf("diff ran but JSON includes diffSkipped: %s", stdout.String())
+				}
+			}
+			return
+		}
+		t.Fatalf("no UPDATED item in the report: %s", stdout.String())
+	})
+
+	t.Run("post-update review", func(t *testing.T) {
+		var stdout bytes.Buffer
+		if code := renderProjectCheck(
+			project,
+			home,
+			false,
+			&stdout,
+		); code != 1 ||
+			!strings.Contains(stdout.String(), "REVIEW REQUIRED — 1 items; nothing was written.") {
+			t.Fatalf("renderProjectCheck() code=%d, want 1 (review): %s", code, stdout.String())
+		}
+	})
+
+	t.Run("textconv", func(t *testing.T) {
+		if err := os.WriteFile(
+			filepath.Join(store, ".git", "info", "attributes"),
+			[]byte("* diff=upper\n"),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+		runStoreGit(t, "-C", store, "config", "diff.upper.textconv", "tr a-z A-Z")
+		var stdout bytes.Buffer
+		code := RunProjectUpdates(project, home, true, &stdout)
+		var report struct {
+			Items []projectReportItem `json:"items"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range report.Items {
+			if item.Status == projectUpdated {
+				if code != 1 || item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") ||
+					strings.Contains(item.Diff, "UPSTREAM LINE") {
+					t.Fatalf(
+						"textconv report code=%d diff=%q error=%q, want plain diff",
+						code,
+						item.Diff,
+						item.DiffError,
+					)
+				}
+				return
+			}
+		}
+		t.Fatalf("no UPDATED item: %s", stdout.String())
+	})
+}
+
+func TestProjectUpdatesDiffIgnoresAnInheritedForeignRepository(t *testing.T) {
+	project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
+	foreign := newGitScaffoldStore(t)
+	t.Setenv("GIT_DIR", filepath.Join(foreign, ".git"))
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(t.TempDir(), "missing-index"))
 	var stdout bytes.Buffer
-	if code := RunProjectUpdates(project, home, true, &stdout); code != 1 {
-		t.Fatalf("RunProjectUpdates(--json) code=%d, want 1 (review): %s", code, stdout.String())
-	}
+	code := RunProjectUpdates(project, home, true, &stdout)
 	var report struct {
 		Items []projectReportItem `json:"items"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("report is not one JSON object: %v\n%s", err, stdout.String())
+		t.Fatal(err)
 	}
 	for _, item := range report.Items {
-		if item.Status != projectUpdated {
-			continue
+		if item.Status == projectUpdated {
+			if code != 1 || item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") {
+				t.Fatalf("foreign repository report code=%d diff=%q error=%q", code, item.Diff, item.DiffError)
+			}
+			return
 		}
-		if item.DiffError != "" || !strings.Contains(item.Diff, "\n+upstream line\n") ||
-			strings.Contains(item.Diff, "\x1b[") {
-			t.Fatalf(
-				"UPDATED %s diff=%q diffError=%q, want git's plain unified diff",
-				item.Local,
-				item.Diff,
-				item.DiffError,
-			)
-		}
-		return
 	}
-	t.Fatalf("no UPDATED item in the report: %s", stdout.String())
+	t.Fatalf("no UPDATED item: code=%d %s", code, stdout.String())
 }
 
 // TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore: inside the dev
@@ -129,7 +213,7 @@ func TestProjectUpdatesDiffReadsAFencedLinkedWorktreeStore(t *testing.T) {
 
 // TestProjectUpdatesDiffUnreadableIsAFailure pins 0-contracts § A: a pin
 // whose SHA is absent from the store's git history renders the UNREADABLE
-// line and a FAILED terminal (doctor exit 3, bare update exit 1).
+// line and a FAILED terminal (doctor and bare update both exit 3).
 func TestProjectUpdatesDiffUnreadableIsAFailure(t *testing.T) {
 	project, home := newUpdatedGitStoreProject(t, newGitScaffoldStore(t))
 	baseline, err := Load(project)
@@ -175,8 +259,8 @@ func TestProjectUpdatesDiffUnreadableIsAFailure(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if code := renderProjectCheck(project, home, false, &stdout); code != 1 {
-		t.Fatalf("renderProjectCheck() code=%d stdout=%q, want 1", code, stdout.String())
+	if code := renderProjectCheck(project, home, false, &stdout); code != 3 {
+		t.Fatalf("renderProjectCheck() code=%d stdout=%q, want 3", code, stdout.String())
 	}
 	got = strings.TrimSpace(stdout.String())
 	if !strings.HasSuffix(got, wantHuman) {
@@ -240,6 +324,32 @@ func TestProjectUpdatesSelfHostedPinIsAReviewNotAFailure(t *testing.T) {
 		!strings.HasSuffix(got, "REVIEW REQUIRED — 1 items; nothing was written.") {
 		t.Fatalf("RunProjectUpdates() code=%d, want 1 with a REVIEW REQUIRED terminal:\n%s", code, got)
 	}
+	stdout.Reset()
+	if code := RunProjectUpdates(project, home, true, &stdout); code != 1 {
+		t.Fatalf("RunProjectUpdates(--json) code=%d, want 1: %s", code, stdout.String())
+	}
+	var report struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range report.Items {
+		if string(item["status"]) != `"UPDATED"` {
+			continue
+		}
+		var skipped string
+		if err := json.Unmarshal(item["diffSkipped"], &skipped); err != nil {
+			t.Fatalf("diffSkipped is missing or invalid: %v\n%s", err, stdout.String())
+		}
+		_, diff := item["diff"]
+		_, diffError := item["diffError"]
+		if skipped != "self-hosted pin or store: no git history" || diff || diffError {
+			t.Fatalf("skipped diff fields = %s", stdout.String())
+		}
+		return
+	}
+	t.Fatalf("no UPDATED item: %s", stdout.String())
 }
 
 // TestProjectUpdatesMissingBaselineNamesAdoptCommand is a REGRESSION test for

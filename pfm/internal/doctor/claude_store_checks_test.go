@@ -16,7 +16,7 @@ import (
 )
 
 func TestClaudeStoreChecks(t *testing.T) {
-	for _, scenario := range []string{"ok", "store-missing", "account-missing", "link-missing", "elsewhere", "foreign", "broken", "unreadable-store", "unreadable-account", "unreadable-link", "real", "account-store"} {
+	for _, scenario := range []string{"ok", "store-missing", "account-missing", "link-missing", "elsewhere", "foreign", "broken", "unreadable-store", "unreadable-account", "account-not-dir", "real", "account-store"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
 			store := installer.ClaudeStore(home)
@@ -97,18 +97,19 @@ func TestClaudeStoreChecks(t *testing.T) {
 					path := filepath.Join(store, entry.Name)
 					want += fmt.Sprintf("store: %s UNREADABLE error=lstat %s: %s\n", path, path, syscall.ENOTDIR)
 				}
-			case "unreadable-link":
+			case "account-not-dir":
 				if err := os.RemoveAll(account); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.WriteFile(account, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
-				want, failures = "", len(installer.StoreEntries)
-				for _, entry := range installer.StoreEntries {
-					path := filepath.Join(account, entry.Name)
-					want += fmt.Sprintf("account-link: %s UNREADABLE error=lstat %s: %s\n", path, path, syscall.ENOTDIR)
-				}
+				want, failures = fmt.Sprintf(
+					"account: 1 %s is a file, not a directory — mv %s %s.bak, then run pfm install\n",
+					account,
+					account,
+					account,
+				), 1
 			default:
 				if err := os.Remove(link); err != nil {
 					t.Fatal(err)

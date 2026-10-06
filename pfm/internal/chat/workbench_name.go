@@ -11,7 +11,13 @@ import (
 )
 
 // WorkbenchName reserves numbers against every roster row, including killed chats.
-func WorkbenchName(ctx context.Context, cwd string, warn io.Writer, runtime *pfmconfig.Runtime) (string, bool, error) {
+func WorkbenchName(
+	ctx context.Context,
+	cwd string,
+	warn io.Writer,
+	runtime *pfmconfig.Runtime,
+	reserved ...string,
+) (string, bool, error) {
 	bench, found, err := workbench.Nearest(cwd)
 	if err != nil || !found {
 		return "", false, err
@@ -24,9 +30,10 @@ func WorkbenchName(ctx context.Context, cwd string, warn io.Writer, runtime *pfm
 		obs.Logger(ctx).Error("workbench roster", "path", cwd, obs.FieldErr, err)
 		return "", false, err
 	}
-	names := make([]string, 0, len(rows))
+	names := make([]string, 0, len(rows)+len(reserved))
 	for i := range rows {
 		names = append(names, rows[i].Name)
 	}
+	names = append(names, reserved...)
 	return naming.NextNumbered(bench.Prefix, names), true, nil
 }

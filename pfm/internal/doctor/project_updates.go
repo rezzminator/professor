@@ -7,8 +7,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
-const doctorUsage = "usage: pfm doctor [--verbose] [--skip-harvest] | pfm doctor --project-updates [--root DIR] [--json]" +
-	" exit 0 clean, 1 warnings, 3 failures"
+const doctorUsage = "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 clean, 1 warnings, 3 failures) | " +
+	"pfm doctor --project-updates [--root DIR] [--json] (exit 0 clean, 1 review required, 3 report failure); 2 usage error"
 
 // projectUpdatesFlags are doctor's --project-updates mode: the project-template
 // report alone, through professor.RunProjectUpdates, never the health pass.

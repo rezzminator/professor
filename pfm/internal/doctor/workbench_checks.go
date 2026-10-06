@@ -20,9 +20,13 @@ func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failu
 		return 0, 1
 	}
 	if !found {
+		fmt.Fprintln(stdout, "doctor: workbench none — not inside a Professor project")
 		return 0, 0
 	}
 	benches, walkErrors := workbench.Discover([]string{root})
+	if len(benches) == 0 && len(walkErrors) == 0 {
+		fmt.Fprintf(stdout, "doctor: workbench none under %s\n", root)
+	}
 	for i := range benches {
 		bench := &benches[i]
 		if bench.Err != nil {
@@ -34,18 +38,12 @@ func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failu
 		for _, engine := range bench.Engines {
 			engines = append(engines, pfmengine.MustLookup(engine).LongName)
 		}
-		fmt.Fprintf(
-			stdout,
-			"doctor: workbench %s ok · engines %s · prompt %s\n",
-			bench.Dir,
-			strings.Join(engines, ","),
-			bench.Prompt,
-		)
+		beforeFailures := failures
 		for _, engine := range bench.Engines {
 			if engine != pfmengine.Codex && engine != pfmengine.OpenCode {
 				continue
 			}
-			stale, err := workbench.CheckMirror(*bench, engine, home)
+			check, err := workbench.CheckMirror(*bench, engine, home)
 			if err != nil {
 				fmt.Fprintf(
 					stdout,
@@ -55,16 +53,39 @@ func printWorkbenchDoctor(stdout io.Writer, start, home string) (warnings, failu
 					err,
 				)
 				failures++
-			} else if stale != "" {
+				continue
+			}
+			name := pfmengine.MustLookup(engine).LongName
+			for _, problem := range check.Failing {
 				fmt.Fprintf(
 					stdout,
-					"doctor: workbench %s %s mirror STALE: %s — the next launch there rebuilds it\n",
+					"doctor: workbench %s %s mirror FAILED: %s — the next launch there fails; fix it, then run pfm %s build %s\n",
 					bench.Dir,
-					pfmengine.MustLookup(engine).LongName,
-					stale,
+					name,
+					problem,
+					name,
+					bench.Dir,
 				)
+				failures++
+			}
+			if len(check.Rebuildable) != 0 {
+				repair := "the next launch there rebuilds it"
+				if len(check.Failing) != 0 {
+					repair = fmt.Sprintf("rebuilt by pfm %s build %s once the failures are fixed", name, bench.Dir)
+				}
+				fmt.Fprintf(stdout, "doctor: workbench %s %s mirror STALE: %s — %s\n",
+					bench.Dir, name, strings.Join(check.Rebuildable, "; "), repair)
 				warnings++
 			}
+		}
+		if failures == beforeFailures {
+			fmt.Fprintf(
+				stdout,
+				"doctor: workbench %s ok · engines %s · prompt %s\n",
+				bench.Dir,
+				strings.Join(engines, ","),
+				bench.Prompt,
+			)
 		}
 	}
 	for _, walkError := range walkErrors {

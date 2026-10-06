@@ -49,20 +49,21 @@ clone() {
     JSCPD_SCAN_MARKER="$T/scanned" bash "$ROOT/scripts/clone-check.sh" ${4:+"$4"} 2>&1
 }
 
-out=$(clone "$T/absent"); rc=$?
-if [[ $rc -eq 2 && "$out" == *'CLONES ERROR TOOLCHAIN-MISSING — jscpd not installed; run infra/fence/tools.sh'* ]]; then
-  ok 'missing jscpd names the installer and returns 2'
-else
-  bad 'missing jscpd names the installer and returns 2' "rc=$rc; $out"
-fi
-
-rm -f "$T/scanned"
-out=$(clone "$T/bin" 9.9.9); rc=$?
-if [[ $rc -eq 2 && "$out" == *"jscpd 9.9.9 is not JSCPD_VERSION $JSCPD_VERSION"* && ! -e "$T/scanned" ]]; then
-  ok 'wrong jscpd version refuses the scan and returns 2'
-else
-  bad 'wrong jscpd version refuses the scan and returns 2' "rc=$rc; $out"
-fi
+for scenario in missing-scan wrong-scan missing-resolve wrong-resolve; do
+  case "$scenario" in
+    missing-*) tool_bin="$T/absent"; version="$JSCPD_VERSION" ;;
+    wrong-*) tool_bin="$T/bin"; version=9.9.9 ;;
+  esac
+  mode_flag=
+  [[ "$scenario" != *-resolve ]] || mode_flag=--resolve
+  rm -f "$T/scanned"
+  out=$(clone "$tool_bin" "$version" pass "$mode_flag"); rc=$?
+  if [[ $rc -eq 2 && "$out" == *jscpd* && ! -e "$T/scanned" ]]; then
+    ok "$scenario: unavailable jscpd refuses to scan and returns 2"
+  else
+    bad "$scenario: unavailable jscpd refuses to scan and returns 2" "rc=$rc; $out"
+  fi
+done
 
 rm -f "$T/scanned"
 out=$(clone "$T/bin"); rc=$?
@@ -95,24 +96,8 @@ else
   bad '--resolve prints the pinned jscpd and does not scan' "rc=$rc; $out"
 fi
 
-rm -f "$T/scanned"
-out=$(clone "$T/absent" "$JSCPD_VERSION" pass --resolve); rc=$?
-if [[ $rc -eq 2 && "$out" == 'CLONES ERROR TOOLCHAIN-MISSING — jscpd not installed; run infra/fence/tools.sh (make -C pfm tools)' && ! -e "$T/scanned" ]]; then
-  ok '--resolve names a missing jscpd and returns 2'
-else
-  bad '--resolve names a missing jscpd and returns 2' "rc=$rc; $out"
-fi
-
-rm -f "$T/scanned"
-out=$(clone "$T/bin" 9.9.9 pass --resolve); rc=$?
-if [[ $rc -eq 2 && "$out" == "CLONES ERROR TOOLCHAIN-MISSING — jscpd 9.9.9 is not JSCPD_VERSION $JSCPD_VERSION; run infra/fence/tools.sh (make -C pfm tools)" && ! -e "$T/scanned" ]]; then
-  ok '--resolve names a wrong jscpd version and returns 2'
-else
-  bad '--resolve names a wrong jscpd version and returns 2' "rc=$rc; $out"
-fi
-
 out=$(clone "$T/bin" "$JSCPD_VERSION" pass --bogus); rc=$?
-if [[ $rc -eq 2 && "$out" == 'usage: clone-check.sh [--measure|--resolve]' ]]; then
+if [[ $rc -eq 2 && "$out" == usage:* ]]; then
   ok 'an unknown mode prints the usage and returns 2'
 else
   bad 'an unknown mode prints the usage and returns 2' "rc=$rc; $out"

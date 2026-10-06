@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -37,21 +39,66 @@ func hasValidCodexCredentials(home string) (bool, error) {
 	return valid, nil
 }
 
+// ErrCodexLoggedOut identifies a Codex home with no runtime login.
+var ErrCodexLoggedOut = errors.New("codex home is logged out")
+
+type codexLoggedOutError struct {
+	path string
+}
+
+func (err codexLoggedOutError) Error() string {
+	return err.path +
+		" must contain tokens.access_token with tokens.account_id, or OPENAI_API_KEY — run codex login"
+}
+
+func (err codexLoggedOutError) Is(target error) bool { return target == ErrCodexLoggedOut }
+
 // CodexLoginError checks runtime login state for a configured Codex home.
 // Configuration loading validates the home's shape, not its credentials.
 func CodexLoginError(home string) error {
-	valid, err := hasValidCodexCredentials(home)
 	path := filepath.Join(home, "auth.json")
-	if err != nil {
+	body, err := os.ReadFile(path)
+	if err == nil {
+		var credentials struct {
+			Tokens *struct {
+				AccessToken string `json:"access_token"`
+				AccountID   string `json:"account_id"`
+			} `json:"tokens"`
+			OpenAIAPIKey string `json:"OPENAI_API_KEY"`
+		}
+		if err := json.Unmarshal(body, &credentials); err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+		validTokens := credentials.Tokens != nil &&
+			strings.TrimSpace(credentials.Tokens.AccessToken) != "" &&
+			strings.TrimSpace(credentials.Tokens.AccountID) != ""
+		if validTokens || strings.TrimSpace(credentials.OpenAIAPIKey) != "" {
+			return nil
+		}
+		return codexLoggedOutError{path: path}
+	}
+	if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	if !valid {
-		return fmt.Errorf(
-			"%s must contain a valid auth.json with tokens.access_token and account_id — run codex login",
-			path,
-		)
+
+	configPath := filepath.Join(home, "config.toml")
+	body, err = os.ReadFile(configPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return codexLoggedOutError{path: path}
 	}
-	return nil
+	if err != nil {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+	var preferences struct {
+		CLIAuthCredentialsStore string `toml:"cli_auth_credentials_store"`
+	}
+	if err := toml.Unmarshal(body, &preferences); err != nil {
+		return fmt.Errorf("parse %s: %w", configPath, err)
+	}
+	if preferences.CLIAuthCredentialsStore == "keyring" || preferences.CLIAuthCredentialsStore == "auto" {
+		return nil
+	}
+	return codexLoggedOutError{path: path}
 }
 
 // openCodeStoreExists recognizes both a materialized session database and an

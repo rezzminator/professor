@@ -48,7 +48,6 @@
     "authToken": null
   },
   "ask": {
-    "engine": "codex",
     "claude": {
       "model": "claude-haiku-4-5",
       "effort": "low"

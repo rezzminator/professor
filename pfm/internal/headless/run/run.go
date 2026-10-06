@@ -408,6 +408,9 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		return Result{Engine: request.Engine, ExitCode: -1}, err
 	}
 	request = resolved
+	if err := checkCodexRunLogin(request); err != nil {
+		return Result{Engine: request.Engine, ExitCode: -1}, err
+	}
 	result.Engine, result.Model, result.Effort, result.ExitCode = request.Engine, request.Model, request.Effort, -1
 	for _, option := range request.unsupportedOptions {
 		result.Diagnostics = append(result.Diagnostics, "unsupported control not applied for Codex: "+option)

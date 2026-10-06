@@ -531,7 +531,7 @@ def numbered(lines, a, b, mark=None):
 
 def bre_or_re(pattern):
     """A caller's grep pattern may be BRE (`a\\|b`, `f(`); read it the way grep would. -> (regex, how)."""
-    if "\\|" not in pattern and "\\(" not in pattern:
+    if not any(token in pattern for token in ("\\|", "\\(", "\\)", "\\{", "\\}", "\\<", "\\>")):
         try:
             return re.compile(pattern), None
         except re.error:
@@ -541,7 +541,8 @@ def bre_or_re(pattern):
         c = pattern[i]
         if c == "\\" and i + 1 < len(pattern):
             nxt = pattern[i + 1]
-            out.append({"|": "|", "(": "(", ")": ")", "{": "{", "}": "}", "+": "+", "?": "?"}.get(nxt, "\\" + nxt))
+            out.append({"|": "|", "(": "(", ")": ")", "{": "{", "}": "}", "+": "+", "?": "?",
+                        "<": r"(?<!\w)(?=\w)", ">": r"(?<=\w)(?!\w)"}.get(nxt, "\\" + nxt))
             i += 2
             continue
         out.append("\\" + c if c in "()|{}+?" else c)
@@ -553,7 +554,8 @@ def bre_or_re(pattern):
     try:
         return re.compile(pattern), None
     except re.error:
-        return re.compile(re.escape(pattern)), "not a valid regex; matched literally"
+        literal = re.sub(r"\\(.)", r"\1", pattern)
+        return re.compile(re.escape(literal)), "not a valid regex; matched literally"
 
 
 class Miss(Exception):
@@ -619,7 +621,7 @@ def run_verb(root, files, verb, args):
     if verb == "grep":
         header, body, how = grep_block(root, files, pos, opts)
         if " · 0 hits " in header and not body:
-            read = f", {how}" if how else ""
+            read = f", {how or 'read as a Python regex'}"
             raise Miss(f"no line matches /{pos[0]}/ in {' '.join(pos[1:]) or 'the whole repo'} (searched{read})")
         return [(header, body)]
     if verb == "consts":
@@ -684,8 +686,9 @@ def run_verb(root, files, verb, args):
         rx, how = bre_or_re(pos[1])
         hits = [i for i, line in enumerate(lines) if rx.search(line)]
         if len(hits) < opts["n"]:
-            raise Miss(f"no line matching /{pos[1]}/ in {rel}" if not hits else
-                       f"/{pos[1]}/ matches {len(hits)} lines in {rel}, not {opts['n']}")
+            reason = (f"no line matching /{pos[1]}/ in {rel}" if not hits else
+                      f"/{pos[1]}/ matches {len(hits)} lines in {rel}, not {opts['n']}")
+            raise Miss(f"{reason} ({how or 'read as a Python regex'})")
         idx = hits[opts["n"] - 1]
         end = block_end(lines, idx, rel)
         if end is None:

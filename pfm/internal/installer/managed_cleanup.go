@@ -26,10 +26,11 @@ const (
 
 // ManagedCleanupStatus is the shared install and doctor inspection result.
 type ManagedCleanupStatus struct {
-	Path  string
-	State string
-	Value int
-	Err   error
+	Path      string
+	State     string
+	Value     int
+	KeyAbsent bool
+	Err       error
 }
 
 // InspectManagedCleanup reads the managed drop-in without changing it.
@@ -59,8 +60,9 @@ func InspectManagedCleanup(dir string, require bool, want int) ManagedCleanupSta
 			err = json.Unmarshal(raw, &document)
 			if err == nil {
 				value, present := document["cleanupPeriodDays"]
-				if !present && document != nil {
+				if !present {
 					status.State = ManagedCleanupWrong
+					status.KeyAbsent = true
 					return status
 				}
 				if decodeErr := json.Unmarshal(value, &status.Value); decodeErr != nil {
@@ -79,6 +81,16 @@ func InspectManagedCleanup(dir string, require bool, want int) ManagedCleanupSta
 		status.State = ManagedCleanupWrong
 	}
 	return status
+}
+
+// ManagedCleanupFix returns the shell line that writes the managed retention setting.
+func ManagedCleanupFix(dir, path string, days int) string {
+	return fmt.Sprintf(
+		"sudo mkdir -p %s && printf '%%s\\n' '{\"cleanupPeriodDays\":%d}' | sudo tee %s >/dev/null",
+		shellCommandLine(dir),
+		days,
+		shellCommandLine(path),
+	)
 }
 
 func (installer *engine) installManagedCleanup(ctx context.Context) error {
@@ -126,14 +138,12 @@ func (installer *engine) installManagedCleanup(ctx context.Context) error {
 		installer.say("sudo %s", shellCommandLine(sudoArgs...))
 		if sudoErr := options.Runner.Run(ctx, "sudo", sudoArgs...); sudoErr != nil {
 			installer.say(
-				"  warn    managed-cleanup %s not written: %v; %s: %v; run: sudo mkdir -p %s && printf '%%s\\n' '{\"cleanupPeriodDays\":%d}' | sudo tee %s >/dev/null",
+				"  warn    managed-cleanup %s not written: %v; %s: %v; run: %s",
 				status.Path,
 				directErr,
 				shellCommandLine(append([]string{"sudo"}, sudoArgs...)...),
 				sudoErr,
-				shellCommandLine(options.ManagedSettingsDir),
-				options.CleanupPeriodDays,
-				shellCommandLine(status.Path),
+				ManagedCleanupFix(options.ManagedSettingsDir, status.Path, options.CleanupPeriodDays),
 			)
 			installer.record("warn", "managed-cleanup "+status.Path+" not written", errors.Join(directErr, sudoErr))
 			return nil

@@ -31,18 +31,45 @@ const contentChars = (c) => typeof c === "string" ? c.length : Array.isArray(c) 
 const tlTarget = (inp) => { const t = String(inp.file_path ?? inp.command ?? inp.pattern ?? inp.path ?? inp.subagent_type ?? inp.skill ?? inp.url ?? inp.query ?? Object.values(inp).find((v) => typeof v === "string") ?? "").replace(/\s+/g, " ").trim();
   return t.length > 100 ? t.slice(0, 99) + "…" : t; };
 const TL_BIG = 20 * 1024; // --timeline: a tool result above this many chars counts as big
-// message.ids already billed by an earlier transcript in this scan (forked/resumed sessions copy them)
-const PRICED_IDS = new Set();
+// Symbols keep request IDs distinct from every message ID string, including matching prefixes.
+const callKey = (o, file, line) => o.message.id || (o.requestId ? Symbol.for(`requestId:${o.requestId}`) : o.uuid || `${file}:${line}`);
 
-export function auditFile(file, opts) {
-  const { tl: TL, since: SINCE, hours: HOURS, project: PROJECT } = opts;
-  const isSub = file.includes(`${path.sep}subagents${path.sep}`);
+// A call held by more than one transcript (one message.id is one API response) is billed once, in
+// its owner: the holder another copy names as its origin (session_id or forkedFrom), else the first
+// holder not marked forkedFrom, in path order. Index before replay so attribution never depends on
+// which transcript is scanned first. A session_id mismatch alone marks no copy.
+export function callOrigins(files) {
+  const holders = new Map();
+  for (const file of files) { let line = 0;
+    try { for (const ln of linesOf(file)) { line++;
+      let o; try { o = JSON.parse(ln); } catch { continue; } // malformed lines are counted by replay
+      if (o.type !== "assistant" || !o.message?.usage) continue;
+      const key = callKey(o, file, line), session = o.sessionId || path.basename(file, ".jsonl"), named = o.forkedFrom?.sessionId || o.session_id;
+      if (!holders.has(key)) holders.set(key, new Map());
+      const byFile = holders.get(key); if (!byFile.has(file)) byFile.set(file, { session, named: new Set(), fork: false });
+      const h = byFile.get(file); if (named && named !== session) h.named.add(named); if (o.forkedFrom) h.fork = true;
+    } } catch (e) { SCAN.readErrors.push(`${file}: ${e.message}`); }
+  }
+  const owners = new Map();
+  for (const [key, byFile] of holders) { if (byFile.size < 2) continue;
+    const hs = [...byFile].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)), named = new Set(hs.flatMap(([, h]) => [...h.named]));
+    const owner = hs.find(([, h]) => !h.fork && named.has(h.session)) || hs.find(([, h]) => !h.fork);
+    owners.set(key, owner ? owner[0] : null); } // null: every holder is a marked fork copy, the origin is outside the scan
+  return owners;
+}
+
+export function sessionOf(file) {
   const segsOf = file.split(path.sep), si = segsOf.lastIndexOf("subagents");
-  const sid = isSub ? segsOf[si - 1] : path.basename(file, ".jsonl");
+  return file.includes(`${path.sep}subagents${path.sep}`) ? segsOf[si - 1] : path.basename(file, ".jsonl");
+}
+
+export function auditFile(file, opts, origins = new Map()) {
+  const { tl: TL, since: SINCE, hours: HOURS, project: PROJECT } = opts;
+  const isSub = file.includes(`${path.sep}subagents${path.sep}`), sid = sessionOf(file);
   let meta = {}; if (isSub) { const mp = file.replace(/\.jsonl$/, ".meta.json");
     try { meta = JSON.parse(fs.readFileSync(mp, "utf8")); } catch (e) { if (e.code !== "ENOENT") SCAN.readErrors.push(`${mp}: ${e.message}`); } }
   const seq = [], usage = new Map(), toolUses = new Map(), seenReads = new Map(), allCmd = new Map();
-  let title = "", aiTitle = "", cwd0 = "", harnessUsd = null, compactPending = false, brief = null;
+  let title = "", aiTitle = "", cwd0 = "", harnessUsd = null, compactPending = false, brief = null, copiedCalls = 0;
   const B = { tests: 0, testFails: 0, testCmd: {}, readsBeforeEdit: 0, firstEditCall: 0, edits: 0, editFiles: {} };
   // --timeline only: each call's issued tools (callId → slots), each slot by tool_use id, the record span
   const tlIssued = new Map(), tlSlot = new Map(); let nLines = 0, nBad = 0, recT0 = Infinity, recT1 = 0, tlBig = 0;
@@ -60,10 +87,12 @@ export function auditFile(file, opts) {
       const u = usageOf(o.message.usage), mdl = o.message.model, wr = writesOf(u);
       if (mdl === "<synthetic>" || !(TOP4(u) + wr.cw5 + wr.cw1)) { SCAN.syntheticCalls++; continue; }
       if (Number.isNaN(ts)) { SCAN.noTimestamp++; continue; }
-      // one API response = one message.id, however many content-block lines repeat its usage
-      const id = o.message.id || o.uuid || `${file}:${nLines}`;
+      // one API response, however many content-block lines repeat its usage
+      // a fork's inherited line carries forkedFrom (its live calls may still name the origin in session_id)
+      const id = callKey(o, file, nLines), fork = o.forkedFrom?.sessionId, current = o.sessionId || sid, owner = origins.get(id);
+      const copied = (!!fork && fork !== current) || (owner !== undefined && owner !== file);
       if (!usage.has(id)) seq.push({ call: id });
-      usage.set(id, { u, m: mdl, ts, effort: o.effort ?? o.perTurnEffort ?? "-" });
+      usage.set(id, { u, m: mdl, ts, effort: o.effort ?? o.perTurnEffort ?? "-", copied });
       for (const b of o.message.content || []) if (b.type === "tool_use") { toolUses.set(b.id, { name: b.name, input: b.input || {}, ts });
         if (TL) { const slot = { name: b.name, target: tlTarget(b.input || {}), chars: null, err: false, dur: 0 }; tlSlot.set(b.id, slot);
           if (!tlIssued.has(id)) tlIssued.set(id, []); tlIssued.get(id).push(slot); } }
@@ -122,7 +151,7 @@ export function auditFile(file, opts) {
         R.toolWaitMs += e.dur; }
       if (e.ts >= SINCE && e.att) { bump2(G.attach, e.att, "n", 1); bump2(G.attach, e.att, "chars", e.chars); bump2(R.attach, e.att, "n", 1); bump2(R.attach, e.att, "chars", e.chars); }
       continue; }
-    const { u, m, ts, effort } = usage.get(e.call), r = RATE(m);
+    const { u, m, ts, effort, copied } = usage.get(e.call), r = RATE(m);
     const tlPush = (usd) => { if (TL) tlRows.push({ n: R.calls, ts, gap: Number.isNaN(lastToolTs) ? null : ts - lastToolTs, ctx, out, usd, tools: tlIssued.get(e.call) || [] }); };
     if (R.firstTs === undefined) R.firstTs = ts;
     const { cw5, cw1, split } = writesOf(u), cwAll = cw5 + cw1;
@@ -143,10 +172,9 @@ export function auditFile(file, opts) {
     const pendChars = pending.reduce((a, p) => a + p.chars, 0), onlyTools = pending.length > 0 && pending.every((p) => p.tool || p.att);
     pending = []; prevOut = out;
     if (ts < SINCE) { prev = { ctx, ts, m }; continue; }
-    // A forked or resumed session copies earlier responses, message.id and all, into a new
-    // transcript: the first transcript scanned bills the response, every copy counts nothing.
-    if (!TL && PRICED_IDS.has(e.call)) { SCAN.copiedCalls++; prev = { ctx, ts, m }; continue; }
-    if (!TL) PRICED_IDS.add(e.call);
+    // A fork marker proves inheritance even without the origin file; otherwise the index
+    // proves that the named origin holds this same call. Copies still shape carried context.
+    if (copied) { SCAN.copiedCalls++; copiedCalls++; prev = { ctx, ts, m }; continue; }
     // An unpriced model is IGNORANCE, not a $0 spend: the call's tokens stay in every token
     // total and its run renders "n/a" in the $ column, exactly as the Codex side does.
     if (!r) { SCAN.unpricedCalls++; bump(SCAN.unpricedModels, m || "(none)", 1); R.unpriced = true;
@@ -198,7 +226,7 @@ export function auditFile(file, opts) {
     R.series.push([Math.round(ctx / 1000), +(usd * 1000).toFixed(1), ...F.map((v) => +(v * 1000).toFixed(1))]);
     prev = { ctx, ts, m };
   }
-  if (!R.calls) return null;
+  if (!R.calls) { if (copiedCalls) SCAN.copiesOnly.push({ file, sid }); return null; }
   if (TL) R.timeline = { rows: tlRows, t0: recT0, t1: recT1, big: tlBig };
   R.distinctRead = seenReads.size;
   for (const l of landed) { const after = R.calls - l.at, rr = RATE(l.m); if (after > 0 && rr) G.landings.push({ usd: l.tok * after * rr.rd / 1e6, tokK: Math.round(l.tok / 1000), after, tool: l.tool, target: String(l.target).slice(0, 90), run: RUNS.length }); }
@@ -211,19 +239,27 @@ export function auditFile(file, opts) {
   return R;
 }
 
-// ---------- run: every transcript in the window, deduped, replayed, then the --session filter and the project-root fold
+// ---------- run: every transcript in the window, deduped, session-selected, replayed, then the project-root fold
 export function collectRuns(opts) {
   const { session: SESSION } = opts;
   SCAN.roots = roots(opts); const files = []; for (const r of SCAN.roots) walk(r, files, opts);
-  const seenKey = new Set();
-  for (const f of files) { const key = f.split(path.sep).slice(-3).join("/"); if (seenKey.has(key)) { SCAN.dupFiles++; continue; } seenKey.add(key);
-    SCAN.files++; let R; try { R = auditFile(f, opts); } catch (e) { SCAN.readErrors.push(`${f}: ${e.stack || e.message}`); continue; } if (R) RUNS.push(R); }
+  const seenKey = new Set(), unique = [];
+  for (const f of files) { const key = f.split(path.sep).slice(-3).join("/"); if (seenKey.has(key)) { SCAN.dupFiles++; continue; } seenKey.add(key); unique.push(f); }
+  const origins = callOrigins(unique);
+  let skipped = 0; const unreadable = [];
+  for (const f of unique) {
+    if (SESSION && !sessionOf(f).startsWith(SESSION)) { skipped++; continue; }
+    SCAN.files++; let R; try { R = auditFile(f, opts, origins); } catch (e) { SCAN.readErrors.push(`${f}: ${e.stack || e.message}`); unreadable.push(`${f}: ${e.message}`); continue; } if (R) RUNS.push(R); }
 
   // --session: the selector a sub-agent-orchestrated run HAS. A chat title exists only on a
   // main chat, so --family alone cannot select a family whose work an agent orchestrated.
-  if (SESSION) { const kept = RUNS.filter((r) => r.sid.startsWith(SESSION)); const dropped = RUNS.length - kept.length;
-    if (!kept.length) die(`--session ${SESSION} matched none of the ${RUNS.length} runs in this window; pass a session-id prefix as it appears in the transcript path`);
-    SCAN.notes.push(`--session ${SESSION}: ${dropped} runs outside that session excluded`); RUNS.length = 0; RUNS.push(...kept); }
+  if (SESSION) {
+    if (!RUNS.length && !SCAN.copiesOnly.length) die(SCAN.files
+      ? `--session ${SESSION} matched ${SCAN.files} transcripts in this window but read no call from them${unreadable.length ? `; unreadable: ${unreadable.join("; ")}` : ""}`
+      : `--session ${SESSION} matched none of the ${unique.length} transcripts in this window; pass a session-id prefix as it appears in the transcript path`);
+    if (!RUNS.length) SCAN.notes.push(`--session ${SESSION}: matched only transcripts holding copied calls (billed to their origin): ${[...new Set(SCAN.copiesOnly.map((r) => r.sid))].join(", ")}`);
+    else SCAN.notes.push(`--session ${SESSION}: ${skipped} transcripts outside that session not read`);
+  }
 
   // fold sub-folder chats onto the shortest enclosing project root (never onto a bare home dir)
   const projRoots = [...new Set(RUNS.map((r) => r.project))].filter((p) => p && !isHome(p)).sort((a, b) => a.length - b.length);

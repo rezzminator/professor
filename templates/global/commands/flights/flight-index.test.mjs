@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -79,8 +79,10 @@ test('lists spread over several lines and block lists parse like inline ones', (
   }
 });
 
-test('frontmatter defects are ERROR lines and exit 1, the index still written', () => {
+test('frontmatter defects are ERROR lines and exit 1, the old index stays untouched', () => {
+  const old = '# old — index\n';
   const dir = flight({
+    'index.md': old,
     '1-a.md': task('1-a', { rating: 'main' }),
     '1-b.md': task('1-c', { files: '[src/b.ts]' }),
     '2-a.md': task('2-a', { needs: '[1-a, diagnosis-e1-reload]', reads: '[0-missing.md]', files: '[src/c.ts]' }),
@@ -96,7 +98,7 @@ test('frontmatter defects are ERROR lines and exit 1, the index still written', 
     assert.match(out, /ERROR 2-a\.md: reads 0-missing\.md, which is not in the directory/);
     assert.match(out, /ERROR 2-b\.md: no frontmatter: the first line is not ---/);
     assert.doesNotMatch(out, /3-a\.md: needs 2-b/, 'an unparsable task is reported once, not again by every task needing it');
-    assert.match(readFileSync(join(dir, 'index.md'), 'utf8'), /\| 3-a \|/);
+    assert.equal(readFileSync(join(dir, 'index.md'), 'utf8'), old);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -128,6 +130,9 @@ test('a file in two tasks collides unless a needs chain orders them', () => {
     const { code, out } = run(dir);
     assert.equal(code, 1, out);
     assert.match(out, /COLLISIONS 1: docs\/lanes\.md: 1-a, 1-b\n/);
+    const index = readFileSync(join(dir, 'index.md'), 'utf8');
+    assert.match(index, /\| 1-a \|/);
+    assert.match(index, /\| 1-b \|/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -176,6 +181,7 @@ test('--check reports the same and leaves the index untouched', () => {
     const { code, out } = run(dir, '--check');
     assert.equal(code, 1, out);
     assert.match(out, /check only, not written/);
+    assert.match(out, /^INDEX .* · 1 tasks · check only, not written · not written: 1 errors$/m);
     assert.match(out, /ERROR 1-a\.md: rating main/);
     assert.equal(readFileSync(join(dir, 'index.md'), 'utf8'), old);
   } finally {
@@ -214,5 +220,117 @@ test('a main-chat task is a row like any other', () => {
     assert.match(readFileSync(join(dir, 'index.md'), 'utf8'), /\| 1-a \|  \| main-chat \|  \|  \| \.claude\/scripts\/dev\.sh \| task 1-a \|/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('input handling preserves the index on errors and accepts valid task lists', async (t) => {
+  const cases = [
+    {
+      name: 'an ERROR keeps the old index',
+      files: { '1-a.md': task('1-a', { rating: 'main' }), 'index.md': '# old — index\n' },
+      code: 1,
+      lines: [/^INDEX .* · 1 tasks · not written: 1 errors$/m, /^ERROR 1-a\.md: rating main is none of /m],
+    },
+    {
+      name: 'a collision alone still writes',
+      files: {
+        '1-a.md': task('1-a', { files: '[docs/lanes.md]' }),
+        '1-b.md': task('1-b', { files: '[docs/lanes.md]' }),
+      },
+      code: 1,
+      writes: true,
+      lines: [/^COLLISIONS 1: docs\/lanes\.md: 1-a, 1-b$/m, /^ERRORS 0$/m],
+    },
+    {
+      name: 'an unparsed task is never a removal',
+      files: { '1-a.md': task('1-a'), '2-b.md': task('2-b', { files: '[src/b.ts]' }) },
+      cleanFirst: true,
+      rewrite: ['2-b.md', 'no frontmatter at all\n'],
+      code: 1,
+      lines: [/^DELTA added none · changed none · removed none$/m, /^ERROR 2-b\.md: no frontmatter: /m],
+    },
+    {
+      name: 'a directory named like a task file',
+      files: { '1-a.md': task('1-a', { needs: '[1-b]' }) },
+      directory: '1-b.md',
+      code: 1,
+      lines: [/^ERROR 1-b\.md: cannot read: EISDIR: illegal operation on a directory, read$/m, /^ERRORS 1$/m],
+    },
+    {
+      name: 'an unreadable task is never a removal',
+      files: {
+        '1-a.md': task('1-a', { needs: '[1-b]' }),
+        '1-b.md': task('1-b', { files: '[src/b.ts]' }),
+      },
+      cleanFirst: true,
+      directory: '1-b.md',
+      code: 1,
+      lines: [/^DELTA added none · changed none · removed none$/m, /^ERROR 1-b\.md: cannot read: EISDIR: /m, /^ERRORS 1$/m],
+    },
+    {
+      name: 'a file listed twice in one task',
+      files: { '1-a.md': task('1-a', { files: '[src/a.ts, src/a.ts]' }) },
+      code: 0,
+      lines: [/^COLLISIONS 0$/m],
+    },
+    ...['—', '–', '-', 'none', '[]'].map((marker) => ({
+      name: `needs: ${marker}`,
+      files: { '1-a.md': task('1-a', { needs: marker, shares: marker, reads: marker }) },
+      code: 0,
+      lines: [/^ERRORS 0$/m, /^\| 1-a \|  \| mechanical \|  \|  \| src\/a\.ts \| task 1-a \|$/m],
+    })),
+    {
+      name: 'files: none',
+      files: { '1-a.md': task('1-a', { files: 'none' }) },
+      code: 0,
+      lines: [/^ERRORS 0$/m, /^\| 1-a \|  \| mechanical \|  \|  \|  \| task 1-a \|$/m],
+    },
+    {
+      name: 'a misnamed task file',
+      files: {
+        '1-a.md': task('1-a'),
+        '1-b.txt': 'any content\n',
+        '2-A.md': 'any content\n',
+        '0-notes.md': 'notes\n',
+        'run.md': 'run\n',
+      },
+      directory: '3-scratch.txt',
+      code: 1,
+      lines: [
+        /^ERROR 1-b\.txt: named like a task file but not \{level\}-\{letter\}\.md$/m,
+        /^ERROR 2-A\.md: named like a task file but not \{level\}-\{letter\}\.md$/m,
+        /^ERRORS 2$/m,
+      ],
+    },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const dir = flight(scenario.files);
+      try {
+        let old = scenario.files['index.md'];
+        if (scenario.cleanFirst) {
+          const first = run(dir);
+          assert.equal(first.code, 0, first.out);
+          old = readFileSync(join(dir, 'index.md'), 'utf8');
+        }
+        if (scenario.rewrite) writeFileSync(join(dir, scenario.rewrite[0]), scenario.rewrite[1]);
+        if (scenario.directory) {
+          rmSync(join(dir, scenario.directory), { force: true });
+          mkdirSync(join(dir, scenario.directory));
+        }
+        const { code, out, err } = run(dir);
+        assert.equal(code, scenario.code, out + err);
+        for (const line of scenario.lines) assert.match(out, line);
+        assert.equal(err, '', 'task-file defects belong on stdout without a stack trace');
+        if (old !== undefined) assert.equal(readFileSync(join(dir, 'index.md'), 'utf8'), old);
+        else if (scenario.writes) {
+          const index = readFileSync(join(dir, 'index.md'), 'utf8');
+          assert.match(index, /\| 1-a \|/);
+          assert.match(index, /\| 1-b \|/);
+        } else if (code === 1) assert.throws(() => readFileSync(join(dir, 'index.md')), { code: 'ENOENT' });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   }
 });

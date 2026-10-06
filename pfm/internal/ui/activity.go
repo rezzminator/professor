@@ -29,12 +29,11 @@ type ActivityClock struct {
 	wake chan struct{}
 }
 
-// NewActivityClock starts a clock already stamped: typing `pfm ls` IS the
-// first interaction, so the picker opens at full cadence rather than climbing
-// out of a backoff it never earned.
+// NewActivityClock opens stamped so the cadence starts at base. No key has
+// been pressed yet, so nothing is waiting on Wake.
 func NewActivityClock(now time.Time) *ActivityClock {
 	clock := &ActivityClock{wake: make(chan struct{}, 1)}
-	clock.Stamp(now)
+	clock.lastNS.Store(now.UnixNano())
 	return clock
 }
 
@@ -51,7 +50,7 @@ func (clock *ActivityClock) Stamp(now time.Time) {
 }
 
 // Wake is the channel one token lands on per interaction burst. The refresh
-// stream owns the staleness decision (it alone knows when it last finished a
+// stream owns the staleness decision (it alone knows when it last attempted a
 // pass), so a key that finds a fresh fleet costs it one channel receive and no
 // work. A nil clock returns a nil channel, which blocks forever in a select.
 func (clock *ActivityClock) Wake() <-chan struct{} {

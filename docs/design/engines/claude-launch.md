@@ -241,11 +241,11 @@ Reads each live `cc-` chat's Claude argv from `/proc`, decodes it with `claudela
 | Verdict | Meaning |
 | --- | --- |
 | `INJECTED` | argv carries `--settings` with `outputStyle:"default"` and the registry's hook set, plus the prompt material the account's `systemPrompt` names (`--system-prompt-file`, or `env.CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT` inside the `--settings` payload) |
-| `VIOLATION` | a fresh launch without the registry payload — a spawn site bypassed `Render` |
-| `PREDATES-LAYER` | the process started before the current registry; reload to carry it |
+| `VIOLATION` | a fresh launch without the registry payload, or professor prompt material missing because the composed prompt is unavailable; that reason names the resolve error and blames no spawn site |
+| `PREDATES-LAYER` | the process started before the current spawn door, with its age named, or its hook set differs from the registry at any age; reload to carry it |
 | `ROLE-OK` / `ROLE-MISMATCH` / `ROLE-CHECK-FAILED` | a seat prompt file against its role |
 
-Account attribution matches the process environment's `CLAUDE_CONFIG_DIR` exactly to a roster entry before grading against that account's effective settings. A missing or unmatched value is graded against the primary account with `account unmatched; graded against primary`. An unreadable environment reports `account environment unreadable; graded against primary`. No account is attributed to the store.
+Account attribution matches the process environment's `CLAUDE_CONFIG_DIR` to a roster entry by physical path, falling back to the cleaned spelling when either path cannot be resolved, before grading against that account's effective settings. A trailing slash or a symlinked spelling still matches. An empty roster grades against the primary account with no note. A missing or unmatched value is graded against the primary account with `account unmatched; graded against primary`. An unreadable environment reports `account environment unreadable; graded against primary`. No account is attributed to the store.
 
 Values set through the `--settings` `env` block are read from argv, never from `/proc/{pid}/environ`: Claude writes them into its environment after exec. A probe that cannot run reports `CHECK FAILED to run … — live chats unaudited`, never "no chats".
 

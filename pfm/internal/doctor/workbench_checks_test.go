@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/opencodegen"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/professor"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -66,11 +67,11 @@ func TestWorkbenchDoctorMirrors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				want += fmt.Sprintf(
+				want = fmt.Sprintf(
 					"doctor: workbench %s codex mirror STALE: %s — the next launch there rebuilds it\n",
 					dir,
-					result.Problems[0],
-				)
+					strings.Join(result.Problems, "; "),
+				) + want
 				wantWarnings = 1
 			case "broken":
 				writeDoctorBenchFile(t, filepath.Join(dir, ".claude", "codex-build.json"), "{")
@@ -78,7 +79,7 @@ func TestWorkbenchDoctorMirrors(t *testing.T) {
 				if err == nil {
 					t.Fatal("broken fixture did not fail")
 				}
-				want += fmt.Sprintf("doctor: workbench %s codex mirror BROKEN: %v\n", dir, err)
+				want = fmt.Sprintf("doctor: workbench %s codex mirror BROKEN: %v\n", dir, err)
 				wantFailures = 1
 			case "invalid":
 				writeDoctorBenchFile(t, paths.WorkbenchManifest(dir), `{"prompt":""}`)
@@ -160,7 +161,7 @@ func TestWorkbenchDoctorOutsideAndUnreadable(t *testing.T) {
 			}
 			var stdout bytes.Buffer
 			warnings, failures := printWorkbenchDoctor(&stdout, root, home)
-			want := ""
+			want := "doctor: workbench none — not inside a Professor project\n"
 			wantFailures := 0
 			if broken {
 				_, _, err := professor.ResolveProjectRoot(root)
@@ -187,5 +188,103 @@ func TestWorkbenchDoctorRunWiring(t *testing.T) {
 	want := fmt.Sprintf("doctor: workbench %s FAILED: %s: \"prompt\" is required\n", dir, paths.WorkbenchManifest(dir))
 	if code != 3 || !strings.Contains(stdout.String(), want) {
 		t.Fatalf("doctor code=%d missing %q: stdout=%s stderr=%s", code, want, stdout.String(), stderr.String())
+	}
+}
+
+func TestWorkbenchDoctorMirrorProblemSplit(t *testing.T) {
+	for _, scenario := range []string{"Codex rebuildable", "OpenCode failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, dir, home := doctorBenchFixture(t)
+			var want string
+			wantFailures := 0
+			switch scenario {
+			case "Codex rebuildable":
+				source := filepath.Join(dir, ".claude", "agents", "old.md")
+				writeDoctorBenchFile(t, source, "---\nname: old\ndescription: Old.\n---\nOld.\n")
+				result, err := codexgen.Build(codexgen.Options{Root: dir, Home: home})
+				if err != nil || !result.OK {
+					t.Fatalf("seed=%#v err=%v", result, err)
+				}
+				if err := os.Remove(source); err != nil {
+					t.Fatal(err)
+				}
+				writeDoctorBenchFile(t, filepath.Join(dir, "CLAUDE.md"), "Edited scribe.\n")
+				want = fmt.Sprintf(
+					"doctor: workbench %s codex mirror STALE: STALE %s; ORPHAN %s — the next launch there rebuilds it\n",
+					dir,
+					filepath.Join(dir, "AGENTS.md"),
+					filepath.Join(dir, ".codex", "agents", "old.toml"),
+				) +
+					fmt.Sprintf(
+						"doctor: workbench %s ok · engines claude,codex · prompt %s\n",
+						dir,
+						filepath.Join(dir, ".professor", "scribe.md"),
+					)
+			case "OpenCode failure":
+				writeDoctorBenchFile(
+					t,
+					paths.WorkbenchManifest(dir),
+					`{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"xhigh","engines":["claude","opencode"]}`,
+				)
+				source := filepath.Join(dir, ".claude", "commands", "local.md")
+				writeDoctorBenchFile(t, source, "---\ndescription: Local.\n---\nLocal.\n")
+				result, err := opencodegen.Compile(
+					opencodegen.Options{Root: dir, Home: home, Mode: opencodegen.ModeBuild},
+				)
+				if err != nil || !result.OK {
+					t.Fatalf("seed=%#v err=%v", result, err)
+				}
+				writeDoctorBenchFile(t, source, "---\ndescription: Local.\n---\nEdited.\n")
+				writeDoctorBenchFile(
+					t,
+					filepath.Join(dir, ".claude", "commands", "hand.md"),
+					"---\ndescription: Hand.\n---\nHand.\n",
+				)
+				writeDoctorBenchFile(t, filepath.Join(dir, ".opencode", "command", "hand.md"), "hand\n")
+				conflict := "CONFLICT " + filepath.Join(
+					dir,
+					".opencode",
+					"command",
+					"hand.md",
+				) + " — exists without a generated marker; not touching it"
+				stale := "STALE " + filepath.Join(dir, ".opencode", "command", "local.md")
+				want = fmt.Sprintf(
+					"doctor: workbench %s opencode mirror FAILED: %s — the next launch there fails; fix it, then run pfm opencode build %s\n",
+					dir,
+					conflict,
+					dir,
+				) +
+					fmt.Sprintf(
+						"doctor: workbench %s opencode mirror STALE: %s — rebuilt by pfm opencode build %s once the failures are fixed\n",
+						dir,
+						stale,
+						dir,
+					)
+				wantFailures = 1
+			}
+			var stdout bytes.Buffer
+			warnings, failures := printWorkbenchDoctor(&stdout, root, home)
+			if stdout.String() != want || warnings != 1 || failures != wantFailures {
+				t.Fatalf(
+					"warnings=%d failures=%d output=%q, want 1 %d %q",
+					warnings,
+					failures,
+					stdout.String(),
+					wantFailures,
+					want,
+				)
+			}
+		})
+	}
+}
+
+func TestWorkbenchDoctorProjectWithoutBench(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeDoctorBenchFile(t, professor.BaselinePath(root), "{}")
+	var stdout bytes.Buffer
+	warnings, failures := printWorkbenchDoctor(&stdout, root, home)
+	want := "doctor: workbench none under " + root + "\n"
+	if stdout.String() != want || warnings != 0 || failures != 0 {
+		t.Fatalf("warnings=%d failures=%d output=%q, want %q", warnings, failures, stdout.String(), want)
 	}
 }

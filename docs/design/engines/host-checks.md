@@ -14,7 +14,7 @@
 
 `Severity` is a string; `Block` renders `BLOCK` and `Warn` renders `WARN`. `Row` holds `Severity`, stable `Check`, absolute `Path`, `Problem` and `Fix`. `Row.Line()` renders `{severity} {check} {path} — {problem}`.
 
-`Env` holds `Home`, `Store`, `ConfigPath`, `LegacyConfigDir`, `StateDB`, `CacheDB`, `ManagedRoot`, `ConfigExplicit`, `HarvesterCacheDir`, `MCPPort`, `Accounts` and `Now`. `EnvFor(runtime config.Runtime, now time.Time) Env` derives it from the loaded runtime: store and managed root through installer path functions, legacy config through `config.LegacyConfigDir`.
+`Env` holds `Home`, `Store`, `ConfigPath`, `CloneConfigPath`, `LegacyConfigDir`, `StateDB`, `CacheDB`, `ManagedRoot`, `ConfigExplicit`, `HarvesterCacheDir`, `MCPPort`, `Accounts` and `Now`. `EnvFor(runtime config.Runtime, now time.Time) Env` derives it from the loaded runtime: store and managed root through installer path functions, legacy config through `config.LegacyConfigDir`. `CloneConfigPath` is the recorded clone's `pfm.config.json`, or empty when the marker cannot resolve.
 
 `Detector` holds a stable `Check` and `Detect func(Env) ([]Row, error)`. `Detectors() []Detector` returns the ordered registry; `RunAll(env Env) []Row` concatenates findings; `Count(rows []Row, severity Severity) int` counts one severity. The installer package does not import hostcheck; hostcheck can use installer readers.
 
@@ -71,11 +71,13 @@ The table gives one row per detector; exact problems and fixes follow under each
 
 **Severity:** BLOCK
 
-Looks at `{legacy}/pfm.config.json`, `{legacy}/config.json`; skipped when ConfigExplicit.
+Looks at `{legacy}/pfm.config.json`, `{legacy}/config.json`. With `ConfigExplicit`, only the explicit config is checked when its physical directory is `{legacy}` or below it; an explicit config elsewhere produces no rows.
 
 Problem: `legacy pfm config outside the clone`.
 
 Fix: target `{cfg}` absent: `mv {path} {cfg}`; present: `diff {path} {cfg} && rm {path}`.
+
+An explicit config inside the legacy config dir gets one row at its path with problem `explicit --config inside the legacy config dir`. Its target is the recorded clone's `pfm.config.json`: absent target, `mv {path} {clone}/pfm.config.json`; present target, `diff {path} {clone}/pfm.config.json && rm {path}`; unknown clone, `move {path} into the clone as pfm.config.json, then run pfm install from the clone`. An unreadable explicit config produces the `UNREADABLE` row.
 
 ### legacy-harvester-config
 
@@ -243,6 +245,8 @@ Fix: `check it names the same oauthAccount as {acct1}/.claude.json, then rm {pat
 Looks at each account × shared entry: a real file or dir at `{acct}/{entry}`, or a link to existing data outside the store; skipped for an account `account-is-store` reports.
 
 Problem: `{entry} is a real {dir|file}; it belongs in the store`, or `{entry} links to {target} outside the store; its data belongs in the store`.
+
+An account whose config dir is a regular file gets one row for the account instead of its entries' rows, path `{acct}`, problem `account config dir is a file, not a directory`, fix `mv {acct} {acct}.bak  # pfm install then creates the account dir`.
 
 Fix: the entry-specific rule below. For a link, the merge reads its target's data and the final `rm` removes only the link.
 

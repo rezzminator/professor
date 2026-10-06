@@ -59,6 +59,7 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 			if err := os.MkdirAll(accountHome, 0o700); err != nil {
 				t.Fatal(err)
 			}
+			writeHarvestCodexAuth(t, accountHome)
 			source := filepath.Join(home, "source.txt")
 			if err := os.WriteFile(source, []byte("the fixture answer is forty-two\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -164,6 +165,7 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 	if err := os.MkdirAll(accountHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeHarvestCodexAuth(t, accountHome)
 	good := filepath.Join(home, "good.txt")
 	if err := os.WriteFile(good, []byte("load-bearing local evidence\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -287,6 +289,7 @@ func TestHarvestAskAcceptsFiftySourcesAndFlagsAfterPositionals(t *testing.T) {
 	if err := os.MkdirAll(accountHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeHarvestCodexAuth(t, accountHome)
 	promptCapture := filepath.Join(home, "prompt.txt")
 	binary := filepath.Join(home, "codex-fixture")
 	script := "#!/bin/sh\ncat > \"$PFM_ASK_PROMPT\"\n" + askJSONReply(pfmengine.Codex, "boundary answer")
@@ -328,6 +331,7 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 	if err := os.MkdirAll(accountHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeHarvestCodexAuth(t, accountHome)
 	binary := filepath.Join(home, "codex-fixture")
 	if err := testjail.WriteExecutable(
 		binary,
@@ -449,4 +453,15 @@ func askHarvester(home string) pfmconfig.HarvesterConfig {
 	harvester := pfmconfig.DefaultHarvester()
 	harvester.Cache.Dir = filepath.Join(home, "cache")
 	return harvester
+}
+
+func writeHarvestCodexAuth(t *testing.T, home string) {
+	t.Helper()
+	if err := os.WriteFile(
+		filepath.Join(home, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 }

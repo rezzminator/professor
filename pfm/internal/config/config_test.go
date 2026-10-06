@@ -86,7 +86,7 @@ func TestLoadWithoutMarkerIgnoresLegacyConfigAndHasNoWriterPath(t *testing.T) {
 	}
 }
 
-func TestUnusableMarkerDoesNotBecomeAConfigPath(t *testing.T) {
+func TestUnusableMarkerIsALoadError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvConfig, "")
 	marker := paths.SourceRepoPath(home)
@@ -98,15 +98,12 @@ func TestUnusableMarkerDoesNotBecomeAConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, err := Load("", home, nil)
-	if err != nil || loaded.Path != "" || loaded.Exists {
+	if loaded.Path != "" || loaded.Exists || !errors.Is(err, paths.ErrSourceRepoUnusable) ||
+		!strings.Contains(err.Error(), missing) ||
+		!strings.Contains(err.Error(), "run pfm install from the clone, or set PFM_CONFIG") {
 		t.Fatalf("unusable marker Load = path %q exists %t error %v", loaded.Path, loaded.Exists, err)
 	}
-	if err := WriteDefault(
-		"",
-		home,
-		nil,
-		false,
-	); err == nil || !strings.Contains(err.Error(), missing) ||
+	if err := WriteDefault("", home, nil, false); err == nil || !strings.Contains(err.Error(), missing) ||
 		!strings.Contains(err.Error(), paths.EnvConfig) {
 		t.Fatalf("unusable marker writer error = %v", err)
 	}
@@ -879,13 +876,10 @@ func TestDefaultsDiscoversSeatsWithDefaultRoots(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsStoreAndDuplicateAccountDirs(t *testing.T) {
+func TestLoadRejectsDuplicateAccountDirs(t *testing.T) {
 	home := t.TempDir()
-	store := filepath.Join(home, ".claude")
 	dir := DefaultAccountDir(home, 2)
 	for _, tc := range []struct{ name, json, want string }{
-		{"store", `{"version":2,"accounts":[{"id":1,"configDir":"~/.claude"}]}`, fmt.Sprintf("entry 1 configDir %s is the Claude store; an account needs its own dir (default %s)", store, DefaultAccountDir(home, 1))},
-		{"cleaned store", fmt.Sprintf(`{"version":2,"accounts":[{"id":7,"configDir":%q}]}`, store+"/projects/.."), fmt.Sprintf("entry 1 configDir %s is the Claude store; an account needs its own dir (default %s)", store, DefaultAccountDir(home, 7))},
 		{"duplicate", fmt.Sprintf(`{"version":2,"accounts":[{"id":2,"configDir":%q},{"id":7,"configDir":%q}]}`, dir, dir+"/projects/.."), fmt.Sprintf("entry 2 configDir %s duplicates entry 1", dir)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

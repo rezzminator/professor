@@ -934,3 +934,23 @@ func TestPickerWorkbenchRefreshNamesUnresolvableRoot(t *testing.T) {
 		t.Fatalf("cached faults = %#v, %v; want one naming %s", faults, err, looped)
 	}
 }
+
+func TestPickerWorkbenchRefreshCachesDeletedDirectory(t *testing.T) {
+	root, dir, _, values := pickerWorkbenchFixture(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if err := os.Remove(cwd); err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshWorkbenches(scanRequest{RepoRoots: []string{root}}, nil); err != nil {
+		t.Fatalf("refresh with a deleted discovery directory: %v", err)
+	}
+	benches, faults, err := workbench.ReadCache(paths.WorkbenchCache(values))
+	if err != nil || len(benches) != 1 || benches[0].Dir != dir {
+		t.Fatalf("cached benches = %#v, %v; want %s", benches, err, dir)
+	}
+	if len(faults) != 1 || faults[0].Root != "." || faults[0].Path != "." ||
+		!strings.Contains(faults[0].Error(), "read workbench discovery directory") {
+		t.Fatalf("cached faults = %#v; want one naming the unreadable discovery directory", faults)
+	}
+}

@@ -116,6 +116,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 			return 1
 		}
 	}
+	defer config.UseConfigPath(runtime.Config.Path)()
 	runtime.Version = version
 	finishLog := openActivityLog(args, runtime, stderr)
 	defer func() { finishLog(exitCode) }()

@@ -301,7 +301,11 @@ test("--session selects one session and refuses a prefix that matches nothing", 
   assert.match(ok.out, /--session sess-main/);
   const bad = run(["--since", "99999d", "--root", CLAUDE_ROOT, "--session", "no-such-session"]);
   assert.notEqual(bad.code, 0, "a selector that matched nothing must not report a clean $0");
-  assert.match(bad.err, /matched none of the/);
+  assert.equal(bad.err.trim(), "token-audit: --session no-such-session matched none of the 5 transcripts in this window; pass a session-id prefix as it appears in the transcript path");
+  // a selector that matched a transcript holding no call yet names its match, never "matched none"
+  const quiet = run(["--since", "99999d", "--root", priceRoot("quiet", { "sess-q": [{ type: "user", timestamp: "2026-09-20T09:00:00.000Z", message: { role: "user", content: "hi" } }] }), "--session", "sess-q"]);
+  assert.notEqual(quiet.code, 0, "a selector whose transcripts hold no call must not report a clean $0");
+  assert.equal(quiet.err.trim(), "token-audit: --session sess-q matched 1 transcripts in this window but read no call from them");
 });
 
 test("an unreadable root is a failure to look, not an empty result", () => {
@@ -493,19 +497,22 @@ function priceRoot(name, sessions) {
   const root = fs.mkdtempSync(path.join(TMP, `price-${name}-`)), dir = path.join(root, "-tmp-price-proj");
   fs.mkdirSync(dir, { recursive: true });
   for (const [sid, calls] of Object.entries(sessions)) {
-    const lines = [{ type: "custom-title", customTitle: `price ${sid}`, cwd: "/tmp/price-proj" }];
+    const lines = [];
     calls.forEach((c, i) => {
+      if (c.type && c.type !== "assistant") { lines.push(c); return; }
       const blocks = c.blocks || [{ type: "text", text: "step" }], reqs = c.reqs || blocks.map(() => `req-${c.id}`);
-      blocks.forEach((b, k) => lines.push({ type: "assistant", timestamp: `2026-09-20T09:0${i}:00.000Z`, cwd: "/tmp/price-proj", requestId: reqs[k], effort: "medium",
+      blocks.forEach((b, k) => lines.push({ type: "assistant", timestamp: c.timestamp || `2026-09-20T09:0${i}:00.000Z`, cwd: "/tmp/price-proj", requestId: reqs[k], effort: "medium",
+        uuid: c.uuid || `${sid}-${i}-${k}`, sessionId: c.sessionId || sid, session_id: c.session_id, forkedFrom: c.forkedFrom,
         message: { id: c.id, model: c.model, content: [b], usage: c.usage } }));
     });
+    lines.push({ type: "custom-title", customTitle: `price ${sid}`, cwd: "/tmp/price-proj" });
     fs.writeFileSync(path.join(dir, `${sid}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   }
   return root;
 }
-function priced(root) {
+function priced(root, extra = []) {
   const js = path.join(TMP, `price-${Math.random().toString(36).slice(2)}.json`);
-  const r = run(["--since", "99999d", "--root", root, "--out", js]);
+  const r = run(["--since", "99999d", "--root", root, "--out", js, ...extra]);
   assert.equal(r.code, 0, r.err);
   return { ...r, j: JSON.parse(fs.readFileSync(js, "utf8")) };
 }
@@ -556,14 +563,119 @@ test("pricing: a response with zero top-level counts is priced from usage.iterat
   assert.doesNotMatch(out, /synthetic/);
 });
 
-test("pricing: a response copied into a forked session's transcript is billed once", () => {
-  const shared = { id: "msg-shared", model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } };
-  const own = (id, n) => ({ id, model: "claude-sonnet-5", usage: { input_tokens: n, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } });
-  const { j, out } = priced(priceRoot("fork", { "sess-a": [shared, own("msg-a", 2000)], "sess-b": [shared, own("msg-b", 3000)] }));
+function forkPriceRoot(copiesOnly = false, forked = true) {
+  const shared = { id: "msg-shared", uuid: "uuid-shared", session_id: "sess-b", timestamp: "2026-09-20T09:00:00.000Z",
+    model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } };
+  const own = (id, n, extra = {}) => ({ id, model: "claude-sonnet-5", usage: { input_tokens: n, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, ...extra });
+  const marker = { type: "history-suppression", sessionId: "sess-a", cause: "fork_inherit", ts: "2026-09-20T09:00:00.000Z" };
+  // As Claude Code writes a fork: the inherited line carries forkedFrom, and the fork's own live call still names the origin in session_id.
+  const inherited = forked ? { ...shared, forkedFrom: { sessionId: "sess-b", messageUuid: "uuid-shared" } } : shared;
+  return priceRoot("fork", { "sess-a": [...(forked ? [marker] : []), inherited, own("msg-a", 2000, forked ? { session_id: "sess-b" } : {})], "sess-b": [shared, own("msg-b", 3000)],
+    ...(copiesOnly ? { "sess-c": [shared] } : {}) });
+}
+
+test("pricing: a response copied into a forked session's transcript is billed once, to its origin even when the fork sorts first", () => {
+  const { j, out } = priced(forkPriceRoot());
   // (1000 + 2000 + 3000)×$2 + 100×$10 = $0.013; counting the copy again would read $0.016
   cols(j, { in: 0.012, out: 0.001 });
   assert.equal(j.calls, 3);
-  assert.match(out, /^data gaps:.*1 calls copied from another transcript/m);
+  near(j.runs.find((r) => r.sid === "sess-b").usd, 0.009, "origin spend");
+  near(j.runs.find((r) => r.sid === "sess-a").usd, 0.004, "fork spend");
+  assert.equal(out.split("\n").find((l) => l.startsWith("data gaps:")),
+    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once, to the transcript that made them");
+});
+
+test("pricing: a resumed copy is identified by the same call in its named origin, without a fork marker", () => {
+  const { j } = priced(forkPriceRoot(false, false));
+  near(j.runs.find((r) => r.sid === "sess-b").usd, 0.009, "origin spend");
+  near(j.runs.find((r) => r.sid === "sess-a").usd, 0.004, "resumed spend");
+  assert.equal(j.scan.copiedCalls, 1);
+});
+
+test("pricing: a call two transcripts hold with no origin evidence is billed once, to the first in path order", () => {
+  // Forked sub-agents copy their shared prefix with neither session_id nor forkedFrom; a message.id is one API response.
+  const call = { id: "msg-dup", sessionId: "sess-p", model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } };
+  const { j } = priced(priceRoot("dup", { "agent-y": [call], "agent-x": [call] }));
+  cols(j, { in: 0.002 });
+  assert.equal(j.calls, 1);
+  assert.equal(j.scan.copiedCalls, 1);
+  assert.deepEqual(j.runs.map((r) => r.sid), ["agent-x"]);
+});
+
+test("pricing: a live session_id mismatch alone never marks a copy", () => {
+  const { j } = priced(priceRoot("live", { "sess-live": [{ id: "msg-live", session_id: "unrelated-session", model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 0 } }] }));
+  cols(j, { in: 0.002 });
+  assert.equal(j.calls, 1);
+  assert.equal(j.scan.copiedCalls, 0);
+});
+
+test("--session: totals and scan count only the selected session", () => {
+  const root = priceRoot("two", {
+    "sess-a": [{ id: "msg-a", model: "claude-sonnet-5", usage: { input_tokens: 2000000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }],
+    "sess-b": [{ id: "msg-b", model: "claude-sonnet-5", usage: { input_tokens: 3000000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }],
+  });
+  const { j, out } = priced(root, ["--session", "sess-a"]);
+  assert.equal(j.total, 4.0);
+  assert.equal(j.usd.in, 4.0);
+  assert.equal(j.calls, 1);
+  assert.deepEqual(j.runs.map((r) => r.sid), ["sess-a"]);
+  assert.equal(j.scan.files, 1);
+  assert.match(out, /== 1 · TOTAL \$4\.00/);
+  assert.equal(out.split("\n").find((l) => l.startsWith("data gaps:")),
+    "data gaps: --session sess-a: 1 transcripts outside that session not read");
+});
+
+test("--session: a transcript holding only copies exits zero and names their origin", () => {
+  const { j, out } = priced(forkPriceRoot(true), ["--session", "sess-c"]);
+  assert.equal(j.runs.length, 0);
+  assert.equal(j.scan.copiesOnly.length, 1);
+  assert.equal(j.scan.copiesOnly[0].sid, "sess-c");
+  assert.equal(out.split("\n").find((l) => l.startsWith("data gaps:")),
+    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once, to the transcript that made them · 1 transcripts hold only copied calls: sess-c · --session sess-c: matched only transcripts holding copied calls (billed to their origin): sess-c");
+});
+
+test("--timeline: a fork or resumed file prices only its own call, like the default report", () => {
+  for (const forked of [true, false]) {
+    const root = forkPriceRoot(false, forked), report = priced(root), file = path.join(root, "-tmp-price-proj", "sess-a.jsonl");
+    const r = runTl(["--timeline", file]);
+    assert.equal(r.code, 0, r.err);
+    assert.match(tlHeader(r.out), /1 calls .*\$0\.0040/);
+    assert.equal(tlRows(r.out).length, 1);
+    near(Number(tlHeader(r.out).match(/\$([0-9.]+)/)[1]), report.j.runs.find((x) => x.sid === "sess-a").usd, "timeline equals fork run");
+  }
+});
+
+test("--timeline: a forkedFrom mark proves an inherited call even when its origin file is absent", () => {
+  const root = forkPriceRoot(), dir = path.join(root, "-tmp-price-proj");
+  fs.renameSync(path.join(dir, "sess-b.jsonl"), path.join(dir, "origin.hidden"));
+  const r = runTl(["--timeline", path.join(dir, "sess-a.jsonl")]);
+  assert.equal(r.code, 0, r.err);
+  assert.match(tlHeader(r.out), /1 calls .*\$0\.0040/);
+});
+
+test("--timeline: copied-call gaps belong to each named file", () => {
+  const root = forkPriceRoot(), dir = path.join(root, "-tmp-price-proj");
+  const r = runTl(["--timeline", path.join(dir, "sess-a.jsonl"), "--timeline", path.join(dir, "sess-b.jsonl")]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.out.split("\n").filter((l) => l.startsWith("data gaps:")), [
+    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once, to the transcript that made them", "data gaps: none",
+  ]);
+});
+
+test("pricing: streamed lines without message.id share the namespaced requestId call key", () => {
+  const { j } = priced(priceRoot("request", { s: [{ model: "claude-sonnet-5", blocks: [{ type: "thinking", thinking: "" }, { type: "text", text: "step" }],
+    reqs: ["req-s1", "req-s1"], usage: { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }] }));
+  assert.equal(j.calls, 1);
+  cols(j, { in: 0.002 });
+});
+
+test("pricing: a requestId key never collides with a message.id string", () => {
+  const { j } = priced(priceRoot("request-namespace", { s: [
+    { reqs: ["req-s1"], model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 0 } },
+    { id: "requestId:req-s1", model: "claude-sonnet-5", usage: { input_tokens: 2000, output_tokens: 0 } },
+  ] }));
+  assert.equal(j.calls, 2);
+  cols(j, { in: 0.006 });
 });
 
 test("pricing: content-block lines of one message.id are one call even when a line lacks its requestId", () => {

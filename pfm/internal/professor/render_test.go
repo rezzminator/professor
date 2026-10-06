@@ -196,6 +196,14 @@ func TestRenderScaffoldSkipsAMissingLocal(t *testing.T) {
 	if err := os.Remove(claudeMDPath(target)); err != nil {
 		t.Fatal(err)
 	}
+	baseline, err := Load(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline.Files["docs/guide.md"] = baseline.Files[ClaudeInstructionsFile]
+	if err := Save(target, baseline); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout bytes.Buffer
 	rendered, left, err := RenderScaffold(source, target, &stdout)
@@ -207,6 +215,78 @@ func TestRenderScaffoldSkipsAMissingLocal(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "SKIP CLAUDE.md: missing") {
 		t.Fatalf("stdout = %q, want SKIP missing", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "SKIP docs/guide.md: missing") {
+		t.Fatalf("stdout = %q, want SKIP missing when the parent does not exist", stdout.String())
+	}
+}
+
+func TestRenderScaffoldRefusesLinkedLocals(t *testing.T) {
+	for _, local := range []string{ClaudeInstructionsFile, "docs/guide.md"} {
+		t.Run(local, func(t *testing.T) {
+			source := newRenderFixtureStore(t)
+			target := scaffoldedRenderTarget(t, source)
+			writeRenderManifest(t, target, `{"PROJECT_NAME":"Acme"}`)
+			baseline, err := Load(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pin := baseline.Files[ClaudeInstructionsFile]
+			templateRaw, err := os.ReadFile(filepath.Join(source, "templates", filepath.FromSlash(pin.Template)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			outside := t.TempDir()
+			external := filepath.Join(outside, filepath.Base(local))
+			original := addScaffoldMarker(local, pin.Template, pin.PinnedSHA, templateRaw)
+			if err := os.WriteFile(external, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			link := claudeMDPath(target)
+			linkTarget := external
+			wantError := "render CLAUDE.md: a symlink, refused — pfm init --render writes only regular files"
+			if local == ClaudeInstructionsFile {
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				baseline.Files[local] = pin
+				if err := Save(target, baseline); err != nil {
+					t.Fatal(err)
+				}
+				link = filepath.Join(target, "docs")
+				linkTarget = outside
+				wantError = "render docs/guide.md: resolves outside the project"
+			}
+			if err := os.Symlink(linkTarget, link); err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			_, _, err = RenderScaffold(source, target, &stdout)
+			if err == nil || err.Error() != wantError {
+				t.Errorf("RenderScaffold() err=%v, want %q; stdout=%q", err, wantError, stdout.String())
+			}
+			if info, statErr := os.Lstat(link); statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("link was changed: info=%v error=%v", info, statErr)
+			}
+			if after, readErr := os.ReadFile(external); readErr != nil || !bytes.Equal(after, original) {
+				t.Errorf("external file changed: bytes=%q error=%v", after, readErr)
+			}
+			if local != ClaudeInstructionsFile {
+				assertUnchanged(t, target)
+			}
+		})
+	}
+}
+
+func TestSubstituteTokensOnePass(t *testing.T) {
+	for range 100 {
+		got, count := substituteTokens([]byte("{OWNER}PROJECT_NAME} {PROJECT_NAME}"), map[string]string{
+			"OWNER": "{", "PROJECT_NAME": "Acme",
+		})
+		if string(got) != "{PROJECT_NAME} Acme" || count != 2 {
+			t.Fatalf("substituteTokens() = %q, %d; want %q, 2", got, count, "{PROJECT_NAME} Acme")
+		}
 	}
 }
 

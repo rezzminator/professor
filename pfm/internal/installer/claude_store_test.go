@@ -424,7 +424,7 @@ func TestWireClaudeStore(t *testing.T) {
 }
 
 func TestInspectClaudeStore(t *testing.T) {
-	for _, scenario := range []string{"missing-store", "missing-account", "missing-link", "elsewhere", "relative-link", "real", "account-store", "unreadable-store", "unreadable-account", "unreadable-link"} {
+	for _, scenario := range []string{"missing-store", "missing-account", "missing-link", "elsewhere", "relative-link", "real", "account-store", "unreadable-store", "unreadable-account", "account-not-dir"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
 			store := ClaudeStore(home)
@@ -494,7 +494,7 @@ func TestInspectClaudeStore(t *testing.T) {
 				if err := os.Symlink(account, account); err != nil {
 					t.Fatal(err)
 				}
-			case "unreadable-link":
+			case "account-not-dir":
 				if err := os.RemoveAll(account); err != nil {
 					t.Fatal(err)
 				}
@@ -531,8 +531,13 @@ func TestInspectClaudeStore(t *testing.T) {
 				if acct.State != "unreadable" || !errors.Is(acct.Err, syscall.ELOOP) {
 					t.Fatalf("account=%+v", acct)
 				}
+			case "account-not-dir":
+				if acct.ID != 1 || acct.Dir != account || acct.State != "not-dir" || acct.Links != nil ||
+					acct.Err != nil {
+					t.Fatalf("account=%+v", acct)
+				}
 			default:
-				want := map[string]string{"missing-link": "missing", "elsewhere": "elsewhere", "relative-link": "ok", "real": "real", "unreadable-link": "unreadable"}[scenario]
+				want := map[string]string{"missing-link": "missing", "elsewhere": "elsewhere", "relative-link": "ok", "real": "real"}[scenario]
 				if len(acct.Links) != len(StoreEntries) || acct.Links[0].State != want {
 					t.Fatalf("links=%+v want=%s", acct.Links, want)
 				}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
@@ -146,8 +147,8 @@ func printUnreadCache(stdout io.Writer, openErr error, path string, tally *docto
 	var mismatch *fleetdb.SchemaMismatchError
 	switch {
 	case errors.As(openErr, &mismatch):
-		printSchemaWarning(stdout, mismatch, tally)
-		return mismatch.Error()
+		printSchemaWarning(stdout, openErr, mismatch, tally)
+		return schemaMismatchText(openErr, mismatch)
 	case errors.Is(openErr, fleetdb.ErrAbsent):
 		fmt.Fprintf(stdout, "doctor: database %s absent — the first pfm command that needs it creates it\n", path)
 		return ""
@@ -176,10 +177,28 @@ func sharedUnread(degraded error) string {
 	case degraded == nil, errors.Is(degraded, fleetdb.ErrAbsent):
 		return ""
 	case errors.As(degraded, &mismatch):
-		return mismatch.Error()
+		return schemaMismatchText(degraded, mismatch)
 	default:
 		return "could not look: " + degraded.Error()
 	}
+}
+
+func schemaMismatchText(original error, mismatch *fleetdb.SchemaMismatchError) string {
+	parts := []string{mismatch.Error()}
+	var appendOther func(error)
+	appendOther = func(err error) {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, part := range joined.Unwrap() {
+				appendOther(part)
+			}
+			return
+		}
+		if err != mismatch {
+			parts = append(parts, strings.ReplaceAll(err.Error(), "\n", "; "))
+		}
+	}
+	appendOther(original)
+	return strings.Join(parts, "; ")
 }
 
 // printSharedStoreDoctor prints the shared store row from its read-only open.
@@ -195,7 +214,7 @@ func printSharedStoreDoctor(stdout io.Writer, path string, degraded error, tally
 			path,
 		)
 	case errors.As(degraded, &mismatch):
-		printSchemaWarning(stdout, mismatch, tally)
+		printSchemaWarning(stdout, degraded, mismatch, tally)
 	case errors.Is(degraded, paths.ErrLegacyPending):
 		tally.warn()
 		fmt.Fprintf(
@@ -205,21 +224,22 @@ func printSharedStoreDoctor(stdout io.Writer, path string, degraded error, tally
 			path,
 		)
 	default:
-		tally.fail()
-		fmt.Fprintf(stdout, "doctor: unhealthy database: shared store=%s state=%s\n", path, degraded.Error())
+		tally.warn()
+		fmt.Fprintf(stdout, "doctor: shared store=%s state=%s\n", path, degraded.Error())
 	}
 }
 
 // printSchemaWarning is the one warning for a database doctor did not read
 // because this build would migrate it, or cannot read what a newer pfm wrote.
-func printSchemaWarning(stdout io.Writer, mismatch *fleetdb.SchemaMismatchError, tally *doctorTally) {
+func printSchemaWarning(stdout io.Writer, original error, mismatch *fleetdb.SchemaMismatchError, tally *doctorTally) {
 	tally.warn()
+	suffix := strings.TrimPrefix(schemaMismatchText(original, mismatch), mismatch.Error())
 	if mismatch.Newer() {
 		fmt.Fprintf(
 			stdout,
 			"doctor: warning %s database %s schema v%d is newer than this build's v%d — a newer pfm wrote it; "+
-				"this pfm cannot use it until that newer pfm is installed again (pfm install --yes from its build)\n",
-			mismatch.Name, mismatch.Path, mismatch.Found, mismatch.Expected,
+				"this pfm cannot use it until that newer pfm is installed again (pfm install --yes from its build)%s\n",
+			mismatch.Name, mismatch.Path, mismatch.Found, mismatch.Expected, suffix,
 		)
 		return
 	}
@@ -227,23 +247,31 @@ func printSchemaWarning(stdout io.Writer, mismatch *fleetdb.SchemaMismatchError,
 		stdout,
 		"doctor: warning %s database %s schema v%d, this build expects v%d — doctor left it as found; "+
 			"once this build is installed (pfm install --yes), the first pfm command that opens it "+
-			"migrates it and keeps a backup\n",
-		mismatch.Name, mismatch.Path, mismatch.Found, mismatch.Expected,
+			"migrates it and keeps a backup%s\n",
+		mismatch.Name, mismatch.Path, mismatch.Found, mismatch.Expected, suffix,
 	)
 }
 
-// printCodexPaneDoctor audits the Codex pane bindings when the cache was
-// read; the bindings live in it, so an unread cache says why it has none.
+// printCodexPaneDoctor audits bindings only when the cache and shared kill
+// state were read; otherwise it names the unread database without counting again.
 func printCodexPaneDoctor(
 	ctx context.Context, stdout io.Writer, database *store.Store, openErr error, runtime config.Runtime,
 ) int {
 	if database != nil {
+		if text := sharedUnread(database.SharedDegraded()); text != "" {
+			fmt.Fprintf(
+				stdout,
+				"doctor: codex_pane_bindings %s — binding audit skipped: its kill state lives in the shared store\n",
+				text,
+			)
+			return 0
+		}
 		return PrintCodexPaneBinding(ctx, stdout, database, runtime)
 	}
 	var mismatch *fleetdb.SchemaMismatchError
 	switch {
 	case errors.As(openErr, &mismatch):
-		fmt.Fprintf(stdout, "doctor: codex_pane_bindings %v\n", mismatch)
+		fmt.Fprintf(stdout, "doctor: codex_pane_bindings %s\n", schemaMismatchText(openErr, mismatch))
 	case errors.Is(openErr, fleetdb.ErrAbsent):
 		fmt.Fprintln(stdout, "doctor: codex_pane_bindings total=0 (cache database absent)")
 	default:

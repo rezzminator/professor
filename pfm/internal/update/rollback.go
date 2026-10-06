@@ -23,7 +23,7 @@ func updateFailure(primary, rollbackErr error) error {
 			rollbackErr,
 		)
 	}
-	return fmt.Errorf("%w; rolled back update-owned changes", primary)
+	return fmt.Errorf("%w; rolled back what the lines above name, then re-ran the previous install", primary)
 }
 
 func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writer) error {
@@ -42,15 +42,14 @@ func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writ
 	return rollbackErr
 }
 
-// rollbackUpdateState restores owned binaries and the source before the prior
-// binary's installer converges host wiring back to the previous release.
-// A clean doctor is part of rollback proof; without it, updateFailure reports
-// residue instead of claiming a safe rollback.
+// rollbackUpdateState restores binaries, source and files before re-running
+// the previous install and its doctor; failures are joined as rollback residue.
 func rollbackUpdateState(
 	ctx context.Context,
 	repo, installSourceRepo, previousRef string,
 	sourceAdvanced bool,
 	replacements []updateReplacement,
+	snapshots []updateFileSnapshot,
 	runtime config.Runtime,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
@@ -62,6 +61,7 @@ func rollbackUpdateState(
 		}
 		fmt.Fprintf(stderr, "pfm update: rolled back source to %s\n", previousRef)
 	}
+	rollbackErr = errors.Join(rollbackErr, restoreUpdateOwnedFiles(snapshots, stderr))
 	if len(replacements) == 0 {
 		return errors.Join(rollbackErr, errors.New("no previous binary is available to restore installer state"))
 	}

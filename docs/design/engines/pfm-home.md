@@ -34,14 +34,13 @@ With no configured roster, `config.Defaults` supplies account 1 at `~/.cc/1`, wh
 
 The jail's `PFM_CLAUDE_ROOTS` replaces discovery inputs. With a nonstandard root list, each root's parent becomes an account directory, with IDs assigned in list order and no extra `~/.cc` discovery. Empty roots or the single standard `~/.claude/projects` root use the default roster rule.
 
-An explicit roster validates positive unique IDs, absolute or home-relative paths, unique cleaned directory strings, and refuses the cleaned store path. Errors are prefixed `config {path}: accounts:`:
+An explicit roster validates positive unique IDs, absolute or home-relative paths, and unique cleaned directory strings. Errors are prefixed `config {path}: accounts:`:
 
 - `entry {n} id must be positive` or `duplicate id {id}`.
 - `entry {n} configDir: must not contain NUL`, or `must be absolute or start with ~/ or $HOME/, got {value}`.
 - `entry {n} configDir {dir} duplicates entry {earlier}`.
-- `entry {n} configDir {store} is the Claude store; an account needs its own dir (default {account dir})`.
 
-Physical aliases to the store or into it are separately blocked by `account-is-store`. A symlinked account directory resolving outside the store is accepted. Launch refuses a missing directory with `run pfm install`, and a file or a directory resolving into the store with `run pfm doctor`. It also refuses a dangling link, naming its inspection error, and an unknown roster ID ([claude-launch.md](claude-launch.md#checkconfigdir)).
+An entry naming the store loads; `account-is-store` blocks it and directs the operator to point its `configDir` at the account's default directory. Physical aliases to the store or into it are also blocked by `account-is-store`. A symlinked account directory resolving outside the store is accepted. Launch refuses a missing directory with `run pfm install`, and a file or a directory resolving into the store with `run pfm doctor`. It also refuses a dangling link, naming its inspection error, and an unknown roster ID ([claude-launch.md](claude-launch.md#checkconfigdir)).
 
 ### mcp.thirdParty
 

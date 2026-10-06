@@ -855,3 +855,50 @@ func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
 		}
 	})
 }
+
+func TestChatNewCodexRequiresLogin(t *testing.T) {
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.Remove(filepath.Join(home, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-logged-out-new")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--config", configPath, "chat", "new", "--engine", "codex", "x"}, &stdout, &stderr)
+	entries, err := os.ReadDir(jail.tmuxDir)
+	if code != 1 || !strings.Contains(stderr.String(), "run codex login") || err != nil || len(entries) != 0 {
+		t.Fatalf("chat new code=%d stderr=%q sockets=%v error=%v", code, stderr.String(), entries, err)
+	}
+}
+
+func TestChatNewCodexAdmitsAnAPIKeyHome(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	t.Cleanup(func() { jail.killSockets(t) })
+	home := filepath.Join(jail.root, "codex")
+	configPath := writeConfigFixture(t, jail.root,
+		`{"version":2,"codex":{"homes":[{"id":1,"home":"`+home+`"}]}}`)
+	if err := os.WriteFile(
+		filepath.Join(home, "auth.json"),
+		[]byte(`{"OPENAI_API_KEY":"sk-fixture","tokens":null}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_FRESH_SOCKET", "cx-api-key-new")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--config", configPath, "chat", "new", "--engine", "codex",
+		"--cwd", filepath.Join(jail.root, "work"), "x",
+	}, &stdout, &stderr)
+	if code != 0 || strings.Contains(stderr.String(), "run codex login") ||
+		!strings.Contains(stdout.String(), "attach: tmux -L cx-") {
+		t.Fatalf("chat new code=%d stdout=%q stderr=%q; want API-key home to launch",
+			code, stdout.String(), stderr.String())
+	}
+}

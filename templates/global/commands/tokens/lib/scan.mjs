@@ -17,7 +17,7 @@ export function roots(opts) {
   if (!out.length) die("no transcript root found; pass --root DIR");
   return out;
 }
-export const SCAN = { roots: [], files: 0, skippedOld: 0, dupFiles: 0, badLines: 0, noTimestamp: 0, unpricedCalls: 0, unpricedModels: {}, tierUnknownCalls: 0, syntheticCalls: 0, copiedCalls: 0, readErrors: [], notes: [] };
+export const SCAN = { roots: [], files: 0, skippedOld: 0, dupFiles: 0, badLines: 0, noTimestamp: 0, unpricedCalls: 0, unpricedModels: {}, tierUnknownCalls: 0, syntheticCalls: 0, copiedCalls: 0, copiesOnly: [], readErrors: [], notes: [] };
 // Every dropped, unpriced or unreadable thing reaches the reader on ONE line. A count
 // that exists only in --out JSON is a gap the text report claims not to have; the
 // synthetic-call drop used to be exactly that.
@@ -29,7 +29,8 @@ export function gapsLine() {
   if (SCAN.syntheticCalls) loud.push(`${SCAN.syntheticCalls} synthetic/zero-usage calls (dropped: the harness billed nothing for them)`);
   if (SCAN.unpricedCalls) loud.push(`${SCAN.unpricedCalls} UNPRICED calls ${JSON.stringify(SCAN.unpricedModels)} — tokens counted, dollars "n/a"; add the model to pfm.prices.json`);
   if (SCAN.tierUnknownCalls) loud.push(`${SCAN.tierUnknownCalls} cache writes with no 5m/1h split (priced as 5m)`);
-  if (SCAN.copiedCalls) loud.push(`${SCAN.copiedCalls} calls copied from another transcript (forked/resumed session) — billed once, in the first transcript scanned`);
+  if (SCAN.copiedCalls) loud.push(`${SCAN.copiedCalls} calls copied from another transcript (forked/resumed session) — billed once, to the transcript that made them`);
+  if (SCAN.copiesOnly.length) loud.push(`${SCAN.copiesOnly.length} transcripts hold only copied calls: ${SCAN.copiesOnly.slice(0, 3).map((r) => r.sid.slice(0, 12)).join(", ")}`);
   if (SCAN.dupFiles) loud.push(`${SCAN.dupFiles} duplicate files skipped`);
   // notes are bounded: a per-row note on a 200-agent flight must not become the report
   for (const n of SCAN.notes.slice(0, 4)) loud.push(n);

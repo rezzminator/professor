@@ -9,8 +9,8 @@
 // the table, the delta against the index it replaced, the file collisions, the
 // largest read and one ERROR line per defect.
 //
-// Exit 0: no defect. Exit 1: an ERROR or a collision printed (the index is
-// still written).
+// Exit 0: no defect. Exit 1: an ERROR (index not written, the previous one
+// left as it was) or a collision (index written).
 // Exit 2: nothing written: the directory is missing, unreadable or holds no
 // task file, so a broken run never reads as an empty flight.
 
@@ -20,6 +20,7 @@ import { join, basename, resolve } from 'node:path';
 const TASK_FILE = /^([1-9]\d*)-([a-z]+)\.md$/;
 const COLUMNS = ['id', 'needs', 'rating', 'shares', 'reads', 'files', 'title'];
 const LIST_KEYS = new Set(['needs', 'shares', 'reads', 'files']);
+const EMPTY_MARKERS = new Set(['—', '–', '-', 'none', '[]']);
 const RATINGS = new Set(['mechanical', 'precise', 'smart', 'main-chat']);
 const READ_BUDGET = 25000;
 
@@ -77,7 +78,7 @@ function row(task) {
 // A row's content, cell by cell, so a formatting-only difference is no change.
 function normalize(line) {
   const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
-  const empty = (c) => (['—', '–', '-', 'none', '[]'].includes(c) ? '' : c);
+  const empty = (c) => (EMPTY_MARKERS.has(c) ? '' : c);
   return cells.map((c, i) => (LIST_KEYS.has(COLUMNS[i]) ? splitList(empty(c)).join(', ') : c)).join(' | ');
 }
 
@@ -111,25 +112,36 @@ function main(argv) {
     return 2;
   }
   const dir = resolve(args[0]);
-  let names;
+  let entries;
   try {
-    names = readdirSync(dir);
+    entries = readdirSync(dir, { withFileTypes: true });
   } catch (err) {
     console.error(`NOT BUILT: cannot read ${dir}: ${err.message}`);
     return 2;
   }
-  const taskNames = names.filter((name) => TASK_FILE.test(name)).sort((a, b) => byId(a.slice(0, -3), b.slice(0, -3)));
+  const taskNames = entries.map((entry) => entry.name).filter((name) => TASK_FILE.test(name)).sort((a, b) => byId(a.slice(0, -3), b.slice(0, -3)));
   if (taskNames.length === 0) {
     console.error(`NOT BUILT: no task file ({level}-{letter}.md) in ${dir}`);
     return 2;
   }
 
-  const errors = [];
+  const errors = entries
+    .filter((entry) => entry.isFile() && /^[1-9]\d*-/.test(entry.name) && !TASK_FILE.test(entry.name))
+    .map((entry) => `${entry.name}: named like a task file but not {level}-{letter}.md`);
   const tasks = new Map();
   const unparsed = new Set();
   for (const name of taskNames) {
     const path = join(dir, name);
-    const { fields, error } = parseFrontmatter(readFileSync(path, 'utf8'));
+    let text, bytes;
+    try {
+      text = readFileSync(path, 'utf8');
+      bytes = statSync(path).size;
+    } catch (err) {
+      errors.push(`${name}: cannot read: ${err.message}`);
+      unparsed.add(name.slice(0, -3));
+      continue;
+    }
+    const { fields, error } = parseFrontmatter(text);
     if (error) {
       errors.push(`${name}: ${error}`);
       unparsed.add(name.slice(0, -3));
@@ -138,10 +150,12 @@ function main(argv) {
     const missing = COLUMNS.filter((column) => !(column in fields));
     if (missing.length) errors.push(`${name}: frontmatter lacks ${missing.join(', ')}`);
     const task = Object.fromEntries(COLUMNS.map((c) => [c, fields[c] ?? (LIST_KEYS.has(c) ? [] : '')]));
-    for (const key of LIST_KEYS) if (!Array.isArray(task[key])) task[key] = splitList(task[key]);
+    for (const key of LIST_KEYS) {
+      if (!Array.isArray(task[key])) task[key] = EMPTY_MARKERS.has(task[key]) ? [] : splitList(task[key]);
+    }
     if (task.id !== name.slice(0, -3)) errors.push(`${name}: id ${task.id || '(empty)'} differs from the file name`);
     if (!RATINGS.has(task.rating)) errors.push(`${name}: rating ${task.rating || '(empty)'} is none of ${[...RATINGS].join(', ')}`);
-    task.bytes = statSync(path).size;
+    task.bytes = bytes;
     tasks.set(name.slice(0, -3), task);
   }
 
@@ -172,7 +186,7 @@ function main(argv) {
   for (const id of [...onCycle].sort(byId)) errors.push(`${id}.md: needs form a cycle through ${id}`);
 
   const owners = new Map();
-  for (const [id, task] of tasks) for (const file of task.files) owners.set(file, [...(owners.get(file) ?? []), id]);
+  for (const [id, task] of tasks) for (const file of new Set(task.files)) owners.set(file, [...(owners.get(file) ?? []), id]);
   const collisions = [];
   for (const [file, ids] of owners) {
     for (let i = 0; i < ids.length; i++) {
@@ -199,7 +213,7 @@ function main(argv) {
   const rows = ids.map((id) => row(tasks.get(id)));
   const table = [`| ${COLUMNS.join(' | ')} |`, `| ${COLUMNS.map(() => '---').join(' | ')} |`, ...rows];
   try {
-    if (!check) writeFileSync(indexPath, `# ${basename(dir)} — index\n\n${table.join('\n')}\n`);
+    if (!check && errors.length === 0) writeFileSync(indexPath, `# ${basename(dir)} — index\n\n${table.join('\n')}\n`);
   } catch (err) {
     console.error(`NOT BUILT: cannot write ${indexPath}: ${err.message}`);
     return 2;
@@ -207,10 +221,10 @@ function main(argv) {
 
   const added = ids.filter((id) => !before.has(id));
   const changed = ids.filter((id, i) => before.has(id) && before.get(id) !== normalize(rows[i]));
-  const removed = [...before.keys()].filter((id) => !tasks.has(id)).sort(byId);
+  const removed = [...before.keys()].filter((id) => !tasks.has(id) && !unparsed.has(id)).sort(byId);
   const list = (items) => (items.length ? items.join(', ') : 'none');
 
-  console.log(`INDEX ${indexPath} · ${ids.length} tasks${check ? ' · check only, not written' : ''}`);
+  console.log(`INDEX ${indexPath} · ${ids.length} tasks${check ? ' · check only, not written' : ''}${errors.length ? ` · not written: ${errors.length} errors` : ''}`);
   console.log(table.join('\n'));
   console.log(`DELTA added ${list(added)} · changed ${list(changed)} · removed ${list(removed)}`);
   console.log(`COLLISIONS ${collisions.length}${collisions.length ? ': ' + collisions.join('; ') : ''}`);

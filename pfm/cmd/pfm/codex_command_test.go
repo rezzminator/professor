@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -208,6 +210,27 @@ func codexCLISnapshot(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return result.String()
+}
+
+func TestCodexRepoRootProbeFailure(t *testing.T) {
+	jailTest(t)
+	deep := t.TempDir()
+	for remaining := 4088 - len(deep); remaining > 0; {
+		n := min(200, remaining-1)
+		if remaining-(n+1) == 1 {
+			n--
+		}
+		deep = filepath.Join(deep, strings.Repeat("x", n))
+		remaining -= n + 1
+	}
+	if err := os.MkdirAll(deep, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(deep)
+	got, err := codexRepoRoot()
+	if got != "" || !errors.Is(err, syscall.ENAMETOOLONG) {
+		t.Fatalf("root=%q err=%v, want empty root and ENAMETOOLONG", got, err)
+	}
 }
 
 func TestCodexBuildInsideWorkbench(t *testing.T) {

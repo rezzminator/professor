@@ -8,10 +8,13 @@ func ProbeEnv(environ []string, sinkURL, configDir string) []string {
 	for _, name := range hygiene {
 		stripped[name] = true
 	}
+	stripped["CLAUDE_CODE_USE_BEDROCK"] = true
+	stripped["CLAUDE_CODE_USE_VERTEX"] = true
 	result := make([]string, 0, len(environ)+6)
 	for _, entry := range environ {
 		name, _, _ := strings.Cut(entry, "=")
-		if !stripped[name] {
+		if !stripped[name] && !strings.HasPrefix(name, "ANTHROPIC_BEDROCK_") &&
+			!strings.HasPrefix(name, "ANTHROPIC_VERTEX_") {
 			result = append(result, entry)
 		}
 	}

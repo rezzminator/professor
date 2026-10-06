@@ -116,7 +116,8 @@ type HeadlessPlan struct {
 	// spawn layer can prove it resolves BEFORE a tmux server is created
 	// around it — a pane that dies on "command not found" takes the fresh
 	// server with it and the engine is never named in the wreckage.
-	Binary string
+	Binary    string
+	CodexHome string
 	// PromptOnCommandLine is false when the prompt must be typed into the
 	// running TUI instead — Codex is named through its own rename UI, and a
 	// prompt on the command line would start a turn before that can happen.
@@ -173,7 +174,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 			PromptOnCommandLine: true,
 		}, nil
 	case pfmengine.Codex:
-		_, found := machine.CodexAccountByID(request.PrimaryAccount)
+		account, found := machine.CodexAccountByID(request.PrimaryAccount)
 		if !found {
 			return HeadlessPlan{}, fmt.Errorf(
 				"requested Codex account %d is not in the configured roster",
@@ -197,6 +198,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 				machine,
 				request.PrimaryAccount,
 				arguments...),
+			CodexHome:           account.Home,
 			Binary:              codexBinaryWord(machine, request.PrimaryAccount),
 			PromptOnCommandLine: true,
 		}, nil
@@ -285,7 +287,7 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 		return HeadlessPlan{}, err
 	}
 	machine := normalizedMachineConfig(request.Config, request.Home)
-	_, found := machine.CodexAccountByID(request.PrimaryAccount)
+	account, found := machine.CodexAccountByID(request.PrimaryAccount)
 	if !found {
 		return HeadlessPlan{}, fmt.Errorf(
 			"requested Codex account %d is not in the configured roster",
@@ -307,7 +309,8 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 		arguments = append(arguments, CodexDeveloperInstructionsArg(request.PromptChannel)...)
 	}
 	return HeadlessPlan{
-		Run:    codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),
-		Binary: codexBinaryWord(machine, request.PrimaryAccount),
+		Run:       codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),
+		Binary:    codexBinaryWord(machine, request.PrimaryAccount),
+		CodexHome: account.Home,
 	}, nil
 }

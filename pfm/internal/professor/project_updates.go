@@ -14,10 +14,8 @@ import (
 
 // renderProjectReport is the one report-writing path both entries share: it
 // builds the report, captures the pinned→current diff for every UPDATED
-// item, and writes the human or JSON body. Only the caller's exit mapping
-// differs (renderProjectCheck's bare-update 0/3/1 vs RunProjectUpdates's
-// doctor 0/1/3) — the root resolution, the diff capture and the writer are
-// never duplicated.
+// item, and writes the human or JSON body. Both callers use projectReportExit
+// for the same clean/review/failure mapping.
 func renderProjectReport(root, home string, jsonOutput bool, stdout io.Writer) (reviewRequired, failed bool) {
 	report, err := buildProjectReport(root, home)
 	if err != nil {
@@ -36,8 +34,8 @@ func renderProjectReport(root, home string, jsonOutput bool, stdout io.Writer) (
 	return report.reviewRequired() != 0, diffFailed
 }
 
-// captureProjectDiffs fills Diff/DiffError on every UPDATED item — never
-// inside buildProjectReport, whose other callers (PrintDoctor and
+// captureProjectDiffs fills Diff/DiffError/DiffSkipped on every UPDATED item.
+// It never runs inside buildProjectReport, whose other callers (PrintDoctor and
 // runProjectPin) run no git. A self-hosted pin or store is skipped: its
 // review lines stay the existing two-line self-hosted body.
 func captureProjectDiffs(report *projectReport) (anyFailed bool) {
@@ -47,6 +45,7 @@ func captureProjectDiffs(report *projectReport) (anyFailed bool) {
 			continue
 		}
 		if item.Pin.PinnedSHA == UnknownSelfHostedSHA || report.Store.SHA == UnknownSelfHostedSHA {
+			item.DiffSkipped = "self-hosted pin or store: no git history"
 			continue
 		}
 		diff, err := diffUpdatedTemplate(report.Store, *item)
@@ -86,8 +85,8 @@ func projectTerminal(report projectReport) string {
 var gitObjectName = regexp.MustCompile(`^[0-9a-fA-F]{4,64}$`)
 
 // diffUpdatedTemplate runs the pinned→working-tree diff for one UPDATED
-// item. The user's gitconfig never shapes it (--no-ext-diff, --no-color: the
-// report and the JSON carry git's plain unified diff), and inside the dev
+// item. The user's gitconfig never shapes it (--no-ext-diff, --no-textconv,
+// --no-color: the report and the JSON carry git's plain unified diff). In the dev
 // fence it reaches the store's git through the same GIT_DIR contract
 // storeSHAWithRunner resolves the store SHA by.
 func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
@@ -101,10 +100,10 @@ func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
 		)
 	}
 	argv := []string{
-		deps.Executable("git"), "diff", "--no-ext-diff", "--no-color",
+		deps.Executable("git"), "diff", "--no-ext-diff", "--no-textconv", "--no-color",
 		item.Pin.PinnedSHA, "--", "templates/" + item.Template,
 	}
-	env := os.Environ()
+	env := deps.WithoutGitRepoVars(os.Environ())
 	if gitDir, useFenceGit := pfmpaths.DevRepoGitDir(store.Root); useFenceGit {
 		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+store.Root)
 	}
@@ -118,15 +117,19 @@ func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
 	return string(result.Stdout), nil
 }
 
-// renderProjectCheck is the bare `pfm update` post-update report: 0 clean, 3
-// review required, 1 failure (an unreadable diff is a failure).
+// renderProjectCheck is the bare `pfm update` post-update report: 0 clean, 1
+// review required, 3 failure (an unreadable diff is a failure).
 func renderProjectCheck(root, home string, jsonOutput bool, stdout io.Writer) int {
 	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout)
+	return projectReportExit(reviewRequired, failed)
+}
+
+func projectReportExit(reviewRequired, failed bool) int {
 	if failed {
-		return 1
+		return 3
 	}
 	if reviewRequired {
-		return 3
+		return 1
 	}
 	return 0
 }
@@ -146,11 +149,5 @@ func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer)
 		return 3
 	}
 	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout)
-	if failed {
-		return 3
-	}
-	if reviewRequired {
-		return 1
-	}
-	return 0
+	return projectReportExit(reviewRequired, failed)
 }

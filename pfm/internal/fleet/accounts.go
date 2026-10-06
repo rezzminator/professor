@@ -15,8 +15,8 @@ import (
 )
 
 // PrimaryAccount resolves the fleet DB's meta row first, then the
-// ~/.claude-primary mirror, and maps anything off the roster to the first
-// configured account.
+// ~/.claude-primary mirror, and maps anything off the roster to the implicit
+// account.
 //
 // Reading the mirror alone is how the picker came up showing a different
 // account from the one the launchers used: primary-set writes both, but a
@@ -41,10 +41,7 @@ func PrimaryAccount(values paths.Values, configs ...pfmconfig.Config) (int, erro
 			return account, nil
 		}
 	}
-	if len(machine.Accounts) != 0 {
-		return machine.Accounts[0].ID, nil
-	}
-	return 1, nil
+	return machine.ImplicitAccount(), nil
 }
 
 // SetPrimaryAccount validates the operator-facing roster before committing

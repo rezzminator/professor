@@ -220,9 +220,21 @@ func homeStateFile(env Env) ([]Row, error) {
 }
 
 func accountEntryReal(env Env) ([]Row, error) {
+	const accountEntryRealCheckID = "account-entry-real"
 	var rows []Row
 	for _, account := range sortedAccounts(env) {
 		inspected := claudelaunch.InspectConfigDir(env.Store, account.ConfigDir)
+		if inspected.State == claudelaunch.ConfigDirNotDir {
+			dir := account.ConfigDir
+			rows = append(rows, Row{
+				Block,
+				accountEntryRealCheckID,
+				dir,
+				"account config dir is a file, not a directory",
+				"mv " + dir + " " + dir + ".bak  # pfm install then creates the account dir",
+			})
+			continue
+		}
 		if inspected.State == claudelaunch.ConfigDirStore {
 			continue
 		}
@@ -232,7 +244,7 @@ func accountEntryReal(env Env) ([]Row, error) {
 		}
 		for _, entry := range installer.StoreEntries {
 			path := filepath.Join(account.ConfigDir, entry.Name)
-			info := inspectPath(&rows, "account-entry-real", path)
+			info := inspectPath(&rows, accountEntryRealCheckID, path)
 			if info == nil {
 				continue
 			}
@@ -243,7 +255,7 @@ func accountEntryReal(env Env) ([]Row, error) {
 				case "foreign":
 					problem = entry.Name + " links to " + link.Target + " outside the store; its data belongs in the store"
 				case "unreadable":
-					rows = append(rows, unreadable("account-entry-real", path, link.Err))
+					rows = append(rows, unreadable(accountEntryRealCheckID, path, link.Err))
 					continue
 				default:
 					continue
@@ -257,7 +269,7 @@ func accountEntryReal(env Env) ([]Row, error) {
 			}
 			fix, ok := removeKeeping(
 				&rows,
-				"account-entry-real",
+				accountEntryRealCheckID,
 				filepath.Join(env.Store, entry.Name),
 				sharedEntryFix(env.Store, path, entry.Name),
 				path,
@@ -269,7 +281,7 @@ func accountEntryReal(env Env) ([]Row, error) {
 				rows,
 				Row{
 					Block,
-					"account-entry-real",
+					accountEntryRealCheckID,
 					path,
 					problem,
 					fix,

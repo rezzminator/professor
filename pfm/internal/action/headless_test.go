@@ -249,3 +249,19 @@ func TestHeadlessRunRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestHeadlessCodexStatesSelectedHome(t *testing.T) {
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	want := filepath.Join(home, ".codex-2")
+	if err := os.Remove(filepath.Join(want, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := HeadlessRun(HeadlessRequest{
+		Engine: pfmengine.Codex, Name: "worker", CWD: "/work",
+		Home: home, PrimaryAccount: 2, Config: machine,
+	})
+	if err != nil || plan.CodexHome != want {
+		t.Fatalf("plan CodexHome=%q error=%v; want %q", plan.CodexHome, err, want)
+	}
+}

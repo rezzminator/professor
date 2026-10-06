@@ -67,7 +67,7 @@ func TestLaunchWorkbench(t *testing.T) {
 			root := testjail.ShortRoot(t)
 			dir := filepath.Join(root, "acme", "docs", "scribe")
 			prompt := filepath.Join(dir, ".professor", "scribe.md")
-			manifest := `{"prompt":"scribe.md","effort":"XHigh"}`
+			manifest := `{"prompt":"scribe.md","effort":"xhigh"}`
 			args := []string{}
 			wantPrompt, wantEffort, wantError := prompt, "xhigh", ""
 			switch scenario {

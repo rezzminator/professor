@@ -51,9 +51,9 @@ func TestLoadSeedNamesAMissingExample(t *testing.T) {
 	}
 }
 
-// pfm install seeds the tracked example on every home, and the example holds
-// ask.engine at its default (codex). A home with no Codex account must still
-// load that seed; a home with no roster still has account 1, so it resolves to Claude.
+// pfm install seeds the tracked example without ask.engine so DefaultEngine
+// resolves the available roster. A home with no roster still has account 1,
+// so it resolves to Claude.
 func TestSeededExampleLoadsWithoutACodexAccount(t *testing.T) {
 	example := examplePath(t)
 	t.Run("claude-only", func(t *testing.T) {

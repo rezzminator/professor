@@ -384,14 +384,24 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 	nonPfm := filepath.Join(home, "opt", "claude")
 
 	cases := []struct {
-		name       string
-		path       string
-		exitCode   int
-		wantMissed bool
+		name                     string
+		path                     string
+		exitCode                 int
+		wantMissed               bool
+		probeHomeErr, verboseErr string
+		wantWarnings             int
 	}{
-		{"pfms launcher absent", launcher, 127, true},
-		{"pfms launcher broken", launcher, 1, false},
-		{"non-pfm claude at 127", nonPfm, 127, false},
+		{name: "pfms launcher absent", path: launcher, exitCode: 127, wantMissed: true},
+		{name: "pfms launcher broken", path: launcher, exitCode: 1},
+		{name: "non-pfm claude at 127", path: nonPfm, exitCode: 127},
+		{
+			name: "absent with probe home residue", path: launcher, exitCode: 127, wantMissed: true,
+			probeHomeErr: "remove /srv/sid/pfm-probe-home-1: device busy", wantWarnings: 1,
+		},
+		{
+			name: "absent with verbose failure", path: launcher, exitCode: 127, wantMissed: true,
+			verboseErr: "write /srv/sid/pfm-doctor/claude.log: device busy", wantWarnings: 1,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -399,24 +409,32 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 				return []deps.Result{{
 					Entry: entry, State: deps.StateBroken, Path: testCase.path,
 					ExitCode: testCase.exitCode, Error: fmt.Sprintf("exit status %d", testCase.exitCode),
+					ProbeHomeErr: testCase.probeHomeErr, VerboseErr: testCase.verboseErr,
 				}}
 			}
 			var output bytes.Buffer
-			_, failures, claudeAbsent := PrintDependencies(
+			warnings, failures, claudeAbsent := PrintDependencies(
 				context.Background(),
 				&output,
 				home,
 				[]deps.Entry{entry},
 				deps.ProbeOptions{},
 			)
-			if claudeAbsent != testCase.wantMissed {
-				t.Fatalf("claudeAbsent=%v, want %v", claudeAbsent, testCase.wantMissed)
+			if claudeAbsent != testCase.wantMissed || warnings != testCase.wantWarnings {
+				t.Fatalf("claudeAbsent=%v warnings=%d, want %v/%d", claudeAbsent, warnings,
+					testCase.wantMissed, testCase.wantWarnings)
 			}
 			if testCase.wantMissed {
 				if failures != 0 {
 					t.Fatalf("failures=%d, want 0\n%s", failures, output.String())
 				}
 				want := "doctor: dep claude path=" + testCase.path + " MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n"
+				if testCase.verboseErr != "" {
+					want += "doctor: dep claude verbose broken error=" + testCase.verboseErr + "\n"
+				}
+				if testCase.probeHomeErr != "" {
+					want += "doctor: dep claude probe-home residue error=" + testCase.probeHomeErr + "\n"
+				}
 				if output.String() != want {
 					t.Fatalf("output=%q, want %q", output.String(), want)
 				}

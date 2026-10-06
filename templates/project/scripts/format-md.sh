@@ -5,10 +5,12 @@ set -uo pipefail
 # the repo-root `.rumdl.toml` policy (see /quality:md-forlint). Receives hook JSON
 # on stdin.
 #
-# What rumdl cannot fix goes back to the agent that wrote the file: exit 2 with,
+# What rumdl cannot fix goes back only when the write introduced it against the
+# committed file: match rule + message counts, ignoring shifted positions. Exit 2 with,
 # on stderr, one header line, one `UNFIXED <file>:<line>:<col> <rule> <message>`
 # line per issue, and the re-check command (Claude Code shows a PostToolUse exit-2
-# stderr to the model; the write itself stands). A clean file exits 0, silent.
+# stderr to the model; the write itself stands). Clean or standing-only issues
+# exit 0, silent.
 #
 # What this reports when IT is broken: a failing `rumdl fmt` or `rumdl check`
 # exits 2 naming the step; a missing `jq` or `rumdl` prints one stderr line and
@@ -28,7 +30,9 @@ FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')
 [[ "$FILE_PATH" != *.md ]] && exit 0
 [[ ! -f "$FILE_PATH" ]] && exit 0
 
-REPO_ROOT=$(git -C "$(dirname "$FILE_PATH")" rev-parse --show-toplevel 2>/dev/null) || exit 0
+FILE_DIR=$(cd "$(dirname "$FILE_PATH")" && pwd -P) || exit 0
+FILE_PATH="$FILE_DIR/${FILE_PATH##*/}"
+REPO_ROOT=$(git -C "$FILE_DIR" rev-parse --show-toplevel 2>/dev/null) || exit 0
 REL_PATH="${FILE_PATH#"$REPO_ROOT"/}"
 
 # Only format Professor-owned files — not user source code. Generated mirrors
@@ -57,6 +61,42 @@ fi
 # rumdl resolves `[per-file-ignores]` globs against the CURRENT DIRECTORY, not
 # against the config's own location: run it from the repo root or the whole
 # category policy silently fails to match.
+BASELINE_KEYS=()
+BASE_HEAD=$(git -C "$REPO_ROOT" rev-parse --verify --quiet HEAD 2>&1)
+GIT_RC=$?
+if ((GIT_RC != 0 && GIT_RC != 1)); then
+  echo "format-md: FAILED rumdl check of the committed ${REL_PATH} (git rev-parse exit ${GIT_RC}) — ${BASE_HEAD}" >&2
+  exit 2
+fi
+if ((GIT_RC == 0)); then
+  COMMITTED_PATH=$(git -C "$REPO_ROOT" ls-tree --name-only "$BASE_HEAD" -- "$REL_PATH" 2>&1)
+  GIT_RC=$?
+  if ((GIT_RC != 0)); then
+    echo "format-md: FAILED rumdl check of the committed ${REL_PATH} (git ls-tree exit ${GIT_RC}) — ${COMMITTED_PATH}" >&2
+    exit 2
+  fi
+  if [[ -n "$COMMITTED_PATH" ]]; then
+    # The sentinel keeps command substitution from stripping the file's final newlines.
+    COMMITTED=$(git -C "$REPO_ROOT" show "HEAD:$REL_PATH" 2>&1 && printf '.')
+    GIT_RC=$?
+    if ((GIT_RC != 0)); then
+      echo "format-md: FAILED rumdl check of the committed ${REL_PATH} (git show exit ${GIT_RC}) — ${COMMITTED}" >&2
+      exit 2
+    fi
+    BASELINE=$(cd "$REPO_ROOT" && printf '%s' "${COMMITTED%.}" | rumdl check --stdin --stdin-filename "$REL_PATH" --output-format concise 2>&1)
+    BASELINE_RC=$?
+    if ((BASELINE_RC != 0 && BASELINE_RC != 1)); then
+      echo "format-md: FAILED rumdl check of the committed ${REL_PATH} (exit ${BASELINE_RC}) — ${BASELINE}" >&2
+      exit 2
+    fi
+    while IFS= read -r line; do
+      [[ $line == "$REL_PATH:"*": ["*"] "* ]] || continue
+      rest=${line#*: \[}
+      BASELINE_KEYS+=("${rest%%]*} ${rest#*] }")
+    done <<< "$BASELINE"
+  fi
+fi
+
 if ! (cd "$REPO_ROOT" && rumdl fmt "$REL_PATH" >/dev/null 2>&1); then
   echo "format-md: FAILED rumdl fmt on ${REL_PATH} — the file is unformatted; run \`rumdl fmt ${REL_PATH}\` from ${REPO_ROOT} to see why" >&2
   exit 2
@@ -75,16 +115,32 @@ if ((CHECK_RC != 1)); then
 fi
 
 ISSUES=()
+PARSED=0
 while IFS= read -r line; do
   # concise: `<file>:<line>:<col>: [<rule>] <message>`; anything else is rumdl's summary
   [[ $line == "$REL_PATH:"*": ["*"] "* ]] || continue
   loc=${line%%: \[*}
   rest=${line#*: \[}
-  ISSUES+=("UNFIXED ${loc} ${rest%%]*} ${rest#*] }")
+  key="${rest%%]*} ${rest#*] }"
+  PARSED=$((PARSED + 1))
+  matched=0
+  for ((i=0; i<${#BASELINE_KEYS[@]}; i++)); do
+    if [[ ${BASELINE_KEYS[i]} == "$key" ]]; then
+      BASELINE_KEYS[i]=''
+      matched=1
+      break
+    fi
+  done
+  if ((matched == 0)); then
+    ISSUES+=("UNFIXED ${loc} ${key}")
+  fi
 done <<< "$LEFT"
-if ((${#ISSUES[@]} == 0)); then
+if ((PARSED == 0)); then
   echo "format-md: FAILED rumdl check on ${REL_PATH} reported issues in a shape this hook cannot read: ${LEFT}" >&2
   exit 2
+fi
+if ((${#ISSUES[@]} == 0)); then
+  exit 0
 fi
 
 {

@@ -10,7 +10,7 @@ import (
 func TestClaudeLaunchPreferencesMergeAndValidateByScope(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(t.TempDir(), FileName)
-	content := `{"version":2,"claude":{"webSearchesPerSession":7,"autoCompactWindow":250000,"tmuxTruecolor":false,"cleanupPeriodDays":30,"requireManagedCleanup":false},"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":9,"autoCompactWindow":50000,"tmuxTruecolor":true,"cleanupPeriodDays":14,"requireManagedCleanup":true}},{"id":2,"configDir":"~/two"}]}`
+	content := `{"version":2,"claude":{"webSearchesPerSession":7,"autoCompactWindow":50000,"tmuxTruecolor":false,"cleanupPeriodDays":30,"requireManagedCleanup":false},"accounts":[{"id":1,"configDir":"~/one","claude":{"webSearchesPerSession":9,"autoCompactWindow":250000,"tmuxTruecolor":true,"cleanupPeriodDays":14,"requireManagedCleanup":true}},{"id":2,"configDir":"~/two"}]}`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestClaudeLaunchPreferencesMergeAndValidateByScope(t *testing.T) {
 		truecolor bool
 		cleanup   int
 		managed   bool
-	}{{1, 9, 50000, true, 14, true}, {2, 7, 250000, false, 30, false}} {
+	}{{1, 9, 250000, true, 14, true}, {2, 7, 50000, false, 30, false}} {
 		prefs := loaded.EffectiveClaude(tc.id)
 		if prefs.WebSearchesPerSession != tc.web || prefs.AutoCompactWindow != tc.window ||
 			prefs.TmuxTruecolor != tc.truecolor ||
@@ -34,7 +34,7 @@ func TestClaudeLaunchPreferencesMergeAndValidateByScope(t *testing.T) {
 		}
 	}
 	if loaded.Source("claude.autoCompactWindow") != SourceFile ||
-		loaded.Source("accounts[0].autoCompactWindow") != SourceFile {
+		loaded.Source("accounts[0].claude.autoCompactWindow") != SourceFile {
 		t.Fatalf("auto compact window sources = %#v", loaded.Sources)
 	}
 	encoded, err := Marshal(loaded, false)

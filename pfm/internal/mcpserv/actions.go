@@ -139,13 +139,27 @@ func (service *Service) chatNew(
 	}
 	if strings.TrimSpace(input.Name) == "" {
 		if directory == "" {
-			return nil, ActionOutput{}, fmt.Errorf("name is required outside a workbench")
+			return nil, ActionOutput{}, fmt.Errorf(
+				"name is required: no working directory is known to look up a workbench",
+			)
 		}
 		effective, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
 		}
-		name, found, err := chat.WorkbenchName(ctx, directory, service.backend.warnings, &effective)
+		service.nameMutex.Lock()
+		reserved := make([]string, 0, len(service.pendingNames))
+		for name := range service.pendingNames {
+			reserved = append(reserved, name)
+		}
+		name, found, err := chat.WorkbenchName(ctx, directory, service.backend.warnings, &effective, reserved...)
+		if err == nil && found {
+			if service.pendingNames == nil {
+				service.pendingNames = make(map[string]struct{})
+			}
+			service.pendingNames[name] = struct{}{}
+		}
+		service.nameMutex.Unlock()
 		if err != nil {
 			return nil, ActionOutput{}, fmt.Errorf("chat_new: name the chat: %w", err)
 		}
@@ -153,6 +167,11 @@ func (service *Service) chatNew(
 			return nil, ActionOutput{}, fmt.Errorf("name is required outside a workbench")
 		}
 		input.Name = name
+		defer func() {
+			service.nameMutex.Lock()
+			delete(service.pendingNames, name)
+			service.nameMutex.Unlock()
+		}()
 	}
 	args := []string{chatCommand, "new", "--name", input.Name}
 	if input.Engine != "" {
@@ -190,8 +209,8 @@ func (service *Service) chatNew(
 	if input.Await {
 		args = append(args, "--await")
 	}
-	if input.Timeout != 0 {
-		args = append(args, "--timeout", fmt.Sprint(input.Timeout))
+	if input.Timeout != nil {
+		args = append(args, "--timeout", fmt.Sprint(*input.Timeout))
 	}
 	if input.Settle != 0 {
 		args = append(args, "--settle", fmt.Sprint(input.Settle))

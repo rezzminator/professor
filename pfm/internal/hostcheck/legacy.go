@@ -13,9 +13,29 @@ import (
 
 const preSplitMCPPort = 8377
 
+const legacyConfigCheck = "legacy-config"
+
 func legacyConfig(env Env) ([]Row, error) {
 	var rows []Row
 	if env.ConfigExplicit {
+		if !inStore(env.LegacyConfigDir, filepath.Dir(env.ConfigPath)) {
+			return rows, nil
+		}
+		if _, ok := readFile(&rows, legacyConfigCheck, env.ConfigPath); !ok {
+			return rows, nil
+		}
+		fix := "move " + env.ConfigPath + " into the clone as pfm.config.json, then run pfm install from the clone"
+		if env.CloneConfigPath != "" {
+			var ok bool
+			fix, ok = moveOrRemove(&rows, legacyConfigCheck, env.ConfigPath, env.CloneConfigPath)
+			if !ok {
+				return rows, nil
+			}
+		}
+		rows = append(
+			rows,
+			Row{Block, legacyConfigCheck, env.ConfigPath, "explicit --config inside the legacy config dir", fix},
+		)
 		return rows, nil
 	}
 	for _, name := range []string{config.FileName, "config.json"} {
@@ -23,11 +43,11 @@ func legacyConfig(env Env) ([]Row, error) {
 		if paths.PhysicalPath(path) == paths.PhysicalPath(env.ConfigPath) {
 			continue
 		}
-		if _, ok := readFile(&rows, "legacy-config", path); !ok {
+		if _, ok := readFile(&rows, legacyConfigCheck, path); !ok {
 			continue
 		}
-		if fix, ok := moveOrRemove(&rows, "legacy-config", path, env.ConfigPath); ok {
-			rows = append(rows, Row{Block, "legacy-config", path, "legacy pfm config outside the clone", fix})
+		if fix, ok := moveOrRemove(&rows, legacyConfigCheck, path, env.ConfigPath); ok {
+			rows = append(rows, Row{Block, legacyConfigCheck, path, "legacy pfm config outside the clone", fix})
 		}
 	}
 	return rows, nil

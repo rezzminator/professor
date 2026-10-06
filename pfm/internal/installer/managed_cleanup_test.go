@@ -175,19 +175,27 @@ func TestInstallManagedCleanupCachedSudo(t *testing.T) {
 
 func TestInspectManagedCleanup(t *testing.T) {
 	for _, tc := range []struct {
-		raw   string
-		state string
-		want  int
-	}{{`{"cleanupPeriodDays":30}`, "wrong", 36500}, {`{"cleanupPeriodDays":36500}`, "ok", 36500}, {"{", "unreadable", 36500}, {`{}`, "wrong", 36500}, {`{}`, "wrong", 0}, {`{"cleanupPeriodDays":"30"}`, "unreadable", 36500}} {
+		raw       string
+		state     string
+		want      int
+		value     int
+		keyAbsent bool
+	}{
+		{`{"cleanupPeriodDays":30}`, "wrong", 36500, 30, false},
+		{`{"cleanupPeriodDays":36500}`, "ok", 36500, 36500, false},
+		{"{", "unreadable", 36500, 0, false},
+		{`{}`, "wrong", 36500, 0, true},
+		{`{}`, "wrong", 0, 0, true},
+		{`null`, "wrong", 36500, 0, true},
+		{`{"cleanupPeriodDays":"30"}`, "unreadable", 36500, 0, false},
+	} {
 		t.Run(fmt.Sprintf("%s_%s_want_%d", tc.state, tc.raw, tc.want), func(t *testing.T) {
 			dir := t.TempDir()
 			writeFixture(t, filepath.Join(dir, "pfm.json"), tc.raw)
 			got := InspectManagedCleanup(dir, true, tc.want)
-			if got.State != tc.state || (got.Err != nil) != (tc.state == "unreadable") {
+			if got.State != tc.state || (got.Err != nil) != (tc.state == "unreadable") ||
+				got.KeyAbsent != tc.keyAbsent || got.Value != tc.value {
 				t.Fatalf("status=%+v", got)
-			}
-			if tc.raw == `{}` && got.Value != 0 {
-				t.Fatalf("keyless Value=%d want=0", got.Value)
 			}
 		})
 	}

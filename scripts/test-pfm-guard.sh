@@ -34,5 +34,9 @@ run; rc=$?
 rm -f "$H_GUARD/quality_loaded.$SID"
 run; rc=$?
 [[ $rc -eq 2 ]] || { echo "FAIL: no quality stamp anywhere — the edit was not denied (exit $rc)"; fail=1; }
+printf '%s\n' "$(( $(date +%s) - 1600 ))" > "$T_GUARD/quality_loaded.$SID"
+date +%s > "$H_GUARD/quality_loaded.$SID"; date +%s > "$T_GUARD/pfm_active.$SID"
+run; rc=$?
+[[ $rc -eq 0 ]] || { echo "FAIL: stale target law stamp, fresh session law stamp — the edit was denied (exit $rc)"; fail=1; }
 [[ $fail -eq 0 ]] && echo "PASS pfm-guard: cross-repo law stamp opens the gate; an unread law keeps it shut"
 exit $fail

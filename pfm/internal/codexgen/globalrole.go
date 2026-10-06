@@ -149,11 +149,6 @@ func ClassifyGlobalRole(target string, want []byte, ownedLinkDirs []string) (Glo
 	return GlobalRoleStale, "", nil
 }
 
-// writes reports whether ApplyGlobalRole changes the filesystem in this state.
-func (state GlobalRoleState) writes() bool {
-	return state == GlobalRoleMissing || state == GlobalRoleStale || state == GlobalRoleOwnedLink
-}
-
 // ApplyGlobalRole performs the filesystem change ClassifyGlobalRole's state
 // recommends. Current and Foreign are both no-ops — the first because nothing
 // is wrong, the second because a role pfm does not own is never touched.

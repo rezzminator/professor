@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -593,5 +594,185 @@ func TestLoadInstallRuntimeMissingNamedLegacyConfigIsExplicit(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestLoadRuntimeUnusableMarker(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		load               func(string) (Runtime, error)
+		refuse, diagnostic bool
+	}{
+		{name: "ordinary", load: LoadRuntime, refuse: true},
+		{name: "install", load: LoadInstallRuntime},
+		{name: "diagnostic", load: LoadDiagnosticRuntime, diagnostic: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			t.Setenv(paths.EnvConfig, "")
+			missing := filepath.Join(home, "missing-clone")
+			marker := paths.SourceRepoPath(home)
+			if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(marker, []byte(missing+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := tc.load("")
+			if tc.refuse {
+				if !errors.Is(err, paths.ErrSourceRepoUnusable) || !strings.Contains(err.Error(), missing) ||
+					!strings.Contains(err.Error(), "run pfm install from the clone") {
+					t.Fatalf("ordinary marker load = %v, want the recorded clone and remedy", err)
+				}
+				return
+			}
+			if err != nil || got.Config.Path != "" || got.Config.Exists {
+				t.Fatalf("runtime marker load: path=%q exists=%v err=%v", got.Config.Path, got.Config.Exists, err)
+			}
+			if tc.diagnostic && (!errors.Is(got.ConfigError, paths.ErrSourceRepoUnusable) ||
+				!strings.Contains(got.ConfigError.Error(), missing)) {
+				t.Fatalf("diagnostic marker error = %v, want the recorded clone", got.ConfigError)
+			}
+		})
+	}
+}
+
+func TestDiagnosticStatePaths(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, state string
+	}{
+		{"unrelated key", `{"version":2,"accounts":[],"ask":{"engine":"cc"},"state":{"db":"~/diag.db"}}`, "diag.db"},
+		{"broken JSON", `{"version":2`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv(paths.EnvHome, home)
+			t.Setenv(paths.EnvStateDB, "")
+			t.Setenv(paths.EnvCacheDB, "")
+			resolved, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(home, FileName)
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := LoadDiagnosticRuntime(path)
+			want := resolved.StateDB
+			if tc.state != "" {
+				want = filepath.Join(home, tc.state)
+			}
+			if err != nil || got.ConfigError == nil || !got.Config.Exists || got.Paths.StateDB != want ||
+				got.Paths.CacheDB != resolved.CacheDB || !strings.Contains(got.ConfigError.Error(), path) {
+				t.Fatalf("diagnostic paths=%q,%q exists=%v load=%v config=%v, want state=%q",
+					got.Paths.StateDB, got.Paths.CacheDB, got.Config.Exists, err, got.ConfigError, want)
+			}
+			if tc.state == "" && !strings.Contains(got.ConfigError.Error(), "JSON") {
+				t.Fatalf("broken JSON config error = %v, want parse error", got.ConfigError)
+			}
+		})
+	}
+}
+
+func TestStatePathsFromMarkerResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name, override       string
+		missingClone, pinned bool
+	}{
+		{"vanished clone", "", true, false},
+		{"whitespace override", "   ", false, false},
+		{"vanished clone, process pinned to no config", "", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			missing := filepath.Join(home, "missing-clone")
+			if tc.missingClone {
+				marker := paths.SourceRepoPath(home)
+				if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(marker, []byte(missing+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := &paths.MapEnv{Values: map[string]string{paths.EnvConfig: tc.override}}
+			if tc.pinned {
+				defer UseConfigPath("")()
+			}
+			state, cache, err := StatePathsFrom(env, home)
+			if tc.missingClone && !tc.pinned {
+				if state != "" || cache != "" || !errors.Is(err, paths.ErrSourceRepoUnusable) ||
+					!strings.Contains(err.Error(), missing) {
+					t.Fatalf("marker state paths=%q,%q err=%v, want unusable clone", state, cache, err)
+				}
+				return
+			}
+			if err != nil || state != paths.DefaultStateDB(home) || cache != paths.DefaultCacheDB(home) {
+				t.Fatalf("%s: state paths=%q,%q err=%v, want defaults", tc.name, state, cache, err)
+			}
+		})
+	}
+}
+
+func TestStatePathsFromPinnedConfig(t *testing.T) {
+	home := t.TempDir()
+	pinned, fromEnv := filepath.Join(home, "pinned.json"), filepath.Join(home, "env.json")
+	for path, content := range map[string]string{
+		pinned:  `{"version":2,"state":{"db":"~/pinned.db"}}`,
+		fromEnv: `{"version":2,"state":{"db":"~/env.db"}}`,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stateEnv := range []string{"", "/env/state.db"} {
+		t.Run("state="+stateEnv, func(t *testing.T) {
+			env := &paths.MapEnv{Values: map[string]string{paths.EnvConfig: fromEnv, paths.EnvStateDB: stateEnv}}
+			restore := UseConfigPath(pinned)
+			defer restore()
+			state, cache, err := StatePathsFrom(env, home)
+			want := filepath.Join(home, "pinned.db")
+			if stateEnv != "" {
+				want = stateEnv
+			}
+			if err != nil || state != want || cache != paths.DefaultCacheDB(home) {
+				t.Fatalf("pinned paths=%q,%q err=%v, want %q", state, cache, err, want)
+			}
+			restoreNested := UseConfigPath(fromEnv)
+			restoreNested()
+			var wg sync.WaitGroup
+			for range 16 {
+				wg.Go(func() {
+					restoreSame := UseConfigPath(pinned)
+					defer restoreSame()
+					got, _, readErr := StatePathsFrom(env, home)
+					if readErr != nil || got != want {
+						t.Errorf("concurrent pinned state=%q err=%v, want %q", got, readErr, want)
+					}
+				})
+			}
+			wg.Wait()
+			restore()
+			state, _, err = StatePathsFrom(env, home)
+			want = filepath.Join(home, "env.db")
+			if stateEnv != "" {
+				want = stateEnv
+			}
+			if err != nil || state != want {
+				t.Fatalf("restored state=%q err=%v, want %q", state, err, want)
+			}
+		})
+	}
+}
+
+func TestLoadRuntimeWhitespaceOverrideStillRefusesLegacy(t *testing.T) {
+	_, legacyDir, _ := legacyConfigHome(t, false)
+	if err := os.WriteFile(filepath.Join(legacyDir, FileName), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvConfig, "  ")
+	if _, err := LoadRuntime(""); !errors.Is(err, ErrNotMigrated) {
+		t.Fatalf("blank override load=%v, want ErrNotMigrated", err)
 	}
 }

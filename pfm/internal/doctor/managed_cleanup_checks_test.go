@@ -13,7 +13,7 @@ import (
 )
 
 func TestManagedCleanupChecks(t *testing.T) {
-	for _, scenario := range []string{"missing", "wrong", "ok", "off", "relative", "unreadable"} {
+	for _, scenario := range []string{"missing", "wrong", "null", "ok", "off", "relative", "unreadable"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "pfm.json")
@@ -24,14 +24,19 @@ func TestManagedCleanupChecks(t *testing.T) {
 			var content string
 			warnings, failures := 0, 0
 			want := "managed-cleanup: " + path + " ok\n"
+			fix := "sudo mkdir -p " + dir + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500}' | sudo tee " + path + " >/dev/null"
 			switch scenario {
 			case "missing":
 				warnings = 1
-				want = "managed-cleanup: " + path + " missing — transcripts older than 30 days are deleted by any Claude launch outside pfm\n"
+				want = "managed-cleanup: " + path + " missing — transcripts older than 30 days are deleted by any Claude launch outside pfm; run: " + fix + "\n"
 			case "wrong":
 				content = `{"cleanupPeriodDays":30}`
 				warnings = 1
-				want = "managed-cleanup: " + path + " cleanupPeriodDays=30, want 36500\n"
+				want = "managed-cleanup: " + path + " cleanupPeriodDays=30, want 36500; run: " + fix + "\n"
+			case "null":
+				content = `null`
+				warnings = 1
+				want = "managed-cleanup: " + path + " has no cleanupPeriodDays, want 36500; run: " + fix + "\n"
 			case "ok":
 				content = `{"cleanupPeriodDays":36500}`
 			case "off":

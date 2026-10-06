@@ -194,6 +194,10 @@ func ValidateAccount(machine pfmconfig.Config, engine pfmengine.ID, account int)
 				account,
 			)
 		}
+		if err := pfmconfig.CodexLoginError(selected.Home); err != nil {
+			//nolint:staticcheck // Codex is the proper noun in the required login instruction.
+			return AccountSelection{}, fmt.Errorf("Codex account %d: %w", account, err)
+		}
 		policy := machine.EffectiveCodex(account)
 		return AccountSelection{
 			IDs: machine.CodexAccountIDs(), CodexHome: selected.Home,

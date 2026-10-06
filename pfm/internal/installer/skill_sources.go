@@ -42,16 +42,6 @@ const (
 var (
 	skillSourceName       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	unresolvedPlaceholder = regexp.MustCompile(`\{[A-Z][A-Z0-9_]*\}`)
-	// skillGitRepoVars select a repository or its storage: a skill git call
-	// drops them, so no inherited GIT_DIR or GIT_WORK_TREE steers it into
-	// another repository, while every other GIT_* (a CA bundle, a proxy, an
-	// ssh command) passes through.
-	skillGitRepoVars = map[string]bool{
-		"GIT_DIR": true, "GIT_WORK_TREE": true, "GIT_COMMON_DIR": true, "GIT_INDEX_FILE": true,
-		"GIT_OBJECT_DIRECTORY": true, "GIT_ALTERNATE_OBJECT_DIRECTORIES": true, "GIT_NAMESPACE": true,
-		"GIT_IMPLICIT_WORK_TREE": true, "GIT_PREFIX": true, "GIT_SHALLOW_FILE": true, "GIT_GRAFT_FILE": true,
-		"GIT_CEILING_DIRECTORIES": true,
-	}
 )
 
 type skillSourceRegistry struct {
@@ -574,7 +564,7 @@ func (installer *engine) runSkillGit(deadline time.Time, args ...string) (string
 }
 
 // runSkillGitWith runs git in dir without the inherited variables that select
-// a repository (skillGitRepoVars), with discovery stopped above dir
+// a repository (deps.WithoutGitRepoVars), with discovery stopped above dir
 // (GIT_CEILING_DIRECTORIES) and credential prompts disabled — the overrides
 // appended last, so each wins over an inherited value. WaitDelay bounds the
 // wait for a grandchild (git-remote-https) still holding the output pipes
@@ -595,12 +585,10 @@ func runSkillGitContext(
 ) (string, error) {
 	env := make([]string, 0, len(os.Environ())+4)
 	sshConfigured := false
-	for _, entry := range os.Environ() {
+	for _, entry := range deps.WithoutGitRepoVars(os.Environ()) {
 		name, _, _ := strings.Cut(entry, "=")
 		sshConfigured = sshConfigured || name == "GIT_SSH_COMMAND" || name == "GIT_SSH"
-		if !skillGitRepoVars[name] {
-			env = append(env, entry)
-		}
+		env = append(env, entry)
 	}
 	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=",
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))

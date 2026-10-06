@@ -43,6 +43,17 @@ func printClaudeStoreChecks(stdout io.Writer, runtime config.Runtime) int {
 			fmt.Fprintf(stdout, "account: %d %s UNREADABLE error=%v\n", account.ID, account.Dir, account.Err)
 			failures++
 			continue
+		case "not-dir":
+			fmt.Fprintf(
+				stdout,
+				"account: %d %s is a file, not a directory — mv %s %s.bak, then run pfm install\n",
+				account.ID,
+				account.Dir,
+				account.Dir,
+				account.Dir,
+			)
+			failures++
+			continue
 		case "store":
 			clean = false
 			continue

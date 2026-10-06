@@ -70,7 +70,7 @@ func TestCodexLaunchWorkbench(t *testing.T) {
 			scribe, duo := newWorkbenchRunFixture(t, &runJail{root: root})
 			if err := os.WriteFile(
 				paths.WorkbenchManifest(duo),
-				[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"XHigh"}`),
+				[]byte(`{"prompt":"duo.md","engines":["codex","claude"],"model":"gpt-x","effort":"xhigh"}`),
 				0o600,
 			); err != nil {
 				t.Fatal(err)

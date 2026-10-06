@@ -285,3 +285,76 @@ func TestStdioProxyCancellationInterruptsAnUnresponsiveReplayProbe(t *testing.T)
 		t.Fatal("a cancelled request stayed blocked on the unresponsive daemon's runtime probe")
 	}
 }
+
+func TestRunStdioCancelledDaemonProbe(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close silent daemon: %v", err)
+		}
+	})
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if conn, acceptErr := listener.Accept(); acceptErr == nil {
+			accepted <- conn
+		}
+	}()
+	previous := DaemonProbeTimeoutOverride
+	DaemonProbeTimeoutOverride = 30 * time.Second
+	t.Cleanup(func() { DaemonProbeTimeoutOverride = previous })
+	var warnings proxyTestBuffer
+	service := stdioTestService("cancelled-start", &warnings)
+	professor := stdioTestProfessor(t, service)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	outputReader, outputWriter := io.Pipe()
+	defer func() {
+		_ = outputReader.Close()
+		_ = outputWriter.Close()
+	}()
+	done := make(chan error, 1)
+	go func() {
+		done <- professor.runStdioTransport(
+			ctx, io.NopCloser(strings.NewReader("")), outputWriter,
+			stdioTestOptions(service, listener.Addr().String()),
+		)
+	}()
+	var conn net.Conn
+	finished := false
+	defer func() {
+		cancel()
+		if conn != nil {
+			if err := conn.Close(); err != nil {
+				t.Errorf("close start probe connection: %v", err)
+			}
+		}
+		if !finished {
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Error("stdio start stayed blocked after closing the probe")
+			}
+		}
+	}()
+	select {
+	case conn = <-accepted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stdio start never probed the daemon")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		finished = true
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("stdio start error = %v, want context.Canceled", err)
+		}
+		if strings.Contains(warnings.String(), "using in-process MCP") {
+			t.Errorf("cancelled stdio start fell back: %s", warnings.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancelled stdio start stayed blocked on the daemon probe")
+	}
+}

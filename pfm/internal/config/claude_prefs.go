@@ -73,7 +73,10 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 }
 
 func applyClaudeLaunchPrefs(target *ClaudePrefs, raw rawClaude, sources map[string]Source, scope string, index int) {
-	base := configScope(scope, index) + "."
+	base := scope + "."
+	if index >= 0 {
+		base = fmt.Sprintf("accounts[%d].claude.", index)
+	}
 	if raw.WebSearchesPerSession != nil {
 		target.WebSearchesPerSession = *raw.WebSearchesPerSession
 		sources[base+"webSearchesPerSession"] = SourceFile

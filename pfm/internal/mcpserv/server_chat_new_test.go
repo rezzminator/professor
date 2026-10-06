@@ -9,7 +9,9 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -48,6 +50,39 @@ func TestChatNewCacheChoiceAndValidation(t *testing.T) {
 	}
 	if len(calls) != len(want) {
 		t.Fatalf("invalid cache dispatched: %q", calls)
+	}
+}
+
+func TestChatNewTimeoutForwarding(t *testing.T) {
+	t.Parallel()
+	zero, seconds := 0, 30
+	for _, test := range []struct {
+		name    string
+		timeout *int
+		want    []string
+	}{
+		{name: "unset", want: []string{"chat", "new", "--name", "child", "--await"}},
+		{name: "forever", timeout: &zero, want: []string{"chat", "new", "--name", "child", "--await", "--timeout", "0"}},
+		{name: "seconds", timeout: &seconds, want: []string{"chat", "new", "--name", "child", "--await", "--timeout", "30"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls [][]string
+			service := newService(
+				"test",
+				&backend{dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
+					calls = append(calls, append([]string(nil), args...))
+					return 0
+				}},
+			)
+			_, _, err := service.chatNew(
+				context.Background(),
+				nil,
+				NewInput{Name: "child", Await: true, Timeout: test.timeout},
+			)
+			if err != nil || !reflect.DeepEqual(calls, [][]string{test.want}) {
+				t.Fatalf("chat_new timeout = %v, calls %q; want %q", err, calls, test.want)
+			}
+		})
 	}
 }
 
@@ -162,20 +197,26 @@ func listedChatNew(t *testing.T) *mcp.Tool {
 	return nil
 }
 
+func chatNewWorkbenchFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := testjail.Fleet(t)
+	dir := filepath.Join(root, "acme", "docs", "scribe")
+	for path, body := range map[string]string{
+		filepath.Join(root, "acme", ".professor", "baseline.json"): "{}",
+		paths.WorkbenchManifest(dir):                               `{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"xhigh"}`,
+		filepath.Join(dir, ".professor", "scribe.md"):              "You are scribe.",
+	} {
+		if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root, dir
+}
+
 func TestChatNewWorkbench(t *testing.T) {
 	for _, name := range []string{"auto-name", "outside", "no cwd", "named", "caller disabled", "caller enabled", "caller cwd", "roster error"} {
 		t.Run(name, func(t *testing.T) {
-			root := testjail.Fleet(t)
-			dir := filepath.Join(root, "acme", "docs", "scribe")
-			for path, body := range map[string]string{
-				filepath.Join(root, "acme", ".professor", "baseline.json"): "{}",
-				paths.WorkbenchManifest(dir):                               `{"prompt":"scribe.md","title":"Scribe","name":"_SCRIBE","effort":"xhigh"}`,
-				filepath.Join(dir, ".professor", "scribe.md"):              "You are scribe.",
-			} {
-				if err := atomicfile.Write(path, []byte(body), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
+			root, dir := chatNewWorkbenchFixture(t)
 			var calls [][]string
 			backend := &backend{
 				warnings: io.Discard,
@@ -243,9 +284,17 @@ func TestChatNewWorkbench(t *testing.T) {
 				t.Setenv(paths.EnvCacheDB, filepath.Join(blocker, "index.db"))
 			}
 			_, _, err := service.chatNew(context.Background(), request, input)
-			if name == "outside" || name == "no cwd" {
+			if name == "outside" {
 				if err == nil || err.Error() != "name is required outside a workbench" || len(calls) != 0 {
 					t.Fatalf("outside = %v, calls %q", err, calls)
+				}
+				return
+			}
+			if name == "no cwd" {
+				if err == nil ||
+					err.Error() != "name is required: no working directory is known to look up a workbench" ||
+					len(calls) != 0 {
+					t.Fatalf("no cwd = %v, calls %q", err, calls)
 				}
 				return
 			}
@@ -260,6 +309,112 @@ func TestChatNewWorkbench(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChatNewWorkbenchReservations(t *testing.T) {
+	t.Run("concurrent", func(t *testing.T) {
+		root, dir := chatNewWorkbenchFixture(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		firstStarted := make(chan struct{})
+		releaseFirst := make(chan struct{})
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+		defer release()
+		var mutex sync.Mutex
+		var calls [][]string
+		service := newService("test", &backend{
+			warnings: io.Discard,
+			paths:    paths.Values{TmuxDir: filepath.Join(root, "tmux")},
+			dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
+				mutex.Lock()
+				calls = append(calls, append([]string(nil), args...))
+				first := len(calls) == 1
+				mutex.Unlock()
+				if first {
+					close(firstStarted)
+					select {
+					case <-releaseFirst:
+					case <-ctx.Done():
+						return 1
+					}
+				}
+				return 0
+			},
+		})
+		firstDone := make(chan error, 1)
+		go func() {
+			_, _, err := service.chatNew(ctx, nil, NewInput{CWD: dir})
+			firstDone <- err
+		}()
+		select {
+		case <-firstStarted:
+		case <-ctx.Done():
+			t.Fatal("first unnamed chat never reached its launch")
+		}
+		secondDone := make(chan error, 1)
+		go func() {
+			_, _, err := service.chatNew(ctx, nil, NewInput{CWD: dir})
+			secondDone <- err
+		}()
+		select {
+		case err := <-secondDone:
+			if err != nil {
+				t.Errorf("second unnamed chat = %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("second unnamed chat blocked behind the first launch")
+		}
+		select {
+		case err := <-firstDone:
+			t.Fatalf("first launch returned before release: %v", err)
+		default:
+		}
+		mutex.Lock()
+		got := append([][]string(nil), calls...)
+		mutex.Unlock()
+		want := [][]string{
+			{"chat", "new", "--name", "_SCRIBE:1", "--cwd", dir},
+			{"chat", "new", "--name", "_SCRIBE:2", "--cwd", dir},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("concurrent chat_new calls = %q, want %q", got, want)
+		}
+		release()
+		select {
+		case err := <-firstDone:
+			if err != nil {
+				t.Fatalf("first unnamed chat = %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("first unnamed chat did not finish after release")
+		}
+	})
+	t.Run("failed launch releases name", func(t *testing.T) {
+		root, dir := chatNewWorkbenchFixture(t)
+		var calls [][]string
+		service := newService("test", &backend{
+			warnings: io.Discard,
+			paths:    paths.Values{TmuxDir: filepath.Join(root, "tmux")},
+			dispatch: func(_ context.Context, args []string, _, stderr io.Writer) int {
+				calls = append(calls, append([]string(nil), args...))
+				if len(calls) == 1 {
+					_, _ = io.WriteString(stderr, "launch failed")
+					return 1
+				}
+				return 0
+			},
+		})
+		_, output, err := service.chatNew(context.Background(), nil, NewInput{CWD: dir})
+		if err == nil || output.Status != statusError || output.Code != 1 || output.Message != "launch failed" {
+			t.Fatalf("failed launch = %#v, %v", output, err)
+		}
+		_, _, err = service.chatNew(context.Background(), nil, NewInput{CWD: dir})
+		want := []string{"chat", "new", "--name", "_SCRIBE:1", "--cwd", dir}
+		if err != nil || !reflect.DeepEqual(calls, [][]string{want, want}) {
+			t.Fatalf("chat_new after failed launch = %v, calls %q; want name reused", err, calls)
+		}
+	})
 }
 
 func TestChatNewWorkbenchNameSchema(t *testing.T) {

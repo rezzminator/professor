@@ -182,6 +182,13 @@ func TestCodexAppServerFeedsPfmsStatuslineCache(t *testing.T) {
 }
 
 func codexHeadlessRequest(fix *fixture, prompt string) run.Request {
+	if err := os.WriteFile(
+		filepath.Join(fix.codexHome, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		fix.t.Fatal(err)
+	}
 	return run.Request{
 		Config: pfmconfig.Config{
 			Codex:         pfmconfig.CodexPrefs{Binary: "codex"},

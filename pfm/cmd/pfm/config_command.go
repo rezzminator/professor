@@ -15,6 +15,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
@@ -196,8 +197,13 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
-	fmt.Fprintf(stdout, "config state.db=%s (%s)\n", runtime.Paths.StateDB, config.Source("state.db"))
-	fmt.Fprintf(stdout, "config state.cacheDb=%s (%s)\n", runtime.Paths.CacheDB, config.Source("state.cacheDb"))
+	for index, value := range []string{runtime.Paths.StateDB, runtime.Paths.CacheDB} {
+		source := config.Source([]string{"state.db", "state.cacheDb"}[index])
+		if (paths.OSEnv{}).Get([]string{paths.EnvStateDB, paths.EnvCacheDB}[index]) != "" {
+			source = "env"
+		}
+		fmt.Fprintf(stdout, "config state.%s=%s (%s)\n", []string{"db", "cacheDb"}[index], value, source)
+	}
 	accounts := make([]string, 0, len(config.Accounts))
 	for index, account := range config.Accounts {
 		accounts = append(accounts, fmt.Sprintf("%d:%s:%s", account.ID, account.ConfigDir, config.EmojiFor(account.ID)))
@@ -246,7 +252,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 	sort.Strings(thirdParty)
 	names, source := strings.Join(thirdParty, ","), config.Source("mcp.thirdParty")
 	if len(thirdParty) == 0 {
-		names, source = "none", pfmconfig.SourceDefault
+		names = "none"
 	}
 	fmt.Fprintf(stdout, "config mcp.thirdParty=%s (%s)\n", names, source)
 	for _, name := range pfmconfig.RegisteredMCPServers() {

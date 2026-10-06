@@ -14,6 +14,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type cachedWorkbench struct {
@@ -67,7 +68,7 @@ func ReadCache(path string) ([]Bench, []WalkError, error) {
 				fmt.Errorf("invalid workbench directory %q under %q", entry.Dir, entry.Root),
 			)
 		}
-		found, err := hasWorkbenchManifest(entry.Dir)
+		found, err := paths.HasWorkbenchManifest(entry.Dir)
 		if err != nil {
 			return nil, nil, workbenchCacheError(path, err)
 		}

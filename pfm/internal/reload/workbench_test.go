@@ -95,13 +95,13 @@ func TestReloadWorkbench(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if stale, err := workbench.CheckMirror(
+				if check, err := workbench.CheckMirror(
 					persona.Bench,
 					pfmengine.Codex,
 					request.Home,
 				); err != nil ||
-					stale != "" {
-					t.Fatalf("mirror stale = %q, err = %v", stale, err)
+					len(check.Rebuildable) != 0 || len(check.Failing) != 0 {
+					t.Fatalf("mirror check = %#v, err = %v", check, err)
 				}
 			}
 		})

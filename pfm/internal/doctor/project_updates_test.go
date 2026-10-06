@@ -44,5 +44,10 @@ func TestDoctorProjectUpdatesUsageRejectsMixedFlags(t *testing.T) {
 		if code := runDoctor(args, &stdout, &stderr, runtime); code != 2 {
 			t.Fatalf("doctor %v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
+		want := "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 clean, 1 warnings, 3 failures) | " +
+			"pfm doctor --project-updates [--root DIR] [--json] (exit 0 clean, 1 review required, 3 report failure); 2 usage error\n"
+		if stderr.String() != want {
+			t.Fatalf("doctor %v usage=%q, want %q", args, stderr.String(), want)
+		}
 	}
 }

@@ -15,6 +15,20 @@ func TestActivityClockNilReadsAsUnstamped(t *testing.T) {
 	}
 }
 
+func TestActivityClockOpensStampedWithoutWake(t *testing.T) {
+	clock := NewActivityClock(time.Unix(1_800_000_000, 0))
+	if got := clock.StampNS(); got != 1800000000000000000 {
+		t.Fatalf("opening stamp = %d, want 1800000000000000000", got)
+	}
+	if got := len(clock.Wake()); got != 0 {
+		t.Fatalf("opening wake tokens = %d, want 0 before a keypress", got)
+	}
+	clock.Stamp(time.Unix(1_800_000_001, 0))
+	if got := len(clock.Wake()); got != 1 {
+		t.Fatalf("keypress wake tokens = %d, want 1", got)
+	}
+}
+
 func TestActivityClockStampChangesOnInteraction(t *testing.T) {
 	start := time.Now()
 	clock := NewActivityClock(start)

@@ -17,7 +17,7 @@
 | lead | `reviewer`, opus, effort high | the brief: TREE, BASE..HEAD, PATHSPECS, MODE, SANDBOX, claims | `review.md`, one line | 40 calls |
 | tracer | `tracer` (Sonnet 5.5, high) | 3–6 threads as numbered questions, at most 5 tracers | facts with quoted `path:line`, no verdicts | its own 25 |
 | hunter | `general-purpose`, opus | ~100 hunks or ~1200 changed lines, at most 6, every changed file to one hunter; the § Hunter procedure verbatim | findings, ruled out, coverage | 35 calls |
-| test | `general-purpose`, sonnet | build, vet, `-count=1` tests of changed packages and their direct importers, the diff's own gates, budget and count claims measured at BASE and HEAD | commands, exit codes, NEW vs FAILS-AT-BASE | 40 calls |
+| test | `general-purpose`, sonnet | the project's own build and static checks; tests through its testing manual, else its gate, else the native suite (`pytest` for Python), uncached and unpiped over changed packages and their direct importers where scoped; the diff's own gates, budget and count claims measured at BASE and HEAD | commands, exit codes and failing lines (a command that will not start included), NEW vs FAILS-AT-BASE | 40 calls |
 
 - Phase 0: the lead reads the stat, the claims and the production diff (a new file by its surface only — declarations and I/O lines), writes `threads.md`, assigns seats. A run holds about 600 hunks, the size `releaser` packs its review areas to.
 - Phase 1: every seat in one message, the test seat first; the lead ends its turn and is re-invoked per return.

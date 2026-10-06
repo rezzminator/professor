@@ -139,6 +139,8 @@ func Run(
 		}
 		// Row facts feed the picker's live gauge, so only the interactive picker
 		// reads them; the scripted listings stay as composed.
+		// The Reader caches each file by size and modification time: a refresh
+		// re-stats each row's files and reads again only a file that changed.
 		request.Facts = rowfacts.NewReader(runtime.Paths.SIDDir)
 		scan, err = scanFleetCached(ctx, database, request)
 		if err != nil {
@@ -177,9 +179,9 @@ func Run(
 		// so it is buffered here and flushed only once Pick has released
 		// the terminal.
 		var warnings bufferedWarnings
-		// Opening the picker IS an interaction, so the clock starts stamped
-		// and the first frames refresh at full cadence. Every keystroke
-		// restamps it; going quiet is what makes the stream back off.
+		// The clock opens stamped so the first frames use the full cadence.
+		// Every real keystroke restamps and wakes it; going quiet is what
+		// makes the stream back off.
 		activity := ui.NewActivityClock(clock.Real.Now())
 		scan.Snapshot.Activity = activity
 		request.RepoRoots = scan.Output.RepoRoots()
@@ -188,7 +190,7 @@ func Run(
 			database,
 			request,
 			warnings.add,
-			stderr,
+			&warnings,
 			updates,
 			activity,
 		)
@@ -466,7 +468,10 @@ func killApplier(
 	}
 	return func(change ui.KillChange) error {
 		if !change.Killed {
-			_, err := manager.Unkill(ctx, change.ID)
+			removed, err := manager.Unkill(ctx, change.ID)
+			if err == nil && !removed {
+				return fmt.Errorf("%s is not killed; nothing was unkilled", change.ID)
+			}
 			return err
 		}
 		request := kill.Request{

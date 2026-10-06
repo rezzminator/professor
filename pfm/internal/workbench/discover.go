@@ -2,14 +2,11 @@ package workbench
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/gitroot"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -44,7 +41,7 @@ func Discover(roots []string) ([]Bench, []WalkError) {
 				return
 			}
 			if eligibleBench(root, dir) && !seen[dir] {
-				found, err := hasWorkbenchManifest(dir)
+				found, err := paths.HasWorkbenchManifest(dir)
 				if err != nil {
 					walkError := WalkError{Root: root, Path: dir, Err: err}
 					obs.Logger(context.Background()).Error("workbench discovery", "path", dir, obs.FieldErr, walkError)
@@ -89,24 +86,6 @@ func eligibleBench(root, dir string) bool {
 		}
 	}
 	return true
-}
-
-func hasWorkbenchManifest(dir string) (bool, error) {
-	path := paths.WorkbenchManifest(dir)
-	for _, candidate := range []string{filepath.Dir(path), path} {
-		info, err := os.Lstat(candidate)
-		// ENOTDIR: a regular file named .professor holds no manifest.
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-			return false, nil
-		}
-		if err != nil {
-			return false, fmt.Errorf("inspect workbench %s: %w", candidate, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 // ManagedRoots resolves distinct managed roots using the project owner.
@@ -178,7 +157,7 @@ func Nearest(cwd string) (Bench, bool, error) {
 		if !eligibleBench(root, dir) {
 			continue
 		}
-		found, err := hasWorkbenchManifest(dir)
+		found, err := paths.HasWorkbenchManifest(dir)
 		if err != nil {
 			obs.Logger(context.Background()).Error("workbench nearest", "path", dir, obs.FieldErr, err)
 			return Bench{}, false, err

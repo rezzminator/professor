@@ -161,7 +161,7 @@ graph_order() {
     END {if (barriers!=1) exit 1}
   ' "$T/registered"
 }
-static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | paste -sd, -; }
+static_names() { sed -n '/^BARRIER$/,$p' "$T/registered" | sed '1d' | sort | paste -sd, -; }
 pfm_static='pfm.lint-new,pfm.fmt-check,pfm.vet,pfm.vet-darwin,pfm.arch'
 templates_static='templates.check-map,templates.clone,templates.leak,templates.placeholders,templates.scratch-paths,templates.descriptions,templates.mirrors,templates.token-audit,templates.flight-index,templates.release-check,templates.codex-sync,templates.refresh-scope,templates.pfm-guard,templates.dev-report,templates.format-md,templates.check-pfm-tests,templates.check-templates-tests,templates.test-pfm-tests,templates.test-templates-tests,templates.unit-path-tests,templates.opencode-writer-tests,templates.skill-tests,templates.opencode-writer-refs'
 heavy_names='pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin,templates.check-map'
@@ -173,7 +173,7 @@ if gate_run all >"$T/all.out" &&
   [ "$(grep -c '^templates\.lanes\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/fence/lanes/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
   [ "$(grep -c '^templates\.demo\.' "$T/registered")" -eq "$(find "$REPO_ROOT/infra/demo/tests" -name '*_test.sh' | wc -l | tr -d ' ')" ] &&
   [ "$(sed -n '1,2p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e' ] &&
-  [ "$(static_names)" = "$pfm_static,$templates_static" ] &&
+  [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ] &&
   [ -z "$(sort "$T/registered" | uniq -d)" ] && graph_order all; then
   ok 'all registers tests before one barrier and each static step once'
@@ -181,7 +181,7 @@ else bad 'all registration' "$(cat "$T/all.out")" "$(cat "$T/registered")"; fi
 
 if PFM_TEST_TIMING_DIR="$T/real-pfm" gate_run pfm >"$T/pfm.out" &&
   [ "$(sed -n '1,2p' "$T/registered" | paste -sd, -)" = 'pfm.unit,pfm.e2e' ] &&
-  [ "$(static_names)" = "$pfm_static" ] &&
+  [ "$(static_names)" = "$(printf '%s' "$pfm_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(sort "$T/heavy" | paste -sd, -)" = 'pfm.e2e,pfm.fmt-check,pfm.lint-new,pfm.unit,pfm.vet,pfm.vet-darwin' ] &&
   graph_order pfm; then
   ok 'pfm graph runs its tests before static checks'
@@ -195,16 +195,16 @@ if [ -s "$real_run/profile.tsv" ] && [ -f "$real_run/profile/INDEX.txt" ] && gre
 else bad 'real summary' "$(cat "$T/pfm.out")"; fi
 
 if gate_run templates >"$T/templates.out" &&
-  [ "$(static_names)" = "$templates_static" ] &&
+  [ "$(static_names)" = "$(printf '%s' "$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] &&
   [ "$(cat "$T/heavy")" = templates.check-map ] &&
   graph_order templates; then
   ok 'templates graph runs its tests before static checks'
 else bad 'templates graph' "$(cat "$T/registered")"; fi
-unit_script_rows="$(printf 'templates.%s-tests checks_templates_unit_script %s\n' check-pfm check-pfm check-templates check-templates test-pfm test-pfm test-templates test-templates unit-path unit-path)"
-if [ "$(grep '^templates\.[a-z-]*-tests checks_templates_unit_script ' "$T/registered.args" | tail -5)" = "$unit_script_rows" ] &&
-  grep -Fxq 'templates.unit-path-tests checks_templates_unit_script unit-path' "$T/registered.args"; then
-  ok 'each unit-script suite is a gate step handed its own name: templates.unit-path-tests runs checks_templates_unit_script unit-path'
-else bad 'unit-script step registration' "$(grep 'checks_templates_unit_script' "$T/registered.args")"; fi
+for n in check-pfm check-templates test-pfm test-templates unit-path; do
+  if grep -Fxq "templates.$n-tests checks_templates_unit_script $n" "$T/registered.args"; then
+    ok "$n suite is registered with its own name"
+  else bad "$n suite registration" "$(grep 'checks_templates_unit_script' "$T/registered.args")"; fi
+done
 
 # The pfm that pfm.unit prebuilds is kept in <run>/bin: check-map and the mirrors are handed it.
 if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then
@@ -212,8 +212,8 @@ if PFM_TEST_TIMING_DIR="$T/reuse" gate_run all >"$T/reuse.out"; then
   if grep -Fxq "pfm.unit checks_pfm_unit $REPO_ROOT/pfm $reuse_run" "$T/registered.args" &&
     grep -Fxq "templates.check-map checks_gate_check_map $reuse_run" "$T/registered.args" &&
     grep -Fxq "templates.mirrors checks_templates_mirrors $reuse_run/bin/pfm" "$T/registered.args" &&
-    [ "$(static_names)" = "$pfm_static,$templates_static" ] && [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ]; then
-    ok 'templates.mirrors is registered with <run>/bin/pfm, same position and light; check-map and pfm.unit keep their arguments'
+    [ "$(static_names)" = "$(printf '%s' "$pfm_static,$templates_static" | tr ',' '\n' | sort | paste -sd, -)" ] && [ "$(sort "$T/heavy" | paste -sd, -)" = "$heavy_names" ]; then
+    ok 'templates.mirrors is registered with <run>/bin/pfm and stays light; check-map and pfm.unit keep their arguments'
   else bad 'kept pfm registration' "$(grep -E '^(pfm.unit|templates.check-map|templates.mirrors) ' "$T/registered.args")"; fi
 else bad 'gate_run all (kept pfm registration)' "$(cat "$T/reuse.out")"; fi
 if [ -n "${reuse_run:-}" ] && [ "${TIMING_RUN_LAST:-}" = "$reuse_run" ]; then
@@ -649,24 +649,26 @@ if [ "$(cat "$T/mirrors-args.out")" = "$(printf 'opencode-arg [%s]\nopencode-arg
 else bad 'mirrors argument' "$(cat "$T/mirrors-args.out")"; fi
 
 # checks_templates_unit_script: one suite of .claude/scripts under its own label; a red suite is run's FAIL, so its status passes through.
-out="$( ( run() { printf 'run [%s]\n' "$*"; }; head_() { printf 'head [%s]\n' "$*"; }; REPO_ROOT=/repo; checks_templates_unit_script unit-path ) 2>&1 )"
-if [ "$out" = "$(printf 'head [templates — test-unit-path.sh self-test]\nrun [templates: test-unit-path.sh self-test -- bash /repo/scripts/test-unit-path.sh]')" ]; then
-  ok 'checks_templates_unit_script runs bash scripts/test-<name>.sh under the label "templates: test-<name>.sh self-test"'
+out="$( ( run() { shift 2; printf 'run [%s]\n' "$*"; }; head_() { printf 'head [%s]\n' "$*"; }; REPO_ROOT=/repo; checks_templates_unit_script unit-path ) 2>&1 )"
+if grep -Fxq 'run [bash /repo/scripts/test-unit-path.sh]' <<<"$out"; then
+  ok 'the unit-path suite runs through bash'
 else bad 'checks_templates_unit_script run' "$out"; fi
 out="$( ( run() { return 3; }; head_() { :; }; REPO_ROOT=/repo; checks_templates_unit_script check-pfm; echo "rc=$?" ) 2>&1 )"
 if [ "$out" = 'rc=3' ]; then ok "checks_templates_unit_script returns run's status, a red suite is not swallowed"
 else bad 'checks_templates_unit_script red suite' "$out"; fi
 
-# checks_templates (CI's iso test templates): the five suites follow format-md, in order, before the opencode mirror check.
+# checks_templates (CI's iso test templates) calls each of the five unit-script suites once.
 out="$( (
   for f in $(declare -F | awk '{print $3}' | grep '^checks_templates_'); do
     eval "$f() { printf '%s%s\\n' '$f' \"\${*:+ \$*}\"; }"
   done
   checks_templates
-) 2>&1 | sed -n '/^checks_templates_format_md$/,/^checks_templates_mirrors_opencode$/p' | paste -sd, -)"
-if [ "$out" = 'checks_templates_format_md,checks_templates_unit_script check-pfm,checks_templates_unit_script check-templates,checks_templates_unit_script test-pfm,checks_templates_unit_script test-templates,checks_templates_unit_script unit-path,checks_templates_mirrors_opencode' ]; then
-  ok 'checks_templates calls the five unit-script suites in order, right after format-md'
-else bad 'checks_templates serial list' "$out"; fi
+) 2>&1 )"
+for n in check-pfm check-templates test-pfm test-templates unit-path; do
+  if [ "$(grep -Fxc "checks_templates_unit_script $n" <<<"$out")" -eq 1 ]; then
+    ok "the serial list calls the $n suite once"
+  else bad "the serial list calls the $n suite once" "$out"; fi
+done
 
 # The RUN DIR line (dev.sh's EXIT trap, so it is the output's last line): the run dir this invocation
 # made, by its HOST path — inside the fence /pfm-timing is the bind of PFM_TEST_TIMING_HOST.

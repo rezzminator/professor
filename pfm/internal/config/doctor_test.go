@@ -1,10 +1,50 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestMarshalDoctorIgnoreWarningsRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	machine := Defaults(home, nil)
+	want := []string{"vscode-link", "vscode-settings"}
+	machine.Doctor.IgnoreWarnings = want
+	content, err := Marshal(machine, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, FileName)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded.Doctor.IgnoreWarnings, want) {
+		t.Fatalf("Doctor.IgnoreWarnings = %#v, want %#v", loaded.Doctor.IgnoreWarnings, want)
+	}
+}
+
+func TestMarshalDoctorWithoutIgnoreWarnings(t *testing.T) {
+	machine := Defaults(t.TempDir(), nil)
+	content, err := Marshal(machine, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(content, &value); err != nil {
+		t.Fatal(err)
+	}
+	if block, found := value["doctor"]; found {
+		t.Fatalf("doctor block = %s, want omitted with nil IgnoreWarnings", block)
+	}
+}
 
 // TestDoctorIgnoreWarningsLoadsAndValidatesAtLoad pins doctor.ignoreWarnings
 // at data entry: an absent or null key is today's behaviour (nothing

@@ -121,6 +121,9 @@ func (executor *Executor) Open(
 	if err := applyWorkbench(&request); err != nil {
 		return "", err
 	}
+	if err := checkCodexLaunch(request); err != nil {
+		return "", err
+	}
 	switch request.Row.Kind {
 	case compose.Agent:
 		if err := executor.Solo(ctx, request.Row.ID, "", true, request.Config.Claude.Binary); err != nil {
@@ -157,6 +160,21 @@ func (executor *Executor) Open(
 	}
 	trail.Reach("opened", "pane attached")
 	return plan.Line, nil
+}
+
+func checkCodexLaunch(request Request) error {
+	if request.Row.Kind != compose.NewCodex && request.Row.Kind != compose.ResumeCodex {
+		return nil
+	}
+	account, found := request.Config.CodexAccountByID(request.PrimaryAccount)
+	if !found {
+		return nil
+	}
+	if err := pfmconfig.CodexLoginError(account.Home); err != nil {
+		//nolint:staticcheck // Codex is the proper noun in the required login instruction.
+		return fmt.Errorf("Codex account %d: %w", account.ID, err)
+	}
+	return nil
 }
 
 func (executor *Executor) recordLaunch(ctx context.Context, record *fleetdb.Launch) {

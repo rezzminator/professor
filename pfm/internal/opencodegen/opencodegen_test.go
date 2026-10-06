@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -678,5 +680,121 @@ func TestOpenCodeWorkbenchHomeFree(t *testing.T) {
 				t.Errorf("home roster not used: %q err=%v", data, err)
 			}
 		})
+	}
+}
+
+func TestOpenCodeWorkbenchProbeErrors(t *testing.T) {
+	for _, scenario := range []string{"root", "child"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, home := t.TempDir(), t.TempDir()
+			length := 4088
+			if scenario == "child" {
+				length = 3834
+			}
+			for remaining := length - len(root); remaining > 0; {
+				n := min(200, remaining-1)
+				if remaining-(n+1) == 1 {
+					n--
+				}
+				root = filepath.Join(root, strings.Repeat("d", n))
+				remaining -= n + 1
+			}
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			sentinel := filepath.Join(home, ".config", "opencode", "command", "old.md")
+			body := newMarker + " from fixture\n"
+			writeTestFile(t, sentinel, body)
+			var child string
+			if scenario == "child" {
+				child = filepath.Join(root, strings.Repeat("y", 255))
+				if err := os.MkdirAll(child, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+			if scenario == "root" {
+				if !errors.Is(err, syscall.ENAMETOOLONG) || !reflect.DeepEqual(result, Result{}) {
+					t.Errorf("compile=%#v err=%v, want zero result and ENAMETOOLONG", result, err)
+				}
+				if raw, err := os.ReadFile(sentinel); err != nil || string(raw) != body {
+					t.Errorf("home sentinel=%q err=%v, want %q", raw, err, body)
+				}
+			} else {
+				want := "inspect workbench " + filepath.Join(child, ".professor") + ": "
+				found := false
+				for _, problem := range result.Problems {
+					found = found || strings.HasPrefix(problem, want)
+				}
+				if err != nil || result.OK || !found {
+					t.Fatalf("compile=%#v err=%v, want problem prefix %q", result, err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenCodeRealAgentBeatsDanglingTwin(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	source := filepath.Join(root, ".claude", "agents", "scan-api.md")
+	writeTestFile(t, source, "---\ndescription: Old.\n---\nOld.\n")
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("seed=%#v err=%v", result, err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../vendor/scan-api.md", source); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(root, "api", "CLAUDE.md"), "API.\n")
+	realSource := filepath.Join(root, "api", ".claude", "agents", "scan.md")
+	writeTestFile(t, realSource, "---\ndescription: Scan.\n---\nScan.\n")
+	result, err = Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	body, readErr := os.ReadFile(filepath.Join(root, ".opencode", "agent", "scan-api.md"))
+	warnings := 0
+	for _, warning := range result.Warnings {
+		if strings.Contains(warning, source) && strings.Contains(warning, realSource) {
+			warnings++
+		}
+	}
+	if err != nil || !result.OK || readErr != nil ||
+		!strings.Contains(string(body), generatedMarker("api/.claude/agents/scan.md")) ||
+		warnings != 1 {
+		t.Fatalf("build=%#v err=%v body=%q read=%v replacement warnings=%d", result, err, body, readErr, warnings)
+	}
+}
+
+func TestOpenCodeDanglingCommandKeepsItsTwin(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	source := filepath.Join(root, ".claude", "commands", "lab.md")
+	twin := filepath.Join(root, ".opencode", "command", "lab.md")
+	writeTestFile(t, source, "---\ndescription: Lab.\n---\nLab.\n")
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("seed=%#v err=%v", result, err)
+	}
+	seeded, err := os.ReadFile(twin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	target := "../../vendor/lab.md"
+	if err := os.Symlink(target, source); err != nil {
+		t.Fatal(err)
+	}
+	result, err = Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	body, readErr := os.ReadFile(twin)
+	warning := "source unresolvable: " + source + " → " + target + "; twin kept"
+	if err != nil || !result.OK || result.Deleted != 0 || readErr != nil || !bytes.Equal(body, seeded) ||
+		!containsProblem(result.Warnings, warning) {
+		t.Fatalf("build=%#v err=%v body=%q read=%v, want kept twin warning %q", result, err, body, readErr, warning)
+	}
+	result, err = Compile(Options{Root: root, Home: home, Mode: ModeCheck})
+	if err != nil || result.OK || !containsProblem(result.Problems, "DANGLING "+source) {
+		t.Fatalf("check=%#v err=%v", result, err)
 	}
 }

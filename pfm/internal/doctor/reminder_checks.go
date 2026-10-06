@@ -159,7 +159,8 @@ func reminderDatabasePart(ctx context.Context, source reminderSource, now time.T
 		// Not created yet: no reminder was ever set, and nothing is wrong.
 		return "db=absent", nil, false
 	} else if err != nil {
-		return unreadable(err)
+		return fmt.Sprintf("db=unreadable error=%v", err),
+			[]string{"reminder state unknown; the doctor: shared store row counts it"}, false
 	}
 	due, err := source.DueReminders(ctx, now)
 	if err != nil {
@@ -173,7 +174,7 @@ func reminderDatabasePart(ctx context.Context, source reminderSource, now time.T
 	var latest *fleetdb.Reminder
 	for i := range problems {
 		reminder := &problems[i]
-		if !reminder.NextFire.After(now.Add(-reminderDoctorGrace)) {
+		if reminder.LastError == "" && !reminder.NextFire.After(now.Add(-reminderDoctorGrace)) {
 			overdue++
 		}
 		if reminder.LastError == "" {

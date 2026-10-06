@@ -3,6 +3,7 @@ package reload
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,9 +86,17 @@ func TestReloadBirthUnreadableRecordStops(t *testing.T) {
 }
 
 func TestValidateReloadAccountUsesTheSeatEngineRoster(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(home, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	machine := pfmconfig.Config{
 		Version:       pfmconfig.Version,
-		CodexAccounts: []pfmconfig.CodexAccount{{ID: 3, Home: "/codex/3"}},
+		CodexAccounts: []pfmconfig.CodexAccount{{ID: 3, Home: home}},
 	}
 	if _, err := ValidateAccount(machine, "cx", 3); err != nil {
 		t.Fatalf("requested Codex account rejected: %v", err)
@@ -147,5 +156,15 @@ func TestReloadBirthDetachedShellIgnoresTheLoginDefault(t *testing.T) {
 				t.Fatalf("birth = %d, %v; want %d", account, err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateCodexReloadRequiresLogin(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex-3")
+	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 3, Home: home}}}
+	_, err := ValidateAccount(machine, "cx", 3)
+	want := "Codex account 3: " + filepath.Join(home, "auth.json") + " "
+	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("ValidateAccount error=%v; want %q", err, want)
 	}
 }

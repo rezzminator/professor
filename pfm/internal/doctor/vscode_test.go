@@ -114,18 +114,33 @@ func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
 		{"relinquished missing", `[]`, "/old", "primary", "CLAUDE_CONFIG_DIR missing (pfm relinquished it after an operator edit) — run pfm install --yes --vscode", false, false, 1},
 		{"malformed", `{}`, "", "primary", "claudeCode.environmentVariables unreadable error=malformed VS Code settings: claudeCode.environmentVariables must be an array", false, true, 1},
 		{"malformed no primary", `{}`, "", "", "claudeCode.environmentVariables unreadable error=malformed VS Code settings: claudeCode.environmentVariables must be an array", false, true, 1},
+		{"owned settings deleted", `[{"name":"CLAUDE_CONFIG_DIR","value":"primary"}]`, "primary", "primary", "", true, false, 1},
+		{"owned profile missing", `[{"name":"CLAUDE_CONFIG_DIR","value":"primary"}]`, "primary", "primary", "", true, false, 1},
+		{"conflicting profile env primary", `[{"name":"CLAUDE_CONFIG_DIR","value":"primary"}]`, "primary", "primary", "", true, false, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, "settings.json")
 			raw := `{"claudeCode.environmentVariables":` + tc.env + `}`
 			profileState := "relinquished"
+			profileOwned := tc.malformed
+			profileFix := ""
 			if tc.malformed {
 				raw = `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh"}},"claudeCode.environmentVariables":` + tc.env + `}`
 				profileState = "owned"
 			}
-			if err := os.WriteFile(settings, []byte(raw), 0o600); err != nil {
-				t.Fatal(err)
+			switch tc.name {
+			case "owned settings deleted", "owned profile missing":
+				profileOwned, profileState = true, "missing"
+				profileFix = "run pfm install --yes --vscode"
+			case "conflicting profile env primary":
+				raw = `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/operator/shell"}},"claudeCode.environmentVariables":` + tc.env + `}`
+				profileFix = `rename or remove the "PFM" terminal profile in ` + settings + ", then run pfm install --yes --vscode"
+			}
+			if tc.name != "owned settings deleted" {
+				if err := os.WriteFile(settings, []byte(raw), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			root := filepath.Join(home, ".local", "share", "pfm", "install")
 			if err := os.MkdirAll(root, 0o700); err != nil {
@@ -140,7 +155,7 @@ func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
 							"platform":     "linux",
 							"envOwned":     tc.owned,
 							"envValue":     tc.envValue,
-							"profileOwned": tc.malformed,
+							"profileOwned": profileOwned,
 						},
 					},
 				},
@@ -150,7 +165,12 @@ func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
 			}
 			var out bytes.Buffer
 			warnings := printVSCodeDoctor(&out, home, tc.primary, warningFilter{configPath: "/cfg/pfm.config.json"})
-			want := "doctor: vscode settings=" + settings + " profile=PFM(" + profileState + ") default=(none)\n"
+			want := "doctor: vscode settings=" + settings + " profile=PFM(" + profileState + ") default=(none)"
+			if profileFix != "" {
+				want += " — " + profileFix + settingsHint
+			} else {
+				want += "\n"
+			}
 			if tc.row != "" {
 				want += "doctor: vscode settings=" + settings + " " + tc.row + settingsHint
 			}
@@ -193,18 +213,19 @@ func TestDoctorVSCodeConflictingProfileFixWorksVerbatim(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			printVSCodeDoctor(&out, home, "primary", warningFilter{configPath: "/cfg/pfm.config.json"})
+			warnings := printVSCodeDoctor(&out, home, "primary", warningFilter{configPath: "/cfg/pfm.config.json"})
 			got := out.String()
-			want := "doctor: vscode settings=" + settings + plainFix + settingsHint
+			profileRow := "doctor: vscode settings=" + settings + " profile=PFM(relinquished) default=PFM"
+			wantWarnings := 1
+			want := profileRow + "\n" + "doctor: vscode settings=" + settings + plainFix + settingsHint
 			if name == "operator" {
-				want = "doctor: vscode settings=" + settings + ` CLAUDE_CONFIG_DIR missing — rename or remove the "PFM" terminal profile in ` +
-					settings + ", then run pfm install --yes --vscode" + settingsHint
-				if strings.Contains(got, plainFix) {
-					t.Fatalf("conflicting profile still prints the refusing fix:\n%s", got)
-				}
+				fix := `rename or remove the "PFM" terminal profile in ` + settings + ", then run pfm install --yes --vscode"
+				want = profileRow + " — " + fix + settingsHint +
+					"doctor: vscode settings=" + settings + " CLAUDE_CONFIG_DIR missing — " + fix + settingsHint
+				wantWarnings = 2
 			}
-			if !strings.Contains(got, want) {
-				t.Fatalf("got %q\nwant %q", got, want)
+			if got != want || warnings != wantWarnings {
+				t.Fatalf("warnings=%d want %d; got %q\nwant %q", warnings, wantWarnings, got, want)
 			}
 		})
 	}

@@ -2,10 +2,15 @@ package action
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
@@ -142,5 +147,28 @@ func TestOpenDetachedNilExecutor(t *testing.T) {
 	var executor *Executor
 	if _, err := executor.OpenDetached(context.Background(), Request{}); err == nil {
 		t.Fatal("want an error for a nil executor, got nil")
+	}
+}
+
+func TestOpenDetachedCodexRequiresLogin(t *testing.T) {
+	jailAction(t)
+	home := t.TempDir()
+	machine := testMachineConfig(home)
+	authPath := filepath.Join(home, ".codex", "auth.json")
+	if err := os.Remove(authPath); err != nil {
+		t.Fatal(err)
+	}
+	tmux := &fakeActionTmux{alive: map[string]bool{}}
+	executor, err := New(Dependencies{Tmux: tmux, Processes: &fakeProcesses{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = executor.OpenDetached(context.Background(), Request{
+		Row:    compose.Row{Kind: compose.ResumeCodex, ID: "t1", CWD: "/work"},
+		Config: machine, Home: home, PrimaryAccount: 1, FreshSocket: "cx-fresh",
+	})
+	want := "open detached: Codex account 1: " + authPath + " "
+	if !errors.Is(err, pfmconfig.ErrCodexLoggedOut) || !strings.HasPrefix(err.Error(), want) || len(tmux.created) != 0 {
+		t.Fatalf("OpenDetached error=%v created=%d; want %q", err, len(tmux.created), want)
 	}
 }

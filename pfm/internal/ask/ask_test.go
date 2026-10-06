@@ -132,9 +132,17 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	codexHome := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(codexHome, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	machine := pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 2, ConfigDir: configDir}},
-		CodexAccounts: []pfmconfig.CodexAccount{{ID: 4, Home: "/fixture/codex-4"}},
+		CodexAccounts: []pfmconfig.CodexAccount{{ID: 4, Home: codexHome}},
 		Claude:        pfmconfig.Claude{Binary: "claude"},
 		Codex:         pfmconfig.Codex{Binary: "codex"},
 	}
@@ -149,7 +157,7 @@ printf '%s\n' '{"result":"claude answer","usage":{"input_tokens":7,"cached_input
 		{
 			name:     "codex",
 			input:    AskInput{Engine: pfmengine.Codex, Model: "cx-model", Effort: "high"},
-			wantHome: "/fixture/codex-4",
+			wantHome: codexHome,
 			wantArgs: []string{
 				"exec",
 				"--model cx-model",
@@ -309,13 +317,21 @@ func askMachine(t *testing.T, engineName string) pfmconfig.Config {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	codexHome := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(codexHome, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	id, err := pfmengine.Parse(engineName)
 	if err != nil {
 		panic(err)
 	}
 	return pfmconfig.Config{
 		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: configDir}},
-		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: "/fixture/codex"}},
+		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
 		Claude:        pfmconfig.Claude{Binary: "claude"},
 		Codex:         pfmconfig.Codex{Binary: "codex"},
 		Ask:           pfmconfig.AskConfig{Engine: id},

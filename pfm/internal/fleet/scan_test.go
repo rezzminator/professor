@@ -196,11 +196,56 @@ func TestResolveEnvWorkbenchCacheOptIn(t *testing.T) {
 	if err != nil || len(env.Workbenches) != 0 {
 		t.Fatalf("chat environment = %+v, %v", env, err)
 	}
-	if err := os.WriteFile(paths.WorkbenchCache(runtime.Paths), []byte("{broken"), 0o600); err != nil {
+}
+
+func TestResolveEnvWorkbenchUnreadableCache(t *testing.T) {
+	runtime := jailRuntime(t)
+	runtime.Paths.CacheDB = filepath.Join(t.TempDir(), "index.db")
+	cachePath := paths.WorkbenchCache(runtime.Paths)
+	if err := os.WriteFile(cachePath, []byte(`{"version":2,"workbenches":[],"errors":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env, err = ResolveEnv(Request{Runtime: runtime, Workbenches: true})
-	if err != nil || len(env.Workbenches) != 0 {
-		t.Fatalf("corrupt first frame = %+v, %v", env, err)
+	for _, interactive := range []bool{true, false} {
+		name := "plain"
+		if interactive {
+			name = "interactive"
+		}
+		t.Run(name, func(t *testing.T) {
+			env, err := ResolveEnv(Request{Runtime: runtime, Workbenches: interactive})
+			if err != nil || len(env.Workbenches) != 0 {
+				t.Fatalf("environment = %+v, %v; want no benches and nil error", env, err)
+			}
+			if !interactive {
+				if len(env.WorkbenchErrors) != 0 {
+					t.Fatalf("plain scan faults = %#v; want none", env.WorkbenchErrors)
+				}
+				return
+			}
+			if len(env.WorkbenchErrors) != 1 {
+				t.Fatalf("cache faults = %#v; want one visible error", env.WorkbenchErrors)
+			}
+			fault := env.WorkbenchErrors[0]
+			if fault.Root != env.CurrentDir || fault.Path != cachePath ||
+				!strings.Contains(
+					fault.Error(),
+					cachePath,
+				) || !strings.Contains(fault.Error(), "unsupported version 2") {
+				t.Fatalf(
+					"cache fault = %#v (%s); want current directory, cache path and version error",
+					fault,
+					fault.Error(),
+				)
+			}
+			output := ComposeFleet(env, compose.AllView, Data{}, gather.Snapshot{})
+			var invalid []compose.Row
+			for _, row := range output.Rows {
+				if row.Kind == compose.WorkbenchInvalid {
+					invalid = append(invalid, row)
+				}
+			}
+			if len(invalid) != 1 || invalid[0].Name != fault.Error() {
+				t.Fatalf("invalid workbench rows = %#v; want one named %q", invalid, fault.Error())
+			}
+		})
 	}
 }

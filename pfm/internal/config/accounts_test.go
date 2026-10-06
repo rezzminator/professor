@@ -1,11 +1,61 @@
 package config
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+func TestImplicitAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		accounts []Account
+		want     int
+	}{
+		{"empty roster", nil, 1},
+		{"no ID 1", []Account{{ID: 7}, {ID: 2}}, 7},
+		{"ID 1 not first", []Account{{ID: 7}, {ID: 1}}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := Config{Accounts: tc.accounts}
+			if got := machine.ImplicitAccount(); got != tc.want {
+				t.Fatalf("ImplicitAccount() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAccountForConfigDirUsesImplicitAccount(t *testing.T) {
+	home := t.TempDir()
+	machine := Config{Accounts: []Account{
+		{ID: 7, ConfigDir: filepath.Join(home, "seven")},
+		{ID: 1, ConfigDir: filepath.Join(home, "one")},
+	}}
+	for _, tc := range []struct{ name, dir string }{
+		{"empty", ""},
+		{"unmatched", filepath.Join(home, "elsewhere")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := machine.AccountForConfigDir(tc.dir); got != 1 {
+				t.Fatalf("AccountForConfigDir(%q) = %d, want 1", tc.dir, got)
+			}
+		})
+	}
+}
+
+func TestAccountForConfigDirMatchesAccount(t *testing.T) {
+	home := t.TempDir()
+	machine := Config{Accounts: []Account{
+		{ID: 7, ConfigDir: filepath.Join(home, "seven")},
+		{ID: 1, ConfigDir: filepath.Join(home, "one")},
+	}}
+	dir := filepath.Join(home, "seven")
+	if got := machine.AccountForConfigDir(dir); got != 7 {
+		t.Fatalf("AccountForConfigDir(%q) = %d, want 7", dir, got)
+	}
+}
 
 // TestAccountProjectionsFollowTheRoster pins every per-engine projection of the
 // roster, and the zero answers with an engine that has no accounts.

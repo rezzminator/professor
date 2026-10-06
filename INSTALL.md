@@ -106,15 +106,18 @@ Use `pfm`, `pfm chat open <target>` and the picker’s account selector. Reload 
 
 Optional memory helpers use `memory-wire.sh` and `memory-consolidate.sh`. The `memory-helpers` host check refuses recognized copies under their old names and prints the moves and hook edits; run those fixes before installation. Helpers are never executed by the check.
 
-**Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` also checks required dependencies and the name-sync scheduler without writing: a BLOCK row or a running scheduler exits 4, and another preflight failure exits 1. A mutating install checks the scheduler before its writes and refuses an actively running name-sync job with exit 97. Wait for it to finish or stop `pfm-name-sync.service` on Linux / `com.professor.pfm.name-sync` on macOS, then rerun. Installation does not move legacy config or databases; `pfm doctor` prints those fixes.
+**Known gate — read before you run it.** Host checks run before dependency provisioning or installer writes. `pfm install --check` covers host checks (a BLOCK row exits 4), existence of an explicit `--config` (missing exits 1), required dependencies (failure exits 1), and both name-sync and reminder scheduler jobs. It never waits for a running job: either job exits 4. A scheduler it cannot probe prints a `skip` line and the check still passes if the other checks pass. It stops before the config seed and the installer's own plan pass, so exit 0 is no promise that `pfm install --yes` will not refuse.
+
+A mutating install refuses a running name-sync job at once with exit 97. It waits up to 90 s for a running reminder fire, then refuses with exit 97 if the fire is still running. Wait for the job to finish, or stop it before retrying: on Linux, `systemctl --user stop pfm-name-sync.service` or `systemctl --user stop pfm-reminder.service`; on macOS, `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` or `launchctl bootout gui/$(id -u)/com.professor.pfm.reminder`. Installation does not move legacy config or databases; `pfm doctor` prints those fixes.
 
 ### First install on a host that already used Claude
 
-A default Claude installation stores identity alongside shared data in `~/.claude` and may also have `~/.claude.json`. `pfm install` refuses that shape: account 1 must be a real directory at `~/.cc/1`, and identity belongs there. Run `pfm doctor` first; its `account-is-store` and `store-identity` rows print the exact moves. If a destination already exists, compare it and follow the row's keep/remove instruction instead of overwriting it.
+A default Claude installation stores identity alongside shared data in `~/.claude` and may also have `~/.claude.json`. Identity entries in the store (`store-identity`) and an account directory resolving to the store (`account-is-store`) are BLOCK rows that refuse installation: account 1 must be a real directory at `~/.cc/1`, and identity belongs there. A home `~/.claude.json` is the `home-state-file` warning row, with its own fix. Run `pfm doctor` first; its rows print the exact moves. If a destination already exists, compare it and follow the row's keep/remove instruction instead of overwriting it.
 
-On Linux, close every chat, including background Claude sessions, then run the following for the default account-1 path. The per-account list below is `installer.AccountEntries`; shared entries stay in the store. For `state`, the host check identifies only `state/mcp-discover-verdicts.json`; this first-install block moves the whole per-account `state` directory.
+On Linux, close every chat, including background Claude sessions, then run the following for the default account-1 path. The 15-entry per-account list below is `installer.AccountEntries` minus `installer.RetiredStoreEntries` (`.last-update-result.json`, which install archives); shared entries stay in the store. For `state`, the host check identifies only `state/mcp-discover-verdicts.json`; this first-install block moves the whole per-account `state` directory. The block runs in a subshell: a refusal leaves its message on screen and your shell open, without running `pfm install --yes`.
 
 ```bash
+(
 # Close every chat before moving account identity.
 if [ -L "$HOME/.cc/1" ] && [ "$HOME/.cc/1" -ef "$HOME/.claude" ]; then
   rm "$HOME/.cc/1" || exit 1
@@ -139,6 +142,7 @@ if [ -e "$HOME/.claude.json" ]; then
   mv "$HOME/.claude.json" "$HOME/.cc/1/.claude.json" || exit 1
 fi
 pfm install --yes
+)
 ```
 
 The symlink check compares physical targets, so it also handles a relative link to the store; `rm` removes that link only. Resolve any other BLOCK rows doctor names before the final install.
@@ -240,7 +244,7 @@ Each tier has one source of truth and one update mechanism:
 
 | Tier | Truth | Staying current |
 | ----------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. It rolls back only on a `pfm doctor` failure (a required dependency, launcher, hooks, host overlay, global agents, config, or database state); pre-existing warnings never block it, and it reports each warning the update newly introduced. |
+| Machine-global commands, agents, and skills | Blueprint originals | `pfm update` advances the tagged source clone, rebuilds the binary, runs `pfm install --yes`, and refreshes the registry symlinks. It rolls back if replacing an owned binary fails, if `pfm install --yes` after staging fails (including a host-check BLOCK, exit 4), or if the post-update doctor reports any failure (exit 3, whatever it reported before) or cannot run. Warnings never block it, and it reports newly introduced warnings. A stopped or rolled-back update exits 5. |
 | Project files (`CLAUDE.md`, `.claude/**`, docs, scripts) | The local files | `pfm init` scaffolds them once (`pfm update adopt` pins an install that predates scaffolding). `pfm doctor --project-updates` reports template deltas with the upstream diff under each `UPDATED` row; you carry what applies into the local file, keep your own edits, then pin it. |
 | Engine mirrors (`AGENTS.md`, `.codex/**`, OpenCode outputs) | Generated from local project files | Never edit them by hand. Rebuild or verify them with their compiler, including `pfm codex build` and `pfm codex check`. |
 
@@ -250,7 +254,7 @@ A fresh clone of the blueprint itself carries none of these outputs — `AGENTS.
 
 ### Building and restoring the host binary
 
-`make -C pfm host-install` builds and smoke-tests the new binary, then runs its `pfm install --check` before the atomic swap. Any refusing check keeps the installed binary untouched. A host-check refusal prints each blocking row's fix; for any other refusal, build with `make -C pfm build` and run the built binary's doctor for the fixes. Then retry. `SKIP_INSTALL_CHECK=1` explicitly skips this check; `FORCE=1` controls only the downgrade guard.
+`make -C pfm host-install` builds and smoke-tests the new binary, then runs its `pfm install --check` before the atomic swap. That check covers host checks, existence of an explicit `--config`, required dependencies, and the scheduler, then stops before the config seed and the installer's own plan pass; exit 0 does not promise that `pfm install --yes` will not refuse. Any refusing check keeps the installed binary untouched. A host-check refusal prints each blocking row's fix; for any other refusal, build with `make -C pfm build` and run the built binary's doctor for the fixes. Then retry. `SKIP_INSTALL_CHECK=1` explicitly skips this check; `FORCE=1` controls only the downgrade guard.
 
 The swap keeps the previous binary as `pfm.prev`. `make -C pfm rollback` restores it atomically, reruns that restored binary's `install --yes`, then restarts the MCP daemon. It reports a failed install or restart with the next command to inspect. `make install` restarts the daemon and sweeps stale processes after the swap; a failed restart restores the previous binary before the sweep.
 

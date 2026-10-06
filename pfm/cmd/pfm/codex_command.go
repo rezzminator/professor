@@ -199,17 +199,17 @@ func codexRepoRoot() (string, error) {
 	}
 	fallback := ""
 	for {
-		if _, err := os.Stat(paths.WorkbenchManifest(dir)); err == nil {
+		if found, err := paths.HasWorkbenchManifest(dir); err != nil {
+			return "", err
+		} else if found {
 			return dir, nil
 		}
 		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
 			return dir, nil
 		}
 		if fallback == "" {
-			if info, statErr := os.Stat(
-				filepath.Join(dir, professor.ClaudeInstructionsFile),
-			); statErr == nil &&
-				info.Mode().IsRegular() {
+			instructions := filepath.Join(dir, professor.ClaudeInstructionsFile)
+			if info, statErr := os.Stat(instructions); statErr == nil && info.Mode().IsRegular() {
 				fallback = dir
 			}
 		}

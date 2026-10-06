@@ -31,6 +31,12 @@ func TestLegacyConfig(t *testing.T) {
 			}
 			assertRows(t, detect(t, "legacy-config", env), want...)
 			env.ConfigExplicit = true
+			env.CloneConfigPath = env.ConfigPath
+			env.ConfigPath = want[0].Path
+			assertRows(t, detect(t, "legacy-config", env), Row{
+				Block, "legacy-config", env.ConfigPath, "explicit --config inside the legacy config dir", want[0].Fix,
+			})
+			env.ConfigPath = filepath.Join(env.Home, "elsewhere.json")
 			assertRows(t, detect(t, "legacy-config", env))
 		})
 	}
@@ -63,6 +69,37 @@ func TestLegacyConfig(t *testing.T) {
 			},
 		)
 	})
+	for _, kind := range []string{"unknown clone", "unreadable explicit", "nested", "physical alias"} {
+		t.Run(kind, func(t *testing.T) {
+			env := fixtureEnv(t)
+			env.ConfigExplicit = true
+			env.CloneConfigPath = env.ConfigPath
+			env.ConfigPath = filepath.Join(env.LegacyConfigDir, config.FileName)
+			if kind == "nested" {
+				env.ConfigPath = filepath.Join(env.LegacyConfigDir, "nested", config.FileName)
+			}
+			if kind == "unreadable explicit" {
+				makeDir(t, env.ConfigPath)
+				assertUnreadable(t, detect(t, "legacy-config", env), "legacy-config", env.ConfigPath, syscall.EISDIR)
+				return
+			}
+			writeFile(t, env.ConfigPath, "{}")
+			writeFile(t, filepath.Join(env.LegacyConfigDir, config.LegacyFileName), "{}")
+			if kind == "physical alias" {
+				alias := filepath.Join(env.Home, "alias")
+				symlink(t, env.LegacyConfigDir, alias)
+				env.ConfigPath = filepath.Join(alias, config.FileName)
+			}
+			fix := "mv " + env.ConfigPath + " " + env.CloneConfigPath
+			if kind == "unknown clone" {
+				env.CloneConfigPath = ""
+				fix = "move " + env.ConfigPath + " into the clone as pfm.config.json, then run pfm install from the clone"
+			}
+			assertRows(t, detect(t, "legacy-config", env), Row{
+				Block, "legacy-config", env.ConfigPath, "explicit --config inside the legacy config dir", fix,
+			})
+		})
+	}
 }
 
 func TestLegacyHarvesterConfig(t *testing.T) {

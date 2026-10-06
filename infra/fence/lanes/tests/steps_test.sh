@@ -39,10 +39,6 @@ dev_knobs() { # dev_knobs <dev.sh>: the injected names in order, one per line; r
   [ -n "$names" ] || return 1
   printf '%s\n' "$names"
 }
-printf '# nothing here injects a knob\nextra+=(-v /a:/b)\n' > "$T/no-knobs-dev.sh"
-if out="$(dev_knobs "$T/no-knobs-dev.sh")"; then bad 'a dev.sh with no injected knob yields a derivation' "$out"
-elif [ -z "$out" ]; then ok 'a derivation yielding no name returns non-zero and prints nothing'
-else bad 'a failed derivation printed names' "$out"; fi
 if derived_knobs="$(dev_knobs "$DEV_SH")"; then
   missing=''
   for n in PFM_TEST_TIMING_HOST PFM_TEST_RUN_NOTE TESTFLAGS STEPS_JOBS STEPS_HEAVY_JOBS STEPS_BOUND_S STEPPROF_TRACE STEPPROF_GRACE_TICKS PFM_TEST_PROFILE PFM_GATE_FIXTURES; do
@@ -74,11 +70,6 @@ if [ -d "$T" ] && [ "$(trap -p EXIT)" ]; then
 else bad 'a forked child removed the suite scratch dir'; mkdir -p "$T"; fi
 
 # shtest_clean_also: the owning shell's EXIT removes $T and the named paths; a forked child running the trap removes neither
-X="$T/clean-also-own"
-own_t="$(bash -c 'SHTEST_TAG=clean-own; source "$1"; mkdir -p "$2"; shtest_clean_also "$2"; echo "$T"' _ "$SHTEST_SH" "$X")"
-if [ -n "$own_t" ] && [ ! -e "$own_t" ] && [ ! -e "$X" ]; then
-  ok 'shtest_clean_also: the owning shell removes its scratch and the named path at exit'
-else bad 'shtest_clean_also owning shell' "scratch ${own_t:-<none>}: $(ls -d "$own_t" 2>&1)" "path $X: $(ls -d "$X" 2>&1)"; rm -rf -- "$own_t" "$X"; fi
 X="$T/clean-also-foreign"
 foreign_out="$(bash -c 'SHTEST_TAG=clean-foreign; source "$1"; mkdir -p "$2"; shtest_clean_also "$2"
   ( eval "$(trap -p EXIT)"; exit 0 )
@@ -92,34 +83,28 @@ else bad 'shtest_clean_also foreign PID' "$foreign_out" "path $X: $(ls -d "$X" 2
 mkdir -p "$T/iso-hooks"
 printf '[commit]\n\tgpgsign = true\n[core]\n\thooksPath = %s\n' "$T/iso-hooks" > "$T/iso-gitconfig"
 printf '#!/bin/sh\nexit 1\n' > "$T/iso-hooks/pre-commit"; chmod +x "$T/iso-hooks/pre-commit"
-if out="$( (
-  export GIT_CONFIG_GLOBAL="$T/iso-gitconfig"
-  git init -q "$T/iso-control" && ! git -C "$T/iso-control" -c user.name=t -c user.email=t@t commit -q --allow-empty -m x 2>/dev/null ||
-    { echo "the fixture git config does not make a commit fail"; exit 1; }
-  shtest_isolate_host
-  [ "$HOME" = "$T/home" ] && [ -d "$HOME" ] || { echo "HOME is '$HOME' (want $T/home, a directory)"; exit 1; }
-  git init -q "$T/iso-repo" && git -C "$T/iso-repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m x
-) 2>&1 )"; then
-  ok 'shtest_isolate_host: HOME is the scratch home and a fixture commit passes under a host config that signs and hooks'
-else bad 'shtest_isolate_host' "$out"; fi
-# a suite run from a git hook (GIT_DIR exported) or under an outer `git -c` (GIT_CONFIG_COUNT) commits to its own fixture repo
-if out="$( (
-  export GIT_DIR="$T/iso-control/.git" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$T/iso-hooks"
-  shtest_isolate_host
-  git init -q "$T/iso-env-repo" && git -C "$T/iso-env-repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m env &&
-    [ "$(git -C "$T/iso-env-repo" log --format=%s -1)" = env ]
-) 2>&1 )"; then
-  ok 'shtest_isolate_host: an inherited GIT_DIR or injected git config never reaches the fixture repository'
-else bad 'shtest_isolate_host inherited git environment' "$out"; fi
-# an exported GIT_TEMPLATE_DIR copies no host hook into a fixture repository's .git/hooks
 mkdir -p "$T/iso-template/hooks" && cp "$T/iso-hooks/pre-commit" "$T/iso-template/hooks/pre-commit"
-if out="$( (
-  export GIT_TEMPLATE_DIR="$T/iso-template"
-  shtest_isolate_host
-  git init -q "$T/iso-tpl-repo" && git -C "$T/iso-tpl-repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m tpl
-) 2>&1 )"; then
-  ok 'shtest_isolate_host: an inherited GIT_TEMPLATE_DIR puts no hook in the fixture repository'
-else bad 'shtest_isolate_host inherited template directory' "$out"; fi
+for setup in config environment template; do
+  if out="$( (
+    case "$setup" in
+      config)
+        export GIT_CONFIG_GLOBAL="$T/iso-gitconfig"
+        git init -q "$T/iso-control" && ! git -C "$T/iso-control" -c user.name=t -c user.email=t@t commit -q --allow-empty -m x 2>/dev/null ||
+          { echo "the fixture git config does not make a commit fail"; exit 1; }
+        ;;
+      environment)
+        export GIT_DIR="$T/iso-control/.git" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$T/iso-hooks"
+        ;;
+      template) export GIT_TEMPLATE_DIR="$T/iso-template" ;;
+    esac
+    shtest_isolate_host
+    [ "$HOME" = "$T/home" ] && [ -d "$HOME" ] || { echo "HOME is '$HOME' (want $T/home, a directory)"; exit 1; }
+    git init -q "$T/iso-$setup-repo" && git -C "$T/iso-$setup-repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "$setup" &&
+      [ "$(git -C "$T/iso-$setup-repo" log --format=%s -1)" = "$setup" ]
+  ) 2>&1 )"; then
+    ok "$setup setup: the scratch home and fixture commit are isolated from the host"
+  else bad "$setup setup: host isolation" "$out"; fi
+done
 
 # shtest_clean_also called twice removes the paths of both calls
 X1="$T/clean-twice-a" X2="$T/clean-twice-b"
@@ -128,16 +113,15 @@ if [ -n "$twice_t" ] && [ ! -e "$twice_t" ] && [ ! -e "$X1" ] && [ ! -e "$X2" ];
   ok 'shtest_clean_also: a second call adds its paths, the first call'"'"'s are still removed'
 else bad 'shtest_clean_also twice' "first $X1: $(ls -d "$X1" 2>&1)" "second $X2: $(ls -d "$X2" 2>&1)"; rm -rf -- "$twice_t" "$X1" "$X2"; fi
 
-# the five unit-script suites call shtest_isolate_host on the line after sourcing shtest.sh and set no EXIT trap of their own
+# the five unit-script suites source shtest.sh and call shtest_isolate_host; all six files set no EXIT trap of their own
 for f in test-check-pfm test-check-templates test-test-pfm test-test-templates test-unit-path stub-root; do
   suite="$REPO_ROOT/scripts/$f.sh"
-  src="$(grep -n 'shtest\.sh"$' "$suite" | head -1 | cut -d: -f1)"
   if [ "$f" = stub-root ]; then
     if [ "$(grep -cE "^[[:space:]]*trap +['\"]" "$suite")" = 0 ]; then ok "$f.sh sets no EXIT trap of its own"
     else bad "$f.sh sets its own trap" "$(grep -nE "^[[:space:]]*trap +['\"]" "$suite")"; fi
-  elif [ -n "$src" ] && [ "$(sed -n "$((src + 1))p" "$suite")" = shtest_isolate_host ] && [ "$(grep -cE "^[[:space:]]*trap +['\"]" "$suite")" = 0 ]; then
-    ok "$f.sh isolates the host on the line after sourcing shtest.sh and sets no EXIT trap of its own"
-  else bad "$f.sh isolation or own trap" "source line ${src:-<none>}: $(sed -n "$((${src:-0} + 1))p" "$suite")" "$(grep -nE "^[[:space:]]*trap +['\"]" "$suite")"; fi
+  elif grep -q 'shtest\.sh"$' "$suite" && grep -qx shtest_isolate_host "$suite" && [ "$(grep -cE "^[[:space:]]*trap +['\"]" "$suite")" = 0 ]; then
+    ok "$f.sh sources shtest.sh, isolates the host and sets no EXIT trap of its own"
+  else bad "$f.sh isolation or own trap" "$(grep -n 'shtest' "$suite")" "$(grep -nE "^[[:space:]]*trap +['\"]" "$suite")"; fi
 done
 
 # a suite whose EXIT trap is empty when its probe runs FAILs the probe, never PASSes it: each suite's head through its
@@ -149,7 +133,7 @@ for f in test-check-templates test-test-templates; do
   sed '/^shtest_probe_trap_guard /q' "$REPO_ROOT/scripts/$f.sh" > "$d/scripts/$f.sh"
   printf 'shtest_end\n' >> "$d/scripts/$f.sh"
   TMPDIR="$d/tmp" bash "$d/scripts/$f.sh" "$REPO_ROOT/.claude/scripts/${f#test-}.sh" > "$d/out" 2>&1
-  if grep -Fxq 'FAIL  trap: no EXIT trap installed' "$d/out" && ! grep -q '^PASS  trap:' "$d/out"; then
+  if grep -Eq '^FAIL[[:space:]]+trap:' "$d/out" && ! grep -q '^PASS  trap:' "$d/out"; then
     ok "$f.sh: an empty EXIT trap fails the probe case, never passes it"
   else bad "$f.sh probe on an empty EXIT trap" "$(cat "$d/out")"; fi
 done

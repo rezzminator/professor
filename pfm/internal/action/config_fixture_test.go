@@ -26,6 +26,18 @@ func testMachineConfig(home string) pfmconfig.Config {
 		{ID: 2, Home: home + "/.codex-2"},
 		{ID: 3, Home: home + "/.codex-3"},
 	}
+	for _, account := range machine.CodexAccounts {
+		if err := os.MkdirAll(account.Home, 0o700); err != nil {
+			panic(fmt.Sprintf("fixture Codex home %s: %v", account.Home, err))
+		}
+		if err := os.WriteFile(
+			filepath.Join(account.Home, "auth.json"),
+			[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+			0o600,
+		); err != nil {
+			panic(fmt.Sprintf("fixture Codex auth %s: %v", account.Home, err))
+		}
+	}
 	return machine
 }
 

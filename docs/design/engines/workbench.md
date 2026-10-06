@@ -72,9 +72,9 @@ Attaching to an already live seat does not relaunch it. Bare non-session adminis
 
 A workbench owns its own CLAUDE.md: pfm codex build {dir} compiles it into {dir}/AGENTS.md, and without it every Codex launch in the workbench is refused.
 
-`EnsureMirror` builds Codex/OpenCode before a persona launch; a compiler failure refuses it as `build the {engine} mirror of workbench {dir}: {error}`. `CheckMirror` separates a first stale artifact problem from a compiler error. Claude needs no mirror. Source: `pfm/internal/workbench/mirror.go`.
+`EnsureMirror` builds Codex/OpenCode before a persona launch; a compiler failure refuses it as `build the {engine} mirror of workbench {dir}: {error}`. `CheckMirror` returns every mirror problem, split into rebuildable outputs and failures, with compiler errors returned separately. Claude needs no mirror. Source: `pfm/internal/workbench/mirror.go`.
 
-`codexgen` and `opencodegen` skip a child marked by a workbench manifest whether discovered or explicitly listed: each bench builds as its own root. `pfm codex build` without a root inside a bench resolves that bench rather than its git/managed parent. Builds at a bench write no home-level Codex skills/prompts or OpenCode commands. Sources: `pfm/internal/codexgen/project_discovery.go`, `pfm/internal/codexgen/compiler.go`, `pfm/internal/opencodegen/compiler.go`, `pfm/internal/opencodegen/reconcile.go`, `pfm/cmd/pfm/codex_command.go`.
+`codexgen` and `opencodegen` skip a child marked by a workbench manifest whether discovered or explicitly listed: each bench builds as its own root. An unreadable manifest is an error; a symlinked manifest or `.professor` directory is no workbench. `pfm codex build` without a root inside a bench resolves that bench rather than its git/managed parent. Builds at a bench write no home-level Codex skills/prompts or OpenCode commands. Sources: `pfm/internal/codexgen/project_discovery.go`, `pfm/internal/codexgen/compiler.go`, `pfm/internal/opencodegen/compiler.go`, `pfm/internal/opencodegen/reconcile.go`, `pfm/cmd/pfm/codex_command.go`.
 
 Codex `.codex/agents/` is generated only from the bench's own `.claude/agents/*.md`. A bench without roles gets no empty agents directory: the role lookup can continue to the managed root. Codex and OpenCode also load ancestor `AGENTS.md` files, so the parent repo's rules reach their workbench seats. Sources: `pfm/internal/codexgen/compiler.go`, `pfm/internal/agentrole/agentrole.go` (`roleLadderRoot`).
 
@@ -92,19 +92,24 @@ Claude ✦ launches choose a numbered name from the live/killed roster. Codex/Op
 
 `paths.WorkbenchCache` names `workbenches.json` beside `CacheDB`. The version-1 cache stores bench directories/roots and discovery failures, not prompt content. `ReadCache` reloads manifests, skips deleted entries, recalculates duplicate-title keys, distinguishes missing from corrupt files, and returns saved walk failures. `WriteCache` publishes atomically. Source: `pfm/internal/workbench/cache.go`.
 
-Picker first paint uses this cache without walking; refresh discovers benches and publishes both rows and cache. A corrupt cache produces a first frame without benches and refresh repairs it. Fleet scans opt in through `Request.Workbenches`; plain scans keep their existing rows. Sources: `pfm/internal/picker/pipeline.go` (`refreshWorkbenches`), `pfm/internal/fleet/scan.go`.
+Picker first paint uses this cache without walking; refresh discovers benches and publishes both rows and cache. A corrupt cache produces a first frame with an error row naming the cache, and refresh repairs it. Fleet scans opt in through `Request.Workbenches`; plain scans keep their existing rows. Sources: `pfm/internal/picker/pipeline.go` (`refreshWorkbenches`), `pfm/internal/fleet/scan.go`.
 
 ## Doctor
 
-`printWorkbenchDoctor` resolves the managed root and walks it afresh. No managed root means no bench lines; lookup failure prints `doctor: workbench UNREADABLE {err}` and counts one failure. Source: `pfm/internal/doctor/workbench_checks.go`, wired by `pfm/internal/doctor/doctor.go`.
+`printWorkbenchDoctor` resolves the managed root and walks it afresh. No managed root prints `doctor: workbench none — not inside a Professor project`; a managed root with no benches and no discovery failures prints `doctor: workbench none under {root}`. Neither counts. Lookup failure prints `doctor: workbench UNREADABLE {err}` and counts one failure. Source: `pfm/internal/doctor/workbench_checks.go`, wired by `pfm/internal/doctor/doctor.go`.
 
 | output pattern | count | repair |
 | --- | --- | --- |
-| `doctor: workbench {dir} ok · engines {engines} · prompt {prompt}` | none | Read following mirror lines. |
-| `doctor: workbench {dir} FAILED: {fault}` | failure | Repair the manifest/prompt named by the fault; no mirror check runs for it. |
-| `doctor: workbench {dir} {engine} mirror STALE: {first problem} — the next launch there rebuilds it` | warning | Repair the named problem and rebuild that engine's mirror. |
+| `doctor: workbench none — not inside a Professor project` | none | Run from a managed root or bench to inspect its workbenches. |
+| `doctor: workbench none under {root}` | none | No workbench was found under this managed root. |
+| `doctor: workbench {dir} ok · engines {engines} · prompt {prompt}` | none | Manifest valid; printed after mirror checks only when none failed. |
+| `doctor: workbench {dir} FAILED: {fault}` | failure | Repair the named manifest/prompt; no mirror check runs for it. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — the next launch there rebuilds it` | warning | Stale, missing, wrong-mode and orphaned outputs are cleared by a build. The next launch rebuilds them, or run `pfm {engine} build {dir}`. |
+| `doctor: workbench {dir} {engine} mirror FAILED: {problem} — the next launch there fails; fix it, then run pfm {engine} build {dir}` | failure per problem | Repair every named failure, build the mirror, then rerun doctor. |
+| `doctor: workbench {dir} {engine} mirror STALE: {problems} — rebuilt by pfm {engine} build {dir} once the failures are fixed` | warning | Rebuildable outputs accompany failures; fix those failures before building. |
 | `doctor: workbench {dir} {engine} mirror BROKEN: {err}` | failure | Repair the named compiler input and rebuild. |
 | `doctor: workbench discovery FAILED: {WalkError text} — whether more workbenches exist there is UNKNOWN` | failure | Restore access to the path and rerun discovery. |
+| `doctor: workbench UNREADABLE {err}` | failure | Repair the managed-root lookup path and rerun doctor. |
 
 ## Operator manual and installation
 

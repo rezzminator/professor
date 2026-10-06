@@ -112,7 +112,7 @@ func storeSHAWithRunner(root string, runner deps.Runner) (string, error) {
 		}
 	}
 	argv := []string{deps.Executable("git"), "rev-parse", "--short", "HEAD"}
-	env := os.Environ()
+	env := deps.WithoutGitRepoVars(os.Environ())
 	if useFenceGit {
 		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
 	}
@@ -171,7 +171,7 @@ func adoptGit(runner deps.Runner, root string, args ...string) (string, string, 
 	result, err := runner.Run(
 		context.Background(),
 		append([]string{deps.Executable("git")}, args...),
-		deps.RunOptions{Dir: root},
+		deps.RunOptions{Dir: root, Env: deps.WithoutGitRepoVars(os.Environ())},
 	)
 	if err != nil {
 		return string(result.Stdout), string(result.Stderr), err

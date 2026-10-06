@@ -124,12 +124,30 @@ func planRender(store Store, target, local string, pin FilePin, values map[strin
 		return plan, fmt.Errorf("baseline %s, %s: %w", BaselinePath(target), local, err)
 	}
 	plan.path = filepath.Join(target, filepath.FromSlash(cleanLocal))
-	info, err := os.Stat(plan.path)
+	info, err := os.Lstat(plan.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		plan.skip = "missing"
 		return plan, nil
 	} else if err != nil {
 		return plan, fmt.Errorf("inspect %s: %w", local, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return plan, fmt.Errorf("render %s: a symlink, refused — pfm init --render writes only regular files", local)
+	}
+	projectRoot, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return plan, fmt.Errorf("render %s: resolve project: %w", local, err)
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(plan.path))
+	if err != nil {
+		return plan, fmt.Errorf("render %s: resolve parent: %w", local, err)
+	}
+	relative, err := filepath.Rel(projectRoot, parent)
+	if err != nil {
+		return plan, fmt.Errorf("render %s: resolve parent relative to project: %w", local, err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return plan, fmt.Errorf("render %s: resolves outside the project", local)
 	}
 	plan.mode = info.Mode().Perm()
 	if plan.current, err = os.ReadFile(plan.path); err != nil {
@@ -295,20 +313,22 @@ func carriesRegisteredToken(value string, installTime, runtimeSet map[string]boo
 }
 
 // substituteTokens replaces every {KEY} of every supplied key with its
-// value, literal byte replacement, and returns the substitution count.
+// value in one pass over the original bytes, and returns the substitution count.
 func substituteTokens(raw []byte, values map[string]string) ([]byte, int) {
 	text := string(raw)
-	total := 0
-	for key, value := range values {
-		token := "{" + key + "}"
-		count := strings.Count(text, token)
-		if count == 0 {
-			continue
-		}
-		text = strings.ReplaceAll(text, token, value)
-		total += count
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
 	}
-	return []byte(text), total
+	sort.Strings(keys)
+	replacements := make([]string, 0, 2*len(keys))
+	total := 0
+	for _, key := range keys {
+		token := "{" + key + "}"
+		total += strings.Count(text, token)
+		replacements = append(replacements, token, values[key])
+	}
+	return []byte(strings.NewReplacer(replacements...).Replace(text)), total
 }
 
 // leftoverTokens names every install-time token still present in content,

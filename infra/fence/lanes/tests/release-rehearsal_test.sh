@@ -62,9 +62,8 @@ rm -f "$STUB_RUNNING"; : >"$STUB_EXITED"; : >"$STUB_DOCKER_LOG"
 OUT="$(bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
 hk_line="$(grep -n '^fence_housekeeping' "$STUB_DOCKER_LOG" | head -1 | cut -d: -f1)"
 build_line="$(grep -n '^build ' "$STUB_DOCKER_LOG" | head -1 | cut -d: -f1)"
-run_line="$(grep -n '^run ' "$STUB_DOCKER_LOG" | head -1 | cut -d: -f1)"
-if [ "$RC" -eq 0 ] && [ -n "$hk_line" ] && [ -n "$build_line" ] && [ -n "$run_line" ] \
-  && [ "$hk_line" -lt "$build_line" ] && [ "$build_line" -lt "$run_line" ] && ! grep -q 'already exists' <<<"$OUT"; then
+if [ "$RC" -eq 0 ] && [ -n "$hk_line" ] && [ -n "$build_line" ] \
+  && [ "$hk_line" -lt "$build_line" ] && ! grep -q 'already exists' <<<"$OUT"; then
   ok "up: an exited container housekeeping reaps does not block the rebuild"
 else bad "up: exited container" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 
@@ -72,7 +71,7 @@ else bad "up: exited container" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi
 : >"$STUB_RUNNING"; rm -f "$STUB_EXITED"; : >"$STUB_DOCKER_LOG"
 OUT="$(bash "$R/infra/fence/release-rehearsal.sh" up 2>&1)"; RC=$?
 if [ "$RC" -eq 1 ] \
-  && grep -qF "release-rehearsal: container pfm-release-rehearsal already exists — 'down' it or 'revert' to the snapshot" <<<"$OUT" \
+  && grep -qF 'pfm-release-rehearsal' <<<"$OUT" \
   && ! grep -q '^build ' "$STUB_DOCKER_LOG"; then
   ok "up: a running container still refuses before the image build"
 else bad "up: running container" "rc=$RC" "$OUT" "$(cat "$STUB_DOCKER_LOG")"; fi

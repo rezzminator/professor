@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+func TestListedProjectWorkbenchProbeFailure(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
+	project := strings.Repeat("x", 300)
+	writeTestFile(t, filepath.Join(root, ".claude", "codex-build.json"),
+		`{"version":1,"projects":["`+project+`"]}`)
+	result, err := Build(Options{Root: root, Home: home})
+	want := "inspect workbench " + filepath.Join(root, project, ".professor") + ": "
+	if err != nil || result.OK || result.Wrote != 0 || len(result.Problems) != 1 ||
+		!strings.HasPrefix(result.Problems[0], want) {
+		t.Fatalf("build = %#v, %v, want zero writes and problem starting %q", result, err, want)
+	}
+}
+
 func TestWorkbenchParentProjects(t *testing.T) {
 	for _, listed := range []bool{false, true} {
 		name := "scan"

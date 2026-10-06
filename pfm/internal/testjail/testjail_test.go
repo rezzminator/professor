@@ -323,7 +323,7 @@ func TestRunPassesProfilerVariablesThrough(t *testing.T) {
 }
 
 func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
-	check := func(home, configPath string, installed bool) {
+	check := func(home, configPath string, extra map[string]any) {
 		t.Helper()
 		if configPath != filepath.Join(home, "pfm.config.json") {
 			t.Fatalf("PFM_CONFIG=%q, want a config under %q", configPath, home)
@@ -337,22 +337,26 @@ func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 			t.Fatalf("parse seeded config = %q: %v", body, err)
 		}
 		want := map[string]any{"version": float64(2)}
-		if installed {
-			want["accounts"] = []any{map[string]any{
-				"id": float64(1), "configDir": config.DefaultAccountDir(home, 1),
-			}}
+		for key, value := range extra {
+			want[key] = value
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("seeded config = %q, want %v", body, want)
 		}
 	}
-	check(os.Getenv(paths.EnvHome), os.Getenv(paths.EnvConfig), false)
+	check(os.Getenv(paths.EnvHome), os.Getenv(paths.EnvConfig), nil)
 	for _, builder := range []struct {
-		build     func(*testing.T) string
-		installed bool
-	}{{Fleet, false}, {InstalledHome, true}} {
+		build func(*testing.T) string
+		extra map[string]any
+	}{{Fleet, nil}, {InstalledHome, map[string]any{}}} {
 		root := builder.build(t)
-		check(filepath.Join(root, "home"), os.Getenv(paths.EnvConfig), builder.installed)
+		home := filepath.Join(root, "home")
+		if builder.extra != nil {
+			builder.extra["accounts"] = []any{map[string]any{
+				"id": float64(1), "configDir": config.DefaultAccountDir(home, 1),
+			}}
+		}
+		check(home, os.Getenv(paths.EnvConfig), builder.extra)
 	}
 	_, environment := FleetEnv(t)
 	var envHome, envConfig string
@@ -364,13 +368,13 @@ func TestEveryJailPinsAndSeedsPFMConfig(t *testing.T) {
 			envConfig = value
 		}
 	}
-	check(envHome, envConfig, false)
+	check(envHome, envConfig, nil)
 	runtime := CleanHome(
 		t,
 		[]string{"projects", "file-history", "tasks", "session-env"},
 		map[string]string{"settings.json": "{}\n"},
 	)
-	check(runtime.Paths.Home, os.Getenv(paths.EnvConfig), false)
+	check(runtime.Paths.Home, os.Getenv(paths.EnvConfig), map[string]any{"ask": map[string]any{"engine": "claude"}})
 }
 
 // TestRunScrubsAmbientIdentity pins the jail's own scrub: an executor's shell

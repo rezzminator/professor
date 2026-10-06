@@ -352,7 +352,7 @@ func clearRetiredHarvesterEnv(t *testing.T) {
 	}
 }
 
-// TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd: a database doctor cannot
+// TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd: a cache database doctor cannot
 // open is a failure row and exit 3, and doctor reads on to the host checks —
 // `pfm update` reads the failure only from the `doctor: failures=N` line.
 func TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd(t *testing.T) {
@@ -362,8 +362,8 @@ func TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Both resolutions doctor reads — the store's own and the runtime's — name the unopenable path.
-	runtime.Paths.StateDB = filepath.Join(blocked, "pfm.db")
-	t.Setenv(paths.EnvStateDB, runtime.Paths.StateDB)
+	runtime.Paths.CacheDB = filepath.Join(blocked, "pfm-cache.db")
+	t.Setenv(paths.EnvCacheDB, runtime.Paths.CacheDB)
 
 	var stdout, stderr bytes.Buffer
 	code := runDoctor(nil, &stdout, &stderr, runtime)
@@ -373,6 +373,11 @@ func TestDoctorUnopenableDatabaseIsAFailureRowNotTheEnd(t *testing.T) {
 	}
 	if !strings.Contains(output, "doctor: unhealthy database: ") {
 		t.Fatalf("the unhealthy database row is missing:\n%s", output)
+	}
+	_, unhealthy, _ := strings.Cut(output, "doctor: unhealthy database: ")
+	unhealthy, _, _ = strings.Cut(unhealthy, "\n")
+	if !strings.Contains(unhealthy, runtime.Paths.CacheDB) {
+		t.Fatalf("the unhealthy database row does not name cache %s:\n%s", runtime.Paths.CacheDB, output)
 	}
 	if !strings.Contains(output, "host-check: ") || !strings.Contains(output, "doctor: rows could not look: ") {
 		t.Fatalf("doctor stopped at the database instead of reading on:\n%s", output)

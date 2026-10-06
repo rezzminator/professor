@@ -125,6 +125,18 @@ func TestHarvestAskE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	codexHome := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(codexHome, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"fixture","account_id":"fixture"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
 	for name, engine := range engines {
 		t.Run(name, func(t *testing.T) {
 			subHarness := *harness

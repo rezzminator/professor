@@ -3,6 +3,7 @@ package harvestmcp
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -45,10 +46,8 @@ func TestResolverClientRefusesALoopbackTarget(t *testing.T) {
 					response.Status,
 				)
 			}
-			if err == nil {
-				t.Fatal(
-					"loopback request returned no error; MCP resolver client must dial only through harvest's pinned, SSRF-checked transport",
-				)
+			if err == nil || !strings.Contains(err.Error(), "refusing private/internal host 127.0.0.1") {
+				t.Fatalf("loopback refusal = %v, want the SSRF refusal itself", err)
 			}
 			if got := requests.Load(); got != 0 {
 				t.Fatalf(

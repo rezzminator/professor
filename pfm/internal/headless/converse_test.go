@@ -538,3 +538,50 @@ func TestAwaitHoldsACodexTurnUntilItsEndRecord(t *testing.T) {
 		})
 	}
 }
+
+// TestAwaitStopsAtTheFirstReplyAndNamesAnAPIError: the reply watch a launch
+// runs after delivery returns on the first thing the chat writes back, and a
+// reply that is a refused request reads as an error, never as an answer.
+func TestAwaitStopsAtTheFirstReplyAndNamesAnAPIError(t *testing.T) {
+	for _, reply := range []struct {
+		name, line, wantState, wantError string
+	}{
+		{name: "api error", line: claudeAPIErrorLine, wantState: StateError, wantError: "server_error"},
+		{name: "tool call", line: tool("Bash"), wantState: StateWorking},
+		{name: "answer", line: assistant("on it"), wantState: StateWorking},
+	} {
+		t.Run(reply.name, func(t *testing.T) {
+			talk := newConversation(t)
+			talk.say(user("the launch prompt"))
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				talk.say(reply.line)
+			}()
+			options := fastOptions()
+			options.StopOnReply = true
+			options.Settle = time.Minute
+			turn, err := Await(context.Background(), talk.resolve, options)
+			if err != nil {
+				t.Fatalf("Await() error = %v", err)
+			}
+			if turn.State != reply.wantState || turn.Error != reply.wantError {
+				t.Fatalf("turn = %+v, want state %q error %q", turn, reply.wantState, reply.wantError)
+			}
+		})
+	}
+}
+
+// TestAwaitClearsAnErrorARealAnswerFollows: an API error the model recovered
+// from is not the turn's verdict — only the newest answer's kind counts.
+func TestAwaitClearsAnErrorARealAnswerFollows(t *testing.T) {
+	talk := newConversation(t)
+	talk.say(user("the question"), claudeAPIErrorLine, assistant("answered after a retry"))
+	options := fastOptions()
+	turn, err := Await(context.Background(), talk.resolve, options)
+	if err != nil {
+		t.Fatalf("Await() error = %v", err)
+	}
+	if turn.Error != "" {
+		t.Fatalf("Error = %q, want none once a real answer followed", turn.Error)
+	}
+}

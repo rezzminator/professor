@@ -146,7 +146,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 				fetchedAt = meta["fetched_at"]
 			}
 			body = stripPublicMetadata(body)
-			body, err = h.withPublicImages(source, body, result.Path, &out)
+			body, err = h.withPublicImages(source, body, publicImageBase(result), &out)
 			if err != nil {
 				return h.publicExportFailure(source, result, "export embedded image", err)
 			}

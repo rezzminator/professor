@@ -1,6 +1,10 @@
 package claudelaunch
 
-import pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+import (
+	"strings"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+)
 
 const (
 	knobBinary                     = "binary"
@@ -312,4 +316,32 @@ func IdentityHygiene() []string {
 		ConfigDirDefaultEnv,
 		envCodexThreadID,
 	}
+}
+
+// FunctionHooksEnv is the variable the function-hooks knob sets on every
+// launch. Claude Code still loads no plugin hook module while its cached
+// rollout flag is false, so a host check names both.
+const FunctionHooksEnv = envFunctionHooks
+
+// SessionMarkerEnv is set in every process Claude Code spawns: a pfm whose
+// environment carries it runs inside a chat, not a login shell.
+const SessionMarkerEnv = envClaudeCode
+
+// EnvPrefixes are the name families of the variables Claude Code reads.
+func EnvPrefixes() []string { return []string{"CLAUDE_", "ANTHROPIC_"} }
+
+// LaunchEnvNames names every variable a pfm Claude launch sets itself, in the
+// process environment or the --settings env block, so a chat carries it
+// whichever process spawned it.
+func LaunchEnvNames() []string {
+	var names []string
+	for _, knob := range Knobs {
+		switch {
+		case knob.Wire == WireEnv:
+			names = append(names, knob.Target)
+		case knob.Wire == WireSettings && strings.HasPrefix(knob.Target, "env."):
+			names = append(names, strings.TrimPrefix(knob.Target, "env."))
+		}
+	}
+	return names
 }

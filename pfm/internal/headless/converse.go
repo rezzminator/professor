@@ -36,7 +36,11 @@ type Turn struct {
 	// Superseded says a SECOND human turn landed while this one was waiting —
 	// somebody else spoke to the chat. The answer below is the newest one, but
 	// it may be answering their question, not yours.
-	Superseded    bool     `json:"superseded,omitempty"`
+	Superseded bool `json:"superseded,omitempty"`
+	// Error is the kind of the API error the newest answer IS — Claude's
+	// synthetic API-error message, Codex's errored task_complete — so a
+	// refused turn never reads as a reply. Empty for a real answer.
+	Error         string   `json:"error,omitempty"`
 	Trace         []string `json:"trace,omitempty"`
 	WaitedSeconds float64  `json:"waited_seconds"`
 	// Offset is the transcript frontier this turn ended on, so a caller
@@ -75,6 +79,12 @@ type AwaitOptions struct {
 	// StopOnDelivery returns as soon as the human turn lands, without waiting
 	// for the answer — the proof `run` needs that a prompt was really sent.
 	StopOnDelivery bool
+	// StopOnReply returns as soon as the chat writes anything back — an
+	// answer, a tool call or an API error — without waiting for the turn to
+	// finish: the proof `run` needs that a delivered prompt was not refused
+	// by the model server. A reply that is an API error returns with
+	// State error and Turn.Error naming its kind.
+	StopOnReply bool
 	// Grace is how long a chat that resolves to NOTHING is treated as still
 	// arriving rather than gone. A seat spawned a moment ago is not in the
 	// index yet, and calling it dead is the wrong answer to "did my prompt
@@ -131,6 +141,7 @@ func Await(
 	path := ""
 	answers := make([]string, 0, 2)
 	newestRole := ""
+	replied := false
 	quietSince := start
 	codexTurn := codexTurnRead{at: -1}
 	var chat Chat
@@ -205,10 +216,15 @@ func Await(
 				// A fresh human turn is a fresh question: whatever was said
 				// before it answers something else.
 				answers = answers[:0]
+				turn.Error = ""
+				replied = false
 			case transcript.RoleAssistant:
 				answers = append(answers, entry.Text)
+				turn.Error = entry.Error
+				replied = true
 			case transcript.RoleTool:
 				turn.Tools++
+				replied = true
 			}
 			newestRole = entry.Role
 		}
@@ -217,6 +233,13 @@ func Await(
 		}
 		if options.StopOnDelivery && turn.Delivered {
 			turn.State = StateWorking
+			return finish(turn, answers, start, options.Now()), nil
+		}
+		if options.StopOnReply && replied {
+			turn.State = StateWorking
+			if turn.Error != "" {
+				turn.State = StateError
+			}
 			return finish(turn, answers, start, options.Now()), nil
 		}
 		answered := len(answers) > 0 &&

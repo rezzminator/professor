@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -19,6 +20,7 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
@@ -473,7 +475,7 @@ func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "doctor: clean") ||
 		!strings.Contains(stdout.String(), "transcripts=1") ||
-		!strings.Contains(stdout.String(), "host-check: ok (22 checks)") ||
+		!strings.Contains(stdout.String(), fmt.Sprintf("host-check: ok (%d checks)", len(hostcheck.Detectors()))) ||
 		!strings.Contains(stdout.String(), "account-links: ok (1 accounts × 22 entries)") {
 		t.Fatalf("doctor stdout=%q", stdout.String())
 	}

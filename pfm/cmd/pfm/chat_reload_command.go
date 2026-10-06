@@ -49,7 +49,7 @@ var startReloadWorker = func(argv []string, opts deps.StartOptions) error {
 	return process.Release()
 }
 
-var displayReloadWorkerFailure = reloadCommandTmux{}.Display
+var displayReloadWorkerFailure = reload.CommandTmux{}.Display
 
 func runChatReloadWithRuntime(
 	args []string,
@@ -68,7 +68,7 @@ func runChatReloadWithRuntime(
 		return 2
 	}
 	resolved := runtime.Paths
-	tmux := reloadCommandTmux{launchDir: resolved.TmuxDir}
+	tmux := reload.CommandTmux{LaunchDir: resolved.TmuxDir}
 	callerSock := reloadSocketArgument(args)
 	callerPane := reloadPaneArgument(args)
 	// Resolve before detaching; the worker has no tmux ancestry to recover.
@@ -271,7 +271,7 @@ func runChatReloadWorkerWithRuntime(
 		}
 	}
 	resolved := runtime.Paths
-	tmux := reloadCommandTmux{launchDir: resolved.TmuxDir}
+	tmux := reload.CommandTmux{LaunchDir: resolved.TmuxDir}
 	socketPath, pane, paneState, code := reloadTarget(
 		context.Background(),
 		sock,

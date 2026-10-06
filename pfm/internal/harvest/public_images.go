@@ -173,6 +173,32 @@ func readPublicImage(canonical string) ([]byte, string, string) {
 	return data, ext, ""
 }
 
+// publicImageBase is the path a stored document's relative image links
+// resolve against: a local document's own file — its author wrote them against
+// its directory, and the web localizer (pageRelativeLink), whose links are
+// relative to the cached page, never runs for a local source — else the cached
+// artifact. An archive keeps the cached artifact: its members are not files
+// beside the archive.
+func publicImageBase(result Result) string {
+	if result.Kind == kindArchive || result.Kind == kindArchiveMember {
+		return result.Path
+	}
+	source := strings.TrimSpace(result.Source)
+	if strings.HasPrefix(strings.ToLower(source), "file://") {
+		path, err := fileURLPath(source)
+		if err != nil {
+			obs.Logger(context.Background()).Warn("harvest: a local source URL cannot anchor its relative images",
+				"target", logSource(source), obs.FieldErr, err.Error())
+			return result.Path
+		}
+		return path
+	}
+	if filepath.IsAbs(source) {
+		return source
+	}
+	return result.Path
+}
+
 // publicImagePath is the local file raw names, and whether it names one. A
 // remote link — http(s), data:, or protocol-relative (//host/…, which a page
 // may carry past the localizer's image cap) — names none.

@@ -23,7 +23,7 @@ func TestProjectUpdatesReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T
 	fixture := newProjectUpdateFixture(t)
 	before := projectTreeDigest(t, fixture.project)
 	var stdout bytes.Buffer
-	code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout)
+	code := projectReportNoScan(fixture.project, fixture.runtime.Paths.Home, false, &stdout)
 	if code != 1 {
 		t.Fatalf("RunProjectUpdates() code=%d stdout=%q", code, stdout.String())
 	}
@@ -72,7 +72,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 ||
+	if code := projectReportNoScan(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 ||
 		!strings.Contains(stdout.String(), "UPDATED       1") ||
 		!strings.Contains(stdout.String(), ".claude/updated-two.md") {
 		t.Fatalf("deferred check code=%d stdout=%q", code, stdout.String())
@@ -125,7 +125,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 0 ||
+	if code := projectReportNoScan(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 0 ||
 		!strings.HasSuffix(stdout.String(), "clean\n") {
 		t.Fatalf("clean check code=%d stdout=%q", code, stdout.String())
 	}
@@ -134,7 +134,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 func TestProjectUpdatesJSONIsOneObjectCarriesDiffAndUnreadableBaselineFails(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	var stdout bytes.Buffer
-	if code := professor.RunProjectUpdates(
+	if code := projectReportNoScan(
 		fixture.project, fixture.runtime.Paths.Home, true, &stdout,
 	); code != 1 {
 		t.Fatalf("json check code=%d stdout=%q", code, stdout.String())
@@ -168,7 +168,7 @@ func TestProjectUpdatesJSONIsOneObjectCarriesDiffAndUnreadableBaselineFails(t *t
 		t.Fatal(err)
 	}
 	stdout.Reset()
-	if code := professor.RunProjectUpdates(
+	if code := projectReportNoScan(
 		fixture.project, fixture.runtime.Paths.Home, false, &stdout,
 	); code != 3 ||
 		!strings.Contains(stdout.String(), "FAILED — BASELINE-MALFORMED") {
@@ -233,7 +233,7 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	// carries templates/project/commands/per-project/testing-manual.md — a file
 	// planInitCopies deliberately skips, so it is never in plan and is
 	// never absent, but check still counts it NEW: NEW = plan size - 2 + 1.
-	if code := professor.RunProjectUpdates(project, runtime.Paths.Home, false, &stdout); code != 1 {
+	if code := projectReportNoScan(project, runtime.Paths.Home, false, &stdout); code != 1 {
 		t.Fatalf("check code=%d stdout=%q", code, stdout.String())
 	}
 	wantNew := planSize - 2 + 1
@@ -290,7 +290,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := professor.RunProjectUpdates(project, runtime.Paths.Home, false, &stdout); code != 1 {
+	if code := projectReportNoScan(project, runtime.Paths.Home, false, &stdout); code != 1 {
 		t.Fatalf("check code=%d stdout=%q", code, stdout.String())
 	}
 	for _, want := range []string{
@@ -381,7 +381,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 {
+	if code := projectReportNoScan(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 {
 		t.Fatalf("check after ignore code=%d stdout=%q", code, stdout.String())
 	}
 	for _, want := range []string{"NEW           0", "ignored       1", "REVIEW REQUIRED — 4 items"} {
@@ -392,7 +392,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := professor.RunProjectUpdates(
+	if code := projectReportNoScan(
 		fixture.project, fixture.runtime.Paths.Home, true, &stdout,
 	); code != 1 {
 		t.Fatalf("check --json after ignore code=%d stdout=%q", code, stdout.String())
@@ -443,7 +443,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := professor.RunProjectUpdates(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 ||
+	if code := projectReportNoScan(fixture.project, fixture.runtime.Paths.Home, false, &stdout); code != 1 ||
 		!strings.Contains(stdout.String(), "NEW           1") {
 		t.Fatalf("check after undo code=%d stdout=%q", code, stdout.String())
 	}

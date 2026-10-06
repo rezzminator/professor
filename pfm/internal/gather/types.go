@@ -22,8 +22,12 @@ type ProbePane struct {
 
 // TmuxSnapshot is the live pane result plus recoverable sweep diagnostics.
 type TmuxSnapshot struct {
-	Panes         []ProbePane
-	CorpseSwept   []string
+	Panes       []ProbePane
+	CorpseSwept []string
+	// EmptyServers names each socket whose server answered with no session
+	// (ErrServerEmpty); each also carries its EmptyServerWarning in
+	// ProbeWarnings.
+	EmptyServers  []string
 	ProbeWarnings []string
 }
 

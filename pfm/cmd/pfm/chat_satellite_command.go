@@ -255,7 +255,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtime
 		default:
 			fmt.Fprintln(
 				stderr,
-				"usage: pfm chat ls [--all]  (--all: live chats in every repo; MCP chat_ls all also adds killed rows)",
+				"usage: pfm chat ls [--all|--reap]  (--all: chats in every repo; --reap: end empty pfm tmux servers)",
 			)
 			return 2
 		}

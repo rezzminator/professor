@@ -11,7 +11,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-const preSplitMCPPort = 8377
+const (
+	preSplitMCPPort           = 8377
+	checkLegacyStateDB        = "legacy-state-db"
+	checkLegacyCacheDB        = "legacy-cache-db"
+	checkLegacyHarvesterCache = "legacy-harvester-cache"
+	checkStagedPrompts        = "staged-prompts"
+	checkSharedDB             = "shared-db"
+)
 
 const legacyConfigCheck = "legacy-config"
 
@@ -188,11 +195,11 @@ func besideConfig(env Env) []Row {
 }
 
 func detectLegacyStateDB(env Env) ([]Row, error) {
-	return legacyDB("legacy-state-db", "state", paths.LegacyStateDB(env.Home), env.StateDB)
+	return legacyDB(checkLegacyStateDB, "state", paths.LegacyStateDB(env.Home), env.StateDB)
 }
 
 func detectLegacyCacheDB(env Env) ([]Row, error) {
-	return legacyDB("legacy-cache-db", "cache", paths.LegacyCacheDB(env.Home), env.CacheDB)
+	return legacyDB(checkLegacyCacheDB, "cache", paths.LegacyCacheDB(env.Home), env.CacheDB)
 }
 
 func legacyDB(check, kind, legacy, target string) ([]Row, error) {
@@ -249,7 +256,7 @@ func legacyHarvesterCache(env Env) ([]Row, error) {
 	if env.HarvesterCacheDir != "" {
 		return rows, nil
 	}
-	const check = "legacy-harvester-cache"
+	const check = checkLegacyHarvesterCache
 	path, target := paths.LegacyHarvesterCacheDir(env.Home), paths.HarvesterCacheDir(env.Home)
 	if inspectPath(&rows, check, path) == nil {
 		return rows, nil
@@ -299,15 +306,15 @@ func stagedShim(env Env) ([]Row, error) {
 func stagedPrompts(env Env) ([]Row, error) {
 	var rows []Row
 	path := filepath.Join(env.ManagedRoot, "harness-prompts")
-	if inspectPath(&rows, "staged-prompts", path) != nil {
+	if inspectPath(&rows, checkStagedPrompts, path) != nil {
 		before := len(rows)
-		readDir(&rows, "staged-prompts", path)
+		readDir(&rows, checkStagedPrompts, path)
 		if len(rows) == before {
 			rows = append(
 				rows,
 				Row{
 					Warn,
-					"staged-prompts",
+					checkStagedPrompts,
 					path,
 					"retired staged prompt dir",
 					"rm -r " + path + " once no chat started before the move is open",
@@ -321,12 +328,12 @@ func stagedPrompts(env Env) ([]Row, error) {
 func sharedDB(env Env) ([]Row, error) {
 	var rows []Row
 	path := filepath.Join(env.Home, ".local", "state", "pfm", "shared.db")
-	if raw, ok := readFile(&rows, "shared-db", path); ok {
+	if raw, ok := readFile(&rows, checkSharedDB, path); ok {
 		problem := "retired empty shared.db"
 		if len(raw) != 0 {
 			problem = fmt.Sprintf("retired shared.db holds %d bytes", len(raw))
 		}
-		rows = append(rows, Row{Warn, "shared-db", path, problem, "rm " + path})
+		rows = append(rows, Row{Warn, checkSharedDB, path, problem, "rm " + path})
 	}
 	return rows, nil
 }

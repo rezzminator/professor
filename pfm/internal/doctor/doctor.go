@@ -127,12 +127,13 @@ func Run(
 	dependencies = normalizeDependencies(dependencies)
 	flags := cli.NewFlagSet(
 		doctorCommand,
-		doctorUsage,
+		doctorUsage+"\n"+doctorStaleUsage,
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
 	skipHarvest := flags.Bool("skip-harvest", false, "exclude the optional harvestpy runtime from health")
 	projectUpdates := bindProjectUpdatesFlags(flags)
+	stale := bindStaleFlags(flags)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -140,7 +141,16 @@ func Run(
 		flags.Usage()
 		return 2
 	}
-	if code, handled := projectUpdates.dispatch(flags, *verbose || *skipHarvest, runtime.Paths.Home, stdout); handled {
+	healthFlagSet := *verbose || *skipHarvest
+	if code, handled := projectUpdates.dispatch(
+		flags,
+		healthFlagSet || stale.set(),
+		runtime.Paths.Home,
+		stdout,
+	); handled {
+		return code
+	}
+	if code, handled := stale.dispatch(flags, healthFlagSet, runtime, dependencies.Clock.Now(), stdout); handled {
 		return code
 	}
 	resolved := runtime.Paths
@@ -1268,7 +1278,10 @@ func appendHarvestBrowserDoctorRowWithRunner(
 		case inspectErr == nil && digest.State == "ready":
 			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s provisioned disabled gate=fetch.browser\n", fingerprint)
 		case errors.Is(inspectErr, os.ErrNotExist):
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=fetch.browser\n")
+			fmt.Fprintf(
+				stdout,
+				"doctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=fetch.browser hint=set fetch.browser=true in harvester.config.json; the next browser fetch provisions it (needs uv and network access)\n",
+			)
 		case inspectErr != nil:
 			fmt.Fprintf(
 				stdout,
@@ -1289,7 +1302,7 @@ func appendHarvestBrowserDoctorRowWithRunner(
 		if errors.Is(inspectErr, os.ErrNotExist) {
 			fmt.Fprintf(
 				stdout,
-				"doctor: harvestpy_browser env=NOT_PROVISIONED interpreter=%s error=browser environment was never provisioned; it provisions on the first browser fetch (check uv and network access)\n",
+				"doctor: harvestpy_browser env=NOT_PROVISIONED interpreter=%s error=browser environment was never provisioned hint=fetch.browser is already true; the next fetch that reaches the browser rung provisions it (needs uv and network access)\n",
 				interpreter,
 			)
 		} else {

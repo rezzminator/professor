@@ -1,6 +1,7 @@
 package harvest
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -310,5 +311,42 @@ func TestPublicExportFailureSaysPermanentOrTransient(t *testing.T) {
 	)
 	if !strings.Contains(transient.Error, "Retry later") {
 		t.Fatalf("transient export failure = %q, want Retry later", transient.Error)
+	}
+}
+
+// TestFetchPublicLocalMarkdownResolvesRelativeImagesAgainstItsOwnDirectory
+// pins that a local Markdown file's relative image links resolve against the
+// file's own directory, never the cache copy's: an existing image is
+// published, and only a link whose target is truly missing is a gap.
+func TestFetchPublicLocalMarkdownResolvesRelativeImagesAgainstItsOwnDirectory(t *testing.T) {
+	setHarvestTestJail(t)
+	root := t.TempDir()
+	docs := filepath.Join(root, "docs")
+	if err := os.MkdirAll(filepath.Join(docs, "img"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{filepath.Join(docs, "img", "a.png"), filepath.Join(root, "b.png")} {
+		if err := os.WriteFile(image, []byte(pngMagic), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	docPath := filepath.Join(docs, "doc.md")
+	doc := "# Report\n\n![a](img/a.png)\n\n![b](../b.png)\n\n![gone](img/gone.png)\n"
+	if err := os.WriteFile(docPath, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
+	got := h.FetchPublic(context.Background(), docPath, FetchOptions{})
+	if got.Error != "" {
+		t.Fatalf("FetchPublic(%q) error = %q", docPath, got.Error)
+	}
+	if got.Partial != "1 image(s) could not be published" {
+		t.Fatalf("FetchPublic(%q) partial = %q, want only the missing image as a gap\n%s",
+			docPath, got.Partial, got.Content)
+	}
+	if strings.Contains(got.Content, "img/a.png") || strings.Contains(got.Content, "../b.png") ||
+		strings.Contains(got.Content, "img/gone.png") || strings.Count(got.Content, "](./") != 2 {
+		t.Fatalf("FetchPublic(%q) did not publish the two existing images and drop the missing one:\n%s",
+			docPath, got.Content)
 	}
 }

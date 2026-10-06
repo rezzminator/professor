@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -240,7 +241,8 @@ func TestDoctorInstalledHomeAccountLinks(t *testing.T) {
 	if got := printClaudeStoreChecks(&out, runtime); got != 0 {
 		t.Fatalf("store failures=%d output=%q", got, out.String())
 	}
-	if want := "host-check: ok (22 checks)\naccount-links: ok (1 accounts × 22 entries)\n"; out.String() != want {
+	if want := fmt.Sprintf("host-check: ok (%d checks)\n", len(hostcheck.Detectors())) +
+		"account-links: ok (1 accounts × 22 entries)\n"; out.String() != want {
 		t.Fatalf("output=%q want=%q", out.String(), want)
 	}
 	for _, account := range runtime.Config.Accounts {

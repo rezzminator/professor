@@ -28,7 +28,7 @@ Doctor prints every finding as `host-check: {row.Line()}`, followed by `host-che
 
 The fix strings below are instructions for the operator. Detection and the install gate do not execute them. Install creates missing store entries and account links only after the gate; doctor also checks these targets ([claude-config-dir.md](claude-config-dir.md#pfm-doctor-checks)).
 
-An operator or a model applies a fix exactly as printed, so each fix must be safe as written, in any order. A fix that deletes one path while keeping another goes through `removeKeeping` (`pfm/internal/hostcheck/hostcheck.go`). These are the present-target fixes of `legacy-config`, `legacy-harvester-config`, `legacy-state-db`, `legacy-cache-db`, `legacy-harvester-cache` and `store-identity`, plus `pre-split-config` (b), `home-state-file`, `beside-backup` and every `account-entry-real` fix. The fix prints only when no deleted path is the same file as the kept one after following links (`os.SameFile`; a path with nothing at it is no file). One file under two names prints `{remove} and {keep} are one file through a link: delete neither; replace the link with a real copy, then rerun pfm doctor` instead. A failed stat, a dangling link included, prints the `UNREADABLE` row in place of the row, with no delete.
+An operator or a model applies a fix exactly as printed, so each fix must be safe as written, in any order. A fix that deletes or moves aside one path while keeping another goes through `removeKeeping` (`pfm/internal/hostcheck/hostcheck.go`). These are the present-target fixes of `legacy-config`, `legacy-harvester-config`, `legacy-state-db`, `legacy-cache-db`, `legacy-harvester-cache` and `store-identity`, plus `pre-split-config` (b), `home-state-file`, `beside-backup` and every `account-entry-real` fix. The fix prints only when no deleted path is the same file as the kept one after following links (`os.SameFile`; a path with nothing at it is no file). One file under two names prints `{remove} and {keep} are one file through a link: delete neither; replace the link with a real copy, then rerun pfm doctor` instead. A failed stat, a dangling link included, prints the `UNREADABLE` row in place of the row, with no delete.
 
 ## Paths and ordering
 
@@ -56,8 +56,8 @@ The table gives one row per detector; exact problems and fixes follow under each
 | `shared-db` | WARN | old shared database | retired file | remove |
 | `stray-dir` | WARN | non-account `.cc` dirs | stray directory | inspect/remove |
 | `account-is-store` | BLOCK | physical account path | identity dir is store | unlink or configure |
-| `store-identity` | BLOCK | account entries in store | identity inside store | move or inspect/remove |
-| `home-state-file` | WARN | home Claude state | launch without account env | compare account/remove |
+| `store-identity` | BLOCK | account entries in store | identity inside store | move, or move aside |
+| `home-state-file` | WARN | home Claude state | launch without account env | move aside |
 | `account-entry-real` | BLOCK | real shared entries or links to existing outside data | data outside store | entry-specific merge |
 | `retired-store-entry` | WARN | retired entries in accounts and store | leftover link or store copy | `pfm install` |
 | `unclassified` | WARN | unknown top-level names | neither entry list | keep |
@@ -219,14 +219,14 @@ Fix:
 
 Looks at each `AccountEntries` entry in `{store}` that is not in `RetiredStoreEntries` (those are `retired-store-entry`'s); for `state`, only `state/mcp-discover-verdicts.json` is checked. `{acct1}` is classified by `claudelaunch.InspectConfigDir`, as in `account-is-store`.
 
-Problem: `{entry} is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)`. pfm launches always set `CLAUDE_CONFIG_DIR` to an account dir, so identity lands in the store only through a launch that points it at the store.
+Problem: `{entry} is account identity inside the store, written by a Claude launched with CLAUDE_CONFIG_DIR set to the store (a loop over config dirs that still lists it)`. pfm launches always set `CLAUDE_CONFIG_DIR` to an account dir, so identity lands in the store only through a launch that points it at the store. For `backups` the problem adds `; a Claude launched without CLAUDE_CONFIG_DIR writes backups here too`: an unscoped Claude's config dir is the store. For `.claude.json`, `.claude.json.backup` and `backups` it ends with the file's birth, `({birth})` — see [Stray state birth](#stray-state-birth).
 
 Fix: `{acct1}` resolving to the store makes `{path}` and `{acct1}/{entry}` one file, so the fix deletes neither:
 
 - `{acct1}` a symlink: `[ ! -L {acct1} ] || { rm {acct1} && mkdir -m 700 {acct1}; } &&` followed by the move below. That prefix is `account-is-store`'s own fix, guarded so the line also runs after that fix has, and a later run of that fix refuses on the real dir without deleting anything.
 - `{acct1}` a real dir in the store: `apply account-is-store's fix for {acct1} first; pfm doctor then names this entry's move`.
 
-Otherwise, `{acct1}/{entry}` absent: `mkdir -m 700 -p {acct1} && mv {path} {acct1}/{entry}` (for `state`, `mkdir -m 700 -p {acct1} {acct1}/state`), runnable before account 1 exists; present: `keep {acct1}/{entry}; after checking, rm -r {path}`, through `removeKeeping`.
+Otherwise, `{acct1}/{entry}` absent: `mkdir -m 700 -p {acct1} && mv {path} {acct1}/{entry}` (for `state`, `mkdir -m 700 -p {acct1} {acct1}/state`), runnable before account 1 exists; present: the [move-aside fix](#stray-state-birth), through `removeKeeping`.
 
 ### home-state-file
 
@@ -234,9 +234,15 @@ Otherwise, `{acct1}/{entry}` absent: `mkdir -m 700 -p {acct1} && mv {path} {acct
 
 Looks at `{home}/.claude.json`.
 
-Problem: `a Claude launched without CLAUDE_CONFIG_DIR wrote this state file`.
+Problem: `a Claude launched without CLAUDE_CONFIG_DIR wrote this state file ({birth})`.
 
-Fix: `check it names the same oauthAccount as {acct1}/.claude.json, then rm {path}`.
+Fix: the move-aside fix below, through `removeKeeping` with `{acct1}/.claude.json` kept.
+
+#### Stray state birth
+
+`{birth}` is `mtime {RFC 3339 UTC}, firstStartTime {value}`, the file's mtime and the `firstStartTime` Claude recorded in it; for a dir (`backups`) it is `newest {name}: …` for its newest regular file, or `holds no file`. A value that cannot be read says why: `firstStartTime absent`, `firstStartTime unreadable: not JSON ({cause})`, `firstStartTime unreadable: {cause}`, `firstStartTime not a string: {raw}`, `contents unreadable: {cause}`.
+
+The move-aside fix deletes nothing: `mkdir -m 700 -p {dir(aside)} && [ ! -e {aside} ] && mv {path} {aside}  # moved aside, never deleted`, where `{aside}` is `{path}` below `{home}` mirrored under `{home}/.local/state/pfm/stray-claude-state/{run stamp YYYYMMDD-HHMMSS}/`, so one doctor run's rows share one directory and never land on an earlier file.
 
 ### account-entry-real
 
@@ -273,7 +279,7 @@ Fix: `run pfm install; it removes the link, and Claude writes this account's own
 
 **Severity:** WARN
 
-Looks at top-level names in `{store}` and every `{acct}` on neither list, not ignored, not matched by the two leftover checks.
+Looks at top-level names in `{store}` and every `{acct}` on neither list, not ignored (Claude Code's runtime entries `debug`, `daemon.lock`, `daemon.status.json` and `tmp` included), not matched by the two leftover checks, and not named after a plugin `{store}/plugins/installed_plugins.json` lists (the `{name}` of each `{name}@{marketplace}` key: a plugin's own dir, its logs). A registry that exists but cannot be read or parsed, in a readable store, adds `WARN unclassified {registry} — UNREADABLE plugin registry: {cause} — a dir named after a plugin reports unclassified` with fix `make {registry} readable JSON, then rerun pfm doctor`, and those dirs report unclassified.
 
 Problem: `UNCLASSIFIED — on neither the shared nor the per-account list`.
 

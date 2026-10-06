@@ -3,11 +3,13 @@ package professor
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -15,14 +17,21 @@ import (
 // renderProjectReport is the one report-writing path both entries share: it
 // builds the report, captures the pinned→current diff for every UPDATED
 // item, and writes the human or JSON body. Both callers use projectReportExit
-// for the same clean/review/failure mapping.
-func renderProjectReport(root, home string, jsonOutput bool, stdout io.Writer) (reviewRequired, failed bool) {
+// for the same clean/review/failure mapping. A non-nil scan adds retired-name
+// hits in unpinned files as review items and unreadable files as failures.
+func renderProjectReport(
+	root, home string,
+	jsonOutput bool,
+	stdout io.Writer,
+	scan RetiredNameScanner,
+) (reviewRequired, failed bool) {
 	report, err := buildProjectReport(root, home)
 	if err != nil {
 		writeProjectFailure(stdout, jsonOutput, err)
 		return false, true
 	}
 	diffFailed := captureProjectDiffs(&report)
+	scanFailed := captureRetiredNames(&report, scan)
 	if jsonOutput {
 		if err := writeProjectJSON(stdout, report); err != nil {
 			writeProjectFailure(stdout, false, err)
@@ -31,7 +40,82 @@ func renderProjectReport(root, home string, jsonOutput bool, stdout io.Writer) (
 	} else {
 		writeProjectHuman(stdout, report)
 	}
-	return report.reviewRequired() != 0, diffFailed
+	return report.reviewRequired() != 0, diffFailed || scanFailed
+}
+
+// RetiredNameHit is one retired command, agent, skill, phase, tool or path
+// name found on one line of a project file the baseline does not pin.
+type RetiredNameHit struct {
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Successor string `json:"successor,omitempty"`
+}
+
+// RetiredNameFailure is one file or directory the retired-name scan could
+// not read: the scan of it did not happen, so it is never reported clean.
+type RetiredNameFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
+// RetiredNameScan is the retired-name pass's result; both slices are non-nil
+// once a scan ran.
+type RetiredNameScan struct {
+	Hits     []RetiredNameHit     `json:"hits"`
+	Failures []RetiredNameFailure `json:"failures"`
+}
+
+// RetiredNameScanner scans root's files for retired names, skipping every
+// slash-separated root-relative path in pinned. The registry and the scan
+// live in internal/update (update.ScanRetiredNames), which imports this
+// package, so the caller passes it in.
+type RetiredNameScanner func(root string, pinned map[string]bool) RetiredNameScan
+
+// captureRetiredNames runs scan over the project, skipping every pinned
+// local file (the item diff already covers it), and records the result on
+// the report. A nil scan records nothing: the report then carries no
+// retired-name section at all, never an empty one.
+func captureRetiredNames(report *projectReport, scan RetiredNameScanner) (anyFailed bool) {
+	if scan == nil {
+		return false
+	}
+	pinned := make(map[string]bool, len(report.Items))
+	for index := range report.Items {
+		if local := report.Items[index].Local; local != "" {
+			pinned[local] = true
+		}
+	}
+	result := scan(report.Root, pinned)
+	if result.Hits == nil {
+		result.Hits = []RetiredNameHit{}
+	}
+	if result.Failures == nil {
+		result.Failures = []RetiredNameFailure{}
+	}
+	report.Retired = &result
+	return len(result.Failures) != 0
+}
+
+// writeRetiredNamesHuman is the human report's RETIRED-NAME block: the hit
+// count, one `path:line` row per hit, then one UNREADABLE row per file the
+// scan could not read. A report built without a scan writes nothing.
+func writeRetiredNamesHuman(stdout io.Writer, scan *RetiredNameScan) {
+	if scan == nil {
+		return
+	}
+	fmt.Fprintf(stdout, "  %-13s %d\n", "RETIRED-NAME", len(scan.Hits))
+	for _, hit := range scan.Hits {
+		successor := "no successor"
+		if hit.Successor != "" {
+			successor = "now " + hit.Successor
+		}
+		fmt.Fprintf(stdout, "    %s:%d   %s — retired %s, %s\n", hit.Path, hit.Line, hit.Name, hit.Kind, successor)
+	}
+	for _, failure := range scan.Failures {
+		fmt.Fprintf(stdout, "    %s   retired-name scan UNREADABLE — %s\n", failure.Path, failure.Error)
+	}
 }
 
 // captureProjectDiffs fills Diff/DiffError/DiffSkipped on every UPDATED item.
@@ -75,8 +159,9 @@ func captureProjectDiffs(report *projectReport) (anyFailed bool) {
 }
 
 // projectTerminal is the report's one JSON terminal, first match wins: any
-// UPDATED item whose diff could not be read makes it FAILED (counted by
-// DiffError, never by the review count), else REVIEW REQUIRED, else clean.
+// UPDATED item whose diff could not be read, or any file the retired-name
+// scan could not read, makes it FAILED (never counted as review), else
+// REVIEW REQUIRED (retired-name hits included), else clean.
 // writeProjectHuman appends "; nothing was written." to the first two.
 func projectTerminal(report projectReport) string {
 	unreadable := 0
@@ -85,8 +170,18 @@ func projectTerminal(report projectReport) string {
 			unreadable++
 		}
 	}
+	var failures []string
 	if unreadable != 0 {
-		return fmt.Sprintf("FAILED — %d item(s) could not be read", unreadable)
+		failures = append(failures, fmt.Sprintf("%d item(s) could not be read", unreadable))
+	}
+	if report.Retired != nil && len(report.Retired.Failures) != 0 {
+		failures = append(
+			failures,
+			fmt.Sprintf("%d file(s) could not be scanned for retired names", len(report.Retired.Failures)),
+		)
+	}
+	if len(failures) != 0 {
+		return "FAILED — " + strings.Join(failures, ", ")
 	}
 	if review := report.reviewRequired(); review != 0 {
 		return fmt.Sprintf("REVIEW REQUIRED — %d items", review)
@@ -132,7 +227,7 @@ func diffUpdatedTemplate(store Store, item projectReportItem) (string, error) {
 // renderProjectCheck is the bare `pfm update` post-update report: 0 clean, 1
 // review required, 3 failure (an unreadable diff is a failure).
 func renderProjectCheck(root, home string, jsonOutput bool, stdout io.Writer) int {
-	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout)
+	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout, nil)
 	return projectReportExit(reviewRequired, failed)
 }
 
@@ -148,9 +243,11 @@ func projectReportExit(reviewRequired, failed bool) int {
 
 // RunProjectUpdates is the only entry for `pfm doctor --project-updates`: 0
 // clean, 1 at least one review item, 3 failure (baseline not found, baseline
-// or store unreadable, any UPDATED diff unreadable). It resolves the root
-// itself and shares its report writing with renderProjectCheck.
-func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer) int {
+// or store unreadable, any UPDATED diff unreadable, any file scan could not
+// read). It resolves the root itself and shares its report writing with
+// renderProjectCheck; scan (update.ScanRetiredNames from doctor) adds the
+// retired-name hits in the project's unpinned files.
+func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer, scan RetiredNameScanner) int {
 	root, found, err := ResolveProjectRoot(rootFlag)
 	if err != nil {
 		writeProjectFailure(stdout, jsonOutput, err)
@@ -160,7 +257,7 @@ func RunProjectUpdates(rootFlag, home string, jsonOutput bool, stdout io.Writer)
 		writeProjectFailure(stdout, jsonOutput, errBaselineNotFound)
 		return 3
 	}
-	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout)
+	reviewRequired, failed := renderProjectReport(root, home, jsonOutput, stdout, scan)
 	return projectReportExit(reviewRequired, failed)
 }
 
@@ -175,4 +272,33 @@ func writeUnavailablePinHistory(stdout io.Writer, report projectReport, item pro
 		),
 		filepath.Join(report.Store.Templates, filepath.FromSlash(item.Template)),
 	)
+}
+
+func writeProjectJSON(stdout io.Writer, r projectReport) error {
+	type blueprintJSON struct {
+		Pinned  string `json:"pinned"`
+		Current string `json:"current"`
+	}
+	payload := struct {
+		Professor      string                `json:"professor"`
+		Blueprint      blueprintJSON         `json:"blueprint"`
+		Counts         map[projectStatus]int `json:"counts"`
+		Items          []projectReportItem   `json:"items"`
+		Ignored        []string              `json:"ignored"`
+		RetiredNames   *RetiredNameScan      `json:"retiredNames,omitempty"`
+		ReviewRequired int                   `json:"reviewRequired"`
+		Terminal       string                `json:"terminal"`
+	}{
+		r.Root,
+		blueprintJSON{r.Baseline.Blueprint.SHA, r.Store.SHA},
+		r.Counts, r.Items, r.Baseline.Ignored,
+		r.Retired, r.reviewRequired(), "",
+	}
+	payload.Terminal = projectTerminal(r)
+	encoder := json.NewEncoder(stdout)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(payload); err != nil {
+		return fmt.Errorf("encode project report: %w", err)
+	}
+	return nil
 }

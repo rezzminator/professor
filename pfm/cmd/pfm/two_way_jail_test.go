@@ -108,6 +108,11 @@ func TestAskReportsATimeoutWithoutLosingDelivery(t *testing.T) {
 	statedTestSender(t)
 	defer jail.killSockets(t)
 	t.Setenv("STUB_MUTE", "1")
+	// A chat still at work when the reply watch closes is a launch that
+	// worked: the watch is shortened, never skipped.
+	restoreReply := launchReplyWindow
+	launchReplyWindow = 250 * time.Millisecond
+	t.Cleanup(func() { launchReplyWindow = restoreReply })
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{

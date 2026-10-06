@@ -290,7 +290,7 @@ func TestInstallUnknownFlagPrintsTheUsage(t *testing.T) {
 		if code := runInstall(args, &stdout, &stderr); code != wantCode {
 			t.Fatalf("args=%q code=%d stderr=%q", args, code, stderr.String())
 		}
-		want := "usage: pfm install [--yes] [--check] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]\n"
+		want := "usage: pfm install [--yes] [--check [--plan]] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]\n"
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr=%q want=%q", stderr.String(), want)
 		}

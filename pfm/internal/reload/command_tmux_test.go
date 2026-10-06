@@ -1,4 +1,4 @@
-package main
+package reload
 
 import (
 	"context"
@@ -16,14 +16,14 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-// TestReloadCommandTmuxRecordsUnderTheTmuxComponent: cmd/pfm's direct tmux
+// TestReloadCommandTmuxRecordsUnderTheTmuxComponent: reload's direct tmux
 // calls terminate through the observed command. Against a socket nothing
 // serves, tmux answers non-zero (or is absent) — either way exactly one
 // comp=tmux record names the subcommand; no live server is touched.
 func TestReloadCommandTmuxRecordsUnderTheTmuxComponent(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	socket := filepath.Join(t.TempDir(), "no-server")
-	if err := (reloadCommandTmux{}).command(ctx, socket, "kill-server").Run(); err == nil {
+	if err := (CommandTmux{}).command(ctx, socket, "kill-server").Run(); err == nil {
 		t.Fatal("kill-server on a socket nothing serves succeeded")
 	}
 	records := recorder.Records()
@@ -48,7 +48,7 @@ func TestReloadCommandTmuxRecordsUnderTheTmuxComponent(t *testing.T) {
 func TestReloadCommandTmuxSetRemainAgainstNoServer(t *testing.T) {
 	ctx := context.Background()
 	socket := filepath.Join(t.TempDir(), "no-server")
-	tmux := reloadCommandTmux{}
+	tmux := CommandTmux{}
 	if err := tmux.SetRemain(ctx, socket, "%0", true); err == nil {
 		t.Fatal("SetRemain(on) against a socket nothing serves succeeded")
 	}
@@ -96,7 +96,7 @@ func TestReloadRespawnLaunchesACommandLongerThanATmuxMessage(t *testing.T) {
 	marker := filepath.Join(root, "respawned")
 	command := "PFM_LAUNCH_MARK='" + marker + "' sh -c 'touch \"$PFM_LAUNCH_MARK\"; exec sleep 120' pfm-launch '" +
 		strings.Repeat("x", 64<<10) + "'"
-	respawner := reloadCommandTmux{launchDir: tmuxDir}
+	respawner := CommandTmux{LaunchDir: tmuxDir}
 	if err := respawner.Respawn(ctx, socketPath, query("#{pane_id}"), root, command); err != nil {
 		t.Fatalf("respawn with a %d-byte command: %v", len(command), err)
 	}

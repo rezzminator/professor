@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/hostcheck"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -41,6 +42,9 @@ const (
 	// The answer is real and is printed; the claim on it is not provable, so
 	// it is not a 0.
 	codeAwaitSuperseded = 7
+	// codeTurnError says the prompt was delivered and the model server
+	// refused it: the turn ended on an API error, not an answer.
+	codeTurnError = 8
 )
 
 func runHeadless(
@@ -123,6 +127,9 @@ func runChatWithRuntime(
 	case "save":
 		return runChatSaveContext(ctx, rest, stdout, stderr, paths.OSEnv{}, runtime)
 	case "find", branchAction, "history", "ls":
+		if verb == "ls" && len(rest) == 1 && rest[0] == "--reap" {
+			return hostcheck.RunTmuxReap(&runtime, stdout, stderr)
+		}
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, paths.OSEnv{}, clock.Real, runtime)
 	case "modal":
 		return runChatModal(rest, stdout, stderr, clock.Real)

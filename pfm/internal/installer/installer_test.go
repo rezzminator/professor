@@ -415,9 +415,14 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	// at their contracted ~/.local/bin names, including the Claude launcher.
 	managedClaude := filepath.Join(managed, "bin", "claude")
 	assertLink(t, filepath.Join(home, ".local", "bin", "claude"), managedClaude)
-	wantClaude := "#!/bin/sh\n" + `exec "$HOME/.local/bin/pfm" internal claude-launch "$@"` + "\n"
-	if got := readFixture(t, managedClaude); got != wantClaude {
-		t.Fatalf("managed claude=%q, want exact native exec shim", got)
+	// The shim's own behaviour (the login-default CLAUDE_CONFIG_DIR, then the
+	// native exec) is pinned in launcher_test.go; install materializes it verbatim.
+	wantClaude, err := readAsset("bin/claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, managedClaude); got != string(wantClaude) {
+		t.Fatalf("managed claude=%q, want the shipped shim %q", got, wantClaude)
 	}
 	for name, command := range map[string]string{"pfm-statusline": "statusline", "tmux-title-renudge": "tmux-title-renudge"} {
 		managedShim := filepath.Join(managed, "bin", name)

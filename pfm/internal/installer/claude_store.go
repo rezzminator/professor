@@ -67,7 +67,13 @@ var AccountEntries = []string{
 	"telemetry", "feedback", ".last-update-result.json", gather.AccountLaunchClaimsName,
 }
 
-var IgnoredEntries = []string{"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName}
+// IgnoredEntries are neither shared nor per-account identity: IDE locks, pfm's
+// pane bookkeeping, a project settings name, and Claude Code's own runtime
+// scratch (debug logs, the daemon's lock and status, temp files).
+var IgnoredEntries = []string{
+	"ide", ".cc-new-children", ".cc-pane-children", claudeLocalSettingsName,
+	"debug", "daemon.lock", "daemon.status.json", "tmp",
+}
 
 // EntryClass classifies a top-level Claude entry.
 func EntryClass(name string) string {

@@ -91,3 +91,13 @@ func TestUpdateCheckAlias(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateCheckAliasReportsRetiredNames(t *testing.T) {
+	fixture := newProjectUpdateFixture(t)
+	writeProjectFixtureFile(t, fixture.project, "legacy.md", "Use /wave:refine.\n")
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime)
+	if code != 1 || !strings.Contains(stdout.String(), "legacy.md:1   /wave") {
+		t.Fatalf("alias code=%d stdout=%q stderr=%q; want retired-name review", code, stdout.String(), stderr.String())
+	}
+}

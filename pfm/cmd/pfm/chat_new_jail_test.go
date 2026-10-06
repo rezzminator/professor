@@ -648,6 +648,25 @@ func callJailedChatNew(
 	input mcpserv.NewInput,
 ) {
 	t.Helper()
+	result := callJailedChatNewResult(t, runtime, row, input)
+	if result.IsError {
+		content, marshalErr := json.Marshal(result.Content)
+		if marshalErr != nil {
+			t.Fatalf("chat_new returned tool error %#v (encode error: %v)", result.Content, marshalErr)
+		}
+		t.Fatalf("chat_new returned tool error: %s", content)
+	}
+}
+
+// callJailedChatNewResult drives the chat_new MCP tool through the real
+// in-process CLI dispatcher and hands back whatever the tool answered.
+func callJailedChatNewResult(
+	t *testing.T,
+	runtime commandRuntime,
+	row compose.Row,
+	input mcpserv.NewInput,
+) *mcp.CallToolResult {
+	t.Helper()
 	bridge := mcpRuntime(runtime, false)
 	bridge.Chat = chatNewCallerVerbs{row: row}
 	service, err := mcpserv.NewConfigured("test", io.Discard, bridge)
@@ -679,13 +698,7 @@ func callJailedChatNew(
 	if err != nil {
 		t.Fatalf("chat_new: %v", err)
 	}
-	if result.IsError {
-		content, marshalErr := json.Marshal(result.Content)
-		if marshalErr != nil {
-			t.Fatalf("chat_new returned tool error %#v (encode error: %v)", result.Content, marshalErr)
-		}
-		t.Fatalf("chat_new returned tool error: %s", content)
-	}
+	return result
 }
 
 func assertJailedSpawnLineage(t *testing.T, jail *runJail, parent, forbiddenParent, wantCWD string) {
@@ -900,5 +913,77 @@ func TestChatNewCodexAdmitsAnAPIKeyHome(t *testing.T) {
 		!strings.Contains(stdout.String(), "attach: tmux -L cx-") {
 		t.Fatalf("chat new code=%d stdout=%q stderr=%q; want API-key home to launch",
 			code, stdout.String(), stderr.String())
+	}
+}
+
+// firstTurnAPIError is the synthetic reply Claude writes when the model
+// server refuses the very first request, as a gateway rejecting a beta header
+// does.
+const firstTurnAPIError = "API Error: 400 unsupported beta header"
+
+// TestChatNewReportsAFirstTurnAPIError: a chat whose first turn the model
+// server refused is not a launch that worked. Both the bare launch and the
+// --await launch say so with a non-zero exit naming the error.
+func TestChatNewReportsAFirstTurnAPIError(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	for _, mode := range []struct {
+		name  string
+		extra []string
+	}{
+		{name: "launch"},
+		{name: "await", extra: []string{"--await", "--timeout", "10", "--settle", "0"}},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			jail := newRunJail(t)
+			defer jail.killSockets(t)
+			t.Setenv("STUB_API_ERROR", firstTurnAPIError)
+			args := append([]string{
+				"chat", "new", "--engine", "claude", "--name", "refused " + mode.name,
+				"--cwd", filepath.Join(jail.root, "work"),
+			}, mode.extra...)
+			var stdout, stderr bytes.Buffer
+			code := run(append(args, "first question"), &stdout, &stderr)
+			if code != codeTurnError {
+				t.Fatalf("chat new exit=%d, want %d for a refused first turn (stdout=%q stderr=%q)",
+					code, codeTurnError, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), firstTurnAPIError) ||
+				!strings.Contains(stderr.String(), "invalid_request") {
+				t.Fatalf("chat new stderr=%q, want it to name the API error and its kind", stderr.String())
+			}
+		})
+	}
+}
+
+// TestMCPChatNewReportsAFirstTurnAPIError is the MCP door of the same
+// failure: the tool must not answer ok for a chat sitting in state error.
+func TestMCPChatNewReportsAFirstTurnAPIError(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	t.Setenv("STUB_API_ERROR", firstTurnAPIError)
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := callJailedChatNewResult(t, runtime, compose.Row{
+		Kind: compose.LiveClaude, ID: "request-caller", CWD: filepath.Join(jail.root, "work"),
+		SessionName: "caller-seat", Socket: "caller-socket", PaneID: "%1",
+	}, mcpserv.NewInput{
+		Name: "refused child", Engine: "claude", Prompt: "first question",
+	})
+	content, err := json.Marshal(result.Content)
+	if err != nil {
+		t.Fatalf("encode chat_new content: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("chat_new answered ok for a refused first turn: %s", content)
+	}
+	if !strings.Contains(string(content), firstTurnAPIError) {
+		t.Fatalf("chat_new content=%s, want it to name the API error", content)
 	}
 }

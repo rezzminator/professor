@@ -81,7 +81,7 @@ func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
 	for key, value := range map[string]string{
 		"HOME": home, paths.EnvHome: home, "XDG_CONFIG_HOME": filepath.Join(home, ".config"),
 		paths.EnvProcRoot: filepath.Join(home, "proc"), paths.EnvStateDB: "", paths.EnvCacheDB: "",
-		paths.EnvConfig: "",
+		paths.EnvConfig: "", paths.EnvTmuxDir: filepath.Join(home, "tmux"),
 	} {
 		t.Setenv(key, value)
 	}

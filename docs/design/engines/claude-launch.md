@@ -30,7 +30,7 @@ Every Claude Code chat pfm starts in a tmux pane is described by one table, the 
 - **Three things stay outside it.** `CLAUDE_CONFIG_DIR` is process environment because it chooses where Claude reads settings from; the unset list is `env -u` because a settings `env` block can set a variable but not remove one; `--system-prompt-file`, `--mcp-config` and the session verbs (`--session-id`, `--resume`, `--fork-session`, `--name`) are flags because no settings key replaces them; the autonomy pair, `--model` and `--effort` stay flags because a flag outranks its settings key.
 - **Defaults come only from `pfm.config.json`.** A per-launch choice changes one launch; no door carries a default of its own ([pfm-home.md](pfm-home.md#decisions)).
 - **Agent teams are off, always.** `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` is a constant row, not a config key, and no project file needs to carry it.
-- **The plugin env rides the launch.** `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and the auto-compact window are launch values, never account `settings.json` keys; keys an older install wrote there stay, outranked by `--settings`.
+- **The plugin env rides the launch.** `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and the auto-compact window are launch values, never account `settings.json` keys; keys an older install wrote there stay, outranked by `--settings`. The variable does not override a cached `cachedGrowthBookFeatures.tengu_plugin_hooks_modules: false` in `{configDir}/.claude.json`, which a gateway host never refreshes; `pfm doctor`'s `function-hook-modules` row reports it.
 
 ## How Claude layers its settings
 
@@ -215,7 +215,7 @@ The VS Code Claude extension's panel is not a pfm launch door. pfm never launche
 
 ## The managed launcher
 
-1. `~/.local/bin/claude` links to `~/.local/share/pfm/install/bin/claude`, which runs `pfm internal claude-launch "$@"`.
+1. `~/.local/bin/claude` links to `~/.local/share/pfm/install/bin/claude`, which runs `pfm internal claude-launch "$@"`, first giving an unset `CLAUDE_CONFIG_DIR` the login default ([claude-config-dir.md](claude-config-dir.md#launches-outside-pfm)).
 2. `claude-launch` resolves the real binary — `claude.binary`, else the newest native version under `~/.local/share/claude/versions/`, else `PATH` — never the launcher itself.
 3. **Passthrough** — `PFM_LAUNCH_PASSTHROUGH=1`, already inside a pfm tmux socket, `-p`/`--print`/`--output-format`/`-h`/`--help`/`--version`/`-v`, or the subcommands `agents mcp update install doctor setup-token plugin config` — execs the real binary. Such a run carries no pfm settings except, when it starts a session, the two plugin env values in its process environment; the managed `cleanupPeriodDays` still applies to it.
 4. Otherwise it renders `LauncherRun` into a fresh `cc-` tmux socket.

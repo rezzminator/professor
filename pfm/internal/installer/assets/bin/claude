@@ -1,2 +1,17 @@
 #!/bin/sh
+# An unset CLAUDE_CONFIG_DIR takes the login default pfm install wrote (account
+# 1's config dir) with its sentinel, so a Claude started outside a login shell
+# never writes ~/.claude.json or ~/.claude/backups; a set value is kept. Calling
+# a binary under versions/ directly bypasses this wrapper.
+if [ -z "${CLAUDE_CONFIG_DIR:-}" ] && [ -r "$HOME/.config/environment.d/pfm-claude-config-dir.conf" ]; then
+	while IFS= read -r line; do
+		case $line in
+		PFM_CLAUDE_CONFIG_DIR_DEFAULT=?*)
+			CLAUDE_CONFIG_DIR=${line#*=}
+			PFM_CLAUDE_CONFIG_DIR_DEFAULT=$CLAUDE_CONFIG_DIR
+			export CLAUDE_CONFIG_DIR PFM_CLAUDE_CONFIG_DIR_DEFAULT
+			;;
+		esac
+	done <"$HOME/.config/environment.d/pfm-claude-config-dir.conf"
+fi
 exec "$HOME/.local/bin/pfm" internal claude-launch "$@"

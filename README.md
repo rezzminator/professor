@@ -146,6 +146,8 @@ cat "$HOME/.professor/docs/SETUP.md"      # the install interview — start here
 
 The checkout is pinned to the latest semantic version tag. A maintainer checkout also runs `git config core.hooksPath .githooks` so `pfm doctor` reports `pre-push gate=armed`. Upgrading? Follow the [update workflow](INSTALL.md#updating): `pfm doctor --project-updates` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED` with the upstream diff under each `UPDATED` row, you carry what applies into your local file, and `pin` / `ignore` / `drop` record your decision — pfm never rewrites a project file after init.
 
+Jumping several versions on one host? [UPGRADING.md](UPGRADING.md) prints the host fixes in apply order with `pfm install --check --plan`, and covers single-account gateway hosts.
+
 > [!WARNING]
 > **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `professor` MCP server's two families ship disabled — `mcp.servers.chat.enabled` for chat, `harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
 

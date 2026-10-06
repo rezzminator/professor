@@ -5,13 +5,16 @@ import (
 	"io"
 
 	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 const doctorUsage = "usage: pfm doctor [--verbose] [--skip-harvest] (exit 0 clean, 1 warnings, 3 failures) | " +
 	"pfm doctor --project-updates [--root DIR] [--json] (exit 0 clean, 1 review required, 3 report failure); 2 usage error"
 
 // projectUpdatesFlags are doctor's --project-updates mode: the project-template
-// report alone, through professor.RunProjectUpdates, never the health pass.
+// report alone, through professor.RunProjectUpdates with the retired-name
+// scan of the project's unpinned files (update.ScanRetiredNames), never the
+// health pass.
 type projectUpdatesFlags struct {
 	enabled, json *bool
 	root          *string
@@ -39,7 +42,7 @@ func (p projectUpdatesFlags) dispatch(
 		flags.Usage()
 		return 2, true
 	case *p.enabled:
-		return professor.RunProjectUpdates(*p.root, home, *p.json, stdout), true
+		return professor.RunProjectUpdates(*p.root, home, *p.json, stdout, update.ScanRetiredNames), true
 	}
 	return 0, false
 }

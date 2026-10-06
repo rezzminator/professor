@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/workbench"
@@ -302,5 +304,50 @@ func TestChatNewExplicitNamePreservesAnotherProducersReservation(t *testing.T) {
 			err,
 			stderr.String(),
 		)
+	}
+}
+
+// TestFirstReplyVerdict: the reply watch after a delivered launch prompt calls
+// silence a chat at work, a refused turn an error naming it, and a watch that
+// could not read the chat that failure — never ok.
+func TestFirstReplyVerdict(t *testing.T) {
+	result := spawn.Result{Socket: "cc-sock", Session: "cc-sess"}
+	refused := headless.Turn{Error: "invalid_request", Answer: "API Error: 400\nbad beta"}
+	readFailure := errors.New("read transcript: permission denied")
+	for _, check := range []struct {
+		name     string
+		turn     headless.Turn
+		err      error
+		wantCode int
+		want     []string
+	}{
+		{name: "replied", turn: headless.Turn{Answer: "on it"}, wantCode: 0},
+		{name: "still working", err: headless.ErrAwaitTimeout, wantCode: 0},
+		{
+			name: "refused", turn: refused, wantCode: codeTurnError,
+			want: []string{"API error (invalid_request)", "API Error: 400 bad beta", "tmux -L cc-sock attach -t cc-sess"},
+		},
+		{
+			name: "refused then gone", turn: refused, err: headless.ErrChatGone, wantCode: codeTurnError,
+			want: []string{"invalid_request"},
+		},
+		{name: "gone", err: headless.ErrChatGone, wantCode: codeDeadChat, want: []string{"died before replying"}},
+		{name: "read failure", err: readFailure, wantCode: 1, want: []string{"could not be read", readFailure.Error()}},
+		{name: "cancelled", err: context.Canceled, wantCode: 1, want: []string{context.Canceled.Error()}},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			code, message := firstReplyVerdict("worker", check.turn, check.err, result)
+			if code != check.wantCode {
+				t.Fatalf("code = %d, want %d (message %q)", code, check.wantCode, message)
+			}
+			if check.wantCode == 0 && message != "" {
+				t.Fatalf("message = %q, want none for an ok launch", message)
+			}
+			for _, want := range check.want {
+				if !strings.Contains(message, want) {
+					t.Fatalf("message = %q, want it to contain %q", message, want)
+				}
+			}
+		})
 	}
 }

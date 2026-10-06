@@ -21,7 +21,9 @@ cx_user()  { _append "{\"timestamp\":\"2026-08-12T00:00:00.000Z\",\"type\":\"res
 cx_agent() { _append "{\"timestamp\":\"2026-08-12T00:00:01.000Z\",\"payload\":{\"type\":\"agent_message\",\"message\":\"$(_esc "$1")\"}}"; }
 cc_user()  { _append "{\"type\":\"user\",\"cwd\":\"$(_esc "$PWD")\",\"message\":{\"content\":\"$(_esc "$1")\"}}"; }
 cc_agent() { _append "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"$(_esc "$1")\"}]}}"; }
+cc_api_error() { _append "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"invalid_request\",\"message\":{\"role\":\"assistant\",\"model\":\"<synthetic>\",\"content\":[{\"type\":\"text\",\"text\":\"$(_esc "$1")\"}]}}"; }
 answer() {
+  if [ -n "$STUB_API_ERROR" ] && [ "$STUB_KIND" != cx ]; then cc_api_error "$STUB_API_ERROR"; return 0; fi
   if [ "$STUB_KIND" = cx ]; then cx_agent "${STUB_REPLY:-ack}: $1"; else cc_agent "${STUB_REPLY:-ack}: $1"; fi
 }
 turn() {

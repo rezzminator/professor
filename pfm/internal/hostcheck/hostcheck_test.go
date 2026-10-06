@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	goRuntime "runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -121,7 +122,7 @@ func TestHostcheckAPI(t *testing.T) {
 		t.Fatal("severity count")
 	}
 	want := strings.Fields(
-		"legacy-config legacy-harvester-config pre-split-config legacy-state-db legacy-cache-db legacy-harvester-cache pfm-settings pfm-mcp memory-helpers staged-shim staged-prompts shared-db stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup",
+		"legacy-config legacy-harvester-config pre-split-config legacy-state-db legacy-cache-db legacy-harvester-cache pfm-settings pfm-mcp memory-helpers staged-shim staged-prompts shared-db stray-dir account-is-store store-identity home-state-file account-entry-real retired-store-entry unclassified third-party-mcp stale-state-tmp beside-backup function-hook-modules shell-claude-env tmux-servers",
 	)
 	var got []string
 	for _, detector := range Detectors() {
@@ -184,6 +185,10 @@ func TestEnvFor(t *testing.T) {
 	env.LegacyConfigDir = filepath.Join(env.Home, "xdg", "pfm")
 	env.MCPPort = 19200
 	env.HarvesterCacheDir = runtime.Config.Harvester.Cache.Dir
+	env.Environ = os.Environ()
+	if !slices.Contains(got.Environ, "XDG_CONFIG_HOME="+filepath.Join(env.Home, "xdg")) {
+		t.Fatalf("env.Environ=%v lacks the process environment", got.Environ)
+	}
 	if !reflect.DeepEqual(got, env) {
 		t.Fatalf("env=%+v want=%+v", got, env)
 	}

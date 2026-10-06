@@ -33,16 +33,16 @@ Every command, agent, and rule sorts into one of three tiers:
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator voice and root persona. Lives in `pfm/harness-prompts/`, composed per engine and selected by the Claude launch policy.
 - **/pcm** — Professor Change Manager: edits the pipeline at the source. Surgery, not journaling. `/pcm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget. `/pfm` is the machine-global CLI guide; `/pfm:workbench` scaffolds and checks workbenches.
-- **/flights:{init,spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the chat family of the opt-in `professor` MCP server the same binary registers — one stdio command, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`; its chat and harvester families toggle through `mcp.servers.chat.enabled` and `harvester.enabled`.
+- **/flights:{init,spec,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the chat family of the opt-in `professor` MCP server the same binary registers — one stdio command, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`; its chat and harvester families toggle through `mcp.servers.chat.enabled` and `harvester.enabled`.
 
 > The Tier A persona ships as ONE version: `professor.md` (the harness replacement) — lean voice plus the behavioral contract (concise delivery, the Verdict, the Analysis Protocol).
 
 **Bundled commands (ship with the blueprint):**
 
 - **the framework bus** — the framework repo's release flow publishes the blueprint; project installs are scaffolded once and adopt later template deltas by reviewed diff.
-- **/flights:init** — readies a project for flights, once, before its first spec: maps its build units inside-out, writes the speccer manual, and gives each unit a testing manual, a test command and a static-check command.
-- **/flights:spec** — maps the area, grills the user round by round with a recommended answer per question until no technical or product gap is left, hands `flights-speccer` the decisions, and presents the index it wrote.
-- **/flights:orchestrate-{nested,live,cross-harness}** — one manual in three containers: a `flights-orchestrator` sub-agent, the main chat running the flight itself, or chat seats on three engines as the executors.
+- **/flights:init** — readies a project for flights, once, before its first spec: maps its build units inside-out, writes the project map, and gives each unit a testing manual, a test command and a static-check command.
+- **/flights:spec** — walks only what asking needs, grills the user round by round with a recommended answer per question until no technical or product gap is left, writes `requirements.md` and hands it to `flights-foreman`.
+- **/flights:orchestrate-cross-harness** — the main chat acts as the root `flights-foreman`, its child foremen chat seats on another engine.
 - **/flights:audit** — the skeptic over a flight, running or landed: every claim checked against its artifact — `run.md`, git, the executor transcripts, the checks' own output — and an artifact it cannot read is a finding, never an absence.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
@@ -56,7 +56,7 @@ Every command, agent, and rule sorts into one of three tiers:
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones):**
 
 - **codeprobe** — in-tree skill under `templates/global/skills/codeprobe/`: the extraction script `collector` runs.
-- **transcript** — in-tree skill under `templates/global/skills/transcript/`: digests one Claude or Codex session into one line per event; the revising `flights-speccer` and `agent-optimizer` read runs through it.
+- **transcript** — in-tree skill under `templates/global/skills/transcript/`: digests one Claude or Codex session into one line per event; `agent-optimizer` and `chat-investigator` read runs through it.
 - **close-out** — in-tree skill under `templates/global/skills/close-out/`: the user's `/close-out` sweeps the whole chat for open threads, unfinished or unverified work, uncommitted changes and running agents, finishes what needs no ruling, asks for the rest, and ends with one closing report.
 - **god-speed** — say "god speed" and the agent finishes the request unattended, reporting every decision it took at the end.
 
@@ -72,7 +72,7 @@ Every command, agent, and rule sorts into one of three tiers:
 
 ### The plumbing (Tier C — invisible)
 
-- `gitter` — root agent; `tracer` (prose answers for a spec writer, on sonnet at high effort), `collector` (exact code text, over the `codeprobe` skill's script), `flights-speccer` (writes a flight's task files), `flights-orchestrator` (runs them), `flights-mechanical-executor`, `flights-precise-executor` and `flights-smart-executor` (one task file each, one body per tier, picked by the task's rating), `flights-lander` (gates the landing, one per flight), `general-orchestrator` (cuts a batch of problems and runs one `general-foreman` per problem, or a `general-executor` per change its caller already decided), `general-foreman` (works one problem out live: digs to the cause, decides, builds it or briefs `general-executor`, proves it), `general-executor` (the family's hand: one decided change each, for a foreman or the orchestrator), `reviewer`, `rr`, `sub-rr` (the digger the `rr` leads spawn), `tracer-rr` (the repository digger only `rr-pro` and `rr-pro-max` spawn: clones a public repository and answers from its code), and `agent-optimizer` (audits one agent's run against its prompt and design) are machine-global originals under `templates/global/agents/`, linked by `pfm install`; `variants.json` beside them declares agents rendered from an original with overridden frontmatter and, under `replace`, body text swapped (`tracer-pro` = `tracer` at xhigh effort, `tracer-pro-max` = `tracer` on opus at medium effort, `rr-pro` = `rr` at medium effort with 6 diggers a round, 5 rounds and the repository lane, `rr-pro-max` = `rr` at medium effort with 8 diggers a round, no round ceiling, the repository lane and `Read` added to its tools), which `pfm install` writes to its own generated directory and links the same way. Role-defined, not character-defined.
+- `gitter` — root agent; `tracer` (prose answers for a spec writer, on sonnet at high effort), `collector` (exact code text, over the `codeprobe` skill's script), `flights-foreman` (builds one request with or without a spec: reads, designs, builds, splits only by ownership into child foremen, lands), `flights-mechanical-executor` (one bulk edit a foreman fixed line by line), `flights-lander` (gates the landing, one per flight), `reviewer`, `rr`, `sub-rr` (the digger the `rr` leads spawn), `tracer-rr` (the repository digger only `rr-pro` and `rr-pro-max` spawn: clones a public repository and answers from its code), `agent-optimizer` (audits one agent's run against its prompt and design), and `chat-investigator` (answers a question from other chats' and sub-agents' transcripts, line-cited) are machine-global originals under `templates/global/agents/`, linked by `pfm install`; `variants.json` beside them declares agents rendered from an original with overridden frontmatter and, under `replace`, body text swapped (`tracer-pro` = `tracer` at xhigh effort, `tracer-pro-max` = `tracer` on opus at medium effort, `rr-pro` = `rr` at medium effort with 6 diggers a round, 5 rounds and the repository lane, `rr-pro-max` = `rr` at medium effort with 8 diggers a round, no round ceiling, the repository lane and `Read` added to its tools), which `pfm install` writes to its own generated directory and links the same way. Role-defined, not character-defined.
 - `worktree.sh`, `alloc-ports.sh`, `dev.sh` — scripts.
 - `pfm statusline` — native status bar with model, fleet counts, context, git, cost, spend, and rate limits. Its command rides every pfm-launched Claude's `--settings`.
 - `.rumdl.toml` — the markdown policy: one config whose `[per-file-ignores]` table decides which rules each path category obeys (prompt, doc, public; generated and record paths excluded). Read by `/quality:md-forlint` and by the `format-md.sh` hook.
@@ -153,48 +153,41 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
 
 ## Pipeline architecture
 
-Work takes the lowest rung that fits (the fleet prompt's § Orchestration): direct, then `general-orchestrator` for a batch of clear tasks, then a **flight** — one spec directory, one orchestration, one landing — for large work whose solution is not in hand. A flight's pipeline:
+Work takes the lowest rung that fits (the fleet prompt's § Orchestration): direct, then `flights-foreman` for anything larger or crossing build units, with `/flights:spec` first when the requirements are not settled. A flight's pipeline:
 
 ```text
   /flights:init          once per project: map the build units · write the
-                         speccer manual · a testing manual, test command
+                         project map · a testing manual, test command
                          and static-check command per unit
                                      │
                                      ▼
-  /flights:spec          map the area · ask what the code cannot answer ·
-                         hand the decisions to flights-speccer · present
+  /flights:spec          walk only what asking needs · grill the user ·
+  (when needed)          write requirements.md · hand it to flights-foreman
                                      │
                                      ▼
-  flights-speccer        $HOME/.local/state/pfm/flights/{project}/{flight}/ — index.md, one
-                         self-contained task file per executor, shared
-                         0-{topic}.md files
+  flights-foreman        base gate · GOAL and every door · data shapes from
+  (root)                 their producer · DECIDE · freeze the interface in
+                         the innermost unit · build the unit it read
                                      │
                                      ▼
-  the orchestration      one manual, three containers — the user picks one:
-                         /flights:orchestrate-nested         a flights-orchestrator sub-agent
-                         /flights:orchestrate-live           the main chat runs the manual itself
-                         /flights:orchestrate-cross-harness  chat seats as the executors
-                                     │
-                                     ▼
-  the run                every ready task dispatched together, one FRESH
-                         executor per task file; each return verified against
-                         the diff before run.md records it; SPEC-DRIFT and
-                         FAILED go back to flights-speccer, never to a guess
+  child foremen          one per other build unit or unrelated problem, in
+                         parallel against the frozen interface; each reads
+                         and builds its own unit; every return verified;
+                         the owner repairs its own reds
                                      │
                                      ▼
   the landing (once)     one flights-lander for the flight: each project's
                          checks, one review of the whole diff, adversarial
-                         tests, its own fixes · the landing checks watched
-                         printing · gitter commits when the brief asked for
-                         a commit
+                         tests, its own fixes · gitter commits when the
+                         brief asked for a commit
                                      │
                                      ▼
-  /flights:audit         at any time, by the user: run.md, git, the task files,
-                         the executor transcripts, the checks' own output —
+  /flights:audit         at any time, by the user: run.md, requirements.md,
+                         git, the transcripts, the checks' own output —
                          artifacts, never a report
 ```
 
-The executor is `flights-mechanical-executor`, `flights-precise-executor` or `flights-smart-executor`, picked by the task's rating, or a seat on another engine; it writes the code and its covering tests in the pattern of the project's testing manual, and one `flights-lander` closes the whole flight — each project's checks, one review of the whole diff, adversarial tests, its own fixes. Specifying and running are two decisions: approving an index never starts a run, and the user picks the container.
+The agent that reads the code builds it: no task files, no executor reading again what a planner read. A bulk edit a foreman fixed line by line may go to `flights-mechanical-executor`; one `flights-lander` closes the whole flight.
 
 Meta path: `/pcm {request}` → edits the agent definitions at the source.
 
@@ -245,8 +238,8 @@ your-project/
 Scratch protocol state (flight specs, lane/timing artifacts, doctor captures)
 lives outside the repo, at `/tmp/{project}/` (`{project}` = this repo's
 directory name, leading dot stripped) — never under a repo-local `tmp/`.
-A flight's own layout: `$HOME/.local/state/pfm/flights/{project}/{flight}/` — index.md, task
-files, run.md, gate.md, audit.md; `speccer-manual.md` sits beside the
+A flight's own layout: `$HOME/.local/state/pfm/flights/{project}/{flight}/` — requirements.md,
+run.md, briefs/, returns/, gate.md, audit.md; `project-map.md` sits beside the
 flight directories.
 ```
 

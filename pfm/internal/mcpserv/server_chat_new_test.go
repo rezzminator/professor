@@ -124,13 +124,13 @@ func TestChatNewCarriesTheAgentRole(t *testing.T) {
 		calls = append(calls, append([]string(nil), args...))
 		return 0
 	}})
-	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights-smart-executor"}
+	input := NewInput{Name: "seat", Model: "claude-sonnet-5-5", Effort: "xhigh", AgentRole: "flights-foreman"}
 	if _, _, err := service.chatNew(context.Background(), nil, input); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{{
 		"chat", "new", "--name", "seat", "--model", "claude-sonnet-5-5", "--effort", "xhigh",
-		"--agent-role", "flights-smart-executor",
+		"--agent-role", "flights-foreman",
 	}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("chat_new calls = %q, want %q", calls, want)

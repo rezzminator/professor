@@ -104,7 +104,7 @@ A GPT agent exists only in a session started through the router: pfm's launch li
 
 `Agent(subagent_type: "sol", description: …, prompt: …)` — no `model`. A spawn-time `model` silently overrides the GPT definition back to Claude (W9).
 
-- `flights-orchestrator` already spawns executors with "no model override" (`templates/global/agents/flights-orchestrator.md`, the executor spawn step), so a GPT executor twin needs no orchestrator change.
+- `flights-foreman` already spawns its children and `flights-mechanical-executor` with no model override (`templates/global/agents/flights-foreman.md`), so a GPT twin needs no foreman change.
 - The fleet prompt names a tier alias at each spawn site (`pfm/harness-prompts/claude/professor.md`, § Claude Code: "The tiers, by model alias, named inline at each spawn site"). A GPT-pinned agent needs an exception there: it is spawned with no `model`.
 
 ## Costs and risks

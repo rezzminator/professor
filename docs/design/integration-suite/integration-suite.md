@@ -388,7 +388,7 @@ The design document is reviewed before anything is built. The laws reach every t
 
 In a project installed from this blueprint, the flights cast builds and keeps the suite:
 
-- `flights-speccer`'s reconcile phase performs the review, and the build goes through `/flights:spec`.
+- The build goes through `/flights:spec` and `flights-foreman`, whose `DECIDE` line and the lander's review cover the design.
 - A flight executor builds the harness, the mocks and the lanes from the task files that Build order produces, and records each row's bite.
 - `flights-lander` runs the blocking commands of the unit and hermetic tiers, sweeps the refused shapes and performs the § The threat model duties on every landing; where a live tier exists it also runs the touched lanes from their checkpoints while it fixes, the touched lane alone, and the sequence at the gate's open and at its close. The sequence at open gives a baseline, so a red at close can be attributed to the flight. A defect a test or a lane exposes is the lander's to fix.
 

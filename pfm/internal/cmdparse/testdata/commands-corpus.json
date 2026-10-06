@@ -470,7 +470,7 @@
   "name": "cd-for-wc-stdin-and-grep",
   "covers": "cd X; for over literal paths with $(wc -l < $f) inside a string and grep $f",
   "cwd": "/tmp/demo-proj",
-  "command": "cd /tmp/demo-proj; for f in templates/global/agents/flights-speccer.md templates/global/agents/flights-orchestrator.md; do echo \"=== $f ($(wc -l < $f) lines)\"; grep -nEi 'alpha-suite|qa\\b|test pattern|convention|/quality|test' $f; done",
+  "command": "cd /tmp/demo-proj; for f in templates/global/agents/flights-foreman.md templates/global/agents/flights-lander.md; do echo \"=== $f ($(wc -l < $f) lines)\"; grep -nEi 'alpha-suite|qa\\b|test pattern|convention|/quality|test' $f; done",
   "parts": [
    {
     "program": "cd",
@@ -498,8 +498,8 @@
     "args": [
      "-nEi",
      "alpha-suite|qa\\b|test pattern|convention|/quality|test",
-     "templates/global/agents/flights-speccer.md",
-     "templates/global/agents/flights-orchestrator.md"
+     "templates/global/agents/flights-foreman.md",
+     "templates/global/agents/flights-lander.md"
     ],
     "status": "ok"
    }

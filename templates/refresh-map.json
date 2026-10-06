@@ -34,18 +34,6 @@
     "global/agents/agent-optimizer.md": {
       "curated": true
     },
-    "global/agents/flights-precise-executor.md": {
-      "curated": true
-    },
-    "global/agents/flights-smart-executor.md": {
-      "curated": true
-    },
-    "global/agents/general-executor.md": {
-      "curated": true
-    },
-    "global/agents/general-foreman.md": {
-      "curated": true
-    },
     "global/agents/reviewer.md": {
       "curated": true
     },
@@ -62,12 +50,6 @@
       "curated": true
     },
     "global/commands/context-meter.md": {
-      "curated": true
-    },
-    "global/commands/flights/flight-index.mjs": {
-      "curated": true
-    },
-    "global/commands/flights/flight-index.test.mjs": {
       "curated": true
     },
     "global/commands/flights/init.md": {

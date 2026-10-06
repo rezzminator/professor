@@ -1,52 +1,45 @@
 ---
 name: flights:orchestrate-cross-harness
-description: 'Run tasks on another engine — /flights:orchestrate-cross-harness {directory} [engine claude|codex] [worktree {path}] [commit]: this chat acts as flights-orchestrator, one chat seat per task file instead of a sub-agent, default engine codex. /flights:spec → here → executor seats.'
-argument-hint: <flight directory> [engine <claude|codex>] [worktree <path>] [commit]
+description: 'Child foremen on another engine — /flights:orchestrate-cross-harness {requirements.md or work} [engine claude|codex|opencode] [worktree {path}] [commit]: this chat acts as the root flights-foreman, one chat seat per child unit instead of a sub-agent, default engine codex. /flights:spec → here → child foreman seats, flights-lander.'
+argument-hint: <requirements.md | work> [engine <claude|codex|opencode>] [worktree <path>] [commit]
 ---
 
-# Orchestrate, cross-harness — run a flight on chat seats
+# Orchestrate, cross-harness — child foremen on chat seats
 
-Read the `flights-orchestrator` agent body from the registry (`~/.claude/agents/flights-orchestrator.md`) and be it for the rest of this flight, with the transport substituted and nothing else:
-
-At input, accept only `claude` or `codex` (default `codex`). Any other engine stops before a seat or `CLAIMED` line, printing `engine {engine} refused: pfm chat new --agent-role cannot launch an {engine} seat`.
+Read the `flights-foreman` agent body from the registry (`~/.claude/agents/flights-foreman.md`) and be the root foreman for the rest of this flight, with the transport substituted and nothing else. Input: $ARGUMENTS — a `requirements.md` path or the work, the engine (default `codex`), the worktree, and `commit` when the user ordered the landing's commit.
 
 | In the manual | Here |
 | --- | --- |
-| Spawn an executor `Agent(subagent_type)` | A seat of the engine (the argument; default `codex`), named `{flight}-{id}`, in the project directory or the worktree, born with the executor role its rating picks and, on `codex`, the model and effort its rating picks — mechanical `gpt-6-luna` at `xhigh`; precise `gpt-6.1-sol` at `high`; smart `gpt-6.1-sol` at `high`: the shell `pfm chat new --name {flight}-{id} --engine {engine} --cwd {dir} --agent-role {flights-mechanical-executor, flights-precise-executor or flights-smart-executor} --model {model} --effort {effort} --prompt-file {flight directory}/briefs/{id}-r{round}.md` (another engine drops `--model` and `--effort`: the role's own pin holds) — the MCP verb carries no role. Its exit 0 is the brief confirmed as the seat's first turn; the `CLAIMED` line is written only once the Claim call (§ Monitors) then exits 0: a brief that never started is no claim. Any other exit is no claim: `chat_kill` the seat it left, if any, no `CLAIMED` line; one retry, then the task holds and the return names it |
-| Spawn the lander | Unchanged: a sub-agent of this chat, never a seat; the returns Monitor's `RETURN` line for its `gate-r{round}` file is one more wake for the same file |
-| The brief in the spawn prompt | The brief file, written before the spawn, goes verbatim as the seat's first turn through `--prompt-file`, never a later `chat_inject`. It closes with the way home: "when done, write your return to `{flight directory}/returns/{id}-r{round}.md` and send it with `pfm chat inject {this chat's name} --file {path}`"; the return file is the return, and a trailing `**Verdict:**` line in it or in `chat_last` is ignored — your name from `chat_whoami`; a seat's plain inject carries one line |
-| Wait: end the message, the return arrives | The same; a return is its file appearing in `returns/`, announced by the returns Monitor's `RETURN {path}` line; the seat's inject is a bonus, never the signal |
-| Verify from the return and the new-file rule | The orchestrator's verify, unchanged; `chat_last` on the seat when the inject arrived cut short |
-| A question back by `SendMessage` | `chat_inject` on the seat, closing with "continue, then return once more in the return shape" |
-| The executor's transcript, sent to `flights-speccer` with every `FAILED` and `SPEC-DRIFT` and named on the `run.md` line | The seat's session id, read right after birth while its name still resolves: `pfm chat resolve {flight}-{id}`, third column. It goes on the `CLAIMED` line as `sid {session id}` and on each verdict line as `transcript {session id}`, always before `chat_kill`. A resolve with no third column writes `transcript UNRESOLVED · {what resolve printed}`, never nothing |
-| An executor never returns | The watch Monitor's lines, each acted on per § Monitors |
-| A question only the user can answer → `BLOCKED` | `AskUserQuestion` now; the seat re-briefed by inject, closing with "continue, then return once more in the return shape"; a ruling that changes the spec goes to `flights-speccer` as a revising call first, on `model: "opus"` like every revising round |
+| Spawn a child `Agent(subagent_type: "flights-foreman")` | A seat of the engine, named `{flight}-{unit}`, in the project directory or the worktree, born with the foreman role: the shell `pfm chat new --name {flight}-{unit} --engine {engine} --cwd {dir} --agent-role flights-foreman --prompt-file {flight directory}/briefs/{unit}-r{round}.md` (on `codex` add `--model gpt-6.1-sol --effort high`; another engine keeps the role's own pin) — the MCP verb carries no role. Its exit 0 is the brief confirmed as the seat's first turn; write `{unit} CLAIMED · sid {session id}` only once the Claim call (§ Monitors) exits 0. Any other exit is no claim: `chat_kill` the seat it left, if any; one retry, then the unit holds and the return names it |
+| Spawn the lander, or a mechanical executor | Unchanged: a sub-agent of this chat, never a seat |
+| The child's brief file | The same file, verbatim, as the seat's first turn through `--prompt-file`, never a later `chat_inject`. Its last item becomes: "your last act writes your return to `{flight directory}/returns/{unit}-r{round}.md` and sends it with `pfm chat inject {this chat's name} --file {path}`" — your name from `chat_whoami`; the return file is the return, and a trailing `**Verdict:**` line in it is ignored |
+| The return watch per child | The returns Monitor's `RETURN {path}` line; the seat's inject is a bonus, never the signal |
+| Verify from the return and `git diff {baseline} --stat -- {unit}` | The same; `chat_last` on the seat when the inject arrived cut short |
+| A red back to the child by `SendMessage` | `chat_inject` on the same seat, closing with "continue, then write your return once more" |
+| The child's session | `pfm chat resolve {flight}-{unit}`, third column, read right after birth while the name resolves; on the `CLAIMED` line and on each verdict line as `transcript {session id}`, always before `chat_kill`. No third column: `transcript UNRESOLVED · {what resolve printed}` |
+| A question only the user can answer → `BLOCKED` | `AskUserQuestion` now; the answer appended to `requirements.md` `## Rulings`, the seat re-briefed by inject |
 | The caller hears from you once | The user is the caller: the return at the end |
-| After a verdict is recorded | `chat_kill` the seat; `DISPATCHED` counts seats born against returns received |
+| After a child's verdict is recorded | `chat_kill` the seat; the return's `UNITS` row names the seat's session |
 
-Input: $ARGUMENTS, resolved as `/flights:orchestrate-nested` resolves it, plus the engine. Every seat is one-shot: born for one task file, killed after its verdict. After your return, a `LANDED` or `NOT LANDED` row is handled as `/flights:orchestrate-nested` step 4 handles it. Waiting is the two Monitors below; a seat is never polled by `chat_status`.
+Every seat is one-shot: born for one unit, killed after its verdict. Waiting is the two Monitors below; a seat is never polled by `chat_status`.
 
 ## Monitors
 
-Arm both at the first dispatch, each `timeout_ms: 1800000`, and re-arm each on its expiry; a re-armed watch prints one `SEEN` line per seat, a snapshot, not news. Keep `grep --line-buffered`, never a `head` or `tail` stage: a buffered pipe holds the lines until the Monitor dies.
+Arm both at the first spawn, each `timeout_ms: 1800000`, and re-arm each on its expiry; a re-armed watch prints one `SEEN` line per seat, a snapshot, not news. Keep `grep --line-buffered`, never a `head` or `tail` stage.
 
 - Returns: `bash -c 'G="$1"; seen=$(ls -1 $G 2>/dev/null); while :; do now=$(ls -1 $G 2>/dev/null); comm -13 <(printf "%s\n" "$seen") <(printf "%s\n" "$now") | sed -u "s/^/RETURN /"; seen=$now; sleep 1; done' _ "{flight directory}/returns/*"`
 - Seats: `cd /tmp && pfm chat watch '{flight}-*' --transitions --quiet-after 900 --poll 15 2>&1 | grep --line-buffered -vE '^WORKING '`
-- Claim, one call after `pfm chat new` exits 0, since the seats Monitor drops `WORKING`: `bash -c 'exec 3< <(exec timeout 120 pfm chat watch "$1" --transitions --poll 5 2>&1); w=$!; while IFS= read -r l <&3; do case $l in "SEEN "*" working"*|"WORKING "*) r=0;; "SEEN "*" idle"*|"IDLE "*) r=1;; "SEEN "*|"BLOCKED "*|"EXIT "*|"DEAD "*) continue;; *) r=2;; esac; echo "$l"; kill $w; exit $r; done; echo "NO CLAIM in 120s"; exit 3' _ '{flight}-{id}'`, by exit code:
-  - 0, a working line: write `CLAIMED`.
-  - 1, an idle line: its row below, `error=` the coma row, else the `IDLE`, no-return row.
-  - 2, `ERROR` or a line that is no watch event (the watch's own failure): the `ERROR` row, a failed probe; capture the pane, never kill.
-  - 3, `NO CLAIM in 120s`, the seat neither working nor idle (a dialog, a dead seat): a full-screen `chat_capture`, judged by the rows below.
+- Claim, one call after `pfm chat new` exits 0: `bash -c 'exec 3< <(exec timeout 120 pfm chat watch "$1" --transitions --poll 5 2>&1); w=$!; while IFS= read -r l <&3; do case $l in "SEEN "*" working"*|"WORKING "*) r=0;; "SEEN "*" idle"*|"IDLE "*) r=1;; "SEEN "*|"BLOCKED "*|"EXIT "*|"DEAD "*) continue;; *) r=2;; esac; echo "$l"; kill $w; exit $r; done; echo "NO CLAIM in 120s"; exit 3' _ '{flight}-{unit}'`, by exit code: 0 write `CLAIMED`; 1 its row below; 2 a failed probe — capture the pane, never kill; 3 a full-screen `chat_capture`, judged by the rows below.
 
 A seat that stopped without finishing, by the watch line:
 
 | Line | Action |
 | --- | --- |
-| `IDLE {seat} … error={kind}`, or `SEEN {seat} error … error={kind}` | `chat_inject` the seat: "The model hit a {kind} error and your turn stopped. Continue where you were; finish and write your return to `{flight directory}/returns/{id}-r{round}.md`."; `{id} COMA · {kind} · re-prompted · {time}` in `run.md`. A second coma of that seat within 10 minutes: the model is down; `chat_kill` it and re-dispatch the task on the Claude engine at the task's tier model; `{id} COMA · {kind} · re-dispatched on {engine} {model} · {time}` in `run.md` |
-| `IDLE {seat}`, no `returns/{id}-r{round}.md` | A full-screen `chat_capture`: the composer holds an unsent message or shows `Queued follow-up inputs` → `pfm chat keys {seat} Enter` once, then the Claim call again; a question asked → answer it; still idle → `chat_kill` and re-dispatch |
-| `QUIET {seat} quiet_seconds=N` | Capture and judge: a long run under `write_stdin` is legitimate, left alone; a stuck spinner or a reconnect loop is a coma: `chat_inject … force_now` with the continue message |
+| `IDLE {seat} … error={kind}`, or `SEEN {seat} error … error={kind}` | `chat_inject` the seat: "The model hit a {kind} error and your turn stopped. Continue where you were; finish and write your return to `{flight directory}/returns/{unit}-r{round}.md`."; `{unit} COMA · {kind} · re-prompted · {time}` in `run.md`. A second coma within 10 minutes: `chat_kill` it and spawn the unit as a `flights-foreman` sub-agent instead; `{unit} COMA · {kind} · re-spawned as sub-agent · {time}` |
+| `IDLE {seat}`, no return file | A full-screen `chat_capture`: an unsent message or `Queued follow-up inputs` → `pfm chat keys {seat} Enter` once, then the Claim call again; a question asked → answer it; still idle → `chat_kill` and re-spawn |
+| `QUIET {seat} quiet_seconds=N` | Capture and judge: a long run under `write_stdin` is legitimate; a stuck spinner or a reconnect loop is a coma: `chat_inject … force_now` with the continue message |
 | `BLOCKED {seat}` | Capture and answer the dialog |
-| `EXIT` or `DEAD`, no return file | The seat died: re-dispatch |
+| `EXIT` or `DEAD`, no return file | The seat died: re-spawn |
 | `ERROR {seat} …` | The watch could not look: a failed probe, never a quiet seat; capture the pane by hand |
 
-A re-dispatch is a fresh seat, the same task file, the next round.
+A re-spawn is a fresh seat, the same brief file, the next round.

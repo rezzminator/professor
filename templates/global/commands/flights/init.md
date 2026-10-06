@@ -1,6 +1,6 @@
 ---
 name: flights:init
-description: 'Readies a repository for flights — /flights:init [root]: maps its build units inside-out, writes the speccer manual, gives each unit a testing manual, test-{unit}.sh and check-{unit}.sh with their tests; re-runnable. here → /flights:spec. Returns a row per unit, the speccer-manual path, gaps.'
+description: 'Readies a repository for flights — /flights:init [root]: maps its build units inside-out, writes the project map, gives each unit a testing manual, test-{unit}.sh and check-{unit}.sh with their tests; re-runnable. here → /flights:spec. Returns a row per unit, the project-map path, gaps.'
 argument-hint: [repository root]
 ---
 
@@ -20,7 +20,7 @@ Before the first write into the repository: a branch or worktree from the reposi
 
 ## 1 — Map
 
-Read the speccer manual when one exists; name the units from it and the repository's layout, in order inside-out, the shared contract first. Then one message of `tracer` sub-agents, one per unit, each reading its unit's testing manual first, answers the same questions, each fact with its path:
+Read the project map when one exists; name the units from it and the repository's layout, in order inside-out, the shared contract first. Then one message of `tracer` sub-agents, one per unit, each reading its unit's testing manual first, answers the same questions, each fact with its path:
 
 1. Toolchain: each test runner, with its selector syntax, and each static check as the unit's installed tools run it; the command that installs its dependencies and an offline check that they are installed, or `no dependencies`.
 2. Static checks: which take file arguments and which files each applies to, which run whole, which build, serve or reach beyond the machine, which rewrite the tree to compare, and which another check already runs.
@@ -32,13 +32,13 @@ Read the speccer manual when one exists; name the units from it and the reposito
 
 A fact the map could not prove is a gap, never a guess.
 
-## 2 — Speccer manual
+## 2 — Project map
 
-Write or update `$HOME/.local/state/pfm/flights/{project}/speccer-manual.md`: static facts, each with its path: build units (each with its own testing manual) in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files; runners and checks belong to the testing manual. Rewrite every line the map proved wrong, add the missing ones, leave the rest; the code wins over it; never a source of shapes. It lives outside the repository and takes no commit.
+Write or update `$HOME/.local/state/pfm/flights/{project}/project-map.md`, the map every `flights-foreman` reads at intake: static facts, each with its path: build units (each with its own testing manual) in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files; runners and checks belong to the testing manual. Rewrite every line the map proved wrong, add the missing ones, leave the rest; the code wins over it; never a source of shapes. It lives outside the repository and takes no commit. A repository readied before the project map existed gets it by re-running this command.
 
 ## 3 — Testing manual
 
-Per unit, a testing manual where flights looks for it: `.claude/commands/{unit}-testing-manual.md`, or the repository's own path, recorded in the speccer manual. A unit without one gets a minimal manual under the eleven headings (Tiers, Where a test lives, Lanes and registries, Mock boundary, Environments and cleanup, Run commands, Concurrency, Gates and floors, Bug classes, Tricks and traps, What not to test) holding only facts the map proved, its top line marking it a starting point the owner completes. A section the map did not reach says `unmapped`, never `none`.
+Per unit, a testing manual where flights looks for it: `.claude/commands/{unit}-testing-manual.md`, or the repository's own path, recorded in the project map. A unit without one gets a minimal manual under the eleven headings (Tiers, Where a test lives, Lanes and registries, Mock boundary, Environments and cleanup, Run commands, Concurrency, Gates and floors, Bug classes, Tricks and traps, What not to test) holding only facts the map proved, its top line marking it a starting point the owner completes. A section the map did not reach says `unmapped`, never `none`.
 
 ## 4 — Test command
 
@@ -49,7 +49,7 @@ Per unit, a testing manual where flights looks for it: `.claude/commands/{unit}-
 - A selection that drops to empty exits 2 naming the dropped files, the runner never called.
 - `ALL` first prints its rerun reminder: after a fix, run only the files that failed last round.
 - Output to `{tmp}/test-{unit}/{UTC timestamp}-{pid}.log`; the repository's output filter, when it has one, reads that file, never a live pipe; print the log path. Several runners: each named file goes to its runner, `ALL` runs every runner; exit with the first non-zero runner code, else 0.
-- After a green file selection only, two lines: `A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.` and `Green. When your work is done, run {scripts}/check-{unit}.sh <your task's files> once, then write your return.`
+- After a green file selection only, two lines: `A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.` and `Green. When your work is done, run {scripts}/check-{unit}.sh <the files you changed> once, then write your return.`
 
 ## 5 — Check command
 
@@ -57,7 +57,7 @@ Per unit, a testing manual where flights looks for it: `.claude/commands/{unit}-
 
 - No argument, a flag or an empty argument: exit 2 with the usage line `Name the files you changed.`
 - The unit's installed tools only, never a runner that fetches a tool. Not installed per the map's offline check: only the line `FAIL install ({unit} has no installed dependencies — run: {install command})`, no check run, exit 1; a unit with `no dependencies` never prints it.
-- File-scoped checks (format check, lint) on the named files their tool applies to; one that no named file applies to prints exactly `SKIP {check} (no named file it applies to)` in every unit, never PASS. Unit-wide checks (type check, an architecture ratchet, any other static check the testing manual requires for an executor's change) whole. A check that builds, serves or reaches beyond the machine stays out, named under GAPS as a landing check the owner places; a check another listed check already runs is listed once.
+- File-scoped checks (format check, lint) on the named files their tool applies to; one that no named file applies to prints exactly `SKIP {check} (no named file it applies to)` in every unit, never PASS. Unit-wide checks (type check, an architecture ratchet, any other static check the testing manual requires for a builder's change) whole. A check that builds, serves or reaches beyond the machine stays out, named under GAPS as a landing check the owner places; a check another listed check already runs is listed once.
 - A check that needs a running service: only after it fails, a probe names on its FAIL line the missing service and the command that starts it in the current checkout, or that the probe itself failed and why, never the service as up; config values never interpolate into a shell string.
 - A check that rewrites the tree to compare (regenerate-and-compare) holds a lock keyed to the checkout path, waits a bounded time then prints `FAIL {check}` naming the holder, is freed when its holder dies, and leaves the tree as it found it.
 - Every check runs even after one fails, one `PASS {check}`, `FAIL {check}` or `SKIP {check}` line each; output to `{tmp}/check-{unit}/{UTC timestamp}-{pid}.log`, its path printed.
@@ -69,7 +69,7 @@ In the repository's script-test home (none: beside the scripts, and a gap), with
 
 ## 7 — The manual names both
 
-The test command as the only way to run the unit's tests; the check command as its static-check command, run once, last, with the task's `files`, and on a red fixed and run again. Align a line naming another way to run an affected test; the lander's gate commands stay.
+The test command as the only way to run the unit's tests; the check command as its static-check command, run once, last, with the files changed, and on a red fixed and run again. Align a line naming another way to run an affected test; the lander's gate commands stay.
 
 ## 8 — Engine copies
 
@@ -77,7 +77,7 @@ When `.codex/` or `.opencode/` sits at the root, regenerate that engine's copies
 
 ## 9 — Verify
 
-Every script test. Then a unit not installed per the map's offline check is installed by its install command; a file the install changes is restored and named under GAPS, and a unit still not installed is a gap. A live smoke runs each test command on the map's smoke test file and each check command on its smoke source file; every path in the speccer manual resolves. A red in what you built is fixed; a red that is the unit's own state (a failing test on the base branch, a service down) is reported as printed and is a gap.
+Every script test. Then a unit not installed per the map's offline check is installed by its install command; a file the install changes is restored and named under GAPS, and a unit still not installed is a gap. A live smoke runs each test command on the map's smoke test file and each check command on its smoke source file; every path in the project map resolves. A red in what you built is fixed; a red that is the unit's own state (a failing test on the base branch, a service down) is reported as printed and is a gap.
 
 ## 10 — Git
 
@@ -91,7 +91,7 @@ The smoke cell holds each command's verdict lines and exit code on one line, a `
 | unit | test command | check command | manual | smoke |
 | {unit} | {path} created|aligned|ok | {path} created|aligned|ok | {path} created|aligned|ok | test exit {code} · check {its PASS, FAIL and SKIP lines} exit {code} |
 RESOLVER {path} created|aligned|ok
-SPECCER MANUAL {path} created|aligned|ok
+PROJECT MAP {path} created|aligned|ok
 ENGINE COPIES regenerated|none
 COMMIT {sha} on {branch}|none
 GAPS {each fact or item the owner must supply}|none

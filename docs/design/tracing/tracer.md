@@ -35,10 +35,9 @@ Price, accuracy and clean blocks are each tier's measured share of `tracer-pro-m
 - A variant overrides `name`, `description`, `model` and `effort` only; it carries no `replace`, so the three bodies are one text.
 - The bench measured Sonnet 5.5 behind the alias `sonnet`; a new Sonnet release behind the alias re-opens the bench.
 - Codex: only the executors carry a Codex pin (`TestGlobalAgentsWithoutCodexOverridesKeepOriginalBytes`), so the tiers compile through the alias map: `tracer` and `tracer-pro` to `gpt-5.6-luna` at `high` and `xhigh`, `tracer-pro-max` to `gpt-5.6-sol` at `medium`. The Codex tiers are unmeasured.
-- A caller spawns `tracer` unless its prompt names a tier: `flights-speccer`, `/flights:spec` and `reviewer` name none.
+- A caller spawns `tracer` unless its prompt names a tier: `/flights:spec` and `reviewer` name none.
 
 ## Open items
 
 - Reading every item of a list the brief asks to classify: the rule is in the prompt, and the opus run still stopped at the grep hits.
-- `flights-speccer` pastes a tracer's fenced lines as task-file shapes and spawns tier 1, whose blocks were clean 58% of the time; spawning `tracer-pro` for shape questions is a `flights-speccer` prompt change.
 - The tier numbers rest on one run per setup, two for Sonnet at `xhigh`.

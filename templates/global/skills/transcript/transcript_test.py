@@ -105,7 +105,7 @@ class Fixture(unittest.TestCase):
         self.claude = os.path.join(self.home, ".claude/projects/-work-repo", CLAUDE_SID, "subagents", f"agent-{CLAUDE_AGENT}.jsonl")
         write_jsonl(self.claude, claude_records(), bad_lines=1)
         with open(self.claude.replace(".jsonl", ".meta.json"), "w") as handle:
-            json.dump({"agentType": "flights-speccer", "description": "Revise 3-d"}, handle)
+            json.dump({"agentType": "flights-foreman", "description": "Build unit be"}, handle)
         self.codex = os.path.join(self.home, ".codex/sessions/2026/09/29", f"rollout-2026-09-29T22-42-11-{CODEX_SID}.jsonl")
         write_jsonl(self.codex, codex_records())
 
@@ -262,7 +262,7 @@ class ClaudeTest(Fixture):
     def test_digest_renders_prompt_calls_error_tail_queued_prompt_and_final(self):
         out = self.ok("show", self.claude)
         self.assertIn("TRANSCRIPT claude · agent a0123456789abcdef of session", out)
-        self.assertIn("flights-speccer · Revise 3-d", out)
+        self.assertIn("flights-foreman · Build unit be", out)
         self.assertRegex(out, r"L1 20:00:00 PROMPT Revise task 3-d")
         self.assertRegex(out, r"L4 20:00:02 Bash go test \./pkg/\.\.\. → ERR \d+B · 28s")
         self.assertIn("    | fork reuses parent sid", out)
@@ -412,6 +412,130 @@ class FilterTest(Fixture):
         self.assertRegex(out, r"^WROTE .*digest.txt · \d+ bytes · \d+ lines$")
         with open(target) as handle:
             self.assertIn("FINAL", handle.read())
+
+
+def session_records(sid, *titles, second=0):
+    """A top-level Claude session: one prompt, then each (kind, name) title record as Claude Code appends it."""
+    out = [{"type": "user", "sessionId": sid, "cwd": "/work/repo", "timestamp": ts(second),
+            "message": {"role": "user", "content": "Open the audit desk."}}]
+    for kind, name in titles:
+        key = "customTitle" if kind == "custom-title" else "agentName"
+        out.append({"type": kind, key: name, "sessionId": sid})
+    return out
+
+
+SID_A = "aaaaaaaa-1111-2222-3333-444444444444"
+SID_B = "bbbbbbbb-1111-2222-3333-444444444444"
+
+
+class NameTest(Fixture):
+    def session(self, sid, *titles, second=0):
+        path = os.path.join(self.home, ".claude/projects/-work-repo", f"{sid}.jsonl")
+        write_jsonl(path, session_records(sid, *titles, second=second))
+        return path
+
+    def test_a_chat_name_resolves_case_insensitively_and_heads_the_digest(self):
+        path = self.session(SID_A, ("agent-name", "AUDIT DESK"), ("custom-title", "Audit Desk"))
+        self.assertEqual(self.ok("locate", "audit desk").strip(), os.path.realpath(path))
+        self.assertIn("\nNAME Audit Desk\n", self.ok("show", "AUDIT DESK"))
+        self.assertIn("\nNAME Audit Desk\n", self.ok("counts", SID_A[:8]))
+        only_agent = self.session(SID_B, ("agent-name", "Night Shift"))
+        self.assertEqual(self.ok("locate", "night shift").strip(), os.path.realpath(only_agent))
+
+    def test_a_renamed_chat_matches_only_its_last_title(self):
+        path = self.session(SID_A, ("custom-title", "Old Desk"), ("agent-name", "Old Desk"), ("custom-title", "New Desk"))
+        self.assertEqual(self.ok("locate", "New Desk").strip(), os.path.realpath(path))
+        proc = self.run_tp("locate", "Old Desk")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("NOT FOUND Old Desk", proc.stderr)
+
+    def test_two_chats_sharing_a_name_fail_ambiguous_listing_both(self):
+        first = self.session(SID_A, ("custom-title", "Twin"), second=5)
+        second = self.session(SID_B, ("custom-title", "Twin"), second=9)
+        proc = self.run_tp("show", "twin")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("AMBIGUOUS twin — 2 transcripts", proc.stderr)
+        for path, second_ in ((first, 5), (second, 9)):
+            size_ = os.path.getsize(path)
+            self.assertIn(f"{os.path.realpath(path)} ({size_} bytes, last record {ts(second_)})", proc.stderr)
+
+    def test_an_unknown_name_fails_naming_the_lookup_and_its_scope(self):
+        self.session(SID_A, ("custom-title", "Audit Desk"))
+        self.session(SID_B)
+        proc = self.run_tp("show", "Nobody Here")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("NOT FOUND Nobody Here", proc.stderr)
+        self.assertIn("name lookup over 2 session files", proc.stderr)
+
+    def test_a_symlinked_root_is_searched_once(self):
+        path = self.session(SID_A, ("custom-title", "Audit Desk"))
+        os.makedirs(os.path.join(self.home, ".cc/1"))
+        os.symlink(os.path.join(self.home, ".claude/projects"), os.path.join(self.home, ".cc/1/projects"))
+        self.assertEqual(self.ok("locate", "Audit Desk").strip(), os.path.realpath(path))
+        proc = self.run_tp("show", "Nobody Here")
+        self.assertIn("name lookup over 1 session files", proc.stderr)
+
+
+class PromptKindTest(Fixture):
+    def digest(self, *records):
+        write_jsonl(self.claude, claude_records() + [dict(r, sessionId=CLAUDE_SID, timestamp=ts(50)) for r in records])
+        return self.ok("show", self.claude)
+
+    def test_a_queued_task_notification_is_a_note(self):
+        out = self.digest({"type": "attachment", "attachment": {"type": "queued_command",
+                                                                "prompt": "<task-notification>\n<task-id>ab1</task-id>"}})
+        self.assertIn("NOTE <task-notification> <task-id>ab1</task-id>", out)
+        self.assertNotIn("PROMPT(queued) <task-notification>", out)
+        self.assertIn("PROMPT(queued) Two more items from the orchestrator.", out)
+
+    def test_a_plugin_message_is_a_plugin_prompt(self):
+        out = self.digest({"type": "user", "message": {"role": "user", "content": "The buddy plugin sent a message: ping"}})
+        self.assertIn("PROMPT(plugin) The buddy plugin sent a message: ping", out)
+
+
+class AgentsTest(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.session = os.path.join(self.home, ".claude/projects/-work-repo", f"{SID_A}.jsonl")
+        write_jsonl(self.session, session_records(SID_A, ("custom-title", "Audit Desk")))
+        self.subagents = os.path.join(self.home, ".claude/projects/-work-repo", SID_A, "subagents")
+
+    def agent(self, aid, start, calls, meta):
+        path = os.path.join(self.subagents, f"agent-{aid}.jsonl")
+        records = [{"type": "user", "sessionId": SID_A, "agentId": aid, "timestamp": ts(start), "message": {"content": "go"}}]
+        for i in range(calls):
+            records.append({"type": "assistant", "sessionId": SID_A, "agentId": aid, "timestamp": ts(start + 1 + i), "message": {
+                "content": [{"type": "tool_use", "id": f"{aid}{i}", "name": "Bash", "input": {"command": "ls"}}]}})
+        write_jsonl(path, records)
+        if meta is not None:
+            with open(path.replace(".jsonl", ".meta.json"), "w") as handle:
+                handle.write(meta if isinstance(meta, str) else json.dumps(meta))
+        return path
+
+    def rows(self, out):
+        return [ln for ln in out.splitlines() if ln.startswith("a")]
+
+    def test_agents_lists_each_subagent_sorted_by_first_timestamp(self):
+        late = self.agent("a2late", 30, 3, {"agentType": "gitter", "description": "Commit the docs"})
+        self.agent("a1early", 10, 1, {"agentType": "tracer", "description": "Map the doors"})
+        out = self.ok("agents", "Audit Desk")
+        self.assertIn(f"SESSION {SID_A} · {os.path.realpath(self.session)}", out)
+        self.assertIn("\nAGENTS 2\n", out)
+        rows = self.rows(out)
+        self.assertEqual([r.split()[0] for r in rows], ["a1early", "a2late"])
+        self.assertEqual(rows[1], f"a2late · gitter · Commit the docs · {ts(30)[:19].replace('T', ' ')}Z → "
+                                  f"{ts(33)[:19].replace('T', ' ')}Z · 4 records · {os.path.getsize(late)}B · 3 calls")
+
+    def test_a_missing_or_broken_meta_prints_meta_error(self):
+        self.agent("a1nometa", 10, 0, None)
+        self.agent("a2badmeta", 20, 0, "{not json")
+        rows = self.rows(self.ok("agents", SID_A[:8]))
+        self.assertTrue(rows[0].startswith("a1nometa · META ERROR missing "), rows[0])
+        self.assertTrue(rows[1].startswith("a2badmeta · META ERROR "), rows[1])
+
+    def test_no_subagents_directory_prints_agents_zero(self):
+        out = self.ok("agents", SID_A)
+        self.assertIn(f"AGENTS 0 — no subagents directory at {os.path.realpath(self.subagents)}", out)
 
 
 if __name__ == "__main__":

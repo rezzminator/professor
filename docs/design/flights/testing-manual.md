@@ -1,6 +1,6 @@
 # The testing manual
 
-A testing manual is one project's living law of testing: how its unit and integration tests are designed, where a test lives, which gates exist, the tricks and traps, what to test and what not to. One file per project, one fixed section order, three readers. It closes the hole through which flights ignored project test law: neither `flights-speccer` nor `flights-orchestrator` knew such law existed, and tests complied only where someone restated the rules by hand in a `0-` file.
+A testing manual is one project's living law of testing: how its unit and integration tests are designed, where a test lives, which gates exist, the tricks and traps, what to test and what not to. One file per project, one fixed section order, three readers. It closes the hole through which flights ignored project test law: no flights agent knew such law existed, and tests complied only where someone restated the rules by hand in a task file.
 
 Decisions live in this file. The template lives in [`templates/project/commands/per-project/testing-manual.md`](../../../templates/project/commands/per-project/testing-manual.md).
 
@@ -16,7 +16,7 @@ Decisions live in this file. The template lives in [`templates/project/commands/
 
 ## What it replaces
 
-In the adopter this was measured on, project test law was spread over twelve files in two trees: about 34 KB across six QA agent prompts and six child contract files, beside a 19.8 KB shared testing command of which 87% was generic mechanism. Every reader loaded the shared command plus an agent prompt to extract its own slice. The generic mechanism moves into the [flight executors](flights-executors.md) (writing tests) and [`flights-lander`](flights-lander.md) (attacking them); the project law moves into the manual; the per-project `developer` and `qa` agents go.
+In the adopter this was measured on, project test law was spread over twelve files in two trees: about 34 KB across six QA agent prompts and six child contract files, beside a 19.8 KB shared testing command of which 87% was generic mechanism. Every reader loaded the shared command plus an agent prompt to extract its own slice. The generic mechanism moves into the [foreman](flights-foreman.md#tests) and the [mechanical executor](mechanical-executor.md) (writing tests) and [`flights-lander`](flights-lander.md) (attacking them); the project law moves into the manual; the per-project `developer` and `qa` agents go.
 
 ## Where it lives
 
@@ -31,7 +31,7 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 3. Lanes and registries: the lane or beat a capability lands with, the registry rows that land in the same change, the shared-core files with one editor.
 4. Mock boundary: what may be mocked and what is always real.
 5. Environments and cleanup: environment files, stack start, ports, the cleanup targets.
-6. Run commands: the command per scope — affected, full — and the timeout each needs; the static-check command, one command that takes a list of files, an executor's only static check, run once, last.
+6. Run commands: the command per scope — affected, full — and the timeout each needs; the static-check command, one command that takes a list of files, a builder's only static check, run once, last.
 7. Concurrency: workers, isolation, what may run beside what.
 8. Gates and floors: coverage floor, lint, type check, format, any scored gate and its thresholds; read by the lander as its gate rows.
 9. Bug classes: the finding codes only this project raises.
@@ -42,24 +42,20 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 
 | Reader | Sections | For |
 | --- | --- | --- |
-| `flights-speccer` | 1, 2, 3, 8, and the removal clause of 11 | The tier decides a task's `shares`; the test home, the registry rows and the gate-owned data the change trips are `Files` entries; a removal lists its retiring tests; a floor is never a task's row |
-| `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor` | all | Writing the covering tests in the project's pattern |
-| `general-foreman`, `general-executor` | all, when the brief names the manual | Writing the covering test in the project's pattern |
+| `flights-foreman`, `flights-mechanical-executor` | all | Writing the covering tests in the project's pattern; a floor is never a requirement row, it is the lander's |
 | `flights-lander` | all, 5 to 9 most | Running each project's gate with its floors as gate rows, sweeping test validity, raising the project's bug classes |
-
-The speccer takes facts from the manual into the task file as `Decisions` and `Files` lines; it never puts the manual in a task's `reads`, since the manual would consume the task's reading budget.
 
 ## How it reaches a flight
 
-- The caller of a flight names the project; `flights-speccer` opens that project's manual, its path recorded in the speccer manual, during intake and applies the sections above. A project without a manual is a `NOTES` line in the speccer's return, never a silent skip.
-- The flight's caller resolves each manual's path, the speccer manual's record first; the orchestrator's brief carries it beside the standing rules: to an executor, its own project's; to the lander, every touched project's.
-- A `Done when` test row names the tier, and `Files` names the test home and every registry file: a test outside the pattern is then a task that cannot verify as `DONE`.
+- The caller of a flight names the project; each foreman opens its unit's manual, its path recorded in the project map, before its first test. A unit without a manual is a line in the foreman's return, never a silent skip.
+- Each spawning foreman's brief carries the manual's path: to a child, its own unit's; to the lander, every touched project's.
+- In a mechanical task file, a `Done when` test row names the tier, and `Files` names the test home and every registry file: a test outside the pattern is then a task that cannot verify as `DONE`.
 
 ## What stays out
 
-- The generic mechanism of writing and attacking tests: in the three executor bodies and the lander.
+- The generic mechanism of writing and attacking tests: in the foreman, the mechanical executor and the lander.
 - The cross-suite design of an integration suite — landscape, map, lanes, budgets: `/quality:integration-suite` designs it ([its design](../integration-suite/_index.md)), and the manual's section 3 states the duty it leaves on every change.
-- Pipeline glue (who spawns whom, where reports go): in the orchestrator.
+- Pipeline glue (who spawns whom, where reports go): in the foreman.
 
 ## Surfaces that stay in sync
 
@@ -67,7 +63,6 @@ The speccer takes facts from the manual into the task file as `Decisions` and `F
 | --- | --- | --- |
 | The template | `templates/project/commands/per-project/testing-manual.md` | The eleven headings with placeholder bodies |
 | This repository's own manual | `.claude/commands/pfm-testing-manual.md` | The pfm instance, drawn from `pfm/CLAUDE.md` and `docs/dev/testing/` |
-| The speccer | [`flights-speccer`](flights-speccer.md) | Reads sections 1, 2, 3, 8 and the removal clause of 11 at intake |
-| The executor and the lander | [flight executors](flights-executors.md), [`flights-lander`](flights-lander.md) | Read it whole |
+| The builders and the lander | [`flights-foreman`](flights-foreman.md), [mechanical](mechanical-executor.md), [`flights-lander`](flights-lander.md) | Read it whole |
 | Setup | `docs/SETUP.md`, `templates/refresh-map.json` | Generation of one manual per project |
 | The scaffold | `pfm/internal/professor/scaffold.go`, lane `A` (`infra/fence/lanes/A.sh`) | `commands/per-project/` is never deployed by a bare `pfm init` |

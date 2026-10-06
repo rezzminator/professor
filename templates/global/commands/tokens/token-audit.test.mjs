@@ -144,7 +144,7 @@ test("--flight: a Bash poll is counted even when a harness attachment follows ev
 });
 
 test("--flight: the call cap comes from the agent type name — executor 150, lander 200", () => {
-  for (const [type, cap] of [["flights-precise-executor", 150], ["executor", 150], ["flights-speccer", 150], ["flights-lander", 200], ["lander", 200]])
+  for (const [type, cap] of [["flights-mechanical-executor", 150], ["executor", 150], ["flights-foreman", 250], ["foreman", 250], ["flights-lander", 200], ["lander", 200]])
     assert.equal(callCap(type), cap, type);
   const f = flight("flight"), d = rowOf(f.json, "1-d"), e = rowOf(f.json, "1-e");
   assert.equal(d.calls, 85);

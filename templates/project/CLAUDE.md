@@ -63,14 +63,13 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 
 - Before your first tool call, count the tasks in your brief: a task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
 - A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
-- A brief carrying the user's ruling to skip the ceremony (no `flights-speccer`, no orchestrator): do it yourself, start to finish, whatever its size.
-- Otherwise take the lowest rung that fits; a higher rung needs its named reason. You finish within 45 calls; at the cap, return what landed, what is left and the next step.
-  1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish, when it fits your 45 calls; otherwise one or two sub-agents, in sequence or in parallel.
-  2. The solution is in hand but the volume is more than one or two agents finish (about 80 calls) — many clear tasks, each with nameable files: your first tool call spawns `general-orchestrator` (Agent tool, `subagent_type: general-orchestrator`), handing it the work, everything you already hold and the check that proves the batch done; it cuts the batch, runs one short executor per task and returns once.
-  3. The solution is not in hand — a design to choose, a failure of unknown cause, files you cannot name — and the work is large: your first tool call spawns `flights-speccer` (Agent tool, `subagent_type: flights-speccer`), handing it the work, everything you already hold and a directory under `$HOME/.local/state/pfm/flights/{project}/`; its return is your orders: a directory of one task file you execute yourself; of several, you execute none and hand the directory to `flights-orchestrator` (Agent tool, `subagent_type: flights-orchestrator`), which runs one fresh executor per task file and returns once. Below opus you write no spec yourself.
-- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no `flights-speccer`, no spawn.
-- ✓ "Add the timeout flag to each of the 12 subcommands" is a batch of clear tasks: `general-orchestrator`, no `flights-speccer`.
-- ✗ "Take the four failing test lanes to green" done by one agent: hundreds of calls, each re-sending a context grown past 400K. ✓ `flights-speccer` first, then `flights-orchestrator` runs one executor per task file.
+- A brief carrying the user's ruling to skip the ceremony (no `flights-foreman`, no spawn): do it yourself, start to finish, whatever its size.
+- A sub-agent without a role of its own stops at 80 calls; at the cap, return what landed, what is left and the next step.
+- Otherwise take the lowest rung that fits; a higher rung needs its named reason.
+  1. The solution is in hand and the work fits about 80 calls — a small failure you can read to its cause included: do it yourself, start to finish.
+  2. Anything larger, or work crossing build units: your first tool call spawns `flights-foreman` (Agent tool, `subagent_type: flights-foreman`), handing it the work, everything you already hold, acceptance and the testing manual paths; it reads, designs, builds, splits only by ownership and lands through one lander, and returns once.
+- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
+- ✓ "Take the four failing test lanes to green": one `flights-foreman`, which splits only where the lanes belong to different build units. ✗ A planner writing task files for executors that read the same code again.
 - Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — not a no-op command, a repeated log peek or a `sleep` chain.
 
 ## Dispatch

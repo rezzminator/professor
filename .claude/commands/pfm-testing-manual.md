@@ -1,6 +1,6 @@
 ---
 name: pfm-testing-manual
-description: The testing law of pfm (the Go fleet engine) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by flights-speccer at intake, by every flight or general executor before its first test, by flights-lander whole; `/pfm-testing-manual` opens it for a human. Keep it true in the same change that alters how pfm is tested.
+description: The testing law of pfm (the Go fleet engine) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by every flights-foreman and flights-mechanical-executor before its first test, by flights-lander whole; `/pfm-testing-manual` opens it for a human. Keep it true in the same change that alters how pfm is tested.
 ---
 
 # pfm testing manual

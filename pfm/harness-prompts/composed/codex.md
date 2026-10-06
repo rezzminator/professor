@@ -98,7 +98,7 @@ You spawned a `flights-foreman`, or you are one with children.
 
 - Hold the verdicts, never a file you are not editing: a child reads its own unit.
 - A child's brief carries its requirement rows verbatim, the frozen interface's paths, acceptance, its testing manual path, the worktree and the flight directory — never steps, never beliefs about code you did not read.
-- Waiting is one call or none: end the turn; the return arrives. No poll, no sleep chain, no log peek, no status check before the stale bound.
+- Waiting is one call or none: end the turn; the return arrives. No poll, no sleep chain, no log peek, no status check.
 - A return is a claim. Match its first-line token; verify DONE against the diff of the child's unit and its covering tests; record one line in run.md. A red goes back to the child that built it, with the cause; a second red of one child is BLOCKED; BLOCKED travels up; nothing is re-run unchanged. The flight lands through one `flights-lander` for the whole flight — the only review, once, over the whole diff of every project.
 - You report once to your caller, plus a question only the user can answer.
 

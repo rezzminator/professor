@@ -62,7 +62,7 @@ The questions are fixed so every run briefs its tracers the same way and the mai
 
 ## I2 — The project map
 
-Write or update `$HOME/.local/state/pfm/flights/{project}/project-map.md`, the foreman's per-project map ([`flights-foreman`](flights-foreman.md)), with the map's static facts, each with its path: the build units (each with its own testing manual) and their inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. An update rewrites every line the map proved wrong, adds the missing ones and leaves the rest. The code wins over it, and it is never a source of shapes: a shape is always pasted from output the run printed. The map's runners and static checks go to the unit's testing manual (I3, I7), never into this list. It sits in the flights state root, outside the repository, so it takes no commit.
+Write or update `$HOME/.local/state/pfm/flights/{project}/project-map.md`, the foreman's per-project map ([`flights-foreman`](flights-foreman.md)), with the map's static facts, each with its path: the build units (each with its own testing manual) and their inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. An update rewrites every line the map proved wrong, adds the missing ones and leaves the rest. The code wins over it, and it is never a source of shapes: a shape is always pasted from output the run printed. The map's runners and static checks go to the unit's testing manual (I3, I7), never into this list. It sits in the flights state root, outside the repository, so it takes no commit. A repository readied before the project map existed gets it by re-running the command.
 
 ## I3 — A testing manual per unit
 
@@ -81,7 +81,7 @@ Each unit needs a [testing manual](testing-manual.md) where flights looks for it
 - `ALL` prints its rerun reminder first: the whole suite runs, and after a fix only the files that failed last round rerun.
 - Full output goes to a log under the temp-artifact directory, `test-{unit}/{UTC timestamp}-{pid}.log`, so two runs in one second never share one; the repository's output filter, when it has one, reads that file (never a live pipe); the command prints the log path.
 - A unit with several runners routes each named file to its runner; `ALL` runs every runner. The command exits with the first non-zero runner code, else 0, so a later green runner never hides an earlier red one.
-- After a green file selection, never after `ALL`, two more lines: `A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.` and `Green. When your work is done, run {agent-scripts directory}/check-{unit}.sh <your task's files> once, then write your return.`
+- After a green file selection, never after `ALL`, two more lines: `A file that failed in a wider run and now passes alone, with no change that explains it, fails alongside others: rerun the selection it failed in.` and `Green. When your work is done, run {agent-scripts directory}/check-{unit}.sh <the files you changed> once, then write your return.`
 
 An existing test command is aligned, never rewritten.
 
@@ -91,7 +91,7 @@ An existing test command is aligned, never rewritten.
 
 - No argument, a flag or an empty argument exits 2 with the usage line `Name the files you changed.`; paths go through I4's resolver.
 - It calls the unit's installed tools only, never a runner that fetches a tool: a fetched tool is unpinned, and its verdict is not the unit's. A unit the map's offline check finds not installed prints only the line `FAIL install ({unit} has no installed dependencies — run: {install command})`, runs no check and exits 1; a unit with `no dependencies` never prints it.
-- File-scoped checks (format check, lint) run on the named files their tool applies to; one that no named file applies to prints exactly `SKIP {check} (no named file it applies to)`, one wording in every unit, never `PASS`, since it checked nothing. Unit-wide checks (type check, an architecture ratchet, any other static check the testing manual requires for an executor's change) run whole.
+- File-scoped checks (format check, lint) run on the named files their tool applies to; one that no named file applies to prints exactly `SKIP {check} (no named file it applies to)`, one wording in every unit, never `PASS`, since it checked nothing. Unit-wide checks (type check, an architecture ratchet, any other static check the testing manual requires for a builder's change) run whole.
 - A check that builds, serves or reaches beyond the machine stays out of the check command; the lander's gate does not run it either, so the return names it under GAPS as a landing check the owner places. A check another listed check already runs is listed once.
 - A check that needs a running service probes it only after the check fails, never on a green run: the probe decorates that `FAIL` line with the missing service and the command that starts it in the current checkout, since a worktree may start it differently from the main checkout. A probe that itself errors says so and why, never reporting the service as up, so a down service never reads as a code red. A probe never interpolates a config value into a shell string.
 - A check that mutates the tree (regenerate-and-compare) serialises per checkout, because parallel foremen share one worktree: a lock keyed to the checkout path, a bounded wait that ends in a `FAIL {check}` line naming the holder, freed when its holder dies; the check leaves the tree as it found it.
@@ -105,7 +105,7 @@ Each command gets tests in the repository's script-test home (the map finds it; 
 
 ## I7 — The manual names both
 
-The unit's testing manual names the test command as the only way to run its tests and the check command as its static-check command: run once, last, with the task's `files`; on a red, fix and run the same command again. The gate commands the [`flights-lander`](flights-lander.md) runs stay as they are. A manual line naming another way to run an affected test is aligned to the test command.
+The unit's testing manual names the test command as the only way to run its tests and the check command as its static-check command: run once, last, with the files changed; on a red, fix and run the same command again. The gate commands the [`flights-lander`](flights-lander.md) runs stay as they are. A manual line naming another way to run an affected test is aligned to the test command.
 
 ## I8 — Engine copies
 

@@ -37,7 +37,7 @@ Three agents, four commands. Project law reaches them through the project contra
 1. Ready. `/flights:init`, once per project: the project map, and each unit's testing manual, test command and static-check command. Re-run, it builds only what is missing and aligns what is stale.
 2. Specify, when the requirements are not settled. `/flights:spec` grills and writes `requirements.md`: the binding rulings and the requirement rows, each row testable. A model caller with settled work skips it and hands the foreman the request.
 3. Build. One root `flights-foreman`: the base gate, the doors, the data shapes, the decision; the interface frozen in the innermost unit; the producer built by the foreman that read it; one child foreman per other unit, in parallel against the interface; every return verified; the owner repairs its own reds.
-4. Land. One `flights-lander` for the whole flight, then the commit and, for a worktree flight, the merge through the repository's git writer, the lander's `PASS` or `FIXED` being the merge nod.
+4. Land. One `flights-lander` for the whole flight, then, when the caller ordered it, the commit and, for a worktree flight, the merge through the repository's git writer, the lander's `PASS` or `FIXED` being the merge nod.
 5. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
 
 ## The flight directory
@@ -49,7 +49,7 @@ $HOME/.local/state/pfm/flights/{project}/{flight}/
   agents.tsv      one row per spawn: unit, type, agent id, round, time, engine   appended by the root flights-foreman
   briefs/         one brief file per spawn                   written by the spawning foreman
   tasks/          one task file per mechanical bulk edit     written by the foreman that fixed it
-  returns/        one return file per seat (cross-harness) and per gate round   written by each seat and by flights-lander
+  returns/        one return file per child foreman (sub-agent or seat) and per gate round   written by each child and by flights-lander
   metrics.md      per-agent calls, context, tokens, price    written by token-audit.mjs at landing
   gate.md         the gate's attack map and findings         written by flights-lander
   REVIEW.md       the merge-gating report, from gate.md      written by the root flights-foreman

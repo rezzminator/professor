@@ -16,7 +16,7 @@ An anchor you cannot read is a finding ("failed to look"), never an absence ("no
 | --- | --- | --- |
 | `requirements.md` | the directory | The rulings and the requirement rows, each naming the unit that owns it; absent for a flight with no spec, whose intent is the root's `GOAL` line |
 | `run.md` | the directory | The header's baseline sha and date; `BASE`, `GOAL`, `DECIDE`, `FROZEN`, `CLAIMED`, verdict, `gate` and `RETRO` lines |
-| `briefs/{unit}-r{round}.md`, `briefs/gate-r{round}.md`, `agents.tsv` | the directory | What each child, executor and lander was told; a spawn in `agents.tsv` without its brief file is a finding |
+| `briefs/{unit}-r{round}.md`, `briefs/{id}-r{round}.md`, `briefs/gate-r{round}.md`, `agents.tsv` | the directory | What each child, executor and lander was told; a spawn in `agents.tsv` without its brief file is a finding |
 | `tasks/{id}.md` | the directory | Each mechanical bulk edit the foreman fixed, and the `Files` its executor's diff must stay inside |
 | `returns/{unit}-r{round}.md`, `returns/gate-r{round}.md` | the directory | Each child's, seat's and lander's return as written; a verdict line in `run.md` without its return file is a finding |
 | `audit.md` | the directory | The previous audit, for a delta |

@@ -34,7 +34,7 @@ A fact the map could not prove is a gap, never a guess.
 
 ## 2 — Project map
 
-Write or update `$HOME/.local/state/pfm/flights/{project}/project-map.md`, the map every `flights-foreman` reads at intake: static facts, each with its path: build units (each with its own testing manual) in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files; runners and checks belong to the testing manual. Rewrite every line the map proved wrong, add the missing ones, leave the rest; the code wins over it; never a source of shapes. It lives outside the repository and takes no commit.
+Write or update `$HOME/.local/state/pfm/flights/{project}/project-map.md`, the map every `flights-foreman` reads at intake: static facts, each with its path: build units (each with its own testing manual) in inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files; runners and checks belong to the testing manual. Rewrite every line the map proved wrong, add the missing ones, leave the rest; the code wins over it; never a source of shapes. It lives outside the repository and takes no commit. A repository readied before the project map existed gets it by re-running this command.
 
 ## 3 — Testing manual
 

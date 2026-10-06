@@ -35,7 +35,7 @@ A requirement row states what must be true, never how the code does it: an examp
 
 ## S4 — Hand off
 
-Spawn one `flights-foreman` with the path of `requirements.md`, the flight directory and the project map's path. End the message; the return arrives once the flight landed or stopped.
+Spawn one `flights-foreman` with the path of `requirements.md`, the flight directory, the project map's path, acceptance (what the user confirmed must be true when it lands) and whether the user ordered a commit or merge. End the message; the return arrives once the flight landed or stopped.
 
 ## S5 — The one question
 

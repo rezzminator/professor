@@ -16,7 +16,7 @@ Decisions live in this file. The template lives in [`templates/project/commands/
 
 ## What it replaces
 
-In the adopter this was measured on, project test law was spread over twelve files in two trees: about 34 KB across six QA agent prompts and six child contract files, beside a 19.8 KB shared testing command of which 87% was generic mechanism. Every reader loaded the shared command plus an agent prompt to extract its own slice. The generic mechanism moves into the [flight executors](flights-executors.md) (writing tests) and [`flights-lander`](flights-lander.md) (attacking them); the project law moves into the manual; the per-project `developer` and `qa` agents go.
+In the adopter this was measured on, project test law was spread over twelve files in two trees: about 34 KB across six QA agent prompts and six child contract files, beside a 19.8 KB shared testing command of which 87% was generic mechanism. Every reader loaded the shared command plus an agent prompt to extract its own slice. The generic mechanism moves into the [foreman](flights-foreman.md#tests) and the [mechanical executor](mechanical-executor.md) (writing tests) and [`flights-lander`](flights-lander.md) (attacking them); the project law moves into the manual; the per-project `developer` and `qa` agents go.
 
 ## Where it lives
 
@@ -31,7 +31,7 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 3. Lanes and registries: the lane or beat a capability lands with, the registry rows that land in the same change, the shared-core files with one editor.
 4. Mock boundary: what may be mocked and what is always real.
 5. Environments and cleanup: environment files, stack start, ports, the cleanup targets.
-6. Run commands: the command per scope — affected, full — and the timeout each needs; the static-check command, one command that takes a list of files, an executor's only static check, run once, last.
+6. Run commands: the command per scope — affected, full — and the timeout each needs; the static-check command, one command that takes a list of files, a builder's only static check, run once, last.
 7. Concurrency: workers, isolation, what may run beside what.
 8. Gates and floors: coverage floor, lint, type check, format, any scored gate and its thresholds; read by the lander as its gate rows.
 9. Bug classes: the finding codes only this project raises.
@@ -45,12 +45,11 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 | `flights-foreman`, `flights-mechanical-executor` | all | Writing the covering tests in the project's pattern; a floor is never a requirement row, it is the lander's |
 | `flights-lander` | all, 5 to 9 most | Running each project's gate with its floors as gate rows, sweeping test validity, raising the project's bug classes |
 
-
 ## How it reaches a flight
 
 - The caller of a flight names the project; each foreman opens its unit's manual, its path recorded in the project map, before its first test. A unit without a manual is a line in the foreman's return, never a silent skip.
 - Each spawning foreman's brief carries the manual's path: to a child, its own unit's; to the lander, every touched project's.
-- A `Done when` test row names the tier, and `Files` names the test home and every registry file: a test outside the pattern is then a task that cannot verify as `DONE`.
+- In a mechanical task file, a `Done when` test row names the tier, and `Files` names the test home and every registry file: a test outside the pattern is then a task that cannot verify as `DONE`.
 
 ## What stays out
 

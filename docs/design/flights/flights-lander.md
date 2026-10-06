@@ -1,6 +1,6 @@
 # flights-lander
 
-`flights-lander` is a flight's gate, the step before its landing: one fresh agent for the whole flight, whatever projects it touched, which runs each project's checks, reviews the flight's whole diff across every project, attacks the change with tests written to break it, and fixes what it finds itself. It is the flight's one review and its only independent tester; the executors write their own covering tests and run no review.
+`flights-lander` is a flight's gate, the step before its landing: one fresh agent for the whole flight, whatever projects it touched, which runs each project's checks, reviews the flight's whole diff across every project, attacks the change with tests written to break it, and fixes what it finds itself. It is the flight's one review and its only independent tester; the foremen write their own covering tests and run no review.
 
 Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-lander.md`](../../../templates/global/agents/flights-lander.md).
 
@@ -27,7 +27,7 @@ A builder that tests its own code is biased toward making it pass. The lander ha
 From the root foreman's brief, and nothing more:
 
 - the flight directory: `run.md` for the baseline sha, and `requirements.md` (or the root's `GOAL` line when the flight has no spec) as the statement of intent the attack reads against;
-- the baseline sha from `run.md`'s header, whose `DONE` lines name the done tasks: the diff is `git diff {baseline}` over the union of those tasks' `files`, plus the uncommitted tree;
+- the baseline sha from `run.md`'s header, whose `DONE` lines name the done units: the diff is `git diff {baseline}` over the worktree, plus the uncommitted tree;
 - every project the flight touched, each with the path of its [testing manual](testing-manual.md);
 - the standing rules and the worktree or worktrees.
 
@@ -44,7 +44,7 @@ The agent is pinned `model: opus`, `effort: high`.
 5. The validity sweep: every test file the diff adds or touches, read against the placement, tier, economy and validity laws of its own project's manual. Each violation is a finding in its class. Its economy half folds the duplicate tests it finds (a decision tested in two units keeps the test of the unit that makes it, every case the fold removes kept as a case of that test) and deletes the assertions it finds catching nothing (a test id that only exists, an echo of a mock call, copy asserted in every variant or locale, a snapshot of the fixture); finding none, it removes nothing.
 6. Adversarial tests, written into the module that owns the contract, as cases or assertions of its existing test where one fits — there is no lander-owned directory. A test is accepted only after it was watched failing against the code it attacks.
 7. Fixes (next section), then the affected tests.
-8. Close each project's gate: the full suite once more, and the manual's floors (coverage minimums and the like) checked as rows of this gate. A floor is the lander's, never a task's `Done when` row. Exactly two full runs per project; a full run is never looped to chase a fix.
+8. Close each project's gate: the full suite once more, and the manual's floors (coverage minimums and the like) checked as rows of this gate. A floor is the lander's, never a requirement row. Exactly two full runs per project; a full run is never looped to chase a fix.
 
 ## It fixes what it finds
 
@@ -57,7 +57,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 - No nested copy of itself and no `Agent` tool. The adopter's QA handed its fixes to a fresh QA seat; here the closing full-suite run and the watched-failing proof of every new test are the judges of the lander's own fixes.
 - No row-by-row conformance audit: each foreman verified its children's returns against their rows; `requirements.md` is read as the attack's statement of intent.
-- No commit and no merge. `gitter` commits after the lander returns, and lands a committed worktree flight whose every task is `DONE` on the lander's `PASS` or `FIXED`.
+- No commit and no merge. `gitter` commits after the lander returns, and lands a committed worktree flight whose every unit is `DONE` on the lander's `PASS` or `FIXED`.
 
 ## Bounds
 
@@ -70,7 +70,7 @@ The lander owns defect resolution: every defect its attacks, the review or the c
 
 `{flight directory}/gate.md`: the attack map, then one row per finding — project · source (checks, review, attack, sweep) · area · failing test · reproduction · expected · status (fixed, residual, outside the flight).
 
-The return's first line is `PASS {flight}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {flight}: {n} defects fixed` or `FAIL {flight}: {n} residuals`, `{flight}` being the flight directory's name; then each project's two full-run verdict lines as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([Retro lines](flights-orchestrator.md#retro-lines)).
+The return's first line is `PASS {flight}` (nothing fixed, no residual; findings outside the flight are listed), `FIXED {flight}: {n} defects fixed` or `FAIL {flight}: {n} residuals`, `{flight}` being the flight directory's name; then each project's two full-run verdict lines as printed, the review's counts, each finding outside the flight, the residuals, and one `RETRO {lesson}` or `RETRO none` line ([the foreman's return](flights-foreman.md#return)).
 
 The return is also a file. The lander's last act before returning writes it, verbatim, to `{flight directory}/returns/gate-r{round}.md`, `{round}` read from its brief file's name: the directory created, the text written under a dot-prefixed temporary name in it and moved onto that name, so the file appears whole and a directory watcher's glob never sees the temporary. An answer to a question back goes the same way to the file the question names. The lander ends turns mid-gate (its gate runs may be background commands, and its review runs forked), and a return sent after such a turn can reach the main chat instead of the root foreman; the foreman's own background wait on this file always reaches it ([flights-foreman](flights-foreman.md#waiting)). The background gate runs stay allowed.
 
@@ -93,7 +93,7 @@ A lander certifies its own fixes. The research collected for this design condemn
 | The builder | [`flights-foreman`](flights-foreman.md) | The landing: the lander and the wait on its return file, then `gitter`'s commit and merge; the reaction to `FAIL` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project law the sweep and the gate run against |
 | The audit | [`flights-audit`](flights-audit.md) | `gate.md` and `returns/gate-r{round}.md` as anchors; the review read from the lander's transcript |
-| The family | [`flights.md`](flights.md) | The lander among the six agents and the directory's five writers |
+| The family | [`flights.md`](flights.md) | The lander among the three agents and the directory's writers |
 
 ## Evidence
 

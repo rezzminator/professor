@@ -20,7 +20,7 @@ A RUN is one transcript file: one main chat loop, one sub-agent, or one Codex ro
 | `--root <dir>` | Extra Claude transcript root (repeatable). A root that will not resolve is a hard error. |
 | `--project <substr>` | Keep runs whose cwd contains the substring. |
 | `--family <substr>` | Drill into one family — matches a chat title, an agent type, a sub-agent's spawn description, or a session-id prefix. |
-| `--session <sid-prefix>` | Restrict every section to one session. The selector a sub-agent-orchestrated run has, where a chat title does not exist. |
+| `--session <sid-prefix>` | Restrict every section to one session. The selector a sub-agent-orchestrated run has, where a chat title does not exist. Ownership indexing still reads every transcript discovered under the roots; the gaps line names that scope and any read failures. |
 | `--top <n>` | Rows per section (default 12). |
 | `--out <file>` | Full JSON dataset. |
 | `--codex` | Read Codex rollouts instead of Claude transcripts. |
@@ -37,7 +37,7 @@ Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/pr
 **Claude Code.** `{root}/{projectSlug}/{conversationId}.jsonl` (the main loop) and `{conversationId}/subagents/agent-{agentId}.jsonl` (+ `.meta.json` for `agentType`, `description`, `spawnDepth`), including nested `subagents/workflows/wf_*/agent-*.jsonl`.
 
 - Usage rides on every `assistant` line at `message.usage`; the model is `message.model`.
-- **Dedup is mandatory**: streaming writes several lines per API call. The tool keys on `message.id`, else a namespaced `requestId`, else `uuid`, else the file and line, and keeps the last — summing raw lines overcounts 2-3x. A forked or resumed session copies earlier responses into its own transcript: each response is billed once, to the transcript that made it, in every mode; the gaps line counts copies and transcripts holding only copies. An inherited line's `forkedFrom` mark, or the same call in the origin a copy names, proves a copy; a call several transcripts hold with no such evidence (forked sub-agents) is billed once, to the first holder in path order; a `session_id` mismatch alone proves nothing, since a fork's own calls may still name its origin.
+- **Dedup is mandatory**: streaming writes several lines per API call. The tool keys on `message.id`, else a namespaced `requestId`, else `uuid`, else the file and line, and keeps the last — summing raw lines overcounts 2-3x. Records lacking both response identifiers are counted as uncertain in the gaps line: a per-record fallback may include streamed copies. A forked or resumed session copies earlier responses into its own transcript: each response is billed once, to its named origin or first unmarked holder in path order within the ownership scan, in every mode; the gaps line counts copies and transcripts holding only copies. An inherited line's `forkedFrom` mark, or the same call in the origin a copy names, proves a copy; a call several transcripts hold with no such evidence (forked sub-agents) is billed once, to the first holder in path order; a `session_id` mismatch alone proves nothing, since a fork's own calls may still name its origin.
 - `tool_use` blocks are paired with their `tool_result` so every tool call, its size, its duration and its `is_error` are known — that is what makes the per-agent measures possible.
 - A `system`/`compact_boundary` line, or a context that shrinks below 60% of what is carried, resets the replay: that is a compaction.
 
@@ -87,7 +87,7 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 
 ## `--timeline <file>`
 
-One transcript, the whole file — no window applies, and `--flight`, `--codex`, `--project` or `--since` beside it is refused. `<file>` is a sub-agent's `…/subagents/agent-{id}.jsonl` (its agent type comes from the `.meta.json` beside it) or a main session file; repeat the flag for several. The file goes through the same `auditFile` replay and price table as the default report, so the header's price equals that run's price there.
+One transcript, the whole file — no window applies, and `--flight`, `--codex`, `--project` or `--since` beside it is refused. `<file>` is a sub-agent's `…/subagents/agent-{id}.jsonl` (its agent type comes from the `.meta.json` beside it) or a main session file; repeat the flag for several. The file goes through the same `auditFile` replay and price table as the default report, so the header's price equals that run's price there when both use the same `--root` ownership domain. Without `--root`, a timeline indexes the enclosing Claude transcript root, including project and subagent directories; a standalone file uses its own directory.
 
 Per file, one header line — agent type, model(s), effort, calls, wall seconds from the first to the last timestamped record, peak context, output tokens, tool errors, tool results over 20 KB, USD — then one row per model call (a call written as several assistant lines sharing one `message.id` is one row): call number, clock time (UTC), seconds since the previous tool result, context (input + cache read + cache write), output tokens, the call's USD, and each tool the call issued as `name: target` (target cut to 100 chars) with its result chars, `ERR` when `is_error`, and the tool's wait; `(no result)` when none came back. Then the file's own `data gaps:` line.
 

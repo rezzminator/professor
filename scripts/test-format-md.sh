@@ -42,7 +42,7 @@ chmod +x "$T/bin/rumdl"
 export PATH="$T/bin:$PATH"
 
 hook() { # hook <file>: RC and ERR of one hook run
-  ERR=$(printf '{"tool_input":{"file_path":"%s"}}' "$1" | bash "$HOOK" 2>&1 >/dev/null)
+  ERR=$(printf '{"session_id":"%s","tool_input":{"file_path":"%s"}}' "${HOOK_SESSION:-}" "$1" | bash "$HOOK" 2>&1 >/dev/null)
   RC=$?
 }
 
@@ -115,4 +115,18 @@ PATH="$T/nobin" hook "$R/docs/dev/a.md"
 if [[ $RC == 0 && -n $ERR && $ERR == *docs/dev/a.md* ]]; then ok "a missing rumdl exits 0 with stderr naming the file"
 else bad "a missing rumdl" "rc $RC (want 0)" "stderr: ${ERR:-<empty>}"; fi
 
+# The shipped hook reports standing uncommitted diagnostics once per session.
+if [[ "$HOOK" == */templates/project/scripts/format-md.sh ]]; then
+  for cache_repo in "$R" "$C"; do
+    STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
+    if [[ $RC == 2 && $ERR == *UNFIXED* ]]; then ok "first uncommitted diagnostic reports for $cache_repo"
+    else bad "first uncommitted diagnostic reports" "rc=$RC; err=$ERR"; fi
+    STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="${introduced/12:3/13:3}" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
+    if [[ $RC == 0 && -z $ERR ]]; then ok "later unrelated write suppresses standing uncommitted diagnostics for $cache_repo"
+    else bad "later unrelated write suppresses standing uncommitted diagnostics" "rc=$RC; err=$ERR"; fi
+    STUB_COMMITTED_CHECK_RC=0 STUB_CHECK_RC=1 STUB_CHECK_OUT="$introduced$introduced" TMPDIR="$T/cache" HOOK_SESSION=repeat-test hook "$cache_repo/docs/dev/a.md"
+    if [[ $RC == 2 && $ERR == *'1 issue(s)'* ]]; then ok "a later extra occurrence is reported for $cache_repo"
+    else bad "a later extra occurrence is reported" "rc=$RC; err=$ERR"; fi
+  done
+fi
 shtest_end

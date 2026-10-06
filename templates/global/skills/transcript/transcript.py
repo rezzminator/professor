@@ -31,6 +31,11 @@ CODEX_TYPES = ("session_meta", "response_item", "event_msg", "turn_context", "wo
 CLAUDE_TYPES = ("user", "assistant", "attachment", "system", "summary")
 
 
+class TranscriptArguments(argparse.ArgumentParser):
+    def error(self, message):
+        fail(message)
+
+
 class Failure(Exception):
     pass
 
@@ -357,7 +362,7 @@ def parse_claude(P, records):
                 P.meta.setdefault("model", msg["model"])
             blocks = msg.get("content")
             blocks = [{"type": "text", "text": blocks}] if isinstance(blocks, str) else (blocks or [])
-            last_text = max((i for i, b in enumerate(blocks) if isinstance(b, dict) and b.get("type") == "text"), default=-1)
+            last_text = max((i for i, b in enumerate(blocks) if isinstance(b, dict) and b.get("type") == "text" and (b.get("text") or "").strip()), default=-1)
             shown, other = False, []
             for i, b in enumerate(blocks):
                 bt = b.get("type") if isinstance(b, dict) else "?"
@@ -921,7 +926,7 @@ def cmd_agents(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="transcript.py", description="Mechanical reader of Claude Code and Codex transcripts.")
+    ap = TranscriptArguments(prog="transcript.py", description="Mechanical reader of Claude Code and Codex transcripts.")
     ap.add_argument("verb", choices=("show", "counts", "types", "locate", "agents"))
     ap.add_argument("target", help="a transcript path, a session id or its prefix, a Claude agent id, a Codex agent path (/root/{name}), or a Claude chat name (its last title)")
     ap.add_argument("--root", action="append", default=[], help="an extra directory searched for the id")
@@ -947,8 +952,8 @@ def main(argv=None):
         if x in ("--since", "--until") and raw and raw[0].startswith("-"):
             x = f"{x}={raw.pop(0)}"
         argv.append(x)
-    a = ap.parse_args(argv)
     try:
+        a = ap.parse_args(argv)
         if not re.fullmatch(r"brief|none|full|tail:\d+", a.results):
             fail(f"--results {a.results!r}: brief, none, full or tail:N")
         sys.stdout.reconfigure(errors="backslashreplace")

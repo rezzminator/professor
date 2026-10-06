@@ -89,6 +89,7 @@ export function auditFile(file, opts, origins = new Map()) {
       if (Number.isNaN(ts)) { SCAN.noTimestamp++; continue; }
       // one API response, however many content-block lines repeat its usage
       // a fork's inherited line carries forkedFrom (its live calls may still name the origin in session_id)
+      if (!o.message.id && !o.requestId) SCAN.identityUnknownRecords++;
       const id = callKey(o, file, nLines), fork = o.forkedFrom?.sessionId, current = o.sessionId || sid, owner = origins.get(id);
       const copied = (!!fork && fork !== current) || (owner !== undefined && owner !== file);
       if (!usage.has(id)) seq.push({ call: id });
@@ -240,11 +241,25 @@ export function auditFile(file, opts, origins = new Map()) {
 }
 
 // ---------- run: every transcript in the window, deduped, session-selected, replayed, then the project-root fold
+export function ownershipFiles(opts, file = null) {
+  // Explicit --root is the same domain in aggregate and timeline modes. Without
+  // it, a timeline uses its enclosing transcript root (including project and subagent directories).
+  let domain;
+  if (file && !opts.root.length) {
+    const parts = file.split(path.sep), si = parts.lastIndexOf("subagents");
+    const projectDir = si >= 0 ? parts.slice(0, si - 1).join(path.sep) || path.sep : path.dirname(file);
+    // Claude encodes cwd as a dash-prefixed directory immediately below projects/.
+    domain = [path.basename(projectDir).startsWith("-") ? path.dirname(projectDir) : projectDir];
+  } else domain = roots(opts);
+  const files = []; for (const root of domain) walk(root, files, opts);
+  const seen = new Set(), unique = [];
+  for (const f of files) { const key = f.split(path.sep).slice(-3).join("/"); if (seen.has(key)) { SCAN.dupFiles++; continue; } seen.add(key); unique.push(f); }
+  return { domain, files: unique };
+}
+
 export function collectRuns(opts) {
   const { session: SESSION } = opts;
-  SCAN.roots = roots(opts); const files = []; for (const r of SCAN.roots) walk(r, files, opts);
-  const seenKey = new Set(), unique = [];
-  for (const f of files) { const key = f.split(path.sep).slice(-3).join("/"); if (seenKey.has(key)) { SCAN.dupFiles++; continue; } seenKey.add(key); unique.push(f); }
+  const ownership = ownershipFiles(opts); SCAN.roots = ownership.domain; const unique = ownership.files;
   const origins = callOrigins(unique);
   let skipped = 0; const unreadable = [];
   for (const f of unique) {
@@ -258,7 +273,7 @@ export function collectRuns(opts) {
       ? `--session ${SESSION} matched ${SCAN.files} transcripts in this window but read no call from them${unreadable.length ? `; unreadable: ${unreadable.join("; ")}` : ""}`
       : `--session ${SESSION} matched none of the ${unique.length} transcripts in this window; pass a session-id prefix as it appears in the transcript path`);
     if (!RUNS.length) SCAN.notes.push(`--session ${SESSION}: matched only transcripts holding copied calls (billed to their origin): ${[...new Set(SCAN.copiesOnly.map((r) => r.sid))].join(", ")}`);
-    else SCAN.notes.push(`--session ${SESSION}: ${skipped} transcripts outside that session not read`);
+    else SCAN.notes.push(`--session ${SESSION}: ${skipped} transcripts outside that session not replayed; ownership read ${unique.length} transcripts`);
   }
 
   // fold sub-folder chats onto the shortest enclosing project root (never onto a bare home dir)

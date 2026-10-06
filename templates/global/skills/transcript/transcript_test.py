@@ -195,7 +195,9 @@ class ClaudeTest(Fixture):
                     {"type": "user", "message": {"content": "B"}},
                     {"type": "assistant", "message": {"stop_reason": stop, "content": [
                         {"type": "text", "text": "earlier block"},
-                        {"type": "text", "text": "done"}]}},
+                        {"type": "text", "text": "done"},
+                        {"type": "text", "text": ""},
+                        {"type": "text", "text": "  "}]}},
                 ]
                 write_jsonl(self.claude, records)
                 out = self.ok("show", self.claude)
@@ -325,6 +327,7 @@ class CodexTest(Fixture):
 class FilterTest(Fixture):
     def test_invalid_input_reports_failure_without_traceback(self):
         for args, reason in ((["--since", "25:00"], "unreadable time '25:00'"),
+                             (["--width", "nope"], "invalid int value"),
                              (["--lines", "9-3"], "--lines 9-3: FROM is after TO"),
                              (["--out", self.home], "--out " + self.home)):
             with self.subTest(args=args):

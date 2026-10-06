@@ -23,6 +23,11 @@ fi
 EOF
 cat > "$T/bin/grep" <<'EOF'
 #!/usr/bin/env bash
+if [[ -n "${GREP_FAIL_STDIN:-}" && "$*" == *syntheticsecret* ]]; then
+  input=$(cat)
+  if [[ -n "$input" && " $* " == *" $GREP_FAIL_STDIN "* ]]; then exit 2; fi
+  exec /usr/bin/grep "$@" <<<"$input"
+fi
 for arg in "$@"; do
   if [[ -n "${GREP_FAIL_FILE:-}" && "$arg" == "$GREP_FAIL_FILE" ]]; then
     exit 2
@@ -65,7 +70,7 @@ leak_run() {
   local terms="${TERMS:-$T/terms}"
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE \
     TEST_REPO="$T/repo" GREP_FAIL_FILE="${GREP_FAIL_FILE:-}" GREP_FAIL_SUFFIX="${GREP_FAIL_SUFFIX:-}" \
-    GREP_FORCE_C="${GREP_FORCE_C:-}" GREP_NOFOLD_LOCALE="${GREP_NOFOLD_LOCALE:-}" GREP_NOFOLD_SCOPE="${GREP_NOFOLD_SCOPE:-}" \
+    GREP_FAIL_STDIN="${GREP_FAIL_STDIN:-}" GREP_FORCE_C="${GREP_FORCE_C:-}" GREP_NOFOLD_LOCALE="${GREP_NOFOLD_LOCALE:-}" GREP_NOFOLD_SCOPE="${GREP_NOFOLD_SCOPE:-}" \
     GIT_DIFF_FILE="$T/diff" LEAK_TERMS="$terms" LC_ALL="${LEAK_LC_ALL:-C.UTF-8}" \
     PATH="$T/bin:$PATH" \
     bash "$ROOT/scripts/leak-check.sh" "$@" > "$T/out" 2> "$T/err" < /dev/null
@@ -347,5 +352,19 @@ if [[ "$rc" -eq 1 && "$out" == 'LEAK plus.txt: ++ syntheticsecret' ]]; then
 else
   bad 'an added line starting with "++" in a pushed range is judged as content, never read as a file header' "rc=$rc; out=$out; err=$err"
 fi
+
+# Runtime matcher/judge failures are distinct from no match or suppression.
+printf 'diff --git a/r.txt b/r.txt\n--- a/r.txt\n+++ b/r.txt\n@@ -0,0 +1 @@\n+syntheticsecret\n' > "$T/diff"
+for mode in staged range; do
+  for stage in -niE -qiE; do
+    if [[ "$mode" == staged ]]; then GREP_FAIL_STDIN="$stage" leak_run
+    else GREP_FAIL_STDIN="$stage" run_range; fi
+    if [[ "$rc" -ne 0 && "$out$err" == *'SCAN-ERROR r.txt:'* && "$out" != *'leak-check: clean'* ]]; then
+      ok "$mode: runtime $stage failure refuses clean"
+    else
+      bad "$mode: runtime $stage failure refuses clean" "rc=$rc; out=$out; err=$err"
+    fi
+  done
+done
 
 shtest_end

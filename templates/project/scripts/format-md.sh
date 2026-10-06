@@ -6,7 +6,8 @@ set -uo pipefail
 # on stdin.
 #
 # What rumdl cannot fix goes back only when the write introduced it against the
-# committed file: match rule + message counts, ignoring shifted positions. Exit 2 with,
+# committed file on the first hook, then the previous hook in this session:
+# match rule + message counts, ignoring shifted positions. Exit 2 with,
 # on stderr, one header line, one `UNFIXED <file>:<line>:<col> <rule> <message>`
 # line per issue, and the re-check command (Claude Code shows a PostToolUse exit-2
 # stderr to the model; the write itself stands). Clean or standing-only issues
@@ -97,6 +98,28 @@ if ((GIT_RC == 0)); then
   fi
 fi
 
+# Hook session_id is supplied by Claude Code. Keep the last observed diagnostics
+# outside the checkout; separate repositories and sessions have separate snapshots.
+STATE_FILE=""
+SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty')
+if [[ -n "$SESSION_ID" ]]; then
+  if ! STATE_KEY=$(printf '%s\n' "$REPO_ROOT" "$SESSION_ID" "$REL_PATH" | git -C "$REPO_ROOT" hash-object --stdin); then
+    echo "format-md: FAILED diagnostic snapshot key for ${REL_PATH}" >&2; exit 2
+  fi
+  PROJECT_DIR="${REPO_ROOT##*/}"
+  STATE_DIR="${TMPDIR:-/tmp}/${PROJECT_DIR#.}/format-md"
+  if ! mkdir -p "$STATE_DIR"; then
+    echo "format-md: FAILED diagnostic snapshot directory for ${REL_PATH}" >&2; exit 2
+  fi
+  STATE_FILE="$STATE_DIR/$STATE_KEY"
+  if [[ -f "$STATE_FILE" ]]; then
+    BASELINE_KEYS=()
+    if ! { while IFS= read -r key; do BASELINE_KEYS+=("$key"); done < "$STATE_FILE"; }; then
+      echo "format-md: FAILED reading diagnostic snapshot for ${REL_PATH}" >&2; exit 2
+    fi
+  fi
+fi
+
 if ! (cd "$REPO_ROOT" && rumdl fmt "$REL_PATH" >/dev/null 2>&1); then
   echo "format-md: FAILED rumdl fmt on ${REL_PATH} — the file is unformatted; run \`rumdl fmt ${REL_PATH}\` from ${REPO_ROOT} to see why" >&2
   exit 2
@@ -107,6 +130,9 @@ fi
 LEFT=$(cd "$REPO_ROOT" && rumdl check --output-format concise "$REL_PATH" 2>&1)
 CHECK_RC=$?
 if ((CHECK_RC == 0)); then
+  if [[ -n "$STATE_FILE" ]] && ! rm -f "$STATE_FILE"; then
+    echo "format-md: FAILED clearing diagnostic snapshot for ${REL_PATH}" >&2; exit 2
+  fi
   exit 0
 fi
 if ((CHECK_RC != 1)); then
@@ -115,6 +141,7 @@ if ((CHECK_RC != 1)); then
 fi
 
 ISSUES=()
+CURRENT_KEYS=()
 PARSED=0
 while IFS= read -r line; do
   # concise: `<file>:<line>:<col>: [<rule>] <message>`; anything else is rumdl's summary
@@ -122,6 +149,7 @@ while IFS= read -r line; do
   loc=${line%%: \[*}
   rest=${line#*: \[}
   key="${rest%%]*} ${rest#*] }"
+  CURRENT_KEYS+=("$key")
   PARSED=$((PARSED + 1))
   matched=0
   for ((i=0; i<${#BASELINE_KEYS[@]}; i++)); do
@@ -138,6 +166,15 @@ done <<< "$LEFT"
 if ((PARSED == 0)); then
   echo "format-md: FAILED rumdl check on ${REL_PATH} reported issues in a shape this hook cannot read: ${LEFT}" >&2
   exit 2
+fi
+if [[ -n "$STATE_FILE" ]]; then
+  if ! STATE_TMP=$(mktemp "$STATE_DIR/.snapshot.XXXXXX"); then
+    echo "format-md: FAILED creating diagnostic snapshot for ${REL_PATH}" >&2; exit 2
+  fi
+  if ! printf '%s\n' "${CURRENT_KEYS[@]}" > "$STATE_TMP" || ! mv "$STATE_TMP" "$STATE_FILE"; then
+    rm -f "$STATE_TMP"
+    echo "format-md: FAILED saving diagnostic snapshot for ${REL_PATH}" >&2; exit 2
+  fi
 fi
 if ((${#ISSUES[@]} == 0)); then
   exit 0

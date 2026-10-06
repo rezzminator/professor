@@ -72,11 +72,11 @@ match_grep() {
 # convention), so they are applied to the lowercased line; PATTERN matches with -i.
 line_is_real_hit() {
   local line tok
-  line="$(printf '%s ' "$1" | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g")"
+  line="$(printf '%s ' "$1" | sed -E "s#${BENIGN_TOKENS}([^A-Za-z0-9_-])#<BENIGN>\2#g")" || return 2
   if (( ${#ignore_tokens[@]} > 0 )); then
-    line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
+    line="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')" || return 2
     for tok in "${ignore_tokens[@]}"; do
-      line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")"
+      line="$(printf '%s' "$line" | sed -E "s#${tok}#<IGNORED>#g")" || return 2
     done
   fi
   match_grep -qiE "$PATTERN" <<<"$line"
@@ -312,15 +312,30 @@ scan_diff_stream() {
       fi
     done
 
-    local matches
-    matches="$(printf '%s\n' "${contents[@]}" | match_grep -niE "$PATTERN" || true)"
+    local matches rc
+    matches="$(printf '%s\n' "${contents[@]}" | match_grep -niE "$PATTERN")" && rc=0 || rc=$?
+    if (( rc >= 2 )); then
+      local error_seen=$'\n'
+      for f in "${files[@]}"; do
+        if [[ "$error_seen" != *$'\n'"$f"$'\n'* ]]; then
+          error_seen+="$f"$'\n'
+          printf 'SCAN-ERROR %s: %s diff matcher failed (rc=%d) — refusing clean\n' "${f:-<unattributed>}" "$mode" "$rc" >&2
+        fi
+      done
+      return 1
+    fi
     if [[ -n "$matches" ]]; then
       local idx content
       while IFS=: read -r idx content; do
         if line_is_real_hit "$content"; then
           printf 'LEAK %s: %s\n' "${files[idx-1]}" "$content"
         else
-          suppressed=$((suppressed + 1))
+          rc=$?
+          if (( rc >= 2 )); then
+            printf 'SCAN-ERROR %s: matched line could not be judged (rc=%d) — refusing clean\n' "${files[idx-1]}" "$rc"
+          else
+            suppressed=$((suppressed + 1))
+          fi
         fi
       done <<< "$matches"
     fi
@@ -394,7 +409,12 @@ case "$mode" in
               if line_is_real_hit "$content"; then
                 printf 'LEAK %s: %s\n' "$f" "$content" >> "$hits_file"
               else
-                suppressed=$((suppressed + 1))
+                rc=$?
+                if (( rc >= 2 )); then
+                  printf 'SCAN-ERROR %s: matched line could not be judged (rc=%d) — refusing clean\n' "$f" "$rc" >> "$hits_file"
+                else
+                  suppressed=$((suppressed + 1))
+                fi
               fi
             done <<< "$matches"
           fi

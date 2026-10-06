@@ -582,7 +582,7 @@ test("pricing: a response copied into a forked session's transcript is billed on
   near(j.runs.find((r) => r.sid === "sess-b").usd, 0.009, "origin spend");
   near(j.runs.find((r) => r.sid === "sess-a").usd, 0.004, "fork spend");
   assert.equal(out.split("\n").find((l) => l.startsWith("data gaps:")),
-    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once, to the transcript that made them");
+    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once within the ownership scan (named origin, else first unmarked holder in path order)");
 });
 
 test("pricing: a resumed copy is identified by the same call in its named origin, without a fork marker", () => {
@@ -622,7 +622,7 @@ test("--session: totals and scan count only the selected session", () => {
   assert.equal(j.scan.files, 1);
   assert.match(out, /== 1 · TOTAL \$4\.00/);
   assert.equal(out.split("\n").find((l) => l.startsWith("data gaps:")),
-    "data gaps: --session sess-a: 1 transcripts outside that session not read");
+    "data gaps: --session sess-a: 1 transcripts outside that session not replayed; ownership read 2 transcripts");
 });
 
 test("--session: a transcript holding only copies exits zero and names their origin", () => {
@@ -631,7 +631,7 @@ test("--session: a transcript holding only copies exits zero and names their ori
   assert.equal(j.scan.copiesOnly.length, 1);
   assert.equal(j.scan.copiesOnly[0].sid, "sess-c");
   assert.equal(out.split("\n").find((l) => l.startsWith("data gaps:")),
-    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once, to the transcript that made them · 1 transcripts hold only copied calls: sess-c · --session sess-c: matched only transcripts holding copied calls (billed to their origin): sess-c");
+    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once within the ownership scan (named origin, else first unmarked holder in path order) · 1 transcripts hold only copied calls: sess-c · --session sess-c: matched only transcripts holding copied calls (billed to their origin): sess-c");
 });
 
 test("--timeline: a fork or resumed file prices only its own call, like the default report", () => {
@@ -658,7 +658,7 @@ test("--timeline: copied-call gaps belong to each named file", () => {
   const r = runTl(["--timeline", path.join(dir, "sess-a.jsonl"), "--timeline", path.join(dir, "sess-b.jsonl")]);
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(r.out.split("\n").filter((l) => l.startsWith("data gaps:")), [
-    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once, to the transcript that made them", "data gaps: none",
+    "data gaps: 1 calls copied from another transcript (forked/resumed session) — billed once within the ownership scan (named origin, else first unmarked holder in path order)", "data gaps: none",
   ]);
 });
 
@@ -760,4 +760,27 @@ test("prices: an active override leads every data-gaps line, naming its file and
     assert.ok(gaps.length, `${mode}: no data-gaps line in:\n${r.out}`);
     for (const g of gaps) assert.match(g, /^data gaps: price override active: 2 rows from \/cfg\/pfm\.prices\.json( · |$)/, `${mode}: ${g}`);
   }
+});
+
+
+test("--timeline: ownership across project directories matches aggregate within --root", () => {
+  const usage = { input_tokens: 1000, output_tokens: 0 };
+  const root = priceRoot("ownership-domain", { "sess-a": [{ id: "shared-domain", model: "claude-sonnet-5", usage }],
+    "sess-b": [{ id: "shared-domain", model: "claude-sonnet-5", usage }, { id: "own-domain", model: "claude-sonnet-5", usage }] });
+  const later = path.join(root, "-tmp-z-other-proj", "sess-b.jsonl");
+  fs.mkdirSync(path.dirname(later));
+  fs.renameSync(path.join(root, "-tmp-price-proj", "sess-b.jsonl"), later);
+  const report = priced(root), want = report.j.runs.find((x) => x.sid === "sess-b");
+  for (const scope of [[], ["--root", root]]) {
+    const r = runTl(["--timeline", later, ...scope]);
+    assert.equal(r.code, 0, r.err);
+    near(Number(tlHeader(r.out).match(/\$([0-9.]+)/)[1]), want.usd, "shared ownership domain");
+  }
+});
+
+test("pricing: missing response identity exposes per-record billing uncertainty", () => {
+  const root = priceRoot("identity-unknown", { "sess-a": [{ model: "claude-sonnet-5", usage: { input_tokens: 1000, output_tokens: 0 },
+    reqs: [null, null], blocks: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }] });
+  const { out } = priced(root);
+  assert.match(out, /2 assistant records without message.id or requestId.*billing may include streamed copies/);
 });

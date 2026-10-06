@@ -112,9 +112,9 @@ A mutating install refuses a running name-sync job at once with exit 97. It wait
 
 ### First install on a host that already used Claude
 
-A default Claude installation stores identity alongside shared data in `~/.claude` and may also have `~/.claude.json`. Identity entries in the store (`store-identity`) and an account directory resolving to the store (`account-is-store`) are BLOCK rows that refuse installation: account 1 must be a real directory at `~/.cc/1`, and identity belongs there. A home `~/.claude.json` is the `home-state-file` warning row, with its own fix. Run `pfm doctor` first; its rows print the exact moves. If a destination already exists, compare it and follow the row's keep/remove instruction instead of overwriting it.
+A default Claude installation stores identity alongside shared data in `~/.claude` and may also have `~/.claude.json`. Identity entries in the store (`store-identity`) and an account directory resolving to the store (`account-is-store`) are BLOCK rows that refuse installation: account 1 must resolve to a directory outside the store, and identity belongs there. Its default path is `~/.cc/1`; an outside-store symlink or a configured account directory is also accepted. A home `~/.claude.json` is the `home-state-file` warning row, with its own fix. Run `pfm doctor` first; its rows print the exact moves. If a destination already exists, compare it and follow the row's keep/remove instruction instead of overwriting it.
 
-On Linux, close every chat, including background Claude sessions, then run the following for the default account-1 path. The 15-entry per-account list below is `installer.AccountEntries` minus `installer.RetiredStoreEntries` (`.last-update-result.json`, which install archives); shared entries stay in the store. For `state`, the host check identifies only `state/mcp-discover-verdicts.json`; this first-install block moves the whole per-account `state` directory. The block runs in a subshell: a refusal leaves its message on screen and your shell open, without running `pfm install --yes`.
+On Linux, close every chat, including background Claude sessions, then run the following for the default account-1 path. The 16-entry per-account list below is `installer.AccountEntries` minus `installer.RetiredStoreEntries` (`.last-update-result.json`, which install archives); shared entries stay in the store. For `state`, the host check identifies only `state/mcp-discover-verdicts.json`; this first-install block moves the whole per-account `state` directory. The block runs in a subshell: a refusal leaves its message on screen and your shell open, without running `pfm install --yes`.
 
 ```bash
 (
@@ -125,7 +125,7 @@ fi
 mkdir -m 700 -p "$HOME/.cc/1" || exit 1
 for entry in .credentials.json .claude.json .claude.json.backup backups \
   sessions daemon daemon.log daemon-auth-status.json daemon-auth-cooldown \
-  jobs cache state mcp-needs-auth-cache.json telemetry feedback; do
+  jobs cache state mcp-needs-auth-cache.json telemetry feedback .pfm-launches; do
   if [ -e "$HOME/.claude/$entry" ] || [ -L "$HOME/.claude/$entry" ]; then
     if [ -e "$HOME/.cc/1/$entry" ] || [ -L "$HOME/.cc/1/$entry" ]; then
       echo "destination exists: $HOME/.cc/1/$entry; follow pfm doctor" >&2

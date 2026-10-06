@@ -249,7 +249,7 @@ Claude takes your answers and:
 | `/audit:code-hygiene` | Command `templates/project/commands/audit/code-hygiene.md` | Hydrated by RR (Phase 2.5) |
 | `/audit:security` | Command `templates/project/commands/audit/security.md` | Hydrated by RR (Phase 2.5) |
 
-7b. **Installs statusline** — obtains the `pfm` binary and runs `pfm install --yes`; the status line, hooks and MCP settings ride every managed Claude launch. The native renderer shows model, fleet counts, context, git, cache state, cost, spend and rate limits; detached refreshers keep network work off the render path. The installer strips pfm-owned legacy account-file entries.
+7b. **Installs statusline** — obtains the `pfm` binary and runs `pfm install --yes`; the status line rides interactive Claude chat launches; query launches omit it. Hooks and MCP settings ride managed Claude launches. The native renderer shows model, fleet counts, context, git, cache state, cost, spend and rate limits; detached refreshers keep network work off the render path. The installer strips pfm-owned legacy account-file entries.
 
 7b-i. **Installs global settings** — `pfm install` manages `cleanupPeriodDays` in the Claude managed-settings directory, using sudo when required. It preserves other keys and writes no cleanup key into account `settings.json`; doctor inspects the managed file for missing, wrong and unreadable states.
 
@@ -308,15 +308,15 @@ Claude takes your answers and:
   "installed_at": "2026-04-28T14:32:00Z",
   "updated_at": null,
   "interview": {
-    "project_name": "neurolab",
-    "project_pitch": "AI-assisted neuropsychological assessment platform",
+    "project_name": "acme-orders",
+    "project_pitch": "Example order-tracking service for a fictional shop",
     "character_name": "Professor",
     "character_voice": "keep",
-    "sacred_ground": "patient cognitive assessment data and diagnostic accuracy",
+    "sacred_ground": "fictional customer orders and their payment state",
     "structure": "multi-project",
     "subprojects": [
-      { "dir": "a", "desc": "the assessment service", "pkg": "pnpm", "owns_infra": true },
-      { "dir": "b", "desc": "the scoring worker", "pkg": "uv", "owns_infra": false }
+      { "dir": "a", "desc": "the order service", "pkg": "pnpm", "owns_infra": true },
+      { "dir": "b", "desc": "the order-notification worker", "pkg": "uv", "owns_infra": false }
     ],
     "tech_commands": {
       "a": {
@@ -337,18 +337,18 @@ Claude takes your answers and:
     "tier_b": {
       "officer": {
         "enabled": true,
-        "regulation": "HIPAA",
-        "authority": "HHS OCR",
-        "rights": "HIPAA Privacy Rule",
-        "notification": "60 days"
+        "regulation": "PCI DSS",
+        "authority": "PCI Security Standards Council",
+        "rights": "customer order privacy",
+        "notification": "contract-defined"
       },
       "mentor": {
         "enabled": true,
-        "market": "clinical neuropsych SaaS",
+        "market": "fictional retail order tracking",
         "jurisdiction": "US",
         "entity": "LLC",
-        "funding": "NIH SBIR, health-tech VCs",
-        "bodies": "FDA (if SaMD), state licensing boards"
+        "funding": "fictional retail investors",
+        "bodies": "retail trade associations"
       },
       "marketer": { "enabled": false }
     },

@@ -26,13 +26,12 @@ for _pfm_retired in cc cc1 cc2 cc3 cc4 cc-clean cc-ls cc-open cc-revive cc-swap 
   cc_mem cc_mtime cc_mtime0 cc_pane_of cc_penv cc_pfiles cc_ppid cc_pstart \
   cc_sed_i cc_session_live cc_size cc_size0 cc_timeout cc_trylock cc_unlock \
   cc_master_item cc_account_meta cc_item_sfx cc_read_item cc_expires_of \
-  cc_freshest_token cc_promote _pfm_eval; do
+  cc_freshest_token cc_promote _pfm_eval _pfm_primary; do
   unfunction "$_pfm_retired" 2>/dev/null || true
   unalias "$_pfm_retired" 2>/dev/null || true
 done
 unset _pfm_retired _cc_auto_what PFM_CLAUDE_PROMPTED
 
-_pfm_primary() { local n; n="$("$HOME/.local/bin/pfm" internal primary-get 2>/dev/null)"; case "$n" in 1|2) ;; *) n=1 ;; esac; echo "$n"; }
 # cx — a CODEX chat on the same per-chat-server pattern, socket prefix cx-* instead of cc-*.
 # The prefix IS the engine marker: codex writes no statusline breadcrumbs and no ~/.claude
 # transcript, so pfm recognizes (and lists) a live Codex chat by socket name alone. Claude

@@ -58,7 +58,12 @@ func InspectManagedCleanup(dir string, require bool, want int) ManagedCleanupSta
 			var document map[string]json.RawMessage
 			err = json.Unmarshal(raw, &document)
 			if err == nil {
-				if decodeErr := json.Unmarshal(document["cleanupPeriodDays"], &status.Value); decodeErr != nil {
+				value, present := document["cleanupPeriodDays"]
+				if !present && document != nil {
+					status.State = ManagedCleanupWrong
+					return status
+				}
+				if decodeErr := json.Unmarshal(value, &status.Value); decodeErr != nil {
 					err = fmt.Errorf("cleanupPeriodDays: %w", decodeErr)
 				}
 			}
@@ -92,40 +97,49 @@ func (installer *engine) installManagedCleanup(ctx context.Context) error {
 	case ManagedCleanupUnreadable:
 		return fmt.Errorf("managed-cleanup %s: %w", status.Path, status.Err)
 	}
-	return installer.change("write "+status.Path, func() error {
-		content := []byte(fmt.Sprintf("{\"cleanupPeriodDays\":%d}\n", options.CleanupPeriodDays))
-		writeManaged := options.writeManaged
-		if writeManaged == nil {
-			writeManaged = func(path string, content []byte) error { return atomicfile.Write(path, content, 0o644) }
-		}
-		if err := writeManaged(status.Path, content); err == nil {
+	if !installer.apply {
+		return installer.change("write "+status.Path, nil)
+	}
+	content := []byte(fmt.Sprintf("{\"cleanupPeriodDays\":%d}\n", options.CleanupPeriodDays))
+	writeManaged := options.writeManaged
+	if writeManaged == nil {
+		writeManaged = func(path string, content []byte) error { return atomicfile.Write(path, content, 0o644) }
+	}
+	directErr := writeManaged(status.Path, content)
+	if directErr == nil {
+		return installer.change("write "+status.Path, nil)
+	}
+	if !errors.Is(directErr, fs.ErrPermission) {
+		return fmt.Errorf("managed-cleanup %s: write: %w", status.Path, directErr)
+	}
+	temporary, err := os.MkdirTemp("", "pfm-managed-cleanup-")
+	if err != nil {
+		return fmt.Errorf("create managed-cleanup temporary directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(temporary) }()
+	source := filepath.Join(temporary, "pfm.json")
+	if err := atomicfile.Write(source, content, 0o600); err != nil {
+		return fmt.Errorf("stage managed-cleanup: %w", err)
+	}
+	for _, args := range managedInstallArgs(source, status.Path) {
+		sudoArgs := append([]string{"-n"}, args...)
+		installer.say("sudo %s", shellCommandLine(sudoArgs...))
+		if sudoErr := options.Runner.Run(ctx, "sudo", sudoArgs...); sudoErr != nil {
+			installer.say(
+				"  warn    managed-cleanup %s not written: %v; %s: %v; run: sudo mkdir -p %s && printf '%%s\\n' '{\"cleanupPeriodDays\":%d}' | sudo tee %s >/dev/null",
+				status.Path,
+				directErr,
+				shellCommandLine(append([]string{"sudo"}, sudoArgs...)...),
+				sudoErr,
+				shellCommandLine(options.ManagedSettingsDir),
+				options.CleanupPeriodDays,
+				shellCommandLine(status.Path),
+			)
+			installer.record("warn", "managed-cleanup "+status.Path+" not written", errors.Join(directErr, sudoErr))
 			return nil
 		}
-		temporary, err := os.MkdirTemp("", "pfm-managed-cleanup-")
-		if err != nil {
-			return fmt.Errorf("create managed-cleanup temporary directory: %w", err)
-		}
-		defer func() { _ = os.RemoveAll(temporary) }()
-		source := filepath.Join(temporary, "pfm.json")
-		if err := atomicfile.Write(source, content, 0o600); err != nil {
-			return fmt.Errorf("stage managed-cleanup: %w", err)
-		}
-		for _, args := range managedInstallArgs(source, status.Path) {
-			sudoArgs := append([]string{"-n"}, args...)
-			installer.say("sudo %s", shellCommandLine(sudoArgs...))
-			if err := options.Runner.Run(ctx, "sudo", sudoArgs...); err != nil {
-				installer.say(
-					"  warn    managed-cleanup %s — sudo -n needs cached credentials; run: sudo mkdir -p %s && printf '%%s\\n' '{\"cleanupPeriodDays\":%d}' | sudo tee %s >/dev/null",
-					status.Path,
-					shellCommandLine(options.ManagedSettingsDir),
-					options.CleanupPeriodDays,
-					shellCommandLine(status.Path),
-				)
-				return nil
-			}
-		}
-		return nil
-	})
+	}
+	return installer.change("write "+status.Path, nil)
 }
 
 // installProgram is install(1), which managedInstallArgs runs under sudo.

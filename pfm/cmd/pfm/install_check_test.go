@@ -106,7 +106,7 @@ func installCheckHome(t *testing.T, legacy bool) (home, clone, account string) {
 }
 
 func TestInstallCheckPreChangeChecks(t *testing.T) {
-	for _, scenario := range []string{"quiet", "running", "dependency", "explicit missing"} {
+	for _, scenario := range []string{"quiet", "running", "reminder running", "unprobed", "dependency", "explicit missing"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, _, _ := installCheckHome(t, false)
 			bin, _ := writeManagerFakes(
@@ -129,6 +129,24 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 					schedulerErr = installer.ErrLaunchAgentRunning
 				}
 				wantCode, wantErr = 4, installer.SchedulerRefusal(installCommand, schedulerErr)+"\n"
+			}
+			if scenario == "reminder running" {
+				bin, _ = writeManagerFakes(
+					t,
+					"case \"$*\" in *pfm-reminder.service*) echo activating;; *ActiveState*) echo inactive;; esac\nexit 0",
+					"case \"$*\" in *com.professor.pfm.reminder*) echo 'state = running';; *) echo 'state = not running';; esac",
+				)
+				schedulerErr := installer.ErrReminderRunning
+				if runtime.GOOS == "darwin" {
+					schedulerErr = installer.ErrReminderAgentRunning
+				}
+				wantCode, wantErr = 4, installer.SchedulerRefusal(installCommand, schedulerErr)+"\n"
+			}
+			if scenario == "unprobed" {
+				bin, _ = writeManagerFakes(t,
+					"case \"$*\" in *show*) exit 1;; esac\nexit 0",
+					"exit 1",
+				)
 			}
 			t.Setenv("PATH", bin)
 			savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
@@ -173,9 +191,18 @@ func TestInstallCheckPreChangeChecks(t *testing.T) {
 					errOut.Len() != 0 {
 					t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 				}
-			case "running":
+			case "running", "reminder running":
 				if errOut.String() != wantErr {
 					t.Fatalf("stderr=%q want=%q", errOut.String(), wantErr)
+				}
+			case "unprobed":
+				note := "name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or reminder run is not refused"
+				if runtime.GOOS == "darwin" {
+					note = "launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or reminder run is not refused"
+				}
+				want := "install check: ok — pfm install --yes would pass its pre-change checks\n  skip    " + note + "\n"
+				if out.String() != want || errOut.Len() != 0 {
+					t.Fatalf("stdout=%q stderr=%q, want %q", out.String(), errOut.String(), want)
 				}
 			case "dependency":
 				if !strings.Contains(out.String(), "doctor: dep tmux path=(none) MISSING required") ||

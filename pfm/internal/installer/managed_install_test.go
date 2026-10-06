@@ -63,7 +63,7 @@ func TestInstallManagedCommandsQuoteSpacedPath(t *testing.T) {
 		if echoed == "" && strings.HasPrefix(line, "sudo -n ") {
 			echoed = line
 		}
-		if _, command, found := strings.Cut(line, "sudo -n needs cached credentials; run: "); found {
+		if _, command, found := strings.Cut(line, "; run: "); found {
 			advisory = command
 		}
 	}

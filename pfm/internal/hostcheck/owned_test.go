@@ -3,6 +3,7 @@ package hostcheck
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -39,17 +40,19 @@ func TestPFMSettings(t *testing.T) {
 		}
 	}
 	env.Accounts = append(env.Accounts, config.Account{ID: 2, ConfigDir: config.DefaultAccountDir(env.Home, 2)})
-	assertRows(
-		t,
-		detect(t, "pfm-settings", env),
-		Row{
-			Block,
-			"pfm-settings",
-			path,
-			"carries pfm statusLine — they ride --settings at launch and would run twice",
-			"remove statusLine from " + path + " (pfm's hook commands only; keep every other key)",
-		},
-	)
+	t.Run("status-line", func(t *testing.T) {
+		assertRows(
+			t,
+			detect(t, "pfm-settings", env),
+			Row{
+				Block,
+				"pfm-settings",
+				path,
+				"carries pfm's statusLine — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install",
+				"remove statusLine from " + path + " (each hook entry running that command and each named key; keep every other entry)",
+			},
+		)
+	})
 	t.Run("unreadable-continues", func(t *testing.T) {
 		env := fixtureEnv(t)
 		path := filepath.Join(env.Store, "settings.json")
@@ -65,8 +68,8 @@ func TestPFMSettings(t *testing.T) {
 				Block,
 				"pfm-settings",
 				other,
-				"carries pfm statusLine — they ride --settings at launch and would run twice",
-				"remove statusLine from " + other + " (pfm's hook commands only; keep every other key)",
+				"carries pfm's statusLine — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install",
+				"remove statusLine from " + other + " (each hook entry running that command and each named key; keep every other entry)",
 			},
 		)
 	})
@@ -78,6 +81,45 @@ func TestPFMSettings(t *testing.T) {
 		if len(rows) != 1 || rows[0].Path != path || !strings.HasPrefix(rows[0].Problem, "UNREADABLE "+path+":") {
 			t.Fatalf("rows=%v", rows)
 		}
+	})
+	t.Run("operator-ledger-only", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(env.Store, "settings.json")
+		command := env.Home + "/private-ledger-hook"
+		writeFile(t, path, fmt.Sprintf(`{"hooks":{"SessionStart":[{"hooks":[{"command":%q}]}]}}`, command))
+		ledger := filepath.Join(env.ManagedRoot, "settings-hook-ownership.json")
+		writeFile(
+			t,
+			ledger,
+			fmt.Sprintf(
+				`{"version":1,"hooks":[{"path":%q,"event":"SessionStart","matcher":"","command":%q,"count":1}]}`,
+				path,
+				command,
+			),
+		)
+		assertRows(t, detect(t, "pfm-settings", env))
+	})
+	t.Run("hook-edit", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(env.Store, "settings.json")
+		command := env.Home + "/.local/bin/pfm internal launcher-repair"
+		writeFile(
+			t,
+			path,
+			fmt.Sprintf(
+				`{"hooks":{"SessionStart":[{"hooks":[{"command":%q},{"command":"pfm internal clear-hide"},{"command":"operator-hook"}]}]},"statusLine":{"command":"pfm statusline"},"subagentStatusLine":{"command":%q}}`,
+				command,
+				claudelaunch.SubagentStatusLineCommand(env.Home),
+			),
+		)
+		items := fmt.Sprintf(`hook %q, hook "pfm internal clear-hide", statusLine, subagentStatusLine`, command)
+		assertRows(t, detect(t, "pfm-settings", env), Row{
+			Block,
+			"pfm-settings",
+			path,
+			"carries pfm's " + items + " — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install",
+			"remove " + items + " from " + path + " (each hook entry running that command and each named key; keep every other entry)",
+		})
 	})
 }
 
@@ -160,8 +202,10 @@ func TestPFMMCP(t *testing.T) {
 		}
 		ledger, err := json.Marshal(
 			map[string]any{
-				"clients":       []string{"client"},
-				"registrations": map[string]any{path: map[string]any{"registered": map[string]any{}}},
+				"clients": []string{"client"},
+				"registrations": map[string]any{
+					path: map[string]any{"registered": map[string]any{"command": "invented"}},
+				},
 			},
 		)
 		if err != nil {
@@ -176,8 +220,8 @@ func TestPFMMCP(t *testing.T) {
 				Block,
 				"pfm-mcp",
 				path,
-				"carries pfm mcpServers.client,registered",
-				"remove mcpServers.client,registered from " + path + "; pfm's server rides --mcp-config at launch",
+				"carries pfm mcpServers.registered",
+				"remove mcpServers.registered from " + path + "; pfm's server rides --mcp-config at launch",
 			},
 			Row{
 				Block,
@@ -187,6 +231,35 @@ func TestPFMMCP(t *testing.T) {
 				"remove \"clients\" from " + ledgerPath,
 			},
 		)
+	})
+	t.Run("operator-professor", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(env.Accounts[0].ConfigDir, ".claude.json")
+		writeFile(t, path, `{"mcpServers":{"professor":{"command":"/opt/operator/mcp"}}}`)
+		writeFile(
+			t,
+			filepath.Join(env.ManagedRoot, "mcp-ownership.json"),
+			fmt.Sprintf(`{"registrations":{%q:{"professor":{"command":"old"}}}}`, path),
+		)
+		assertRows(t, detect(t, "pfm-mcp", env))
+		assertRows(t, detect(t, "third-party-mcp", env), Row{
+			Warn,
+			"third-party-mcp",
+			path,
+			"mcpServers.professor is declared outside pfm",
+			"move it to mcp.thirdParty.professor in " + env.ConfigPath + ", then remove mcpServers.professor from " + path,
+		})
+	})
+	t.Run("clients-only", func(t *testing.T) {
+		env := fixtureEnv(t)
+		writeFile(t, filepath.Join(env.Home, ".mcp.json"), `{"mcpServers":{"client":{"command":"invented"}}}`)
+		ledger := filepath.Join(env.ManagedRoot, "mcp-ownership.json")
+		writeFile(t, ledger, `{"clients":["client"]}`)
+		assertRows(t, detect(t, "pfm-mcp", env), Row{
+			Block, "pfm-mcp", ledger,
+			"mcp-ownership.json still records pfm clients",
+			"remove \"clients\" from " + ledger,
+		})
 	})
 }
 
@@ -298,7 +371,9 @@ func TestThirdPartyMCP(t *testing.T) {
 	)
 	// The ledger, as well as shape matching, excludes pfm's entries.
 	ledger, err := json.Marshal(
-		map[string]any{"registrations": map[string]any{path: map[string]any{"foreign": map[string]any{}}}},
+		map[string]any{
+			"registrations": map[string]any{path: map[string]any{"foreign": map[string]any{"command": "invented"}}},
+		},
 	)
 	if err != nil {
 		t.Fatal(err)

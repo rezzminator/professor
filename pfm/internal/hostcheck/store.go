@@ -222,18 +222,38 @@ func homeStateFile(env Env) ([]Row, error) {
 func accountEntryReal(env Env) ([]Row, error) {
 	var rows []Row
 	for _, account := range sortedAccounts(env) {
-		if claudelaunch.InspectConfigDir(env.Store, account.ConfigDir).State == claudelaunch.ConfigDirStore {
+		inspected := claudelaunch.InspectConfigDir(env.Store, account.ConfigDir)
+		if inspected.State == claudelaunch.ConfigDirStore {
 			continue
+		}
+		base := inspected.Real
+		if base == "" {
+			base = account.ConfigDir
 		}
 		for _, entry := range installer.StoreEntries {
 			path := filepath.Join(account.ConfigDir, entry.Name)
 			info := inspectPath(&rows, "account-entry-real", path)
-			if info == nil || info.Mode()&os.ModeSymlink != 0 {
+			if info == nil {
 				continue
 			}
-			kind := "file"
-			if info.IsDir() {
-				kind = "dir"
+			problem := ""
+			if info.Mode()&os.ModeSymlink != 0 {
+				link := installer.InspectAccountLink(env.Store, base, path, entry.Name)
+				switch link.State {
+				case "foreign":
+					problem = entry.Name + " links to " + link.Target + " outside the store; its data belongs in the store"
+				case "unreadable":
+					rows = append(rows, unreadable("account-entry-real", path, link.Err))
+					continue
+				default:
+					continue
+				}
+			} else {
+				kind := "file"
+				if info.IsDir() {
+					kind = "dir"
+				}
+				problem = entry.Name + " is a real " + kind + "; it belongs in the store"
 			}
 			fix, ok := removeKeeping(
 				&rows,
@@ -251,7 +271,7 @@ func accountEntryReal(env Env) ([]Row, error) {
 					Block,
 					"account-entry-real",
 					path,
-					entry.Name + " is a real " + kind + "; it belongs in the store",
+					problem,
 					fix,
 				},
 			)

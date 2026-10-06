@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,5 +200,247 @@ func TestCodexResumeUnkillHookAndTrustAreRemovedOnUninstall(t *testing.T) {
 	}
 	if !strings.Contains(transcript.String(), "change  remove resume-unkill hook trust "+account) {
 		t.Fatalf("trust removal not reported:\n%s", transcript.String())
+	}
+}
+
+func TestCodexResumeUnkillTrustContinuesAfterAccountFailure(t *testing.T) {
+	home := t.TempDir()
+	second, binary, requestLog := stageResumeUnkillAccount(t, home)
+	first := filepath.Join(home, ".codex-first")
+	writeFixture(t, filepath.Join(first, "hooks.json"), `{"hooks":{}}`)
+	var output bytes.Buffer
+	installer := resumeUnkillEngine(home, first, binary, ModeApply, &output)
+	installer.options.CodexHomes = []string{first, second}
+	if err := installer.wireCodexHooks(); err != nil {
+		t.Fatalf("trust failure stopped wiring: %v", err)
+	}
+	err := errors.Join(installer.deferred...)
+	if err == nil || !strings.Contains(err.Error(), "Codex hook trust for "+first+": ") ||
+		strings.Contains(err.Error(), "Codex hook trust for "+second+": ") {
+		t.Fatalf("deferred error=%v, want only first account", err)
+	}
+	if !strings.Contains(output.String(), "  FAIL    Codex hook trust for "+first+": ") ||
+		!strings.Contains(readFixture(t, requestLog), `"method":"config/value/write"`) {
+		t.Fatalf("second account did not receive trust after first failed:\n%s", output.String())
+	}
+	var receipt map[string]string
+	if err := json.Unmarshal(
+		[]byte(readFixture(t, filepath.Join(second, ".professor-hook-trust.json"))),
+		&receipt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if receipt[second+"/hooks.json:session_start:0:0"] != "sha256:deadbeef" {
+		t.Fatalf("second account receipt=%v", receipt)
+	}
+}
+
+func TestCodexHookLedgerDryRunCountsOneWriteForTwoHomes(t *testing.T) {
+	home := t.TempDir()
+	first, _, _ := stageResumeUnkillAccount(t, home)
+	second := filepath.Join(home, ".codex-second")
+	writeFixture(t, filepath.Join(second, "hooks.json"), `{"hooks":{}}`)
+	var output bytes.Buffer
+	preview := resumeUnkillEngine(home, first, "", ModeDryRun, &output)
+	preview.options.CodexHomes = []string{first, second}
+	preview.apply = false
+	if err := preview.wireCodexHooks(); err != nil {
+		t.Fatal(err)
+	}
+	line := "  change  write " + settingsHookOwnershipPath(preview.managedRoot) + "\n"
+	if got := strings.Count(output.String(), line); got != 1 {
+		t.Errorf("ledger writes=%d, want 1:\n%s", got, output.String())
+	}
+	apply := resumeUnkillEngine(home, first, "", ModeApply, &bytes.Buffer{})
+	apply.options.CodexHomes = preview.options.CodexHomes
+	if err := apply.wireCodexHooks(); err != nil {
+		t.Fatal(err)
+	}
+	if preview.report.Changed != apply.report.Changed {
+		t.Errorf("preview changed=%d, apply changed=%d", preview.report.Changed, apply.report.Changed)
+	}
+}
+
+func TestCodexResumeUnkillReplacesOwnedStaleCommandAndKeepsForeignLookalike(t *testing.T) {
+	for _, owned := range []bool{true, false} {
+		t.Run(map[bool]string{true: "owned", false: "foreign"}[owned], func(t *testing.T) {
+			home := t.TempDir()
+			account := filepath.Join(home, ".codex")
+			path := filepath.Join(account, "hooks.json")
+			const stale = "/old/home/.local/bin/pfm internal resume-unkill"
+			writeFixture(t, path, strings.ReplaceAll(resumeUnkillHooksBody(home), resumeUnkillCommand(home), stale))
+			installer := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{})
+			if owned {
+				encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
+					physicalSettingsPath(path): {{Event: "SessionStart", Matcher: "resume", Command: stale}: 1},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, settingsHookOwnershipPath(installer.managedRoot), string(encoded))
+			}
+			if err := installer.wireCodexHooks(); err != nil {
+				t.Fatal(err)
+			}
+			raw := readFixture(t, path)
+			wantStale := 1
+			if owned {
+				wantStale = 0
+			}
+			if hookCommandCount(t, raw, "SessionStart", resumeUnkillCommand(home)) != 1 ||
+				hookCommandCount(t, raw, "SessionStart", stale) != wantStale {
+				t.Fatalf("wrong handlers after ownership-aware replacement:\n%s", raw)
+			}
+			ledger, _, err := readSettingsHookOwnership(settingsHookOwnershipPath(installer.managedRoot))
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
+			if len(ledger[physicalSettingsPath(path)]) != 1 || ledger[physicalSettingsPath(path)][current] != 1 {
+				t.Fatalf("ledger=%v, want ownership of current handler", ledger)
+			}
+		})
+	}
+}
+
+func TestCodexHookLedgerPrunesClaudeRowsAndKeepsUnconfiguredCodexHomes(t *testing.T) {
+	for _, configured := range []bool{true, false} {
+		t.Run(map[bool]string{true: "configured", false: "skipped Codex"}[configured], func(t *testing.T) {
+			home := t.TempDir()
+			account := filepath.Join(home, ".codex")
+			path := filepath.Join(account, "hooks.json")
+			writeFixture(t, path, resumeUnkillHooksBody(home))
+			installer := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{})
+			if !configured {
+				installer.options.CodexHomes = nil
+			}
+			key := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
+			encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
+				physicalSettingsPath(path):                      {key: 1},
+				filepath.Join(home, ".claude", "settings.json"): {key: 1},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledgerPath := settingsHookOwnershipPath(installer.managedRoot)
+			writeFixture(t, ledgerPath, string(encoded))
+			if err := installer.wireCodexHooks(); err != nil {
+				t.Fatal(err)
+			}
+			ledger, _, err := readSettingsHookOwnership(ledgerPath)
+			if err != nil || len(ledger) != 1 || ledger[physicalSettingsPath(path)][key] != 1 {
+				t.Fatalf("ledger=%v err=%v, want only Codex ownership", ledger, err)
+			}
+		})
+	}
+}
+
+func TestCodexHookLedgerWritesCompletedHomesBeforeUninstallRefusal(t *testing.T) {
+	home := t.TempDir()
+	first, second := filepath.Join(home, ".codex"), filepath.Join(home, ".codex-second")
+	firstPath, secondPath := filepath.Join(first, "hooks.json"), filepath.Join(second, "hooks.json")
+	writeFixture(t, firstPath, resumeUnkillHooksBody(home))
+	writeFixture(t, secondPath, "{broken")
+	key := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
+	encoded, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
+		physicalSettingsPath(firstPath): {key: 1}, physicalSettingsPath(secondPath): {key: 1},
+		filepath.Join(home, ".claude", "settings.json"): {key: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	installer := resumeUnkillEngine(home, first, "", ModeUninstall, &output)
+	installer.options.CodexHomes = []string{first, second}
+	ledgerPath := settingsHookOwnershipPath(installer.managedRoot)
+	writeFixture(t, ledgerPath, string(encoded))
+	err = installer.wireCodexHooks()
+	if err == nil || !strings.Contains(err.Error(), "refuse to strand owned hooks") ||
+		!strings.Contains(err.Error(), secondPath) {
+		t.Fatalf("uninstall error=%v, want second home's refusal", err)
+	}
+	ledger, _, err := readSettingsHookOwnership(ledgerPath)
+	if err != nil || len(ledger) != 1 || ledger[physicalSettingsPath(secondPath)][key] != 1 {
+		t.Fatalf("ledger=%v err=%v, want remaining second-home ownership", ledger, err)
+	}
+	if hookCommandCount(t, readFixture(t, firstPath), "SessionStart", key.Command) != 0 {
+		t.Fatal("first home's uninstall did not land")
+	}
+}
+
+func TestCodexHookLedgerRecordsNoOwnershipForAFailedWrite(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	account := filepath.Join(home, ".codex")
+	// A name that leaves atomicfile's scratch suffix past NAME_MAX fails the
+	// write even for root.
+	physical := filepath.Join(t.TempDir(), strings.Repeat("h", 245))
+	writeFixture(t, physical, `{"hooks":{}}`)
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(physical, filepath.Join(account, "hooks.json")); err != nil {
+		t.Fatal(err)
+	}
+	installer := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{})
+	if err := installer.wireCodexHooks(); err == nil {
+		t.Fatal("a failed hooks.json write returned success")
+	}
+	ledger, _, err := readSettingsHookOwnership(settingsHookOwnershipPath(installer.managedRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owned := ledger[physicalSettingsPath(physical)]; len(owned) != 0 {
+		t.Fatalf("ledger owns %v in a hooks.json the failed write never reached", owned)
+	}
+}
+
+func TestCodexHookLedgerKeepsAHooksFileLinkedUnderAnotherName(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	account := filepath.Join(home, ".codex")
+	physical := filepath.Join(home, "dotfiles", "codex-hooks.json")
+	writeFixture(t, physical, `{"hooks":{}}`)
+	if err := os.MkdirAll(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(physical, filepath.Join(account, "hooks.json")); err != nil {
+		t.Fatal(err)
+	}
+	installer := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{})
+	if err := installer.wireCodexHooks(); err != nil {
+		t.Fatal(err)
+	}
+	if hookCommandCount(t, readFixture(t, physical), "SessionStart", resumeUnkillCommand(home)) != 1 {
+		t.Fatalf("install did not write the handler through the link:\n%s", readFixture(t, physical))
+	}
+	ledger, _, err := readSettingsHookOwnership(settingsHookOwnershipPath(installer.managedRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := settingsHookKey{Event: "SessionStart", Matcher: "resume", Command: resumeUnkillCommand(home)}
+	if ledger[physicalSettingsPath(physical)][current] != 1 {
+		t.Fatalf("ledger=%v, want ownership of the handler written into %s", ledger, physical)
+	}
+
+	// A home that fails before the linked one is reached never costs it its row.
+	broken := filepath.Join(home, ".codex-broken")
+	if err := os.MkdirAll(broken, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "moved", "hooks.json"), filepath.Join(broken, "hooks.json")); err != nil {
+		t.Fatal(err)
+	}
+	failing := resumeUnkillEngine(home, account, "", ModeApply, &bytes.Buffer{})
+	failing.options.CodexHomes = []string{broken, account}
+	if err := failing.wireCodexHooks(); err == nil {
+		t.Fatal("a dangling hooks.json returned nil")
+	}
+	ledger, _, err = readSettingsHookOwnership(settingsHookOwnershipPath(installer.managedRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger[physicalSettingsPath(physical)][current] != 1 {
+		t.Fatalf("ledger=%v after a failed earlier home, want ownership of %s kept", ledger, physical)
 	}
 }

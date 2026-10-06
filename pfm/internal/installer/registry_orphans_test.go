@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -251,36 +253,95 @@ func TestRegistryDeadLinksUninstall(t *testing.T) {
 	}
 }
 
-func TestRegistryInstallKeepsManagedLeftovers(t *testing.T) {
-	t.Parallel()
+func TestRegistryDeadLinkResilience(t *testing.T) {
+	for _, scenario := range []string{"unusable marker", "busy store", "lock error"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			managed := managedRootForHome(home)
+			link := filepath.Join(home, ".claude", "commands", "gone.md")
+			if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(managed, "gone.md"), link); err != nil {
+				t.Fatal(err)
+			}
+			var want string
+			switch scenario {
+			case "unusable marker":
+				writeFixture(t, paths.SourceRepoPath(home), filepath.Join(home, "moved-away")+"\n")
+				_, markerErr := paths.ReadSourceRepoMarker(home)
+				want = "  skip    registry dead-link check skipped: " +
+					"read source repository marker for registry dead-link check: " + markerErr.Error() +
+					" — rerun pfm install --yes from inside your Professor clone\n"
+			case "busy store":
+				if err := os.MkdirAll(managed, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				holder, err := os.Open(managed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := holder.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+					t.Fatal(err)
+				}
+				want = "  skip    registry dead-link check skipped: another pfm install holds " +
+					skillStoreRoot(home) + "\n"
+			case "lock error":
+				if err := os.MkdirAll(filepath.Dir(managed), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(managed, managed); err != nil {
+					t.Fatal(err)
+				}
+				_, openErr := os.Open(managed)
+				want = "  skip    registry dead-link check skipped: open skill store lock " +
+					managed + ": " + openErr.Error() + "\n"
+			}
+			var output bytes.Buffer
+			installer := &engine{
+				options: Options{
+					Mode:      ModeUninstall,
+					Home:      home,
+					ConfigDir: filepath.Join(home, ".claude"),
+					Stdout:    &output,
+				},
+				apply:       true,
+				managedRoot: managed,
+			}
+			if err := installer.retireDeadRegistryLinks(); err != nil {
+				t.Fatalf("registry retirement: %v", err)
+			}
+			if output.String() != want {
+				t.Fatalf("output=%q, want %q", output.String(), want)
+			}
+			assertLink(t, link, filepath.Join(managed, "gone.md"))
+		})
+	}
+}
+
+func TestRegistryDeadLinkLockReleased(t *testing.T) {
 	home := t.TempDir()
 	managed := managedRootForHome(home)
-	fixtures := []struct{ path, content string }{
-		{"chat/stray-note.md", "operator chat note\n"},
-		{"codex-skills/bb/keepme.txt", "operator skill note\n"},
-		{"chat/ls.command.md", "legacy command card\n"},
+	if err := os.MkdirAll(managed, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	for _, fixture := range fixtures {
-		writeFixture(t, filepath.Join(managed, filepath.FromSlash(fixture.path)), fixture.content)
+	installer := &engine{
+		options: Options{Home: home, ConfigDir: filepath.Join(home, ".claude"), Stdout: io.Discard},
+		apply:   true, managedRoot: managed,
 	}
-	if _, err := Run(
-		context.Background(),
-		Options{
-			Mode:          ModeApply,
-			Home:          home,
-			Runner:        &fakeRunner{},
-			MCPConfigPath: testConfigPath(t),
-			CodexHomes:    []string{},
-		},
-	); err != nil {
-		t.Fatalf("install over managed leftovers: %v", err)
+	if err := installer.retireDeadRegistryLinks(); err != nil {
+		t.Fatal(err)
 	}
-	for _, fixture := range fixtures {
-		path := filepath.Join(managed, filepath.FromSlash(fixture.path))
-		if got := readFixture(t, path); got != fixture.content {
-			t.Errorf("%s=%q, want %q", fixture.path, got, fixture.content)
-		}
+	unlock, busy, err := installer.lockSkillStore(skillStoreRoot(home))
+	if err != nil || busy {
+		t.Fatalf("lock after retirement: busy=%t err=%v", busy, err)
 	}
+	unlock()
 }
 
 // TestRetireDeadRegistryRootLink pins a registry root that is itself a dead

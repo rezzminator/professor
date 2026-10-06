@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,10 +166,12 @@ func TestSourceFetchedSkillsDryRunWritesNothing(t *testing.T) {
 	output := runSkillInstall(t, home, ModeDryRun)
 
 	store := filepath.Join(skillStoreRoot(home), "atlas")
+	requireNoPath(t, skillStoreRoot(home), "dry run created the store root")
 	requireNoPath(t, store, "dry run cloned")
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "atlas"), "dry run linked")
 	requireNoPath(t, filepath.Join(home, ".claude", "skills", "atlas"), "dry run linked")
 	for _, want := range []string{
+		"  change  create " + skillStoreRoot(home) + "\n",
 		"change  fetch file://" + repo + " -> " + store,
 		"change  link " + filepath.Join(home, ".agents", "skills", "atlas") + " -> " + store,
 	} {
@@ -347,7 +350,14 @@ func TestSourceFetchedSkillsRetireUnregisteredAndUninstall(t *testing.T) {
 	}
 
 	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"keep": "file://" + keep}))
-	runSkillInstall(t, home, ModeApply)
+	output := runSkillInstall(t, home, ModeApply)
+	ledger := skillLinkLedgerPath(home)
+	if strings.Contains(output, ledger) {
+		t.Errorf("an unchanged second apply named the ledger:\n%s", output)
+	}
+	if _, err := os.Stat(ledger); err != nil {
+		t.Errorf("install did not record skill link dirs: %v", err)
+	}
 
 	storeRoot := skillStoreRoot(home)
 	requireNoPath(t, filepath.Join(storeRoot, "drop"), "an unregistered store survived")
@@ -360,6 +370,7 @@ func TestSourceFetchedSkillsRetireUnregisteredAndUninstall(t *testing.T) {
 	requireNoPath(t, filepath.Join(home, ".claude", "skills", "keep"), "uninstall left an account link")
 	requireNoPath(t, filepath.Join(home, ".agents", "skills", "keep"), "uninstall left the .agents link")
 	requireNoPath(t, storeRoot, "uninstall left the skill store")
+	requireNoPath(t, ledger, "uninstall left the skill link record")
 	assertLink(t, operator, drop)
 }
 
@@ -707,4 +718,59 @@ func TestShippedSkillSourcesRegistryLoads(t *testing.T) {
 			t.Fatalf("entry %s: repo=%q problem=%q", entry.Name, entry.Repo, entry.Problem)
 		}
 	}
+}
+
+// TestSkillStoreUnlockReleasesForkedCopies pins the release against a child
+// forked while the lock was held: until it execs, the child keeps a copy of
+// the lock's descriptor, and closing ours alone left the lock with it.
+func TestSkillStoreUnlockReleasesForkedCopies(t *testing.T) {
+	if goRuntime.GOOS != "linux" {
+		return // the copy is found through /proc/self/fd
+	}
+	home := t.TempDir()
+	root := skillStoreRoot(home)
+	parent := filepath.Dir(root)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installer := &engine{options: Options{Home: home, Stdout: &bytes.Buffer{}}, apply: true}
+	unlock, busy, err := installer.lockSkillStore(root)
+	if err != nil || busy {
+		t.Fatalf("first lock: busy=%t err=%v", busy, err)
+	}
+	physical, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forked := -1
+	for _, entry := range entries {
+		if target, err := os.Readlink("/proc/self/fd/" + entry.Name()); err == nil && target == physical {
+			fd := 0
+			if _, err := fmt.Sscan(entry.Name(), &fd); err != nil {
+				t.Fatal(err)
+			}
+			if forked, err = syscall.Dup(fd); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if forked < 0 {
+		t.Fatalf("no descriptor open on %s", physical)
+	}
+	t.Cleanup(func() {
+		if err := syscall.Close(forked); err != nil {
+			t.Error(err)
+		}
+	})
+	unlock()
+	relock, busy, err := installer.lockSkillStore(root)
+	if err != nil || busy {
+		t.Fatalf("lock after release with a forked copy open: busy=%t err=%v", busy, err)
+	}
+	relock()
 }

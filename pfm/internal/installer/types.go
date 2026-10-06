@@ -93,13 +93,21 @@ type Options struct {
 	// (ClaudeUserRegistries) the fullscreen canary clear visits; nil visits none.
 	ClaudeAccounts []pfmconfig.Account
 	// ClaudeRosterHost is set when the config lists Claude accounts, with or
-	// without --config-dir, which leaves ClaudeAccounts nil; only the plugin
-	// step reads it, refusing a dir that resolves to the store.
+	// without --config-dir, which leaves ClaudeAccounts nil; the plugin step
+	// reads it to refuse a dir that resolves to the store, and the login default
+	// reads it to leave itself as it is on a --config-dir install.
 	ClaudeRosterHost bool
 	// CodexBinary enables native hook trust registration for command callers.
 	CodexBinary string
-	Clock       clock.Clock
-	Env         paths.Env
+	// ConfigSeed is the example.pfm.config.json path a first install seeds
+	// MCPConfigPath from; empty means nothing is seeded.
+	ConfigSeed string
+	// RosterConfigDirs lists every roster Claude account's config dir, whether
+	// or not --config-dir is given; nil on a host with no roster. Live-chat
+	// guards are its only readers.
+	RosterConfigDirs []string
+	Clock            clock.Clock
+	Env              paths.Env
 	// SourceRepo is the clone whose templates and binary are being installed.
 	// Empty preserves an existing marker when install is invoked elsewhere.
 	SourceRepo string
@@ -192,11 +200,8 @@ type Report struct {
 	Skipped int
 }
 
-// execCommandRunner runs a command through the observed real runner;
-// processGroup starts it in its own process group.
-type execCommandRunner struct {
-	processGroup bool
-}
+// execCommandRunner runs a command through the observed real runner.
+type execCommandRunner struct{}
 
 type commandExitError struct {
 	name string
@@ -239,7 +244,7 @@ func (runner execCommandRunner) Run(ctx context.Context, name string, args ...st
 		return fmt.Errorf("run %q: %w", name, lookErr)
 	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
-		ctx, append([]string{name}, args...), deps.RunOptions{ProcessGroup: runner.processGroup},
+		ctx, append([]string{name}, args...), deps.RunOptions{},
 	)
 	if err != nil {
 		return err
@@ -255,7 +260,7 @@ func (runner execCommandRunner) Output(ctx context.Context, name string, args ..
 		return nil, fmt.Errorf("run %q: %w", name, lookErr)
 	}
 	result, err := obs.Runner(deps.RealRunner{}).Run(
-		ctx, append([]string{name}, args...), deps.RunOptions{ProcessGroup: runner.processGroup},
+		ctx, append([]string{name}, args...), deps.RunOptions{},
 	)
 	if err != nil {
 		return nil, err

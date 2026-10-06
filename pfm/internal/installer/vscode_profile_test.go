@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
 
 // TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape
@@ -78,6 +80,83 @@ func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t
 	afterEdit := readFixture(t, settings)
 	if !strings.Contains(afterEdit, `"color": "terminal.ansiGreen"`) {
 		t.Fatalf("operator-edited profile was overwritten instead of relinquished:\n%s", afterEdit)
+	}
+}
+
+func TestVSCodeProfileShapesPinned(t *testing.T) {
+	t.Parallel()
+	t.Run("canonical", func(t *testing.T) {
+		want := map[string]any{"PFM_AUTO_OPEN": "pfm", "TMUX": nil, "TMUX_PANE": nil}
+		for _, name := range claudelaunch.IdentityHygiene() {
+			want[name] = nil
+		}
+		if len(claudelaunch.IdentityHygiene()) != 6 || !reflect.DeepEqual(vscodeProfile()["env"], want) {
+			t.Fatalf("canonical env=%#v want %#v with six identity names", vscodeProfile()["env"], want)
+		}
+	})
+	t.Run("legacy", func(t *testing.T) {
+		literals := []string{
+			`{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}`,
+			`{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm"}}`,
+			`{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm","TMUX":null,"TMUX_PANE":null,"CLAUDE_CODE_SESSION_ID":null,"CLAUDECODE":null,"CLAUDE_CODE_CHILD_SESSION":null}}`,
+			`{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm","TMUX":null,"TMUX_PANE":null,"CLAUDE_CODE_SESSION_ID":null,"CLAUDECODE":null,"CLAUDE_CODE_CHILD_SESSION":null},"icon":"mortar-board","color":"terminal.ansiMagenta"}`,
+			`{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm","TMUX":null,"TMUX_PANE":null,"CLAUDE_CODE_SESSION_ID":null,"CLAUDECODE":null,"CLAUDE_CODE_CHILD_SESSION":null,"CLAUDE_CONFIG_DIR":null,"CODEX_THREAD_ID":null},"icon":"mortar-board","color":"terminal.ansiMagenta"}`,
+		}
+		if len(vscodeLegacyProfiles) != len(literals) {
+			t.Fatalf("legacy profiles=%d want %d", len(vscodeLegacyProfiles), len(literals))
+		}
+		for i, literal := range literals {
+			var want map[string]any
+			if err := json.Unmarshal([]byte(literal), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(vscodeLegacyProfiles[i], want) {
+				t.Errorf("legacy %d=%#v want %#v", i, vscodeLegacyProfiles[i], want)
+			}
+		}
+	})
+}
+
+func TestVSCodeDevelopEraProfileUpgrade(t *testing.T) {
+	for _, owned := range []bool{true, false} {
+		name := "relinquished"
+		if owned {
+			name = "owned"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			settings := filepath.Join(home, "settings.json")
+			writeFixture(
+				t,
+				settings,
+				`{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"PFM_AUTO_OPEN":"pfm","TMUX":null,"TMUX_PANE":null,"CLAUDE_CODE_SESSION_ID":null,"CLAUDECODE":null,"CLAUDE_CODE_CHILD_SESSION":null,"CLAUDE_CONFIG_DIR":null,"CODEX_THREAD_ID":null},"icon":"mortar-board","color":"terminal.ansiMagenta"}},"terminal.integrated.defaultProfile.linux":"PFM"}`,
+			)
+			writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
+				Path: settings, Platform: "linux", ProfileOwned: owned, DefaultOwned: true,
+			})
+			if _, err := Run(context.Background(), Options{
+				MCPConfigPath: testConfigPath(t), Mode: ModeApply, Home: home,
+				Runner: &fakeRunner{}, Stdout: &bytes.Buffer{}, VSCode: !owned,
+				PrimaryConfigDir: filepath.Join(home, "primary"),
+				vscodePlatform:   "linux", vscodeSettingsPaths: []string{settings},
+			}); err != nil {
+				t.Fatalf("develop-era profile upgrade refused: %v", err)
+			}
+			doc, err := decodeJSONCObject([]byte(readFixture(t, settings)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := doc["terminal.integrated.profiles.linux"].(map[string]any)["PFM"]; !reflect.DeepEqual(
+				got,
+				vscodeProfile(),
+			) {
+				t.Fatalf("profile=%#v want canonical %#v", got, vscodeProfile())
+			}
+			ledger := readVSCodeLedgerFixture(t, managedRootForHome(home))
+			if len(ledger.Files) != 1 || !ledger.Files[0].ProfileOwned || (!owned && !ledger.Files[0].EnvOwned) {
+				t.Fatalf("profile/env ownership=%+v", ledger)
+			}
+		})
 	}
 }
 

@@ -239,9 +239,22 @@ func (installer *engine) removeUpdateMetadata() error {
 			return err
 		}
 	}
-	if err := os.Remove(installer.managedRoot); err != nil &&
-		!errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
-		return err
+	if err := os.Remove(installer.managedRoot); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if !errors.Is(err, syscall.ENOTEMPTY) {
+			return err
+		}
+		entries, readErr := os.ReadDir(installer.managedRoot)
+		if readErr != nil {
+			return fmt.Errorf("inspect non-empty managed root %s: %w", installer.managedRoot, readErr)
+		}
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		installer.skip("leave non-empty managed root " + installer.managedRoot + ": " + strings.Join(names, ", "))
 	}
 	return nil
 }

@@ -10,17 +10,17 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
-	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // The login default points a Claude started outside pfm (a login shell, a
-// systemd user service, a desktop launcher) at account 1 instead of the store.
+// systemd user service, a desktop launcher) at the primary account instead of the store.
 // It lives in a pfm-named environment.d file and in one fenced block in each
 // shell startup file; every write keeps a CLAUDE_CONFIG_DIR already set.
 const (
-	loginDefaultFenceBegin = "# BEGIN pfm claude-config-dir — installer-owned"
-	loginDefaultFenceEnd   = "# END pfm claude-config-dir — installer-owned"
-	loginDefaultEnvFile    = "pfm-claude-config-dir.conf"
+	loginDefaultFenceBegin              = "# BEGIN pfm claude-config-dir — installer-owned"
+	loginDefaultFenceEnd                = "# END pfm claude-config-dir — installer-owned"
+	loginDefaultEnvFile                 = "pfm-claude-config-dir.conf"
+	loginDefaultExplicitConfigDirReason = "a --config-dir install leaves it as it is"
 	// loginDefaultUnsafe is every byte the value may not carry: it is written
 	// unescaped into environment.d and single-quoted into POSIX sh.
 	loginDefaultUnsafe = " \t\r\n\"'\\$`"
@@ -61,25 +61,35 @@ func loginDefaultEnvironment(dir string) string {
 		claudelaunch.ConfigDirDefaultEnv + "=" + dir + "\n"
 }
 
-// loginDefaultDir is account 1's configured dir, or "" with the reason the
+// loginDefaultDir is the primary account's configured dir, or "" with the reason the
 // login default is not written. A dir pfm would not launch is an error.
 func (installer *engine) loginDefaultDir() (string, string, error) {
+	if installer.options.ClaudeRosterHost && len(installer.options.ClaudeAccounts) == 0 {
+		return "", loginDefaultExplicitConfigDirReason, nil
+	}
 	if len(installer.options.ClaudeAccounts) == 0 {
 		return "", "no Claude account roster", nil
 	}
-	account, found := pfmconfig.Config{Accounts: installer.options.ClaudeAccounts}.AccountByID(1)
-	if !found {
-		return "", "account 1 is not in the roster", nil
+	dir := installer.options.PrimaryConfigDir
+	if dir == "" {
+		return "", "no primary Claude account", nil
 	}
-	if strings.ContainsAny(account.ConfigDir, loginDefaultUnsafe) {
+	id := 0
+	for _, account := range installer.options.ClaudeAccounts {
+		if filepath.Clean(account.ConfigDir) == filepath.Clean(dir) {
+			id = account.ID
+			break
+		}
+	}
+	if strings.ContainsAny(dir, loginDefaultUnsafe) {
 		return "", "", fmt.Errorf(
-			"login default: account 1 dir %q carries a space, quote, backslash, $ or backtick", account.ConfigDir,
+			"login default: account %d dir %q carries a space, quote, backslash, $ or backtick", id, dir,
 		)
 	}
-	if err := installer.checkLaunchConfigDir(1, account.ConfigDir); err != nil {
+	if err := installer.checkLaunchConfigDir(id, dir); err != nil {
 		return "", "", fmt.Errorf("login default: %w", err)
 	}
-	return account.ConfigDir, "", nil
+	return dir, "", nil
 }
 
 // checkLaunchConfigDir applies the refusal every launch applies to dir. A
@@ -102,13 +112,14 @@ func (installer *engine) wireLoginDefault(uninstall bool) error {
 		var err error
 		dir, reason, err = installer.loginDefaultDir()
 		if err != nil {
-			installer.say("  FAIL    %s", err)
-			installer.record("fail", err.Error(), err)
-			return err
+			return installer.fail(err)
 		}
 		if reason != "" {
 			installer.skip("login default: " + reason)
-			return nil
+			if reason == loginDefaultExplicitConfigDirReason {
+				return nil
+			}
+			uninstall = true
 		}
 	}
 	block := ""
@@ -128,17 +139,47 @@ func (installer *engine) wireLoginDefault(uninstall bool) error {
 }
 
 // wireLoginDefaultBlock puts block (empty: none) in path, every other line of
-// the file kept; a symlinked startup file is written through to its target.
+// the file kept; a symlinked startup file is left for its owner to edit.
 func (installer *engine) wireLoginDefaultBlock(path, block string) error {
-	target := path
 	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
-		resolved, resolveErr := filepath.EvalSymlinks(path)
+		target, resolveErr := filepath.EvalSymlinks(path)
 		if resolveErr != nil {
-			return installer.loginDefaultFailure(fmt.Errorf("resolve %s: %w", path, resolveErr))
+			target, resolveErr = os.Readlink(path)
+			if resolveErr != nil {
+				return installer.loginDefaultFailure(fmt.Errorf("read link %s: %w", path, resolveErr))
+			}
 		}
-		target = resolved
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			if block == "" {
+				// A link to nothing holds no block to take back.
+				if errors.Is(readErr, fs.ErrNotExist) {
+					return nil
+				}
+				return installer.loginDefaultFailure(fmt.Errorf("read %s: %w", path, readErr))
+			}
+		} else {
+			updated, err := spliceLoginDefaultBlock(string(raw), block)
+			if err != nil {
+				return installer.loginDefaultFailure(fmt.Errorf("%s: %w", path, err))
+			}
+			if updated == string(raw) {
+				if block != "" {
+					installer.ok(path + " login default")
+				}
+				return nil
+			}
+		}
+		message := "login default: " + path + " links to " + target + "; pfm does not write through a link — "
+		if block == "" {
+			installer.skip(message + "remove the block between \"" + loginDefaultFenceBegin + "\" and \"" +
+				loginDefaultFenceEnd + "\" from " + target + " by hand")
+		} else {
+			installer.skip(message + "add this block to " + target + " by hand:\n" + strings.TrimSuffix(block, "\n"))
+		}
+		return nil
 	}
-	raw, err := os.ReadFile(target)
+	raw, err := os.ReadFile(path)
 	existed := err == nil
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return installer.loginDefaultFailure(fmt.Errorf("read %s: %w", path, err))
@@ -154,30 +195,34 @@ func (installer *engine) wireLoginDefaultBlock(path, block string) error {
 		return nil
 	}
 	mode := fs.FileMode(0o644)
-	if info, statErr := os.Stat(target); statErr == nil {
+	if info, statErr := os.Stat(path); statErr == nil {
 		mode = info.Mode().Perm()
 	}
 	backup := ""
 	if existed && len(raw) > 0 {
-		backup = availableBackup(target, installer.stamp)
+		backup = availableBackup(path, installer.stamp)
 	}
-	return installer.change(changeDescription(path, existed), func() error {
+	err = installer.change(changeDescription(path, existed), func() error {
 		if backup != "" {
-			if err := copyBackup(target, backup); err != nil {
-				return fmt.Errorf("back up %s to %s: %w", target, backup, err)
+			if err := copyBackup(path, backup); err != nil {
+				return fmt.Errorf("back up %s to %s: %w", path, backup, err)
 			}
 		}
 		if block == "" && updated == "" {
-			if err := os.Remove(target); err != nil {
-				return fmt.Errorf("remove emptied %s: %w", target, err)
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("remove emptied %s: %w", path, err)
 			}
 			return nil
 		}
-		if err := atomicfile.Write(target, []byte(updated), mode); err != nil {
-			return fmt.Errorf("write %s: %w", target, err)
+		if err := atomicfile.Write(path, []byte(updated), mode); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
 		}
 		return nil
 	})
+	if err != nil {
+		return installer.loginDefaultFailure(err)
+	}
+	return nil
 }
 
 // wireLoginDefaultEnvironment writes the environment.d file for dir, or
@@ -193,12 +238,16 @@ func (installer *engine) wireLoginDefaultEnvironment(dir string) error {
 		if !existed {
 			return nil
 		}
-		return installer.change("remove "+path, func() error {
+		err = installer.change("remove "+path, func() error {
 			if err := os.Remove(path); err != nil {
 				return fmt.Errorf("remove %s: %w", path, err)
 			}
 			return nil
 		})
+		if err != nil {
+			return installer.loginDefaultFailure(err)
+		}
+		return nil
 	}
 	wanted := loginDefaultEnvironment(dir)
 	if existed && string(raw) == wanted {
@@ -221,10 +270,7 @@ func (installer *engine) wireLoginDefaultEnvironment(dir string) error {
 }
 
 func (installer *engine) loginDefaultFailure(err error) error {
-	failure := fmt.Errorf("login default: %w", err)
-	installer.say("  FAIL    %s", failure)
-	installer.record("fail", failure.Error(), err)
-	return failure
+	return installer.fail(fmt.Errorf("login default: %w", err))
 }
 
 // spliceLoginDefaultBlock replaces the fenced block in content with block, in
@@ -241,8 +287,11 @@ func spliceLoginDefaultBlock(content, block string) (string, error) {
 			}
 			begin = index
 		case loginDefaultFenceEnd:
-			if begin < 0 || end >= 0 {
+			if begin < 0 {
 				return "", errors.New("a pfm claude-config-dir end marker with no begin before it; remove it by hand")
+			}
+			if end >= 0 {
+				return "", errors.New("two pfm claude-config-dir end markers; remove one by hand")
 			}
 			end = index
 		}

@@ -148,33 +148,34 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		}
 	}
 	if *check {
-		if err := installer.CheckScheduler(context.Background(), nil); err != nil {
+		unprobed, err := installer.CheckScheduler(context.Background(), nil)
+		if err != nil {
 			fmt.Fprintln(stderr, installer.SchedulerRefusal(installCommand, err))
 			return 4
 		}
 		fmt.Fprintln(stdout, "install check: ok — pfm install --yes would pass its pre-change checks")
+		if unprobed != "" {
+			fmt.Fprintln(stdout, "  skip    "+unprobed)
+		}
 		return 0
 	}
 	installConfig, seeded, configErr := installer.InstallConfig(
 		runtime,
 		paths.OSEnv{},
 		professor.DiscoverSourceRepo(),
-		mode == installer.ModeApply,
 	)
 	if configErr != nil {
 		fmt.Fprintf(stderr, "pfm install: seed config: %v\n", configErr)
 		return 1
 	}
 	runtime.Config = installConfig
-	if seeded != "" {
-		fmt.Fprintf(stdout, "  change  seed %s from %s\n", runtime.Config.Path, seeded)
-	}
 	// An apply ran the dependency preflight before its first write.
 	preflight := 0
 	if mode != installer.ModeApply {
 		preflight = printDependencies(stdout, runtime)
 	}
 	options := withFlags(newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime))
+	options.ConfigSeed = seeded
 	code = runInstallerCommand(installCommand, options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
 		if preflight != 0 {
@@ -243,6 +244,9 @@ func newInstallerOptions(
 			options.CodexHomes = append(options.CodexHomes, account.Home)
 		}
 		options.ClaudeRosterHost = len(runtime.Config.Accounts) > 0
+		for _, account := range runtime.Config.Accounts {
+			options.RosterConfigDirs = append(options.RosterConfigDirs, account.ConfigDir)
+		}
 		if configDir == "" {
 			options.ClaudeAccounts = runtime.Config.Accounts
 			if len(runtime.Config.Accounts) > 0 {

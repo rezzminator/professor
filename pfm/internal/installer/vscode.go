@@ -366,7 +366,12 @@ func (installer *engine) mergeVSCodeSettings(
 
 	envEntries, next, envChanged, err := installer.mergeVSCodeClaudeEnvironment(document, record)
 	if err != nil {
-		return nil, record, false, err
+		if !errors.Is(err, errMalformedVSCodeSettings) {
+			return nil, record, false, err
+		}
+		if installer.options.VSCode || record.EnvOwned {
+			installer.skip("VS Code Claude environment skipped " + path + ": " + err.Error())
+		}
 	}
 	record = next
 	for _, key := range vscodeScalarKeys {
@@ -498,7 +503,7 @@ func (installer *engine) unwireVSCode(
 			continue
 		}
 		if record.EnvOwned {
-			if _, _, envErr := readVSCodeClaudeEnvironment(document); envErr != nil {
+			if _, _, envErr := readVSCodeClaudeEnvironment(document, record.EnvValue); envErr != nil {
 				installer.skip("VS Code settings skipped " + settings + ": " + envErr.Error())
 				continue
 			}

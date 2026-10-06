@@ -22,7 +22,7 @@ Detectors read only: no filesystem write, process signal or network call. Missin
 
 ## Install gate and doctor
 
-All three install modes, preview, `--yes` and `--check`, run host checks before any install write. With any `BLOCK`, stderr contains, per blocking row, `row.Render("pfm install: ")` — its `pfm install: {row.Line()}` line, then `pfm install:   fix: {row.Fix}` — the same renderer `pfm doctor` prints with under its `host-check: ` prefix, so a user rolled back to a binary without host checks still has the fixes; the rows are followed by `pfm install: {N} blocking — run pfm doctor for the fixes`; install exits 4. With no blocks, warnings print `pfm install: {M} warnings — run pfm doctor to see them` on stdout and install continues. Required-dependency and scheduler checks remain additional install preflight checks.
+All three install modes, preview, `--yes` and `--check`, run host checks before any install write. With any `BLOCK`, stderr contains, per blocking row, `row.Render("pfm install: ")` — its `pfm install: {row.Line()}` line, then `pfm install:   fix: {row.Fix}` — the same renderer `pfm doctor` prints with under its `host-check:` prefix, so a user rolled back to a binary without host checks still has the fixes; the rows are followed by `pfm install: {N} blocking — run pfm doctor for the fixes`; install exits 4. With no blocks, warnings print `pfm install: {M} warnings — run pfm doctor to see them` on stdout and install continues. Required-dependency and scheduler checks remain additional install preflight checks.
 
 Doctor prints every finding as `host-check: {row.Line()}`, followed by `host-check:   fix: {row.Fix}`. A block counts a failure; a warning counts a warning. With no findings it prints `host-check: ok ({n} checks)`, where `n` is `len(Detectors())`.
 
@@ -58,7 +58,7 @@ The table gives one row per detector; exact problems and fixes follow under each
 | `account-is-store` | BLOCK | physical account path | identity dir is store | unlink or configure |
 | `store-identity` | BLOCK | account entries in store | identity inside store | move or inspect/remove |
 | `home-state-file` | WARN | home Claude state | launch without account env | compare account/remove |
-| `account-entry-real` | BLOCK | real shared account entries | data outside store | entry-specific merge |
+| `account-entry-real` | BLOCK | real shared entries or links to existing outside data | data outside store | entry-specific merge |
 | `retired-store-entry` | WARN | retired entries in accounts and store | leftover link or store copy | `pfm install` |
 | `unclassified` | WARN | unknown top-level names | neither entry list | keep |
 | `third-party-mcp` | WARN | user-level MCP names | server outside pfm config | edit `mcp.thirdParty` |
@@ -133,15 +133,15 @@ Fix: target absent: `mv {path} {paths.HarvesterCacheDir(home)}`; present: `rm -r
 
 Looks at each physical `settings.json` among `{store}` and every `{acct}`, once per physical file.
 
-Problem: `carries pfm {keys} — they ride --settings at launch and would run twice` (keys from `installer.PFMSettingsLeftovers`).
+Problem: `carries pfm's {items} — pfm supplies its own hooks and status lines through --settings at launch, so these entries are leftovers of an earlier install` (items from `installer.PFMSettingsLeftovers`: distinct `hook "{command}"` entries sorted by command, then `statusLine`, then `subagentStatusLine`, joined with `, `).
 
-Fix: `remove {keys} from {path} (pfm's hook commands only; keep every other key)`.
+Fix: `remove {items} from {path} (each hook entry running that command and each named key; keep every other entry)`.
 
 ### pfm-mcp
 
 **Severity:** BLOCK
 
-Looks at every file from `installer.ClaudeUserRegistries(home, accounts, "")`, `{home}/.claude.json`, `{home}/.mcp.json`, once per physical file; plus `{managed}/mcp-ownership.json` `clients`.
+Looks at every file from `installer.ClaudeUserRegistries(home, accounts, "")`, `{home}/.claude.json`, `{home}/.mcp.json`, once per physical file; plus `{managed}/mcp-ownership.json` `clients`. A ledger name counts only when the current entry equals a recorded entry under a ledger key resolving to that file, ignoring an empty `env`; pfm command shapes count independently. The names-only `clients` list never decides entry ownership.
 
 Problem: `carries pfm mcpServers.{names}`; ledger: `mcp-ownership.json still records pfm clients`.
 
@@ -221,7 +221,7 @@ Problem: `{entry} is account identity inside the store, written by a Claude laun
 
 Fix: `{acct1}` resolving to the store makes `{path}` and `{acct1}/{entry}` one file, so the fix deletes neither:
 
-- `{acct1}` a symlink: `[ ! -L {acct1} ] || { rm {acct1} && mkdir -m 700 {acct1}; } && ` followed by the move below. That prefix is `account-is-store`'s own fix, guarded so the line also runs after that fix has, and a later run of that fix refuses on the real dir without deleting anything.
+- `{acct1}` a symlink: `[ ! -L {acct1} ] || { rm {acct1} && mkdir -m 700 {acct1}; } &&` followed by the move below. That prefix is `account-is-store`'s own fix, guarded so the line also runs after that fix has, and a later run of that fix refuses on the real dir without deleting anything.
 - `{acct1}` a real dir in the store: `apply account-is-store's fix for {acct1} first; pfm doctor then names this entry's move`.
 
 Otherwise, `{acct1}/{entry}` absent: `mkdir -m 700 -p {acct1} && mv {path} {acct1}/{entry}` (for `state`, `mkdir -m 700 -p {acct1} {acct1}/state`), runnable before account 1 exists; present: `keep {acct1}/{entry}; after checking, rm -r {path}`, through `removeKeeping`.
@@ -240,11 +240,11 @@ Fix: `check it names the same oauthAccount as {acct1}/.claude.json, then rm {pat
 
 **Severity:** BLOCK
 
-Looks at each account × shared entry: a real file or dir at `{acct}/{entry}`; skipped for an account `account-is-store` reports.
+Looks at each account × shared entry: a real file or dir at `{acct}/{entry}`, or a link to existing data outside the store; skipped for an account `account-is-store` reports.
 
-Problem: `{entry} is a real {dir|file}; it belongs in the store`.
+Problem: `{entry} is a real {dir|file}; it belongs in the store`, or `{entry} links to {target} outside the store; its data belongs in the store`.
 
-Fix: the entry-specific rule below.
+Fix: the entry-specific rule below. For a link, the merge reads its target's data and the final `rm` removes only the link.
 
 For `account-entry-real`, the fix is selected by entry. Each fix is one shell line whose delete is the last link of an `&&` chain, so it runs only after the merge into the store succeeded. The trailing `#` comment carries the prose:
 

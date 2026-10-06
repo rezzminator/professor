@@ -205,7 +205,12 @@ func TestWireClaudeStore(t *testing.T) {
 					case scenario == "second":
 						fmt.Fprintln(&want, "  ok      "+path)
 					case scenario == "elsewhere" && entry.Name == "agents":
-						fmt.Fprintf(&want, "  change  repoint %s -> %s (was %s)\n", path, target, old)
+						fmt.Fprintf(
+							&want,
+							"  skip    %s links to %s outside the store — pfm doctor names its merge\n",
+							path,
+							old,
+						)
 					case strings.HasPrefix(scenario, "real-") && entry.Name == "projects":
 						fmt.Fprintf(
 							&want,
@@ -256,7 +261,11 @@ func TestWireClaudeStore(t *testing.T) {
 					(strings.HasPrefix(scenario, "real-") && entry.Name == "projects") {
 					continue
 				}
-				if got, err := os.Readlink(filepath.Join(account, entry.Name)); err != nil || got != path {
+				target := path
+				if scenario == "elsewhere" && entry.Name == "agents" {
+					target = old
+				}
+				if got, err := os.Readlink(filepath.Join(account, entry.Name)); err != nil || got != target {
 					t.Fatalf("link %s=%q error=%v", entry.Name, got, err)
 				}
 			}
@@ -274,6 +283,142 @@ func TestWireClaudeStore(t *testing.T) {
 					t.Fatalf("real data=%q error=%v", raw, err)
 				}
 			}
+		})
+	}
+	for _, scenario := range []string{"dangling", "wrong-entry", "live", "live-once", "live-read-error"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			store, account := ClaudeStore(home), pfmconfig.DefaultAccountDir(home, 1)
+			var output bytes.Buffer
+			runner := &engine{options: Options{Home: home, ConfigDir: store, Stdout: &output}, apply: true}
+			if err := runner.wireClaudeStore(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(account, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			old := filepath.Join(home, "gone")
+			if scenario == "wrong-entry" {
+				old = filepath.Join(store, "commands")
+			}
+			path := filepath.Join(account, "agents")
+			if err := os.Symlink(old, path); err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "live", "live-once":
+				writeFixture(t, filepath.Join(account, "sessions", "4242.json"), "{}")
+				runner.options.ProcRoot = filepath.Join(home, "proc")
+				if err := os.MkdirAll(filepath.Join(runner.options.ProcRoot, "4242"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(old, filepath.Join(account, "commands")); err != nil {
+					t.Fatal(err)
+				}
+			case "live-read-error":
+				writeFixture(t, filepath.Join(account, "sessions"), "file")
+			}
+			runner.options.ClaudeAccounts = []pfmconfig.Account{{ID: 1, ConfigDir: account}}
+			var writer *storeMutationWriter
+			if scenario == "live-once" {
+				writer = &storeMutationWriter{match: "  skip    repoint " + path, mutate: func() {
+					sessions := filepath.Join(account, "sessions")
+					if err := os.RemoveAll(sessions); err != nil {
+						t.Fatal(err)
+					}
+					writeFixture(t, sessions, "file")
+				}}
+				runner.options.Stdout = writer
+			}
+			output.Reset()
+			err := runner.wireClaudeStore()
+			if scenario == "live-read-error" {
+				if err == nil || !strings.Contains(err.Error(), "read live chats in "+account) {
+					t.Fatalf("live-chat read error=%v", err)
+				}
+				if got, err := os.Readlink(path); err != nil || got != old {
+					t.Fatalf("link=%q error=%v want=%q", got, err, old)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want strings.Builder
+			for _, entry := range StoreEntries {
+				fmt.Fprintln(&want, "  ok      "+filepath.Join(store, entry.Name))
+			}
+			fmt.Fprintln(&want, "  ok      "+account)
+			for _, entry := range StoreEntries {
+				path, target := filepath.Join(account, entry.Name), filepath.Join(store, entry.Name)
+				switch {
+				case (scenario == "live" || scenario == "live-once") && (entry.Name == "agents" || entry.Name == "commands"):
+					fmt.Fprintf(
+						&want,
+						"  skip    repoint %s: live chats 4242 on %s — close them and rerun pfm install --yes\n",
+						path,
+						account,
+					)
+					target = old
+				case entry.Name == "agents":
+					fmt.Fprintf(&want, "  change  repoint %s -> %s (was %s)\n", path, target, old)
+				default:
+					fmt.Fprintf(&want, "  change  link %s -> %s\n", path, target)
+				}
+				if got, err := os.Readlink(path); err != nil || got != target {
+					t.Errorf("link=%q error=%v want=%q", got, err, target)
+				}
+			}
+			if writer != nil {
+				output = writer.output
+			}
+			if output.String() != want.String() {
+				t.Fatalf("transcript=%q want=%q", output.String(), want.String())
+			}
+			if scratch, err := filepath.Glob(
+				filepath.Join(account, ".agents.pfm-link-*"),
+			); err != nil ||
+				len(scratch) != 0 {
+				t.Fatalf("scratch=%v error=%v", scratch, err)
+			}
+		})
+	}
+	for _, scenario := range []string{"dangling-store", "file-in-dir", "dir-in-file"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			store, account := ClaudeStore(home), pfmconfig.DefaultAccountDir(home, 1)
+			path, reason := filepath.Join(store, "agents"), "a file where a directory belongs"
+			switch scenario {
+			case "dangling-store":
+				path, reason = filepath.Join(store, "projects"), "a dangling link"
+				if err := os.MkdirAll(store, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(home, "gone"), path); err != nil {
+					t.Fatal(err)
+				}
+			case "file-in-dir":
+				writeFixture(t, path, "file")
+			case "dir-in-file":
+				path, reason = filepath.Join(store, "settings.json"), "a directory where a file belongs"
+				if err := os.MkdirAll(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runner := &engine{
+				options: Options{
+					Home:           home,
+					ConfigDir:      store,
+					ClaudeAccounts: []pfmconfig.Account{{ID: 1, ConfigDir: account}},
+					Stdout:         &bytes.Buffer{},
+				},
+				apply: true,
+			}
+			want := fmt.Sprintf("store entry %s broken: %s — remove %s, then run pfm install --yes", path, reason, path)
+			if err := runner.wireClaudeStore(); err == nil || err.Error() != want {
+				t.Fatalf("error=%v want=%s", err, want)
+			}
+			assertAbsent(t, account)
 		})
 	}
 }
@@ -394,6 +539,75 @@ func TestInspectClaudeStore(t *testing.T) {
 			}
 		})
 	}
+	for _, scenario := range []string{"foreign", "dangling", "wrong-entry", "dangling-store", "file-in-dir", "dir-in-file", "linked-store", "unreadable-target"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			store, account := ClaudeStore(home), pfmconfig.DefaultAccountDir(home, 1)
+			if err := (&engine{options: Options{Home: home, ConfigDir: store, Stdout: &bytes.Buffer{}}, apply: true}).wireClaudeStore(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(account, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path, target, want, reason := filepath.Join(account, "agents"), filepath.Join(home, "gone"), "elsewhere", ""
+			index := 0
+			switch scenario {
+			case "foreign":
+				target, want = filepath.Join(home, "old", "agents"), "foreign"
+				writeFixture(t, filepath.Join(target, "kept"), "kept")
+			case "wrong-entry":
+				target = filepath.Join(store, "commands")
+			case "dangling-store", "linked-store":
+				index, path = 6, filepath.Join(store, "projects")
+				want, reason = "broken", "a dangling link"
+				if scenario == "linked-store" {
+					target, want, reason = filepath.Join(home, "data", "projects"), "ok", ""
+					if err := os.MkdirAll(target, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "file-in-dir":
+				path, want, reason = filepath.Join(store, "agents"), "broken", "a file where a directory belongs"
+			case "dir-in-file":
+				index, path, want, reason = 16, filepath.Join(
+					store,
+					"settings.json",
+				), "broken", "a directory where a file belongs"
+			case "unreadable-target":
+				target, want = path, "unreadable"
+			}
+			if strings.Contains(scenario, "store") || scenario == "file-in-dir" || scenario == "dir-in-file" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch scenario {
+			case "file-in-dir":
+				writeFixture(t, path, "file")
+			case "dir-in-file":
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			report := InspectClaudeStore(store, []pfmconfig.Account{{ID: 1, ConfigDir: account}})
+			if strings.Contains(scenario, "store") || scenario == "file-in-dir" || scenario == "dir-in-file" {
+				entry := report.Entries[index]
+				if entry.State != want || (reason != "" && (entry.Err == nil || entry.Err.Error() != reason)) {
+					t.Fatalf("entry=%+v want=%s reason=%q", entry, want, reason)
+				}
+			} else {
+				link := report.Accounts[0].Links[0]
+				if link.State != want || link.Target != target ||
+					(want == "unreadable" && !errors.Is(link.Err, syscall.ELOOP)) {
+					t.Fatalf("link=%+v want=%s target=%q", link, want, target)
+				}
+			}
+		})
+	}
 }
 
 // TestClaudeStoreSymlinkedAccount pins install's door of the account-dir rule:
@@ -488,6 +702,7 @@ func TestClaudeStoreSymlinkedAccount(t *testing.T) {
 
 // storeMutationWriter inserts an I/O failure after inspection and before the change.
 type storeMutationWriter struct {
+	output bytes.Buffer
 	match  string
 	mutate func()
 }
@@ -498,7 +713,7 @@ func (writer *storeMutationWriter) Write(data []byte) (int, error) {
 		writer.mutate = nil
 		mutate()
 	}
-	return len(data), nil
+	return writer.output.Write(data)
 }
 
 func TestWireClaudeStoreWriteErrors(t *testing.T) {
@@ -576,6 +791,15 @@ func TestWireClaudeStoreWriteErrors(t *testing.T) {
 			if err := runner.wireClaudeStore(); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("error=%v want=%s", err, want)
 			}
+			if scenario == "repoint" {
+				assertContent(t, filepath.Join(path, "kept"), "")
+				if scratch, err := filepath.Glob(
+					filepath.Join(account, ".agents.pfm-link-*"),
+				); err != nil ||
+					len(scratch) != 0 {
+					t.Fatalf("scratch=%v error=%v", scratch, err)
+				}
+			}
 		})
 	}
 }
@@ -612,4 +836,43 @@ func TestWireClaudeStoreAccountOrder(t *testing.T) {
 	if output.String() != want.String() {
 		t.Fatalf("account order=%q want=%q", output.String(), want.String())
 	}
+
+	t.Run("alias", func(t *testing.T) {
+		home := t.TempDir()
+		store, account := ClaudeStore(home), pfmconfig.DefaultAccountDir(home, 1)
+		alias := filepath.Join(home, "alias")
+		if err := os.MkdirAll(account, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(account, alias); err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		accounts := []pfmconfig.Account{{ID: 2, ConfigDir: alias}, {ID: 1, ConfigDir: account}}
+		runner := &engine{
+			options: Options{Home: home, ConfigDir: store, ClaudeAccounts: accounts, Stdout: &output},
+			apply:   true,
+		}
+		if err := runner.wireClaudeStore(); err != nil {
+			t.Fatal(err)
+		}
+		var want strings.Builder
+		for _, entry := range StoreEntries {
+			fmt.Fprintln(&want, "  change  create "+filepath.Join(store, entry.Name))
+		}
+		fmt.Fprintf(&want, "  ok      %s\n  skip    account 2 %s is the same directory as account 1\n", account, alias)
+		for _, entry := range StoreEntries {
+			path, target := filepath.Join(account, entry.Name), filepath.Join(store, entry.Name)
+			fmt.Fprintf(&want, "  change  link %s -> %s\n", path, target)
+			if got, err := os.Readlink(path); err != nil || got != target {
+				t.Fatalf("link=%q error=%v want=%q", got, err, target)
+			}
+		}
+		if output.String() != want.String() {
+			t.Fatalf("transcript=%q want=%q", output.String(), want.String())
+		}
+		if report := InspectClaudeStore(store, accounts); len(report.Accounts) != 2 {
+			t.Fatalf("report=%+v", report)
+		}
+	})
 }

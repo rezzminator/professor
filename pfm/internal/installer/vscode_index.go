@@ -261,6 +261,12 @@ type VSCodeProductStatus struct {
 type VSCodeSettingsStatus struct {
 	ClaudeConfigDir string
 	Path            string
+	// EnvOwned records whether pfm owns the account environment entry.
+	EnvOwned bool
+	// EnvRelinquished marks an account environment entry released after an operator edit.
+	EnvRelinquished bool
+	// EnvError carries an environment-array read failure independently of profile state.
+	EnvError string
 	// Profile is one of "owned", "relinquished", "missing", "unreadable".
 	Profile string
 	// ProfileConflict is true when pfm does not own the existing "PFM"
@@ -344,7 +350,9 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 	sort.Strings(sortedSettings)
 	for _, path := range sortedSettings {
 		record := ownership[path]
-		status := VSCodeSettingsStatus{Path: path}
+		status := VSCodeSettingsStatus{
+			Path: path, EnvOwned: record.EnvOwned, EnvRelinquished: !record.EnvOwned && record.EnvValue != "",
+		}
 		raw, readErr := os.ReadFile(path)
 		switch {
 		case errors.Is(readErr, fs.ErrNotExist):
@@ -367,13 +375,14 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 				status.Error = decodeErr.Error()
 				break
 			}
-			entries, index, envErr := readVSCodeClaudeEnvironment(document)
-			if envErr != nil {
-				status.Profile = MCPClientUnreadable
-				status.Error = envErr.Error()
-				break
+			owned := ""
+			if record.EnvOwned {
+				owned = record.EnvValue
 			}
-			if index >= 0 {
+			entries, index, envErr := readVSCodeClaudeEnvironment(document, owned)
+			if envErr != nil {
+				status.EnvError = envErr.Error()
+			} else if index >= 0 {
 				status.ClaudeConfigDir = entries[index].(map[string]any)["value"].(string)
 			}
 			profileKey, defaultKey := vscodeSettingKeys(record.Platform)
@@ -402,7 +411,7 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 
 const vscodeEnvironmentKey = "claudeCode.environmentVariables"
 
-func readVSCodeClaudeEnvironment(document map[string]any) ([]any, int, error) {
+func readVSCodeClaudeEnvironment(document map[string]any, owned string) ([]any, int, error) {
 	value, exists := document[vscodeEnvironmentKey]
 	if !exists {
 		return []any{}, -1, nil
@@ -412,6 +421,7 @@ func readVSCodeClaudeEnvironment(document map[string]any) ([]any, int, error) {
 		return nil, -1, fmt.Errorf("%w: %s must be an array", errMalformedVSCodeSettings, vscodeEnvironmentKey)
 	}
 	index := -1
+	ownedIndex := -1
 	for i, entry := range entries {
 		object, ok := entry.(map[string]any)
 		if !ok {
@@ -435,6 +445,12 @@ func readVSCodeClaudeEnvironment(document map[string]any) ([]any, int, error) {
 		if name == claudeConfigDirEnv && index < 0 {
 			index = i
 		}
+		if name == claudeConfigDirEnv && owned != "" && object["value"] == owned && ownedIndex < 0 {
+			ownedIndex = i
+		}
+	}
+	if ownedIndex >= 0 {
+		index = ownedIndex
 	}
 	return entries, index, nil
 }
@@ -443,7 +459,11 @@ func (installer *engine) mergeVSCodeClaudeEnvironment(
 	document map[string]any,
 	record vscodeOwnershipRecord,
 ) ([]any, vscodeOwnershipRecord, bool, error) {
-	entries, index, err := readVSCodeClaudeEnvironment(document)
+	owned := ""
+	if record.EnvOwned {
+		owned = record.EnvValue
+	}
+	entries, index, err := readVSCodeClaudeEnvironment(document, owned)
 	if err != nil {
 		return nil, record, false, err
 	}
@@ -457,14 +477,16 @@ func (installer *engine) mergeVSCodeClaudeEnvironment(
 		record.PreviousEnv = ""
 		record.EnvKeyAdded = false
 		// Keep the last written value as the relinquishment marker on later installs.
-		return entries, record, false, nil
+		if !installer.options.VSCode {
+			return entries, record, false, nil
+		}
 	}
 	want := installer.options.PrimaryConfigDir
 	if want == "" {
 		return entries, record, false, nil
 	}
 	if !record.EnvOwned {
-		if !installer.options.VSCode || record.EnvValue != "" {
+		if !installer.options.VSCode {
 			return entries, record, false, nil
 		}
 		record.EnvOwned = true
@@ -499,7 +521,7 @@ func restoreVSCodeClaudeEnvironment(
 	if !record.EnvOwned {
 		return raw, false, nil
 	}
-	entries, index, err := readVSCodeClaudeEnvironment(document)
+	entries, index, err := readVSCodeClaudeEnvironment(document, record.EnvValue)
 	if err != nil {
 		return nil, false, err
 	}

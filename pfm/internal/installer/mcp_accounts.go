@@ -65,8 +65,10 @@ func ClaudeUserRegistries(home string, accounts []pfmconfig.Account, ambientConf
 }
 
 func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
+	ownership.Registrations = nil
+	ownership.Pending = nil
 	path := installer.mcpOwnershipPath()
-	if len(ownership.Clients) == 0 && len(ownership.Registrations) == 0 && len(ownership.Pending) == 0 &&
+	if len(ownership.Clients) == 0 &&
 		len(ownership.OpenCodeRegistrations) == 0 && len(ownership.OpenCodePending) == 0 {
 		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -86,4 +88,15 @@ func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 	return installer.change("write "+path, func() error {
 		return atomicfile.Write(path, encoded, 0o600)
 	})
+}
+
+func (installer *engine) dropClaudeMCPOwnership() error {
+	ownership, err := installer.loadMCPOwnership()
+	if err != nil {
+		return err
+	}
+	if len(ownership.Registrations) > 0 || len(ownership.Pending) > 0 {
+		return installer.saveMCPOwnership(ownership)
+	}
+	return nil
 }

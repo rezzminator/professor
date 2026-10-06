@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,10 +175,103 @@ func TestClearFullscreenAutoDisableReportsAnUnreadableRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	installer, output := fullscreenEngine(t, true, account)
-	if err := installer.clearFullscreenAutoDisable(); err != nil {
+	err := installer.clearFullscreenAutoDisable()
+	want := "claude fullscreen canary in " + filepath.Join(account.ConfigDir, ".claude.json") +
+		": registry unreadable, state unknown:"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	if output.String() != "  FAIL    "+err.Error()+"\n" {
+		t.Fatalf("unreadable registry output = %q, want the complete FAIL line", output.String())
+	}
+}
+
+func TestClearFullscreenAutoDisableSkipsLiveChats(t *testing.T) {
+	for _, unreadable := range []bool{false, true} {
+		t.Run(fmt.Sprint(unreadable), func(t *testing.T) {
+			account := fullscreenAccount(t, `{"tui":"fullscreen"}`, canaryRegistry)
+			proc := filepath.Join(t.TempDir(), "proc")
+			if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if unreadable {
+				writeFixture(t, filepath.Join(account.ConfigDir, "sessions"), "not a directory")
+			} else {
+				writeFixture(t, filepath.Join(account.ConfigDir, "sessions", "4242.json"), "{}")
+			}
+			installer, output := fullscreenEngine(t, true, account)
+			installer.options.ProcRoot = proc
+			err := installer.clearFullscreenAutoDisable()
+			path := filepath.Join(account.ConfigDir, ".claude.json")
+			want := "  skip    claude fullscreen canary in " + path + ": live chats 4242 on " +
+				account.ConfigDir + " — close them and rerun pfm install --yes\n"
+			if unreadable {
+				prefix := "claude fullscreen canary in " + path + ": read live chats in " + account.ConfigDir
+				if err == nil || !strings.Contains(err.Error(), prefix) {
+					t.Fatalf("error = %v, want %q", err, prefix)
+				}
+				want = "  FAIL    " + err.Error() + "\n"
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != want {
+				t.Errorf("output = %q, want %q", output.String(), want)
+			}
+			if got := readRegistry(t, account); got != canaryRegistry {
+				t.Errorf("registry = %q, want original bytes %q", got, canaryRegistry)
+			}
+		})
+	}
+}
+
+func TestClearFullscreenAutoDisableFailsUnreadableState(t *testing.T) {
+	for _, settings := range []bool{false, true} {
+		t.Run(fmt.Sprint(settings), func(t *testing.T) {
+			account := fullscreenAccount(t, `{"tui":"fullscreen"}`, canaryRegistry)
+			path := filepath.Join(account.ConfigDir, ".claude.json")
+			want := "claude fullscreen canary in " + path +
+				": registry unparsable, state unknown: decode key: unexpected end of JSON input"
+			before := "{"
+			if settings {
+				path = filepath.Join(account.ConfigDir, "settings.json")
+				want = "claude fullscreen canary for account 3: settings unreadable, state unknown: parse " +
+					path + ": unexpected end of JSON input"
+				before = canaryRegistry
+			}
+			writeFixture(t, path, "{")
+			installer, output := fullscreenEngine(t, true, account)
+			err := installer.clearFullscreenAutoDisable()
+			if err == nil || err.Error() != want {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+			if output.String() != "  FAIL    "+want+"\n" {
+				t.Errorf("output = %q, want the complete FAIL line", output.String())
+			}
+			if got := readRegistry(t, account); got != before {
+				t.Errorf("registry = %q, want %q", got, before)
+			}
+		})
+	}
+}
+
+func TestClearFullscreenAutoDisableHandlesEveryAccount(t *testing.T) {
+	first := fullscreenAccount(t, `{"tui":"fullscreen"}`, "")
+	first.ID = 1
+	second := fullscreenAccount(t, `{"tui":"fullscreen"}`, canaryRegistry)
+	second.ID = 2
+	path := filepath.Join(first.ConfigDir, ".claude.json")
+	if err := os.Mkdir(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "skip") || !strings.Contains(output.String(), "state unknown") {
-		t.Fatalf("unreadable registry not reported:\n%s", output)
+	installer, output := fullscreenEngine(t, true, first, second)
+	err := installer.clearFullscreenAutoDisable()
+	if err == nil || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), second.ConfigDir) {
+		t.Fatalf("error = %v, want only account 1's registry %s", err, path)
+	}
+	if !strings.Contains(output.String(), "  FAIL    "+err.Error()+"\n") {
+		t.Errorf("output = %q, want the complete FAIL line", output.String())
+	}
+	if got := readRegistry(t, second); got != canaryCleared {
+		t.Errorf("account 2 registry = %q, want %q", got, canaryCleared)
 	}
 }

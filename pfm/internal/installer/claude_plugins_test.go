@@ -619,3 +619,76 @@ func TestClaudePluginFailedCommandKeepsItsWrites(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudePluginStepFailsUnreadableState(t *testing.T) {
+	for _, record := range []bool{false, true} {
+		t.Run(fmt.Sprint(record), func(t *testing.T) {
+			home, binary, first, second := pluginFixture(t)
+			path := filepath.Join(first, "settings.json")
+			state := "settings"
+			if record {
+				path = filepath.Join(first, "plugins", "installed_plugins.json")
+				state = "install record"
+			}
+			writeFixture(t, path, "{")
+			runner := &pluginRunner{}
+			var output bytes.Buffer
+			installer := pluginEngine(home, binary, first, second, runner, &output, true)
+			err := installer.ensureClaudePlugins(context.Background())
+			want := "claude plugins in " + first + ": " + state + " unreadable, state unknown: parse " +
+				path + ": unexpected end of JSON input"
+			if err == nil || err.Error() != want {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+			if output.String() != "  FAIL    "+want+"\n" || len(runner.calls) != 0 {
+				t.Fatalf(
+					"output = %q calls=%v, want the complete FAIL line and no commands",
+					output.String(),
+					runner.calls,
+				)
+			}
+		})
+	}
+}
+
+func TestClaudePluginStepGuardsRosterDirs(t *testing.T) {
+	for _, alias := range []bool{false, true} {
+		t.Run(fmt.Sprint(alias), func(t *testing.T) {
+			home, binary, first, second := pluginFixture(t)
+			t.Setenv(paths.EnvHome, home)
+			runner := &pluginRunner{}
+			var output bytes.Buffer
+			installer := pluginEngine(home, binary, first, second, runner, &output, true)
+			installer.options.RosterConfigDirs = []string{first, second}
+			liveDir := second
+			if alias {
+				link := filepath.Join(home, "alias")
+				if err := os.Symlink(first, link); err != nil {
+					t.Fatal(err)
+				}
+				installer.options.RosterConfigDirs = []string{link}
+				liveDir = first
+			} else {
+				installer.options.ClaudeAccounts, installer.options.PrimaryConfigDir = nil, ""
+				installer.options.ClaudeRosterHost = true
+				installer.options.ConfigDir = filepath.Join(home, "custom")
+				if err := os.Mkdir(installer.options.ConfigDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			proc := filepath.Join(home, "proc")
+			if err := os.MkdirAll(filepath.Join(proc, "4242"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeFixture(t, filepath.Join(liveDir, "sessions", "4242.json"), "{}")
+			installer.options.ProcRoot = proc
+			if err := installer.ensureClaudePlugins(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := "  skip    claude plugins: live chats 4242 on " + liveDir + " — close them and rerun pfm install --yes\n"
+			if output.String() != want || len(runner.calls) != 0 {
+				t.Fatalf("output = %q calls=%v, want %q and no commands", output.String(), runner.calls, want)
+			}
+		})
+	}
+}

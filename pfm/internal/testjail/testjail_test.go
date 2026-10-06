@@ -21,6 +21,7 @@ const keepAmbientChild = "PFM_TEST_KEEP_AMBIENT_CHILD"
 
 func TestMain(m *testing.M) {
 	KeepAmbientIdentity = os.Getenv(keepAmbientChild) == "1"
+	UnsetXDGConfigHome = os.Getenv(unsetXDGChild) == "1"
 	os.Exit(Run(m))
 }
 

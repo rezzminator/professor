@@ -1,7 +1,10 @@
 package installer
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -413,5 +416,290 @@ func TestCheckSkillFileNamesAnUninspectablePath(t *testing.T) {
 	err := checkSkillFile(filepath.Join(t.TempDir(), strings.Repeat("a", 300)))
 	if !errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, errSkillFileUnusable) {
 		t.Fatalf("an uninspectable SKILL.md path: %v", err)
+	}
+}
+
+func TestSourceFetchedSkillsSwapFailure(t *testing.T) {
+	for _, restoreFails := range []bool{true, false} {
+		name := "restored"
+		if restoreFails {
+			name = "old-copy-kept"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+			writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+			runSkillInstall(t, home, ModeApply)
+			skillFixtureCommit(t, repo, map[string]string{"SKILL.md": "# v2\n"})
+			store := filepath.Join(skillStoreRoot(home), "god-speed")
+			previous := skillStoreRename
+			t.Cleanup(func() { skillStoreRename = previous })
+			var staging string
+			var moveErr error
+			skillStoreRename = func(from, to string) error {
+				base := filepath.Base(from)
+				if strings.HasPrefix(base, ".god-speed.fetch-") && !strings.HasSuffix(base, ".old") {
+					staging = from
+					moveErr = &os.LinkError{Op: "rename", Old: from, New: to, Err: syscall.EIO}
+					return moveErr
+				}
+				if restoreFails && strings.HasSuffix(from, ".old") {
+					return &os.LinkError{Op: "rename", Old: from, New: to, Err: syscall.EIO}
+				}
+				return os.Rename(from, to)
+			}
+			var output bytes.Buffer
+			_, err := Run(context.Background(), Options{
+				Mode: ModeApply, Home: home, MCPConfigPath: testConfigPath(t), Stdout: &output, Runner: &fakeRunner{},
+			})
+			if restoreFails {
+				if err == nil || !strings.Contains(err.Error(), "replace skill store "+store+": ") ||
+					!strings.Contains(err.Error(), "(the old copy is kept at "+staging+".old)") {
+					t.Fatalf("failed swap did not retain and name the old copy: %v\n%s", err, output.String())
+				}
+				if got := readSkillFile(t, filepath.Join(staging+".old", "SKILL.md")); got != "# v1\n" {
+					t.Fatalf("old copy = %q, want v1", got)
+				}
+				if strings.Contains(output.String(), "(keeping "+store+")") {
+					t.Fatalf("failed restore reported a store in place:\n%s", output.String())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf(
+				"  skip    SKILL-FETCH-FAILED god-speed: move %s into place (old store restored): %v (keeping %s)\n",
+				staging,
+				moveErr,
+				store,
+			)
+			if !strings.Contains(output.String(), want) {
+				t.Fatalf("restored skip missing %q:\n%s", want, output.String())
+			}
+			if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
+				t.Fatalf("restored store = %q, want v1", got)
+			}
+			entries, err := filepath.Glob(filepath.Join(skillStoreRoot(home), ".god-speed.fetch-*"))
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("swap leftovers = %v, err=%v", entries, err)
+			}
+		})
+	}
+}
+
+func TestSourceFetchedSkillsDryRunReclonesAnUnusableStore(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	store := filepath.Join(skillStoreRoot(home), "god-speed")
+	skill := filepath.Join(store, "SKILL.md")
+	if err := os.Remove(skill); err != nil {
+		t.Fatal(err)
+	}
+	output := runSkillInstall(t, home, ModeDryRun)
+	want := "  change  re-clone " + store + " from file://" + repo +
+		" (inspect " + skill + ": lstat " + skill + ": no such file or directory)\n"
+	if !strings.Contains(output, want) ||
+		!strings.Contains(output, "  ok      "+filepath.Join(home, ".agents", "skills", "god-speed")+"\n") ||
+		strings.Contains(output, "SKILL-SOURCE-MISSING god-speed") {
+		t.Fatalf("dry run did not preview the usable replacement %q:\n%s", want, output)
+	}
+}
+
+func TestSourceFetchedSkillsInterruptedSwap(t *testing.T) {
+	for _, restoreFails := range []bool{false, true} {
+		name := "restored"
+		if restoreFails {
+			name = "restore-failed"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+			writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+			if err := os.RemoveAll(repo); err != nil {
+				t.Fatal(err)
+			}
+			root := skillStoreRoot(home)
+			store := filepath.Join(root, "god-speed")
+			staging := filepath.Join(root, ".god-speed.fetch-abc")
+			trash := staging + ".old"
+			writeFixture(t, filepath.Join(trash, "SKILL.md"), "# v1\n")
+			if err := os.Mkdir(staging, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			var restoreErr error
+			if restoreFails {
+				previous := skillStoreRename
+				t.Cleanup(func() { skillStoreRename = previous })
+				restoreErr = &os.LinkError{Op: "rename", Old: trash, New: store, Err: syscall.EIO}
+				skillStoreRename = func(from, to string) error {
+					if from == trash {
+						return restoreErr
+					}
+					return os.Rename(from, to)
+				}
+			}
+			var output bytes.Buffer
+			_, err := Run(context.Background(), Options{
+				Mode: ModeApply, Home: home, MCPConfigPath: testConfigPath(t), Stdout: &output, Runner: &fakeRunner{},
+			})
+			if restoreFails {
+				want := fmt.Sprintf("restore %s from %s: %v", store, trash, restoreErr)
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("restore error missing %q: %v\n%s", want, err, output.String())
+				}
+				if got := readSkillFile(t, filepath.Join(trash, "SKILL.md")); got != "# v1\n" {
+					t.Fatalf("failed recovery lost v1: %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "  change  restore " + store + " from " + trash + " (an interrupted swap)\n"
+			if !strings.Contains(output.String(), want) ||
+				!strings.Contains(output.String(), "  skip    SKILL-FETCH-FAILED god-speed: ") ||
+				!strings.Contains(output.String(), " (keeping "+store+")\n") {
+				t.Fatalf("recovery did not name the restored store %q:\n%s", want, output.String())
+			}
+			if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
+				t.Fatalf("recovered store = %q, want v1", got)
+			}
+			requireNoPath(t, staging, "recovery left staging")
+			assertLink(t, filepath.Join(home, ".agents", "skills", "god-speed"), store)
+		})
+	}
+}
+
+func TestRunSkillGitSSHEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, program, want string
+	}{
+		{name: "no-prompt", want: "ssh -o BatchMode=yes"},
+		{name: "inherited-command", command: "ssh -i /user/key", want: "ssh -i /user/key"},
+		{name: "inherited-program", program: "/user/ssh-wrap", want: "unset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GIT_SSH_COMMAND", tc.command)
+			t.Setenv("GIT_SSH", tc.program)
+			for key, value := range map[string]string{"GIT_SSH_COMMAND": tc.command, "GIT_SSH": tc.program} {
+				if value == "" {
+					if err := os.Unsetenv(key); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			script := filepath.Join(t.TempDir(), "git")
+			if err := testjail.WriteExecutable(
+				script,
+				[]byte("#!/bin/sh\nprintf '%s' \"${GIT_SSH_COMMAND-unset}\"\n"),
+				0o755,
+			); err != nil {
+				t.Fatal(err)
+			}
+			got, err := runSkillGitWith(
+				deps.RealRunner{},
+				10*time.Second,
+				skillGitWaitDelay,
+				script,
+				t.TempDir(),
+				"ls-remote",
+			)
+			if err != nil || got != tc.want {
+				t.Fatalf("git ssh command = %q, err=%v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+type skillDeadlineRunner struct {
+	deps.Runner
+	deadlines []time.Time
+}
+
+func TestSourceFetchedSkillsInterruptedSwapPreviewAndSelection(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []Mode{ModeDryRun, ModeApply} {
+		name := "apply"
+		if mode == ModeDryRun {
+			name = "dry-run"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			repo := filepath.Join(t.TempDir(), "deleted-repo")
+			writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+			root := skillStoreRoot(home)
+			store := filepath.Join(root, "god-speed")
+			older := filepath.Join(root, ".god-speed.fetch-aaa.old")
+			trash := filepath.Join(root, ".god-speed.fetch-abc.old")
+			writeFixture(t, filepath.Join(older, "SKILL.md"), "# earlier\n")
+			writeFixture(t, filepath.Join(trash, "SKILL.md"), "# v1\n")
+			output := runSkillInstall(t, home, mode)
+			want := "  change  restore " + store + " from " + trash + " (an interrupted swap)\n"
+			if !strings.Contains(output, want) {
+				t.Fatalf("recovery did not choose the lexically last copy %q:\n%s", want, output)
+			}
+			if mode == ModeDryRun {
+				if strings.Contains(output, "retire "+trash+" ") {
+					t.Fatalf("dry run also retired its recovery source:\n%s", output)
+				}
+				if got := readSkillFile(t, filepath.Join(trash, "SKILL.md")); got != "# v1\n" {
+					t.Fatalf("dry-run recovery changed the old copy to %q", got)
+				}
+				requireNoPath(t, store, "dry-run recovery changed the store")
+				return
+			}
+			if got := readSkillFile(t, filepath.Join(store, "SKILL.md")); got != "# v1\n" {
+				t.Fatalf("recovered store = %q, want v1", got)
+			}
+			requireNoPath(t, older, "recovery left an older interrupted copy")
+		})
+	}
+}
+
+func (runner *skillDeadlineRunner) Run(ctx context.Context, _ []string, _ deps.RunOptions) (deps.RunResult, error) {
+	deadline, _ := ctx.Deadline()
+	runner.deadlines = append(runner.deadlines, deadline)
+	return deps.RunResult{Stdout: []byte("fixture\n")}, nil
+}
+
+func TestRunSkillGitBudget(t *testing.T) {
+	t.Parallel()
+	t.Run("spent", func(t *testing.T) {
+		runner := &deps.FakeRunner{}
+		installer := &engine{options: Options{Home: t.TempDir(), ProcessRunner: runner}}
+		_, err := installer.runSkillGit(time.Now().Add(-time.Second), "ls-remote", "--", "file:///nowhere", "HEAD")
+		want := "skill fetch budget of 2m0s spent before git ls-remote -- file:///nowhere HEAD"
+		if err == nil || err.Error() != want {
+			t.Fatalf("spent budget = %v, want %q", err, want)
+		}
+		if calls := runner.Calls(); len(calls) != 0 {
+			t.Fatalf("spent budget reached the runner: %+v", calls)
+		}
+	})
+	for _, budget := range []time.Duration{5 * time.Second, 10 * time.Minute} {
+		t.Run(budget.String(), func(t *testing.T) {
+			runner := &skillDeadlineRunner{}
+			installer := &engine{options: Options{Home: t.TempDir(), ProcessRunner: runner}}
+			start := time.Now()
+			deadline := start.Add(budget)
+			if _, err := installer.runSkillGit(deadline, "ls-remote"); err != nil {
+				t.Fatal(err)
+			}
+			if len(runner.deadlines) != 1 {
+				t.Fatalf("recorded deadlines = %v", runner.deadlines)
+			}
+			got := runner.deadlines[0]
+			if budget < skillGitTimeout && (got.After(deadline) || got.Before(deadline.Add(-time.Second))) {
+				t.Fatalf("call deadline = %v, want at most %v", got, deadline)
+			}
+			if budget > skillGitTimeout &&
+				(got.Before(start.Add(59*time.Second)) || got.After(start.Add(61*time.Second))) {
+				t.Fatalf("call deadline = %v, want 60s +/- 1s after %v", got, start)
+			}
+		})
 	}
 }

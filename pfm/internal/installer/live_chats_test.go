@@ -26,10 +26,6 @@ func TestLiveChatPIDs(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, []string{"12", "3"}) {
 		t.Fatalf("live=%v err=%v", got, err)
 	}
-	pids, err := processIDs(proc)
-	if err != nil || !reflect.DeepEqual(pids, got) {
-		t.Fatalf("processes=%v err=%v", pids, err)
-	}
 }
 
 func TestLiveChatPIDsMissingAndUnreadable(t *testing.T) {
@@ -41,12 +37,5 @@ func TestLiveChatPIDsMissingAndUnreadable(t *testing.T) {
 	writeFixture(t, filepath.Join(account, "sessions"), "not a directory")
 	if _, err := liveChatPIDs(root, account); err == nil {
 		t.Fatal("unreadable sessions read as empty")
-	}
-	if err := os.Remove(filepath.Join(account, "sessions")); err != nil {
-		t.Fatal(err)
-	}
-	writeFixture(t, filepath.Join(account, "sessions", "12.json"), "{}")
-	if _, err := processIDs(filepath.Join(root, "missing-proc")); err == nil {
-		t.Fatal("unreadable process table read as empty")
 	}
 }

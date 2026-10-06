@@ -9,7 +9,10 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
-func TestMain(m *testing.M) { os.Exit(testjail.Run(m)) }
+func TestMain(m *testing.M) {
+	testjail.UnsetXDGConfigHome = true
+	os.Exit(testjail.Run(m))
+}
 
 var testConfigPaths sync.Map
 

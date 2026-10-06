@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -230,5 +231,72 @@ func TestOpenCodeInstructionsRejectsUnusableClone(t *testing.T) {
 	}
 	if raw := readFixture(t, config); raw != original {
 		t.Fatalf("config changed: %q", raw)
+	}
+}
+
+func TestOpenCodeInstructionsOtherClones(t *testing.T) {
+	for _, mode := range []Mode{ModeApply, ModeUninstall} {
+		name := "apply"
+		if mode == ModeUninstall {
+			name = "uninstall"
+		}
+		t.Run(name, func(t *testing.T) {
+			home, clone := t.TempDir(), t.TempDir()
+			config := OpenCodeConfigPath(home)
+			composed := filepath.Join(clone, "pfm", "harness-prompts", "composed", "opencode.md")
+			entries := []string{
+				"/srv/old-clone/pfm/harness-prompts/composed/opencode.md",
+				filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts", "opencode.md"),
+				"./house-rules.md",
+			}
+			want := []string{composed, "./house-rules.md"}
+			if mode == ModeUninstall {
+				entries = append(entries, composed)
+				want = []string{"./house-rules.md"}
+			}
+			raw, err := json.Marshal(map[string]any{"instructions": entries})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFixture(t, config, string(raw))
+			if _, err := Run(context.Background(), Options{
+				Mode: mode, Home: home, SourceRepo: clone, MCPConfigPath: testConfigPath(t),
+				Runner: &fakeRunner{nameSyncIdle: true}, Stdout: io.Discard, CodexHomes: []string{},
+				OpenCodeConfigPath: config,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, readFixture(t, config)), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("instructions = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeInstructionsUninstallWithoutMarker(t *testing.T) {
+	home := t.TempDir()
+	config := OpenCodeConfigPath(home)
+	writeFixture(
+		t,
+		config,
+		`{"instructions":["/srv/old-clone/pfm/harness-prompts/composed/opencode.md","operator.md"]}`,
+	)
+	var output strings.Builder
+	installer := &engine{options: Options{
+		Mode: ModeUninstall, Home: home, OpenCodeConfigPath: config, Stdout: &output,
+	}, apply: true}
+	if err := installer.wireOpenCodeInstructions(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := openCodeInstructionEntries(decodeOpenCodeFixture(t, readFixture(t, config)), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"operator.md"}) || installer.report.Skipped != 0 {
+		t.Fatalf("instructions = %v, report = %+v, output = %q", got, installer.report, output.String())
 	}
 }

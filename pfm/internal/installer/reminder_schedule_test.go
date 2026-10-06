@@ -190,3 +190,91 @@ func TestReminderUnitsSurviveInstallUninstallReinstall(t *testing.T) {
 		assertLink(t, link, want)
 	}
 }
+
+func TestReminderScheduleDrift(t *testing.T) {
+	scenarios := []string{"no drift", "drifted unit", "nothing installed", "unreadable unit", "no home"}
+	if !schedulerIsLaunchd {
+		// Only systemd units are links into the managed root.
+		scenarios = append(scenarios, "dangling unit link")
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, ".config", "systemd", "user", reminderTimerUnit)
+			if schedulerIsLaunchd {
+				path = filepath.Join(home, "Library", "LaunchAgents", reminderLaunchdLabel+".plist")
+			}
+			if scenario == "no drift" || scenario == "drifted unit" || scenario == "dangling unit link" {
+				if schedulerIsLaunchd {
+					installer := engine{apply: true, stamp: "test", options: Options{
+						Home: home, Runner: &fakeRunner{}, Stdout: io.Discard, Sleep: func(time.Duration) {},
+					}}
+					if err := installer.wireReminderLaunchAgent(context.Background()); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if _, err := Run(context.Background(), Options{
+						Mode: ModeApply, Home: home, MCPConfigPath: testConfigPath(t),
+						Runner: &fakeRunner{manager: true}, Stdout: io.Discard,
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if scenario == "drifted unit" {
+				if !schedulerIsLaunchd {
+					path = filepath.Join(home, ".config", "systemd", "user", reminderServiceUnit)
+				}
+				if err := os.WriteFile(path, []byte("stale\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if !schedulerIsLaunchd {
+					target, err := os.Readlink(path)
+					if err != nil {
+						t.Fatalf("drift fixture must retain the installed symlink: %v", err)
+					}
+					if raw, err := os.ReadFile(target); err != nil || string(raw) != "stale\n" {
+						t.Fatalf("link target=%q err=%v", raw, err)
+					}
+				}
+			}
+			if scenario == "dangling unit link" {
+				target, err := os.Readlink(path)
+				if err != nil {
+					t.Fatalf("dangling fixture must start from the installed symlink: %v", err)
+				}
+				if err := os.Remove(target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "unreadable unit" {
+				if err := os.MkdirAll(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "no home" {
+				home = ""
+			}
+			gotPath, drifted, err := ReminderScheduleDrift(home)
+			switch scenario {
+			case "no home":
+				if err == nil || err.Error() != "reminder schedule drift: no home directory" || drifted ||
+					gotPath != "" {
+					t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
+				}
+			case "unreadable unit":
+				if err == nil || !strings.HasPrefix(err.Error(), "read "+path+":") || drifted || gotPath != "" {
+					t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
+				}
+			case "drifted unit", "dangling unit link":
+				if err != nil || !drifted || gotPath != path {
+					t.Fatalf("path=%q drifted=%t err=%v want drift=%s", gotPath, drifted, err, path)
+				}
+			default:
+				if err != nil || drifted || gotPath != "" {
+					t.Fatalf("path=%q drifted=%t err=%v", gotPath, drifted, err)
+				}
+			}
+		})
+	}
+}

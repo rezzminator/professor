@@ -40,22 +40,24 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 	// The clone being installed wins: a first install records the marker
 	// only later in this same run, as at wireShell.
 	var composed string
-	var err error
-	if repo := strings.TrimSpace(installer.options.SourceRepo); repo != "" {
-		var content []byte
-		content, err = paths.SourceRepoMarkerContent(repo)
-		if err == nil {
-			composed = paths.ComposedHarnessPromptIn(strings.TrimSpace(string(content)), pfmengine.OpenCode)
+	if wanted {
+		var err error
+		if repo := strings.TrimSpace(installer.options.SourceRepo); repo != "" {
+			var content []byte
+			content, err = paths.SourceRepoMarkerContent(repo)
+			if err == nil {
+				composed = paths.ComposedHarnessPromptIn(strings.TrimSpace(string(content)), pfmengine.OpenCode)
+			}
+		} else {
+			composed, err = paths.ComposedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
 		}
-	} else {
-		composed, err = paths.ComposedHarnessPrompt(installer.options.Home, pfmengine.OpenCode)
-	}
-	if errors.Is(err, paths.ErrNoSourceRepoMarker) {
-		installer.skip("skip opencode instructions: no source repo recorded")
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("resolve OpenCode prompt: %w", err)
+		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
+			installer.skip("skip opencode instructions: no source repo recorded")
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("resolve OpenCode prompt: %w", err)
+		}
 	}
 	path = physicalSettingsPath(path)
 	original, existed, err := readMCPFile(path)
@@ -74,6 +76,7 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 		return fmt.Errorf("parse OpenCode config %s: %w", path, err)
 	}
 	legacy := filepath.Join(paths.LegacyHarnessPromptsDir(installer.options.Home), "opencode.md")
+	composedSuffix := "/" + filepath.ToSlash(paths.ComposedHarnessPromptIn("", pfmengine.OpenCode))
 	current, err := openCodeInstructionEntries(document, path)
 	if err != nil {
 		return err
@@ -83,7 +86,7 @@ func (installer *engine) editOpenCodeInstructions(wanted bool) error {
 		next = append(next, composed)
 	}
 	for _, entry := range current {
-		if entry == composed || entry == legacy {
+		if entry == legacy || strings.HasSuffix(filepath.ToSlash(entry), composedSuffix) {
 			continue
 		}
 		next = append(next, entry)

@@ -1099,14 +1099,6 @@ Read only.
 	}
 }
 
-func TestRunRefusesMissingConfigPathAndSourceRepo(t *testing.T) {
-	home := t.TempDir()
-	_, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}})
-	if err == nil || !strings.Contains(err.Error(), "preflight apply plan: no config path: no source repo recorded") {
-		t.Fatalf("Run error=%v, want missing config path refusal", err)
-	}
-}
-
 func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()

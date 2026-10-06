@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,17 +173,99 @@ func TestInstallMarkdownToolDryRunPlansOnlyAndRunsNothing(t *testing.T) {
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("output=%q, want to contain %q", output.String(), want)
 	}
-	if eng.report.OK != 0 || eng.report.Skipped != 0 || eng.report.Changed != 0 {
-		t.Fatalf("dry-run report=%+v, want all zero (a preview never mutates the report)", eng.report)
+	if eng.report.OK != 0 || eng.report.Skipped != 0 || eng.report.Changed != 1 {
+		t.Fatalf("dry-run report=%+v, want one planned config change", eng.report)
 	}
 	assertNeverRan(t, marker, "rumdl")
 	assertNeverRan(t, marker, "uv")
 	config := filepath.Join(home, ".config", "rumdl", "rumdl.toml")
-	if !strings.Contains(output.String(), "rumdl dry-run: would write user config "+config) {
+	if !strings.Contains(output.String(), "  change  write rumdl user config -> "+config+"\n") {
 		t.Fatalf("output=%q, want the user config planned", output.String())
 	}
 	if _, err := os.Lstat(config); !os.IsNotExist(err) {
 		t.Fatalf("dry run wrote %s: %v", config, err)
+	}
+}
+
+func TestRemoveRumdlUserConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, content      string
+		present, directory bool
+	}{
+		{name: "pfm", content: wantRumdlUserConfig, present: true},
+		{name: "vanished", content: wantRumdlUserConfig, present: true},
+		{name: "operator", content: "[global]\nline-length = 120\n", present: true},
+		{name: "absent"},
+		{name: "unreadable", directory: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			installer, output := presentRumdlEngine(t, home, &paths.MapEnv{})
+			config := filepath.Join(home, ".config", "rumdl", "rumdl.toml")
+			if tc.present {
+				writeFixture(t, config, tc.content)
+			} else if tc.directory {
+				if err := os.MkdirAll(config, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.name == "vanished" {
+				// Another uninstall removes it between the read and the remove.
+				installer.options.Stdout = &storeMutationWriter{
+					match: "  change  remove rumdl user config",
+					mutate: func() {
+						if err := os.Remove(config); err != nil {
+							t.Fatal(err)
+						}
+					},
+				}
+			}
+			err := installer.removeRumdlUserConfig()
+			if tc.name == "vanished" {
+				if err != nil {
+					t.Fatalf("a config removed meanwhile failed the removal: %v", err)
+				}
+				return
+			}
+			if tc.directory {
+				if err == nil || !strings.HasPrefix(err.Error(), "read rumdl user config "+config+": ") ||
+					!strings.Contains(err.Error(), "is a directory") {
+					t.Fatalf("read error = %v, want named directory error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := ""
+			changed, skipped := 0, 0
+			if tc.name == "pfm" {
+				want = "  change  remove rumdl user config " + config + "\n"
+				changed = 1
+				if _, err := os.Stat(config); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("pfm config removal: %v", err)
+				}
+				if _, err := os.Stat(filepath.Dir(config)); err != nil {
+					t.Fatalf("rumdl directory removed: %v", err)
+				}
+			} else if tc.present {
+				want = "  skip    rumdl user config " + config + " is not pfm's; kept\n"
+				skipped = 1
+				if got := readFixture(t, config); got != tc.content {
+					t.Fatalf("operator config = %q, want %q", got, tc.content)
+				}
+			}
+			if output.String() != want || installer.report.Changed != changed || installer.report.Skipped != skipped {
+				t.Fatalf(
+					"report = %+v, output = %q; want changed = %d, skipped = %d, output = %q",
+					installer.report,
+					output.String(),
+					changed,
+					skipped,
+					want,
+				)
+			}
+		})
 	}
 }
 

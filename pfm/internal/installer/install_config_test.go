@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -13,7 +15,7 @@ import (
 )
 
 func TestInstallConfig(t *testing.T) {
-	for _, scenario := range []string{"existing", "empty target", "explicit missing", "no clone", "no example", "preview", "apply", "marker wins"} {
+	for _, scenario := range []string{"existing", "empty target", "explicit missing", "no clone", "no example", "plan seed", "marker wins"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, clone := t.TempDir(), t.TempDir()
 			target := filepath.Join(home, "config", pfmconfig.FileName)
@@ -31,7 +33,6 @@ func TestInstallConfig(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantTheme, wantSeed := "original", ""
-			apply := scenario == "apply"
 			switch scenario {
 			case "existing":
 				if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
@@ -51,23 +52,21 @@ func TestInstallConfig(t *testing.T) {
 				if err := os.Remove(example); err != nil {
 					t.Fatal(err)
 				}
-			case "preview":
-				wantTheme = "seeded"
-			case "apply":
+			case "plan seed":
 				wantTheme, wantSeed = "seeded", example
 			case "marker wins":
 				if err := paths.WriteSourceRepoMarker(home, clone); err != nil {
 					t.Fatal(err)
 				}
 				clone = t.TempDir()
-				wantTheme = "seeded"
+				wantTheme, wantSeed = "seeded", example
 			}
 			before := snapshotMemoryMigrationTree(t, home)
-			got, seeded, err := InstallConfig(runtime, &paths.MapEnv{}, clone, apply)
+			got, seeded, err := InstallConfig(runtime, &paths.MapEnv{}, clone)
 			if err != nil || got.Theme != wantTheme || seeded != wantSeed {
 				t.Fatalf("config=%+v seeded=%q err=%v", got, seeded, err)
 			}
-			if !apply && !reflect.DeepEqual(before, snapshotMemoryMigrationTree(t, home)) {
+			if !reflect.DeepEqual(before, snapshotMemoryMigrationTree(t, home)) {
 				t.Fatal("read-only config changed home")
 			}
 			if wantTheme == "original" && !reflect.DeepEqual(got, runtime.Config) {
@@ -81,22 +80,12 @@ func TestInstallConfig(t *testing.T) {
 					t.Fatalf("accounts=%+v", got.Accounts)
 				}
 			}
-			if apply {
-				raw, err := os.ReadFile(target)
-				if err != nil || !bytes.Equal(raw, content) {
-					t.Fatalf("bytes=%q err=%v", raw, err)
-				}
-				info, err := os.Stat(target)
-				if err != nil || info.Mode().Perm() != 0o600 {
-					t.Fatalf("mode=%v err=%v", info, err)
-				}
-			}
 		})
 	}
 }
 
 func TestInstallConfigErrors(t *testing.T) {
-	for _, scenario := range []string{"inspect target", "load existing", "marker", "read example", "preview load", "apply load", "write target", "resolve clone"} {
+	for _, scenario := range []string{"inspect target", "load existing", "marker", "read example", "preview load", "resolve clone", "file clone"} {
 		t.Run(scenario, func(t *testing.T) {
 			home, clone := t.TempDir(), t.TempDir()
 			target := filepath.Join(home, "config", pfmconfig.FileName)
@@ -104,7 +93,6 @@ func TestInstallConfigErrors(t *testing.T) {
 			if err := os.WriteFile(example, []byte(`{"version":2}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			apply := scenario == "write target" || scenario == "apply load"
 			switch scenario {
 			case "inspect target":
 				if err := os.WriteFile(filepath.Dir(target), nil, 0o600); err != nil {
@@ -128,14 +116,12 @@ func TestInstallConfigErrors(t *testing.T) {
 				if err := os.Mkdir(example, 0o700); err != nil {
 					t.Fatal(err)
 				}
-			case "preview load", "apply load":
+			case "preview load":
 				if err := os.WriteFile(example, []byte("invalid"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-			case "write target":
-				if err := os.Symlink(filepath.Join(home, "absent"), filepath.Dir(target)); err != nil {
-					t.Fatal(err)
-				}
+			case "file clone":
+				clone = example
 			case "resolve clone":
 				cwd := t.TempDir()
 				t.Chdir(cwd)
@@ -145,8 +131,63 @@ func TestInstallConfigErrors(t *testing.T) {
 				clone = "relative"
 			}
 			runtime := pfmconfig.Runtime{Config: pfmconfig.Config{Path: target}, Paths: paths.Values{Home: home}}
-			if _, _, err := InstallConfig(runtime, &paths.MapEnv{}, clone, apply); err == nil {
+			_, _, err := InstallConfig(runtime, &paths.MapEnv{}, clone)
+			if err == nil {
 				t.Fatal("unreadable config returned success")
+			}
+			if (scenario == "resolve clone" || scenario == "file clone") &&
+				!strings.HasPrefix(err.Error(), "resolve install clone "+strconv.Quote(clone)+": ") {
+				t.Fatalf("clone error = %v", err)
+			}
+		})
+	}
+}
+
+func TestSeedConfig(t *testing.T) {
+	for _, scenario := range []string{"dry run", "apply", "nothing", "write fails"} {
+		t.Run(scenario, func(t *testing.T) {
+			home, clone := t.TempDir(), t.TempDir()
+			target := filepath.Join(home, "config", pfmconfig.FileName)
+			example := filepath.Join(clone, "example.pfm.config.json")
+			content := []byte(`{"version":2,"theme":"seeded"}`)
+			writeFixture(t, example, string(content))
+			var output bytes.Buffer
+			installer := logDefaultEngine(t, target, scenario != "dry run", &output)
+			installer.options.ConfigSeed = example
+			if scenario == "nothing" {
+				installer.options.ConfigSeed = ""
+			}
+			if scenario == "write fails" {
+				if err := os.Symlink(filepath.Join(home, "absent"), filepath.Dir(target)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := installer.seedConfig()
+			if scenario == "write fails" {
+				if err == nil || !strings.HasPrefix(err.Error(), "write install config "+target+": ") {
+					t.Fatalf("seed write error = %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			want, changed := "  change  seed "+target+" from "+example+"\n", 1
+			if scenario == "nothing" {
+				want, changed = "", 0
+			}
+			if output.String() != want || installer.report.Changed != changed {
+				t.Fatalf("output=%q changed=%d, want %q/%d", output.String(), installer.report.Changed, want, changed)
+			}
+			if scenario == "apply" {
+				raw, err := os.ReadFile(target)
+				if err != nil || !bytes.Equal(raw, content) {
+					t.Fatalf("bytes=%q err=%v", raw, err)
+				}
+				info, err := os.Stat(target)
+				if err != nil || info.Mode().Perm() != 0o600 {
+					t.Fatalf("mode=%v err=%v", info, err)
+				}
+			} else if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Fatalf("target exists: %v", err)
 			}
 		})
 	}

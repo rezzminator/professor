@@ -3,6 +3,7 @@ package installer
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
@@ -29,13 +30,23 @@ func settingsLeftovers(document map[string]any, home string, owned settingsHookC
 	for _, hook := range claudeHookTemplates(home) {
 		commands[hook.Command] = true
 	}
-	leftovers := []string{}
+	pfmBinary := home + "/.local/bin/pfm"
+	found := map[string]bool{}
 	for key, count := range countSettingsHookCommands(document) {
 		if count > 0 &&
-			(commands[key.Command] || isRetiredHookCommand(key.Command, home+"/.local/bin/pfm") || ledgerReadable && owned[key] > 0) {
-			leftovers = append(leftovers, "hooks")
-			break
+			(commands[key.Command] || isRetiredHookCommand(key.Command, pfmBinary) ||
+				ledgerReadable && owned[key] > 0 && strings.SplitN(key.Command, " ", 2)[0] == pfmBinary) {
+			found[key.Command] = true
 		}
+	}
+	hookCommands := make([]string, 0, len(found))
+	for command := range found {
+		hookCommands = append(hookCommands, command)
+	}
+	sort.Strings(hookCommands)
+	leftovers := []string{}
+	for _, command := range hookCommands {
+		leftovers = append(leftovers, fmt.Sprintf("hook %q", command))
 	}
 	if status, ok := document["statusLine"].(map[string]any); ok && ownedStatusCommand(home, status[configCommandKey]) {
 		leftovers = append(leftovers, "statusLine")
@@ -49,7 +60,8 @@ func settingsLeftovers(document map[string]any, home string, owned settingsHookC
 
 func ownedStatusCommand(home string, value any) bool {
 	command, ok := value.(string)
-	return ok && (command == claudelaunch.StatusLineCommand(home) || command == home+"/.local/bin/pfm statusline")
+	return ok &&
+		(command == claudelaunch.StatusLineCommand(home) || command == home+"/.local/bin/pfm statusline" || command == "pfm statusline")
 }
 
 func parseAccountDocument(raw []byte) (map[string]any, error) {
@@ -101,8 +113,8 @@ func validateAccountHooks(document map[string]any) error {
 type mcpShaped func(name string, registration map[string]any) bool
 
 // accountMCPLeftovers names the mcpServers entries pfm owns in a Claude MCP
-// file: the ledger-owned names present plus the shape-matched ones.
-func accountMCPLeftovers(raw []byte, owned []string, shaped mcpShaped) ([]string, error) {
+// file: registrations matching their ledger records plus shape-matched ones.
+func accountMCPLeftovers(raw []byte, owned map[string][]any, shaped mcpShaped) ([]string, error) {
 	document, err := parseAccountDocument(raw)
 	if err != nil {
 		return nil, err
@@ -126,36 +138,40 @@ func accountMCPServers(document map[string]any) (map[string]any, error) {
 	return servers, nil
 }
 
-// ledgerOwnedMCP returns the names the ledger owns in one physical registry
-// file and the keys that name it. A key matches when it resolves to that file:
-// older installs keyed the path as reached, and a link on the way (macOS /tmp
-// is /private/tmp) makes that differ from the physical path.
-func ledgerOwnedMCP(registrations map[string]map[string]any, physical string) ([]string, []string) {
-	names := map[string]bool{}
+// ledgerOwnedMCP returns the registrations recorded for one physical registry
+// file. A key matches when it resolves to that file: older installs keyed the
+// path as reached, and a link on the way (macOS /tmp is /private/tmp) makes
+// that differ from the physical path.
+func ledgerOwnedMCP(registrations map[string]map[string]any, physical string) map[string][]any {
 	keys := []string{}
-	for key, owned := range registrations {
+	for key := range registrations {
 		if key != physical && physicalSettingsPath(key) != physical {
 			continue
 		}
 		keys = append(keys, key)
-		for name := range owned {
-			names[name] = true
+	}
+	sort.Strings(keys)
+	owned := map[string][]any{}
+	for _, key := range keys {
+		for name, record := range registrations[key] {
+			owned[name] = append(owned[name], record)
 		}
 	}
-	owned := make([]string, 0, len(names))
-	for name := range names {
-		owned = append(owned, name)
-	}
-	sort.Strings(owned)
-	sort.Strings(keys)
-	return owned, keys
+	return owned
 }
 
-func ownedMCPNames(servers map[string]any, owned []string, shaped mcpShaped) []string {
+func ownedMCPNames(servers map[string]any, owned map[string][]any, shaped mcpShaped) []string {
 	seen := map[string]bool{}
-	for _, name := range owned {
-		if _, present := servers[name]; present {
-			seen[name] = true
+	for name, records := range owned {
+		current, present := servers[name]
+		if !present {
+			continue
+		}
+		for _, record := range records {
+			if sameClaudeRegistration(current, record) {
+				seen[name] = true
+				break
+			}
 		}
 	}
 	if shaped != nil {
@@ -171,4 +187,14 @@ func ownedMCPNames(servers map[string]any, owned []string, shaped mcpShaped) []s
 	}
 	sort.Strings(result)
 	return result
+}
+
+func sameClaudeRegistration(current, recorded any) bool {
+	if registration, ok := current.(map[string]any); ok {
+		current = withoutEmptyEnv(registration)
+	}
+	if registration, ok := recorded.(map[string]any); ok {
+		recorded = withoutEmptyEnv(registration)
+	}
+	return sameJSONValue(current, recorded)
 }

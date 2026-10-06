@@ -3,6 +3,15 @@ package installer
 import (
 	"context"
 	"errors"
+	"time"
+
+	"github.com/rezzminator/professor/pfm/internal/reminder"
+)
+
+const (
+	launchGateUnprobedNote   = "launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or reminder run is not refused"
+	nameSyncGateUnprobedNote = "name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or reminder run is not refused"
+	reminderGatePoll         = 5 * time.Second
 )
 
 // schedulerServiceRunning reports whether the Linux scheduler service unit
@@ -26,12 +35,18 @@ func schedulerServiceRunning(ctx context.Context, runner CommandRunner, unit str
 	return unitStateRunning(state)
 }
 
-func CheckScheduler(ctx context.Context, runner CommandRunner) error {
+func CheckScheduler(ctx context.Context, runner CommandRunner) (unprobed string, err error) {
 	if runner == nil {
 		runner = execCommandRunner{}
 	}
-	_, err := schedulerGate(ctx, runner)
-	return err
+	probed, err := schedulerGate(ctx, runner)
+	if !probed {
+		if schedulerIsLaunchd {
+			return launchGateUnprobedNote, err
+		}
+		return nameSyncGateUnprobedNote, err
+	}
+	return "", err
 }
 
 func schedulerGate(ctx context.Context, runner CommandRunner) (probed bool, err error) {
@@ -73,4 +88,21 @@ func SchedulerRefusal(command string, err error) string {
 			": the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first"
 	}
 	return ""
+}
+
+func awaitSchedulerGate(ctx context.Context, options Options) (probed bool, err error) {
+	probed, err = schedulerGate(ctx, options.Runner)
+	if !errors.Is(err, ErrReminderRunning) && !errors.Is(err, ErrReminderAgentRunning) {
+		return probed, err
+	}
+	waiter := &engine{options: options}
+	waiter.say("  wait    the pfm reminder is delivering; waiting up to %s for it to finish", reminder.ComposerWait)
+	for waited := time.Duration(0); waited < reminder.ComposerWait; waited += reminderGatePoll {
+		waiter.pause(reminderGatePoll)
+		probed, err = schedulerGate(ctx, options.Runner)
+		if !errors.Is(err, ErrReminderRunning) && !errors.Is(err, ErrReminderAgentRunning) {
+			return probed, err
+		}
+	}
+	return probed, err
 }

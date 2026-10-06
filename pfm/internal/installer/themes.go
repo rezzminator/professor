@@ -33,6 +33,8 @@ const (
 	maxThemeDownloadBytes = 10 << 20
 )
 
+var errThemesOfflineFetch = fmt.Errorf("fetch failed: fetch skipped: %s=1", paths.EnvThemesOffline)
+
 type themeManifest struct {
 	Comment       string                  `json:"_comment,omitempty"`
 	SourceFetched map[string]themeSource  `json:"source_fetched,omitempty"`
@@ -145,6 +147,16 @@ func (installer *engine) installThemes(ctx context.Context) {
 		}
 
 		if !installer.apply {
+			if installer.options.ThemesOffline {
+				if source.local == "" {
+					installer.skip("theme " + name + " " + errThemesOfflineFetch.Error())
+					continue
+				}
+				if source.base != "" && sources[source.base].local == "" {
+					installer.skip("theme " + name + " base " + source.base + " " + errThemesOfflineFetch.Error())
+					continue
+				}
+			}
 			if owned && exists {
 				installer.ok("theme " + name + " currently installed; apply checks its source for updates")
 			} else {
@@ -293,7 +305,7 @@ func loadThemeContent(ctx context.Context, client *http.Client, source themeSour
 		content = read
 	} else {
 		if offline {
-			return nil, fmt.Errorf("fetch failed: fetch skipped: %s=1", paths.EnvThemesOffline)
+			return nil, errThemesOfflineFetch
 		}
 		fetched, err := fetchTheme(ctx, client, source.Raw)
 		if err != nil {

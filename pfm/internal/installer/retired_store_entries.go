@@ -53,6 +53,9 @@ func (installer *engine) retireStoreEntries() error {
 	report := InspectClaudeStore(store, installer.options.ClaudeAccounts)
 	for _, name := range RetiredStoreEntries {
 		keep := ""
+		if len(installer.options.ClaudeAccounts) == 0 {
+			keep = "no account roster to check its links"
+		}
 		for _, account := range report.Accounts {
 			switch account.State {
 			case stateStore:

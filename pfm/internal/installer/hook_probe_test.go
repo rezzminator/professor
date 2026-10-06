@@ -190,3 +190,16 @@ func TestProbeCodexHooksReportsAnUntrustedResumeUnkillHookAndPassesATrustedOne(t
 		}
 	}
 }
+
+func TestProbeCodexHooksReportsUnreadableTrustReceipt(t *testing.T) {
+	home, machine, hooksPath := stageCodexProbeHome(t, "")
+	writeFixture(t, hooksPath, resumeUnkillHooksBody(home))
+	receipt := filepath.Join(filepath.Dir(hooksPath), ".professor-hook-trust.json")
+	if err := os.Symlink(receipt, receipt); err != nil {
+		t.Fatal(err)
+	}
+	rows := probeCodexHooks(home, machine, filepath.Join(home, ".local", "bin", "pfm"))
+	if len(rows) != 1 || rows[0].State != stateUnreadable || !strings.Contains(rows[0].Error, receipt) {
+		t.Fatalf("rows=%+v, want one unreadable trust receipt row", rows)
+	}
+}

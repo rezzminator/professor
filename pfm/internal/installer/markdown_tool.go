@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -138,7 +139,7 @@ func (installer *engine) ensureRumdlUserConfig() {
 		return
 	}
 	if !installer.apply {
-		installer.say("rumdl dry-run: would write user config %s (cache = false)", path)
+		_ = installer.change("write rumdl user config -> "+path, nil)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -150,6 +151,28 @@ func (installer *engine) ensureRumdlUserConfig() {
 		return
 	}
 	_ = installer.change("write rumdl user config -> "+path, nil)
+}
+
+func (installer *engine) removeRumdlUserConfig() error {
+	path := installer.rumdlUserConfigPath()
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read rumdl user config %s: %w", path, err)
+	}
+	if bytes.Equal(raw, []byte(rumdlUserConfig)) {
+		return installer.change("remove rumdl user config "+path, func() error {
+			// Gone between the read and the remove is the outcome asked for.
+			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("remove rumdl user config %s: %w", path, err)
+			}
+			return nil
+		})
+	}
+	installer.skip("rumdl user config " + path + " is not pfm's; kept")
+	return nil
 }
 
 // rumdlVersionWithRunner runs `path --version` through the installer's

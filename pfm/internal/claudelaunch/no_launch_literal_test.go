@@ -37,6 +37,9 @@ var launchLiteralReaders = map[string]launchLiteralAllowance{
 		"--session-id", "--session-id=", "--fork-session", "--resume", "CLAUDE_CODE_SSE_PORT",
 	}},
 	"internal/chat/find.go": {"reads session identity", []string{"CLAUDE_CODE_SESSION_ID"}},
+	"internal/installer/vscode_profile.go": {"pins every terminal-profile env shape pfm wrote", []string{
+		"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
+	}},
 	"internal/doctor/harness_prompt.go": {"fixed headless capture argv and drift diagnosis", []string{
 		"--mcp-config", "the CLI answered from the real endpoint and ignored ANTHROPIC_BASE_URL",
 	}},

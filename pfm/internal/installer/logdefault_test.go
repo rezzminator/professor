@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // logDefaultEngine builds an engine whose pfm.config.json is path.
@@ -147,11 +148,13 @@ func TestInstallLogDefaultLeavesAnAbsentFileAlone(t *testing.T) {
 		t.Fatalf("dry run wrote the file (present=%t changed=%d)", present, preview.report.Changed)
 	}
 
-	none := logDefaultEngine(t, "", true, io.Discard)
-	if err := none.wireLogDefault(); err == nil ||
-		!strings.Contains(err.Error(), "no config path: no source repo recorded") ||
-		!strings.Contains(err.Error(), "PFM_CONFIG") {
-		t.Fatalf("unknown config path writer error = %v", err)
+	stdout.Reset()
+	none := logDefaultEngine(t, "", true, &stdout)
+	if err := none.wireLogDefault(); err != nil {
+		t.Fatal(err)
+	}
+	if want := "  skip    log default: no pfm.config.json path known — nothing to write\n"; stdout.String() != want {
+		t.Fatalf("stdout=%q, want %q", stdout.String(), want)
 	}
 }
 
@@ -176,5 +179,61 @@ func TestInstallRunsTheLogDefaultStep(t *testing.T) {
 	}
 	if block, present := readLogBlock(t, path); !present || block["level"] != pfmconfig.InstallLogLevel {
 		t.Fatalf("install() did not write the log default: %v present=%t", block, present)
+	}
+}
+
+func TestInstallLogDefaultPlansOnSeed(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pfm.config.json")
+	example := filepath.Join(t.TempDir(), "example.pfm.config.json")
+	writeFixture(t, example, `{"version": 2}`)
+	var output bytes.Buffer
+	installer := logDefaultEngine(t, path, false, &output)
+	installer.options.ConfigSeed = example
+	if err := installer.wireLogDefault(); err != nil {
+		t.Fatal(err)
+	}
+	block, err := json.Marshal(pfmconfig.InstallLogBlock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "  change  write log default " + string(block) + " into " + path + "\n"
+	if output.String() != want || installer.report.Changed != 1 {
+		t.Fatalf("output=%q changed=%d, want %q/1", output.String(), installer.report.Changed, want)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("preview target exists: %v", err)
+	}
+}
+
+func TestInstallFreshHomeThenPlansConfigSeed(t *testing.T) {
+	t.Setenv(paths.EnvConfig, "")
+	if err := os.Unsetenv(paths.EnvConfig); err != nil {
+		t.Fatal(err)
+	}
+	home, clone, _ := aliasInstallFixture(t)
+	example := filepath.Join(clone, "example.pfm.config.json")
+	writeFixture(t, example, `{"version":2,"theme":"seeded"}`)
+	var output bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, SourceRepo: clone, Runner: &fakeRunner{}, Stdout: &output,
+	}); err != nil {
+		t.Fatalf("fresh install: %v\n%s", err, output.String())
+	}
+	if want := "  skip    log default: no pfm.config.json path known — nothing to write\n"; !strings.Contains(
+		output.String(),
+		want,
+	) {
+		t.Fatalf("fresh install missing log skip: %s", output.String())
+	}
+	if got, err := paths.ReadSourceRepoMarker(home); err != nil || got != clone {
+		t.Fatalf("marker=%q err=%v, want %q", got, err, clone)
+	}
+	runtime := pfmconfig.Runtime{
+		Config: pfmconfig.Config{Path: filepath.Join(clone, pfmconfig.FileName)},
+		Paths:  paths.Values{Home: home},
+	}
+	if _, seeded, err := InstallConfig(runtime, &paths.MapEnv{}, ""); err != nil || seeded != example {
+		t.Fatalf("seeded=%q err=%v, want %q", seeded, err, example)
 	}
 }

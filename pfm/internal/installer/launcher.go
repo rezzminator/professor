@@ -36,6 +36,8 @@ var ErrClaudeBinaryNotFound = errors.New("claude binary not found")
 // executable in its absolute location or the caller-supplied PATH.
 var ErrConfiguredClaudeBinaryNotFound = errors.New("configured Claude binary not found")
 
+var readClaudeShim = os.ReadFile
+
 func managedClaudeLauncher(home string) string {
 	return filepath.Join(
 		home,
@@ -162,8 +164,8 @@ const (
 
 // isPfmClaudeShim reports whether path is a pfm Claude launcher shim, whichever
 // home owns it: it resolves to a managed launcher path under any home, or it is
-// a small script that execs pfm's claude-launch subcommand. A read error is
-// "not a shim".
+// a small script that execs pfm's claude-launch subcommand.
+// A candidate that stats but cannot be read counts as a shim: the loop guard fails closed.
 func isPfmClaudeShim(path string) bool {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil &&
 		strings.HasSuffix(resolved, string(filepath.Separator)+managedClaudeLauncher("")) {
@@ -173,9 +175,9 @@ func isPfmClaudeShim(path string) bool {
 	if err != nil || info.Size() > claudeShimMaxBytes {
 		return false
 	}
-	body, err := os.ReadFile(path)
+	body, err := readClaudeShim(path)
 	if err != nil {
-		return false
+		return true
 	}
 	return strings.HasPrefix(string(body), "#!") && strings.Contains(string(body), claudeShimMarker)
 }

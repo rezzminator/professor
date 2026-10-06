@@ -16,6 +16,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // claudeConfigDirEnv is the variable that points a claude process at one
@@ -147,21 +148,16 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 	}
 	if len(installer.options.ClaudeAccounts) > 0 || installer.options.ClaudeRosterHost {
 		if err := installer.checkLaunchConfigDir(0, dir); err != nil {
-			failure := fmt.Errorf("claude plugins in %s: %w", dir, err)
-			installer.say("  FAIL    %s", failure)
-			installer.record("fail", failure.Error(), err)
-			return failure
+			return installer.pluginStepFailure(dir, err)
 		}
 	}
 	document, err := readClaudeSettingsDocument(filepath.Join(dir, "settings.json"))
 	if err != nil {
-		installer.skip("claude plugins in " + dir + ": settings unreadable, state unknown: " + err.Error())
-		return nil
+		return installer.pluginStepFailure(dir, fmt.Errorf("settings unreadable, state unknown: %w", err))
 	}
 	missing, err := ClaudePluginsNotInstalled(dir)
 	if err != nil {
-		installer.skip("claude plugins in " + dir + ": install record unreadable, state unknown: " + err.Error())
-		return nil
+		return installer.pluginStepFailure(dir, fmt.Errorf("install record unreadable, state unknown: %w", err))
 	}
 	binary, resolveErr := ResolveClaudeBinary(
 		installer.options.Home,
@@ -187,9 +183,19 @@ func (installer *engine) ensureClaudePlugins(ctx context.Context) error {
 			for _, account := range installer.options.ClaudeAccounts {
 				dirs = append(dirs, account.ConfigDir)
 			}
+			dirs = append(dirs, installer.options.RosterConfigDirs...)
+			seen := map[string]bool{}
 			pids := map[int]bool{}
 			liveDirs := []string{}
-			for _, accountDir := range cleanUniquePaths(dirs) {
+			for _, accountDir := range dirs {
+				if accountDir == "" {
+					continue
+				}
+				physical := paths.PhysicalPath(accountDir)
+				if seen[physical] {
+					continue
+				}
+				seen[physical] = true
 				live, err := liveChatPIDs(installer.options.ProcRoot, accountDir)
 				if err != nil {
 					return installer.pluginFailure(
@@ -297,8 +303,9 @@ func runClaudePluginCommand(ctx context.Context, runner deps.Runner, argv []stri
 }
 
 func (installer *engine) pluginFailure(dir, plugin string, err error) error {
-	failure := fmt.Errorf("claude plugin %s in %s: %w", plugin, dir, err)
-	installer.say("  FAIL    %s", failure)
-	installer.record("fail", failure.Error(), err)
-	return failure
+	return installer.fail(fmt.Errorf("claude plugin %s in %s: %w", plugin, dir, err))
+}
+
+func (installer *engine) pluginStepFailure(dir string, err error) error {
+	return installer.fail(fmt.Errorf("claude plugins in %s: %w", dir, err))
 }

@@ -140,10 +140,11 @@ func TestInstallFirstConfigSeed(t *testing.T) {
 				if options.MCPConfigPath != target {
 					t.Errorf("config=%q", options.MCPConfigPath)
 				}
-				if apply {
-					if info, err := os.Stat(target); err != nil || info.Mode().Perm() != 0o600 {
-						t.Fatalf("seed missing before install: %v", err)
-					}
+				if options.ConfigSeed != example {
+					t.Errorf("seed=%q, want %q", options.ConfigSeed, example)
+				}
+				if _, err := os.Stat(target); !os.IsNotExist(err) {
+					t.Fatalf("command wrote seed before engine: %v", err)
 				}
 				return installer.Report{}, nil
 			}
@@ -156,30 +157,25 @@ func TestInstallFirstConfigSeed(t *testing.T) {
 			if code := runInstall(args, &out, &errOut, loaded); code != 0 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
-			if apply {
-				if !strings.Contains(out.String(), "  change  seed "+target+" from "+example+"\n") {
-					t.Fatal(out.String())
-				}
-			} else if !reflect.DeepEqual(before, installCheckTree(t, home)) {
-				t.Fatal("preview seeded home")
+			if strings.Contains(out.String(), "  change  seed ") {
+				t.Fatalf("command printed engine seed row: %s", out.String())
+			}
+			if !reflect.DeepEqual(before, installCheckTree(t, home)) {
+				t.Fatal("command changed home before engine")
 			}
 		})
 	}
 }
 
 func TestInstallSeedErrorNamesContext(t *testing.T) {
-	for _, scenario := range []string{"preview read", "apply read", "apply write"} {
+	for _, scenario := range []string{"preview read", "apply read"} {
 		t.Run(scenario, func(t *testing.T) {
-			home, clone, _ := installCheckHome(t, false)
+			_, clone, _ := installCheckHome(t, false)
 			if err := os.Remove(filepath.Join(clone, pfmconfig.FileName)); err != nil {
 				t.Fatal(err)
 			}
 			example := filepath.Join(clone, "example.pfm.config.json")
-			if scenario == "apply write" {
-				if err := os.WriteFile(example, []byte(`{"version":2}`), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := os.Mkdir(example, 0o700); err != nil {
+			if err := os.Mkdir(example, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			loaded, err := pfmconfig.LoadInstallRuntime("")
@@ -187,14 +183,7 @@ func TestInstallSeedErrorNamesContext(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := "pfm install: seed config: read install example "
-			if scenario == "apply write" {
-				parent := filepath.Join(home, "dangling-config")
-				if err := os.Symlink(filepath.Join(home, "absent"), parent); err != nil {
-					t.Fatal(err)
-				}
-				loaded.Config.Path = filepath.Join(parent, pfmconfig.FileName)
-				want = "pfm install: seed config: write install config "
-			}
+
 			args := []string{"--skip-harvest"}
 			if scenario != "preview read" {
 				args = append(args, "--yes")
@@ -204,5 +193,41 @@ func TestInstallSeedErrorNamesContext(t *testing.T) {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
 		})
+	}
+}
+
+func TestInstallRosterConfigDirsWithConfigDirFlag(t *testing.T) {
+	home, clone, _ := installCheckHome(t, false)
+	account := filepath.Join(home, "acct1")
+	if err := os.Mkdir(account, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := fmt.Sprintf(`{"version":2,"accounts":[{"id":1,"configDir":%q}]}`, account)
+	if err := os.WriteFile(filepath.Join(clone, pfmconfig.FileName), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := pfmconfig.LoadInstallRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := runInstaller
+	t.Cleanup(func() { runInstaller = saved })
+	called := false
+	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+		called = true
+		if !reflect.DeepEqual(options.RosterConfigDirs, []string{account}) || options.ClaudeAccounts != nil {
+			t.Errorf("roster=%v ClaudeAccounts=%v", options.RosterConfigDirs, options.ClaudeAccounts)
+		}
+		return installer.Report{}, nil
+	}
+	var out, errOut bytes.Buffer
+	if code := runInstall(
+		[]string{"--yes", "--skip-harvest", "--config-dir", account},
+		&out,
+		&errOut,
+		loaded,
+	); code != 0 ||
+		!called {
+		t.Fatalf("code=%d called=%t stdout=%q stderr=%q", code, called, out.String(), errOut.String())
 	}
 }

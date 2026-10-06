@@ -440,6 +440,32 @@ func TestAccountEntryRealFixesRun(t *testing.T) {
 			}
 		})
 	}
+	t.Run("foreign-link", func(t *testing.T) {
+		env := fixtureEnv(t)
+		path := filepath.Join(env.Accounts[0].ConfigDir, "CLAUDE.md")
+		outside, store := filepath.Join(env.Home, "dotfiles", "CLAUDE.md"), filepath.Join(env.Store, "CLAUDE.md")
+		writeFile(t, outside, "mine\n")
+		writeFile(t, store, "store\n")
+		makeDir(t, filepath.Dir(path))
+		if err := os.Symlink(outside, path); err != nil {
+			t.Fatal(err)
+		}
+		rows := detect(t, "account-entry-real", env)
+		if len(rows) != 1 {
+			t.Fatalf("rows=%+v", rows)
+		}
+		if output, err := exec.Command("sh", "-c", rows[0].Fix).CombinedOutput(); err != nil {
+			t.Fatalf("fix %q: %v: %s", rows[0].Fix, err, output)
+		}
+		for file, want := range map[string]string{store: "store\nmine\n", outside: "mine\n"} {
+			if got, err := os.ReadFile(file); err != nil || string(got) != want {
+				t.Fatalf("%s=%q error=%v want=%q", file, got, err, want)
+			}
+		}
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("account link still exists: %v", err)
+		}
+	})
 }
 
 func TestHomeStateFile(t *testing.T) {
@@ -569,6 +595,50 @@ func TestAccountEntryReal(t *testing.T) {
 			t.Fatal("environment roster reordered")
 		}
 	})
+	for _, scenario := range []string{"foreign", "dangling", "store-link", "unreadable-link"} {
+		t.Run(scenario, func(t *testing.T) {
+			env := fixtureEnv(t)
+			account := env.Accounts[0].ConfigDir
+			name, target := "CLAUDE.md", filepath.Join(env.Home, "dotfiles", "CLAUDE.md")
+			if scenario != "foreign" {
+				name, target = "agents", filepath.Join(env.Home, "gone")
+			}
+			path := filepath.Join(account, name)
+			makeDir(t, account)
+			switch scenario {
+			case "foreign":
+				writeFile(t, target, "mine\n")
+			case "store-link":
+				target = filepath.Join(env.Store, name)
+				makeDir(t, target)
+			case "unreadable-link":
+				target = path
+			}
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+			rows := detect(t, "account-entry-real", env)
+			switch scenario {
+			case "foreign":
+				fix := "cat " + path + " >> " + env.Store + "/CLAUDE.md && rm " + path + "  # appended whole; prune " + env.Store + "/CLAUDE.md as you like"
+				assertRows(
+					t,
+					rows,
+					Row{
+						Block,
+						"account-entry-real",
+						path,
+						"CLAUDE.md links to " + target + " outside the store; its data belongs in the store",
+						fix,
+					},
+				)
+			case "unreadable-link":
+				assertUnreadable(t, rows, "account-entry-real", path, syscall.ELOOP)
+			default:
+				assertRows(t, rows)
+			}
+		})
+	}
 }
 
 func TestStoreLeftovers(t *testing.T) {

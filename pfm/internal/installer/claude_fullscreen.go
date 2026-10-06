@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -71,12 +73,13 @@ func ReadFullscreenAutoDisable(path string) (*FullscreenAutoDisable, error) {
 // registry is kept; a registry without either key is not written.
 func (installer *engine) clearFullscreenAutoDisable() error {
 	seen := map[string]bool{}
+	var failures []error
 	for _, account := range installer.options.ClaudeAccounts {
 		wants, err := claudelaunch.WantsFullscreen(account.ConfigDir)
 		if err != nil {
-			installer.skip(fmt.Sprintf(
-				"claude fullscreen canary for account %d: settings unreadable, state unknown: %v", account.ID, err,
-			))
+			failures = append(failures, installer.fail(fmt.Errorf(
+				"claude fullscreen canary for account %d: settings unreadable, state unknown: %w", account.ID, err,
+			)))
 			continue
 		}
 		if !wants {
@@ -88,41 +91,63 @@ func (installer *engine) clearFullscreenAutoDisable() error {
 			continue
 		}
 		seen[physical] = true
-		raw, err := os.ReadFile(physical)
+		file, err := os.Open(physical)
 		if errors.Is(err, fs.ErrNotExist) {
 			installer.ok("claude fullscreen renderer not auto-disabled in " + path + " (no registry yet)")
 			continue
 		}
+		var raw []byte
+		var mode fs.FileMode
+		if err == nil {
+			var info fs.FileInfo
+			info, err = file.Stat()
+			if err == nil {
+				mode = info.Mode().Perm()
+				raw, err = io.ReadAll(file)
+			}
+			err = errors.Join(err, file.Close())
+		}
 		if err != nil {
-			installer.skip(
-				"claude fullscreen canary in " + path + ": registry unreadable, state unknown: " + err.Error(),
-			)
+			failures = append(failures, installer.fail(fmt.Errorf(
+				"claude fullscreen canary in %s: registry unreadable, state unknown: %w", path, err,
+			)))
 			continue
 		}
 		cleared, removed, err := removeTopLevelKeys(raw, fullscreenAutoDisabledKey, fullscreenBootStrikesKey)
 		if err != nil {
-			installer.skip(
-				"claude fullscreen canary in " + path + ": registry unparsable, state unknown: " + err.Error(),
-			)
+			failures = append(failures, installer.fail(fmt.Errorf(
+				"claude fullscreen canary in %s: registry unparsable, state unknown: %w", path, err,
+			)))
 			continue
 		}
 		if !removed {
 			installer.ok("claude fullscreen renderer not auto-disabled in " + path)
 			continue
 		}
-		info, err := os.Stat(physical)
+		live, err := liveChatPIDs(installer.options.ProcRoot, account.ConfigDir)
 		if err != nil {
-			return fmt.Errorf("clear claude fullscreen auto-disable: stat %s: %w", physical, err)
+			failures = append(failures, installer.fail(fmt.Errorf(
+				"claude fullscreen canary in %s: read live chats in %s: %w", path, account.ConfigDir, err,
+			)))
+			continue
 		}
-		mode := info.Mode().Perm()
+		if len(live) > 0 {
+			installer.skip(fmt.Sprintf(
+				"claude fullscreen canary in %s: live chats %s on %s — close them and rerun pfm install --yes",
+				path, strings.Join(live, ","), account.ConfigDir,
+			))
+			continue
+		}
 		if err := installer.change(
 			"clear Claude's fullscreen auto-disable in "+physical,
 			func() error { return atomicfile.Write(physical, cleared, mode) },
 		); err != nil {
-			return fmt.Errorf("clear claude fullscreen auto-disable in %s: %w", physical, err)
+			failures = append(failures, installer.fail(fmt.Errorf(
+				"clear claude fullscreen auto-disable in %s: %w", physical, err,
+			)))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // jsonMember is one top-level member of a JSON object: its key and the byte

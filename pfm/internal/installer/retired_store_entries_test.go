@@ -124,6 +124,23 @@ func TestRetireStoreEntries(t *testing.T) {
 			}
 		})
 	}
+	t.Run("no-roster", func(t *testing.T) {
+		home := t.TempDir()
+		store := ClaudeStore(home)
+		path := filepath.Join(store, ".last-update-result.json")
+		writeFixture(t, path, "store copy")
+		var output bytes.Buffer
+		runner := &engine{options: Options{Home: home, ConfigDir: store, Stdout: &output}, apply: true}
+		if err := runner.retireStoreEntries(); err != nil {
+			t.Fatal(err)
+		}
+		want := "  skip    keep " + path + ": no account roster to check its links — pfm doctor names the fix\n"
+		if output.String() != want {
+			t.Fatalf("transcript=%q want=%q", output.String(), want)
+		}
+		assertContent(t, path, "store copy")
+		assertAbsent(t, RetiredStoreArchive(home))
+	})
 }
 
 func assertContent(t *testing.T, path, want string) {

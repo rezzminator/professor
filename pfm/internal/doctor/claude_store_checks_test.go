@@ -16,7 +16,7 @@ import (
 )
 
 func TestClaudeStoreChecks(t *testing.T) {
-	for _, scenario := range []string{"ok", "store-missing", "account-missing", "link-missing", "elsewhere", "unreadable-store", "unreadable-account", "unreadable-link", "real", "account-store"} {
+	for _, scenario := range []string{"ok", "store-missing", "account-missing", "link-missing", "elsewhere", "foreign", "broken", "unreadable-store", "unreadable-account", "unreadable-link", "real", "account-store"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := t.TempDir()
 			store := installer.ClaudeStore(home)
@@ -43,6 +43,19 @@ func TestClaudeStoreChecks(t *testing.T) {
 			want, failures := "account-links: ok (1 accounts × 22 entries)\n", 0
 			switch scenario {
 			case "ok":
+			case "broken":
+				path := filepath.Join(store, "agents")
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("file"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				want, failures = fmt.Sprintf(
+					"store: %s broken: a file where a directory belongs — remove %s, then run pfm install --yes\n",
+					path,
+					path,
+				), 1
 			case "store-missing":
 				path := filepath.Join(store, "CLAUDE.md")
 				if err := os.Remove(path); err != nil {
@@ -103,8 +116,13 @@ func TestClaudeStoreChecks(t *testing.T) {
 				switch scenario {
 				case "link-missing":
 					want, failures = "account-link: "+link+" missing — run pfm install\n", 1
-				case "elsewhere":
+				case "elsewhere", "foreign":
 					target := filepath.Join(home, "old", "agents")
+					if scenario == "foreign" {
+						if err := os.MkdirAll(target, 0o700); err != nil {
+							t.Fatal(err)
+						}
+					}
 					if err := os.Symlink(target, link); err != nil {
 						t.Fatal(err)
 					}
@@ -114,6 +132,13 @@ func TestClaudeStoreChecks(t *testing.T) {
 						target,
 						filepath.Join(store, "agents"),
 					), 1
+					if scenario == "foreign" {
+						want, failures = fmt.Sprintf(
+							"account-link: %s points at %s outside the store — run pfm install --yes; its host check names the merge\n",
+							link,
+							target,
+						), 0
+					}
 				case "real":
 					if err := os.Mkdir(link, 0o700); err != nil {
 						t.Fatal(err)

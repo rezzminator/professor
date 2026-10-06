@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -27,6 +29,7 @@ type fakeRunner struct {
 	// "activating" (a reminder fire mid-run). The same idle flags make it answer
 	// "inactive"; otherwise the probe fails like an unanswered one.
 	reminderActive bool
+	reminderStates []string
 	// mcpState is pfm-mcp.service's ActiveState after its restart ("" is
 	// active).
 	mcpState string
@@ -63,6 +66,28 @@ const reminderStateProbe = "systemctl --user show --property=ActiveState --value
 func (runner *fakeRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
 	call := name + " " + strings.Join(args, " ")
 	runner.calls = append(runner.calls, call)
+	if len(runner.reminderStates) != 0 {
+		if call == reminderStateProbe || (name == "launchctl" && strings.HasSuffix(call, "/"+reminderLaunchdLabel)) {
+			state := runner.reminderStates[0]
+			if len(runner.reminderStates) > 1 {
+				runner.reminderStates = runner.reminderStates[1:]
+			}
+			if name == "launchctl" {
+				if state == "activating" {
+					return []byte("state = running\n"), nil
+				}
+				return []byte("state = not running\n"), nil
+			}
+			return []byte(state + "\n"), nil
+		}
+		if name == "launchctl" && strings.HasSuffix(call, "/"+launchdLabel) {
+			state := "not running"
+			if runner.nameSyncActive {
+				state = "running"
+			}
+			return []byte("state = " + state + "\n"), nil
+		}
+	}
 	if call == nameSyncStateProbe {
 		if runner.nameSyncActive {
 			return []byte("activating\n"), nil
@@ -356,6 +381,7 @@ func TestRunningReminderRefusesMutatingModesBeforeWriting(t *testing.T) {
 				MCPConfigPath: testConfigPath(t),
 				Mode:          mode, Home: home,
 				Runner: &fakeRunner{nameSyncIdle: true, reminderActive: true},
+				Sleep:  func(time.Duration) {},
 			})
 			if !errors.Is(err, ErrReminderRunning) {
 				t.Fatalf("Run() error = %v, want %v", err, ErrReminderRunning)
@@ -401,5 +427,74 @@ func TestLaunchAgentRunningProbesTheGivenLabel(t *testing.T) {
 	}
 	if running, probed := launchAgentRunning(context.Background(), runner, reminderLaunchdLabel); !running || !probed {
 		t.Fatalf("reminder label = (%v, %v), want (true, true)", running, probed)
+	}
+}
+
+func TestAwaitSchedulerGate(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"finishes", "bound", "name-sync"} {
+		t.Run(scenario, func(t *testing.T) {
+			runner := &fakeRunner{nameSyncIdle: true, reminderStates: []string{"activating"}}
+			wantErr, wantSleeps, wantProbes := ErrReminderRunning, make([]time.Duration, 18), 19
+			if schedulerIsLaunchd {
+				wantErr = ErrReminderAgentRunning
+			}
+			for i := range wantSleeps {
+				wantSleeps[i] = 5 * time.Second
+			}
+			wantOutput := "  wait    the pfm reminder is delivering; waiting up to 1m30s for it to finish\n"
+			switch scenario {
+			case "finishes":
+				runner.reminderStates = []string{"activating", "activating", "inactive"}
+				wantErr, wantSleeps, wantProbes = nil, []time.Duration{5 * time.Second, 5 * time.Second}, 3
+			case "name-sync":
+				runner.nameSyncActive = true
+				wantErr, wantSleeps, wantProbes, wantOutput = ErrNameSyncRunning, nil, 0, ""
+				if schedulerIsLaunchd {
+					wantErr = ErrLaunchAgentRunning
+				}
+			}
+			var output bytes.Buffer
+			var sleeps []time.Duration
+			probed, err := awaitSchedulerGate(context.Background(), Options{
+				Runner: runner, Stdout: &output,
+				Sleep: func(d time.Duration) { sleeps = append(sleeps, d) },
+			})
+			if !probed || !errors.Is(err, wantErr) || !reflect.DeepEqual(sleeps, wantSleeps) ||
+				output.String() != wantOutput {
+				t.Fatalf(
+					"gate=(%v,%v) sleeps=%v output=%q, want (true,%v) %v %q",
+					probed,
+					err,
+					sleeps,
+					output.String(),
+					wantErr,
+					wantSleeps,
+					wantOutput,
+				)
+			}
+			probes := 0
+			for _, call := range runner.calls {
+				if call == reminderStateProbe || strings.HasSuffix(call, "/"+reminderLaunchdLabel) {
+					probes++
+				}
+			}
+			if probes != wantProbes {
+				t.Fatalf("reminder probes=%d, want %d: %v", probes, wantProbes, runner.calls)
+			}
+		})
+	}
+}
+
+func TestCheckSchedulerReturnsRunningReminder(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{nameSyncIdle: true, reminderStates: []string{"activating", "inactive"}}
+	wantErr := ErrReminderRunning
+	if schedulerIsLaunchd {
+		wantErr = ErrReminderAgentRunning
+	}
+	unprobed, err := CheckScheduler(context.Background(), runner)
+	if unprobed != "" || !errors.Is(err, wantErr) || len(runner.calls) != 2 {
+		t.Fatalf("check=(%q,%v) calls=%v, want running reminder after one probe", unprobed, err, runner.calls)
 	}
 }

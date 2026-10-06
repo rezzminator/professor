@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,12 +20,22 @@ func TestCodexDefaultsInstall(t *testing.T) {
 	config := filepath.Join(home, ".codex", "config.toml")
 	original := "# local preference\nmodel = 'custom'\ndeveloper_instructions = '''Keep my rules.\n[not.a.table]\n\n<!-- BEGIN Professor subagent coordination -->\nUse the agent mailbox.\n<!-- END Professor subagent coordination -->\n'''\n[features.multi_agent_v2]\ndefault_wait_timeout_ms = 900000\n# BEGIN pfm mcp\n[mcp_servers.chat]\nurl = 'http://localhost:1234'\n# END pfm mcp\n"
 	writeFixture(t, config, original)
-	options := Options{MCPConfigPath: testConfigPath(t), Mode: ModeDryRun, Home: home, Runner: &fakeRunner{}}
+	var output strings.Builder
+	options := Options{
+		MCPConfigPath: testConfigPath(t),
+		Mode:          ModeDryRun,
+		Home:          home,
+		Runner:        &fakeRunner{},
+		Stdout:        &output,
+	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFixture(t, config); got != original {
 		t.Fatal("dry run modified config")
+	}
+	if !strings.Contains(output.String(), "  change  merge Professor defaults into "+config+"\n") {
+		t.Fatalf("defaults report = %q, want unchanged label", output.String())
 	}
 	options.Mode = ModeApply
 	if _, err := Run(context.Background(), options); err != nil {
@@ -56,6 +67,45 @@ func TestCodexDefaultsInstall(t *testing.T) {
 	backups, err := filepath.Glob(config + ".pre-professor-*")
 	if err != nil || len(backups) == 0 {
 		t.Fatalf("missing backup: %v %v", backups, err)
+	}
+}
+
+func TestCodexDefaultsNamesYieldedMCPTables(t *testing.T) {
+	home := t.TempDir()
+	config := filepath.Join(home, ".codex", "config.toml")
+	writeFixture(
+		t,
+		config,
+		codexProfessorFence(home)+"[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/lane-m-foreign\"\n",
+	)
+	var output strings.Builder
+	if _, err := Run(context.Background(), Options{
+		MCPConfigPath: testConfigPath(t), Mode: ModeDryRun, Home: home,
+		Runner: &fakeRunner{}, Stdout: &output, MCPEnabled: map[string]bool{chatName: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := "  change  merge Professor defaults into " + config + "; remove pfm's MCP tables: mcp_servers.professor\n"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("defaults report = %q, want %q", output.String(), want)
+	}
+}
+
+func TestYieldedCodexMCPTables(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, yielded string
+		want               []string
+	}{
+		{name: "unchanged", raw: "[mcp_servers.professor]\n", yielded: "[mcp_servers.professor]\n"},
+		{name: "duplicate retained", raw: "[mcp_servers.professor]\n[mcp_servers.professor]\n", yielded: "[mcp_servers.professor]\n", want: []string{"professor"}},
+		{name: "sorted multiset", raw: "[mcp_servers.zeta]\n[mcp_servers.alpha]\n[mcp_servers.alpha]\n[mcp_servers.professor]\n[mcp_servers.professor]\n", yielded: "[mcp_servers.professor]\n", want: []string{"alpha", "alpha", "professor", "zeta"}},
+		{name: "literal headers", raw: " [mcp_servers.indented]\n[mcp_servers.trailing] # comment\n[features]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := yieldedCodexMCPTables(tc.raw, tc.yielded); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("yielded tables = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

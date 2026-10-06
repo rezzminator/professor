@@ -145,6 +145,16 @@ func updateCodexHooks(
 		if err != nil {
 			return nil, false, nil, err
 		}
+		stale := settingsHookCounts{}
+		for key, count := range owned {
+			if key.Event == resumeUnkill.Event && key.Matcher == resumeUnkill.Matcher &&
+				key.Command != resumeUnkill.Command && strings.HasSuffix(key.Command, "/.local/bin/pfm internal resume-unkill") {
+				stale[key] = count
+			}
+		}
+		if removeOwnedSettingsHooks(document, stale) {
+			changed = true
+		}
 		if ensureCodexHook(document, resumeUnkill) {
 			changed = true
 		}
@@ -243,93 +253,107 @@ func (installer *engine) wireCodexHooks() error {
 	if len(installer.codexHomes()) == 0 {
 		installer.skip("no Codex accounts configured — hooks.json wiring has nothing to wire")
 	}
+	var loopErr error
 	for _, codexHome := range installer.codexHomes() {
-		path := filepath.Join(codexHome, "hooks.json")
-		physical := physicalSettingsPath(path)
-		if seen[physical] {
-			continue
-		}
-		seen[physical] = true
-		raw, readErr := os.ReadFile(path)
-		existed := true
-		if errors.Is(readErr, fs.ErrNotExist) {
-			if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("hooks file for Codex is a dangling symlink: %s", path)
-			} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
-				return fmt.Errorf("inspect Codex hooks %s: %w", path, statErr)
+		loopErr = func() error {
+			path := filepath.Join(codexHome, "hooks.json")
+			physical := physicalSettingsPath(path)
+			if seen[physical] {
+				return nil
 			}
-			existed = false
-			raw = []byte("{\"hooks\":{}}\n")
-			if installer.options.Mode == ModeUninstall {
-				delete(ownership, physical)
-				continue
-			}
-		} else if readErr != nil {
-			return fmt.Errorf("read %s: %w", path, readErr)
-		}
-		updated, changed, nextOwned, updateErr := updateCodexHooks(
-			raw,
-			installer.options.Home,
-			installer.options.Mode == ModeUninstall,
-			ownership[physical],
-		)
-		if updateErr != nil {
-			if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {
-				return fmt.Errorf("refuse to strand owned hooks in invalid Codex hooks JSON at %s: %w", path, updateErr)
-			}
-			// A hooks file the operator broke by hand is skipped loudly and the
-			// run continues. Only owned hooks that would be stranded justify
-			// stopping — one unparseable seat file must not cost the machine
-			// its MCP clients, log default, shell line and update metadata.
-			installer.skip("invalid Codex hooks JSON at " + path + ": " + updateErr.Error())
-			continue
-		}
-		if len(nextOwned) == 0 {
-			delete(ownership, physical)
-		} else {
-			ownership[physical] = nextOwned
-		}
-		if !uninstalling {
-			final := raw
-			if changed {
-				final = updated
-			}
-			carries, err := codexHooksCarryResumeUnkill(final, installer.options.Home)
-			if err != nil {
-				return fmt.Errorf("inspect Codex hooks %s: %w", path, err)
-			}
-			carriesHook[physical] = carries
-		}
-
-		backup := ""
-		if existed {
-			backup = availableBackup(path, installer.stamp)
-		}
-		if !changed {
-			installer.ok(path + " wiring")
-		} else if err := installer.change(changeDescription(path, existed), func() error {
-			if existed {
-				if err := copyBackup(path, backup); err != nil {
-					return fmt.Errorf("backup %s: %w", path, err)
+			seen[physical] = true
+			raw, readErr := os.ReadFile(path)
+			existed := true
+			if errors.Is(readErr, fs.ErrNotExist) {
+				if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+					return fmt.Errorf("hooks file for Codex is a dangling symlink: %s", path)
+				} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+					return fmt.Errorf("inspect Codex hooks %s: %w", path, statErr)
 				}
+				existed = false
+				raw = []byte("{\"hooks\":{}}\n")
+				if installer.options.Mode == ModeUninstall {
+					delete(ownership, physical)
+					return nil
+				}
+			} else if readErr != nil {
+				return fmt.Errorf("read %s: %w", path, readErr)
 			}
-			return atomicfile.Write(physical, updated, 0o600)
-		}); err != nil {
-			return err
-		}
-		if err := installer.writeSettingsHookOwnership(ownershipPath, ownershipRaw, ownership); err != nil {
-			return err
-		}
-		if len(ownership) == 0 {
-			ownershipRaw = nil
-		} else {
-			ownershipRaw, err = encodeSettingsHookOwnership(ownership)
-			if err != nil {
+			updated, changed, nextOwned, updateErr := updateCodexHooks(
+				raw,
+				installer.options.Home,
+				installer.options.Mode == ModeUninstall,
+				ownership[physical],
+			)
+			if updateErr != nil {
+				if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {
+					return fmt.Errorf(
+						"refuse to strand owned hooks in invalid Codex hooks JSON at %s: %w",
+						path,
+						updateErr,
+					)
+				}
+				// A hooks file the operator broke by hand is skipped loudly and the
+				// run continues. Only owned hooks that would be stranded justify
+				// stopping — one unparseable seat file must not cost the machine
+				// its MCP clients, log default, shell line and update metadata.
+				installer.skip("invalid Codex hooks JSON at " + path + ": " + updateErr.Error())
+				return nil
+			}
+			if !uninstalling {
+				final := raw
+				if changed {
+					final = updated
+				}
+				carries, err := codexHooksCarryResumeUnkill(final, installer.options.Home)
+				if err != nil {
+					return fmt.Errorf("inspect Codex hooks %s: %w", path, err)
+				}
+				carriesHook[physical] = carries
+			}
+
+			backup := ""
+			if existed {
+				backup = availableBackup(path, installer.stamp)
+			}
+			if !changed {
+				installer.ok(path + " wiring")
+			} else if err := installer.change(changeDescription(path, existed), func() error {
+				if existed {
+					if err := copyBackup(path, backup); err != nil {
+						return fmt.Errorf("backup %s: %w", path, err)
+					}
+				}
+				return atomicfile.Write(physical, updated, 0o600)
+			}); err != nil {
 				return err
 			}
+			// The ledger follows the file: a write that failed owns nothing new.
+			if len(nextOwned) == 0 {
+				delete(ownership, physical)
+			} else {
+				ownership[physical] = nextOwned
+			}
+			return nil
+		}()
+		if loopErr != nil {
+			break
 		}
 	}
-	if err := installer.writeSettingsHookOwnership(ownershipPath, ownershipRaw, ownership); err != nil {
+	// Claude settings rows go; a configured home's hooks file stays under
+	// whatever name its link resolves to, the homes a stopped loop never
+	// reached included.
+	configured := map[string]bool{}
+	for _, codexHome := range installer.codexHomes() {
+		configured[physicalSettingsPath(filepath.Join(codexHome, "hooks.json"))] = true
+	}
+	for path := range ownership {
+		if filepath.Base(path) != "hooks.json" && !configured[path] {
+			delete(ownership, path)
+		}
+	}
+	ledgerErr := installer.writeSettingsHookOwnership(ownershipPath, ownershipRaw, ownership)
+	if err := errors.Join(loopErr, ledgerErr); err != nil {
 		return err
 	}
 	return installer.wireCodexHookTrust(carriesHook)
@@ -352,6 +376,9 @@ func codexHooksCarryResumeUnkill(raw []byte, home string) (bool, error) {
 // wireCodexHookTrust records or removes Codex's trust of the resume-unkill hook
 // per physical account, and cleans up after the retired appendix hook.
 func (installer *engine) wireCodexHookTrust(carriesHook map[string]bool) error {
+	if _, err := codexResumeUnkillHook(installer.options.Home); err != nil {
+		return err
+	}
 	seenAccounts := map[string]bool{}
 	for _, account := range installer.codexHomes() {
 		physical := physicalSettingsPath(account)
@@ -359,20 +386,26 @@ func (installer *engine) wireCodexHookTrust(carriesHook map[string]bool) error {
 			continue
 		}
 		seenAccounts[physical] = true
-		// The SessionStart appendix hook is retired: the fleet prompt now
-		// reaches Codex through developer_instructions. An install cleans up
-		// after it exactly as an uninstall does — an existing install carries
-		// the recorded trust until something takes it away.
-		if codexappendix.TrustRecorded(account) {
-			if err := installer.change(
-				"remove retired appendix hook trust "+account,
-				func() error { return codexappendix.Unregister(account) },
-			); err != nil {
-				return err
+		err := func() error {
+			// Retired appendix trust is cleaned up on install and uninstall.
+			if codexappendix.TrustRecorded(account) {
+				if err := installer.change(
+					"remove retired appendix hook trust "+account,
+					func() error { return codexappendix.Unregister(account) },
+				); err != nil {
+					return err
+				}
 			}
-		}
-		if err := installer.wireResumeUnkillTrust(account, carriesHook); err != nil {
-			return err
+			return installer.wireResumeUnkillTrust(account, carriesHook)
+		}()
+		if err != nil {
+			//nolint:staticcheck // Codex is a product name.
+			failure := fmt.Errorf(
+				"Codex hook trust for %s: %w",
+				account,
+				err,
+			)
+			installer.deferFailure(installer.fail(failure))
 		}
 	}
 	return nil

@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -19,6 +21,12 @@ import (
 // tick (a suspend, a slow fire, a tick that found the fire lock held) is
 // normal, but a reminder due three ticks running means nothing is firing.
 const reminderDoctorGrace = 15 * time.Minute
+
+type reminderScheduleDrift struct {
+	Path    string
+	Drifted bool
+	Err     error
+}
 
 // reminderScheduleProbeOverride lets tests exercise printReminderDoctor
 // without a real service manager, as ServiceManagerProbeOverride does for the
@@ -64,7 +72,10 @@ func printReminderDoctor(
 			warnings++
 		}
 	}()
-	return renderReminderDoctor(ctx, stdout, configuredReminderScheduleProbe(ctx, runner), store, now)
+	schedule := configuredReminderScheduleProbe(ctx, runner)
+	var drift reminderScheduleDrift
+	drift.Path, drift.Drifted, drift.Err = installer.ReminderScheduleDrift(values.Home)
+	return renderReminderDoctor(ctx, stdout, schedule, drift, store, now)
 }
 
 // renderReminderDoctor writes the one `doctor: reminders` line: the scheduler
@@ -72,7 +83,12 @@ func printReminderDoctor(
 // any problem holds. An unreadable database renders as db=unreadable with no
 // counts — a failure to look never reads as zero reminders.
 func renderReminderDoctor(
-	ctx context.Context, stdout io.Writer, schedule serviceManagerReport, source reminderSource, now time.Time,
+	ctx context.Context,
+	stdout io.Writer,
+	schedule serviceManagerReport,
+	drift reminderScheduleDrift,
+	source reminderSource,
+	now time.Time,
 ) int {
 	manager, unit := schedule.Manager, schedule.Unit.Unit
 	if unit == "" {
@@ -105,6 +121,17 @@ func renderReminderDoctor(
 		if schedule.Unit.Present {
 			hints = append(hints, "start with: "+serviceManagerStartHint(manager, unit))
 		} else {
+			hints = append(hints, "run pfm install --yes")
+		}
+	}
+
+	if drift.Err != nil {
+		scheduler += fmt.Sprintf(" drift=could_not_compare error=%v", drift.Err)
+		problem = true
+	} else if drift.Drifted {
+		scheduler += " drift=" + drift.Path
+		problem = true
+		if !slices.Contains(hints, "run pfm install --yes") {
 			hints = append(hints, "run pfm install --yes")
 		}
 	}

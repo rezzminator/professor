@@ -28,6 +28,7 @@ type engine struct {
 	managedRoot string
 	outputErr   error
 	planErrors  []error
+	deferred    []error
 	// removedPaths are the paths this pass removed, or — in a dry run, where
 	// nothing is removed at all — planned to remove. retireEmptyDir discounts
 	// them before refusing a non-empty directory (retire_empty_dir.go).
@@ -71,7 +72,7 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	}
 	if options.Mode != ModeDryRun {
 		// A job running now refuses before the installer writes.
-		probed, gateErr := schedulerGate(ctx, options.Runner)
+		probed, gateErr := awaitSchedulerGate(ctx, options)
 		if gateErr != nil {
 			return Report{}, gateErr
 		}
@@ -112,6 +113,9 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 	if len(installer.planErrors) != 0 {
 		err = errors.Join(append([]error{err}, installer.planErrors...)...)
 	}
+	if len(installer.deferred) != 0 {
+		err = errors.Join(append([]error{err}, installer.deferred...)...)
+	}
 	installer.say("")
 	installer.say("summary changed=%d ok=%d skipped=%d", installer.report.Changed,
 		installer.report.OK, installer.report.Skipped)
@@ -119,6 +123,19 @@ func Run(ctx context.Context, options Options) (report Report, err error) {
 		err = errors.Join(err, installer.outputErr)
 	}
 	return installer.report, err
+}
+
+// fail prints and records a step failure and returns it.
+func (installer *engine) fail(err error) error {
+	installer.say("  FAIL    %s", err)
+	installer.record("fail", err.Error(), err)
+	return err
+}
+
+func (installer *engine) deferFailure(err error) {
+	if err != nil {
+		installer.deferred = append(installer.deferred, err)
+	}
 }
 
 // preflight executes the selected complete planner against the same host
@@ -160,6 +177,9 @@ func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 }
 
 func (installer *engine) install(ctx context.Context) error {
+	if err := installer.seedConfig(); err != nil {
+		return err
+	}
 	if err := installer.installHarvest(ctx); err != nil {
 		return err
 	}
@@ -205,6 +225,15 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.retireRenamedGlobalAgents(); err != nil {
 		return err
 	}
+	if err := installer.retireBBInstall(); err != nil {
+		return err
+	}
+	if err := installer.retireChatCommands(); err != nil {
+		return err
+	}
+	if err := installer.retireStagedManagedSurfaces(false); err != nil {
+		return err
+	}
 	if err := installer.wireCommands(assets); err != nil {
 		return err
 	}
@@ -247,9 +276,7 @@ func (installer *engine) install(ctx context.Context) error {
 	if schedulerIsLaunchd {
 		if installer.apply {
 			if installer.options.launchGateUnprobed {
-				installer.skip(
-					"launch-agent gate NOT probed (launchctl print could not run or its output could not be read); an apply during a name-sync or reminder run is not refused",
-				)
+				installer.skip(launchGateUnprobedNote)
 			} else {
 				installer.ok("launch-agent gate: name-sync is not mid-execution")
 			}
@@ -268,24 +295,30 @@ func (installer *engine) install(ctx context.Context) error {
 		}
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
-			installer.skip(
-				"name-sync gate NOT probed (systemctl show could not read the unit state); an apply during a name-sync or reminder run is not refused",
-			)
+			installer.skip(nameSyncGateUnprobedNote)
 		}
 		unitChanged, err := installer.wireUnits(ctx)
 		if err != nil {
 			return err
 		}
-		if systemdAssetChanged || unitChanged {
+		reload := systemdAssetChanged || unitChanged
+		if !reload && installer.apply {
+			for _, unit := range []string{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit} {
+				state, err := fleetUnitState(ctx, installer.options.Runner, unit)
+				if err != nil || state != unitStateActive {
+					reload = true
+					break
+				}
+			}
+		}
+		if reload {
 			installer.reloadUnits(ctx)
 		}
 	}
 	// A failed plugin install is reported at once and fails the run only
 	// after every later step has landed.
-	pluginErr := installer.ensureClaudePlugins(ctx)
-	if err := installer.clearFullscreenAutoDisable(); err != nil {
-		return errors.Join(err, pluginErr)
-	}
+	installer.deferFailure(installer.ensureClaudePlugins(ctx))
+	installer.deferFailure(installer.clearFullscreenAutoDisable())
 	if err := installer.wireCodexHooks(); err != nil {
 		return err
 	}
@@ -299,32 +332,31 @@ func (installer *engine) install(ctx context.Context) error {
 	// daemon after its complete config/client transaction has landed.
 	// A restart that does not come back fails the run after every later step
 	// has landed, like a failed plugin install.
-	var restartErr error
 	if !schedulerIsLaunchd && installer.apply && installer.mcpAnyEnabled() && installer.userManagerAvailable(ctx) {
-		restartErr = installer.restartMCPUnit(ctx)
+		installer.deferFailure(installer.restartMCPUnit(ctx))
 	}
 	if mcpErr != nil {
-		return errors.Join(mcpErr, restartErr)
+		return mcpErr
 	}
 	if err := installer.wireOpenCodeInstructions(); err != nil {
-		return errors.Join(err, restartErr)
+		return err
 	}
 	if err := installer.wireLogDefault(); err != nil {
-		return errors.Join(err, restartErr)
+		return err
 	}
 	if err := installer.wireShell(false); err != nil {
-		return errors.Join(err, restartErr)
+		return err
 	}
 	if err := installer.wireVSCode(); err != nil {
-		return errors.Join(err, restartErr)
+		return err
 	}
 	if err := installer.writeUpdateMetadata(); err != nil {
-		return errors.Join(err, restartErr)
+		return err
 	}
 	// Like a failed plugin install, a refused login default is reported at
 	// once and fails the run after every other step has landed.
-	loginErr := installer.wireLoginDefault(false)
-	return errors.Join(pluginErr, loginErr, restartErr)
+	installer.deferFailure(installer.wireLoginDefault(false))
+	return nil
 }
 
 // wireCodexAgents runs on every install: it serves the Claude agent
@@ -721,6 +753,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	installer.uninstallThemes()
+	if err := installer.removeRumdlUserConfig(); err != nil {
+		return err
+	}
 	assets, err := assetFiles()
 	if err != nil {
 		return fmt.Errorf("enumerate embedded install assets: %w", err)
@@ -751,6 +786,12 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.unwireGeneratedCodexAgents(); err != nil {
+		return err
+	}
+	if err := installer.retireBBInstall(); err != nil {
+		return err
+	}
+	if err := installer.retireChatCommands(); err != nil {
 		return err
 	}
 	if schedulerIsLaunchd {
@@ -811,10 +852,11 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.wireShell(true); err != nil {
 		return err
 	}
-	if err := installer.wireLoginDefault(true); err != nil {
+	installer.deferFailure(installer.wireLoginDefault(true))
+	if err := installer.wireVSCode(); err != nil {
 		return err
 	}
-	if err := installer.wireVSCode(); err != nil {
+	if err := installer.retireStagedManagedSurfaces(true); err != nil {
 		return err
 	}
 	if err := installer.removeManagedAssets(assets); err != nil {
@@ -1085,10 +1127,10 @@ func (installer *engine) removeManagedAssets(assets []assetFile) error {
 		directories := make(map[string]bool)
 		for _, asset := range assets {
 			for directory := filepath.Dir(filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))); strings.HasPrefix(directory, installer.managedRoot); directory = filepath.Dir(directory) {
-				directories[directory] = true
 				if directory == installer.managedRoot {
 					break
 				}
+				directories[directory] = true
 			}
 		}
 		ordered := make([]string, 0, len(directories))
@@ -1104,9 +1146,7 @@ func (installer *engine) removeManagedAssets(assets []assetFile) error {
 				directory,
 			); err != nil && !errors.Is(err, fs.ErrNotExist) &&
 				!errors.Is(err, fs.ErrInvalid) {
-				if !errors.Is(err, fs.ErrExist) {
-					installer.skip("leave non-empty managed directory " + directory + ": " + err.Error())
-				}
+				installer.skip("leave non-empty managed directory " + directory + ": " + err.Error())
 			}
 		}
 	}
@@ -1606,9 +1646,17 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		return
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
-	installer.runSystemctl(ctx, "enable", "--now", nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit)
+	enablements := [][]string{{nameSyncPathUnit, nameSyncTimerUnit, reminderTimerUnit}}
 	if installer.mcpAnyEnabled() {
-		installer.runSystemctl(ctx, "enable", "--now", mcpUnitName)
+		enablements = append(enablements, []string{mcpUnitName})
+	}
+	for _, units := range enablements {
+		args := append([]string{"enable", "--now"}, units...)
+		if err := userSystemctl(ctx, installer.options.Runner, args...); err != nil {
+			installer.deferFailure(installer.fail(
+				fmt.Errorf("systemctl --user enable --now %s: %w", strings.Join(units, " "), err),
+			))
+		}
 	}
 }
 
@@ -1628,8 +1676,7 @@ func (installer *engine) restartMCPUnit(ctx context.Context) error {
 		err = verifyFleetUnitsActive(ctx, installer.options.Runner, []string{mcpUnitName})
 	}
 	if err != nil {
-		installer.say("  fail    %v", err)
-		return err
+		return installer.fail(err)
 	}
 	installer.ok("systemctl --user restart " + mcpUnitName)
 	return nil
@@ -1692,10 +1739,21 @@ func (installer *engine) wireShell(uninstall bool) error {
 		var err error
 		repo, err = paths.ReadSourceRepoMarker(installer.options.Home)
 		if errors.Is(err, paths.ErrNoSourceRepoMarker) {
-			installer.skip("zshrc: no source repo recorded")
-			return nil
+			repo, err = GlobalSourceRepo(installer.options.Home)
+			if err != nil {
+				installer.skip("zshrc: " + err.Error() + " — rerun pfm install --yes from inside your Professor clone")
+				return nil
+			}
+			shim := filepath.Join(repo, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
+			if _, err := os.Stat(shim); errors.Is(err, fs.ErrNotExist) {
+				installer.skip("zshrc: no source repo recorded and " + shim + " does not exist")
+				return nil
+			} else if err != nil {
+				return fmt.Errorf("inspect fallback shell shim %s: %w", shim, err)
+			}
 		} else if err != nil {
-			return err
+			installer.skip("zshrc: " + err.Error() + " — rerun pfm install --yes from inside your Professor clone")
+			return nil
 		}
 	}
 	shim := filepath.Join(repo, "pfm", "internal", "installer", "assets", "shim", "pfm.zsh")
@@ -1987,7 +2045,9 @@ var retiredGlobalAgents = []string{"frr", "rr-super"}
 func (installer *engine) retireRenamedGlobalAgents() error {
 	repos, err := installer.recordedProfessorSourceRepos()
 	if err != nil {
-		return err
+		installer.skip("renamed global agents skipped: " + err.Error() +
+			" — rerun pfm install --yes from inside your Professor clone")
+		return nil
 	}
 	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
 	config := installer.options.ConfigDir

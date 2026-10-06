@@ -46,6 +46,20 @@ func HookTrustRecorded(account string) bool {
 	return receiptRecorded(hookReceiptPath(account))
 }
 
+// HookTrustState distinguishes an absent receipt from one that cannot be inspected.
+func HookTrustState(account string) (recorded bool, err error) {
+	path := hookReceiptPath(account)
+	_, err = os.Stat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, os.ErrNotExist):
+		return false, nil
+	default:
+		return false, fmt.Errorf("inspect hook trust receipt %s: %w", path, err)
+	}
+}
+
 // UnregisterHookTrust removes the hooks.state tables the hook receipt names and
 // then the receipt; foreign tables and the appendix receipt stay untouched.
 func UnregisterHookTrust(account string) error {
@@ -103,9 +117,6 @@ func RegisterHookTrust(ctx context.Context, binary, account, event, matcher, com
 	if h.TrustStatus == trustedState && receipt[h.Key] == h.CurrentHash {
 		return nil
 	}
-	if err := saveHookReceipt(physical, receipt, h); err != nil {
-		return err
-	}
 	key, err := json.Marshal(h.Key)
 	if err != nil {
 		return fmt.Errorf("quote hook key %q: %w", h.Key, err)
@@ -118,7 +129,7 @@ func RegisterHookTrust(ctx context.Context, binary, account, event, matcher, com
 	if err != nil {
 		return fmt.Errorf("write hook trust %s for Codex account %s: %w", h.Key, physical, err)
 	}
-	return nil
+	return saveHookReceipt(physical, receipt, h)
 }
 
 func readHookReceipt(account string) (map[string]string, error) {

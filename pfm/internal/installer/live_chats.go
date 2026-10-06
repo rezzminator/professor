@@ -48,21 +48,3 @@ func liveChatPIDs(procRoot, configDir string) ([]string, error) {
 	sort.Strings(pids)
 	return pids, nil
 }
-
-func processIDs(procRoot string) ([]string, error) {
-	entries, err := os.ReadDir(procRoot)
-	if err != nil {
-		return nil, err
-	}
-	pids := []string{}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if _, err := strconv.Atoi(entry.Name()); err == nil {
-			pids = append(pids, entry.Name())
-		}
-	}
-	sort.Strings(pids)
-	return pids, nil
-}

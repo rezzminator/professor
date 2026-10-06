@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,17 +33,26 @@ func TestHostSettingsProbe(t *testing.T) {
 	}
 	writeFixture(t, ledger, string(encoded))
 	names, err := PFMSettingsLeftovers(home, link)
-	if err != nil || !reflect.DeepEqual(names, []string{"hooks", "statusLine", "subagentStatusLine"}) {
+	if err != nil ||
+		!reflect.DeepEqual(
+			names,
+			[]string{
+				fmt.Sprintf("hook %q", home+"/.local/bin/pfm internal launcher-repair"),
+				`hook "pfm internal clear-hide"`,
+				"statusLine",
+				"subagentStatusLine",
+			},
+		) {
 		t.Fatalf("names=%v err=%v", names, err)
 	}
-	// A ledger-owned command that does not match a pfm template still belongs to pfm.
+	// A ledger record does not claim a command running the operator's binary.
 	writeFixture(
 		t,
 		path,
 		`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"`+home+`/private-ledger-hook"}]}]}}`,
 	)
 	names, err = PFMSettingsLeftovers(home, link)
-	if err != nil || !reflect.DeepEqual(names, []string{"hooks"}) {
+	if err != nil || len(names) != 0 {
 		t.Fatalf("ledger names=%v err=%v", names, err)
 	}
 	writeFixture(t, ledger, "{")
@@ -74,8 +84,10 @@ func TestHostMCPProbes(t *testing.T) {
 	writeFixture(t, path, string(raw))
 	encoded, err := json.Marshal(
 		mcpOwnership{
-			Registrations: map[string]map[string]any{physicalSettingsPath(path): {"owned": map[string]any{}}},
-			Clients:       []string{"owned"},
+			Registrations: map[string]map[string]any{
+				physicalSettingsPath(path): {"owned": map[string]any{"command": "invented"}},
+			},
+			Clients: []string{"owned"},
 		},
 	)
 	if err != nil {
@@ -89,7 +101,8 @@ func TestHostMCPProbes(t *testing.T) {
 	}
 	writeFixture(t, filepath.Join(home, ".mcp.json"), string(raw))
 	got, clients, err := PFMHomeMCPLeftovers(home, config.DefaultMCPPort)
-	if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(clients, []string{"owned"}) {
+	if err != nil || !reflect.DeepEqual(got, []string{"mcpServers.professor"}) ||
+		!reflect.DeepEqual(clients, []string{"owned"}) {
 		t.Fatalf("home names=%v clients=%v err=%v", got, clients, err)
 	}
 	writeFixture(t, ledger, "{")
@@ -141,12 +154,83 @@ func TestIsStagedShimLine(t *testing.T) {
 		{`source "$HOME/.cc/cc-fleet.zsh"`, true},
 		{`source "$HOME/clone/pfm/internal/installer/assets/shim/pfm.zsh"`, false},
 		{`source '$HOME/clone/pfm/internal/installer/assets/shim/pfm.zsh' # keep`, false},
+		{`(source "$HOME/clone/pfm/internal/installer/assets/shim/pfm.zsh")`, false},
+		{`(source $HOME/clone/pfm/internal/installer/assets/shim/pfm.zsh)`, false},
+		{`(source "$HOME/.local/share/pfm/install/shim/pfm.zsh")`, true},
 		{`# source "$HOME/old/pfm.zsh"`, false},
 		{"echo unrelated", false},
 	} {
 		t.Run(test.line, func(t *testing.T) {
 			if got := IsStagedShimLine(test.line); got != test.want {
 				t.Fatalf("got=%v want=%v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHostMCPRegistrationOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		server   string
+		recorded string
+		current  string
+		want     []string
+	}{
+		{"operator-professor", "professor", `{"command":"old"}`, `{"command":"/opt/operator/mcp"}`, []string{}},
+		{"professor-shape", "professor", "", "", []string{"mcpServers.professor"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			path := filepath.Join(home, ".claude.json")
+			current := test.current
+			if current == "" {
+				current = fmt.Sprintf(
+					`{"type":"stdio","command":%q,"args":["mcp","serve","--stdio"]}`,
+					home+"/.local/bin/pfm",
+				)
+			}
+			writeFixture(t, path, fmt.Sprintf(`{"mcpServers":{%q:%s}}`, test.server, current))
+			ledger := filepath.Join(ManagedRoot(home), mcpOwnershipName)
+			if test.recorded != "" {
+				writeFixture(t, ledger, fmt.Sprintf(`{"registrations":{%q:{%q:%s}}}`, path, test.server, test.recorded))
+			}
+			got, err := PFMMCPLeftovers(home, 8377, path)
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("names=%v err=%v want=%v", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestLedgerOwnedMCPPhysicalRecords(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "registry.json")
+	writeFixture(t, path, "{}")
+	link := filepath.Join(home, "registry-link.json")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := json.Marshal(mcpOwnership{Registrations: map[string]map[string]any{
+		path: {"owned": map[string]any{"command": "first"}},
+		link: {"owned": map[string]any{"command": "second"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(ManagedRoot(home), mcpOwnershipName), string(ledger))
+	for _, test := range []struct {
+		command string
+		want    []string
+	}{
+		{"first", []string{"mcpServers.owned"}},
+		{"second", []string{"mcpServers.owned"}},
+		{"operator", []string{}},
+	} {
+		t.Run(test.command, func(t *testing.T) {
+			writeFixture(t, path, fmt.Sprintf(`{"mcpServers":{"owned":{"command":%q,"env":{}}}}`, test.command))
+			got, err := PFMMCPLeftovers(home, 8377, link)
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("names=%v err=%v want=%v", got, err, test.want)
 			}
 		})
 	}

@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
 )
 
 // newVSCodeExtensionEngine builds the minimal *engine a linkVSCodeExtension /
@@ -892,7 +894,7 @@ func TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv(t *testing.T) {
 	if !ok || marker == "" {
 		t.Fatalf("terminal profile env missing a PROFESSOR_TERMINAL marker: %v", profile.Env)
 	}
-	for _, key := range []string{"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "TMUX", "TMUX_PANE"} {
+	for _, key := range append(claudelaunch.IdentityHygiene(), "TMUX", "TMUX_PANE") {
 		value, present := profile.Env[key]
 		if !present {
 			t.Fatalf("terminal profile env dropped %s entirely instead of nulling it: %v", key, profile.Env)
@@ -900,6 +902,20 @@ func TestVSCodeExtensionTerminalProfileStripsChatIdentityEnv(t *testing.T) {
 		if value != nil {
 			t.Fatalf("terminal profile env[%s] = %v, want JSON null (VS Code deletes the inherited var)", key, value)
 		}
+	}
+	nulled := 0
+	for _, value := range profile.Env {
+		if value == nil {
+			nulled++
+		}
+	}
+	if want := len(claudelaunch.IdentityHygiene()) + 2; nulled != want {
+		t.Fatalf(
+			"terminal profile env nulls %d names, want exactly the %d identity and TMUX names: %v",
+			nulled,
+			want,
+			profile.Env,
+		)
 	}
 }
 

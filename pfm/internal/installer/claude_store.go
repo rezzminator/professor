@@ -3,9 +3,11 @@ package installer
 import (
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/claudelaunch"
@@ -18,6 +20,7 @@ const (
 	claudeLocalSettingsName = "settings.local.json"
 	stateStore              = "store"
 	stateElsewhere          = "elsewhere"
+	stateForeign            = "foreign"
 )
 
 // ClaudeStore is the shared Claude data directory; claudelaunch owns it, since
@@ -116,10 +119,23 @@ func InspectClaudeStore(store string, accounts []pfmconfig.Account) ClaudeStoreR
 	for _, entry := range StoreEntries {
 		state := StoreEntryState{Name: entry.Name, Path: filepath.Join(store, entry.Name), State: "ok"}
 		_, err := os.Lstat(state.Path)
-		if errors.Is(err, os.ErrNotExist) {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			state.State = string(HostOverlayMissing)
-		} else if err != nil {
+		case err != nil:
 			state.State, state.Err = stateUnreadable, err
+		default:
+			info, err := os.Stat(state.Path)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				state.State, state.Err = stateBroken, errors.New("a dangling link")
+			case err != nil:
+				state.State, state.Err = stateUnreadable, err
+			case entry.Dir && !info.IsDir():
+				state.State, state.Err = stateBroken, errors.New("a file where a directory belongs")
+			case !entry.Dir && info.IsDir():
+				state.State, state.Err = stateBroken, errors.New("a directory where a file belongs")
+			}
 		}
 		report.Entries = append(report.Entries, state)
 	}
@@ -145,35 +161,58 @@ func InspectClaudeStore(store string, accounts []pfmconfig.Account) ClaudeStoreR
 		}
 		if state.State != stateStore && state.State != stateUnreadable {
 			for _, entry := range StoreEntries {
-				link := LinkState{Entry: entry.Name, Path: filepath.Join(state.Dir, entry.Name), State: "ok"}
-				info, err := os.Lstat(link.Path)
-				switch {
-				case errors.Is(err, os.ErrNotExist):
-					link.State = string(HostOverlayMissing)
-				case err != nil:
-					link.State, link.Err = stateUnreadable, err
-				case info.Mode()&os.ModeSymlink == 0:
-					link.State = "real"
-				default:
-					link.Target, err = os.Readlink(link.Path)
-					if err != nil {
-						link.State, link.Err = stateUnreadable, err
-					} else {
-						target := link.Target
-						if !filepath.IsAbs(target) {
-							target = filepath.Join(base, target)
-						}
-						if paths.PhysicalPath(target) != paths.PhysicalPath(filepath.Join(store, entry.Name)) {
-							link.State = stateElsewhere
-						}
-					}
-				}
-				state.Links = append(state.Links, link)
+				state.Links = append(
+					state.Links,
+					InspectAccountLink(store, base, filepath.Join(state.Dir, entry.Name), entry.Name),
+				)
 			}
 		}
 		report.Accounts = append(report.Accounts, state)
 	}
 	return report
+}
+
+// InspectAccountLink inspects one account entry; base resolves relative targets.
+func InspectAccountLink(store, base, path, entry string) LinkState {
+	link := LinkState{Entry: entry, Path: path, State: "ok"}
+	info, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		link.State = string(HostOverlayMissing)
+	case err != nil:
+		link.State, link.Err = stateUnreadable, err
+	case info.Mode()&os.ModeSymlink == 0:
+		link.State = "real"
+	default:
+		link.Target, err = os.Readlink(path)
+		if err != nil {
+			link.State, link.Err = stateUnreadable, err
+			return link
+		}
+		target := link.Target
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(base, target)
+		}
+		physical := paths.PhysicalPath(target)
+		if physical == paths.PhysicalPath(filepath.Join(store, entry)) {
+			return link
+		}
+		_, err := os.Stat(path)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			link.State = stateElsewhere
+		case err != nil:
+			link.State, link.Err = stateUnreadable, err
+		default:
+			storeReal := paths.PhysicalPath(store)
+			if physical == storeReal || strings.HasPrefix(physical, storeReal+string(filepath.Separator)) {
+				link.State = stateElsewhere
+			} else {
+				link.State = stateForeign
+			}
+		}
+	}
+	return link
 }
 
 func (installer *engine) wireClaudeStore() error {
@@ -183,6 +222,13 @@ func (installer *engine) wireClaudeStore() error {
 		switch entry.State {
 		case "ok":
 			installer.ok(entry.Path)
+		case stateBroken:
+			return fmt.Errorf(
+				"store entry %s broken: %v — remove %s, then run pfm install --yes",
+				entry.Path,
+				entry.Err,
+				entry.Path,
+			)
 		case stateUnreadable:
 			return fmt.Errorf("inspect store entry %s: %w", entry.Path, entry.Err)
 		case string(HostOverlayMissing):
@@ -197,7 +243,17 @@ func (installer *engine) wireClaudeStore() error {
 			}
 		}
 	}
+	seen := make(map[string]int)
+	accounts := make([]AccountLinks, 0, len(report.Accounts))
 	for _, account := range report.Accounts {
+		physical := paths.PhysicalPath(account.Dir)
+		if first, ok := seen[physical]; ok {
+			installer.skip(
+				fmt.Sprintf("account %d %s is the same directory as account %d", account.ID, account.Dir, first),
+			)
+			continue
+		}
+		seen[physical] = account.ID
 		switch account.State {
 		case stateStore:
 			installer.skip(
@@ -216,11 +272,11 @@ func (installer *engine) wireClaudeStore() error {
 		case "ok":
 			installer.ok(account.Dir)
 		}
+		accounts = append(accounts, account)
 	}
-	for _, account := range report.Accounts {
-		if account.State == stateStore {
-			continue
-		}
+	for _, account := range accounts {
+		var live []string
+		liveRead := false
 		for _, link := range account.Links {
 			target := filepath.Join(store, link.Entry)
 			switch link.State {
@@ -228,6 +284,14 @@ func (installer *engine) wireClaudeStore() error {
 				installer.ok(link.Path)
 			case stateUnreadable:
 				return fmt.Errorf("inspect account link %s: %w", link.Path, link.Err)
+			case stateForeign:
+				installer.skip(
+					fmt.Sprintf(
+						"%s links to %s outside the store — pfm doctor names its merge",
+						link.Path,
+						link.Target,
+					),
+				)
 			case "real":
 				info, err := os.Lstat(link.Path)
 				if err != nil {
@@ -238,23 +302,59 @@ func (installer *engine) wireClaudeStore() error {
 					kind = "dir"
 				}
 				installer.skip(fmt.Sprintf("%s is a real %s — pfm doctor names its merge", link.Path, kind))
-			case string(HostOverlayMissing), stateElsewhere:
-				message := fmt.Sprintf("link %s -> %s", link.Path, target)
-				if link.State == stateElsewhere {
-					message = fmt.Sprintf("repoint %s -> %s (was %s)", link.Path, target, link.Target)
-				}
-				if err := installer.change(message, func() error {
-					if link.State == stateElsewhere {
-						if err := os.Remove(link.Path); err != nil {
-							return err
-						}
-					}
+			case string(HostOverlayMissing):
+				if err := installer.change(fmt.Sprintf("link %s -> %s", link.Path, target), func() error {
 					return os.Symlink(target, link.Path)
+				}); err != nil {
+					return fmt.Errorf("link account entry %s -> %s: %w", link.Path, target, err)
+				}
+			case stateElsewhere:
+				if !liveRead {
+					var err error
+					live, err = liveChatPIDs(installer.options.ProcRoot, account.Dir)
+					if err != nil {
+						return fmt.Errorf("read live chats in %s: %w", account.Dir, err)
+					}
+					liveRead = true
+				}
+				if len(live) > 0 {
+					installer.skip(
+						fmt.Sprintf(
+							"repoint %s: live chats %s on %s — close them and rerun pfm install --yes",
+							link.Path,
+							strings.Join(live, ","),
+							account.Dir,
+						),
+					)
+					continue
+				}
+				message := fmt.Sprintf("repoint %s -> %s (was %s)", link.Path, target, link.Target)
+				if err := installer.change(message, func() error {
+					return installer.repointAccountLink(target, link.Path)
 				}); err != nil {
 					return fmt.Errorf("link account entry %s -> %s: %w", link.Path, target, err)
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// repointAccountLink replaces a link in one rename, preserving a directory
+// that races into its place and removing the scratch link on failure.
+func (installer *engine) repointAccountLink(target, path string) error {
+	scratch := filepath.Join(
+		filepath.Dir(path),
+		fmt.Sprintf(".%s.pfm-link-%d-%016x", filepath.Base(path), os.Getpid(), rand.Uint64()),
+	)
+	if err := os.Symlink(target, scratch); err != nil {
+		return err
+	}
+	if err := os.Rename(scratch, path); err != nil {
+		if removeErr := os.Remove(scratch); removeErr != nil {
+			return errors.Join(err, fmt.Errorf("remove scratch link %s: %w", scratch, removeErr))
+		}
+		return err
 	}
 	return nil
 }

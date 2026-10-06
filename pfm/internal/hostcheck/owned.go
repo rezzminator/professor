@@ -35,15 +35,15 @@ func pfmSettings(env Env) ([]Row, error) {
 			continue
 		}
 		if len(keys) > 0 {
-			keysText := strings.Join(keys, ",")
+			items := strings.Join(keys, ", ")
 			rows = append(
 				rows,
 				Row{
 					Block,
 					"pfm-settings",
 					path,
-					"carries pfm " + keysText + " — they ride " + claudelaunch.SettingsFlag + " at launch and would run twice",
-					"remove " + keysText + " from " + path + " (pfm's hook commands only; keep every other key)",
+					"carries pfm's " + items + " — pfm supplies its own hooks and status lines through " + claudelaunch.SettingsFlag + " at launch, so these entries are leftovers of an earlier install",
+					"remove " + items + " from " + path + " (each hook entry running that command and each named key; keep every other entry)",
 				},
 			)
 		}

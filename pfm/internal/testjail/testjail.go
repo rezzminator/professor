@@ -271,9 +271,8 @@ func jailHome(base string) (func(), error) {
 	if err := paths.WriteSourceRepoMarker(home, checkoutRoot()); err != nil {
 		warnSetup("write source repository marker: %v", err)
 	}
-	// Keep child tools' XDG files inside the package jail.
-	if err := os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")); err != nil {
-		warnSetup("set XDG_CONFIG_HOME under %s: %v", home, err)
+	if err := pinXDGConfigHome(home); err != nil {
+		return cleanup, err
 	}
 	if paths.EnvOr(paths.EnvSIDDir, "") == "" {
 		sidDir := filepath.Join(home, "sid")

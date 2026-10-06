@@ -28,10 +28,13 @@ const (
 	reminderOpened       = "opened"
 )
 
+// ComposerWait bounds the revived composer wait; the installer gate bounds its wait by it.
+const ComposerWait = 90 * time.Second
+
 // Package variables so a test shortens the wait.
 var (
 	reminderComposerPoll = 500 * time.Millisecond
-	reminderComposerWait = 90 * time.Second
+	reminderComposerWait = ComposerWait
 )
 
 // chatDeliverer wakes a chat and types a reminder into it: a live chat

@@ -71,6 +71,9 @@ func (installer *engine) mcpOwnershipPath() string {
 }
 
 func (installer *engine) wireMCP() error {
+	if err := installer.dropClaudeMCPOwnership(); err != nil {
+		return err
+	}
 	if installer.options.Mode == ModeUninstall {
 		return installer.removeMCPClientRegistrations()
 	}

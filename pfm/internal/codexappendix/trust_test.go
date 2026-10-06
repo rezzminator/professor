@@ -220,3 +220,53 @@ func writeReceiptFile(t *testing.T, account, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestRegisterHookTrustRecordsReceiptOnlyAfterAcceptedWrite(t *testing.T) {
+	account, binary, requestLog := stageTrustAccount(t, func(account string) []listedHook {
+		return []listedHook{ownHook(account, "untrusted")}
+	})
+	script, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script = []byte(strings.ReplaceAll(string(script), `{"id":1,"result":{}}`,
+		`{"id":1,"error":{"code":-1,"message":"denied"}}`))
+	if err := testjail.WriteExecutable(binary, script, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err = registerOwn(binary, account)
+	if err == nil || !strings.HasPrefix(err.Error(), "write hook trust ") || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("registration error=%v, want write hook trust denial", err)
+	}
+	if len(writeRequests(t, requestLog)) != 1 || HookTrustRecorded(account) {
+		t.Fatal("a denied write was recorded as trusted")
+	}
+}
+
+func TestHookTrustStateDistinguishesMissingRecordedAndUnreadable(t *testing.T) {
+	for _, state := range []string{"absent", "file", "self-symlink"} {
+		t.Run(state, func(t *testing.T) {
+			account := t.TempDir()
+			path := hookReceiptPath(account)
+			switch state {
+			case "file":
+				writeReceiptFile(t, account, `{}`)
+			case "self-symlink":
+				if err := os.Symlink(path, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			recorded, err := HookTrustState(account)
+			if state == "self-symlink" {
+				if recorded || err == nil || !strings.HasPrefix(err.Error(), "inspect hook trust receipt "+path+": ") {
+					t.Fatalf("state=(%v, %v), want unreadable receipt", recorded, err)
+				}
+				if !HookTrustRecorded(account) {
+					t.Fatal("uninstall must still attempt unreadable receipt cleanup")
+				}
+			} else if err != nil || recorded != (state == "file") {
+				t.Fatalf("state=(%v, %v), want recorded=%v", recorded, err, state == "file")
+			}
+		})
+	}
+}

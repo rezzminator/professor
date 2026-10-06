@@ -130,6 +130,70 @@ func TestOfflineThemesSkipRemoteAndInstallBundled(t *testing.T) {
 	}
 }
 
+func TestThemesDryRunOffline(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		offline, overlay bool
+	}{
+		{name: "offline", offline: true},
+		{name: "offline overlay", offline: true, overlay: true},
+		{name: "online"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, sourceRepo := t.TempDir(), t.TempDir()
+			bundled := "local"
+			base := ""
+			if tc.overlay {
+				bundled = "gold"
+				base = `,"base":"remote"`
+			}
+			writeFixture(t, filepath.Join(sourceRepo, themeManifestRelative), fmt.Sprintf(`{
+  "source_fetched": {"remote": {"repo": "https://example.invalid", "raw": "https://example.invalid/remote.json", "target": "~/.claude/themes/remote.json"}},
+  "bundled": {%q: {"file": %q, "target": %q%s}}
+}`, bundled, bundled+".json", "~/.claude/themes/"+bundled+".json", base))
+			writeFixture(
+				t,
+				filepath.Join(sourceRepo, "templates", "themes", bundled+".json"),
+				`{"name":"Local","base":"dark","overrides":{"claude":"#ffd60a"}}`,
+			)
+			var output bytes.Buffer
+			installer := &engine{options: Options{
+				Mode: ModeDryRun, Home: home, SourceRepo: sourceRepo, Stdout: &output,
+				InstallThemes: true, ThemesOffline: tc.offline,
+			}, managedRoot: filepath.Join(home, "install")}
+			installer.installThemes(context.Background())
+			target := filepath.Join(home, ".claude", "themes", bundled+".json")
+			want := "  change  read bundled theme " + bundled + " -> " + target + "\n"
+			changed, skipped := 1, 1
+			if tc.overlay {
+				want = "  skip    theme gold base remote fetch failed: fetch skipped: PFM_THEMES_OFFLINE=1\n"
+				changed, skipped = 0, 2
+			}
+			if tc.offline {
+				want += "  skip    theme remote fetch failed: fetch skipped: PFM_THEMES_OFFLINE=1\n"
+			} else {
+				want += "  change  fetch theme remote -> " + filepath.Join(
+					home,
+					".claude",
+					"themes",
+					"remote.json",
+				) + "\n"
+				changed, skipped = 2, 0
+			}
+			if output.String() != want || installer.report.Changed != changed || installer.report.Skipped != skipped {
+				t.Fatalf(
+					"report = %+v, output = %q; want changed = %d, skipped = %d, output = %q",
+					installer.report,
+					output.String(),
+					changed,
+					skipped,
+					want,
+				)
+			}
+		})
+	}
+}
+
 func TestOfflineThemesWithoutLocalManifestNameSkip(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()

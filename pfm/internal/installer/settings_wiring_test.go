@@ -240,7 +240,7 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFixture(t, settingsHookOwnershipPath(managed), string(encoded))
-	installer := engine{options: Options{Mode: ModeUninstall, Home: home}, managedRoot: managed}
+	installer := engine{options: Options{Mode: ModeUninstall, Home: home, Stdout: io.Discard}, managedRoot: managed}
 	err = installer.wireCodexHooks()
 	if err == nil || !strings.Contains(err.Error(), "refuse to strand owned hooks in invalid Codex hooks JSON") {
 		t.Fatalf("wireCodexHooks error=%v", err)

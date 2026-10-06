@@ -102,11 +102,28 @@ func TestDoctorReportsEachVSCodeProductLinkAndIndexState(t *testing.T) {
 
 func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
 	const settingsHint = ` · don't want this? add "vscode-settings" to doctor.ignoreWarnings in /cfg/pfm.config.json` + "\n"
-	for _, value := range []string{"", "other", "primary"} {
-		t.Run(value, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, env, envValue, primary, row string
+		owned, malformed                  bool
+		warnings                          int
+	}{
+		{"owned missing", `[{"name":"CLAUDE_CONFIG_DIR","value":""}]`, "", "primary", "CLAUDE_CONFIG_DIR missing — run pfm install --yes --vscode", true, false, 1},
+		{"owned drift", `[{"name":"CLAUDE_CONFIG_DIR","value":"other"}]`, "other", "primary", "CLAUDE_CONFIG_DIR=other, want primary — run pfm install --yes --vscode", true, false, 1},
+		{"owned primary", `[{"name":"CLAUDE_CONFIG_DIR","value":"primary"}]`, "primary", "primary", "", true, false, 0},
+		{"relinquished drift", `[{"name":"CLAUDE_CONFIG_DIR","value":"other"}]`, "/old", "primary", "CLAUDE_CONFIG_DIR=other, want primary (pfm relinquished it after an operator edit) — run pfm install --yes --vscode", false, false, 1},
+		{"relinquished missing", `[]`, "/old", "primary", "CLAUDE_CONFIG_DIR missing (pfm relinquished it after an operator edit) — run pfm install --yes --vscode", false, false, 1},
+		{"malformed", `{}`, "", "primary", "claudeCode.environmentVariables unreadable error=malformed VS Code settings: claudeCode.environmentVariables must be an array", false, true, 1},
+		{"malformed no primary", `{}`, "", "", "claudeCode.environmentVariables unreadable error=malformed VS Code settings: claudeCode.environmentVariables must be an array", false, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			settings := filepath.Join(home, "settings.json")
-			raw := `{"claudeCode.environmentVariables":[{"name":"CLAUDE_CONFIG_DIR","value":"` + value + `"}]}`
+			raw := `{"claudeCode.environmentVariables":` + tc.env + `}`
+			profileState := "relinquished"
+			if tc.malformed {
+				raw = `{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh"}},"claudeCode.environmentVariables":` + tc.env + `}`
+				profileState = "owned"
+			}
 			if err := os.WriteFile(settings, []byte(raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +135,13 @@ func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
 				map[string]any{
 					"version": 1,
 					"files": []map[string]any{
-						{"path": settings, "platform": "linux", "envOwned": true, "envValue": value},
+						{
+							"path":         settings,
+							"platform":     "linux",
+							"envOwned":     tc.owned,
+							"envValue":     tc.envValue,
+							"profileOwned": tc.malformed,
+						},
 					},
 				},
 			)
@@ -126,19 +149,13 @@ func TestDoctorVSCodeClaudeEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			warnings := printVSCodeDoctor(&out, home, "primary", warningFilter{configPath: "/cfg/pfm.config.json"})
-			want := 0
-			line := ""
-			switch value {
-			case "":
-				want = 1
-				line = "doctor: vscode settings=" + settings + " CLAUDE_CONFIG_DIR missing — run pfm install --yes --vscode" + settingsHint
-			case "other":
-				want = 1
-				line = "doctor: vscode settings=" + settings + " CLAUDE_CONFIG_DIR=other, want primary — run pfm install --yes --vscode" + settingsHint
+			warnings := printVSCodeDoctor(&out, home, tc.primary, warningFilter{configPath: "/cfg/pfm.config.json"})
+			want := "doctor: vscode settings=" + settings + " profile=PFM(" + profileState + ") default=(none)\n"
+			if tc.row != "" {
+				want += "doctor: vscode settings=" + settings + " " + tc.row + settingsHint
 			}
-			if warnings != want || (line != "" && !strings.Contains(out.String(), line)) {
-				t.Fatalf("warnings=%d got %q want %q", warnings, out.String(), line)
+			if warnings != tc.warnings || out.String() != want {
+				t.Fatalf("warnings=%d want %d; got %q want %q", warnings, tc.warnings, out.String(), want)
 			}
 		})
 	}

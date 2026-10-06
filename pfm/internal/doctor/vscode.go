@@ -94,37 +94,51 @@ func printVSCodeDoctor(stdout io.Writer, home, primaryDir string, filter warning
 		} else {
 			fmt.Fprintln(stdout, row)
 		}
-		if settings.Error == "" && primaryDir != "" {
-			envFix := vscodeFix
-			if settings.ProfileConflict {
-				// `pfm install --vscode` refuses an operator's own PFM profile,
-				// so the fix names the step that clears the refusal first.
-				envFix = fmt.Sprintf(
-					`rename or remove the "PFM" terminal profile in %s, then %s`,
-					settings.Path,
-					vscodeFix,
-				)
-			}
-			switch {
-			case settings.ClaudeConfigDir == "":
+		if settings.Error == "" {
+			if settings.EnvError != "" {
 				warnings += filter.warn(
 					stdout,
 					warnVSCodeSettings,
-					"doctor: vscode settings="+settings.Path+" CLAUDE_CONFIG_DIR missing",
-					envFix,
+					"doctor: vscode settings="+settings.Path+" claudeCode.environmentVariables unreadable error="+settings.EnvError,
+					"",
 				)
-			case settings.ClaudeConfigDir != primaryDir:
-				warnings += filter.warn(
-					stdout,
-					warnVSCodeSettings,
-					fmt.Sprintf(
-						"doctor: vscode settings=%s CLAUDE_CONFIG_DIR=%s, want %s",
+			} else if primaryDir != "" {
+				envFix := vscodeFix
+				if settings.ProfileConflict {
+					// `pfm install --vscode` refuses an operator's own PFM profile,
+					// so the fix names the step that clears the refusal first.
+					envFix = fmt.Sprintf(
+						`rename or remove the "PFM" terminal profile in %s, then %s`,
 						settings.Path,
-						settings.ClaudeConfigDir,
-						primaryDir,
-					),
-					envFix,
-				)
+						vscodeFix,
+					)
+				}
+				suffix := ""
+				if settings.EnvRelinquished {
+					suffix = " (pfm relinquished it after an operator edit)"
+				}
+				switch {
+				case settings.ClaudeConfigDir == "":
+					warnings += filter.warn(
+						stdout,
+						warnVSCodeSettings,
+						"doctor: vscode settings="+settings.Path+" CLAUDE_CONFIG_DIR missing"+suffix,
+						envFix,
+					)
+				case settings.ClaudeConfigDir != primaryDir:
+					warnings += filter.warn(
+						stdout,
+						warnVSCodeSettings,
+						fmt.Sprintf(
+							"doctor: vscode settings=%s CLAUDE_CONFIG_DIR=%s, want %s%s",
+							settings.Path,
+							settings.ClaudeConfigDir,
+							primaryDir,
+							suffix,
+						),
+						envFix,
+					)
+				}
 			}
 		}
 		if settings.Error != "" {

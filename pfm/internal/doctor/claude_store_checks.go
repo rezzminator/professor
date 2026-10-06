@@ -19,6 +19,15 @@ func printClaudeStoreChecks(stdout io.Writer, runtime config.Runtime) int {
 		case missingState:
 			fmt.Fprintf(stdout, "store: %s missing — run pfm install\n", entry.Path)
 			failures++
+		case "broken":
+			fmt.Fprintf(
+				stdout,
+				"store: %s broken: %v — remove %s, then run pfm install --yes\n",
+				entry.Path,
+				entry.Err,
+				entry.Path,
+			)
+			failures++
 		case unreadableState:
 			fmt.Fprintf(stdout, "store: %s UNREADABLE error=%v\n", entry.Path, entry.Err)
 			failures++
@@ -43,6 +52,14 @@ func printClaudeStoreChecks(stdout io.Writer, runtime config.Runtime) int {
 			case missingState:
 				fmt.Fprintf(stdout, "account-link: %s missing — run pfm install\n", link.Path)
 				failures++
+			case "foreign":
+				fmt.Fprintf(
+					stdout,
+					"account-link: %s points at %s outside the store — run pfm install --yes; its host check names the merge\n",
+					link.Path,
+					link.Target,
+				)
+				clean = false
 			case "elsewhere":
 				fmt.Fprintf(
 					stdout,

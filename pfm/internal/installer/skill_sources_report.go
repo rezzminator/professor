@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,52 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+const (
+	skillLinkLedgerName    = "skill-links.json"
+	skillLinkLedgerVersion = 1
+)
+
+type skillLinkLedger struct {
+	Version  int      `json:"version"`
+	LinkDirs []string `json:"link_dirs"`
+}
+
+func skillLinkLedgerPath(home string) string {
+	return filepath.Join(managedRootForHome(home), skillLinkLedgerName)
+}
+
+func readSkillLinkLedger(home string) ([]string, bool, error) {
+	path := skillLinkLedgerPath(home)
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, true, fmt.Errorf("skill link ledger %s: %w", path, err)
+	}
+	var ledger skillLinkLedger
+	if err := json.Unmarshal(content, &ledger); err != nil {
+		return nil, true, fmt.Errorf("skill link ledger %s: %w", path, err)
+	}
+	if ledger.Version != skillLinkLedgerVersion {
+		return nil, true, fmt.Errorf(
+			"skill link ledger %s: version %d, want %d",
+			path,
+			ledger.Version,
+			skillLinkLedgerVersion,
+		)
+	}
+	if len(ledger.LinkDirs) == 0 {
+		return nil, true, fmt.Errorf("skill link ledger %s: link_dirs is empty", path)
+	}
+	for _, dir := range ledger.LinkDirs {
+		if !filepath.IsAbs(dir) {
+			return nil, true, fmt.Errorf("skill link ledger %s: link dir %s is not absolute", path, dir)
+		}
+	}
+	return ledger.LinkDirs, true, nil
+}
 
 // SkillSourceState is one source-fetched skill's install state, measured the
 // way wireSourceFetchedSkills builds it. CHECK-FAILED is its own state on
@@ -31,7 +78,7 @@ const (
 )
 
 // SkillSourceStatus is one doctor row: a registered skill (Name set) or the
-// registry itself (Name empty, Path the registry or clone).
+// registry itself (Name empty, Path the registry, clone or link ledger).
 type SkillSourceStatus struct {
 	Name      string
 	Path      string
@@ -74,7 +121,8 @@ func (status SkillSourceStatus) Describe() string {
 }
 
 // InspectSkillSources classifies each registered skill once against its managed
-// storage, the store skills registry, and ~/.agents/skills.
+// storage and the recorded link dirs, falling back to the default store's
+// skills registry and ~/.agents/skills when there is no link ledger.
 func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
 	repo, err := GlobalSourceRepo(home)
 	if err != nil {
@@ -94,11 +142,17 @@ func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
 		return []SkillSourceStatus{{Path: registry, State: SkillSourceNoRegistry}}
 	}
 	storeRoot := skillStoreRoot(home)
-	configDirs := []string{ClaudeStore(home)}
+	linkDirs, recorded, err := readSkillLinkLedger(home)
+	if err != nil {
+		return []SkillSourceStatus{{Path: skillLinkLedgerPath(home), State: SkillSourceCheckFailed, Error: err.Error()}}
+	}
+	if !recorded {
+		linkDirs = []string{filepath.Join(ClaudeStore(home), "skills"), filepath.Join(home, ".agents", "skills")}
+	}
 	statuses := make([]SkillSourceStatus, 0, len(sources))
 	for _, source := range sources {
 		store := filepath.Join(storeRoot, source.Name)
-		statuses = append(statuses, inspectSkillSource(source, storeRoot, store, configDirs, home, offline))
+		statuses = append(statuses, inspectSkillSource(source, storeRoot, store, linkDirs, offline))
 	}
 	return statuses
 }
@@ -108,7 +162,7 @@ func InspectSkillSources(home string, offline bool) []SkillSourceStatus {
 // anything else), its root SKILL.md usable (checkSkillFile: an unusable one is
 // SKIPPED, as install skips linking it), and every target linked.
 func inspectSkillSource(
-	source skillSource, storeRoot, store string, configDirs []string, home string, offline bool,
+	source skillSource, storeRoot, store string, linkDirs []string, offline bool,
 ) SkillSourceStatus {
 	status := SkillSourceStatus{Name: source.Name, Path: store, State: SkillSourceLinked}
 	if source.Problem != "" {
@@ -137,11 +191,8 @@ func inspectSkillSource(
 		status.State, status.Error = SkillSourceCheckFailed, err.Error()
 		return status
 	}
-	targets := make([]string, 0, len(configDirs)+1)
-	for _, dir := range configDirs {
-		targets = append(targets, filepath.Join(dir, "skills", source.Name))
-	}
-	for _, target := range append(targets, filepath.Join(home, ".agents", "skills", source.Name)) {
+	for _, dir := range linkDirs {
+		target := filepath.Join(dir, source.Name)
 		state, _, err := codexgen.ClassifyGlobalLink(target, store, storeRoot, codexgen.GlobalLinkDir)
 		if err != nil {
 			status.State, status.Error = SkillSourceCheckFailed, err.Error()

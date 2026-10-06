@@ -1,6 +1,9 @@
 package installer
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -35,6 +38,116 @@ func TestMCPWiresCodexAndOpenCodeWithoutClaudeRegistry(t *testing.T) {
 		if err != nil || !strings.Contains(string(content), professorName) {
 			t.Fatalf("%s lacks the professor MCP server: %s err=%v", path, content, err)
 		}
+	}
+}
+
+func TestWireMCPDropsClaudeOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		mode       Mode
+		apply      bool
+		enabled    bool
+		opencode   bool
+		unreadable bool
+	}{
+		{"uninstall", ModeUninstall, true, false, false, false},
+		{"disabled-install", ModeApply, true, false, false, false},
+		{"install-keeps-opencode", ModeApply, true, true, true, false},
+		{"dry-run", ModeApply, false, true, true, false},
+		{"unreadable-ledger", ModeUninstall, true, false, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			var stdout bytes.Buffer
+			e := engine{
+				options: Options{Home: home, Mode: test.mode, MCPPort: 8377, Stdout: &stdout},
+				apply:   test.apply, managedRoot: managedRootForHome(home), stamp: "fixture",
+			}
+			if test.enabled {
+				e.options.MCPEnabled = map[string]bool{"chat": true}
+			}
+			registry := filepath.Join(home, ".claude.json")
+			originalRegistry := `{"mcpServers":{"owned":{"command":"invented"}}}`
+			writeFixture(t, registry, originalRegistry)
+			ownership := mcpOwnership{
+				Registrations: map[string]map[string]any{registry: {"owned": map[string]any{"command": "invented"}}},
+				Pending: map[string]map[string]any{
+					registry: {"pending": map[string]any{"command": "invented-pending"}},
+				},
+			}
+			if test.opencode {
+				e.options.OpenCodeConfigPath = OpenCodeConfigPath(home)
+				registration := e.mcpOpenCodeRegistration()
+				ownership.OpenCodeRegistrations = map[string]map[string]any{
+					e.options.OpenCodeConfigPath: {professorName: registration},
+				}
+				raw, err := json.Marshal(map[string]any{"mcp": map[string]any{professorName: registration}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, e.options.OpenCodeConfigPath, string(raw))
+			}
+			raw, err := json.Marshal(ownership)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledger := e.mcpOwnershipPath()
+			writeFixture(t, ledger, string(raw))
+			if test.unreadable {
+				if err := os.Rename(ledger, ledger+".fixture"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(ledger, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = e.wireMCP()
+			if test.unreadable {
+				assertProbePath(t, err, ledger)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := readFixture(t, registry); got != originalRegistry {
+				t.Fatalf("Claude registry=%s want=%s", got, originalRegistry)
+			}
+			if !test.apply {
+				if got := readFixture(t, ledger); got != string(raw) {
+					t.Fatalf("dry-run ledger=%s want=%s", got, raw)
+				}
+				return
+			}
+			if !test.opencode {
+				if _, err := os.Stat(ledger); !os.IsNotExist(err) {
+					t.Fatalf("retired ledger stat=%v want=not-exist", err)
+				}
+				want := fmt.Sprintf("  change  remove %s\n", ledger)
+				if got := stdout.String(); got != want {
+					t.Fatalf("output=%q want=%q", got, want)
+				}
+				return
+			}
+			got, err := e.loadMCPOwnership()
+			if err != nil || len(got.Registrations) != 0 || len(got.Pending) != 0 ||
+				!sameJSONValue(got.OpenCodeRegistrations, ownership.OpenCodeRegistrations) {
+				t.Fatalf("ledger=%+v err=%v want OpenCode registrations=%v", got, err, ownership.OpenCodeRegistrations)
+			}
+			var document map[string]any
+			if err := json.Unmarshal([]byte(readFixture(t, ledger)), &document); err != nil {
+				t.Fatal(err)
+			}
+			if _, present := document["registrations"]; present {
+				t.Fatal("saved ledger carries Claude registrations")
+			}
+			if _, present := document["pending"]; present {
+				t.Fatal("saved ledger carries Claude pending registrations")
+			}
+			want := fmt.Sprintf("  change  write %s\n", ledger)
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("output=%q lacks=%q", stdout.String(), want)
+			}
+		})
 	}
 }
 

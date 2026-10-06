@@ -70,9 +70,22 @@ func InspectDeadRegistryLinks(home, store string, repos []string) ([]DeadLink, e
 }
 
 func (installer *engine) retireDeadRegistryLinks() error {
+	storeRoot := skillStoreRoot(installer.options.Home)
+	unlock, busy, err := installer.lockSkillStore(storeRoot)
+	if err != nil {
+		installer.skip("registry dead-link check skipped: " + err.Error())
+		return nil
+	}
+	if busy {
+		installer.skip("registry dead-link check skipped: another pfm install holds " + storeRoot)
+		return nil
+	}
+	defer unlock()
 	repos, err := installer.recordedProfessorSourceRepos()
 	if err != nil {
-		return err
+		installer.skip("registry dead-link check skipped: " + err.Error() +
+			" — rerun pfm install --yes from inside your Professor clone")
+		return nil
 	}
 	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
 	dead, err := InspectDeadRegistryLinks(installer.options.Home, installer.options.ConfigDir, repos)

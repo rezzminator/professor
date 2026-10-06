@@ -24,13 +24,16 @@ import (
 
 // skillSourcesRelative is the host-global registry of skills fetched from
 // their own public repositories — pfm install is its one owner: it fetches
-// each into the store (skillStoreRoot) and links it into every Claude
-// account's skills/ and into ~/.agents/skills/ (read by Codex and OpenCode).
+// each into the store (skillStoreRoot) and links it into {ConfigDir}/skills/
+// (the store's, or the --config-dir dir) and into ~/.agents/skills/ (read by
+// Codex and OpenCode).
 const skillSourcesRelative = "templates/global/skills/sources.json"
 
 const (
 	// skillGitTimeout bounds every git call a skill fetch makes.
 	skillGitTimeout = 60 * time.Second
+	// skillSourceBudget bounds all git calls for one source together.
+	skillSourceBudget = 120 * time.Second
 	// skillGitWaitDelay bounds the wait, past skillGitTimeout, for a git
 	// grandchild still holding the output pipes.
 	skillGitWaitDelay = 2 * time.Second
@@ -136,7 +139,7 @@ func loadSkillSources(sourceRepo, manifestURL string) ([]skillSource, bool, erro
 }
 
 // wireSourceFetchedSkills fetches registered skills into managed storage and links
-// them into the store skills registry and ~/.agents/skills.
+// them into {ConfigDir}/skills and ~/.agents/skills.
 func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 	registry := filepath.Join(sourceRepo, filepath.FromSlash(skillSourcesRelative))
 	sources, present, err := loadSkillSources(sourceRepo, installer.options.ThemeManifestURL)
@@ -175,12 +178,13 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 		}
 		fetch = fetch || source.Problem == ""
 	}
-	if !rootExists && fetch && installer.apply && !installer.options.SkillSourcesOffline {
+	if !rootExists && fetch && !installer.options.SkillSourcesOffline {
 		if err := installer.change("create "+storeRoot, func() error {
 			return os.Mkdir(storeRoot, 0o755)
 		}); err != nil {
 			return err
 		}
+		rootExists = true
 	}
 	if err := installer.retireSkillSources(active); err != nil {
 		return err
@@ -200,6 +204,23 @@ func (installer *engine) wireSourceFetchedSkills(sourceRepo string) error {
 		}
 		for _, target := range installer.skillSourceLinkTargets(source.Name) {
 			if err := installer.wireSkillSourceLink(store, target, storeRoot); err != nil {
+				return err
+			}
+		}
+	}
+	if rootExists {
+		dirs := installer.skillSourceLinkDirs()
+		content, err := json.MarshalIndent(skillLinkLedger{Version: skillLinkLedgerVersion, LinkDirs: dirs}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode skill link ledger: %w", err)
+		}
+		content = append(content, '\n')
+		ledger := skillLinkLedgerPath(installer.options.Home)
+		current, readErr := os.ReadFile(ledger)
+		if readErr != nil || !bytes.Equal(current, content) {
+			if err := installer.change("record skill link dirs "+strings.Join(dirs, ", ")+" in "+ledger, func() error {
+				return atomicfile.Write(ledger, content, 0o644)
+			}); err != nil {
 				return err
 			}
 		}
@@ -251,7 +272,10 @@ func (installer *engine) lockSkillStore(storeRoot string) (unlock func(), busy b
 		return nil, false, fmt.Errorf("lock skill store %s: %w", parent, err)
 	}
 	return func() {
-		if err := root.Close(); err != nil {
+		// LOCK_UN releases the lock for every copy of the descriptor, including
+		// one a concurrently forked child holds until it execs; Close alone does not.
+		unlockErr := syscall.Flock(int(root.Fd()), syscall.LOCK_UN)
+		if err := errors.Join(unlockErr, root.Close()); err != nil {
 			installer.skip("unlock skill store " + parent + ": " + err.Error())
 		}
 	}, false, nil
@@ -322,7 +346,9 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	}
 	if !installer.apply {
 		if exists {
-
+			if err := checkSkillFile(store); err != nil {
+				return true, installer.change("re-clone "+store+" from "+source.Repo+" ("+err.Error()+")", nil)
+			}
 			installer.say("check   %s against %s (a dry run reads no remote; the apply replaces it if the head moved)",
 				store, source.Repo)
 			return installer.linkableStore(source.Name, store), nil
@@ -332,6 +358,7 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 			func() error { return nil },
 		)
 	}
+	deadline := installer.now().Add(skillSourceBudget)
 	keeping := ""
 	if exists {
 		keeping = " (keeping " + store + ")"
@@ -340,7 +367,7 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 		installer.skip("SKILL-FETCH-FAILED " + source.Name + ": " + reason + keeping)
 		return installer.linkableStore(source.Name, store), nil
 	}
-	head, err := installer.runSkillGit("ls-remote", "--", source.Repo, "HEAD")
+	head, err := installer.runSkillGit(deadline, "ls-remote", "--", source.Repo, "HEAD")
 	commit, _, _ := strings.Cut(head, "\t")
 	if err == nil && commit == "" {
 		err = fmt.Errorf("git ls-remote %s: no HEAD", source.Repo)
@@ -368,7 +395,16 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 			installer.skip("leave skill staging directory " + staging + ": " + removeErr.Error())
 		}
 	}()
-	if _, err := installer.runSkillGit("clone", "--depth", "1", "--quiet", "--", source.Repo, staging); err != nil {
+	if _, err := installer.runSkillGit(
+		deadline,
+		"clone",
+		"--depth",
+		"1",
+		"--quiet",
+		"--",
+		source.Repo,
+		staging,
+	); err != nil {
 		return fail(err.Error())
 	}
 	if err := checkSkillFile(staging); errors.Is(err, fs.ErrNotExist) {
@@ -379,7 +415,7 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	} else if err != nil {
 		return fail(source.Repo + ": " + err.Error())
 	}
-	cloned, err := installer.runSkillGit("--git-dir", filepath.Join(staging, ".git"), "rev-parse", "HEAD")
+	cloned, err := installer.runSkillGit(deadline, "--git-dir", filepath.Join(staging, ".git"), "rev-parse", "HEAD")
 	if err != nil {
 		return fail(err.Error())
 	}
@@ -401,6 +437,9 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 		return atomicfile.Write(record, []byte(cloned+"\n"), 0o644)
 	})
 	current, statErr := os.Lstat(store)
+	if err != nil && exists && statErr != nil {
+		return false, fmt.Errorf("replace skill store %s: %w (the old copy is kept at %s)", store, err, trash)
+	}
 	if removeErr := os.RemoveAll(trash); removeErr != nil {
 		installer.skip("leave the old skill store copy " + trash + ": " + removeErr.Error())
 	}
@@ -415,17 +454,20 @@ func (installer *engine) fetchSkillSource(source skillSource, store string) (lin
 	return true, nil
 }
 
+var skillStoreRename = os.Rename
+
 // swapSkillStore moves the old store aside to trash and the fresh clone into
-// place; a failed move puts the old store back. The caller removes trash.
+// place; a failed move puts the old store back. The caller removes trash
+// unless the restore failed.
 func swapSkillStore(staging, trash, store string, exists bool) error {
 	if !exists {
-		return os.Rename(staging, store)
+		return skillStoreRename(staging, store)
 	}
-	if err := os.Rename(store, trash); err != nil {
+	if err := skillStoreRename(store, trash); err != nil {
 		return fmt.Errorf("move %s aside: %w", store, err)
 	}
-	if err := os.Rename(staging, store); err != nil {
-		if restoreErr := os.Rename(trash, store); restoreErr != nil {
+	if err := skillStoreRename(staging, store); err != nil {
+		if restoreErr := skillStoreRename(trash, store); restoreErr != nil {
 			return errors.Join(fmt.Errorf("move %s into place: %w", staging, err),
 				fmt.Errorf("restore %s from %s: %w", store, trash, restoreErr))
 		}
@@ -462,7 +504,7 @@ func checkSkillFile(dir string) error {
 		}
 		target, err := filepath.EvalSymlinks(path)
 		var errno syscall.Errno
-		if err != nil && errors.As(err, &errno) && errno != syscall.ENOENT {
+		if err != nil && errors.As(err, &errno) && errno != syscall.ENOENT && errno != syscall.ENOTDIR {
 			return fmt.Errorf("inspect %s: %w", path, err)
 		} else if err != nil {
 			return fmt.Errorf("%s: %v: %w", path, err, errSkillFileUnusable)
@@ -505,14 +547,30 @@ func (installer *engine) linkableStore(name, store string) bool {
 
 // runSkillGit runs one git call outside every repository — its working
 // directory is the store root's parent, and runSkillGitWith stops discovery
-// there — under skillGitTimeout, returning trimmed stdout.
-func (installer *engine) runSkillGit(args ...string) (string, error) {
+// there — under both skillGitTimeout and the source's deadline, returning
+// trimmed stdout.
+func (installer *engine) runSkillGit(deadline time.Time, args ...string) (string, error) {
+	remaining := deadline.Sub(installer.now())
+	if remaining <= 0 {
+		return "", fmt.Errorf(
+			"skill fetch budget of %s spent before git %s",
+			skillSourceBudget,
+			strings.Join(args, " "),
+		)
+	}
 	git, err := deps.Resolve("git")
 	if err != nil {
 		return "", fmt.Errorf("resolve git: %w", err)
 	}
 	dir := filepath.Dir(skillStoreRoot(installer.options.Home))
-	return runSkillGitWith(installer.processRunner(), skillGitTimeout, skillGitWaitDelay, git, dir, args...)
+	timeout := min(skillGitTimeout, deadline.Sub(installer.now()))
+	callDeadline := installer.now().Add(skillGitTimeout)
+	if deadline.Before(callDeadline) {
+		callDeadline = deadline
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), callDeadline)
+	defer cancel()
+	return runSkillGitContext(ctx, installer.processRunner(), timeout, skillGitWaitDelay, git, dir, args...)
 }
 
 // runSkillGitWith runs git in dir without the inherited variables that select
@@ -529,14 +587,26 @@ func runSkillGitWith(
 ) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	return runSkillGitContext(ctx, runner, timeout, waitDelay, git, dir, args...)
+}
+
+func runSkillGitContext(
+	ctx context.Context, runner deps.Runner, timeout, waitDelay time.Duration, git, dir string, args ...string,
+) (string, error) {
 	env := make([]string, 0, len(os.Environ())+4)
+	sshConfigured := false
 	for _, entry := range os.Environ() {
-		if name, _, _ := strings.Cut(entry, "="); !skillGitRepoVars[name] {
+		name, _, _ := strings.Cut(entry, "=")
+		sshConfigured = sshConfigured || name == "GIT_SSH_COMMAND" || name == "GIT_SSH"
+		if !skillGitRepoVars[name] {
 			env = append(env, entry)
 		}
 	}
 	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=",
 		"GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
+	if !sshConfigured {
+		env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	}
 	result, err := runner.Run(ctx, append([]string{git}, args...), deps.RunOptions{
 		Dir: dir, Env: env, WaitDelay: waitDelay,
 	})
@@ -563,7 +633,8 @@ func shortCommit(commit string) string {
 	return commit
 }
 
-// skillSourceLinkDirs names the store skills registry and ~/.agents/skills.
+// skillSourceLinkDirs names {ConfigDir}/skills (the store's, or the
+// --config-dir dir) and ~/.agents/skills.
 func (installer *engine) skillSourceLinkDirs() []string {
 	return []string{
 		filepath.Join(installer.options.ConfigDir, "skills"),
@@ -614,7 +685,30 @@ func (installer *engine) retireSkillSources(active map[string]bool) error {
 	kept := make(map[string]bool, 2*len(active))
 	for name := range active {
 		kept[name] = true
-		kept[filepath.Base(skillCommitPath(filepath.Join(storeRoot, name)))] = true
+		store := filepath.Join(storeRoot, name)
+		kept[filepath.Base(skillCommitPath(store))] = true
+		if _, err := os.Lstat(store); !errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		trash := ""
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "."+name+".fetch-") &&
+				strings.HasSuffix(entry.Name(), ".old") {
+				trash = filepath.Join(storeRoot, entry.Name())
+			}
+		}
+		if trash == "" {
+			continue
+		}
+		if err := installer.change("restore "+store+" from "+trash+" (an interrupted swap)", func() error {
+			if err := skillStoreRename(trash, store); err != nil {
+				return fmt.Errorf("restore %s from %s: %w", store, trash, err)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		kept[filepath.Base(trash)] = true
 	}
 	for _, entry := range entries {
 		if kept[entry.Name()] {
@@ -654,6 +748,16 @@ func (installer *engine) unwireSkillSources() error {
 	}
 	if err := installer.retireSkillSources(map[string]bool{}); err != nil {
 		return err
+	}
+	ledger := skillLinkLedgerPath(installer.options.Home)
+	if _, err := os.Lstat(ledger); err == nil {
+		if err := installer.change("retire "+ledger+" (source-fetched skill link record)", func() error {
+			return os.Remove(ledger)
+		}); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect skill link ledger %s: %w", ledger, err)
 	}
 	return installer.retireEmptyDir(storeRoot)
 }

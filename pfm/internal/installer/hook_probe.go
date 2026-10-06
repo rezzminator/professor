@@ -219,11 +219,16 @@ func probeCodexHooks(home string, config pfmconfig.Config, pfmBinary string) []H
 		switch {
 		case codexHookHandlerCount(document, expected) == 0:
 			results = append(results, HookProbeResult{Hook: expectedHook, State: stateMissing})
-		case !codexappendix.HookTrustRecorded(account.Home):
-			results = append(results, HookProbeResult{
-				Hook: expectedHook, State: stateUntrusted,
-				Error: "no Codex trust is recorded for the hook, so Codex may refuse to run it",
-			})
+		default:
+			recorded, err := codexappendix.HookTrustState(account.Home)
+			if err != nil {
+				unreadable(err)
+			} else if !recorded {
+				results = append(results, HookProbeResult{
+					Hook: expectedHook, State: stateUntrusted,
+					Error: "no Codex trust is recorded for the hook, so Codex may refuse to run it",
+				})
+			}
 		}
 		for _, key := range sortedHookKeys(countSettingsHookCommands(document)) {
 			if stale, found := staleHookResult(target, path, key, pfmBinary, home, true); found {

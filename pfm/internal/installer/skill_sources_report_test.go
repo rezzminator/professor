@@ -2,8 +2,11 @@ package installer
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -274,5 +277,165 @@ func TestInspectSkillSourcesChecksTheStoreInstallWrites(t *testing.T) {
 	if len(statuses) != 1 || statuses[0].State != SkillSourceMissing ||
 		len(statuses[0].Missing) != 1 || statuses[0].Missing[0] != link {
 		t.Fatalf("the default account link install writes was not checked: %+v", statuses)
+	}
+}
+
+func TestSkillFileThroughARegularFile(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	store := filepath.Join(skillStoreRoot(home), "god-speed")
+	skill := filepath.Join(store, "SKILL.md")
+	if err := os.Remove(skill); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(store, "notadir"), "file\n")
+	symlinkFixture(t, "notadir/SKILL.md", skill)
+	err := checkSkillFile(store)
+	if !errors.Is(err, errSkillFileUnusable) {
+		t.Errorf("a link through a file is not classified as unusable: %v", err)
+	}
+	output := runSkillInstall(t, home, ModeApply, func(options *Options) { options.SkillSourcesOffline = true })
+	want := "  skip    SKILL-SOURCE-INVALID god-speed: " + err.Error() + "\n"
+	if !strings.Contains(output, want) {
+		t.Errorf("offline install missing %q:\n%s", want, output)
+	}
+	var report bytes.Buffer
+	warnings, failures := ReportSkillSources(&report, home, false)
+	row := skillSourceRow(t, report.String(), "god-speed")
+	wantRow := "doctor: skill-source name=god-speed store=" + store + " state=SKIPPED error=" + err.Error()
+	if row != wantRow || strings.Contains(row, "hint=") || warnings != 1 || failures != 0 {
+		t.Fatalf("doctor warnings=%d failures=%d row=%q, want %q", warnings, failures, row, wantRow)
+	}
+}
+
+func TestInspectSkillSourcesConfiguredLinkDirs(t *testing.T) {
+	t.Parallel()
+	for _, removed := range []bool{false, true} {
+		name := "linked"
+		if removed {
+			name = "missing"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+			writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+			configDir := filepath.Join(home, ".cc", "x")
+			configure := func(options *Options) { options.ConfigDir = configDir }
+			runSkillInstall(t, home, ModeApply, configure)
+			ledger := skillLinkLedgerPath(home)
+			content, err := os.ReadFile(ledger)
+			if err != nil {
+				t.Errorf("install did not write its link ledger: %v", err)
+			} else {
+				var got skillLinkLedger
+				want := skillLinkLedger{Version: 1, LinkDirs: []string{
+					filepath.Join(configDir, "skills"), filepath.Join(home, ".agents", "skills"),
+				}}
+				if err := json.Unmarshal(content, &got); err != nil || !reflect.DeepEqual(got, want) {
+					t.Errorf("ledger=%s, decoded=%+v err=%v; want %+v", content, got, err, want)
+				}
+				wantBytes, err := json.MarshalIndent(want, "", "  ")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(content, append(wantBytes, '\n')) {
+					t.Errorf("ledger bytes = %q, want indented JSON with a newline", content)
+				}
+			}
+			if output := runSkillInstall(t, home, ModeApply, configure); strings.Contains(output, ledger) {
+				t.Errorf("second apply named an unchanged ledger:\n%s", output)
+			}
+			link := filepath.Join(configDir, "skills", "god-speed")
+			wantState := SkillSourceLinked
+			if removed {
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
+				wantState = SkillSourceMissing
+			}
+			statuses := InspectSkillSources(home, false)
+			if len(statuses) != 1 || statuses[0].State != wantState {
+				t.Fatalf("configured link state = %+v, want %s", statuses, wantState)
+			}
+			if removed && !reflect.DeepEqual(statuses[0].Missing, []string{link}) {
+				t.Fatalf("missing configured link = %v, want %s", statuses[0].Missing, link)
+			}
+			var report bytes.Buffer
+			warnings, failures := ReportSkillSources(&report, home, false)
+			wantFailures := 0
+			if removed {
+				wantFailures = 1
+			}
+			if warnings != 0 || failures != wantFailures {
+				t.Fatalf(
+					"configured link warnings=%d failures=%d, want 0/%d\n%s",
+					warnings,
+					failures,
+					wantFailures,
+					report.String(),
+				)
+			}
+		})
+	}
+}
+
+func TestInspectSkillSourcesLegacyLinkDirs(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo := skillFixtureRepo(t, filepath.Join(t.TempDir(), "gs"), map[string]string{"SKILL.md": "# v1\n"})
+	writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file://" + repo}))
+	runSkillInstall(t, home, ModeApply)
+	if err := os.Remove(skillLinkLedgerPath(home)); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	link := filepath.Join(home, ".claude", "skills", "god-speed")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	statuses := InspectSkillSources(home, false)
+	if len(statuses) != 1 || statuses[0].State != SkillSourceMissing ||
+		!reflect.DeepEqual(statuses[0].Missing, []string{link}) {
+		t.Fatalf("legacy missing link = %+v, want %s", statuses, link)
+	}
+	var report bytes.Buffer
+	if warnings, failures := ReportSkillSources(&report, home, false); warnings != 0 || failures != 1 {
+		t.Fatalf("legacy missing link warnings=%d failures=%d\n%s", warnings, failures, report.String())
+	}
+}
+
+func TestInspectSkillSourcesLinkLedgerFailure(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, content, cause string
+	}{
+		{"decode", "{broken", "invalid character"},
+		{"read", "", "is a directory"},
+		{"version", `{"version":2,"link_dirs":["/fixture/skills"]}`, "version 2, want 1"},
+		{"empty", `{"version":1,"link_dirs":[]}`, "link_dirs is empty"},
+		{"relative", `{"version":1,"link_dirs":["relative/skills"]}`, "link dir relative/skills is not absolute"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeSkillRegistry(t, home, skillRegistryJSON(map[string]string{"god-speed": "file:///nowhere"}))
+			ledger := skillLinkLedgerPath(home)
+			if tc.name == "read" {
+				writeFixture(t, filepath.Join(ledger, "blocker"), "file\n")
+			} else {
+				writeFixture(t, ledger, tc.content)
+			}
+			statuses := InspectSkillSources(home, false)
+			if len(statuses) != 1 || statuses[0].Path != ledger || statuses[0].State != SkillSourceCheckFailed ||
+				!strings.Contains(statuses[0].Error, "skill link ledger "+ledger+": ") ||
+				!strings.Contains(statuses[0].Error, tc.cause) {
+				t.Fatalf("unreadable ledger = %+v, want CHECK-FAILED naming %s and %q", statuses, ledger, tc.cause)
+			}
+			var report bytes.Buffer
+			if warnings, failures := ReportSkillSources(&report, home, false); warnings != 0 || failures != 1 {
+				t.Fatalf("ledger failure warnings=%d failures=%d\n%s", warnings, failures, report.String())
+			}
+		})
 	}
 }

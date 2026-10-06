@@ -40,7 +40,7 @@ func PFMMCPLeftovers(home string, port int, path string) ([]string, error) {
 	if err != nil {
 		return nil, probePathError(ledger, err)
 	}
-	owned, _ := ledgerOwnedMCP(ownership.Registrations, physicalSettingsPath(path))
+	owned := ledgerOwnedMCP(ownership.Registrations, physicalSettingsPath(path))
 	return probeMCPFile(home, port, path, owned)
 }
 
@@ -51,11 +51,11 @@ func PFMHomeMCPLeftovers(home string, port int) (names, clients []string, err er
 	if err != nil {
 		return nil, nil, probePathError(ledger, err)
 	}
-	names, err = probeMCPFile(home, port, filepath.Join(home, ".mcp.json"), ownership.Clients)
+	names, err = probeMCPFile(home, port, filepath.Join(home, ".mcp.json"), nil)
 	return names, ownership.Clients, err
 }
 
-func probeMCPFile(home string, port int, path string, owned []string) ([]string, error) {
+func probeMCPFile(home string, port int, path string, owned map[string][]any) ([]string, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -108,7 +108,7 @@ func IsStagedShimLine(line string) bool {
 		return false
 	}
 	for _, field := range strings.Fields(line) {
-		path := strings.Trim(field, "\"';")
+		path := strings.Trim(field, "\"';()")
 		if strings.HasSuffix(path, "pfm/internal/installer/assets/shim/pfm.zsh") {
 			return false
 		}

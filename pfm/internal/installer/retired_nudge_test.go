@@ -148,7 +148,7 @@ func TestRemoveRetiredNudgeStatePreviewNamesTheChangeAndRemovesNothing(t *testin
 		t.Fatal(err)
 	}
 	planned := "remove retired compact-nudge state from " + dir
-	if installer.report.Changed != 1 || !strings.Contains(output.String(), planned) {
+	if installer.report.Changed != 1 || output.String() != "  change  "+planned+"\n" {
 		t.Fatalf(
 			"preview changed=%d output=%q, want the one planned removal named",
 			installer.report.Changed,
@@ -159,5 +159,61 @@ func TestRemoveRetiredNudgeStatePreviewNamesTheChangeAndRemovesNothing(t *testin
 		if _, err := os.Lstat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("preview removed %s: %v", name, err)
 		}
+	}
+}
+
+func TestRemoveRetiredNudgeStateRemovalOutcomes(t *testing.T) {
+	for _, allFail := range []bool{true, false} {
+		name := "partial"
+		if allFail {
+			name = "all fail"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			ctxPath, bandPath := filepath.Join(dir, "nudge-ctx-a"), filepath.Join(dir, "nudge-band-a")
+			for _, path := range []string{ctxPath, bandPath} {
+				writeFixture(t, path, "fixture")
+			}
+			var output bytes.Buffer
+			installer := &engine{options: Options{
+				Env: &paths.MapEnv{Values: map[string]string{paths.EnvSIDDir: dir}}, Stdout: &output,
+			}, apply: true}
+			err := installer.removeRetiredNudgeStateWith(os.ReadDir, func(path string) error {
+				if allFail || path == ctxPath {
+					return errors.New("permission denied")
+				}
+				return os.Remove(path)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "  warn    " + ctxPath + ": permission denied\n"
+			changed := 1
+			if allFail {
+				want = "  warn    " + bandPath + ": permission denied\n" + want
+				changed = 0
+			} else {
+				want += "  change  remove retired compact-nudge state from " + dir + "\n"
+			}
+			if output.String() != want || installer.report.Changed != changed {
+				t.Fatalf(
+					"changed = %d, output = %q; want changed = %d, output = %q",
+					installer.report.Changed,
+					output.String(),
+					changed,
+					want,
+				)
+			}
+			if got := readFixture(t, ctxPath); got != "fixture" {
+				t.Fatalf("failed removal changed ctx file: %q", got)
+			}
+			if allFail {
+				if got := readFixture(t, bandPath); got != "fixture" {
+					t.Fatalf("failed removal changed band file: %q", got)
+				}
+			} else if _, err := os.Stat(bandPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("successful removal: %v", err)
+			}
+		})
 	}
 }

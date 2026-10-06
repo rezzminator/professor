@@ -72,10 +72,31 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 		name     string
 		skipOn   string
 		schedule serviceManagerReport
+		drift    reminderScheduleDrift
 		source   fakeReminderSource
 		want     string
 		warnings int
 	}{
+		{
+			name:     "drifted scheduler",
+			schedule: armedTimerReport(),
+			drift:    reminderScheduleDrift{Path: "/h/.config/systemd/user/pfm-reminder.timer", Drifted: true},
+			want:     armed + "drift=/h/.config/systemd/user/pfm-reminder.timer due=0 overdue=0 failed=0 — run pfm install --yes\n",
+			warnings: 1,
+		},
+		{
+			name: "drifted scheduler with timer missing", schedule: unitReport(serviceManagerUnitState{}),
+			drift: reminderScheduleDrift{Path: "/h/.config/systemd/user/pfm-reminder.timer", Drifted: true},
+			want: head + "armed=false present=false enabled=false state=none " +
+				"drift=/h/.config/systemd/user/pfm-reminder.timer due=0 overdue=0 failed=0 — run pfm install --yes\n",
+			warnings: 1,
+		},
+		{
+			name: "could not compare scheduler", schedule: armedTimerReport(),
+			drift:    reminderScheduleDrift{Err: errors.New("read /h/x: is a directory")},
+			want:     armed + "drift=could_not_compare error=read /h/x: is a directory due=0 overdue=0 failed=0\n",
+			warnings: 1,
+		},
 		{
 			name:     "healthy",
 			schedule: armedTimerReport(),
@@ -175,7 +196,7 @@ func TestRenderReminderDoctorStates(t *testing.T) {
 				t.Skipf("%s treats a loaded StartInterval job as armed", tc.skipOn)
 			}
 			var out strings.Builder
-			got := renderReminderDoctor(context.Background(), &out, tc.schedule, tc.source, now)
+			got := renderReminderDoctor(context.Background(), &out, tc.schedule, tc.drift, tc.source, now)
 			if out.String() != tc.want {
 				t.Fatalf("line =\n%q\nwant\n%q", out.String(), tc.want)
 			}
@@ -253,5 +274,40 @@ func TestPrintReminderDoctorUnreadableState(t *testing.T) {
 	}
 	if got != 1 {
 		t.Fatalf("warnings = %d, want 1", got)
+	}
+}
+
+func TestPrintReminderDoctorScheduleDrift(t *testing.T) {
+	stubReminderScheduleProbe(t, armedTimerReport())
+	home := t.TempDir()
+	timer := filepath.Join(home, ".config", "systemd", "user", "pfm-reminder.timer")
+	plist := filepath.Join(home, "Library", "LaunchAgents", "com.professor.pfm.reminder.plist")
+	for _, path := range []string{timer, plist} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("stale\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	values := paths.Values{Home: home, StateDB: filepath.Join(home, "state.db")}
+	ctx := context.Background()
+	store := fleetdb.OpenSharedState(ctx, values)
+	if err := store.Degraded(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := timer
+	if goRuntime.GOOS == "darwin" {
+		path = plist
+	}
+	var out strings.Builder
+	got := printReminderDoctor(ctx, &out, &deps.FakeRunner{}, values, time.Now())
+	want := "doctor: reminders scheduler=systemd unit=pfm-reminder.timer armed=true state=active drift=" +
+		path + " due=0 overdue=0 failed=0 — run pfm install --yes\n"
+	if out.String() != want || got != 1 {
+		t.Fatalf("output=%q warnings=%d want=%q warnings=1", out.String(), got, want)
 	}
 }

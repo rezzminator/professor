@@ -9,13 +9,15 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func TestInstallManagedCleanup(t *testing.T) {
-	for _, scenario := range []string{"absent", "wrong", "correct", "preview", "off", "relative", "unreadable"} {
+	for _, scenario := range []string{"absent", "wrong", "keyless", "correct", "preview", "off", "relative", "unreadable", "noninteger"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "managed")
 			path := filepath.Join(dir, "pfm.json")
@@ -24,6 +26,8 @@ func TestInstallManagedCleanup(t *testing.T) {
 			switch scenario {
 			case "wrong":
 				writeFixture(t, path, `{"cleanupPeriodDays":30}`)
+			case "keyless":
+				writeFixture(t, path, `{}`)
 			case "correct":
 				writeFixture(t, path, `{"cleanupPeriodDays":36500}`)
 			case "preview":
@@ -35,12 +39,14 @@ func TestInstallManagedCleanup(t *testing.T) {
 				path = filepath.Join(options.ManagedSettingsDir, "pfm.json")
 			case "unreadable":
 				writeFixture(t, path, "{")
+			case "noninteger":
+				writeFixture(t, path, `{"cleanupPeriodDays":"30"}`)
 			}
 			var output bytes.Buffer
 			options.Stdout = &output
 			installer := &engine{options: options, apply: apply}
 			err := installer.installManagedCleanup(context.Background())
-			if scenario == "unreadable" {
+			if scenario == "unreadable" || scenario == "noninteger" {
 				if err == nil || !strings.Contains(err.Error(), "managed-cleanup "+path+":") {
 					t.Fatalf("err=%v", err)
 				}
@@ -59,8 +65,15 @@ func TestInstallManagedCleanup(t *testing.T) {
 			if output.String() != want {
 				t.Fatalf("output=%q want=%q", output.String(), want)
 			}
+			changed := 0
+			if scenario == "absent" || scenario == "wrong" || scenario == "keyless" || scenario == "preview" {
+				changed = 1
+			}
+			if installer.report.Changed != changed {
+				t.Fatalf("Changed=%d want=%d", installer.report.Changed, changed)
+			}
 			switch scenario {
-			case "absent", "wrong", "correct":
+			case "absent", "wrong", "keyless", "correct":
 				raw, err := os.ReadFile(path)
 				content := "{\"cleanupPeriodDays\":36500}\n"
 				if scenario == "correct" {
@@ -139,10 +152,18 @@ func TestInstallManagedCleanupCachedSudo(t *testing.T) {
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("calls=%q want=%q", runner.calls, want)
 	}
+	var wantOutput strings.Builder
 	for _, args := range runner.calls {
-		if !strings.Contains(output.String(), "sudo "+shellCommandLine(args...)+"\n") {
-			t.Fatalf("echo=%q", output.String())
-		}
+		fmt.Fprintln(&wantOutput, "sudo "+shellCommandLine(args...))
+	}
+	fmt.Fprintln(&wantOutput, "  change  write "+filepath.Join(dir, "pfm.json"))
+	if output.String() != wantOutput.String() || installer.report.Changed != 1 {
+		t.Fatalf(
+			"output=%q Changed=%d want=%q Changed=1",
+			output.String(),
+			installer.report.Changed,
+			wantOutput.String(),
+		)
 	}
 	if got := InspectManagedCleanup(dir, true, 36500); got.State != "ok" {
 		t.Fatalf("status=%+v", got)
@@ -156,13 +177,17 @@ func TestInspectManagedCleanup(t *testing.T) {
 	for _, tc := range []struct {
 		raw   string
 		state string
-	}{{`{"cleanupPeriodDays":30}`, "wrong"}, {`{"cleanupPeriodDays":36500}`, "ok"}, {"{", "unreadable"}, {`{}`, "unreadable"}, {`{"cleanupPeriodDays":"30"}`, "unreadable"}} {
-		t.Run(fmt.Sprintf("%s_%s", tc.state, tc.raw), func(t *testing.T) {
+		want  int
+	}{{`{"cleanupPeriodDays":30}`, "wrong", 36500}, {`{"cleanupPeriodDays":36500}`, "ok", 36500}, {"{", "unreadable", 36500}, {`{}`, "wrong", 36500}, {`{}`, "wrong", 0}, {`{"cleanupPeriodDays":"30"}`, "unreadable", 36500}} {
+		t.Run(fmt.Sprintf("%s_%s_want_%d", tc.state, tc.raw, tc.want), func(t *testing.T) {
 			dir := t.TempDir()
 			writeFixture(t, filepath.Join(dir, "pfm.json"), tc.raw)
-			got := InspectManagedCleanup(dir, true, 36500)
+			got := InspectManagedCleanup(dir, true, tc.want)
 			if got.State != tc.state || (got.Err != nil) != (tc.state == "unreadable") {
 				t.Fatalf("status=%+v", got)
+			}
+			if tc.raw == `{}` && got.Value != 0 {
+				t.Fatalf("keyless Value=%d want=0", got.Value)
 			}
 		})
 	}
@@ -176,12 +201,14 @@ func TestInspectManagedCleanup(t *testing.T) {
 }
 
 func TestInstallManagedCleanupDeclinedSudo(t *testing.T) {
+	_, recorder := obs.Test(t)
 	dir := filepath.Join(t.TempDir(), "Application Support", "managed-settings.d")
 	path := filepath.Join(dir, "pfm.json")
 	var output bytes.Buffer
 	installer := &engine{
 		apply: true,
 		options: Options{
+			Mode:                  ModeApply,
 			ManagedSettingsDir:    dir,
 			RequireManagedCleanup: true,
 			CleanupPeriodDays:     36500,
@@ -194,14 +221,56 @@ func TestInstallManagedCleanupDeclinedSudo(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
-	want := "  warn    managed-cleanup " + path + " — sudo -n needs cached credentials; run: sudo mkdir -p " + shellCommandLine(
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "sudo -n ") {
+		t.Fatalf("output=%q want two lines starting with sudo -n", output.String())
+	}
+	words := parseShellWords(t, lines[0])
+	args := append([]string{"sudo", "-n"}, managedInstallArgs(words[len(words)-2], path)[0]...)
+	if !reflect.DeepEqual(words, args) {
+		t.Fatalf("sudo argv=%q want=%q", words, args)
+	}
+	want := "  warn    managed-cleanup " + path + " not written: permission denied; " + lines[0] + ": permission denied; run: sudo mkdir -p " + shellCommandLine(
 		dir,
 	) + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500}' | sudo tee " + shellCommandLine(
 		path,
 	) + " >/dev/null"
-	if len(lines) != 3 || lines[0] != "  change  write "+path || !strings.HasPrefix(lines[1], "sudo -n ") ||
-		lines[2] != want {
+	if lines[1] != want || installer.report.Changed != 0 {
 		t.Fatalf("output=%q want warning=%q", output.String(), want)
+	}
+	records := recorder.Records()
+	if len(records) != 1 || records[0].Message != "installer.step" {
+		t.Fatalf("records=%s", recorder.Raw())
+	}
+	for key, want := range map[string]any{
+		obs.FieldComp: "installer", "kind": "apply", "decision": "warn",
+		"step": "managed-cleanup " + path + " not written", obs.FieldErr: "permission denied\npermission denied",
+	} {
+		if got, _ := records[0].Field(key); got != want {
+			t.Fatalf("record %s=%v want=%v", key, got, want)
+		}
+	}
+}
+
+func TestInstallManagedCleanupWriteError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pfm.json")
+	runner := &fakeRunner{}
+	var output bytes.Buffer
+	installer := &engine{
+		apply: true,
+		options: Options{
+			ManagedSettingsDir: dir, RequireManagedCleanup: true, CleanupPeriodDays: 36500,
+			Runner: runner, Stdout: &output,
+			writeManaged: func(string, []byte) error { return syscall.ENOSPC },
+		},
+	}
+	err := installer.installManagedCleanup(context.Background())
+	want := "managed-cleanup " + path + ": write: no space left on device"
+	if err == nil || err.Error() != want || !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("err=%v want=%s", err, want)
+	}
+	if len(runner.calls) != 0 || output.Len() != 0 || installer.report.Changed != 0 {
+		t.Fatalf("calls=%q output=%q Changed=%d", runner.calls, output.String(), installer.report.Changed)
 	}
 }
 
@@ -210,13 +279,14 @@ func TestInstallManagedCleanupTemporaryDirectoryFailure(t *testing.T) {
 	bad := filepath.Join(dir, "not-a-directory")
 	writeFixture(t, bad, "blocked")
 	t.Setenv("TMPDIR", bad)
+	var output bytes.Buffer
 	installer := &engine{
 		apply: true,
 		options: Options{
 			ManagedSettingsDir:    filepath.Join(dir, "managed"),
 			RequireManagedCleanup: true,
 			CleanupPeriodDays:     36500,
-			Stdout:                &bytes.Buffer{},
+			Stdout:                &output,
 			writeManaged:          func(string, []byte) error { return os.ErrPermission },
 		},
 	}
@@ -225,6 +295,9 @@ func TestInstallManagedCleanupTemporaryDirectoryFailure(t *testing.T) {
 	); err == nil ||
 		!strings.Contains(err.Error(), "create managed-cleanup temporary directory:") {
 		t.Fatalf("err=%v", err)
+	}
+	if output.Len() != 0 || installer.report.Changed != 0 {
+		t.Fatalf("output=%q Changed=%d", output.String(), installer.report.Changed)
 	}
 }
 
@@ -254,8 +327,9 @@ func TestInstallManagedCleanupInRun(t *testing.T) {
 			if _, err := Run(context.Background(), options); err != nil {
 				t.Fatalf("install err=%v\n%s", err, output.String())
 			}
-			if !strings.Contains(output.String(), "  change  write "+path+"\n") {
-				t.Fatalf("cleanup step omitted:\n%s", output.String())
+			changed := strings.Contains(output.String(), "  change  write "+path+"\n")
+			if changed != (scenario != "declined sudo") {
+				t.Fatalf("cleanup change=%t scenario=%s:\n%s", changed, scenario, output.String())
 			}
 			switch scenario {
 			case "apply":
@@ -263,7 +337,14 @@ func TestInstallManagedCleanupInRun(t *testing.T) {
 					t.Fatalf("status=%+v", status)
 				}
 			case "declined sudo":
-				want := "  warn    managed-cleanup " + path + " — sudo -n needs cached credentials; run: sudo mkdir -p " + shellCommandLine(
+				var sudo string
+				for _, line := range strings.Split(output.String(), "\n") {
+					if strings.HasPrefix(line, "sudo -n ") {
+						sudo = line
+						break
+					}
+				}
+				want := "  warn    managed-cleanup " + path + " not written: permission denied; " + sudo + ": permission denied; run: sudo mkdir -p " + shellCommandLine(
 					dir,
 				) + " && printf '%s\\n' '{\"cleanupPeriodDays\":36500}' | sudo tee " + shellCommandLine(
 					path,

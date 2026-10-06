@@ -334,9 +334,52 @@ func TestInspectVSCodeClaudeEnvironment(t *testing.T) {
 				vscodeOwnershipRecord{Path: settings, Platform: "linux", EnvOwned: true, EnvValue: value},
 			)
 			report, err := InspectVSCode(home)
-			if err != nil || len(report.Settings) != 1 || report.Settings[0].ClaudeConfigDir != value {
+			if err != nil || len(report.Settings) != 1 || report.Settings[0].ClaudeConfigDir != value ||
+				!report.Settings[0].EnvOwned {
 				t.Fatalf("report=%+v err=%v", report, err)
 			}
 		})
+	}
+}
+
+func TestInspectVSCodeOwnedClaudeEnvironmentDuplicate(t *testing.T) {
+	home := t.TempDir()
+	settings := filepath.Join(home, "settings.json")
+	primary := filepath.Join(home, "primary")
+	writeFixture(
+		t,
+		settings,
+		`{"claudeCode.environmentVariables":[{"name":"CLAUDE_CONFIG_DIR","value":"/op"},{"name":"CLAUDE_CONFIG_DIR","value":"`+primary+`"}]}`,
+	)
+	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
+		Path: settings, Platform: "linux", EnvOwned: true, EnvValue: primary,
+	})
+	report, err := InspectVSCode(home)
+	if err != nil || len(report.Settings) != 1 || report.Settings[0].ClaudeConfigDir != primary ||
+		!report.Settings[0].EnvOwned {
+		t.Fatalf("owned duplicate report=%+v err=%v", report, err)
+	}
+}
+
+func TestInspectVSCodeMalformedClaudeEnvironment(t *testing.T) {
+	home := t.TempDir()
+	settings := filepath.Join(home, "settings.json")
+	writeFixture(
+		t,
+		settings,
+		`{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh"}},"terminal.integrated.defaultProfile.linux":"PFM","claudeCode.environmentVariables":{}}`,
+	)
+	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
+		Path: settings, Platform: "linux", ProfileOwned: true,
+	})
+	report, err := InspectVSCode(home)
+	if err != nil || len(report.Settings) != 1 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	status := report.Settings[0]
+	want := "malformed VS Code settings: claudeCode.environmentVariables must be an array"
+	if status.Profile != "owned" || status.Default != "PFM" || status.Error != "" || status.EnvError != want ||
+		status.ClaudeConfigDir != "" {
+		t.Fatalf("malformed environment status=%+v want owned profile/default and EnvError=%q", status, want)
 	}
 }

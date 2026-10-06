@@ -7,7 +7,7 @@ event, its transcript line number first. Every record not rendered is counted
 by type and named in the SKIPPED line: an unparsed record never disappears.
 
 Verbs: show (the digest), counts (per-tool table), types (every record type and
-its disposition), locate (the resolved path). A failure prints
+its disposition), locate (the resolved path), agents (a session's sub-agents). A failure prints
 `TRANSCRIPT FAILED — {reason}` on stderr and exits 2.
 """
 import argparse
@@ -26,6 +26,7 @@ READ_ONLY_CMD = {"read", "search", "list_files"}
 INJECTED = ("# AGENTS.md instructions", "<environment_context>", "<user_instructions>",
             "<INSTRUCTIONS>", "<permissions instructions>")
 NOTIFICATION = ("[SYSTEM NOTIFICATION", "<task-notification>", "<system-reminder>")
+PLUGIN_PROMPT = re.compile(r"^The \S+ plugin sent a message:")
 CODEX_TYPES = ("session_meta", "response_item", "event_msg", "turn_context", "world_state")
 CLAUDE_TYPES = ("user", "assistant", "attachment", "system", "summary")
 
@@ -65,21 +66,85 @@ def resolve(target, extra_roots):
         return target
     if re.fullmatch(r"/root(?:/[0-9A-Za-z_-]+)+", target):
         return pick(target, *by_agent_path(target, extra_roots), extra_roots)
-    if os.sep in target or target.endswith(".jsonl"):
+    if os.path.isabs(target) or target.startswith(("~", ".")) or target.endswith(".jsonl"):
         fail(f"no such transcript file: {target}")
     tid = target[6:] if target.startswith("agent-") else target
-    if not re.fullmatch(r"[0-9A-Za-z_-]{6,}", tid):
-        fail(f"not a session id or a path: {target!r} (a seat name resolves to its id with `pfm chat resolve {target}`, third column)")
     hits = []
-    for root in claude_roots():
-        hits += glob.glob(f"{root}/*/{tid}*.jsonl") + glob.glob(f"{root}/*/*/subagents/agent-{tid}*.jsonl")
-    for home in codex_homes():
-        hits += glob.glob(f"{home}/sessions/*/*/*/rollout-*{tid}*.jsonl")
-        hits += glob.glob(f"{home}/archived_sessions/rollout-*{tid}*.jsonl")
-    for root in extra_roots:
-        for pattern in (f"{tid}*.jsonl", f"agent-{tid}*.jsonl", f"rollout-*{tid}*.jsonl"):
-            hits += glob.glob(f"{root}/**/{pattern}", recursive=True)
-    return pick(target, hits, [], extra_roots)
+    if re.fullmatch(r"[0-9A-Za-z_-]{6,}", tid):
+        for root in claude_roots():
+            hits += glob.glob(f"{root}/*/{tid}*.jsonl") + glob.glob(f"{root}/*/*/subagents/agent-{tid}*.jsonl")
+        for home in codex_homes():
+            hits += glob.glob(f"{home}/sessions/*/*/*/rollout-*{tid}*.jsonl")
+            hits += glob.glob(f"{home}/archived_sessions/rollout-*{tid}*.jsonl")
+        for root in extra_roots:
+            for pattern in (f"{tid}*.jsonl", f"agent-{tid}*.jsonl", f"rollout-*{tid}*.jsonl"):
+                hits += glob.glob(f"{root}/**/{pattern}", recursive=True)
+    if hits:
+        return pick(target, hits, [], extra_roots)
+    return by_name(target, extra_roots)
+
+
+NAME_TAIL = 256 * 1024
+TITLE_RX = re.compile(rb'"type"\s*:\s*"(custom-title|agent-name)"')
+STAMP_RX = re.compile(rb'"timestamp"\s*:\s*"([^"]+)"')
+
+
+def tail_bytes(path):
+    with open(path, "rb") as handle:
+        handle.seek(max(0, os.path.getsize(path) - NAME_TAIL))
+        return handle.read()
+
+
+def chat_name(tail):
+    """A chat's name is its LAST custom-title record (else its last agent-name): Claude Code appends
+    them over the chat's life and a renamed chat keeps its old ones. Only the file's tail is read."""
+    found = {}
+    for match in reversed(list(TITLE_RX.finditer(tail))):
+        kind = match.group(1).decode()
+        if kind in found:
+            continue
+        start, end = tail.rfind(b"\n", 0, match.start()) + 1, tail.find(b"\n", match.end())
+        try:
+            record = json.loads(tail[start:end if end >= 0 else len(tail)])
+        except ValueError:
+            continue
+        name = record.get("customTitle" if kind == "custom-title" else "agentName") if isinstance(record, dict) else None
+        if isinstance(record, dict) and record.get("type") == kind and isinstance(name, str) and name:
+            found[kind] = name
+            if kind == "custom-title":
+                break
+    return found.get("custom-title") or found.get("agent-name") or ""
+
+
+def by_name(target, extra_roots):
+    """A target that is no id, prefix or path is a Claude chat name (Codex names are not looked up)."""
+    files = []
+    for root in unique(os.path.realpath(r) for r in claude_roots()):
+        files += [f for f in glob.glob(f"{root}/*/*.jsonl") if not os.path.basename(f).startswith("agent-")]
+    files = unique(os.path.realpath(f) for f in files)
+    wanted, hits, unreadable = target.casefold(), [], []
+    for path in files:
+        try:
+            tail = tail_bytes(path)
+        except OSError as error:
+            unreadable.append(f"{path} ({error})")
+            continue
+        name = chat_name(tail)
+        if name and name.casefold() == wanted:
+            hits.append((path, tail))
+    if len(hits) == 1:
+        return hits[0][0]
+    if hits:
+        rows = []
+        for path, tail in sorted(hits):
+            stamps = STAMP_RX.findall(tail)
+            rows.append(f"{path} ({os.path.getsize(path)} bytes, last record {stamps[-1].decode() if stamps else 'without a timestamp'})")
+        fail(f"AMBIGUOUS {target} — {len(hits)} transcripts named {target!r}: " + " ".join(rows))
+    searched = ", ".join(claude_roots() + codex_homes() + list(extra_roots)) or "no root exists"
+    tail = f"; {len(unreadable)} session files unreadable: " + " ".join(unreadable) if unreadable else ""
+    fail(f"NOT FOUND {target} — searched {searched} for an id or prefix; the name lookup over {len(files)} session files "
+         f"(the last {NAME_TAIL // 1024} KB of each) found no chat whose last title is {target!r}{tail} "
+         f"(a seat name resolves to its id with `pfm chat resolve {target}`, third column)")
 
 
 def by_agent_path(target, extra_roots):
@@ -326,7 +391,10 @@ def parse_claude(P, records):
                 elif bt == "text" and b.get("text", "").strip():
                     text = b["text"].strip()
                     kind = "note" if o.get("isMeta") or text.startswith(NOTIFICATION) else "prompt"
-                    P.events.append(Event(n, ts, kind, text=text))
+                    ev = Event(n, ts, kind, text=text)
+                    if kind == "prompt" and PLUGIN_PROMPT.match(text):
+                        ev.sub = "plugin"
+                    P.events.append(ev)
                     shown = True
                 elif bt == "image":
                     P.events.append(Event(n, ts, "prompt", text="[image]"))
@@ -337,11 +405,20 @@ def parse_claude(P, records):
         elif t == "attachment":
             att = o.get("attachment") or {}
             if att.get("type") == "queued_command":
-                ev = Event(n, ts, "prompt", text=flat(att.get("prompt")))
+                text = flat(att.get("prompt"))
+                if text.strip().startswith(NOTIFICATION):
+                    P.add(Event(n, ts, "note", text=text.strip()), "attachment.queued_command (notification)")
+                    continue
+                ev = Event(n, ts, "prompt", text=text)
                 ev.sub = "queued"
                 P.add(ev, "attachment.queued_command")
             else:
                 P.mark(n, "skipped", f"attachment.{att.get('type', '?')}")
+        elif t in ("custom-title", "agent-name"):
+            name = o.get("customTitle" if t == "custom-title" else "agentName")
+            if isinstance(name, str) and name:
+                P.meta[t] = name
+            P.mark(n, "header", t)
         elif t == "system" and o.get("subtype") == "compact_boundary":
             P.add(Event(n, ts, "note", text="COMPACTED — the context was compacted here"), "system.compact_boundary")
         elif t == "system":
@@ -674,11 +751,13 @@ def header(P, a, shown=None):
         who = f"agent {m['agent']} of session {who}"
     role = " · ".join(x for x in (m.get("agent_type"), m.get("description")) if x)
     model = " ".join(x for x in (m.get("model"), m.get("effort")) if x) or "model ?"
+    title = m.get("custom-title") or m.get("agent-name")
     span = "no timestamps"
     if P.t0:
         span = f"{P.t0:%Y-%m-%d %H:%M:%S}Z → {P.t1:%H:%M:%S}Z · {int((P.t1 - P.t0).total_seconds())}s wall"
     out = [f"TRANSCRIPT {P.engine} · {who} · {model}" + (f" · {role}" if role else ""),
            f"FILE {P.path} · {P.bytes} bytes · {P.records} records · cwd {m.get('cwd', '?')} (shown as ./)",
+           *([f"NAME {title}"] if title else []),
            f"SPAN {span}"]
     calls = [e for e in P.events if e.kind == "call" and not e.hidden]
     per, errs = Counter(e.name for e in calls), Counter(e.name for e in calls if e.err)
@@ -757,10 +836,70 @@ def cmd_types(P, a):
     return "\n".join(lines) + "\n"
 
 
+def agent_meta(path):
+    meta = re.sub(r"\.jsonl$", ".meta.json", path)
+    if not os.path.isfile(meta):
+        return f"META ERROR missing {meta}"
+    try:
+        with open(meta) as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as error:
+        return f"META ERROR {meta}: {error}"
+    if not isinstance(data, dict):
+        return f"META ERROR {meta}: not a JSON object"
+    return f"{data.get('agentType') or 'type ?'} · {data.get('description') or 'no description'}"
+
+
+def agent_row(path):
+    """One streamed pass: records, first and last timestamp, tool_use blocks; no digest is built."""
+    records = calls = 0
+    first = last = None
+    try:
+        with open(path, "rb") as handle:
+            for raw in handle:
+                if not raw.strip():
+                    continue
+                records += 1
+                try:
+                    o = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(o, dict):
+                    continue
+                t = parse_ts(o.get("timestamp"))
+                if t:
+                    first = t if first is None or t < first else first
+                    last = t if last is None or t > last else last
+                msg = o.get("message") if o.get("type") == "assistant" and isinstance(o.get("message"), dict) else {}
+                blocks = msg.get("content") if isinstance(msg.get("content"), list) else []
+                calls += sum(1 for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use")
+    except OSError as error:
+        return None, f"{os.path.basename(path)} · READ ERROR {error}"
+    aid = re.sub(r"^agent-|\.jsonl$", "", os.path.basename(path))
+    span = f"{first:%Y-%m-%d %H:%M:%S}Z → {last:%Y-%m-%d %H:%M:%S}Z" if first else "no timestamps"
+    return first, (f"{aid} · {agent_meta(path)} · {span} · {records} records · "
+                   f"{size(os.path.getsize(path))} · {calls} calls")
+
+
+def cmd_agents(path):
+    name = os.path.basename(path)
+    if os.path.basename(os.path.dirname(path)) == "subagents" or name.startswith(("agent-", "rollout-")):
+        fail(f"agents takes a top-level Claude session; {path} is a sub-agent or Codex transcript")
+    sid = re.sub(r"\.jsonl$", "", name)
+    folder = os.path.join(os.path.dirname(path), sid, "subagents")
+    lines = [f"SESSION {sid} · {path}"]
+    if not os.path.isdir(folder):
+        return "\n".join(lines + [f"AGENTS 0 — no subagents directory at {folder}"]) + "\n"
+    rows = [agent_row(p) for p in glob.glob(os.path.join(folder, "agent-*.jsonl"))]
+    far = datetime.max.replace(tzinfo=timezone.utc)
+    rows.sort(key=lambda r: (r[0] or far, r[1]))
+    return "\n".join(lines + [f"AGENTS {len(rows)}"] + [r[1] for r in rows]) + "\n"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="transcript.py", description="Mechanical reader of Claude Code and Codex transcripts.")
-    ap.add_argument("verb", choices=("show", "counts", "types", "locate"))
-    ap.add_argument("target", help="a transcript path, a session id or its prefix, a Claude agent id, or a Codex agent path (/root/{name})")
+    ap.add_argument("verb", choices=("show", "counts", "types", "locate", "agents"))
+    ap.add_argument("target", help="a transcript path, a session id or its prefix, a Claude agent id, a Codex agent path (/root/{name}), or a Claude chat name (its last title)")
     ap.add_argument("--root", action="append", default=[], help="an extra directory searched for the id")
     ap.add_argument("--only", default=DEFAULT_ONLY, help=f"event kinds, comma-separated: {', '.join(KINDS)}; 'error' alone keeps only failed calls")
     ap.add_argument("--tool", action="append", default=[], help="keep only calls of these tool names (comma or repeated)")
@@ -791,6 +930,9 @@ def main(argv=None):
         path = resolve(a.target, a.root)
         if a.verb == "locate":
             sys.stdout.write(path + "\n")
+            return 0
+        if a.verb == "agents":
+            sys.stdout.write(cmd_agents(path))
             return 0
         P = parse(path)
         text = {"show": cmd_show, "counts": cmd_counts, "types": cmd_types}[a.verb](P, a)

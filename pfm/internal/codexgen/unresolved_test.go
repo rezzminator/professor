@@ -2,6 +2,7 @@ package codexgen
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,5 +226,96 @@ func TestAbsentAgentSourceStillDeletesItsTwin(t *testing.T) {
 	}
 	if containsFinding(build.Warnings, "twin kept") {
 		t.Fatalf("an absent source claimed a kept twin: %#v", build.Warnings)
+	}
+}
+
+func TestUnresolvableCommandFormsKeepAllTwins(t *testing.T) {
+	for _, global := range []bool{false, true} {
+		for _, shape := range []string{"file", "directory", "md-directory", "readme-directory", "skill-directory", "skill-file", "skill"} {
+			t.Run(fmt.Sprintf("global_%v/%s", global, shape), func(t *testing.T) {
+				root, home := t.TempDir(), t.TempDir()
+				writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Root.\n")
+				base := root
+				if global {
+					base = home
+				}
+				name, leaf := "lab", "run.md"
+				switch shape {
+				case "file":
+					name, leaf = "lab.md", ""
+				case "md-directory":
+					name = "lab.md"
+				case "readme-directory":
+					name = "README.md"
+				case "skill-directory":
+					name = "SKILL.md"
+				case "skill", "skill-file":
+					leaf = "SKILL.md"
+				}
+				source := filepath.Join(base, ".claude", "commands", name)
+				path := source
+				if leaf != "" {
+					path = filepath.Join(source, leaf)
+				}
+				writeTestFile(t, path, "Run lab.\n")
+				build := func() (Result, error) { return Build(Options{Root: root, Home: home}) }
+				first, err := build()
+				if err != nil || !first.OK {
+					t.Fatalf("seed: %#v %v", first, err)
+				}
+				flat := "lab"
+				if shape == "directory" {
+					flat = "lab-run"
+				}
+				if shape == "md-directory" {
+					flat = "lab.md-run"
+				}
+				if shape == "readme-directory" {
+					flat = "README.md-run"
+				}
+				if shape == "skill-directory" {
+					flat = "SKILL.md-run"
+				}
+				skillTwin := filepath.Join(base, ".codex", "skills", flat)
+				before, err := os.Lstat(skillTwin)
+				if err != nil {
+					t.Fatal(err)
+				}
+				twin := skillTwin
+				var seeded []byte
+				if before.Mode()&os.ModeSymlink == 0 {
+					twin = filepath.Join(twin, "SKILL.md")
+					seeded = mustReadTestFile(t, twin)
+				}
+				if shape == "skill-file" {
+					source = path
+				}
+				if err := os.Rename(source, filepath.Join(base, "saved-source")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../../missing-source", source); err != nil {
+					t.Fatal(err)
+				}
+				got, err := build()
+				if err != nil || !got.OK {
+					t.Fatalf("build: %#v %v", got, err)
+				}
+				if _, err := os.Lstat(twin); err != nil {
+					t.Fatalf("unresolved twin removed: %s: %v", twin, err)
+				}
+				if seeded != nil && !bytes.Equal(mustReadTestFile(t, twin), seeded) {
+					t.Fatalf("twin rewritten: %s", twin)
+				}
+				if global && shape != "skill" && shape != "skill-file" {
+					prompt := filepath.Join(home, ".codex", "prompts", flat+".md")
+					if _, err := os.Stat(prompt); err != nil {
+						t.Fatalf("prompt twin removed: %v", err)
+					}
+				}
+				if !containsFinding(got.Warnings, "twin kept") {
+					t.Fatalf("warnings: %q", got.Warnings)
+				}
+			})
+		}
 	}
 }

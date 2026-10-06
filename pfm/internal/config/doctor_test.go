@@ -95,3 +95,34 @@ func TestDoctorIgnoreWarningsLoadsAndValidatesAtLoad(t *testing.T) {
 		})
 	}
 }
+
+func TestMarshalDoctorExplicitEmptyIgnoreWarnings(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, FileName)
+	if err := os.WriteFile(path, []byte(`{"version":2,"doctor":{"ignoreWarnings":[]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	machine, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := Marshal(machine, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path, home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Source(keyDoctorIgnoreWarnings) != SourceFile ||
+		!reflect.DeepEqual(loaded.Doctor.IgnoreWarnings, []string{}) {
+		t.Fatalf(
+			"empty warning list provenance=%q value=%#v",
+			loaded.Source(keyDoctorIgnoreWarnings),
+			loaded.Doctor.IgnoreWarnings,
+		)
+	}
+}

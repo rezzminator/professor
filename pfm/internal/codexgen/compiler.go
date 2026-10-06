@@ -541,7 +541,7 @@ func compileRepoCommands(
 	sourceRoot := filepath.Join(root, ".claude", "commands")
 	for _, entry := range markdownSources(sourceRoot, cfg.ExcludeDirs, result) {
 		if entry.target != "" {
-			if entry.dirLink {
+			if entry.dirLink || strings.HasSuffix(entry.rel, ".md") {
 				for _, twin := range keptDirTwins(root, entry, problem) {
 					add(twin)
 				}
@@ -580,7 +580,13 @@ func compileGlobalCommands(
 	result *Result,
 ) {
 	sourceRoot := filepath.Join(sourceHome, ".claude", "commands")
-	for _, entry := range discoverMarkdown(sourceRoot, nil, result) {
+	for _, entry := range markdownSources(sourceRoot, nil, result) {
+		if entry.target != "" {
+			for _, twin := range keptGlobalCommandTwins(outputHome, entry, problem) {
+				add(twin)
+			}
+			continue
+		}
 		if entry.skillDir {
 			dst := filepath.Join(outputHome, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)))
 			link := entry.path

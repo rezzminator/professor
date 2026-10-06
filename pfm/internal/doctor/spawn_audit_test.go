@@ -82,8 +82,11 @@ func TestSpawnAuditHookDrift(t *testing.T) {
 					100,
 					nil,
 				)
-				if verdict != spawnPredatesLayer ||
-					reason != "hook set differs from the registry — reload to carry it" {
+				want := spawnViolation
+				if started < 100 {
+					want = spawnPredatesLayer
+				}
+				if verdict != want || !strings.Contains(reason, "hook set differs from the registry") {
 					t.Fatalf("%s: %s", verdict, reason)
 				}
 			})
@@ -141,8 +144,8 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 		{accountDir + "/", 2, ""},
 		{link, 2, ""},
 		{"/accounts/1/", 1, ""},
-		{"/unknown", 1, "account unmatched; graded against primary"},
-		{"", 1, "account unmatched; graded against primary"},
+		{"/unknown", 0, "account unmatched; policy unverified"},
+		{"", 0, "account unmatched; policy unverified"},
 	} {
 		t.Run(test.dir, func(t *testing.T) {
 			got, reason := spawnAccount(
@@ -156,7 +159,7 @@ func TestSpawnAuditMatchesAccountByProcessConfigDir(t *testing.T) {
 		})
 	}
 	got, reason := spawnAccount(machine, 1, spawnObservation{EnvironErr: errors.New("denied")})
-	if got != 1 || !strings.Contains(reason, "unreadable") {
+	if got != 0 || !strings.Contains(reason, "unreadable") {
 		t.Fatalf("account=%d reason=%q", got, reason)
 	}
 	t.Run("empty roster", func(t *testing.T) {
@@ -680,4 +683,71 @@ func mustParseSpawn(t *testing.T, argv []string) claudelaunch.Parsed {
 		t.Fatal(err)
 	}
 	return parsed
+}
+
+func TestSpawnAuditUnverifiablePayload(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		argv   []string
+		want   spawnVerdict
+		reason string
+	}{
+		{"file settings", []string{"claude", "--settings", "/srv/settings.json"}, spawnVerdict("UNVERIFIED"), "file-backed settings"},
+		{"bare resume", []string{"claude", "--resume"}, spawnVerdict("UNVERIFIED"), "resumed argv"},
+		{"historical bare resume", []string{"claude", "--resume"}, spawnPredatesLayer, "before the current spawn door"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := mustParseSpawn(t, tc.argv)
+			start := int64(200)
+			if strings.HasPrefix(tc.name, "historical") {
+				start = 50
+			}
+			got, reason := classifySpawn(
+				parsed,
+				spawnObservation{StartedUnix: start},
+				config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction},
+				t.TempDir(),
+				100,
+				nil,
+			)
+			if got != tc.want || !strings.Contains(reason, tc.reason) {
+				t.Fatalf("%s: %s", got, reason)
+			}
+		})
+	}
+}
+
+func TestPrintSpawnAuditUnknownAccountStaysUnverified(t *testing.T) {
+	home := t.TempDir()
+	machine := config.Config{
+		Claude: config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor},
+		Accounts: []config.Account{
+			{ID: 1, ConfigDir: "/accounts/1", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProfessor}},
+			{ID: 2, ConfigDir: "/accounts/2", Claude: &config.ClaudePrefs{SystemPrompt: config.SystemPromptProduction}},
+		},
+	}
+	launch, err := claudelaunch.Render(claudelaunch.Request{Home: home}, config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := spawnObservationsProbe
+	t.Cleanup(func() { spawnObservationsProbe = previous })
+	for _, environ := range []map[string]string{nil, {}, {"CLAUDE_CONFIG_DIR": "/unknown"}} {
+		spawnObservationsProbe = func(context.Context, paths.Values, config.Config, clock.Clock) ([]spawnObservation, []string, error) {
+			return []spawnObservation{
+				{
+					Socket:  "cc-unknown",
+					PID:     22,
+					Argv:    append([]string{launch.Binary}, launch.Argv...),
+					Environ: environ,
+				},
+			}, nil, nil
+		}
+		var out bytes.Buffer
+		warnings := printSpawnAuditDoctorWithClock(t.Context(), &out, paths.Values{Home: home}, machine, 1, clock.Real)
+		if warnings != 1 || !strings.Contains(out.String(), "UNVERIFIED cc-unknown") ||
+			!strings.Contains(out.String(), "violations=0 undecodable=0 unverified=1") {
+			t.Fatalf("warnings=%d output=%s", warnings, out.String())
+		}
+	}
 }

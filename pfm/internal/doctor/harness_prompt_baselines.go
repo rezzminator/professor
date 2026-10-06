@@ -139,14 +139,11 @@ func printModelHarnessPromptDoctorWithDeps(
 	if unavailable != nil {
 		return printHarnessBaselineUnavailable(
 			stdout,
-			HarnessPromptModel{
-				Alias: baselineModel,
-				Stem:  fields[1],
-			},
+			model,
 			dir,
 			baselinePath,
 			"baseline inconsistent",
-			unavailable,
+			fmt.Errorf("captured model=%q body=%q: %w", baselineModel, fields[1], unavailable),
 		)
 	}
 	captured, captureErr := configuredHarnessCaptureWithDeps(ctx, home, machine, model.Alias, verboseDir, dependencies)

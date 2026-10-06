@@ -45,3 +45,39 @@ func TestLoadRejectsExplicitAskEngineWithEmptyRoster(t *testing.T) {
 		})
 	}
 }
+
+func TestAskCodexDefaultHomeRecognizesLoginModes(t *testing.T) {
+	for _, tc := range []struct{ name, auth, prefs string }{
+		{"tokens", `{"tokens":{"access_token":"token","account_id":"account"}}`, ""},
+		{"api key", `{"OPENAI_API_KEY":"fixture-key"}`, ""},
+		{"keyring", "", `cli_auth_credentials_store = "keyring"`},
+		{"auto", "", `cli_auth_credentials_store = "auto"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			codex := filepath.Join(home, ".codex")
+			if err := os.MkdirAll(codex, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for name, content := range map[string]string{"auth.json": tc.auth, "config.toml": tc.prefs} {
+				if content != "" {
+					if err := os.WriteFile(filepath.Join(codex, name), []byte(content), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			path := filepath.Join(home, FileName)
+			if err := os.WriteFile(
+				path,
+				[]byte(`{"version":2,"accounts":[],"ask":{"engine":"codex"}}`),
+				0o600,
+			); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load(path, home, nil, codex)
+			if err != nil || len(got.CodexAccounts) != 1 || got.CodexAccounts[0].Home != codex {
+				t.Fatalf("default roster: %#v error=%v", got.CodexAccounts, err)
+			}
+		})
+	}
+}

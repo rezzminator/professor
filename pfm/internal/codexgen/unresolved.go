@@ -10,6 +10,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/sourcelink"
 )
 
+const skillFileName = "SKILL.md"
+
 // sourceEntry is one discovered Claude source. A non-empty target marks a
 // symlink that does not resolve right now — an adopter's
 // .claude/agents/labber.md pointing into an uninitialised submodule — and
@@ -43,9 +45,17 @@ func markdownSources(dir string, excludes []string, result *Result) []sourceEntr
 	entries := discoverMarkdown(dir, excludes, result)
 	for _, leaf := range result.leafLinks[before:] {
 		name := filepath.Base(leaf.path)
-		if strings.HasSuffix(name, ".md") && name != "README.md" && name != "SKILL.md" {
+		if name == skillFileName {
+			skill := leaf
+			skill.rel, skill.dirLink, skill.skillDir = filepath.Dir(leaf.rel), true, true
+			entries = append(entries, skill)
+		}
+		if strings.HasSuffix(name, ".md") {
+			if name == "README.md" || name == skillFileName {
+				leaf.dirLink = true
+			}
 			entries = append(entries, leaf)
-		} else if !strings.HasSuffix(name, ".md") {
+		} else {
 			leaf.dirLink = true
 			entries = append(entries, leaf)
 		}
@@ -62,7 +72,10 @@ func keptTwin(path string, source sourceEntry) generatedFile {
 // keptCommandTwin is keptTwin at the repo command skill compileCommandFile
 // writes for entry.
 func keptCommandTwin(root string, entry sourceEntry) generatedFile {
-	return keptTwin(filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)), "SKILL.md"), entry)
+	return keptTwin(
+		filepath.Join(root, ".codex", "skills", flatName(filepath.ToSlash(entry.rel)), skillFileName),
+		entry,
+	)
 }
 
 func keptDirTwins(root string, entry sourceEntry, problem func(string)) []generatedFile {
@@ -76,9 +89,10 @@ func keptDirTwins(root string, entry sourceEntry, problem func(string)) []genera
 		return nil
 	}
 	name := flatName(filepath.ToSlash(entry.rel))
+	prefix := strings.ReplaceAll(filepath.ToSlash(entry.rel), "/", "-")
 	var outputs []generatedFile
 	for _, twin := range twins {
-		if twin.Name() == name || strings.HasPrefix(twin.Name(), name+"-") {
+		if twin.Name() == name || (!entry.skillDir && strings.HasPrefix(twin.Name(), prefix+"-")) {
 			outputs = append(outputs, keptTwin(filepath.Join(dir, twin.Name()), entry))
 		}
 	}
@@ -95,4 +109,29 @@ func (r *reconcileResult) keepTwin(output generatedFile) {
 	if problem != "" {
 		r.Problems = append(r.Problems, problem)
 	}
+}
+
+// keptGlobalCommandTwins preserves both global surfaces of an unresolved command.
+func keptGlobalCommandTwins(home string, entry sourceEntry, problem func(string)) []generatedFile {
+	outputs := keptDirTwins(home, entry, problem)
+	if entry.skillDir {
+		return outputs
+	}
+	dir := filepath.Join(home, ".codex", "prompts")
+	prompts, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return outputs
+	}
+	if err != nil {
+		problem(fmt.Sprintf("read %s: %v", dir, err))
+		return outputs
+	}
+	name := flatName(filepath.ToSlash(entry.rel))
+	prefix := strings.ReplaceAll(filepath.ToSlash(entry.rel), "/", "-")
+	for _, prompt := range prompts {
+		if prompt.Name() == name+".md" || strings.HasPrefix(prompt.Name(), prefix+"-") {
+			outputs = append(outputs, keptTwin(filepath.Join(dir, prompt.Name()), entry))
+		}
+	}
+	return outputs
 }

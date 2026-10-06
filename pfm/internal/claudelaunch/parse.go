@@ -8,6 +8,8 @@ import (
 
 type Parsed struct {
 	Settings                                                      map[string]any
+	SettingsFile                                                  string
+	Resumed                                                       bool
 	SettingsEnv                                                   map[string]string
 	Hooks                                                         []Hook
 	PromptFile, MCPConfig, SessionID, Resume, Name, Model, Effort string
@@ -57,6 +59,7 @@ func Parse(argv []string) (Parsed, error) {
 				parsed.SessionID = word
 			case flagResume:
 				parsed.Resume = word
+				parsed.Resumed = true
 			case flagName:
 				parsed.Name = word
 			case flagModel:
@@ -67,6 +70,7 @@ func Parse(argv []string) (Parsed, error) {
 				parsed.PromptFile = word
 			case flagSettings:
 				if !strings.HasPrefix(strings.TrimSpace(word), "{") {
+					parsed.SettingsFile = word
 					parsed.Rest = append(parsed.Rest, flag, word)
 					continue
 				}

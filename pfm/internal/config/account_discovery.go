@@ -14,29 +14,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-// hasValidCodexCredentials reports whether home/auth.json is the real Codex
-// CLI shape: access_token and account_id both live INSIDE tokens. An absent
-// file is the ordinary "no account here" case (ok=false, err=nil). Any other
-// read failure (permission denied, etc.) is NOT folded into that silence —
-// it comes back as a non-nil error the caller must surface, never swallow.
+// hasValidCodexCredentials uses the launch validator's supported login modes
+// for default-home discovery. A logged-out home is absence; an unreadable or
+// malformed credential/config file remains an explicit discovery error.
 func hasValidCodexCredentials(home string) (bool, error) {
-	body, err := os.ReadFile(filepath.Join(home, "auth.json"))
-	if errors.Is(err, os.ErrNotExist) {
+	err := CodexLoginError(home)
+	if errors.Is(err, ErrCodexLoggedOut) {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	var marker struct {
-		Tokens struct {
-			AccessToken string `json:"access_token"`
-			AccountID   string `json:"account_id"`
-		} `json:"tokens"`
-	}
-	valid := json.Unmarshal(body, &marker) == nil &&
-		strings.TrimSpace(marker.Tokens.AccessToken) != "" &&
-		strings.TrimSpace(marker.Tokens.AccountID) != ""
-	return valid, nil
+	return err == nil, err
 }
 
 // ErrCodexLoggedOut identifies a Codex home with no runtime login.

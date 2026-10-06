@@ -44,6 +44,7 @@ func printClaudeStoreChecks(stdout io.Writer, runtime config.Runtime) int {
 			failures++
 			continue
 		case "not-dir":
+			clean = false
 			fmt.Fprintf(
 				stdout,
 				"account: %d %s is a file, not a directory — mv %s %s.bak, then run pfm install\n",
@@ -52,7 +53,7 @@ func printClaudeStoreChecks(stdout io.Writer, runtime config.Runtime) int {
 				account.Dir,
 				account.Dir,
 			)
-			failures++
+			// host-check account-entry-real owns this directory failure count.
 			continue
 		case "store":
 			clean = false

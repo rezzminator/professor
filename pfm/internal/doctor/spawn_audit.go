@@ -35,6 +35,8 @@ const (
 	// spawnViolation: required launch material is missing; the reason
 	// distinguishes a bypassed door from an unavailable composed prompt.
 	spawnViolation spawnVerdict = "VIOLATION"
+	// spawnUnverified carries a payload or account policy the audit cannot establish.
+	spawnUnverified spawnVerdict = "UNVERIFIED"
 )
 
 type rolePromptOutcome string
@@ -78,6 +80,16 @@ func classifySpawn(
 	layerStampUnix int64,
 	promptErr error,
 ) (spawnVerdict, string) {
+	if parsed.SettingsFile != "" {
+		return spawnUnverified, "file-backed settings payload unverified; live process settings are unavailable"
+	}
+	if (parsed.Resumed || parsed.Resume != "") && parsed.Settings == nil {
+		reason := "resumed argv with no registry payload"
+		if age, older := predatesLayer(observation, layerStampUnix); older {
+			return spawnPredatesLayer, reason + fmt.Sprintf(" (born %s before the current spawn door)", age)
+		}
+		return spawnUnverified, reason + " — original launch payload unverified"
+	}
 	missing := ""
 	switch promptPolicyName(prefs.SystemPrompt) {
 	case config.SystemPromptProfessor:
@@ -99,7 +111,7 @@ func classifySpawn(
 		missing = "missing --settings outputStyle default"
 	}
 	if missing == "" && !sameSpawnHooks(parsed.Hooks, claudelaunch.HookTemplates(home)) {
-		return spawnPredatesLayer, "hook set differs from the registry — reload to carry it"
+		missing = "hook set differs from the registry"
 	}
 	if missing == "" {
 		switch promptPolicyName(prefs.SystemPrompt) {
@@ -114,9 +126,7 @@ func classifySpawn(
 	if age, older := predatesLayer(observation, layerStampUnix); older {
 		return spawnPredatesLayer, missing + fmt.Sprintf(" (born %s before the current spawn door)", age)
 	}
-	if parsed.Resume != "" && parsed.Settings == nil {
-		return spawnPredatesLayer, "resumed argv with no registry payload — reborn before the door"
-	}
+
 	return spawnViolation, missing + " — some spawn site bypassed the door"
 }
 
@@ -293,15 +303,18 @@ func printSpawnAuditDoctorWithClock(
 			continue
 		}
 		accountID, accountReason := spawnAccount(machine, primary, *observation)
-		verdict, reason := classifySpawn(
-			observation.Parsed,
-			*observation,
-			machine.EffectiveClaude(accountID),
-			resolved.Home,
-			stamp,
-			promptErr,
-		)
-		if accountReason != "" {
+		verdict, reason := spawnUnverified, accountReason
+		if accountID != 0 {
+			verdict, reason = classifySpawn(
+				observation.Parsed,
+				*observation,
+				machine.EffectiveClaude(accountID),
+				resolved.Home,
+				stamp,
+				promptErr,
+			)
+		}
+		if accountReason != "" && accountID != 0 {
 			reason += " (" + accountReason + ")"
 		}
 		counts[verdict]++
@@ -317,17 +330,18 @@ func printSpawnAuditDoctorWithClock(
 	roleWarnings := printSpawnRoleAudit(stdout, observations)
 	fmt.Fprintf(
 		stdout,
-		"doctor: spawn-audit: policy=%s chats=%d injected=%d predates-layer=%d violations=%d undecodable=%d (age signal: %s)\n",
+		"doctor: spawn-audit: policy=%s chats=%d injected=%d predates-layer=%d violations=%d undecodable=%d unverified=%d (age signal: %s)\n",
 		policy,
 		len(observations),
 		counts[spawnInjected],
 		counts[spawnPredatesLayer],
 		counts[spawnViolation],
 		undecodable,
+		counts[spawnUnverified],
 		stampSignal,
 	)
 	warnings := spawnAuditUnreadWarnings(stdout, unread)
-	if counts[spawnViolation] != 0 {
+	if counts[spawnViolation] != 0 || counts[spawnUnverified] != 0 {
 		warnings++
 	}
 	warnings += roleWarnings
@@ -347,7 +361,7 @@ func spawnAccount(machine config.Config, primary int, observation spawnObservati
 		return primary, ""
 	}
 	if observation.Environ == nil {
-		return primary, "account environment unreadable; graded against primary"
+		return 0, "account environment unreadable; policy unverified"
 	}
 	dir := observation.Environ["CLAUDE_CONFIG_DIR"]
 	for _, account := range machine.Accounts {
@@ -355,7 +369,7 @@ func spawnAccount(machine config.Config, primary int, observation spawnObservati
 			return account.ID, ""
 		}
 	}
-	return primary, "account unmatched; graded against primary"
+	return 0, "account unmatched; policy unverified"
 }
 
 // spawnAuditUnreadWarnings reports the sockets and panes the audit could not

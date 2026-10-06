@@ -109,7 +109,7 @@ func TestClaudeStoreChecks(t *testing.T) {
 					account,
 					account,
 					account,
-				), 1
+				), 0 // host-check account-entry-real owns this failure count
 			default:
 				if err := os.Remove(link); err != nil {
 					t.Fatal(err)

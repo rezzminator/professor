@@ -190,6 +190,8 @@ func (config AskConfig) PrefsFor(id pfmengine.ID) EnginePrefs {
 // Config is the fully materialized configuration. Sources records whether
 // each effective value came from the machine file or from a default.
 type Config struct {
+	// SeedContent carries the validated seed bytes into installation.
+	SeedContent      []byte `json:"-"`
 	Version          int
 	InputVersion     int
 	Theme            string
@@ -1435,8 +1437,12 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	if len(config.MCP.ThirdParty) != 0 {
 		value["mcp"].(map[string]any)["thirdParty"] = config.MCP.ThirdParty
 	}
-	if len(config.Doctor.IgnoreWarnings) != 0 {
-		value["doctor"] = map[string]any{"ignoreWarnings": config.Doctor.IgnoreWarnings}
+	if len(config.Doctor.IgnoreWarnings) != 0 || config.Source(keyDoctorIgnoreWarnings) == SourceFile {
+		ids := config.Doctor.IgnoreWarnings
+		if ids == nil {
+			ids = []string{}
+		}
+		value["doctor"] = map[string]any{"ignoreWarnings": ids}
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

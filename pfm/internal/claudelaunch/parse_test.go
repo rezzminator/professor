@@ -202,21 +202,26 @@ func TestParseValueFlags(t *testing.T) {
 		{
 			name: "equals form",
 			argv: []string{"claude", "--system-prompt-file=/srv/p.md", "--resume=abc", `--settings={"outputStyle":"default"}`},
-			want: Parsed{PromptFile: "/srv/p.md", Resume: "abc", Settings: map[string]any{"outputStyle": "default"}},
+			want: Parsed{PromptFile: "/srv/p.md", Resume: "abc", Resumed: true, Settings: map[string]any{"outputStyle": "default"}},
 		},
 		{
 			name: "bare resume before flag",
 			argv: []string{"claude", "--resume", "--settings", `{"outputStyle":"default"}`},
-			want: Parsed{Settings: map[string]any{"outputStyle": "default"}},
+			want: Parsed{Resumed: true, Settings: map[string]any{"outputStyle": "default"}},
 		},
-		{name: "bare resume last", argv: []string{"claude", "--resume"}},
+		{name: "bare resume last", argv: []string{"claude", "--resume"}, want: Parsed{Resumed: true}},
 		{name: "required flag followed by flag", argv: []string{"claude", "--model", "--settings", "{}"}, err: "--model requires a value"},
 		{name: "required flag last", argv: []string{"claude", "--model"}, err: "--model requires a value"},
 		{name: "required empty equals value", argv: []string{"claude", "--system-prompt-file="}, err: "--system-prompt-file requires a value"},
 		{
 			name: "settings file",
 			argv: []string{"claude", "--settings", "/srv/claude/settings.json"},
-			want: Parsed{Rest: []string{"--settings", "/srv/claude/settings.json"}},
+			want: Parsed{SettingsFile: "/srv/claude/settings.json", Rest: []string{"--settings", "/srv/claude/settings.json"}},
+		},
+		{
+			name: "settings file equals",
+			argv: []string{"claude", "--settings=/srv/settings.json"},
+			want: Parsed{SettingsFile: "/srv/settings.json", Rest: []string{"--settings", "/srv/settings.json"}},
 		},
 		{
 			name: "remaining equals flags",

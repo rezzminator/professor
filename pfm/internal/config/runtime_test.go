@@ -644,6 +644,7 @@ func TestDiagnosticStatePaths(t *testing.T) {
 	}{
 		{"unrelated key", `{"version":2,"accounts":[],"ask":{"engine":"cc"},"state":{"db":"~/diag.db"}}`, "diag.db"},
 		{"broken JSON", `{"version":2`, ""},
+		{"invalid state", `{"version":2,"state":{"db":false}}`, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -668,7 +669,37 @@ func TestDiagnosticStatePaths(t *testing.T) {
 				t.Fatalf("diagnostic paths=%q,%q exists=%v load=%v config=%v, want state=%q",
 					got.Paths.StateDB, got.Paths.CacheDB, got.Config.Exists, err, got.ConfigError, want)
 			}
-			if tc.state == "" && !strings.Contains(got.ConfigError.Error(), "JSON") {
+			defer UseConfigPath(got.Config.Path, got.Config.State)()
+			state, cache, readErr := StatePathsFrom(paths.OSEnv{}, home)
+			if readErr != nil || state != got.Paths.StateDB || cache != got.Paths.CacheDB {
+				t.Fatalf(
+					"diagnostic store paths=%q,%q error=%v; runtime=%q,%q",
+					state,
+					cache,
+					readErr,
+					got.Paths.StateDB,
+					got.Paths.CacheDB,
+				)
+			}
+			for _, overrides := range []map[string]string{
+				{paths.EnvStateDB: filepath.Join(home, "env-state.db")},
+				{paths.EnvCacheDB: filepath.Join(home, "env-cache.db")},
+				{paths.EnvStateDB: filepath.Join(home, "env-state.db"), paths.EnvCacheDB: filepath.Join(home, "env-cache.db")},
+			} {
+				env := &paths.MapEnv{Values: overrides}
+				state, cache, err := StatePathsFrom(env, home)
+				wantState, wantCache := got.Paths.StateDB, got.Paths.CacheDB
+				if overrides[paths.EnvStateDB] != "" {
+					wantState = overrides[paths.EnvStateDB]
+				}
+				if overrides[paths.EnvCacheDB] != "" {
+					wantCache = overrides[paths.EnvCacheDB]
+				}
+				if err != nil || state != wantState || cache != wantCache {
+					t.Fatalf("snapshot overrides=%v paths=%q,%q error=%v", overrides, state, cache, err)
+				}
+			}
+			if tc.name == "broken JSON" && !strings.Contains(got.ConfigError.Error(), "JSON") {
 				t.Fatalf("broken JSON config error = %v, want parse error", got.ConfigError)
 			}
 		})

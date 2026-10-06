@@ -19,19 +19,26 @@ var configPathPin struct {
 	sync.RWMutex
 	path   string
 	pinned bool
+	state  *State
 }
 
 // UseConfigPath pins the loaded config for database readers until restore runs.
+// An optional resolved state pins the runtime snapshot, including diagnostic
+// defaults over a broken config, without re-reading the config file.
 // An empty path pins the defaults: a runtime loaded with no config file (an
 // install over an unusable marker) reads the same database pair it reports.
-func UseConfigPath(path string) (restore func()) {
+func UseConfigPath(path string, states ...State) (restore func()) {
 	configPathPin.Lock()
-	previous, previouslyPinned := configPathPin.path, configPathPin.pinned
-	configPathPin.path, configPathPin.pinned = path, true
+	previous, previouslyPinned, previousState := configPathPin.path, configPathPin.pinned, configPathPin.state
+	configPathPin.path, configPathPin.pinned, configPathPin.state = path, true, nil
+	if len(states) != 0 {
+		state := states[0]
+		configPathPin.state = &state
+	}
 	configPathPin.Unlock()
 	return func() {
 		configPathPin.Lock()
-		configPathPin.path, configPathPin.pinned = previous, previouslyPinned
+		configPathPin.path, configPathPin.pinned, configPathPin.state = previous, previouslyPinned, previousState
 		configPathPin.Unlock()
 	}
 }
@@ -314,7 +321,7 @@ func StatePathsFrom(env paths.Env, home string) (stateDB, cacheDB string, err er
 		return "", "", err
 	}
 	configPathPin.RLock()
-	configPath, pinned := configPathPin.path, configPathPin.pinned
+	configPath, pinned, pinnedState := configPathPin.path, configPathPin.pinned, configPathPin.state
 	configPathPin.RUnlock()
 	if !pinned {
 		configPath, err = ResolvePathFrom(env, home)
@@ -327,9 +334,14 @@ func StatePathsFrom(env paths.Env, home string) (stateDB, cacheDB string, err er
 			}
 		}
 	}
-	state, err := loadState(configPath, home)
-	if err != nil {
-		return "", "", err
+	var state State
+	if pinnedState != nil {
+		state = *pinnedState
+	} else {
+		state, err = loadState(configPath, home)
+		if err != nil {
+			return "", "", err
+		}
 	}
 	resolved := paths.Values{StateDB: stateDB, CacheDB: cacheDB}
 	applyStatePaths(&resolved, Config{State: state}, env)

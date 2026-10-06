@@ -243,8 +243,7 @@ func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
 					t.Fatalf("code=%d, row does not carry %q: %s", code, want, line)
 				}
 			}
-			if scenario.state != "baseline inconsistent" &&
-				!strings.Contains(line, "identity="+model.Stem+" model=\""+model.Alias+"\"") {
+			if !strings.Contains(line, "identity="+model.Stem+" model=\""+model.Alias+"\"") {
 				t.Fatalf("row lost requested identity: %s", line)
 			}
 		})

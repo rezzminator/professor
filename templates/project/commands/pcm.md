@@ -46,7 +46,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 <!-- INSTALL: this section is derive-only by design — no fixed counts to fill in. The bash commands below run against the actual roster/filesystem every time, so a single-project install and a ten-project install both get correct answers from the same text. -->
 
 - **Projects:** derive with `ls -d {project}*/`; each child CLAUDE.md § Quick Start names its package manager
-- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every project specialist is registered at root on the `{proj}-{role}` convention, plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-precise-executor`, `flights-smart-executor`, `flights-lander`, `general-orchestrator`, `general-foreman`, `general-executor`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per the fleet prompt § Model Selection
+- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every project specialist is registered at root on the `{proj}-{role}` convention, plus the project-neutral `gitter`; the machine-global cast (`flights-foreman`, `flights-mechanical-executor`, `flights-lander`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per the fleet prompt § Model Selection
 - Commands and skills: `ls .claude/commands/ .claude/skills/ ~/.claude/commands/ ~/.claude/skills/`
 
 ---
@@ -135,7 +135,7 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 
 ### Step 3 — Plan
 
-Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Route the work by the fleet prompt § Orchestration ladder: direct work is done here or by one or two agents; a batch of clear tasks goes to `general-orchestrator`; only work whose solution is not in hand goes to `flights-speccer`, and `flights-orchestrator` runs one executor per task file. Edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here, from the brief or the task file that names them.
+Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Route the work by the fleet prompt § Orchestration ladder: direct work is done here or by one sub-agent; anything larger goes to `flights-foreman`, with `/flights:spec` first when the requirements are not settled. Edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here, from the return that names them.
 
 ### Step 4 — Execute
 
@@ -246,12 +246,12 @@ Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — incl
 
 ### `pipeline` — Walk the flight chain end-to-end
 
-Files: `~/.claude/commands/flights/*.md` (machine-global: init, spec, orchestrate-nested, orchestrate-live, orchestrate-cross-harness, audit), all agents they reference
+Files: `~/.claude/commands/flights/*.md` (machine-global: init, spec, orchestrate-cross-harness, audit), all agents they reference
 
 - **Reference resolution:** every "Read and follow" path → target file exists
 - **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, or `~/.claude/agents/`
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
-- **Verdict tokens ↔ their writers:** every token a command cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `TOO-LARGE`, `WAIT`, `BLOCKED`, `MAIN-CHAT`, `COMA`, `REVISED`) is one `flights-orchestrator`, `flights-speccer` or a `/flights:orchestrate-*` command writes
+- **Verdict tokens ↔ their writers:** every token a command cites (`CLAIMED`, `DONE`, `PARTIAL`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `COMA`) is one `flights-foreman`, `flights-mechanical-executor` or `/flights:orchestrate-cross-harness` writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
 - **Flow integrity:** spec → orchestrate → land across commands; executor → `flights-lander` → gitter within a flight — no step references an agent from a later phase
 

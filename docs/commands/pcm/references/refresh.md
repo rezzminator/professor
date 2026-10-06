@@ -33,7 +33,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{init,spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{init,spec,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
@@ -144,7 +144,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 **Phase 2.6 — Host tooling probe (git-host bridge):** Check the install machine for `gh` and `glab` (`command -v`). For each present, write a one-file host command at `.claude/commands/h/{gh|glab}.md` (the `h:` host namespace) whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: an adopter on GitLab forks + releases professor through `/h:glab`, a GitHub adopter through `/h:gh`, and `/pfm:release` and gitter read this marker to target the right host. These host-local bridges are KEEP-LOCAL — excluded from the portable blueprint. Absent tools get no command. Then resolve the blueprint repo target: if the user has push access to the canonical repo, set `{BLUEPRINT_REPO}`/`{GH_USER}`/`{BLUEPRINT_CLONE_PATH}` to it; otherwise have them fork it and use the fork.
 
-**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `/flights:orchestrate-live` task and watch its project checks.
+**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `flights-foreman` fix and watch its project checks.
 
 ## 5. Public README
 
@@ -172,7 +172,7 @@ One-paragraph pitch: portable .claude/ that turns Claude Code into a self-discip
 install pfm, cd your-project, `pfm init .`, claude → follow the printed SETUP.md install interview → customize → smoke test
 
 ## The cast — Tier A
-Professor, /pfm, /flights:{init,spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev
+Professor, /pfm, /flights:{init,spec,orchestrate-cross-harness,audit}, /dev
 
 ## Tier B (opt-in)
 /officer, /mentor, /marketer

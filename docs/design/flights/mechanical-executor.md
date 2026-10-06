@@ -1,6 +1,6 @@
 # The mechanical executor
 
-`flights-mechanical-executor` runs one task file rated `mechanical`. The base executor is the same as every tier's — [flights-executors](flights-executors.md) holds what every executor is, holds and returns; this tier's body is made for work that needs no judgment: the task file's Steps, Decisions and Shapes already hold every edit, and the executor applies them in order and proves them.
+`flights-mechanical-executor` runs one task file a [`flights-foreman`](flights-foreman.md) wrote for a bulk edit it already fixed line by line; the test law it shares with the foreman is in [flights-foreman § Tests](flights-foreman.md#tests). Its body is made for work that needs no judgment: the task file's Steps, Decisions and Shapes already hold every edit, and the executor applies them in order and proves them.
 
 Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-mechanical-executor.md`](../../../templates/global/agents/flights-mechanical-executor.md).
 
@@ -10,13 +10,12 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 - [What the body adds](#what-the-body-adds)
 - [What the body leaves out](#what-the-body-leaves-out)
 - [Situations](#situations)
-- [The general twin](#the-general-twin)
 - [Pins and measurements](#pins-and-measurements)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
 
 ## What it is for
 
-A task the speccer rates `mechanical`: no execution judgment at all — repetitive, straightforward work that needs no reasoning to do right ([Rating](flights-speccer.md#rating)). Each local choice such a task still carries, a helper's name included, is written as a `Decisions` line, so the executor never meets a name the task does not give. Renames, moves, deletions, splits, formatter output and pinned one-place edits are its work.
+A task the foreman judged mechanical: no execution judgment at all — repetitive, straightforward work that needs no reasoning to do right. Each local choice such a task still carries, a helper's name included, is written as a `Decisions` line, so the executor never meets a name the task does not give. Renames, moves, deletions, splits, formatter output and pinned one-place edits are its work.
 
 The body is a numbered procedure rather than a set of principles: every stop is one the executor can observe.
 
@@ -37,15 +36,15 @@ Before the first edit it searches the project for every line the Steps quote, ev
 - a quote is found nowhere, or at more than one place the Steps could mean;
 - a new name is already taken;
 - a build, test or caller outside `Files` would break;
-- an edit would push a file over the project's size ceiling — a split is a design act, so it is the speccer's.
+- an edit would push a file over the project's size ceiling — a split is a design act, so it is the foreman's.
 
-Friction: `Files` lists missed callers, and the drift was found mid-edit, with a partial diff left behind; one flight recorded that 2 of 2 drifts so far were `Files` lists missing test callers of a changed symbol. In a benchmark round 5 of 6 seats named a new helper with a name another package already exported. A search a small model can run literally catches both; whether a concept already exists under another name is a judgment, so the speccer quotes reuse targets as `EXISTING` shapes.
+Friction: `Files` lists missed callers, and the drift was found mid-edit, with a partial diff left behind; one flight recorded that 2 of 2 drifts so far were `Files` lists missing test callers of a changed symbol. In a benchmark round 5 of 6 seats named a new helper with a name another package already exported. A search a small model can run literally catches both; whether a concept already exists under another name is a judgment, so the foreman quotes reuse targets as `EXISTING` shapes.
 
 ### Tests: one red run, one green run
 
 Each decision is tested once, in the test of the unit its row names, a row being a matrix row or a `Given` line, in the pattern of the testing manual the brief names: a unit's rows are cases of one table-driven test, or assertions of one test, in its existing test file (a new one only where the source file has no test home, the manual's test home then); every assertion that fits one render or one call goes in one test; each `Given` line gets its test too; a caller's test covers only what the caller decides; user-visible text is asserted whole, once, where the copy is the behaviour; no assertion catches nothing. Step 2, before any test, reads every row and `Given` line: one that makes an error look like absence or contradicts the project contract returns `SPEC-DRIFT {id}: {row}: {why}`, nothing written for it, ahead of and over the rule for a row read two ways. Then:
 
-- tests before code, never after: each row's case or assertion, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; no test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the speccer adds the example;
+- tests before code, never after: each row's case or assertion, and on the project's first task the project's integration test, is written from the row's example before any code, the example's inputs and expected values kept exactly; no test is written after the code: a branch no example covers is deleted, or, when a `Done when` row needs it, returned as `SPEC-DRIFT` so the foreman adds the example;
 - every row's case or assertion is written first, each new name the Steps give stubbed so it compiles and returns the zero value or today's behaviour; every new or extended test runs in one command against the unfixed tree, each test or table case failing on an assertion (a build error proves nothing), rows batched in one test sharing its failing line, the log kept; then the Steps are applied and the same command runs green once;
 - a row whose behaviour was in the tree before that red run (a previous round's code) gets no red proof: the return marks it `pre-existing, no red proof`, citing its test passing in the red log (its case or assertion never shares a test with this round's new rows) and the commit or `run.md` line that introduced the behaviour, and the orchestrator records `DONE` only with both cited; no executor re-breaks, stashes, reverts or mutates finished or committed code to watch a test fail, even where the testing manual asks for a re-break or mutation proof; a new gate proves its bite on a fixture or a `mktemp` copy;
 - a task with no behaviour change (a rename, a move, a deletion, the doc references one carries) writes no test: the build and the affected tests green, plus the pre-edit search finding the old name only in history or in a hit named under Outside defects, are its proof.
@@ -55,8 +54,8 @@ Friction: 12 of 130 runs used git writes (`stash`, `checkout --`) to re-break co
 ### Reds are bounded
 
 - A red its own edit caused inside `Files` (a typo, a missing import, a formatter complaint): fix its cause there and rerun; never a stop.
-- A cause outside `Files` (a sibling task's half-edited file in the shared worktree), a red in a test the diff does not reach, or a check rejecting what was there before the edit (a missing ToC, a file already over size): named under Outside defects, and the task finishes `DONE`. Only when it stops the executor's own tests, after running what can still run past it: it returns every outside cause at once, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause. The orchestrator records `{id} WAIT · …` only when every named file is in the index `files` of a task in flight, and sends the task out once more unchanged after those tasks' verdicts; otherwise the `FAILED` road to the speccer.
-- Any other red: read the error and the lines it names, then return `SPEC-DRIFT` or `FAILED` with the cause, or what was read and "cause unknown". Deeper diagnosis is the `smart` tier's work.
+- A cause outside `Files` (a sibling task's half-edited file in the shared worktree), a red in a test the diff does not reach, or a check rejecting what was there before the edit (a missing ToC, a file already over size): named under Outside defects, and the task finishes `DONE`. Only when it stops the executor's own tests, after running what can still run past it: it returns every outside cause at once, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause. The foreman that wrote the task sends it out once more unchanged after the work changing those files has landed, or reads the cause itself.
+- Any other red: read the error and the lines it names, then return `SPEC-DRIFT` or `FAILED` with the cause, or what was read and "cause unknown". Deeper diagnosis is the foreman's work.
 
 Friction: the base body's unbounded read-to-cause produced diagnosis spirals of 150 calls and more. Sibling reds were rediscovered flight after flight in `RETRO` lines. In the benchmark round the first tier body stopped as `SPEC-DRIFT` on a pre-existing missing ToC after finishing all its work; the outside-defect rule separates "report it and finish" from "stop".
 
@@ -82,7 +81,7 @@ Friction: siblings overwrote each other's generic scratch files, and a backup na
 
 The return is a fixed template: the token line first, the `RETRO` line last, nothing before or after, with a contrastive ✗/✓ example of the first line.
 
-Friction: 47 of 130 flight runs and 18 of 21 general runs put a sentence ("All green.") before the token the orchestrator matches by position; 11 of 130 had no `RETRO` line.
+Friction: 47 of 130 flight runs and 18 of 21 general runs put a sentence ("All green.") before the token the foreman matches by position; 11 of 130 had no `RETRO` line.
 
 ### The cap
 
@@ -102,7 +101,7 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A quoted line found at another place, an import the edit needs, the formatter's output | Adapt and list it under Adapted |
 | An edit the Steps do not settle (another approach, a name not given, a file outside `Files`) | Stop, every touched file building; `SPEC-DRIFT {id}: {what the task file lacks}` with what is done |
 | Its own edit turns a check red inside `Files` | Fix the cause there, rerun |
-| A branch no example covers | Deleted; when a `Done when` row needs it, `SPEC-DRIFT {id}` so the speccer adds the example |
+| A branch no example covers | Deleted; when a `Done when` row needs it, `SPEC-DRIFT {id}` so the foreman adds the example |
 | A sibling's file, an unreached test or a pre-existing finding is red | Outside defects; finish `DONE` — or, when it stops its own tests, first line `FAILED {id}: blocked by {file}, {file}…` naming every file, then one `{file}: {error line}` line per cause |
 | Any other red | Read the error and the lines it names; `SPEC-DRIFT` or `FAILED` with the cause or "cause unknown" |
 | A row that reads two ways | The reading today's code and the Steps support, named in the return; `SPEC-DRIFT` only when neither settles it and they build different code |
@@ -110,10 +109,6 @@ The task file pins these on this tier, so the body does not carry them: the faç
 | A brief naming the full suite, a whole-tree sweep or a review | Refused, named in the return |
 | A decision it cannot make | `BLOCKED {id}: {question}` |
 | 150 tool calls | `FAILED {id}: cap` with what is done, what is left, the next step |
-
-## The general twin
-
-The general family has no tier twin: its one hand, [`general-executor`](../general/general-executor.md), builds a change its [`general-foreman`](../general/general-foreman.md) or its orchestrator's caller already decided, on one body.
 
 ## Pins and measurements
 
@@ -126,14 +121,11 @@ The full ID is pinned because the `sonnet` alias resolved to different models on
 
 A benchmark round then ran the first tier bodies against the shared one on Codex, one seat per configuration, blind-judged with the Claude seats as anchors: `gpt-6-luna` at `xhigh` scored 90 against the shared body's 87, at `medium` 84 against 76, and at `high` 84 against 85. `xhigh` stayed the best on both bodies. The `xhigh` seat on the tier body spawned a stray sub-agent that cost $0.598 beside its own $0.155; the body now names that it spawns none.
 
-The `gpt-6.1-sol` round covered the `precise` and `smart` tiers only; this tier stays on `gpt-6-luna`.
+This tier stays on `gpt-6-luna`.
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
 | The agent | `templates/global/agents/flights-mechanical-executor.md` | The executable wording and the pins |
-| The base | [flights-executors](flights-executors.md) | What every tier holds; the tier table |
-| The speccer | [flights-speccer](flights-speccer.md) | The `mechanical` rating; local choices as `Decisions` lines; reuse targets and the façade as `EXISTING` shapes |
-| The orchestrator | [flights-orchestrator](flights-orchestrator.md) | `blocked by` held as `WAIT` for the in-flight siblings' verdicts |
-| The cross-harness seat | `templates/global/commands/flights/orchestrate-cross-harness.md` | The Codex model and effort on the seat's launch line |
+| The foreman | [flights-foreman](flights-foreman.md) | The task file: every edit fixed, local choices as `Decisions` lines, reuse targets and the façade as `EXISTING` shapes; the test law |

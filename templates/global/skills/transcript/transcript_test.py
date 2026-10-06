@@ -101,7 +101,7 @@ class Fixture(unittest.TestCase):
         self.claude = os.path.join(self.home, ".claude/projects/-work-repo", CLAUDE_SID, "subagents", f"agent-{CLAUDE_AGENT}.jsonl")
         write_jsonl(self.claude, claude_records(), bad_lines=1)
         with open(self.claude.replace(".jsonl", ".meta.json"), "w") as handle:
-            json.dump({"agentType": "flights-speccer", "description": "Revise 3-d"}, handle)
+            json.dump({"agentType": "flights-foreman", "description": "Build unit be"}, handle)
         self.codex = os.path.join(self.home, ".codex/sessions/2026/09/29", f"rollout-2026-09-29T22-42-11-{CODEX_SID}.jsonl")
         write_jsonl(self.codex, codex_records())
 
@@ -171,7 +171,7 @@ class ClaudeTest(Fixture):
     def test_digest_renders_prompt_calls_error_tail_queued_prompt_and_final(self):
         out = self.ok("show", self.claude)
         self.assertIn("TRANSCRIPT claude · agent a0123456789abcdef of session", out)
-        self.assertIn("flights-speccer · Revise 3-d", out)
+        self.assertIn("flights-foreman · Build unit be", out)
         self.assertRegex(out, r"L1 20:00:00 PROMPT Revise task 3-d")
         self.assertRegex(out, r"L4 20:00:02 Bash go test \./pkg/\.\.\. → ERR \d+B · 28s")
         self.assertIn("    | fork reuses parent sid", out)

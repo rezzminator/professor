@@ -1,6 +1,6 @@
 ---
 name: {project}-testing-manual
-description: The testing law of {project} ({PROJECT_ROLE}) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by flights-speccer at intake, by every flight or general executor before its first test, by flights-lander whole; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
+description: The testing law of {project} ({PROJECT_ROLE}) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by every flights-foreman and flights-mechanical-executor before its first test, by flights-lander whole; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
 ---
 
 # {project} testing manual

@@ -1,6 +1,6 @@
 # /flights:init
 
-`/flights:init` readies a repository for flights. It maps the repository's build units, writes the speccer manual, and gives each unit the three things a flight leans on: a testing manual, a test command and a static-check command, each command with its tests. It runs once per repository and again whenever the repository's shape moves: it detects what exists, builds only what is missing, aligns what is stale, never rewrites a working file, and reports. It is concept-level: the units, toolchains, runners and paths are the repository's own, found by the map and never assumed by the command. Its first runs on real repositories are its proof: each run's frictions go back into this file and the command ([What run 1 measured](#what-run-1-measured)).
+`/flights:init` readies a repository for flights. It maps the repository's build units, writes the project map, and gives each unit the three things a flight leans on: a testing manual, a test command and a static-check command, each command with its tests. It runs once per repository and again whenever the repository's shape moves: it detects what exists, builds only what is missing, aligns what is stale, never rewrites a working file, and reports. It is concept-level: the units, toolchains, runners and paths are the repository's own, found by the map and never assumed by the command. Its first runs on real repositories are its proof: each run's frictions go back into this file and the command ([What run 1 measured](#what-run-1-measured)).
 
 Decisions live in this file. The executable wording lives in [`templates/global/commands/flights/init.md`](../../../templates/global/commands/flights/init.md).
 
@@ -10,7 +10,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 - [Terms](#terms)
 - [The re-run law](#the-re-run-law)
 - [I1 — Map](#i1--map)
-- [I2 — The speccer manual](#i2--the-speccer-manual)
+- [I2 — The project map](#i2--the-project-map)
 - [I3 — A testing manual per unit](#i3--a-testing-manual-per-unit)
 - [I4 — The test command](#i4--the-test-command)
 - [I5 — The check command](#i5--the-check-command)
@@ -48,25 +48,25 @@ The tests of I6 are the detector: one test per rule of I4 and I5, so an existing
 
 ## I1 — Map
 
-The command reads the speccer manual when one exists and names the build units from it and the repository's layout, in dependency order inside-out, the shared contract first. `tracer` sub-agents, one per unit in one message, each read their unit's testing manual first and answer the same questions, each fact with its path:
+The command reads the project map when one exists and names the build units from it and the repository's layout, in dependency order inside-out, the shared contract first. `tracer` sub-agents, one per unit in one message, each read their unit's testing manual first and answer the same questions, each fact with its path:
 
 1. Toolchain: each test runner, with its selector syntax, and each static check as the unit's installed tools run it; the command that installs its dependencies and an offline check that they are installed, or `no dependencies`.
 2. Static checks: which take file arguments and which files each applies to, which run whole, which build, serve or reach beyond the machine, which rewrite the tree to compare, and which another check already runs.
 3. Services: each check or test that needs a running service, how to probe it, how a script tells a worktree from the main checkout, and the command that starts the service in each.
 4. Homes: where its tests live, the script-test home, and the gates its full suite uses.
 5. Shared contract: where it lives or what the unit consumes from it, and the paths generated from it.
-6. Hot files: existing files nearly every parallel change adds a line to (a registry, a routes table), as recent history shows — the speccer's meaning, which gives all their edits to one task.
+6. Hot files: existing files nearly every parallel change adds a line to (a registry, a routes table), as recent history shows — the foreman's meaning: the unit that owns a hot file adds every line to it, so two children never edit it at once.
 7. Smoke: one real test file and one source file its checks pass, both needing no running service.
 
 The questions are fixed so every run briefs its tracers the same way and the main context never reads every unit's manual whole. A fact the map could not prove stays unproven: it is a gap, never a guess.
 
-## I2 — The speccer manual
+## I2 — The project map
 
-Write or update `$HOME/.local/state/pfm/flights/{project}/speccer-manual.md`, the speccer's own per-project manual ([`flights-speccer`](flights-speccer.md)), with the map's static facts, each with its path: the build units (each with its own testing manual) and their inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. An update rewrites every line the map proved wrong, adds the missing ones and leaves the rest. The code wins over it, and it is never a source of shapes: a shape is always pasted from output the run printed. The map's runners and static checks go to the unit's testing manual (I3, I7), never into this list. It sits in the flights state root, outside the repository, so it takes no commit.
+Write or update `$HOME/.local/state/pfm/flights/{project}/project-map.md`, the foreman's per-project map ([`flights-foreman`](flights-foreman.md)), with the map's static facts, each with its path: the build units (each with its own testing manual) and their inside-out dependency order, where the shared contract lives and what it generates, each unit's testing manual path and gates, test homes, hot files. An update rewrites every line the map proved wrong, adds the missing ones and leaves the rest. The code wins over it, and it is never a source of shapes: a shape is always pasted from output the run printed. The map's runners and static checks go to the unit's testing manual (I3, I7), never into this list. It sits in the flights state root, outside the repository, so it takes no commit.
 
 ## I3 — A testing manual per unit
 
-Each unit needs a [testing manual](testing-manual.md) where flights looks for it: `.claude/commands/{unit}-testing-manual.md` by default, or the repository's own path, which the speccer manual records. A unit without one gets a minimal manual under the eleven fixed headings, holding only the facts the map proved (run commands, test homes, the two commands below) and marked at its top as a starting point the owner completes. A section the map did not reach says `unmapped`, kept apart from `none`, which claims the section does not apply: an unread fact never renders as an absent one.
+Each unit needs a [testing manual](testing-manual.md) where flights looks for it: `.claude/commands/{unit}-testing-manual.md` by default, or the repository's own path, which the project map records. A unit without one gets a minimal manual under the eleven fixed headings, holding only the facts the map proved (run commands, test homes, the two commands below) and marked at its top as a starting point the owner completes. A section the map did not reach says `unmapped`, kept apart from `none`, which claims the section does not apply: an unread fact never renders as an absent one.
 
 ## I4 — The test command
 
@@ -87,14 +87,14 @@ An existing test command is aligned, never rewritten.
 
 ## I5 — The check command
 
-`check-{unit}.sh <file>...` in the agent-scripts directory, the static-check command an executor runs once, last, with its task's `files`:
+`check-{unit}.sh <file>...` in the agent-scripts directory, the static-check command a builder runs once, last, with the files it changed:
 
 - No argument, a flag or an empty argument exits 2 with the usage line `Name the files you changed.`; paths go through I4's resolver.
 - It calls the unit's installed tools only, never a runner that fetches a tool: a fetched tool is unpinned, and its verdict is not the unit's. A unit the map's offline check finds not installed prints only the line `FAIL install ({unit} has no installed dependencies — run: {install command})`, runs no check and exits 1; a unit with `no dependencies` never prints it.
 - File-scoped checks (format check, lint) run on the named files their tool applies to; one that no named file applies to prints exactly `SKIP {check} (no named file it applies to)`, one wording in every unit, never `PASS`, since it checked nothing. Unit-wide checks (type check, an architecture ratchet, any other static check the testing manual requires for an executor's change) run whole.
 - A check that builds, serves or reaches beyond the machine stays out of the check command; the lander's gate does not run it either, so the return names it under GAPS as a landing check the owner places. A check another listed check already runs is listed once.
 - A check that needs a running service probes it only after the check fails, never on a green run: the probe decorates that `FAIL` line with the missing service and the command that starts it in the current checkout, since a worktree may start it differently from the main checkout. A probe that itself errors says so and why, never reporting the service as up, so a down service never reads as a code red. A probe never interpolates a config value into a shell string.
-- A check that mutates the tree (regenerate-and-compare) serialises per checkout, because parallel executors share one worktree: a lock keyed to the checkout path, a bounded wait that ends in a `FAIL {check}` line naming the holder, freed when its holder dies; the check leaves the tree as it found it.
+- A check that mutates the tree (regenerate-and-compare) serialises per checkout, because parallel foremen share one worktree: a lock keyed to the checkout path, a bounded wait that ends in a `FAIL {check}` line naming the holder, freed when its holder dies; the check leaves the tree as it found it.
 - Every check runs even after one fails, each printing one `PASS {check}`, `FAIL {check}` or `SKIP {check}` line; the full output goes to `check-{unit}/{UTC timestamp}-{pid}.log` under the temp-artifact directory, and the command prints its path.
 - Exit 1 when any line is `FAIL`, else 0.
 - No change to the unit's package manifest.
@@ -113,7 +113,7 @@ A repository keeps engine copies of its commands when `.codex/` or `.opencode/` 
 
 ## I9 — Verify
 
-Every script test runs. Before the smoke, a unit the map's offline check finds not installed is installed by its install command, so a re-run pays no install; a file the install changes (a lockfile) is restored and named under GAPS, never committed, and a unit still not installed is a gap. Then a live smoke: each test command on the map's smoke test file and each check command on the map's smoke source file, both needing no running service. Every path the speccer manual names resolves. A red that is the unit's own state (a failing test on the base branch, a service down) is reported as printed and is a gap; a red in what the command built is fixed before the return.
+Every script test runs. Before the smoke, a unit the map's offline check finds not installed is installed by its install command, so a re-run pays no install; a file the install changes (a lockfile) is restored and named under GAPS, never committed, and a unit still not installed is a gap. Then a live smoke: each test command on the map's smoke test file and each check command on the map's smoke source file, both needing no running service. Every path the project map names resolves. A red that is the unit's own state (a failing test on the base branch, a service down) is reported as printed and is a gap; a red in what the command built is fixed before the return.
 
 ## I10 — Git
 
@@ -127,7 +127,7 @@ The smoke cell holds each command's verdict lines and exit code on one line, a `
 | unit | test command | check command | manual | smoke |
 | {unit} | {path} created|aligned|ok | {path} created|aligned|ok | {path} created|aligned|ok | test exit {code} · check {its PASS, FAIL and SKIP lines} exit {code} |
 RESOLVER {path} created|aligned|ok
-SPECCER MANUAL {path} created|aligned|ok
+PROJECT MAP {path} created|aligned|ok
 ENGINE COPIES regenerated|none
 COMMIT {sha} on {branch}|none
 GAPS {each fact or item the owner must supply}|none
@@ -154,7 +154,7 @@ Run 1 on a six-unit repository, 2026-10-05, and the merge-gating review of the s
 | Smoke cell (the return) | Whole printed output in the smoke cell made the return unreadable |
 | One path resolver (I4, I5) | Per-script copies drifted: one compared only the first path segment, so a repository-root file shadowed by a same-named unit directory passed as a unit file |
 | Fixtures in a fake root (I6) | Script tests read the host checkout: green only where they were written |
-| Lock on a tree-mutating check (I5) | A regenerate-and-compare check races when parallel executors share one worktree |
+| Lock on a tree-mutating check (I5) | A regenerate-and-compare check races when parallel foremen share one worktree |
 | Probe only after a red (I5) | The review found a probe on green runs, where there is no red to explain, and config values interpolated into a shell string |
 | One `SKIP` wording (I5) | The skip line's wording differed between units |
 
@@ -174,8 +174,8 @@ Run 1 on a six-unit repository, 2026-10-05, and the merge-gating review of the s
 | Surface | File | Holds |
 | --- | --- | --- |
 | The command | `templates/global/commands/flights/init.md` | The ten steps and the return |
-| The speccer | [`flights-speccer`](flights-speccer.md) | The speccer manual's file and content, read at intake; hot files in its meaning |
+| The builder | [`flights-foreman`](flights-foreman.md) | The project map's file and content, read at intake; hot files in its meaning |
 | The testing manual | [testing-manual.md](testing-manual.md) | The default home and the eleven headings |
-| The executors | [flight executors](flights-executors.md), [mechanical](mechanical-executor.md), [precise](precise-executor.md), [smart](smart-executor.md), `templates/global/agents/flights-*-executor.md` | The check command run once, last, with the task's `files` |
+| The builders | [`flights-foreman`](flights-foreman.md), [mechanical](mechanical-executor.md), `templates/global/agents/flights-foreman.md`, `flights-mechanical-executor.md` | The check command run once, last, with the files changed |
 | The lander | [`flights-lander`](flights-lander.md), `templates/global/agents/flights-lander.md` | The gate commands this command leaves as they are |
 | The family | [`flights.md`](flights.md) | The command's row in the family table |

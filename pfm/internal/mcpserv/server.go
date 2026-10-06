@@ -206,7 +206,7 @@ func (service *Service) registerTools(server *mcp.Server) {
 	newInputSchema.Properties["cache"].Enum = []any{"1h", "5m"}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat_new",
-		Description: "MANDATORY for every chat or model run this chat starts — a seat, a worker, a probe, at any model, effort or agent role; never claude -p or pfm headless exec. Call chat_new{name:\"auth-review\", model:\"claude-sonnet-5-5\", effort:\"xhigh\", agentRole:\"flights-smart-executor\", prompt:\"…\", await:true}. chat_kill it once its job is done, or it stays listed in pfm ls. Returns status ok with the launch message, or with await the first answer; a tool error = the launch failed, its stderr in the message. Not for a helper inside THIS chat → a harness sub-agent.",
+		Description: "MANDATORY for every chat or model run this chat starts — a seat, a worker, a probe, at any model, effort or agent role; never claude -p or pfm headless exec. Call chat_new{name:\"auth-review\", model:\"claude-sonnet-5-5\", effort:\"xhigh\", agentRole:\"flights-foreman\", prompt:\"…\", await:true}. chat_kill it once its job is done, or it stays listed in pfm ls. Returns status ok with the launch message, or with await the first answer; a tool error = the launch failed, its stderr in the message. Not for a helper inside THIS chat → a harness sub-agent.",
 		Annotations: mutating,
 		InputSchema: newInputSchema,
 	}, obs.Tool("chat_new", service.chatNew))

@@ -58,8 +58,8 @@ export function loadFlightPlan(opts) {
   opts.hours = Math.max(1, (opts.now - opts.since) / 3600e3);
 }
 
-// the call cap comes from the agent type name: a lander 200, everything else 150
-export const callCap = (type) => (/lander/i.test(type) ? 200 : 150);
+// the call cap comes from the agent type name: a foreman 250, a lander 200, everything else 150
+export const callCap = (type) => (/foreman/i.test(type) ? 250 : /lander/i.test(type) ? 200 : 150);
 
 // ---------- --flight: one row per agent the flight spawned, bounded whatever its size
 export function runFlight(opts) {
@@ -111,7 +111,7 @@ export function runFlight(opts) {
   const K = (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1000 ? Math.round(v / 1000) + "K" : String(Math.round(v)));
   const cash = (r) => (r.unpriced ? "n/a" : "$" + r.usd.toFixed(2));
   // A transcript inside the window with no ledger row is a hole in the ledger, never a drop:
-  // it is priced, so a speccer, an orchestrator or a skill-spawned review never vanishes from the spend.
+  // it is priced, so a child foreman, a lander or a skill-spawned review never vanishes from the spend.
   const parents = new Set(rows.map((x) => x.run.sid).filter(Boolean)), unledgered = [];
   for (const r of claudeAgents) if (!takenClaude.has(r.agentId) && parents.has(r.sid) && r.t0 >= SINCE) { unledgered.push(r);
     unmatched.push(`TRANSCRIPT ${r.agentType || "agent"} · claude · ${r.agentId.slice(0, 12)} · ${new Date(r.t0).toISOString().slice(0, 16)} · ${cash(r)} · ran under this flight's session with no ledger row`); }

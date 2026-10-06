@@ -102,8 +102,8 @@
     ".claude/codex-build.json": "a25e19df556db6fa67cfe410101c9de7816003ba1ef3271e2d70d3ce67adfea7",
     ".claude/commands/dev.md": "f3f197fb3ed4546ba409b0b75121e65fc5099c1d6e367f42623d2c44b67c83d3",
     ".claude/commands/github-marketing.md": "fc1f1aa8f3f09d37fbbd7a99b309121fa915168297b00ff90fa9cbcfbc72e75d",
-    ".claude/commands/pcm.md": "c5bd98d4a3d425d5a515b9c58fade4faf0786f2a9705045fa3bbc17c9dc8342b",
-    ".claude/commands/pfm-testing-manual.md": "5d619695320161c41d4ffc0af8a2920caf0dca8556f06608b60800f04cab17fd",
+    ".claude/commands/pcm.md": "c87f638124303b6ea8496aa609e6305b89d006bdcf36b237a2ca8a945bc76136",
+    ".claude/commands/pfm-testing-manual.md": "dea64d458bdb9f3eaed09c4dd36155c2e8d3f77dadede186044cbec84e363b5d",
     ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
     ".claude/scripts/check-pfm.sh": "d0396e5c5b8044e26d22ac65ac7d91a0a623e960397757b01d71fc225c0b1dcd",
     ".claude/scripts/check-templates.sh": "c04dd11fa1eeef2bb66fd426b6444c2892fa2b823af42bb8f86931416d1ccef6",
@@ -118,9 +118,9 @@
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "333d7b9833b8f4c7acb40cf1293ad669c0581a075d89e723062a56d59b14c475",
-    "CLAUDE.md": "5ed6a029cf5f32781fe22db4bd2961e35db61357728e45ece37789c0cea91e68",
-    "docs/commands/pcm/references/audit-scopes.md": "b05635c2e4143d1dfac5b7f2d803fa2a8eb96f2e3eabb0f2e5c0b7116616e894",
-    "docs/commands/pcm/references/refresh.md": "aae54233441e6be9a2fe523c39200d00873162c4c87abc2d25cba182c4b94b78",
+    "CLAUDE.md": "1ed7ad02bfab1363957b99a88cbcd123e2a4c87ab5174837e96a3686656fe4cf",
+    "docs/commands/pcm/references/audit-scopes.md": "3b60a73eaef4477265a18a8e125046c4a188b5b2bad7b48b2d1c0320fbb5d63a",
+    "docs/commands/pcm/references/refresh.md": "a0a9aac0a6fd5ba51a87459b041d9af5460b520db2d7cf738ae2496bdc4df42c",
     "docs/commands/pfm/references/release-rehearsal.md": "27b60500fabc8d0a8b42de317986c7cf770225fcbe09f8b2ce37bc22ed7c4894",
     "pfm/CLAUDE.md": "c7ecb08f927956c4de592010531b62ca07814f17657654fbba05cb9aabfdda85"
   }

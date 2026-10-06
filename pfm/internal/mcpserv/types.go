@@ -291,7 +291,7 @@ type NewInput struct {
 	Cache     string `json:"cache,omitempty" jsonschema:"prompt cache for this launch: 1h or 5m"`
 	Model     string `json:"model,omitempty" jsonschema:"model alias or full id, e.g. claude-sonnet-5-5; the engine's default when empty"`
 	Effort    string `json:"effort,omitempty" jsonschema:"reasoning effort, e.g. high or xhigh; the engine's default when empty"`
-	AgentRole string `json:"agentRole,omitempty" jsonschema:"registered agent the chat runs as, e.g. flights-smart-executor: its role prompt joins the fleet prompt; not on OpenCode"`
+	AgentRole string `json:"agentRole,omitempty" jsonschema:"registered agent the chat runs as, e.g. flights-foreman: its role prompt joins the fleet prompt; not on OpenCode"`
 	Prompt    string `json:"prompt,omitempty" jsonschema:"first message; the chat opens idle without one"`
 	Await     bool   `json:"await,omitempty" jsonschema:"wait for the first answer and return it instead of the launch message"`
 	Timeout   int    `json:"timeout,omitempty" jsonschema:"with await: seconds to wait, 0 waits forever; 600 when unset"`

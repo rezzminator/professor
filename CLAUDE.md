@@ -17,9 +17,8 @@ This repo is the framework, not an app that uses it: everything under `templates
 - fleet prompt: the main chat's system layer per engine, composed at build into the tracked `pfm/harness-prompts/composed/` by `make -C pfm prompts`; sub-agents never receive it, so their first move and the dispatch law live under § Rules here · `pfm/harness-prompts/` · model tiers in § Model Selection `pfm/harness-prompts/share/head.md` · the main chat's rungs in § Orchestration `pfm/harness-prompts/share/tail.md`
 - host assets: the files `pfm install` stages onto the host, owned here alone · `pfm/internal/installer/assets/`
 - harvester: the only web and document harvester, over a pinned Python conversion sidecar · `pfm/internal/harvest/`, `pfm/internal/harvestmcp/`, sidecar `pfm/internal/harvestpy/`
-- general family: `general-orchestrator` and its executors, for a clear batch · `templates/global/agents/` · design `docs/design/general/`
-- flights: the spec → execute → land pipeline for large work, `/flights:*` with the `flights-*` agents · `templates/global/commands/flights/` · design `docs/design/flights/`
-- flight directory: a flight's task files and audit trail, outside the tree and kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
+- flights: `flights-foreman` builds and lands any work past the direct rung, with or without a `/flights:spec` spec, `/flights:*` with the `flights-*` agents · `templates/global/commands/flights/` · design `docs/design/flights/`
+- flight directory: a flight's requirements, run log and audit trail, outside the tree and kept across reboots; never scratch · `$HOME/.local/state/pfm/flights/{project}/{flight}/`
 - quality laws: the `/quality:*` family every prompt and orientation-file edit loads · `templates/global/commands/quality/` · design `docs/design/quality/`
 - fence: the isolated dev container — fresh machine, own HOME, worktree mounted — with the `pfm-dev` image and the `pfm-sim` real-browser target · `infra/fence/` · design `docs/dev/isolated-dev-foundation.md`
 - demo fence: for presentations · `infra/demo/`
@@ -95,14 +94,12 @@ This repo is the framework, not an app that uses it: everything under `templates
 Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
 
 - A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
-- A brief carrying the user's ruling to skip the ceremony (no `flights-speccer`, no orchestrator): do it yourself, start to finish, whatever its size.
-- Otherwise take the lowest rung that fits; a higher rung needs its named reason. You finish within 45 calls; at the cap, return what landed, what is left and the next step.
-  1. The solution is in hand and fits about 80 calls, a small failure you can read to its cause included: do it yourself when it fits your 45 calls, otherwise one or two sub-agents, in sequence or in parallel.
-  2. The solution is in hand but the volume is past one or two agents — many clear tasks with nameable files: your first call spawns `general-orchestrator` with the work, all you hold and the check that proves the batch done.
-  3. The solution is not in hand — a design to choose, a failure of unknown cause, files you cannot name — and the work is large: your first call spawns `flights-speccer` with the work, all you hold and a directory under `$HOME/.local/state/pfm/flights/{project}/`. Its return is your orders: one task file, you execute it; several, you execute none and hand the directory to `flights-orchestrator`. Below the smart tier you write no spec yourself.
+- A brief carrying the user's ruling to skip the ceremony (no `flights-foreman`, no spawn): do it yourself, start to finish, whatever its size.
+- Otherwise take the lowest rung that fits; a higher rung needs its named reason. A sub-agent without a role of its own stops at 80 calls and returns what landed, what is left and the next step.
+  1. The solution is in hand and fits about 80 calls, a small failure you can read to its cause included: do it yourself.
+  2. Anything larger, or work crossing build units: your first call spawns `flights-foreman` with the work, all you hold, acceptance and the testing manual paths; its return is your answer.
 - ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no spawn.
-- ✓ "Add the timeout flag to each of the 12 subcommands" is a batch of clear tasks: `general-orchestrator`, no `flights-speccer`.
-- ✗ "Take the four failing test lanes to green" done by one agent: hundreds of calls, each re-sending a context past 400K. ✓ `flights-speccer`, then `flights-orchestrator`.
+- ✓ "Take the four failing test lanes to green": one `flights-foreman`, which splits only where the lanes belong to different build units. ✗ A planner writing task files for executors that read the same code again.
 - Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
 
 ## Dispatch

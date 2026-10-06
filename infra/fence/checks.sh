@@ -265,11 +265,6 @@ checks_templates_token_audit() {
 
 }
 
-checks_templates_flight_index() {
-  head_ "templates — flight-index tests"
-  node_test_suite "flight-index" "$TMP_BASE/templates/flight-index.tap" templates/global/commands/flights/flight-index.test.mjs
-}
-
 checks_templates_release_check() {
   head_ "templates — release-check tests and the notes grammar"
   node_test_suite "release-check" "$TMP_BASE/templates/release-check.tap" scripts/release-check.test.mjs
@@ -421,7 +416,6 @@ checks_templates() {
   checks_templates_mirrors_marker
   checks_templates_mirrors_roster
   checks_templates_token_audit
-  checks_templates_flight_index
   checks_templates_release_check
   checks_templates_codex_sync
   checks_templates_refresh_scope
@@ -859,7 +853,6 @@ gate_run() { # pfm, templates, or all
     steps_add templates.descriptions checks_templates_descriptions
     steps_add templates.mirrors checks_templates_mirrors "$run_dir/bin/pfm"
     steps_add templates.token-audit checks_templates_token_audit
-    steps_add templates.flight-index checks_templates_flight_index
     steps_add templates.release-check checks_templates_release_check
     steps_add templates.codex-sync checks_templates_codex_sync
     steps_add templates.refresh-scope checks_templates_refresh_scope
